@@ -3282,7 +3282,7 @@
   "plugin_error.failed": "{plugin}: {reason}",
   "plugin_error.failed_export": "{plugin} không thể xuất {file}: {reason}",
   "plugin_error.failed_file": "{plugin} không mở được {file}: {reason}",
-  "plugin_error.fuel_ceiling": "nó yêu cầu {requested} fuel, trong khi plugin chỉ được dùng {allowed}. Hãy tăng Giới hạn fuel tối đa cho plugin trong Tùy chọn › Plugin (trong solidcraft-cli: max_fuel trong tệp --plugin-limits).",
+  "plugin_error.fuel_ceiling": "nó yêu cầu {requested} fuel, trong khi plugin chỉ được dùng {allowed}. Hãy cài đặt lại plugin và cho phép yêu cầu fuel của nó, hoặc tăng Giới hạn fuel tối đa cho plugin trong Tùy chọn › Plugin (trong solidcraft-cli: max_fuel trong tệp --plugin-limits).",
   "plugin_error.memory_ceiling": "nó yêu cầu {requested} MiB bộ nhớ, trong khi plugin chỉ được dùng {allowed} MiB. Hãy cài lại plugin và cho phép yêu cầu bộ nhớ của nó, hoặc tăng Giới hạn bộ nhớ tối đa cho plugin (MiB) trong Tùy chọn › Plugin (trong solidcraft-cli: max_memory_mib trong tệp --plugin-limits).",
   "plugin_error.out_of_fuel": "nó đã dùng hết {allowed} fuel đã yêu cầu và bị dừng. Hãy nhờ tác giả tăng giới hạn fuel.",
   "plugin_error.out_of_memory": "nó cần nhiều hơn {allowed} MiB bộ nhớ đã yêu cầu và bị dừng. Hãy nhờ tác giả tăng giới hạn bộ nhớ.",
