@@ -209,6 +209,7 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
             evaluation: None,
             forms: Vec::new(),
             form_source: None,
+            messages: Vec::new(),
         };
         // The guest's stack is on this thread's: run it on a thread with room for the stack the
         // importer asks for (a real decoder needs about 16 MiB) and the host's own calls.

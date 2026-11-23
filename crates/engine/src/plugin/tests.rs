@@ -94,6 +94,7 @@ fn deferred_forms_are_scoped_to_interactive_plugin_entries_and_rollback() {
         evaluation: None,
         forms: vec![],
         form_source: Some(("sample".into(), parse_manifest(&serde_json::to_vec(&manifest()).unwrap(), "sample").unwrap().runtime.unwrap().entries)),
+        messages: vec![],
     };
     assert!(matches!(host.open_form("make", &json!({})), Err(HostError::InteractiveRequired { .. })));
     host.session.plugin_forms_interactive = true;
@@ -224,6 +225,7 @@ fn an_importer_checks_its_own_design_apart_from_the_open_one() {
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        messages: Vec::new(),
     };
     let mut made = Session::new(solidcraft_doc::Document::new("Bracket"));
     made.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
@@ -256,6 +258,7 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        messages: Vec::new(),
     };
     let catalog = host.command_catalog();
     let built = crate::command_specs().into_iter().filter(|c| c.planned.is_none()).count();
@@ -291,6 +294,37 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
     assert!(refused.contains("needs \"file\" in runtime.permissions.command_groups"), "{refused}");
     m["runtime"]["permissions"] = json!({"command_groups":["file"]});
     assert!(parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").is_ok());
+}
+
+#[test]
+fn plugin_log_messages_accumulate_with_levels_and_appear_in_run_result() {
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
+        evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
+        messages: Vec::new(),
+    };
+    host.begin_transaction().unwrap();
+    craft_plugin::PluginHost::log_level(&mut host, craft_plugin::LogLevel::Warn, "mortise cheek 6.0 mm under 8 mm");
+    craft_plugin::PluginHost::log_level(&mut host, craft_plugin::LogLevel::Info, "27 joints updated");
+    host.commit_transaction().unwrap();
+
+    assert_eq!(
+        host.messages,
+        vec![
+            crate::schema::plugin::PluginMessage { level: craft_plugin::LogLevel::Warn, message: "mortise cheek 6.0 mm under 8 mm".into() },
+            crate::schema::plugin::PluginMessage { level: craft_plugin::LogLevel::Info, message: "27 joints updated".into() },
+        ]
+    );
+    assert!(host.session.log.iter().any(|l| l == "plugin: mortise cheek 6.0 mm under 8 mm"));
+    assert!(host.session.log.iter().any(|l| l == "plugin: 27 joints updated"));
 }
 /// A read-only folder must pass the importer's scope check without granting write access.
 /// Both the user's grant and the package's manifest must allow the intended operation.
@@ -353,6 +387,7 @@ fn read_only_folder_allows_step_insert_but_refuses_file_writes() {
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        messages: Vec::new(),
     };
     host.begin_transaction().unwrap();
     let inserted = host.run_command("file.insert_step", &json!({"path":source_path}));
@@ -385,6 +420,7 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        messages: Vec::new(),
     };
     host.begin_transaction().unwrap();
     s_box(&mut host);
@@ -418,6 +454,7 @@ fn nested_plugin_edits_save_their_current_token_without_retagging_at_acceptance(
         file_folders: vec![folder.0.clone()],
         file_read_folders: Vec::new(),
         evaluation: None,
+        messages: Vec::new(),
     };
     let before = host.session.design_token();
     let mut accepted = Session::default();
@@ -459,6 +496,7 @@ fn a_command_in_another_spelling_is_never_granted() {
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        messages: Vec::new(),
     };
     host.begin_transaction().unwrap();
     for id in ["file.save_as", "file.export_step", "doc.open", "plugin.run", "plugin.list", "settings.get", "diagnostics.crash_reports", "solid.box"]
@@ -1467,6 +1505,7 @@ mod native {
             file_folders: Vec::new(),
             file_read_folders: Vec::new(),
             evaluation: None,
+            messages: Vec::new(),
         };
         assert_eq!(catalog_command("pointcloud.deviation").unwrap().effect, Effect::Read);
         host.begin_transaction().unwrap();
@@ -1637,6 +1676,7 @@ mod native {
                     evaluation: None,
                     forms: Vec::new(),
                     form_source: None,
+                    messages: Vec::new(),
                 };
                 solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([f.0.clone()])), || {
                     assert!(host.authorize_file_path(&target, write).is_ok(), "explicit scope grants hidden access");
@@ -2268,6 +2308,7 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        messages: Vec::new(),
     };
     let catalog = host.command_catalog();
     for command in ["sketch.edit", "sketch.finish", "sketch.cancel", "solid.box", "sketch.export_dxf"] {
@@ -2323,6 +2364,7 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        messages: Vec::new(),
     };
     solidcraft_io::vfs::scoped(None, || {
         for write in [false, true] {

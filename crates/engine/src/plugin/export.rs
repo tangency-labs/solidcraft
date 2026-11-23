@@ -92,6 +92,7 @@ fn convert(session: &mut Session, exporter: &FormatSlot, path: &str, options: &V
             evaluation: None,
             forms: Vec::new(),
             form_source: None,
+            messages: Vec::new(),
         };
         // The guest's stack is on this thread's: run it on a thread with room for the stack the
         // exporter asks for and the host's own calls, as an import does.

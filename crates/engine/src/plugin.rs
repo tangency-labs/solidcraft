@@ -398,6 +398,7 @@ pub fn update_dialog(
             evaluation: None,
             forms: Vec::new(),
             form_source: None,
+            messages: Vec::new(),
         };
         let (_, result) = craft_plugin_wasm::dialog_fields(
             host,
@@ -485,6 +486,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
             evaluation: None,
             forms: Vec::new(),
             form_source: Some((package.manifest.id.clone(), rt.entries.clone())),
+            messages: Vec::new(),
         };
         let approved = host.granted_folders();
         let file_read_folders = approved_file_folders(&approved, &rt.permissions.files, false);
@@ -514,6 +516,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
             sketch_exits: host.sketch_exits,
             view: host.view,
             param_warnings: vec![],
+            messages: host.messages,
         })
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
@@ -566,6 +569,7 @@ pub struct SolidCraftHost {
     evaluation: Option<Box<Session>>,
     forms: Vec<crate::schema::plugin::FormRequest>,
     form_source: Option<(String, Vec<Entry>)>,
+    messages: Vec<crate::schema::plugin::PluginMessage>,
 }
 
 impl SolidCraftHost {
@@ -774,9 +778,14 @@ impl PluginHost for SolidCraftHost {
         grant_covers(&self.session.plugin_state.file_grants, path, write)
     }
     fn log(&mut self, message: &str) {
+        self.log_level(craft_plugin::LogLevel::Info, message);
+    }
+    fn log_level(&mut self, level: craft_plugin::LogLevel, message: &str) {
+        let clean: String = message.chars().filter(|c| !c.is_control()).collect();
         if let Some(s) = self.transaction.as_mut() {
-            s.echo(format!("plugin: {}", message.chars().filter(|c| !c.is_control()).collect::<String>()));
+            s.echo(format!("plugin: {clean}"));
         }
+        self.messages.push(crate::schema::plugin::PluginMessage { level, message: clean });
     }
     fn progress(&mut self, fraction: f32, message: &str) {
         solidcraft_doc::progress::item(Some((message, (fraction.clamp(0., 1.) * 100.) as usize, 100)));
