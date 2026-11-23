@@ -283,8 +283,8 @@ fn bezier_points(n: u8, p: &[Point2; MAX_BEZIER_CTRL]) -> Option<&[Point2]> {
 
 impl Seg2 {
     /// Whether `piece` is the restriction of this cubic Bézier to a nonempty interval of
-    /// [0, 1], in either direction, within control-point roundoff (at most 1e-9 mm).
-    /// A root in the wider coordinate only proposes an endpoint: the four controls of the
+    /// `[0, 1]`, in either direction, within control-point roundoff (at most 1e-9 mm).
+    /// A coordinate root only proposes an endpoint: the four controls of the
     /// restriction must all agree, which bounds the whole curve by the convex hull property.
     #[must_use]
     pub fn cubic_contains(&self, piece: &Self) -> bool {
@@ -310,14 +310,22 @@ impl Seg2 {
         if !hull.contains_point(a, tol) || !hull.contains_point(d, tol) {
             return false;
         }
-        let coord = |p: Point2| {
-            if hull.max.x - hull.min.x >= hull.max.y - hull.min.y {
-                p.x
+        let params = |p: Point2, tangent: Vec2| {
+            // Invert the coordinate that changes fastest at this end of the restriction.
+            // The wider coordinate of the whole span can turn here and lose the parameter
+            // to rounding while the other coordinate still distinguishes nearby points.
+            let direction = if tangent.x == 0.0 && tangent.y == 0.0 {
+                hull.max - hull.min
             } else {
-                p.y
-            }
-        };
-        let params = |p| {
+                tangent
+            };
+            let coord = |q: Point2| {
+                if direction.x.abs() >= direction.y.abs() {
+                    q.x
+                } else {
+                    q.y
+                }
+            };
             // Include the span ends: a crossing there can differ by roundoff in the chosen coordinate.
             let mut roots = vec![0.0, 1.0];
             let mut work = 128;
@@ -331,7 +339,7 @@ impl Seg2 {
             );
             roots
         };
-        let ends = params(d);
+        let ends = params(d, d - c);
         // The blossom of the cubic: restricting to [u,v] gives B(u,u,u), B(u,u,v),
         // B(u,v,v), B(v,v,v), equally for a reversed interval.
         let blossom = |s, t, u| {
@@ -341,7 +349,7 @@ impl Seg2 {
             let cd = lerp(p2, p3, s);
             lerp(lerp(ab, bc, t), lerp(bc, cd, t), u)
         };
-        params(a).into_iter().any(|u| {
+        params(a, b - a).into_iter().any(|u| {
             blossom(u, u, u).distance(a) <= tol
                 && ends.iter().copied().any(|v| {
                     u != v

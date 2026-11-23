@@ -1043,6 +1043,17 @@ mod tests {
     }
 
     #[test]
+    fn a_trim_starting_near_a_coordinate_turn_keeps_its_source_in_both_directions() {
+        use solidcore_record::Vec2;
+        // x(t) = 3t(1-t) rounds to 0.75 at the trim. y(t) = 0.375t still separates it from t = 0.5.
+        let span = Seg2::Cubic { p0: Vec2::ZERO, p1: Vec2::new(1., 0.125), p2: Vec2::new(1., 0.25), p3: Vec2::new(0., 0.375) };
+        let piece = span.part(0.5 + 2_f64.powi(-30), 0.875);
+        let sources = ExactSketchCurves { segments: vec![], free_form: vec![("s1", vec![span])] };
+        assert_eq!(sources.find_free_form(&piece).as_deref(), Some("s1"));
+        assert_eq!(sources.find_free_form(&piece.reversed()).as_deref(), Some("s1"));
+    }
+
+    #[test]
     fn prepared_sources_keep_exact_identity_and_reject_ambiguity() {
         use solidcore_record::Vec2;
         let mut sketch = solidcraft_sketch::Sketch::new();
