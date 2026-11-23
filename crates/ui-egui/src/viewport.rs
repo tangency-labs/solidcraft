@@ -5796,6 +5796,14 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
         return;
     }
     let sel = crate::dialogs_move::from_shown(app, sel);
+    // A plane picked into a feature's empty profiles starts a sketch on it (New Sketch).
+    if matches!(sel, Sel::Plane { .. })
+        && app.dialog.as_ref().is_some_and(crate::command_sketch::plane_starts_sketch)
+        && let Some(d) = app.dialog.take()
+    {
+        crate::command_sketch::begin(app, d, Some(sel));
+        return;
+    }
     // A joint origin picked among a hovered face's points remembers the face (#11476).
     let snaps = app.dialog.as_ref().is_some_and(crate::dialogs_assembly::takes_snaps);
     let from_face = crate::dialogs_assembly::face_point_source(app, snaps, &sel);
