@@ -1844,6 +1844,58 @@ mod tests {
         }
     }
 
+    /// A quarter turn of a square profile, its faces facing out of it, trimmed and split by the
+    /// plane through the axis halfway round: each wall left keeps facing out (#13640, #19447).
+    /// Some of its faces are turned over in the record (`forward: false`), which the kernel
+    /// refused before #13640 ("SMLib numbers the body's faces unlike its record").
+    #[test]
+    fn a_revolved_profile_trims_and_splits_with_its_walls_facing_out() {
+        use std::f64::consts::FRAC_PI_8;
+        let sq = Loop2::polygon(&[Vec2::new(2.0, 0.0), Vec2::new(3.0, 0.0), Vec2::new(3.0, 1.0), Vec2::new(2.0, 1.0)]);
+        let ring = revolve_sheet(&Plane::XY, std::slice::from_ref(&sq.segs), Vec2::ZERO, Vec2::new(0.0, 1.0), 0.0, std::f64::consts::FRAC_PI_2).unwrap();
+        // the turn runs from +x towards +z or -z about +y
+        let s = if measure(&ring).unwrap().bbox.max.z > 1.0 { 1.0 } else { -1.0 };
+        let radial = |a: f64| Vec3::new(a.cos(), 0.0, s * a.sin());
+        // a point on each wall at angle a round the turn, with the way it faces out of the square
+        let walls = |a: f64| {
+            [
+                (radial(a) * 2.0 + Vec3::Y * 0.5, radial(a) * -1.0),
+                (radial(a) * 3.0 + Vec3::Y * 0.5, radial(a)),
+                (radial(a) * 2.5, Vec3::new(0.0, -1.0, 0.0)),
+                (radial(a) * 2.5 + Vec3::Y, Vec3::Y),
+            ]
+        };
+        let normal = |body: &Body, p: Vec3| {
+            let faces = crate::blend::Faces::of(body).unwrap();
+            let on = |f: usize| {
+                let surface = SurfaceEval::new(faces.rec.faces.get(f)?.parameters()).ok()?;
+                surface.point(surface.project(p, None, 1e-6)?).filter(|q| q.dist(p) < 1e-6)
+            };
+            let found: Vec<Vec3> = (0..faces.rec.faces.len()).filter(|f| on(*f).is_some()).filter_map(|f| faces.normal_at(f, p, 1e-6)).collect();
+            // after the split, a wall's two pieces share its surface: they must face alike
+            let first = *found.first().unwrap_or_else(|| panic!("no face through {p:?}"));
+            assert!(found.iter().all(|n| n.dist(first) < 1e-9), "faces through {p:?} disagree: {found:?}");
+            first
+        };
+        let faces_out = |body: &Body, a: f64| {
+            for (p, out) in walls(a) {
+                let n = normal(body, p);
+                assert!(n.dist(out) < 1e-6, "at {p:?}: {n:?} vs {out:?}");
+            }
+        };
+        faces_out(&ring, FRAC_PI_8);
+        let halfway = Plane::new(Vec3::ZERO, Vec3::Y, radial(2.0 * FRAC_PI_8)).unwrap();
+        let tool = crate::SplitTool::Plane(halfway);
+        let kept = trim(&ring, &tool, walls(FRAC_PI_8)[1].0).unwrap();
+        assert_eq!(kept.face_count(), 4);
+        faces_out(&kept, FRAC_PI_8);
+        let all: Vec<usize> = (0..ring.face_count()).collect();
+        let split = crate::split_faces(&ring, &all, &tool).unwrap();
+        assert_eq!(split.face_count(), 8);
+        faces_out(&split, FRAC_PI_8);
+        faces_out(&split, 3.0 * FRAC_PI_8);
+    }
+
     #[test]
     fn revolve_sheet_refuses_bad_input() {
         let rev = |chain: Vec<Seg2>, sweep: f64| revolve_sheet(&Plane::XY, &[chain], Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), 0.0, sweep);
