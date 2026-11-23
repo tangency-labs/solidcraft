@@ -986,6 +986,63 @@ fn style_required(schema: &mut Schema) {
     require(schema, "style");
 }
 
+/// `view.fit` and `view.home` take no parameters: the first frames the model or what is selected,
+/// the second first returns the camera to its starting direction. Both are display actions the
+/// window applies in its own view (with a drawing open, its sheet): the design is not changed,
+/// nothing is added to undo, and no dialog opens. Both refuse a key they don't read, so one
+/// contract describes both calls.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct FitHomeParams {}
+
+/// What the two framing commands answer: nothing, because the window frames its own view and has
+/// nothing to report back. A call with a key either command doesn't read is refused by the command
+/// itself, so no reply carries `param_warnings`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FitHomeResult {}
+
+/// Which stage of the Render workspace's stage list the window shows. The names are the keys the
+/// window's own stages are kept under.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum RenderStage {
+    Look,
+    Light,
+    Frame,
+    Output,
+}
+
+impl RenderStage {
+    /// Every stage, in the order the Render window lists them.
+    pub const ALL: [Self; 4] = [Self::Look, Self::Light, Self::Frame, Self::Output];
+}
+
+reads!(render_stage_value -> RenderStage, "expected look, light, frame or output");
+
+/// `view.render_stage`: show one of the four Render stages. Per-document UI state: the design is
+/// not changed or evaluated, nothing is added to undo, and no dialog opens.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = stage_required)]
+pub struct RenderStageParams {
+    // Optional in the type and required in the schema (`stage_required`): left out, the handler
+    // refuses it with its own message.
+    /// `look`, `light`, `frame` or `output`.
+    #[serde(default, deserialize_with = "render_stage_value", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "RenderStage")]
+    pub stage: Option<RenderStage>,
+}
+
+/// What `view.render_stage` returns: the stage the window shows. The command reads its one key
+/// itself and refuses anything else, so no reply carries `param_warnings`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RenderStageResult {
+    pub stage: RenderStage,
+}
+
+fn stage_required(schema: &mut Schema) {
+    require(schema, "stage");
+}
+
 #[cfg(test)]
 #[path = "view_navigation_tests.rs"]
 mod tests;

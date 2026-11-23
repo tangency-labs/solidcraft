@@ -191,9 +191,15 @@ pub struct ExportParams {
     #[serde(default)]
     pub path: Option<String>,
     /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, glb, urdf, sdf or json, or a file name
-    /// whose extension names it. Default: from the path's extension.
+    /// whose extension names it, or an installed exporter plugin as `plugin_id.entry` (`plugin.list`'s
+    /// `exporters`). Default: from the path's extension; an extension SolidCraft does not write
+    /// goes to the exporter plugin that claims it.
     #[serde(default)]
     pub format: Option<String>,
+    /// An exporter plugin's options, as its slot declares them. Refused for SolidCraft's own
+    /// formats. Default: the slot's defaults.
+    #[serde(default)]
+    pub options: Option<serde_json::Map<String, Value>>,
     /// The bodies to export, by name. Default: every body. Design JSON and URDF export the
     /// complete design, so they refuse a list.
     #[serde(default)]
@@ -299,6 +305,7 @@ impl<'de> Deserialize<'de> for ExportParams {
         let mut out = ExportParams {
             path: None,
             format: None,
+            options: None,
             bodies: None,
             quality: None,
             objects: None,
@@ -320,6 +327,11 @@ impl<'de> Deserialize<'de> for ExportParams {
             Some(_) => return Err(refuse::<D::Error>("`path` is required")),
         };
         out.format = text::<D::Error>(&m, "format")?;
+        out.options = match m.get("options") {
+            None | Some(Value::Null) => None,
+            Some(Value::Object(options)) => Some(options.clone()),
+            Some(_) => return Err(refuse("`options` must be an object")),
+        };
         let Some(format) = out.format.as_deref().or(out.path.as_deref()).and_then(|n| Format::from_name(n).ok()) else {
             // The handler refuses a format it does not know before it reads anything else.
             return Ok(out);
@@ -1096,6 +1108,8 @@ pub enum FileExportResult {
     File(ExportResult),
     /// URDF.
     Urdf(UrdfExportResult),
+    /// A format an exporter plugin writes.
+    Plugin(crate::schema::plugin::ExportedFile),
     /// A Gazebo model folder (SDF).
     Sdf(SdfExportResult),
 }
