@@ -1933,6 +1933,19 @@ mod tests {
             assert_eq!(build_script::evaluation_source_from_disk(&dir.0, false).as_deref(), Some(base.as_str()));
         }
 
+        // Only build-output directories (`target`, `target-<name>`) are left out: source whose name
+        // merely starts with `target` is hashed like any other, so editing it changes the digest.
+        put("crates/doc/target-wt/artifact.bin", "ignored");
+        assert_eq!(build_script::evaluation_source_from_disk(&dir.0, false).as_deref(), Some(base.as_str()));
+        put("crates/doc/src/target_x.rs", "pub fn target() {}\n");
+        let with_file = build_script::evaluation_source_from_disk(&dir.0, false).unwrap();
+        assert_ne!(with_file, base, "a source file named target_x.rs is hashed");
+        put("crates/doc/src/target_x.rs", "pub fn target_v2() {}\n");
+        let edited = build_script::evaluation_source_from_disk(&dir.0, false).unwrap();
+        assert_ne!(edited, with_file, "editing target_x.rs changes the digest");
+        std::fs::remove_file(dir.0.join("crates/doc/src/target_x.rs")).unwrap();
+        assert_eq!(build_script::evaluation_source_from_disk(&dir.0, false).as_deref(), Some(base.as_str()));
+
         // Missing required inputs fail closed (`None` -> `"unknown"`).
         std::fs::remove_file(dir.0.join("Cargo.lock")).unwrap();
         assert_eq!(build_script::evaluation_source_from_disk(&dir.0, false), None);

@@ -96,8 +96,22 @@ pub(crate) fn evaluation_source(root: &Path) -> Option<String> {
     Some(hex_digest(digest))
 }
 
-fn skip_disk_name(name: &str) -> bool {
-    name == ".git" || name == ".DS_Store" || name == "__pycache__" || name.starts_with("target") || name.ends_with('~') || name.ends_with(".swp")
+/// What the disk hash leaves out: VCS and OS litter, editor backups, and cargo's build output,
+/// which is a directory named `target` or `target-<name>` (one per worktree here). A file, or a
+/// directory, whose name only starts with `target` (`target_loops.json`, `target_frame.rs`) is
+/// source and is hashed.
+fn skip_disk_name(name: &str, is_dir: bool) -> bool {
+    name == ".git"
+        || name == ".DS_Store"
+        || name == "__pycache__"
+        || (is_dir && (name == "target" || name.starts_with("target-")))
+        || name.ends_with('~')
+        || name.ends_with(".swp")
+}
+
+/// Whether `path` is a directory itself (a symlink to one is hashed as a link, not walked).
+fn is_real_dir(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir())
 }
 
 fn sorted_dir(path: &Path) -> Option<Vec<(String, PathBuf)>> {
@@ -115,7 +129,7 @@ fn hash_disk_path(root: &Path, path: &Path, digest: &mut Sha256, watch: bool) ->
     if meta.is_dir() {
         digest.update(format!("dir {}\n{rel}\n", rel.len()));
         for (name, child) in sorted_dir(path)? {
-            if !skip_disk_name(&name) {
+            if !skip_disk_name(&name, is_real_dir(&child)) {
                 hash_disk_path(root, &child, digest, watch)?;
             }
         }
@@ -149,7 +163,7 @@ pub(crate) fn evaluation_source_from_disk(root: &Path, watch: bool) -> Option<St
         println!("cargo:rerun-if-changed={}", vendor.display());
     }
     for (name, child) in sorted_dir(&vendor)? {
-        if !VENDOR_OUTSIDE.contains(&name.as_str()) && !skip_disk_name(&name) {
+        if !VENDOR_OUTSIDE.contains(&name.as_str()) && !skip_disk_name(&name, is_real_dir(&child)) {
             hash_disk_path(root, &child, &mut digest, watch)?;
         }
     }
