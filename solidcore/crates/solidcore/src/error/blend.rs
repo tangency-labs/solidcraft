@@ -3754,6 +3754,123 @@ mod tests {
         );
     }
 
+    /// #19825: each cause the overflows name is no phrase, replaces the status it
+    /// keeps, has its class (a missing input is `Missing`, neither a defect nor a refusal:
+    /// the overflow's helpers read the caller's body and the executive's sheet alike), and
+    /// is worded with its class.
+    #[test]
+    fn the_cliff_overflow_causes_keep_their_status_and_class() {
+        let mut rows = Vec::new();
+        for input in [
+            OverflowInput::FaceSurface,
+            OverflowInput::EdgeCurve,
+            OverflowInput::EdgeStartVertex,
+            OverflowInput::EdgeEndVertex,
+            OverflowInput::EdgeOtherVertex,
+        ] {
+            rows.push((
+                BlendFailure::OverflowInputMissing(input),
+                ErrorKind::Missing,
+                SM_ERR_NULL_POINTER,
+            ));
+        }
+        for drop in [
+            OverflowDrop::EdgePieceEndOntoEdge,
+            OverflowDrop::EdgeMiddleOntoFilletFace,
+            OverflowDrop::LoopSampleOntoSurface,
+        ] {
+            rows.push((
+                BlendFailure::OverflowPointDoesNotDrop(drop),
+                ErrorKind::NotFound,
+                SM_ERR,
+            ));
+        }
+        rows.push((
+            BlendFailure::ExtensionEndOnTwoSideLines,
+            ErrorKind::Unsupported,
+            SM_ERR,
+        ));
+        rows.push((
+            BlendFailure::NoBlendedEdgeNearExtension,
+            ErrorKind::NotFound,
+            SM_ERR,
+        ));
+        for (cause, class, status) in rows {
+            assert!(!cause.is_phrase(), "{cause:?}");
+            assert!(cause.replaces_upstream_status(), "{cause:?}");
+            assert_eq!(cause.class(), class, "{cause:?}");
+            assert_eq!(cause.comparison_status(), status, "{cause:?}");
+            let text = cause.to_string();
+            assert!(text.starts_with(&format!("{class}: ")), "{text}");
+            let error = SolidError::blend("blend::op", cause);
+            assert_eq!(error.kind(), class, "{error:?}");
+            assert_eq!(error.upstream_status(), Some(status), "{error:?}");
+            assert!(!error.is_defect(), "{error:?}");
+        }
+        assert_eq!(
+            BlendFailure::OverflowInputMissing(OverflowInput::FaceSurface).to_string(),
+            "missing: a face a blend's overflow reads has no surface"
+        );
+    }
+
+    /// #19825: each cause of a kept feature or a trim at the creases that is not built is no
+    /// phrase, replaces the status `SM_ERR` it keeps, has its stop's class (none a defect or
+    /// a refusal), and is worded with its class.
+    #[test]
+    fn the_kept_feature_and_crease_trim_causes_keep_their_status_and_class() {
+        let mut rows = Vec::new();
+        for (stop, class) in [
+            (KeepStop::WallsNotUpright, ErrorKind::Unsupported),
+            (KeepStop::WallsNotAllCopied, ErrorKind::Failed),
+            (KeepStop::WallMeetsNoRound, ErrorKind::NotFound),
+            (KeepStop::RoundNotClosed, ErrorKind::NotFound),
+            (KeepStop::RoundNotSewn, ErrorKind::Failed),
+        ] {
+            rows.push((BlendFailure::KeptFeatureNotBuilt(stop), class));
+        }
+        for (stop, class) in [
+            (
+                CreaseTrimStop::NoSectionThroughEndVertex,
+                ErrorKind::Degenerate,
+            ),
+            (
+                CreaseTrimStop::PieceOnBoundaryAwayFromCreases,
+                ErrorKind::Unsupported,
+            ),
+            (
+                CreaseTrimStop::CornerBetweenAddingAndTaking,
+                ErrorKind::Unsupported,
+            ),
+            (
+                CreaseTrimStop::SectionEndAlongUncutEdge,
+                ErrorKind::Unsupported,
+            ),
+            (CreaseTrimStop::TakesOffNothing, ErrorKind::NotFound),
+            (CreaseTrimStop::ReachesEveryFace, ErrorKind::NotFound),
+            (CreaseTrimStop::MovedEdgeLeavesGeometry, ErrorKind::Failed),
+            (CreaseTrimStop::NotSewn, ErrorKind::Failed),
+        ] {
+            rows.push((BlendFailure::CreaseTrimNotBuilt(stop), class));
+        }
+        for (cause, class) in rows {
+            assert!(!cause.is_phrase(), "{cause:?}");
+            assert!(cause.replaces_upstream_status(), "{cause:?}");
+            assert_eq!(cause.class(), class, "{cause:?}");
+            assert_eq!(cause.comparison_status(), SM_ERR, "{cause:?}");
+            let text = cause.to_string();
+            assert!(text.starts_with(&format!("{class}: ")), "{text}");
+            let error = SolidError::blend("blend::op", cause);
+            assert_eq!(error.kind(), class, "{error:?}");
+            assert_eq!(error.upstream_status(), Some(SM_ERR), "{error:?}");
+            assert!(!error.is_defect() && !error.is_refusal(), "{error:?}");
+        }
+        assert_eq!(
+            BlendFailure::CreaseTrimNotBuilt(CreaseTrimStop::NotSewn).to_string(),
+            "failed: a blend past its faces does not sew into the body along its creases and \
+             rails"
+        );
+    }
+
     /// The `BlendFailure` variants the per-file scan (`phrase_sites::BLEND`) counts are
     /// exactly the phrase causes (`phrase_causes!`, which [`BlendFailure::is_phrase`] is
     /// built from), so the per-file pins in `error/phrase_sites.rs` see every phrase cause.
