@@ -133,6 +133,42 @@ pub enum TraceFailure {
         /// The fillet points given.
         sections: usize,
     },
+    /// The faces of the edge the caller asked to fillet meet tangentially (the cosine
+    /// `dot` between one face's binormal and the other's normal is within the square root
+    /// of the effective zero, where the check measures one), or the edge has no sector to
+    /// fillet: the constant radius solver has no side to offset each surface to. The
+    /// caller's input ([`ErrorKind::InvalidInput`]); status `SM_ERR`.
+    EdgeFacesTangent {
+        /// The cosine measured, where the check measures one.
+        dot: Option<f64>,
+    },
+    /// The chamfer solver's rail points are `gap` apart, more than ten times its distance
+    /// `distance` (the check measures `sqrt(|gap^2 - distance^2|)` against `10 distance`):
+    /// the Newton step has run away from the solution. A solve that stops with its numbers,
+    /// a defect ([`ErrorKind::StationDidNotConverge`]).
+    RailPointsDiverged {
+        /// The distance between the rail points.
+        gap: f64,
+        /// The chamfer's distance.
+        distance: f64,
+    },
+    /// The curve-based solver's base curve is not B-spline based, and only a B-spline
+    /// based curve is extended past its interval ([`ErrorKind::Unsupported`]).
+    CurveNotExtendable,
+    /// A knot inserted in the middle of the largest span of the rails, which have
+    /// `knots` distinct knots, added none, so the rails cannot be refined to four cross
+    /// sections. The caller's rails ([`ErrorKind::InvalidInput`]); status `SM_ERR`.
+    RailKnotsNotRefinable {
+        /// The rails' distinct knots.
+        knots: usize,
+    },
+    /// The circular cross section surface generator kept `sections` cross sections (it
+    /// skips those whose rails are at radii more than a tenth apart), fewer than the
+    /// surface it builds needs ([`ErrorKind::NotFound`]).
+    TooFewCrossSections {
+        /// The cross sections kept.
+        sections: usize,
+    },
 }
 
 impl TraceFailure {
@@ -144,20 +180,24 @@ impl TraceFailure {
             | Self::BaseSurfaceNotOnFace { .. }
             | Self::CrossSectionsIncompatible { .. }
             | Self::SurfaceGeneratorMissing
-            | Self::SmoothedCurveMissing => ErrorKind::InvalidInput,
+            | Self::SmoothedCurveMissing
+            | Self::EdgeFacesTangent { .. }
+            | Self::RailKnotsNotRefinable { .. } => ErrorKind::InvalidInput,
+            Self::RailPointsDiverged { .. } => ErrorKind::StationDidNotConverge,
             Self::ZoneEndsCoincide { .. }
             | Self::ZoneFootAtPole
             | Self::ChordTooShort { .. }
             | Self::SectionTangentZero { .. }
             | Self::BaseDerivativeZero
             | Self::BaseNormalZero { .. } => ErrorKind::Degenerate,
-            Self::ZoneWedgeNearHalfTurn { .. } | Self::ZoneWeightNotPositive { .. } => {
-                ErrorKind::Unsupported
-            }
+            Self::ZoneWedgeNearHalfTurn { .. }
+            | Self::ZoneWeightNotPositive { .. }
+            | Self::CurveNotExtendable => ErrorKind::Unsupported,
             Self::TraceBuiltNoSurface
             | Self::TraceHasNoPoints
             | Self::NoSingleSurfaceFoot { .. }
-            | Self::BisectorMissesSegment { .. } => ErrorKind::NotFound,
+            | Self::BisectorMissesSegment { .. }
+            | Self::TooFewCrossSections { .. } => ErrorKind::NotFound,
             Self::SectionValuesFailed | Self::SmoothingFailed | Self::SkinningFailed => {
                 ErrorKind::Failed
             }
@@ -186,7 +226,12 @@ impl TraceFailure {
             | Self::BaseDerivativeZero
             | Self::BaseNormalZero { .. }
             | Self::BisectorMissesSegment { .. }
-            | Self::CrossSectionsIncompatible { .. } => SM_ERR,
+            | Self::CrossSectionsIncompatible { .. }
+            | Self::EdgeFacesTangent { .. }
+            | Self::RailPointsDiverged { .. }
+            | Self::CurveNotExtendable
+            | Self::RailKnotsNotRefinable { .. }
+            | Self::TooFewCrossSections { .. } => SM_ERR,
         }
     }
 }
@@ -258,6 +303,25 @@ impl core::fmt::Display for TraceFailure {
                 f,
                 "the rails have {rail1_knots} and {rail2_knots} knots for {sections} cross sections"
             ),
+            Self::EdgeFacesTangent { dot: Some(dot) } => {
+                write!(f, "the edge's faces meet tangentially (cosine {dot})")
+            }
+            Self::EdgeFacesTangent { dot: None } => {
+                f.write_str("the edge is smooth or has no sector to fillet")
+            }
+            Self::RailPointsDiverged { gap, distance } => write!(
+                f,
+                "the rail points are {gap} apart, more than ten times the distance {distance}"
+            ),
+            Self::CurveNotExtendable => {
+                f.write_str("a curve that is not B-spline based cannot be extended")
+            }
+            Self::RailKnotsNotRefinable { knots } => {
+                write!(f, "a knot inserted into rails of {knots} knots added none")
+            }
+            Self::TooFewCrossSections { sections } => {
+                write!(f, "only {sections} cross sections were kept")
+            }
         }
     }
 }
@@ -310,6 +374,18 @@ mod tests {
             let b = e.blend_failure().unwrap();
             assert!(!b.is_phrase() && b.replaces_upstream_status(), "{cause:?}");
         }
+        // A solve that stops with its numbers is a defect (failure-codes guide §6 rule 3),
+        // and keeps the site's SM_ERR.
+        let e = SolidError::blend_trace(
+            "blend::op",
+            TraceFailure::RailPointsDiverged {
+                gap: 11.0,
+                distance: 1.0,
+            },
+        );
+        assert_eq!(e.kind(), ErrorKind::StationDidNotConverge);
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert!(e.is_defect());
         let d = SolidError::blend_null_defect("blend::op", "why");
         assert!(d.is_defect());
         assert_eq!(d.sm_status(), Some(SM_ERR_NULL_POINTER));
