@@ -695,7 +695,7 @@ fn an_all_pole_loop_is_refused_when_one_point_and_left_to_its_nodes_when_spread(
     let s = spline_sphere();
     let face = poles::Face::new(s.clone(), 0.0);
     let uvs: Vec<[f64; 2]> = (0..45).map(|k| [f64::from(k) / 45.0, 1.0]).collect();
-    let ranges = vec![0..uvs.len()];
+    let ranges = [0..uvs.len()];
     let one_point: Vec<Vec3> = uvs.iter().map(|_| Vec3::new(0.0, 0.0, 1.0)).collect();
     let why = super::pole_caps(&face, &uvs, &one_point, &ranges, 1e-3).err();
     assert_eq!(why.as_deref(), Some("a loop of 45 nodes all at one pole"));
