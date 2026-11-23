@@ -1,5 +1,4 @@
-//! The solidcore backend: one kernel for the process (SMLib's context is process-global too, and
-//! some of its state, such as the fillet solver's latched step, lives for the whole process),
+//! The solidcore backend: one kernel for the process (SMLib's context is process-global too),
 //! every call under its lock and a panic guard.
 //!
 //! Upstream fixes ([`fixes`]) are solidcore's opt-in corrections of SMLib defects that the C++
@@ -161,7 +160,6 @@ fn put_kernel(k: Option<Kernel>) {
 /// stay. Tolerances and fixes are the same on every kernel.)
 fn start_clean(k: &mut Kernel) {
     *k.blend_station_memo.borrow_mut() = Default::default();
-    k.fillet_point_step.set(None);
     k.upstream_ub_passed.clear();
 }
 
