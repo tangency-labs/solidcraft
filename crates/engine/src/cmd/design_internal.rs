@@ -102,7 +102,28 @@ pub(crate) fn unpack(doc: &Document, design: &str) -> Unpacked {
         }
     }
     stamps.save();
+    // A folder made by something that hides nothing (the command-line tool, an earlier build) is
+    // hidden once the app has the design open.
+    if let Some(hide) = HIDE.get().filter(|_| folder.is_dir()) {
+        hide(&folder);
+    }
     done
+}
+
+/// What hides a work folder where its name does not: set once by the app ([`set_work_folder_hider`]).
+///
+/// The folder is hidden on purpose, on every system, even though the files in it (`.scprt`,
+/// `.scasm`, `.scdwg`) are there so that people from part / assembly / drawing CAD can see a
+/// single file design as the kinds they know. At rest a design is one `.sc` and nothing else
+/// should appear beside it; someone who wants to see what it holds turns hidden items on, which
+/// the documentation says to do. Do not make the folder visible to "help" with that.
+static HIDE: std::sync::OnceLock<fn(&Path)> = std::sync::OnceLock::new();
+
+/// Have every work folder made from now on hidden by `hide`. A work folder's name starts with a
+/// dot, which hides it on Linux and macOS; on Windows the app passes what sets the Hidden
+/// attribute. The engine has no platform code, so without this the folder is only named.
+pub fn set_work_folder_hider(hide: fn(&Path)) {
+    let _ = HIDE.set(hide);
 }
 
 /// Write the work file `file`, making its folder. A file already there is replaced.
@@ -110,7 +131,11 @@ pub(crate) fn write(file: &Path, bytes: &[u8]) -> Result<(), String> {
     let shown = file.to_string_lossy();
     solidcraft_io::vfs::check_new(&shown).map_err(|e| e.to_string())?;
     if let Some(folder) = file.parent() {
+        let made = !folder.exists();
         std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+        if let Some(hide) = HIDE.get().filter(|_| made) {
+            hide(folder);
+        }
     }
     solidcraft_io::write_atomic(file, bytes, false).map_err(|e| format!("{shown}: {e}"))
 }

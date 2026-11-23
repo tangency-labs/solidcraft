@@ -82,7 +82,7 @@ pub use cmd::{
 };
 pub use edit_start::{EditStart, RefreshedSketchModel, SketchDomain, SketchFinishEvent};
 // Internal components (#6892).
-pub use cmd::{in_work_folder, internal_owner, tidy_work_folder};
+pub use cmd::{in_work_folder, internal_owner, set_work_folder_hider, tidy_work_folder};
 // Experimental file kinds (#6892).
 pub use cmd::{experimental_file_kinds, file_kinds_on_for_tests, set_experimental_file_kinds, set_part_library_folders};
 pub use solidcraft_doc as doc;
