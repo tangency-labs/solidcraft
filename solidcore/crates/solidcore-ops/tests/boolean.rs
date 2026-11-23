@@ -3679,3 +3679,100 @@ fn a_traced_revolved_counterbore_a_hair_off_the_holes_axis_cuts_the_part() {
         "volume {v}, on the hole's axis {want}"
     );
 }
+
+/// #20422: two curved spline pockets meeting diagonally at the crossing (4, 5) leave a vertical
+/// self-touching pinch edge along (4, 5, 3)..(4, 5, 4) whose curve is a degree-1 `Record::Spline`.
+/// Through a record round trip, `split_touching` writes two copies of that edge; before the fix,
+/// `curve::from_parameters` marked clamped polynomial splines rational (`w = 1.0` instead of
+/// `NOW`), so `glue_self_touching_edges` and `edges_coincide` both refused them (`certified_hausdorff`
+/// rejects rational curves) and cutting the third adjacent pocket N failed in `relate`.
+///
+/// Closed-form areas (depth 1 on the [0, 10] × [0, 10] × [0, 4] box of volume 400):
+/// - L (x ∈ [3, 4], between y = 2 + 4u - u² and y = 8 - 4u + u²): ∫₀¹ (6 - 8u + 2u²) du = 8/3
+/// - M (x ∈ [4, 6], between y = 5 - 4t(1-t) and y = 5 + 4t(1-t), dx/dt = 2): 16/6 = 8/3
+/// - N (x ∈ [3, 5], up to y = 8 above L's top and M's left half-top): 5/3 + 7/3 = 4
+///
+/// Remaining volume: 400 - 28/3 = 1172/3.
+#[test]
+fn curved_pockets_touching_along_a_vertical_spline_edge_cut_after_round_trip() {
+    all_fixes();
+    let z = 3.0;
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line {
+        start: [a[0], a[1], z],
+        end: [b[0], b[1], z],
+    };
+    let quad = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| Curve::Nurbs {
+        degree: 2,
+        points: vec![
+            [a[0], a[1], z, 1.0],
+            [b[0], b[1], z, 1.0],
+            [c[0], c[1], z, 1.0],
+        ],
+        knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    };
+    let tool = |curves: &[Curve]| {
+        extrude(
+            curves,
+            [0.0, 0.0, 1.0],
+            1.0,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap()
+    };
+    let region_l = tool(&[
+        line([3.0, 8.0], [3.0, 2.0]),
+        quad([3.0, 2.0], [3.5, 4.0], [4.0, 5.0]),
+        quad([4.0, 5.0], [3.5, 6.0], [3.0, 8.0]),
+    ]);
+    let region_m = tool(&[
+        quad([4.0, 5.0], [5.0, 3.0], [6.0, 5.0]),
+        quad([6.0, 5.0], [5.0, 7.0], [4.0, 5.0]),
+    ]);
+    let region_n = tool(&[
+        quad([3.0, 8.0], [3.5, 6.0], [4.0, 5.0]),
+        quad([4.0, 5.0], [4.5, 6.0], [5.0, 6.0]),
+        line([5.0, 6.0], [5.0, 8.0]),
+        line([5.0, 8.0], [3.0, 8.0]),
+    ]);
+
+    let block = make_box([0.0, 0.0, 0.0], [10.0, 10.0, 4.0]).unwrap();
+    let after_l = round_tripped(
+        &boolean(block, region_l, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap(),
+    );
+    let after_m_raw = boolean(after_l, region_m, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    // Verify the exported record actually has the two duplicate vertical `Spline` edges at (4, 5).
+    let (rec, _) = after_m_raw.to_record().unwrap();
+    let at_pinch = |p: [f64; 3]| (p[0] - 4.0).abs() < 1e-9 && (p[1] - 5.0).abs() < 1e-9;
+    let pinch_splines = rec
+        .edges
+        .iter()
+        .filter(|e| {
+            let [a, b] = e.vertices;
+            at_pinch(rec.vertices[a as usize].point)
+                && at_pinch(rec.vertices[b as usize].point)
+                && matches!(e.curve, solidcore_record::brep::Curve::Spline { .. })
+        })
+        .count();
+    assert_eq!(
+        pinch_splines, 2,
+        "expected 2 duplicate vertical Spline pinch edges at (4, 5)"
+    );
+
+    let after_m = Body::from_record(&rec, true).unwrap().0;
+    let r = boolean(after_m, region_n, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(r.solid_count().unwrap(), 1);
+    assert!(r.is_manifold_solid().unwrap());
+    let want = 400.0 - 28.0 / 3.0;
+    let got = volume(&r);
+    assert!(near(got, want), "volume {got} vs closed form {want}");
+}
