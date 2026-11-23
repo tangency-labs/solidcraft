@@ -480,38 +480,6 @@ impl SurfaceFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_)
-            | Self::Defect { .. }
-            | Self::DerivativeOrderTooHigh { .. }
-            | Self::UnsupportedCacheKind
-            | Self::ApproximationNotConverged { .. }
-            | Self::ParameterOutsideInterval { .. }
-            | Self::ZeroLengthTangent
-            | Self::NoNormal
-            | Self::ParallelNormals
-            | Self::TangentAlongNormal
-            | Self::TooFewSolverVariables { .. }
-            | Self::EndPointOutsideDomain
-            | Self::TooFewUniqueKnots
-            | Self::UnsupportedTangencyType
-            | Self::InvalidDerivativeSurface
-            | Self::PointDoesNotDrop
-            | Self::NoParameterDirection
-            | Self::ReferencePointOnBoundary
-            | Self::NoTangentTowardDirection
-            | Self::AtPole
-            | Self::SolverSurfaceNotBSpline
-            | Self::NoControlPoints
-            | Self::PointsDoNotTurnOneWay
-            | Self::UnsupportedSurfaceKind
-            | Self::UnsupportedSolverOperation
-            | Self::NoRoughGuess
-            | Self::ZeroStepOutsideDomain
-            | Self::LineSearchNormUnsigned
-            | Self::LineSearchNotBracketed
-            | Self::AltCachesFull
-            | Self::NodeNotSurfaceNode
-            | Self::NodeHasChildren => SM_ERR,
             Self::Missing(_)
             | Self::SolverWithout { .. }
             | Self::SolveCacheNotMade
@@ -547,7 +515,7 @@ impl SurfaceFailure {
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
-            Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::Defect { .. } | Self::ApproximationNotConverged { .. } => ErrorKind::StageFailed,
             Self::SolverWithout { .. }
             | Self::LineDirectionZero
             | Self::EmptyDomain
@@ -559,33 +527,8 @@ impl SurfaceFailure {
             | Self::UnknownVolumeType { .. }
             | Self::NoNurb
             | Self::CurveWithoutNurb
-            | Self::CurveWithoutControlPoints => ErrorKind::InvalidInput,
-            Self::BoxOutsideBendHalfSpace { .. }
-            | Self::BoxOutsideZeroPeriod { .. }
-            | Self::PointOutsideVolumeDomain { .. }
-            | Self::PointOutsideGivenDomain { .. }
-            | Self::BoxOutsideParamDomain
-            | Self::PseudoBoxOutsideDomain => ErrorKind::OutsideDomain,
-            Self::IsoCurveKindNotLiftable
-            | Self::DerivativeCombinationUnsupported { .. }
-            | Self::PlainVolume
-            | Self::BSplineVolumeUnsupported => ErrorKind::Unsupported,
-            Self::PointInBendSingularity | Self::ZeroVolumeTangent { .. } => ErrorKind::Degenerate,
-            Self::SolveCacheNotMade
-            | Self::BlendSurfaceNotMade
-            | Self::MergedRangeReversed { .. }
-            | Self::KnotsAndContinuitiesDisagree { .. }
-            | Self::DegenerateParameterNotFound
-            | Self::DistanceNotEnclosed
-            | Self::FartherThanGuess { .. }
-            | Self::SingularBoundaryNotPole { .. }
-            | Self::RecursionPastBound { .. }
-            | Self::NoContinuousDomain
-            | Self::NothingLifted
-            | Self::NoVolumeInverse
-            | Self::CallFailed => ErrorKind::Failed,
-            Self::ApproximationNotConverged { .. } => ErrorKind::StageFailed,
-            Self::ParameterOutsideInterval { .. }
+            | Self::CurveWithoutControlPoints
+            | Self::ParameterOutsideInterval { .. }
             | Self::TooFewSolverVariables { .. }
             | Self::InputNotGiven { .. }
             | Self::TrimmedCacheHasNoFace
@@ -602,7 +545,18 @@ impl SurfaceFailure {
             | Self::NodeNotSurfaceNode
             | Self::NodeHasChildren
             | Self::NodeHasNoSurface => ErrorKind::InvalidInput,
-            Self::UnsupportedCacheKind
+            Self::BoxOutsideBendHalfSpace { .. }
+            | Self::BoxOutsideZeroPeriod { .. }
+            | Self::PointOutsideVolumeDomain { .. }
+            | Self::PointOutsideGivenDomain { .. }
+            | Self::BoxOutsideParamDomain
+            | Self::PseudoBoxOutsideDomain
+            | Self::ZeroStepOutsideDomain => ErrorKind::OutsideDomain,
+            Self::IsoCurveKindNotLiftable
+            | Self::DerivativeCombinationUnsupported { .. }
+            | Self::PlainVolume
+            | Self::BSplineVolumeUnsupported
+            | Self::UnsupportedCacheKind
             | Self::UnsupportedTangencyType
             | Self::AtPole
             | Self::SurfaceNotBSplineKind
@@ -610,15 +564,9 @@ impl SurfaceFailure {
             | Self::SolverSurfaceNotBSpline
             | Self::UnsupportedSurfaceKind
             | Self::UnsupportedSolverOperation => ErrorKind::Unsupported,
-            Self::SurfaceCacheNotBuilt
-            | Self::SurfaceCacheTreeNotBuilt
-            | Self::CurveCacheNotBuilt
-            | Self::CurveCacheTreeNotBuilt
-            | Self::PointDoesNotDrop
-            | Self::NoParameterDirection
-            | Self::NoTangentTowardDirection
-            | Self::NoControlPoints => ErrorKind::Failed,
-            Self::ZeroLengthTangent
+            Self::PointInBendSingularity
+            | Self::ZeroVolumeTangent { .. }
+            | Self::ZeroLengthTangent
             | Self::NoNormal
             | Self::ParallelNormals
             | Self::NormalsCancel
@@ -626,8 +574,28 @@ impl SurfaceFailure {
             | Self::TooFewUniqueKnots
             | Self::ReferencePointOnBoundary
             | Self::PointsDoNotTurnOneWay => ErrorKind::Degenerate,
+            Self::SolveCacheNotMade
+            | Self::BlendSurfaceNotMade
+            | Self::MergedRangeReversed { .. }
+            | Self::KnotsAndContinuitiesDisagree { .. }
+            | Self::DegenerateParameterNotFound
+            | Self::DistanceNotEnclosed
+            | Self::FartherThanGuess { .. }
+            | Self::SingularBoundaryNotPole { .. }
+            | Self::RecursionPastBound { .. }
+            | Self::NoContinuousDomain
+            | Self::NothingLifted
+            | Self::NoVolumeInverse
+            | Self::CallFailed
+            | Self::SurfaceCacheNotBuilt
+            | Self::SurfaceCacheTreeNotBuilt
+            | Self::CurveCacheNotBuilt
+            | Self::CurveCacheTreeNotBuilt
+            | Self::PointDoesNotDrop
+            | Self::NoParameterDirection
+            | Self::NoTangentTowardDirection
+            | Self::NoControlPoints => ErrorKind::Failed,
             Self::NoRoughGuess => ErrorKind::NotFound,
-            Self::ZeroStepOutsideDomain => ErrorKind::OutsideDomain,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
