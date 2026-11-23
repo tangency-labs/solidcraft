@@ -283,14 +283,14 @@ pub(crate) fn share_grants(app: &mut SolveApp) {
         log::warn!("plugins: approvals could not be shared with the command line: {e}");
     }
     app.preferences.plugin_grants.retain(|id, grants| valid_id(id) && valid_grants(grants));
-    app.plugin_grant_store = Some(synced);
+    app.plugins.grant_store = Some(synced);
     sync_policy(app);
 }
 
 /// Write the grants changed here to the shared store, then take in what the command line or
 /// headless MCP changed there. Nothing to do unless the app shares its grants.
 fn sync_store(app: &mut SolveApp) -> Result<(), String> {
-    let Some(synced) = app.plugin_grant_store.as_mut() else { return Ok(()) };
+    let Some(synced) = app.plugins.grant_store.as_mut() else { return Ok(()) };
     let Some(dir) = app.session.plugin_state.plugins_dir() else { return Ok(()) };
     let saved = synced.persist(&dir, &app.preferences.plugin_grants);
     // A record that could not be written or deleted reads back as last seen: no change here.
@@ -706,7 +706,7 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
 }
 
 /// What was approved at install for `plugin`'s current package, in plain words: command groups,
-/// folders with their access, and memory. Grants made for another version count for nothing.
+/// folders with their access, fuel and memory. Grants made for another version count for nothing.
 pub(crate) fn approved_text(app: &SolveApp, plugin: &Plugin) -> String {
     use solidcraft_ui_text::{format, tr};
     let Some(grants) = app.session.plugin_state.grants.get(&plugin.id).filter(|g| g.package_hash.as_deref() == Some(plugin.approval.as_str())) else {
@@ -727,6 +727,9 @@ pub(crate) fn approved_text(app: &SolveApp, plugin: &Plugin) -> String {
             _ => "prefs.plugin_folder_read",
         });
         parts.push(format("prefs.plugin_folder", &[("name", &folder.name), ("access", access)]));
+    }
+    if let Some(fuel) = grants.fuel {
+        parts.push(format("prefs.plugin_approved_fuel", &[("fuel", &fuel.to_string())]));
     }
     if let Some(memory) = grants.memory_mib {
         parts.push(format("prefs.plugin_approved_memory", &[("memory", &memory.to_string())]));

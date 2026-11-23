@@ -343,7 +343,7 @@ fn drawing_files_open_from_disk_in_either_form() {
 // W38a acceptance through the real design container, not only Drawing JSON.
 fn design_with_sheet_sketches() -> Document {
     use solidcore_record::Vec2;
-    use solidcraft_doc::drawing::{SheetSketch, Units};
+    use solidcraft_doc::drawing::{Owner, SheetSketch, Units};
     use solidcraft_doc::sketch::{ConstraintKind, PointExprs, Sketch};
 
     let mut doc = plate();
@@ -364,7 +364,7 @@ fn design_with_sheet_sketches() -> Document {
         d.units = Units::Fixed { unit: "in".into() };
         // Identical sketch ids in different drawings are legal: the namespace
         // is drawing-local, just as the curve/point ids are sketch-local.
-        d.sketches.push(Arc::new(SheetSketch { id: shared_id, sheet: d.sheets[0].id, name: format!("Outline {i}"), sketch }));
+        d.sketches.push(Arc::new(SheetSketch { id: shared_id, owner: Owner::Sheet(d.sheets[0].id), name: format!("Outline {i}"), sketch }));
         d.validate().unwrap();
     }
     doc
@@ -380,7 +380,7 @@ fn sheet_sketches_round_trip_through_real_container_and_plain_design() {
         assert_eq!(reopened.drawings, source.drawings);
         for (i, d) in reopened.drawings.iter().enumerate() {
             let record = &d.sketches[0];
-            assert_eq!(record.sheet, d.sheets[0].id);
+            assert_eq!(record.owner, solidcraft_doc::drawing::Owner::Sheet(d.sheets[0].id));
             assert_eq!(record.name, format!("Outline {i}"));
             assert_eq!(record.sketch.points[1].pos.x, 15.0 + i as f64);
             assert_eq!(record.sketch.points[2].pos.x - record.sketch.points[1].pos.x, 40.0);
@@ -434,7 +434,7 @@ fn a_bad_sheet_sketch_refuses_the_whole_container_without_owner_fallback() {
     let good: Value = serde_json::from_slice(&good_parts[&own_entry]).unwrap();
     let foreign_sheet = source.drawings[1].sheets[0].id;
     for (pointer, value) in [
-        ("/sketches/0/sheet", json!(ids::encode(foreign_sheet))),
+        ("/sketches/0/owner/sheet", json!(ids::encode(foreign_sheet))),
         ("/sketches/0/id", json!(ids::encode(source.drawings[0].id))),
         ("/sketches/0/sketch/curves/0/a", json!(99_999)),
         ("/sketches/0/sketch/points/1/id", json!("origin")),

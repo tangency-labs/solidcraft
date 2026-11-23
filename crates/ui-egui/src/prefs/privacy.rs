@@ -35,13 +35,21 @@ fn usage(app: &mut SolveApp, ui: &mut egui::Ui) {
         _ => {
             let check = ui_kit::checkbox(ui, &label, &mut app.preferences.usage_statistics);
             crate::scenario::publish_target("prefs:usage_statistics", check.rect);
-            if check.changed() && !app.preferences.usage_statistics {
-                app.usage.store.days.clear();
+            // Switched on here is an explicit yes, like OK on the notice; off ends the notice too.
+            if check.changed() {
+                if app.preferences.usage_statistics {
+                    usage_stats::agree(app);
+                } else {
+                    app.usage.store.days.clear();
+                }
             }
         }
     }
     // Wrapped: the note is a few lines long.
     ui.horizontal_wrapped(|ui| ui_kit::settings_inline_note(ui, app.tr("prefs.privacy.share_help")));
+    if off.is_none() && !app.usage.store.notice_ok {
+        ui.horizontal_wrapped(|ui| ui_kit::settings_inline_note(ui, app.tr("prefs.privacy.waiting_ok")));
+    }
     let on = off.is_none();
     // The installation id the reports carry, and what can be done with it.
     let id = if app.usage.store.install_id.is_empty() { app.tr("prefs.privacy.no_id").to_string() } else { app.usage.store.install_id.clone() };

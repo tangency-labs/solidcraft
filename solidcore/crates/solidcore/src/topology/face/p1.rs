@@ -204,6 +204,7 @@ use crate::topology::face::p2 as fp2;
 use crate::topology::face::p3 as fp3;
 use crate::topology::face::p4::BrepSeamObjects;
 use crate::topology::loopuse as lu1;
+use crate::topology::loopuse::QueryTopology;
 use crate::topology::trimming_tools as tt;
 use crate::topology::vertex as vx;
 use crate::topology::vertexuse as vu1;
@@ -324,20 +325,41 @@ fn has_seam_problem<O: LoopObject>(
 
 /// `pEU->NormalizedEvaluate(dT, TRUE, rUV)` (UV evaluation; default arguments: no
 /// first derivative, `bOKToMakeUVTrimCurve = TRUE`).
-fn normalized_evaluate_uv(k: &Kernel, b: &mut Brep, eu: EdgeuseId, t: f64) -> Result<Point3> {
-    Ok(eu3::normalized_evaluate(k, b, eu, t, true, false, true)?.point)
+/// Read only ([`QueryTopology::Prepared`]), the UV trim curve must exist: nothing is made.
+fn normalized_evaluate_uv(
+    k: &Kernel,
+    b: &mut QueryTopology<'_>,
+    eu: EdgeuseId,
+    t: f64,
+) -> Result<Point3> {
+    Ok(match b {
+        QueryTopology::Mutable(b) => eu3::normalized_evaluate(k, b, eu, t, true, false, true)?,
+        QueryTopology::Prepared(b) | QueryTopology::Requested(b, _) => {
+            eu3::normalized_evaluate_existing_uv(k, b, eu, t, false)?
+        }
+    }
+    .point)
 }
 
 /// `pEU->GetOrCreateUVTrimCurve(rpUVCurve)` (default arguments: no distance or
 /// deviation, `bOKToMakeUVTrimCurve = TRUE`): the returned status, and the edge use's
 /// (or its mate's) UV trim curve afterwards, which a failing status can still leave
-/// attached.
+/// attached. Read only ([`QueryTopology::Prepared`]), the existing curve's fetch, and
+/// [`SolidError::PreparationRequired`] where there is none: nothing is made.
 fn fetch_uv_trim_curve(
     k: &Kernel,
-    b: &mut Brep,
+    b: &mut QueryTopology<'_>,
     eu: EdgeuseId,
 ) -> Result<(std::result::Result<(), SolidError>, Option<Curve>)> {
-    let fetch = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
+    let fetch = match b {
+        QueryTopology::Mutable(b) => {
+            eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?
+        }
+        QueryTopology::Prepared(b) | QueryTopology::Requested(b, _) => {
+            eu3::existing_uv_trim_curve(b, eu, false)?
+                .ok_or(SolidError::PreparationRequired { operation: OP })?
+        }
+    };
     let curve = eu1::uv_trim_curve(b, eu)?.0.cloned();
     Ok((fetch.status, curve))
 }
@@ -345,6 +367,12 @@ fn fetch_uv_trim_curve(
 /// `SER(pEU->GetOrCreateUVTrimCurve(rpUVCurve))`: the UV trim curve; a failing status
 /// returns, and a missing curve is the null dereference that follows upstream.
 fn get_or_create_uv_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<Curve> {
+    uv_trim_curve_in(k, &mut QueryTopology::Mutable(b), eu)
+}
+
+/// [`get_or_create_uv_trim_curve`] through `b`: read only ([`QueryTopology::Prepared`]),
+/// the curve must exist ([`fetch_uv_trim_curve`]).
+fn uv_trim_curve_in(k: &Kernel, b: &mut QueryTopology<'_>, eu: EdgeuseId) -> Result<Curve> {
     let (status, curve) = fetch_uv_trim_curve(k, b, eu)?;
     status?;
     curve.ok_or_else(|| {
@@ -739,10 +767,37 @@ pub struct OrientedTrimBoundary {
 /// dereferences null; those of the copies, conversions, reversals and evaluations;
 /// [`SolidError::Unported`] (`CreateUVTrimCurves`, and the deferred callees of
 /// `NormalizedEvaluate` / `GetOrCreateUVTrimCurve`).
-#[allow(clippy::too_many_lines)] // one upstream routine
 pub fn create_oriented_trim_boundary(
     k: &Kernel,
     b: &mut Brep,
+    f: FaceId,
+    parameter_space: bool,
+    fill_singularities: bool,
+    loop_to_use: Option<LoopId>,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+) -> Result<OrientedTrimBoundary> {
+    oriented_trim_boundary_in(
+        k,
+        &mut QueryTopology::Mutable(b),
+        f,
+        parameter_space,
+        fill_singularities,
+        loop_to_use,
+        key_of,
+    )
+}
+
+/// [`create_oriented_trim_boundary`] through `b`: read only ([`QueryTopology::Prepared`])
+/// every UV trim curve it reads must exist, and nothing is made; where one is missing,
+/// [`SolidError::PreparationRequired`].
+///
+/// # Errors
+///
+/// Those of [`create_oriented_trim_boundary`], and [`SolidError::PreparationRequired`].
+#[allow(clippy::too_many_lines)] // one upstream routine
+pub(crate) fn oriented_trim_boundary_in(
+    k: &Kernel,
+    b: &mut QueryTopology<'_>,
     f: FaceId,
     parameter_space: bool,
     fill_singularities: bool,
@@ -762,7 +817,12 @@ pub fn create_oriented_trim_boundary(
 
     // Create trimCurves for all Face->Edgeuses
     if !have_trimming_curves {
-        create_uv_trim_curves(k, b, f)?;
+        match b {
+            QueryTopology::Mutable(b) => create_uv_trim_curves(k, b, f)?,
+            QueryTopology::Prepared(_) | QueryTopology::Requested(..) => {
+                return Err(SolidError::PreparationRequired { operation: OP });
+            }
+        }
     }
 
     let mut out = OrientedTrimBoundary {
@@ -818,7 +878,7 @@ pub fn create_oriented_trim_boundary(
             // for every edgeuse in this loop
             for &eu in &edgeuses {
                 if eu1::orientation(b, eu)? == OrientType::Same {
-                    let uv_curve = get_or_create_uv_trim_curve(k, b, eu)?;
+                    let uv_curve = uv_trim_curve_in(k, b, eu)?;
                     let ivl = uv_curve.natural_interval();
 
                     // get trim curve's start UV point
@@ -883,7 +943,7 @@ pub fn create_oriented_trim_boundary(
                     out.edgeuses.push(Some(eu));
                 } else {
                     let mut bsc = if parameter_space {
-                        let orig = get_or_create_uv_trim_curve(k, b, eu)?;
+                        let orig = uv_trim_curve_in(k, b, eu)?;
                         let mut bsc = orig.copy(k)?;
                         bsc.convert_to_2d(k)?;
                         let _ = bsc.set_owner(orig.owner(), None);

@@ -166,7 +166,10 @@ fn pieces(asm: &Assembly, lp: &[AUse], n: Vec3) -> Result<Vec<Piece>> {
                     let sweep = (t1 - t0) * along * z.dot(n).signum();
                     Ok(Piece { a, b, arc: Some(Arc { centre: Vec3::from(frame.origin), sweep }) })
                 }
-                _ => Err(fail("edges must be lines or arcs")),
+                Curve::Ellipse { .. } => Err(LipRefusal::RimCurve("an ellipse").into()),
+                Curve::Polyline { .. } => Err(LipRefusal::RimCurve("a polyline").into()),
+                Curve::Spline { .. } | Curve::RationalSpline { .. } => Err(LipRefusal::RimCurve("a spline").into()),
+                Curve::SurfaceIntersection { .. } => Err(LipRefusal::RimCurve("a curve where two surfaces meet").into()),
             }
         })
         .collect()
@@ -258,6 +261,9 @@ pub enum LipRefusal {
     /// The band's far edge crosses the rim's other edge in some places only.
     #[error("the band's far edge crosses the rim's other edge in part, so the face left beside it has no single side")]
     BandCrossesRim,
+    /// A rim edge of a curve the band cannot follow, such as the ellipse a tilted cut leaves.
+    #[error("not supported yet: a rim edge that is {0}; a lip follows only lines and arcs")]
+    RimCurve(&'static str),
 }
 
 /// An edge from vertex `a` to vertex `b` along `p` (a line, or an arc of its circle about `n`):

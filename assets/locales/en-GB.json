@@ -347,6 +347,7 @@
   "ui.drawing_detail.step_centre": "Click inside a view at the centre of the region to show.",
   "ui.drawing_export.dxf_note": "The sheet shown, its lines in millimetres, a layer for each kind of line. Shaded views and images are left out.",
   "ui.drawing_note.align_centre": "Centre",
+  "ui.drawing_note.align_saved": "Centre (as before)",
   "ui.drawing_offscreen.recenter": "Centre sheet",
   "ui.export_keymap_tip": "Keys, S box favourites and the toolbar, as a file",
   "ui.instances": "Instances",

@@ -140,8 +140,8 @@ that triggered the notification. Each invocation uses a fresh guest instance.
 Handler results use the existing 1 MiB JSON reply limit; retained panel data is
 limited to 16 MiB in total. Exceeding either limit reports a typed limit error.
 
-Panel support from #19516 is not present here. The host keeps the handler's
-bounded JSON result through a plain function for a future panel adapter.
+A handler of a plugin that declares `ui@0.1` may refresh that plugin's panel data with
+`ui.set-data` (see Docked panels below).
 
 ## Classifying points and reading surface normals
 
@@ -176,12 +176,24 @@ leaves the design and undo history unchanged.
 **Install plugin…** in **Preferences > Plugins** (desktop only) picks a plugin `.zip`.
 One confirmation screen shows its name, version, summary, requested permissions and entry placements.
 Each command group explains its access in plain words: files, designs, application settings or other plugins.
-Enter an absolute local path for each requested folder. Each folder shows its requested read/write access.
+Use **Browse…** to choose each requested folder, or type or paste its absolute local path.
+Each folder shows its requested read/write access. When updating an installed plugin, a stored folder
+with the same name is kept as the editable starting value only when the requested access is the same
+or lower, with read access lower than write access (including read and write). Read-to-read and write-to-read updates keep the
+folder; read-to-write updates start empty so you choose the folder again. You can change any kept
+folder before approving it with **Install**. If a kept folder no longer exists, **Install** reports
+the folder error; choose a folder again. The plugin gets only the folders displayed and approved with
+**Install**; choosing or editing a folder grants nothing on its own.
 When the plugin asks for more memory than the ceiling in **Preferences > Plugins** (128 MiB unless
-changed), the screen says how much it asks for and what the ceiling is.
-**Install** approves the displayed command groups, folders and memory, publishes the package and stores the
-approvals; **Cancel** changes nothing. Installation never runs plugin code. Approved memory applies to
-that exact package only: a replaced or changed package asks again. Fuel still has to fit the ceiling.
+changed), or more fuel than **Max plugin fuel** (100,000,000,000 unless changed), the screen says
+how much it asks for and what the default limit is.
+**Install** approves the displayed command groups, folders, fuel and memory, publishes the package and stores the
+approvals; **Cancel** changes nothing. Installation never runs plugin code. Approved fuel and memory apply to
+that exact package only: a replaced or changed request asks again, since the approval hash covers the
+manifest and component. Other plugins keep the user's default limits.
+Fuel approval has a hard host ceiling of **10,000,000,000,000** (`craft_plugin::MAX_APPROVED_FUEL`).
+A request above it is refused at install with `OverCeiling`, naming the request and the hard ceiling,
+even when Max plugin fuel is higher.
 
 Programs use the same `plugin.install` command without opening dialogs:
 
@@ -192,6 +204,7 @@ Programs use the same `plugin.install` command without opening dialogs:
   "approve": {
     "command_groups": ["file"],
     "folders": [{"name": "exports", "path": "/home/user/exports", "read": false, "write": true}],
+    "fuel": 10000000000000,
     "memory_mib": 1024
   }
 }
@@ -199,8 +212,10 @@ Programs use the same `plugin.install` command without opening dialogs:
 
 Approvals may only narrow the manifest's requests. An unrequested group, folder name or access mode
 returns a typed refusal. `memory_mib` is either omitted (the plugin runs under the app's ceiling) or
-exactly the manifest's `runtime.limits.memory_mib`.
-Omitting `approve` grants no groups, folders or memory, including when replacing a plugin.
+exactly the manifest's `runtime.limits.memory_mib`. Likewise, `fuel` is omitted (Max plugin fuel
+applies) or exactly `runtime.limits.fuel`, up to the hard host ceiling. Headless callers submit the
+same `approve` object to `plugin.install`; stored grants include the approved fuel.
+Omitting `approve` grants no groups, folders, fuel or memory, including when replacing a plugin.
 Providing `approve` replaces that plugin id's stored approvals; grants the new manifest no longer requests
 cannot survive replacement. `plugin.run` checks stored grants against the current manifest on every call.
 A package copied into the plugin directory by hand also starts with no grants.
@@ -240,10 +255,10 @@ The command surface exposes management without opening dialogs:
 | Command | Parameters | Result |
 |---|---|---|
 | `plugin.check` | `{path}`: a package folder or `.zip` | `{ok, id, name, version, kind, approval, entries, problems: [{severity, field, problem, fix}]}`; installs nothing |
-| `plugin.install` | `{path, approval?, archive?, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?, input_folder?}}` | Package description and installation status, including declared `entry_points` |
+| `plugin.install` | `{path, approval?, archive?, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], fuel?, memory_mib?, input_folder?}}` | Package description and installation status, including declared `entry_points` |
 | `plugin.list` | `{}` | `{plugins: [{manifest, commands, disabled}]}` |
 | `plugin.remove` | `{id}` | `{id, removed: true}` |
-| `plugin.grants` | `{}` | `{grants: [{id, status, package_hash, command_groups, folders, memory_mib?, input_folder?}]}` |
+| `plugin.grants` | `{}` | `{grants: [{id, status, package_hash, command_groups, folders, fuel?, memory_mib?, input_folder?}]}` |
 | `plugin.revoke` | `{id}` | `{id, revoked}` |
 | `plugin.tools` | `{name?}` | `{tools: [{name, kind, plugin, entry, plugin_name, plugin_version, description, effect, extensions, input_schema, approval?}]}`: every installed, enabled plugin's entries as tools for agents (below); `approval` only for the one tool `name` asks for |
 
@@ -275,7 +290,7 @@ solidcraft-cli --keep-plugin-approvals run import.json                          
   plugins, and with `--keep-plugin-approvals` its own approvals, there, apart from the user's. With
   `mcp`, both need `--headless`; a connected desktop app uses its own plugins.
 - **What a record allows.** A record holds what was approved at install: command groups, folders,
-  memory and `input_folder`, bound to the exact manifest and component reviewed (`package_hash`).
+  fuel, memory and `input_folder`, bound to the exact manifest and component reviewed (`package_hash`).
   A changed package, even one whose files were edited in place, runs only after it is installed and
   approved again (`plugin.install` with `replace: true` and `approve`); until then its import or run is
   refused. Nothing is granted implicitly: an install without `approve` stores a record that grants
@@ -385,8 +400,10 @@ From the application control surface, use:
 }}}
 ```
 
-Plugins-menu entry forms use this same form implementation. The panel work in #19516 is not
-on main yet: its future Edit row action can call the plain opening function or `ui.start` above.
+Plugins-menu entry forms use this same form implementation. A docked panel's table row action
+(`on_edit`, see Docked panels) runs the declared entry as an ordinary command with the typed
+event; it does not open this form itself. To edit a stored operation from a panel, call the plain
+opening function or `ui.start` above.
 An entry that already has an unsubmitted form is refused rather than replacing its values.
 
 Scripts and MCP use explicit parameters to call `<plugin>.<entry>` or `plugin.run`.
@@ -420,6 +437,27 @@ revision changed, the entry does not run: the form revalidates against the curre
 reports missing picks beside their fields, and asks the person to review and Apply again.
 If the design changes while a worker computes, atomic command acceptance rejects its result.
 No stale result can overwrite the current design.
+
+### Shared field definitions
+
+When several entries ask for the same field, define it once under `$defs` and point to it with
+`{"$ref": "#/$defs/<name>"}`. The `$defs` can sit at the top of the manifest, where every entry
+can use it, or in one entry's `input_schema`, where it wins over a top-level definition of the
+same name. Keys beside a `$ref` replace the definition's own, so an entry can keep the shared choices
+with its own `default` or `description`:
+
+```json
+"$defs": {"units": {"type": "string", "title": "Units", "enum": ["mm", "in"], "default": "mm"}},
+"runtime": {"entries": [
+  {"name": "box", "input_schema": {"type": "object", "properties": {"units": {"$ref": "#/$defs/units"}}}},
+  {"name": "lid", "input_schema": {"type": "object", "properties": {"units": {"$ref": "#/$defs/units", "default": "in"}}}}
+]}
+```
+
+The app inlines every `$ref` once, when it loads the manifest, so dialogs, tools, conditions and
+input checks see the full field. Only these local names are followed. An unknown name, a definition
+that refers back to itself, or nesting too deep to expand refuses the manifest. The 64 KiB cap
+applies to `plugin.json` as written.
 
 ### Conditional fields, choices and defaults
 
@@ -726,9 +764,9 @@ reports progress and cancellation, reads named files and a clock, and exports th
 `plugin.json` lists what it needs, for example `"capabilities": ["commands@0.2"]`; the host refuses
 an unknown or newer capability when it reads the manifest, with a plain message such as "needs
 commands 0.3; update SolidCraft or the plugin". `formats@0.2` adds file-format slots: importers and
-exporters; `evaluate@0.2` lets an importer check its result, and `storage@0.1` keeps data in a
-design (below). `ui` and `viewport` arrive later as their own versioned interfaces. While a version
-is 0.x, a minor version may break the one before it.
+exporters; `evaluate@0.2` lets an importer check its result, `storage@0.1` keeps data in a design
+(below), and `ui@0.1` adds host-drawn docked panels. `viewport` arrives later as its own versioned
+interface. While a version is 0.x, a minor version may break the one before it.
 
 0.2 added one error, `plugin-error.unsupported(string)`: the input is valid, but this plugin does
 not handle it, such as a file with no solids or a newer version of its format. Use it instead of
@@ -738,6 +776,60 @@ bracket.smp: ..." instead of an "invalid" file. Plugins built against 0.1 (`comm
 component's own imports and exports, and serves the frozen 0.1 WIT
 (`crates/craft-plugin/wit-0.1/plugin.wit`) to those. A component that names a version the host does
 not run, or two versions at once, is refused before any of its code runs.
+
+## Docked panels
+
+Add `"ui@0.1"` alongside `"commands@0.2"`, declare `runtime.ui`, and target `panel-plugin` in
+`crates/craft-plugin/wit/plugin.wit`. The `ui` and `ui-provider` records follow
+[RFC 0015 section 1](rfcs/0015-plugin-ui-workspaces.md#1-panels). The manifest declarations are
+listed during installation. The component's `ui-provider.describe` must return those declarations.
+The host owns the controls, theme, docking and plugin badge; plugins ship data and layouts.
+Panels belong to command plugins; the importer world remains separate.
+
+For example, `runtime.ui` can declare a job table whose row action runs the entry `edit`:
+
+```json
+{
+  "ui_version": 1,
+  "panels": [{
+    "id": "jobs", "title": "Jobs", "zones": ["right", "bottom"],
+    "layout": {"root": 0, "nodes": [{"widget": {"table": {
+      "bind": "/jobs", "row_id": "id",
+      "columns": [{"key": "name", "label": "Operation", "unit": null}],
+      "select": "single", "on_select": null, "on_edit": "edit"
+    }}}]}
+  }],
+  "workspaces": []
+}
+```
+
+Every action names an entry in `runtime.entries`. Buttons, toolbar items, list selection,
+table selection or editing, and form changes invoke ordinary `<plugin>.<entry>` commands.
+Panel clicks put the event in the host command envelope's `ui_event` field and pass the same
+event as the entry's `params`. `ui-provider.on-event` receives the typed event in the same
+transaction. For the table above, the event is
+`{"panel":"jobs","event":"edit","path":"/jobs","row":"op1","value":null}`.
+An MCP caller uses `execute` with the same `<plugin>.<entry>` command and an envelope containing
+`approval`, `params` and `ui_event`. Ordinary entry parameters, including fields named `panel`
+and `event`, remain entry data and do not invoke `ui-provider.on-event`. Programmatic calls open
+no forms.
+
+The component updates cells with `ui.set-data`, for example `/jobs/0/id` = `text("op1")` and
+`/jobs/0/name` = `text("Pocket")`. Values are typed scalars, with lengths in mm and angles in
+degrees. Slash paths identify cells; no JSON arrays cross the UI WIT interface. Successful calls
+merge into the panel once per frame. A failing entry discards its updates. `clear-data` replaces
+the panel data with an empty set; `show-panel` requests visibility in the current workspace.
+Calling `show-panel(true)` again reopens a panel the user closed. Closing a panel keeps the
+other workspaces' placements and does not cancel a command already running.
+
+The phase 2 host draws groups, tabs, splits, forms, buttons, toolbars, lists, tables, text,
+progress and empty states. Trees, charts and newer widget versions show a placeholder.
+Panels are transient view state, cleared when a design closes or the plugin is disabled.
+The host remembers placement by plugin id, panel id and dock zones. Code and data updates keep
+that placement. Changing the allowed zones or initial zone opens a new section in a legal dock.
+Limits are eight panels per plugin, 512 widgets per layout, 1 MiB of data per panel and 100,000
+rows. The widget count includes every layout node, toolbar button, form field and table column.
+Lists and tables scroll virtually.
 
 ## Commands and permissions
 
@@ -773,7 +865,7 @@ beside the built-in tools, so an agent can find and use what a plugin offers wit
   edit commands and the file-writing host import `write-file`, whatever folders the plugin was
   granted. The refusal names the import (or command).
 - **A missing grant is an error, never a prompt.** A call that needs a grant the plugin lacks
-  (a folder, a command group, more memory than the ceiling, or approval of a changed package)
+  (a folder, a command group, more fuel or memory than the default limit, or approval of a changed package)
   fails with an error that names the plugin, the grant and how to approve it: in Preferences ›
   Plugins by installing the plugin again and allowing it, or headlessly with `plugin.install` and
   its `approve` object. Over MCP the result also carries it as data,
@@ -891,10 +983,17 @@ Only an importer may say `open`.
 - **Failures.** A failure fails that one import, named with the plugin and the file ("Sample
   could not open bracket.smp: ...", or "Sample does not support bracket.smp: ..." for
   `unsupported`), and the next one gets a fresh instance. The compiled component stays in memory, so the next file opens
-  without compiling again; nothing compiled is written to disk.
+  without compiling again.
+- **Compiled plugins are kept.** A plugin compiles once per version: SolidCraft keeps the compiled
+  code with Wasmtime's compilation cache in the `plugin-compile` folder of its per-user cache folder
+  (`%LOCALAPPDATA%\SolidCraft\plugin-compile`, `~/Library/Caches/SolidCraft/plugin-compile`, or
+  `~/.cache/solidcraft/plugin-compile`), never in the plugin's or a design's folder. It is safe to
+  delete: the next session compiles again. A changed plugin, SolidCraft version or setting gets its own
+  entry; a damaged entry is compiled again, and a folder that can't be written only means compiling
+  each session. The folder holds machine code SolidCraft runs, so it is as trusted as the app itself.
 - **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
-  `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel has to fit the user's ceiling in Preferences › Plugins, and
-  its memory too unless the user approved more at install. Build it for `wasm32-unknown-unknown` and wrap it with
+  `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel and memory must fit the user's default limits in Preferences › Plugins
+  unless the user approved more for this exact package at install. Build it for `wasm32-unknown-unknown` and wrap it with
   `wasm-tools component new`: the host links no WASI, so a component that imports any is refused.
 
 ## Exporters
@@ -951,7 +1050,7 @@ and MCP give the English.
 | `unsupported` from the plugin | Sample does not support sketch.smp: the model has no solids |
 | `invalid-input` from the plugin | Sample could not open broken.smp: (its reason) |
 | More memory than plugins may use | Sample could not open big.smp: it asks for 2048 MiB of memory, and plugins may use 128 MiB. Install the plugin again and allow its memory request, or raise Max plugin memory (MiB) in Preferences › Plugins (in solidcraft-cli, max_memory_mib in the --plugin-limits file). |
-| More fuel than plugins may use | ... it asks for N fuel, and plugins may use M. Raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file). |
+| More fuel than plugins may use | ... it asks for N fuel, and plugins may use M. Install the plugin again and allow its fuel request, or raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file). |
 | It ran out of fuel, memory, stack or time | ... it used all N fuel it asks for and was stopped. Ask its author to raise its fuel limit. (memory in MiB, stack in KiB, time in seconds) |
 | Its design is over 256 MiB | ... the design it made is larger than 256 MiB, the most a plugin can hand over. |
 | A trap | ... it stopped on an error inside the plugin (details). Report this to its author. |
