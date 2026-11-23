@@ -958,6 +958,10 @@ in that order. The person at the window can go on working meanwhile: the file is
 operations panel, and its result lands after their edits (`ui.prefs {"file_operations_wait":
 true}` brings back the card over the design that makes everything wait for the file).
 
+On the desktop, a direct `engine.execute` of `drawing.export` uses the file operation worker
+for both a file and an SVG or DXF returned in the reply. Its operation can be cancelled from
+the window or with `ui.operations`.
+
 Timeouts and `control.pending` work as described above. A slow command is still answered when it
 is done, from a later frame. With the preference off, commands run on the window thread, and the
 window waits for each one.
