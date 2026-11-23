@@ -1686,6 +1686,17 @@ fn collapsed_at_pole(s: &poles::Face, l: &seam::Loop, reach: f64) -> bool {
 /// range's end. A loop that does not run round (one node repeated) bounds no area.
 fn point_loop_has_area(s: &poles::Face, l: &seam::Loop) -> bool {
     let dom = uv::domain(s);
+    // A loop that spans both parameters bounds a patch of the surface (a tiny one on an open
+    // surface, which has no period to run round): zero area is not established, so it is kept.
+    // Only a loop along one parameter line, the pole's, can be a line with no patch beside it.
+    let spans = |d: usize| {
+        let (lo, hi) = l.uv.iter().map(|q| comp(q, d)).fold((f64::MAX, f64::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+        let scale = dom.range.get(d).copied().flatten().map_or(1.0, |(a, b)| (b - a).abs().max(f64::MIN_POSITIVE));
+        hi - lo > scale * 1e-9
+    };
+    if spans(0) && spans(1) {
+        return true;
+    }
     (0..2).any(|d| {
         let Some(per) = dom.period.get(d).copied().flatten() else { return false };
         let drift = seam::drift(l, d, per);

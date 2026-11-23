@@ -695,12 +695,13 @@ fn an_all_pole_loop_is_refused_when_one_point_and_left_to_its_nodes_when_spread(
     let s = spline_sphere();
     let face = poles::Face::new(s.clone(), 0.0);
     let uvs: Vec<[f64; 2]> = (0..45).map(|k| [f64::from(k) / 45.0, 1.0]).collect();
-    let ranges = [0..uvs.len()];
+    let whole = 0..uvs.len();
+    let ranges = std::slice::from_ref(&whole);
     let one_point: Vec<Vec3> = uvs.iter().map(|_| Vec3::new(0.0, 0.0, 1.0)).collect();
-    let why = super::pole_caps(&face, &uvs, &one_point, &ranges, 1e-3).err();
+    let why = super::pole_caps(&face, &uvs, &one_point, ranges, 1e-3).err();
     assert_eq!(why.as_deref(), Some("a loop of 45 nodes all at one pole"));
     let spread: Vec<Vec3> = (0..45).map(|k| Vec3::new(f64::from(k), 0.0, 1.0)).collect();
-    let caps = super::pole_caps(&face, &uvs, &spread, &ranges, 1e-3).expect("a sliver is not refused");
+    let caps = super::pole_caps(&face, &uvs, &spread, ranges, 1e-3).expect("a sliver is not refused");
     assert!(caps.is_empty());
 }
 
@@ -743,6 +744,27 @@ fn a_sliver_narrower_than_the_reach_is_meshed_by_its_boundary_nodes() {
     assert!(!fp.triangles.is_empty());
     let n = u32::try_from(fp.uv.len()).expect("a count");
     assert!(fp.triangles.iter().all(|t| t.iter().all(|&i| i < n)));
+}
+
+/// A flat open patch 0.0005 mm by 0.0002 mm, every boundary node within the reach (0.001 mm) of a
+/// collapsed line and of one point, has an area of 1e-7 mm2 though its surface has no period to
+/// run round: the mesh path never gives it an empty plan (it meshes it or refuses it).
+#[test]
+fn a_tiny_open_patch_within_the_reach_is_never_given_an_empty_plan() {
+    let ctrl = vec![[0.0, 0.0, 0.0, 1.0], [5e-4, 0.0, 0.0, 1.0], [0.0, 2e-4, 0.0, 1.0], [5e-4, 2e-4, 0.0, 1.0]];
+    let s = EvalSurface::nurbs([1, 1], [vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]], [2, 2], ctrl);
+    let face = poles::Face::new(s.clone(), 0.0);
+    let nodes: Vec<[f64; 2]> = vec![[0.0, 0.0], [0.5, 0.0], [1.0, 0.0], [1.0, 0.5], [1.0, 1.0], [0.5, 1.0], [0.0, 1.0], [0.0, 0.5]];
+    let pts: Vec<Vec3> = nodes.iter().map(|q| s.derivs(q[0], q[1]).expect("evaluates").0).collect();
+    let tiny = seam::Loop { uv: nodes, pts };
+    let rules = size::Rules::new(0.001, 22.9, None);
+    let (h, speed) = size::face_size(&s, &uv::domain(&s), &rules);
+    let shape = Shape { min_angle: 20.0, side: None, size_at: None, sides: Sides::Kept };
+    let mut stats = PlanStats::default();
+    let plan = plan_face(9, "spline", &face, std::slice::from_ref(&tiny), &rules, (h, speed), 1e-3, &mut stats, Lenient::No, Purpose::Mesh(shape));
+    if let Ok(Planned::Face(fp)) = plan {
+        assert!(!fp.triangles.is_empty(), "a face with area was given an empty plan");
+    }
 }
 
 /// The (u, v) points and 3D points of a cap test: ring nodes 0..=5 along v = 0 from (0, 0) to
