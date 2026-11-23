@@ -1337,12 +1337,12 @@ impl Sketch {
             _ => {}
         }
         if let Some(v) = k.value()
-            && (!v.is_finite() || v.abs() > MAX_COORD || (v < 0.0 && !k.is_angle()))
+            && (!v.is_finite() || v.abs() > MAX_COORD || (v < 0.0 && !k.is_angle() && !matches!(k, OffsetDistance { .. })))
         {
             return Err(SketchError::Invalid(format!("dimension value {v}")));
         }
         if let OffsetDistance { output, value, .. } = k
-            && (*value <= 1e-9 || output.len() > 512 || self.offset_distance(output).is_none())
+            && (value.abs() <= 1e-9 || output.len() > 512 || self.offset_distance(output).is_none())
         {
             return Err(SketchError::Invalid("offset dimension needs a nonzero distance and an existing association".into()));
         }
@@ -1468,6 +1468,21 @@ impl Sketch {
                 } else {
                     false
                 }
+            }
+            ConstraintKind::OffsetDistance { ref output, .. } => {
+                if !mag.is_finite() || mag <= 1e-9 || mag > MAX_COORD {
+                    return false;
+                }
+                let Some(constraint) =
+                    self.constraints.iter_mut().find(|c| matches!(&c.kind, ConstraintKind::OffsetDistance { output: id, .. } if id == output))
+                else {
+                    return false;
+                };
+                if let ConstraintKind::OffsetDistance { value, reverse, .. } = &mut constraint.kind {
+                    *reverse = !*reverse;
+                    *value = mag;
+                }
+                true
             }
             _ => false,
         }

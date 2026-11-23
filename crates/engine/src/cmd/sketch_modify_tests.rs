@@ -6833,3 +6833,129 @@ fn a_chamfer_reaches_the_corner_symmetric_to_the_one_it_cuts() {
     assert_eq!(area.len(), 1);
     assert!(close(area[0], 800.0 - 2.0 * 0.5 * 5.0 * 5.0), "{area:?}");
 }
+
+/// #21336: changing an offset's driving dimension from positive to negative flips the offset to
+/// the opposite side instead of failing the sketch and wiping everything from view, both alone and
+/// after a downstream extrude.
+#[test]
+fn offset_dimension_edited_negative_flips_side_and_keeps_sketch() {
+    // 1. Center rectangle with outward 2 mm offset, no extrude: +2 -> -2 -> -2 -> -5, plus undo/reopen.
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [20, 15]}));
+    let l = ids(&r["curves"]);
+    let o = run(&mut s, "sketch.offset", json!({"curves": [l[0]], "distance": 2, "side": [0, -25]}));
+    let out = ids(&o["curves"]);
+    let param = o["param"].as_str().unwrap().to_string();
+    let curve_count = sketch(&s).curves.len();
+    assert!(box_is(&sketch(&s), &out, [-22.0, -17.0], [22.0, 17.0]), "initial outward offset: {:?}", bounds(&sketch(&s), &out));
+
+    let changed = run(&mut s, "parameters.change", json!({"name": param, "expression": "-2"}));
+    assert_eq!(changed["errors"], json!([]), "{changed}");
+    assert_eq!(changed["expression"], "2 mm", "{changed}");
+    assert!(box_is(&sketch(&s), &out, [-18.0, -13.0], [18.0, 13.0]), "flipped inward offset: {:?}", bounds(&sketch(&s), &out));
+    assert_eq!(sketch(&s).curves.len(), curve_count);
+
+    // Flipping back to the outside with -2 and resizing to 5 mm inward.
+    let back = run(&mut s, "parameters.change", json!({"name": param, "expression": "-2"}));
+    assert_eq!(back["errors"], json!([]), "{back}");
+    assert!(box_is(&sketch(&s), &out, [-22.0, -17.0], [22.0, 17.0]), "flipped back outward: {:?}", bounds(&sketch(&s), &out));
+    run(&mut s, "parameters.change", json!({"name": param, "expression": "-5"}));
+    assert!(box_is(&sketch(&s), &out, [-15.0, -10.0], [15.0, 10.0]), "flipped inward 5 mm: {:?}", bounds(&sketch(&s), &out));
+
+    // Undo and save/reopen preserve the flipped side.
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let world_reopened = reopened.world_state().unwrap();
+    let sk_reopened = &world_reopened.sketch(1).unwrap().sketch;
+    assert!(box_is(sk_reopened, &out, [-15.0, -10.0], [15.0, 10.0]), "reopened: {:?}", bounds(sk_reopened, &out));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(box_is(&sketch(&s), &out, [-22.0, -17.0], [22.0, 17.0]), "undo restores outward: {:?}", bounds(&sketch(&s), &out));
+
+    // 2. Same workflow after extruding the outer rectangle and re-entering sketch edit.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let r = run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [20, 15]}));
+    let l = ids(&r["curves"]);
+    let o = run(&mut s, "sketch.offset", json!({"curves": [l[0]], "distance": 2, "side": [0, -25]}));
+    let out = ids(&o["curves"]);
+    let param = o["param"].as_str().unwrap().to_string();
+    let curve_count = sketch(&s).curves.len();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10}));
+    run(&mut s, "sketch.edit", json!({"sketch": 1}));
+    let changed = run(&mut s, "parameters.change", json!({"name": param, "expression": "-2"}));
+    assert!(s.world_state().unwrap().sketch(1).is_some(), "sketch must stay visible after negative offset edit: {changed}");
+    let sk = sketch(&s);
+    assert_eq!(sk.curves.len(), curve_count);
+    assert!(box_is(&sk, &out, [-18.0, -13.0], [18.0, 13.0]), "flipped inward after extrude: {:?}", bounds(&sk, &out));
+}
+
+/// #21336: negative values also work through a referenced user parameter, symmetric offsets, and
+/// multi-instance ladders; zero or collapsing offset values are refused cleanly without wiping the
+/// sketch.
+#[test]
+fn offset_negative_user_param_symmetric_ladder_and_refusal() {
+    // 1. Driven by a user parameter whose sign flips from +2 to -2 and back.
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "off", "expression": "2 mm"}));
+    let r = run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [20, 15]}));
+    let l = ids(&r["curves"]);
+    let o = run(&mut s, "sketch.offset", json!({"curves": [l[0]], "distance": "off", "side": [0, -25]}));
+    let out = ids(&o["curves"]);
+    assert!(box_is(&sketch(&s), &out, [-22.0, -17.0], [22.0, 17.0]));
+    let r_neg = run(&mut s, "parameters.change", json!({"name": "off", "expression": "-2 mm"}));
+    assert_eq!(r_neg["errors"], json!([]), "{r_neg}");
+    assert!(box_is(&sketch(&s), &out, [-18.0, -13.0], [18.0, 13.0]), "negative user param flips inward: {:?}", bounds(&sketch(&s), &out));
+    let r_pos = run(&mut s, "parameters.change", json!({"name": "off", "expression": "2 mm"}));
+    assert_eq!(r_pos["errors"], json!([]), "{r_pos}");
+    assert!(box_is(&sketch(&s), &out, [-22.0, -17.0], [22.0, 17.0]), "positive user param flips back outward: {:?}", bounds(&sketch(&s), &out));
+
+    // Zero or collapsing distance is refused and leaves the sketch untouched.
+    let before = s.doc.to_json();
+    let e_zero = s.execute("parameters.change", &json!({"name": "off", "expression": "0 mm"})).unwrap_err().to_string();
+    assert!(e_zero.contains("the values were not changed"), "{e_zero}");
+    assert_eq!(s.doc.to_json(), before);
+    let e_collapse = s.execute("parameters.change", &json!({"name": "off", "expression": "-20 mm"})).unwrap_err().to_string();
+    assert!(e_collapse.contains("the values were not changed"), "{e_collapse}");
+    assert_eq!(s.doc.to_json(), before);
+    assert!(s.world_state().unwrap().sketch(1).is_some());
+
+    // 2. Direct negative edit that would collapse the flipped offset is also refused cleanly.
+    let param = o["param"].as_str().unwrap().to_string();
+    let e_direct = s.execute("parameters.change", &json!({"name": param, "expression": "-20"})).unwrap_err().to_string();
+    assert!(e_direct.contains("the values were not changed"), "{e_direct}");
+    assert_eq!(s.doc.to_json(), before);
+
+    // 3. Symmetric offset: editing the shared parameter to -3 swaps both sides cleanly.
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    let l = ids(&r["curves"]);
+    let o = run(&mut s, "sketch.offset", json!({"curves": [l[0]], "distance": 2, "symmetric": true}));
+    let (a, b) = (side_curves(&o, 0), side_curves(&o, 1));
+    let param = o["param"].as_str().unwrap().to_string();
+    let a_was_inner = box_is(&sketch(&s), &a, [2.0, 2.0], [38.0, 28.0]);
+    let changed = run(&mut s, "parameters.change", json!({"name": param, "expression": "-3"}));
+    assert_eq!(changed["errors"], json!([]), "{changed}");
+    let sk = sketch(&s);
+    if a_was_inner {
+        assert!(box_is(&sk, &a, [-3.0, -3.0], [43.0, 33.0]), "{:?}", bounds(&sk, &a));
+        assert!(box_is(&sk, &b, [3.0, 3.0], [37.0, 27.0]), "{:?}", bounds(&sk, &b));
+    } else {
+        assert!(box_is(&sk, &a, [3.0, 3.0], [37.0, 27.0]), "{:?}", bounds(&sk, &a));
+        assert!(box_is(&sk, &b, [-3.0, -3.0], [43.0, 33.0]), "{:?}", bounds(&sk, &b));
+    }
+
+    // 4. Multi-instance offset ladder: editing the shared parameter to -2 flips all 3 rings inward.
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    let l = ids(&r["curves"]);
+    let o = run(&mut s, "sketch.offset", json!({"curves": [l[0]], "distance": 2, "side": [20, -10], "instances": 3}));
+    let param = o["param"].as_str().unwrap().to_string();
+    offset_rings(&sketch(&s), &o, &[2.0, 4.0, 6.0]);
+    let changed = run(&mut s, "parameters.change", json!({"name": param, "expression": "-2"}));
+    assert_eq!(changed["errors"], json!([]), "{changed}");
+    let sk = sketch(&s);
+    for (index, inset) in [2.0, 4.0, 6.0].into_iter().enumerate() {
+        let curves = side_curves(&o, index);
+        assert!(box_is(&sk, &curves, [inset, inset], [40.0 - inset, 30.0 - inset]), "ring {}: {:?}", index + 1, bounds(&sk, &curves));
+    }
+}
