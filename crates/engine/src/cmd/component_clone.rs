@@ -221,7 +221,7 @@ pub(super) fn paste(
     params: &Value,
 ) -> Result<Value> {
     let (scratch, out) = build(s, &Source::of(s), component, source_occurrence, transform, parent, None, params)?;
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     Ok(out)
 }
 
@@ -909,6 +909,13 @@ fn transfer_into_copy(kind: &mut FeatureKind, components: &BTreeMap<u64, u64>) -
             *from = *to;
             *transform = solidcraft_doc::IDENTITY;
         }
+    }
+    if let FeatureKind::Pattern { components: patterned, occurrences, .. } = kind {
+        for id in patterned.iter_mut() {
+            *id = *components.get(id).ok_or_else(|| bad(CMD, "patterned component is outside the copied graph"))?;
+        }
+        // Occurrence ids are of the source design; the copy's reconcile makes its own.
+        occurrences.clear();
     }
     Ok(())
 }

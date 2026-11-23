@@ -6,12 +6,12 @@
 //! on a hovered drop-down row pins or unpins; the toolbar's own menu (the plus after the tabs,
 //! or right-click its empty space or a tab) shows or hides each tab, and has Customize Toolbar…
 //! (a window listing every command of the tab with a check box) and Reset Toolbar; Reset Toolbar
-//! restores the tab. The buttons are kept with the preferences and exported or imported with the
-//! keyboard shortcuts; hidden tabs are kept in the `hidden_toolbar_tabs` preference.
+//! restores the tab. The window also has Reset All Tabs, which asks first and then runs
+//! `view.toolbar_reset_all`. The buttons are kept with the preferences and exported or imported
+//! with the keyboard shortcuts; hidden tabs are kept in the `hidden_toolbar_tabs` preference.
 //!
-//! The quick-access bar (#10223) is kept here too: the commands a command's menu added to the
-//! application bar, after Save, Undo and Redo, in the order the user dragged them into. It is
-//! empty, and so not drawn, until a command is added.
+//! The quick-access command inventory (#10223) is kept here too. The application bar's saved
+//! item list owns their order, zones and visibility. The inventory is empty until a command is added.
 
 use std::collections::BTreeMap;
 
@@ -31,7 +31,7 @@ pub struct ToolbarCustom {
     pub panels: BTreeMap<String, Vec<String>>,
     /// `"<workspace>/<tab>"` → gallery commands moved to full-size buttons.
     pub gallery_buttons: BTreeMap<String, Vec<String>>,
-    /// The quick-access bar's commands, in order (#10223). Empty by default: no bar.
+    /// Pinned commands in enrolment order (#10223); `app_bar` owns their drawing order.
     pub quick_access: Vec<String>,
     /// One saved list for every movable application-bar control.
     pub app_bar: ui_kit::app_bar_items::Layout,
@@ -39,6 +39,10 @@ pub struct ToolbarCustom {
     pub extra: BTreeMap<String, Value>,
     /// The Customize Toolbar window is open (not kept).
     pub customizing: bool,
+    /// The application-bar editor is open (not kept).
+    pub app_bar_customizing: bool,
+    /// The window asks whether to reset every tab (#11471; not kept).
+    pub confirm_reset_all: bool,
 }
 
 /// Most commands the quick-access bar holds.
@@ -405,33 +409,19 @@ pub fn quick_remove(app: &mut SolveApp, id: &str) {
     app.toolbar_custom.app_bar.items.retain(|p| p.id != format!("quick:{id}"));
 }
 
-/// Move a quick-access button before another one (`before`: None puts it at the end).
-pub fn quick_move(app: &mut SolveApp, id: &str, before: Option<&str>) {
-    let list = &mut app.toolbar_custom.quick_access;
-    if !list.iter().any(|q| q == id) || before == Some(id) {
-        return;
-    }
-    list.retain(|q| q != id);
-    let at = before.and_then(|b| list.iter().position(|q| q == b)).unwrap_or(list.len());
-    list.insert(at, id.to_string());
-    let key = format!("quick:{id}");
-    if let Some(at) = app.toolbar_custom.app_bar.items.iter().position(|p| p.id == key) {
-        let item = app.toolbar_custom.app_bar.items.remove(at);
-        let before_key = before.map(|id| format!("quick:{id}"));
-        let target = before_key
-            .as_ref()
-            .and_then(|id| app.toolbar_custom.app_bar.items.iter().position(|p| &p.id == id && p.zone == item.zone))
-            .or_else(|| app.toolbar_custom.app_bar.items.iter().rposition(|p| p.id.starts_with("quick:") && p.zone == item.zone).map(|i| i + 1))
-            .unwrap_or(at.min(app.toolbar_custom.app_bar.items.len()));
-        app.toolbar_custom.app_bar.items.insert(target, item);
-    }
-}
-
 /// Reset Toolbar: a tab's panels back to their defaults.
 pub fn reset(app: &mut SolveApp, tab: &str) {
     let prefix = format!("{WORKSPACE}/{tab}/");
     app.toolbar_custom.panels.retain(|k, _| !k.starts_with(&prefix));
     app.toolbar_custom.gallery_buttons.remove(&format!("{WORKSPACE}/{tab}"));
+}
+
+/// Every tab's buttons back to their defaults (`view.toolbar_reset_all`). Only the Design
+/// workspace has a customisable toolbar, so this is the whole workspace. Hidden tabs stay hidden.
+pub fn reset_all(app: &mut SolveApp) {
+    let prefix = format!("{WORKSPACE}/");
+    app.toolbar_custom.panels.retain(|k, _| !k.starts_with(&prefix));
+    app.toolbar_custom.gallery_buttons.retain(|k, _| !k.starts_with(&prefix));
 }
 
 /// The menu of a command (toolbar button, drop-down row, S box row).
@@ -561,6 +551,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
     let tab = app.ui.tab.clone();
     let mut changes: Vec<(&'static str, bool)> = Vec::new();
     let mut reset_tab = false;
+    let mut ask_all = false;
     let t = solidcraft_theme::Tokens::get();
     // This long card grows as sections open. A top-left pivot keeps its controls at their
     // published positions instead of shifting them after egui measures the taller content.
@@ -571,39 +562,48 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
             .placed(egui::Align2::LEFT_TOP, origin)
             .cards(2.0)
             .actions("", "ui.close", None)
-            .show(ctx, true, |ui| {
-                ui_kit::text(
-                    ui,
-                    &solidcraft_ui_text::format("toolbar.customize_note", &[("tab", app.tr_label(&tab))]),
-                    ui_kit::Text::Note("customize"),
-                );
-                egui::ScrollArea::vertical()
-                    .max_height(
-                        (ctx.content_rect().height() - solidcraft_theme::Tokens::get().control_height * 8.0)
-                            .min(solidcraft_theme::Tokens::get().control_height * 20.0),
-                    )
-                    .show(ui, |ui| {
-                        for (panel, cmds, n) in panel_lists(&tab) {
-                            if cmds.is_empty() {
-                                continue;
-                            }
-                            ui_kit::section(ui, panel, app.tr_label(panel), true, |ui| {
-                                let shown = buttons(app, &tab, panel, &cmds, n);
-                                for c in &cmds {
-                                    let mut on = shown.iter().any(|b| b.id == c.id) || pinned_on(app, &tab, c.id).is_some();
-                                    let r = ui_kit::checkbox_icon(ui, app.tr_label(c.label), row_icon(app, c), &mut on);
-                                    crate::scenario::publish_handle(&format!("customize:{}", c.id), r.rect.center());
-                                    if r.changed() {
-                                        changes.push((c.id, on));
-                                    }
+            .show_with_left(
+                ctx,
+                true,
+                |ui| {
+                    ui_kit::text(
+                        ui,
+                        &solidcraft_ui_text::format("toolbar.customize_note", &[("tab", app.tr_label(&tab))]),
+                        ui_kit::Text::Note("customize"),
+                    );
+                    egui::ScrollArea::vertical()
+                        .max_height(
+                            (ctx.content_rect().height() - solidcraft_theme::Tokens::get().control_height * 8.0)
+                                .min(solidcraft_theme::Tokens::get().control_height * 20.0),
+                        )
+                        .show(ui, |ui| {
+                            for (panel, cmds, n) in panel_lists(&tab) {
+                                if cmds.is_empty() {
+                                    continue;
                                 }
-                            });
-                        }
-                    });
-                let reset = ui_kit::button(ui, solidcraft_ui_text::tr_label("Reset Toolbar"), ui_kit::Button::Normal);
-                crate::scenario::publish_target("customize:reset", reset.rect);
-                reset_tab |= reset.clicked();
-            });
+                                ui_kit::section(ui, panel, app.tr_label(panel), true, |ui| {
+                                    let shown = buttons(app, &tab, panel, &cmds, n);
+                                    for c in &cmds {
+                                        let mut on = shown.iter().any(|b| b.id == c.id) || pinned_on(app, &tab, c.id).is_some();
+                                        let r = ui_kit::checkbox_icon(ui, app.tr_command(c.id, c.label), row_icon(app, c), &mut on);
+                                        crate::scenario::publish_handle(&format!("customize:{}", c.id), r.rect.center());
+                                        if r.changed() {
+                                            changes.push((c.id, on));
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                },
+                |ui| {
+                    let reset = ui_kit::button(ui, solidcraft_ui_text::tr_label("Reset Toolbar"), ui_kit::Button::Normal);
+                    crate::scenario::publish_target("customize:reset", reset.rect);
+                    reset_tab |= reset.clicked();
+                    let reset_all = ui_kit::button(ui, app.tr("toolbar.reset_all_tabs"), ui_kit::Button::Normal);
+                    crate::scenario::publish_target("customize:reset_all", reset_all.rect);
+                    ask_all |= reset_all.clicked();
+                },
+            );
     for (id, on) in changes {
         if on {
             if let Err(e) = pin(app, &tab, id) {
@@ -616,7 +616,37 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
     if reset_tab {
         reset(app, &tab);
     }
+    app.toolbar_custom.confirm_reset_all |= ask_all;
     app.toolbar_custom.customizing = !closed && action != ui_kit::Action::Cancel;
+    if !app.toolbar_custom.customizing {
+        app.toolbar_custom.confirm_reset_all = false;
+    }
+    confirm_reset_all(app, ctx);
+}
+
+/// Asks before Reset All Tabs; Reset runs `view.toolbar_reset_all`, Cancel keeps every button.
+fn confirm_reset_all(app: &mut SolveApp, ctx: &egui::Context) {
+    if !app.toolbar_custom.confirm_reset_all {
+        return;
+    }
+    let (closed, action) =
+        ui_kit::Confirm::new(egui::Id::unique("sc_toolbar_reset_confirm"), "restore", solidcraft_ui_text::tr_label("Reset Toolbar"))
+            .tone(ui_kit::Tone::Warning)
+            .actions(app.tr("toolbar.reset"), "Cancel", None)
+            .show(ctx, true, |ui| {
+                ui_kit::text(ui, app.tr("toolbar.reset_all_tabs_confirm"), ui_kit::Text::Report("reset", false));
+            });
+    match action {
+        ui_kit::Action::Ok => {
+            app.toolbar_custom.confirm_reset_all = false;
+            if let Err(e) = app.run("view.toolbar_reset_all", json!({})) {
+                app.set_status(e, true);
+            }
+        }
+        ui_kit::Action::Cancel => app.toolbar_custom.confirm_reset_all = false,
+        _ if closed => app.toolbar_custom.confirm_reset_all = false,
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -646,6 +676,39 @@ mod row_icon_tests {
 #[cfg(test)]
 mod migration_tests {
     use super::*;
+
+    #[test]
+    fn app_bar_context_menu_rows_edit_the_saved_list() {
+        use crate::context_menu::{Target, items, run_item};
+        use ui_kit::app_bar_items::Zone;
+        let mut h = crate::scenario::Harness::new();
+        let target = Target::AppBar { id: Some("save".into()) };
+        let rows = items(&h.app, &target);
+        assert_eq!(rows.iter().filter(|r| !r.is_sep()).count(), 6);
+        for (action, zone) in [("end", Zone::End), ("start", Zone::Start)] {
+            let row = rows.iter().find(|r| r.params.as_ref().and_then(|p| p.get("action")).and_then(Value::as_str) == Some(action)).unwrap();
+            run_item(&mut h.app, row, egui::Pos2::ZERO);
+            assert_eq!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "save").unwrap().zone, zone);
+        }
+        let hide = rows.iter().find(|r| r.params.as_ref().and_then(|p| p.get("action")).and_then(Value::as_str) == Some("hide")).unwrap();
+        run_item(&mut h.app, hide, egui::Pos2::ZERO);
+        assert!(!h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "save").unwrap().shown);
+        for id in ["logo", "tabs", "more", "captions", "managed", "offered"] {
+            let rows = items(&h.app, &Target::AppBar { id: Some(id.into()) });
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].id, "ui.appBarCustomize");
+        }
+        let empty = items(&h.app, &Target::AppBar { id: None });
+        let file_rows = items(&h.app, &Target::AppBar { id: Some("file".into()) });
+        assert!(!file_rows[0].enabled, "File can move but Hide is disabled");
+        run_item(&mut h.app, &file_rows[0], egui::Pos2::ZERO);
+        assert!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "file").unwrap().shown);
+        assert_eq!(empty.len(), 2);
+        run_item(&mut h.app, empty.iter().find(|r| r.id == "ui.appBarReset").unwrap(), egui::Pos2::ZERO);
+        assert_eq!(h.app.toolbar_custom.app_bar, ui_kit::app_bar_items::Layout::default());
+        run_item(&mut h.app, &empty[0], egui::Pos2::ZERO);
+        assert!(h.app.toolbar_custom.app_bar_customizing);
+    }
 
     #[test]
     fn app_bar_migrates_old_quick_access_and_preserves_future_toolbar_keys() {
@@ -690,7 +753,8 @@ mod migration_tests {
         quick_add(&mut h.app, "solid.box").unwrap();
         quick_add(&mut h.app, "solid.fillet").unwrap();
         quick_add(&mut h.app, "solid.box").unwrap();
-        quick_move(&mut h.app, "solid.fillet", Some("solid.box"));
+        let defaults = ui_kit::app_bar_items::Layout::default_for(h.app.toolbar_custom.quick_access.iter().map(String::as_str));
+        h.app.toolbar_custom.app_bar.move_before("quick:solid.fillet", ui_kit::app_bar_items::Zone::Start, Some("quick:solid.box"), &defaults);
         let quick: Vec<_> = h.app.toolbar_custom.app_bar.items.iter().filter_map(|p| p.id.strip_prefix("quick:")).collect();
         assert_eq!(quick, ["solid.fillet", "solid.box"]);
         quick_remove(&mut h.app, "solid.fillet");
@@ -745,5 +809,118 @@ mod migration_tests {
         assert!(!custom.panels["DESIGN/MODEL/CREATE"].contains(&"solid.extrude".into()));
         assert!(!custom.panels["DESIGN/MANAGE/RULES"].contains(&"plastic.manage_rules".into()));
         assert_eq!(custom.panels["DESIGN/SKETCH/CONSTRAIN"], vec!["sketch.dimension"]);
+    }
+}
+
+#[cfg(test)]
+mod reset_tests {
+    use super::*;
+    use crate::scenario::{Harness, handle_at, rect_of};
+
+    /// A real click at `at`, then frames for the window to answer it.
+    fn click(h: &mut Harness, at: egui::Pos2) {
+        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        h.frames(2);
+    }
+
+    /// The customised panels, as `"<workspace>/<tab>/<panel>"` keys.
+    fn design_keys(h: &Harness) -> Vec<String> {
+        h.app.toolbar_custom.panels.keys().cloned().collect()
+    }
+
+    /// Customised buttons on the Model tab and on the Inspect tab.
+    fn customised() -> Harness {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width": 1800, "height": 1000}));
+        h.app.ui.tab = "MODEL".into();
+        pin(&mut h.app, "MODEL", "solid.sweep").unwrap();
+        h.app.toolbar_custom.panels.insert(format!("{WORKSPACE}/INSPECT/MEASURE"), vec![]);
+        assert!(design_keys(&h).iter().any(|k| k.starts_with("DESIGN/MODEL/")), "{:?}", design_keys(&h));
+        h
+    }
+
+    #[test]
+    fn reset_buttons_share_the_footer_with_close_at_both_window_sizes() {
+        for (width, height) in [(1280, 720), (1920, 1080)] {
+            let mut h = Harness::new();
+            h.call("ui.resize", json!({"width": width, "height": height}));
+            h.app.toolbar_custom.customizing = true;
+            h.frames(3);
+
+            let reset = rect_of("customize:reset").unwrap();
+            let reset_all = rect_of("customize:reset_all").unwrap();
+            let close = rect_of("dialog:cancel").unwrap();
+            let footer = rect_of("dialog:footer").unwrap();
+            let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width as f32, height as f32));
+
+            assert!(viewport.contains_rect(footer), "{width}×{height}: {footer:?}");
+            assert!([reset, reset_all, close].into_iter().all(|button| footer.contains_rect(button)));
+            assert!(reset.right() < reset_all.left() && reset_all.right() < close.left());
+            assert!((reset.center().y - close.center().y).abs() <= 1.0);
+            assert!((reset_all.center().y - close.center().y).abs() <= 1.0);
+
+            click(&mut h, close.center());
+            assert!(!h.app.toolbar_custom.customizing);
+        }
+    }
+
+    /// Reset Toolbar still resets this tab at once (#11471 keeps it); Reset All Tabs asks first,
+    /// Cancel keeps every button and the window, and Reset puts every tab back.
+    #[test]
+    fn reset_toolbar_resets_this_tab_and_reset_all_tabs_asks_first() {
+        let mut h = customised();
+        let customized = design_keys(&h);
+        h.app.toolbar_custom.customizing = true;
+        h.frames(3);
+
+        click(&mut h, rect_of("customize:reset_all").unwrap().center());
+        assert!(h.app.toolbar_custom.confirm_reset_all);
+        assert_eq!(design_keys(&h), customized, "nothing is reset before the answer");
+        click(&mut h, handle_at("dialog:Cancel").unwrap());
+        assert!(!h.app.toolbar_custom.confirm_reset_all);
+        assert_eq!(design_keys(&h), customized, "Cancel keeps every button");
+        assert!(h.app.toolbar_custom.customizing, "Cancel answers the question, not the window");
+
+        click(&mut h, rect_of("customize:reset").unwrap().center());
+        assert!(!h.app.toolbar_custom.confirm_reset_all, "Reset Toolbar asks nothing");
+        assert_eq!(design_keys(&h), vec![format!("{WORKSPACE}/INSPECT/MEASURE")], "only the Model tab is reset");
+
+        click(&mut h, rect_of("customize:reset_all").unwrap().center());
+        click(&mut h, handle_at("dialog:Reset").unwrap());
+        assert!(design_keys(&h).is_empty(), "every tab is reset");
+        assert!(!h.app.toolbar_custom.confirm_reset_all);
+    }
+
+    /// Escape while Reset All Tabs asks answers the question without resetting, and reopening the
+    /// window shows no leftover question.
+    #[test]
+    fn escape_drops_the_reset_all_question() {
+        let mut h = customised();
+        let customized = design_keys(&h);
+        h.app.toolbar_custom.customizing = true;
+        h.frames(3);
+        click(&mut h, rect_of("customize:reset_all").unwrap().center());
+        assert!(h.app.toolbar_custom.confirm_reset_all);
+        h.call("ui.key", json!({"key": "Escape"}));
+        h.frames(2);
+        assert!(!h.app.toolbar_custom.confirm_reset_all, "the question is gone");
+        assert_eq!(design_keys(&h), customized, "nothing is reset");
+        h.app.toolbar_custom.customizing = true;
+        h.frames(3);
+        assert!(!h.app.toolbar_custom.confirm_reset_all);
+        assert!(handle_at("dialog:Reset").is_none(), "no leftover question when the window opens again");
+    }
+
+    /// Agents and scripts reach Reset All Tabs as a command through `engine.execute`, with no
+    /// dialog; command search does not offer it to people, who use the window's button.
+    #[test]
+    fn engine_execute_resets_every_tab_without_a_dialog() {
+        let mut h = customised();
+        let reply = h.call("engine.execute", json!({"command": "view.toolbar_reset_all", "params": {}}));
+        assert_eq!(reply["result"], json!({}), "{reply}");
+        assert!(design_keys(&h).is_empty(), "every tab is reset");
+        assert!(!h.app.toolbar_custom.confirm_reset_all && !h.app.toolbar_custom.customizing, "nothing asks or opens");
+        assert!(h.call("engine.execute", json!({"command": "view.toolbar_reset_all", "params": {"tab": "MODEL"}}))["error"].is_string());
+        assert!(crate::workspace::AGENT_ONLY.contains(&"view.toolbar_reset_all"));
     }
 }

@@ -256,6 +256,11 @@ pub struct Link {
     /// matched by its geometry, as before.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub curve_edges: Vec<String>,
+    /// Complete single-loop boundary saved before exact whole-body projection. Only the
+    /// design-format migration sets this: downstream curve picks keep naming this source's
+    /// entire region when rebuilding the projection changes its curves and identifiers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profile_boundary: Vec<String>,
     /// Automatically projected borders owned by a durable sketch face attachment.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_face: bool,
@@ -844,6 +849,7 @@ impl Sketch {
             edge_name: None,
             vertex_name: None,
             curve_edges: Vec::new(),
+            profile_boundary: Vec::new(),
             auto_face: false,
             lost: false,
             name_dropped: false,
@@ -1063,7 +1069,7 @@ impl Sketch {
             && !loops::valid(&lay.curves, &lay.pts)
         {
             self.set_link_lost(id, true);
-            return Err(SketchError::Invalid("projected face boundaries cross, touch or have ambiguous topology; last geometry retained".into()));
+            return Err(SketchError::Invalid("projected face boundaries cross, touch or have ambiguous topology; last geometry retained: pick the face again to update the projection".into()));
         }
         let curves = self.link_curves(id);
         let points = self.link_points(id);
@@ -1265,7 +1271,9 @@ impl Sketch {
             let loop_roles = loop_roles_required.then(|| loops::roles(cur, &old, &lay.curves, &lay.pts)).flatten();
             if loop_roles_required && loop_roles.is_none() {
                 self.set_link_lost(id, true);
-                return Err(SketchError::Invalid("projected face boundary identity is ambiguous; last geometry retained".into()));
+                return Err(SketchError::Invalid(
+                    "projected face boundary identity is ambiguous; last geometry retained: pick the face again to update the projection".into(),
+                ));
             }
             let (a, b) = match &loop_roles {
                 Some(roles) => (roles.old_normal.clone(), roles.fresh_normal.clone()),
@@ -1440,7 +1448,9 @@ impl Sketch {
         // when the geometric match is ambiguous; the document reports a lost link.
         if same && !same_order_agrees && self.link(id).is_some_and(closed_boundary) {
             self.set_link_lost(id, true);
-            return Err(SketchError::Invalid("projected face boundary identity is ambiguous; last geometry retained".into()));
+            return Err(SketchError::Invalid(
+                "projected face boundary identity is ambiguous; last geometry retained: pick the face again to update the projection".into(),
+            ));
         }
         if same {
             for (k, pi) in points.iter().enumerate() {
