@@ -1607,6 +1607,15 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // narrowing reads.
         {
             let (paired1, paired2) = loosely_paired(&boxes1, &boxes2, self.this_approx_tol_3d());
+            // every trim first (a trim can raise its edge's tolerance, which a box reads)
+            for (faces, paired) in [(&faces1, &paired1), (&faces2, &paired2)] {
+                for (&f, &paired) in faces.iter().zip(paired.iter()) {
+                    k.check_cancelled(OP_INTERSECT_TOPOLOGY)?;
+                    if paired {
+                        make_missing_uv_trims(k, brep, f)?;
+                    }
+                }
+            }
             for (faces, paired, boxes) in [
                 (&faces1, paired1, &mut boxes1),
                 (&faces2, paired2, &mut boxes2),
@@ -1616,7 +1625,6 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     if !paired {
                         continue;
                     }
-                    make_missing_uv_trims(k, brep, f)?;
                     if let Some((arena, EntityRef::Face(face))) = brep.topology_entity(f) {
                         if let Some(proved) =
                             crate::query::face::p1::proved_bounding_box(k, arena, face)?
@@ -3091,23 +3099,40 @@ fn loosely_paired(boxes1: &[Extent3d], boxes2: &[Extent3d], tol: f64) -> (Vec<bo
 
 /// The UV trim curve of every edge use of face `f` that has none (nor its mate), made by
 /// `GetOrCreateUVTrimCurve` as a classification against the face makes it
-/// (`query::brep::ray`, `uv_space_ok`). A trim that cannot be made is left unmade.
+/// (`query::brep::ray`, `uv_space_ok`; it may raise the edge's tolerance to cover the
+/// trim). A trim that cannot be made is left unmade: only a cancellation fails.
 fn make_missing_uv_trims<O: ClassObject + SolutionObject + Ord>(
     k: &Kernel,
     brep: &mut impl IntersectorBrepP2<O>,
     f: O,
 ) -> Result<()> {
-    let Some(target) = ignore_soft(brep.face_cache_target(f))? else {
+    fn only_cancelled<T>(r: Result<T>) -> Result<Option<T>> {
+        match r {
+            Ok(v) => Ok(Some(v)),
+            Err(e) if e.is_cancelled() => Err(e),
+            Err(_) => Ok(None),
+        }
+    }
+    let Some(target) = only_cancelled(brep.face_cache_target(f))? else {
         return Ok(());
     };
     let (b, face) = (target.brep, target.face);
-    for lu in crate::topology::face::p4::upward_loopuses(b, face, false, None)? {
-        for eu in crate::topology::edgeuse::p1::loopuse_edgeuses(b, lu)? {
-            if crate::topology::edgeuse::p1::uv_trim_curve(b, eu)?
-                .0
-                .is_none()
-            {
-                ignore_soft(crate::topology::edgeuse::p3::get_or_create_uv_trim_curve(
+    let Some(loopuses) = only_cancelled(crate::topology::face::p4::upward_loopuses(
+        b, face, false, None,
+    ))?
+    else {
+        return Ok(());
+    };
+    for lu in loopuses {
+        let Some(edgeuses) = only_cancelled(crate::topology::edgeuse::p1::loopuse_edgeuses(b, lu))?
+        else {
+            continue;
+        };
+        for eu in edgeuses {
+            let missing = only_cancelled(crate::topology::edgeuse::p1::uv_trim_curve(b, eu))?
+                .is_some_and(|(c, _)| c.is_none());
+            if missing {
+                only_cancelled(crate::topology::edgeuse::p3::get_or_create_uv_trim_curve(
                     k, b, eu, false, false, true,
                 ))?;
             }

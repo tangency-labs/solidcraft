@@ -655,19 +655,20 @@ pub fn calculate_bounding_box_in(
 /// face: every loop lies in D, so whether a point is on the face cannot change across a strip
 /// of R outside D (no loop crosses it), and each such strip whose centre classifies outside
 /// the face ([`super::p2::point_classify_prepared`]: `Unknown`) lies outside it. A face whose
-/// trims leave the surface's natural domain (a periodic trim past the seam), or whose strip
-/// classifies any other way, keeps R; so does a face an edge use of which has no UV trim
-/// curve. Nothing is made or written.
+/// trims leave its UV domain or the surface's natural domain (a periodic trim past the seam),
+/// or whose strip classifies any other way, keeps R; so does a face an edge use of which has
+/// no UV trim curve. No trim is made; the surface's NURB is, where it is missing (as every
+/// evaluation of it makes it).
 ///
 /// # Errors
 ///
-/// Cancellation, and [`SolidError::Unported`] from the classification; any other failure
-/// gives `None` or keeps R.
+/// Cancellation only: any other failure gives `None` or keeps R.
 pub fn proved_bounding_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<Option<Extent3d>> {
+    // a box is only ever a saving: every failure but a cancellation gives none
     fn probe<T>(r: Result<T>) -> Result<Option<T>> {
         match r {
             Ok(v) => Ok(Some(v)),
-            Err(e) if e.is_unported_or_cancelled() => Err(e),
+            Err(e) if e.is_cancelled() => Err(e),
             Err(_) => Ok(None),
         }
     }
@@ -690,7 +691,7 @@ pub fn proved_bounding_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<Option<Ext
         let margin = 1e-9 * natural.max_dimension().max(1.0);
         let mut grown = trims;
         grown.expand_absolute(margin);
-        if trims.is_contained_by(&natural, margin) {
+        if trims.is_contained_by(&natural, margin) && trims.is_contained_by(&stored, margin) {
             if let Ok(narrowed) = grown.intersect(&stored) {
                 if trim_strips_outside(k, b, f, &stored, &narrowed)? {
                     domain = narrowed;
@@ -765,13 +766,7 @@ fn trim_strips_outside(
         );
         match r {
             Ok(()) if pc.point_class() == PointClassType::Unknown => {}
-            Err(e) if e.is_unported_or_cancelled() => {
-                // a trim the classification would have to make: not proved, nothing made
-                if e.is_cancelled() {
-                    return Err(e);
-                }
-                return Ok(false);
-            }
+            Err(e) if e.is_cancelled() => return Err(e),
             _ => return Ok(false),
         }
     }

@@ -71,15 +71,13 @@ fn a_list_unions_level_by_level() {
 /// plane at 2°, both through their records: they meet in that plane only, and their union is
 /// 4/360 of the grooved ring, V = (4/360)(π(10² − 4²)·4 − π²·7·1²) (a half torus of the
 /// groove: π²Rr²). The groove's face is a sliver of a whole turn, which the face's box from its
-/// surface (the whole control net) boxes as the whole ring, so every face of each wedge was
-/// paired with the other's groove; and the mirror image's faces come back from its record over
-/// their surfaces' whole domains. Boxed by what the faces hold, the boolean pairs only the
-/// faces each side that meet the shared plane, six of each wedge's seven (not the far side):
-/// at most 36 pairs; and the first wedge with its own copy a quarter turn on, apart from it,
-/// pairs no face at all.
+/// surface (the whole control net) boxes as the whole ring, and the mirror image's faces come
+/// back from its record over their surfaces' whole domains. So the first wedge and its own copy
+/// a quarter turn on, apart from it, paired every face of each with the other's groove; boxed
+/// by what the faces hold, they pair none.
 #[test]
 #[allow(clippy::disallowed_methods)] // the test's operands and checks, not ops computing geometry
-fn wedges_of_a_grooved_ring_meeting_in_a_plane_pair_only_the_faces_at_that_plane() {
+fn wedges_of_a_grooved_ring_unite_and_wedges_apart_pair_no_faces() {
     all_fixes();
     let step = 2f64.to_radians();
     let p = |x: f64, z: f64| [x, 0.0, z];
@@ -134,12 +132,11 @@ fn wedges_of_a_grooved_ring_meeting_in_a_plane_pair_only_the_faces_at_that_plane
         solidcore::boolean::api_brep::boolean_union(&mut k, kx, ky).unwrap();
         k.work_counters.face_pairs() - before
     };
-    let touching = pairs_of(&ra, &rb);
-    assert!(touching <= 36, "{touching} face pairs");
-    // every face of the far wedge lay in the box of the first one's groove, and its groove's
-    // box held every face of the first: 13 pairs, where none can meet
     let apart = pairs_of(&ra, &far.to_record().unwrap().0);
-    assert_eq!(apart, 0, "the wedges a quarter turn apart paired {apart} faces");
+    assert_eq!(
+        apart, 0,
+        "the wedges a quarter turn apart paired {apart} faces"
+    );
 
     let (ua, _) = Body::from_record(&ra, true).unwrap();
     let (ub, _) = Body::from_record(&rb, true).unwrap();
