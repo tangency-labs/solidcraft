@@ -40,20 +40,123 @@
 
 use crate::error::topology::TopologyFailure;
 use crate::error::{Result, SolidError};
+use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::tol::USE_DEFAULT;
 use crate::kernel::Kernel;
-use crate::topology::brep::p10::TopologyEnv;
-use crate::topology::brep::{p3, p5, p7};
+use crate::topology::brep::p10::{make_topology_from_data, MakeTopologyOptions, TopologyEnv};
+use crate::topology::brep::{p2, p3, p5, p7};
+use crate::topology::brep_data::BrepData;
 use crate::topology::brep_data_write::{self, FromBrepEnv};
 use crate::topology::database_io::FileType;
+use crate::topology::loopuse::{entity_of_notify_key, notify_ref};
 use crate::topology::part_file::{self, Part, PartEnv};
-use crate::topology::Brep;
+use crate::topology::topology::NotifyRecords;
+use crate::topology::{Brep, NamingScheme};
 
 const OP_READ_BREP: &str = "topology::api_files::read_brep_from_file";
 const OP_READ_PART: &str = "topology::api_files::read_part_from_file";
 const OP_TURN: &str = "topology::api_files::turn_to_nurbs";
 const OP_WRITE_BREP: &str = "topology::api_files::write_brep_to_file";
 const OP_SLOTS: &str = "topology::api_files::add_curve_output_slots";
+
+/// Rebuild a B-rep from its native binary representation, with fresh radial links and
+/// evaluation caches. Keep its tolerance and the attributes that the native file omits.
+pub fn rebuild_native(k: &mut Kernel, source: &Brep) -> Result<Brep> {
+    const OP: &str = "topology::api_files::rebuild_native";
+    let original = source.attribute_store();
+    let mut handles = Vec::new();
+    let mut records = NotifyRecords::new();
+    let env = FromBrepEnv {
+        attributes: original,
+        key_of: &notify_ref,
+        records: &records,
+        curve_key: &|_| ObjectKey(0),
+        uv_curve_key: &|_| ObjectKey(0),
+        surface_key: &|_| ObjectKey(0),
+    };
+    let mut data = BrepData::from_brep(source, &env, &mut handles)?;
+    let bytes = data.write_to_file_with_nurbs(k, FileType::Binary)?;
+    let mut rebuilt_data = BrepData::read_from_file(k, bytes, FileType::Binary)?;
+
+    // The binary representation preserves row order. Put back the attribute indices that
+    // belong to each row, including the lists for loopuses and mated edgeuses.
+    macro_rules! restore_rows {
+        ($rows:ident, $($field:ident).+ $(, $($other:ident).+)*) => {
+            if data.$rows.len() != rebuilt_data.$rows.len() {
+                return Err(SolidError::invalid_input(OP, "native round trip changed topology row counts"));
+            }
+            for (input, rebuilt) in data.$rows.into_iter().zip(&mut rebuilt_data.$rows) {
+                rebuilt.$($field).+ = input.$($field).+;
+                $(rebuilt.$($other).+ = input.$($other).+;)*
+            }
+        }
+    }
+    rebuilt_data.attributes = data.attributes;
+    restore_rows!(regions, topology.attributes);
+    restore_rows!(shells, topology.attributes);
+    restore_rows!(faceuses, topology.attributes);
+    restore_rows!(faces, topology.attributes);
+    restore_rows!(
+        loops,
+        topology.attributes,
+        lu_upper_attributes,
+        lu_lower_attributes
+    );
+    restore_rows!(edgeuses, topology.attributes, mate_attributes);
+    restore_rows!(edges, topology.attributes);
+    restore_rows!(vertices, topology.attributes);
+
+    let mut attributes = AttributeStore::default();
+    let handles = handles
+        .into_iter()
+        .map(|handle| {
+            let attribute = original
+                .get(handle)
+                .ok_or_else(|| SolidError::invalid_input(OP, "missing operand attribute"))?;
+            attributes.insert(attribute.clone())
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut env = TopologyEnv {
+        all_attributes: &handles,
+        attributes: &mut attributes,
+        key_of: &notify_ref,
+        records: &mut records,
+        next_key: 1 << 50,
+    };
+    let options = MakeTopologyOptions {
+        force_same_tol: true,
+        ..MakeTopologyOptions::default()
+    };
+    let mut rebuilt = Brep::new_with_infinite_region()?;
+    make_topology_from_data(k, &mut rebuilt, &mut rebuilt_data, &mut env, options)?;
+    rebuilt.set_naming(NamingScheme::Notify);
+    rebuilt.refresh_cached_topology();
+
+    let brep_key = rebuilt.key();
+    let lists = |store: &AttributeStore| {
+        store
+            .attributed_objects()
+            .into_iter()
+            .map(|key| store.attributes(key).len())
+            .sum::<usize>()
+    };
+    p2::restore_decoded_attributes(&mut rebuilt, attributes, &|key| {
+        if key == brep_key {
+            Some(crate::EntityRef::Brep(crate::topology::BrepId::from_index(
+                0,
+            )))
+        } else {
+            entity_of_notify_key(key)
+        }
+    })?;
+    if lists(original) != lists(rebuilt.attribute_store()) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "native round trip changed attribute lists",
+        ));
+    }
+    Ok(rebuilt)
+}
 
 /// `SM_BIG_ULONG` (`SmMath.h`): the size no `SmTArray` reaches.
 pub const BIG_ULONG: u64 = 99_999_999;

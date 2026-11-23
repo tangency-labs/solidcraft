@@ -20,7 +20,7 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p3::{brep_copy, brep_copy_mapped};
 use solidcore::topology::brep::primitive_outward::{is_outward_primitive, Template};
 use solidcore::topology::brep::sheet::turn_over_sheet;
-use solidcore::topology::brep::{is_outward_solid, is_valid_and_outward};
+use solidcore::topology::brep::{is_outward_solid, valid_and_outward_failure, SolidTest};
 use solidcore::topology::face::p2 as face_p2;
 use solidcore::topology::FaceId;
 use solidcore::{Brep, EntityRef, Vec3};
@@ -58,7 +58,8 @@ pub(crate) struct Proof {
     primitive: Option<Template>,
 }
 
-/// The proof that a B-rep is valid and faces out ([`is_valid_and_outward`] held on it), with
+/// The proof that a B-rep is valid and faces out ([`valid_and_outward_failure`] answering
+/// `None` for it), with
 /// the kernel settings it was made under. Made only by [`prove`], on the B-rep it is then kept
 /// beside; it stands for that B-rep only while it is unchanged ([`BodyGuard`]) and the
 /// kernel's settings are the same ([`Outward::holds`]).
@@ -101,15 +102,31 @@ impl Outward {
     }
 }
 
-/// The proof that `b` is valid and faces out, if it is ([`is_valid_and_outward`], the part of
-/// the solid tests after their topology test): the only maker of an [`Outward`].
+/// The proof that `b` is valid and faces out, if it is ([`valid_and_outward_failure`], the part
+/// of the solid tests after their topology test): the only maker of an [`Outward`].
 ///
 /// # Errors
 /// The kernel's, from the validity check and the volume's sign.
 fn prove(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<Option<Outward>> {
-    Ok(is_valid_and_outward(k, b)?.then(|| Outward {
-        settings: Box::new(Settings::of(k)),
-    }))
+    Ok(prove_naming(k, b)?.ok())
+}
+
+/// As [`prove`], naming the test the body fails where it is not a valid outward solid: the
+/// kernel's [`SolidTest`], so a caller can tell a body that is not a solid from one whose
+/// volume sign the kernel could not decide ([`SolidTest::VolumeUndecided`]).
+///
+/// # Errors
+/// The kernel's, from the validity check and the volume's sign.
+fn prove_naming(
+    k: &mut Kernel,
+    b: &mut Brep,
+) -> solidcore::Result<std::result::Result<Outward, SolidTest>> {
+    match valid_and_outward_failure(k, b)? {
+        None => Ok(Ok(Outward {
+            settings: Box::new(Settings::of(k)),
+        })),
+        Some(test) => Ok(Err(test)),
+    }
 }
 
 /// A [`Body`] locked: the B-rep to read through `Deref`; through `DerefMut` it is handed out
@@ -517,13 +534,14 @@ pub enum Contract {
     /// no validity check runs and no volume is computed, on the operand or on the result, so
     /// a volume whose sign the kernel cannot decide never refuses a result, and the result
     /// holds no proof. An application that wants a result checked asks for it
-    /// ([`Body::check`], [`Body::check_solid`]) when it chooses.
+    /// ([`Body::check_solid`]) when it chooses.
     #[default]
     Closed,
     /// An operand counts as a solid only when it is closed and proved valid and facing out
     /// (its held proof, its template, or a new proof), and a solid's result must be proved so
-    /// too: [`Error::NotSolid`] where it is not. The result keeps its proof, so the next
-    /// proved operation that takes it does not prove it again (#14830).
+    /// too: [`Error::NotSolidBecause`] naming the test it fails where it is not. The result
+    /// keeps its proof, so the next proved operation that takes it does not prove it again
+    /// (#14830).
     Proved,
 }
 
@@ -629,7 +647,8 @@ impl Expect {
 }
 
 /// The result contract: a result has faces ([`Error::Empty`] if not), and a solid input gives a
-/// solid ([`Error::NotSolid`] if not): closed, manifold, valid and oriented out.
+/// solid ([`Error::NotSolidBecause`] naming the test it fails if not): closed, manifold, valid
+/// and oriented out.
 ///
 /// # Errors
 /// The kernel's error from the solid test.
@@ -638,7 +657,7 @@ pub(crate) fn finish(k: &mut Kernel, b: Brep, expect: Expect) -> solidcore::Resu
 }
 
 /// As [`finish`], with the proof its solid test made on the result, if it made one (a solid
-/// result: the topology test, then [`prove`]), for the result's [`Body`] to keep
+/// result: the topology test, then [`prove_naming`]), for the result's [`Body`] to keep
 /// ([`Body::held`]).
 ///
 /// # Errors
@@ -660,11 +679,20 @@ pub(crate) fn finish_proved(
     } else {
         is_manifold_solid(&b)?
     };
-    let outward = if closed { prove(k, &mut b)? } else { None };
-    if outward.is_none() {
-        return Ok(Err(Error::NotSolid));
-    }
-    Ok(Ok((b, outward)))
+    let outward = if closed {
+        match prove_naming(k, &mut b)? {
+            Ok(outward) => outward,
+            Err(test) => return Ok(Err(Error::NotSolidBecause(test))),
+        }
+    } else {
+        // the topology test failed first, so it is the one named
+        return Ok(Err(Error::NotSolidBecause(if expect.touching {
+            SolidTest::NotClosedSolids
+        } else {
+            SolidTest::NotManifold
+        })));
+    };
+    Ok(Ok((b, Some(outward))))
 }
 
 /// The result contract under `contract`. [`Contract::Proved`]: [`finish_proved`]'s.

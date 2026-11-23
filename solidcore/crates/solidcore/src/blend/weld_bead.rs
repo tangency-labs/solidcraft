@@ -24,12 +24,14 @@
 //! builds: a toe past its face's trims ([`NoRoomReason::LegPastFace`], the leg) and a sagitta
 //! past its bound ([`NoRoomReason::BeadCutsFace`], the sagitta). As invalid input: an edge
 //! that is not an inside corner (an outside or a tangent edge), an edge listed twice, sizes
-//! not one per edge.
+//! not one per edge, and a leg below the body's resolution
+//! ([`BlendFailure::SizeBelowResolution`] naming the edge and the leg, as a chamfer's).
 //!
 //! The bead never trims or changes the body (#15132).
 //!
 //! Not upstream (solidcore's). No recursion.
 
+use crate::blend::blend_refusal::setback_below_resolution;
 use crate::blend::fillet_exact::ClassInputs;
 use crate::blend::fillet_executive::NoRoomReason;
 use crate::curve::curve::p2::CurveKind;
@@ -390,7 +392,8 @@ struct Frame {
 /// [`WeldGap::CurvedJoint`] naming the edge for an edge that is not straight or a face on it
 /// that is not a plane; [`WeldGap::ObtuseToe`] naming the edge for legs whose toe is obtuse;
 /// native invalid input for an edge with no curve, not between two faces, or not an inside
-/// corner; those of the evaluations and of [`BeadDefinition::new`].
+/// corner; [`BlendFailure::SizeBelowResolution`] naming the edge for a leg below the smallest
+/// size a fillet builds on `target`; those of the evaluations and of [`BeadDefinition::new`].
 fn frame(
     k: &Kernel,
     target: &mut Brep,
@@ -481,8 +484,17 @@ fn frame(
         ));
     }
     let wedge = u1.cross(u2).length().atan2(u1.dot(u2));
-    let bead = BeadDefinition::new(ChamferDefinition::new(size, wedge)?, sagitta)?;
-    let [d1, d2] = bead.chamfer.setbacks();
+    let chamfer = ChamferDefinition::new(size, wedge)?;
+    let [d1, d2] = chamfer.setbacks();
+    // a leg is a setback, how far a toe lies from the edge along its face, whether given as a
+    // distance or computed from an angle: one below the smallest size a fillet builds on the
+    // body (an angle so small its second leg is far below the body's tolerance) puts the toe
+    // on the edge within tolerance, a sliver, refused as the chamfer refuses it (#21138).
+    // Checked before the sagitta's bound: the sliver's tiny chord would otherwise be
+    // reported as a sagitta too large, hiding the leg that is wrong
+    setback_below_resolution(OP, edge_id, [d1, d2], target.tolerance())
+        .map_err(|e| e.or_at(at_edge))?;
+    let bead = BeadDefinition::new(chamfer, sagitta)?;
     let feet = [u1 * d1, u2 * d2];
     let up = (feet[0] + feet[1]) * 0.5;
     let arc = (sagitta != 0.0)
@@ -643,8 +655,11 @@ impl Frame {
 /// # Errors
 ///
 /// Native invalid input for sizes not one per edge, an edge listed twice and an edge not in
-/// an inside corner (an outside or a tangent edge); [`NoRoomReason::BeadCutsFace`] with the
-/// sagitta that fits for a bead past its bound ([`BeadDefinition::new`]) and
+/// an inside corner (an outside or a tangent edge); [`BlendFailure::SizeBelowResolution`]
+/// naming the edge for a leg below the smallest size a fillet builds on `target` (eight
+/// times its tolerance), whether given or computed from an angle;
+/// [`NoRoomReason::BeadCutsFace`] with the sagitta that fits for a bead past its bound
+/// ([`BeadDefinition::new`]) and
 /// [`NoRoomReason::LegPastFace`] with the leg that fits, naming the face, for a toe past its
 /// face's trims; [`BlendFailure::WeldNotBuilt`] for two of `edges` that meet at a
 /// vertex ([`WeldGap::BeadsMeetAtVertex`], naming it), an edge that is not straight between
