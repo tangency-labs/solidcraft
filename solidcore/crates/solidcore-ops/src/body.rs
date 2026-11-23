@@ -138,9 +138,11 @@ fn prove_naming(
 /// result) would build them again; after it the check runs on the body and builds none, nor
 /// does a later proof.
 ///
-/// A trim that cannot be built stays missing (the call stops at the first one): the check then
-/// meets it on its copy, as it met it on the body before. A cancellation or an unported step
-/// stops the proof.
+/// A trim that cannot be built stays missing (the call stops at the first one), and its failure
+/// is not this step's answer: the check builds the same trim on its copy and answers for it as
+/// it did on the body before, by the rule it applies to that build (the face walk and the
+/// pointer pass's face check go on past every failure but a cancellation or an unported step).
+/// Those two stop the proof here too.
 ///
 /// # Errors
 /// The kernel's cancellation and unported statuses.

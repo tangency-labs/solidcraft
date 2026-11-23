@@ -540,6 +540,9 @@ pub fn assert_valid_scoped(
     keys: &dyn Fn(EntityRef) -> ObjectRef,
     scope: ValidityScope,
 ) -> Result<bool> {
+    if level > LEVEL_GIVEN {
+        return Err(super::invalid("invalid assert test level"));
+    }
     let mut standing = standing_where_trims_lack(b)?;
     let b = standing.as_mut().unwrap_or(b);
     assert_valid_with(k, b, reports, level, walk, keys, scope, true)
@@ -557,10 +560,18 @@ pub fn assert_valid_scoped(
 /// keeps none of it: no trims, no raised tolerances, and none of the gaps or repairs the check
 /// stores. A body that has its trims, the one a caller makes once
 /// ([`create_missing_uv_trim_curves`](crate::topology::brep::p2::create_missing_uv_trim_curves)),
-/// is checked on itself and builds none.
+/// is checked on itself and builds none. A face whose trims cannot be looked up (a broken
+/// loop link) counts as lacking them: the check, on the copy, is what reports the link.
+///
+/// # Errors
+///
+/// Those of the copy's geometry copies.
 fn standing_where_trims_lack(b: &Brep) -> Result<Option<Brep>> {
     for &f in b.face_list() {
-        if !crate::topology::trimming_tools::face_uv_curves_present(b, f)? {
+        if !matches!(
+            crate::topology::trimming_tools::face_uv_curves_present(b, f),
+            Ok(true)
+        ) {
             return Ok(Some(b.clone_standing_for_self_keeping_definitions()?));
         }
     }
@@ -1046,6 +1057,9 @@ mod tests {
             before,
             "AssertValid with the walk wrote trims or tolerances on the body"
         );
+        // a level past 4 is refused before any copy is made
+        let err = assert_valid(&mut k, &mut b, None, 5, true, &keys).unwrap_err();
+        assert!(matches!(err, SolidError::InvalidInput { .. }), "{err:?}");
     }
 
     /// Replaces the curve of the box's first edge by a cubic B-spline along the same line
