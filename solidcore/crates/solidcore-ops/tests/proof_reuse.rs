@@ -173,3 +173,103 @@ fn a_proof_made_under_other_fixes_is_not_taken() {
     // `first` decided again, then the result: one more than under the proof's own fixes
     assert_eq!(decided, 2);
 }
+
+/// A named read of a body.
+type Read = (&'static str, Box<dyn Fn(&Body)>);
+
+/// A pure read of the proved plate less drill 1, each of the measures that read the body
+/// through a shared reference, with the record order of an identically built body (a body's
+/// own `to_record` is an edit, which drops its proof).
+fn reads() -> Vec<Read> {
+    let (_, order) = cut(plate(), drill(1)).to_record().unwrap();
+    let order2 = order.clone();
+    let order3 = order.clone();
+    vec![
+        (
+            "bounds",
+            Box::new(|b: &Body| {
+                b.bounds().unwrap();
+            }),
+        ),
+        (
+            "is_manifold_solid",
+            Box::new(|b: &Body| {
+                b.is_manifold_solid().unwrap();
+            }),
+        ),
+        (
+            "solid_count",
+            Box::new(|b: &Body| {
+                b.solid_count().unwrap();
+            }),
+        ),
+        (
+            "classify_point",
+            Box::new(|b: &Body| {
+                b.classify_point([50.0, 10.0, 5.0]).unwrap();
+            }),
+        ),
+        (
+            "classify_points",
+            Box::new(|b: &Body| {
+                b.classify_points(&[[50.0, 10.0, 5.0]]).unwrap();
+            }),
+        ),
+        (
+            "edge_length",
+            Box::new(move |b: &Body| {
+                b.edge_length(&order, 0, 1e-9).unwrap();
+            }),
+        ),
+        (
+            "edge_middle",
+            Box::new(move |b: &Body| {
+                b.edge_middle(&order2, 0).unwrap();
+            }),
+        ),
+        (
+            "vertex_distance",
+            Box::new(move |b: &Body| {
+                b.vertex_distance(&order3, 0, [1.0, 2.0, 3.0]).unwrap();
+            }),
+        ),
+    ]
+}
+
+/// A read through the shared door leaves the proof beside the body standing: the next proved
+/// operation on it decides only its result (it dropped the proof when it went through the
+/// edit door, and decided the body again).
+#[test]
+fn a_read_of_a_proved_body_keeps_its_proof() {
+    all_fixes();
+    for (name, read) in reads() {
+        let first = cut(plate(), drill(1));
+        read(&first);
+        assert_eq!(second_cut(first), 1, "{name} dropped the proof");
+    }
+}
+
+/// A read hands back the same body: its content is what it was, and its counts, volume and
+/// bounds read the same after.
+#[test]
+fn a_read_leaves_the_body_as_it_was() {
+    all_fixes();
+    for (name, read) in reads() {
+        let b = cut(plate(), drill(1));
+        let (counts, volume, bounds) = (
+            b.counts().unwrap(),
+            b.volume(1e-9).unwrap().to_bits(),
+            b.bounds().unwrap(),
+        );
+        let record = format!("{:?}", b.copy().unwrap().to_record().unwrap().0);
+        read(&b);
+        assert_eq!(b.counts().unwrap(), counts, "{name}");
+        assert_eq!(b.volume(1e-9).unwrap().to_bits(), volume, "{name}");
+        assert_eq!(b.bounds().unwrap(), bounds, "{name}");
+        assert_eq!(
+            format!("{:?}", b.copy().unwrap().to_record().unwrap().0),
+            record,
+            "{name}: its record changed"
+        );
+    }
+}

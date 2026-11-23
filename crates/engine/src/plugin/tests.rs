@@ -127,7 +127,7 @@ fn named_tool_refusals_keep_plugin_file_and_budget_details() {
                 json!({"plugin":"sample","grant":"memory_mib","approve":tools::APPROVE}),
             ),
         ] {
-            let failure = PluginFailure { plugin: "Sample".into(), file: file.map(String::from), error };
+            let failure = PluginFailure { plugin: "Sample".into(), file: file.map(String::from), exporting: false, error };
             let original = failure.text();
             let explained = explain_named(&session, &manifest, "make", EngineError::PluginFailed(Box::new(failure))).to_string();
             assert!(explained.starts_with(&original), "{explained}");
@@ -136,6 +136,7 @@ fn named_tool_refusals_keep_plugin_file_and_budget_details() {
         let failure = PluginFailure {
             plugin: "Sample".into(),
             file: file.map(String::from),
+            exporting: false,
             error: HostError::Exhausted { limit: "fuel".into(), allowed: 100000 },
         };
         let original = failure.text();
@@ -507,6 +508,7 @@ fn a_failure_message_shows_braces_in_a_file_name_or_reason_as_they_are() {
     let failure = |file: &str, reason: &str| PluginFailure {
         plugin: "Sample".into(),
         file: Some(file.into()),
+        exporting: false,
         error: craft_plugin::HostError::Unsupported { reason: reason.into() },
     };
     assert_eq!(failure("part{reason}.smp", "no {file} solids").text(), "Sample does not support part{reason}.smp: no {file} solids");
@@ -2670,6 +2672,235 @@ mod importers {
         s.execute("plugin.remove", &json!({"id": "smp"})).unwrap();
         assert!(!record.exists() && !plugins.join("smp").exists());
         std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+/// Exporter plugins: an export slot writes the open design as a file of an extension it claims.
+#[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+mod exporters {
+    use super::*;
+
+    fn exporter_manifest(commands: Value) -> Value {
+        let slot = |name: &str, extension: &str| json!({"name":name,"kind":"exporter","extensions":[extension]});
+        json!({"id":"smp","name":"Sample Exporter","version":"1","capabilities":["formats@0.1"],"runtime":{
+            "module":"exporter.wasm","commands":commands,
+            "entries":[slot("copy","smp"),slot("error","bad"),slot("trap","bad"),slot("loop","bad"),slot("write","bad")],
+            "limits":{"fuel":10_000_000,"memory_mib":2,"deadline_ms":5000}}})
+    }
+    struct Fixture(std::path::PathBuf);
+    impl Fixture {
+        fn new(name: &str) -> Self {
+            let root = Self(solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-exporter-{}-{name}", std::process::id())));
+            let _ = std::fs::remove_dir_all(&root.0);
+            root
+        }
+    }
+    impl std::ops::Deref for Fixture {
+        type Target = Path;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A session with a box whose plugins folder holds the original exporter fixture, and a folder
+    /// to export into. The fixture's `copy` slot writes the reply of `document.inspect`.
+    fn installed(name: &str) -> (Session, Fixture) {
+        let root = Fixture::new(name);
+        let (package, version) = API.split_once('@').unwrap();
+        let component = wat::parse_str(include_str!("exporter_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap();
+        let dir = root.join("plugins/smp");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("plugin.json"), exporter_manifest(json!(["document.inspect"])).to_string()).unwrap();
+        std::fs::write(dir.join("exporter.wasm"), &component).unwrap();
+        std::fs::create_dir_all(root.join("files")).unwrap();
+        let mut s = Session::new(solidcraft_doc::Document::new("Bracket"));
+        s.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
+        s.plugin_state.plugins_dir = Some(root.join("plugins"));
+        (s, root)
+    }
+    fn at(root: &Path, name: &str) -> String {
+        root.join("files").join(name).to_string_lossy().into_owned()
+    }
+    fn files(root: &Path) -> Vec<String> {
+        let mut names: Vec<String> =
+            std::fs::read_dir(root.join("files")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn the_exporter_fixture_cleans_up_on_return_and_unwind() {
+        for unwind in [false, true] {
+            let fixture = Fixture::new(if unwind { "cleanup-unwind" } else { "cleanup-return" });
+            let path = fixture.0.clone();
+            let result = std::panic::catch_unwind(move || {
+                let root = fixture;
+                std::fs::create_dir_all(root.join("plugins")).unwrap();
+                std::fs::write(root.join("partial.wasm"), b"partial setup").unwrap();
+                if unwind {
+                    panic!("fixture setup interrupted");
+                }
+            });
+            assert_eq!(result.is_err(), unwind);
+            assert!(!path.exists(), "fixture files remain at {}", path.display());
+        }
+    }
+
+    #[test]
+    fn an_installed_exporter_id_takes_precedence_over_a_native_file_name() {
+        let (mut s, root) = installed("native-name");
+        let mut manifest = exporter_manifest(json!(["document.inspect"]));
+        manifest["runtime"]["entries"][0]["name"] = json!("step");
+        std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
+        let reply = s.execute("file.export", &json!({"path": at(&root, "bracket.step"), "format": "smp.step"})).unwrap();
+        assert_eq!(reply["format"], "smp.step");
+        let written: Value = serde_json::from_slice(&std::fs::read(at(&root, "bracket.step")).unwrap()).unwrap();
+        let mut inspected = s.execute("document.inspect", &json!({})).unwrap();
+        inspected["undo"] = json!(0);
+        assert_eq!(written, inspected);
+    }
+
+    #[test]
+    fn an_export_slot_writes_what_it_read_of_the_design_and_changes_nothing() {
+        let (mut s, root) = installed("round-trip");
+        let listed = s.execute("plugin.list", &json!({})).unwrap();
+        assert_eq!(listed["exporters"][0]["id"], "smp.copy");
+        assert_eq!(listed["plugins"][0]["commands"], json!([]), "an exporter is not a command");
+        // An agent's output folder grants no access to the installed package itself.
+        solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([root.join("files")])), || {
+            let tools = s.execute("plugin.tools", &json!({"name":"smp.copy"})).unwrap();
+            assert_eq!(tools["tools"][0]["kind"], "exporter");
+            assert!(tools["tools"][0].get("approval").is_none(), "format tools use the package's stored grants");
+            let described = s.execute("engine.describe", &json!({"command":"smp.copy"})).unwrap();
+            assert_eq!(described["kind"], "exporter");
+            assert_eq!(described["tool"]["input"], tools["tools"][0]["input_schema"]);
+        });
+        let (before, undo) = (s.doc.to_json(), s.undo.len());
+        let mut inspected = s.execute("document.inspect", &json!({})).unwrap();
+        // The plugin reads a copy of the session that carries no undo history, so it counts none.
+        assert_eq!(inspected["undo"], 1);
+        inspected["undo"] = json!(0);
+        // The extension picks the slot; the file holds exactly what the plugin read.
+        let reply = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([root.join("files")])), || {
+            s.execute("file.export", &json!({"path": at(&root, "bracket.smp")}))
+        })
+        .unwrap();
+        assert_eq!((reply["format"].as_str(), reply["plugin"].as_str()), (Some("smp.copy"), Some("Sample Exporter")));
+        let written: Value = serde_json::from_slice(&std::fs::read(at(&root, "bracket.smp")).unwrap()).unwrap();
+        assert_eq!(written, inspected);
+        assert_eq!(reply["bytes"].as_u64(), Some(std::fs::metadata(at(&root, "bracket.smp")).unwrap().len()));
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, undo), "an export leaves the design and its history alone");
+        // `format` names a slot even for an extension SolidCraft writes; without it, SolidCraft does.
+        assert_eq!(s.execute("file.export", &json!({"path": at(&root, "copy.json"), "format": "smp.copy"})).unwrap()["format"], "smp.copy");
+        assert_eq!(s.execute("file.export", &json!({"path": at(&root, "own.json")})).unwrap()["format"], "Design");
+        assert!(s.execute("file.export", &json!({"path": at(&root, "own.stl"), "options": {}})).is_err(), "options are a plugin's");
+        assert!(s.execute("file.export", &json!({"path": at(&root, "b.smp"), "bodies": ["Box"]})).is_err());
+        assert_eq!(files(&root), ["bracket.smp", "copy.json", "own.json"]);
+        // A disabled plugin writes nothing.
+        s.disabled_plugins.insert("smp".into());
+        assert!(s.execute("file.export", &json!({"path": at(&root, "off.smp")})).is_err());
+    }
+
+    #[test]
+    fn exporter_hooks_fill_omitted_options_preserve_callers_and_fail_before_writing() {
+        let (mut s, root) = installed("dialog-hook");
+        let mut manifest = exporter_manifest(json!([]));
+        manifest["capabilities"] = json!(["formats@0.2", "dialog@0.1"]);
+        manifest["runtime"]["entries"] = json!([{"name":"copy","kind":"exporter","extensions":["smp"],"dialog_hook":true,
+        "input_schema":{"type":"object","required":["width"],"properties":{
+            "width":{"type":"number","minimum":1},
+            "size":{"type":"string","oneOf":[{"const":"small"},{"const":"large"}]}
+        }}}]);
+        std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
+        let reply = r#"{"width":{"default":24},"size":{"choices":["large"]}}"#;
+        // The command fixture echoes its inputs. Give that echo the export-file signature
+        // (string and list<u8> share the canonical layout), retaining its update-fields export.
+        let source = include_str!("../../../craft-plugin-wasm/src/dialog_fixture.wat")
+            .replace(
+                r##"(type (;7;) (func (param "entry" string) (param "params" $"#type4 json") (result 6)))"##,
+                r##"(type $export-bytes (list u8))
+                (type $export-result (result $export-bytes (error $"#type5 plugin-error")))
+                (type $export-type (func (param "slot" string) (param "options" $"#type4 json") (result $export-result)))"##,
+            )
+            .replace("(func $execute (;1;) (type 7)", "(func $execute (;1;) (type $export-type)")
+            .replace(r#"(export "execute" (func $execute))"#, r#"(export "export-file" (func $execute))"#)
+            .replace(
+                r#"(export "__PACKAGE__/entry@__VERSION__" (instance $command))"#,
+                r#"(export "__PACKAGE__/formats-provider@__VERSION__" (instance $command))"#,
+            )
+            .replace("__PACKAGE__", "craft:plugin")
+            .replace("__VERSION__", "0.2.0")
+            .replace("__REPLY_LEN__", &reply.len().to_string())
+            .replace("__REPLY__", &reply.replace('"', "\\22"));
+        let component_path = root.join("plugins/smp/exporter.wasm");
+        std::fs::write(&component_path, wat::parse_str(source.replace("__HOOK_CODE__", "")).unwrap()).unwrap();
+        let tools = s.execute("plugin.tools", &json!({"name":"smp.copy"})).unwrap();
+        let schema = &tools["tools"][0]["input_schema"];
+        check_input(schema, &json!({"path":at(&root, "defaults.smp"),"options":{}})).unwrap();
+        assert!(schema["properties"]["options"].get("required").is_none());
+        for (name, options, width) in [("defaults.smp", json!({}), 24), ("explicit.smp", json!({"width":12}), 12)] {
+            s.execute("file.export", &json!({"path":at(&root, name),"options":options})).unwrap();
+            let written: Value = serde_json::from_slice(&std::fs::read(at(&root, name)).unwrap()).unwrap();
+            assert_eq!(written["width"], width);
+        }
+        let path = at(&root, "refused.smp");
+        std::fs::write(&path, b"original").unwrap();
+        assert!(s.execute("file.export", &json!({"path":path,"options":{"size":"small"}})).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"original");
+        for code in ["unreachable", "(loop $forever br $forever)", "call $box"] {
+            std::fs::write(&component_path, wat::parse_str(source.replace("__HOOK_CODE__", code)).unwrap()).unwrap();
+            assert!(s.execute("file.export", &json!({"path":path})).is_err(), "{code}");
+            assert_eq!(std::fs::read(&path).unwrap(), b"original");
+        }
+    }
+
+    #[test]
+    fn an_export_that_errors_traps_or_runs_away_leaves_the_folder_as_it_was() {
+        let (mut s, root) = installed("failures");
+        std::fs::write(at(&root, "keep.bad"), b"original").unwrap();
+        for (slot, says) in [("error", "refused this design"), ("trap", "UnreachableCodeReached"), ("loop", "fuel")] {
+            for name in ["keep.bad", "new.bad"] {
+                let failure = s.execute("file.export", &json!({"path": at(&root, name), "format": format!("smp.{slot}")})).unwrap_err().to_string();
+                assert!(failure.contains(says), "{slot}: {failure}");
+                assert!(failure.starts_with(&format!("Sample Exporter could not export {name}:")), "{failure}");
+                if slot == "loop" {
+                    assert!(failure.contains("Ask its author to raise its fuel limit."), "{failure}");
+                }
+            }
+        }
+        assert_eq!(std::fs::read(at(&root, "keep.bad")).unwrap(), b"original");
+        assert_eq!(files(&root), ["keep.bad"], "no new file and no partial or temporary file");
+        // The next export gets a fresh instance.
+        assert!(s.execute("file.export", &json!({"path": at(&root, "after.smp")})).is_ok());
+    }
+
+    #[test]
+    fn an_exporter_reaches_no_other_path_and_may_only_read() {
+        let (mut s, root) = installed("no-files");
+        let failure = s.execute("file.export", &json!({"path": at(&root, "x.bad"), "format": "smp.write"})).unwrap_err().to_string();
+        assert!(failure.contains("file.export"), "{failure}");
+        assert_eq!(files(&root), Vec::<String>::new());
+        assert!(!Path::new("stolen.txt").exists());
+        // A manifest asking for a command that writes, edits or reaches a file is refused at once.
+        for commands in [json!(["file.export"]), json!(["solid.box"])] {
+            let refused = parse_manifest(exporter_manifest(commands.clone()).to_string().as_bytes(), "smp");
+            assert!(refused.is_err(), "{commands}");
+        }
+        let mut grants = exporter_manifest(json!([]));
+        grants["runtime"]["permissions"] = json!({"files":[{"name":"out","write":true}]});
+        assert!(parse_manifest(grants.to_string().as_bytes(), "smp").is_err());
+        // The caller's file scope decides where an export may go, before any plugin code runs.
+        let outside = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([root.join("plugins")])), || {
+            s.execute("file.export", &json!({"path": at(&root, "y.smp")}))
+        });
+        assert!(outside.is_err());
+        assert_eq!(files(&root), Vec::<String>::new());
     }
 }
 
