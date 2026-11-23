@@ -997,6 +997,7 @@ crates/kernel/src/fill.rs:normal_curvature dot
 crates/kernel/src/fill.rs:planar cross,dot,normalized
 crates/kernel/src/helix.rs:helix_profile atan2,cross,dot,normalized
 crates/kernel/src/helix.rs:loft_to_point dot
+crates/kernel/src/helix.rs:loft_to_point_with_rails dot
 crates/kernel/src/helix.rs:rot cross,dot
 crates/kernel/src/helix.rs:sweep_helix_mesh normalized,triangles
 crates/kernel/src/iges_in.rs:Tr::arc atan2
@@ -1015,7 +1016,7 @@ crates/kernel/src/loft_blend.rs:Blend::shape normalized
 crates/kernel/src/loft_blend.rs:section_frames cross,dot,normalized
 crates/kernel/src/loft_blend.rs:third_derivative dot
 crates/kernel/src/loft_rails.rs:line_of dot,normalized
-crates/kernel/src/loft_rails.rs:railed normalized
+crates/kernel/src/loft_rails.rs:railed_ending normalized
 crates/kernel/src/loft_rails.rs:section_normals dot
 crates/kernel/src/loft_rails.rs:section_planes cross,dot,normalized
 crates/kernel/src/loft_rails.rs:station_map dot,normalized
@@ -1319,6 +1320,7 @@ crates/ui-egui/src/hole_place.rs:nearest distance
 crates/ui-egui/src/hole_place.rs:on_face cross,dot
 crates/ui-egui/src/hole_place.rs:to_segment distance,dot
 crates/ui-egui/src/icons/markers.rs:dimension_arrow normalized
+crates/ui-egui/src/icons/markers.rs:dimension_arrow_rimmed normalized
 crates/ui-egui/src/icons/markers.rs:snap normalized
 crates/ui-egui/src/inference.rs:Tracking::axis_guide distance
 crates/ui-egui/src/inference.rs:Tracking::meeting_of distance
