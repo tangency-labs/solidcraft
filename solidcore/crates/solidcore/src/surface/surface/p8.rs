@@ -3130,7 +3130,9 @@ fn coincident_range<O: SolutionObject>(
 /// agree within `param_tol`, the one with the smaller value is kept, in the first's
 /// place. (Not upstream) the solution kept carries the [`Contact::merged`] of both (two
 /// crossings undecided), and stays a crossing for two crossings only where one lies in the
-/// unique box of the other's certified root: otherwise they may be two contacts, and one
+/// unique box of the other's certified root and neither carries a shared contact id (a seam
+/// pair's point merged is not shown that seam point any more: the one kept never keeps an
+/// id, [`crate::geom::solution_array::ContactId`]): otherwise they may be two contacts, and one
 /// solution standing for both would turn a full line's parity. Two such solutions are
 /// still merged, as upstream merges them, so that no result but the contact changes; not
 /// merging two crossings in unique boxes apart is the consumers' change.
@@ -3177,10 +3179,16 @@ fn remove_repeated_solutions<O: SolutionObject>(
                 } else {
                     si
                 };
+                // (a seam pair's point merged is not shown that seam point any more: its
+                // shared contact is cleared, and it stays a crossing only off every pair)
+                let paired = si.shared_contact.is_some() || sj.shared_contact.is_some();
                 kept.contact = match (si.contact, sj.contact) {
-                    (Contact::Crossing, Contact::Crossing) if one_contact => Contact::Crossing,
+                    (Contact::Crossing, Contact::Crossing) if one_contact && !paired => {
+                        Contact::Crossing
+                    }
                     (a, b) => a.merged(b),
                 };
+                kept.shared_contact = None;
                 sols.set_at(ii, &kept)?;
 
                 // remove the worst duplicate
@@ -3201,7 +3209,8 @@ fn remove_repeated_solutions<O: SolutionObject>(
 /// which `last_sol` then absorbs unchanged. (Not upstream) a range made or extended here,
 /// or one that absorbs the point, takes the [`Contact::absorbed`] of both (unclassified
 /// when both are, undecided otherwise: a stretch is neither of its ends' contacts), and a
-/// point that absorbs another takes the [`Contact::merged`] of both.
+/// point that absorbs another takes the [`Contact::merged`] of both. Either way the solution
+/// made keeps no shared contact id (nothing shows it is still that one contact).
 fn join_across_coincidence<O: SolutionObject>(
     mut last_sol: Solution<O>,
     curr_sol: &Solution<O>,
@@ -3221,6 +3230,8 @@ fn join_across_coincidence<O: SolutionObject>(
     last_sol.contact = last_original_contact.absorbed(curr_sol.contact);
     let last_original_unique = last_sol.unique;
     last_sol.unique = None;
+    // (no point merged or absorbed is shown the seam point it was identified as)
+    last_sol.shared_contact = None;
 
     // if CurrSol is a range
     if curr_sol.solution_type == SolutionType::RangeOfValues {
@@ -4640,6 +4651,28 @@ mod tests {
             assert_eq!(sols.len(), 1, "{second:?}");
             assert_eq!(sols.as_slice()[0].contact, want, "{second:?}");
         }
+        // a point of a seam pair (a shared contact id) merged with a third point: the one
+        // kept loses the id and is undecided, even where one lies in the other's unique box
+        // (it is not shown the seam point any more); its twin keeps its crossing and the id,
+        // counted once
+        let id = core::num::NonZeroU32::new(1).map(crate::geom::solution_array::ContactId);
+        let mut sols = SolutionArray::new();
+        let mut p = line_point(2e-9, [0.5, 0.2, 0.3], Contact::Crossing);
+        p.shared_contact = id;
+        let mut r = line_point(1e-9, [0.5 + 1e-6, 0.2 + 1e-6, 0.3], Contact::Crossing);
+        r.unique = Some([[0.1, 0.3], [0.2, 0.4]]);
+        let mut q = line_point(1e-9, [0.5, 0.9, 0.3], Contact::Crossing);
+        q.shared_contact = id;
+        for s in [p, r, q] {
+            sols.add(&s);
+        }
+        remove_repeated_solutions(&mut sols, &[1e-4; 3]).unwrap();
+        let got: Vec<_> = sols
+            .as_slice()
+            .iter()
+            .map(|s| (s.contact, s.shared_contact))
+            .collect();
+        assert_eq!(got, [(Contact::Undecided, None), (Contact::Crossing, id)]);
     }
 
     /// The join across a coincident stretch: a range built from two points, or extended by
@@ -4682,6 +4715,16 @@ mod tests {
             let kept = join_across_coincidence(last, &near, Some(&unit)).unwrap();
             assert_eq!(kept.solution_type, SolutionType::SingleValue);
             assert_eq!(kept.contact, want, "{a:?} {b:?}");
+        }
+        // a shared contact id is lost by a range and by a point that absorbs another
+        let id = core::num::NonZeroU32::new(1).map(crate::geom::solution_array::ContactId);
+        let mut last = line_point(0.0, [0.2, 0.1, 0.1], Contact::Crossing);
+        last.shared_contact = id;
+        let far = line_point(0.0, [0.6, 0.5, 0.1], Contact::Crossing);
+        let near = line_point(0.0, [0.2 + EFF_ZERO, 0.1, 0.1], Contact::Crossing);
+        for curr in [far, near] {
+            let joined = join_across_coincidence(last, &curr, Some(&unit)).unwrap();
+            assert_eq!(joined.shared_contact, None);
         }
     }
 

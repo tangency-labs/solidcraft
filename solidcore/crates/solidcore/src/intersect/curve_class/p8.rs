@@ -216,6 +216,7 @@ fn insert_solutions<O: ClassObject>(
             nodes: s.nodes,
             contact: s.contact,
             unique: s.unique,
+            shared_contact: s.shared_contact,
         })
         .collect();
     super::p5::insert_solutions(k, geometry, cc, &mut mapped, target, Some(tol))?;
@@ -308,6 +309,7 @@ fn intersections(
                         nodes: s.nodes,
                         contact: s.contact,
                         unique: s.unique,
+                        shared_contact: s.shared_contact,
                     })
                     .collect());
             }

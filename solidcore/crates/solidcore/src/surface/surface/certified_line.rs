@@ -366,6 +366,33 @@
 //! stays undecided in the side record: a ray would otherwise pass a crossing it was not
 //! given.
 //!
+//! **The seam pair** (answer11, Q1). The leaf solve and p8's dedupe measure u and v
+//! natively, so a contact on a seam the solve wraps can come back twice, once at each end
+//! of the knots' range (their parameters differ by the range's width, so the dedupe never
+//! merges them). Two points of a component are one seam location ([`seam_pair`]) when every
+//! one of these holds: (1) the solve wraps in that direction and the component is joined
+//! across that seam; (2) the component is decided, not typed by its sides or foot in leaves
+//! not all inside the face, every one of its certified roots carried exactly once, and
+//! neither point in any root's unique box (each is another point, so the pair never enters a
+//! count, and a seam crossing identified here never becomes two roots); (3) the two are its
+//! only other points; (4) one lies in a box of it reaching the range's low end and the other
+//! in one reaching its high end, and those two boxes are joined directly by the seam rule of
+//! [`components`] (a link through the rest of the component is not one); (5) both lie where
+//! the two boxes meet, their line parameters in the meet of the boxes' line parameters and
+//! their coordinates along the seam in the meet of the boxes' stretches along it (at a
+//! corner, the corner), each with its gap shown below the tolerance. The pair is then one
+//! slot of the rest: both crossings where the rest is odd, both touching where it is even,
+//! and the component is stood for. Its parity is its rule's, which an identification never
+//! changes; what reaches a consumer is the points, so the two carry one id
+//! ([`ContactId`], `Solution::shared_contact`; never an index, which the rescale, the ray's
+//! truncation, the dedupe and the coincidence pass shift), and the consumer's contract is
+//! that a linked pair counts once: over every component stood for, its crossings, a linked
+//! pair once, add up to its parity. A tolerance merge of a linked point loses the id and
+//! gives the merged contact, undecided for a crossing (the safe direction). A double root
+//! next to the seam, two real crossings: certified, they are two roots with two carriers,
+//! which (2) excludes; in boxes at the floor, the component's rule holds their parity, and
+//! the pair stands for it at a location (5) keeps true.
+//!
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`LineNet`], [`isolate`], [`PassLine`], [`CertifiedRoot`], [`Isolation`], [`Stop`], [`FloorBox`], [`FloorKind`], [`Exclusion`], [`LeafSides`], [`leaf_sides`], [`enclose_strip`], [`SearchedLeaf`], [`drop_fenced`], [`Drops`], [`components`], [`Components`], [`Component`], [`side_record`], [`Revolved`], [`type_components`], [`Typed`], [`Why`], [`Overlap`], [`FootWhy`], [`Stretch`], [`type_solutions`], [`SolutionAt`] | (not upstream) |
@@ -397,7 +424,7 @@ use crate::geom::krawczyk::{
     Linearised, KRAWCZYK_STEPS,
 };
 use crate::geom::nurbs_enclosure::nurbs_partials_over_box_about;
-use crate::geom::solution_array::{Contact, SideRecord};
+use crate::geom::solution_array::{Contact, ContactId, SideRecord};
 use crate::kernel::{CancelToken, Kernel};
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
@@ -4489,9 +4516,11 @@ fn covered_by_leaves(u: Ivl, v: Ivl, leaves: &[SearchedLeaf]) -> bool {
     })
 }
 
-/// What [`type_solutions`] gives a solution: its contact, and the unique box of the
-/// certified root it stands for.
-pub(crate) type Typing = (Contact, Option<[Ivl; 2]>);
+/// What [`type_solutions`] gives a solution: its contact, the unique box of the certified
+/// root it stands for, and the id of the one contact it and another solution both stand for
+/// (module docs, "The seam pair": the two points of a pair, numbered from 1 in the order
+/// the components are named).
+pub(crate) type Typing = (Contact, Option<[Ivl; 2]>, Option<ContactId>);
 
 /// A solution of the solve as [`type_solutions`] reads it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -4530,7 +4559,9 @@ enum Placing {
 /// root's only carrier; two carriers of one root are undecided). The component's parity
 /// less its roots' leaves what its boxes left at the floor hold: with every root carried
 /// once, the other points are touching when that is even, and the one other point is a
-/// crossing when it is odd; otherwise they are undecided. A component typed by its sides
+/// crossing when it is odd; two other points that are one seam location (module docs,
+/// "The seam pair") are one slot, both crossing or both touching, and share an id;
+/// otherwise they are undecided. A component typed by its sides
 /// whose leaves are not all inside the face may straddle its border, so its other points
 /// are undecided. A component stands for itself when every root is carried once and its
 /// parity is accounted for (a touching one with no point does).
@@ -4542,11 +4573,12 @@ pub(crate) fn type_solutions(
     unplaced: bool,
 ) -> (Vec<Option<Typing>>, Vec<bool>) {
     let mut stood = vec![false; comps.list.len()];
-    let undecided = Some((Contact::Undecided, None));
+    let undecided = Some((Contact::Undecided, None, None));
+    let mut pairs = 0_u32;
     if comps.over_budget || unplaced {
         let out = at
             .iter()
-            .map(|a| (!matches!(a, SolutionAt::Other)).then_some((Contact::Undecided, None)))
+            .map(|a| (!matches!(a, SolutionAt::Other)).then_some((Contact::Undecided, None, None)))
             .collect();
         return (out, stood);
     }
@@ -4562,7 +4594,7 @@ pub(crate) fn type_solutions(
         .collect();
     let mut out: Vec<Option<Typing>> = placing
         .iter()
-        .map(|p| p.map(|_| (Contact::Undecided, None)))
+        .map(|p| p.map(|_| (Contact::Undecided, None, None)))
         .collect();
     for (c, comp) in comps.list.iter().enumerate() {
         let decided = matches!(comp.contact, Contact::Crossing | Contact::Touching)
@@ -4592,7 +4624,7 @@ pub(crate) fn type_solutions(
                     _ => None,
                 };
                 if let Some(slot) = out.get_mut(*one) {
-                    *slot = Some((Contact::Crossing, unique));
+                    *slot = Some((Contact::Crossing, unique, None));
                 }
             }
         }
@@ -4601,15 +4633,37 @@ pub(crate) fn type_solutions(
         // (what the boxes left at the floor hold, beyond the roots, as a parity)
         let parity = usize::from(comp.contact == Contact::Crossing);
         let rest = (parity + comp.classes.len()) % 2;
-        let other = match (carried && !straddles, rest, others.as_slice()) {
+        // the seam pair (module docs, "The seam pair"): exactly two other points, one seam
+        // location reported on each end of the range, one slot of the rest
+        // (its id made here: past `u32::MAX` pairs there is none, and the two points stay
+        // two slots, never two crossings that lost their link)
+        let pair = match (carried && !straddles, others.as_slice()) {
+            (true, &[i, j]) => match (at.get(i), at.get(j)) {
+                (Some(&SolutionAt::Point(p)), Some(&SolutionAt::Point(q)))
+                    if seam_pair(net, line, comps, comp, [p, q]) =>
+                {
+                    pairs
+                        .checked_add(1)
+                        .and_then(core::num::NonZeroU32::new)
+                        .map(ContactId)
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        let slots = if pair.is_some() { 1 } else { others.len() };
+        let other = match (carried && !straddles, rest, slots) {
             (true, 0, _) => Some(Contact::Touching),
-            (true, _, [_]) => Some(Contact::Crossing),
+            (true, _, 1) => Some(Contact::Crossing),
             _ => None,
         };
         if let Some(contact) = other {
+            if let Some(ContactId(id)) = pair {
+                pairs = id.get();
+            }
             for &i in &others {
                 if let Some(slot) = out.get_mut(i) {
-                    *slot = Some((contact, None));
+                    *slot = Some((contact, None, pair));
                 }
             }
             if let Some(slot) = stood.get_mut(c) {
@@ -4677,6 +4731,82 @@ fn place(
         (Some((c, class)), None) if c == comp => Placing::Carrier { comp, class },
         _ => Placing::Undecided,
     }
+}
+
+/// Whether the two points `p` and `q` (`(t, u, v)`, each placed as another point of the
+/// component `comp`: its gap shown below the tolerance, in a box of it, in no root's unique
+/// box) are one seam location (module docs, "The seam pair"; answer11, Q1): in a direction
+/// the solve wraps in and `comp` is joined across, one lies in a box of `comp` reaching the
+/// knots' range's low end and the other in one reaching its high end, those two boxes are
+/// joined directly by the seam rule of [`components`] (their stretches along the seam meet,
+/// or meet at a corner across the other seam, and their line parameters overlap), and both
+/// points lie where the two boxes meet: their line parameters in the meet of the two boxes'
+/// line parameters, and their coordinates along the seam in the meet of the two boxes'
+/// stretches along it (at a corner, the corner itself: each on its own box's end of the
+/// other direction's range). A link only through the rest of the component is not one.
+fn seam_pair(
+    net: &LineNet,
+    line: &PassLine,
+    comps: &Components,
+    comp: &Component,
+    [p, q]: [[f64; 3]; 2],
+) -> bool {
+    let seams = net.seams(&line.solve_domain);
+    let holds = |b: &PlacedBox, [t, u, v]: [f64; 3]| {
+        b.u.lo <= u && u <= b.u.hi && b.v.lo <= v && v <= b.v.hi && b.t.lo <= t && t <= b.t.hi
+    };
+    let along = |b: &PlacedBox, d: usize| if d == 0 { b.u } else { b.v };
+    let at = |[_, u, v]: [f64; 3], d: usize| if d == 0 { u } else { v };
+    let boxes: Vec<&PlacedBox> = comp
+        .boxes
+        .iter()
+        .filter_map(|&i| comps.boxes.get(i))
+        .collect();
+    for d in 0..2 {
+        let (Some(&true), Some(&[e0, e1]), Some(span)) =
+            (seams.wrap.get(d), seams.range.get(d), comp.hull.get(d))
+        else {
+            continue;
+        };
+        if span.then.is_none() {
+            continue;
+        }
+        let other = 1 - d;
+        let wrap_other = seams.wrap.get(other).copied().unwrap_or(false);
+        let [f0, f1] = seams.range.get(other).copied().unwrap_or([f64::NAN; 2]);
+        for (lo_pt, hi_pt) in [(p, q), (q, p)] {
+            let lows = boxes
+                .iter()
+                .filter(|b| along(b, d).lo <= e0 && holds(b, lo_pt));
+            for a in lows {
+                let highs = boxes
+                    .iter()
+                    .filter(|b| along(b, d).hi >= e1 && holds(b, hi_pt));
+                for b in highs {
+                    let Some(t) = meet(a.t, b.t) else {
+                        continue;
+                    };
+                    let in_t = [lo_pt, hi_pt].iter().all(|&[pt, _, _]| within_point(pt, t));
+                    let (x, y) = (along(a, other), along(b, other));
+                    let (lo_s, hi_s) = (at(lo_pt, other), at(hi_pt, other));
+                    let direct =
+                        meet(x, y).is_some_and(|m| within_point(lo_s, m) && within_point(hi_s, m));
+                    let corner = wrap_other
+                        && ((x.lo <= f0 && y.hi >= f1 && lo_s <= f0 && hi_s >= f1)
+                            || (y.lo <= f0 && x.hi >= f1 && hi_s <= f0 && lo_s >= f1));
+                    if in_t && (direct || corner) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Whether `x` lies in the closed interval `i`.
+fn within_point(x: f64, i: Ivl) -> bool {
+    i.lo <= x && x <= i.hi
 }
 
 /// What a box of the work list becomes; each verdict but the first and the halving carries
@@ -7525,5 +7655,301 @@ mod tests {
             c.list[0]
         );
         assert!(!c.list[0].whole_turn);
+    }
+
+    /// The test of the seam pair (answer11, Q1): over every component the solutions
+    /// stand for, the crossings among the points placed in it, a linked pair counted once,
+    /// add up to its parity mod 2.
+    fn points_add_up(
+        net: &LineNet,
+        line: &PassLine,
+        comps: &Components,
+        at: &[SolutionAt],
+        (typed, stood): (&[Option<Typing>], &[bool]),
+    ) -> bool {
+        let holds = |[qu, qv]: [Ivl; 2], u: f64, v: f64| {
+            qu.lo <= u && u <= qu.hi && qv.lo <= v && v <= qv.hi
+        };
+        comps.list.iter().enumerate().all(|(c, comp)| {
+            if !stood.get(c).copied().unwrap_or(false) {
+                return true;
+            }
+            let mut links: Vec<ContactId> = Vec::new();
+            let mut crossings = 0_usize;
+            for (a, t) in at.iter().zip(typed) {
+                let SolutionAt::Point(p) = *a else {
+                    continue;
+                };
+                let mine = match place(net, line, comps, p, holds) {
+                    Placing::Carrier { comp: pc, .. } | Placing::Other { comp: pc } => pc == c,
+                    Placing::Undecided => false,
+                };
+                match t {
+                    Some((Contact::Crossing, _, link)) if mine => match link {
+                        Some(l) if links.contains(l) => {}
+                        Some(l) => {
+                            links.push(*l);
+                            crossings += 1;
+                        }
+                        None => crossings += 1,
+                    },
+                    _ => {}
+                }
+            }
+            crossings % 2 == usize::from(comp.contact == Contact::Crossing)
+        })
+    }
+
+    /// A crossing on the seam reported on both ends of the range is one contact (answer11,
+    /// Q1): the line along x at y = 0, z = ½ crosses the unit cylinder (seam toward +x)
+    /// exactly on its seam's meridian at `t = ¾`, one component joined across the seam, a
+    /// crossing by its sides with no certified root. The two points `(¾, u₀, v)` and
+    /// `(¾, u₁, v)` (the same point of the net, on the two ends) are one seam location: both
+    /// crossings, linked, and the component stood for; answer11's sum over the component counts
+    /// the pair once. Without the pair rule they were two other points of an odd rest,
+    /// undecided.
+    #[test]
+    fn a_seam_crossing_reported_on_both_ends_is_one_contact() {
+        let k = Kernel::default();
+        let s = cylinder(&k);
+        let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let net = LineNet::of(&k, &s).unwrap().unwrap();
+        let (p, d, tol) = (Vec3::new(-2.0, 0.0, 0.5), Vec3::new(4.0, 0.0, 0.0), 1.0e-5);
+        let line = PassLine {
+            point: p,
+            vector: d,
+            span: [0.0, 1.0],
+            solve_domain: whole,
+            tol,
+        };
+        let (_, c) = typed_of(&k, &s, p, d, tol, &[whole]);
+        let seam = c.list.iter().position(|x| x.t.lo > 0.5).unwrap();
+        assert_eq!(
+            (c.list[seam].contact, c.list[seam].typed),
+            (Contact::Crossing, Typed::Sides)
+        );
+        assert!(glued(&c.list[seam]) && c.list[seam].classes.is_empty());
+        let [[u0, u1], [v0, v1]] = net.range;
+        let vm = 0.5 * (v0 + v1);
+        let at = [
+            SolutionAt::Point([0.75, u0, vm]),
+            SolutionAt::Point([0.75, u1, vm]),
+        ];
+        let (typed, stood) = type_solutions(&net, &line, &c, &at, false);
+        let link = typed[0].and_then(|(_, _, l)| l);
+        assert!(link.is_some(), "{typed:?}");
+        assert_eq!(typed[0], Some((Contact::Crossing, None, link)));
+        assert_eq!(typed[1], Some((Contact::Crossing, None, link)));
+        assert!(stood[seam]);
+        assert!(points_add_up(&net, &line, &c, &at, (&typed, &stood)));
+    }
+
+    /// A scene of [`seam_records`]: the surface, the line's point and vector, and the solve's
+    /// domain (`None` for the whole).
+    type SeamScene<'a> = (&'a Surface, Vec3, Vec3, Option<Extent2d>);
+
+    /// The unit cylinder and the line along x at y = 0, z = ½ through its seam point
+    /// `(1, 0, ½)` at `t = ¾`, over the solve `solve`.
+    fn cylinder_seam(s: &Surface, solve: Option<Extent2d>) -> SeamScene<'_> {
+        (
+            s,
+            Vec3::new(-2.0, 0.0, 0.5),
+            Vec3::new(4.0, 0.0, 0.0),
+            solve,
+        )
+    }
+
+    /// The records of a seam pair (answer11, Q1) on the net of the scene's surface, its line
+    /// through a seam point at `t = ¾` (tolerance 10⁻²): boxes `(u, v, t)` of one leaf over
+    /// the solve's domain, joined into components, the one holding `t = ¾` typed a crossing
+    /// by its sides with no root (`inside` its leaves), and the solutions `at` typed.
+    fn seam_records(
+        (s, point, vector, solve): SeamScene<'_>,
+        boxes: &[([f64; 2], [f64; 2], [f64; 2])],
+        at: &[[f64; 3]],
+        edit: impl Fn(&mut Components),
+    ) -> (Components, Vec<Option<Typing>>, Vec<bool>, bool) {
+        let k = Kernel::default();
+        let whole = solve.unwrap_or_else(|| s.natural_uv_domain_with_nurb(&k).unwrap());
+        let net = LineNet::of(&k, s).unwrap().unwrap();
+        let line = PassLine {
+            point,
+            vector,
+            span: [0.0, 1.0],
+            solve_domain: whole,
+            tol: 1.0e-2,
+        };
+        let floor = boxes
+            .iter()
+            .map(|&(u, v, [t0, t1])| FloorBox {
+                t: Some(Ivl::new(t0, t1)),
+                ..rec(FloorKind::Left, u, v)
+            })
+            .collect();
+        let seams = net.seams(&whole);
+        let leaves = [leaf_of(whole, Stop::Finished, Some(floor))];
+        let mut c = components(
+            &leaves,
+            &leaf_sides(&[whole], &whole, seams),
+            [0.0, 1.0],
+            seams,
+        );
+        for x in &mut c.list {
+            if x.t.lo <= 0.75 && 0.75 <= x.t.hi {
+                x.contact = Contact::Crossing;
+                x.typed = Typed::Sides;
+            }
+        }
+        edit(&mut c);
+        let at: Vec<SolutionAt> = at.iter().map(|&p| SolutionAt::Point(p)).collect();
+        let (typed, stood) = type_solutions(&net, &line, &c, &at, false);
+        let adds = points_add_up(&net, &line, &c, &at, (&typed, &stood));
+        (c, typed, stood, adds)
+    }
+
+    /// Each condition of the seam pair (answer11, Q1) failing on its own leaves the two
+    /// points unlinked (undecided; or, with one not placed, the other the single point of the
+    /// rest; or, each in a root's unique box, two carriers): on the cylinder's records of [`seam_records`], with `A` a box on the low
+    /// end of u and `B` one on the high end, joined across the seam, `p` in `A` and `q` in
+    /// `B` at the seam point (both linked crossings, the case that passes, and two touching
+    /// for an even rest). Failing: a third other point; `A` and `B` joined only through a
+    /// third box (`A`'s stretch along the seam apart from `B`'s, `C` on the high end meeting
+    /// both); `p`'s line parameter outside the meet of `A`'s and `B`'s, or its coordinate
+    /// along the seam outside the meet of their stretches; `q`'s gap at or above the
+    /// tolerance (not placed: `p` alone carries the rest, unlinked); the component in leaves
+    /// not all inside the face; certified roots in unique boxes about `p` and `q` (each a
+    /// carrier, no pair); and the component not joined across the seam. At a corner of the
+    /// torus (both directions wrap), boxes on opposite corners meet across both seams: the
+    /// two points at the corner are linked, a point inside its corner box is not.
+    #[test]
+    fn a_seam_pair_needs_every_condition() {
+        let k = Kernel::default();
+        let cyl = cylinder(&k);
+        let net = LineNet::of(&k, &cyl).unwrap().unwrap();
+        let cyl_records = |boxes: &[([f64; 2], [f64; 2], [f64; 2])],
+                           at: &[[f64; 3]],
+                           edit: &dyn Fn(&mut Components)| {
+            seam_records(cylinder_seam(&cyl, None), boxes, at, edit)
+        };
+        let [[u0, u1], [v0, v1]] = net.range;
+        let vm = 0.5 * (v0 + v1);
+        let h = 1.0e-3 * (u1 - u0).min(v1 - v0);
+        let a = ([u0, u0 + h], [vm - h, vm + h], [0.749, 0.7505]);
+        let b = ([u1 - h, u1], [vm - h, vm + h], [0.7495, 0.751]);
+        let (p, q) = ([0.75, u0, vm], [0.75, u1, vm]);
+        let linked =
+            |typed: &[Option<Typing>]| typed.iter().any(|t| t.is_some_and(|x| x.2.is_some()));
+        // passes
+        let (c, typed, stood, adds) = cyl_records(&[a, b], &[p, q], &|_| {});
+        assert_eq!(c.list.len(), 1, "{:?}", c.list);
+        let l = typed[0].and_then(|x| x.2);
+        assert!(l.is_some() && typed[1].and_then(|x| x.2) == l, "{typed:?}");
+        assert!(typed
+            .iter()
+            .all(|t| t.is_some_and(|x| x.0 == Contact::Crossing)));
+        assert!(stood[0] && adds);
+        // an even rest: both touching, still one location
+        let (_, typed, stood, adds) = cyl_records(&[a, b], &[p, q], &|c| {
+            c.list[0].contact = Contact::Touching;
+        });
+        assert!(typed
+            .iter()
+            .all(|t| t.is_some_and(|x| x.0 == Contact::Touching)));
+        assert!(linked(&typed) && stood[0] && adds);
+        let undecided = |typed: &[Option<Typing>], stood: &[bool]| {
+            typed
+                .iter()
+                .all(|t| *t == Some((Contact::Undecided, None, None)))
+                && !stood[0]
+        };
+        // three other points
+        let third = [0.75, u0 + 0.5 * h, vm];
+        let (_, typed, stood, _) = cyl_records(&[a, b], &[p, q, third], &|_| {});
+        assert!(undecided(&typed, &stood), "{typed:?}");
+        // joined only through the rest of the component: A's stretch along the seam apart
+        // from B's, C on the high end meeting A across the seam and B natively
+        let a_up = ([u0, u0 + h], [vm + 2.0 * h, vm + 3.0 * h], a.2);
+        let b_down = ([u1 - h, u1], [vm - h, vm], b.2);
+        let c_mid = ([u1 - h, u1], [vm, vm + 3.0 * h], b.2);
+        let p_up = [0.75, u0, vm + 2.5 * h];
+        let q_down = [0.75, u1, vm - 0.5 * h];
+        let (c, typed, stood, _) = cyl_records(&[a_up, b_down, c_mid], &[p_up, q_down], &|_| {});
+        assert_eq!(c.list.len(), 1, "{:?}", c.list);
+        assert!(undecided(&typed, &stood), "{typed:?}");
+        // p's line parameter outside the meet of A's and B's (0.7492 < 0.7495), gap 0.0032
+        let (_, typed, stood, _) = cyl_records(&[a, b], &[[0.7492, u0, vm], q], &|_| {});
+        assert!(undecided(&typed, &stood), "{typed:?}");
+        // p along the seam outside the meet of the two stretches
+        let b_high = ([u1 - h, u1], [vm, vm + 2.0 * h], b.2);
+        let (_, typed, stood, _) =
+            cyl_records(&[a, b_high], &[[0.75, u0, vm - 0.5 * h], q], &|_| {});
+        assert!(undecided(&typed, &stood), "{typed:?}");
+        // q's gap above the tolerance: not placed, p alone carries the odd rest, unlinked
+        let wide = ([u1 - h, u1], [vm - h, vm + h], [0.7495, 0.77]);
+        let (_, typed, stood, adds) = cyl_records(&[a, wide], &[p, [0.76, u1, vm]], &|_| {});
+        assert_eq!(typed[0], Some((Contact::Crossing, None, None)), "{typed:?}");
+        assert_eq!(
+            typed[1],
+            Some((Contact::Undecided, None, None)),
+            "{typed:?}"
+        );
+        assert!(stood[0] && adds);
+        // the component in leaves not all inside the face (it may straddle its border)
+        let (_, typed, stood, _) = cyl_records(&[a, b], &[p, q], &|c| c.list[0].inside = false);
+        assert!(undecided(&typed, &stood), "{typed:?}");
+        // certified roots about the seam: each point a root's carrier, no pair
+        let (_, typed, stood, adds) = cyl_records(&[a, b], &[p, q], &|c| {
+            c.list[0].contact = Contact::Touching;
+            c.list[0].classes = vec![
+                vec![[Ivl::new(u0, u0 + h), Ivl::new(vm - h, vm + h)]],
+                vec![[Ivl::new(u1 - h, u1), Ivl::new(vm - h, vm + h)]],
+            ];
+        });
+        assert!(typed
+            .iter()
+            .all(|t| t.is_some_and(|x| x.0 == Contact::Crossing && x.1.is_some())));
+        assert!(!linked(&typed) && stood[0] && adds);
+        // the component not joined across the seam (its hull one native piece)
+        let (_, typed, stood, _) = cyl_records(&[a, b], &[p, q], &|c| {
+            c.list[0].hull[0] = Span::native(c.list[0].u);
+        });
+        assert!(undecided(&typed, &stood), "{typed:?}");
+        // at a corner of the torus (both directions wrap): boxes on opposite corners meet
+        // across both seams, and the two points at the corner are one location; a point
+        // inside its corner box, on neither seam line, is not
+        let tor = torus(&k);
+        let tn = LineNet::of(&k, &tor).unwrap().unwrap();
+        assert_eq!(tn.closes, [true, true]);
+        let [[a0, a1], [b0, b1]] = tn.range;
+        // (a turn of 2π·10⁻⁵ moves a point 0.0022 at the torus's outer radius 35: placed)
+        let g = 1.0e-5 * (a1 - a0).min(b1 - b0);
+        let corner = (
+            &tor,
+            Vec3::new(38.0, 0.0, 0.0),
+            Vec3::new(-4.0, 0.0, 0.0),
+            None,
+        );
+        let low = ([a0, a0 + g], [b0, b0 + g], [0.749, 0.7505]);
+        let high = ([a1 - g, a1], [b1 - g, b1], [0.7495, 0.751]);
+        let (c, typed, stood, adds) = seam_records(
+            corner,
+            &[low, high],
+            &[[0.75, a0, b0], [0.75, a1, b1]],
+            |_| {},
+        );
+        assert_eq!(c.list.len(), 1, "{:?}", c.list);
+        assert!(
+            c.list[0].hull.iter().all(|h| h.then.is_some()),
+            "{:?}",
+            c.list[0]
+        );
+        assert!(typed
+            .iter()
+            .all(|t| t.is_some_and(|x| x.0 == Contact::Crossing)));
+        assert!(linked(&typed) && stood[0] && adds, "{typed:?}");
+        let inner = [0.75, a1 - 0.5 * g, b1 - 0.5 * g];
+        let (_, typed, stood, _) =
+            seam_records(corner, &[low, high], &[[0.75, a0, b0], inner], |_| {});
+        assert!(undecided(&typed, &stood), "{typed:?}");
     }
 }

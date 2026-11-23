@@ -10,6 +10,7 @@
 //! | [`SolutionType`]                              | `SmSolutionType`                                           |
 //! | [`SortKey`]                                   | `SmSortKeyType`                                            |
 //! | [`Contact`], [`Contact::merged`], `Solution::contact` | (not upstream) how a solution meets the surface     |
+//! | [`ContactId`], `Solution::shared_contact`     | (not upstream) two solutions of one solve standing for one contact |
 //! | [`SideRecord`], [`SolutionArray::side_record`] | (not upstream) what a line solve left undecided          |
 //! | [`SolutionEnd`], [`SolutionEnd::new`]         | `SmSolutionEnd`, `SmSolutionEnd()`                         |
 //! | `Clone`/`Copy` for [`SolutionEnd`]            | `SmSolutionEnd::operator=`                                 |
@@ -105,7 +106,9 @@
 //!   It takes no part in the sort, the duplicate tests or the classification. A
 //!   solution typed by a certified root also carries the `(u, v)` box that root is
 //!   the only root in (`Solution::unique`), so that two solutions in boxes apart,
-//!   which are two contacts, are never merged by a tolerance.
+//!   which are two contacts, are never merged by a tolerance; and the two solutions a line
+//!   solve reports for one contact on a seam, once at each end of the range, share a
+//!   [`ContactId`] (`Solution::shared_contact`), so that a consumer counts them once.
 //! - `SmSolution::Dump` and `SmSolutionArray::Dump` print diagnostics only and are
 //!   not ported; the `SM_DEBUG_CODE`/`GWC` blocks and `ERR` on an unknown sort key
 //!   (impossible with the [`SortKey`] enum) have no counterpart.
@@ -214,6 +217,22 @@ impl Contact {
         }
     }
 }
+
+/// One contact two solutions of one solve both stand for (not upstream): a line solve that
+/// reports one contact on a seam twice, once at each end of the knots' range
+/// (`surface::surface::certified_line`, "The seam pair"), gives the two the same id, shared
+/// by no other solution of that solve, each typed as that contact. The contract for a
+/// consumer: two solutions of one solve (the same objects) with the same id are one contact,
+/// counted once; ids of different solves are unrelated, so arrays pooled from several solves
+/// keep their solves apart. It is no index: the solutions are rescaled, truncated to the
+/// first hit, deduplicated and joined after the typing, and the id travels with each copy. A
+/// solution merged with or absorbed into another by a tolerance loses it (nothing shows the
+/// kept one is still that contact) and takes the [`Contact::merged`] or
+/// [`Contact::absorbed`] of the two, undecided for a crossing: the one direction that could
+/// count the contact twice, two crossings with the id lost, never occurs while both stay
+/// crossings. A new or reset solution has none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ContactId(pub core::num::NonZeroU32);
 
 /// What a line solve has not decided along the line, beside its solutions (not upstream):
 /// the side record a line/surface solve of a certified kind fills
@@ -661,6 +680,10 @@ pub struct Solution<O> {
     /// root in, for a solution typed a crossing by that root: two solutions whose boxes are
     /// apart are two contacts.
     pub unique: Option<[[f64; 2]; 2]>,
+    /// (not upstream) the one contact this solution and another of the same solve both
+    /// stand for ([`ContactId`]); `None`, or an id no other solution of the solve carries,
+    /// for a solution that is its own contact.
+    pub shared_contact: Option<ContactId>,
 }
 
 impl<O: Copy> Default for Solution<O> {
@@ -683,6 +706,7 @@ impl<O: Copy> Solution<O> {
             nodes: [None; MAX_TREES],
             contact: Contact::Unclassified,
             unique: None,
+            shared_contact: None,
         }
     }
 
@@ -708,6 +732,7 @@ impl<O: SolutionObject> Solution<O> {
         self.nodes = [None; MAX_TREES];
         self.contact = Contact::Unclassified;
         self.unique = None;
+        self.shared_contact = None;
     }
 
     /// Checks the counts upstream would use to index its fixed arrays.
@@ -1779,6 +1804,7 @@ impl<O: SolutionObject> SolutionArray<O> {
                 nodes: s.nodes,
                 contact: s.contact,
                 unique: s.unique,
+                shared_contact: s.shared_contact,
             });
         }
         // (the same solve's: the record names no object)
@@ -1930,6 +1956,7 @@ impl<O: SolutionObject> SolutionArray<O> {
                     *old = *new;
                 }
                 old.contact = contact;
+                old.shared_contact = None;
                 return Ok(None);
             }
 
@@ -2138,6 +2165,35 @@ mod tests {
         let contacts: Vec<_> = bare.as_slice().iter().map(|s| s.contact).collect();
         let held: Vec<_> = a.as_slice().iter().map(|s| s.contact).collect();
         assert_eq!(contacts, held);
+
+        // the shared contact id: none on a new solution, kept by a copy, a sort, a swap, a
+        // truncation and the objects' clearing, cleared by a reset
+        assert_eq!(Solution::<Obj>::new().shared_contact, None);
+        let id = core::num::NonZeroU32::new(7).map(ContactId);
+        let mut linked = crossing;
+        linked.shared_contact = id;
+        let copy = linked;
+        assert_eq!(copy.shared_contact, id);
+        let mut cleared = linked;
+        cleared.reset();
+        assert_eq!(cleared.shared_contact, None);
+        let mut a: SolutionArray<Obj> = SolutionArray::new();
+        for v in [3.0, 1.0] {
+            let mut s = single(v, &[v]);
+            s.shared_contact = id;
+            a.add_sorted_solution(&s, SortKey::BySolutionValue).unwrap();
+        }
+        a.add_sorted_solution(&single(2.0, &[2.0]), SortKey::BySolutionValue)
+            .unwrap();
+        a.swap(0, 1).unwrap();
+        let ids: Vec<_> = a.as_slice().iter().map(|s| s.shared_contact).collect();
+        assert_eq!(ids, [None, id, id]);
+        let bare: SolutionArray<Obj> = a.without_objects();
+        let kept: Vec<_> = bare.as_slice().iter().map(|s| s.shared_contact).collect();
+        assert_eq!(kept, ids);
+        a.swap(0, 1).unwrap();
+        a.set_size(1);
+        assert_eq!(a.get(0).map(|s| s.shared_contact), Some(id));
     }
 
     /// The merge rule: two solutions merged by a tolerance keep the shared type when both
@@ -2210,6 +2266,25 @@ mod tests {
             b.get(0).map(|s| (s.start.solution_value, s.contact)),
             Some((2.0, Undecided))
         );
+        // a duplicate merged loses a shared contact id, either one kept (nothing shows the
+        // kept one is still that contact)
+        let id = core::num::NonZeroU32::new(1).map(ContactId);
+        for first in [true, false] {
+            let mut c: SolutionArray<Obj> = SolutionArray::new();
+            let mut s = with_contact(single(2.0 + 1e-7, &[2.0]), Crossing);
+            let mut t = with_contact(single(2.0, &[2.0]), Crossing);
+            if first {
+                s.shared_contact = id;
+            } else {
+                t.shared_contact = id;
+            }
+            c.add_sorted_solution(&s, SortKey::BySolutionValue).unwrap();
+            c.add_sorted_solution(&t, SortKey::BySolutionValue).unwrap();
+            assert_eq!(
+                c.get(0).map(|s| (s.contact, s.shared_contact)),
+                Some((Undecided, None))
+            );
+        }
     }
 
     #[test]

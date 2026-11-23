@@ -1647,6 +1647,7 @@ fn combine_min_max<O: SolutionObject>(
     let ranged = |s: Solution<O>| Solution {
         contact: both,
         unique: None,
+        shared_contact: None,
         ..s
     };
     // when 1st solution is rangeOfValues
@@ -1684,11 +1685,13 @@ fn combine_min_max<O: SolutionObject>(
                     // (not upstream) a range made from a point is not that point's contact
                     max.contact = both;
                     max.unique = None;
+                    max.shared_contact = None;
 
                     // change min solution into a range that stops at the point solution
                     min.end = max.start;
                     min.contact = both;
                     min.unique = None;
+                    min.shared_contact = None;
                     return Ok(None);
                 }
                 // combine point into range
@@ -2084,6 +2087,7 @@ pub trait GlobalSolve<'t, O: SolutionObject + 't> {
                 // (not upstream) the solution kept carries both contacts
                 let mut kept = if keep { *solution } else { *test };
                 kept.contact = test.contact.merged(solution.contact);
+                kept.shared_contact = None;
                 self.solver_mut().solutions.set_at(ii, &kept)?;
                 return Ok(());
             }

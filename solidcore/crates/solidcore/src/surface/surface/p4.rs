@@ -1863,6 +1863,7 @@ impl Surface {
                     nodes: s.nodes,
                     contact: s.contact,
                     unique: s.unique,
+                    shared_contact: s.shared_contact,
                 });
             }
             out

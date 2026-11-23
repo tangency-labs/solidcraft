@@ -1166,11 +1166,13 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         }
         let (typed, stood) = certified_line::type_solutions(net, line, components, &at, unplaced);
         for (i, t) in typed.into_iter().enumerate() {
-            let (Some((contact, unique)), Some(sol)) = (t, self.base.solutions.get_mut(i)) else {
+            let (Some((contact, unique, shared)), Some(sol)) = (t, self.base.solutions.get_mut(i))
+            else {
                 continue;
             };
             sol.contact = contact;
             sol.unique = unique.map(|[u, v]| [[u.lo, u.hi], [v.lo, v.hi]]);
+            sol.shared_contact = shared;
         }
         Ok(stood)
     }
@@ -1865,6 +1867,7 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
                 };
                 // (not upstream) the point kept stands for both
                 kept.contact = last_sol.contact.merged(curr.contact);
+                kept.shared_contact = None;
                 solutions.set_at(last_slot, &kept)?;
             }
         } else {
@@ -2532,6 +2535,91 @@ mod tests {
         assert!((range.start.parameters[0] - (0.5 - half)).abs() < 1.0e-9);
         assert!((range.end.parameters[0] - (0.5 + half)).abs() < 1.0e-9);
         assert_eq!((range.contact, range.unique), (Contact::Undecided, None));
+    }
+
+    /// A line crossing the unit cylinder exactly on its seam's meridian (along x at y = 0,
+    /// z = ½; the seam toward +x) is reported there twice, at `u ≈ 0` and at `u ≈ 2π`, one
+    /// point of the net on the two ends of the range (p8's dedupe measures u natively and
+    /// never merges them). The two are one contact (answer11, Q1): both crossings, sharing
+    /// one id no other solution has, so that the line's two contacts, the entry at
+    /// `x = −1` (a certified root) and the seam exit, count twice, not three times. The id
+    /// survives the line's rescale (a line vector of length 7), and a ray keeps only its
+    /// first hit, the entry, with no id. Before the seam pair the two were undecided (an odd
+    /// rest with two points).
+    #[test]
+    fn a_crossing_on_the_seam_reported_twice_is_one_contact() {
+        let k = Kernel::default();
+        let mut c = crate::surface::cone::Cone::new_cylinder_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            1.0,
+            0.0,
+            360.0,
+            1.0,
+            false,
+            false,
+            true,
+        );
+        c.make_nurb(&k).unwrap();
+        let s = Surface::from(c);
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let p = Vec3::new(-2.0, 0.0, 0.5);
+        for len in [4.0, 7.0] {
+            let sols = s
+                .base_global_line_intersect::<H>(
+                    &k,
+                    H(0),
+                    &domain,
+                    p,
+                    Vec3::new(len, 0.0, 0.0),
+                    None,
+                    false,
+                    1.0e-5,
+                )
+                .unwrap();
+            let all = sols.as_slice();
+            assert_eq!(all.len(), 3, "{all:?}");
+            let entry = 1.0 / len;
+            assert!((all[0].start.parameters[0] - entry).abs() < 1.0e-12);
+            assert_eq!(
+                (all[0].contact, all[0].shared_contact),
+                (Contact::Crossing, None)
+            );
+            let id = all[1].shared_contact;
+            assert!(id.is_some(), "{all:?}");
+            for sol in &all[1..] {
+                assert!(
+                    (sol.start.parameters[0] - 3.0 / len).abs() < 1.0e-12,
+                    "{all:?}"
+                );
+                assert_eq!((sol.contact, sol.shared_contact), (Contact::Crossing, id));
+            }
+            let (u1, u2) = (all[1].start.parameters[1], all[2].start.parameters[1]);
+            assert!(
+                u1.min(u2) < 1.0e-9 && u1.max(u2) > domain.max().x - 1.0e-9,
+                "{all:?}"
+            );
+        }
+        let ray = s
+            .base_global_line_intersect::<H>(
+                &k,
+                H(0),
+                &domain,
+                p,
+                Vec3::new(4.0, 0.0, 0.0),
+                None,
+                true,
+                1.0e-5,
+            )
+            .unwrap();
+        assert_eq!(ray.len(), 1, "{:?}", ray.as_slice());
+        let first = ray.as_slice()[0];
+        assert_eq!(
+            (first.contact, first.shared_contact),
+            (Contact::Crossing, None)
+        );
+        assert!((first.start.parameters[0] - 0.25).abs() < 1.0e-12);
     }
 
     /// The solve's leaves are counted by how their pass ended: on the line dipping below
