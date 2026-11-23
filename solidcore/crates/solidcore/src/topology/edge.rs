@@ -130,7 +130,7 @@ use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::tol::{are_same_to_tol, scaled_zero2};
-use crate::heal::gap::{EdgeFaceGap, VertexEdgeGap};
+use crate::heal::gap::{EdgeEdgeGap, EdgeFaceGap, VertexEdgeGap};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -385,9 +385,24 @@ pub fn interval(b: &Brep, e: EdgeId) -> Result<Extent1d> {
     Ok(b.edge(e)?.interval)
 }
 
-/// `SetInterval`.
+/// `SetInterval`. The cached gaps measured over the old interval go with it: each edge
+/// use's largest edge/face gap and its gap to the counter-clockwise edge use, the
+/// clockwise neighbour's gap to it (measured at this edge's start), and each vertex use's
+/// vertex/edge gap. Upstream assigns the interval and keeps them (#20939).
 pub fn set_interval(b: &mut Brep, e: EdgeId, new_interval: &Extent1d) -> Result<()> {
     b.edge_mut(e)?.interval = *new_interval;
+    for eu in b.edge(e)?.edgeuses.clone() {
+        let use_ = b.edgeuse_mut(eu)?;
+        use_.max_edge_face_gap = EdgeFaceGap::new();
+        use_.edge_ccw_edge_gap = EdgeEdgeGap::new();
+        let (cw, vu) = (use_.cw, use_.vertexuse);
+        if let Some(cw) = cw {
+            b.edgeuse_mut(cw)?.edge_ccw_edge_gap = EdgeEdgeGap::new();
+        }
+        if let Some(vu) = vu {
+            b.vertexuse_mut(vu)?.vertex_edge_gap = VertexEdgeGap::new();
+        }
+    }
     Ok(())
 }
 
@@ -2362,7 +2377,7 @@ pub fn reverse_orientation(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
         Some(c) => c.reverse_parameterization(k, &old_ivl)?,
         None => old_ivl,
     };
-    b.edge_mut(e)?.interval = new_ivl;
+    set_interval(b, e, &new_ivl)?;
 
     // invert EU orientations, and any uv trim curves.
     let list = b.edge(e)?.edgeuses.clone();
