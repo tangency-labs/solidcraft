@@ -2138,7 +2138,7 @@ fn a_compiled_component_is_read_back_from_the_disk_cache_by_a_new_engine() {
     let versions: Vec<String> =
         std::fs::read_dir(root.join("modules")).unwrap().flatten().map(|v| v.file_name().to_string_lossy().into_owned()).collect();
     assert!(versions.len() == 1 && versions[0].starts_with("wasmtime-"), "{versions:?}");
-    std::fs::remove_dir_all(root).unwrap();
+    let _ = std::fs::remove_dir_all(root); // best effort: Wasmtime's cache worker may still be writing here
 }
 #[test]
 fn a_changed_component_or_compile_setting_gets_its_own_cache_entry() {
@@ -2157,7 +2157,7 @@ fn a_changed_component_or_compile_setting_gets_its_own_cache_entry() {
         wasmtime::Module::new(&Engine::new(&config).unwrap(), &module).unwrap();
     }
     assert_eq!((cache.cache_hits(), cache.cache_misses(), cache_entries(&root).len()), (1, 4, 4));
-    std::fs::remove_dir_all(root).unwrap();
+    let _ = std::fs::remove_dir_all(root); // best effort: Wasmtime's cache worker may still be writing here
 }
 #[test]
 fn fuel_still_stops_code_read_back_from_the_disk_cache() {
@@ -2178,7 +2178,7 @@ fn fuel_still_stops_code_read_back_from_the_disk_cache() {
         assert_eq!(failure.downcast_ref::<wasmtime::Trap>(), Some(&wasmtime::Trap::OutOfFuel));
     }
     assert_eq!((cache.cache_hits(), cache.cache_misses()), (1, 1));
-    std::fs::remove_dir_all(root).unwrap();
+    let _ = std::fs::remove_dir_all(root); // best effort: Wasmtime's cache worker may still be writing here
 }
 #[test]
 fn a_damaged_or_mismatched_cache_entry_is_compiled_again() {
@@ -2214,8 +2214,8 @@ fn a_damaged_or_mismatched_cache_entry_is_compiled_again() {
         compile_cached(&bytes, &cache).unwrap();
         assert_eq!(cache.cache_hits(), hits + 1, "{damage}");
     }
-    std::fs::remove_dir_all(root).unwrap();
-    std::fs::remove_dir_all(other_root).unwrap();
+    let _ = std::fs::remove_dir_all(root); // best effort: Wasmtime's cache worker may still be writing here
+    let _ = std::fs::remove_dir_all(other_root); // best effort: Wasmtime's cache worker may still be writing here
 }
 #[test]
 fn a_cache_folder_that_cannot_be_made_or_written_still_compiles() {
@@ -2239,5 +2239,5 @@ fn a_cache_folder_that_cannot_be_made_or_written_still_compiles() {
         }
         std::fs::set_permissions(&read_only, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
-    std::fs::remove_dir_all(root).unwrap();
+    let _ = std::fs::remove_dir_all(root); // best effort: Wasmtime's cache worker may still be writing here
 }
