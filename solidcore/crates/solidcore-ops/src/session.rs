@@ -739,12 +739,16 @@ pub(crate) fn read_held<T: Answer>(
     if body.is_poisoned() {
         return Err(unfinished(call));
     }
-    run_on(call, &[("brep", body)], |k| {
-        let b = body.lock();
-        let r = catch_unwind(AssertUnwindSafe(|| f(k, &b)));
-        drop(b);
-        r.unwrap_or_else(|p| resume_unwind(p))
-    })
+    run_on(call, &[("brep", body)], |k| read_locked(body, |b| f(k, b)))
+}
+
+/// Reads a body within a running kernel call. Release the unchanged body before sending
+/// a panic on to the session, so a failed read does not poison the input.
+pub(crate) fn read_locked<T>(body: &Body, f: impl FnOnce(&crate::body::BodyGuard<'_>) -> T) -> T {
+    let b = body.lock();
+    let r = catch_unwind(AssertUnwindSafe(|| f(&b)));
+    drop(b);
+    r.unwrap_or_else(|p| resume_unwind(p))
 }
 
 /// Runs `f`, a measure that takes the kernel's `&mut Brep` (for its caches) but answers about
