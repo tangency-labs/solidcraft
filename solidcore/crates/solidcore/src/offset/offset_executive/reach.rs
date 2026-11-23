@@ -5172,14 +5172,22 @@ mod tests {
                 .is_none()
         );
         let far = 2.0 * root;
-        for (a, c) in [(&cone, &hole), (&hole, &cone)] {
+        // the hole's axis stored either way along the line, in either argument order: the
+        // plane follows the cone's own axis
+        let reversed = cylinder(Vec3::new(0.0, 0.0, -5.0), -Vec3::Z, 2.0);
+        for (a, c, on) in [
+            (&cone, &hole, &hole),
+            (&hole, &cone, &hole),
+            (&cone, &reversed, &reversed),
+            (&reversed, &cone, &reversed),
+        ] {
             let radical = quadric::Radical::of(a, c).unwrap();
-            assert_eq!(radical.quadric(), &hole);
+            assert_eq!(radical.quadric(), on);
             let trace = |p: Dv, t: Dv| {
                 let (nu, h) = radical.over(p);
                 section_trace(p, t, nu, h)
             };
-            match trace_quadric_piece(edge, edge, Ivl::from(0.0), &trace, &hole, 1e-6) {
+            match trace_quadric_piece(edge, edge, Ivl::from(0.0), &trace, on, 1e-6) {
                 PieceBound::Value { upper, .. } => {
                     assert!(far <= upper && upper < far + 1e-9, "{upper}");
                 }

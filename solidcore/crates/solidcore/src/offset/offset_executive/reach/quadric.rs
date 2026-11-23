@@ -185,9 +185,16 @@ impl Radical {
             (false, true) => {
                 Self::cone_and_cylinder(oa, axis, ra, ta, on_one_line(oa, ob, aa), rb, *b)
             }
-            (true, false) => {
-                Self::cone_and_cylinder(ob, axis, rb, tb, on_one_line(oa, ob, aa), ra, *a)
-            }
+            // the cone's own axis: the cylinder's may be the opposite sense
+            (true, false) => Self::cone_and_cylinder(
+                ob,
+                Dv::constant(ab),
+                rb,
+                tb,
+                on_one_line(oa, ob, aa),
+                ra,
+                *a,
+            ),
             (false, false) => None,
         }
     }
