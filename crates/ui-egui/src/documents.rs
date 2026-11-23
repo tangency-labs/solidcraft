@@ -2357,15 +2357,20 @@ pub(crate) fn tab_name(app: &SolveApp, session: &Session) -> String {
 
 /// Tab names (with an unsaved-changes flag), in order.
 pub fn tabs_info(app: &SolveApp) -> Vec<(String, bool)> {
+    // A part edited in place names its assembly first, so its tab says where it belongs.
+    let named = |session: &Session, edit: Option<&crate::edit_in_place::PartContext>| {
+        let name = tab_name(app, session);
+        (edit.map_or(name.clone(), |context| crate::edit_in_place::tab_name(context, &name)), session.is_dirty())
+    };
     if app.docs.slots.is_empty() {
-        return vec![(tab_name(app, &app.session), app.session.is_dirty())];
+        return vec![named(&app.session, app.edit_in_place.active.as_ref())];
     }
     app.docs
         .slots
         .iter()
         .map(|s| match s {
-            Some(d) => (tab_name(app, &d.session), d.session.is_dirty()),
-            None => (tab_name(app, &app.session), app.session.is_dirty()),
+            Some(d) => named(&d.session, d.edit_in_place.as_ref()),
+            None => named(&app.session, app.edit_in_place.active.as_ref()),
         })
         .collect()
 }

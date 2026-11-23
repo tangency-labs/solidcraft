@@ -38,6 +38,47 @@ pub struct PartContext {
     pub bounds: Aabb3,
     /// The part's tab was opened for this edit, so Finish Edit closes it again.
     pub opened: bool,
+    /// The assembly's components as its Browser lists them, with the one edited marked: where
+    /// the part sits, drawn dull above the part's own tree.
+    pub tree: Arc<Vec<ContextRow>>,
+}
+
+/// One component of the assembly around a part edited in place.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContextRow {
+    pub name: String,
+    /// How deep it is nested: 0 for a component of the assembly itself.
+    pub depth: usize,
+    /// The component being edited.
+    pub edited: bool,
+}
+
+/// The components of `doc`, each under its parent in the order the design holds them, with
+/// `edited` marked. A design whose parents loop lists what can be reached and no more.
+pub(crate) fn context_rows(doc: &solidcraft_engine::doc::Document, edited: u64) -> Vec<ContextRow> {
+    fn under(doc: &solidcraft_engine::doc::Document, parent: u64, depth: usize, edited: u64, rows: &mut Vec<ContextRow>) {
+        if depth > MAX_DEPTH || rows.len() >= MAX_ROWS {
+            return;
+        }
+        for component in doc.components.iter().filter(|c| c.parent == parent && c.id != parent) {
+            if rows.len() >= MAX_ROWS {
+                return;
+            }
+            rows.push(ContextRow { name: component.name.clone(), depth, edited: component.id == edited });
+            under(doc, component.id, depth + 1, edited, rows);
+        }
+    }
+    const MAX_DEPTH: usize = 32;
+    const MAX_ROWS: usize = 2000;
+    let mut rows = Vec::new();
+    under(doc, 0, 0, edited, &mut rows);
+    rows
+}
+
+/// A tab's name while its design is a part edited in place: the assembly, then the part, so the
+/// tab says where the part belongs ("counter › bracket").
+pub(crate) fn tab_name(context: &PartContext, name: &str) -> String {
+    format!("{} \u{203a} {name}", context.assembly_name)
 }
 
 /// Update Links run on the assembly while its part is edited in place.
@@ -293,6 +334,7 @@ fn prepare(app: &mut SolveApp, component: u64, path: Option<Vec<u64>>, ask: bool
         triangles: Arc::new(triangles),
         bounds,
         opened,
+        tree: Arc::new(context_rows(&app.session.doc, component)),
     };
     Ok((context, link))
 }
@@ -600,6 +642,19 @@ pub(crate) fn browser_strip(app: &SolveApp, ui: &mut egui::Ui) {
         ui.add_space(t.space_6);
         crate::ui_kit::text(ui, &text, crate::ui_kit::Text::Hint("edit_in_place"));
     });
+    // The assembly's components, dull, with the part being edited lit: the same picture as the
+    // 3D view, where the rest of the assembly is faded around the part.
+    if context.tree.len() > 1 {
+        egui::ScrollArea::vertical().id_salt("edit_in_place_tree").max_height(t.control_height * 8.0).show(ui, |ui| {
+            for row in context.tree.iter() {
+                ui.horizontal(|ui| {
+                    ui.add_space(t.space_6 + t.space_12 * row.depth.min(12) as f32);
+                    let style = if row.edited { crate::ui_kit::Text::NameCell(true) } else { crate::ui_kit::Text::Hint("edit_in_place_tree") };
+                    crate::ui_kit::text(ui, &row.name, style);
+                });
+            }
+        });
+    }
     ui.add_space(t.space_3);
 }
 
