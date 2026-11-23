@@ -17,7 +17,7 @@
 //! ([`keeps_contract`]); one outside it is a harness error.
 //!
 //! **`GetPointsInFace` with more than one point** draws its V dither from
-//! `srand(time(NULL))` / `rand()` upstream and from `kernel.rng` in the port
+//! `srand(time(NULL))` / `rand()` upstream and from the call's own seeded generator in the port
 //! (`plan/findings.md`); such cases record what does not depend on the draw: the
 //! point count, the U values and, on a rectangular face, each V's grid slot
 //! (`round(v / dVInc)`, the dither being under half a slot).

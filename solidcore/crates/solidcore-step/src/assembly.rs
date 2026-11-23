@@ -536,8 +536,7 @@ impl<'t> Assembly<'t> {
                 };
                 let eval = CurveEval::new(curve).map_err(|m| m.to_string())?;
                 let mut gap = 0.0f64;
-                for k in 0..=EDGE_GAP_SAMPLES {
-                    let t = if k == EDGE_GAP_SAMPLES { t1 } else { t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64) };
+                for t in gap_samples(curve, [t0, t1], matches!(surface, BSurface::Plane { .. } | BSurface::PlaneThrough { .. })) {
                     let Some(p) = eval.point(t) else { continue };
                     // A point with no nearest point is the pcurves' to refuse, with why.
                     let Some(s) = on.project_with(&starts, p, None, f64::INFINITY).and_then(|q| on.point(q)) else { continue };
@@ -1907,6 +1906,24 @@ fn uses_of<'e>(edges: &'e [EdgeB], edge_loops: &[Vec<(u32, bool)>], given: Optio
         uses.push(u);
     }
     Ok(uses)
+}
+
+/// On a plane also a spline's knot spans' middles, where its closed-form pcurve is checked:
+/// crowded knots can lie off it only between the even samples, and a plane has no bounded
+/// domain for the kernel's trims to fall back on (#11652).
+fn gap_samples(curve: &BCurve, [t0, t1]: [f64; 2], on_plane: bool) -> Vec<f64> {
+    let mut ts: Vec<f64> =
+        (0..=EDGE_GAP_SAMPLES).map(|k| if k == EDGE_GAP_SAMPLES { t1 } else { t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64) }).collect();
+    if let (true, BCurve::Spline { knots, .. } | BCurve::RationalSpline { knots, .. }) = (on_plane, curve) {
+        let mut cut = vec![t0];
+        cut.extend(knots.iter().copied().filter(|k| *k > t0 && *k < t1));
+        cut.push(t1);
+        ts.extend(cut.windows(2).filter_map(|w| match w {
+            [a, b] if a < b => Some(0.5 * (a + b)),
+            _ => None,
+        }));
+    }
+    ts
 }
 
 /// A spline surface's parameter box: its knot ranges.
