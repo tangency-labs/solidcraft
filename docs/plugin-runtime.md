@@ -298,7 +298,10 @@ entry's format and settings, not its machine code, so whoever can write that fol
 a plugin call runs: it is the user's own folder, as trusted as the app's files.
 
 There is no unsafe deserialization in SolidCraft's code, no WASI filesystem/clock/socket/process API,
-network integration, persistent guest store, signed index, custom panels or plugin-supplied icons.
+network integration, persistent guest store, signed index or plugin-supplied icons.
+The optional `ui@0.1` capability provides host-drawn panels, with declarations in `runtime.ui`
+and the matching `ui-provider.describe` export. Panel updates use the command transaction and
+are merged by the window once per frame; see [Docked panels](plugins.md#docked-panels).
 A plugin keeps data in a design through the `storage.*` commands, not a WIT interface of its own.
 `manifest()` is not used.
 

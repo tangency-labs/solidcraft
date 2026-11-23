@@ -938,6 +938,157 @@ pub fn without_text_counters(sk: &Sketch, profiles: Vec<Profile>) -> Vec<Profile
     profiles.into_iter().zip(keep).filter(|(_, k)| *k).map(|(p, _)| p).collect()
 }
 
+/// Curves above which [`enclosed_gaps`] does not look for drawn loops (it then finds no gap).
+const MAX_GAP_CURVES: usize = 20_000;
+
+/// Which of `profiles` are gaps between drawn loops: regions that closed loops crossing each
+/// other shut off, but that lie inside none of those loops. The middle of four closed strips
+/// laid out as a # is one (#19963). A drawn loop is a circle or another closed curve, or a run of
+/// curves end to end that closes with exactly two curve ends at each corner. A profile is a gap
+/// when every curve of its outer loop belongs to such a loop and none of those loops holds it.
+/// A profile bounded in part by any other curve (a line that crosses the drawing, a branch) is
+/// never a gap, so regions that open curves close off stay as they are.
+pub fn enclosed_gaps(sk: &Sketch, profiles: &[Profile]) -> Vec<bool> {
+    let none = vec![false; profiles.len()];
+    if sk.curves.len() > MAX_GAP_CURVES {
+        return none;
+    }
+    let loops = drawn_loops(sk);
+    if loops.is_empty() {
+        return none;
+    }
+    let mut loop_of: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for (l, (curves, _)) in loops.iter().enumerate() {
+        for ci in curves {
+            if let Some(c) = sk.curves.get(*ci) {
+                loop_of.insert(c.id.as_str(), l);
+            }
+        }
+    }
+    profiles
+        .iter()
+        .map(|p| {
+            if p.outer_curves.is_empty() {
+                return false;
+            }
+            let Some(around) = p.outer_curves.iter().map(|id| loop_of.get(id.as_str()).copied()).collect::<Option<HashSet<usize>>>() else {
+                return false;
+            };
+            let probe = p.region.interior_point();
+            around.iter().all(|l| loops.get(*l).is_some_and(|(_, lp)| !lp.contains(probe)))
+        })
+        .collect()
+}
+
+/// The sketch's closed drawn loops, each as its curves and the loop they make: closed curves on
+/// their own, and runs of open curves end to end through corners where exactly two curve ends
+/// meet (ends within [`ENDPOINT_JOIN_TOL`] are one corner).
+fn drawn_loops(sk: &Sketch) -> Vec<(Vec<usize>, Loop2)> {
+    let mut out = Vec::new();
+    // Corners: positions of curve ends, found through a grid of cells ENDPOINT_JOIN_TOL wide.
+    let mut corners: Vec<Vec2> = Vec::new();
+    let mut grid: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+    let cell = |p: Vec2| ((p.x / ENDPOINT_JOIN_TOL).floor() as i64, (p.y / ENDPOINT_JOIN_TOL).floor() as i64);
+    let mut corner = |p: Vec2| -> usize {
+        let (cx, cy) = cell(p);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                if let Some(found) =
+                    grid.get(&(cx + dx, cy + dy)).and_then(|v| v.iter().find(|i| corners.get(**i).is_some_and(|q| q.dist(p) <= ENDPOINT_JOIN_TOL)))
+                {
+                    return *found;
+                }
+            }
+        }
+        corners.push(p);
+        let i = corners.len() - 1;
+        grid.entry((cx, cy)).or_default().push(i);
+        i
+    };
+    // Open curves by their end corners.
+    let mut open: Vec<(usize, usize, usize)> = Vec::new();
+    for (ci, c) in sk.curves.iter().enumerate() {
+        if c.construction || c.centerline || c.infinite {
+            continue;
+        }
+        match c.kind.ends() {
+            None => {
+                let segs = sk.segs(ci);
+                if !segs.is_empty() {
+                    out.push((vec![ci], Loop2 { segs }));
+                }
+            }
+            Some((a, b)) => {
+                let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b)) else { continue };
+                if !pa.is_finite() || !pb.is_finite() {
+                    continue;
+                }
+                let (u, v) = (corner(pa), corner(pb));
+                open.push((ci, u, v));
+            }
+        }
+    }
+    let mut at: Vec<Vec<usize>> = vec![Vec::new(); corners.len()];
+    for (k, (_, u, v)) in open.iter().enumerate() {
+        if let Some(list) = at.get_mut(*u) {
+            list.push(k);
+        }
+        if let Some(list) = at.get_mut(*v) {
+            list.push(k);
+        }
+    }
+    let mut used = vec![false; open.len()];
+    for first in 0..open.len() {
+        if used.get(first).copied().unwrap_or(true) {
+            continue;
+        }
+        let Some(&(_, start, _)) = open.get(first) else { continue };
+        // Walk from `first`'s start corner along curves through corners of exactly two ends.
+        let mut run: Vec<(usize, bool)> = Vec::new();
+        let (mut k, mut from) = (first, start);
+        let mut closed = false;
+        for _ in 0..open.len() {
+            let Some(&(_, u, v)) = open.get(k) else { break };
+            if used.get(k).copied().unwrap_or(true) {
+                break;
+            }
+            if let Some(flag) = used.get_mut(k) {
+                *flag = true;
+            }
+            let reversed = from != u;
+            run.push((k, reversed));
+            let far = if reversed { u } else { v };
+            if far == start {
+                closed = true;
+                break;
+            }
+            let Some(ends) = at.get(far).filter(|e| e.len() == 2) else { break };
+            let Some(&next) = ends.iter().find(|e| **e != k) else { break };
+            (k, from) = (next, far);
+        }
+        // A closed run needs its start corner to hold exactly two ends too.
+        if !closed || at.get(start).is_none_or(|e| e.len() != 2) {
+            continue;
+        }
+        let mut curves = Vec::with_capacity(run.len());
+        let mut segs = Vec::new();
+        for (k, reversed) in run {
+            let Some(&(ci, _, _)) = open.get(k) else { continue };
+            curves.push(ci);
+            let piece = sk.segs(ci);
+            if reversed {
+                segs.extend(piece.iter().rev().map(Seg2::reversed));
+            } else {
+                segs.extend(piece);
+            }
+        }
+        if !segs.is_empty() {
+            out.push((curves, Loop2 { segs }));
+        }
+    }
+    out
+}
+
 /// Find all closed profiles of a sketch. Curves are split where other curves end on them or
 /// cross them, like a drawing would be read.
 pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
@@ -2043,7 +2194,12 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                     slivers.push(ei);
                 }
             }
-            if lp.signed_area() > 1e-9 {
+            // A loop smaller than 1e-9 mm squared is still a region where it is wider than the
+            // merge tolerance: a circle crossing a polygon's sides a hair from a corner leaves a
+            // sliver of 5e-11 mm squared that is 3e-6 mm wide (#20992). Only a loop thinner than
+            // that (round-off) is no region.
+            let has_width = area > 0.0 && 2.0 * area / perimeter.max(1e-12) > MERGE_TOL;
+            if area > 1e-9 || has_width {
                 let c = edges.get(start / 2).map(|e| find(&mut comp, e.u)).unwrap_or(0);
                 let curve = edges.get(start / 2).map(|e| e.curve).unwrap_or(usize::MAX);
                 let complete = whole_graph_complete.then(|| complete_loop(&coverage_tags, &expected, sk)).flatten();
