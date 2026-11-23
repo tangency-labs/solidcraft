@@ -618,6 +618,45 @@ pub enum SurfaceFailure {
     /// The inversion of a point onto an iso curve of the surface failed (its error is the
     /// cause). Class `failed`; whether it is a defect or a refusal is its cause's.
     CurveInversionFailed,
+    /// The sphere's inversion could not answer whether the point is on it: the point is at
+    /// the centre of a sphere whose radius is not above the 3D tolerance, so it has no
+    /// parameters. [`ErrorKind::Degenerate`].
+    InversionNotAnswered,
+    /// The surface record read names a surface type `code` the reader does not know.
+    /// [`ErrorKind::InvalidInput`].
+    UnknownSurfaceType {
+        /// The type code read.
+        code: i64,
+    },
+    /// The classification given has no intervals (it was never sized, so its reset leaves
+    /// it empty). [`ErrorKind::InvalidInput`].
+    ClassificationWithoutIntervals,
+    /// The tree given is not owned by a surface cache (or a trimmed or tessellated
+    /// surface's cache). [`ErrorKind::InvalidInput`].
+    TreeNotOfSurfaceCache,
+    /// The surface cache that owns the tree was built without a surface handle, so the
+    /// tree names no original surface. [`ErrorKind::InvalidInput`].
+    CacheWithoutSurfaceHandle,
+    /// The evaluation at this point failed before, and the evaluator keeps that answer
+    /// until the point moves. Class `failed`.
+    EvaluationFailedBefore,
+    /// The evaluator has no surface set. [`ErrorKind::InvalidInput`].
+    NoSurfaceGiven,
+    /// The surface's evaluation at the point failed (its error is the cause). Class
+    /// `failed`; whether it is a defect or a refusal is its cause's.
+    EvaluationFailed,
+    /// The step surface given has no base surface. [`ErrorKind::InvalidInput`].
+    StepWithoutBase,
+    /// The cross-section values given do not agree in size or order (arrays of different
+    /// sizes, a derivative without the lower ones, or end values without their start's).
+    /// [`ErrorKind::InvalidInput`].
+    CrossSectionValuesDisagree,
+    /// The surface has no normal at the point (its tangents' cross product is zero), or its
+    /// fundamental forms degenerate there. [`ErrorKind::Degenerate`].
+    SingularPoint,
+    /// The vector does not drop onto the surface's tangent plane: its 2D solve against the
+    /// tangents failed (the solve's error is the cause). Class `failed`.
+    VectorNotDropped,
 }
 
 /// An input of a surface routine that its caller did not give
@@ -783,7 +822,8 @@ impl SurfaceFailure {
             | Self::SurfaceWithoutGenerator
             | Self::GeneratorNotMade
             | Self::NoInputStream
-            | Self::NoPolarConverter => SM_ERR_NULL_POINTER,
+            | Self::NoPolarConverter
+            | Self::NoSurfaceGiven => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_)
             | Self::LineDirectionZero
             | Self::NormalsCancel
@@ -853,7 +893,14 @@ impl SurfaceFailure {
             | Self::DegenerateIsoCurve
             | Self::LeanNotFinite
             | Self::ToleranceNotADistance
-            | Self::GeneratorOnAxis => ErrorKind::InvalidInput,
+            | Self::GeneratorOnAxis
+            | Self::UnknownSurfaceType { .. }
+            | Self::ClassificationWithoutIntervals
+            | Self::TreeNotOfSurfaceCache
+            | Self::CacheWithoutSurfaceHandle
+            | Self::NoSurfaceGiven
+            | Self::StepWithoutBase
+            | Self::CrossSectionValuesDisagree => ErrorKind::InvalidInput,
             Self::BoxOutsideBendHalfSpace { .. }
             | Self::BoxOutsideZeroPeriod { .. }
             | Self::PointOutsideVolumeDomain { .. }
@@ -896,7 +943,9 @@ impl SurfaceFailure {
             | Self::LineCrossingSingular
             | Self::NurbAxesParallel
             | Self::PlaneTangentUnmeasurable
-            | Self::ConeClosesWithinSpan => ErrorKind::Degenerate,
+            | Self::ConeClosesWithinSpan
+            | Self::InversionNotAnswered
+            | Self::SingularPoint => ErrorKind::Degenerate,
             Self::SolveCacheNotMade
             | Self::BlendSurfaceNotMade
             | Self::MergedRangeReversed { .. }
@@ -924,7 +973,8 @@ impl SurfaceFailure {
             | Self::NurbEvaluationFailed
             | Self::NoPolarConverter
             | Self::AngleNotMeasured
-            | Self::CurveInversionFailed => ErrorKind::Failed,
+            | Self::CurveInversionFailed
+            | Self::EvaluationFailed => ErrorKind::Failed,
             Self::NoRoughGuess => ErrorKind::NotFound,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
@@ -1252,6 +1302,34 @@ impl core::fmt::Display for SurfaceFailure {
             Self::GeneratorNotPlanar => f.write_str("the generator is not planar"),
             Self::CurveInversionFailed => {
                 f.write_str("the inversion of a point onto an iso curve failed")
+            }
+            Self::InversionNotAnswered => {
+                f.write_str("the sphere's inversion could not answer for the point")
+            }
+            Self::UnknownSurfaceType { code } => {
+                write!(f, "the surface type {code} is not one the reader knows")
+            }
+            Self::ClassificationWithoutIntervals => {
+                f.write_str("the classification has no intervals")
+            }
+            Self::TreeNotOfSurfaceCache => f.write_str("the tree is not owned by a surface cache"),
+            Self::CacheWithoutSurfaceHandle => {
+                f.write_str("the surface cache has no surface handle")
+            }
+            Self::EvaluationFailedBefore => {
+                f.write_str("an earlier evaluation at the point failed")
+            }
+            Self::NoSurfaceGiven => f.write_str("the evaluator has no surface"),
+            Self::EvaluationFailed => f.write_str("the evaluation at the point failed"),
+            Self::StepWithoutBase => f.write_str("the step surface has no base surface"),
+            Self::CrossSectionValuesDisagree => {
+                f.write_str("the cross-section values do not agree in size or order")
+            }
+            Self::SingularPoint => {
+                f.write_str("the surface has no normal or its fundamental forms degenerate")
+            }
+            Self::VectorNotDropped => {
+                f.write_str("the vector does not drop onto the tangent plane")
             }
         }
     }
@@ -1945,6 +2023,54 @@ mod tests {
                 SM_ERR,
                 ErrorKind::Failed,
             ),
+            (
+                SurfaceFailure::InversionNotAnswered,
+                SM_ERR,
+                ErrorKind::Degenerate,
+            ),
+            (
+                SurfaceFailure::UnknownSurfaceType { code: 7 },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                SurfaceFailure::ClassificationWithoutIntervals,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                SurfaceFailure::TreeNotOfSurfaceCache,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                SurfaceFailure::CacheWithoutSurfaceHandle,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                SurfaceFailure::EvaluationFailedBefore,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                SurfaceFailure::NoSurfaceGiven,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (SurfaceFailure::EvaluationFailed, SM_ERR, ErrorKind::Failed),
+            (
+                SurfaceFailure::StepWithoutBase,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                SurfaceFailure::CrossSectionValuesDisagree,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (SurfaceFailure::SingularPoint, SM_ERR, ErrorKind::Degenerate),
+            (SurfaceFailure::VectorNotDropped, SM_ERR, ErrorKind::Failed),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::surface(op, failure);
@@ -2284,8 +2410,6 @@ mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/surface/cone/p3.rs", 3),
-            ("solidcore/src/surface/surface/p2.rs", 21),
         ];
         assert_pinned("surface phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
