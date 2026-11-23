@@ -279,6 +279,18 @@ impl System {
         for l in &model.links {
             pending.push((index(l.driver, &mut sys)?, index(l.follower, &mut sys)?, l.ratio, l.offset));
         }
+        // Report every scalar angle continuously, including joints with no force or link.
+        // These coordinates use the same integrated rates and per-step resync as driven angles.
+        for (joint, j) in model.joints.iter().enumerate() {
+            let dof = match j.kind {
+                JointKind::Revolute | JointKind::Cylindrical => Some(0),
+                JointKind::Planar => Some(2),
+                _ => None,
+            };
+            if let Some(dof) = dof {
+                index(Coord::new(joint, dof), &mut sys)?;
+            }
+        }
         // A link without an offset keeps the one that holds at the start.
         let y = sys.initial_state(model)?;
         let kin = sys.kinematics(&y);
@@ -735,6 +747,17 @@ impl System {
                 (-fa, -(ta + (xa - b.p).cross(fa)))
             };
             out.push(JointResult { values, rates, force, torque });
+        }
+        // Track accepted steps because output intervals can span several whole turns.
+        for (i, c) in self.coords.iter().enumerate().filter(|(_, c)| c.kind == CoordKind::Angle) {
+            let dof = match self.joints.get(c.joint).map(|j| j.kind) {
+                Some(JointKind::Revolute | JointKind::Cylindrical) => 0,
+                Some(JointKind::Planar) => 2,
+                _ => continue,
+            };
+            if let Some(value) = out.get_mut(c.joint).and_then(|j| j.values.get_mut(dof)) {
+                *value = self.coord_row(&kin, y, i).phi;
+            }
         }
         out
     }

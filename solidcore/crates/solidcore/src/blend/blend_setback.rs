@@ -104,7 +104,10 @@
 //! operation; their statuses are unchanged. Not the fork's (tangency-labs/solidcore#2697):
 //! `round_jets` puts its rows in the section's standard form across and returns no
 //! `rdDtDs`; the G2 fill's spokes are measured on the rows the patch takes, not on the round's own
-//! evaluation at the middle of its parameter across. No recursion.
+//! evaluation at the middle of its parameter across. Not the fork's (#16408): a G2 fill's
+//! interior map is taken at the least degree that meets its conditions and leaves no patch
+//! whose control net turns back (`check_brep`'s `SmBSplineSurface` test #5), and is refused
+//! with [`SETBACK_G2_NET_TURNS_BACK`] where no degree up to 9 does. No recursion.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-safe tests
 
@@ -118,6 +121,7 @@ use crate::nurbs::b_spline_curve::KnotType;
 use crate::nurbs::b_spline_surface::{
     BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData, SurfParamType,
 };
+use crate::surface::surface::assert_valid::grid_has_non_monotonic_points_to_rounding;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 mod certify;
@@ -341,7 +345,7 @@ pub fn ease_surface(
 }
 
 /// [`ease_surface`] of two fillet surfaces that may be the fork's procedural blends
-/// (`SmProceduralBlend`, opt-in `fillet_round_as_definition`): the fork's `EaseSurface`
+/// (`SmProceduralBlend`): the fork's `EaseSurface`
 /// takes them as `SmBSplineSurface`s, and its copies' `Reparameterize`, `Reverse` and
 /// `EvaluatePoint` are a blend's own (its map follows, its points are its
 /// definition's); the ease itself is made of the nets. Surfaces that are not blends go
@@ -2537,6 +2541,8 @@ fn fill_hole_with(
     }
 
     // the interior map's degree: the least from 2k + 1 at which its conditions can be met
+    // and no patch's control net turns back
+    let mut turned_back = false;
     for d in big_n..=9 {
         let mono = monomials(d);
         let mc = mono.len();
@@ -2913,6 +2919,14 @@ fn fill_hole_with(
                 uv_domain: None,
             })?);
         }
+        // a patch whose control net turns back is not taken (#16408): `check_brep` refuses
+        // the body it makes (its `SmBSplineSurface` test #5), so the next degree is tried, as
+        // the G1 fill beside a curved face holds its nets to the same test
+        // (`curved::net_monotone`)
+        if !nets_never_turn_back(&patches)? {
+            turned_back = true;
+            continue;
+        }
         return Ok(Fill {
             patches,
             round: cycle_round,
@@ -2921,9 +2935,29 @@ fn fill_hole_with(
             degree: d,
         });
     }
-    Err(Refusal::sm_err(
-        "SmBlendSetback: no interior map up to degree 9 meets the setback patches' conditions",
-    ))
+    Err(Refusal::sm_err(if turned_back {
+        SETBACK_G2_NET_TURNS_BACK
+    } else {
+        "SmBlendSetback: no interior map up to degree 9 meets the setback patches' conditions"
+    }))
+}
+
+/// The refusal of a G2 fill whose every interior map up to degree 9 that meets the setback
+/// patches' conditions leaves a patch whose control net turns back (#16408).
+pub const SETBACK_G2_NET_TURNS_BACK: &str =
+    "SmBlendSetback: every G2 fill up to degree 9 has a patch whose control net turns back";
+
+/// Whether no patch has a control net whose rows or columns turn back: the predicate of
+/// `check_brep`'s `SmBSplineSurface` test #5
+/// ([`grid_has_non_monotonic_points_to_rounding`]), each patch open both ways.
+fn nets_never_turn_back(patches: &[BSplineSurface]) -> Result<bool> {
+    for patch in patches {
+        let net = patch.control_point_net()?;
+        if grid_has_non_monotonic_points_to_rounding(&net.points, net.v_count, false, false)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// `SmBlendSetback::Containment`: the most any patch of `fill` stands past a face out of the

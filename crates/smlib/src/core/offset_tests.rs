@@ -16,13 +16,55 @@ use solidcore::geom::vector3d::Vec3;
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::sweep::api_brep::create_linear_sweep;
 
-use super::offset::{draft, mark_moved, moved_faces, offset_faces, offset_sheet, shell, thicken};
+use super::offset::{draft, mark_moved, moved_faces, offset_faces, offset_sheet, refused, shell, thicken};
 use super::{Body, area, bounds, counts, make_box, make_cylinder, make_sphere, run, to_arrays, volume};
 use crate::export::native;
 use crate::{BooleanOp, Error};
 
 /// A case longer than this is a hang.
 const TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Stress corpus S0790 (#18802): a frustum with two blind holes, one separated from its
+/// top rim by 0.00002 mm, shelled inward by 1.2 mm. A refusal must keep its named cause. The
+/// rim hole's edge comes within the two edges' tolerances of the rim on the seam at (10, 0, 50),
+/// so the top's outline touches itself there and the shell is refused as such (#18568), with
+/// the kernel's failure kept whole after it.
+#[test]
+fn shell_of_a_drilled_frustum_keeps_its_failure_reason() {
+    let error = timed("S0790", || {
+        let cone = super::make_cone([0.0; 3], 25.0, 10.0, 50.0).unwrap();
+        let rim_hole = make_cylinder([8.79998, 0.0, 40.0], 1.2, 10.0).unwrap();
+        let centre_hole = make_cylinder([0.0, 0.0, 42.0], 1.0, 8.0).unwrap();
+        let drilled = super::boolean::boolean(&cone, &rim_hole, BooleanOp::Subtract).unwrap().unwrap();
+        let drilled = super::boolean::boolean(&drilled, &centre_hole, BooleanOp::Subtract).unwrap().unwrap();
+        shell(&drilled, &[], TOL, -1.2).expect_err("the shell is currently refused")
+    });
+    let words = error.to_string();
+    let Error::OutlineTouches { at, .. } = &error else { panic!("{words}") };
+    assert!((at[0] - 10.0).abs() < 1e-4 && at[1].abs() < 1e-4 && (at[2] - 50.0).abs() < 1e-4, "at {at:?}");
+    assert!(!words.contains("upstream status"), "{words}");
+    assert!(words.contains("an offset edge could not be split where a loop gap or a step corner needs it"), "{words}");
+    eprintln!("{words}");
+}
+
+#[test]
+fn typed_offset_refusals_keep_their_nested_kernel_cause() {
+    use solidcore_ops::{Error as Ops, OffsetRefusal};
+
+    let refusal = Ops::OffsetRefused { face: None, why: OffsetRefusal::ExactCurveUncut };
+    let diagnostic = "offset::trim: exact_curve_uncut; caused by intersect::clip: the exact trim does not cross the face boundary".to_owned();
+    let error = refused(refusal.clone(), diagnostic.clone());
+    let words = error.to_string();
+    assert!(words.contains(&refusal.to_string()), "{words}");
+    assert!(words.contains(&diagnostic), "{words}");
+    assert_eq!(error, Error::RefusedWithDiagnostic { refusal, diagnostic });
+}
+
+#[test]
+fn offset_folds_keep_the_largest_wall() {
+    let refusal = solidcore_ops::Error::WallFolds { largest: Some(1.0) };
+    assert_eq!(refused(refusal, "offset::face: a folded wall".into()), Error::WallFolds { largest: Some(1.0) });
+}
 
 /// How near a pick point must be.
 const TOL: f64 = 0.01;
@@ -59,14 +101,14 @@ impl Shape {
                 let c = Curve::from(create_line_segment(v3(a), v3(b))?);
                 create_linear_sweep(k, &[Some(&c)], v3(dir), dist, false)
             })
-            .map(Body::new)
+            .map(Body::from_kernel)
             .unwrap(),
             Shape::ArcSheet(o, r, degrees, h) => run("sheet", |k| {
                 let frame = Axis2Placement::new(v3(o), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
                 let c = Curve::from(Ellipse::create_canonical_circle(k, &frame, r, Some(&Extent1d::from_min_max(0.0, degrees)), None)?);
                 create_linear_sweep(k, &[Some(&c)], Vec3::new(0.0, 0.0, 1.0), h, false)
             })
-            .map(Body::new)
+            .map(Body::from_kernel)
             .unwrap(),
             Shape::Notched => {
                 let block = make_box([0.0; 3], [60.0, 40.0, 10.0]).unwrap();
@@ -664,7 +706,43 @@ fn a_draft_past_the_neighbours_meeting_is_refused_as_an_edge_that_vanishes() {
     let prism = super::sweep::extrude(&profile, [0.0, 0.0, 1.0], 10.0, 0.0, DraftCorner::default(), true).unwrap();
     let (tip, z, origin, angle) = ([[10.0, 18.0, 5.0]], [0.0, 0.0, 1.0], [0.0, 0.0, -100.0], (-2f64).to_radians());
     let vanishes = solidcore_ops::Error::OffsetRefused { face: None, why: solidcore_ops::OffsetRefusal::EdgeVanishes };
-    assert_eq!(draft(&prism, &tip, TOL, origin, z, z, angle).err(), Some(Error::Refused(vanishes)));
+    assert!(matches!(
+        draft(&prism, &tip, TOL, origin, z, z, angle).err(),
+        Some(Error::RefusedWithDiagnostic { refusal, .. }) if refusal == vanishes
+    ));
+}
+
+/// Stress corpus S8188 (#20767): a cone r 2 at z = 0 to r 1 at z = 3, shelled 0.12 in to a closed
+/// cavity, its side drafted 3 degrees about its base, leaning in going up, through the kernel
+/// wrapper's draft. The kernel's test (solidcore-ops `offset/tests.rs`,
+/// `a_shelled_cones_side_drafted_into_its_cavity_is_refused_naming_the_largest_angle`) derives
+/// the closed forms used here: the side reaches the cavity's rim at
+/// atan((2 - rim) / 2.88) - atan(1/3) = 0.038994633885685748 rad (2.234 degrees), rim =
+/// 2 - 0.04 sqrt(10) - 0.96, so 3 degrees is refused naming that angle, not as a body that fails
+/// its check. With a 0.5 wall the rim is reached only at 10.118 degrees, and 3 degrees builds the
+/// drafted cone less the cavity, 13.675559992581547.
+#[test]
+fn a_draft_into_a_shelled_cones_cavity_is_refused_naming_the_largest_angle() {
+    const LARGEST: f64 = 0.038_994_633_885_685_75;
+    const DRAFTED: f64 = 13.675_559_992_581_547;
+    // 3 degrees, radians
+    const THREE: f64 = 0.052_359_877_559_829_89;
+    let z = [0.0, 0.0, 1.0];
+    for wall in [0.12, 0.5] {
+        let cone = super::make_cone([0.0; 3], 2.0, 1.0, 3.0).unwrap();
+        let shelled = shell(&cone, &[], TOL, -wall).unwrap();
+        let drafted = draft(&shelled, &[[0.0, -1.5, 1.5]], TOL, [0.0; 3], z, z, THREE);
+        if wall == 0.12 {
+            let Some(Error::RefusedWithDiagnostic { refusal, diagnostic }) = drafted.as_ref().err() else { panic!("{drafted:?}") };
+            let solidcore_ops::Error::OffsetRefused { why: solidcore_ops::OffsetRefusal::DraftClosesWall { largest }, .. } = refusal else {
+                panic!("{refusal}")
+            };
+            assert!((largest - LARGEST).abs() < 1e-12, "{largest}: {diagnostic}");
+        } else {
+            let got = volume(&drafted.unwrap(), 1e-8).unwrap();
+            assert!(rel(got, DRAFTED) < 1e-9, "{got}");
+        }
+    }
 }
 
 /// A flat L of two faces thickened by 2 with mitred walls: 2 x 10 x (20 + 22).

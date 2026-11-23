@@ -140,8 +140,9 @@ pub enum DxfTextRecordKind {
 
 /// Source fields needed by the existing sketch-import projection. A typed TEXT
 /// may use its second alignment anchor and decoded contents, while the original
-/// import contract uses its first anchor and trimmed first group1 value. These
-/// fields retain actual DXF data; no alternate Geom2 or whole parse is cached.
+/// import contract uses its first anchor and trimmed raw value (TEXT's group 1;
+/// MTEXT's group 3 chunks and group 1 tail, joined). These fields retain actual
+/// DXF data; no alternate Geom2 or whole parse is cached.
 #[derive(Debug, PartialEq)]
 pub struct DxfTextSource {
     kind: DxfTextRecordKind,
@@ -461,6 +462,11 @@ impl<G> DxfFile<G> {
             return Err(invalid("DXF source layer has no resolved declared style"));
         }
         self.layers.get(id.index).ok_or_else(|| invalid("unknown DXF layer handle"))
+    }
+
+    /// Where a declared layer sits in [`Self::layers`].
+    pub(super) fn layer_index(&self, id: LayerId) -> Result<usize> {
+        self.layer(id).map(|_| id.index)
     }
 
     /// The frozen legacy fixtures keep exact names and first declaration wins.

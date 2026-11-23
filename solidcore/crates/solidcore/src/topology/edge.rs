@@ -121,7 +121,8 @@
 pub mod edge_form;
 
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignore_status, EntityRef, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{ignore_status, EntityRef, Failure, Result, SolidError};
 use crate::geom::a_object;
 use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::context::Context;
@@ -129,7 +130,7 @@ use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::tol::{are_same_to_tol, scaled_zero2};
-use crate::heal::gap::{EdgeFaceGap, VertexEdgeGap};
+use crate::heal::gap::{EdgeEdgeGap, EdgeFaceGap, VertexEdgeGap};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -179,12 +180,6 @@ pub const fn is_kind_of(t: i64) -> bool {
 
 fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
-}
-
-/// A value the edge routine computes with that has no defined result, as the phrase
-/// says (upstream `SM_ERR_INVALID_INPUT`).
-fn invalid_value(what: &'static str) -> SolidError {
-    SolidError::topology_invalid_value(OP, what)
 }
 
 impl Edge {
@@ -390,9 +385,24 @@ pub fn interval(b: &Brep, e: EdgeId) -> Result<Extent1d> {
     Ok(b.edge(e)?.interval)
 }
 
-/// `SetInterval`.
+/// `SetInterval`. The cached gaps measured over the old interval go with it: each edge
+/// use's largest edge/face gap and its gap to the counter-clockwise edge use, the
+/// clockwise neighbour's gap to it (measured at this edge's start), and each vertex use's
+/// vertex/edge gap. Upstream assigns the interval and keeps them (#20939).
 pub fn set_interval(b: &mut Brep, e: EdgeId, new_interval: &Extent1d) -> Result<()> {
     b.edge_mut(e)?.interval = *new_interval;
+    for eu in b.edge(e)?.edgeuses.clone() {
+        let use_ = b.edgeuse_mut(eu)?;
+        use_.max_edge_face_gap = EdgeFaceGap::new();
+        use_.edge_ccw_edge_gap = EdgeEdgeGap::new();
+        let (cw, vu) = (use_.cw, use_.vertexuse);
+        if let Some(cw) = cw {
+            b.edgeuse_mut(cw)?.edge_ccw_edge_gap = EdgeEdgeGap::new();
+        }
+        if let Some(vu) = vu {
+            b.vertexuse_mut(vu)?.vertex_edge_gap = VertexEdgeGap::new();
+        }
+    }
     Ok(())
 }
 
@@ -713,6 +723,25 @@ pub fn upward_edgeuse_of_face(
     Ok(None)
 }
 
+/// Not upstream: whether `face` lies on both sides of the edge, two of the edge's uses on
+/// the face's upward face use (a seam: the face closing on itself across the edge). Such an
+/// edge bounds no material; it is where the surface's parametrisation ends
+/// (docs/booleans.md, "Seams and poles").
+///
+/// # Errors
+///
+/// Those of the face use and edge use queries.
+pub fn face_on_both_sides(b: &Brep, e: EdgeId, face: FaceId) -> Result<bool> {
+    let upward = face2::upward_faceuse(b, face)?;
+    let mut count = 0usize;
+    for eu in edgeuses(b, e, None, None)? {
+        if eu1::face(b, eu)? == Some(face) && eu1::faceuse(b, eu)? == upward {
+            count += 1;
+        }
+    }
+    Ok(count >= 2)
+}
+
 // ---- radial sectors ---------------------------------------------------------------------
 
 /// The answer of [`find_radial_sector`] / [`find_radial_sector_of_curve`].
@@ -803,10 +832,7 @@ pub fn find_radial_sector_between(
 
     // no work - no candidate edgeuses after culling
     if cands.is_empty() {
-        return Err(SolidError::topology_failed(
-            OP,
-            "no radial edge use is left after culling",
-        ));
+        return Err(SolidError::topology(OP, TopologyFailure::NoRadialCandidate));
     }
 
     // Special case: one possible answer and a region
@@ -843,12 +869,11 @@ pub fn find_radial_sector_between(
                 classify_eu,
             ) {
                 Ok(c) => c,
+                Err(err) if err.is_unported_or_cancelled() => return Err(err),
                 Err(err) => {
-                    failed(err)?;
-                    return Err(SolidError::topology_failed(
-                        OP,
-                        "an edge use could not be classified",
-                    ));
+                    return Err(Failure::new(OP, TopologyFailure::EdgeUseNotClassified)
+                        .caused_by(err)
+                        .into_error());
                 }
             };
 
@@ -901,9 +926,9 @@ pub fn find_radial_sector_between(
     }
 
     // No valid answers found is a valid case.
-    Err(SolidError::topology_failed(
+    Err(SolidError::topology(
         OP,
-        "no radial sector lies between the faces",
+        TopologyFailure::NoRadialSectorBetween,
     ))
 }
 
@@ -1003,8 +1028,9 @@ pub fn reset_primary_edgeuse(
     // Given EU must be one of ours.
     let pos = new_primary.and_then(|p| list.iter().position(|&x| x == p));
     let (Some(pos), Some(new_primary)) = (pos, new_primary) else {
-        return Err(invalid_value(
-            "the new primary edge use is not one of the edge's",
+        return Err(SolidError::topology(
+            OP,
+            TopologyFailure::NewPrimaryNotOnEdge,
         ));
     };
 
@@ -1121,7 +1147,10 @@ pub fn insert_manifold_edge_end(
 
     // check state: ThisEdge expected to be a manifold edge with 4 Edgeuses
     let [a0, a1, a2, a3] = list.as_slice() else {
-        return Err(invalid_value("the edge does not have four edge uses"));
+        return Err(SolidError::topology(
+            OP,
+            TopologyFailure::NotFourEdgeUses { found: list.len() },
+        ));
     };
     let (top1, bot1, bot2, top2) = if is_start_vertex {
         (*a0, *a1, *a2, *a3)
@@ -2348,7 +2377,7 @@ pub fn reverse_orientation(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
         Some(c) => c.reverse_parameterization(k, &old_ivl)?,
         None => old_ivl,
     };
-    b.edge_mut(e)?.interval = new_ivl;
+    set_interval(b, e, &new_ivl)?;
 
     // invert EU orientations, and any uv trim curves.
     let list = b.edge(e)?.edgeuses.clone();
@@ -2412,14 +2441,14 @@ pub fn orient_edge_sequence(k: &Kernel, b: &mut Brep, edges: &[EdgeId]) -> Resul
     } else if v11 == v01 {
         reverse_orientation(k, b, e1)?;
     } else {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP,
-            "the first two edges do not share a vertex",
+            TopologyFailure::EdgesNotChained { index: 1 },
         ));
     }
 
     // Now the rest of them.
-    for pair in edges.windows(2).skip(1) {
+    for (at, pair) in edges.windows(2).enumerate().skip(1) {
         let [a, c] = pair else {
             continue;
         };
@@ -2431,9 +2460,9 @@ pub fn orient_edge_sequence(k: &Kernel, b: &mut Brep, edges: &[EdgeId]) -> Resul
         } else if v01 == v11 {
             reverse_orientation(k, b, *c)?;
         } else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP,
-                "an edge does not continue from the previous one",
+                TopologyFailure::EdgesNotChained { index: at + 1 },
             ));
         }
     }

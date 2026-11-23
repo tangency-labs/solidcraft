@@ -92,14 +92,12 @@
 //!   fork's search for isolated tangential contacts (`tangent_contacts`,
 //!   tangency-labs/smlib@c26edbc), run after the loop for a non-self intersection.
 //!   Its Newton iterations are bounded loops (8 + 25 steps), no recursion.
-//! - **Opt-in fix (WR-79 part 2, #396).** With
-//!   `Kernel::fixes.ssi_low_angle_start_on_probation` (off by default),
-//!   `FindInteriorCurves` traces a start point below the 5/2 degree normal-angle tests
-//!   on probation (the SolidCraft fork's tangency-labs/smlib@30d25bf): kept only as a
-//!   closed loop whose box diagonal exceeds twice the tolerance and that is not
-//!   tangent, coincident or touching; skipped below `2 tol / modelSize` radians;
-//!   rejected traces and their start points are remembered. Off, the port matches the
-//!   pinned C++.
+//! - **Fix (WR-79 part 2, #396).** `FindInteriorCurves` traces a start point below
+//!   the 5/2 degree normal-angle tests on probation (the SolidCraft fork's
+//!   tangency-labs/smlib@30d25bf) where upstream skips it: kept only as a closed loop
+//!   whose box diagonal exceeds twice the tolerance and that is not tangent,
+//!   coincident or touching; skipped below `2 tol / modelSize` radians; rejected
+//!   traces and their start points are remembered.
 //! - **Singular start direction** (not upstream, WR-512). A curve starting at a
 //!   singularity takes its first direction from the first singular direction that
 //!   points into both domains, whose angle is the search's `dAngleMin`, before the
@@ -107,12 +105,18 @@
 //!   direction. Upstream leaves the output at `aSingDirections[0]`, so where the first
 //!   inside direction is the nearest (or the only one) the curve starts along a
 //!   direction that need not point into either domain.
+//! - **Closure is no self intersection** (not upstream, #18117). A self intersection also
+//!   rejects two patches that are neighbours across the surface's closure (one at the start
+//!   and one at the end of a direction it closes in, meeting across it), as it rejects two
+//!   that share a side: upstream reports a closed surface's seam as a self intersection,
+//!   so a closed offset surface failed its own validity test.
 //! - **Not ported.** `Dump` and the `SM_DEBUG_CODE` drawing blocks; `SM_ASSERT`s.
 
 use crate::curve::conic::{Conic, ConicType};
 use crate::curve::curve::p6::DropPointCaches;
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::point_project_to_plane;
@@ -237,10 +241,10 @@ pub struct AdvSurfaceIntersector<'s, 't, O> {
     /// Nesting depth of [`GlobalSolve::solve_branch`] (bounds the recursion on cyclic
     /// tree links).
     solve_depth: usize,
-    /// Not upstream (the fork's `m_vTangentSeeds`, opt-in
-    /// `Kernel::fixes.ssi_tangent_curve_tracer`, WR-75): the UV pairs where
+    /// Not upstream (the fork's `m_vTangentSeeds`, WR-75): the UV pairs where
     /// [`AdvSurfaceIntersector::find_interior_curves`] found the normals (nearly)
-    /// parallel, seeds of the tangential curve pass.
+    /// parallel, seeds of the tangential curve pass (none where that pass does not run,
+    /// [`AdvSurfaceIntersector::trivial_solution_in_both_domains`]).
     pub(crate) tangent_curve_seeds: Vec<[Point2; 2]>,
 }
 
@@ -384,37 +388,39 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` ([`SolidError::null_pointer`]) without caches or when a
-    /// tree cannot be built (`NER`); [`SolidError::Unported`] from a build that reaches unported code.
+    /// `SM_ERR_NULL_POINTER`: [`IntersectFailure::NoSurfaceCaches`] without caches,
+    /// [`IntersectFailure::SurfaceCacheNotBuilt`] (the build's error is the cause) when a
+    /// tree cannot be built (`NER`); [`SolidError::Unported`] from a build that reaches
+    /// unported code.
     pub fn set_surface_caches(
         &mut self,
         k: &Kernel,
         caches: &'t mut [SurfaceCache<O>],
     ) -> Result<()> {
-        if caches.is_empty() {
-            return Err(SolidError::intersect_missing(
+        let Some((first, rest)) = caches.split_first_mut() else {
+            return Err(SolidError::intersect(
                 OP_SET_CACHES,
-                "a surface cache to intersect",
+                IntersectFailure::NoSurfaceCaches,
             ));
-        }
-        let second = usize::from(caches.len() > 1);
-        for i in [0, second] {
-            let c = caches
-                .get_mut(i)
-                .ok_or_else(|| SolidError::intersect_missing(OP_SET_CACHES, "the surface cache"))?;
-            c.get_tree(k).map_err(|e| {
-                if e.is_unported_or_cancelled() {
-                    e
-                } else {
-                    SolidError::intersect_missing(OP_SET_CACHES, "the surface cache's tree")
-                }
-            })?;
-        }
-        let caches: &'t [SurfaceCache<O>] = caches;
-        let cache1 = caches.first().ok_or_else(|| {
-            SolidError::intersect_missing(OP_SET_CACHES, "the first surface cache")
-        })?;
-        let cache2 = caches.get(second).unwrap_or(cache1);
+        };
+        let not_built = |e: SolidError| {
+            if e.is_unported_or_cancelled() {
+                e
+            } else {
+                Failure::new(OP_SET_CACHES, IntersectFailure::SurfaceCacheNotBuilt)
+                    .caused_by(e)
+                    .into_error()
+            }
+        };
+        // the first cache, then the second (the first again when it serves both)
+        first.get_tree(k).map_err(not_built)?;
+        match rest.first_mut() {
+            Some(second) => second.get_tree(k).map_err(not_built)?,
+            None => first.get_tree(k).map_err(not_built)?,
+        };
+        let cache1: &'t SurfaceCache<O> = first;
+        let rest: &'t [SurfaceCache<O>] = rest;
+        let cache2 = rest.first().unwrap_or(cache1);
         self.bind_caches(cache1, cache2)
     }
 
@@ -424,8 +430,8 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` ([`SolidError::null_pointer`]) for a cache without tree
-    /// (`NER(pTree)`).
+    /// `SM_ERR_NULL_POINTER` as an [`IntersectFailure::Defect`] for a cache without tree
+    /// (`NER(pTree)`): both callers build the trees just before.
     pub(crate) fn bind_caches(
         &mut self,
         cache1: &'t SurfaceCache<O>,
@@ -433,7 +439,16 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
     ) -> Result<()> {
         let tree = |c: &'t SurfaceCache<O>| {
             c.tree().ok_or_else(|| {
-                SolidError::intersect_missing(OP_SET_CACHES, "the surface cache's tree")
+                Failure::new(
+                    OP_SET_CACHES,
+                    IntersectFailure::Defect {
+                        why: "both callers bind caches whose trees they have just built \
+                              (GetTree returns the tree or fails), so a cache without one \
+                              lost it",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
             })
         };
         let t1 = tree(cache1)?;
@@ -486,11 +501,12 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
 
     /// The `SmBezierPatch` of node `id` of tree `index` (`(SmBezierPatch*)m_pData`).
     fn patch(&self, index: usize, id: Option<NodeId>) -> Result<&'t BezierPatch<O>> {
-        let cache = self.caches.get(index).copied().flatten().ok_or_else(|| {
-            SolidError::intersect_missing(OP_LOCAL, "the surface cache of the patch")
-        })?;
-        let id =
-            id.ok_or_else(|| SolidError::intersect_missing(OP_LOCAL, "the patch's tree node"))?;
+        // a caller can set the pub `solver.trees` without `set_surface_caches`
+        let cache =
+            self.caches.get(index).copied().flatten().ok_or_else(|| {
+                SolidError::intersect(OP_LOCAL, IntersectFailure::NoSurfaceCaches)
+            })?;
+        let id = id.ok_or_else(|| unbound_patch(OP_LOCAL))?;
         cache.patch(id)
     }
 
@@ -581,11 +597,9 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
     /// per intersecting leaf pair, and traces a curve from each candidate whose
     /// normals are at least 5 degrees apart, whose local intersection succeeds with
     /// normals at least 2 degrees apart and which is not on a curve found already.
-    /// The curves are appended to `out`. With
-    /// `Kernel::fixes.ssi_low_angle_start_on_probation` a candidate below either
-    /// angle (but at least `2 tol / modelSize` radians) is traced on probation and kept
-    /// only as a closed transversal loop larger than twice the tolerance (see the
-    /// module deviations).
+    /// The curves are appended to `out`. A candidate below either angle (but at least
+    /// `2 tol / modelSize` radians) is traced on probation and kept only as a closed
+    /// transversal loop larger than twice the tolerance (see the module deviations).
     ///
     /// # Errors
     ///
@@ -611,21 +625,19 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         // Not upstream (WR-74, #394): the patch UV domains of the node pairs that cannot
         // start a crossing curve seed the tangential contact point search below.
         let mut tangent_seeds: Vec<[Extent2d; 2]> = Vec::new();
-        // Fix WR-79 part 2 (#396, opt-in): the 3D curves traced from low-angle start
-        // points and then rejected (and those start points), with their drop caches;
-        // later low-angle start points on them are not traced again.
-        let probation = k.fixes.ssi_low_angle_start_on_probation;
+        // Fix WR-79 part 2 (#396): the 3D curves traced from low-angle start points and
+        // then rejected (and those start points), with their drop caches; later
+        // low-angle start points on them are not traced again.
         let mut rejected_curves: Vec<Curve> = Vec::new();
         let mut rejected_caches = DropPointCaches::default();
         // The smallest normal angle worth tracing from: on a transversal loop of radius
         // r between surfaces of relative curvature radius R the normals differ by about
         // r/R, so loops above the tolerance on surfaces curved at model scale stay above
         // tol/modelSize, while tangent curves and tangent points fall below it.
-        let min_loop_angle_rad = if probation {
-            self.min_loop_angle_rad(k)?
-        } else {
-            0.0
-        };
+        let min_loop_angle_rad = self.min_loop_angle_rad(k)?;
+        // (WR-75) seeds of the tangential curve pass, which does not run where a self
+        // intersection's trivial solution lies in both domains (#18930)
+        let collect_tangent_curve_seeds = !self.trivial_solution_in_both_domains();
 
         // Now for each node pair do a test to see if produces a unique start point
         for sol in solutions.as_slice() {
@@ -638,9 +650,9 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             let bss1 = self.base.surface(SrfIndex::First);
             let bss2 = self.base.surface(SrfIndex::Second);
 
-            // Skip cases where surface normals are very close (with the WR-79 fix:
-            // trace them on probation, keeping only a closed transversal loop larger
-            // than the tolerance)
+            // Cases where surface normals are very close (upstream skips them; the
+            // WR-79 fix traces them on probation, keeping only a closed transversal
+            // loop larger than the tolerance)
             let mut low_angle_start = false;
             {
                 let norm1 = surface_evaluate_normal(k, bss1, uv_guess1)?;
@@ -651,12 +663,9 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                 }
                 if angle_rad * (180.0 / PI) < 5.0 {
                     self.push_tangent_seed(&mut tangent_seeds, node1, node2)?;
-                    // (WR-75, opt-in) a seed of the tangential curve pass
-                    if k.fixes.ssi_tangent_curve_tracer {
+                    // (WR-75) a seed of the tangential curve pass
+                    if collect_tangent_curve_seeds {
                         self.tangent_curve_seeds.push([uv_guess1, uv_guess2]);
-                    }
-                    if !probation {
-                        continue;
                     }
                     low_angle_start = true;
                 }
@@ -688,7 +697,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             let uv2 = Point2::new(start[2], start[3]);
             let surf_pnt = bss1.evaluate_point(k, uv)?;
 
-            // Skip cases where surface normals are very close
+            // Cases where surface normals are very close (traced on probation, above)
             {
                 let norm1 = surface_evaluate_normal(k, bss1, uv)?;
                 let norm2 = surface_evaluate_normal(k, bss2, uv2)?;
@@ -698,12 +707,9 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                 }
                 if angle_rad * (180.0 / PI) < 2.0 {
                     self.push_tangent_seed(&mut tangent_seeds, node1, node2)?;
-                    // (WR-75, opt-in) a seed of the tangential curve pass
-                    if k.fixes.ssi_tangent_curve_tracer {
+                    // (WR-75) a seed of the tangential curve pass
+                    if collect_tangent_curve_seeds {
                         self.tangent_curve_seeds.push([uv, uv2]);
-                    }
-                    if !probation {
-                        continue;
                     }
                     low_angle_start = true;
                 }
@@ -828,6 +834,18 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         Ok(())
     }
 
+    /// Not upstream (#18930): whether the trivial solution of a self intersection, a point of
+    /// the surface with itself at equal parameters, lies in both intersected domains: a self
+    /// intersection whose two domains overlap or touch (the patch pairs
+    /// [`Self::find_interior_curves`] rejects for the same reason). Every such point solves the
+    /// tangential curve pass's equations (`S(x) - S(x) = 0`, equal normals), so that pass is
+    /// not run there. Two disjoint domains of one surface hold no such point: the pass keeps
+    /// each solve in its own domain.
+    pub(crate) fn trivial_solution_in_both_domains(&self) -> bool {
+        let [d1, d2] = &self.base.uv_domains;
+        self.base.doing_self_intersection && !d1.are_disjoint(d2, 0.0)
+    }
+
     /// The WR-79 fix's (#396 part 2) smallest normal angle worth tracing from:
     /// `2 tol / modelSize`, with the model size the larger diagonal of the two
     /// surfaces' boxes over their UV domains (`PI`, nothing, when that is not above the
@@ -906,11 +924,12 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
 
     /// `((SmBezierAux2d*)m_pData)->GetPolarBox()` of node `id` of tree `index`.
     fn polar_box(&self, k: &Kernel, index: usize, id: Option<NodeId>) -> Result<PolarBox> {
-        let cache = self.caches.get(index).copied().flatten().ok_or_else(|| {
-            SolidError::intersect_missing(OP_GAUSS, "the surface cache of the patch")
-        })?;
-        let id =
-            id.ok_or_else(|| SolidError::intersect_missing(OP_GAUSS, "the patch's tree node"))?;
+        // a caller can set the pub `solver.trees` without `set_surface_caches`
+        let cache =
+            self.caches.get(index).copied().flatten().ok_or_else(|| {
+                SolidError::intersect(OP_GAUSS, IntersectFailure::NoSurfaceCaches)
+            })?;
+        let id = id.ok_or_else(|| unbound_patch(OP_GAUSS))?;
         // built lazily upstream; built without storing it here (the caches are
         // shared), which gives the same box
         cache.polar_box_unstored(k, id)
@@ -997,6 +1016,22 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
     }
 }
 
+/// Not upstream (#18117): whether two patch domains of a self intersection are neighbours
+/// across the surface's closure: in a direction the surface closes in over the intersected
+/// domain (`m_bClosedU`, `m_bClosedV`), one reaches the domain's start and the other its end,
+/// and their ranges across that direction overlap or touch. There the surface meets itself by
+/// its closure (its seam's two sides are one curve), which is no self intersection, as patches
+/// that share a side are none; upstream takes a closed surface's seam for one.
+fn neighbours_across_closure(base: &SurfaceIntersector<'_>, a: &Extent2d, b: &Extent2d) -> bool {
+    let dom = &base.uv_domains[0];
+    let ends_u = |p: &Extent2d, q: &Extent2d| p.u_min() <= dom.u_min() && q.u_max() >= dom.u_max();
+    let ends_v = |p: &Extent2d, q: &Extent2d| p.v_min() <= dom.v_min() && q.v_max() >= dom.v_max();
+    let meet_v = a.v_min() <= b.v_max() && b.v_min() <= a.v_max();
+    let meet_u = a.u_min() <= b.u_max() && b.u_min() <= a.u_max();
+    (base.closed_u[0] && meet_v && (ends_u(a, b) || ends_u(b, a)))
+        || (base.closed_v[0] && meet_u && (ends_v(a, b) || ends_v(b, a)))
+}
+
 impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for AdvSurfaceIntersector<'_, 't, O> {
     fn solver(&self) -> &GlobalSolver<'t, O> {
         &self.solver
@@ -1058,8 +1093,11 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for AdvSurfaceIntersector<'_
         }
 
         // If we are doing self intersection then reject case where domains are not
-        // disjoint.
-        if self.base.doing_self_intersection && !uv_domain1.are_disjoint(&uv_domain2, 0.0) {
+        // disjoint (not upstream, #18117: nor neighbours across the surface's closure).
+        if self.base.doing_self_intersection
+            && (!uv_domain1.are_disjoint(&uv_domain2, 0.0)
+                || neighbours_across_closure(&self.base, &uv_domain1, &uv_domain2))
+        {
             return Ok(false);
         }
 
@@ -1831,11 +1869,9 @@ impl SurfaceIntersector<'_> {
             return Ok(());
         }
 
-        // a single singular direction is not a valid result
-        Err(SolidError::intersect_failed(
-            OP_SING,
-            "only one singular direction was found, which is not a valid result",
-        ))
+        // a single singular direction is not a valid result: a contact the intersector
+        // cannot trace through, refused by name (`docs/ssi.md` §1)
+        Err(SolidError::intersect(OP_SING, IntersectFailure::Tangent))
     }
 
     /// The singularity/coincidence case of matching principal curvatures and
@@ -1875,6 +1911,23 @@ impl SurfaceIntersector<'_> {
         }
         Ok(())
     }
+}
+
+/// A defect with the null pointer status upstream's `NULL` dereference has: a patch the
+/// solve reaches through a branch with no node for its tree. `local_solve` and
+/// `branch_is_gauss_separate` look the node up with `node` first, which already fails on a
+/// branch without one, and `find_interior_curves` passes the solver's own solutions, whose
+/// leaf save fills the node of both trees.
+fn unbound_patch(op: &'static str) -> SolidError {
+    Failure::new(
+        op,
+        IntersectFailure::Defect {
+            why: "the solve reaches a patch only through a branch it checked or a solution it \
+                  saved with a node for each tree, so one without it was built wrong",
+        },
+    )
+    .with_status(SM_ERR_NULL_POINTER)
+    .into_error()
 }
 
 #[cfg(test)]

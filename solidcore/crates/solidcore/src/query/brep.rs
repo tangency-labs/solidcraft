@@ -92,6 +92,7 @@ pub use ray::{
 
 use core::cell::OnceCell;
 
+use crate::error::query::QueryFailure;
 use crate::error::{native_failure, EntityRef, Result, SolidError};
 use crate::geom::attribute::{Attribute, AttributeValue, Behavior};
 use crate::geom::extent3d::Extent3d;
@@ -103,7 +104,7 @@ use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::topology_solver::p1::TopologySolver;
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, SQRT3};
+use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::knots::Side;
 use crate::query::edge as qe;
@@ -532,9 +533,8 @@ pub struct Ray {
 }
 
 impl Ray {
-    /// The ray from `origin` along `direction`, made unit at any finite length: the direction
-    /// is first divided by its largest absolute coordinate, so its squared length neither
-    /// overflows nor underflows, then made unit ([`Vec3::unitize`]).
+    /// The ray from `origin` along `direction`, made unit at any finite length
+    /// ([`Vec3::length_and_unit`]).
     ///
     /// # Errors
     ///
@@ -549,23 +549,8 @@ impl Ray {
             ));
         }
         let no_length = || SolidError::invalid_input(OP_RAY, "a direction of no length");
-        let scale = direction
-            .x
-            .abs()
-            .max(direction.y.abs())
-            .max(direction.z.abs());
-        // `scale` is the length to within a factor of sqrt 3, so this also refuses the zero
-        // direction before it divides.
-        if scale * SQRT3 < EFF_ZERO {
-            return Err(no_length());
-        }
-        let scaled = direction / scale;
-        // `scaled` has a coordinate of magnitude 1: its length is in [1, sqrt 3].
-        if scale * scaled.length() < EFF_ZERO {
-            return Err(no_length());
-        }
-        let direction = scaled.unitize().map_err(|_| no_length())?;
-        if !(finite(direction) && (direction.length() - 1.0).abs() <= EFF_ZERO) {
+        let (length, direction) = direction.length_and_unit().ok_or_else(no_length)?;
+        if length < EFF_ZERO {
             return Err(no_length());
         }
         Ok(Self { origin, direction })
@@ -927,7 +912,7 @@ impl<'a> BrepQuery<'a> {
             if let Some(sol) = solutions.get(0) {
                 // Just grab the first one -- we asked for Single.
                 let object = sol.objects[0].ok_or_else(|| {
-                    SolidError::query_missing(OP_CLASSIFY, "the object the ray solution hit")
+                    crate::error::Failure::new(OP_CLASSIFY, QueryFailure::Defect { why: "the B-rep point solve fills the first object slot of each solution it returns" }).with_status(crate::error::SM_ERR_NULL_POINTER).into_error()
                 })?;
                 pc.load_from_intersection(
                     point_zone_tol_3d,
@@ -995,9 +980,8 @@ impl<'a> BrepQuery<'a> {
             }
         }
 
-        let region = region.ok_or_else(|| {
-            SolidError::query_failed(OP_CLASSIFY, "no ray fired from the point found its region")
-        })?;
+        let region =
+            region.ok_or_else(|| SolidError::query(OP_CLASSIFY, QueryFailure::RegionNotFound))?;
 
         // load output
         pc.set_class_object(PointClassType::Region, Some(EntityRef::Region(region)));
@@ -1085,6 +1069,10 @@ pub enum LazyBrep<'a> {
         /// Its private copy, made at the first edit.
         copy: Option<Box<Brep>>,
     },
+    /// A B-rep read only, with its UV trim curves made: an edit is not made, on it or on
+    /// a copy; the query that would make one returns
+    /// [`SolidError::PreparationRequired`] instead.
+    Prepared(&'a Brep),
 }
 
 impl<'a> From<&'a mut Brep> for LazyBrep<'a> {
@@ -1106,6 +1094,7 @@ impl LazyBrep<'_> {
         match self {
             Self::Own(b) => b,
             Self::Shared { source, copy } => copy.as_deref().unwrap_or(source),
+            Self::Prepared(b) => b,
         }
     }
 
@@ -1114,7 +1103,8 @@ impl LazyBrep<'_> {
     ///
     /// # Errors
     ///
-    /// Those of [`Brep::clone_standing_for_self`], at the first edit of a shared B-rep.
+    /// Those of [`Brep::clone_standing_for_self`], at the first edit of a shared B-rep;
+    /// [`SolidError::PreparationRequired`] for a [`LazyBrep::Prepared`] one.
     pub fn get_mut(&mut self) -> Result<&mut Brep> {
         match self {
             Self::Own(b) => Ok(b),
@@ -1122,6 +1112,9 @@ impl LazyBrep<'_> {
                 Some(c) => Ok(c),
                 slot @ None => Ok(slot.insert(Box::new(source.clone_standing_for_self()?))),
             },
+            Self::Prepared(_) => Err(SolidError::PreparationRequired {
+                operation: OP_TIGHT_BOX,
+            }),
         }
     }
 }

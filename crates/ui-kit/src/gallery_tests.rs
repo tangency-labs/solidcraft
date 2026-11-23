@@ -21,6 +21,30 @@ const SAMPLE_EMPHASIS: EmphasisLabels<'static> = EmphasisLabels { bold: "Bold", 
 /// The paging arrows' names a host passes to [`theme_browser`].
 const SAMPLE_ARROWS: PageLabels<'static> = PageLabels { previous: "Previous themes", next: "Next themes" };
 
+/// The grid specimen's rows: names, units, expressions and a read-only value.
+struct GallerySheet;
+
+impl GridSource for GallerySheet {
+    fn columns(&self) -> Vec<GridColumn> {
+        vec![
+            GridColumn::new("name", "Name", 1.0, CellKind::Text).flex(),
+            GridColumn::new("unit", "Unit", 0.6, CellKind::Choice(vec!["mm".into(), "in".into()])),
+            GridColumn::new("expression", "Expression", 1.4, CellKind::Expression).flex(),
+            GridColumn::new("value", "Value", 1.0, CellKind::ReadOnly).flex(),
+        ]
+    }
+    fn row_count(&self) -> usize {
+        2
+    }
+    fn row_key(&self, row: usize) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(if row == 0 { "width" } else { "height" })
+    }
+    fn text(&self, row: usize, col: usize) -> std::borrow::Cow<'_, str> {
+        let cells = [["width", "mm", "40 mm", "40 mm"], ["height", "mm", "width / 2", "20 mm"]];
+        std::borrow::Cow::Borrowed(cells.get(row).and_then(|r| r.get(col)).copied().unwrap_or(""))
+    }
+}
+
 /// One gallery specimen: its name, the published rect it fills, the handle inside it, and how
 /// to draw it.
 pub struct Element {
@@ -1440,6 +1464,9 @@ pub const ELEMENTS: &[Element] = &[
     element!("add_column_button", |ui, _| {
         add_column_button(ui, |_| {});
     }),
+    element!("grid", |ui, _| {
+        Grid::new("gallery_grid").empty("Empty").show(ui, &mut GallerySheet);
+    }),
     element!("table_custom", |ui, _| {
         table_custom(ui, "custom", &[Column::new("Name", 1.0)], "Empty", |ui, table| {
             table.headers(ui, |_, _| false);
@@ -1516,7 +1543,7 @@ pub const ELEMENTS: &[Element] = &[
         slider(ui, &mut 12.0, 0.0..=100.0, Slider { show_value: false, integer: true, ..Default::default() });
     }),
     element!("canvas_value_field", |ui, s| {
-        canvas_value_field(ui, ui.scope_id().with("canvas_value"), &mut s.value, false);
+        canvas_value_field(ui, ui.scope_id().with("canvas_value"), &mut s.value, false, "");
     }),
     element!("placement_field", |ui, s| {
         placement_field(ui, ui.scope_id().with("placement"), &mut s.value, "Distance");
@@ -1627,6 +1654,9 @@ pub const ELEMENTS: &[Element] = &[
     element!("text", "dialog:report:gallery", Some("dialog:report:gallery"), |ui, _| {
         text(ui, "Validation report with retained units: 10 mm", Text::Report("gallery", false));
     }),
+    element!("shell_search_field", |ui, s| {
+        shell_search_field(ui, ui.scope_id().with("shell_search"), &mut s.value, "Search");
+    }),
     element!("name_cell_with_hint", "dialog:cell:Width", Some("dialog:cell:Width"), |ui, _| {
         name_cell_with_hint(ui, "Width", false, "Double-click to rename");
     }),
@@ -1641,6 +1671,12 @@ pub const ELEMENTS: &[Element] = &[
     }),
     element!("cell_editor", |ui, s| {
         cell_editor(ui, ui.scope_id().with("cell"), &mut s.value, "Expression", true);
+    }),
+    element!("expandable_cell_preview", "gallery:comment-preview", Some("gallery:comment-preview:expand"), |ui, s| {
+        expandable_cell_preview(ui, ui.scope_id().with("comment-preview"), &s.value, "gallery:comment-preview");
+    }),
+    element!("expandable_cell_editor", "gallery:comment", Some("gallery:comment:expand"), |ui, s| {
+        expandable_cell_editor(ui, ui.scope_id().with("comment"), &mut s.value, "Comment", "gallery:comment");
     }),
     element!("color_field", |ui, _| {
         color_field(ui, &mut [120, 150, 180]);
@@ -2049,6 +2085,21 @@ pub const ELEMENTS: &[Element] = &[
             [false, true],
             [PairButton { key: "look_at", label: "ui.look_at", icon: Some("lookat") }, PairButton { key: "slice", label: "Slice", icon: None }],
         );
+    }),
+    element!("button_row_in_card", "library:insert_mesh", Some("library:insert_mesh"), |ui, _| {
+        button_row_in_card(
+            ui,
+            "library",
+            [
+                PairButton { key: "insert_step", label: "STEP", icon: Some("insert_step") },
+                PairButton { key: "insert_iges", label: "IGES", icon: Some("insert_step") },
+                PairButton { key: "insert_mesh", label: "Mesh", icon: Some("insert_mesh") },
+            ],
+        );
+    }),
+    element!("icon_button_colored", |ui, _| {
+        let (rect, _) = ui.allocate_exact_size(vec2(row_height(), row_height()), egui::Sense::hover());
+        icon_button_colored(ui, rect, "refresh", "Refresh", Some(solidcraft_theme::Tokens::get().text));
     }),
     element!("icon_button_at", |ui, _| {
         let (rect, _) = ui.allocate_exact_size(vec2(row_height(), row_height()), egui::Sense::hover());
@@ -2512,6 +2563,7 @@ fn gallery_covers_every_inline_element() {
         "disclosure.rs",
         "fields.rs",
         "framing.rs",
+        "grid.rs",
         "layout.rs",
         "look_chain.rs",
         "menu.rs",

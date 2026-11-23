@@ -47,6 +47,67 @@ use crate::session::run;
 use crate::sweep::{coord_ok, CURVE_MAX_POINTS};
 use crate::{Error, Result};
 
+/// What an imported cubic Bezier curve on `[0, 1]` stands as in the model: its chord, a curve,
+/// or a curve the B-spline curve check refuses.
+pub use solidcore::curve::hermite_curve::CubicStanding;
+
+impl crate::session::Answer for CubicStanding {}
+
+/// [`CubicStanding`] of the cubic Bezier curve through `points` on `[0, 1]`, the curve a profile
+/// cubic is built as: its chord where the whole curve (bounded by the larger distance of its
+/// inner control points from the finite chord, the convex hull property) lies within the model's
+/// zone tolerance of it, else whether the B-spline curve check passes it
+/// ([`solidcore::curve::hermite_curve::classify_cubic`]).
+///
+/// # Errors
+/// [`Error::Argument`] if a coordinate is not finite or exceeds the coordinate bound; those of
+/// the session.
+pub fn classify_cubic(points: [[f64; 3]; 4]) -> Result<CubicStanding> {
+    if !points.iter().all(|p| coord_ok(p)) {
+        return Err(Error::Argument);
+    }
+    run("classify_cubic", |k| {
+        solidcore::curve::hermite_curve::classify_cubic(k, points.map(point))
+    })
+}
+
+/// One piece of an imported cubic Bezier curve ([`cubic_pieces`]): the cubic Bezier curve through
+/// `points` on `[0, 1]` and what it stands as.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CubicPiece {
+    /// Its four control points.
+    pub points: [[f64; 3]; 4],
+    /// What it stands as in the model.
+    pub standing: CubicStanding,
+}
+
+impl crate::session::Answer for Vec<CubicPiece> {}
+
+/// The cubic Bezier curve through `points` on `[0, 1]` as pieces the model can keep, in order:
+/// the whole curve unless the B-spline curve check refuses it, else the same curve split exactly
+/// (de Casteljau) into pieces that each pass the check or lie within the zone tolerance of their
+/// chord, or the whole curve, refused, when no such split exists
+/// ([`solidcore::curve::hermite_curve::cubic_pieces`]).
+///
+/// # Errors
+/// [`Error::Argument`] if a coordinate is not finite or exceeds the coordinate bound; those of
+/// the session.
+pub fn cubic_pieces(points: [[f64; 3]; 4]) -> Result<Vec<CubicPiece>> {
+    if !points.iter().all(|p| coord_ok(p)) {
+        return Err(Error::Argument);
+    }
+    run("cubic_pieces", |k| {
+        let pieces = solidcore::curve::hermite_curve::cubic_pieces(k, points.map(point))?;
+        Ok(pieces
+            .into_iter()
+            .map(|p| CubicPiece {
+                points: p.points.map(|q| [q.x, q.y, q.z]),
+                standing: p.standing,
+            })
+            .collect())
+    })
+}
+
 /// Which end of a curve a blend meets, and how ([`blend_curve`]).
 pub use solidcore::curve::blend::{Contact, End};
 
@@ -819,6 +880,140 @@ pub fn closest_point(curve: &Curve, p: [f64; 3], tolerance: f64) -> Result<Optio
     })?
 }
 
+/// Point and unit tangent sampled along a free curve at a given arc length
+/// ([`point_at_arc_length`], [`samples_at_fractions`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CurveSample {
+    /// Parameter on the record's curve (radians on a circle or ellipse).
+    pub parameter: f64,
+    /// Point on the curve.
+    pub point: [f64; 3],
+    /// Unit tangent along the curve when the derivative is non-zero and finite.
+    pub tangent: Option<[f64; 3]>,
+    /// `true` when the requested distance reached past the interval's end.
+    pub past_end: bool,
+}
+
+fn checked_interval(curve: &Curve, interval: Option<[f64; 2]>) -> Result<[f64; 2]> {
+    if check_curve(curve, &mut Budget::input()).is_err() {
+        return Err(Error::Argument);
+    }
+    let range = match interval {
+        Some([lo, hi]) if lo.is_finite() && hi.is_finite() && lo <= hi => [lo, hi],
+        Some(_) => return Err(Error::Argument),
+        None => own_range(curve).ok_or(Error::Argument)?,
+    };
+    Ok(range)
+}
+
+/// Exact arc length of `curve` over `interval` (or its natural range when `None`), via
+/// [`solidcore::query::api_queries::curve_arc_length`].
+///
+/// # Errors
+/// [`Error::Argument`] for an invalid curve or interval; the kernel's status otherwise.
+pub fn arc_length(curve: &Curve, interval: Option<[f64; 2]>) -> Result<f64> {
+    let range = checked_interval(curve, interval)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    run("curve::arc_length", |k| {
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        Ok(
+            solidcore::query::api_queries::curve_arc_length(k, &made.curve, &made.interval)
+                .map_err(crate::error::status),
+        )
+    })?
+}
+
+/// Sample `curve` over `interval` (or its natural range when `None`) at `distance` arc length from
+/// its start (or from its end when `from_end` is `true`), via
+/// [`solidcore::query::api_queries::curve_point_at_arc_length`].
+///
+/// # Errors
+/// [`Error::Argument`] for invalid inputs or negative `distance`; the kernel's status otherwise.
+pub fn point_at_arc_length(
+    curve: &Curve,
+    interval: Option<[f64; 2]>,
+    from_end: bool,
+    distance: f64,
+) -> Result<CurveSample> {
+    if !distance.is_finite() || distance < 0.0 {
+        return Err(Error::Argument);
+    }
+    let range = checked_interval(curve, interval)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    run("curve::point_at_arc_length", |k| {
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let s = match solidcore::query::api_queries::curve_point_at_arc_length(
+            k,
+            &made.curve,
+            &made.interval,
+            from_end,
+            distance,
+        ) {
+            Ok(s) => s,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        Ok(Ok(CurveSample {
+            parameter: record_parameter(&record, range, s.parameter, s.point),
+            point: [s.point.x, s.point.y, s.point.z],
+            tangent: s.tangent.map(|t| [t.x, t.y, t.z]),
+            past_end: s.past_end,
+        }))
+    })?
+}
+
+/// Measure `curve`'s total arc length over `interval` (or its natural range when `None`) and
+/// sample it at each fraction in `fractions` (clamped to `[0, 1]`), building the kernel curve once.
+///
+/// # Errors
+/// [`Error::Argument`] for invalid inputs or non-finite fractions; the kernel's status otherwise.
+pub fn samples_at_fractions(
+    curve: &Curve,
+    interval: Option<[f64; 2]>,
+    fractions: &[f64],
+) -> Result<(f64, Vec<CurveSample>)> {
+    if fractions.iter().any(|f| !f.is_finite()) {
+        return Err(Error::Argument);
+    }
+    let range = checked_interval(curve, interval)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    run("curve::samples_at_fractions", |k| {
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let (total, samples) = match solidcore::query::api_queries::curve_samples_at_fractions(
+            k,
+            &made.curve,
+            &made.interval,
+            fractions,
+        ) {
+            Ok(res) => res,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let out = samples
+            .into_iter()
+            .map(|s| CurveSample {
+                parameter: record_parameter(&record, range, s.parameter, s.point),
+                point: [s.point.x, s.point.y, s.point.z],
+                tangent: s.tangent.map(|t| [t.x, t.y, t.z]),
+                past_end: s.past_end,
+            })
+            .collect();
+        Ok(Ok((total, out)))
+    })?
+}
+
 /// Where two free curves cross ([`crossings`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Crossing {
@@ -1167,6 +1362,32 @@ mod tests {
         [10.0, 10.0, 0.0],
         [0.0, 10.0, 0.0],
     ];
+
+    #[test]
+    fn a_cubic_is_its_chord_only_within_the_zone_tolerance() {
+        // Chord 10 along x; the zone tolerance is 1e-5.
+        let off = |y: f64| [[0., 0., 0.], [3., y, 0.], [7., 0., 0.], [10., 0., 0.]];
+        let class = |p| classify_cubic(p).unwrap();
+        assert_eq!(class(off(0.)), CubicStanding::Chord);
+        assert_eq!(class(off(0.9e-5)), CubicStanding::Chord);
+        assert_eq!(class(off(1.1e-5)), CubicStanding::Curve);
+        assert_eq!(class(off(2.)), CubicStanding::Curve);
+        // A point is its own chord.
+        assert_eq!(class([[1., 2., 3.]; 4]), CubicStanding::Chord);
+        // Inner control points almost on the start, 0.002 off a chord of 100: the speed
+        // there falls below the check's tolerance (#16190).
+        assert_eq!(
+            class([
+                [0., 0., 0.],
+                [0.001, 0.002, 0.],
+                [0.002, 0.001, 0.],
+                [0., 100., 0.]
+            ]),
+            CubicStanding::Refused
+        );
+        assert!(classify_cubic([[f64::NAN, 0., 0.]; 4]).is_err());
+        assert!(classify_cubic([[f64::INFINITY, 0., 0.]; 4]).is_err());
+    }
 
     #[test]
     fn a_cubic_through_four_points_is_clamped_on_its_end_points() {

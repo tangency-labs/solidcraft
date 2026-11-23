@@ -708,7 +708,7 @@ pub fn offered(app: &SolveApp) -> Option<&Release> {
 /// organization's policy turned checks off.
 pub fn available(app: &mut SolveApp) -> bool {
     !app.updater.off
-        && app.policy.mandatory.check_for_updates != Some(false)
+        && app.policy.mandatory.check_for_updates() != Some(false)
         && (app.updater.feed.is_some() || (app.services.http_get.is_some() && app.updater.kind().checks()))
 }
 
@@ -989,7 +989,7 @@ pub fn button(app: &mut SolveApp, ui: &mut egui::Ui, span: egui::Rect, labeled: 
     // squeezed; the icon alone in a narrow bar.
     let full = solidcraft_ui_text::format("update.button_version", &[("version", &version)]);
     let labels = [full.as_str(), solidcraft_ui_text::tr("update.button")];
-    let (rect, response) = crate::toolbar::offer_pill(ui, span, labeled, &labels, TAB_ROOM, "update", "titlebar:update")?;
+    let (rect, response) = crate::toolbar::offer_pill(ui, span, labeled, &labels, TAB_ROOM, "update", "titlebar:update", false)?;
     if response.backing_on_hover_text(solidcraft_ui_text::format("update.available", &[("version", &version)])).clicked() {
         app.updater.open = !app.updater.open;
     }
@@ -1040,8 +1040,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     };
     let id = egui::Id::unique("sc_update");
     let mut also_download = false;
-    let (closed, answer) =
-        ui_kit::Window::new(id, "update", solidcraft_ui_text::tr("update.title")).cards(1.7).actions(ok, cancel, apply).show(ctx, true, |ui| {
+    let (closed, answer) = ui_kit::Window::new(id, "update", solidcraft_ui_text::tr("update.title"))
+        .cards(1.7)
+        .actions(ok, cancel, apply)
+        .wrap_actions()
+        .show(ctx, true, |ui| {
             ui_kit::text(
                 ui,
                 &solidcraft_ui_text::format("update.available", &[("version", release.version())]),
@@ -1159,7 +1162,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Manual checks also have a visible result when no update can be offered.
 fn show_check_status(app: &mut SolveApp, ctx: &egui::Context) {
-    let (message, warning) = if app.policy.mandatory.check_for_updates == Some(false) {
+    let (message, warning) = if app.policy.mandatory.check_for_updates() == Some(false) {
         (solidcraft_ui_text::tr("policy.updates_off").to_string(), false)
     } else if !available(app) {
         (solidcraft_ui_text::tr("update.check_unavailable").to_string(), false)
@@ -1204,7 +1207,7 @@ enum State {
 pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     let can = available(app);
     let kind = app.updater.kind().clone();
-    let policy = app.policy.mandatory.check_for_updates;
+    let policy = app.policy.mandatory.check_for_updates();
     let note = if kind == InstallKind::Web {
         solidcraft_ui_text::tr("update.prefs_web").to_string()
     } else if policy == Some(false) {
@@ -1455,12 +1458,16 @@ pub fn row_spans(cells: &[Vec<Span>], header: bool) -> Vec<Span> {
 }
 
 fn markdown(ui: &mut egui::Ui, src: &str, t: &Tokens) {
-    markdown_blocks(ui, &parse_markdown(src), t);
+    show_markdown_blocks(ui, &parse_markdown(src), t, true);
 }
 
 /// Parsed Markdown, for a text shown every frame that is parsed once (the About dialog's
 /// attributions, #7776).
 pub fn markdown_blocks(ui: &mut egui::Ui, blocks: &[Block], t: &Tokens) {
+    show_markdown_blocks(ui, blocks, t, false);
+}
+
+fn show_markdown_blocks(ui: &mut egui::Ui, blocks: &[Block], t: &Tokens, inline_links: bool) {
     let body = ui.visuals().text_color();
     let job = |spans: &[Span], size: f32, strong: bool, wrap: f32| {
         let mut job = LayoutJob::default();
@@ -1476,9 +1483,39 @@ pub fn markdown_blocks(ui: &mut egui::Ui, blocks: &[Block], t: &Tokens) {
         }
         job
     };
-    // A laid-out text can't be clicked in parts: a block's web links follow it as buttons that
-    // open them in the browser (#2943), as the agent chat shows its links.
+    let draw = |ui: &mut egui::Ui, spans: &[Span], size: f32, strong: bool, wrap: f32| {
+        if !inline_links || !spans.iter().any(|span| matches!(span, Span::Link { url: Some(_), .. })) {
+            ui.add(egui::Label::new(job(spans, size, strong, wrap)).wrap());
+            return;
+        }
+
+        // Egui's wrapping horizontal layout lets a label continue on the next line. Draw each
+        // text run up to the next link, then its native hyperlink in the same flow.
+        let layout = egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true);
+        ui.allocate_ui_with_layout(egui::vec2(wrap.max(0.0), 0.0), layout, |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+            ui.visuals_mut().hyperlink_color = t.accent;
+            let mut start = 0;
+            for (index, span) in spans.iter().enumerate() {
+                if let Span::Link { text, url: Some(url) } = span {
+                    if index > start {
+                        ui.add(egui::Label::new(job(&spans[start..index], size, strong, wrap)).wrap());
+                    }
+                    ui.hyperlink_to(RichText::new(text).size(size).color(t.accent), url).backing_on_hover_text(url);
+                    start = index + 1;
+                }
+            }
+            if let Some(trailing) = spans.get(start..).filter(|trailing| !trailing.is_empty()) {
+                ui.add(egui::Label::new(job(trailing, size, strong, wrap)).wrap());
+            }
+        });
+    };
+    // The About tables retain their separate link row (#2943).
     let links = |ui: &mut egui::Ui, spans: &[Span], indent: f32| {
+        if inline_links {
+            return;
+        }
         let targets: Vec<(&str, &str)> = spans
             .iter()
             .filter_map(|s| match s {
@@ -1502,17 +1539,17 @@ pub fn markdown_blocks(ui: &mut egui::Ui, blocks: &[Block], t: &Tokens) {
         match block {
             Block::Heading(spans) => {
                 ui.add_space(4.0);
-                ui.add(egui::Label::new(job(spans, t.font_heading, true, width)).wrap());
+                draw(ui, spans, t.font_heading, true, width);
             }
             Block::Paragraph(spans) => {
-                ui.add(egui::Label::new(job(spans, t.font_label, false, width)).wrap());
+                draw(ui, spans, t.font_label, false, width);
                 links(ui, spans, 0.0);
                 ui.add_space(3.0);
             }
             Block::Row { header, cells } => {
                 let spans = row_spans(cells, *header);
                 let size = if *header { t.font_caption } else { t.font_label };
-                ui.add(egui::Label::new(job(&spans, size, false, width)).wrap());
+                draw(ui, &spans, size, false, width);
                 links(ui, &spans, 0.0);
                 ui.add_space(2.0);
             }
@@ -1521,7 +1558,7 @@ pub fn markdown_blocks(ui: &mut egui::Ui, blocks: &[Block], t: &Tokens) {
                 ui.horizontal_top(|ui| {
                     ui.add_space(indent);
                     ui.label(RichText::new("•").size(solidcraft_theme::Tokens::get().font_label));
-                    ui.add(egui::Label::new(job(spans, t.font_label, false, width - indent - 14.0)).wrap());
+                    draw(ui, spans, t.font_label, false, width - indent - 14.0);
                 });
                 links(ui, spans, indent + 14.0);
             }

@@ -63,7 +63,11 @@ fn bounded_position(p: Vec3) -> bool {
 
 impl SurfaceEffect {
     pub fn prepare(&self) -> Result<PreparedEffect> {
-        if self.body.is_empty() || self.body.len() > 256 || self.body.capacity() > 256 || self.body.chars().any(char::is_control) {
+        if self.body.is_empty()
+            || self.body.len() > crate::job::MAX_BODY_NAME_BYTES
+            || self.body.capacity() > crate::job::MAX_BODY_NAME_BYTES
+            || self.body.chars().any(char::is_control)
+        {
             return Err(invalid("surface effect requires an exact bounded captured-body name"));
         }
         let origin = vector(self.frame.origin_mm);
@@ -104,10 +108,10 @@ fn bounded_body_name<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Res
     impl serde::de::Visitor<'_> for Name {
         type Value = String;
         fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("captured body name of 1..256 bytes without control characters")
+            f.write_str("captured body name of 1..512 bytes without control characters")
         }
         fn visit_str<E: serde::de::Error>(self, value: &str) -> std::result::Result<String, E> {
-            if value.is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
+            if value.is_empty() || value.len() > crate::job::MAX_BODY_NAME_BYTES || value.chars().any(char::is_control) {
                 return Err(E::custom("bounded captured body name required"));
             }
             let mut name = String::new();

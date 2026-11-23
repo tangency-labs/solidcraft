@@ -34,15 +34,13 @@ fn a_panic_is_an_error_and_the_kernel_is_fresh_after() {
 }
 
 /// After a panic the kernel is replaced (a mark the panicking call left on it is gone, and the
-/// tolerance it changed is the default again), its fixes are the application's, and the
-/// process-lifetime latch of the fillet solver's step survives.
+/// tolerance it changed is the default again) and its fixes are the application's.
 #[test]
 fn the_kernel_after_a_panic_is_configured_as_before() {
     in_own_process(
         "session::tests::the_kernel_after_a_panic_is_configured_as_before",
         || {
             all_fixes();
-            let latched = run("latch", |k| Ok(k.latch_fillet_point_step(0.123))).unwrap();
             let r: Result<()> = run("panics part way", |k| {
                 k.tolerances.zone_tol_3d = 7.0;
                 k.upstream_ub_passed.push("marker");
@@ -52,15 +50,195 @@ fn the_kernel_after_a_panic_is_configured_as_before() {
             let default_zone = solidcore::Tolerances::default().zone_tol_3d;
             let after = run("after", |k| {
                 Ok(Some((
-                    k.fillet_point_step.get(),
                     k.tolerances.zone_tol_3d,
                     k.upstream_ub_passed.is_empty(),
                     k.fixes == UpstreamFixes::all(),
                 )))
             })
             .unwrap();
-            assert_eq!(after, Some((Some(latched), default_zone, true, true)));
+            assert_eq!(after, Some((default_zone, true, true)));
         },
+    );
+}
+
+/// Seven sample points of a face of a 1 x 2 x 3 box made on `k`: what a call's random draws
+/// decide (each point's place across the face is dithered by one draw).
+fn sampled(k: &mut Kernel) -> solidcore::Result<Vec<[f64; 2]>> {
+    use solidcore::math::Point3;
+    let mut b = solidcore::primitive::api_primitives::create_box(
+        k,
+        Point3::new(0.0, 0.0, 0.0),
+        1.0,
+        2.0,
+        3.0,
+    )?;
+    let f = solidcore::topology::brep::faces(&b, None)?[0];
+    let points = solidcore::topology::face::p2::points_in_face(k, &mut b, f, 7)?;
+    Ok(points.uv.iter().map(|uv| [uv.x, uv.y]).collect())
+}
+
+/// Every call draws from the start of the default seed's sequence: a call that draws changes
+/// nothing for the call that takes that kernel next, whose draws are a fresh kernel's.
+#[test]
+fn a_call_draws_the_same_whatever_ran_on_its_kernel_before() {
+    all_fixes();
+    let expected = sampled(&mut Kernel::new(&KernelOptions::default())).unwrap();
+    assert_eq!(expected.len(), 7);
+    let draws = |call| run(call, |k| sampled(k).map(Some)).unwrap();
+    assert_eq!(draws("draws first"), Some(expected.clone()));
+    let more = run("draws more", |k| Ok(sampled(k)?.len() + sampled(k)?.len()));
+    assert_eq!(more.unwrap(), 14);
+    assert_eq!(draws("draws after"), Some(expected));
+}
+
+/// A solid test on an operand changes nothing in what the operation that follows draws, so it
+/// draws the same as on an operand that brought its proof. The operand is a box with a void
+/// inside: the test of which shell is the inner one draws.
+#[test]
+fn a_solid_test_of_an_operand_moves_no_random_draw() {
+    use crate::body::Expect;
+    all_fixes();
+    let hollow = crate::boolean::boolean(
+        make_box([0.0; 3], [10.0, 10.0, 10.0]).unwrap(),
+        crate::make_sphere([5.0, 5.0, 5.0], 2.0).unwrap(),
+        crate::BooleanOp::Subtract,
+    )
+    .unwrap()
+    .unwrap();
+    let unmoved = run("tests its operand", |k| {
+        let before = sampled(k)?;
+        let (mut operand, _proof) = hollow.take_held();
+        let solid = Expect::of(k, &mut operand)?.solid();
+        Ok(solid && sampled(k)? == before)
+    });
+    assert!(unmoved.unwrap());
+}
+
+/// A call that fails with a kernel error leaves the kernel's own words for the thread to
+/// take, once: the typed error keeps only the kernel's kind. A call that ends well leaves none.
+#[test]
+fn a_kernel_failure_leaves_its_own_words_to_take() {
+    all_fixes();
+    drop(take_failure_detail());
+    let kernel = SolidError::invalid_input("the routine", "what was wrong");
+    let words = kernel.to_string();
+    let r: Result<()> = run("fails", move |_| Err(kernel));
+    assert_eq!(
+        r,
+        Err(Error::Refused {
+            operation: "the routine",
+            reason: "what was wrong"
+        })
+    );
+    assert_eq!(take_failure_detail(), Some(words));
+    assert_eq!(take_failure_detail(), None, "taken once");
+    run("ends well", |_| Ok(())).unwrap();
+    assert_eq!(take_failure_detail(), None);
+}
+
+/// A call that fails with a kernel error has the kernel's code: its kind's number and its
+/// operation, on the call; taken once, like the kernel's words.
+#[test]
+fn a_kernel_failure_leaves_its_code_to_take() {
+    all_fixes();
+    let _ = take_failure_code();
+    let r: Result<()> = run("fails", |_| {
+        Err(SolidError::invalid_input("the routine", "what was wrong"))
+    });
+    assert!(r.is_err());
+    let code = FailureCode {
+        call: "fails",
+        kind: solidcore::error::ErrorKind::InvalidInput.code(),
+        operation: "the routine",
+    };
+    assert_eq!(take_failure_code(), Some(code));
+    assert_eq!(take_failure_code(), None, "taken once");
+    run("ends well", |_| Ok(())).unwrap();
+    assert_eq!(take_failure_code(), None);
+    assert_eq!(
+        code.to_string(),
+        format!("fails · {} · the routine", code.kind)
+    );
+}
+
+/// A refusal a call's answer carries keeps the code of the kernel error it is, as ops typed
+/// it; a refusal ops decided itself is [`FailureCode::OPS`] with its variant's name, even after
+/// the call typed a kernel error it did not refuse with; a panic is ops' `Internal`; a
+/// cancellation is no failure and leaves no code.
+#[test]
+fn a_refusal_keeps_the_kernel_code_it_came_from() {
+    all_fixes();
+    let _ = take_failure_code();
+    let r: Result<Result<()>> = run("refuses", |_| {
+        Ok(Err(status(SolidError::invalid_input("the routine", "no"))))
+    });
+    assert!(matches!(r, Ok(Err(Error::Refused { .. }))));
+    assert_eq!(
+        take_failure_code(),
+        Some(FailureCode {
+            call: "refuses",
+            kind: solidcore::error::ErrorKind::InvalidInput.code(),
+            operation: "the routine",
+        })
+    );
+    let r: Result<Result<()>> = run("refuses itself", |_| {
+        // a kernel error typed and dropped: not what the call refuses with
+        drop(status(SolidError::invalid_input("the routine", "no")));
+        Ok(Err(Error::NoEffect))
+    });
+    assert_eq!(r, Ok(Err(Error::NoEffect)));
+    assert_eq!(
+        take_failure_code(),
+        Some(FailureCode {
+            call: "refuses itself",
+            kind: FailureCode::OPS,
+            operation: "NoEffect",
+        })
+    );
+    let r: Result<()> = run("panics", |_| panic!("on purpose"));
+    assert!(matches!(r, Err(Error::Internal(_))));
+    assert_eq!(
+        take_failure_code(),
+        Some(FailureCode {
+            call: "panics",
+            kind: FailureCode::OPS,
+            operation: "Internal",
+        })
+    );
+    let token = CancelToken::new();
+    token.cancel();
+    let r: Result<()> = crate::cancel::within(&token, || run("cancelled", |_| Ok(())));
+    assert_eq!(r, Err(Error::Cancelled));
+    assert_eq!(take_failure_code(), None);
+}
+
+/// An attempt a call tries and gives up after its refusal was noted puts the note back: the
+/// refusal it returns keeps the code of the kernel error it was typed from, not the attempt's.
+#[test]
+fn a_given_up_attempt_leaves_the_refusals_code() {
+    all_fixes();
+    let _ = take_failure_code();
+    let r: Result<Result<()>> = run("tries again", |_| {
+        let refusal = status(SolidError::invalid_input("the first pass", "no"));
+        let note = note();
+        // the attempt notes its own kernel error, of the same variant, and is given up
+        drop(status(SolidError::invalid_input(
+            "the attempt",
+            "no either",
+        )));
+        note_back(note);
+        Ok(Err(refusal))
+    });
+    assert!(matches!(
+        r,
+        Ok(Err(Error::Refused {
+            operation: "the first pass",
+            ..
+        }))
+    ));
+    assert_eq!(
+        take_failure_code().map(|c| c.operation),
+        Some("the first pass")
     );
 }
 
@@ -637,24 +815,4 @@ fn calls_locking_two_bodies_in_opposite_orders_both_finish() {
         "the comparison does not depend on the order"
     );
     assert!(forward.iter().all(|v| v.is_some() && *v == forward[0]));
-}
-
-/// The fillet solver's latched step is the process's, as upstream keeps it: latched in a call
-/// on one kernel, it is the step of a call on another kernel (made while the first is held).
-#[test]
-fn a_latched_step_reaches_every_kernel() {
-    in_own_process(
-        "session::tests::a_latched_step_reaches_every_kernel",
-        || {
-            all_fixes();
-            let latched = run("latch", |k| Ok(k.latch_fillet_point_step(0.25))).unwrap();
-            // the latching call's kernel, held; the next call gets another
-            let (release, held) = call_held_open("holds the latching kernel");
-            let elsewhere =
-                answered(|| run("reads the step", |k| Ok(k.fillet_point_step.get())).unwrap());
-            release.send(()).unwrap();
-            held.join().unwrap().unwrap();
-            assert_eq!(elsewhere, Some(latched));
-        },
-    );
 }

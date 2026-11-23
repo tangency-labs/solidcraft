@@ -8,19 +8,25 @@ can see a ticket unless the reporter makes it public.
 The form has the app (SolidCraft unless another is picked), the type (bug, feature or question),
 a title and a description. From a failed operation it arrives filled in: the title is
 "<Command>: <error>", the description names the failed command, its key settings and the error,
-and ends with "What were you trying to do?".
+and ends with "What were you trying to do?" (dropped on Send when nothing was written after it).
+A long error is cut at a line break or a space and ends with "…"; the whole error goes with the
+failed operation details.
 
 Right under the description is **Include your model (.sc file)**, off by default: the design with
-its full history, which is what reproduces a problem. Left off on a report about a failure, the
+its full history, which is what reproduces a problem. A report made from a crash report attaches
+the crashed session's design as the crash report kept it (its last autosave or its file), never
+the design open now; when the crash left no copy, no design is offered and the dialog and the
+details say so. When the open design is new and empty and a design from a run that ended (a
+crash, a lost graphics device) waits for recovery, that design is offered instead. Left off on a report about a failure, the
 dialog says plainly that the failure probably can't be reproduced without it. Below it, each other
 attachment is a checkbox with what it holds, shown before it goes:
 
 | Attachment | Default | What it holds |
 | --- | --- | --- |
 | Screenshot of the 3D view | on | The view as it was when the report opened (Retake updates it). |
-| Log | on | The last 300 lines of the design's command log and the Messages, with the home folder shown as `~`. |
+| Log | on | The last 500 lines (at most 128 KB) of the app's log file, `<data folder>/logs/solidcraft.log`, after the end of the run before's (`solidcraft.previous.log`) when this run has fewer; the home folder shown as `~`. The log has SolidCraft's info lines and other libraries' warnings: every command and how it went, and every message shown. The web build, which has no log file, sends the command log and the Messages. |
 | System info | on | App version, commit, target, renderer, graphics card and driver, window size, language. Nothing about the design. |
-| Failed operation details | on | `session_start` (new or opened), the design's SHA-256 (not the file), its format version, undo and redo steps, and the failed command with its exact parameters and error. |
+| Failed operation details | on | `session_start` (new, opened, recovered or crashed), the attached design's SHA-256 (not the file) or why there is none, its format version, undo and redo steps, the recent `steps` (the last 50 commands of the session, or the crash report's, with whether each worked; their parameters, which name things in the design, go only when the model is included, and a command about files keeps only the file's name) and the failed command with its exact parameters and error. |
 | Crash report | off | Offered for a report made from a crash report. |
 
 The ticket carries a `consent` record listing exactly which boxes were ticked.
@@ -70,8 +76,9 @@ solidcraft-cli run replay.json --in design.sc
 
 ## Network use
 
-SolidCraft talks to the ticket server only when the person sends a report (or Retry), or an
-agent asks for one. There is no telemetry and nothing in the background.
+The bug reporter talks to the ticket server only when the person sends a report (or Retry), or an
+agent asks for one; it sends nothing in the background. Anonymous usage statistics are separate:
+they go to their own service, never the ticket server ([Privacy](privacy.md)).
 
 ## The old behaviour
 

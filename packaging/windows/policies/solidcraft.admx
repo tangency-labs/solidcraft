@@ -5,7 +5,7 @@
   Intune's import takes no combo boxes and wants every namespace it references uploaded first, so
   this file uses none of either. The target namespace never changes; a new policy raises revision.
 -->
-<policyDefinitions xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.0" schemaVersion="1.0">
+<policyDefinitions xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.4" schemaVersion="1.0">
   <policyNamespaces>
     <target prefix="solidcraft" namespace="TangencyLabs.Policies.SolidCraft" />
   </policyNamespaces>
@@ -13,6 +13,7 @@
   <supportedOn>
     <definitions>
       <definition name="SUPPORTED_SolidCraft_0_44" displayName="$(string.SUPPORTED_SolidCraft_0_44)" />
+      <definition name="SUPPORTED_SolidCraft_0_46" displayName="$(string.SUPPORTED_SolidCraft_0_46)" />
     </definitions>
   </supportedOn>
   <categories>
@@ -22,6 +23,163 @@
     <policy name="CheckForUpdates" class="Both" displayName="$(string.CheckForUpdates)" explainText="$(string.CheckForUpdates_Explain)" presentation="$(presentation.CheckForUpdates)" key="Software\Policies\SolidCraft" valueName="CheckForUpdates">
       <parentCategory ref="SolidCraft" />
       <supportedOn ref="SUPPORTED_SolidCraft_0_44" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
+    </policy>
+    <policy name="UsageStatistics" class="Both" displayName="$(string.UsageStatistics)" explainText="$(string.UsageStatistics_Explain)" presentation="$(presentation.UsageStatistics)" key="Software\Policies\SolidCraft" valueName="UsageStatistics">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
+    </policy>
+    <policy name="OrganizationName" class="Both" displayName="$(string.OrganizationName)" explainText="$(string.OrganizationName_Explain)" presentation="$(presentation.OrganizationName)" key="Software\Policies\SolidCraft">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_44" />
+      <elements>
+        <text id="OrganizationName" valueName="OrganizationName" maxLength="64" required="true" />
+      </elements>
+    </policy>
+    <policy name="DefaultUnits" class="Both" displayName="$(string.DefaultUnits)" explainText="$(string.DefaultUnits_Explain)" presentation="$(presentation.DefaultUnits)" key="Software\Policies\SolidCraft">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <elements>
+        <enum id="DefaultUnits" valueName="DefaultUnits" required="true">
+          <item displayName="$(string.DefaultUnits_mm)">
+            <value>
+              <string>mm</string>
+            </value>
+          </item>
+          <item displayName="$(string.DefaultUnits_cm)">
+            <value>
+              <string>cm</string>
+            </value>
+          </item>
+          <item displayName="$(string.DefaultUnits_m)">
+            <value>
+              <string>m</string>
+            </value>
+          </item>
+          <item displayName="$(string.DefaultUnits_in)">
+            <value>
+              <string>in</string>
+            </value>
+          </item>
+          <item displayName="$(string.DefaultUnits_ft)">
+            <value>
+              <string>ft</string>
+            </value>
+          </item>
+        </enum>
+      </elements>
+    </policy>
+    <policy name="Language" class="Both" displayName="$(string.Language)" explainText="$(string.Language_Explain)" presentation="$(presentation.Language)" key="Software\Policies\SolidCraft">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <elements>
+        <text id="Language" valueName="Language" maxLength="16" required="true" />
+      </elements>
+    </policy>
+    <policy name="ReopenDesigns" class="Both" displayName="$(string.ReopenDesigns)" explainText="$(string.ReopenDesigns_Explain)" presentation="$(presentation.ReopenDesigns)" key="Software\Policies\SolidCraft" valueName="ReopenDesigns">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
+    </policy>
+    <policy name="ShowDiscordButton" class="Both" displayName="$(string.ShowDiscordButton)" explainText="$(string.ShowDiscordButton_Explain)" presentation="$(presentation.ShowDiscordButton)" key="Software\Policies\SolidCraft" valueName="ShowDiscordButton">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
+    </policy>
+    <policy name="ShowDonateButton" class="Both" displayName="$(string.ShowDonateButton)" explainText="$(string.ShowDonateButton_Explain)" presentation="$(presentation.ShowDonateButton)" key="Software\Policies\SolidCraft" valueName="ShowDonateButton">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
+    </policy>
+    <policy name="AgentControl" class="Both" displayName="$(string.AgentControl)" explainText="$(string.AgentControl_Explain)" presentation="$(presentation.AgentControl)" key="Software\Policies\SolidCraft" valueName="AgentControl">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
+    </policy>
+    <policy name="AgentTurnLimit" class="Both" displayName="$(string.AgentTurnLimit)" explainText="$(string.AgentTurnLimit_Explain)" presentation="$(presentation.AgentTurnLimit)" key="Software\Policies\SolidCraft">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <elements>
+        <decimal id="AgentTurnLimit" valueName="AgentTurnLimit" required="true" minValue="0" maxValue="200" />
+      </elements>
+    </policy>
+    <policy name="AiFeatures" class="Both" displayName="$(string.AiFeatures)" explainText="$(string.AiFeatures_Explain)" presentation="$(presentation.AiFeatures)" key="Software\Policies\SolidCraft" valueName="AiFeatures">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
+    </policy>
+    <policy name="AiPermissions" class="Both" displayName="$(string.AiPermissions)" explainText="$(string.AiPermissions_Explain)" presentation="$(presentation.AiPermissions)" key="Software\Policies\SolidCraft">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <elements>
+        <enum id="AiPermissions" valueName="AiPermissions" required="true">
+          <item displayName="$(string.AiPermissions_ask)">
+            <value>
+              <string>ask</string>
+            </value>
+          </item>
+          <item displayName="$(string.AiPermissions_edits)">
+            <value>
+              <string>edits</string>
+            </value>
+          </item>
+          <item displayName="$(string.AiPermissions_all)">
+            <value>
+              <string>all</string>
+            </value>
+          </item>
+        </enum>
+      </elements>
+    </policy>
+    <policy name="AiToolbarButton" class="Both" displayName="$(string.AiToolbarButton)" explainText="$(string.AiToolbarButton_Explain)" presentation="$(presentation.AiToolbarButton)" key="Software\Policies\SolidCraft" valueName="AiToolbarButton">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
+    </policy>
+    <policy name="ConnectAiApps" class="Both" displayName="$(string.ConnectAiApps)" explainText="$(string.ConnectAiApps_Explain)" presentation="$(presentation.ConnectAiApps)" key="Software\Policies\SolidCraft" valueName="ConnectAiApps">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
       <enabledValue>
         <decimal value="1" />
       </enabledValue>

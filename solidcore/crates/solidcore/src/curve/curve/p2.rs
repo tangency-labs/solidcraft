@@ -209,8 +209,7 @@ use crate::geom::geom_utility::p1::{
     line_line_closest_point, point_project_to_plane, segment_point_angle_deg_to_perp,
 };
 use crate::geom::geom_utility::p2::{
-    evaluate_curve_continuity_with, frenet_from_derivatives, ContinuityOptions, ContinuityType,
-    CurveEval,
+    evaluate_curve_continuity, frenet_from_derivatives, ContinuityType, CurveEval,
 };
 use crate::geom::global_solver::{
     resolve_object_zone_tol_3d, Branch, GlobalSolve, GlobalSolver, ObjectZoneTol,
@@ -598,6 +597,30 @@ pub enum CurveKind {
     Composite(CompositeCurve),
 }
 
+impl CurveKind {
+    /// The kind's name, for a cause that names the curve kind a step cannot handle
+    /// (`"B-spline"`, `"line"`, `"iso-parametric"`, ...).
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::BSpline(_) => "B-spline",
+            Self::Line(_) => "line",
+            Self::Ellipse(_) => "ellipse",
+            Self::Parabola(_) => "parabola",
+            Self::Hyperbola(_) => "hyperbola",
+            Self::Hermite(_) => "Hermite",
+            Self::Projected(_) => "projected",
+            Self::Iso(_) => "iso-parametric",
+            Self::Offset(_) => "offset",
+            Self::Conic(_) => "conic",
+            Self::CrvInVolume(_) => "curve-in-volume",
+            Self::CrvOnSurf(_) => "curve-on-surface",
+            Self::TangentField(_) => "tangent-field",
+            Self::Composite(_) => "composite",
+        }
+    }
+}
+
 /// A curve (`SmCurve`): its concrete kind and the object owning it (`m_pOwner`:
 /// an edge, edge use, face or another curve).
 #[derive(Debug)]
@@ -892,6 +915,25 @@ impl Curve {
     #[must_use]
     pub const fn kind(&self) -> &CurveKind {
         &self.kind
+    }
+
+    /// Not upstream: the same curve by definition, exactly: the same kind and equal
+    /// defining data (IEEE `==`, so a NaN refuses). Equal definitions give the same
+    /// point and derivatives at every parameter, so this is an identity, not a sample.
+    /// Only the B-spline kinds whose definition is their own data (B-spline, line,
+    /// ellipse and circle, hyperbola, parabola) are compared; every other kind (curves
+    /// on or over other geometry, composites, offsets) answers `false`, which callers
+    /// treat as "not known to be the same".
+    #[must_use]
+    pub fn same_definition(&self, other: &Self) -> bool {
+        match (&self.kind, &other.kind) {
+            (CurveKind::BSpline(a), CurveKind::BSpline(b)) => a.same_definition(b),
+            (CurveKind::Line(a), CurveKind::Line(b)) => a.same_definition(b),
+            (CurveKind::Ellipse(a), CurveKind::Ellipse(b)) => a.same_definition(b),
+            (CurveKind::Hyperbola(a), CurveKind::Hyperbola(b)) => a.same_definition(b),
+            (CurveKind::Parabola(a), CurveKind::Parabola(b)) => a.same_definition(b),
+            _ => false,
+        }
     }
 
     /// `GetInsideOut` of a curve derived from `SmBSplineCurve`: only lines and conic
@@ -2637,7 +2679,7 @@ pub struct CurveContinuity {
 ///
 /// # Errors
 ///
-/// Those of the evaluators and of [`evaluate_curve_continuity_with`].
+/// Those of the evaluators and of [`evaluate_curve_continuity`].
 pub fn evaluate_continuity<A, B>(
     k: &Kernel,
     this: &A,
@@ -2668,14 +2710,7 @@ where
         second: at(&right, 2),
         third: Some(at(&right, 3)),
     };
-    let continuity = evaluate_curve_continuity_with(
-        &eval_left,
-        &eval_right,
-        continuity_angle_tol,
-        &ContinuityOptions {
-            geometric_g2: k.fixes.geometric_g2_continuity,
-        },
-    )?;
+    let continuity = evaluate_curve_continuity(&eval_left, &eval_right, continuity_angle_tol)?;
 
     // set outputs
     Ok(CurveContinuity {

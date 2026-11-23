@@ -1,6 +1,7 @@
 use super::*;
 use crate::prelude::*;
 use solidcore_ops::{label, pcurve, record_check as check};
+use solidcore_record::Vec3;
 use solidcore_record::brep::*;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
@@ -745,6 +746,32 @@ fn a_form_on_arcs_of_its_own_is_the_surface_and_does_not_close_around_an_open_fa
     let (whole, _) = form::surface_on_own_arcs(&torus, [[0.3, 1.2], [-FRAC_PI_2, -FRAC_PI_2 + TAU]], tol).unwrap();
     assert_eq!(tube(&whole), (-1.0, 3.0));
     assert!(form::surface_on_own_arcs(&Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] }, label, tol).is_none());
+}
+
+/// The flux of p / 3 out of a tetrahedron is its volume, 1/6, to rounding; a constant added to the
+/// field (as about a far origin) adds nothing, however large the faces' shares grow.
+#[test]
+fn the_flux_of_p_over_3_out_of_a_tetrahedron_is_its_volume() {
+    let b = tetra();
+    let Shell::Faces { faces, .. } = &b.shells[0] else { panic!("faces") };
+    for c in [Vec3::ZERO, Vec3::new(1e3, -2e3, 5e2)] {
+        let mut sum = 0.0;
+        for of in faces {
+            let face = &b.faces[of.face as usize];
+            let s = eval::SurfaceEval::new(&face.surface).unwrap();
+            let loops: Vec<Vec<(&Curve2, bool)>> = face
+                .loops
+                .iter()
+                .map(|l| match l {
+                    Loop::Edges { edges } => edges.iter().map(|e| (&e.pcurve, e.forward)).collect(),
+                    _ => Vec::new(),
+                })
+                .collect();
+            let flux = eval::face_flux(&s, face.domain[1][0], &loops, &|p| (p + c) * (1.0 / 3.0)).unwrap();
+            sum += if of.forward { flux } else { -flux };
+        }
+        assert!((sum - 1.0 / 6.0).abs() < 1e-12 * (1.0 + c.len()), "{c:?}: {sum}");
+    }
 }
 
 /// A whole turn whose seam lies a rounding short of a quarter line (as a file's seam on its

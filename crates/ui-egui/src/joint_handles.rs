@@ -741,6 +741,26 @@ mod tests {
         h.app.viewport.joint_handles.as_ref().unwrap().drag.as_ref().unwrap()
     }
 
+    /// Idle Joint Move handles brighten under the pointer, which only a frame draws: pointer
+    /// motion onto a handle needs one, though what lights up under it stays the same.
+    #[test]
+    fn moving_onto_an_idle_handle_needs_a_frame() {
+        let (mut h, _) = assembly("slider", Vec3::X, false);
+        h.app.start("occurrence.move");
+        h.frames(3);
+        let a = h.app.viewport.joint_handles.as_ref().unwrap().axes[0].clone();
+        let proj = projection(&h);
+        let r = radius(&h.app, &proj, &a).unwrap();
+        let on_handle = proj.to_screen(a.origin + a.axis * r * 0.7).unwrap();
+        assert!(owns_pointer(&h.app, &proj, on_handle));
+        let near = crate::test_support::lit_alike_around(&h, on_handle, |p| owns_pointer(&h.app, &proj, p));
+        assert!(near.len() >= 2, "the handle lies over something larger than it: {near:?}");
+        move_to(&mut h, near[0]);
+        assert!(h.app.viewport.quiet_motion.is_some(), "a still view, only hovered");
+        assert!(crate::viewport::follow_pointer_without_frame(&mut h.app, &h.ctx, near[1]), "the same item, off the handles");
+        assert!(!crate::viewport::follow_pointer_without_frame(&mut h.app, &h.ctx, on_handle), "onto a handle");
+    }
+
     #[test]
     fn move_is_explicit_and_both_entry_points_hide_when_measuring() {
         let (mut h, _) = assembly("revolute", Vec3::Z, false);
