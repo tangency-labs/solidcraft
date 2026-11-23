@@ -102,7 +102,10 @@
 //!   for: how a line or curve meets the surface there. [`Solution::new`],
 //!   [`Solution::reset`] and new slots make it [`Contact::Unclassified`]; a
 //!   duplicate merged into a held solution leaves it [`Contact::merged`] from both.
-//!   It takes no part in the sort, the duplicate tests or the classification.
+//!   It takes no part in the sort, the duplicate tests or the classification. A
+//!   solution typed by a certified root also carries the `(u, v)` box that root is
+//!   the only root in (`Solution::unique`), so that two solutions in boxes apart,
+//!   which are two contacts, are never merged by a tolerance.
 //! - `SmSolution::Dump` and `SmSolutionArray::Dump` print diagnostics only and are
 //!   not ported; the `SM_DEBUG_CODE`/`GWC` blocks and `ERR` on an unknown sort key
 //!   (impossible with the [`SortKey`] enum) have no counterpart.
@@ -183,16 +186,30 @@ pub enum Contact {
 }
 
 impl Contact {
-    /// The contact of one solution kept for two that are one contact (a duplicate
-    /// merged into the solution it repeats): the shared type when both agree, the
-    /// other's when one is [`Contact::Unclassified`], and [`Contact::Undecided`] when
-    /// two decided types differ or either is undecided.
+    /// The contact of one solution kept for two merged into it (a duplicate merged into
+    /// the solution it repeats): unclassified for two unclassified, touching for two
+    /// touching, and [`Contact::Undecided`] otherwise. Every merge is by a tolerance, never
+    /// by a certificate that the two are one contact, so an unclassified one merged with a
+    /// decided one is undecided (nothing has shown that the decided type is the other's),
+    /// and so are two crossings (they may be two, which one solution would count once); a
+    /// caller that has shown two crossings one contact keeps the crossing itself.
     #[must_use]
     pub const fn merged(self, other: Self) -> Self {
         match (self, other) {
-            (Self::Unclassified, x) | (x, Self::Unclassified) => x,
-            (Self::Crossing, Self::Crossing) => Self::Crossing,
+            (Self::Unclassified, Self::Unclassified) => Self::Unclassified,
             (Self::Touching, Self::Touching) => Self::Touching,
+            _ => Self::Undecided,
+        }
+    }
+
+    /// The contact of a range that takes in another solution (a point it absorbs, a range
+    /// it is joined with, the point a range is made from): unclassified when both are
+    /// (callers then behave as upstream), and [`Contact::Undecided`] once a solution typing
+    /// looked at goes into it, since a stretch is not the contact of a point in it.
+    #[must_use]
+    pub const fn absorbed(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Unclassified, Self::Unclassified) => Self::Unclassified,
             _ => Self::Undecided,
         }
     }
@@ -640,6 +657,10 @@ pub struct Solution<O> {
     pub nodes: [Option<NodeId>; MAX_TREES],
     /// (not upstream) how the solution meets the surface; see [`Contact`].
     pub contact: Contact,
+    /// (not upstream) the `(u, v)` box `[[u0, u1], [v0, v1]]` a certified root is the only
+    /// root in, for a solution typed a crossing by that root: two solutions whose boxes are
+    /// apart are two contacts.
+    pub unique: Option<[[f64; 2]; 2]>,
 }
 
 impl<O: Copy> Default for Solution<O> {
@@ -661,6 +682,7 @@ impl<O: Copy> Solution<O> {
             objects: [None; MAX_TREES],
             nodes: [None; MAX_TREES],
             contact: Contact::Unclassified,
+            unique: None,
         }
     }
 
@@ -685,6 +707,7 @@ impl<O: SolutionObject> Solution<O> {
         self.objects = [None; MAX_TREES];
         self.nodes = [None; MAX_TREES];
         self.contact = Contact::Unclassified;
+        self.unique = None;
     }
 
     /// Checks the counts upstream would use to index its fixed arrays.
@@ -1755,6 +1778,7 @@ impl<O: SolutionObject> SolutionArray<O> {
                 objects: [None; MAX_TREES],
                 nodes: s.nodes,
                 contact: s.contact,
+                unique: s.unique,
             });
         }
         // (the same solve's: the record names no object)
@@ -2116,22 +2140,38 @@ mod tests {
         assert_eq!(contacts, held);
     }
 
-    /// The merge rule: two solutions that are one contact keep the shared type, an
-    /// unclassified one takes the other's, and two decided types that differ, or an
-    /// undecided one, give undecided.
+    /// The merge rule: two solutions merged by a tolerance keep the shared type when both
+    /// are unclassified or touching, and any other pair gives undecided: an unclassified one
+    /// with a decided one (nothing shows the decided type is the other's), and two crossings
+    /// (they may be two contacts). A range taking in a solution stays unclassified only when
+    /// both are.
     #[test]
     fn merged_contacts() {
         use Contact::{Crossing, Touching, Unclassified, Undecided};
         let all = [Unclassified, Crossing, Touching, Undecided];
         for x in all {
-            // the same type on both
-            assert_eq!(x.merged(x), x);
-            // unclassified takes the other's, in either order
-            assert_eq!(Unclassified.merged(x), x);
-            assert_eq!(x.merged(Unclassified), x);
+            // the same type on both, two crossings apart (they may be two contacts)
+            let same = if x == Crossing { Undecided } else { x };
+            assert_eq!(x.merged(x), same);
             // undecided stays undecided
             assert_eq!(Undecided.merged(x), Undecided);
             assert_eq!(x.merged(Undecided), Undecided);
+            // a range: unclassified with unclassified alone
+            let range = if x == Unclassified {
+                Unclassified
+            } else {
+                Undecided
+            };
+            assert_eq!(Unclassified.absorbed(x), range);
+            assert_eq!(x.absorbed(Unclassified), range);
+            for y in [Crossing, Touching, Undecided] {
+                assert_eq!(x.absorbed(y), Undecided);
+            }
+        }
+        // an unclassified one with a decided one, in either order
+        for x in [Crossing, Touching] {
+            assert_eq!(Unclassified.merged(x), Undecided);
+            assert_eq!(x.merged(Unclassified), Undecided);
         }
         // two decided types that differ
         assert_eq!(Crossing.merged(Touching), Undecided);
@@ -2165,9 +2205,10 @@ mod tests {
                 .unwrap(),
             None
         );
+        // (an unclassified one with a decided one: undecided)
         assert_eq!(
             b.get(0).map(|s| (s.start.solution_value, s.contact)),
-            Some((2.0, Crossing))
+            Some((2.0, Undecided))
         );
     }
 

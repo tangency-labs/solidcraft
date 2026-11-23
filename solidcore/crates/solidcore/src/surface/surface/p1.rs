@@ -3992,6 +3992,36 @@ pub fn is_node_valid<O: Copy + PartialEq>(
     }
 }
 
+/// Whether the surface tree node `node` lies wholly inside its face (not upstream): its
+/// trim classification is inside, or no point can be rejected by the face (a tree no
+/// surface cache owns, the point test off). A cache that is not current classifies no node
+/// while the face's point test still filters points, so its nodes are not inside.
+/// [`is_node_valid`] keeps a node on the face's border too; this tells the two apart for
+/// the certified line pass, whose component in a border node may straddle the trim.
+///
+/// # Errors
+///
+/// A surface cache node without surface data.
+pub(crate) fn is_node_inside<O: Copy + PartialEq>(
+    owner: Option<TreeOwner>,
+    cache: &SurfaceCache<O>,
+    node: &TreeNode<O>,
+) -> Result<bool> {
+    if !is_surface_cache_owner(owner) || !cache.point_test_enabled {
+        return Ok(true);
+    }
+    if cache.face_was_modified || !cache.have_t_surface_cache {
+        return Ok(false);
+    }
+    match &node.data {
+        NodeData::Surface(aux) => Ok(aux.node_class == NodeClass::Inside),
+        _ => Err(SolidError::invalid_input(
+            "surface::surface::p1::is_node_inside",
+            "surface cache node without surface data",
+        )),
+    }
+}
+
 // ---- SmSurfaceEval accessors ---------------------------------------------------------
 
 impl SurfaceEval<'_> {

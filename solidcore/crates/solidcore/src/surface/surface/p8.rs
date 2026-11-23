@@ -68,8 +68,10 @@
 //! found); a maximize keeps the farthest drop, or its guess reported unconverged.
 //! Solutions carry a contact upstream has none of
 //! ([`crate::geom::solution_array::Contact`]): the line solve's removal of repeated
-//! solutions leaves the one kept with the [`Contact::merged`] of both, and its join
-//! across a coincident stretch makes the range it builds [`Contact::Unclassified`].
+//! solutions leaves the one kept with the [`Contact::merged`] of both, a crossing for two
+//! crossings only where one lies in the other's certified unique box, and its join across a
+//! coincident stretch gives the range it builds or extends the [`Contact::absorbed`] of
+//! both (unclassified only when both are).
 //! The solutions of the line solve carry the side record of its certified pass
 //! ([`crate::geom::solution_array::SideRecord`]), scaled back with them and, for a ray,
 //! kept to what starts before the one solution it keeps; nothing reads it yet.
@@ -3126,7 +3128,12 @@ fn coincident_range<O: SolutionObject>(
 /// The post-solve removal of repeated solutions of [`Surface::global_line_intersect`]:
 /// of two solutions of one type whose line and surface parameters (and a range's ends)
 /// agree within `param_tol`, the one with the smaller value is kept, in the first's
-/// place. (Not upstream) the solution kept carries the [`Contact::merged`] of both.
+/// place. (Not upstream) the solution kept carries the [`Contact::merged`] of both (two
+/// crossings undecided), and stays a crossing for two crossings only where one lies in the
+/// unique box of the other's certified root: otherwise they may be two contacts, and one
+/// solution standing for both would turn a full line's parity. Two such solutions are
+/// still merged, as upstream merges them, so that no result but the contact changes; not
+/// merging two crossings in unique boxes apart is the consumers' change.
 fn remove_repeated_solutions<O: SolutionObject>(
     sols: &mut SolutionArray<O>,
     param_tol: &[f64; 3],
@@ -3151,6 +3158,16 @@ fn remove_repeated_solutions<O: SolutionObject>(
                     same = false;
                 }
             }
+            // (not upstream) two crossings are one contact only where one lies in the unique
+            // box of the other's certified root (that box holds one root)
+            let one = |a: &Solution<O>, b: &Solution<O>| -> Result<bool> {
+                let Some([[u0, u1], [v0, v1]]) = b.unique else {
+                    return Ok(false);
+                };
+                let (u, v) = (a.start.param(1)?, a.start.param(2)?);
+                Ok(u0 <= u && u <= u1 && v0 <= v && v <= v1)
+            };
+            let one_contact = one(&si, &sj)? || one(&sj, &si)?;
 
             // remove duplicates
             if same {
@@ -3160,7 +3177,10 @@ fn remove_repeated_solutions<O: SolutionObject>(
                 } else {
                     si
                 };
-                kept.contact = si.contact.merged(sj.contact);
+                kept.contact = match (si.contact, sj.contact) {
+                    (Contact::Crossing, Contact::Crossing) if one_contact => Contact::Crossing,
+                    (a, b) => a.merged(b),
+                };
                 sols.set_at(ii, &kept)?;
 
                 // remove the worst duplicate
@@ -3178,10 +3198,10 @@ fn remove_repeated_solutions<O: SolutionObject>(
 /// solution `curr_sol` bracket a stretch of the line found coincident with the
 /// surface, so `last_sol` becomes the range over both (a range `curr_sol` extends
 /// it), unless `curr_sol` is a point too close to `last_sol`'s start for a range,
-/// which `last_sol` then absorbs unchanged. (Not upstream) a range made here is
-/// [`Contact::Unclassified`], since a stretch is neither of its ends' contacts; a
-/// range that absorbs the point keeps its contact, and a point that absorbs another
-/// takes the [`Contact::merged`] of both.
+/// which `last_sol` then absorbs unchanged. (Not upstream) a range made or extended here,
+/// or one that absorbs the point, takes the [`Contact::absorbed`] of both (unclassified
+/// when both are, undecided otherwise: a stretch is neither of its ends' contacts), and a
+/// point that absorbs another takes the [`Contact::merged`] of both.
 fn join_across_coincidence<O: SolutionObject>(
     mut last_sol: Solution<O>,
     curr_sol: &Solution<O>,
@@ -3198,7 +3218,9 @@ fn join_across_coincidence<O: SolutionObject>(
 
     // Set last solution to range
     last_sol.solution_type = SolutionType::RangeOfValues;
-    last_sol.contact = Contact::Unclassified;
+    last_sol.contact = last_original_contact.absorbed(curr_sol.contact);
+    let last_original_unique = last_sol.unique;
+    last_sol.unique = None;
 
     // if CurrSol is a range
     if curr_sol.solution_type == SolutionType::RangeOfValues {
@@ -3225,9 +3247,10 @@ fn join_across_coincidence<O: SolutionObject>(
         if (last_sol.start.param(0)? - curr_sol.start.param(0)?).abs() < tol {
             // restore last interval
             last_sol.solution_type = last_original_type;
-            // (not upstream) a range keeps its contact; a point stands for both
+            // (not upstream) a range takes the point in; a point stands for both
+            last_sol.unique = last_original_unique;
             last_sol.contact = if last_original_type == SolutionType::RangeOfValues {
-                last_original_contact
+                last_original_contact.absorbed(curr_sol.contact)
             } else {
                 last_original_contact.merged(curr_sol.contact)
             };
@@ -4574,7 +4597,12 @@ mod tests {
         for (a, b, want) in [
             (Contact::Crossing, Contact::Touching, Contact::Undecided),
             (Contact::Touching, Contact::Touching, Contact::Touching),
-            (Contact::Unclassified, Contact::Crossing, Contact::Crossing),
+            (Contact::Unclassified, Contact::Crossing, Contact::Undecided),
+            (
+                Contact::Unclassified,
+                Contact::Unclassified,
+                Contact::Unclassified,
+            ),
             (Contact::Crossing, Contact::Undecided, Contact::Undecided),
         ] {
             let mut sols = SolutionArray::new();
@@ -4593,38 +4621,61 @@ mod tests {
                 "{a:?} {b:?}"
             );
         }
+        // two crossings are one contact where one lies in the other's unique box: merged as
+        // before, the one kept a crossing; with unique boxes apart, or one with none, the one
+        // kept is undecided
+        for (second, want) in [
+            (Some([[0.21, 0.3], [0.2, 0.4]]), Contact::Undecided),
+            (None, Contact::Undecided),
+            (Some([[0.1, 0.3], [0.2, 0.4]]), Contact::Crossing),
+        ] {
+            let mut sols = SolutionArray::new();
+            let mut a = line_point(2e-9, [0.5, 0.2, 0.3], Contact::Crossing);
+            a.unique = Some([[0.1, 0.2], [0.2, 0.4]]);
+            let mut b = line_point(1e-9, [0.5 + 1e-6, 0.2 + 1e-6, 0.3], Contact::Crossing);
+            b.unique = second;
+            sols.add(&a);
+            sols.add(&b);
+            remove_repeated_solutions(&mut sols, &[1e-4; 3]).unwrap();
+            assert_eq!(sols.len(), 1, "{second:?}");
+            assert_eq!(sols.as_slice()[0].contact, want, "{second:?}");
+        }
     }
 
-    /// The join across a coincident stretch: a range built from two points is
-    /// unclassified, whatever their contacts; a point too close for a range is
-    /// absorbed, and the point kept takes the merged contact of both.
+    /// The join across a coincident stretch: a range built from two points, or extended by
+    /// a range, is unclassified when both were and undecided once either was typed; a point
+    /// too close for a range is absorbed, and the point kept takes the merged contact of
+    /// both (a range absorbing it, their absorbed contact).
     #[test]
     fn a_range_joined_from_points_is_unclassified() {
         let unit = Extent1d::from_min_max(0.0, 1.0);
-        let last = line_point(0.0, [0.2, 0.1, 0.1], Contact::Crossing);
-        let curr = line_point(0.0, [0.6, 0.5, 0.1], Contact::Crossing);
-        let joined = join_across_coincidence(last, &curr, Some(&unit)).unwrap();
-        assert_eq!(joined.solution_type, SolutionType::RangeOfValues);
-        assert_eq!(
-            (joined.start.parameters[0], joined.end.parameters[0]),
-            (0.2, 0.6)
-        );
-        assert_eq!(joined.contact, Contact::Unclassified);
+        for (contact, want) in [
+            (Contact::Crossing, Contact::Undecided),
+            (Contact::Unclassified, Contact::Unclassified),
+        ] {
+            let last = line_point(0.0, [0.2, 0.1, 0.1], contact);
+            let curr = line_point(0.0, [0.6, 0.5, 0.1], contact);
+            let joined = join_across_coincidence(last, &curr, Some(&unit)).unwrap();
+            assert_eq!(joined.solution_type, SolutionType::RangeOfValues);
+            assert_eq!(
+                (joined.start.parameters[0], joined.end.parameters[0]),
+                (0.2, 0.6)
+            );
+            assert_eq!(joined.contact, want);
 
-        // (a range extended by another range is a stretch too)
-        let mut extended = curr;
-        extended.solution_type = SolutionType::RangeOfValues;
-        extended.end.parameters[0] = 0.9;
-        let joined = join_across_coincidence(last, &extended, Some(&unit)).unwrap();
-        assert_eq!(
-            (joined.end.parameters[0], joined.contact),
-            (0.9, Contact::Unclassified)
-        );
+            // (a range extended by another range is a stretch too)
+            let mut extended = curr;
+            extended.solution_type = SolutionType::RangeOfValues;
+            extended.end.parameters[0] = 0.9;
+            let joined = join_across_coincidence(last, &extended, Some(&unit)).unwrap();
+            assert_eq!((joined.end.parameters[0], joined.contact), (0.9, want));
+        }
 
         // a point closer than the shortest range: the point kept stands for both
         for (a, b, want) in [
             (Contact::Crossing, Contact::Touching, Contact::Undecided),
-            (Contact::Unclassified, Contact::Touching, Contact::Touching),
+            (Contact::Unclassified, Contact::Touching, Contact::Undecided),
+            (Contact::Touching, Contact::Touching, Contact::Touching),
         ] {
             let last = line_point(0.0, [0.2, 0.1, 0.1], a);
             let near = line_point(0.0, [0.2 + EFF_ZERO, 0.1, 0.1], b);

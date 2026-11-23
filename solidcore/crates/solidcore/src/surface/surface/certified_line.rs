@@ -154,17 +154,90 @@
 //! seam) and their line parameters overlap. A component records its boxes, its `(u, v)` and
 //! line parameter hulls, whether it reaches an end of the line's own interval, whether it
 //! lies in or touches a leaf at the limit, a leaf not run or a stretch nothing searched, and
-//! the certified roots in it. Each is undecided until the typing of components. The solve's
+//! the certified roots in it. The solve's
 //! [`side_record`] ([`SideRecord`], owned by its solution array) is not run when no solved
 //! leaf's pass ran, whatever the strips found (the strips are then not enclosed), or, with
-//! every leaf culled, when no strip ran; complete when no component is left and every cull
-//! has its strip; and undecided
-//! otherwise, over each component's line parameters and over the whole line's interval
-//! where a cull's strip could not be placed. Nothing reads the records yet.
+//! every leaf culled, when no strip ran; complete when every component is decided and
+//! stood for (below) and every cull has its strip; and undecided otherwise, over the line
+//! parameters of each component that is not, and over the whole line's interval where a
+//! cull's strip could not be placed. Nothing reads the records yet.
+//!
+//! **Typing** ([`type_components`]). A component is a crossing when the line passes from
+//! one side of the surface to the other across it (an odd number of times), touching when
+//! it leaves on the side it came from, and undecided otherwise. It is undecided whatever
+//! its sides when its line parameters reach an end of the line's own interval (it has no
+//! end there), when it holds or touches a leaf whose pass stopped at its limit or did not
+//! run, touches a stretch nothing searched (a trim cull: it may straddle the face's
+//! border), or holds a strip box step 1 did not exclude or a certified root not reported.
+//! Otherwise:
+//!
+//! - **Every box regular** (no box left at the floor): every exact root of `F` with `(u, v)`
+//!   in the component lies in one of its boxes (the gap there is 0, so no distance verdict
+//!   took it, and its `t` is its foot, inside the box's line parameters), a box with no root
+//!   holds none, and a root box holds exactly one, a transversal crossing (`[S_u S_v −D]` is
+//!   nonsingular there). Its parity is the count of its distinct certified roots: two are
+//!   one where an enclosure lies in the other's unique box, two where their enclosures are
+//!   apart, and the component is undecided when two are neither. It is undecided too when a
+//!   box has a side on a boundary (the surface's, a seam among them, or the solve's): a root
+//!   there may be counted again by the patch across it. Any kind of surface.
+//! - **A box left at the floor**, on a surface of revolution whose net is a sphere, a
+//!   cylinder or cone, or a ring torus ([`Revolved`]): the side function `f` (the distance
+//!   to the sphere, the radius past the cylinder's or the cone's line in the half-plane
+//!   through the axis, the distance to the torus's tube circle in that half-plane) is
+//!   continuous on all of space and vanishes exactly on the complete surface Σ (the whole
+//!   sphere or torus, the infinite cylinder, one infinite nappe of the cone), with one sign
+//!   on each side; every point of Σ is the meridian rotation of one point of its profile
+//!   (the closest point of Σ to `X` lies in `X`'s half-plane through the axis). With
+//!   `[t₀, t₁]` the component's line parameters and σ the line over them: (1) `f` at
+//!   `L(t₀)` and at `L(t₁)` is proved apart from 0 (each is at least the tolerance from the
+//!   surface over the component, its line parameters ending a tolerance past every foot);
+//!   (2) no other component's line parameters meet `[t₀, t₁]`; (3) the component's
+//!   `(u, v)` hull `H` is covered by the domains of searched leaves and strips (no trim cull
+//!   inside it) and, on a cone, clear of the apex; (4) every piece of σ over which `f` is not
+//!   proved more than half the tolerance from 0 lies in `S(H)`, read in coordinates each
+//!   point of Σ has one value of: its direction about the axis inside the directions of
+//!   `H`'s ends in the turn (each of the net's knot spans a rational quadratic arc, less than
+//!   half a turn; no test for a whole turn), and its height inside the heights of `H`'s
+//!   profile ends (cone; monotone along the profile) or its direction in the half-plane
+//!   about the profile circle's centre inside theirs (sphere, torus; at a pole the height
+//!   hardly changes, the direction does), the pieces halved within a budget
+//!   ([`MAX_SIDE_PIECES`]). Then every zero of
+//!   `f` on σ is a root `S(u, v) = L(t)` with `(u, v)` in `H`; by (3) it lies in a recorded
+//!   box of a searched leaf whose line parameters hold `t`, a box of a component meeting
+//!   `[t₀, t₁]`, so by (2) of this one; and the sign of `f` changes along σ an odd number of
+//!   times exactly when it differs at the two ends: a crossing for opposite signs, touching
+//!   for one. (2) also keeps a point of Σ two parameters name (a seam, a pole) from being
+//!   counted by two components: a sphere's pole is decided this way, a cone's apex is not.
+//!   Any other kind with a box left is undecided: a foot certified at each end alone does
+//!   not show that the sign changes in this component.
+//!
+//! The distinct roots of a component are counted from its root boxes: one where an
+//! enclosure lies in the other's unique box, two where the enclosures are apart, and the
+//! component is undecided when two are neither. The side test also asks, at its ends, that
+//! the side function be more than half the tolerance from 0 (its pieces are skipped only
+//! past that too), so that it does not rest on the net and the closed form agreeing to the
+//! last bit, only to well within half the tolerance.
+//!
+//! The solutions of the solve are then typed ([`type_solutions`]). With a cull not placed
+//! or the components not built, every one is undecided, and so is every range. A point is
+//! undecided unless its gap to the line is enclosed below the tolerance and it lies in a box
+//! of a decided component (the boxes of two components never both hold a point with its
+//! line parameter). There, a point in the unique box of one of the component's roots
+//! carries that root, a crossing (the two are one contact) when it is that root's only
+//! carrier; a point in the unique boxes of two roots not shown one, or of another
+//! component's root, is undecided. What the boxes left at the floor hold beyond the roots
+//! is the component's parity less its count of roots: with every root carried once, the
+//! other points are touching where that is even, and the single other point a crossing
+//! where it is odd; otherwise they are undecided. A component typed by its sides in leaves
+//! not all wholly inside the face may straddle its border (a leaf on the trim is searched
+//! whole), so its other points are undecided. A component the solutions do not stand for
+//! (a root not carried once, an odd rest with no single point to carry it, or undecided)
+//! stays undecided in the side record: a ray would otherwise pass a crossing it was not
+//! given.
 //!
 //! | Rust | Upstream |
 //! |------|----------|
-//! | [`LineNet`], [`isolate`], [`PassLine`], [`CertifiedRoot`], [`Isolation`], [`Stop`], [`FloorBox`], [`FloorKind`], [`Exclusion`], [`LeafSides`], [`leaf_sides`], [`enclose_strip`], [`SearchedLeaf`], [`drop_fenced`], [`Drops`], [`components`], [`Components`], [`Component`], [`side_record`] | (not upstream) |
+//! | [`LineNet`], [`isolate`], [`PassLine`], [`CertifiedRoot`], [`Isolation`], [`Stop`], [`FloorBox`], [`FloorKind`], [`Exclusion`], [`LeafSides`], [`leaf_sides`], [`enclose_strip`], [`SearchedLeaf`], [`drop_fenced`], [`Drops`], [`components`], [`Components`], [`Component`], [`side_record`], [`Revolved`], [`type_components`], [`Typed`], [`Why`], [`type_solutions`], [`SolutionAt`] | (not upstream) |
 //!
 //! Deviations: none (no upstream counterpart). Bounds: no recursion (work lists); a box is
 //! halved until its middle is one of its ends; at most [`MAX_SCRATCH_BOXES`] boxes a leaf,
@@ -176,7 +249,9 @@
 //! [`MAX_MEETING_TESTS`] pairs of boxes tested in one sweep, [`MAX_SOLVE_BOXES`] boxes in
 //! one solve's drop and components, past which nothing is dropped, the components are not
 //! built and the whole line is undecided, and [`MAX_DROP_ENCLOSURES`] side enclosures in
-//! one solve's drop.
+//! one solve's drop; at most [`MAX_SIDE_PIECES`] piece enclosures in one component's side
+//! test, [`MAX_COVER_RECTS`] leaves in its coverage test and [`MAX_ROOT_BOXES`] root boxes
+//! told apart.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
@@ -230,6 +305,9 @@ pub(crate) struct LineNet {
     /// The interior knots of multiplicity at least the degree, in u and in v: the knot lines
     /// across which the net is below `C¹` in parameter (each once, ascending).
     creases: [Vec<f64>; 2],
+    /// The complete surface of revolution the net is a patch of, for the kinds the side
+    /// test reads ([`Revolved`]); `None` for every other surface.
+    revolved: Option<Revolved>,
 }
 
 impl LineNet {
@@ -259,10 +337,12 @@ impl LineNet {
             return Ok(None);
         };
         let creases = [creases(&net.u, net.p, u), creases(&net.v, net.q, v)];
+        let revolved = Revolved::of(surface, &net);
         Ok(Some(Self {
             net,
             range: [u, v],
             creases,
+            revolved,
         }))
     }
 
@@ -777,8 +857,12 @@ pub(crate) enum FloorKind {
     Edge,
     /// No root (step 2), and no side on such a border.
     NoRoot,
-    /// Its root, certified and reported, the only one in `unique` with any line parameter.
-    Root { unique: [Ivl; 2] },
+    /// Its root, certified and reported, the only one in `unique` with any line parameter,
+    /// and held by `enclosure` (in `(u, v, t)`).
+    Root {
+        unique: [Ivl; 2],
+        enclosure: [Ivl; 3],
+    },
     /// Its root, certified but not reported ([`Isolation::unshown`]), the only one in
     /// `unique`.
     Unshown { unique: [Ivl; 2] },
@@ -958,11 +1042,11 @@ fn isolate_within(
                             && meet(rv, sv).is_some()
                             && regular_over(net, &line, ru.hull(su), rv.hull(sv)))
                 });
-                let unique = root.unique;
+                let (unique, enclosure) = (root.unique, root.enclosure);
                 if !known {
                     out.roots.push(root);
                 }
-                (FloorKind::Root { unique }, Some(t))
+                (FloorKind::Root { unique, enclosure }, Some(t))
             }
             Visit::Unshown(unique, t) => {
                 out.unshown += 1;
@@ -1368,6 +1452,9 @@ pub(crate) struct SearchedLeaf {
     /// Whether it is a culled strip ([`enclose_strip`]) rather than a leaf the traversal
     /// solved.
     pub strip: bool,
+    /// Whether it lies wholly inside the face (its trim classification, or a solve with no
+    /// trim to test): a component in such leaves alone cannot straddle the face's border.
+    pub inside: bool,
 }
 
 impl SearchedLeaf {
@@ -1673,10 +1760,17 @@ pub(crate) struct Component {
     pub touches: Touches,
     /// Its boxes by kind.
     pub holds: Holds,
-    /// The certified roots in it, `(u, v, t)`.
-    pub roots: Vec<[f64; 3]>,
-    /// Its type: undecided until the typing of components.
+    /// The certified roots in it.
+    pub roots: Vec<CertifiedRoot>,
+    /// Its type ([`type_components`]): undecided until typed.
     pub contact: Contact,
+    /// How its type was decided.
+    pub typed: Typed,
+    /// Its distinct certified roots ([`root_classes`]), each the unique boxes of the root
+    /// boxes that hold it; empty until typed.
+    pub classes: Vec<Vec<[Ivl; 2]>>,
+    /// Whether every leaf holding a box of it lies wholly inside the face.
+    pub inside: bool,
 }
 
 /// The components of one solve (module docs, "Components").
@@ -1802,6 +1896,9 @@ pub(crate) fn components(
                 holds: Holds::default(),
                 roots: Vec::new(),
                 contact: Contact::Undecided,
+                typed: Typed::Untyped,
+                classes: Vec::new(),
+                inside: true,
             });
             c
         };
@@ -1818,6 +1915,7 @@ pub(crate) fn components(
         comp.touches.unfinished |= flags.unfinished;
         comp.touches.not_run |= flags.not_run;
         comp.touches.unsearched |= flags.unsearched;
+        comp.inside &= leaves.get(b.leaf).is_some_and(|l| l.inside);
         let h = &mut comp.holds;
         let count = match b.part {
             Part::NotRunLeaf => Some(&mut h.not_run),
@@ -1853,7 +1951,7 @@ pub(crate) fn components(
                 .and_then(|i| of_box.get(i).copied())
                 .and_then(|c| out.list.get_mut(c));
             if let Some(comp) = comp {
-                comp.roots.push(root.point);
+                comp.roots.push(*root);
             }
         }
     }
@@ -1891,7 +1989,8 @@ fn facing(b: &PlacedBox, leaves: &[SearchedLeaf], sides: &[LeafSides]) -> Touche
 /// leaf the traversal solved and no such leaf's pass ran, whatever its culled strips found
 /// (the solutions are then the guesses' alone, and a strip's boxes undecided around a leaf
 /// not run narrow nothing), or when it has none and no strip ran; otherwise undecided over
-/// every component's line parameters (each undecided until the typing of components) and
+/// the line parameters of every component that is undecided, or decided but not stood for
+/// by the solutions (`stood_for`, by the component's index; none where it is short), and
 /// over the whole of the line's own interval `span` where a cull's strip could not be
 /// placed (`unplaced`: nothing has enclosed it) or the components passed their bounds;
 /// complete only with none of these. A strip's boxes it left undecided are in the
@@ -1901,6 +2000,7 @@ fn facing(b: &PlacedBox, leaves: &[SearchedLeaf], sides: &[LeafSides]) -> Touche
 pub(crate) fn side_record(
     leaves: &[SearchedLeaf],
     components: &Components,
+    stood_for: &[bool],
     unplaced: bool,
     span: [f64; 2],
 ) -> SideRecord {
@@ -1912,7 +2012,14 @@ pub(crate) fn side_record(
     if unplaced || components.over_budget {
         spans.push(span);
     }
-    for c in &components.list {
+    for (i, c) in components.list.iter().enumerate() {
+        // (a decided component the solutions do not stand for is not decided for a ray:
+        // a touching one too, whose crossings may be the solutions' to carry)
+        let decided = matches!(c.contact, Contact::Touching | Contact::Crossing)
+            && stood_for.get(i).copied().unwrap_or(false);
+        if decided {
+            continue;
+        }
         let (lo, hi) = (cmax(c.t.lo, s0), cmin(c.t.hi, s1));
         if c.t.lo.is_nan() || c.t.hi.is_nan() {
             // (nothing is known of where it lies)
@@ -1938,6 +2045,962 @@ pub(crate) fn leaves_not_run(leaves: &[SearchedLeaf]) -> bool {
         solved.all(|l| l.stop == Stop::NotRun)
     } else {
         !leaves.is_empty() && leaves.iter().all(|l| l.stop == Stop::NotRun)
+    }
+}
+
+/// The complete surface of revolution a net is a patch of (module docs, "Typing"): a
+/// sphere, a cylinder or one nappe of a cone, or a ring torus, about the axis of its
+/// placement, as the analytic surface the net was made from defines it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Revolved {
+    /// A point on the axis (the placement's origin).
+    origin: [f64; 3],
+    /// The placement's x and y axes (the plane the turn is measured in) and its axis.
+    x: [f64; 3],
+    y: [f64; 3],
+    z: [f64; 3],
+    /// The profile.
+    shape: Shape,
+    /// Whether the net's u is the turn about the axis (else its v).
+    turn_in_u: bool,
+    /// Whether the turn is a whole one (the analytic angles span 360°).
+    whole_turn: bool,
+    /// Whether the profile is a whole circle (a torus whose minor angles span 360°).
+    whole_profile: bool,
+}
+
+/// The profile of a [`Revolved`] in its half-plane through the axis (radius from the axis,
+/// height along it).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Shape {
+    /// A circle about the origin.
+    Sphere { radius: f64 },
+    /// A line: the radius at height 0 and its change per unit height (0: a cylinder).
+    Cone { radius: f64, slope: f64 },
+    /// A circle of radius `minor` about the point at radius `major` and height 0, with
+    /// `major > minor` (a ring torus: no point of it on the axis).
+    Torus { major: f64, minor: f64 },
+}
+
+impl Revolved {
+    /// The surface of revolution of `surface` when it is a sphere, a cone or cylinder, or a
+    /// ring torus whose net turns about the axis in a direction of degree 2 (each of its
+    /// knot spans a rational quadratic arc, less than half a turn) and, for the sphere and
+    /// the torus, whose profile circle is of degree 2 too; `None` otherwise.
+    fn of(surface: &Surface, net: &Nurbs) -> Option<Self> {
+        use crate::surface::surface::SurfaceKind;
+        let (rev, shape) = match surface.kind() {
+            SurfaceKind::Sphere(s) => (&s.base, Shape::Sphere { radius: s.radius }),
+            SurfaceKind::Cone(c) => (
+                &c.rev,
+                Shape::Cone {
+                    radius: c.base_radius,
+                    slope: if c.cylinder {
+                        0.0
+                    } else {
+                        c.semi_angle_deg.to_radians().tan()
+                    },
+                },
+            ),
+            SurfaceKind::Torus(t) if t.major_radius > t.minor_radius => (
+                &t.base,
+                Shape::Torus {
+                    major: t.major_radius,
+                    minor: t.minor_radius,
+                },
+            ),
+            _ => return None,
+        };
+        let finite = match shape {
+            Shape::Sphere { radius } => radius > 0.0 && radius.is_finite(),
+            Shape::Cone { radius, slope } => radius.is_finite() && slope.is_finite(),
+            Shape::Torus { major, minor } => minor > 0.0 && major.is_finite(),
+        };
+        let turn_in_u = !rev.swap_uv;
+        let (turn_degree, profile_degree) = if turn_in_u {
+            (net.p, net.q)
+        } else {
+            (net.q, net.p)
+        };
+        let torus = matches!(shape, Shape::Torus { .. });
+        let circle = torus || matches!(shape, Shape::Sphere { .. });
+        if !finite || turn_degree != 2 || (circle && profile_degree != 2) {
+            return None;
+        }
+        let place = &rev.position;
+        let angles = rev.anal_uv_domain;
+        Some(Self {
+            origin: f3(place.origin()),
+            x: f3(place.x_axis()),
+            y: f3(place.y_axis()),
+            z: f3(place.z_axis()),
+            shape,
+            turn_in_u,
+            whole_turn: angles.max().x - angles.min().x >= 360.0,
+            whole_profile: torus && angles.max().y - angles.min().y >= 360.0,
+        })
+    }
+
+    /// The point `w + origin` in the placement: its two coordinates in the plane of the
+    /// turn, and its height along the axis, enclosed.
+    fn coordinates(&self, w: &I3) -> ([Ivl; 2], Ivl) {
+        ([dot(self.x, w), dot(self.y, w)], dot(self.z, w))
+    }
+
+    /// The side function at the points `w + origin`, enclosed: continuous on all of space,
+    /// zero exactly on the complete surface (the whole sphere, the infinite cylinder or the
+    /// infinite nappe of the cone, the whole torus), of one sign on each side of it, and in
+    /// magnitude the distance to the surface (sphere, cylinder, torus) or to the line through
+    /// the cone's profile in the half-plane through the axis (no more than the distance to
+    /// the nappe).
+    fn side(&self, w: &I3) -> Ivl {
+        let ([a, b], h) = self.coordinates(w);
+        let rho = || radius_of(a, b);
+        match self.shape {
+            Shape::Sphere { radius } => length_squared(w).sqrt() - Ivl::from(radius),
+            // (the distance in the half-plane to the line through the profile, signed by
+            // the radius that line has at height h, which no point reaches past the apex:
+            // the zero set is one nappe)
+            Shape::Cone { radius, slope } => {
+                let s = Ivl::from(slope);
+                (rho() - Ivl::from(radius) - s * h) / (Ivl::from(1.0) + s * s).sqrt()
+            }
+            Shape::Torus { major, minor } => {
+                let across = rho() - Ivl::from(major);
+                length_squared(&[across, h, Ivl::from(0.0)]).sqrt() - Ivl::from(minor)
+            }
+        }
+    }
+
+    /// The point in the profile's half-plane a circle profile's angle is read from: the
+    /// radius past the major radius (the torus's; 0 for the sphere), and the height.
+    fn in_the_tube(&self, w: &I3) -> [Ivl; 2] {
+        let ([a, b], h) = self.coordinates(w);
+        let rho = radius_of(a, b);
+        match self.shape {
+            Shape::Torus { major, .. } => [rho - Ivl::from(major), h],
+            // (no subtraction of 0: its outward rounding would reach below the axis)
+            _ => [rho, h],
+        }
+    }
+}
+
+/// The length of the plane vector `(a, b)`, enclosed, never below 0 (the square root's
+/// outward rounding of 0 is not a length).
+fn radius_of(a: Ivl, b: Ivl) -> Ivl {
+    let r = length_squared(&[a, b, Ivl::from(0.0)]).sqrt();
+    Ivl::new(r.lo.max(0.0), r.hi)
+}
+
+/// `a × b` of two plane vectors, enclosed.
+fn cross2(a: [Ivl; 2], b: [Ivl; 2]) -> Ivl {
+    let [a0, a1] = a;
+    let [b0, b1] = b;
+    a0 * b1 - a1 * b0
+}
+
+/// A range of directions in a plane: the directions at its ends and at the knots between,
+/// turning counterclockwise, each step less than half a turn (a rational quadratic arc's).
+/// `None` in [`Chart`] for a whole turn, which holds every direction.
+#[derive(Debug, Clone)]
+struct Sector {
+    edges: Vec<[Ivl; 2]>,
+    /// Whether the directions turned clockwise in the order of the parameter (and were
+    /// reversed).
+    reversed: bool,
+}
+
+impl Sector {
+    /// The sector of the directions `edges` (in the order of the parameter), or `None` where
+    /// a direction is not proved apart from 0 or the steps do not all turn one way.
+    fn of(mut edges: Vec<[Ivl; 2]>) -> Option<Self> {
+        let apart_from_0 = |e: &[Ivl; 2]| length_squared(&[e[0], e[1], Ivl::from(0.0)]).lo > 0.0;
+        if edges.len() < 2 || !edges.iter().all(apart_from_0) {
+            return None;
+        }
+        let turns: Vec<Ivl> = edges
+            .windows(2)
+            .filter_map(|w| match *w {
+                [a, b] => Some(cross2(a, b)),
+                _ => None,
+            })
+            .collect();
+        let reversed = if turns.iter().all(|c| c.hi < 0.0) {
+            edges.reverse();
+            true
+        } else if turns.iter().all(|c| c.lo > 0.0) {
+            false
+        } else {
+            return None;
+        };
+        Some(Self { edges, reversed })
+    }
+
+    /// Whether every direction of the plane vectors `w` lies in the sector: `w` apart from 0,
+    /// and between the ends of a run of steps that turns less than half a turn in all (each
+    /// step does, and so does the run when its ends' cross product is positive, the run being
+    /// less than a whole turn).
+    fn holds(&self, w: [Ivl; 2]) -> bool {
+        if !(length_squared(&[w[0], w[1], Ivl::from(0.0)]).lo > 0.0) {
+            return false;
+        }
+        let n = self.edges.len();
+        for i in 0..n {
+            for j in i + 1..n {
+                let (Some(&a), Some(&b)) = (self.edges.get(i), self.edges.get(j)) else {
+                    continue;
+                };
+                let narrow = j == i + 1 || cross2(a, b).lo > 0.0;
+                if narrow && cross2(a, w).lo >= 0.0 && cross2(w, b).lo >= 0.0 {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
+/// The part of the complete surface of revolution a component's `(u, v)` hull covers, in
+/// the coordinates every point of the surface has one value of: its direction about the
+/// axis, and its height (cone) or its direction in the half-plane about the profile
+/// circle's centre (sphere, torus).
+#[derive(Debug, Clone)]
+struct Chart {
+    /// The directions about the axis; `None` for a whole turn.
+    turn: Option<Sector>,
+    /// The heights, a range proved inside the hull's (cone).
+    height: Option<Ivl>,
+    /// The directions about the profile circle's centre (sphere, torus); `None` for a whole
+    /// circle or a cone.
+    tube: Option<Sector>,
+}
+
+/// The most piece enclosures one component's side test makes (module docs, "Typing"): a
+/// leaf's own bound, as for the strips.
+pub(crate) const MAX_SIDE_PIECES: usize = MAX_SCRATCH_BOXES;
+
+/// How a component's type was decided (module docs, "Typing").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum Typed {
+    /// Not typed (the components were not built, or not yet typed).
+    #[default]
+    Untyped,
+    /// Every box regular: its distinct certified roots, each a transversal crossing.
+    Count(usize),
+    /// The side function at its two ends.
+    Sides,
+    /// Undecided, and why.
+    Undecided(Why),
+}
+
+/// Why a component is undecided (module docs, "Typing"), in the order the tests run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Why {
+    /// Its line parameters reach an end of the line's own interval.
+    ReachesEnd,
+    /// It holds or touches a leaf whose pass stopped at its limit.
+    Unfinished,
+    /// It holds or touches a leaf whose pass did not run.
+    NotRun,
+    /// It touches a stretch no searched leaf or strip covers (a trim cull).
+    Unsearched,
+    /// It holds a box of a culled strip that step 1 did not exclude.
+    Culled,
+    /// It holds a box with a certified root not reported.
+    Unshown,
+    /// Every box regular, but one has a side on a boundary (the surface's, the solve's): a
+    /// root there may be another patch's or face's too.
+    OnABoundary,
+    /// Every box regular, but two of its certified roots are neither shown one nor apart.
+    RootsNotTold,
+    /// No side function for the kind (a B-spline, an extrusion, a general surface of
+    /// revolution).
+    NoSideFunction,
+    /// The closed form is not shown to be the net's at the hull's corners.
+    NotTheNet,
+    /// The side function at an end is not proved apart from 0.
+    EndNotShown,
+    /// Another component's line parameters meet its own.
+    Overlapped,
+    /// Its hull reaches the cone's apex.
+    Apex,
+    /// Its hull is not covered by the searched leaves and strips (a trim cull inside it).
+    Uncovered,
+    /// A point of the line between its ends that may lie on the complete surface is not
+    /// shown inside its hull's part of it.
+    OutsideHull,
+    /// The side test ran out of its budget.
+    Budget,
+}
+
+/// Types every component of `comps` (module docs, "Typing"): the solve's `leaves`, `sides`
+/// what lies across each, the line `line` and the surface's net `net`. Components not built
+/// are left as they are.
+///
+/// # Errors
+///
+/// A cancel.
+pub(crate) fn type_components(
+    net: &LineNet,
+    line: &PassLine,
+    leaves: &[SearchedLeaf],
+    sides: &[LeafSides],
+    comps: &mut Components,
+    cancel: Option<&CancelToken>,
+) -> Result<()> {
+    if comps.over_budget {
+        return Ok(());
+    }
+    let [s0, s1] = line.span;
+    let scratch = ScratchLine::of(line, &Extent1d::from_min_max(s0, s1));
+    let overlapped = overlapped(&comps.list.iter().map(|c| c.t).collect::<Vec<Ivl>>());
+    for (ci, c) in comps.list.iter_mut().enumerate() {
+        if let Some(token) = cancel {
+            token.check(OP)?;
+        }
+        let boxes: Vec<PlacedBox> = c
+            .boxes
+            .iter()
+            .filter_map(|&i| comps.boxes.get(i).copied())
+            .collect();
+        let classes = root_classes(&boxes);
+        let typed = match (undecided_by_flags(c), &scratch, classes) {
+            (Some(why), _, _) => Typed::Undecided(why),
+            (None, None, _) => Typed::Undecided(Why::NotRun),
+            (None, Some(_), None) => Typed::Undecided(Why::RootsNotTold),
+            (None, Some(scratch), Some(classes)) => {
+                let n = classes.len();
+                c.classes = classes;
+                if c.holds.left == 0 {
+                    by_count(net, line, sides, &boxes, n)
+                } else {
+                    let others = overlapped.get(ci).copied().unwrap_or(true);
+                    by_sides(net, scratch, leaves, c, others)
+                }
+            }
+        };
+        c.contact = match typed {
+            Typed::Count(n) if n % 2 == 1 => Contact::Crossing,
+            Typed::Count(_) => Contact::Touching,
+            Typed::Sides => c.contact,
+            _ => Contact::Undecided,
+        };
+        c.typed = typed;
+    }
+    Ok(())
+}
+
+/// For each of the closed intervals `hulls`, whether another of them meets it: sorted by
+/// their lower ends, an interval meets an earlier one when the greatest upper end before it
+/// reaches its lower end, and a later one when the next lower end lies within it (every
+/// later one starts no lower). A NaN end meets everything.
+fn overlapped(hulls: &[Ivl]) -> Vec<bool> {
+    if hulls.iter().any(|h| h.lo.is_nan() || h.hi.is_nan()) {
+        return vec![hulls.len() > 1; hulls.len()];
+    }
+    let mut order: Vec<usize> = (0..hulls.len()).collect();
+    let lo = |i: usize| hulls.get(i).map_or(f64::NAN, |h| h.lo);
+    order.sort_by(|&a, &b| lo(a).total_cmp(&lo(b)).then(a.cmp(&b)));
+    let mut out = vec![false; hulls.len()];
+    let mut reach = f64::NEG_INFINITY;
+    for (k, &i) in order.iter().enumerate() {
+        let Some(h) = hulls.get(i) else {
+            continue;
+        };
+        let before = reach >= h.lo;
+        let after = order
+            .get(k + 1)
+            .and_then(|&j| hulls.get(j))
+            .is_some_and(|n| n.lo <= h.hi);
+        if let Some(slot) = out.get_mut(i) {
+            *slot = before || after;
+        }
+        reach = reach.max(h.hi);
+    }
+    out
+}
+
+/// What makes a component undecided whatever its sides (answer to the typing's design:
+/// an end of the line, a leaf not decided, a trim cull, a strip box not excluded).
+fn undecided_by_flags(c: &Component) -> Option<Why> {
+    if c.reaches_end {
+        Some(Why::ReachesEnd)
+    } else if c.touches.unfinished || c.holds.unvisited > 0 {
+        Some(Why::Unfinished)
+    } else if c.touches.not_run || c.holds.not_run > 0 {
+        Some(Why::NotRun)
+    } else if c.touches.unsearched {
+        Some(Why::Unsearched)
+    } else if c.holds.culled > 0 {
+        Some(Why::Culled)
+    } else if c.holds.unshown > 0 {
+        Some(Why::Unshown)
+    } else {
+        None
+    }
+}
+
+/// The most root boxes [`root_classes`] tells apart in one component (pairs tested: their
+/// square); past it the roots are not told.
+const MAX_ROOT_BOXES: usize = 256;
+
+/// The distinct certified roots of the root boxes among `boxes` (a component's): two root
+/// boxes hold one root where the enclosure of either lies in the other's unique box (it
+/// holds one root), two where their enclosures are apart; `None` where two are neither.
+/// Each root is given as the unique boxes of the root boxes holding it, by its first box.
+fn root_classes(boxes: &[PlacedBox]) -> Option<Vec<Vec<[Ivl; 2]>>> {
+    let roots: Vec<([Ivl; 2], I3)> = boxes
+        .iter()
+        .filter_map(|b| match b.part {
+            Part::Floor(FloorKind::Root { unique, enclosure }) => Some((unique, enclosure)),
+            _ => None,
+        })
+        .collect();
+    if roots.len() > MAX_ROOT_BOXES {
+        return None;
+    }
+    let in_unique = |e: &I3, [qu, qv]: [Ivl; 2]| {
+        let [eu, ev, _] = *e;
+        within(eu, qu) && within(ev, qv)
+    };
+    let mut parent: Vec<usize> = (0..roots.len()).collect();
+    for (i, (ui, ei)) in roots.iter().enumerate() {
+        for (j, (uj, ej)) in roots.iter().enumerate().skip(i + 1) {
+            if in_unique(ei, *uj) || in_unique(ej, *ui) {
+                join(&mut parent, i, j);
+            } else if !apart(ei, ej) {
+                return None;
+            }
+        }
+    }
+    let mut classes: Vec<Vec<[Ivl; 2]>> = Vec::new();
+    let mut slot_of: Vec<Option<usize>> = vec![None; roots.len()];
+    for (i, (unique, _)) in roots.iter().enumerate() {
+        let first = root_of(&mut parent, i);
+        let k = if let Some(k) = slot_of.get(first).copied().flatten() {
+            k
+        } else {
+            let k = classes.len();
+            classes.push(Vec::new());
+            if let Some(slot) = slot_of.get_mut(first) {
+                *slot = Some(k);
+            }
+            k
+        };
+        if let Some(class) = classes.get_mut(k) {
+            class.push(*unique);
+        }
+    }
+    Some(classes)
+}
+
+/// A component every box of which is regular (no box left at the floor; with the flags
+/// clear, its `boxes` are roots, boxes with no root and edge boxes): every exact root of the
+/// line on the surface over it lies in a root box, each a transversal crossing, so its
+/// parity is the count `roots` of its distinct roots. Undecided when an edge box has a side
+/// on a boundary (the surface's, a seam among them, or the solve's: the contact may lie
+/// past it) or a root's enclosure reaches one (the patch or face across may count it too).
+fn by_count(
+    net: &LineNet,
+    line: &PassLine,
+    sides: &[LeafSides],
+    boxes: &[PlacedBox],
+    roots: usize,
+) -> Typed {
+    let [[u0, u1], [v0, v1]] = net.range;
+    let (lo, hi) = (line.solve_domain.min(), line.solve_domain.max());
+    let on_a_boundary = boxes.iter().any(|b| match b.part {
+        Part::Floor(FloorKind::Edge) => sides.get(b.leaf).is_none_or(|own| {
+            net.side_kinds(&line.solve_domain, own, Scratch { u: b.u, v: b.v })
+                .contains(&SideKind::Boundary)
+        }),
+        Part::Floor(FloorKind::Root { enclosure, .. }) => {
+            let [eu, ev, _] = enclosure;
+            eu.lo <= u0.max(lo.x)
+                || eu.hi >= u1.min(hi.x)
+                || ev.lo <= v0.max(lo.y)
+                || ev.hi >= v1.min(hi.y)
+        }
+        _ => false,
+    });
+    if on_a_boundary {
+        return Typed::Undecided(Why::OnABoundary);
+    }
+    Typed::Count(roots)
+}
+
+/// The side test of a component holding a box left at the floor (module docs, "Typing"),
+/// for a surface of revolution: the side function at the line's points at the two ends
+/// of its line parameters, each proved apart from 0; no other component's line parameters
+/// meet its own (`others`); its hull clear of a cone's apex and covered by searched leaves
+/// and strips; and every point of the line between the ends that may lie on the complete
+/// surface shown inside the hull's part of it. Sets the component's contact (crossing for
+/// opposite sides, touching for one) and returns [`Typed::Sides`], or why it is undecided.
+fn by_sides(
+    net: &LineNet,
+    line: &ScratchLine,
+    leaves: &[SearchedLeaf],
+    c: &mut Component,
+    others: bool,
+) -> Typed {
+    let Some(rev) = net.revolved else {
+        return Typed::Undecided(Why::NoSideFunction);
+    };
+    let origin_off = line.off_the_start(&[Ivl::from(0.0); 3], rev.origin);
+    // the points `P + t D − origin` for t in `t`, enclosed
+    let at = |t: Ivl| -> I3 {
+        let [o0, o1, o2] = origin_off;
+        let [d0, d1, d2] = line.d.map(Ivl::from);
+        [t * d0 - o0, t * d1 - o1, t * d2 - o2]
+    };
+    let ends = [c.t.lo, c.t.hi].map(|t| rev.side(&at(Ivl::from(t))));
+    // (half the tolerance: an end is at least the tolerance from the surface over the
+    // component, and the net need only agree with the closed form to within the margin)
+    let half = 0.5 * line.tol;
+    let shown = |f: Ivl| f.lo > half || f.hi < -half;
+    let [lo, hi] = ends;
+    if !(shown(lo) && shown(hi)) {
+        return Typed::Undecided(Why::EndNotShown);
+    }
+    if others {
+        return Typed::Undecided(Why::Overlapped);
+    }
+    let Some(chart) = chart_of(net, &rev, c.u, c.v, line.tol) else {
+        return Typed::Undecided(Why::OutsideHull);
+    };
+    // (a guard that the closed form is the net's: within a quarter of the tolerance at the
+    // hull's corners)
+    let on_the_net = [
+        (c.u.lo, c.v.lo),
+        (c.u.lo, c.v.hi),
+        (c.u.hi, c.v.lo),
+        (c.u.hi, c.v.hi),
+    ]
+    .iter()
+    .all(|&(u, v)| {
+        net.at(u, v, rev.origin)
+            .is_some_and(|w| rev.side(&w).mag() <= 0.25 * line.tol)
+    });
+    if !on_the_net {
+        return Typed::Undecided(Why::NotTheNet);
+    }
+    if let Shape::Cone { radius, slope } = rev.shape {
+        // (the apex's height, −radius / slope, against the hull's heights: the chart's
+        // heights lie inside them, so the test reads the hull's own ends)
+        if slope != 0.0 {
+            let apex = Ivl::from(-radius) / Ivl::from(slope);
+            let near = hull_heights(net, &rev, c.u, c.v).is_none_or(|h| meet(apex, h).is_some());
+            if near {
+                return Typed::Undecided(Why::Apex);
+            }
+        }
+    }
+    if !covered_by_leaves(c.u, c.v, leaves) {
+        return Typed::Undecided(Why::Uncovered);
+    }
+    // every piece of the line between the ends that may meet the surface lies in the
+    // hull's part of it, halving pieces within the budget
+    let mut work = vec![c.t];
+    let mut spent = 0_usize;
+    while let Some(piece) = work.pop() {
+        if spent >= MAX_SIDE_PIECES {
+            return Typed::Undecided(Why::Budget);
+        }
+        spent += 1;
+        let w = at(piece);
+        let f = rev.side(&w);
+        if shown(f) {
+            continue;
+        }
+        if chart.holds(&rev, &w) {
+            continue;
+        }
+        let mid = piece.mid();
+        if !(mid > piece.lo && mid < piece.hi) {
+            return Typed::Undecided(Why::OutsideHull);
+        }
+        work.push(Ivl::new(mid, piece.hi));
+        work.push(Ivl::new(piece.lo, mid));
+    }
+    c.contact = if (lo.lo > 0.0) == (hi.lo > 0.0) {
+        Contact::Touching
+    } else {
+        Contact::Crossing
+    };
+    Typed::Sides
+}
+
+impl Chart {
+    /// Whether every point of `w + origin` that lies on the complete surface lies in the
+    /// chart's part of it: its direction about the axis in the turn (where it is not
+    /// whole), its height in the heights, its direction about the tube's centre in the
+    /// tube's sector (where it is not whole).
+    fn holds(&self, rev: &Revolved, w: &I3) -> bool {
+        let (plane, h) = rev.coordinates(w);
+        let turn = self.turn.as_ref().is_none_or(|s| s.holds(plane));
+        let height = self.height.is_none_or(|range| within(h, range));
+        let tube = self
+            .tube
+            .as_ref()
+            .is_none_or(|s| s.holds(rev.in_the_tube(w)));
+        turn && height && tube
+    }
+}
+
+/// The net's knots strictly inside `[a, z]` in u (`in_u`) or v, each once.
+fn knots_inside(net: &LineNet, in_u: bool, [a, z]: [f64; 2]) -> Vec<f64> {
+    let knots = if in_u { &net.net.u } else { &net.net.v };
+    let mut out: Vec<f64> = knots.iter().copied().filter(|&k| k > a && k < z).collect();
+    out.dedup();
+    out
+}
+
+/// The point of the net at the turn parameter `turn` and the profile parameter `profile`,
+/// less the axis's origin, enclosed.
+fn net_point(net: &LineNet, rev: &Revolved, turn: f64, profile: f64) -> Option<I3> {
+    let (u, v) = if rev.turn_in_u {
+        (turn, profile)
+    } else {
+        (profile, turn)
+    };
+    net.at(u, v, rev.origin)
+}
+
+/// The heights of the net's points at the ends of the hull's profile range, enclosed
+/// together (sphere and cone: the height is monotone along the profile).
+fn hull_heights(net: &LineNet, rev: &Revolved, u: Ivl, v: Ivl) -> Option<Ivl> {
+    let (turn, profile) = if rev.turn_in_u { (u, v) } else { (v, u) };
+    let h = |p: f64| net_point(net, rev, turn.mid(), p).map(|w| rev.coordinates(&w).1);
+    Some(h(profile.lo)?.hull(h(profile.hi)?))
+}
+
+/// The chart of the `(u, v)` hull `[u, v]` of a component on the surface of revolution
+/// `rev` (module docs, "Typing"), `tol` the line's tolerance; `None` where it cannot be
+/// shown (a direction at its ends not apart from the axis or the centre, heights not
+/// apart).
+fn chart_of(net: &LineNet, rev: &Revolved, u: Ivl, v: Ivl, tol: f64) -> Option<Chart> {
+    let (turn, profile) = if rev.turn_in_u { (u, v) } else { (v, u) };
+    let [[r0, r1], [p0, p1]] = if rev.turn_in_u {
+        net.range
+    } else {
+        let [a, b] = net.range;
+        [b, a]
+    };
+    // a whole turn by the analytic angles, held to the net: the hull spans its whole range
+    // in the turn, and the net's directions at the two ends of that range agree (a net
+    // covering less than the analytic angles does not pass)
+    let same = |a: [Ivl; 2], b: [Ivl; 2]| {
+        let [a0, a1] = a;
+        let [b0, b1] = b;
+        let c = cross2(a, b);
+        c.lo <= 0.0 && 0.0 <= c.hi && (a0 * b0 + a1 * b1).lo > 0.0
+    };
+    let turn_at = |t: f64| net_point(net, rev, t, profile.mid()).map(|w| rev.coordinates(&w).0);
+    let whole_turn = rev.whole_turn
+        && turn.lo <= r0
+        && turn.hi >= r1
+        && matches!((turn_at(r0), turn_at(r1)), (Some(a), Some(b)) if same(a, b));
+    let turn_sector = if whole_turn {
+        None
+    } else {
+        let mut at: Vec<f64> = vec![turn.lo];
+        at.extend(knots_inside(net, rev.turn_in_u, [turn.lo, turn.hi]));
+        at.push(turn.hi);
+        let edges: Option<Vec<[Ivl; 2]>> = at.iter().map(|&t| turn_at(t)).collect();
+        Some(Sector::of(edges?)?)
+    };
+    let (height, tube) = match rev.shape {
+        Shape::Cone { .. } => {
+            let h = |p: f64| net_point(net, rev, turn.mid(), p).map(|w| rev.coordinates(&w).1);
+            let (a, b) = (h(profile.lo)?, h(profile.hi)?);
+            // the heights the hull's profile range reaches lie between the ends' (the
+            // height is monotone along the profile): a range proved inside them
+            let inner = if a.hi < b.lo {
+                Ivl::new(a.hi, b.lo)
+            } else if b.hi < a.lo {
+                Ivl::new(b.hi, a.lo)
+            } else {
+                return None;
+            };
+            (Some(inner), None)
+        }
+        // (the sphere's profile is a half circle about the origin, the torus's a circle
+        // about the tube's centre: a direction about that centre, which near a pole tells
+        // points apart where the height hardly changes)
+        Shape::Sphere { .. } | Shape::Torus { .. } => {
+            let tube_at = |p: f64| net_point(net, rev, turn.mid(), p).map(|w| rev.in_the_tube(&w));
+            let whole = rev.whole_profile
+                && profile.lo <= p0
+                && profile.hi >= p1
+                && matches!((tube_at(p0), tube_at(p1)), (Some(a), Some(b)) if same(a, b));
+            if whole {
+                (None, None)
+            } else {
+                let mut at: Vec<f64> = vec![profile.lo];
+                at.extend(knots_inside(net, !rev.turn_in_u, [profile.lo, profile.hi]));
+                at.push(profile.hi);
+                // (a sphere's profile end on the axis is its pole, exactly the axis's
+                // direction: the net's pole point lies off the axis by its rounding alone,
+                // within the margin the closed form is held to. The edge is turned on past
+                // the axis, to the half-plane's far side, where no point lies (the radius
+                // is never below 0): the sector holds the same points of the surface, and
+                // the axis itself is inside it rather than on its edge, where an enclosure
+                // cannot show it)
+                let pole = |e: [Ivl; 2]| -> [Ivl; 2] {
+                    let [rho, h] = e;
+                    let sphere = matches!(rev.shape, Shape::Sphere { .. });
+                    if sphere && rho.hi <= 0.25 * tol && (h.lo > 0.0 || h.hi < 0.0) {
+                        [
+                            Ivl::from(-1.0),
+                            Ivl::from(if h.lo > 0.0 { 1.0 } else { -1.0 }),
+                        ]
+                    } else {
+                        e
+                    }
+                };
+                let plain: Option<Vec<[Ivl; 2]>> = at.iter().map(|&p| tube_at(p)).collect();
+                let plain = plain?;
+                let turned: Vec<[Ivl; 2]> = plain.iter().map(|&e| pole(e)).collect();
+                // (the orientation is the net's own directions'; a turned pole edge that
+                // turns a step the other way is no sector of the hull)
+                let (plain, turned) = (Sector::of(plain)?, Sector::of(turned)?);
+                if plain.reversed != turned.reversed {
+                    return None;
+                }
+                (None, Some(turned))
+            }
+        }
+    };
+    Some(Chart {
+        turn: turn_sector,
+        height,
+        tube,
+    })
+}
+
+/// The most leaves and strips the coverage test of a hull reads; past it the hull is not
+/// shown covered.
+const MAX_COVER_RECTS: usize = 64;
+
+/// Whether the `(u, v)` box `[u, v]` is covered by the domains of the searched leaves and
+/// strips `leaves` (no trim cull inside it): each cell of the grid of their sides inside
+/// the box lies in one of them.
+fn covered_by_leaves(u: Ivl, v: Ivl, leaves: &[SearchedLeaf]) -> bool {
+    let rects: Vec<[[f64; 2]; 2]> = leaves
+        .iter()
+        .map(|l| bounds_of(&l.domain))
+        .filter_map(|[[a0, a1], [c0, c1]]| {
+            let (x0, x1, y0, y1) = (a0.max(u.lo), a1.min(u.hi), c0.max(v.lo), c1.min(v.hi));
+            (x0 < x1 && y0 < y1).then_some([[x0, x1], [y0, y1]])
+        })
+        .collect();
+    if rects.len() > MAX_COVER_RECTS || !(u.lo < u.hi && v.lo < v.hi) {
+        return false;
+    }
+    let grid = |pick: fn(&[[f64; 2]; 2]) -> [f64; 2], lo: f64, hi: f64| {
+        let mut xs: Vec<f64> = vec![lo, hi];
+        xs.extend(rects.iter().flat_map(pick));
+        xs.sort_by(f64::total_cmp);
+        xs.dedup();
+        xs
+    };
+    let xs = grid(|r| r[0], u.lo, u.hi);
+    let ys = grid(|r| r[1], v.lo, v.hi);
+    let middles = |zs: &[f64]| -> Vec<f64> {
+        zs.windows(2)
+            .filter_map(|w| match *w {
+                [a, b] => Some(0.5 * (a + b)),
+                _ => None,
+            })
+            .collect()
+    };
+    let (cxs, cys) = (middles(&xs), middles(&ys));
+    cxs.iter().all(|&cx| {
+        cys.iter().all(|&cy| {
+            rects
+                .iter()
+                .any(|&[[a0, a1], [c0, c1]]| a0 <= cx && cx <= a1 && c0 <= cy && cy <= c1)
+        })
+    })
+}
+
+/// What [`type_solutions`] gives a solution: its contact, and the unique box of the
+/// certified root it stands for.
+pub(crate) type Typing = (Contact, Option<[Ivl; 2]>);
+
+/// A solution of the solve as [`type_solutions`] reads it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum SolutionAt {
+    /// A point, `(t, u, v)` in the solve's line parameter.
+    Point([f64; 3]),
+    /// A range of values: undecided once typing runs.
+    Range,
+    /// Any other kind: not typed.
+    Other,
+}
+
+/// How [`type_solutions`] placed a point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Placing {
+    /// Undecided whatever its component (its gap not shown, in no component, or in the
+    /// unique boxes of two roots not shown one, or of a root of another component).
+    Undecided,
+    /// In the unique box of the root `class` of the component `comp`.
+    Carrier { comp: usize, class: usize },
+    /// In a box of the component `comp`, in no root's unique box.
+    Other { comp: usize },
+}
+
+/// The contacts of the solve's solutions `at` (module docs, "Typing"), from its typed
+/// components `comps`, with `unplaced` a cull whose strip could not be placed: for each
+/// solution, its contact and the unique box of the certified root it stands for (`None`
+/// to leave it as it is: a kind not typed); and for each component whether its solutions
+/// stand for it.
+///
+/// Every point and range is undecided where the components were not built or a cull was
+/// not placed. A range is undecided. A point is undecided unless its gap to the line is
+/// enclosed below the tolerance and it lies in a box of a decided component (the boxes of
+/// two components never both hold one point). In it, a point in the unique box of one of
+/// its distinct roots carries that root, a transversal crossing (a crossing, when it is the
+/// root's only carrier; two carriers of one root are undecided). The component's parity
+/// less its roots' leaves what its boxes left at the floor hold: with every root carried
+/// once, the other points are touching when that is even, and the one other point is a
+/// crossing when it is odd; otherwise they are undecided. A component typed by its sides
+/// whose leaves are not all inside the face may straddle its border, so its other points
+/// are undecided. A component stands for itself when every root is carried once and its
+/// parity is accounted for (a touching one with no point does).
+pub(crate) fn type_solutions(
+    net: &LineNet,
+    line: &PassLine,
+    comps: &Components,
+    at: &[SolutionAt],
+    unplaced: bool,
+) -> (Vec<Option<Typing>>, Vec<bool>) {
+    let mut stood = vec![false; comps.list.len()];
+    let undecided = Some((Contact::Undecided, None));
+    if comps.over_budget || unplaced {
+        let out = at
+            .iter()
+            .map(|a| (!matches!(a, SolutionAt::Other)).then_some((Contact::Undecided, None)))
+            .collect();
+        return (out, stood);
+    }
+    let holds =
+        |[qu, qv]: [Ivl; 2], u: f64, v: f64| qu.lo <= u && u <= qu.hi && qv.lo <= v && v <= qv.hi;
+    let placing: Vec<Option<Placing>> = at
+        .iter()
+        .map(|a| match *a {
+            SolutionAt::Other => None,
+            SolutionAt::Range => Some(Placing::Undecided),
+            SolutionAt::Point(p) => Some(place(net, line, comps, p, holds)),
+        })
+        .collect();
+    let mut out: Vec<Option<Typing>> = placing
+        .iter()
+        .map(|p| p.map(|_| (Contact::Undecided, None)))
+        .collect();
+    for (c, comp) in comps.list.iter().enumerate() {
+        let decided = matches!(comp.contact, Contact::Crossing | Contact::Touching)
+            && matches!(comp.typed, Typed::Count(_) | Typed::Sides);
+        if !decided {
+            continue;
+        }
+        let mut carriers: Vec<Vec<usize>> = vec![Vec::new(); comp.classes.len()];
+        let mut others: Vec<usize> = Vec::new();
+        for (i, p) in placing.iter().enumerate() {
+            match *p {
+                Some(Placing::Carrier { comp: pc, class }) if pc == c => {
+                    if let Some(list) = carriers.get_mut(class) {
+                        list.push(i);
+                    }
+                }
+                Some(Placing::Other { comp: pc }) if pc == c => others.push(i),
+                _ => {}
+            }
+        }
+        for (class, list) in carriers.iter().enumerate() {
+            if let ([one], Some(boxes)) = (list.as_slice(), comp.classes.get(class)) {
+                let unique = match at.get(*one) {
+                    Some(&SolutionAt::Point([_, u, v])) => {
+                        boxes.iter().copied().find(|&q| holds(q, u, v))
+                    }
+                    _ => None,
+                };
+                if let Some(slot) = out.get_mut(*one) {
+                    *slot = Some((Contact::Crossing, unique));
+                }
+            }
+        }
+        let carried = carriers.iter().all(|l| l.len() == 1);
+        let straddles = comp.typed == Typed::Sides && !comp.inside;
+        // (what the boxes left at the floor hold, beyond the roots, as a parity)
+        let parity = usize::from(comp.contact == Contact::Crossing);
+        let rest = (parity + comp.classes.len()) % 2;
+        let other = match (carried && !straddles, rest, others.as_slice()) {
+            (true, 0, _) => Some(Contact::Touching),
+            (true, _, [_]) => Some(Contact::Crossing),
+            _ => None,
+        };
+        if let Some(contact) = other {
+            for &i in &others {
+                if let Some(slot) = out.get_mut(i) {
+                    *slot = Some((contact, None));
+                }
+            }
+            if let Some(slot) = stood.get_mut(c) {
+                *slot = true;
+            }
+        } else {
+            for &i in &others {
+                if let Some(slot) = out.get_mut(i) {
+                    *slot = undecided;
+                }
+            }
+        }
+    }
+    (out, stood)
+}
+
+/// Where the point `(t, u, v)` lies among the typed components `comps` ([`type_solutions`]).
+fn place(
+    net: &LineNet,
+    line: &PassLine,
+    comps: &Components,
+    [t, u, v]: [f64; 3],
+    holds: impl Fn([Ivl; 2], f64, f64) -> bool,
+) -> Placing {
+    let shown = ScratchLine::of(line, &Extent1d::from_min_max(t, t)).is_some_and(|scratch| {
+        net.at(u, v, scratch.p).is_some_and(|s| {
+            let gap2 = length_squared(&less(&s, Ivl::from(t), scratch.d));
+            gap2.hi < (Ivl::from(scratch.tol) * Ivl::from(scratch.tol)).lo
+        })
+    });
+    if !shown {
+        return Placing::Undecided;
+    }
+    let held = comps.boxes.iter().position(|b| {
+        b.u.lo <= u && u <= b.u.hi && b.v.lo <= v && v <= b.v.hi && b.t.lo <= t && t <= b.t.hi
+    });
+    let Some(comp) = held.and_then(|i| {
+        comps
+            .list
+            .iter()
+            .position(|c| c.boxes.binary_search(&i).is_ok())
+    }) else {
+        return Placing::Undecided;
+    };
+    // the roots whose unique boxes hold the point, over every component
+    let mut roots = comps.list.iter().enumerate().flat_map(|(c, x)| {
+        x.classes
+            .iter()
+            .enumerate()
+            .filter(|(_, boxes)| boxes.iter().any(|&q| holds(q, u, v)))
+            .map(move |(k, _)| (c, k))
+    });
+    match (roots.next(), roots.next()) {
+        (None, _) => Placing::Other { comp },
+        (Some((c, class)), None) if c == comp => Placing::Carrier { comp, class },
+        _ => Placing::Undecided,
     }
 }
 
@@ -2441,6 +3504,7 @@ mod tests {
             floor: Some(std::mem::take(&mut found.floor)),
             roots: Vec::new(),
             strip: false,
+            inside: true,
         }];
         drop_fenced(&net, &line, &mut leaf, &[sides], None, MAX_DROP_ENCLOSURES).unwrap();
         found.floor = leaf[0].floor.take().unwrap();
@@ -2912,6 +3976,7 @@ mod tests {
             floor,
             roots: Vec::new(),
             strip: false,
+            inside: true,
         }
     }
 
@@ -3262,7 +4327,7 @@ mod tests {
         let c = components(&leaves, &leaf_sides(&[a, b], &whole), [0.0, 1.0]);
         assert!(c.over_budget);
         assert_eq!(
-            side_record(&leaves, &c, false, [0.0, 1.0]),
+            side_record(&leaves, &c, &[], false, [0.0, 1.0]),
             SideRecord::Undecided(vec![[0.0, 1.0]])
         );
     }
@@ -3398,6 +4463,7 @@ mod tests {
                     floor: Some(f.floor),
                     roots: f.roots,
                     strip: false,
+                    inside: true,
                 }
             })
             .collect();
@@ -3440,7 +4506,7 @@ mod tests {
         assert_eq!(one.touches, Touches::default());
         assert_eq!(one.contact, Contact::Undecided);
         assert_eq!(
-            side_record(&leaves, &c, false, [0.0, 1.0]),
+            side_record(&leaves, &c, &[], false, [0.0, 1.0]),
             SideRecord::Undecided(vec![[one.t.lo, one.t.hi]])
         );
 
@@ -3456,7 +4522,9 @@ mod tests {
     /// A line tangent to the torus's crown circle at 45°, tolerance 1e-6, touches it once.
     /// The pass stops at its limit there (the fold is singular along the crown), and what it
     /// kept, the boxes it did not visit among them, is one component: in a leaf at the
-    /// limit, about the contact at t = 0.5.
+    /// limit, about the contact at t = 0.5, and undecided. With a tolerance of 1e-2 the
+    /// pass finishes, and the component is touching by the side function (the line stays
+    /// outside the tube at both ends).
     #[test]
     fn the_crown_tangency_at_45_degrees_is_one_component() {
         let k = Kernel::default();
@@ -3478,6 +4546,28 @@ mod tests {
         assert!(one.touches.unfinished);
         assert!(one.holds.unvisited > 0);
         assert!(one.t.lo <= 0.5 && 0.5 <= one.t.hi, "{:?}", one.t);
+        let (_, typed) = typed_of(
+            &k,
+            &s,
+            Vec3::new(c, c, 5.0) - 10.0 * along,
+            20.0 * along,
+            1.0e-6,
+            &[whole],
+        );
+        assert!(typed
+            .list
+            .iter()
+            .all(|x| x.contact == Contact::Undecided && x.typed != Typed::Sides));
+        let (leaves, typed) = typed_of(
+            &k,
+            &s,
+            Vec3::new(c, c, 5.0) - 10.0 * along,
+            20.0 * along,
+            1.0e-2,
+            &[whole],
+        );
+        assert_eq!(leaves[0].stop, Stop::Finished);
+        assert_eq!(types(&typed), vec![(Contact::Touching, Typed::Sides)]);
     }
 
     /// A culled strip the line passes farther than the tolerance from is excluded by
@@ -3512,7 +4602,7 @@ mod tests {
         let c = components(&leaves, &leaf_sides(&[quarter], &whole), [0.0, 1.0]);
         assert!(c.list.is_empty());
         assert_eq!(
-            side_record(&leaves, &c, false, [0.0, 1.0]),
+            side_record(&leaves, &c, &[], false, [0.0, 1.0]),
             SideRecord::Complete
         );
     }
@@ -3555,7 +4645,7 @@ mod tests {
             ..leaf_of(quarter, found.stop, Some(found.floor))
         }];
         let c = components(&leaves, &leaf_sides(&[quarter], &whole), span);
-        let record = side_record(&leaves, &c, false, span);
+        let record = side_record(&leaves, &c, &[], false, span);
         let SideRecord::Undecided(spans) = &record else {
             panic!("{record:?}");
         };
@@ -3589,21 +4679,22 @@ mod tests {
         let span = [0.0, 1.0];
         let none = Components::default();
         assert_eq!(
-            side_record(&[leaf(Stop::NotRun)], &none, true, span),
+            side_record(&[leaf(Stop::NotRun)], &none, &[], true, span),
             SideRecord::NotRun
         );
         assert_eq!(
-            side_record(&[leaf(Stop::Finished)], &none, false, span),
+            side_record(&[leaf(Stop::Finished)], &none, &[], false, span),
             SideRecord::Complete
         );
         assert_eq!(
-            side_record(&[leaf(Stop::Finished)], &none, true, span),
+            side_record(&[leaf(Stop::Finished)], &none, &[], true, span),
             SideRecord::Undecided(vec![span])
         );
         assert_eq!(
             side_record(
                 &[leaf(Stop::Finished)],
                 &Components::over_budget(),
+                &[],
                 false,
                 span
             ),
@@ -3615,14 +4706,14 @@ mod tests {
         assert_eq!(c.list.len(), 1);
         assert!(c.list[0].touches.not_run);
         assert_eq!(
-            side_record(&leaves, &c, false, span),
+            side_record(&leaves, &c, &[], false, span),
             SideRecord::Undecided(vec![span])
         );
         // (a leaf whose pass stopped at its limit beside one not run: undecided too)
         let leaves = [leaf(Stop::AtLimit), leaf(Stop::NotRun)];
         let c = components(&leaves, &leaf_sides(&[domain, domain], &domain), span);
         assert_eq!(
-            side_record(&leaves, &c, false, span),
+            side_record(&leaves, &c, &[], false, span),
             SideRecord::Undecided(vec![span])
         );
 
@@ -3646,13 +4737,22 @@ mod tests {
         let c = components(&leaves, &sides, span);
         assert!(!c.list.is_empty());
         for unplaced in [false, true] {
-            assert_eq!(side_record(&leaves, &c, unplaced, span), SideRecord::NotRun);
+            assert_eq!(
+                side_record(&leaves, &c, &[], unplaced, span),
+                SideRecord::NotRun
+            );
         }
 
         // no solved leaf (every leaf culled): the strips decide
         let only = |strips: &[SearchedLeaf], unplaced: bool| {
             let sides = leaf_sides(&vec![domain; strips.len()], &domain);
-            side_record(strips, &components(strips, &sides, span), unplaced, span)
+            side_record(
+                strips,
+                &components(strips, &sides, span),
+                &[],
+                unplaced,
+                span,
+            )
         };
         assert_eq!(
             only(&[strip(Stop::Finished, Vec::new())], false),
@@ -3682,5 +4782,288 @@ mod tests {
             ),
             SideRecord::Undecided(vec![span])
         );
+    }
+
+    /// [`components_of`] with the components typed ([`type_components`]).
+    fn typed_of(
+        k: &Kernel,
+        s: &Surface,
+        p: Vec3,
+        d: Vec3,
+        tol: f64,
+        doms: &[Extent2d],
+    ) -> (Vec<SearchedLeaf>, Components) {
+        let net = LineNet::of(k, s).unwrap().unwrap();
+        let solve = s.natural_uv_domain_with_nurb(k).unwrap();
+        let line = PassLine {
+            point: p,
+            vector: d,
+            span: [0.0, 1.0],
+            solve_domain: solve,
+            tol,
+        };
+        let (leaves, mut c) = components_of(k, s, p, d, tol, doms);
+        let sides = leaf_sides(doms, &solve);
+        type_components(&net, &line, &leaves, &sides, &mut c, None).unwrap();
+        (leaves, c)
+    }
+
+    /// The types of the components, in order.
+    fn types(c: &Components) -> Vec<(Contact, Typed)> {
+        c.list.iter().map(|x| (x.contact, x.typed)).collect()
+    }
+
+    /// The side function of each kind of surface of revolution vanishes on its net and has
+    /// one sign on each side of it: a sphere, a cone, a cylinder and a torus placed off the
+    /// origin and tilted, at points of their nets and a hundredth along the normal.
+    #[test]
+    fn the_side_function_vanishes_on_the_net() {
+        let k = Kernel::default();
+        let (o, x, y) = (
+            Vec3::new(1.0, -2.0, 3.0),
+            Vec3::new(0.6, 0.8, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        );
+        let mut sphere = crate::surface::sphere::Sphere::new(
+            &k,
+            o,
+            x,
+            y,
+            Extent2d::from_bounds(0.0, -90.0, 360.0, 90.0),
+            2.5,
+            crate::surface::sphere::SphereOptions::default(),
+        )
+        .unwrap();
+        sphere.make_nurb(&k).unwrap();
+        let mut cone = Cone::new_bounded(o, x, y, 1.5, 0.8, 0.0, 300.0, 2.0, false, false, false);
+        cone.make_nurb(&k).unwrap();
+        let mut cylinder =
+            Cone::new_cylinder_bounded(o, x, y, 1.5, 0.0, 300.0, 2.0, false, false, true);
+        cylinder.make_nurb(&k).unwrap();
+        let mut torus = Torus::new(
+            &k,
+            o,
+            x,
+            y,
+            Extent2d::from_bounds(0.0, 0.0, 360.0, 360.0),
+            4.0,
+            1.0,
+            TorusOptions::default(),
+        )
+        .unwrap();
+        torus.make_nurb(&k).unwrap();
+        for s in [
+            Surface::from(sphere),
+            Surface::from(cone),
+            Surface::from(cylinder),
+            Surface::from(torus),
+        ] {
+            let net = LineNet::of(&k, &s).unwrap().unwrap();
+            let rev = net.revolved.expect("a surface of revolution");
+            let [[u0, u1], [v0, v1]] = net.range;
+            for (i, j) in [(1, 1), (3, 2), (5, 4), (7, 3)] {
+                let (u, v) = (
+                    u0 + (u1 - u0) * f64::from(i) / 8.0,
+                    v0 + (v1 - v0) * f64::from(j) / 5.0,
+                );
+                let on = net.at(u, v, rev.origin).unwrap();
+                let f = rev.side(&on);
+                assert!(f.mag() < 1.0e-12, "{s:?}: {f:?}");
+                let [at, s_u, s_v] = net.over(Ivl::from(u), Ivl::from(v), rev.origin).unwrap();
+                let point = v3(mids(&at)) + v3(rev.origin);
+                let normal = v3(mids(&s_u)).cross(v3(mids(&s_v))).unitize_or_z();
+                let off = |e: f64| {
+                    let q = point + e * normal;
+                    let r = q - v3(rev.origin);
+                    rev.side(&[r.x, r.y, r.z].map(Ivl::from))
+                };
+                let (a, b) = (off(0.01), off(-0.01));
+                assert!(
+                    (a.lo > 0.0 && b.hi < 0.0) || (a.hi < 0.0 && b.lo > 0.0),
+                    "{a:?} {b:?}"
+                );
+            }
+        }
+    }
+
+    /// A line tangent to the sphere touches it: one component of boxes left at the floor,
+    /// typed by the side function at its ends (both outside the sphere). Missing it within
+    /// the tolerance is touching too. A secant crosses it twice: two components, each a
+    /// count of one certified root. A line along the axis through both poles crosses at
+    /// each pole: two components, each a crossing by the side function (each turns about
+    /// the whole axis, so no other component shares the pole).
+    #[test]
+    fn a_sphere_is_touched_by_a_tangent_and_crossed_by_a_secant_and_through_its_poles() {
+        let k = Kernel::default();
+        let s = sphere(&k);
+        let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let tol = 1.0e-6;
+        for gap in [0.0, 0.5 * tol] {
+            let p = Vec3::new(-10.0, 3.0 * (1.0 + gap / 5.0), 4.0 * (1.0 + gap / 5.0));
+            let (_, c) = typed_of(&k, &s, p, Vec3::new(20.0, 0.0, 0.0), tol, &[whole]);
+            assert_eq!(
+                types(&c),
+                vec![(Contact::Touching, Typed::Sides)],
+                "gap {gap}"
+            );
+        }
+        let (_, c) = typed_of(
+            &k,
+            &s,
+            Vec3::new(-10.0, 1.0, 2.0),
+            Vec3::new(20.0, 0.0, 0.0),
+            tol,
+            &[whole],
+        );
+        assert_eq!(
+            types(&c),
+            vec![(Contact::Crossing, Typed::Count(1)); 2],
+            "{:?}",
+            c.list
+        );
+        let (_, c) = typed_of(
+            &k,
+            &s,
+            Vec3::new(0.0, 0.0, -10.0),
+            Vec3::new(0.0, 0.0, 20.0),
+            tol,
+            &[whole],
+        );
+        assert_eq!(
+            types(&c),
+            vec![(Contact::Crossing, Typed::Sides); 2],
+            "{:?}",
+            c.list
+        );
+    }
+
+    /// The cylinder: a tangent line and lines missing it within the tolerance touch it (the
+    /// side function, the radius past the cylinder's, positive at both ends); a shallow
+    /// secant at upstream's step 10 is one component of two certified roots, touching as a
+    /// whole (its two crossings cancel); a line through the axis just above the rim passes
+    /// within the tolerance of the rim beyond the surface, undecided (its edge boxes have a
+    /// side on the surface's boundary, or the side function's zeros between its ends lie past
+    /// the rim).
+    #[test]
+    fn a_cylinder_is_touched_by_a_tangent_and_a_near_miss() {
+        let k = Kernel::default();
+        let s = cylinder(&k);
+        let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
+        for step in [0, 1, 10] {
+            let (p, d) = across(1.0 + f64::from(step) * STEP);
+            let (_, c) = typed_of(&k, &s, p, d, TOL, &[whole]);
+            assert_eq!(
+                types(&c),
+                vec![(Contact::Touching, Typed::Sides)],
+                "step {step}: {:?}",
+                c.list
+            );
+        }
+        let (p, d) = across(1.0 - STEP);
+        let (_, c) = typed_of(&k, &s, p, d, TOL, &[whole]);
+        assert_eq!(c.list.len(), 1, "{:?}", types(&c));
+        assert_eq!(c.list[0].contact, Contact::Touching, "{:?}", types(&c));
+        assert_eq!(c.list[0].classes.len(), 2, "{:?}", types(&c));
+        for h in [0.5, 0.9] {
+            let (_, c) = typed_of(
+                &k,
+                &s,
+                Vec3::new(-2.0, 0.0, 1.0 + h * TOL),
+                Vec3::new(4.0, 0.0, 0.0),
+                TOL,
+                &[whole],
+            );
+            assert!(!c.list.is_empty());
+            assert!(
+                c.list.iter().all(|x| x.contact == Contact::Undecided),
+                "{:?}",
+                types(&c)
+            );
+        }
+    }
+
+    /// A line along a cone's axis through its apex: the component about the apex is
+    /// undecided (the profile ends there), whatever the side function says.
+    #[test]
+    fn a_line_through_a_cone_s_apex_is_undecided() {
+        let k = Kernel::default();
+        // (radius 1 at height 0, shrinking to its apex at height 1)
+        let mut c = Cone::new_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            1.0,
+            0.0,
+            0.0,
+            360.0,
+            1.0,
+            false,
+            false,
+            false,
+        );
+        c.make_nurb(&k).unwrap();
+        let s = Surface::from(c);
+        let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let (_, comps) = typed_of(
+            &k,
+            &s,
+            Vec3::new(0.0, 0.0, 2.0),
+            Vec3::new(0.0, 0.0, -4.0),
+            1.0e-5,
+            &[whole],
+        );
+        assert!(!comps.list.is_empty());
+        let near_apex = comps
+            .list
+            .iter()
+            .filter(|x| x.t.lo <= 0.25 && 0.25 <= x.t.hi)
+            .collect::<Vec<_>>();
+        assert_eq!(near_apex.len(), 1, "{:?}", types(&comps));
+        assert_eq!(near_apex[0].contact, Contact::Undecided);
+    }
+
+    /// Which closed intervals meet another (the side test's second condition): touching
+    /// ends meet, a NaN end meets everything, and the order given does not matter.
+    #[test]
+    fn overlapping_line_parameters_are_told_by_a_sweep() {
+        let i = |a: f64, b: f64| Ivl::new(a, b);
+        assert_eq!(
+            overlapped(&[i(2.0, 3.0), i(0.0, 1.0), i(3.0, 4.0), i(5.0, 6.0)]),
+            vec![true, false, true, false]
+        );
+        assert_eq!(
+            overlapped(&[i(0.0, 10.0), i(5.0, 6.0), i(11.0, 12.0)]),
+            vec![true, true, false]
+        );
+        assert_eq!(
+            overlapped(&[i(0.0, 1.0), Ivl::new(f64::NAN, 1.0), i(5.0, 6.0)]),
+            vec![true, true, true]
+        );
+        assert_eq!(overlapped(&[i(0.0, 1.0)]), vec![false]);
+    }
+
+    /// A hull is covered by the searched leaves and strips when every cell of their grid
+    /// inside it lies in one: two leaves meeting along a side cover the hull across them;
+    /// with a hole (a trim cull) inside it, or a leaf missing at its corner, it is not.
+    #[test]
+    fn a_hull_is_covered_only_by_searched_domains() {
+        let leaf = |a: f64, b: f64, c: f64, d: f64| {
+            leaf_of(
+                Extent2d::from_bounds(a, c, b, d),
+                Stop::Finished,
+                Some(Vec::new()),
+            )
+        };
+        let (u, v) = (Ivl::new(0.2, 0.8), Ivl::new(0.1, 0.9));
+        let two = [leaf(0.0, 0.5, 0.0, 1.0), leaf(0.5, 1.0, 0.0, 1.0)];
+        assert!(covered_by_leaves(u, v, &two));
+        let holed = [
+            leaf(0.0, 0.5, 0.0, 1.0),
+            leaf(0.5, 1.0, 0.0, 0.4),
+            leaf(0.5, 1.0, 0.6, 1.0),
+        ];
+        assert!(!covered_by_leaves(u, v, &holed));
+        let corner = [leaf(0.0, 0.5, 0.0, 1.0), leaf(0.5, 1.0, 0.0, 0.85)];
+        assert!(!covered_by_leaves(u, v, &corner));
     }
 }

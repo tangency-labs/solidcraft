@@ -68,7 +68,7 @@
 //!   nothing reads it yet.
 
 use super::certified_line;
-use super::p1::{is_node_valid, is_surface_cache_owner, surface_to_evaluate};
+use super::p1::{is_node_inside, is_node_valid, is_surface_cache_owner, surface_to_evaluate};
 use super::p2::{original_surface, LsiGlobalSolver, Surface, TsectCurveType};
 use super::p4;
 use super::p6::{CurveIntersection, RangeTangentPoint};
@@ -325,6 +325,9 @@ struct CertifiedLeaf<O> {
     interval: Extent1d,
     conts: [[ContinuityType; 2]; 3],
     nodes: [Option<NodeId>; 2],
+    /// Whether the leaf lies wholly inside the face
+    /// ([`super::p1::is_node_inside`]).
+    inside: bool,
 }
 
 /// What the traversal of a solve with the certified pass keeps (not upstream): the leaves
@@ -521,6 +524,8 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         if !is_node_valid(tree.owner(), cache, &surface_node)? {
             return Ok(false);
         }
+        // (not upstream) whether a component in it can straddle the face's border
+        let inside = keep.is_some() && is_node_inside(tree.owner(), cache, &surface_node)?;
 
         // no work - surfaceLeafDomain disjoint from intersectionDomain
         if uv_domain.are_disjoint(&self.uv_domain, 0.0) {
@@ -753,6 +758,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                 interval: leaf.interval,
                 conts: leaf.conts,
                 nodes: leaf.nodes,
+                inside,
             });
         }
 
@@ -1051,6 +1057,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                 floor: (!over_budget).then_some(found.floor),
                 roots: found.roots,
                 strip: false,
+                inside: job.inside,
             });
         }
         if certified_line::leaves_not_run(&searched) {
@@ -1069,6 +1076,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                     floor: None,
                     roots: Vec::new(),
                     strip: true,
+                    inside: false,
                 });
                 continue;
             }
@@ -1084,9 +1092,10 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                 floor: (!over_budget).then_some(found.floor),
                 roots: Vec::new(),
                 strip: true,
+                inside: false,
             });
         }
-        let components = if over_budget {
+        let mut components = if over_budget {
             certified_line::Components::over_budget()
         } else {
             let drops = certified_line::drop_fenced(
@@ -1107,12 +1116,61 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             u64::try_from(components.list.len()).unwrap_or(u64::MAX),
             at_limit,
         );
+        // (a record not run leaves the solutions the guesses' alone, unclassified)
+        let stood_for = if certified_line::leaves_not_run(&searched) {
+            Vec::new()
+        } else {
+            certified_line::type_components(
+                net,
+                &line,
+                &searched,
+                &sides,
+                &mut components,
+                self.base.cancel.as_ref(),
+            )?;
+            self.type_solutions(net, &line, &components, kept.unplaced > 0)?
+        };
         Ok(certified_line::side_record(
             &searched,
             &components,
+            &stood_for,
             kept.unplaced > 0,
             span,
         ))
+    }
+
+    /// Types every point and range solution of the solve from the typed `components`
+    /// ([`certified_line::type_solutions`]; `unplaced`, a cull whose strip could not be
+    /// placed). Returns, for each component, whether the solutions stand for it.
+    fn type_solutions(
+        &mut self,
+        net: &certified_line::LineNet,
+        line: &certified_line::PassLine,
+        components: &certified_line::Components,
+        unplaced: bool,
+    ) -> Result<Vec<bool>> {
+        use certified_line::SolutionAt;
+        let mut at: Vec<SolutionAt> = Vec::new();
+        for sol in self.base.solutions.as_slice() {
+            at.push(match sol.solution_type {
+                SolutionType::SingleValue => SolutionAt::Point([
+                    sol.start.param(0)?,
+                    sol.start.param(1)?,
+                    sol.start.param(2)?,
+                ]),
+                SolutionType::RangeOfValues => SolutionAt::Range,
+                _ => SolutionAt::Other,
+            });
+        }
+        let (typed, stood) = certified_line::type_solutions(net, line, components, &at, unplaced);
+        for (i, t) in typed.into_iter().enumerate() {
+            let (Some((contact, unique)), Some(sol)) = (t, self.base.solutions.get_mut(i)) else {
+                continue;
+            };
+            sol.contact = contact;
+            sol.unique = unique.map(|[u, v]| [[u.lo, u.hi], [v.lo, v.hi]]);
+        }
+        Ok(stood)
     }
 
     /// One certified root of `leaf`, added as a guess's hit is, unless a solution of the
@@ -2108,7 +2166,7 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geom::solution_array::ObjectKind;
+    use crate::geom::solution_array::{Contact, ObjectKind};
     use crate::math::Vec3;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::b_spline_surface::BSplineSurface;
@@ -2362,6 +2420,8 @@ mod tests {
             let [t, u, v] = [0, 1, 2].map(|i| sol.start.parameters[i]);
             let on_surface = s.evaluate_point(&k, Point2::new(u, v)).unwrap();
             assert!(on_surface.distance(p + t * d) < 1.0e-9);
+            // each a transversal crossing, typed by its certified root
+            assert_eq!(sol.contact, Contact::Crossing, "{t}");
         }
     }
 
@@ -2394,6 +2454,82 @@ mod tests {
             })
             .count();
         assert_ne!(crossings, 1, "one crossing of two: {:?}", sols.as_slice());
+        // the leaves there stop at their limit: whatever the guesses return about the
+        // contact is undecided
+        assert!(sols
+            .as_slice()
+            .iter()
+            .all(|sol| sol.contact == Contact::Undecided));
+        // and so is the line dipping 5e-7 below the crown at 45° (tolerance 1e-6), the
+        // guesses' range or points about its two crossings
+        let c = 30.0 / 2.0_f64.sqrt();
+        let along = Vec3::new(-1.0, 1.0, 0.0) * (1.0 / 2.0_f64.sqrt());
+        let p = Vec3::new(c, c, 5.0 - 5.0e-7) - 10.0 * along;
+        let sols = s
+            .base_global_line_intersect::<H>(
+                &k,
+                H(0),
+                &domain,
+                p,
+                20.0 * along,
+                None,
+                false,
+                1.0e-6,
+            )
+            .unwrap();
+        assert!(!sols.is_empty());
+        assert!(
+            sols.as_slice()
+                .iter()
+                .all(|sol| sol.contact == Contact::Undecided),
+            "{:?}",
+            sols.as_slice()
+        );
+    }
+
+    /// A shallow secant of the unit cylinder, 9.09e-5 deep at tolerance 1.0001e-3 (upstream's
+    /// tangency test at its step 10): the certified pass types its two crossings, a hair
+    /// apart, each a crossing by its certified root, and the line solve's join across the
+    /// coincident stretch then makes upstream's range over both (its golden), which takes
+    /// two typed solutions in: undecided, its ends' unique boxes dropped.
+    #[test]
+    fn a_shallow_secant_s_crossings_are_typed_crossings() {
+        let k = Kernel::default();
+        let mut c = crate::surface::cone::Cone::new_cylinder_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            1.0,
+            0.0,
+            360.0,
+            1.0,
+            false,
+            false,
+            true,
+        );
+        c.make_nurb(&k).unwrap();
+        let s = Surface::from(c);
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let y: f64 = 1.0 - 2.0e-3 / 22.0;
+        let half = (1.0 - y * y).sqrt() / 2.0;
+        let sols = s
+            .base_global_line_intersect::<H>(
+                &k,
+                H(0),
+                &domain,
+                Vec3::new(-1.0, y, 0.5),
+                Vec3::new(2.0, 0.0, 0.0),
+                Some(&Extent1d::from_min_max(0.0, 1.0)),
+                false,
+                1.0001e-3,
+            )
+            .unwrap();
+        assert_eq!(sols.len(), 1, "{:?}", sols.as_slice());
+        let range = sols.as_slice()[0];
+        assert_eq!(range.solution_type, SolutionType::RangeOfValues);
+        assert!((range.start.parameters[0] - (0.5 - half)).abs() < 1.0e-9);
+        assert!((range.end.parameters[0] - (0.5 + half)).abs() < 1.0e-9);
+        assert_eq!((range.contact, range.unique), (Contact::Undecided, None));
     }
 
     /// The solve's leaves are counted by how their pass ended: on the line dipping below
@@ -2446,9 +2582,12 @@ mod tests {
     /// The side record a solve returns is in the line's own parameter: the solver runs on
     /// the line scaled to length about 1 (here 20 times shorter), and the record is scaled
     /// back with the solutions before a ray keeps its first. On a line of length 20 through
-    /// the torus near its crown, over the line interval [5, 5.2]: every interval of the
-    /// record lies in that interval, rounded outward, and holds every solution. The same
-    /// line fired as a ray keeps its first hit, and only what starts before it.
+    /// the torus near its crown, over the line interval [5, 5.2], both crossings (at
+    /// 100.409930808 / 20 and 103.163922132 / 20) are typed crossings and the record is
+    /// complete. Over [5, 5.0204966], which ends a hair past the first crossing, that
+    /// crossing's component reaches the interval's end and is undecided: every interval of
+    /// the record lies in the line interval, rounded outward, and holds the solution. The
+    /// same line fired as a ray keeps its first hit, and only what starts before it.
     #[test]
     fn the_side_record_is_scaled_back_before_a_ray_keeps_its_first_hit() {
         let k = Kernel::default();
@@ -2461,9 +2600,9 @@ mod tests {
                 -0.049_801_099_552_871_67,
             );
         let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
-        let interval = Extent1d::from_min_max(5.0, 5.2);
-        let sols = s
-            .base_global_line_intersect::<H>(
+        let solve = |end: f64| {
+            let interval = Extent1d::from_min_max(5.0, end);
+            s.base_global_line_intersect::<H>(
                 &k,
                 H(0),
                 &domain,
@@ -2473,18 +2612,29 @@ mod tests {
                 false,
                 2.0e-5,
             )
-            .unwrap();
+            .unwrap()
+        };
+        let both = solve(5.2);
+        assert_eq!(both.len(), 2);
+        assert!(both
+            .as_slice()
+            .iter()
+            .all(|x| x.contact == Contact::Crossing));
+        assert_eq!(both.side_record(), &SideRecord::Complete);
+        let end = 5.020_496_6;
+        let sols = solve(end);
         let t: Vec<f64> = sols
             .as_slice()
             .iter()
             .map(|x| x.start.parameters[0])
             .collect();
-        assert_eq!(t.len(), 2, "{t:?}");
+        assert_eq!(t.len(), 1, "{t:?}");
+        assert!((t[0] - 100.409_930_808 / 20.0).abs() < 1.0e-9, "{t:?}");
         let SideRecord::Undecided(spans) = sols.side_record() else {
             panic!("{:?}", sols.side_record());
         };
         for &[lo, hi] in spans {
-            assert!(lo >= 5.0 - 1.0e-12 && hi <= 5.2 + 1.0e-12, "{spans:?}");
+            assert!(lo >= 5.0 - 1.0e-12 && hi <= end + 1.0e-12, "{spans:?}");
         }
         for x in &t {
             assert!(

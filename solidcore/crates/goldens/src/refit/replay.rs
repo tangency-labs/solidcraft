@@ -10,7 +10,11 @@
 //!    is made ([`super::before_topology`]; at least one replaced, on a read the seam sees),
 //!    the encoded row, without the `contact` record main does not print, hashes to main's
 //!    row;
-//! 2. as is, the encoded row equals the committed golden line.
+//! 2. as is, the encoded row equals the committed golden line, and its `contact` record
+//!    (the types of line and curve solutions) equals the first run's wherever the two runs
+//!    return as many solutions: the found spheres' NURB moves no type. Where the NURB moves
+//!    the solutions themselves (another count: measured on five `topology.face_p4` sphere
+//!    rows, every code undecided on both NURBs), the first run is held by its hash alone.
 //!
 //! So each committed row is this branch's output, and it differs from main's only through
 //! the NURB the found spheres keep. `corpus.parity` runs its two sides in this process
@@ -102,6 +106,11 @@ fn hash(v: &Value) -> u64 {
     fnv1a64(&serde_json::to_string(&v).unwrap())
 }
 
+/// A row's `contact` record (`crate::util::contact_codes`), if it has one.
+fn contact(v: &Value) -> Option<Value> {
+    v.get("ints").and_then(|i| i.get("contact")).cloned()
+}
+
 /// `run` with the refit installed: the row and what the seam saw.
 pub(crate) fn run_refit(u: &dyn UnitDiff, case: &Case) -> (Value, Refit) {
     state::set(Some(Refit::default()));
@@ -129,9 +138,18 @@ fn replay(unit_id: &str) -> usize {
         if hash(&line) != old_hash {
             failures.push(format!("{name}: refit row is not main's row"));
         }
+        let refit_contact = contact(&line);
         let line = run(u.as_ref(), case);
         if golden.get(name) != Some(&line) {
             failures.push(format!("{name}: the row is not the committed golden line"));
+        }
+        let counts = |c: &Option<Value>| c.as_ref().and_then(Value::as_array).map(Vec::len);
+        if counts(&refit_contact) == counts(&contact(&line)) && contact(&line) != refit_contact {
+            failures.push(format!(
+                "{name}: contact {:?} refit, {:?} as is",
+                refit_contact,
+                contact(&line)
+            ));
         }
     }
     assert!(failures.is_empty(), "{unit_id}:\n{}", failures.join("\n"));

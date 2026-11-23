@@ -9,8 +9,9 @@
 # offset.offset_executive_p2, surface.surface_cache_p1: main's files with the three rows the retired zero-row-batch flags move (surface_cache_p1 gen0168 and gen0222, the lowest continuity of the V knots; offset_executive_p2 boolean_domain_problemShell12_face0_round, result.geometry[3] by 1.3e-16)
 # surface.surface_point_solve_p2: main's file without the lines of gen0072 and gen0546, Solve maxima a witness grid refutes, now known failing (#13684)
 # surface.surface_point_solve_p3: main's file without the lines of 51 global point solves a witness grid refutes, now known failing (#13684)
-# surface.surface_p8: main's file with the crossings the certified line pass adds where the leaves' guesses missed them (gen0595, gen0602, gen0844; #20499), and the exact `ints.contact` key, every code 0 (unclassified), on the 840 cases that print solution records
-# surface.surface_p10, topology.face_p4: main's files with the exact `ints.contact` key, every code 0 (unclassified), on the cases that print line or curve solution records (841 and 1534; #20499)
+# surface.surface_p8: main's file with the crossings the certified line pass adds where the leaves' guesses missed them (gen0595, gen0602, gen0844; #20499), and the exact `ints.contact` key on the 840 cases that print solution records, each code the type the certified pass gives the solution (0 unclassified where no pass ran; 204 lines carry 192 crossings and 55 undecided)
+# surface.surface_p10: main's file with the exact `ints.contact` key, every code 0 (unclassified: the leaf solve runs no certified pass), on the 841 cases that print line or curve solution records (#20499)
+# topology.face_p4: main's file with the exact `ints.contact` key on the 1534 cases that print line solution records (#20499), each code the type the certified pass gives the solution (0 unclassified where no pass ran; 747 lines carry 960 crossings and 520 undecided)
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -237,7 +238,7 @@ surface.surface_p4	08286ee77b021cb0
 surface.surface_p5	4053a16013112073
 surface.surface_p6	2b213a42de8cade5
 surface.surface_p7	6619493f96d9d624
-surface.surface_p8	1189980b2c7034a7
+surface.surface_p8	b66d557ca094eb4a
 surface.surface_p9	f2fca09a332c9f42
 surface.surface_point_solve_p1	4c854434083b74bd
 surface.surface_point_solve_p2	44853fdb11f55ee8
@@ -282,7 +283,7 @@ topology.edgeuse_p3	2fa671be5fe983ba
 topology.face_p1	eae7279ae1704f4d
 topology.face_p2	3d9f19f33644771c
 topology.face_p3	100eae05c5608203
-topology.face_p4	ef9b34e68be91403
+topology.face_p4	d5ce9cf1abedcf91
 topology.loopuse	a5205f3ad278e686
 topology.part_file	059f0c49211cb6c3
 topology.proto_topology_p1	eb2d12e7c345bfa0
