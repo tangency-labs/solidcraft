@@ -175,12 +175,17 @@ fn with_fallback(mut fonts: egui::FontDefinitions, name: &str, bytes: Vec<u8>) -
     Some(fonts)
 }
 
-/// `fonts` with the Georgian fallback moved ahead of Hack. Hack (egui's built-in last resort, see
-/// [`with_symbol_fallback`]) has Mkhedruli in a monospace design, so a fallback after it would
-/// only ever draw the Asomtavruli and Mtavruli letters Hack lacks. The monospace family keeps Hack's
-/// own design.
+/// `fonts` with the Georgian fallback moved ahead of Hack in a Georgian interface. Hack (egui's
+/// built-in last resort, see [`with_symbol_fallback`]) has Mkhedruli in a monospace design, so a
+/// fallback after it would only ever draw the Asomtavruli and Mtavruli letters Hack lacks. Other
+/// interfaces keep Hack first: the system Georgian face can be a broad one (Sylfaen, Segoe UI,
+/// DejaVu Sans) that would otherwise take over every symbol Plex lacks. The monospace family keeps
+/// Hack's own design.
 #[cfg(not(target_arch = "wasm32"))]
-fn georgian_before_symbols(mut fonts: egui::FontDefinitions) -> egui::FontDefinitions {
+fn georgian_before_symbols(mut fonts: egui::FontDefinitions, language: &str) -> egui::FontDefinitions {
+    if language != "ka" {
+        return fonts;
+    }
     for family in sans_families() {
         let Some(list) = fonts.families.get_mut(&family) else { continue };
         if let Some(georgian) = list.iter().position(|name| name == GEORGIAN_FALLBACK)
@@ -586,7 +591,7 @@ fn install_fonts(ctx: &egui::Context, language: &str, ui_font: &str, system: Opt
             fonts = with_fallback;
         }
     }
-    fonts = georgian_before_symbols(fonts);
+    fonts = georgian_before_symbols(fonts, language);
     if needs_cjk_font(language) {
         // Select the first installed face in language order (a duplicate Chinese face may
         // already be installed as CJK_FALLBACK). Keep explicit interface choices ahead of it.
@@ -1128,11 +1133,18 @@ mod tests {
         };
         // Hack draws Mkhedruli too, so the system face must come before it to be the one used.
         let Some(bytes) = found.into_iter().next() else { return };
-        let fonts = georgian_before_symbols(with_fallback(look::definitions(), GEORGIAN_FALLBACK, bytes).unwrap());
+        let installed = with_fallback(look::definitions(), GEORGIAN_FALLBACK, bytes).unwrap();
+        let at = |fonts: &egui::FontDefinitions, family: &egui::FontFamily, name: &str| {
+            fonts.families[family].iter().position(|entry| entry == name).unwrap()
+        };
+        // Any other interface keeps Hack ahead of it, so symbols Plex lacks still come from Hack.
+        let english = georgian_before_symbols(installed.clone(), "en");
         for family in sans_families() {
-            let list = &fonts.families[&family];
-            let at = |name: &str| list.iter().position(|entry| entry == name).unwrap();
-            assert!(at(GEORGIAN_FALLBACK) < at(SYMBOL_FALLBACK), "the Georgian face comes before Hack");
+            assert!(at(&english, &family, SYMBOL_FALLBACK) < at(&english, &family, GEORGIAN_FALLBACK), "an English interface keeps Hack's place");
+        }
+        let fonts = georgian_before_symbols(installed, "ka");
+        for family in sans_families() {
+            assert!(at(&fonts, &family, GEORGIAN_FALLBACK) < at(&fonts, &family, SYMBOL_FALLBACK), "the Georgian face comes before Hack");
         }
         assert!(georgian(fonts), "Georgian draws with the fallback");
     }

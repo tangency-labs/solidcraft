@@ -219,7 +219,8 @@ appends a system Hebrew font (Arial Hebrew or SF Hebrew on macOS, Segoe UI or Ar
 Noto Sans Hebrew or DejaVu Sans on Linux); the web build has no Hebrew font yet, so a Hebrew
 interface shows empty boxes there.
 Georgian is the same: the desktop host appends a system Georgian font (SF Georgian on macOS,
-Sylfaen or Segoe UI on Windows, Noto Sans Georgian or DejaVu Sans on Linux), ahead of Hack. The web
+Sylfaen or Segoe UI on Windows, Noto Sans Georgian or DejaVu Sans on Linux); in a Georgian interface it
+comes ahead of Hack, elsewhere after it, so other interfaces keep Hack's symbols. The web
 build has no Georgian font yet: there egui's built-in Hack draws the Mkhedruli letters in its
 monospace design, and Asomtavruli and Mtavruli show as empty boxes.
 
