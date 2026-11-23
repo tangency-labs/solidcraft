@@ -182,6 +182,18 @@ impl AfterCheck {
     }
 }
 
+/// The reply a worker sends on `done`, when it comes within `wait`. As with the history's
+/// commands, a wait of zero always leaves the reply for a later frame, and then `done` is not
+/// read at all: a reply that is already in stays in it for that frame. (Read here and not used,
+/// it left the frame nothing to receive but the worker's end, and the delete it was for was
+/// dropped as one that could not be checked.)
+pub(crate) fn reply_within<T>(done: &std::sync::mpsc::Receiver<T>, wait: std::time::Duration) -> Option<T> {
+    if wait.is_zero() {
+        return None;
+    }
+    done.recv_timeout(wait).ok()
+}
+
 /// Commands a later one of the same kind replaces while they wait: where the marker ends is all
 /// that counts.
 fn replaced_by_a_later_one(id: &str) -> bool {
@@ -237,6 +249,8 @@ impl SolveApp {
 
     /// [`Self::run_heavy`], as the operation `serial` (the operations panel's row).
     fn run_heavy_as(&mut self, id: &str, params: Value, serial: u64) -> Result<Value, String> {
+        crate::sketch_view::sync(self)?;
+        crate::workspace::command_receiver(self, id, &params)?;
         if id == "timeline.play" {
             return self.run(id, params);
         }
@@ -347,10 +361,9 @@ impl SolveApp {
             });
             if spawned.is_ok() {
                 let check = DeleteCheck { done: rx, started: crate::now_ms(), then, revision: self.session.revision, kept, progress };
-                // As with the history's commands, zero always leaves it for a later frame.
-                match (wait.is_zero(), check.done.recv_timeout(wait)) {
-                    (false, Ok(replies)) => check.then.finish(self, replies, Some(check.kept.clone())),
-                    _ => self.delete_check = Some(check),
+                match reply_within(&check.done, wait) {
+                    Some(replies) => check.then.finish(self, replies, Some(check.kept.clone())),
+                    None => self.delete_check = Some(check),
                 }
                 return;
             }

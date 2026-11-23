@@ -41,7 +41,7 @@
         "7": 77,
         "76": 1,
         "8": 6,
-        "9": 9
+        "9": 10
       },
       "expressible": 123,
       "not_expressible": 12,
@@ -104,10 +104,10 @@
       "ungraded": {}
     },
     "fillets": {
-      "cases": 320,
+      "cases": 321,
       "chain": {
         "1": 15,
-        "13": 8,
+        "13": 9,
         "14": 1,
         "17": 1,
         "2": 6,
@@ -118,9 +118,9 @@
         "7": 2,
         "8": 1
       },
-      "expressible": 97,
+      "expressible": 98,
       "not_expressible": 16,
-      "operation_expressible": 304,
+      "operation_expressible": 305,
       "reasons": {
         "SolidCraft has no command for it yet": 2,
         "refused or failed in SolidCraft, not in a kernel operation": 14
@@ -504,14 +504,14 @@
       }
     },
     "threads": {
-      "cases": 31,
+      "cases": 32,
       "chain": {
         "4": 1,
-        "7": 23
+        "7": 24
       },
-      "expressible": 24,
+      "expressible": 25,
       "not_expressible": 7,
-      "operation_expressible": 24,
+      "operation_expressible": 25,
       "reasons": {
         "refused or failed in SolidCraft, not in a kernel operation": 7
       },

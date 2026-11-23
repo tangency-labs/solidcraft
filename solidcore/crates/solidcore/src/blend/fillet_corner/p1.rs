@@ -3322,7 +3322,7 @@ impl FilletCorner {
         set_edge_curve(env.pseudo.brep_mut(), rail0, None)?;
         let crv_ivl = rail0_curve.natural_interval();
         set_edge_curve(env.pseudo.brep_mut(), edge0, Some(rail0_curve))?;
-        env.pseudo.brep_mut().edge_mut(edge0)?.interval = crv_ivl;
+        edge::set_interval(env.pseudo.brep_mut(), edge0, &crv_ivl)?;
 
         // move pRail1->Curve to pEdge1 (delete current pEdge1->Curve - reverse Rail1Curve
         // direction)
@@ -3330,7 +3330,7 @@ impl FilletCorner {
         let crv_ivl = rail1_curve.natural_interval();
         let crv_ivl = rail1_curve.reverse_parameterization(env.k, &crv_ivl)?;
         set_edge_curve(env.pseudo.brep_mut(), edge1, Some(rail1_curve))?;
-        env.pseudo.brep_mut().edge_mut(edge1)?.interval = crv_ivl;
+        edge::set_interval(env.pseudo.brep_mut(), edge1, &crv_ivl)?;
 
         // move pEU0->UVTrimCurve to pPrimEU0 (delete current pPrimEU0->UVTrimCurve)
         env.pseudo
@@ -3691,7 +3691,8 @@ fn make_face(
 /// dropped**: only the record of a `Failed` holds a cause. No information is lost today:
 /// every caller passes a failure `SolidError::blend_failed` builds, which is always a
 /// `Failed` ([`re_solved`] at the two corner conversions, their local `sm_err` closure's;
-/// the fillet executive's stage failures and the session's "the fillet body is not built").
+/// the fillet executive's stage failures and the session's fillet body not built, a step of
+/// the executive failing).
 /// A new caller must pass a `Failed` too.
 pub(in crate::blend) fn keeping_cause(error: SolidError, cause: SolidError) -> SolidError {
     match error {

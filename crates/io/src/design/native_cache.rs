@@ -15,7 +15,15 @@ const PAYLOAD: &str = "cache/bodies.bin";
 const MAX_RECORDS: usize = 200_000;
 /// Distinct stored bodies.
 const MAX_UNIQUE: usize = 100_000;
-const MAX_MANIFEST: usize = 32 << 20;
+/// The smallest cap on `cache/model.json`: what it has always been at the default design file limit.
+const MIN_MANIFEST: usize = 32 << 20;
+
+/// The cap on `cache/model.json`, saving and reading: an eighth of the design file limit in force
+/// (the default 256 MiB gives the 32 MiB it always was), so a design the user allows to be that
+/// large keeps its model cache (#20724). Still bounded by that limit, never unbounded.
+pub(super) fn max_manifest() -> usize {
+    MIN_MANIFEST.max(max_design() / 8)
+}
 
 /// The build that wrote a cache (recorded; earlier builds read only their own caches).
 fn build() -> String {
@@ -52,7 +60,23 @@ fn matrix(t: &[[f64; 4]; 4]) -> Vec<f64> {
 pub(super) fn encode_model(model: &SavedModel, document: &[u8], space: usize) -> Result<(Vec<u8>, Vec<u8>)> {
     let encoded = Encoded::of(model)?;
     let total = encoded.slices.iter().fold(0usize, |n, s| n.saturating_add(s.len()));
-    let fits = |manifest: &[u8], payload: &[u8]| manifest.len() <= MAX_MANIFEST && manifest.len().saturating_add(payload.len()) <= space;
+    let cap = max_manifest();
+    // Which limit a cache of this size is over, with the sizes, or none.
+    let refusal = |manifest: &[u8], payload: &[u8]| {
+        if manifest.len() > cap {
+            Some(format!("its manifest is {} MB, over the {} MB allowed", manifest.len() >> 20, cap >> 20))
+        } else if manifest.len().saturating_add(payload.len()) > space {
+            Some(format!(
+                "manifest and bodies are {} MB, over the {} MB room in the file",
+                manifest.len().saturating_add(payload.len()) >> 20,
+                space >> 20
+            ))
+        } else {
+            None
+        }
+    };
+    let fits = |manifest: &[u8], payload: &[u8]| refusal(manifest, payload).is_none();
+    let mut why: Option<String> = None;
     if total <= space {
         let every: Vec<usize> = (0..model.bodies.len()).collect();
         if let Ok((manifest, data)) = encoded.cache(&model.records, &every, document)
@@ -60,6 +84,8 @@ pub(super) fn encode_model(model: &SavedModel, document: &[u8], space: usize) ->
         {
             return Ok((manifest, data));
         }
+    } else {
+        why = Some(format!("its bodies are {} MB, over the {} MB room in the file", total >> 20, space >> 20));
     }
     // Fewer states. The bodies are encoded already: a state costs the slices it adds.
     let size = |s: &usize| encoded.slices.get(*s).map_or(0, Vec::len);
@@ -78,6 +104,7 @@ pub(super) fn encode_model(model: &SavedModel, document: &[u8], space: usize) ->
             break;
         }
         let Ok((manifest, data)) = encoded.cache(&thin.records, &kept, document) else {
+            why = Some("it could not be encoded within the record and body limits".into());
             if smallest {
                 break;
             }
@@ -95,15 +122,20 @@ pub(super) fn encode_model(model: &SavedModel, document: &[u8], space: usize) ->
             );
             return Ok((manifest, data));
         }
+        why = refusal(&manifest, &data).or(why);
         if smallest {
             break;
         }
         // What the choice did not count (the bodies' table, the slices) took the room: choose again
         // within that much less than it counted, so each try keeps less.
-        let over = manifest.len().saturating_add(data.len()).saturating_sub(space).max(manifest.len().saturating_sub(MAX_MANIFEST));
+        let over = manifest.len().saturating_add(data.len()).saturating_sub(space).max(manifest.len().saturating_sub(cap));
         budget = counted.saturating_sub(over).saturating_sub(1);
     }
-    log::info!("the model cache ({} MB) does not fit the design file: saved without it", total >> 20);
+    log::info!(
+        "the model cache ({} MB) does not fit the design file: saved without it ({})",
+        total >> 20,
+        why.as_deref().unwrap_or("not even its final state fits")
+    );
     Err(invalid("model cache size"))
 }
 
@@ -419,7 +451,7 @@ fn read_geometry<R: Read + Seek>(reader: &mut PackageReader<R>, document: &[u8],
     if container.get("format").and_then(Value::as_str) != Some(VERSION) {
         return Err(invalid("container version"));
     }
-    let mut manifest: Value = serde_json::from_slice(&reader.limited_part(MANIFEST, MAX_MANIFEST)?).map_err(invalid)?;
+    let mut manifest: Value = serde_json::from_slice(&reader.limited_part(MANIFEST, max_manifest())?).map_err(invalid)?;
     if !current(&manifest, document) {
         return Err(invalid("model cache key"));
     }
