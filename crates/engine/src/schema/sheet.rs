@@ -578,6 +578,11 @@ pub struct UnfoldParams {
     /// (refold).
     #[serde(default)]
     pub body: Option<String>,
+    /// Unfold: a point on the flat panel that stays where it is, so the flat lies in its plane.
+    /// Default: the largest flat panel, or the one an earlier unfold of the sheet fixed.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FixedPoint")]
+    pub fixed: Option<FixedPoint>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

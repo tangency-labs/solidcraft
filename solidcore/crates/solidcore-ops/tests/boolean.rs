@@ -11,7 +11,7 @@ use std::io::Read as _;
 
 use serde_json::Value;
 use solidcore::topology::vertex::corner;
-use solidcore_ops::boolean::{boolean, imprint, union_all};
+use solidcore_ops::boolean::{boolean, imprint, union_all, union_copies};
 use solidcore_ops::prism::extrude_planar_regions;
 use solidcore_ops::sweep::{extrude, join_arcs, revolve, zone_tolerance, Curve, DraftCorner, Join};
 use solidcore_ops::{
@@ -45,6 +45,32 @@ fn two_overlapping_boxes() {
     assert!(near(volume(&d), 7.0), "{}", volume(&d));
     let i = boolean(a(), b(), BooleanOp::Intersect).unwrap().unwrap();
     assert!(near(volume(&i), 1.0), "{}", volume(&i));
+}
+
+/// The public repro in solidcraft#20408 joins two swept parts along their matching collars.
+#[test]
+fn a_union_of_overlapping_collars_keeps_both_input_bodies() {
+    all_fixes();
+    let a = Body::from_smb(include_bytes!("data/issue_20408_hoop.smb").to_vec(), false).unwrap();
+    let b = Body::from_smb(include_bytes!("data/issue_20408_back.smb").to_vec(), false).unwrap();
+    let before = [volume(&a), volume(&b)];
+    let joined = union_copies(&a, &b).unwrap().unwrap();
+    assert_eq!(joined.solid_count().unwrap(), 1);
+    assert!(joined.check(CheckLevel::Geometry).unwrap().is_valid());
+    // The operands overlap in their coaxial 1.3 mm-radius collars over exactly 2 mm.
+    let overlap = PI * 1.3 * 1.3 * 2.0;
+    assert!(near(volume(&joined), before[0] + before[1] - overlap));
+    assert_eq!(joined.counts().unwrap(), [25, 70, 46]);
+    // The outside of the surviving collar at x=4.75 + 1.3 is 0.1 mm from the probe.
+    let (_, order) = joined.to_record().unwrap();
+    let faces: Vec<usize> = (0..25).collect();
+    let closest = joined
+        .closest_to_point(&order, &faces, &[], [6.15, 15.25, 18.375])
+        .unwrap()
+        .unwrap();
+    assert!(near(closest.distance, 0.1));
+    assert!(near(volume(&a), before[0]));
+    assert!(near(volume(&b), before[1]));
 }
 
 #[test]
@@ -3678,4 +3704,101 @@ fn a_traced_revolved_counterbore_a_hair_off_the_holes_axis_cuts_the_part() {
         (v - want).abs() < 1e-3,
         "volume {v}, on the hole's axis {want}"
     );
+}
+
+/// #20422: two curved spline pockets meeting diagonally at the crossing (4, 5) leave a vertical
+/// self-touching pinch edge along (4, 5, 3)..(4, 5, 4) whose curve is a degree-1 `Record::Spline`.
+/// Through a record round trip, `split_touching` writes two copies of that edge; before the fix,
+/// `curve::from_parameters` marked clamped polynomial splines rational (`w = 1.0` instead of
+/// `NOW`), so `glue_self_touching_edges` and `edges_coincide` both refused them (`certified_hausdorff`
+/// rejects rational curves) and cutting the third adjacent pocket N failed in `relate`.
+///
+/// Closed-form areas (depth 1 on the [0, 10] × [0, 10] × [0, 4] box of volume 400):
+/// - L (x ∈ [3, 4], between y = 2 + 4u - u² and y = 8 - 4u + u²): ∫₀¹ (6 - 8u + 2u²) du = 8/3
+/// - M (x ∈ [4, 6], between y = 5 - 4t(1-t) and y = 5 + 4t(1-t), dx/dt = 2): 16/6 = 8/3
+/// - N (x ∈ [3, 5], up to y = 8 above L's top and M's left half-top): 5/3 + 7/3 = 4
+///
+/// Remaining volume: 400 - 28/3 = 1172/3.
+#[test]
+fn curved_pockets_touching_along_a_vertical_spline_edge_cut_after_round_trip() {
+    all_fixes();
+    let z = 3.0;
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line {
+        start: [a[0], a[1], z],
+        end: [b[0], b[1], z],
+    };
+    let quad = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| Curve::Nurbs {
+        degree: 2,
+        points: vec![
+            [a[0], a[1], z, 1.0],
+            [b[0], b[1], z, 1.0],
+            [c[0], c[1], z, 1.0],
+        ],
+        knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    };
+    let tool = |curves: &[Curve]| {
+        extrude(
+            curves,
+            [0.0, 0.0, 1.0],
+            1.0,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap()
+    };
+    let region_l = tool(&[
+        line([3.0, 8.0], [3.0, 2.0]),
+        quad([3.0, 2.0], [3.5, 4.0], [4.0, 5.0]),
+        quad([4.0, 5.0], [3.5, 6.0], [3.0, 8.0]),
+    ]);
+    let region_m = tool(&[
+        quad([4.0, 5.0], [5.0, 3.0], [6.0, 5.0]),
+        quad([6.0, 5.0], [5.0, 7.0], [4.0, 5.0]),
+    ]);
+    let region_n = tool(&[
+        quad([3.0, 8.0], [3.5, 6.0], [4.0, 5.0]),
+        quad([4.0, 5.0], [4.5, 6.0], [5.0, 6.0]),
+        line([5.0, 6.0], [5.0, 8.0]),
+        line([5.0, 8.0], [3.0, 8.0]),
+    ]);
+
+    let block = make_box([0.0, 0.0, 0.0], [10.0, 10.0, 4.0]).unwrap();
+    let after_l = round_tripped(
+        &boolean(block, region_l, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap(),
+    );
+    let after_m_raw = boolean(after_l, region_m, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    // Verify the exported record actually has the two duplicate vertical `Spline` edges at (4, 5).
+    let (rec, _) = after_m_raw.to_record().unwrap();
+    let at_pinch = |p: [f64; 3]| (p[0] - 4.0).abs() < 1e-9 && (p[1] - 5.0).abs() < 1e-9;
+    let pinch_splines = rec
+        .edges
+        .iter()
+        .filter(|e| {
+            let [a, b] = e.vertices;
+            at_pinch(rec.vertices[a as usize].point)
+                && at_pinch(rec.vertices[b as usize].point)
+                && matches!(e.curve, solidcore_record::brep::Curve::Spline { .. })
+        })
+        .count();
+    assert_eq!(
+        pinch_splines, 2,
+        "expected 2 duplicate vertical Spline pinch edges at (4, 5)"
+    );
+
+    let after_m = Body::from_record(&rec, true).unwrap().0;
+    let r = boolean(after_m, region_n, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(r.solid_count().unwrap(), 1);
+    assert!(r.is_manifold_solid().unwrap());
+    let want = 400.0 - 28.0 / 3.0;
+    let got = volume(&r);
+    assert!(near(got, want), "volume {got} vs closed form {want}");
 }
