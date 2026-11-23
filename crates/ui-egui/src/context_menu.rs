@@ -471,7 +471,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Timeline { feature } => crate::timeline::feature_items(app, *feature),
         Target::Workspace => {
             let rendering = crate::render_workspace::active(app);
-            let drawing = crate::drawing_workspace::active(app);
+            let drawing = crate::drawing_workspace::active(app) || crate::workspace::sheet_scope(app);
             // Design, then Drawing (the owner's order), then Render: the workspaces there are. Ones still
             // to come aren't listed.
             vec![
@@ -2027,7 +2027,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 &format!("{name}.step"),
                 &["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz"],
                 "file.export",
-                json!({"bodies": bodies}),
+                // `hierarchy` is read for GLB only.
+                json!({"bodies": bodies, "hierarchy": app.preferences.glb_export_hierarchy}),
             );
         }
         "ui.findBrowser" => {

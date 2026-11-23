@@ -849,7 +849,7 @@ small error.
 | an intersection loop stays open across a cut | two curve ends on an edge with a loose tolerance lie apart (each face's curve ends where its own surface meets the other face, up to tol / sin φ along the edge), or one ends inside a face; the face is not cut through and the flood crosses the gap | the two causes found are closed before the imprint: one proto vertex per crossing of an edge with a face, and a curve end classified by the face's trims (§5); a loop still open is classified as before, wrong for the set flooded across the gap | a refusal by name for a loop left open across a cut; a crossing whose piece of the edge is not proved inside the band |
 | an imprint fails half way | both bodies are partly imprinted | the imprint's error is returned, not overwritten (`topology_intersector/p2.rs`) | |
 | union deletes a face between the outside and a solid | the solid merges into the infinite region | after post-processing, a union is refused with `SM_ERR` naming the face (`merge/p4.rs`) if the solid side of any such face (the uses of that solid's faces that stay) lies in no solid region, even when another solid region is left; when none of those uses is left, it is refused if no solid region is left | a leak whose solid's remaining face uses all end in solid regions is kept without a check that the union is right (no known input records one) |
-| result not a solid | an open or inward body from solid operands | ops refuses with `Error::NotSolid` | |
+| result not a solid | an open or inward body from solid operands | ops refuses with `Error::NotSolid` under the closed contract, or `Error::NotSolidBecause` naming the test under the proved contract | |
 | result empty | no faces left | ops returns `None` (`boolean`) or `Error::Empty` (`union_all`, `imprint`) | |
 
 **Refusals.** The kernel refuses with `SolidError` statuses: `SM_ERR` (a failed classification, a
@@ -894,7 +894,7 @@ A reviewer can check each of these on a change to the boolean.
 - Definitions carried through face splits and copies (§7), tested on a round.
 - The ops entry points with the result contract (`solidcore-ops/src/boolean.rs`).
 - The rig: 130 boolean cases in `solidcore/tests/kernel_cases/booleans/`, two listed in
-  `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
+  `kernel_cases_known_failing/` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
   returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
 - No opt-in fixes are left for the cases in §5, §6 and §8. Always on: the operand's exact trims on
   a face B gives to A (WR-361), the union's solid-leak refusal (WR-619), a boolean

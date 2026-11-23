@@ -421,6 +421,27 @@ reports missing picks beside their fields, and asks the person to review and App
 If the design changes while a worker computes, atomic command acceptance rejects its result.
 No stale result can overwrite the current design.
 
+### Shared field definitions
+
+When several entries ask for the same field, define it once under `$defs` and point to it with
+`{"$ref": "#/$defs/<name>"}`. The `$defs` can sit at the top of the manifest, where every entry
+can use it, or in one entry's `input_schema`, where it wins over a top-level definition of the
+same name. Keys beside a `$ref` replace the definition's own, so an entry can keep the shared choices
+with its own `default` or `description`:
+
+```json
+"$defs": {"units": {"type": "string", "title": "Units", "enum": ["mm", "in"], "default": "mm"}},
+"runtime": {"entries": [
+  {"name": "box", "input_schema": {"type": "object", "properties": {"units": {"$ref": "#/$defs/units"}}}},
+  {"name": "lid", "input_schema": {"type": "object", "properties": {"units": {"$ref": "#/$defs/units", "default": "in"}}}}
+]}
+```
+
+The app inlines every `$ref` once, when it loads the manifest, so dialogs, tools, conditions and
+input checks see the full field. Only these local names are followed. An unknown name, a definition
+that refers back to itself, or nesting too deep to expand refuses the manifest. The 64 KiB cap
+applies to `plugin.json` as written.
+
 ### Conditional fields, choices and defaults
 
 Command dialogs evaluate declarative conditions on sibling scalar properties. Changing a field
@@ -891,7 +912,14 @@ Only an importer may say `open`.
 - **Failures.** A failure fails that one import, named with the plugin and the file ("Sample
   could not open bracket.smp: ...", or "Sample does not support bracket.smp: ..." for
   `unsupported`), and the next one gets a fresh instance. The compiled component stays in memory, so the next file opens
-  without compiling again; nothing compiled is written to disk.
+  without compiling again.
+- **Compiled plugins are kept.** A plugin compiles once per version: SolidCraft keeps the compiled
+  code with Wasmtime's compilation cache in the `plugin-compile` folder of its per-user cache folder
+  (`%LOCALAPPDATA%\SolidCraft\plugin-compile`, `~/Library/Caches/SolidCraft/plugin-compile`, or
+  `~/.cache/solidcraft/plugin-compile`), never in the plugin's or a design's folder. It is safe to
+  delete: the next session compiles again. A changed plugin, SolidCraft version or setting gets its own
+  entry; a damaged entry is compiled again, and a folder that can't be written only means compiling
+  each session. The folder holds machine code SolidCraft runs, so it is as trusted as the app itself.
 - **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
   `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel has to fit the user's ceiling in Preferences › Plugins, and
   its memory too unless the user approved more at install. Build it for `wasm32-unknown-unknown` and wrap it with

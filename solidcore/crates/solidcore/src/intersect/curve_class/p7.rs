@@ -1998,10 +1998,11 @@ fn classify_face_interval_on<O: ClassObject>(
         _ => {}
     }
 
-    // If a fillet rail leaves a vertex tangent to a boundary, that vertex's
-    // sector alone may vote outside while its other end lies inside the face.
-    // Confirm that unclassified end on the actual trim before testing the
-    // interval's interior.
+    // If a curve leaves a vertex tangent to a boundary, that vertex's sector
+    // alone may vote outside while its unclassified opposite end lies strictly
+    // inside the face (including fillet rails classified by `rails_fit` and
+    // `TestRollOver`, which run with `doing_fillets = false`). Confirm that
+    // unclassified end on the actual trim before testing the interval's interior.
     let opposite_end = match (did_min, did_max) {
         (true, false)
             if !min.inside
@@ -2020,7 +2021,7 @@ fn classify_face_interval_on<O: ClassObject>(
         _ => None,
     };
     let mut opposite_inside = false;
-    if ctx.doing_fillets && ctx.do_point_classify && ctx.uv_space_okay {
+    if ctx.do_point_classify && ctx.uv_space_okay {
         if let Some(t) = opposite_end {
             if let Some(curve) = context_uv_curve1(access.geometry(), ctx)? {
                 let p = curve.evaluate_point(k, t)?;
