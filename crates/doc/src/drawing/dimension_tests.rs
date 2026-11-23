@@ -698,3 +698,20 @@ fn faces_lie_on_one_cone_by_its_apex_axis_and_half_angle() {
     assert!(!a.same(&cone(Vec3::new(1e-3, 0.0, 0.0), Vec3::Z, 0.5), 1e-6), "another apex");
     assert!(!a.same(&Curved::Sphere(Sphere { center: Vec3::ZERO, radius: 1.0 }), 1e-6));
 }
+
+/// A text is read as a template: `{value}` the measured number, doubled braces a brace each, and a
+/// text written with [`text_literal`] comes back as its own characters, which is how an older
+/// drawing's text is carried over.
+#[test]
+fn a_text_template_fills_its_value_and_keeps_literal_braces() {
+    assert_eq!(text_shown("2× {value} THRU", Some("Ø6.00")), "2× Ø6.00 THRU");
+    assert_eq!(text_shown("{value}", Some("6.00")), "6.00");
+    assert_eq!(text_shown("{value} / {value}", Some("6")), "6 / 6");
+    assert_eq!(text_shown("2× {value}", None), "2× ?", "nothing measured to show");
+    assert!(text_shows_value("TYP {value}") && !text_shows_value("SEE NOTE") && !text_shows_value("{{value}}"));
+    for old in ["SEE NOTE", "{value}", "a {b} c", "}{", "{{x}}", "Ø6 {THRU"] {
+        let kept = text_literal(old);
+        assert_eq!(text_shown(&kept, Some("9")), old, "an older text shows what it showed");
+        assert!(!text_shows_value(&kept), "{old}: and stays words");
+    }
+}

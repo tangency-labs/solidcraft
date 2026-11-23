@@ -7,7 +7,8 @@
 //! tolerance of the kernel's certified bound ([`certified_distance`]). Ops checks the inputs
 //! and converts.
 //! A closed periodic curve (unclamped knots, as `curve_fit::closed_cv_curve` makes) is refused
-//! for now: the kernel's knot routines take clamped knots.
+//! for now: the kernel's knot routines take clamped knots. A curve's joints, where its knots make
+//! it at most continuous ([`joints`]), are read from its knots as they are, clamped or not.
 
 use solidcore::error::nurbs::NurbsFailure;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
@@ -175,6 +176,23 @@ pub fn split_at(curve: &Curve, t: f64) -> Result<(Curve, Curve)> {
         };
         Ok(record_of(&before).and_then(|b| record_of(&after).map(|a| (b, a))))
     })?
+}
+
+/// The joints of spline `curve` strictly inside `interval`, in order: its knots held at least
+/// as many times as its degree, where it is at most continuous, as where the pieces of a chain
+/// meet ([`solidcore::nurbs::knots::joints`]).
+///
+/// # Errors
+/// [`Error::Argument`] for a curve that is not a spline or rational spline, or whose knots are
+/// fewer than its control points need.
+pub fn joints(curve: &Curve, interval: [f64; 2]) -> Result<Vec<f64>> {
+    let (knots, count) = match curve {
+        Curve::Spline { knots, points } => (knots, points.len()),
+        Curve::RationalSpline { knots, homogeneous } => (knots, homogeneous.len()),
+        _ => return Err(Error::Argument),
+    };
+    let degree = knots.len().checked_sub(count + 1).ok_or(Error::Argument)?;
+    Ok(solidcore::nurbs::knots::joints(knots, degree, interval))
 }
 
 /// The record of `changed` and the kernel's certified bound of its distance from `original`,
@@ -578,5 +596,35 @@ mod tests {
             end: [1.0; 3],
         };
         assert_eq!(split_at(&line, 0.5), Err(Error::Argument));
+    }
+
+    #[test]
+    fn joints_are_the_knots_held_as_many_times_as_the_degree() {
+        // The cubic on WAVE has the inner knots 1/3 and 2/3 once each: no joint. With 0.5
+        // inserted three times, the degree, it has one there, and only strictly inside.
+        let mut c = cv_curve(&WAVE, 3).unwrap();
+        assert_eq!(joints(&c, [0.0, 1.0]), Ok(vec![]));
+        for _ in 0..3 {
+            c = insert_knot(&c, 0.5).unwrap();
+        }
+        assert_eq!(joints(&c, [0.0, 1.0]), Ok(vec![0.5]));
+        assert_eq!(joints(&c, [0.5, 1.0]), Ok(vec![]));
+        // Unclamped knots are read as they are: 0 to 9 under 6 points, a cubic, each held once.
+        let floating = Curve::Spline {
+            knots: (0..10).map(f64::from).collect(),
+            points: WAVE.to_vec(),
+        };
+        assert_eq!(joints(&floating, [3.0, 6.0]), Ok(vec![]));
+        // Not a spline, or fewer knots than its points need: refused.
+        let line = Curve::Line {
+            start: [0.0; 3],
+            end: [1.0; 3],
+        };
+        assert_eq!(joints(&line, [0.0, 1.0]), Err(Error::Argument));
+        let short = Curve::Spline {
+            knots: vec![0.0, 1.0],
+            points: WAVE.to_vec(),
+        };
+        assert_eq!(joints(&short, [0.0, 1.0]), Err(Error::Argument));
     }
 }

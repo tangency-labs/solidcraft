@@ -43,6 +43,20 @@ impl Scratch {
         std::fs::write(&path, script.to_string()).unwrap();
         path
     }
+
+    /// A box and its measure, then a cut from a sketch that does not exist, which fails, and a
+    /// step that never runs (#19964).
+    fn failing_step_script(&self) -> PathBuf {
+        let path = self.0.join("failing-step.json");
+        let script = json!([
+            {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Box"}},
+            {"command": "inspect.measure", "params": {"summary": true}},
+            {"command": "solid.extrude", "params": {"sketch": "No such sketch", "distance": 5, "operation": "cut", "targets": ["Box"]}},
+            {"command": "inspect.measure", "params": {"summary": true}},
+        ]);
+        std::fs::write(&path, script.to_string()).unwrap();
+        path
+    }
 }
 
 impl Drop for Scratch {
@@ -167,4 +181,69 @@ fn run_json_out_is_not_written_when_a_feature_fails() {
         assert!(String::from_utf8_lossy(&output.stderr).contains("nothing was written"), "{name}");
         assert!(!file.exists(), "{name}");
     }
+}
+
+/// #19964: a step that fails still hands over the results of the steps before it, with its
+/// error, on stdout or in `--json-out`, with `--allow-errors` too; the run fails, and writes no
+/// `--out`.
+#[test]
+fn run_results_keep_the_steps_before_a_failing_step_and_its_error() {
+    let dir = Scratch::new();
+    let script = dir.failing_step_script();
+    let on_stdout = cli().arg("run").arg(&script).arg("--results").output().unwrap();
+    assert_eq!(on_stdout.status.code(), Some(1));
+    let mut printed: Value = serde_json::from_slice(&on_stdout.stdout).unwrap();
+    without_timings(&mut printed);
+    for (name, extra) in [("plain", &[][..]), ("allow-errors", &["--allow-errors"][..])] {
+        let file = dir.0.join(format!("results-{name}.json"));
+        let part = dir.0.join(format!("part-{name}.stl"));
+        let output =
+            cli().arg("run").arg(&script).arg("--results").args(extra).arg("--out").arg(&part).arg("--json-out").arg(&file).output().unwrap();
+        assert_eq!(output.status.code(), Some(1), "{name}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("step 3 (solid.extrude)"), "{name}: {stderr}");
+        assert!(output.stdout.is_empty(), "{name}: the JSON goes to the file");
+        assert!(!part.exists(), "{name}: no part is written from a script that stopped");
+        let mut written: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        without_timings(&mut written);
+        assert_eq!(written, printed, "{name}: the file is what stdout carried");
+        let results = written["results"].as_array().unwrap();
+        assert_eq!(results.len(), 2, "{name}: the two steps before the failure");
+        assert_eq!(results[1]["body_count"], 1, "{name}: the measure before the failure");
+        assert_eq!(written["error"]["step"], 3, "{name}");
+        assert_eq!(written["error"]["command"], "solid.extrude", "{name}");
+        assert!(written["error"]["error"].as_str().is_some_and(|e| !e.is_empty()), "{name}");
+    }
+}
+
+/// With `--timings`, the failing step's time is kept beside the steps before it, and the error
+/// is added beside the timings; a step that names no command has no `command`.
+#[test]
+fn run_timings_keep_the_failing_step_and_a_step_without_a_command() {
+    let dir = Scratch::new();
+    let script = dir.failing_step_script();
+    let output = cli().arg("run").arg(&script).arg("--timings").arg("--results").output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let printed: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(printed["timings"].as_array().map(Vec::len), Some(3), "the failing step is timed too");
+    assert_eq!(printed["results"].as_array().map(Vec::len), Some(2));
+    assert_eq!(printed["error"]["step"], 3);
+
+    let nameless = dir.0.join("nameless.json");
+    std::fs::write(&nameless, json!([{"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}, {"params": {}}]).to_string())
+        .unwrap();
+    let output = cli().arg("run").arg(&nameless).arg("--results").output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("script step 2: missing `command`"));
+    let printed: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(printed["results"].as_array().map(Vec::len), Some(1));
+    assert_eq!(printed["error"], json!({"step": 2, "error": "missing `command`"}));
+}
+
+/// A script whose steps all work prints its results as a list, as before.
+#[test]
+fn run_results_of_a_script_that_works_stay_a_list() {
+    let dir = Scratch::new();
+    let printed: Value = serde_json::from_slice(&stdout_of(cli().arg("run").arg(dir.script()).arg("--results").output().unwrap())).unwrap();
+    assert!(printed.is_array());
 }

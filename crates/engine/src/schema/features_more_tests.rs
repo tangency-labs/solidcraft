@@ -108,6 +108,7 @@ fn schemas_and_the_key_check_agree() {
             "body_names",
             "clockwise",
             "diameter",
+            "end_cut",
             "height",
             "name",
             "operation",

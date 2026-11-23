@@ -56,6 +56,63 @@ pub struct PartsInsertParams {
     pub flip: Option<bool>,
 }
 
+/// Resolve bore picks before placing custom hardware. Each pick names its world body.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PartsSeatsParams {
+    #[schemars(length(min = 1, max = 1000))]
+    pub picks: Vec<BorePick>,
+    /// Major shank diameter in mm for a 90-degree countersunk head.
+    #[serde(default)]
+    pub countersunk_shank_diameter: Option<f64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct BorePick {
+    #[serde(rename = "type")]
+    pub kind: BorePickKind,
+    pub body: String,
+    pub index: usize,
+    pub point: Point3,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum BorePickKind {
+    Edge,
+    Face,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PartsSeats {
+    pub seats: Vec<BoreSeat>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BoreSeat {
+    /// Index of the first pick of this hole.
+    pub pick_index: usize,
+    /// Use as the host side of joint.create.
+    pub origin: BoreOrigin,
+    pub point: [f64; 3],
+    pub normal: [f64; 3],
+    pub x_dir: [f64; 3],
+    /// From the bore end to the shank/head junction along the outward normal, in mm.
+    pub shank_offset: f64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BoreOrigin {
+    pub body: String,
+    pub occurrence: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub path: Vec<u64>,
+    pub circle: String,
+    pub end: String,
+}
+
 /// Change an inserted standard part's size or length, rebuilding it in place; its joints keep it
 /// seated. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]

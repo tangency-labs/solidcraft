@@ -95,7 +95,6 @@ use crate::sweep::topology_sweep::store::SweepIdentities;
 use crate::topology::edge::{NotificationStores, NotifyState};
 use crate::topology::edgeuse::{p1 as eu, p2 as eu2};
 use crate::topology::face::p2 as face;
-#[cfg(test)]
 use crate::topology::topology::Topology;
 use crate::topology::{Brep, BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, RegionId, VertexId};
 
@@ -242,17 +241,21 @@ fn make_shell_edges_exact(
 /// at the original B-rep's tolerance): the distance reaches a radius of curvature of the face
 /// (a round offset by its radius), so the offset is a line there, neither a face nor inside
 /// out, and building on lifts the faces beside it across it and grows their tolerances into
-/// an unsound body. An offset that folds (the distance passes the radius) is
-/// [`refuse_folding_offset`]'s, which runs after it. A base that is no NURB has nothing to
-/// prove.
-fn refuse_singular_offset(
+/// an unsound body. Then (WR-718, #2350 S1) refuses it when it folds on that box
+/// ([`crate::offset::construction::sheets::certify_regular`]), naming the largest wall that
+/// works. Both rest on one search for the face's least radius on the displaced side
+/// ([`crate::offset::construction::sheets::least_wall`]), made once. A base that is no NURB
+/// has nothing to prove.
+fn refuse_singular_or_folding_offset(
     kernel: &Kernel,
     original: &Brep,
     face: FaceId,
     offset: &crate::surface::offset_surface::OffsetSurface,
     operation: &'static str,
 ) -> Result<()> {
-    use crate::offset::construction::sheets::proved_singular;
+    use crate::offset::construction::sheets::{
+        certify_regular_knowing, check_reach, least_wall, singular_at, Regularity,
+    };
     let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, offset.base_surface())? else {
         return Ok(());
     };
@@ -262,17 +265,38 @@ fn refuse_singular_offset(
     let domain = crate::topology::face::p2::uv_domain(original, face)?;
     let uv_box = [domain.min.x, domain.max.x, domain.min.y, domain.max.y];
     let distance = offset.offset_distance();
-    match proved_singular(base, distance, Some(uv_box), original.tolerance())? {
-        Some(singular) if singular.collapses => Err(Failure::new(
+    let resolution = original.tolerance();
+    check_reach(distance, resolution)?;
+    let least = least_wall(base, distance, Some(uv_box))?;
+    if let Some(singular) = least.and_then(|radius| singular_at(radius, distance, resolution)) {
+        if singular.collapses {
+            return Err(Failure::new(
+                operation,
+                OffsetFailure::Collapses {
+                    face,
+                    distance,
+                    radius: singular.radius,
+                },
+            )
+            .into_error());
+        }
+    }
+    match certify_regular_knowing(kernel, base, distance, Some(uv_box), least)? {
+        Regularity::Regular => Ok(()),
+        Regularity::Folds { largest } => Err(Failure::new(
             operation,
-            OffsetFailure::Collapses {
+            OffsetFailure::Folds {
                 face,
                 distance,
-                radius: singular.radius,
+                largest,
             },
         )
         .into_error()),
-        _ => Ok(()),
+        Regularity::NotCertified => Err(Failure::new(
+            operation,
+            OffsetFailure::NotCertified { face, distance },
+        )
+        .into_error()),
     }
 }
 
@@ -481,48 +505,6 @@ fn collapsed_face_radius(
         )
     };
     proved().ok().flatten().unwrap_or_else(|| distance.abs())
-}
-
-/// Not upstream (WR-718, #2350 S1): refuses the offset of `face` (whose implicit offset
-/// surface is `offset`) when it folds on the face's parameter box
-/// ([`crate::offset::construction::sheets::certify_regular`]), naming the largest wall
-/// that works.
-fn refuse_folding_offset(
-    kernel: &Kernel,
-    original: &Brep,
-    face: FaceId,
-    offset: &crate::surface::offset_surface::OffsetSurface,
-    operation: &'static str,
-) -> Result<()> {
-    use crate::offset::construction::sheets::{certify_regular, Regularity};
-    let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, offset.base_surface())? else {
-        return Ok(());
-    };
-    let Some(base) = nurb.gw_nurb() else {
-        return Ok(());
-    };
-    let domain = crate::topology::face::p2::uv_domain(original, face)?;
-    let uv_box = [domain.min.x, domain.max.x, domain.min.y, domain.max.y];
-    match certify_regular(kernel, base, offset.offset_distance(), Some(uv_box))? {
-        Regularity::Regular => Ok(()),
-        Regularity::Folds { largest } => Err(Failure::new(
-            operation,
-            OffsetFailure::Folds {
-                face,
-                distance: offset.offset_distance(),
-                largest,
-            },
-        )
-        .into_error()),
-        Regularity::NotCertified => Err(Failure::new(
-            operation,
-            OffsetFailure::NotCertified {
-                face,
-                distance: offset.offset_distance(),
-            },
-        )
-        .into_error()),
-    }
 }
 
 /// Static offset entry point, with a non-null original and an owned result.
@@ -868,8 +850,8 @@ impl OffsetExecutive {
                             continue;
                         }
                     }
-                    // SE upstream: propagate Unported, ignore other errors.
-                    crate::error::ignore_status(self.mapped_edge_prefix(
+                    // SE upstream: propagate Unported, ignore other errors but a defect.
+                    super::p1::ignored_unless_defect(self.mapped_edge_prefix(
                         kernel,
                         original,
                         edgeuse,
@@ -893,7 +875,7 @@ impl OffsetExecutive {
                             attributes: &mut *notifications.attributes,
                             key_of: notifications.result_key_of,
                         };
-                        crate::error::ignore_status(self.build_side_wall_of_edgeuse_with(
+                        super::p1::ignored_unless_defect(self.build_side_wall_of_edgeuse_with(
                             kernel,
                             original,
                             Some(edgeuse),
@@ -993,6 +975,7 @@ impl OffsetExecutive {
             }
         }
 
+        self.remove_extinct_branches(kernel, original, notifications)?;
         let mapped = order_edgeuses_by_brep(original, &self.mapped_original_edgeuses())?;
         // (not upstream) a local operation's edges whose surfaces all stay are kept
         self.keep_unmoved_edges(original)?;
@@ -1041,18 +1024,19 @@ impl OffsetExecutive {
                         attributes: &mut *notifications.attributes,
                         key_of: notifications.original_key_of,
                     };
-                    let mated = crate::error::ignored(self.mate_edges_across_with_marked(
-                        kernel,
-                        original,
-                        edgeuse,
-                        across,
-                        offset_edgeuse,
-                        offset_across,
-                        mark_type,
-                        &marked,
-                        &mut stores,
-                        notifications.result_key_of,
-                    ))?;
+                    let mated =
+                        super::p1::ignored_unless_defect(self.mate_edges_across_with_marked(
+                            kernel,
+                            original,
+                            edgeuse,
+                            across,
+                            offset_edgeuse,
+                            offset_across,
+                            mark_type,
+                            &marked,
+                            &mut stores,
+                            notifications.result_key_of,
+                        ))?;
                     if mated.is_none() {
                         unbridged =
                             unbridged.or(Some(required(eu::face(original, radial)?, OP_EXTENDED)?));
@@ -1234,6 +1218,7 @@ impl OffsetExecutive {
             // offset's vertex where two consecutive edges' offsets run parallel), then split
             // the edges that run past a step wall's corner (after WR-531's caps below, in the
             // fork's order)
+            self.reconstruct_periodic_boundaries(kernel, original, notifications)?;
             self.close_loop_gaps(kernel, original, notifications)?;
 
             // Not upstream (WR-531; the fork's tangency-labs/smlib@d5dadaa): a vertex where
@@ -1290,13 +1275,14 @@ impl OffsetExecutive {
                     kernel.check_cancelled(OP_EXTENDED)?;
                     let edge = required(eu::edge(original, edgeuse)?, OP_EXTENDED)?;
                     if eu::edge_is_lamina(original, edge)? {
-                        // SE, not SER, upstream: propagate Unported, ignore other errors.
+                        // SE, not SER, upstream: propagate Unported, ignore other errors but
+                        // a defect.
                         let mut stores = NotificationStores {
                             records: &mut *notifications.records,
                             attributes: &mut *notifications.attributes,
                             key_of: notifications.result_key_of,
                         };
-                        crate::error::ignore_status(self.build_side_wall_of_edgeuse_with(
+                        super::p1::ignored_unless_defect(self.build_side_wall_of_edgeuse_with(
                             kernel,
                             original,
                             Some(edgeuse),
@@ -1386,13 +1372,41 @@ impl OffsetExecutive {
                     select = false;
                 }
             }
+            // (not upstream, #18570) a local operation (Offset Face, Draft) keeps the body's
+            // cavities: `make_manifold` with no regions given keeps every finite region and
+            // deletes the faces between two of them, the walls of a hollowed body's cavity
+            // among them, which filled the cavity in. The regions kept are the material
+            // ones, read from the faces ([`p5::alternating_void_flags`]); the cavity's
+            // walls stay, between a kept region and one that is not.
+            let material: Vec<RegionId> =
+                if !select && self.operation() == OffsetOperation::LocalOperation {
+                    crate::topology::brep::p5::alternating_void_flags(&result)?
+                        .filter(|flags| flags.values().filter(|&&v| v).count() > 1)
+                        .map(|flags| {
+                            flags
+                                .into_iter()
+                                .filter(|&(_, v)| !v)
+                                .map(|(r, _)| r)
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+            let keep = if select {
+                Some(cavities.as_slice())
+            } else if material.is_empty() {
+                None
+            } else {
+                Some(material.as_slice())
+            };
             // MakeManifold exists in p5, but its remaining metadata/topology
             // adapters must still propagate Unported even though native ignores
             // ordinary errors. Do not turn that partial path into empty success.
             if crate::error::ignored(crate::topology::brep::p5::make_manifold(
                 kernel,
                 &mut result,
-                select.then_some(cavities.as_slice()),
+                keep,
                 false,
             ))?
             .is_some()
@@ -1413,6 +1427,10 @@ impl OffsetExecutive {
                 for region in bp1::regions(&result, None)? {
                     let is_void = Some(region) == result.infinite_region();
                     result.region_mut(region)?.is_void = i32::from(is_void);
+                }
+                // (not upstream, #18570) the cavities kept above are void again
+                if !material.is_empty() {
+                    crate::topology::brep::p5::set_alternating_void_flags(&mut result)?;
                 }
             }
             let _ = self.take_offset_brep();
@@ -1699,8 +1717,7 @@ impl OffsetExecutive {
             if let Some(crate::surface::surface::SurfaceKind::OffsetSurface(offset)) =
                 surface.as_ref().map(crate::surface::surface::Surface::kind)
             {
-                refuse_singular_offset(kernel, original, id, offset, operation)?;
-                refuse_folding_offset(kernel, original, id, offset, operation)?;
+                refuse_singular_or_folding_offset(kernel, original, id, offset, operation)?;
             }
         }
         // Not upstream (WR-346, tangency-labs/solidcore#397): an inset face whose offset
@@ -2129,7 +2146,9 @@ pub fn offset_brep_simple(
 /// with notification identities of its own, as [`offset_brep_simple`]: for a caller that
 /// keeps no notification stores (`SmBrep::LocalOperation` on a B-rep of the caller's).
 /// The B-rep's attributes stay on its faces as upstream's notifications carry them; its
-/// [`Brep::key`] is restored.
+/// [`Brep::key`] is restored. A complete inward cylindrical draft with fixed axial
+/// end planes uses its exact closed radial removal volume before the executive;
+/// this also trims intervening walls against the drafted support.
 ///
 /// # Errors
 ///
@@ -2140,6 +2159,13 @@ pub fn local_operation_simple(
     faces: &[FaceId],
     surfaces: Vec<crate::surface::surface::Surface>,
 ) -> Result<()> {
+    if crate::topology::brep::local_operation::contract_complete_cylinder(
+        kernel, b, faces, &surfaces,
+    )?
+    .is_some()
+    {
+        return Ok(());
+    }
     let saved_key = b.key();
     b.set_key(attributes::original_key(EntityRef::Brep(BrepId::from_index(0))).key);
     let mut records = attributes::simple_records(b);
@@ -2166,6 +2192,34 @@ pub fn local_operation_simple(
     result
 }
 
+/// Carries the selected face's own attributes onto a static local operation's
+/// swept wall, using the normal Copy handlers and disjoint source/result identities.
+pub(crate) fn copy_local_sweep_attributes(
+    kernel: &mut Kernel,
+    source: &Brep,
+    face: FaceId,
+    target: &mut Brep,
+    wall: FaceId,
+) -> Result<()> {
+    let mut store = AttributeStore::default();
+    attributes::seed_attributes(source, &attributes::original_key, &mut store)?;
+    let from = attributes::original_key(EntityRef::Face(face));
+    let to = attributes::result_key(EntityRef::Face(wall));
+    let mut records = attributes::simple_records(source);
+    records.insert(to.key, Topology::new());
+    crate::topology::topology::notify(
+        &mut records,
+        &mut store,
+        Some(&mut kernel.context),
+        NotifyOperation::Copy,
+        from,
+        Some(to),
+        None,
+        None,
+    )?;
+    attributes::write_back_attributes(target, &attributes::result_key, &store)
+}
+
 /// (not upstream) [`api_shell_brep_full`] with notification identities of its own,
 /// on faces of `original` (`faces` removed: open faces; empty: a closed shell). The
 /// source's attributes reach the result as upstream's notifications carry them; the
@@ -2181,7 +2235,10 @@ pub fn shell_brep_simple(
     faces: &[FaceId],
 ) -> Result<Brep> {
     let source_id = BrepId::from_index(0);
-    let mut source = original.clone_standing_for_self()?;
+    // The working copy keeps the faces' definitions (not upstream: an exact round's
+    // definition rides beside its net, #2485), so that a round offsets by its definition
+    // (#2487: the round of the moved radius on the offset supports), never by its net.
+    let mut source = original.clone_standing_for_self_keeping_definitions()?;
     source.set_key(attributes::original_key(EntityRef::Brep(source_id)).key);
     let mut records = attributes::simple_records(&source);
     let mut store = AttributeStore::default();

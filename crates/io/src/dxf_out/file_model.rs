@@ -464,6 +464,11 @@ impl<G> DxfFile<G> {
         self.layers.get(id.index).ok_or_else(|| invalid("unknown DXF layer handle"))
     }
 
+    /// Where a declared layer sits in [`Self::layers`].
+    pub(super) fn layer_index(&self, id: LayerId) -> Result<usize> {
+        self.layer(id).map(|_| id.index)
+    }
+
     /// The frozen legacy fixtures keep exact names and first declaration wins.
     /// This private seam cannot initialize or relax an ordinary/producer file.
     #[cfg(any(test, feature = "dxf-legacy-baseline-tests"))]

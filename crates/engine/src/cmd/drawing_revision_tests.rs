@@ -91,7 +91,11 @@ fn rows_are_saved_with_the_drawing() {
     let saved = s.drawing("test").unwrap().to_json().unwrap();
     let v: Value = serde_json::from_str(&saved).unwrap();
     assert_eq!(v["revisions"]["rows"][0]["id"], json!(row));
-    assert!(v["format_pending"].as_array().unwrap().contains(&json!("revisions")), "{}", v["format_pending"]);
+    // Revisions are a change of drawing format 2 (folded for 0.45.0-rc.1): the drawing is
+    // written at 2 or later and no longer names the change as pending.
+    let format = v["format"].as_str().and_then(|f| solidcraft_doc::format::DRAWING.version_of(f));
+    assert!(format.is_some_and(|n| n >= 2), "{}", v["format"]);
+    assert!(!v["format_pending"].as_array().is_some_and(|names| names.contains(&json!("revisions"))), "{}", v["format_pending"]);
     assert_eq!(Drawing::from_json(&saved).unwrap().revisions, s.drawing("test").unwrap().revisions);
     // A damaged record is refused as the drawing is read, and one kept per sheet isn't a drawing's yet.
     for (path, bad) in [("/revisions/rows/0/revision", json!("A\nB")), ("/revisions/per_sheet", json!(true))] {

@@ -776,18 +776,29 @@ impl Cone {
             // The kept cone runs between its new apex (where the offset radius reaches
             // zero) and the surviving end, at the original's slope: the radius spans
             // `old_top_radius - old_bot_radius` over `height`.
+            // (The ends are at the STEP domain's heights, not at the origin and `height`
+            // above it as upstream takes them: an unbounded cone runs from its apex, and an
+            // adjusted one from any height. Upstream placed the kept cone's origin as if the
+            // bottom were at the origin, off its apex by the bottom height, so the offset
+            // was another cone: the base radius at the wrong height. With the bottom at
+            // the origin, `0 + h` is `h` and nothing changes.)
+            let bot_height = self.bot_height();
             let (new_height, bot_origin, collapsed_at_base) = if new_bot_radius < approx_tol_3d {
                 let new_height = new_top_radius * height / (old_top_radius - old_bot_radius);
                 new_bot_radius = 0.0;
                 (
                     new_height,
-                    origin + (height + off_z_dist - new_height) * z_axis,
+                    origin + (bot_height + height + off_z_dist - new_height) * z_axis,
                     true,
                 )
             } else {
                 let new_height = new_bot_radius * height / (old_bot_radius - old_top_radius);
                 new_top_radius = 0.0;
-                (new_height, origin + off_z_dist * z_axis, false)
+                (
+                    new_height,
+                    origin + (bot_height + off_z_dist) * z_axis,
+                    false,
+                )
             };
 
             // New Cone Position - truncated at new apex position
@@ -952,10 +963,24 @@ impl Cone {
         })?;
         ignore_status(gen.transform(k, &mv, None))?;
 
+        // (The polar converter's circle is rebuilt on the offset cone, as the truncated
+        // branch above does: upstream's copy kept the original's circle, off the offset
+        // by the offset distance, so conversions through it named the original's
+        // parameters.) (status ignored)
+        ignore_status(off_cone.rebuild_cone_polar_converter(k))?;
+
         Ok(Some(off_cone))
     }
 
     // ---- IsNurbSurfaceCone -------------------------------------------------------
+
+    /// The height (the distance between its end circles' centres) below which
+    /// [`Self::is_nurb_surface_cone`] refuses a NURB as a disk, not a cone, and
+    /// [`Self::rebuild_step_from_nurb_parameters`] refuses to rebuild one. Named so that the
+    /// rotational sweep, which builds no analytic cone lower than this, and these tests use
+    /// the same number (tangency-labs/solidcraft#17085). Above it a form can still be refused
+    /// by the other tests.
+    pub(crate) const MIN_HEIGHT: f64 = EFF_ZERO_SQRT;
 
     /// The cone `test_surface` is (`IsNurbSurfaceCone`), or `None`: the surface must be
     /// rational, of degree 1 with two control points in one direction and degree 2 in
@@ -1072,7 +1097,7 @@ impl Cone {
         let height = nurb_z_axis.length();
 
         // not a cone - height of cone is degenerate (cone is a disk)
-        if height < EFF_ZERO_SQRT {
+        if height < Self::MIN_HEIGHT {
             return Ok(None);
         }
         nurb_z_axis = nurb_z_axis.unitize_or_z();
@@ -1389,6 +1414,24 @@ impl Cone {
         if !equal_radii {
             return Ok(None);
         }
+        // Not upstream (#17462, #18415 review): the chord recovery holds the arcs to the
+        // circle and to the plane square to the ruling only within `pt_tol`, so the copied
+        // net is kept as this cylinder's form only when `implicit::lies_on` certifies it on
+        // the cylinder, to the rounding of storing it. That tolerance does not also cover the
+        // rounding of the recovered origin and radius or of the Bezier decomposition's knot
+        // insertion, so a net off by only those may be refused: conservative, never unsound.
+        // Otherwise the surface is no cylinder here and stays a B-spline.
+        if from_chord {
+            let certificate = implicit::Implicit::Cone {
+                origin,
+                axis: z_axis,
+                radius: bot.radius,
+                tan_angle: 0.0,
+            };
+            if !implicit::lies_on(test_surface, &certificate)? {
+                return Ok(None);
+            }
+        }
 
         let mut cylinder = Self::new_cylinder_bounded(
             origin,
@@ -1623,7 +1666,7 @@ impl Cone {
         let height = nurb_z_axis.length();
 
         // not a cone - height of cone is degenerate (cone is a disk)
-        if height < EFF_ZERO_SQRT {
+        if height < Self::MIN_HEIGHT {
             return Err(SolidError::surface_failed(
                 OP_REBUILD,
                 "the cone's height is degenerate",
@@ -2222,23 +2265,17 @@ mod tests {
         }
     }
 
-    /// #17462: the wall a linear sweep made from 0.008 mm of a spline, a 0.005 degree arc of
-    /// radius 88 mm swept 53 mm along -y, its NURBS form as the app's flat arrays carry it
-    /// (rows exact translates). The legs' normal of so short an arc is 2e-8 rad off the
-    /// ruling, past the angular zero both recoveries held it to, so the form, which is the
-    /// cylinder's own, was refused. It is a cylinder on the form with the ruling's axis.
-    #[test]
-    fn a_very_short_extruded_arc_is_a_cylinder_whatever_its_legs_normal() {
+    /// The #17462 wall's NURBS form (see the test below), its middle control points moved
+    /// by `nudge` (in both rows, so the rows stay translates).
+    fn short_arc_wall(nudge: Vec3) -> BSplineSurface {
         use crate::nurbs::math::CPoint;
         use crate::nurbs::srf_basic::Surface as Nurb;
-        use crate::surface::implicit::{lies_on, AnalyticSupport};
-        let k = kernel();
         let w = 0.999_999_998_985_303_8;
         // (x w, y w, z w, w), as the record holds them
         let row = |p: [[f64; 3]; 3]| -> Vec<CPoint> {
             p.iter()
-                .zip([1.0, w, 1.0])
-                .map(|(&[x, y, z], w)| CPoint::new(x, y, z, w))
+                .zip([(1.0, Vec3::ZERO), (w, nudge * w), (1.0, Vec3::ZERO)])
+                .map(|(&[x, y, z], (w, d))| CPoint::new(x + d.x, y + d.y, z + d.z, w))
                 .collect()
         };
         let net = vec![
@@ -2270,7 +2307,19 @@ mod tests {
             vec![0.0, 0.0, 0.0, knot, knot, knot],
         )
         .unwrap();
-        let form = BSplineSurface::from_nurb(nurb, false);
+        BSplineSurface::from_nurb(nurb, false)
+    }
+
+    /// #17462: the wall a linear sweep made from 0.008 mm of a spline, a 0.005 degree arc of
+    /// radius 88 mm swept 53 mm along -y, its NURBS form as the app's flat arrays carry it
+    /// (rows exact translates). The legs' normal of so short an arc is 2e-8 rad off the
+    /// ruling, past the angular zero both recoveries held it to, so the form, which is the
+    /// cylinder's own, was refused. It is a cylinder on the form with the ruling's axis.
+    #[test]
+    fn a_very_short_extruded_arc_is_a_cylinder_whatever_its_legs_normal() {
+        use crate::surface::implicit::{lies_on, AnalyticSupport};
+        let k = kernel();
+        let form = short_arc_wall(Vec3::ZERO);
         let cone = Cone::is_nurb_surface_cylinder(&k, &form, 1.0)
             .unwrap()
             .expect("a cylinder");
@@ -2284,6 +2333,26 @@ mod tests {
         };
         let axis = placement.z_axis();
         assert!(axis.x.abs() < 1e-15 && axis.z.abs() < 1e-15, "{axis:?}");
+    }
+
+    /// #18415 review: the chord recovery holds the arc's control points to the circle only
+    /// within `pt_tol` (1.4e-8 here). The #17462 wall with its middle control points moved
+    /// 5e-9 mm off the circle, square to the chord in the arc's plane, passes every one of
+    /// those checks, but its net is not the cylinder's: the copy is refused rather than
+    /// labelled as that cylinder, and the surface stays a B-spline.
+    #[test]
+    fn a_short_arc_wall_off_its_circle_by_less_than_the_zero_is_no_cylinder() {
+        let k = kernel();
+        let chord = Vec3::new(
+            4.778_385_209_010_169 - 4.770_516_121_717_348,
+            0.0,
+            58.640_147_758_206_49 - 58.638_980_067_614_24,
+        );
+        let across = Vec3::new(-chord.z, 0.0, chord.x).unitize().unwrap();
+        let wall = short_arc_wall(across * 5e-9);
+        assert!(Cone::is_nurb_surface_cylinder(&k, &wall, 1.0)
+            .unwrap()
+            .is_none());
     }
 
     /// #16488: a form whose rows are not exact translates. A unit-radius arc of 1 rad about

@@ -167,7 +167,7 @@ fn wr649_without_the_band_check() {
 // inner vertical rounds R3, and an inner floor round R1. Synthetic reconstruction
 // through ops does not reproduce the refusal, so retain this valid representation.
 //
-// The kernel is configured from the rig's (`kernel_cases/fixes.json`), so the review
+// The kernel is configured from the rig's (`support/solidcraft_fixes.rs`), so the review
 // sees what every kernel case sees: no operation-specific fix set of its own.
 //
 // The inner planar contour has length L = 152 + 6*pi and total turning 2*pi.

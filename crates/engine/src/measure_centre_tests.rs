@@ -453,6 +453,48 @@ fn edges_measure_between_their_exact_arcs_within_the_arcs() {
     assert!(p.dist(Vec3::new(end[0], end[1], 0.0) * (10.0 / reach) + Vec3::new(0.0, 0.0, 5.0)) < 1e-9, "{r}");
 }
 
+/// The report's concentric half-cylinder faces are 35 - 20 = 15 mm apart (#19061).
+/// Both witnesses must lie on the exact cylinders, throughout their trimmed height.
+#[test]
+fn faces_measure_between_their_exact_half_cylinders() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [0, -20], "end": [0, 20], "through": [20, 0]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [0, -35], "end": [0, 35], "through": [35, 0]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, -20], [0, -35]]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [0, 35]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "5 mm", "operation": "new_body"}));
+    let name = body(&s);
+    for (inner, outer) in [([20.0, 0.0, 2.5], [35.0, 0.0, 2.5]), ([14.142, 14.142, 2.5], [24.749, 24.749, 2.5])] {
+        let pick = |p| json!({"type": "face", "body": name, "point": p});
+        for items in [vec![pick(inner), pick(outer)], vec![pick(outer), pick(inner)]] {
+            let r = measure(&mut s, items);
+            assert!(close(&r["distance_mm"], 15.0, 1e-9), "{r}");
+            assert!(close(&r["min"], 15.0, 1e-9), "{r}");
+            let from: Vec3 = serde_json::from_value(r["from"].clone()).unwrap();
+            let to: Vec3 = serde_json::from_value(r["to"].clone()).unwrap();
+            assert!((from.dist(to) - 15.0).abs() < 1e-9, "{r}");
+            for (key, radius) in [("from", r["items"][0]["radius"].as_f64().unwrap()), ("to", r["items"][1]["radius"].as_f64().unwrap())] {
+                let p: Vec3 = serde_json::from_value(r[key].clone()).unwrap();
+                assert!((p.x.hypot(p.y) - radius).abs() < 1e-9 && p.x >= -1e-9 && p.z >= -1e-9 && p.z <= 5.0 + 1e-9, "{r}");
+            }
+        }
+    }
+    // A failed face solve must report its error instead of substituting display triangles.
+    let _failing = crate::cmd::measure_sel::forced::fail();
+    let error = s
+        .execute(
+            "inspect.measure",
+            &json!({"items": [
+                {"type": "face", "body": name, "point": [20, 0, 2.5]},
+                {"type": "face", "body": name, "point": [35, 0, 2.5]}
+            ]}),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("made to fail"), "{error}");
+}
+
 /// Where the kernel's exact solve can't answer for two edges, they still measure, on the display
 /// mesh, and the reply says the distance is approximate: the issue's concentric arcs (#17823),
 /// whose mesh chords run up to the chord tolerance inside the arcs, so a little under 15.

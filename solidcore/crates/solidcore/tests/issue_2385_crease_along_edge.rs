@@ -45,12 +45,9 @@ const PI: f64 = std::f64::consts::PI;
 
 /// Every flag.
 fn kernel() -> Kernel {
-    let mut fixes = UpstreamFixes::all();
-    // the round on the continued wall; with `fillet_round_ends_on_outline` it ends on the
-    // body's outline (`wr730_round_ends_on_outline.rs`)
-    fixes.fillet_round_ends_on_outline = false;
+    // the round on the continued wall, trimmed at its crease
     let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes = fixes;
+    k.fixes = UpstreamFixes::all();
     k
 }
 

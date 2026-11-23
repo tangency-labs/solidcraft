@@ -127,7 +127,9 @@ impl Drawing {
             require(self.tables.by_id(list).is_some_and(|t| matches!(t.kind, Kind::PartsList(_))), named)?;
         }
         check_edge(&b.edge)?;
-        require(!b.edge.path.is_empty(), || "it points at a placed part: its edge's body is placed through an occurrence".into())?;
+        require(!b.edge.path.is_empty(), || {
+            "a balloon points at a part placed as a component of an assembly: an edge with no `path` is on the design's own body, so place the part as a component and give its occurrence in the edge's `path`".into()
+        })?;
         let [x, y] = b.at;
         require(is_paper_coordinate(x) && is_paper_coordinate(y), || format!("its place is at most {MAX_SIDE_MM} mm on paper"))
     }

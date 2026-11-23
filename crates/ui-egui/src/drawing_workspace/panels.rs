@@ -3,11 +3,11 @@ use solidcraft_engine::doc::drawing::{
     Drawing, MAX_DPI, MAX_NAME_BYTES, MIN_DPI, Sheet,
     dimension::DimensionKind,
     table::{Kind, MassFormat, PartsList},
-    view::ViewPlace,
 };
-use solidcraft_engine::doc::{drawing_view::TangentEdges, ids};
+use solidcraft_engine::doc::ids;
 use solidcraft_engine::geom::{
     drawing_sheet::{DrawingBorderProfile, Orientation, PaperSize, Sheet as Paper, SheetSize},
+    drawing_view::Scale,
     table::Heading,
     title_block::{self, TitleBlock},
 };
@@ -27,9 +27,19 @@ pub(super) enum Tool {
     Dimension(Option<u64>),
     Note(Option<u64>),
     PartsList(Option<u64>),
+    Export,
+    Detail,
 }
 
 impl Tool {
+    /// The placed object whose options these are, if they are one's.
+    pub(super) fn object(self) -> Option<u64> {
+        match self {
+            Self::Base | Self::Projected | Self::Export | Self::Detail => None,
+            Self::Edit(object) | Self::Dimension(object) | Self::Note(object) | Self::PartsList(object) => object,
+        }
+    }
+
     pub(super) fn for_command(id: &str) -> Option<Self> {
         match id {
             "drawing.view.base" | "drawing.view.base.planned" => Some(Self::Base),
@@ -38,6 +48,8 @@ impl Tool {
             "drawing.dimension" => Some(Self::Dimension(None)),
             "drawing.note" => Some(Self::Note(None)),
             "drawing.parts_list" => Some(Self::PartsList(None)),
+            "drawing.export" => Some(Self::Export),
+            "drawing.view.detail" | "drawing.view.detail.planned" => Some(Self::Detail),
             _ => None,
         }
     }
@@ -50,6 +62,8 @@ impl Tool {
             Self::Dimension(_) => tr("ui.drawing_panel.dimension"),
             Self::Note(_) => tr("ui.drawing_panel.note"),
             Self::PartsList(_) => tr("ui.drawing_panel.parts_list"),
+            Self::Export => tr("ui.drawing_export.title"),
+            Self::Detail => tr("ui.drawing_detail.title"),
         }
     }
 }
@@ -115,9 +129,9 @@ pub(super) fn tool_body(app: &SolveApp, ui: &mut egui::Ui, tool: Tool) {
     ui.add_space(Tokens::get().space_8);
     match tool {
         Tool::Base | Tool::Projected => base_view(ui, &app.session.doc.name, tool == Tool::Projected),
-        Tool::Edit(view) => edit_view(ui, drawing, sheet, view),
+        Tool::Edit(_) => {}
         Tool::Dimension(selected) => dimension(ui, drawing, sheet, selected),
-        Tool::Note(_) => {}
+        Tool::Note(_) | Tool::Export | Tool::Detail => {}
         Tool::PartsList(table) => parts_list(ui, drawing, sheet, table, &app.session.doc.name),
     }
 }
@@ -182,43 +196,181 @@ fn visual_style(ui: &mut egui::Ui, label: &str, style: VisualStyle) {
     choice(ui, label, selected, &options);
 }
 
-fn edit_view(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, selected: Option<u64>) {
-    let view = drawing.and_then(|drawing| {
-        selected.and_then(|id| drawing.view(id)).or_else(|| drawing.views.iter().find(|view| Some(view.sheet) == sheet).map(|view| view.as_ref()))
+pub(super) struct ViewEdit {
+    view: u64,
+    scale: String,
+    style: VisualStyle,
+}
+
+pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Option<u64>) -> bool {
+    let sheet = active_sheet(app);
+    let drawing = app.session.drawing("drawing.inspect").ok();
+    let available: Vec<_> =
+        drawing.into_iter().flat_map(|drawing| drawing.views.iter()).filter(|view| Some(view.sheet) == sheet).map(|view| view.id).collect();
+    let mut index = selected
+        .or_else(|| app.drawing_workspace.view_edit.as_ref().map(|edit| edit.view))
+        .and_then(|id| available.iter().position(|view| *view == id))
+        .unwrap_or_default();
+    if selected.is_none() && available.len() > 1 {
+        let labels: Vec<_> =
+            (1..=available.len()).map(|number| solidcraft_ui_text::format("ui.drawing_browser_view", &[("number", &number.to_string())])).collect();
+        let labels: Vec<_> = labels.iter().map(String::as_str).collect();
+        ui_kit::choice_row(ui, tr("ui.drawing_panel.view"), "drawing:edit:view", &mut index, &labels);
+    }
+    let selected = selected.or_else(|| available.get(index).copied());
+    let resolved = drawing.and_then(|drawing| {
+        let view = match selected {
+            Some(id) => drawing.view(id).filter(|view| Some(view.sheet) == sheet),
+            None => drawing.views.iter().find(|view| Some(view.sheet) == sheet).map(|view| view.as_ref()),
+        }?;
+        drawing.resolve_view(view.id).ok().map(|settings| (view.id, settings.scale.value, settings.visual_style.value))
     });
-    let settings = drawing.zip(view).and_then(|(drawing, view)| drawing.resolve_view(view.id).ok());
-    let projected = view.is_some_and(|view| view.kind.parent().is_some());
-    let mut reference = settings.as_ref().map_or(0.0, |settings| settings.reference_shown_percent);
-    ui.add_enabled_ui(false, |ui| {
+    let Some((view, scale, style)) = resolved else {
+        return ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
+    };
+    let mut edit =
+        app.drawing_workspace.view_edit.take().filter(|edit| edit.view == view).unwrap_or_else(|| ViewEdit { view, scale: scale.to_string(), style });
+    let styles = VisualStyle::ALL;
+    let labels = [
+        tr("ui.drawing_panel.visible"),
+        tr("ui.drawing_panel.hidden"),
+        tr("ui.drawing_panel.shaded"),
+        tr("ui.drawing_panel.shaded_visible"),
+        tr("ui.drawing_panel.shaded_hidden"),
+    ];
+    let mut index = styles.iter().position(|candidate| *candidate == edit.style).unwrap_or_default();
+    let (cancel, apply, ok) = super::inset(ui, |ui| {
         ui_kit::section_heading(ui, tr("ui.drawing_panel.display"));
-        visual_style(ui, tr("ui.drawing_panel.visual_style"), settings.as_ref().map_or(VisualStyle::Visible, |settings| settings.visual_style.value));
-        visual_style(
-            ui,
-            tr("ui.drawing_panel.reference_style"),
-            settings.as_ref().map_or(VisualStyle::VisibleHidden, |settings| settings.reference_style.value),
-        );
-        ui_kit::row(ui, tr("ui.drawing_panel.reference_shown"), |ui| {
-            ui_kit::slider(ui, &mut reference, 0.0..=100.0, ui_kit::Slider { format: |value| format!("{value:.0} %"), ..Default::default() });
-        });
-        choice(
-            ui,
-            tr("ui.drawing_panel.hide_model"),
-            usize::from(settings.as_ref().is_some_and(|settings| settings.reference_hides_model.value)),
-            &[tr("ui.drawing_panel.no"), tr("ui.drawing_panel.yes")],
-        );
-        choice(
-            ui,
-            tr("ui.drawing_panel.tangent"),
-            usize::from(settings.as_ref().is_some_and(|settings| settings.tangent_edges.value == TangentEdges::Show)),
-            &[tr("ui.drawing_panel.hide"), tr("ui.drawing_panel.show")],
-        );
-        text(ui, tr("ui.drawing_panel.margin"), "0 mm");
+        let row = ui_kit::choice_row(ui, tr("ui.drawing_panel.visual_style"), "drawing:edit:style", &mut index, &labels);
+        crate::scenario::publish_handle("drawing:edit:style", row.rect.right_center() - egui::vec2(12.0, 0.0));
+        if let Some(value) = styles.get(index) {
+            edit.style = *value;
+        }
         ui_kit::section_heading(ui, tr("ui.scale"));
-        scale(ui, settings.as_ref().map(|settings| settings.scale.value.to_string()));
-        ui_kit::section_heading(ui, tr("ui.drawing_panel.placement"));
-        ui_kit::checkbox(ui, tr("ui.drawing_panel.link"), &mut view.is_some_and(|view| projected && view.settings.is_empty()));
-        ui_kit::checkbox(ui, tr("ui.drawing_panel.aligned"), &mut view.is_some_and(|view| matches!(view.place, ViewPlace::Aligned(_))));
+        ui_kit::text_row(ui, tr("ui.scale"), &mut edit.scale, "1:1");
+        let valid = edit.scale.trim().parse::<Scale>().is_ok();
+        ui.separator();
+        ui.horizontal(|ui| {
+            let cancel = ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
+            let apply = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr("ui.apply"), Button::Normal)).inner.clicked();
+            let ok = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr("ui.heading_ok"), Button::Normal)).inner.clicked();
+            (cancel, apply, ok)
+        })
+        .inner
     });
+    if cancel {
+        return true;
+    }
+    let mut settings = serde_json::Map::new();
+    if let Ok(value) = edit.scale.trim().parse::<Scale>()
+        && value != scale
+    {
+        settings.insert("scale".into(), json!(value));
+    }
+    if edit.style != style {
+        settings.insert("visual_style".into(), json!(edit.style));
+    }
+    app.drawing_workspace.view_edit = Some(edit);
+    if (!apply && !ok) || settings.is_empty() {
+        return ok;
+    }
+    match app.run("drawing.view.edit", json!({"view": ids::encode(view), "set": settings})) {
+        Ok(_) => ok,
+        Err(error) => {
+            app.set_status(error, true);
+            false
+        }
+    }
+}
+
+pub(super) struct DimensionEdit {
+    dimension: u64,
+    offset: String,
+    decimals: usize,
+    text: String,
+}
+
+/// A length typed in the Offset field: a number of millimetres, with or without its unit.
+fn offset_mm(typed: &str) -> Option<f64> {
+    typed.trim().trim_end_matches("mm").trim().parse::<f64>().ok().filter(|value| value.is_finite())
+}
+
+/// A placed dimension's options: how far its line sits from what it measures, how many decimals
+/// its number shows, and the text shown instead of the number (none: the number). Apply and OK
+/// change it through `drawing.dimension.edit`, in one undo step. Returns whether to close.
+pub(super) fn dimension_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: u64) -> bool {
+    let placed = app.session.drawing("drawing.inspect").ok().and_then(|drawing| {
+        let item = drawing.dimension(selected)?;
+        let kind = match item.kind {
+            DimensionKind::Length { .. } => 1,
+            DimensionKind::Angle { .. } => 2,
+            _ => 0,
+        };
+        Some((kind, item.offset_mm, usize::from(item.decimals), item.override_text.clone().unwrap_or_default()))
+    });
+    let Some((kind, offset, decimals, text)) = placed else {
+        return super::inset(ui, |ui| ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked());
+    };
+    let mut edit = app.drawing_workspace.dimension_edit.take().filter(|edit| edit.dimension == selected).unwrap_or_else(|| DimensionEdit {
+        dimension: selected,
+        offset: format!("{offset} mm"),
+        decimals,
+        text: text.clone(),
+    });
+    let (cancel, apply, ok) = super::inset(ui, |ui| {
+        ui.add_enabled_ui(false, |ui| {
+            segments(
+                ui,
+                tr("ui.drawing_panel.type"),
+                kind,
+                &[tr("ui.drawing_panel.linear"), tr("ui.drawing_panel.length"), tr("ui.drawing_panel.angle")],
+            );
+        });
+        ui_kit::section_heading(ui, tr("ui.drawing_panel.layout"));
+        ui_kit::text_row(ui, tr("ui.drawing_panel.offset"), &mut edit.offset, "mm");
+        let labels = ["0", "1", "2", "3", "4", "5", "6"];
+        edit.decimals = edit.decimals.min(labels.len() - 1);
+        ui_kit::choice_row(ui, tr("ui.drawing_panel.decimals"), "drawing:dimension:decimals", &mut edit.decimals, &labels);
+        ui_kit::text_row(ui, tr("ui.drawing_panel.text"), &mut edit.text, solidcraft_engine::doc::drawing::dimension::VALUE_TOKEN);
+        let valid = offset_mm(&edit.offset).is_some();
+        ui.separator();
+        ui.horizontal(|ui| {
+            let cancel = ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
+            let apply = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr("ui.apply"), Button::Normal)).inner.clicked();
+            let ok = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr("ui.heading_ok"), Button::Normal)).inner.clicked();
+            (cancel, apply, ok)
+        })
+        .inner
+    });
+    if cancel {
+        return true;
+    }
+    let mut set = serde_json::Map::new();
+    if let Some(value) = offset_mm(&edit.offset)
+        && (value - offset).abs() > 1e-9
+    {
+        set.insert("offset_mm".into(), json!(value));
+    }
+    if edit.decimals != decimals {
+        set.insert("decimals".into(), json!(edit.decimals));
+    }
+    let typed = edit.text.trim();
+    if typed != text {
+        set.insert("override_text".into(), if typed.is_empty() { Value::Null } else { json!(typed) });
+    }
+    if (!apply && !ok) || set.is_empty() {
+        app.drawing_workspace.dimension_edit = Some(edit);
+        return ok;
+    }
+    match app.run("drawing.dimension.edit", json!({"dimension": ids::encode(selected), "set": set})) {
+        // The fields are read again from the dimension as it is now.
+        Ok(_) => ok,
+        Err(error) => {
+            app.drawing_workspace.dimension_edit = Some(edit);
+            app.set_status(error, true);
+            false
+        }
+    }
 }
 
 fn dimension(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, selected: Option<u64>) {
@@ -242,7 +394,11 @@ fn dimension(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, s
         let decimals = [tr("ui.drawing_panel.default"), "0", "1", "2", "3", "4", "5", "6"];
         let precision = selected.map_or(0, |item| usize::from(item.decimals).saturating_add(1).min(decimals.len() - 1));
         choice(ui, tr("ui.drawing_panel.decimals"), precision, &decimals);
-        text(ui, tr("ui.drawing_panel.text"), selected.and_then(|item| item.override_text.as_deref()).unwrap_or("<dim>"));
+        text(
+            ui,
+            tr("ui.drawing_panel.text"),
+            selected.and_then(|item| item.override_text.as_deref()).unwrap_or(solidcraft_engine::doc::drawing::dimension::VALUE_TOKEN),
+        );
     });
     if let Some(drawing) = drawing {
         ui_kit::section_heading(ui, tr("ui.drawing_panel.dimensions"));
@@ -310,6 +466,9 @@ fn parts_list(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, 
 
 #[derive(Clone)]
 pub(super) struct AddSheet {
+    pub(super) document: u64,
+    pub(super) drawing: u64,
+    pub(super) window: solidcraft_views::WindowId,
     name: String,
     after: usize,
     paper: PaperChoice,
@@ -349,7 +508,15 @@ impl AddSheet {
             None => drawing.sheets.len().checked_sub(1)?,
         };
         let paper = PaperChoice::new(drawing.sheets.get(after)?.sheet);
-        Some(Self { name: String::new(), after, paper, title_block: 0 })
+        Some(Self {
+            document: app.session.uid,
+            drawing: drawing.id,
+            window: app.view_windows.current_window(),
+            name: String::new(),
+            after,
+            paper,
+            title_block: 0,
+        })
     }
 }
 
@@ -416,6 +583,11 @@ pub(super) fn add_window(app: &mut SolveApp, ctx: &egui::Context, mut form: AddS
             Ok(result) => {
                 if let Some(id) = result.get("sheet").and_then(Value::as_str).and_then(ids::decode) {
                     select_sheet(app, id);
+                    if app.preferences.design_sub_tab_sheets
+                        && let Err(error) = crate::sheet_views::open_in(app, drawing.id, id, false)
+                    {
+                        app.set_status(error, true);
+                    }
                 }
                 return None;
             }
@@ -643,7 +815,6 @@ pub(super) fn sheet_settings(app: &mut SolveApp, ui: &mut egui::Ui) {
 
             next_sheet_section(ui, "ui.drawing_panel.screen");
             ui_kit::row(ui, tr("ui.sheet_page.colour"), |ui| crate::drawing_sheet_page::colour_choice(app, ui));
-            ui_kit::row(ui, tr("ui.drawing_backdrop.label"), |ui| crate::drawing_sheet_page::backdrop_choice(app, ui));
         });
         ui.add_space(t.space_8);
         ui.separator();
