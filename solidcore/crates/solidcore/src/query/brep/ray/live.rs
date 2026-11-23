@@ -684,7 +684,7 @@ impl FaceCaches {
     }
 
     /// Keeps `cache` as the face's cache, in place of any it had (and of its lent copy).
-    fn insert(&mut self, face: FaceId, cache: SurfaceCache<CacheObject>) {
+    pub(super) fn insert(&mut self, face: FaceId, cache: SurfaceCache<CacheObject>) {
         self.lent.remove(&face);
         self.kept.insert(face, cache);
     }

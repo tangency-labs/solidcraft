@@ -2122,8 +2122,8 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// curves and alternate curve caches, with all they own) keeps state a read
     /// changes that a later read sees. Those kinds are an offset surface (the
     /// extension its evaluators make, which sets the domain the next evaluation uses)
-    /// and a curve on a surface or tangent field (the breaks and approximation it makes
-    /// on first use). What other geometry writes through `&self` is a memo whose hit
+    /// and a curve on a surface, alone or as a tangent field's base (the breaks and
+    /// approximation it makes on first use). What other geometry writes through `&self` is a memo whose hit
     /// answers what a fresh build answers, or a flag a solve sets and restores.
     ///
     /// # Errors
