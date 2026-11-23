@@ -54,6 +54,8 @@ macro_rules! design_preferences {
             heal_tolerance_defects: bool = true, PAGE_DESIGN => check_id("prefs.heal_tolerance_defects");
             /// The browser's Origin folder starts hidden in designs that don't keep its eye themselves.
             hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
+            /// Ask for acknowledgement when an interactive importer deliberately refuses a file.
+            importer_refusal_dialog: bool = true, PAGE_DESIGN => check_id_help("prefs.importer_refusal_dialog", "prefs.importer_refusal_dialog_tip");
             /// Insert Design lists the designs open in other tabs, each inserted with one click, then
             /// Browse… for a file (#8570). Off: it opens the file picker at once, as before.
             insert_lists_open_designs: bool = true, PAGE_DESIGN => check_id("settings.insert_lists_open_designs");
@@ -85,8 +87,6 @@ macro_rules! design_preferences {
             remember_stand_up: bool = true, PAGE_DESIGN => check_id("prefs.remember_stand_up");
             /// Reopen an unchanged CAD import from the existing saved-design model cache.
             reuse_imports: bool = true, PAGE_DESIGN => check_id("prefs.reuse_imports");
-            /// Ask for acknowledgement when an interactive importer deliberately refuses a file.
-            importer_refusal_dialog: bool = true, PAGE_DESIGN => check_id_help("prefs.importer_refusal_dialog", "prefs.importer_refusal_dialog_tip");
             /// How the offer is made for a file whose header names no program known to save Y up: a note
             /// over the view (the default), the dialog, or nothing (#7717).
             stand_up_unknown: StandUpUnknown = StandUpUnknown::default(), PAGE_DESIGN;
