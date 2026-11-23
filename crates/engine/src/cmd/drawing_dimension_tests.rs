@@ -790,7 +790,8 @@ fn an_ordinate_set_reads_each_hole_and_follows_a_model_edit() {
 }
 
 /// A model edit that moves a target before its origin, or into line with it, leaves the set in the
-/// drawing, unmeasurable and saying why, never a panic; moved on, it reads again.
+/// drawing, unmeasurable and saying why, never a panic, and Check Drawing lists it with the same
+/// why; moved on, it reads again.
 #[test]
 fn a_model_edit_can_make_a_baseline_set_unmeasurable() {
     let (mut s, view) = front_view();
@@ -814,6 +815,12 @@ fn a_model_edit_can_make_a_baseline_set_unmeasurable() {
         let read = moved_to(&mut s, x);
         assert_eq!((read["status"].as_str(), read["why"].as_str()), (Some("unmeasurable"), Some(why)), "x = {x}: {read}");
         s.doc.drawings.iter().for_each(|d| d.validate().unwrap());
+        // Check Drawing lists it, with the same why.
+        let check = run(&mut s, "drawing.check", json!({}));
+        let findings = check["findings"].as_array().cloned().unwrap_or_default();
+        let listed = findings.iter().find(|f| f["object"]["id"] == id).unwrap_or_else(|| panic!("x = {x}: {check}"));
+        let seen = (listed["kind"].as_str(), listed["object"]["kind"].as_str(), listed["why"].as_str());
+        assert_eq!(seen, (Some("unmeasurable"), Some("dimension"), Some(why)), "x = {x}: {check}");
     }
     let read = moved_to(&mut s, 40);
     let values = read["members"].as_array().unwrap().iter().map(|m| m["value"].as_f64().unwrap()).collect::<Vec<_>>();
