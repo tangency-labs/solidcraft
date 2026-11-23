@@ -127,6 +127,8 @@ pub struct SpotPin {
     /// held to the pin's radius: a deeper dish would need a sphere wider than the pin, so
     /// it is held at a half sphere, whose rim meets the pin's wall tangentially (a knife
     /// edge on the outer face).
+    /// Positive; the two ends must leave at least the zone tolerance between them on the axis
+    /// (on two sheets, a dish of 1 makes them meet), or the spot is refused as invalid input.
     pub dish: Option<f64>,
 }
 
@@ -446,6 +448,20 @@ fn check_sizes(k: &Kernel, spot: &SpotWeld, layout: &Layout) -> Result<()> {
             OP_SPOT,
             "a spot diameter or sheet so large that the spot passes the model's size limit",
         ));
+    }
+    if let Some(PinLayout {
+        ends: [upper, lower],
+        ..
+    }) = layout.pin
+    {
+        let depth = |end: Option<(f64, f64)>| end.map_or(0.0, |(c, _)| c);
+        let between = (layout.t_u - depth(upper)) - (-layout.t_l + depth(lower));
+        if between < k.tolerances.zone_tol_3d {
+            return Err(SolidError::invalid_input(
+                OP_SPOT,
+                "a spot pin whose dished ends meet or cross on its axis",
+            ));
+        }
     }
     let smallest = lengths.iter().fold(f64::INFINITY, |m, &l| m.min(l));
     if smallest < k.tolerances.zone_tol_3d {

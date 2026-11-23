@@ -512,6 +512,29 @@ fn bad_sizes_normals_and_styles_are_refused_as_invalid_input() {
         },
     );
     assert!(built.is_ok(), "{built:?}");
+    // a pin of 20 on two 1 mm sheets: its dished ends meet on the axis at a dish of 1 and
+    // cross at 1.2; at 0.99 they stay 0.02 apart, and it builds and passes the check
+    let pinned = |dish| SpotWeld {
+        thicknesses: vec![1.0, 1.0],
+        style: SpotStyle {
+            pin: Some(SpotPin {
+                diameter: 20.0 / D,
+                dish: Some(dish),
+            }),
+            ..none
+        },
+        ..s.clone()
+    };
+    for dish in [1.0, 1.2] {
+        refused(&pinned(dish));
+    }
+    let mut k = kernel();
+    for mut piece in pieces(&mut k, &pinned(0.99)) {
+        let lines = check_brep(&mut k, &mut piece.body, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "{lines:?}");
+    }
 }
 
 /// Finite sizes the model cannot hold are refused as the spot's own invalid input before a
