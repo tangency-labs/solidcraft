@@ -58,6 +58,82 @@ fn an_equal_document_in_a_new_allocation_is_unchanged() {
 }
 
 #[test]
+fn prepared_model_commands_preserve_live_sheet_focus_and_selection() {
+    let mut session = Session::default();
+    session.execute("solid.box", &json!({"length":1,"width":1,"height":1})).unwrap();
+    session.execute("drawing.create", &json!({})).unwrap();
+    let drawing = session.open_drawing.unwrap();
+    let sheet = solidcraft_doc::ids::encode(session.doc.drawing(drawing).unwrap().sheets[0].id);
+    let note = session.execute("drawing.note.add", &json!({"anchor":{"sheet":sheet},"at":[20,20],"content":"Selected note"})).unwrap();
+    let note = solidcraft_doc::ids::decode(note["note"].as_str().unwrap()).unwrap();
+    session.model_focus = true;
+    let prepared = session.scratch().compute_commands(&commands(), None).unwrap();
+    session.model_focus = false;
+    session.selection = vec![crate::Sel::Drawing { drawing, object: note }];
+    let selection = session.selection.clone();
+    assert!(prepared.is_current(&session), "picking in the focused Sheet does not change the Model worker's inputs");
+    session.accept_commands(prepared).unwrap();
+    assert!(!session.model_focus, "worker acceptance never restores its old focused domain");
+    assert_eq!(session.selection, selection, "the focused Sheet keeps its current selection");
+    assert_eq!(session.open_drawing, Some(drawing));
+    assert_eq!(session.doc.features.len(), 2);
+}
+
+#[test]
+fn prepared_model_commands_keep_authoring_and_selection_stale_guards_after_sheet_focus() {
+    for change in 0..7 {
+        let mut session = Session::default();
+        session.execute("solid.box", &json!({"length":1,"width":1,"height":1})).unwrap();
+        session.execute("drawing.create", &json!({})).unwrap();
+        let drawing = session.open_drawing.unwrap();
+        let sheet = solidcraft_doc::ids::encode(session.doc.drawing(drawing).unwrap().sheets[0].id);
+        let note_params = json!({"anchor":{"sheet":sheet},"at":[20,20],"content":"Selected note"});
+        let note = session.execute("drawing.note.add", &note_params).unwrap();
+        let note = solidcraft_doc::ids::decode(note["note"].as_str().unwrap()).unwrap();
+        let other = if change == 5 {
+            let made = session.execute("drawing.create", &json!({"name":"Other drawing"})).unwrap();
+            let other_drawing = session.open_drawing.unwrap();
+            let other_note = session
+                .execute("drawing.note.add", &json!({"anchor":{"sheet":made["sheets"][0]["id"]},"at":[20,20],"content":"Other selection"}))
+                .unwrap();
+            session.open_drawing = Some(drawing);
+            Some((other_drawing, solidcraft_doc::ids::decode(other_note["note"].as_str().unwrap()).unwrap()))
+        } else {
+            None
+        };
+        session.model_focus = true;
+        let mut batch = commands();
+        if change == 4 {
+            batch.push(("drawing.note.add".into(), note_params));
+        }
+        let prepared = session.scratch().compute_commands(&batch, None).unwrap();
+        session.model_focus = false;
+        session.selection = vec![crate::Sel::Drawing { drawing, object: note }];
+        match change {
+            0 => session.revision += 1,
+            1 => session.model_focus = true,
+            2 => session.selection.push(crate::Sel::Axis { name: "X".into() }),
+            3 => session.selection = vec![crate::Sel::Drawing { drawing, object: u64::MAX }],
+            5 => {
+                let (drawing, object) = other.unwrap();
+                session.open_drawing = Some(drawing);
+                session.selection = vec![crate::Sel::Drawing { drawing, object }];
+            }
+            6 => session.selection = vec![crate::Sel::Drawing { drawing: u64::MAX, object: note }],
+            _ => {}
+        }
+        let document = session.doc.clone();
+        let selection = session.selection.clone();
+        let history = (session.undo.len(), session.redo.len());
+        assert!(!prepared.is_current(&session), "case {change}");
+        assert!(session.accept_commands(prepared).is_err(), "case {change}");
+        assert!(Arc::ptr_eq(&document, &session.doc), "case {change}");
+        assert_eq!(session.selection, selection, "case {change}");
+        assert_eq!((session.undo.len(), session.redo.len()), history, "case {change}");
+    }
+}
+
+#[test]
 fn failure_discards_the_entire_batch() {
     let session = Session::default();
     let document = session.doc.clone();

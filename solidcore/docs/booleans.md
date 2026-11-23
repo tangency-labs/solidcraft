@@ -766,7 +766,9 @@ What the port does today:
   faster than linearly from a touching point beyond one of its ends (a point solution, or where
   the two curves' interval ends meet) at which the curves are tangent, when the range stops short
   of the touch and its far end, exact, lies off the ends of both curves: the touch is the
-  intersection. A coincidence through the touch reaches it, and one that ends where a curve ends
+  intersection. The growth is read at the range's two exact ends, not between the range and the
+  touch, where a fitted intersection curve strays by up to its fit tolerance, more than the flank's
+  gap. A coincidence through the touch reaches it, and one that ends where a curve ends
   is not a flank; along a coincidence the gap is rounding and shows no growth either way. The
   range is dropped before point contacts move to the curve ends (`move_contacts_to_curve_ends`),
   which leaves a point whose stretch to the end crosses a range where it is: the flank's points
@@ -847,7 +849,7 @@ small error.
 | an intersection loop stays open across a cut | two curve ends on an edge with a loose tolerance lie apart (each face's curve ends where its own surface meets the other face, up to tol / sin φ along the edge), or one ends inside a face; the face is not cut through and the flood crosses the gap | the two causes found are closed before the imprint: one proto vertex per crossing of an edge with a face, and a curve end classified by the face's trims (§5); a loop still open is classified as before, wrong for the set flooded across the gap | a refusal by name for a loop left open across a cut; a crossing whose piece of the edge is not proved inside the band |
 | an imprint fails half way | both bodies are partly imprinted | the imprint's error is returned, not overwritten (`topology_intersector/p2.rs`) | |
 | union deletes a face between the outside and a solid | the solid merges into the infinite region | after post-processing, a union is refused with `SM_ERR` naming the face (`merge/p4.rs`) if the solid side of any such face (the uses of that solid's faces that stay) lies in no solid region, even when another solid region is left; when none of those uses is left, it is refused if no solid region is left | a leak whose solid's remaining face uses all end in solid regions is kept without a check that the union is right (no known input records one) |
-| result not a solid | an open or inward body from solid operands | ops refuses with `Error::NotSolid` | |
+| result not a solid | an open or inward body from solid operands | ops refuses with `Error::NotSolid` under the closed contract, or `Error::NotSolidBecause` naming the test under the proved contract | |
 | result empty | no faces left | ops returns `None` (`boolean`) or `Error::Empty` (`union_all`, `imprint`) | |
 
 **Refusals.** The kernel refuses with `SolidError` statuses: `SM_ERR` (a failed classification, a

@@ -650,26 +650,30 @@ fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usiz
 
 /// Rows #18166 took out of [`TRIM_COVER`] that it does not move (see the module docs): unit,
 /// case, and the hash of main's committed line (`origin/main` ee673a19bf's expected file).
+/// #18490 moves these four rows (the round sits on the sphere drop's finer trims), so each
+/// hash is of the row with that change, from Linux CI.
+/// Each hash is of the line without the `fillet_point_step` key, which recorded the retired
+/// step latch (#18916).
 const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0xa90a_9179_4750_1297,
+        0x9e43_eafe_0171_4c09,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x1679_1328_0d68_333a,
+        0xe2ec_b89d_309a_54a8,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0xfb1f_0985_b9ee_e48c,
+        0x9fc9_deff_361b_7066,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0xcc4d_2e3f_0192_8b71,
+        0x5669_c3ab_dde7_2e76,
     ),
 ];
 

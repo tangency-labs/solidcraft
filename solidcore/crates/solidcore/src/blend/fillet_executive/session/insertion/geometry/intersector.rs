@@ -156,9 +156,9 @@ impl ti::IntersectorBrep<FilletObject> for InsertionGeometry<'_> {
                 brep::p9::CurveIdentity::Actual(&brep::p9::issue_curve_identity),
             )?;
             if !output.split {
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     super::OP,
-                    "the edge is not split at the parameter",
+                    crate::error::blend::BlendFailure::EdgeSplitDeclined { parameter },
                 ));
             }
             let [a, z] = output
