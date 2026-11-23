@@ -37,7 +37,7 @@ use crate::blend::middle;
 use crate::body::Body;
 use crate::error::status;
 use crate::order::{self, Order};
-use crate::session::{answer, measure_body, read_body, run_on, with_body, Answer};
+use crate::session::{answer, measure_body, read_body, read_else_edit, run_on, with_body, Answer};
 use crate::split::copies_of;
 use crate::{Error, Result};
 
@@ -51,44 +51,30 @@ impl Answer for Vec<Vec<Option<f64>>> {}
 impl Answer for Vec<Result<PointClass>> {}
 impl Answer for Vec<f64> {}
 
-/// A measure read through [`read_body`]: its answer, or `Unprepared` where the kernel's read
-/// needs a UV trim curve the body does not have yet.
-enum Read<T> {
-    Answered(T),
-    Unprepared,
-}
-
-impl<T: Answer> Answer for Read<T> {
-    fn refusal(&self) -> Option<Error> {
-        match self {
-            Self::Answered(v) => v.refusal(),
-            Self::Unprepared => None,
-        }
-    }
-}
-
-/// A kernel measure that has a read-only form: `read` through [`read_body`], which leaves the
-/// body (and its proof) as it is; where the body lacks a UV trim curve the read needs (the
-/// kernel's `PreparationRequired`), `make` through [`with_body`], which makes the trims on the
-/// body as before. The two forms give the same answer where the trims exist; the kernel's
-/// error is the measure's refusal ([`status`]) either way.
+/// A kernel measure that has a read-only form, under one lock of the body
+/// ([`read_else_edit`]): `read`, which leaves the body (and its proof) as it is; where the
+/// body lacks what the read needs (a UV trim curve, a trimmed cache's tree), which the kernel's
+/// read form finds before any work and answers `PreparationRequired`, `make` as [`with_body`]
+/// runs it, which makes them on the body as before. The two forms give the same answer where
+/// the body has them; the kernel's error is the measure's refusal ([`status`]) either way.
 ///
 /// # Errors
-/// As [`read_body`] and [`with_body`].
+/// As [`with_body`].
 fn read_else_make<T>(
     call: &'static str,
     body: &Body,
     read: impl FnOnce(&mut Kernel, &Brep) -> solidcore::Result<T>,
     make: impl FnOnce(&mut Kernel, &mut Brep) -> solidcore::Result<T>,
 ) -> Result<Result<T>> {
-    let read = read_body(call, body, |k, b| match read(k, b) {
-        Err(solidcore::SolidError::PreparationRequired { .. }) => Ok(Read::Unprepared),
-        r => Ok(Read::Answered(r.map_err(status))),
-    })?;
-    match read {
-        Read::Answered(r) => Ok(r),
-        Read::Unprepared => with_body(call, body, |k, b| Ok(make(k, b).map_err(status))),
-    }
+    read_else_edit(
+        call,
+        body,
+        |k, b| match read(k, b) {
+            Err(solidcore::SolidError::PreparationRequired { .. }) => Ok(None),
+            r => Ok(Some(r.map_err(status))),
+        },
+        |k, b| Ok(make(k, b).map_err(status)),
+    )
 }
 
 /// Unit density over every material region, with no per-entity mass attribute (the attribute
