@@ -316,9 +316,9 @@ fn face_of<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<(&
     }
     // A mesh body has no faces to pick: say so, rather than let the pick read as a miss (#11469).
     if let Some(m) = st.bodies.iter().find(|b| lies_on_mesh(b, at)) {
-        return Err(bad(format!("no face at {at:?}: `{}` is a mesh body, which has no faces; use Convert Mesh to make it a solid first", m.name)));
+        return Err(bad(format!("no face at {at}: `{}` is a mesh body, which has no faces; use Convert Mesh to make it a solid first", m.name)));
     }
-    Err(bad(format!("no face at {at:?}")))
+    Err(bad(format!("no face at {at}")))
 }
 
 /// Does `at` lie on the surface of a mesh body, within the pick tolerance? Only mesh bodies:
@@ -361,7 +361,7 @@ fn edge_pick<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<
     }
     match best {
         Some((d, b, i, pts)) if pts.len() >= 2 && d <= 1e-3 + 1e-2 * pts.iter().fold(0.0, |m: f64, p| m.max(p.len())).max(1.0) => Ok((b, i, pts)),
-        _ => Err(bad(format!("no edge at {at:?}"))),
+        _ => Err(bad(format!("no edge at {at}"))),
     }
 }
 
@@ -1132,7 +1132,9 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
             let delta = p - origin;
             let across = delta - dir * delta.dot(dir);
             if !across.len().is_finite() || across.len() < 1e-9 {
-                return Err(bad("the point is on the axis: pick a point off the axis to define a unique plane"));
+                return Err(bad(
+                    "the point is on the axis: pick a point off the axis to define a unique plane. For a plane square to the axis through this point, use Plane Through Point, Square To Line",
+                ));
             }
             Plane::new(origin, dir, across).ok_or_else(degenerate)
         }
@@ -1164,6 +1166,11 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
                 .normalized()
                 .ok_or_else(|| bad("the line is square to the plane: every plane through it is perpendicular; pick a line in or along the plane"))?;
             Plane::new(o, d, n.cross(d)).ok_or_else(degenerate)
+        }
+        PlaneRef::SquareToLine { line: l, point: at } => {
+            let (_, d) = line(ctx, l)?;
+            let d = d.normalized().ok_or_else(|| bad("the line has no direction"))?;
+            Plane::from_normal(point(ctx, at)?, d).ok_or_else(degenerate)
         }
         PlaneRef::AlongPath { path, t } => {
             let t = Document::eval_in(ctx.vals, t, Kind::Unitless)?;
@@ -1310,7 +1317,10 @@ impl PlaneRef {
     /// The references of a plane built from model geometry.
     pub fn refs_mut(&mut self) -> Vec<&mut GeoRef> {
         match self {
-            PlaneRef::Midplane { a, b, .. } | PlaneRef::TwoEdges { a, b } | PlaneRef::AxisPoint { axis: a, point: b } => vec![a.as_mut(), b.as_mut()],
+            PlaneRef::Midplane { a, b, .. }
+            | PlaneRef::TwoEdges { a, b }
+            | PlaneRef::AxisPoint { axis: a, point: b }
+            | PlaneRef::SquareToLine { line: a, point: b } => vec![a.as_mut(), b.as_mut()],
             PlaneRef::Perpendicular { plane, line } => vec![plane.as_mut(), line.as_mut()],
             PlaneRef::ThreePoints { a, b, c } => vec![a.as_mut(), b.as_mut(), c.as_mut()],
             PlaneRef::Tangent { face, reference, .. } => {

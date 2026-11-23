@@ -348,7 +348,33 @@ impl crate::walk::Walk for ProfileSpec {
     }
 }
 
-pub use crate::eval::frame_member::{member_line_ids, member_names, member_turns};
+pub use crate::eval::frame_member::{
+    LaterPieces, corner_at_point, corner_point, default_order, default_orders, group_member_names, is_crossing, is_member_line, is_member_wire,
+    member_line_ids, member_names, member_of_body, member_parts, member_segments, member_turns, members_cross, members_of_bodies, overlap_parent,
+};
+pub use crate::frame_corners::{CornerOverride, CornerType, MAX_GAP, MemberRef, checked_gap, read_coped};
+pub use crate::frame_plate::{PlateHoles, PlateMember, PlateShape, plate_member, plate_region};
+
+/// A frame member between two points (#15705): its id, which names the member as a line's id
+/// does (`names`, End Caps), and its two ends, found again on every evaluation so the member
+/// follows them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemberPair {
+    pub id: String,
+    pub a: crate::construct::GeoRef,
+    pub b: crate::construct::GeoRef,
+}
+
+/// The id of a feature's `n`-th pair: `pair<n>`.
+pub fn pair_id(n: u32) -> String {
+    format!("pair{n}")
+}
+
+/// The number of a pair id written as [`pair_id`] writes it (`pair3` → 3, never 0).
+pub fn parse_pair_id(id: &str) -> Option<u32> {
+    id.strip_prefix("pair")?.parse::<u32>().ok().filter(|n| *n > 0 && pair_id(*n) == id)
+}
 
 /// Where a frame member's cross-section comes from.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
@@ -886,6 +912,18 @@ pub fn member_axes(d: Vec3, angle: f64) -> Option<(Vec3, Vec3)> {
     Some((x * c + y * s, y * c - x * s))
 }
 
+/// [`member_axes`] for a member running along `dir` with its `up` given (#4003 Auto's lined-up sections): the
+/// profile's y is `up` made square to `dir` and x = y × dir; `turn` (radians) then turns the profile as
+/// [`member_axes`] does. `None` when either has no length or `up` runs along `dir` (within [`VERTICAL_TOLERANCE`]).
+pub fn group_axes(dir: Vec3, up: Vec3, turn: f64) -> Option<(Vec3, Vec3)> {
+    let (d, up) = (dir.normalized()?, up.normalized()?);
+    let y = up - d * up.dot(d);
+    let y = y.normalized().filter(|_| y.len() > VERTICAL_TOLERANCE)?;
+    let x = y.cross(d);
+    let (c, s) = (turn.cos(), turn.sin());
+    Some((x * c + y * s, y * c - x * s))
+}
+
 /// `region` turned by `angle` (radians, counter-clockwise) about its `anchor` point and moved so
 /// that point lands on `at`.
 pub fn placed(region: &Region2, anchor: Vec2, at: Vec2, angle: f64) -> Region2 {
@@ -903,4 +941,140 @@ pub fn placed(region: &Region2, anchor: Vec2, at: Vec2, angle: f64) -> Region2 {
     };
     let lp = |l: &Loop2| Loop2 { segs: l.segs.iter().map(seg).collect() };
     Region2 { outer: lp(&region.outer), holes: region.holes.iter().map(lp).collect() }
+}
+
+/// One group of a frame member feature: lines whose members share a placement on the profile
+/// (#4003). This records placement; joined finishing across several groups is explicitly
+/// unsupported until its per-group joint rules are defined.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct MemberGroup {
+    /// The lines, by curve id; none (only in a feature's single group): every straight line drawn
+    /// in the frame sketch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lines: Vec<String>,
+    /// The profile point that sits on each line.
+    #[serde(default, skip_serializing_if = "Anchor::is_origin")]
+    pub anchor: Anchor,
+    /// The profile point that sits on each line, [x, y] from the profile's own origin
+    /// ([`Profile::origin`]). Some: takes precedence over `anchor`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locate: Option<[f64; 2]>,
+    /// How far the profile turns about each line (see [`member_axes`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(angle = "Rotation")]
+    pub angle: Option<Expr>,
+    /// The profile mirrored across its y axis (before it turns).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mirror: bool,
+    /// What the group's members are named after when they have no name of their own; none: the
+    /// profile's description or the profile sketch's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_name: Option<String>,
+}
+
+/// The groups of a frame member feature, in the order their members are made: its `groups`, or,
+/// without them, the one group its own `lines`, `anchor`, `locate`, `angle`, `mirror` and `body_name`
+/// make.
+pub fn member_groups(kind: &crate::FeatureKind) -> Vec<MemberGroup> {
+    match kind {
+        crate::FeatureKind::FrameMember { groups, .. } if !groups.is_empty() => groups.clone(),
+        crate::FeatureKind::FrameMember { lines, anchor, locate, angle, mirror, body_name, .. } => vec![MemberGroup {
+            lines: lines.clone(),
+            anchor: *anchor,
+            locate: *locate,
+            angle: angle.clone(),
+            mirror: *mirror,
+            body_name: body_name.clone(),
+        }],
+        _ => Vec::new(),
+    }
+}
+
+/// Check the combinations this first grouped placement model can represent. Flat Frame Members
+/// retain every Auto/corner/pair option; a grouped frame is independent straight sketch lines.
+/// Refuse an unsupported combination rather than dropping a saved finishing or path setting.
+pub fn check_group_options(kind: &crate::FeatureKind) -> crate::Result<()> {
+    let crate::FeatureKind::FrameMember {
+        groups,
+        path_sketch,
+        lines,
+        anchor,
+        locate,
+        angle,
+        mirror,
+        body_name,
+        pairs,
+        corner,
+        corners,
+        flip,
+        fit_ends,
+        coped,
+        gap,
+        ..
+    } = kind
+    else {
+        return Ok(());
+    };
+    if groups.is_empty() {
+        return Ok(());
+    }
+    let invalid = |s: &str| crate::DocError::Invalid(s.into());
+    if path_sketch.is_none() {
+        return Err(invalid("frame member groups need a frame sketch"));
+    }
+    if !pairs.is_empty() {
+        return Err(invalid("not supported yet: frame member groups with point pairs; use a separate Frame Member for pairs"));
+    }
+    if !corner.is_none() || !corners.is_empty() {
+        return Err(invalid("not supported yet: frame member groups with joined corners; use corner none without corner overrides"));
+    }
+    if *flip || *fit_ends || *coped || gap.is_some() {
+        return Err(invalid("not supported yet: frame member groups with flip, fit_ends, coped or gap; use separate Frame Members for finishing"));
+    }
+    if !lines.is_empty() || !anchor.is_origin() || locate.is_some() || angle.is_some() || *mirror || body_name.is_some() {
+        return Err(invalid("frame member groups keep lines and placement inside each group, not beside groups"));
+    }
+    let total = groups.iter().fold(0usize, |n, g| n.saturating_add(g.lines.len()));
+    if groups.len() > MAX_MEMBERS || total > MAX_MEMBERS {
+        return Err(crate::DocError::Invalid(format!("at most {MAX_MEMBERS} members in one feature")));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for (i, group) in groups.iter().enumerate() {
+        if groups.len() > 1 && group.lines.is_empty() {
+            return Err(crate::DocError::Invalid(format!("group {} has no lines", i + 1)));
+        }
+        if let Some(line) = group.lines.iter().find(|l| !seen.insert(l.as_str())) {
+            return Err(crate::DocError::Invalid(format!("line `{line}` is in two groups")));
+        }
+    }
+    Ok(())
+}
+
+/// Group placements as flat views of the same feature: same id, component, profile, pinned
+/// member names, copy metadata and pair-id counter. Evaluation uses main's straight-member
+/// pipeline for each view; the design itself always keeps its groups.
+pub(crate) fn group_features(f: &crate::Feature) -> crate::Result<Option<Vec<crate::Feature>>> {
+    let crate::FeatureKind::FrameMember { groups, .. } = &f.kind else { return Ok(None) };
+    if groups.is_empty() {
+        return Ok(None);
+    }
+    check_group_options(&f.kind)?;
+    Ok(Some(
+        groups
+            .iter()
+            .map(|group| {
+                let mut flat = f.clone();
+                if let crate::FeatureKind::FrameMember { groups, lines, anchor, locate, angle, mirror, body_name, .. } = &mut flat.kind {
+                    groups.clear();
+                    lines.clone_from(&group.lines);
+                    *anchor = group.anchor;
+                    *locate = group.locate;
+                    angle.clone_from(&group.angle);
+                    *mirror = group.mirror;
+                    body_name.clone_from(&group.body_name);
+                }
+                flat
+            })
+            .collect(),
+    ))
 }

@@ -24,7 +24,7 @@ const DELETE_CONTRACT: TypedContract<PointCloudDeleteParams> = TypedContract::ne
 const LIST_CONTRACT: TypedContract<PointCloudListParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("pointcloud.insert", "Insert Point Cloud", crate::checked!("pointcloud.insert", insert))
+    CommandSpec::new("pointcloud.insert", "Insert Point Cloud", crate::checked!("pointcloud.insert", insert)).begins_edit()
         .at("SOLID", "INSERT")
         .icon("import")
         .contract(&INSERT_CONTRACT)
@@ -545,8 +545,8 @@ mod tests {
         s.execute("pointcloud.edit", &json!({"cloud": id, "visible": false})).unwrap();
         s.execute("edit.undo", &json!({})).unwrap();
         assert!(s.doc.point_clouds[0].visible);
-        let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
-        assert_eq!(back.point_clouds, s.doc.point_clouds);
+        // A plain JSON design can't hold the points: saving one is refused, naming them.
+        assert!(solidcraft_io::write_design(&s.doc).unwrap_err().to_string().contains("point clouds"));
         let file = solidcraft_io::write_design_container(&s.doc).unwrap();
         let opened = solidcraft_io::read_design(&file).unwrap();
         assert_eq!(opened.point_clouds, s.doc.point_clouds);

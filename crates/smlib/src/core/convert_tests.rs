@@ -272,6 +272,17 @@ fn a_sealed_void_crosses_the_arrays_outer_shell_first() {
     assert!(rel(v, SEALED_VOID_VOLUME) < 1e-9, "round trip: {v}");
 }
 
+#[test]
+fn an_import_with_a_sealed_void_reuses_its_proven_shell_order() {
+    let unordered = shells_reversed(&to_arrays(&sealed_void()).unwrap());
+    let imported = crate::Brep::from_arrays(&unordered).unwrap();
+    let (record, _, prepared, _) = imported.to_native_prepared().unwrap();
+    let prepared = prepared.expect("the exact containment test established the outer shell");
+    let rebuilt = crate::Brep::from_record(&record, true).unwrap();
+    assert_eq!(prepared.to_native_ordered().unwrap().0, rebuilt.to_native_ordered().unwrap().0);
+    assert!(rel(prepared.volume(1e-9).unwrap(), SEALED_VOID_VOLUME) < 1e-9);
+}
+
 /// Arrays listing the solid region's void shell before the box around it import with the box
 /// first (SMLib takes a region's first shell as its enclosing one), the volume unchanged.
 #[test]

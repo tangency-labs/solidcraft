@@ -1042,6 +1042,10 @@ pub struct JointExpressions {
     /// The expression of each value by index, `null` for a value that is a number.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<Option<String>>,
+    /// The expressions of each value's limits by index, as `[minimum, maximum]`, `null` for an
+    /// end that is a number.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub limits: Vec<[Option<String>; 2]>,
 }
 
 /// A joint origin's snap as saved, in the component's coordinates.
@@ -1914,6 +1918,43 @@ impl JsonSchema for JointKeyList {
     }
 }
 
+/// The values joints start from, as `joint.reach` reads `from`: `{joint, values}` items. The
+/// handler checks each item (its joint, and one finite value for each of the joint's coordinates).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReachStarts(pub Vec<Value>);
+
+impl ReachStarts {
+    /// `from` as the handler takes it: a list of at most [`MAX_REACH_JOINTS`] items.
+    fn read(v: &Value) -> Result<Self, String> {
+        match v {
+            Value::Array(items) if items.len() <= MAX_REACH_JOINTS => Ok(ReachStarts(items.clone())),
+            _ => Err(format!("`from` must be a list of {{joint, values}}, at most {MAX_REACH_JOINTS}")),
+        }
+    }
+}
+
+impl JsonSchema for ReachStarts {
+    fn schema_name() -> Cow<'static, str> {
+        "ReachStarts".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let joint = generator.subschema_for::<JointKey>();
+        json_schema!({
+            "description": "Joints and the values each starts from, as joint.list gives them (degrees and mm), one value for each of the joint's coordinates.",
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "joint": joint,
+                    "values": {"type": "array", "items": {"type": "number", "exclusiveMinimum": -1e9, "exclusiveMaximum": 1e9}}
+                },
+                "required": ["joint", "values"]
+            },
+            "maxItems": MAX_REACH_JOINTS
+        })
+    }
+}
+
 /// Two or more occurrences, by id or name, as `joint.rigid_group` reads them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OccurrenceList(pub Vec<OccurrenceKey>);
@@ -2438,7 +2479,8 @@ pub struct RigidGroupResult {
 
 /// Move an occurrence's point to a place in the world by changing the values of the joints on its
 /// chain, from where they are to the nearest pose within their limits, through motion links and
-/// keeping closed loops closed as joint.drive does (contact sets are not checked). With `z` the
+/// keeping closed loops closed as joint.drive does. With contact sets on, the joints stop where
+/// two parts of a set would pass into each other (`stopped_by_contact`). With `z` the
 /// occurrence's axis is turned to point that way too. Reaches as far as it can: the reply says how
 /// close it got and what stopped it.
 #[derive(Debug, JsonSchema)]
@@ -2474,6 +2516,13 @@ pub struct ReachParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointKeyList")]
     pub joints: Option<JointKeyList>,
+    /// The values some joints start from instead of the design's (at most 1000): the pose the last
+    /// frame of a drag showed, so the one reach that applies the drag ends where the view showed
+    /// it. With contact sets on, refused unless every value is already the design's, as the move
+    /// to it would not be checked for contact. Default: every joint starts where the design has it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ReachStarts")]
+    pub from: Option<ReachStarts>,
     /// Leave out `dof` and `fixed` in the reply. Default: false.
     #[serde(default)]
     pub quiet: Option<bool>,
@@ -2500,7 +2549,8 @@ impl<'de> Deserialize<'de> for ReachParams {
         let z = reach_vector(&m, "z", true)?;
         let axis = reach_vector(&m, "axis", true)?;
         let joints = given(&m, "joints", JointKeyList::read)?;
-        Ok(ReachParams { occurrence, point, at, z, axis, joints, quiet: flag(&m, "quiet")?, continuous: flag(&m, "continuous")? })
+        let from = given(&m, "from", ReachStarts::read)?;
+        Ok(ReachParams { occurrence, point, at, z, axis, joints, from, quiet: flag(&m, "quiet")?, continuous: flag(&m, "continuous")? })
     }
 }
 

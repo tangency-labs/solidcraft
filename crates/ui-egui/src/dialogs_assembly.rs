@@ -587,7 +587,9 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     for (i, l) in f.limits.iter_mut().enumerate() {
         if let Some(Some((lo, hi))) = j.limits.get(i) {
             let fmt = |v: f64| if j.kind.is_angle(i) { num(v.to_degrees(), "deg") } else { crate::length_input::model(&app.session.doc, v) };
-            *l = (true, fmt(*lo), fmt(*hi));
+            // An end typed as an expression shows (and is sent back) as that expression (#20242).
+            let [lo_expr, hi_expr] = j.exprs.limit(i);
+            *l = (true, lo_expr.map_or_else(|| fmt(*lo), str::to_string), hi_expr.map_or_else(|| fmt(*hi), str::to_string));
         }
     }
     Some(Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f))), inputs))
@@ -1034,14 +1036,27 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
             }
         }
         Sel::Vertex { body, point } => {
+            // A woken centre (a flat face's, a round edge's) is kept by that face or edge, so it
+            // follows the part as a pick of the face or edge does (#11231).
+            if let Some(source) = centre_source(&st, body, *point) {
+                return snap_of(s, &source);
+            }
             // The corner of the edges meeting there, kept by their names, z along the part's +Z
             // as a point's is.
             let z = occurrence_of_body(s, body)
                 .map_or(Vec3::Z, |o| solidcraft_engine::doc::apply_vector(&solidcraft_engine::doc::joints::occurrence_world(&s.doc, o), Vec3::Z));
-            (
-                body.as_str(),
-                SnapPt { at: *point, z: Vec3::Z, kind: SnapKind::Vertex, param: json!({"edge": pt(*point), "corner": pt(*point), "z": pt(z)}) },
-            )
+            let mut param = json!({"edge": pt(*point), "corner": pt(*point), "z": pt(z)});
+            // A woken point on a part that is no corner (an edge's middle, #11231) is kept by the
+            // edge it lies on, so it follows that edge as a pick of the edge does.
+            let tol = 1e-6 * (1.0 + point.len());
+            if st
+                .body(body)
+                .is_some_and(|b| !b.mesh().edges.iter().any(|e| [e.first(), e.last()].into_iter().flatten().any(|q| q.dist(*point) <= tol)))
+                && let Value::Object(m) = &mut param
+            {
+                m.remove("corner");
+            }
+            (body.as_str(), SnapPt { at: *point, z: Vec3::Z, kind: SnapKind::Vertex, param })
         }
         Sel::SketchPoint { id } => {
             // A sketch point's world position, its plane's normal as the joint's z, kept by its
@@ -1113,6 +1128,19 @@ pub(crate) fn woken_pick(app: &SolveApp, snaps: bool, sel: Sel) -> Sel {
 /// Whether a dialog's active input takes joint snaps (a joint's origin, a trace's point).
 pub(crate) fn takes_snaps(d: &Dialog) -> bool {
     d.active_input().is_some_and(|i| i.accept == SNAPS)
+}
+
+/// The flat face or round edge of `body` whose centre is at `at`, if one is.
+fn centre_source(st: &solidcraft_engine::doc::ModelState, body: &str, at: Vec3) -> Option<Sel> {
+    let b = st.body(body)?;
+    let near = |p: Vec3| p.dist(at) <= 1e-6 * (1.0 + at.len());
+    let m = b.mesh();
+    if let Some((i, e)) = m.edges.iter().enumerate().find(|(_, e)| circle_of(e).is_some_and(|(c, _)| near(c))) {
+        return Some(Sel::Edge { body: body.into(), index: i, point: *e.first()? });
+    }
+    let tol = (b.body.size() * 2e-3).max(1e-3);
+    let f = b.body.faces(tol).ok()?.into_iter().find(|f| f.plane_normal.is_some() && near(f.centroid))?;
+    Some(Sel::Face { body: body.into(), index: f.index, point: f.centroid })
 }
 
 /// Each pick's snap, measured once for the world state, design and open sketch it was measured in.
@@ -2155,12 +2183,34 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
         .map(|(_, r)| r.clone());
     // A constraint's reply: how free its part is with the constraint the preview shows.
     let placed = cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.")).map(|(_, r)| r.clone());
-    // A moved component looks like itself (no new surface), with its old place as the ghost.
-    // A plugin can both move and make bodies: the builder distinguishes them per body.
-    let colors = if was_placed && !plugin { Colors { added: colors.body, new_body: colors.body, ..colors } } else { colors };
+    let plugin_view = cmds.iter().zip(&preview.replies).rev().find(|((c, _), _)| c == "plugin.run").and_then(|(_, reply)| reply.get("view")).cloned();
+    let before = preview.before.clone();
+    let shown_after: Vec<_> = preview.after.sketches.iter().filter(|sketch| preview.shown_sketches.contains(&sketch.feature)).cloned().collect();
+    // A Frame Member's tubes, for its dialog to pick (#15705).
+    let centrelines = crate::dialogs_frame::centrelines(&preview);
+    // A moved component looks like itself (no new surface), with its old place as the ghost; Ghost
+    // Frame Members' new tubes keep their see-through tint (`preview::colors`). A plugin can both
+    // move and make bodies: the builder distinguishes them per body.
+    let colors = if was_placed && !plugin {
+        let new_body = if colors.glass_new { colors.new_body } else { colors.body };
+        Colors { added: colors.body, new_body, ..colors }
+    } else {
+        colors
+    };
     Some(build_world_preview(preview, colors).map(|mut built| {
         built.stopped = stopped;
         built.placed = placed;
+        built.plugin_view = plugin_view;
+        if plugin {
+            // Match committed Fit with every sketch shown after the run, even unchanged ones.
+            // The preview diff separately retains changed geometry, including hidden sketches.
+            built.bounds = shown_after.iter().fold(built.bounds, |b, sketch| b.union(&solidcraft_engine::view::sketch_bounds(sketch)));
+        }
+        // Deleting the last body still draws its removed-material ghost.
+        if plugin && built.bounds.is_empty() && !built.replaced.is_empty() {
+            built.bounds = before.bodies.iter().fold(Aabb3::EMPTY, |b, body| b.union(&body.mesh().bounds()));
+        }
+        built.centrelines = centrelines;
         built
     }))
 }
@@ -3028,22 +3078,31 @@ thread_local! {
     static ORIGINS: std::cell::RefCell<Option<(String, Vec<(String, solidcraft_engine::doc::Mat)>)>> = const { std::cell::RefCell::new(None) };
 }
 
+/// Where the view shows the occurrences moved from where the design has them (in their parents):
+/// moves not captured yet, and a joint drag's frame over them (#6325).
+fn shown_moves(s: &Session) -> std::collections::BTreeMap<u64, solidcraft_engine::doc::Mat> {
+    let mut moves = s.pending_moves.clone();
+    moves.extend(s.drag_moves().iter().map(|(o, m)| (*o, *m)));
+    moves
+}
+
 /// Named joint origins in the world: on their occurrence's component, so they move with it
-/// (joint drives, free moves not captured yet, Capture Position).
+/// (joint drives, free moves not captured yet, a joint drag's frame, Capture Position).
 pub fn origins_world(s: &Session) -> Vec<(String, solidcraft_engine::doc::Mat)> {
     if s.doc.assembly.origins.is_empty() {
         return Vec::new();
     }
-    let key = format!("{}:{:?}", s.revision, s.pending_moves);
+    let moves = shown_moves(s);
+    let key = format!("{}:{:?}", s.revision, moves);
     if let Some(v) = ORIGINS.with(|o| o.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
         return v;
     }
-    let doc: std::borrow::Cow<solidcraft_engine::doc::Document> = if s.pending_moves.is_empty() {
+    let doc: std::borrow::Cow<solidcraft_engine::doc::Document> = if moves.is_empty() {
         std::borrow::Cow::Borrowed(&*s.doc)
     } else {
         let mut d = (*s.doc).clone();
         for o in &mut d.occurrences {
-            if let Some(m) = s.pending_moves.get(&o.id) {
+            if let Some(m) = moves.get(&o.id) {
                 o.transform = *m;
             }
         }
@@ -3102,16 +3161,17 @@ pub fn joint_frames_world(s: &Session) -> Vec<(u64, solidcraft_engine::doc::Mat)
     if s.doc.assembly.joints.is_empty() {
         return Vec::new();
     }
-    let key = format!("{}:{:?}", s.revision, s.pending_moves);
+    let moves = shown_moves(s);
+    let key = format!("{}:{:?}", s.revision, moves);
     if let Some(v) = JOINT_FRAMES.with(|o| o.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
         return v;
     }
-    let doc: std::borrow::Cow<solidcraft_engine::doc::Document> = if s.pending_moves.is_empty() {
+    let doc: std::borrow::Cow<solidcraft_engine::doc::Document> = if moves.is_empty() {
         std::borrow::Cow::Borrowed(&*s.doc)
     } else {
         let mut d = (*s.doc).clone();
         for o in &mut d.occurrences {
-            if let Some(m) = s.pending_moves.get(&o.id) {
+            if let Some(m) = moves.get(&o.id) {
                 o.transform = *m;
             }
         }

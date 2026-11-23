@@ -71,7 +71,7 @@ fn bezier([p0, p1, p2, p3]: [Vec2; 4], t: f64) -> Vec2 {
     p0 * (s * s * s) + p1 * (3.0 * s * s * t) + p2 * (3.0 * s * t * t) + p3 * (t * t * t)
 }
 
-const NONE: PdfOptions = PdfOptions { layers: true, title: None, output_time: None };
+const NONE: PdfOptions = PdfOptions { layers: true, title: None, output_time: None, actual_size: false };
 
 /// An A3 sheet's page is A3 in points, and the PDF says who made it.
 #[test]
@@ -102,12 +102,12 @@ fn the_same_scene_gives_the_same_bytes_and_dates_come_only_from_output_time() {
     let sheet = scene(p(210.0, 297.0), vec![stroke(vec![Seg2::Line { a: p(10.0, 20.0), b: p(60.0, 20.0) }], false, 0.5, None)]);
     assert_eq!(pdf(&sheet, &NONE), pdf(&sheet, &NONE));
     assert!(!text(&pdf(&sheet, &NONE)).contains("Date"));
-    let leap_day = PdfOptions { layers: true, title: Some("Sheet 1".into()), output_time: Some(951_782_400) };
+    let leap_day = PdfOptions { layers: true, title: Some("Sheet 1".into()), output_time: Some(951_782_400), actual_size: false };
     let file = text(&pdf(&sheet, &leap_day));
     assert!(file.contains("/CreationDate (D:20000229000000Z)") && file.contains("/ModDate (D:20000229000000Z)"), "{file}");
     assert!(file.contains("/Title (Sheet 1)"), "{file}");
     assert_eq!(pdf(&sheet, &leap_day), pdf(&sheet, &leap_day));
-    let last = PdfOptions { layers: true, title: Some(String::new()), output_time: Some(MAX_OUTPUT_TIME) };
+    let last = PdfOptions { layers: true, title: Some(String::new()), output_time: Some(MAX_OUTPUT_TIME), actual_size: false };
     let file = text(&pdf(&sheet, &last));
     assert!(file.contains("(D:99991231235959Z)") && !file.contains("/Title"), "{file}");
 }
@@ -202,14 +202,15 @@ fn check_number_grid(content: &str) -> std::result::Result<(), String> {
 fn every_cross_reference_points_at_its_object() {
     let sheet = scene(p(420.0, 297.0), vec![stroke(Loop2::circle(p(100.0, 100.0), 40.0).segs, true, 0.7, None)]);
     for title in ["ASCII", "\u{00c7}", "\u{65e5}\u{672c}\u{1f642}", "(sheet 1) \\ title"] {
-        let bytes = pdf(&sheet, &PdfOptions { layers: true, title: Some(title.into()), output_time: Some(0) });
+        let bytes = pdf(&sheet, &PdfOptions { layers: true, title: Some(title.into()), output_time: Some(0), actual_size: false });
         assert!(check_xref(&bytes).is_ok(), "{title:?}: {:?}", check_xref(&bytes));
     }
 }
 
 #[test]
 fn the_byte_offset_oracle_refuses_shifted_or_corrupted_references() {
-    let bytes = pdf(&scene(p(420.0, 297.0), vec![]), &PdfOptions { layers: true, title: Some("\u{00c7}".into()), output_time: None });
+    let bytes =
+        pdf(&scene(p(420.0, 297.0), vec![]), &PdfOptions { layers: true, title: Some("\u{00c7}".into()), output_time: None, actual_size: false });
     let start = check_xref(&bytes).unwrap();
     let mut shifted = bytes.clone();
     shifted.insert(9, b' ');
@@ -368,10 +369,10 @@ fn what_cannot_be_written_is_refused() {
     assert!(e.to_string().contains("at least 3 pt"), "{e}");
     let sheet = scene(p(210.0, 297.0), vec![]);
     let prepared = sheet.prepare().unwrap();
-    assert!(paper_pdf(&prepared, &PdfOptions { layers: true, title: Some("x".repeat(1000)), output_time: None }).is_ok());
-    let e = paper_pdf(&prepared, &PdfOptions { layers: true, title: Some("x".repeat(1001)), output_time: None }).unwrap_err();
+    assert!(paper_pdf(&prepared, &PdfOptions { layers: true, title: Some("x".repeat(1000)), output_time: None, actual_size: false }).is_ok());
+    let e = paper_pdf(&prepared, &PdfOptions { layers: true, title: Some("x".repeat(1001)), output_time: None, actual_size: false }).unwrap_err();
     assert!(e.to_string().contains("1000 characters"), "{e}");
-    let e = paper_pdf(&prepared, &PdfOptions { layers: true, title: None, output_time: Some(MAX_OUTPUT_TIME + 1) }).unwrap_err();
+    let e = paper_pdf(&prepared, &PdfOptions { layers: true, title: None, output_time: Some(MAX_OUTPUT_TIME + 1), actual_size: false }).unwrap_err();
     assert!(e.to_string().contains("9999"), "{e}");
 }
 
@@ -728,7 +729,7 @@ fn flat_pdf_reproduces_the_original_p1_a3_sample_bytes() {
             },
         ],
     );
-    let options = PdfOptions { title: Some("A3 sample".into()), output_time: Some(1_800_000_000), layers: false };
+    let options = PdfOptions { title: Some("A3 sample".into()), output_time: Some(1_800_000_000), layers: false, actual_size: false };
     let bytes = pdf(&sheet, &options);
     // The Info dictionary names the build ("SolidCraft <version>"), so the pin is every byte before it:
     // the header, catalog, page tree, page and content stream. Taken at 0.19.0 as the whole file (1063
@@ -920,7 +921,7 @@ fn one_page_is_the_one_page_call_byte_for_byte() {
     let prepared = sheet.prepare().unwrap();
     for layers in [true, false] {
         for (title, output_time) in [(None, None), (Some("Bracket — sheet 1".to_string()), Some(1_761_800_000))] {
-            let options = PdfOptions { title, output_time, layers };
+            let options = PdfOptions { title, output_time, layers, actual_size: false };
             let one = paper_pdf(&prepared, &options).unwrap();
             let (bytes, reports) = paper_pdf_pages(std::slice::from_ref(&prepared), &options).unwrap();
             assert_eq!((&bytes, &reports[..]), (&one.0, std::slice::from_ref(&one.1)), "{options:?}");
@@ -1095,4 +1096,18 @@ fn pictures_are_embedded_when_their_pixels_are_given() {
     let none: [&dyn Pictures; 0] = [];
     assert!(paper_pdf_pages_with(&prepared, &NONE, Some(PdfPictures { pages: &none, dpi: 254.0 })).is_err());
     assert!(paper_pdf_pages_with(&prepared, &NONE, Some(PdfPictures { pages: &pages, dpi: 5000.0 })).is_err());
+}
+
+/// Asked to, a sheet PDF asks a viewer to print it at its true size: `/PrintScaling /None` in the
+/// catalog's viewer preferences (ISO 32000-1, 12.2); otherwise it has no viewer preferences.
+#[test]
+fn a_sheet_pdf_prints_at_its_true_size() {
+    let sheet = scene(p(420.0, 297.0), vec![]);
+    let catalog = |options: &PdfOptions| {
+        let bytes = pdf(&sheet, options);
+        objects(&bytes).into_iter().find(|(_, t)| t.contains("/Type /Catalog")).unwrap().1.split_whitespace().collect::<Vec<_>>().join(" ")
+    };
+    let asked = catalog(&PdfOptions { actual_size: true, ..NONE.clone() });
+    assert!(asked.contains("/ViewerPreferences << /PrintScaling /None >>"), "{asked}");
+    assert!(!catalog(&NONE).contains("ViewerPreferences"), "only when asked");
 }

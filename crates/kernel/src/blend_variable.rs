@@ -231,7 +231,7 @@ impl EdgeSetup {
     /// The edge of `body` a pick at `at` takes, as the blend takes it.
     fn new(body: &Body, at: Vec3) -> Result<EdgeSetup> {
         let (picked, _) = crate::blend_smlib::picked_edges(body, &[at])?;
-        let edge = *picked.first().ok_or_else(|| KernelError::Invalid(format!("no edge at {at:?}")))?;
+        let edge = *picked.first().ok_or_else(|| KernelError::Invalid(format!("no edge at {at}")))?;
         let rec = Faces::of(body)?;
         if !rec.straight(edge) {
             return Err(unsupported("only straight edges take a variable radius"));
@@ -590,6 +590,15 @@ mod tests {
         let v = measure(&f).unwrap().volume;
         assert!(rel(6000.0 - v, removed) < 1e-4, "{} removed vs {removed}", 6000.0 - v);
         assert_eq!(f.unmeshed_faces(), 0);
+        // At (10-d, y, 30-d) the rolling-ball envelope meets the diagonal when the least
+        // (y-s)^2 + 2(d-r(s))^2 - r(s)^2 over both linear flanks is zero. Sample each
+        // side and their intersection. The great-circle section would be 1.17157 at y=10.
+        for (y, d) in [(5.0, 0.871530), (10.0, 1.162041), (15.0, 0.871530)] {
+            for (offset, class) in [(-0.003, crate::PointClass::Outside), (0.003, crate::PointClass::Inside)] {
+                let inset = d + offset;
+                assert_eq!(f.classify_point(Vec3::new(10.0 - inset, y, 30.0 - inset)).unwrap(), class);
+            }
+        }
     }
 
     /// A radius through a middle point, smooth: the removed volume is the balls' union.

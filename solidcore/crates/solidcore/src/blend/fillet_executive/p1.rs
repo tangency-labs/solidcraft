@@ -128,8 +128,9 @@ use crate::blend::fillet_geom::p1::{FilStatus, FilletCornerType, FilletEdgeType,
 pub use crate::blend::fillet_standard_solver::p1::{FilletLaw, FilletLawKind};
 use crate::blend::round_room::{self, RoundRefusal};
 use crate::boolean::topology_intersector::p1::TopologyIntersector;
+use crate::error::blend::BlendFailure;
 use crate::error::EntityRef;
-use crate::error::{Result, SolidError};
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::object;
 use crate::geom::solution_array::SolutionObject;
@@ -145,6 +146,40 @@ use crate::topology::{loopuse, vertex, Brep, EdgeId};
 
 const OP_EVAL: &str = "blend::fillet_executive::p1::FilletLaw::evaluate";
 const OP_NOTE: &str = "blend::fillet_executive::p1::FilletExecutive::note_fillet_error";
+
+/// Why a filleted vertex without a corner entry is the kernel's fault.
+const NO_CORNER_ENTRY: &str = "a filleted vertex has no corner entry: loading a solver pushes \
+     each new filleted vertex and inserts its corner entry together, and nothing removes either";
+
+/// A missing thing the executive built: a [`BlendFailure::Defect`] keeping the upstream
+/// `NER` status `SM_ERR_NULL_POINTER`.
+fn null_defect(op: &'static str, why: &'static str) -> SolidError {
+    Failure::new(op, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// The curve of `edge`, an edge of the caller's body joined into a smooth sequence.
+fn edge_curve<'b>(
+    op: &'static str,
+    target: &'b Brep,
+    edge: EdgeId,
+) -> Result<&'b crate::curve::curve::Curve> {
+    target.edge(edge)?.curve.as_ref().ok_or_else(|| {
+        SolidError::blend_at(op, BlendFailure::EdgeWithoutCurve, EntityRef::Edge(edge))
+    })
+}
+
+/// [`edge_curve`], to edit.
+fn edge_curve_mut<'b>(
+    op: &'static str,
+    target: &'b mut Brep,
+    edge: EdgeId,
+) -> Result<&'b mut crate::curve::curve::Curve> {
+    target.edge_mut(edge)?.curve.as_mut().ok_or_else(|| {
+        SolidError::blend_at(op, BlendFailure::EdgeWithoutCurve, EntityRef::Edge(edge))
+    })
+}
 
 /// `TOPO_BASE_TYPE`.
 const TOPO_BASE_TYPE: i64 = 16000;
@@ -229,10 +264,7 @@ impl FilletLaw {
     ) -> Result<[f64; 3]> {
         let edge_map = self.edge_map;
         match &mut self.kind {
-            FilletLawKind::Base => Err(SolidError::blend_failed(
-                OP_EVAL,
-                "a base law has no value of its own",
-            )),
+            FilletLawKind::Base => Err(SolidError::blend(OP_EVAL, BlendFailure::LawHasNoValue)),
             FilletLawKind::Linear {
                 start_radius,
                 end_radius,
@@ -348,10 +380,7 @@ fn bspline_evaluate(
     reverse: bool,
 ) -> Result<[f64; 3]> {
     if interval.length() == 0.0 {
-        return Err(SolidError::blend_failed(
-            OP_EVAL,
-            "the law's interval has zero length",
-        ));
+        return Err(SolidError::blend(OP_EVAL, BlendFailure::LawIntervalEmpty));
     }
 
     // select function to evaluate
@@ -450,7 +479,12 @@ fn bspline_evaluate(
             // create_extended_curve found the parameter inside the NURB's own bounds
             // (Ok(None)), which needs natural_interval and those bounds to disagree;
             // upstream would dereference the NULL curve here
-            return Err(SolidError::blend_missing(OP_EVAL, "the extended law curve"));
+            return Err(null_defect(
+                OP_EVAL,
+                "continuing the radius law past its curve gave no curve: the continuation is \
+                 asked only for a parameter outside the law curve's natural interval, which \
+                 lies inside its NURB bounds, so it always builds one",
+            ));
         }
     }
     let law = extended_law.as_ref().unwrap_or(law_curve);
@@ -483,7 +517,14 @@ fn law_values(law: &BSplineCurve, law_t: f64, param_scale: f64, reverse: bool) -
     let pv = law.evaluate(law_t, 2, true, true)?;
     let x = |i: usize| {
         pv.get(i).map(|v| v.x).ok_or_else(|| {
-            SolidError::blend_failed(OP_EVAL, "the law's evaluation has too few derivatives")
+            SolidError::blend(
+                OP_EVAL,
+                BlendFailure::Defect {
+                    why: "the radius law's evaluation returned fewer than the value and two \
+                          derivatives it was asked for, which a B-spline evaluation always \
+                          returns",
+                },
+            )
         })
     };
 
@@ -537,6 +578,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
         self.code = code as i32;
         // (not upstream: this overload names no site)
         self.no_room_without_site = true;
+        self.corner_cause = None;
         if comment.is_some() {
             self.comment = tblock_text(comment);
         }
@@ -557,6 +599,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
         self.edge = edge;
         self.code = code as i32;
         self.no_room_without_site = false;
+        self.corner_cause = None;
         self.status = status as i32;
         self.comment = tblock_text(comment);
     }
@@ -585,6 +628,8 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
         self.location = location;
         self.code = code as i32;
         self.no_room_without_site = false;
+        // (not upstream: an earlier vertex's cause is not this one's)
+        self.corner_cause = None;
         self.status = status as i32;
         if comment.is_some() {
             self.comment = tblock_text(comment);
@@ -606,6 +651,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
     ) {
         self.code = code as i32;
         self.no_room_without_site = false;
+        self.corner_cause = None;
         self.status = status as i32;
         self.edge = filleted_edge;
         self.side_face = side_face;
@@ -631,6 +677,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
     ) {
         self.code = code as i32;
         self.no_room_without_site = false;
+        self.corner_cause = None;
         self.status = status as i32;
         self.corner_type = corner_type;
         self.vertex = vertex;
@@ -655,6 +702,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
     ) {
         self.code = code as i32;
         self.no_room_without_site = false;
+        self.corner_cause = None;
         self.status = status as i32;
         self.edge_type = edge_type as i32;
         add_unique(&mut self.edges, fillet_edge);
@@ -679,6 +727,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
     ) {
         self.code = code as i32;
         self.no_room_without_site = false;
+        self.corner_cause = None;
         self.status = status as i32;
         self.edge_type = FilletEdgeType::Unknown as i32; // (it's not a fillet edge)
         self.edge = filleted_edge;
@@ -819,6 +868,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             self_intersection_handler: None,
             mark_corner_patches: false,
             cliff_overflow: false,
+            continued_cliffs: BTreeMap::new(),
             open_ends: Vec::new(),
             overflow_first: false,
             classify_only: false,
@@ -852,7 +902,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         const OP: &str = "blend::fillet_executive::p1::load_fillet_solver";
         for rail in 0..2 {
             if !access.load_solver_has_surface(solver, rail)? {
-                return Err(SolidError::blend_missing(OP, "the solver's rail surface"));
+                return Err(null_defect(
+                    OP,
+                    "a solver to load has no surface for a rail: the solver set-up gives each \
+                     rail the offset of its face's surface before the solver is loaded",
+                ));
             }
         }
         if let Some(edgeuse) = access.load_solver_edgeuse(solver, 0)? {
@@ -892,9 +946,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 })?;
                 if current == vertex {
                     found = true;
-                    let entry = self.vertex_corner_map.get_mut(&vertex).ok_or_else(|| {
-                        SolidError::blend_missing(OP, "the vertex's corner entry")
-                    })?;
+                    let entry = self
+                        .vertex_corner_map
+                        .get_mut(&vertex)
+                        .ok_or_else(|| null_defect(OP, NO_CORNER_ENTRY))?;
                     let super::p3::VertexEntry::SolverEdgeuses(pending) = entry else {
                         return Err(SolidError::invalid_input(
                             OP,
@@ -1215,6 +1270,10 @@ pub enum CornerCreation<O> {
     Unsupported {
         /// The vertex's point when the owner resolved it.
         location: Option<Point3>,
+        /// The error of the blend corner's classification that failed at the vertex, where
+        /// one did (not the fork's): the executive keeps it with its note of the vertex
+        /// ([`ErrorInfo::unsupported_corner_cause`]).
+        cause: Option<SolidError>,
     },
     /// The fork's (WR-697, tangency-labs/smlib e647dac): a corner the blend corner
     /// refuses with its reason (`SmBlendCorner::Classify`: a Swept turn the ball cannot
@@ -1266,7 +1325,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             |k, executive, vertex, pending| {
                 Ok(match create(k, executive, vertex, pending)? {
                     Some(corner) => CornerCreation::Created(corner),
-                    None => CornerCreation::Unsupported { location: None },
+                    None => CornerCreation::Unsupported {
+                        location: None,
+                        cause: None,
+                    },
                 })
             },
             error_info,
@@ -1281,7 +1343,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// the executive records the vertex, its location, `SM_FIL_FAILURE`,
     /// `FilletErrorType::CornerUnsupported` and `"Corner case not implemented"` (the
     /// fork's note) and still keeps the pending entry: retaining the note does not change
-    /// the operation's result or topology.
+    /// the operation's result or topology. A corner whose classification failed keeps that
+    /// error with the note ([`ErrorInfo::unsupported_corner_cause`]; not the fork's).
     ///
     /// A [`CornerCreation::Refused`] corner (the fork's) is noted at its vertex with its own error and
     /// reason, no later unsupported corner's note replaces it, and the operation fails
@@ -1307,7 +1370,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 Some(VertexEntry::Corner(_)) => {
                     return Err(SolidError::invalid_input(OP, "corner already created"));
                 }
-                None => return Err(SolidError::blend_missing(OP, "the vertex's corner entry")),
+                None => return Err(null_defect(OP, NO_CORNER_ENTRY)),
             };
             match create(k, self, vertex, pending)? {
                 CornerCreation::Created(corner) => {
@@ -1339,8 +1402,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     );
                     refused = true;
                 }
-                CornerCreation::Unsupported { location } => {
-                    if !refused {
+                CornerCreation::Unsupported { location, cause } => {
+                    // `note_vertex_error` notes nothing for a null vertex, so the note is
+                    // made exactly when it was before; the null-vertex test only keeps the
+                    // cause off an earlier vertex's note, which it does not explain
+                    if !refused && vertex.is_some() {
                         self.error.note_vertex_error(
                             vertex,
                             location,
@@ -1348,6 +1414,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                             FilletErrorType::CornerUnsupported,
                             Some("Corner case not implemented"),
                         );
+                        self.error.corner_cause = cause;
                     }
                 }
             }
@@ -1356,10 +1423,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             info.assign(&self.error);
         }
         if refused {
-            return Err(SolidError::blend_failed(
-                OP,
-                "a corner case is not implemented",
-            ));
+            return Err(SolidError::blend(OP, BlendFailure::CornerRefused));
         }
         Ok(())
     }
@@ -1387,7 +1451,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 OP,
                 "no corner created for the vertex",
             )),
-            None => Err(SolidError::blend_missing(OP, "the vertex's corner entry")),
+            None => Err(SolidError::blend(OP, BlendFailure::BevelVertexNotFilleted)),
         }
     }
 
@@ -1438,7 +1502,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
 
             let mut prev_ivl = Extent1d::new();
             let mut curves = Vec::new();
-            for (ii, &edge_id) in edges.iter().enumerate() {
+            // `if (ii > 0)`: the edge before this one, read as `aEdges[ii-1]`
+            let mut prev_edge: Option<EdgeId> = None;
+            for &edge_id in &edges {
                 let mut edge_ivl = topo_edge::interval(target, edge_id)?;
                 let edge_tol = topo_edge::tolerance(target, edge_id)?;
                 let mut tk = Kernel::new(&crate::kernel::KernelOptions {
@@ -1448,14 +1514,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     },
                     ..crate::kernel::KernelOptions::default()
                 });
-                tk.rng = k.rng.clone();
+                tk.seed = k.seed;
                 tk.cancel.clone_from(&k.cancel);
                 let mut trim_ivl = edge_ivl;
-                let crv = target
-                    .edge_mut(edge_id)?
-                    .curve
-                    .as_mut()
-                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+                let crv = edge_curve_mut(OP, target, edge_id)?;
                 // fork 873c7c9 passes this on (SER)
                 crv.trim(
                     &tk,
@@ -1463,20 +1525,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
                 )?;
 
-                if ii > 0 {
-                    let prev_edge_id = *edges
-                        .get(ii - 1)
-                        .ok_or_else(|| SolidError::blend_missing(OP, "the previous edge"))?;
+                if let Some(prev_edge_id) = prev_edge {
                     let prev_param1 = prev_ivl.max();
                     let curr_param0 = edge_ivl.min();
-                    let prev_crv = target.edge(prev_edge_id)?.curve.as_ref().ok_or_else(|| {
-                        SolidError::blend_missing(OP, "the previous edge's curve")
-                    })?;
-                    let curr_crv = target
-                        .edge(edge_id)?
-                        .curve
-                        .as_ref()
-                        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+                    let prev_crv = edge_curve(OP, target, prev_edge_id)?;
+                    let curr_crv = edge_curve(OP, target, edge_id)?;
                     // fork 873c7c9 passes these on (SER)
                     let prev_deriv = eval_first_deriv(k, prev_crv, prev_param1)?;
                     let curr_deriv = eval_first_deriv(k, curr_crv, curr_param0)?;
@@ -1494,23 +1547,16 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                         edge_ivl.translate(prev_ivl.max() - edge_ivl.min());
                     }
 
-                    let crv = target
-                        .edge_mut(edge_id)?
-                        .curve
-                        .as_mut()
-                        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+                    let crv = edge_curve_mut(OP, target, edge_id)?;
                     // fork 873c7c9 passes this on (SER)
                     crv.edit_parameterization(k, &edge_ivl)?;
-                    target.edge_mut(edge_id)?.interval = edge_ivl;
+                    topo_edge::set_interval(target, edge_id, &edge_ivl)?;
                 }
 
-                let curr_crv = target
-                    .edge(edge_id)?
-                    .curve
-                    .as_ref()
-                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
-                curves.push(curve_as_bspline(curr_crv, OP)?);
+                let curr_crv = edge_curve(OP, target, edge_id)?;
+                curves.push(curve_as_bspline(curr_crv, OP, edge_id)?);
                 prev_ivl = edge_ivl;
+                prev_edge = Some(edge_id);
             }
             Ok(curves)
         })?;
@@ -1560,16 +1606,27 @@ fn eval_first_deriv(
     Ok(vals.get(1).copied().unwrap_or(crate::math::Vec3::UNDEF))
 }
 
-fn curve_as_bspline(crv: &crate::curve::curve::Curve, op: &'static str) -> Result<BSplineCurve> {
+/// The B-spline form of `crv`, the curve of `edge` (upstream's `SmBSplineCurve` cast,
+/// `NER` when the curve is not one).
+fn curve_as_bspline(
+    crv: &crate::curve::curve::Curve,
+    op: &'static str,
+    edge: EdgeId,
+) -> Result<BSplineCurve> {
     use crate::curve::curve::CurveKind;
-    match crv.kind() {
-        CurveKind::BSpline(b) => Ok(b.clone()),
-        CurveKind::Line(l) => Ok(l.base_with_nurb()?.into_owned()),
-        CurveKind::Ellipse(e) => Ok(e.base().clone()),
-        CurveKind::Parabola(p) => Ok(p.base().clone()),
-        CurveKind::Hyperbola(h) => Ok(h.base.clone()),
-        _ => Err(SolidError::blend_missing(op, "the curve's B-spline form")),
-    }
+    let kind = match crv.kind() {
+        CurveKind::BSpline(b) => return Ok(b.clone()),
+        CurveKind::Line(l) => return Ok(l.base_with_nurb()?.into_owned()),
+        CurveKind::Ellipse(e) => return Ok(e.base().clone()),
+        CurveKind::Parabola(p) => return Ok(p.base().clone()),
+        CurveKind::Hyperbola(h) => return Ok(h.base.clone()),
+        other => other.name(),
+    };
+    Err(SolidError::blend_at(
+        op,
+        BlendFailure::SequenceCurveNotBSpline { kind },
+        EntityRef::Edge(edge),
+    ))
 }
 
 /// Live adapter operations used by `CollectTangentEdgeSequence` and
@@ -2225,6 +2282,7 @@ mod tests {
                     assert_eq!(vertex, Some(H(3)));
                     Ok(CornerCreation::Unsupported {
                         location: Some(point),
+                        cause: None,
                     })
                 },
                 Some(&mut info),
@@ -2247,6 +2305,162 @@ mod tests {
             executive.vertex_corner_map.get(&Some(H(3))),
             Some(&VertexEntry::SolverEdgeuses(vec![H(20)]))
         );
+    }
+
+    #[test]
+    fn an_unsupported_corner_keeps_the_error_of_its_failed_classification() {
+        use crate::blend::fillet_executive::p3::VertexEntry;
+
+        let k = Kernel::default();
+        let mut executive = corner_creation_executive();
+        executive.filleted_vertices = vec![Some(H(3))];
+        executive
+            .vertex_corner_map
+            .insert(Some(H(3)), VertexEntry::SolverEdgeuses(vec![H(20)]));
+        let classification =
+            SolidError::invalid_input("corner_creation_test", "classification failure");
+        let mut info = ErrorInfo::new(None);
+        executive
+            .create_fillet_corners_recording_vertex_errors(
+                &k,
+                |_, _, _, _| {
+                    Ok(CornerCreation::Unsupported {
+                        location: None,
+                        cause: Some(classification.clone()),
+                    })
+                },
+                Some(&mut info),
+            )
+            .unwrap();
+        // The corner stays unsupported, noted with the same code and status as before.
+        assert!(executive.corners.is_empty());
+        assert_eq!(
+            (executive.error.code, executive.error.status),
+            (
+                FilletErrorType::CornerUnsupported as i32,
+                FilStatus::Failure as i32
+            )
+        );
+        assert_eq!(
+            executive.error.unsupported_corner_cause(),
+            Some(&classification)
+        );
+        assert_eq!(info.unsupported_corner_cause(), Some(&classification));
+        // Another vertex's note is not that classification's.
+        executive.error.note_vertex_error(
+            Some(H(4)),
+            None,
+            FilStatus::Failure,
+            FilletErrorType::CornerUnsupported,
+            None,
+        );
+        assert_eq!(executive.error.unsupported_corner_cause(), None);
+    }
+
+    /// #19803: every note of the error record clears the classification's error, so a
+    /// later note under the same code (a corner's own refusal, a setback not built) never
+    /// reads as caused by it.
+    #[test]
+    fn a_later_note_of_any_kind_is_not_the_classifications() {
+        let classification =
+            SolidError::invalid_input("corner_creation_test", "classification failure");
+        let unsupported = FilletErrorType::CornerUnsupported;
+        let notes: [fn(&mut ErrorInfo<H>, FilletErrorType); 6] = [
+            |e, code| e.note_error(code, None),
+            |e, code| e.note_edge_error(Some(H(1)), FilStatus::Failure, code, None),
+            |e, code| {
+                e.note_merge_error(code, FilStatus::Failure, None, None, None, None, None);
+            },
+            |e, code| {
+                e.note_corner_error(
+                    code,
+                    FilletCornerType::Unknown,
+                    FilStatus::Failure,
+                    None,
+                    Some(H(2)),
+                    [None, None],
+                    [None, None],
+                    None,
+                );
+            },
+            |e, code| {
+                e.note_fillet_edge_error(
+                    code,
+                    FilStatus::Failure,
+                    FilletEdgeType::Unknown,
+                    None,
+                    None,
+                    None,
+                );
+            },
+            |e, code| {
+                e.note_intersection_error(
+                    code,
+                    FilStatus::Failure,
+                    None,
+                    &[],
+                    &[],
+                    &[],
+                    Point3::ZERO,
+                    None,
+                );
+            },
+        ];
+        for (i, note) in notes.iter().enumerate() {
+            let mut e = ErrorInfo::<H>::new(None);
+            e.note_vertex_error(
+                Some(H(3)),
+                None,
+                FilStatus::Failure,
+                unsupported,
+                Some("Corner case not implemented"),
+            );
+            e.corner_cause = Some(classification.clone());
+            assert_eq!(e.unsupported_corner_cause(), Some(&classification));
+            note(&mut e, unsupported);
+            assert_eq!(e.code, unsupported as i32, "note {i}");
+            assert_eq!(e.unsupported_corner_cause(), None, "note {i}");
+        }
+    }
+
+    /// #19803: an unsupported corner at a null vertex notes nothing, as before, and leaves
+    /// the earlier vertex's note and its cause alone.
+    #[test]
+    fn an_unsupported_corner_at_a_null_vertex_leaves_the_earlier_note() {
+        use crate::blend::fillet_executive::p3::VertexEntry;
+
+        let k = Kernel::default();
+        let mut executive = corner_creation_executive();
+        executive.filleted_vertices = vec![Some(H(3)), None];
+        for vertex in [Some(H(3)), None] {
+            executive
+                .vertex_corner_map
+                .insert(vertex, VertexEntry::SolverEdgeuses(vec![H(20)]));
+        }
+        let first = SolidError::invalid_input("corner_creation_test", "first classification");
+        let second = SolidError::invalid_input("corner_creation_test", "second classification");
+        executive
+            .create_fillet_corners_recording_vertex_errors(
+                &k,
+                |_, _, vertex, _| {
+                    Ok(CornerCreation::Unsupported {
+                        location: None,
+                        cause: Some(if vertex.is_some() {
+                            first.clone()
+                        } else {
+                            second.clone()
+                        }),
+                    })
+                },
+                None,
+            )
+            .unwrap();
+        assert_eq!(executive.error.vertex, Some(H(3)));
+        assert_eq!(
+            executive.error.code,
+            FilletErrorType::CornerUnsupported as i32
+        );
+        assert_eq!(executive.error.unsupported_corner_cause(), Some(&first));
     }
 
     #[test]
@@ -2391,10 +2605,11 @@ mod tests {
         let error = result.unwrap_err();
         assert_eq!(
             error.blend_failure(),
-            Some(&crate::error::blend::BlendFailure::Missing(
-                "the vertex's corner entry"
-            ))
+            Some(&BlendFailure::Defect {
+                why: NO_CORNER_ENTRY
+            })
         );
+        assert!(error.is_defect(), "{error:?}");
         assert_eq!(error.sm_status(), Some(1006));
         assert_eq!(error.upstream_status(), Some(1006));
         executive

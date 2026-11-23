@@ -67,6 +67,10 @@ fn status(e: SolidError) -> Error {
 /// their fields; other typed refusals keep the kernel diagnostic alongside them.
 pub(super) fn refused(error: solidcore_ops::Error, diagnostic: String) -> Error {
     use solidcore_ops::Error as Ops;
+    // this crate words a named solid test as the bare NotSolid it always was
+    if error.not_solid_test().is_some() {
+        return Error::RefusedWithDiagnostic { refusal: Ops::NotSolid, diagnostic };
+    }
     match error {
         Ops::WallsTouch => Error::WallsTouch,
         Ops::WallFolds { largest } => Error::WallFolds { largest },
@@ -331,11 +335,27 @@ pub(crate) fn shell(body: &Body, points: &[[f64; 3]], tolerance: f64, thickness:
         if thickness < 0.0 && solid_in && !leaves_cavity(k, &mut w, &picked, -thickness)? {
             return Ok(Err(Error::NoRoom));
         }
-        match called(shell_brep_full(k, &w, thickness, &picked))? {
-            Ok(r) => finish(r, solid_in),
-            Err(e) => Ok(Err(e)),
+        let shelled = match called(shell_brep_full(k, &w, thickness, &picked))? {
+            Ok(r) => finish(r, solid_in)?,
+            Err(e) => Err(e),
+        };
+        match shelled {
+            Err(e) if is_bare_failure(&e) => match solidcore_ops::offset::outline_touch(k, &w)? {
+                Some(at) => Ok(Err(Error::OutlineTouches { at, detail: e.to_string() })),
+                None => Ok(Err(e)),
+            },
+            r => Ok(r),
         }
     })
+}
+
+/// (#18568) A failure that does not say why: a bare status, solidcore's text, a result that is
+/// not a solid, or an offset refused as unsound.
+fn is_bare_failure(e: &Error) -> bool {
+    matches!(
+        e,
+        Error::Status(_) | Error::Solidcore(_) | Error::NotSolid | Error::Exception | Error::Refused(solidcore_ops::Error::OffsetRefused { .. })
+    )
 }
 
 /// `smlib_offset_faces`: its checks, the pick, the solid check, (moving faces in) the cavity
@@ -667,11 +687,25 @@ pub(crate) fn draft(
             }
             surfaces.push(tilted);
         }
+        // A drafted cone that would reach a cavity's wall closes the wall: refused with the largest
+        // angle that keeps it (#20767), before anything changes.
+        let (n, p) = ([normal.x, normal.y, normal.z], [along.x, along.y, along.z]);
+        if let Err(e) = called(solidcore_ops::offset::refuse_draft_closing_wall(k, &w, &picked, neutral_origin, n, p, angle))? {
+            return Ok(Err(e));
+        }
         // `moved_faces(b, status(b->LocalOperation(faces, surfaces)))`, its marks on the picked
         // faces (`mark_moved`).
+        // A face the drafted faces would cut through (a hole's wall within the draft of the side,
+        // #19686): read before the kernel edits the copy, named if the kernel then refuses. Best
+        // effort: a check that fails itself only leaves the kernel's own refusal, and never
+        // refuses a draft the kernel builds.
+        let through = solidcore_ops::offset::drafted_through(k, &mut w, &picked, &surfaces).ok().flatten();
         mark_moved(&mut w, &picked)?;
         if let Err(e) = called(local_operation_simple(k, &mut w, &picked, surfaces))? {
-            return Ok(Err(e));
+            return Ok(Err(match through {
+                Some(t) => Error::DraftCutsThrough { at: [t.at.x, t.at.y, t.at.z], depth: t.depth },
+                None => e,
+            }));
         }
         if !moved_faces(&mut w)? {
             return Ok(Err(Error::NoEffect));
