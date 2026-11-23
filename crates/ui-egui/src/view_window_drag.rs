@@ -208,6 +208,13 @@ pub(crate) fn record(app: &mut SolveApp, ctx: &Context, zones: Vec<(u64, usize, 
             .strips
             .retain(|strip| strip.viewport != viewport && input.raw.viewports.get(&strip.viewport).is_some_and(|info| info.minimized != Some(true)));
     });
+    // A minimised window paints no tab strip, so nothing else would ever clear the highlight it set.
+    if let Some((source, _, _)) = state.hovered
+        && ctx.input(|input| input.raw.viewports.get(&source).is_some_and(|info| info.minimized == Some(true)))
+    {
+        state.hovered = None;
+        repaint_viewports(ctx);
+    }
     let screen = native.unwrap_or(Screen { origin: Pos2::ZERO, pixels_per_point: 1.0 });
     state.strips.extend(zones.into_iter().map(|(tab, count, zone)| Strip { viewport, tab, window, screen, zone, count, name: name.clone() }));
     if state.drag.as_ref().is_some_and(|drag| drag.viewport == viewport && drag.keyboard.is_none() && !drag.header && !drag_continues)
@@ -620,8 +627,10 @@ fn cancel(state: &mut State, ctx: &Context, drag: Drag) {
     if let Some(target) = &drag.target {
         ctx.request_repaint_of(target.viewport(drag.viewport));
     }
+    // The id outside `data`: a context lock taken inside another can freeze the window (#21091).
+    let morph = morph_id(ctx, drag.view.id);
     if ctx.global_style().animation_time > 0.0
-        && let Some(morph) = ctx.data(|data| data.get_temp::<Morph>(morph_id(ctx, drag.view.id)))
+        && let Some(morph) = ctx.data(|data| data.get_temp::<Morph>(morph))
     {
         state.flight = Some(Flight { view: drag.view, viewport: drag.viewport, from: morph.rect, origin: drag.origin, start: ctx.input(|i| i.time) });
         ctx.request_repaint();
@@ -1068,10 +1077,8 @@ mod tests {
                     assert!(keyboard_active(&app, ui.ctx()));
                 } else {
                     route(&mut app, ui.ctx(), view, origin, pos2(230.0, 80.0), false);
-                    assert!(
-                        ui.ctx().data(|data| data.get_temp::<Morph>(morph_id(ui.ctx(), view))).is_some(),
-                        "the preview paints in the first drag frame"
-                    );
+                    let morph = morph_id(ui.ctx(), view);
+                    assert!(ui.ctx().data(|data| data.get_temp::<Morph>(morph)).is_some(), "the preview paints in the first drag frame");
                 }
                 assert!(app.view_window_drag.drag.is_some());
             });
@@ -1108,6 +1115,33 @@ mod tests {
             "dragging must not read back the viewport image"
         );
         output.drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn a_minimised_window_leaves_no_view_highlight() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let view = app.docs.views.active().id;
+        let ctx = Context::default();
+        ctx.set_embed_viewports(true);
+        let child = egui::ViewportId::from_hash_of("minimised window");
+        let frame = |app: &mut SolveApp, minimized: bool| {
+            let mut raw = egui::RawInput::default();
+            raw.viewports.insert(child, egui::ViewportInfo { minimized: Some(minimized), ..Default::default() });
+            let output = ctx.run_ui(raw, |ui| {
+                if !minimized {
+                    let tab = app.docs.current_tab();
+                    app.view_window_drag.hovered = Some((child, tab, view));
+                }
+                record(app, ui.ctx(), vec![], false);
+            });
+            output.drop_without_applying_deltas();
+        };
+        frame(&mut app, false);
+        assert_eq!(hovered_view(&app), Some(view), "a hovered view is highlighted");
+        frame(&mut app, true);
+        assert_eq!(hovered_view(&app), None, "minimising its window clears the highlight");
+        frame(&mut app, true);
+        assert_eq!(hovered_view(&app), None, "it stays cleared until hovered again");
     }
 
     #[test]

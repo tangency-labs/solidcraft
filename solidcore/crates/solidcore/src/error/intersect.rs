@@ -123,6 +123,10 @@ pub enum IntersectFailure {
     /// The point classification has no object, or none of the kind its class names. The
     /// caller's classification: [`ErrorKind::InvalidInput`].
     NoClassObject,
+    /// The topology solver has no object where it solves against one: a null object of
+    /// the caller's trees or a null handle the caller passed (a B-rep, or the vertex, curve or
+    /// surface of a local solve). [`ErrorKind::InvalidInput`].
+    NoObjectToSolve,
     /// The routine reads what an earlier step of the same object sets up (a drop's start
     /// points, a cache's tree), and the caller has not run that step.
     /// [`ErrorKind::InvalidInput`].
@@ -161,12 +165,13 @@ pub enum IntersectFailure {
         /// The number of control points the drop stops at.
         limit: usize,
     },
-    /// The surface has no normal at the dropped point (the cross product of its tangents and
+    /// The surface has no normal at the point (the cross product of its tangents and
     /// the evaluated normal are both shorter than the kernel's zero). [`ErrorKind::Degenerate`].
     NoSurfaceNormal,
-    /// The curve to drop has no tangent to step along: its first derivative is zero where
-    /// the curve is not marked degenerate, or its tangent projected onto the surface's tangent
-    /// plane is zero at the first point. [`ErrorKind::Degenerate`].
+    /// The curve has no tangent to step along: the curve to drop has a zero first derivative
+    /// where it is not marked degenerate, or its tangent projected onto the surface's tangent
+    /// plane is zero at the first point, or the silhouette's tangent is zero at the point.
+    /// [`ErrorKind::Degenerate`].
     DegenerateTangent,
     /// The curve's tangent is `degrees` from the surface normal, within the 3 degrees under
     /// which its drop onto the tangent plane has no direction. [`ErrorKind::Degenerate`].
@@ -186,6 +191,11 @@ pub enum IntersectFailure {
         /// What is left of the drop's tolerance for the move.
         budget: f64,
     },
+    /// The surfaces meet at a singular or tangent point the intersector cannot trace
+    /// through: a contact it cannot prove, refused by name (`docs/ssi.md` §1), a defect only
+    /// through its cause: where an override's attempt failed, its error is the cause. Class
+    /// `failed`.
+    Tangent,
     /// The curve classification has no source curve, or its handle names no curve in the
     /// geometry given (the caller sets it with `set_curve`). The caller's classification:
     /// [`ErrorKind::InvalidInput`].
@@ -217,6 +227,123 @@ pub enum IntersectFailure {
     /// build's error is the cause). Class `missing`; whether it is a defect or a refusal is
     /// its cause's ([`crate::SolidError::is_defect`] follows the chain).
     SurfaceCacheNotBuilt,
+    /// The caller passed no surface caches to an intersection that runs on them.
+    /// [`ErrorKind::InvalidInput`].
+    NoSurfaceCaches,
+    /// The basic intersector was asked for a self intersection, which it does not test.
+    /// [`ErrorKind::Unsupported`].
+    SelfIntersectionUnsupported,
+    /// A point of the trace lies outside the UV domain of surface `surface` (0 or 1), enlarged
+    /// by the check's tolerance. [`ErrorKind::OutsideDomain`].
+    PointOutsideDomain {
+        /// The surface whose domain the point is outside: 0 for the first, 1 for the second.
+        surface: usize,
+    },
+    /// The trace reached `limit` points, more than it builds: the tolerance is too small for
+    /// the curve, or a surface is poorly defined. [`ErrorKind::Unsupported`].
+    TraceTooLong {
+        /// The number of points the trace stops at.
+        limit: usize,
+    },
+    /// The caller gave `given` points, a number the routine does not take (a law
+    /// intersection takes exactly two, a point intersection at least one).
+    /// [`ErrorKind::InvalidInput`].
+    PointCountNotTaken {
+        /// The number of points given.
+        given: usize,
+    },
+    /// Surface `surface` (0 or 1) of a law intersection is not an offset surface, the only
+    /// kind whose offset the law sets. [`ErrorKind::Unsupported`].
+    SurfaceNotOffset {
+        /// The surface that is not an offset: 0 for the first, 1 for the second.
+        surface: usize,
+    },
+    /// The first through point given is not on both surfaces within the intersector's
+    /// tolerance. [`ErrorKind::InvalidInput`].
+    PointNotOnBothSurfaces,
+    /// The values of a through point given (its surface derivatives, normals and curve
+    /// direction) could not be computed; the computation's error is the cause. Class
+    /// `failed`.
+    ThroughPointNotEvaluated,
+    /// The UV trim on an analytic sphere could not be made monotone in its sweep coordinate
+    /// with a certificate, for the reason given, so the intersection is refused rather than
+    /// published with a trim that may leave its 3D curve. Class `failed`.
+    SphereTrimNotCertified {
+        /// Why the fit refused.
+        why: crate::intersect::surface_intersector::sphere_span::SweepRefusal,
+    },
+    /// The classification of a boundary start point took `limit` gap samples, the most it
+    /// takes, without deciding. Class `failed`.
+    NotClassifiedWithinSamples {
+        /// The number of samples the classification stops at.
+        limit: usize,
+    },
+    /// The law curve's normal cannot be interpolated at `parameter`: it is outside the point
+    /// curve's interval, or the interval has no length to invert it in. Class `failed`.
+    LawParameterNotInverted {
+        /// The law parameter that was inverted.
+        parameter: f64,
+    },
+    /// None of `tries` delta steps, each ten times the last, gave the law point's values
+    /// at the delta point. Class `failed`.
+    NoDeltaStep {
+        /// The number of delta steps tried.
+        tries: usize,
+    },
+    /// No trace step toward a snapped point passed in `tries` tries: the step fell under the
+    /// trace's floor, or the tries ran out. Class `failed`.
+    ApproachStepNotFound {
+        /// The tries taken.
+        tries: usize,
+    },
+    /// A trace step toward a snapped point, ending before it, hit a domain boundary.
+    /// Class `failed`.
+    ApproachHitBoundary,
+    /// The span to a snapped point was not certified after `points` traced points were put
+    /// before it, the most the approach puts. Class `failed`.
+    ApproachNotCertified {
+        /// The points the approach put before the snapped point.
+        points: usize,
+    },
+    /// The caller asked to reverse a curve with no points. The kernel's own callers reverse
+    /// only a curve they put points on (`trace_back` skips an empty one, WR-80), so only a
+    /// caller reaches it (upstream's `SM_ERR_NULL_POINTER`). [`ErrorKind::InvalidInput`].
+    NoCurveToReverse,
+    /// The start point the point intersection added was gone when it came to trace from it.
+    /// The driver clears the list and adds the first through point's copy itself, and no
+    /// kernel `IntersectorVirtuals` implementor touches the list, so only a caller's
+    /// override that re-enters the driver (which clears the list) removes it (upstream's
+    /// `SM_ERR_NULL_POINTER`). [`ErrorKind::InvalidInput`].
+    StartPointLost,
+    /// The basic intersector was asked for a law point's delta step, which only the
+    /// advanced intersectors compute. [`ErrorKind::Unsupported`].
+    DeltaStepUnsupported,
+    /// A silhouette point coincides with the perspective eye point, where the view direction
+    /// it is classified by has no length. [`ErrorKind::Degenerate`].
+    PointAtEye,
+    /// The tracer does not compute point values: the base tracer leaves the step to the
+    /// tracers that override it. [`ErrorKind::Unsupported`].
+    TracerHasNoPointValues,
+    /// The tracer does not solve for a next point: the base tracer leaves the step to the
+    /// tracers that override it. [`ErrorKind::Unsupported`].
+    TracerHasNoPointSolve,
+    /// The tracer does not drop a boundary curve for start points: the base tracer and the
+    /// drop-curve tracer leave it to the tracers that override it. [`ErrorKind::Unsupported`].
+    TracerHasNoBoundaryDrop,
+    /// The local solver is of an abstract kind (base, point or curve), which solves nothing:
+    /// only the kinds derived from them solve a pair of objects. [`ErrorKind::Unsupported`].
+    AbstractLocalSolver,
+    /// A boundary iso curve dropped onto `found` UV curves, neither one nor two (two along a
+    /// seam). Class `failed`.
+    BoundaryDropNotOneOrTwo {
+        /// The number of UV curves the drop gave.
+        found: usize,
+    },
+    /// A tracer's reversal succeeded but left the curve with no points. The default
+    /// `SurfaceTrace::reverse_curve_direction` keeps every point, so only an outside
+    /// implementor's override reaches it (upstream's `SM_ERR_NULL_POINTER`).
+    /// [`ErrorKind::InvalidInput`].
+    ReversalLeftNoPoints,
     /// The touches of a curve against a face's loops do not pair into arrivals and
     /// departures: there are `count`, an odd number, or the curve is closed and has fewer
     /// than four touches or its last is not on the seam its first is on. Class `failed`.
@@ -224,6 +351,12 @@ pub enum IntersectFailure {
         /// The number of touches.
         count: usize,
     },
+    /// A touch the loop crossing found on the face's seam drops to a uv point that is not on
+    /// the surface's seam. Class `failed`.
+    SeamTouchOffSeam,
+    /// The uv sector of a vertex use, computed with its status ignored as upstream, names no
+    /// edge use on the side the classified curve leaves along. Class `missing`.
+    NoSectorEdgeuse,
     /// Squeezing out the smallest interval of a classification left its number of intervals
     /// unchanged, so the two classifications of one curve cannot be brought to the same
     /// number of intervals (the squeeze's error, where it gave one, is the cause). Class
@@ -248,6 +381,43 @@ pub enum IntersectFailure {
     /// in: the curve does not classify to that face consistently at its ends. Class
     /// `missing`.
     NoEndSector,
+    /// The two classifications of one curve, which are combined interval by interval, have
+    /// different numbers of intervals (`this` and `other`). Class `failed`.
+    IntervalCountsDiffer {
+        /// The number of intervals of this classification.
+        this: usize,
+        /// The number of intervals of the other classification.
+        other: usize,
+    },
+    /// The interval to collapse is the classification's only one, which is never squeezed
+    /// out. Class `failed`.
+    OnlyInterval,
+    /// The interval to collapse is not degenerate within the pair tolerance of its ends.
+    /// Class `failed`.
+    IntervalNotDegenerate,
+    /// A knot vector of the surface or the discontinuities of the volume in one direction are
+    /// empty (the surface's knot query failed, as a curve-bounded surface's does, its status
+    /// ignored as upstream; its error is the cause), so there are no knot lines or planes to
+    /// classify against. Class `failed`.
+    NoKnots,
+    /// A 2d curve is classified against a volume, which takes a 3d curve.
+    /// [`ErrorKind::Unsupported`].
+    UvCurveAgainstVolume,
+    /// The volume's discontinuities are not aligned with its parameter directions, which the
+    /// classification against its discontinuity planes needs. [`ErrorKind::Unsupported`].
+    UnalignedDiscontinuities,
+    /// A curve handle of the caller's classification or boundary (a source, edge or trim
+    /// curve) names no curve in the geometry given. [`ErrorKind::InvalidInput`].
+    CurveHandleUnresolved,
+    /// An item of the face's trimmed surface cache (a vertex use or an edge use) has no
+    /// handle, or no record among the boundary loops of the face given, so the cache and the
+    /// boundary given are not of the same face. The caller's boundary:
+    /// [`ErrorKind::InvalidInput`].
+    CacheItemNotOnBoundary,
+    /// An edge use of the boundary given has no uv trim curve, and the routine cannot make one
+    /// over the read-only boundary (upstream makes it there; the cached path never needs it).
+    /// [`ErrorKind::Unsupported`].
+    EdgeuseWithoutTrimCurve,
 }
 
 impl IntersectFailure {
@@ -278,24 +448,62 @@ impl IntersectFailure {
             | Self::TangentAlongNormal { .. }
             | Self::DegenerateDomain
             | Self::MoveNotProved { .. }
+            | Self::Tangent
+            | Self::SelfIntersectionUnsupported
+            | Self::PointOutsideDomain { .. }
+            | Self::TraceTooLong { .. }
+            | Self::PointCountNotTaken { .. }
+            | Self::PointNotOnBothSurfaces
+            | Self::ThroughPointNotEvaluated
+            | Self::SphereTrimNotCertified { .. }
+            | Self::NotClassifiedWithinSamples { .. }
+            | Self::LawParameterNotInverted { .. }
+            | Self::NoDeltaStep { .. }
+            | Self::ApproachStepNotFound { .. }
+            | Self::ApproachHitBoundary
+            | Self::ApproachNotCertified { .. }
+            | Self::DeltaStepUnsupported
+            | Self::PointAtEye
+            | Self::TracerHasNoPointValues
+            | Self::TracerHasNoPointSolve
+            | Self::TracerHasNoBoundaryDrop
+            | Self::AbstractLocalSolver
+            | Self::BoundaryDropNotOneOrTwo { .. }
             | Self::NoClassFace
             | Self::IntervalIndexPastEnd { .. }
             | Self::ParameterOutsideRange { .. }
+            | Self::SeamTouchOffSeam
             | Self::SqueezeStalled
             | Self::RepairDidNotSettle { .. }
             | Self::IntervalEndMisplaced
-            | Self::PointClassNotInserted => SM_ERR,
+            | Self::PointClassNotInserted
+            | Self::IntervalCountsDiffer { .. }
+            | Self::OnlyInterval
+            | Self::IntervalNotDegenerate
+            | Self::NoKnots
+            | Self::UvCurveAgainstVolume
+            | Self::UnalignedDiscontinuities => SM_ERR,
             Self::Missing(_)
             | Self::CurveCacheNotBuilt
             | Self::FaceWithoutSurface
             | Self::EdgeWithoutCurve
             | Self::NoClassObject
+            | Self::NoObjectToSolve
             | Self::NotSetUp
             | Self::PolyFaceWithoutEdges
             | Self::CurveNotBSpline
-            | Self::NoSourceCurve
             | Self::SurfaceCacheNotBuilt
-            | Self::NoEndSector => SM_ERR_NULL_POINTER,
+            | Self::NoSectorEdgeuse
+            | Self::NoSurfaceCaches
+            | Self::SurfaceNotOffset { .. }
+            | Self::NoCurveToReverse
+            | Self::StartPointLost
+            | Self::ReversalLeftNoPoints
+            | Self::NoSourceCurve
+            | Self::NoEndSector
+            | Self::CurveHandleUnresolved
+            | Self::CacheItemNotOnBoundary
+            | Self::EdgeuseWithoutTrimCurve => SM_ERR_NULL_POINTER,
             Self::OutsideDomain(_) | Self::SeamJumpNotSnapped => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::Inconsistent(_) | Self::TouchesUnpaired { .. } => SM_ERR_ASSERT_FAILURE,
         }
@@ -322,6 +530,7 @@ impl IntersectFailure {
             | Self::FaceWithoutSurface
             | Self::EdgeWithoutCurve
             | Self::NoClassObject
+            | Self::NoObjectToSolve
             | Self::NotSetUp
             | Self::EmptyStack
             | Self::DomainOutsideSurface
@@ -329,18 +538,39 @@ impl IntersectFailure {
             | Self::NotFinite
             | Self::PolyFaceWithoutEdges
             | Self::EdgeNotSplit
+            | Self::NoSurfaceCaches
+            | Self::PointCountNotTaken { .. }
+            | Self::PointNotOnBothSurfaces
+            | Self::NoCurveToReverse
+            | Self::StartPointLost
+            | Self::ReversalLeftNoPoints
             | Self::NoSourceCurve
             | Self::NoClassFace
             | Self::IntervalIndexPastEnd { .. }
-            | Self::ParameterOutsideRange { .. } => ErrorKind::InvalidInput,
+            | Self::ParameterOutsideRange { .. }
+            | Self::CurveHandleUnresolved
+            | Self::CacheItemNotOnBoundary => ErrorKind::InvalidInput,
             Self::UnsupportedObjectKind
             | Self::CurveNotBSpline
             | Self::SingularPointInside
-            | Self::TooManyControlPoints { .. } => ErrorKind::Unsupported,
+            | Self::TooManyControlPoints { .. }
+            | Self::SelfIntersectionUnsupported
+            | Self::TraceTooLong { .. }
+            | Self::SurfaceNotOffset { .. }
+            | Self::DeltaStepUnsupported
+            | Self::TracerHasNoPointValues
+            | Self::TracerHasNoPointSolve
+            | Self::TracerHasNoBoundaryDrop
+            | Self::UvCurveAgainstVolume
+            | Self::UnalignedDiscontinuities
+            | Self::EdgeuseWithoutTrimCurve
+            | Self::AbstractLocalSolver => ErrorKind::Unsupported,
+            Self::PointOutsideDomain { .. } => ErrorKind::OutsideDomain,
             Self::NoSurfaceNormal
             | Self::DegenerateTangent
             | Self::TangentAlongNormal { .. }
-            | Self::DegenerateDomain => ErrorKind::Degenerate,
+            | Self::DegenerateDomain
+            | Self::PointAtEye => ErrorKind::Degenerate,
             Self::CurveCacheNotBuilt => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
@@ -388,6 +618,7 @@ impl core::fmt::Display for IntersectFailure {
             Self::NoClassObject => {
                 f.write_str("the classification has no object of the kind its class names")
             }
+            Self::NoObjectToSolve => f.write_str("there is no object to solve against"),
             Self::NotSetUp => f.write_str("a step this one reads from has not run"),
             Self::EmptyStack => f.write_str("the stack holds no point and tangent"),
             Self::DomainOutsideSurface => {
@@ -408,8 +639,8 @@ impl core::fmt::Display for IntersectFailure {
                 f,
                 "the dropped curve reached {limit} control points, more than the drop builds"
             ),
-            Self::NoSurfaceNormal => f.write_str("the surface has no normal at the dropped point"),
-            Self::DegenerateTangent => f.write_str("the curve to drop has no tangent there"),
+            Self::NoSurfaceNormal => f.write_str("the surface has no normal at the point"),
+            Self::DegenerateTangent => f.write_str("the curve has no tangent there"),
             Self::TangentAlongNormal { degrees } => write!(
                 f,
                 "the curve's tangent is {degrees} degrees from the surface normal, within 3"
@@ -432,6 +663,9 @@ impl core::fmt::Display for IntersectFailure {
                 f,
                 "the new interval end {param} is outside the range [{min}, {max}] its neighbours allow"
             ),
+            Self::Tangent => f.write_str(
+                "the surfaces meet at a singular or tangent point the intersector cannot trace through",
+            ),
             Self::SurfaceCacheNotBuilt => {
                 f.write_str("no surface cache, or its tree, could be built")
             }
@@ -439,6 +673,12 @@ impl core::fmt::Display for IntersectFailure {
                 f,
                 "the {count} touches of the curve against the loops do not pair into arrivals and departures"
             ),
+            Self::SeamTouchOffSeam => {
+                f.write_str("the seam touch does not drop onto the surface's seam")
+            }
+            Self::NoSectorEdgeuse => {
+                f.write_str("the vertex use's uv sector names no edge use on the curve's side")
+            }
             Self::SqueezeStalled => f.write_str(
                 "squeezing out the smallest interval did not shorten the classification",
             ),
@@ -455,6 +695,136 @@ impl core::fmt::Display for IntersectFailure {
             Self::NoEndSector => {
                 f.write_str("no vertex use at an end of the edge has a sector of the face")
             }
+            Self::IntervalCountsDiffer { this, other } => write!(
+                f,
+                "the two classifications have different numbers of intervals ({this} and {other})"
+            ),
+            Self::NoSurfaceCaches => f.write_str("no surface caches were given"),
+            Self::SelfIntersectionUnsupported => {
+                f.write_str("the basic intersector does not test self intersection")
+            }
+            Self::PointOutsideDomain { surface } => write!(
+                f,
+                "the traced point lies outside the uv domain of surface {surface}"
+            ),
+            Self::TraceTooLong { limit } => write!(
+                f,
+                "the trace reached {limit} points: the tolerance is too small or a surface is \
+                 poorly defined"
+            ),
+            Self::PointCountNotTaken { given } => write!(
+                f,
+                "{given} points were given, a number the intersection does not take"
+            ),
+            Self::SurfaceNotOffset { surface } => write!(
+                f,
+                "surface {surface} of the law intersection is not an offset surface"
+            ),
+            Self::PointNotOnBothSurfaces => {
+                f.write_str("the first through point is not on both surfaces")
+            }
+            Self::ThroughPointNotEvaluated => {
+                f.write_str("the through point's values could not be computed")
+            }
+            Self::SphereTrimNotCertified { why } => f.write_str(sweep_refusal(*why)),
+            Self::NotClassifiedWithinSamples { limit } => write!(
+                f,
+                "the boundary start point is not classified within {limit} samples"
+            ),
+            Self::LawParameterNotInverted { parameter } => write!(
+                f,
+                "the law curve's normal cannot be interpolated at the parameter {parameter}"
+            ),
+            Self::NoDeltaStep { tries } => write!(
+                f,
+                "none of {tries} delta steps gives the law point's values"
+            ),
+            Self::ApproachStepNotFound { tries } => write!(
+                f,
+                "no trace step toward the snapped point passes in {tries} tries"
+            ),
+            Self::PointAtEye => f.write_str("the surface point is at the eye point"),
+            Self::TracerHasNoPointValues => {
+                f.write_str("this tracer does not compute point values")
+            }
+            Self::TracerHasNoPointSolve => f.write_str("this tracer does not step to a next point"),
+            Self::TracerHasNoBoundaryDrop => {
+                f.write_str("this tracer does not drop a boundary curve")
+            }
+            Self::AbstractLocalSolver => {
+                f.write_str("the base, point and curve local solvers solve nothing")
+            }
+            Self::BoundaryDropNotOneOrTwo { found } => write!(
+                f,
+                "the boundary curve dropped onto {found} uv curves, neither one nor two"
+            ),
+            Self::NoCurveToReverse => f.write_str("the curve to reverse has no points"),
+            Self::StartPointLost => {
+                f.write_str("the start point added for the trace was gone when the trace began")
+            }
+            Self::ReversalLeftNoPoints => {
+                f.write_str("the tracer's reversal left the curve with no points")
+            }
+            Self::DeltaStepUnsupported => {
+                f.write_str("the basic intersector does not compute a law point's delta step")
+            }
+            Self::ApproachHitBoundary => {
+                f.write_str("a trace step toward the snapped point hit a domain boundary")
+            }
+            Self::ApproachNotCertified { points } => write!(
+                f,
+                "the span to the snapped point does not certify after {points} points"
+            ),
+            Self::OnlyInterval => {
+                f.write_str("the only interval of the classification is not squeezed out")
+            }
+            Self::IntervalNotDegenerate => f.write_str("the interval to collapse is not degenerate"),
+            Self::NoKnots => f.write_str(
+                "the knot vector is empty, so there are no knot lines to classify against",
+            ),
+            Self::UvCurveAgainstVolume => {
+                f.write_str("a 2D curve cannot be classified against a volume")
+            }
+            Self::UnalignedDiscontinuities => f.write_str(
+                "the volume's discontinuities are not aligned with its parameter directions",
+            ),
+            Self::CurveHandleUnresolved => {
+                f.write_str("the curve handle names no curve in the geometry given")
+            }
+            Self::CacheItemNotOnBoundary => f.write_str(
+                "an item of the face's surface cache is not on the boundary given",
+            ),
+            Self::EdgeuseWithoutTrimCurve => f.write_str("the edge use has no uv trim curve"),
+        }
+    }
+}
+
+/// Not upstream (#17110): the message of a refused monotone sweep fit
+/// ([`crate::intersect::surface_intersector::sphere_span::fit_monotone_sweep`]).
+const fn sweep_refusal(
+    why: crate::intersect::surface_intersector::sphere_span::SweepRefusal,
+) -> &'static str {
+    use crate::intersect::surface_intersector::sphere_span::{Refusal, SweepRefusal};
+    match why {
+        SweepRefusal::Off(Refusal::Off) => {
+            "the UV trim on the sphere made monotone in its sweep coordinate where the curve \
+             is monotone in longitude lies off the 3D curve by more than the tolerance"
+        }
+        SweepRefusal::Off(_) => {
+            "the UV trim on the sphere made monotone in its sweep coordinate where the curve \
+             is monotone in longitude could not be certified within the tolerance of the 3D \
+             curve"
+        }
+        SweepRefusal::TurnsBack => {
+            "a refitted span of the UV trim on the sphere could not be certified monotone \
+             in its sweep coordinate where the curve is monotone in longitude"
+        }
+        SweepRefusal::Degenerate => {
+            "the UV trim on the sphere made monotone in its sweep coordinate has a zero \
+             derivative at a joint"
+        }
+        SweepRefusal::Shape => {
+            "the UV and 3D control points of the traced curve are not matching cubic spans"
         }
     }
 }
@@ -491,17 +861,6 @@ impl crate::SolidError {
     #[track_caller]
     pub(crate) fn intersect_uv_polygon_not_in_domain(operation: &'static str) -> Self {
         Self::intersect(operation, IntersectFailure::UvPolygonNotInDomain)
-    }
-
-    /// [`crate::SolidError::Failed`] for a stage of an intersection routine that failed with
-    /// no reason the kernel names ([`IntersectFailure::StageFailed`], a defect), with
-    /// `status`, the one the C++ reports (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`).
-    #[must_use]
-    #[track_caller]
-    pub(crate) fn intersect_stage_failed(operation: &'static str, status: i32) -> Self {
-        Failure::new(operation, IntersectFailure::StageFailed)
-            .with_status(status)
-            .into_error()
     }
 
     /// The intersection failure behind this error, for a [`crate::SolidError::Failed`]
@@ -618,7 +977,9 @@ pub(super) mod tests {
     fn a_stage_failure_is_a_defect_and_a_typed_cause_keeps_its_status() {
         for status in [SM_ERR, SM_ERR_NULL_POINTER] {
             super::super::tests::assert_stage_failure(
-                &SolidError::intersect_stage_failed("intersect::op", status),
+                &Failure::new("intersect::op", IntersectFailure::StageFailed)
+                    .with_status(status)
+                    .into_error(),
                 "intersect::op",
                 status,
             );
@@ -652,7 +1013,9 @@ pub(super) mod tests {
                 .into_error();
             super::super::tests::assert_defect(
                 &e,
-                &SolidError::intersect_stage_failed("intersect::op", status),
+                &Failure::new("intersect::op", IntersectFailure::StageFailed)
+                    .with_status(status)
+                    .into_error(),
                 "intersect::op",
                 status,
                 &format!("intersect::op: stage_failed: {why}"),
@@ -661,7 +1024,9 @@ pub(super) mod tests {
         }
         super::super::tests::assert_defect(
             &SolidError::intersect("intersect::op", defect),
-            &SolidError::intersect_stage_failed("intersect::op", SM_ERR),
+            &Failure::new("intersect::op", IntersectFailure::StageFailed)
+                .with_status(SM_ERR)
+                .into_error(),
             "intersect::op",
             SM_ERR,
             &format!("intersect::op: stage_failed: {why}"),
@@ -686,6 +1051,7 @@ pub(super) mod tests {
             (F::FaceWithoutSurface, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::EdgeWithoutCurve, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::NoClassObject, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::NoObjectToSolve, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::NotSetUp, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::EmptyStack, SM_ERR, K::InvalidInput),
             (F::DomainOutsideSurface, SM_ERR, K::InvalidInput),
@@ -750,6 +1116,108 @@ pub(super) mod tests {
         assert_eq!(super::super::upstream_status(&e), Some(SM_ERR_NULL_POINTER));
     }
 
+    /// The marching surface/surface intersector's causes (#19844, TE-O-11 part 1) keep the
+    /// status of the site they replace and have their class.
+    #[test]
+    fn the_surface_intersector_causes_keep_their_status_and_have_their_class() {
+        use crate::intersect::surface_intersector::sphere_span::{Refusal, SweepRefusal};
+        use ErrorKind as K;
+        use IntersectFailure as F;
+        let op = "intersect::op";
+        let cases = [
+            (F::Tangent, SM_ERR, K::Failed),
+            (F::NoSurfaceCaches, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::SelfIntersectionUnsupported, SM_ERR, K::Unsupported),
+            (
+                F::PointOutsideDomain { surface: 1 },
+                SM_ERR,
+                K::OutsideDomain,
+            ),
+            (F::TraceTooLong { limit: 5000 }, SM_ERR, K::Unsupported),
+            (F::PointCountNotTaken { given: 1 }, SM_ERR, K::InvalidInput),
+            (
+                F::SurfaceNotOffset { surface: 0 },
+                SM_ERR_NULL_POINTER,
+                K::Unsupported,
+            ),
+            (F::PointNotOnBothSurfaces, SM_ERR, K::InvalidInput),
+            (
+                F::SphereTrimNotCertified {
+                    why: SweepRefusal::Off(Refusal::Off),
+                },
+                SM_ERR,
+                K::Failed,
+            ),
+            (
+                F::SphereTrimNotCertified {
+                    why: SweepRefusal::Shape,
+                },
+                SM_ERR,
+                K::Failed,
+            ),
+            (
+                F::NotClassifiedWithinSamples { limit: 64 },
+                SM_ERR,
+                K::Failed,
+            ),
+            (
+                F::LawParameterNotInverted { parameter: 1.5 },
+                SM_ERR,
+                K::Failed,
+            ),
+            (F::NoDeltaStep { tries: 6 }, SM_ERR, K::Failed),
+            (F::ApproachStepNotFound { tries: 9 }, SM_ERR, K::Failed),
+            (F::ApproachHitBoundary, SM_ERR, K::Failed),
+            (F::ApproachNotCertified { points: 16 }, SM_ERR, K::Failed),
+            (F::NoCurveToReverse, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::StartPointLost, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::DeltaStepUnsupported, SM_ERR, K::Unsupported),
+            (F::PointAtEye, SM_ERR, K::Degenerate),
+            (F::TracerHasNoPointValues, SM_ERR, K::Unsupported),
+            (F::TracerHasNoPointSolve, SM_ERR, K::Unsupported),
+            (F::TracerHasNoBoundaryDrop, SM_ERR, K::Unsupported),
+            (F::AbstractLocalSolver, SM_ERR, K::Unsupported),
+            (F::BoundaryDropNotOneOrTwo { found: 3 }, SM_ERR, K::Failed),
+            (
+                F::ReversalLeftNoPoints,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+        ];
+        for (failure, status, kind) in cases {
+            let e = SolidError::intersect(op, failure);
+            assert_eq!(
+                super::super::upstream_status(&e),
+                Some(status),
+                "{failure:?}"
+            );
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.intersect_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+            assert!(!e.to_string().is_empty());
+        }
+        // a cache build or a through point's evaluation keeps the error it chains as its
+        // cause, which decides defect or not, and its own status
+        let why = "a step the kernel got wrong";
+        let cause = SolidError::intersect(op, F::Defect { why });
+        for (failure, status) in [
+            (F::SurfaceCacheNotBuilt, SM_ERR_NULL_POINTER),
+            (F::ThroughPointNotEvaluated, SM_ERR),
+            (F::Tangent, SM_ERR),
+        ] {
+            let e = Failure::new(op, failure)
+                .caused_by(cause.clone())
+                .into_error();
+            assert_eq!(e.cause(), Some(&cause));
+            assert!(e.is_defect(), "{failure:?}");
+            assert_eq!(
+                super::super::upstream_status(&e),
+                Some(status),
+                "{failure:?}"
+            );
+        }
+    }
+
     /// The curve classification's causes keep the status of the phrase each replaced, and
     /// a chained cause decides defect or refusal.
     #[test]
@@ -780,11 +1248,38 @@ pub(super) mod tests {
                 SM_ERR_ASSERT_FAILURE,
                 K::Failed,
             ),
+            (F::SeamTouchOffSeam, SM_ERR, K::Failed),
+            (F::NoSectorEdgeuse, SM_ERR_NULL_POINTER, K::Missing),
             (F::SqueezeStalled, SM_ERR, K::Failed),
             (F::RepairDidNotSettle { restarts: 4 }, SM_ERR, K::Failed),
             (F::IntervalEndMisplaced, SM_ERR, K::Failed),
             (F::PointClassNotInserted, SM_ERR, K::Failed),
             (F::NoEndSector, SM_ERR_NULL_POINTER, K::Missing),
+            (
+                F::IntervalCountsDiffer { this: 2, other: 3 },
+                SM_ERR,
+                K::Failed,
+            ),
+            (F::OnlyInterval, SM_ERR, K::Failed),
+            (F::IntervalNotDegenerate, SM_ERR, K::Failed),
+            (F::NoKnots, SM_ERR, K::Failed),
+            (F::UvCurveAgainstVolume, SM_ERR, K::Unsupported),
+            (F::UnalignedDiscontinuities, SM_ERR, K::Unsupported),
+            (
+                F::CurveHandleUnresolved,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                F::CacheItemNotOnBoundary,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                F::EdgeuseWithoutTrimCurve,
+                SM_ERR_NULL_POINTER,
+                K::Unsupported,
+            ),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::intersect(op, failure);
@@ -846,20 +1341,7 @@ pub(super) mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/intersect/adv_surface_intersector.rs", 10),
             ("solidcore/src/intersect/curve_class/p3.rs", 19),
-            ("solidcore/src/intersect/curve_class/p4.rs", 26),
-            ("solidcore/src/intersect/curve_class/p5.rs", 8),
-            ("solidcore/src/intersect/curve_class/p7.rs", 17),
-            ("solidcore/src/intersect/curve_class/p8.rs", 17),
-            ("solidcore/src/intersect/curve_class/p9.rs", 17),
-            ("solidcore/src/intersect/surface_intersector/p2.rs", 9),
-            ("solidcore/src/intersect/surface_intersector/p3.rs", 5),
-            ("solidcore/src/intersect/surface_intersector/p4.rs", 17),
-            ("solidcore/src/intersect/surface_silhouette.rs", 7),
-            ("solidcore/src/intersect/surface_tracer.rs", 6),
-            ("solidcore/src/intersect/topology_solver/p1.rs", 12),
-            ("solidcore/src/intersect/topology_solver/p2.rs", 24),
         ];
         assert_pinned(
             "intersection phrase-cause sites",

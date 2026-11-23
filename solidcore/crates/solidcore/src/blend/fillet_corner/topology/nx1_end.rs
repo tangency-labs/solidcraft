@@ -26,6 +26,7 @@
 
 use std::collections::BTreeMap;
 
+use super::shape_not_built;
 use crate::blend::fillet_corner::p1::face_by_two_edgeuses;
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_executive::session::{FilletBody, FilletObject, SolverObject};
@@ -36,6 +37,7 @@ use crate::blend::fillet_geom::p1::{
 use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::blend::fillet_standard_solver::p1::VariableRadiusFs;
 use crate::blend::fillet_tangent_rollover::planar_section;
+use crate::error::blend::CornerShape;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
@@ -1132,14 +1134,14 @@ impl FilletCorner {
                     extend_edge = eu1::edge(target, pick)?;
                     other_side_edgeuse = Some(other);
                 } else {
-                    // Invalid brep topology
-                    return Err(SolidError::blend_failed(
-                        OP,
-                        "the brep's topology at the corner is not valid",
-                    ));
+                    // Invalid brep topology (upstream): at most three edges, whose side edges
+                    // share no face, as where an edge meeting the vertex twice is in the ring
+                    // once
+                    return Err(shape_not_built(OP, CornerShape::EndSideEdgesShareNoFace));
                 }
             }
         }
+        self.end_face = end_face;
         for &(piece, face) in &ribs {
             pseudo
                 .fillet_edge_mut(piece)?

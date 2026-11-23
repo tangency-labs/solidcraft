@@ -83,7 +83,8 @@
 use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::curve::p2::{BSPLINE_CURVE_TYPE, COMPOSITE_CURVE_TYPE};
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::attribute::{AttributeHandle, AttributeStore, ObjectKey};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -271,7 +272,7 @@ fn is_ascii(db: &DatabaseReader) -> bool {
 /// `*rDB.GetInStreamPtr()` (upstream dereferences `NULL` without a stream).
 fn stream(db: &mut DatabaseReader) -> Result<&mut InputStream> {
     db.in_stream_mut()
-        .ok_or_else(|| SolidError::topology_missing(OP_STREAM, "the database's input stream"))
+        .ok_or_else(|| SolidError::topology(OP_STREAM, TopologyFailure::NoInputStream))
 }
 
 /// `rFileIn >> ulong`: stores only when the extraction stores.
@@ -1812,9 +1813,9 @@ pub fn read_curve_from_db(
                 r?
             }
             _ => {
-                return Err(SolidError::topology_failed(
+                return Err(SolidError::topology(
                     OP_CURVE,
-                    "the curve type is not one the database holds",
+                    TopologyFailure::RecordTypeUnknown { type_code: ty },
                 ))
             }
         }
@@ -1832,7 +1833,7 @@ pub fn read_curve_from_db(
                     reason: "attribute index past the attribute table",
                 })?;
             let h = slot.ok_or_else(|| {
-                SolidError::topology_missing(OP_CURVE, "the attribute in the attribute table")
+                SolidError::topology(OP_CURVE, TopologyFailure::AttributeSlotEmpty)
             })?;
             attrs.store.add_attribute(key, h)?;
         }
@@ -1971,9 +1972,9 @@ pub fn read_surface_from_db(
                 )?)
             }
             _ => {
-                return Err(SolidError::topology_failed(
+                return Err(SolidError::topology(
                     OP_SURFACE,
-                    "the surface type is not one the database holds",
+                    TopologyFailure::RecordTypeUnknown { type_code: ty },
                 ))
             }
         }
@@ -1988,10 +1989,9 @@ pub fn read_surface_from_db(
             if e.is_cancelled() || e.is_not_certified() {
                 return e;
             }
-            SolidError::topology_failed(
-                OP_SURFACE,
-                "a procedural blend's net is not proved within its bound of its definition",
-            )
+            Failure::new(OP_SURFACE, TopologyFailure::BlendRecordNotProved)
+                .caused_by(e)
+                .into_error()
         })?;
     }
 
@@ -2459,8 +2459,13 @@ mod tests {
         let mut attrs = AttributeSink::new(&mut store, &mut all, 0);
         // a version 31 line curve type is SM_ERR
         let mut db = ascii_reader("Object Type 14001\n");
-        assert!(read_curve_from_db(&k, 3, 31, &mut attrs, &mut db, true)
-            .is_err_and(|e| e.upstream_status() == Some(1001)));
+        assert!(
+            read_curve_from_db(&k, 3, 31, &mut attrs, &mut db, true).is_err_and(|e| e
+                .upstream_status()
+                == Some(1001)
+                && e.topology_failure()
+                    == Some(&TopologyFailure::RecordTypeUnknown { type_code: 14001 }))
+        );
         // version 31 B-spline line segment with an attribute index into an empty slot
         let text = "Object Type 14033\n1\n1\n0\n3\n0 0 0\n1 1 1\n0\n0\n1\n1\n1 0\n";
         let mut db = ascii_reader(text);
@@ -2472,6 +2477,15 @@ mod tests {
         let c = c.unwrap();
         assert_eq!(c.object.type_code(), BSPLINE_CURVE_TYPE);
         assert_eq!(attrs2.store.attributes(c.key).len(), 1);
+        // the same record cut before the line's end: the line skip fails, so no placeholder
+        // is made and the listed slot stays empty
+        let mut db = ascii_reader(text.trim_end_matches('\n'));
+        let mut store3 = AttributeStore::new();
+        let mut all3: Vec<Option<AttributeHandle>> = vec![None];
+        let mut attrs3 = AttributeSink::new(&mut store3, &mut all3, 0);
+        assert!(read_curve_from_db(&k, 3, 31, &mut attrs3, &mut db, true)
+            .is_err_and(|e| e.upstream_status() == Some(1006)
+                && e.topology_failure() == Some(&TopologyFailure::AttributeSlotEmpty)));
     }
 
     #[test]

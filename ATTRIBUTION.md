@@ -1001,6 +1001,9 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | crates/look/icons/design/svg/flat/window_other.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/small/window_here.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/small/window_other.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/locales/pending/basque-second-batch.json | Ehuntabi | Original Basque (euskara) translation of 145 more of SolidCraft's English command labels (sketch, solid, construct, surface, view, file, inspect, parameters and browser commands), written with Claude Code from the meaning of each English string; terms from the same glossary as the first batch (Euskaltzaindia, Elhuyar, Itzuli, Euskalterm); not yet reviewed by a Basque speaker with CAD vocabulary; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/locales/pt-PT.json | acebear17 | Original European Portuguese (Portugal) translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
+| `assets/locales/pending/note-legacy-centre.json` | SolidCraft contributors | Original note alignment label | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
@@ -1052,10 +1055,11 @@ into THIRD-PARTY-LICENSES.txt when `main` regenerates it.
 
 ## FreeCAD, Rhino and OpenUSD library
 
-FreeCAD `.FCStd` and Rhino `.3dm` files are read, and OpenUSD files read and written, with
+FreeCAD `.FCStd` and Rhino `.3dm` files are read, OpenUSD files read and written, and STEP and IGES
+files read when "Import with cadmpeg" is chosen, with
 [cadmpeg](https://github.com/cadmpeg/cadmpeg) 0.6.12 (Apache-2.0), linked as the crates `cadmpeg-core`,
-`cadmpeg-ir`, `cadmpeg-registry`, `cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-rhino`,
-`cadmpeg-codec-step`, `cadmpeg-codec-usd` and `cadmpeg-tessellate`
+`cadmpeg-ir`, `cadmpeg-registry`, `cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-iges`,
+`cadmpeg-codec-rhino`, `cadmpeg-codec-step`, `cadmpeg-codec-usd` and `cadmpeg-tessellate`
 in native and browser builds (`crates/io/src/native_cad.rs`). Only those open-format codecs are built: no
 default features, so cadmpeg's codecs for commercial CAD formats and its ShapeManager/ACIS
 codec are not compiled in. Its licence text is in THIRD-PARTY-LICENSES.txt; no code from it is
