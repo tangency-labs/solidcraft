@@ -6509,4 +6509,58 @@ mod tests {
             "has no mate",
         );
     }
+
+    /// TE-O-18 part 6 (#19851): the shell's difference missing an operand or its result,
+    /// and a sheet's wall without a surface, are defects that say which (the conversion
+    /// guide, rule 2), with the status of upstream's `NER`.
+    #[test]
+    fn a_missing_operand_result_or_wall_surface_is_a_defect_that_says_which() {
+        let defect = |e: SolidError, says: &str| {
+            assert!(e.is_defect(), "{e}");
+            assert!(
+                matches!(e.offset_failure(), Some(OffsetFailure::Defect { .. })),
+                "{e}"
+            );
+            assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER), "{e}");
+            assert!(e.to_string().contains(says), "{e}");
+        };
+        // the difference of an outward shell: the shell first, the input second
+        let difference = |input: Option<Brep>, take: bool| {
+            let original = source_brep();
+            let mut fixture = NotificationFixture::new(&original);
+            let mut input = input;
+            let mut shell = Brep::new();
+            shell.set_key(result_key(EntityRef::Brep(BrepId::from_index(0))).key);
+            let mut kernel = Kernel::default();
+            shell_difference_with(
+                &mut kernel,
+                &mut input,
+                shell,
+                0.25,
+                1.0e-6,
+                &mut fixture.context(),
+                |_, _, primary, _, _| {
+                    if take {
+                        *primary = None;
+                    }
+                    Ok(true)
+                },
+            )
+            .unwrap_err()
+        };
+        defect(
+            difference(None, false),
+            "an operand of the shell's difference is not there",
+        );
+        defect(difference(Some(source_brep()), true), "which holds none");
+        // a wall of a thickened sheet without its surface
+        let mut kernel = Kernel::default();
+        let (mut brep, face) = one_face(false);
+        let mut fixture = NotificationFixture::new(&brep);
+        defect(
+            put_planar_face_on_its_plane(&mut kernel, &mut brep, face, &mut fixture.context())
+                .unwrap_err(),
+            "has no surface",
+        );
+    }
 }
