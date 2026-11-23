@@ -5045,6 +5045,12 @@ fn installed_plugins_are_listed_and_called_as_tools_until_removed() {
         json!({"id":"smp","name":"Sample importer","version":"1","capabilities":["formats@0.1"],
         "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["smp"]}]}}),
     );
+    write(
+        "out",
+        json!({"id":"out","name":"Sample exporter","version":"1","capabilities":["formats@0.1"],
+        "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"save","kind":"exporter","extensions":["out"],
+        "input_schema":{"type":"object","properties":{"precision":{"type":"integer","minimum":1}}}}]}}),
+    );
     let mut session = solidcraft_engine::Session::default();
     session.plugin_state.plugins_dir = Some(plugins.clone());
     // Grants approved for an older package: this one needs approving again.
@@ -5065,6 +5071,19 @@ fn installed_plugins_are_listed_and_called_as_tools_until_removed() {
     let importer = tools.iter().find(|t| t["name"] == "smp.convert").expect("the importer is a tool");
     assert_eq!(importer["title"], "Open .smp files with Sample importer");
     assert_eq!(importer["inputSchema"]["required"], json!(["path"]));
+    let exporter = tools.iter().find(|t| t["name"] == "out.save").expect("the exporter is a tool");
+    assert_eq!(exporter["title"], "Export .out files with Sample exporter");
+    assert_eq!(exporter["plugin"]["kind"], "exporter");
+    assert_eq!(exporter["inputSchema"]["required"], json!(["path"]));
+    let annotations = &exporter["annotations"];
+    assert_eq!(
+        (&annotations["readOnlyHint"], &annotations["destructiveHint"], &annotations["openWorldHint"]),
+        (&json!(false), &json!(true), &json!(true))
+    );
+    for args in [json!({}), json!({"path":"part.out","extra":true}), json!({"path":"part.out","options":{"precision":0}})] {
+        let invalid = raw_tool(&mut s, "out.save", args);
+        assert!(invalid["error"].is_object() || invalid["result"]["isError"] == true, "{invalid}");
+    }
     // Arguments are checked as strictly as a command's.
     assert!(
         call(&mut s, 2, "tools/call", json!({"name":"gears.make","arguments":{"colour":"red"}}))["error"]["message"]
