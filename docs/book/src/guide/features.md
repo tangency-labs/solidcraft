@@ -168,10 +168,13 @@ another curved face) and a sketch profile. **Deboss** cuts into the face (outwar
 complete cylinder or coaxial sleeve every profile wraps round the wall by arc length: straight edges
 along the axis and round the circumference keep exact radial walls, and curves, diagonals and text
 wrap too, their edges and walls fitted within the part's tolerance. Profiles may have holes and
-concave outlines, and must stay clear of seams and ends. On a partial cylinder wall and any other
-face, each closed region follows the face at the given depth: on a cylinder it is laid on the wall
-at its arc length from the sketch, elsewhere it is projected along the sketch normal; a region that
-does not lie wholly on the face is refused. Capture pending component positions before applying. The
+concave outlines, and must stay clear of seams and ends. A partial cylinder wall bounded by two arcs
+round its axis and two lines along it (a half tube, a rounded box corner, a revolved wall) wraps the
+same way; the profiles must stay inside the picked face, and raised material that runs into another
+part of the body, or sunk material that breaks through another face, is refused. On any other
+cylinder face and any other face, each closed region follows the face at the given depth: on a
+cylinder it is laid on the wall at its arc length from the sketch, elsewhere it is projected along
+the sketch normal; a region that does not lie wholly on the face is refused. Capture pending component positions before applying. The
 feature stores the selected target and author occurrence paths, so edits and reopening retain the
 chosen instances. A new Emboss without an explicit face infers a unique eligible cylinder, outside or a bore;
 select the face when the target is ambiguous. Older saved features without a face retain their

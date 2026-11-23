@@ -106,7 +106,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("unfold")
         .contract(&UNFOLD_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("body? (default: the last sheet body) — all bends"),
+        .params("body? (default: the last sheet body) — all bends; fixed?: [x,y,z] on the flat panel that stays where it is (default: the largest flat panel, or the one an earlier unfold of the sheet fixed)"),
     CommandSpec::new("sheet.refold", "Refold", crate::checked!("sheet.refold", refold)).begins_edit()
         .at("SHEET METAL", "MODIFY")
         .icon("refold")
@@ -796,11 +796,15 @@ fn path_flange(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn unfold(s: &mut Session, p: &Value) -> Result<Value> {
-    add_feature(s, p, FeatureKind::SheetUnfold { body: str_(p, "body").map(BodyName::from), refold: false })
+    let fixed = match p.get("fixed") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(Position(vec3(v).ok_or_else(|| bad("sheet.unfold", "`fixed` must be a point [x, y, z]"))?)),
+    };
+    add_feature(s, p, FeatureKind::SheetUnfold { body: str_(p, "body").map(BodyName::from), refold: false, fixed })
 }
 
 fn refold(s: &mut Session, p: &Value) -> Result<Value> {
-    add_feature(s, p, FeatureKind::SheetUnfold { body: str_(p, "body").map(BodyName::from), refold: true })
+    add_feature(s, p, FeatureKind::SheetUnfold { body: str_(p, "body").map(BodyName::from), refold: true, fixed: None })
 }
 
 fn convert(s: &mut Session, p: &Value) -> Result<Value> {

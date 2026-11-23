@@ -715,6 +715,10 @@ impl SurfaceSheet {
                 b.lerp(a, s)
             }
         };
+        // The lines of the outline beside the edge, read once off the edge as drawn: a run that
+        // moves its stretch of the edge cuts its corners off before the next run, or its own
+        // flange, is laid on.
+        let slants = self.edge_slants(edge.panel, (a, b, d));
         // Each run's stretch as its bend's anchors run, from `a` to `b`: it starts at its `to`
         // (`hi`) and ends at its `from` (`lo`).
         let mut plans = Vec::with_capacity(runs.len());
@@ -788,15 +792,15 @@ impl SurfaceSheet {
                 tails: (Tail::Keep, Tail::Keep),
                 relief: (Relief::None, Relief::None),
             };
-            // Its sides carry on the edges beside it, as laid out in the flat with the bend: through
-            // the anchor's ends on the plate, `slant` along for each mm out (square where those
-            // edges are, and at a junction, where the next stretch's flange stands beside it). The
-            // flange's own anchor lies `allowance - 2·setback` out in the flat.
-            let (k0, k1) = self.edge_slants(edge.panel, (a, b, d));
+            // Its sides carry on the edges beside it on the part's surfaces: the plate's and the
+            // flange's surfaces unfolded about the sharp, each side runs straight on from the
+            // plate's, `slant` along for each mm out (square where those edges are, and at a
+            // junction, where the next stretch's flange stands beside it). The bend carries them
+            // through its zone; the flat follows from that, whatever its rule.
+            let (k0, k1) = slants;
             let (k0, k1) = (if run.junction.0 { 0.0 } else { k0 }, if run.junction.1 { 0.0 } else { k1 });
             let depth = run.leg.max(0.0) + run.sharp;
-            let base = bend.allowance(t, self.sheet.k_factor) - 2.0 * bend.setback(t);
-            let at = |y: f64| (k0 * (base - y), len + k1 * (base - y));
+            let at = |y: f64| (-k0 * y, len - k1 * y);
             let ((p0, p1), (q0, q1)) = (at(0.0), at(-depth));
             if !(p1 - p0 > 1e-9 && q1 - q0 > 1e-9) {
                 return err("the edges beside it close the flange before it reaches its height");
@@ -2181,6 +2185,22 @@ impl SurfaceSheet {
             on_face(qa.z)
                 && on_face(qb.z)
                 && (b2 - a2).normalized().is_some_and(|d| crate::sheet_surface_convert::extent_across(&panel.region, (a2, d)).is_some())
+        })
+    }
+
+    /// The place of the flat panel whose material holds `p` (a point on or in the folded sheet),
+    /// for [`Self::flat`]: where that panel lies, so an unfold keeps it where it is. `None` where
+    /// no flat panel the maker placed holds it.
+    pub fn flat_at(&self, p: Vec3) -> Option<Rigid3> {
+        let t = self.sheet.thickness;
+        let tol = 1e-4 * (1.0 + p.len());
+        let dev = self.develop().ok()?;
+        let folded = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places).ok()?;
+        self.sheet.panels.iter().zip(&folded.places).enumerate().find_map(|(i, (panel, place))| {
+            let (Surface::Plane, Some(place)) = (&panel.surface, place) else { return None };
+            let q = place.inverse().point(p);
+            let on = q.z >= -tol && q.z <= t + tol && crate::sheet_surface_cuts::region_holds(&panel.region, Vec2::new(q.x, q.y));
+            on.then(|| self.places.get(i).copied().flatten()).flatten()
         })
     }
 
