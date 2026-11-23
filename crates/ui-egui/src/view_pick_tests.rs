@@ -421,7 +421,7 @@ fn point_cloud_points_pick_in_view_pick_viewport_and_construct_tools() {
 
     // 1. Pixel pick over (10, 0, 12) chooses front point (index 1) over back wall (index 0 at z = 2).
     let (sp1, px1) = px(Vec3::new(10.0, 0.0, 12.0));
-    let r = pick(&mut h, json!({"pixels": [px1]}));
+    let r = pick(&mut h, json!({"pixels": [px1], "clouds": true}));
     let hit = &r["hits"][0];
     assert_eq!(hit["cloud"], 1, "{hit}");
     assert_eq!(hit["cloud_name"], "Scan", "{hit}");
@@ -429,6 +429,13 @@ fn point_cloud_points_pick_in_view_pick_viewport_and_construct_tools() {
     assert!(hit["body"].is_null() && hit["face"].is_null(), "{hit}");
     assert!((hit["point"][0].as_f64().unwrap() - 10.0).abs() < 1e-9, "{hit}");
     assert!((hit["point"][2].as_f64().unwrap() - 12.0).abs() < 1e-9, "{hit}");
+
+    // 1b. A call that does not ask for clouds keeps its earlier answer (nothing under the pixel);
+    // `point_px` asks for them too.
+    let r = pick(&mut h, json!({"pixels": [px1]}));
+    assert_eq!(r["hits"][0], serde_json::Value::Null, "{r}");
+    let r = pick(&mut h, json!({"pixels": [px1], "point_px": 8}));
+    assert_eq!(r["hits"][0]["point_index"], 1, "{r}");
 
     // 2. Viewport interactive pick finds the same cloud point and accepts it in construct.point.vertex.
     let hits = crate::viewport::pick(&h.app, &proj, sp1);
@@ -466,7 +473,7 @@ fn point_cloud_points_pick_in_view_pick_viewport_and_construct_tools() {
 
     // 3. Filtering out score < 0.85 hides index 1 (0.8), so the same pixel now hits index 0 (1.0, z = 2).
     h.app.session.doc_mut().point_clouds[0].filters.push(Filter { property: "score".into(), keep: Keep::Range { range: [0.85, 1.0] } });
-    let r = pick(&mut h, json!({"pixels": [px1]}));
+    let r = pick(&mut h, json!({"pixels": [px1], "clouds": true}));
     assert_eq!(r["hits"][0]["point_index"], 0, "{r}");
     assert!((r["hits"][0]["point"][2].as_f64().unwrap() - 2.0).abs() < 1e-9, "{r}");
 
@@ -474,7 +481,7 @@ fn point_cloud_points_pick_in_view_pick_viewport_and_construct_tools() {
     h.app.session.doc_mut().point_clouds[0].filters.clear();
     h.call("engine.execute", json!({"command": "inspect.section", "params": {"plane": {"origin": [0, 0, 6], "normal": [0, 0, 1]}}}));
     let (_, px2) = px(Vec3::new(20.0, 0.0, 12.0));
-    let r = pick(&mut h, json!({"pixels": [px2]}));
+    let r = pick(&mut h, json!({"pixels": [px2], "clouds": true}));
     assert_eq!(r["hits"][0], serde_json::Value::Null, "{r}");
     h.call("engine.execute", json!({"command": "inspect.section", "params": {"clear": true}}));
 
@@ -483,9 +490,9 @@ fn point_cloud_points_pick_in_view_pick_viewport_and_construct_tools() {
         "engine.execute",
         json!({"command": "solid.box", "params": {"length": 6, "width": 6, "height": 5, "corner": [7, -3, 15], "body_name": "Cover"}}),
     );
-    let r = pick(&mut h, json!({"pixels": [px1]}));
+    let r = pick(&mut h, json!({"pixels": [px1], "clouds": true}));
     assert_eq!(r["hits"][0]["body"], "Cover", "{r}");
-    let r = pick(&mut h, json!({"pixels": [px1], "all": true}));
+    let r = pick(&mut h, json!({"pixels": [px1], "all": true, "clouds": true}));
     let list = r["hits"][0].as_array().unwrap();
     assert_eq!(list.len(), 2, "{r}");
     assert_eq!(list[0]["body"], "Cover", "{r}");

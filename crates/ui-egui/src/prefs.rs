@@ -1886,6 +1886,10 @@ preference_settings! {
     /// design's and the exported body's names (`export_name`). Empty: each export offers the name
     /// it did before (the design's, or the first body's for a mesh).
     export_name: String = String::new(), PAGE_DESIGN;
+    /// GLB export writes each component occurrence as a named node holding its part's bodies, so a
+    /// viewer can move each part on its own (#5296). Off: every body under the root in world
+    /// coordinates, named as the model names it, as SolidCraft 0.40 wrote it.
+    glb_export_hierarchy: bool = true, PAGE_DESIGN => check_id_help("ui.glb_export_hierarchy", "ui.glb_export_hierarchy_help");
     /// Save as mesh: the last format (`stl` or `3mf`). Older versions also kept a "send to slicer"
     /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
     /// and they are ignored.
@@ -7280,7 +7284,9 @@ mod tests {
             for unit in UNITS {
                 h.step(&json!({"click":{"handle":format!("prefs:default_units:{unit}")}})).unwrap();
                 h.frames(2);
-                let sample = format_length(12.5 * unit_scale(unit).0, unit, 2);
+                // 12.5 in the chosen unit; inches keep at least three decimals.
+                let sample = if *unit == "in" { "12.500 in".to_string() } else { format!("12.50 {unit}") };
+                assert_eq!(design::length_decimals_sample(unit, 2), sample);
                 assert!(h.widget(&sample).is_some(), "{theme}: {unit} uses the real unit-aware sample {sample}");
                 assert_eq!(h.app.session.doc.to_json(), doc);
             }
@@ -7294,7 +7300,7 @@ mod tests {
                 h.frames(2);
             }
             assert_eq!((h.app.preferences.length_decimals, h.app.preferences.angle_decimals, h.app.preferences.parameter_list_rows), (4, 3, 75));
-            assert!(h.widget(&format_length(12.5 * unit_scale("ft").0, "ft", 4)).is_some());
+            assert!(h.widget("12.5000 ft").is_some());
             assert!(h.widget("45.000°").is_some());
             assert_eq!(saved_prefs(&h.app)["preferences"]["length_decimals"], original.length_decimals);
             h.call("ui.prefs", json!({"button":"apply"}));
