@@ -90,6 +90,12 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
             bodies: Vec::new(),
             would_fail: Vec::new(),
             skipped: Vec::new(),
+            views: None,
+            dimensions: None,
+            balloons: None,
+            notes: None,
+            sketches: None,
+            fills: None,
             param_warnings: Vec::new(),
         })
         .map_err(|error| bad(cmd, error.to_string()));
@@ -155,12 +161,21 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
         Ok(())
     })?;
     let listed = |objects: &[u64]| objects.iter().map(|id| ids::encode(*id)).collect::<Vec<_>>();
-    let (views, dimensions, balloons) = (listed(&gone.views), listed(&gone.dimensions), listed(&gone.balloons));
-    let (notes, sketches, fills) = (listed(&gone.notes), listed(&gone.sketches), listed(&gone.fills));
-    Ok(json!({
-        "deleted": also, "deleted_joints": [], "would_fail": [], "skipped": [],
-        "views": views, "dimensions": dimensions, "balloons": balloons, "notes": notes, "sketches": sketches, "fills": fills,
-    }))
+    let reply = SelectionDeleteResult {
+        deleted: also,
+        deleted_joints: Vec::new(),
+        bodies: Vec::new(),
+        would_fail: Vec::new(),
+        skipped: Vec::new(),
+        views: Some(listed(&gone.views)),
+        dimensions: Some(listed(&gone.dimensions)),
+        balloons: Some(listed(&gone.balloons)),
+        notes: Some(listed(&gone.notes)),
+        sketches: Some(listed(&gone.sketches)),
+        fills: Some(listed(&gone.fills)),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 /// The delete `p` asks for is of the open drawing's objects (its undo step is the drawing's): it
@@ -369,7 +384,20 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     // Features after a rolled-back marker count too (#3471).
     let would_fail: Vec<String> =
         super::edit::newly_broken_in_history(&before_doc, &before, &s.doc, &s.model).into_iter().map(|(name, _)| name).collect();
-    let reply = SelectionDeleteResult { deleted, deleted_joints: joints, bodies, would_fail, skipped, param_warnings: Vec::new() };
+    let reply = SelectionDeleteResult {
+        deleted,
+        deleted_joints: joints,
+        bodies,
+        would_fail,
+        skipped,
+        views: None,
+        dimensions: None,
+        balloons: None,
+        notes: None,
+        sketches: None,
+        fills: None,
+        param_warnings: Vec::new(),
+    };
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
@@ -660,6 +688,29 @@ mod tests {
         );
         assert_eq!(gone["views"], json!([ids::encode(top)]), "{gone}");
         assert!(s.drawing("test").unwrap().dimension(dimension).is_none());
+    }
+
+    #[test]
+    fn a_drawing_delete_matches_its_schemas_at_every_check_level() {
+        use crate::schema::delete::{SelectionDeleteParams, SelectionDeleteResult};
+        use crate::schema::tests::conforms;
+        use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
+        let (input, output) = (input_schema_for::<SelectionDeleteParams>(), output_schema_for::<SelectionDeleteResult>());
+        let (input, output) = (input.as_value(), output.as_value());
+        for level in [ParamCheck::Warn, ParamCheck::Strict] {
+            let (mut s, [_, right, top], dimension, balloon, drawing) = sheet_objects();
+            s.param_check = level;
+            let p = json!({"items": [item(drawing, right), item(drawing, dimension), item(drawing, balloon)], "contents": "delete"});
+            assert!(conforms(input, input, &p), "{level:?}: {p} doesn't match {input}");
+            let gone = s.execute("selection.delete", &p).unwrap_or_else(|e| panic!("{level:?}: {e}"));
+            assert!(gone.get("param_warnings").is_none(), "{level:?}: {gone}");
+            assert!(conforms(output, output, &gone), "{level:?}: {gone} doesn't match {output}");
+            let mut views = vec![ids::encode(right), ids::encode(top)];
+            views.sort();
+            assert_eq!(gone["views"], json!(views), "{gone}");
+            assert_eq!((&gone["dimensions"], &gone["balloons"]), (&json!([ids::encode(dimension)]), &json!([ids::encode(balloon)])), "{gone}");
+            assert_eq!((&gone["sketches"], &gone["fills"]), (&json!([]), &json!([])), "{gone}");
+        }
     }
 
     /// A view, a dimension and a balloon are selected by their ids, as a view's own id reads in every

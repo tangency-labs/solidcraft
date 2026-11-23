@@ -345,6 +345,7 @@ pub use helix::sweep_helix_mesh;
 pub use helix::sweep_helix_radial;
 pub use iges_in::MAX_IGES_BYTES;
 pub use iges_in::iges_import;
+pub use iges_in::iges_native_system;
 pub use iges_in::iges_to_step;
 pub use iges_out::iges_export_bodies;
 pub use intersection::MeetingEdge;

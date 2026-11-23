@@ -533,8 +533,8 @@ fn default_reuse_import(app: &SolveApp, request: &mut Request) {
 }
 
 /// Import options the preferences add for `path` (with `history: solids` a FreeCAD file brings
-/// only its solids, as before its history was rebuilt; with `reader: cadmpeg` a STEP, FreeCAD or
-/// Rhino file is read by cadmpeg straight into records).
+/// only its solids, as before its history was rebuilt; with `reader: cadmpeg` a STEP, IGES,
+/// FreeCAD or Rhino file is read by cadmpeg straight into records).
 pub(crate) fn preferred_options(app: &SolveApp, path: &str) -> serde_json::Map<String, Value> {
     let mut out = serde_json::Map::new();
     let freecad = std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("fcstd"));
@@ -545,7 +545,8 @@ pub(crate) fn preferred_options(app: &SolveApp, path: &str) -> serde_json::Map<S
         .extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"));
-    if (step || solidcraft_engine::io::is_native_cad_path(path)) && app.preferences.cadmpeg_import {
+    let cadmpeg_reads = step || solidcraft_engine::io::is_iges_path(path) || solidcraft_engine::io::is_native_cad_path(path);
+    if cadmpeg_reads && app.preferences.cadmpeg_import {
         out.insert("reader".into(), json!("cadmpeg"));
     }
     out
@@ -2328,28 +2329,43 @@ M30
         }
     }
 
-    /// A STEP file is read by SolidCraft's own reader, which keeps the STEP text; with "Import
-    /// with cadmpeg" on, by cadmpeg into records, with no STEP text kept. Both bring the same
-    /// washer.
+    /// A STEP or IGES file is read by SolidCraft's own reader, which keeps the STEP text (an IGES
+    /// file restated as STEP); with "Import with cadmpeg" on, by cadmpeg's STEP or IGES decoder
+    /// into records, with no STEP text kept. Both bring the same washer, and the same
+    /// 10 × 20 × 30 mm box (6000 mm³) written as an IGES manifold solid.
     #[test]
-    fn cadmpeg_import_preference_reads_step_with_cadmpeg_into_records() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/step-conformance/washer.step");
+    fn cadmpeg_import_preference_reads_step_and_iges_with_cadmpeg_into_records() {
+        use solidcore_record::Vec3;
         assert!(!crate::prefs::Prefs::default().cadmpeg_import, "off by default");
-        let mut volumes = Vec::new();
-        for on in [false, true] {
-            let mut app = SolveApp::new(Session::default(), Default::default());
-            app.preferences.cadmpeg_import = on;
-            app.insert_path(path);
-            let import = app.session.doc.features.iter().find_map(|f| match &f.kind {
-                solidcraft_engine::doc::FeatureKind::Import { step, records, .. } => Some((step.is_empty(), records.is_some())),
-                _ => None,
-            });
-            assert_eq!(import, Some((on, on)), "preference {on}");
-            let bodies = &app.session.model.state().bodies;
-            assert_eq!(bodies.len(), 1, "preference {on}");
-            volumes.push(solidcraft_engine::kernel::measure(&bodies[0].body).unwrap().volume);
+        let dir = std::env::temp_dir().join(format!("solidcraft-cadmpeg-iges-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let block = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+        let body = solidcraft_engine::kernel::ExportBody { name: "Block".into(), body: &block, color: None };
+        let iges = dir.join("block.igs");
+        std::fs::write(&iges, solidcraft_engine::kernel::iges_export_bodies(&[body], &Default::default()).unwrap()).unwrap();
+        let washer = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/step-conformance/washer.step").to_string();
+        for (path, want) in [(washer, None), (iges.to_string_lossy().to_string(), Some(6000.0))] {
+            let file = &path;
+            let mut volumes = Vec::new();
+            for on in [false, true] {
+                let mut app = SolveApp::new(Session::default(), Default::default());
+                app.preferences.cadmpeg_import = on;
+                app.insert_path(&path);
+                let import = app.session.doc.features.iter().find_map(|f| match &f.kind {
+                    solidcraft_engine::doc::FeatureKind::Import { step, records, .. } => Some((step.is_empty(), records.is_some())),
+                    _ => None,
+                });
+                assert_eq!(import, Some((on, on)), "{file}: preference {on}");
+                let bodies = &app.session.model.state().bodies;
+                assert_eq!(bodies.len(), 1, "{file}: preference {on}");
+                volumes.push(solidcraft_engine::kernel::measure(&bodies[0].body).unwrap().volume);
+            }
+            assert!((volumes[0] - volumes[1]).abs() < 1e-6 * volumes[0], "{file}: {volumes:?}");
+            if let Some(want) = want {
+                assert!((volumes[0] - want).abs() < 1e-6 * want, "{file}: {volumes:?}");
+            }
         }
-        assert!((volumes[0] - volumes[1]).abs() < 1e-6 * volumes[0], "{volumes:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

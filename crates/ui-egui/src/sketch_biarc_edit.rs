@@ -2,7 +2,8 @@
 
 use egui::{CursorIcon, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2 as ScreenVec, vec2};
 use serde_json::json;
-use solidcore_ops::prism::{chord_point, ray_chord_parameter};
+use solidcore_ops::prism::{self, chord_point, ray_chord_parameter};
+use solidcore_ops::{affine, measure};
 use solidcore_record::{Plane, Seg2, Vec2};
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
@@ -17,6 +18,20 @@ use crate::viewport::Proj;
 const GRAB: f32 = 8.0;
 const DIAMOND: f32 = 5.5;
 const END_MARGIN: f64 = 0.0001;
+
+fn screen_record(point: Pos2) -> Vec2 {
+    Vec2::new(f64::from(point.x), f64::from(point.y))
+}
+
+fn screen_point(point: [f64; 2]) -> Option<Pos2> {
+    let [x, y] = point;
+    let point = Pos2::new(x as f32, y as f32);
+    point.is_finite().then_some(point)
+}
+
+fn screen_distance(a: Pos2, b: Pos2) -> f32 {
+    prism::chord(screen_record(a), screen_record(b)).1 as f32
+}
 
 struct Handle {
     sketch: u64,
@@ -64,21 +79,22 @@ impl Handle {
         let [a, b] = self.ends;
         let to_screen = |p| proj.to_screen(self.plane.to_world(p)).filter(|p| p.is_finite());
         let ends = [to_screen(a)?, to_screen(b)?];
-        let length = ends[0].distance(ends[1]);
+        let length = screen_distance(ends[0], ends[1]);
         (length.is_finite() && length > GRAB * 2.0).then_some((ends, to_screen(chord_point(a, b, ratio))?))
     }
 
     fn hot(&self, proj: &Proj, cursor: Pos2) -> Option<Pos2> {
         let (ends, at) = self.screen(proj, self.ratio)?;
         // Keep both authored points pickable when the ratio lies close to an endpoint.
-        (at.distance(cursor) <= GRAB && ends.iter().all(|end| end.distance(cursor) > DIAMOND)).then_some(at)
+        (screen_distance(at, cursor) <= GRAB && ends.iter().all(|end| screen_distance(*end, cursor) > DIAMOND)).then_some(at)
     }
 
     fn ratio_at(&self, proj: &Proj, cursor: Pos2) -> Option<f64> {
         let ([left, right], _) = self.screen(proj, self.ratio)?;
-        let chord = right - left;
-        let t = (cursor - left).dot(chord) / chord.length_sq();
-        let (origin, direction) = proj.ray(left + chord * t.clamp(0.0, 1.0));
+        // Project onto the screen chord before mapping that point back to the sketch plane.
+        let (_, closest) =
+            measure::polyline_2d_closest_point(screen_record(cursor).into(), &[screen_record(left).into(), screen_record(right).into()]).ok()??;
+        let (origin, direction) = proj.ray(screen_point(closest)?);
         let ratio = ray_chord_parameter(&self.plane, origin, direction, self.ends)?;
         Some(ratio.clamp(END_MARGIN, 1.0 - END_MARGIN))
     }
@@ -252,14 +268,17 @@ pub(crate) fn show(app: &SolveApp, ui: &Ui, painter: &Painter, proj: &Proj, hove
     }
     let chord = Stroke::new(1.0, tk.sketch_construction.gamma_multiply(0.7));
     painter.line_segment([a, b], chord);
-    let d = (b - a).normalized();
+    let (direction, _) = prism::chord(screen_record(a), screen_record(b));
+    let Ok([[dx, dy, _], _]) = affine::orthonormal_axes([direction.x, direction.y, 0.0], [0.0, 0.0, 1.0]) else { return };
+    let d = vec2(dx as f32, dy as f32);
     let arrow = b - d * 8.0;
-    if at.distance(arrow) > GRAB + 4.0 {
-        let n = d.rot90() * 2.5;
+    if screen_distance(at, arrow) > GRAB + 4.0 {
+        let Some(normal) = prism::left_unit_normal(screen_record(b), screen_record(a), 0.0) else { return };
+        let n = vec2(normal.x as f32, normal.y as f32) * 2.5;
         painter.add(Shape::line(vec![arrow - d * 4.0 + n, arrow, arrow - d * 4.0 - n], chord));
     }
     if let Some(join) = proj.to_screen(handle.plane.to_world(preview.map_or(handle.join, |p| p.join))).filter(|p| p.is_finite())
-        && join.distance(at) > GRAB + 2.0
+        && screen_distance(join, at) > GRAB + 2.0
     {
         painter.line_segment([at, join], chord);
         painter.circle_filled(join, 2.0, tk.sketch_construction);

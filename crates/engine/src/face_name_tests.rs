@@ -789,3 +789,26 @@ fn faces_marked_exact_report_their_exact_area() {
     // The four sides, at least, are exact.
     assert!(checked >= 4, "{checked}");
 }
+
+/// #21192: renaming a body of a design opened from its saved model keeps its faces' history
+/// names. They came only from the saved model, and the rename dropped them for `<name>:face:<k>`,
+/// which a later feature then stored and a full evaluation no longer found.
+#[test]
+fn renaming_a_body_opened_from_its_saved_model_keeps_its_face_names() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 50, "width": 50, "height": 20, "body_name": "Block"}));
+    let name = |f: &Value| f["name"].as_str().unwrap_or_default().to_string();
+    let before: Vec<String> = faces(&mut s, "Block").iter().map(name).collect();
+    assert!(before.iter().all(|n| !n.contains(":face:")), "{before:?}");
+    let saved = s.model.saved(&s.doc).unwrap();
+    s.model = solidcraft_doc::Model::adopt(&s.doc, &saved).unwrap();
+    run(&mut s, "body.rename", json!({"body": "Block", "name": "Renamed"}));
+    let after: Vec<String> = faces(&mut s, "Renamed").iter().map(name).collect();
+    assert_eq!(after, before);
+    run(&mut s, "solid.hole", json!({"position": [25, 25, 20], "direction": [0, 0, -1], "diameter": 5, "depth": 10, "name": "Hole1"}));
+    s.model = solidcraft_doc::Model::new();
+    s.model.evaluate(&s.doc);
+    let hole = s.model.state().bodies.iter().find(|b| b.name == "Renamed").map(|b| b.feature);
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?} (body by {hole:?})");
+}
