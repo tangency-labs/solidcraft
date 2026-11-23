@@ -152,13 +152,15 @@ impl MonitorHandle {
 
     #[inline]
     pub fn name(&self) -> Option<String> {
-        let monitor_info = get_monitor_info(self.0).unwrap();
+        // SolidCraft: no name, not a panic, for a monitor that has gone away (OS error 1461).
+        let monitor_info = get_monitor_info(self.0).ok()?;
         Some(decode_wide(&monitor_info.szDevice).to_string_lossy().to_string())
     }
 
     #[inline]
     pub fn native_identifier(&self) -> String {
-        self.name().unwrap()
+        // SolidCraft: empty for a monitor that has gone away, as `name` is then `None`.
+        self.name().unwrap_or_default()
     }
 
     #[inline]
@@ -168,11 +170,17 @@ impl MonitorHandle {
 
     #[inline]
     pub fn size(&self) -> PhysicalSize<u32> {
-        let rc_monitor = get_monitor_info(self.0).unwrap().monitorInfo.rcMonitor;
-        PhysicalSize {
-            width: (rc_monitor.right - rc_monitor.left) as u32,
-            height: (rc_monitor.bottom - rc_monitor.top) as u32,
-        }
+        // SolidCraft: a monitor that has gone away (OS error 1461) reports 0x0 instead of
+        // panicking, as `position` falls back to (0, 0).
+        get_monitor_info(self.0)
+            .map(|info| {
+                let rc_monitor = info.monitorInfo.rcMonitor;
+                PhysicalSize {
+                    width: (rc_monitor.right - rc_monitor.left) as u32,
+                    height: (rc_monitor.bottom - rc_monitor.top) as u32,
+                }
+            })
+            .unwrap_or(PhysicalSize { width: 0, height: 0 })
     }
 
     #[inline]

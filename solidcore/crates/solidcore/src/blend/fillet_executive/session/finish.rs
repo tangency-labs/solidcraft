@@ -47,6 +47,7 @@ use crate::blend::fillet_executive::p3::{
     caught, ErrorInfo, FilletExecutive, FilletFinishAccess, StitchAttempt, StitchSettings,
 };
 use crate::blend::fillet_geom::p1::FilletErrorType;
+use crate::error::blend::BlendFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::object::NotifyOperation;
 use crate::geom::tol::approx_tol3d;
@@ -69,9 +70,56 @@ fn refusable(error: &SolidError) -> Option<(&'static str, i32, Option<EntityRef>
         .map(|code| (error.operation(), code, error.entity()))
 }
 
+/// Whether `error` is the failure a missing corner produces in the live session: a solver
+/// that looks up the corner of its vertex and finds none
+/// (`SessionGeometryContext::corner`, the session's `Missing("the vertex's corner")`),
+/// keeping no cause. That failure names no vertex, so which missing corner it met is not
+/// checked.
+pub(super) fn is_missing_corner(error: &SolidError) -> bool {
+    error.cause().is_none()
+        && error.operation() == "blend::fillet_executive::session"
+        && matches!(
+            error.blend_failure(),
+            Some(BlendFailure::Missing("the vertex's corner"))
+        )
+}
+
+/// `error` with `cause`, the error of the classification that left a vertex without a
+/// corner, kept as the cause of the root of its chain ([`SolidError::root_cause`]), only
+/// where that root is the failure a missing corner produces ([`is_missing_corner`]; #19803).
+/// Then the operation, reason, status and site of every error in the chain stay as they
+/// were, but the error is no longer equal to the one given, its message gains
+/// `"; caused by {cause}"` at its end, and the predicates that follow the chain
+/// ([`SolidError::is_defect`], [`SolidError::is_refusal`], [`SolidError::sized`],
+/// [`SolidError::is_port_failure`], [`SolidError::is_status_answer`]) read `cause` too. Any
+/// other chain is returned as it is and `cause` is dropped (the error record still holds it,
+/// [`ErrorInfo::unsupported_corner_cause`]).
+fn rooted_in(mut error: SolidError, cause: SolidError) -> SolidError {
+    if !is_missing_corner(error.root_cause()) {
+        return error;
+    }
+    let mut slot = &mut error;
+    while let SolidError::Failed(failure) = slot {
+        if let Some(ref mut inner) = failure.cause {
+            slot = inner;
+        } else {
+            failure.cause = Some(cause);
+            break;
+        }
+    }
+    error
+}
+
 /// `FILEXEC_ERR` (`SM_ERR`): the executive's generic failure status, as the phrase says.
 fn failure(what: &'static str) -> SolidError {
     SolidError::blend_failed(OP, what)
+}
+
+/// The fillet body is not built, or has no faces: a step of the executive failed
+/// ([`BlendFailure::ExecutiveStepFailed`], `FILEXEC_ERR`, `SM_ERR`). The session's error info
+/// says which step and why; the step's own error, where there is one, is kept as the cause.
+fn step_failed() -> SolidError {
+    SolidError::blend(OP, BlendFailure::ExecutiveStepFailed)
 }
 
 /// Ordinary statuses become `None`; deferrals propagate.
@@ -826,7 +874,10 @@ impl FilletSession<'_> {
     /// Not upstream (WR-513, #1469): a missing-corner note written by this call's corner
     /// stage is kept in [`FilletSession::error_info`] across the later failure, unless
     /// that failure is a no-room refusal; the returned error is still the later stage's
-    /// own status.
+    /// own status. Where that note's vertex has no corner because its classification failed
+    /// ([`ErrorInfo::unsupported_corner_cause`]) and the later failure's root is a solver
+    /// finding a vertex's corner missing, that root keeps the classification's error as its
+    /// cause ([`rooted_in`], #19803).
     ///
     /// Not upstream (#2510): the fillet is built to the target's approximation tolerance
     /// (`SmTol::GetApproxTol3d`, its solvers' and its merge's), so a face it rolls on that
@@ -859,12 +910,18 @@ impl FilletSession<'_> {
             == FilletErrorType::CornerUnsupported as i32
             && self.executive.error != noted_before)
             .then(|| self.executive.error.clone());
-        let (result, split_and_logged) = self.filleting_split_and_logged(k, None);
+        let (mut result, split_and_logged) = self.filleting_split_and_logged(k, None);
         if result.is_err()
             && self.executive.error.code != FilletErrorType::NoRoom as i32
             && self.executive.error.no_room == noted_before.no_room
         {
             if let Some(note) = missing_corner_note {
+                // (not upstream, #19803) where the later failure's root is a solver finding
+                // a vertex's corner missing, the error of the classification that left the
+                // noted vertex without one is kept as that root's cause
+                if let Some(cause) = note.unsupported_corner_cause().cloned() {
+                    result = result.map_err(|error| rooted_in(error, cause));
+                }
                 self.executive.error = note;
             }
         }
@@ -1021,22 +1078,31 @@ impl FilletSession<'_> {
         // setback set on a made corner (SetSetBackDist) that builds none (neither the
         // Setback nor an N x N corner) would be dropped silently, so it is refused, as
         // `create_corners` refuses one asked with SetSetBackFill at such a corner
-        if self
+        // (not the fork, #2933) otherwise a corner at a vertex marked set back is classified
+        // now, where the setback set on it is first read: the Setback where it is one. A corner
+        // that is the Setback already builds the setback set on it (#16408); one beside a
+        // curved face asked an ease, which its G1 fill cannot take, is refused rather than
+        // built without the ask. Both refusals end in the one failure below.
+        let not_built = if self
             .objects
             .corners
             .iter()
             .any(crate::blend::blend_corner::setback::asked_setback_not_built)
         {
+            Some(crate::blend::blend_corner::setback::SETBACK_NOT_BUILT)
+        } else if self.set_back_marked_corners(k)?.is_some() {
+            Some(crate::blend::blend_corner::setback::SETBACK_EASE_NOT_BUILT)
+        } else {
+            None
+        };
+        if let Some(comment) = not_built {
             self.note_refusal(Refusal {
                 code: FilletErrorType::CornerUnsupported,
                 reason: None,
-                comment: crate::blend::blend_corner::setback::SETBACK_NOT_BUILT,
+                comment,
             });
             return Err(failure("an asked setback is not built"));
         }
-        // (not the fork, #2933) a corner at a vertex marked set back is classified now, where
-        // the setback set on it is first read: the Setback where it is one
-        self.set_back_marked_corners(k)?;
         // not the fork's (#3145): setbacks that overlap on an edge, before the trace
         if let Some((vertex, refusal)) = crate::blend::blend_corner::setback::overlapping_setbacks(
             k,
@@ -1085,10 +1151,7 @@ impl FilletSession<'_> {
                 if let Some(output) = error_out.as_deref_mut() {
                     output.assign(&session.executive.error);
                 }
-                return Err(keeping_cause(
-                    failure("the fillet body is not built"),
-                    stage,
-                ));
+                return Err(keeping_cause(step_failed(), stage));
             }
             let faces = session
                 .objects
@@ -1103,7 +1166,7 @@ impl FilletSession<'_> {
                 if let Some(output) = error_out {
                     output.assign(&session.executive.error);
                 }
-                return Err(failure("the fillet body has no faces"));
+                return Err(step_failed());
             }
             session.shrink_fillet_faces(k)?;
             // The fork's NoteRadiusCornerSurfaces (6eecf04): the fillet surfaces that turn at
@@ -1639,14 +1702,12 @@ mod ball_fit_tests {
     }
 
     /// The executive's generic failure (`FILEXEC_ERR`) is a typed failure with the status,
-    /// operation and (no) entity of the bare status it replaced (#13790).
+    /// operation and (no) entity of the bare status it replaced (#13790), the fillet body not
+    /// built a step of the executive failing (#19824).
     #[test]
     fn the_generic_failure_is_typed_with_its_status() {
-        let e = failure("the fillet body is not built");
-        assert_eq!(
-            e.blend_failure(),
-            Some(&BlendFailure::Failed("the fillet body is not built"))
-        );
+        let e = step_failed();
+        assert_eq!(e.blend_failure(), Some(&BlendFailure::ExecutiveStepFailed));
         assert_eq!(e.upstream_status(), Some(1001));
         assert_eq!(e.operation(), OP);
         assert_eq!(e.entity(), None);
@@ -1685,7 +1746,7 @@ mod ball_fit_tests {
         let e = session.do_fillet(&mut k).unwrap_err();
         let info = session.error_info().clone();
         // as before: the session's failure, its status and the corner's note
-        let bare = failure("the fillet body is not built");
+        let bare = step_failed();
         assert_eq!(e.operation(), OP, "{e:?}");
         assert_eq!(e.blend_failure(), bare.blend_failure(), "{e:?}");
         assert_eq!(e.sm_status(), Some(1001), "{e:?}");
@@ -1704,9 +1765,7 @@ mod ball_fit_tests {
         );
         assert_eq!(
             executive.blend_failure(),
-            Some(&BlendFailure::Failed(
-                "a step of the fillet executive failed"
-            ))
+            Some(&BlendFailure::ExecutiveStepFailed)
         );
         assert_eq!(executive.sm_status(), Some(1001));
         let stage = executive.cause().expect("the stage's error is kept");
@@ -1738,6 +1797,111 @@ mod ball_fit_tests {
         }
         for native in native_failures("intersect::x", 1001) {
             assert_eq!(refusable(&native), None, "{native:?}");
+        }
+    }
+
+    /// The chain `do_fillet` returns where a solver finds a vertex's corner missing: the
+    /// fillet body not built, the executive's step, the missing corner (as the pyramid's
+    /// unsupported apex gives it in `session.rs`), over `root`.
+    fn later_failure_over(root: SolidError) -> SolidError {
+        let step = keeping_cause(
+            SolidError::blend(
+                "blend::fillet_executive::p3",
+                BlendFailure::ExecutiveStepFailed,
+            ),
+            root,
+        );
+        keeping_cause(step_failed(), step)
+    }
+
+    fn a_classification_failure() -> SolidError {
+        SolidError::InvalidInput {
+            operation: "topology::edgeuse::p3",
+            reason: "EvaluateBinormal: face without surface",
+        }
+    }
+
+    /// #19803: the error of a corner's failed classification goes to the root of the later
+    /// failure's chain where that root is a solver finding a vertex's corner missing. Every
+    /// error in the chain keeps its operation, reason and status; the message gains the
+    /// classification's error at its end.
+    #[test]
+    fn a_classification_error_goes_to_the_root_of_the_later_failure() {
+        let missing =
+            SolidError::blend_missing("blend::fillet_executive::session", "the vertex's corner");
+        assert!(is_missing_corner(&missing));
+        let before = later_failure_over(missing);
+        let classification = a_classification_failure();
+        let after = rooted_in(before.clone(), classification.clone());
+        for (was, now) in std::iter::successors(Some(&before), |e| e.cause())
+            .zip(std::iter::successors(Some(&after), |e| e.cause()))
+        {
+            assert_eq!(now.operation(), was.operation());
+            assert_eq!(now.blend_failure(), was.blend_failure());
+            assert_eq!(now.sm_status(), was.sm_status());
+        }
+        assert_eq!(after.root_cause(), &classification);
+        assert_eq!(
+            after
+                .cause()
+                .and_then(SolidError::cause)
+                .and_then(SolidError::cause),
+            Some(&classification)
+        );
+        assert_eq!(
+            after.to_string(),
+            format!("{before}; caused by {classification}")
+        );
+    }
+
+    /// #19803: a chain whose root is no record that keeps a cause is returned as it is.
+    #[test]
+    fn a_classification_error_is_not_kept_under_a_root_that_keeps_none() {
+        let root = SolidError::InvalidInput {
+            operation: "topology::edgeuse::p3",
+            reason: "EvaluateBinormal: face without surface",
+        };
+        let before = keeping_cause(step_failed(), root);
+        let after = rooted_in(
+            before.clone(),
+            SolidError::blend_missing("blend::blend_corner::setback", "z"),
+        );
+        assert_eq!(after, before);
+        assert_eq!(
+            rooted_in(SolidError::sm_err("op"), failure("w")),
+            SolidError::sm_err("op")
+        );
+    }
+
+    /// #19803: a later failure whose root is a record that could keep a cause, but is not
+    /// the missing corner (another stage's failure at another edge, the same phrase in
+    /// another operation, a missing corner that already keeps a cause), is returned as it
+    /// is: nothing ties it to the unsupported vertex.
+    #[test]
+    fn a_classification_error_is_not_kept_under_an_unrelated_root() {
+        let unrelated = [
+            SolidError::blend_failed("blend::fillet_geom::p2::srf_srf_intersection", "w"),
+            SolidError::blend_missing("blend::fillet_executive::session", "the corner"),
+            SolidError::blend_missing(
+                "blend::fillet_solver::p1::set_extension_flags",
+                "the vertex's corner",
+            ),
+            keeping_cause(
+                SolidError::blend_missing(
+                    "blend::fillet_executive::session",
+                    "the vertex's corner",
+                ),
+                SolidError::sm_err("op"),
+            ),
+        ];
+        for root in unrelated {
+            let before = later_failure_over(root.clone());
+            assert_eq!(
+                rooted_in(before.clone(), a_classification_failure()),
+                before,
+                "{root:?}"
+            );
+            assert_eq!(rooted_in(root.clone(), a_classification_failure()), root);
         }
     }
 }

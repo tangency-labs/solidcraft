@@ -505,4 +505,97 @@ mod tests {
         assert_ne!(original.ints, changed.ints);
         assert_eq!(original.values, changed.values);
     }
+
+    /// The seven rows #20179 moved (the point test asks the face, not the cache build,
+    /// whether to test): main's row digest (`MAIN`, the discrete entries' sum and
+    /// weighted sum, from main's `expected/surface.trim_srf_cache.jsonl`) and this
+    /// branch's (`NOW`). On each face (it has loop uses) the cache now reports point
+    /// testing on, and every recorded point test is the face's own classification at
+    /// the effective tolerance; with testing off (main, whose build stored it off on
+    /// these editing-mode builds) each test keeps the point with no object. Rebuilding
+    /// main's row that way from this branch's run gives main's digest exactly.
+    #[test]
+    fn moved_rows_are_the_face_classification_with_testing_on() {
+        use solidcore::surface::surface_cache::face_context::FaceQueries;
+        const MAIN: [(&str, [i64; 2]); 7] = [
+            ("native_face_bspline_editing_does_not_implant_trims", [129988, 6374787]),
+            ("native_face_bspline_get_tree_after_editing_implants_trims", [170740, 11001666]),
+            ("native_face_bspline_get_tree_editing_rebuilds_standalone", [170392, 10997135]),
+            ("native_face_holed_plane_editing_keeps_standalone_flags", [206685, 17613067]),
+            ("native_face_holed_plane_get_tree_after_editing_implants_trims", [247085, 25574742]),
+            ("native_face_holed_plane_get_tree_editing_rebuilds_standalone", [247085, 25574735]),
+            ("native_face_holed_plane_get_tree_unbuilt_editing", [247085, 25574735]),
+        ];
+        const NOW: [[i64; 2]; 7] = [
+            [226083, 11468789], [298845, 19715002], [298497, 19710471], [366938, 32263095],
+            [439344, 46729948], [439344, 46729941], [439344, 46729941],
+        ];
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let fx: Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join("fixtures/surface.trim_srf_cache/native_faces.json")).unwrap(),
+        ).unwrap();
+        let summ = |xs: &[i64]| {
+            let (mut s, mut w) = (0i64, 0i64);
+            for (j, &x) in xs.iter().enumerate() { s += x; w += (j as i64 + 1) * x; }
+            [s, w]
+        };
+        let discrete = |flat: &[f64]| -> Vec<i64> {
+            let mut d = Vec::new();
+            for (i, &v) in flat[..HEADER].iter().enumerate() {
+                if !((5..9).contains(&i) || (16..20).contains(&i)) { d.push(v as i64); }
+            }
+            for p in flat[HEADER..].chunks(PROBE) {
+                for (i, &v) in p.iter().enumerate() { if !(2..5).contains(&i) { d.push(v as i64); } }
+            }
+            d
+        };
+        for (ci, (name, old_sum)) in MAIN.iter().enumerate() {
+            let case = fx["cases"].as_array().unwrap().iter().find(|c| c["name"] == *name).unwrap();
+            let raw = crate::fixtures::expand_inputs(&root, case["inputs"]["native_face"].clone()).unwrap();
+            let input = parse(&raw).unwrap();
+            let mut k = Kernel::default();
+            let crate::own_builder::Built::Brep(b) = crate::own_builder::read_as(&mut k, &input.path, false, false, false, &crate::own_builder::Conventions::TOPOLOGY_FIXTURE).unwrap() else { panic!() };
+            let mut brep = *b;
+            let mut occ = input.occurrence; let mut sel = None;
+            for (face, rec) in brep.faces().iter() {
+                let Some(sf) = rec.surface.as_ref() else { continue };
+                if sf.type_code() != i64::from(input.surface_type) { continue; }
+                if face_p4::upward_loopuses(&brep, face, false, None).unwrap().len() != input.loops as usize { continue; }
+                if occ == 0 { sel = Some(face); break; } occ -= 1;
+            }
+            let face = sel.unwrap();
+            let flat = rust_record(&input, &mut brep, face).unwrap();
+            let d_new = discrete(&flat);
+            assert_eq!(summ(&d_new), NOW[ci], "{name}: the run is not this branch's row");
+            // each test triple derived on its own: a point test on a face with loop uses
+            // is the face classification at the effective tolerance
+            assert!(face_p4::has_loopuses(&brep, face).unwrap());
+            assert_eq!(flat[13], 1.0, "{name}: point testing is on");
+            let handle_of = |e| Ok(e);
+            let q = PreparedFaceQueries::new(&brep, face, &handle_of).unwrap();
+            let mut old_flat = flat.clone();
+            old_flat[13] = 0.0;
+            let mut changed = 0usize;
+            for (pi, p) in flat[HEADER..].chunks(PROBE).enumerate() {
+                let uv = Point2::new(p[2], p[3]);
+                let tol = if input.test_tol { p[4] } else { q.face_zone_tol_3d(EntityRef::Face(face)).unwrap() };
+                let (class, obj) = q.face_point_classify(&k, EntityRef::Face(face), uv, tol).unwrap();
+                let mut want = vec![SUCCESS, flag(matches!(class, 102..=104))];
+                object(&mut want, obj);
+                for off in [5usize, 13] {
+                    assert_eq!(&p[off..off + 4], &want[..], "{name} probe {pi} off {off}");
+                    if p[off + 1] == 0.0 { changed += 1; }
+                    // main: testing off keeps the point, no object
+                    let at = HEADER + pi * PROBE + off;
+                    old_flat[at..at + 4].copy_from_slice(&[SUCCESS, 1.0, -1.0, -1.0]);
+                }
+            }
+            assert_eq!(
+                summ(&discrete(&old_flat)),
+                *old_sum,
+                "{name}: with testing off the row is not main's"
+            );
+            assert!(changed > 0, "{name}: no probe is culled now");
+        }
+    }
 }

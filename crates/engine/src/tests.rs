@@ -1306,6 +1306,7 @@ fn hostile_params_never_panic() {
         .map(|spec| spec.id)
         .filter(|id| !matches!(*id, "doc.open" | "file.save" | "file.save_as" | "file.export" | "file.save_mesh" | "sketch.export_dxf")) // file system side effects are covered by their own tests
         .collect();
+    assert!(ids.contains(&"inspect.classify_points"), "exact point inspection must receive every hostile value");
     let next = std::sync::atomic::AtomicUsize::new(0);
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let internal: Vec<String> = std::thread::scope(|scope| {
@@ -6167,7 +6168,7 @@ fn computed_import_preserves_file_and_earlier_undo_history() {
     let saved = s.doc.clone();
     let mut computed = s.scratch();
     run(&mut computed, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]}));
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert_eq!(s.path.as_deref(), Some("existing.solidcraft"));
     assert!(s.is_dirty());
     assert_eq!(s.model.state().bodies.len(), 2);
@@ -6300,7 +6301,7 @@ fn design_tokens_computed_save_preserves_the_saved_token() {
     run(&mut saved, "file.save_as", json!({"path": folder.path("renamed.sc")}));
     s.adopt_save(&saved);
     let unchanged = s.scratch();
-    s.accept_computed(unchanged);
+    s.accept_computed(unchanged).unwrap();
     assert_eq!(s.design_token(), token, "adopting a save preserves the association too");
 }
 
@@ -6316,7 +6317,7 @@ fn design_tokens_open_pinning_preserves_token_on_noop_acceptance() {
     let mut opened = Session::opened_at(doc, None, None);
     let token = opened.design_token();
     let unchanged = opened.scratch();
-    opened.accept_computed(unchanged);
+    opened.accept_computed(unchanged).unwrap();
     assert_eq!(opened.design_token(), token);
 }
 
@@ -6327,7 +6328,7 @@ fn design_tokens_direct_computed_mutations_after_commands_get_a_fresh_token() {
     run(&mut computed, "parameters.add", json!({"name": "width", "expression": "10 mm"}));
     let executed = computed.design_token();
     computed.doc_mut().name = "Direct candidate edit".into();
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert_ne!(s.design_token(), executed);
 }
 
@@ -6343,10 +6344,10 @@ fn design_tokens_accepting_historical_candidates_never_reuses_their_tokens() {
     let older_edited = s.scratch();
     run(&mut s, "edit.undo", json!({}));
     let current = s.design_token();
-    s.accept_computed(older);
+    s.accept_computed(older).unwrap();
     assert_eq!(s.design_token(), current, "an identical historical candidate keeps the live token");
     assert_eq!(s.doc.to_json(), bytes);
-    s.accept_computed(older_edited);
+    s.accept_computed(older_edited).unwrap();
     assert_eq!(s.doc.to_json(), edited_bytes);
     assert_ne!(s.design_token(), historical);
     assert_ne!(s.design_token(), edited);
@@ -6501,7 +6502,7 @@ fn a_model_put_back_from_an_earlier_copy_lets_go_of_the_bodies_it_replaces() {
     warm(&changed);
     run(&mut s, "inspect.measure", json!({}));
     assert_eq!(warm_bodies(&changed), ["Other", "Block"]);
-    s.accept_computed(original);
+    s.accept_computed(original).unwrap();
     assert_eq!(warm_bodies(&changed), ["Other"]);
 }
 
@@ -6659,7 +6660,7 @@ fn adopting_a_computed_component_keeps_its_warm_world_geometry() {
     for b in &prepared.bodies {
         let _ = b.mesh();
     }
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert!(std::sync::Arc::ptr_eq(&prepared, &s.world_state().unwrap()));
     s.invalidate_view(100);
     assert!(std::sync::Arc::ptr_eq(&prepared, &s.world_state().unwrap()));
@@ -7834,6 +7835,61 @@ fn draft_on_a_cylinder_side_makes_a_frustum() {
     let small = big - h * 5f64.to_radians().tan();
     let expect = PI * h / 3.0 * (big * big + big * small + small * small);
     assert!(rel(volume(&mut s), expect) < 1e-3, "{} vs {expect}", volume(&mut s));
+}
+
+/// #19686: a 2400 x 1600 x 1000 block with a Ø190 blind hole from the top, 500 deep, its four
+/// sides drafted 3° about the base. 3° leans the +X side in by 1000 tan 3° = 52.4 at the top, so a
+/// hole whose wall is nearer the side than that is cut through by the drafted side, which no
+/// draft does: it is refused naming the hole's wall, for the issue's 0.00002 wall as for a 10 one,
+/// and the design is left as it was. A 60 wall stays clear of the drafted side and builds: the
+/// drafted block less the whole hole.
+#[test]
+fn a_draft_that_would_cut_through_a_hole_near_the_side_is_refused_naming_it() {
+    let block = |hole: Option<f64>| {
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 2400, "width": 1600, "height": 1000, "corner": [-1200, -800, 0], "operation": "new", "body_name": "Part"}),
+        );
+        if let Some(x) = hole {
+            run(
+                &mut s,
+                "solid.cylinder",
+                json!({"radius": 95, "height": 500, "base": [x, 0, 500], "axis": "Z", "operation": "cut", "targets": ["Part"]}),
+            );
+        }
+        s
+    };
+    let draft = json!({"faces": [[1200, 0, 500], [-1200, 0, 500], [0, 800, 500], [0, -800, 500]], "angle": "3 deg", "neutral": "XY"});
+    for wall in [0.00002, 10.0] {
+        let mut s = block(Some(1200.0 - 95.0 - wall));
+        let features = s.doc.features.len();
+        let error = s.execute("solid.draft", &draft).unwrap_err().to_string();
+        // The whole sentence, the point and depth between its words, with no run of spaces.
+        let words = [
+            "draft: the drafted face would cut through the face at (",
+            concat!(
+                " mm past it without meeting it (a hole's or pocket's wall near the side); ",
+                "a draft only extends or trims the faces around the drafted face: use a smaller draft angle, ",
+                "or move that face farther from the drafted one"
+            ),
+        ];
+        let (Some(start), Some(end)) = (error.find(words[0]), error.find(words[1])) else { panic!("wall {wall}: {error}") };
+        let between = &error[start + words[0].len()..end];
+        assert!(between.contains("), which reaches at least ") && !error.contains("  "), "wall {wall}: {error}");
+        assert_eq!(s.doc.features.len(), features, "wall {wall}: the draft is not added");
+    }
+    let mut plain = block(None);
+    run(&mut plain, "solid.draft", draft.clone());
+    let mut s = block(Some(1200.0 - 95.0 - 60.0));
+    run(&mut s, "solid.draft", draft);
+    let state = s.world_state().unwrap();
+    assert_eq!(state.bodies.len(), 1);
+    assert!(state.bodies[0].body.validity().is_empty(), "{:?}", state.bodies[0].body.validity());
+    drop(state);
+    let expect = volume(&mut plain) - PI * 95.0 * 95.0 * 500.0;
+    assert!(rel(volume(&mut s), expect) < 1e-9, "{} vs {expect}", volume(&mut s));
 }
 
 /// The copies added after a rename keep their numbers through undo/redo, save/reopen and a

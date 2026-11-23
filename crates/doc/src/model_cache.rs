@@ -441,12 +441,19 @@ impl Model {
             let mut w = Writer::default();
             let mut features = Vec::with_capacity(self.results.len());
             let mut pending = Vec::new();
-            for (k, r) in self.results.iter().enumerate() {
+            for (k, (feature, r)) in doc.features.iter().zip(&self.results).enumerate() {
                 if let Some(report) = r.import_report.as_ref().filter(|i| !i.checks.is_empty()) {
                     pending.push((k, report.clone()));
                 }
                 let state = w.state(&r.state).ok_or_else(|| kernel::KernelError::Invalid("not kept".into()))?;
                 let mut f = json!({"id": r.id, "fingerprint": hex(r.fingerprint), "ms": r.ms, "skipped": r.skipped, "state": state});
+                // The pose a pose-only feature was evaluated at, which its fingerprint leaves out:
+                // opening finds it the same and keeps the result (#12139).
+                if pose_only(feature)
+                    && let Some(pose) = self.poses.get(&r.id)
+                {
+                    f["pose"] = json!(hex(*pose));
+                }
                 if let Some(w) = &r.warning {
                     f["warning"] = json!(w);
                 }
@@ -1091,6 +1098,8 @@ impl Model {
         let mut results = Vec::with_capacity(features.len());
         let mut construction = HashMap::new();
         let mut prepared_states = std::collections::HashSet::new();
+        // The pose-only features saved at the pose `doc` gives them: their results stand.
+        let mut poses = HashMap::new();
         for (i, (f, r)) in doc.features.iter().zip(features).enumerate() {
             let saved = unhex(r.get("fingerprint").unwrap_or(&Json::Null))?;
             // A fingerprint reads the state before its feature (where the bodies it takes lie).
@@ -1122,6 +1131,13 @@ impl Model {
                 }
             }
             let state = state.map(|at| states.get(at).cloned().ok_or_else(|| bad("saved model: state"))).transpose()?;
+            if exact
+                && pose_only(f)
+                && let Some(pose) = r.get("pose").map(unhex).transpose()?
+                && pose == placement_digest(doc, f, Some(&before))
+            {
+                poses.insert(f.id, pose);
+            }
             let result = FeatureResult {
                 id: f.id,
                 name: f.name.clone(),
@@ -1148,11 +1164,18 @@ impl Model {
             }
             results.push(result);
         }
+        // The retained-outline notes as the model is now, whatever the file kept (an older one
+        // has none; a sketch may have been renamed since).
+        for (f, r) in doc.features.iter().zip(results.iter_mut()).filter(|(_, r)| !r.skipped && !r.unkept) {
+            r.warning = crate::eval::with_retained_notes(doc, r.warning.take(), f, &r.state);
+        }
         let mut model = Model { results, param_errors, import_digests, context: ctx, frame_bodies, validation, heal_off: !heal, ..Model::default() };
         let unkept = model.results.iter().filter(|r| r.unkept).count();
         // A pose-only feature's fingerprint leaves its pose out, so its saved result may be from
         // another pose than `doc`'s: evaluated again, with what reads none of it kept (#12139).
-        let posed = doc.features.iter().zip(&model.results).any(|(f, r)| !r.skipped && pose_only(f));
+        // One saved with the pose `doc` gives it is `doc`'s result as it is.
+        let posed = doc.features.iter().zip(&model.results).any(|(f, r)| !r.skipped && pose_only(f) && !poses.contains_key(&f.id));
+        model.poses = poses;
         if unkept > 0 || posed {
             // The features whose state the file did not keep, each evaluated again from the state
             // before it: nothing else in the model is missing then.
@@ -1184,7 +1207,7 @@ impl Model {
                     CachedEval {
                         error: None,
                         error_code: None,
-                        warning: r.warning.clone(),
+                        warning: crate::eval::without_retained_notes(r.warning.clone()),
                         import_report: r.import_report.clone(),
                         repair: r.repair.clone(),
                         lost_projections: None,

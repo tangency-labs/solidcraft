@@ -97,6 +97,13 @@ pub fn two_sided(direction: usize) -> bool {
 /// Thin Extrude wall locations, as `solid.extrude` names them, and their labels.
 const WALL_SIDES: [&str; 4] = ["center", "inside", "outside", "two_sides"];
 const WALL_LABELS: [&str; 4] = ["Center", "Inside", "Outside", "Two Sides"];
+/// Split Body's choices of what a face tool cuts with, as message ids, in the order of
+/// `Kind::Split`'s `sheet` and the command's `tool_sheet` (#9305).
+pub(crate) const SPLIT_SHEETS: [&str; 3] = ["ui.split_body.cut_with.extended", "ui.split_body.cut_with.faces", "ui.split_body.cut_with.body"];
+/// The `tool_sheet` of each of [`SPLIT_SHEETS`].
+const SPLIT_SHEET_PARAMS: [&str; 3] = ["extended", "faces", "body"];
+/// Split Body's input for the tool body's other faces, shown when the picked faces cut.
+pub(crate) const SPLIT_TOOL_FACES: &str = "ui.split_body.tool_faces";
 /// What an extrude's first input picks: profiles or planar faces, or curves too when thin.
 const EXTRUDE_ACCEPT: Accept = PROFILES | PLANAR_FACES;
 const THIN_ACCEPT: Accept = PROFILES | CURVES;
@@ -198,6 +205,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 start: String,
                 /// Keep Offset selected while its expression is being edited.
                 offset_start: bool,
+                /// Offset both sides symmetrically away from the sketch plane.
+                symmetric_offset: bool,
                 /// Extent type All (through everything) instead of a distance.
                 all: bool,
                 /// Thin Extrude: a wall along the picked curves (or profiles' outlines).
@@ -276,8 +285,11 @@ crate::dialog_descriptor::dialog_descriptors! {
                 t: String,
                 sketch: Option<u64>,
             },
-            /// Split a body by a plane.
-            Split,
+            /// Split a body by a plane, a sketch line or a face. With a face: what of the tool body
+            /// cuts, as `SPLIT_SHEETS` lists it (#9305).
+            Split {
+                sheet: usize,
+            },
             /// A cosmetic thread on a cylindrical face.
             Thread {
                 designation: String,
@@ -325,10 +337,15 @@ crate::dialog_descriptor::dialog_descriptors! {
             },
             /// Remove bodies from here on in the timeline.
             Remove,
-            /// Pattern bodies along a path of sketch curves.
+            /// Pattern bodies along a path of sketch curves. Orientation and Flip are kept in
+            /// `extra` (`orientation`, `flip`), as the command takes them.
             PathPattern {
                 count: String,
                 spacing: String,
+                /// The start point (empty: the path's start): a distance along the path, or with
+                /// `fraction` a fraction of its length.
+                start: String,
+                fraction: bool,
             },
             /// Physical material (and with it the appearance) of bodies.
             Material {
@@ -987,6 +1004,7 @@ impl Dialog {
                     to_offset: String::new(),
                     start: String::new(),
                     offset_start: false,
+                    symmetric_offset: false,
                     all: false,
                     thin: false,
                     wall: length_default(s, "2"),
@@ -1046,7 +1064,7 @@ impl Dialog {
             }
             "solid.remove" => Dialog::new(Kind::Remove, vec![SelInput::new("Bodies", BODIES, true)]),
             "solid.pattern.path" => Dialog::new(
-                Kind::PathPattern { count: "4".into(), spacing: length_default(s, "20") },
+                Kind::PathPattern { count: "4".into(), spacing: length_default(s, "20"), start: String::new(), fraction: false },
                 vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
             ),
             "mesh.convert" => Dialog::new(
@@ -1070,7 +1088,7 @@ impl Dialog {
                 Dialog::new(Kind::PathPlane { t: "0.5".into(), sketch: None }, vec![SelInput::new("Path", CURVES | EDGES, false)])
             }
             "solid.split_body" => Dialog::new(
-                Kind::Split,
+                Kind::Split { sheet: 0 },
                 vec![SelInput::new("Body to split", BODIES, false), SelInput::new("Splitting tool", PLANES | FACES | AXES, false)],
             ),
             "solid.thread" => Dialog::new(
@@ -1525,7 +1543,7 @@ impl Dialog {
                 | Kind::Shell { .. }
                 | Kind::Draft { .. }
                 | Kind::Mirror
-                | Kind::Split
+                | Kind::Split { .. }
                 | Kind::Rib { .. }
                 | Kind::Emboss { .. }
                 | Kind::ReplaceFace
@@ -3020,7 +3038,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::ChatContext => "PICK CONTEXT",
         Kind::PluginPick { .. } => "PLUGIN",
         Kind::PathPattern { .. } => "PATTERN ON PATH",
-        Kind::Split => "SPLIT BODY",
+        Kind::Split { .. } => "SPLIT BODY",
         Kind::Thread { .. } => "THREAD",
         Kind::Section { .. } => "SECTION ANALYSIS",
         Kind::PatternRect { .. } => "RECTANGULAR PATTERN",
@@ -3310,7 +3328,7 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
                     vec![SelInput::new("Objects", BODIES, true), SelInput::new("Axis", AXIS_PICKS, false)],
                 ),
                 _ => (
-                    Kind::PathPattern { count: "4".into(), spacing: length_default(session, "20") },
+                    Kind::PathPattern { count: "4".into(), spacing: length_default(session, "20"), start: String::new(), fraction: false },
                     vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
                 ),
             };
@@ -3551,7 +3569,7 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::pref
 
 /// Saved planes/vectors/axes are real inputs even when they have no selection chip.
 fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> {
-    if matches!(d.kind, Kind::Split) && index == 1 {
+    if matches!(d.kind, Kind::Split { .. }) && index == 1 {
         return Some("split_tool_mode");
     }
     if matches!(d.kind, Kind::OffsetPlane { .. }) {
@@ -4720,6 +4738,16 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         && (enter || canvas_enter || (enter_free && nothing_focused) || confirm)
     {
         ok = true;
+        // Shift+Enter makes an Extrude a new body, whatever it would have joined or cut (#18455).
+        // Only a key press does: the OK button and a rebound OK key keep the dialog's choice.
+        // The Shift is the one the Enter press itself carried, not the keyboard's state when the
+        // frame is read: Shift pressed or released in the same frame must not change the answer.
+        let enter_shift = ctx.input(|i| {
+            i.events.iter().any(|e| matches!(e, egui::Event::Key { key: egui::Key::Enter, pressed: true, modifiers, .. } if modifiers.shift))
+        });
+        if (enter || canvas_enter || enter_free) && enter_shift && d.editing.is_none() {
+            make_new_body(&mut d);
+        }
     }
     if !preset_prompt && !report_active && esc && !app.esc_handled && escape_routed_here {
         app.esc_handled = true;
@@ -5120,6 +5148,17 @@ fn mode_inputs_key(kind: &Kind) -> Option<usize> {
 /// Whether Enter (and a right-click in the viewport) runs OK: not where there is no OK, a
 /// deletion's confirmation, a table that takes Enter for its cells (configurations, a study's
 /// keys), or a material being edited.
+/// An Extrude that is being made (not edited) becomes a new body: the operation is New and no
+/// longer chosen for the user, and the bodies it would have joined or cut are let go.
+fn make_new_body(d: &mut Dialog) {
+    let Kind::Extrude { operation, auto_op, .. } = &mut d.kind else { return };
+    *operation = 0;
+    *auto_op = false;
+    for input in d.inputs.iter_mut().filter(|i| i.label == EXTRUDE_TARGETS) {
+        input.items.clear();
+    }
+}
+
 fn enter_applies(d: &Dialog) -> bool {
     !matches!(d.kind, Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. })
         && !matches!(&d.kind, Kind::Motion(k) if k.wide())
@@ -5176,6 +5215,8 @@ fn pick_first(input: &SelInput) -> String {
 
 /// Close the dialog without applying it (Esc, Cancel). An edit puts the timeline marker back.
 pub fn cancel(app: &mut SolveApp) {
+    app.prepared_edit_starts.remove(&app.session.uid);
+    app.session.cancel_prepared_edit_start();
     app.session.feature_edit_sketch = None;
     if let Some(pending) = &mut app.pending_feature_edit {
         pending.cancel();
@@ -5576,10 +5617,17 @@ pub fn start_sketch(app: &mut SolveApp, sel: &Sel) -> Result<(), String> {
     // which left the face filling the view off-centre like a big square.
     if turned
         && let Sel::Face { point, .. } = sel
-        && let Some(mut to) = app.cam_anim.as_ref().map(|a| a.to)
+        && let Some(view) = app.session.sketching_view
     {
-        to.target = *point;
-        app.animate_to(to);
+        let _ = crate::documents::with_sketch_camera(app, view, |app| {
+            let mut to = app.settled_cam();
+            to.target = *point;
+            app.sketch_camera_target = Some(to);
+            app.animate_to(to);
+            if let Some(pre) = &mut app.pre_sketch_cam {
+                pre.facing = to;
+            }
+        });
     }
     Ok(())
 }
@@ -6198,6 +6246,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             taper_present,
             to_offset,
             start,
+            offset_start,
+            symmetric_offset,
             all,
             thin,
             wall,
@@ -6214,6 +6264,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 common["taper"] = json!(taper);
             }
             put(&mut common, &[("start_offset", start)]);
+            if *direction == 2 && *offset_start && *symmetric_offset {
+                common["symmetric_offset"] = json!(true);
+            }
             if *all {
                 common["through_all"] = json!(true);
             }
@@ -6793,7 +6846,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "bodies")?;
             ("solid.remove", json!({"bodies": sels(d, 0).body_names()}))
         }
-        Kind::PathPattern { count, spacing } => {
+        Kind::PathPattern { count, spacing, start, fraction } => {
             need(0, "objects")?;
             need(1, "the path")?;
             let path = sels(d, 1).curve_ids();
@@ -6801,6 +6854,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut p = json!({"path_sketch": sketch, "path": path, "count": count});
             // A saved extent stays first-to-last distance when the quantity changes.
             p[if d.extra.contains_key("distance") { "distance" } else { "spacing" }] = json!(spacing);
+            put(&mut p, &[(if *fraction { "start_fraction" } else { "start" }, start)]);
             pattern_objects(s, sels(d, 0), &mut p);
             ("solid.pattern.path", p)
         }
@@ -6819,13 +6873,30 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             ("solid.bounding_solid", p)
         }
-        Kind::Split => {
+        Kind::Split { sheet } => {
             need(0, "the body to split")?;
             need(1, "the splitting plane")?;
             let body = sels(d, 0).body_names().into_iter().next().unwrap_or_default();
             // A plane, a planar face's plane, or any other face (its surface extended).
             let p = match sels(d, 1).first() {
                 Some(Sel::Plane { name }) => json!({"body": body, "plane": name}),
+                // A face tool with the picked faces or the whole surface body, as they are (#9305).
+                Some(Sel::Face { body: b, point, .. }) if matches!(*sheet, 1 | 2) => {
+                    let mode = SPLIT_SHEET_PARAMS.get(*sheet).copied().unwrap_or("extended");
+                    let mut p = json!({"body": body, "tool": {"body": b, "point": pt(*point)}, "tool_sheet": mode});
+                    if *sheet == 1 {
+                        let others = d.inputs.iter().find(|inp| inp.label == SPLIT_TOOL_FACES).map(|inp| inp.items.as_slice()).unwrap_or_default();
+                        let mut points = Vec::new();
+                        for sel in others {
+                            match sel {
+                                Sel::Face { body: o, point, .. } if o == b => points.push(pt(*point)),
+                                _ => return Err("pick the other tool faces on the splitting tool's body".into()),
+                            }
+                        }
+                        p["tool_faces"] = json!(points);
+                    }
+                    p
+                }
                 Some(Sel::Face { body: b, index, point }) => {
                     let planar = planar_face(s, b, *index);
                     let kept = d.extra.get("split_tool_mode").filter(|v| v["body"] == *b && v["index"] == *index);
@@ -7208,9 +7279,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     if let Value::Object(m) = &mut params {
         // A fillet option that doesn't apply with the others is never sent.
         let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
+        // The dialog has no end cut control to clear one an edited coil kept.
+        let profile_coil = matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && m.contains_key("sketch");
         for (k, v) in &d.extra {
             // Saved selection mode is editor state, not a command parameter.
-            if matches!(d.kind, Kind::Split) && k == "split_tool_mode" {
+            if matches!(d.kind, Kind::Split { .. }) && k == "split_tool_mode" {
+                continue;
+            }
+            if profile_coil && k == "end_cut" {
                 continue;
             }
             if fillet && !dense::fillet_option_applies(&d.extra, k) {
@@ -7301,6 +7377,17 @@ fn pattern_objects(s: &Session, objects: &[Sel], p: &mut Value) {
         p["occurrences"] = json!(paths);
     } else if objects.iter().any(|x| matches!(x, Sel::Feature { .. })) {
         p["features"] = json!(pattern_features(s, objects));
+    } else if objects.iter().any(|x| matches!(x, Sel::Occurrence { .. })) {
+        let mut names = Vec::new();
+        for x in objects {
+            let Sel::Occurrence { path } = x else { continue };
+            let Ok(place) = s.occurrence_placement(path) else { continue };
+            let Some(name) = s.doc.components.iter().find(|c| c.id == place.component).map(|c| c.name.clone()) else { continue };
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        p["components"] = json!(names);
     } else {
         p["bodies"] = json!(objects.body_names());
     }
@@ -8093,6 +8180,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 to_offset: extent.to_offset.as_deref().map(str::to_string).unwrap_or_default(),
                 start: extent.start_offset.as_deref().map(str::to_string).unwrap_or_default(),
                 offset_start: extent.start_offset.is_some(),
+                symmetric_offset: extent.symmetric_offset,
                 all: extent.through_all,
                 thin: thin.is_some(),
                 wall: thin.as_ref().map_or_else(|| length_default(s, "2"), |t| t.thickness.to_string()),
@@ -8544,6 +8632,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             position,
             start_angle,
             clockwise,
+            end_cut,
             operation,
             targets,
         } => {
@@ -8581,6 +8670,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             if *clockwise {
                 d.extra.insert("clockwise".into(), json!(true));
+            }
+            if *end_cut == solidcraft_engine::doc::CoilEndCut::Square {
+                d.extra.insert("end_cut".into(), json!("square"));
             }
             if !targets.is_empty() {
                 d.extra.insert("targets".into(), json!(targets));
@@ -8672,7 +8764,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Pattern { features, pattern, bodies: copied, placements } => {
+        FeatureKind::Pattern { features, pattern, bodies: copied, placements, components, .. } => {
             let ids: Vec<u64> = features.iter().map(|f| f.0).collect();
             let bodies: Vec<Sel> = if copied.is_empty() {
                 st.bodies.iter().filter(|b| ids.contains(&b.feature)).map(|b| Sel::Body { name: b.name.clone() }).collect()
@@ -8686,6 +8778,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 };
                 copied.iter().enumerate().map(|(k, name)| Sel::Body { name: world(k, name) }).collect()
             };
+            let component_sels: Vec<Sel> =
+                components.iter().filter_map(|id| s.doc.occurrence_of(*id).map(|o| Sel::Occurrence { path: vec![o.id] })).collect();
             let mut d = match pattern {
                 PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
                     let mut d = start("solid.pattern.rectangular")?;
@@ -8747,13 +8841,16 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     }
                     d
                 }
-                PatternKind::Path { path_sketch, path, count, spacing, extent, flip, orient } => {
+                PatternKind::Path { path_sketch, path, count, spacing, extent, flip, orient, start: at, start_fraction, .. } => {
                     let mut d = start("solid.pattern.path")?;
-                    d.kind = Kind::PathPattern { count: count.to_string(), spacing: spacing.to_string() };
+                    let (at, fraction) = match (start_fraction, at) {
+                        (Some(f), _) => (f.to_string(), true),
+                        (None, at) => (at.as_deref().map(str::to_string).unwrap_or_default(), false),
+                    };
+                    d.kind = Kind::PathPattern { count: count.to_string(), spacing: spacing.to_string(), start: at, fraction };
                     if let Some(inp) = d.inputs.get_mut(1) {
                         inp.items = path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect();
                     }
-                    // Preserve options the current dialog does not expose as controls.
                     d.extra.insert("flip".into(), json!(flip));
                     d.extra.insert("orientation".into(), json!(if *orient { "path" } else { "identical" }));
                     if *extent {
@@ -8769,6 +8866,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     inp.accept = selection::FEATURES;
                     inp.label = objects_label(inp.accept);
                     inp.items = ids.iter().map(|id| Sel::Feature { id: *id }).collect();
+                } else if !component_sels.is_empty() {
+                    // Same accept as Align of components: bodies/occurrences resolve to placements.
+                    inp.accept = BODIES;
+                    inp.label = "Components";
+                    inp.items = component_sels;
                 } else {
                     inp.accept = BODIES;
                     inp.label = objects_label(inp.accept);
@@ -8787,8 +8889,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 inp.items = sections
                     .iter()
                     .flat_map(|sec| {
+                        if let Some(point) = &sec.point {
+                            return vec![Sel::SketchPoint { id: format!("{}:{point}", sec.sketch.0) }];
+                        }
                         let idx = st.sketch(sec.sketch.0).map(|ss| profile_indices(ss, &sec.profiles)).unwrap_or_default();
-                        idx.into_iter().map(move |index| Sel::Profile { sketch: sec.sketch.0, index })
+                        idx.into_iter().map(move |index| Sel::Profile { sketch: sec.sketch.0, index }).collect()
                     })
                     .collect();
             }
@@ -8995,7 +9100,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Split { body, plane, tool, tool_plane, sketch, line } => {
+        FeatureKind::Split { body, plane, tool, tool_plane, tool_sheet, tool_faces, sketch, line } => {
             let mut d = start("solid.split_body")?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = vec![Sel::Body { name: body.to_string() }];
@@ -9035,6 +9140,28 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                             }
                         }),
                     );
+                }
+            }
+            // The picked faces or the whole surface body (#9305): the other faces follow the tool
+            // face's name in the feature's face names.
+            if let Some(t) = tool {
+                let sheet = match tool_sheet {
+                    solidcraft_engine::doc::SplitSheet::Extended => 0,
+                    solidcraft_engine::doc::SplitSheet::Faces => 1,
+                    solidcraft_engine::doc::SplitSheet::Body => 2,
+                };
+                d.kind = Kind::Split { sheet };
+                if sheet == 1 {
+                    let mut more = SelInput::new(SPLIT_TOOL_FACES, FACES, true);
+                    more.items = tool_faces
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, p)| match f.face_names.get(i + 1).filter(|name| !name.is_empty()) {
+                            Some(name) => named_refill_on_body(s, t.body.as_ref(), name, p.0),
+                            None => face_sel_on(s, Some(t.body.as_ref()), p.0),
+                        })
+                        .collect();
+                    d.inputs.push(more);
                 }
             }
             d
@@ -9991,6 +10118,47 @@ mod extrude_mixed_pick_tests {
         let st = crate::open_meshing::session_world(&h.app.session);
         let volume: f64 = st.bodies.iter().map(|b| solidcraft_engine::doc::kernel::measure(&b.body).unwrap().volume).sum();
         assert!((volume - 8000.0).abs() < 1e-6, "the box grown to 20 mm: {volume}");
+    }
+}
+
+#[cfg(test)]
+mod extrude_shift_enter_tests {
+    //! Shift+Enter in an Extrude makes a new body (#18455).
+
+    use super::*;
+    use crate::scenario::Harness;
+
+    /// A box with a rectangle sketched on its top, the Extrude open with Join chosen by hand.
+    fn joined_extrude() -> Harness {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0]})).unwrap();
+        h.app.run("sketch.create", json!({"plane":{"origin":[0,0,10],"x_dir":[1,0,0],"y_dir":[0,1,0]}})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[5,5],"p1":[10,10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("select.clear", json!({})).unwrap();
+        h.step(&json!({"start":"solid.extrude"})).unwrap();
+        h.frames(2);
+        let Some(d) = h.app.dialog.as_mut() else { panic!("the extrude dialog") };
+        if let Kind::Extrude { distance, operation, auto_op, .. } = &mut d.kind {
+            *distance = "5 mm".into();
+            *operation = 1;
+            *auto_op = false;
+        }
+        h.frames(2);
+        h
+    }
+
+    #[test]
+    fn shift_enter_makes_the_extrude_a_new_body_and_enter_alone_keeps_the_operation() {
+        let mut h = joined_extrude();
+        h.step(&json!({"key":"Enter","shift":true})).unwrap();
+        assert!(h.app.dialog.is_none(), "OK: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+        assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 2, "a second body");
+
+        let mut h = joined_extrude();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 1, "joined to the box");
     }
 }
 

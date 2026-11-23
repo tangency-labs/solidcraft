@@ -1001,6 +1001,113 @@ fn closes_around_the_box(
     }
 }
 
+/// A loop that starts on a closed spline's seam, its lowest point a hair below the range's start
+/// (an edge a few µm off the seam line, a writer's rounding: 1e-6 of the period, about 2e-5 mm on
+/// this cylinder of radius 3), stays on the range at a tolerance that covers that: moved a whole
+/// period on, past the range's end, the face's pcurves lay off its NURBS form, which measured it
+/// short. At a tolerance below it the loop stays where its lowest point puts it.
+#[test]
+fn a_loop_a_hair_below_a_closed_splines_range_stays_on_it() {
+    let (cylinder, _) = form::surface(
+        &Surface::Cylinder {
+            frame: about_z([0.; 3], false),
+            radius: 3.,
+        },
+        [[0., TAU], [0., 4.]],
+    )
+    .unwrap();
+    let dom = SurfaceEval::new(&cylinder).unwrap().domain();
+    let (a, b) = dom.range[0].unwrap();
+    let period = dom.period[0].unwrap();
+    let (lo, hi) = (a - 1e-6 * period, a + 0.75 * period);
+    let line = |p: [f64; 2], q: [f64; 2]| Curve2::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![p, q],
+    };
+    // Three quarters of a turn, counter-clockwise in (u, v).
+    let given = [
+        line([lo, 0.], [hi, 0.]),
+        line([hi, 0.], [hi, 4.]),
+        line([hi, 4.], [lo, 4.]),
+        line([lo, 4.], [lo, 0.]),
+    ];
+    let edge = Curve::Line {
+        start: [0.; 3],
+        end: [1., 0., 0.],
+    };
+    let l: Vec<EdgeUse<'_>> = given
+        .iter()
+        .enumerate()
+        .map(|(e, g)| EdgeUse {
+            edge: e as u32,
+            curve: &edge,
+            interval: [0., 1.],
+            forward: true,
+            tolerance: 0.0,
+            given: Some(g),
+        })
+        .collect();
+    let pcs = pcurves(&cylinder, std::slice::from_ref(&l), 1e-4).unwrap();
+    for pc in &pcs[0] {
+        for q in points(pc) {
+            assert!(
+                (lo - 1e-12..=hi + 1e-12).contains(&q[0]) && q[0] < b,
+                "on the range [{a}, {b}]: {q:?}"
+            );
+        }
+    }
+    let pcs = pcurves(&cylinder, &[l], 1e-7).unwrap();
+    for (got, given) in pcs[0].iter().zip(&given) {
+        let moved: Vec<[f64; 2]> = points(given)
+            .iter()
+            .map(|q| [q[0] + period, q[1]])
+            .collect();
+        assert_eq!(points(got), moved, "below the tolerance: a period on");
+    }
+}
+
+#[test]
+fn stored_trim_hulls_leaving_a_base_period_request_a_topology_edit() {
+    let surface = Surface::Spline {
+        u_knots: vec![0., 0., 1., 2., 3., 4., 4.],
+        v_knots: vec![0., 0., 3., 3.],
+        points: [[-2., -2.], [2., -2.], [2., 2.], [-2., 2.], [-2., -2.]]
+            .map(|[x, y]| vec![[x, y, 0.], [x, y, 3.]])
+            .to_vec(),
+    };
+    let domain = SurfaceEval::new(&surface).unwrap().domain();
+    let line = |a, b| Curve2::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![a, b],
+    };
+    for u in [0.0, 4.0] {
+        assert!(!leaves_base_period(domain, &line([u, 0.], [u, 3.])));
+    }
+    assert!(leaves_base_period(domain, &line([3.9, 0.], [4.1, 3.])));
+    assert!(leaves_base_period(domain, &line([-0.1, 0.], [0.1, 3.])));
+    // The analogous cut in v is handled the same way; an open direction is not a seam.
+    let Surface::Spline {
+        u_knots,
+        v_knots,
+        points,
+    } = &surface
+    else {
+        unreachable!()
+    };
+    let transposed = Surface::Spline {
+        u_knots: v_knots.clone(),
+        v_knots: u_knots.clone(),
+        points: (0..2)
+            .map(|j| points.iter().map(|row| row[j]).collect())
+            .collect(),
+    };
+    assert!(leaves_base_period(
+        SurfaceEval::new(&transposed).unwrap().domain(),
+        &line([0., 3.9], [3., 4.1])
+    ));
+    assert!(!leaves_base_period(domain, &line([0., -1.], [4., 4.])));
+}
+
 /// A full-period loop with a small overrun at its cut belongs around the base
 /// period. Shifting its lowest control point inside moved most of it one turn out.
 #[test]

@@ -194,7 +194,11 @@ impl crate::Storage for FileStorage {
     }
 }
 
-fn save_to_disk(file_path: &PathBuf, kv: &HashMap<String, String>) {
+// SolidCraft: written to a temporary file beside `file_path`, synced and renamed over it, so the
+// file always holds one whole save, the last one written (#4164). Two windows saving at once each
+// truncated and wrote the same file, and a shorter save left a longer one's tail behind it.
+#[doc(hidden)]
+pub fn save_to_disk(file_path: &PathBuf, kv: &HashMap<String, String>) {
     profiling::function_scope!();
 
     if let Some(parent_dir) = file_path.parent()
@@ -204,25 +208,51 @@ fn save_to_disk(file_path: &PathBuf, kv: &HashMap<String, String>) {
         log::warn!("Failed to create directory {}: {err}", parent_dir.display());
     }
 
-    match std::fs::File::create(file_path) {
+    // SolidCraft: one temporary name per process and thread, so concurrent saves never share one.
+    let name = file_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let thread = format!("{:?}", std::thread::current().id()).replace(|c: char| !c.is_ascii_alphanumeric(), "");
+    let tmp_path = file_path.with_file_name(format!(".{name}.{}-{thread}.tmp", std::process::id()));
+
+    match std::fs::File::create(&tmp_path) {
         Ok(file) => {
             let mut writer = std::io::BufWriter::new(file);
             let config = Default::default();
 
             profiling::scope!("ron::serialize");
-            if let Err(err) = ron::Options::default()
+            let written = ron::Options::default()
                 .to_io_writer_pretty(&mut writer, &kv, config)
                 .and_then(|()| writer.flush().map_err(|err| err.into()))
-            {
+                .and_then(|()| writer.get_ref().sync_all().map_err(|err| err.into()));
+            drop(writer);
+            if let Err(err) = written {
                 log::warn!("Failed to serialize app state: {err}");
+                std::fs::remove_file(&tmp_path).ok();
+            } else if let Err(err) = rename_with_retries(&tmp_path, file_path) {
+                log::warn!("Failed to replace {}: {err}", file_path.display());
+                std::fs::remove_file(&tmp_path).ok();
             } else {
                 log::trace!("Persisted to {}", file_path.display());
             }
         }
         Err(err) => {
-            log::warn!("Failed to create file {}: {err}", file_path.display());
+            log::warn!("Failed to create file {}: {err}", tmp_path.display());
         }
     }
+}
+
+// SolidCraft: Windows refuses to replace a file another process has open, as a second window does
+// while it reads or saves the settings. That passes in moments, so try again before giving up. This
+// runs on the save thread, and the longest wait is 150 ms.
+fn rename_with_retries(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut result = std::fs::rename(from, to);
+    for wait_ms in [10, 20, 40, 80] {
+        if result.is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+        result = std::fs::rename(from, to);
+    }
+    result
 }
 
 // ----------------------------------------------------------------------------

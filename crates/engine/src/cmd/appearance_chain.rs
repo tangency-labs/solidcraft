@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::appearance::{AppearanceScope, AppearanceTarget, Look};
 
 use crate::params::bad;
+use crate::schema::appearance::{AppearanceChainResult, AppearanceReplaceResult, ChainStep, LookReply};
 use crate::{Result, Session};
 
 const MAX_TARGETS: usize = 10_000;
@@ -41,10 +42,12 @@ pub(super) fn chain(s: &mut Session, p: &Value) -> Result<Value> {
         _ => return Err(bad(cmd, "target must be {body}, {body, face}, or {component}")),
     };
     let chain = s.doc.appearance_chain(&s.model.state(), target).map_err(|e| bad(cmd, e.to_string()))?;
-    Ok(json!({
-        "steps": chain.steps().into_iter().map(|(step, look)| json!({"step":step,"look":look.map(super::look_json)})).collect::<Vec<_>>(),
-        "active": chain.active(),
-    }))
+    let reply = AppearanceChainResult {
+        steps: chain.steps().into_iter().map(|(step, look)| ChainStep { step: step.to_string(), look: look.map(LookReply::from) }).collect(),
+        active: chain.active().map(str::to_string),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 /// A saved in-design look's label is inert; a string explicitly selects a library
@@ -149,5 +152,5 @@ pub(super) fn replace(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         0
     };
-    Ok(json!({"count": count}))
+    serde_json::to_value(AppearanceReplaceResult { count, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
 }

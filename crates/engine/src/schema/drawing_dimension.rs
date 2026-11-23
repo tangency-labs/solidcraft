@@ -306,7 +306,7 @@ pub enum KindParam {
         #[schemars(with = "String")]
         reading: Option<Reading>,
     },
-    /// A straight edge's length.
+    /// A straight edge's length, or the length of the line a round edge the view sees edge-on draws.
     Length {
         edge: EdgeParam,
         #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]

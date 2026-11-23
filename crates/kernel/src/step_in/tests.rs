@@ -403,6 +403,165 @@ fn a_ball_written_as_a_cap_and_the_rest_round_it_imports_whole() {
     }
 }
 
+/// Two rings (tori about z: R 20 at the origin and R 30 at x = 52, both r 5) written as one
+/// body or as their overlap, each of the two faces a torus less or within a disc cut out of it
+/// by the curve the surfaces meet in: two cubic B-spline edges between (21, 0, ±4.899), built
+/// here as chains of Hermite pieces from the exact intersection. No seam edges are written.
+/// `lens` writes the loops the way the overlap needs them (the faces are the two discs);
+/// otherwise each loop runs the other way and each face is its torus less its disc.
+fn two_rings_step(lens: bool) -> String {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let (ra, rb, r, cb) = (20.0_f64, 30.0_f64, 5.0_f64, 52.0_f64);
+    // On torus A at longitude u and tube angle v.
+    let on_a = |u: f64, v: f64| [(ra + r * v.cos()) * u.cos(), (ra + r * v.cos()) * u.sin(), r * v.sin()];
+    // Negative inside torus B.
+    let in_b = |p: [f64; 3]| ((p[0] - cb).hypot(p[1]) - rb).powi(2) + p[2] * p[2] - r * r;
+    // The tubes' surfaces meet in the plane y = 0 where cos v = (cb - ra - rb) / (2 r).
+    let v0 = ((cb - ra - rb) / (2.0 * r)).acos();
+    // The longitude along torus A, beyond the plane, at which the tube angle `v` meets torus B.
+    let longitude = |v: f64| {
+        let (mut lo, mut hi) = (0.0_f64, FRAC_PI_2);
+        for _ in 0..100 {
+            let mid = 0.5 * (lo + hi);
+            if in_b(on_a(mid, v)) < 0.0 {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        0.5 * (lo + hi)
+    };
+    // The curve as a function of t: t in [-pi/2, 3pi/2] goes once round, through y > 0 first.
+    // The tube angle follows v0 sin t, so the curve is smooth where it turns at its two ends.
+    let curve = |t: f64| {
+        let u = if t.cos().abs() < 1e-12 {
+            0.0
+        } else if t.cos() > 0.0 {
+            longitude(v0 * t.sin())
+        } else {
+            -longitude(v0 * t.sin())
+        };
+        on_a(u, v0 * t.sin())
+    };
+    let slope = |t: f64| {
+        let h = 1e-4;
+        let (p, q) = (curve(t - h), curve(t + h));
+        [(q[0] - p[0]) / (2.0 * h), (q[1] - p[1]) / (2.0 * h), (q[2] - p[2]) / (2.0 * h)]
+    };
+    let mut lines: Vec<String> = Vec::new();
+    fn add(lines: &mut Vec<String>, body: String) -> usize {
+        lines.push(format!("#{}={body};\n", lines.len() + 1));
+        lines.len()
+    }
+    fn point(lines: &mut Vec<String>, p: [f64; 3]) -> usize {
+        add(lines, format!("CARTESIAN_POINT('',({:.16},{:.16},{:.16}))", p[0], p[1], p[2]))
+    }
+    fn direction(lines: &mut Vec<String>, d: [f64; 3]) -> usize {
+        add(lines, format!("DIRECTION('',({:.1},{:.1},{:.1}))", d[0], d[1], d[2]))
+    }
+    // One edge: the curve over `[t0, t0 + pi]` in `pieces` Hermite pieces, between two vertices.
+    let pieces: usize = 24;
+    let edge = |lines: &mut Vec<String>, t0: f64| {
+        let step = PI / pieces as f64;
+        let mut ids = Vec::new();
+        for i in 0..pieces {
+            let (ta, tb) = (t0 + step * i as f64, t0 + step * (i + 1) as f64);
+            let (pa, pb, da, db) = (curve(ta), curve(tb), slope(ta), slope(tb));
+            let third = step / 3.0;
+            let mut four = vec![pa, [pa[0] + da[0] * third, pa[1] + da[1] * third, pa[2] + da[2] * third]];
+            four.push([pb[0] - db[0] * third, pb[1] - db[1] * third, pb[2] - db[2] * third]);
+            four.push(pb);
+            // The piece's first point is the one before's last.
+            for (k, q) in four.into_iter().enumerate() {
+                if i > 0 && k == 0 {
+                    continue;
+                }
+                ids.push(point(lines, q));
+            }
+        }
+        let mut multiplicities = vec!["4".to_string()];
+        multiplicities.extend((1..pieces).map(|_| "3".to_string()));
+        multiplicities.push("4".to_string());
+        let knots: Vec<String> = (0..=pieces).map(|k| format!("{k}.0")).collect();
+        let refs: Vec<String> = ids.iter().map(|i| format!("#{i}")).collect();
+        let spline = add(
+            lines,
+            format!(
+                "B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,({}),({}),.UNSPECIFIED.)",
+                refs.join(","),
+                multiplicities.join(","),
+                knots.join(",")
+            ),
+        );
+        (spline, curve(t0), curve(t0 + PI))
+    };
+    // Bottom to top through y > 0, then top to bottom through y < 0.
+    let (c1, bottom, top) = edge(&mut lines, -FRAC_PI_2);
+    let (c2, _, _) = edge(&mut lines, FRAC_PI_2);
+    let vb = point(&mut lines, bottom);
+    let vb = add(&mut lines, format!("VERTEX_POINT('',#{vb})"));
+    let vt = point(&mut lines, top);
+    let vt = add(&mut lines, format!("VERTEX_POINT('',#{vt})"));
+    let e1 = add(&mut lines, format!("EDGE_CURVE('',#{vb},#{vt},#{c1},.T.)"));
+    let e2 = add(&mut lines, format!("EDGE_CURVE('',#{vt},#{vb},#{c2},.T.)"));
+    let torus = |lines: &mut Vec<String>, centre: [f64; 3], major: f64| {
+        let (c, z, x) = (point(lines, centre), direction(lines, [0.0, 0.0, 1.0]), direction(lines, [1.0, 0.0, 0.0]));
+        let frame = add(lines, format!("AXIS2_PLACEMENT_3D('',#{c},#{z},#{x})"));
+        add(lines, format!("TOROIDAL_SURFACE('',#{frame},{major:.1},{r:.1})"))
+    };
+    let (ta, tb) = (torus(&mut lines, [0.0, 0.0, 0.0], ra), torus(&mut lines, [cb, 0.0, 0.0], rb));
+    // Torus A's loop goes top to bottom through y > 0 and back through y < 0, the face on its
+    // left seen from outside: the edges backwards. Torus B's loop is that one reversed. The
+    // overlap has each loop the other way.
+    let (a_uses, b_uses) = if lens { ([(e1, 'T'), (e2, 'T')], [(e2, 'F'), (e1, 'F')]) } else { ([(e1, 'F'), (e2, 'F')], [(e2, 'T'), (e1, 'T')]) };
+    let face = |lines: &mut Vec<String>, uses: [(usize, char); 2], surface: usize| {
+        let oriented: Vec<String> = uses.iter().map(|&(e, s)| format!("#{}", add(lines, format!("ORIENTED_EDGE('',*,*,#{e},.{s}.)")))).collect();
+        let lp = add(lines, format!("EDGE_LOOP('',({}))", oriented.join(",")));
+        let bound = add(lines, format!("FACE_BOUND('',#{lp},.T.)"));
+        add(lines, format!("ADVANCED_FACE('',(#{bound}),#{surface},.T.)"))
+    };
+    let (fa, fb) = (face(&mut lines, a_uses, ta), face(&mut lines, b_uses, tb));
+    let shell = add(&mut lines, format!("CLOSED_SHELL('',(#{fa},#{fb}))"));
+    let solid = add(&mut lines, format!("MANIFOLD_SOLID_BREP('rings',#{shell})"));
+    let ctx = lines.len() as u64 + 2;
+    add(&mut lines, format!("ADVANCED_BREP_SHAPE_REPRESENTATION('',(#{solid}),#{ctx})"));
+    let mut t = String::from(HEAD);
+    t += &lines.concat();
+    t += &context(ctx, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    t
+}
+
+/// Two rings joined into one body, written as two faces that each have one loop and no seam edge
+/// (#20550): torus A less the disc of it inside torus B, and torus B less the disc of it inside
+/// torus A. Each loop runs clockwise about its face's normal round the disc, so the face is the
+/// rest of its torus; it was read as the disc turned over, both faces on discs and no volume.
+/// The rings' volume is 2π²r²(R₁ + R₂) = 2500π² less the overlap's 1051.39224 (worked out by
+/// integrating over z the overlap of the two cross-section annuli), the area 1000π² less the
+/// overlap's 635.62684. Written the other way round, the same faces are the two discs, the
+/// overlap itself, and stay so.
+#[test]
+fn two_rings_written_as_a_torus_less_a_disc_each_import_whole() {
+    use std::f64::consts::PI;
+    let (lens_volume, lens_area) = (1051.39223963_f64, 635.62684119_f64);
+    for (what, lens, volume, area) in
+        [("the rings joined", false, 2500.0 * PI * PI - lens_volume, 1000.0 * PI * PI - lens_area), ("their overlap", true, lens_volume, lens_area)]
+    {
+        let imp = step_import(&two_rings_step(lens)).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(imp.bodies.len(), 1, "{what}: {:?}", imp.warnings);
+        assert!(
+            !imp.warnings.iter().any(|w| w.contains("turned over") || w.contains("left out") || w.contains("repair")),
+            "{what}: {:?}",
+            imp.warnings
+        );
+        assert!(imp.bodies[0].closed, "{what}: {:?}", imp.warnings);
+        let m = measure(&imp.bodies[0].body).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!((m.faces, m.shells), (2, 1), "{what}");
+        assert!(rel(m.volume, volume) < 1e-5, "{what}: volume {} vs {volume}", m.volume);
+        assert!(rel(m.area, area) < 1e-5, "{what}: area {} vs {area}", m.area);
+    }
+}
+
 /// A 30 × 30 × 10 block with a Ø14 hole through it, its top edge rounded at 1 mm, as SolidCraft
 /// 0.30.1 wrote it after reading its own file (#17929): the round on a SURFACE_OF_REVOLUTION of
 /// a rational circle, which got no pcurves, so the block came in open. The round reads as a
@@ -997,21 +1156,22 @@ fn bezier_block(span: &str, split: f64) -> String {
 /// block it is, as it does with the knots (0, 20).
 #[test]
 fn a_micro_edge_on_a_bezier_with_a_tiny_knot_span_keeps_the_block() {
+    // At 1.283 nm on the knots (0, 1.02e-7) the micro edge lies on [0, 6.549e-15] of the file's
+    // parameter, below SMLib's knot resolution (1e-12); the reader rescales such a curve's
+    // parameter exactly (#16441), so that block too is the closed 20 × 30 × 10 = 6000 mm³ block.
     for span in ["20.", "1.020781457822E-07"] {
-        let case = format!("knots (0, {span})");
-        let imp = step_import(&bezier_block(span, 1.26e-3)).unwrap_or_else(|e| panic!("{case}: {e}"));
-        assert_eq!(imp.bodies.len(), 1, "{case}: {:?}", imp.warnings);
-        let b = &imp.bodies[0];
-        assert!(b.closed, "{case}: open");
-        crate::validation::check_kept(&b.body).unwrap_or_else(|e| panic!("{case}: {e}"));
-        let m = measure(&b.body).unwrap();
-        assert!(rel(m.volume, 6000.0) < 1e-9, "{case}: volume {}", m.volume);
-        assert_eq!(m.faces, 6, "{case}");
+        for split in [1.26e-3, 1.283e-6] {
+            let case = format!("knots (0, {span}), micro edge {split} mm");
+            let imp = step_import(&bezier_block(span, split)).unwrap_or_else(|e| panic!("{case}: {e}"));
+            assert_eq!(imp.bodies.len(), 1, "{case}: {:?}", imp.warnings);
+            let b = &imp.bodies[0];
+            assert!(b.closed, "{case}: open");
+            crate::validation::check_kept(&b.body).unwrap_or_else(|e| panic!("{case}: {e}"));
+            let m = measure(&b.body).unwrap();
+            assert!(rel(m.volume, 6000.0) < 1e-9, "{case}: volume {}", m.volume);
+            assert_eq!(m.faces, 6, "{case}");
+        }
     }
-    // At 1.283 nm the micro edge lies on [0, 6.549e-15], below SMLib's knot resolution (1e-12):
-    // the solid is refused with that interval named, not taken as a body SMLib's check fails.
-    let e = step_import(&bezier_block("1.020781457822E-07", 1.283e-6)).map(|i| i.bodies.len()).unwrap_err().to_string();
-    assert!(e.contains("no longer than SMLib's knot resolution (1e-12)"), "{e}");
 }
 
 /// [`bezier_block`] (split at 1 µm) with its first edge's curve, which the micro edge and the
@@ -1168,7 +1328,14 @@ fn a_placement_that_scales_a_part_is_checked_as_placed() {
 /// A check job for `body`, as the reader makes one (part `name`, `times` instances).
 fn check_job(body: &Body, name: &str, times: usize) -> checks::Job {
     let n = body.face_count();
-    let source = Arc::new(parallel::Part { body: body.clone(), closed: true, file_faces: n, face_origin: (0..n as u64).collect(), refused: None });
+    let source = Arc::new(parallel::Part {
+        body: body.clone(),
+        closed: true,
+        file_faces: n,
+        face_origin: (0..n as u64).collect(),
+        refused: None,
+        split_edges: 0,
+    });
     checks::Job {
         item: 101,
         part: name.into(),
@@ -1186,7 +1353,14 @@ fn check_job(body: &Body, name: &str, times: usize) -> checks::Job {
 /// first instance.
 fn part_jobs(body: &Body, placements: &[M4]) -> (Vec<checks::Job>, checks::Heals) {
     let n = body.face_count();
-    let part = Arc::new(parallel::Part { body: body.clone(), closed: true, file_faces: n, face_origin: (0..n as u64).collect(), refused: None });
+    let part = Arc::new(parallel::Part {
+        body: body.clone(),
+        closed: true,
+        file_faces: n,
+        face_origin: (0..n as u64).collect(),
+        refused: None,
+        split_edges: 0,
+    });
     let mut jobs: Vec<checks::Job> = Vec::new();
     let mut of: HashMap<Option<[u64; 16]>, usize> = HashMap::new();
     for m in placements {
@@ -1225,6 +1399,15 @@ fn heal_run(body: &Body, placements: &[M4], workers: usize) -> (Vec<ImportIssue>
     let checks = ImportChecks::start(jobs, heals, workers, None);
     let issues = checks.wait().expect("not stopped");
     ((*issues).clone(), checks.heals())
+}
+
+/// A check outcome's failure standing in for SMLib's check of a part as read (one failed test,
+/// named `as read`), for tests that give the import's heal the checks' outcomes.
+fn failed_as_read() -> crate::CheckFailure {
+    crate::CheckFailure {
+        failures: 1,
+        tests: vec![crate::validation::FailedTest { name: "as read".into(), number: None, owners: Vec::new(), times: 1 }],
+    }
 }
 
 /// The one body of the lifted block (failing SMLib's check when `fails`) and of the block as
@@ -3231,6 +3414,133 @@ fn extruded_ellipse_patch_crossing_profile_seam_stays_trimmed() {
     }
 }
 
+/// A surface model of planar rectangular sheets standing on the z axis from (0,0,0) to (0,0,10),
+/// one per `(x, y)` direction, all sharing the one `EDGE_CURVE` along the axis.
+fn sheets_on_one_edge(directions: &[[f64; 2]]) -> String {
+    let mut out = String::from(
+        "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('t','',(''),(''),'','hand','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));\nENDSEC;\nDATA;\n\
+#1=CARTESIAN_POINT('',(0.,0.,0.));#2=CARTESIAN_POINT('',(0.,0.,10.));#3=VERTEX_POINT('',#1);#4=VERTEX_POINT('',#2);\n\
+#5=DIRECTION('',(0.,0.,1.));#6=VECTOR('',#5,1.);#7=LINE('',#1,#6);#8=EDGE_CURVE('',#3,#4,#7,.T.);#9=ORIENTED_EDGE('',*,*,#8,.T.);\n",
+    );
+    let mut faces = Vec::new();
+    let mut id = 10;
+    for [dx, dy] in directions {
+        let (a, b, c, d) = (id, id + 1, id + 2, id + 3);
+        // Far corners (top, bottom), their vertices, and the three edges round the shared one.
+        out += &format!("#{a}=CARTESIAN_POINT('',({},{},10.));#{b}=CARTESIAN_POINT('',({},{},0.));\n", dx * 10.0, dy * 10.0, dx * 10.0, dy * 10.0);
+        out += &format!("#{c}=VERTEX_POINT('',#{a});#{d}=VERTEX_POINT('',#{b});\n");
+        let dir = id + 4;
+        out += &format!("#{dir}=DIRECTION('',({dx:.1},{dy:.1},0.));#{}=VECTOR('',#{dir},1.);#{}=LINE('',#2,#{});\n", dir + 1, dir + 2, dir + 1);
+        out += &format!("#{}=DIRECTION('',(0.,0.,-1.));#{}=VECTOR('',#{},1.);#{}=LINE('',#{a},#{});\n", dir + 3, dir + 4, dir + 3, dir + 5, dir + 4);
+        out += &format!(
+            "#{}=DIRECTION('',({:.1},{:.1},0.));#{}=VECTOR('',#{},1.);#{}=LINE('',#{b},#{});\n",
+            dir + 6,
+            -dx,
+            -dy,
+            dir + 7,
+            dir + 6,
+            dir + 8,
+            dir + 7
+        );
+        let e = dir + 9;
+        out += &format!(
+            "#{e}=EDGE_CURVE('',#4,#{c},#{},.T.);#{}=EDGE_CURVE('',#{c},#{d},#{},.T.);#{}=EDGE_CURVE('',#{d},#3,#{},.T.);\n",
+            dir + 2,
+            e + 1,
+            dir + 5,
+            e + 2,
+            dir + 8
+        );
+        let o = e + 3;
+        out += &format!(
+            "#{o}=ORIENTED_EDGE('',*,*,#{e},.T.);#{}=ORIENTED_EDGE('',*,*,#{},.T.);#{}=ORIENTED_EDGE('',*,*,#{},.T.);\n",
+            o + 1,
+            e + 1,
+            o + 2,
+            e + 2
+        );
+        // The loop runs up the shared edge, out, down and back, so its normal is (-dy, dx, 0).
+        let (nx, ny) = (-dy, *dx);
+        out += &format!(
+            "#{}=EDGE_LOOP('',(#9,#{o},#{},#{}));#{}=FACE_OUTER_BOUND('',#{},.T.);\n#{}=DIRECTION('',({nx:.1},{ny:.1},0.));#{}=AXIS2_PLACEMENT_3D('',#1,#{},#{dir});#{}=PLANE('',#{});\n",
+            o + 3,
+            o + 1,
+            o + 2,
+            o + 4,
+            o + 3,
+            o + 5,
+            o + 6,
+            o + 5,
+            o + 7,
+            o + 6
+        );
+        out += &format!("#{}=ADVANCED_FACE('',(#{}),#{},.T.);\n", o + 8, o + 4, o + 7);
+        faces.push(format!("#{}", o + 8));
+        id = o + 9;
+    }
+    out += &format!(
+        "#{id}=OPEN_SHELL('',({}));#{}=SHELL_BASED_SURFACE_MODEL('Sheets',(#{id}));\n#{}=SHAPE_REPRESENTATION('',(#{}),$);\nENDSEC;\nEND-ISO-10303-21;\n",
+        faces.join(","),
+        id + 1,
+        id + 2,
+        id + 1
+    );
+    out
+}
+
+/// Sheets standing on one edge, three of them (a "T"): the edge has three face uses, which an
+/// open body may have, so the model is one open body with every face, not refused.
+#[test]
+fn a_surface_model_with_an_edge_of_three_faces_imports_as_one_open_body() {
+    let imp = step_import(&sheets_on_one_edge(&[[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0]])).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let body = &imp.bodies[0].body;
+    assert!(!imp.bodies[0].closed);
+    assert_eq!(body.face_count(), 3);
+    // Nine outer edges and the shared one, and the third use on a copy of its own: eleven.
+    assert_eq!(body.edge_count(), 11);
+    // The axial edges: the first two uses keep the edge, the third has the copy to itself, with
+    // the same curve and the same vertices.
+    let record = body.record();
+    let mut uses = vec![0usize; record.edges.len()];
+    for face in &record.faces {
+        for l in &face.loops {
+            if let solidcore_record::brep::Loop::Edges { edges } = l {
+                for u in edges {
+                    uses[u.edge as usize] += 1;
+                }
+            }
+        }
+    }
+    let axial: Vec<usize> = (0..record.edges.len())
+        .filter(|&i| {
+            let e = &record.edges[i];
+            e.vertices.iter().all(|&v| {
+                let p = record.vertices[v as usize].point;
+                p[0].abs() < 1e-9 && p[1].abs() < 1e-9
+            })
+        })
+        .collect();
+    assert_eq!(axial.len(), 2, "{axial:?}");
+    let mut counts: Vec<usize> = axial.iter().map(|&i| uses[i]).collect();
+    counts.sort_unstable();
+    assert_eq!(counts, [1, 2]);
+    assert_eq!(record.edges[axial[0]].curve, record.edges[axial[1]].curve);
+    assert_eq!(record.edges[axial[0]].vertices, record.edges[axial[1]].vertices);
+    // One original edge was split, once.
+    assert_eq!(imp.report.split_edges, 1);
+}
+
+/// Two sheets sharing an edge, as before.
+#[test]
+fn a_surface_model_with_an_edge_of_two_faces_still_imports_as_one_open_body() {
+    let imp = step_import(&sheets_on_one_edge(&[[1.0, 0.0], [0.0, 1.0]])).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(!imp.bodies[0].closed);
+    assert_eq!(imp.bodies[0].body.face_count(), 2);
+    assert_eq!(imp.report.split_edges, 0);
+}
+
 /// Parts of known shape from the step-conformance corpus (`tests/step-conformance`, generated
 /// from formulas by https://github.com/dan335/step-conformance at 96f30bb, CC0 1.0):
 /// each reads back with its exact volume (from the generator's own profile), its box and its
@@ -3476,14 +3786,89 @@ fn a_closed_spline_wall_with_a_curved_seam_keeps_all_faces() {
         let m = measure(&imp.bodies[0].body).unwrap();
         assert_eq!(m.faces, 3);
         assert!(rel(m.volume, 100.0 * std::f64::consts::PI) < 1e-6, "{}", m.volume);
+        assert_periodic_trim_domains_and_seams(&imp.bodies[0].body);
+        let check = imp.bodies[0].body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+        assert!(check.is_valid(), "start {start}: {check}");
     }
+}
+
+/// Containment of the positive-weight control hull proves containment of the entire stored
+/// trim, including between samples. Seam uses share an edge and its vertices, run oppositely,
+/// and lie on opposite sides of the surface's base period.
+fn assert_periodic_trim_domains_and_seams(body: &Body) {
+    use solidcore_record::brep::{Curve2, Loop};
+
+    let controls = |pc: &Curve2| -> Vec<[f64; 2]> {
+        match pc {
+            Curve2::Spline { points, .. } => points.clone(),
+            Curve2::RationalSpline { homogeneous, .. } => homogeneous
+                .iter()
+                .map(|h| {
+                    assert!(h[2].is_finite() && h[2] > 0.0);
+                    [h[0] / h[2], h[1] / h[2]]
+                })
+                .collect(),
+        }
+    };
+    let record = body.record();
+    let mut seams = 0;
+    for (fi, face) in record.faces.iter().enumerate() {
+        let domain = solidcraft_geom::brep::eval::SurfaceEval::new(face.nurbs.as_ref().unwrap_or(&face.surface)).unwrap().domain();
+        for l in &face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let points = controls(&u.pcurve);
+                assert!(!points.is_empty());
+                for p in &points {
+                    for (d, range) in domain.range.iter().enumerate() {
+                        if let Some((lo, hi)) = range {
+                            // Only floating-point rounding at a cut, never the edge's model tolerance.
+                            let round = 1e-9 * (hi - lo).abs().max(1.0);
+                            assert!(
+                                p[d].is_finite() && p[d] >= lo - round && p[d] <= hi + round,
+                                "face {fi}, edge {}: {p:?} outside {range:?}",
+                                u.edge
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        for (ei, edge) in record.edges.iter().enumerate() {
+            let [a, b] = edge.uses.as_slice() else { continue };
+            if a.face as usize != fi || b.face as usize != fi {
+                continue;
+            }
+            let use_at = |r: &solidcore_record::brep::EdgeUseRef| {
+                let Loop::Edges { edges } = &face.loops[r.r#loop as usize] else { panic!("a seam use must be on an edge loop") };
+                &edges[r.position as usize]
+            };
+            let (a_use, b_use) = (use_at(a), use_at(b));
+            assert_eq!(a_use.edge as usize, ei);
+            assert_eq!(b_use.edge as usize, ei);
+            assert_ne!(a_use.forward, b_use.forward);
+            assert_eq!(a.upper, !a_use.forward);
+            assert_eq!(b.upper, !b_use.forward);
+            assert_ne!(edge.vertices[0], edge.vertices[1]);
+            let (a_points, b_points) = (controls(&a_use.pcurve), controls(&b_use.pcurve));
+            let on_cut = (0..2).any(|d| {
+                let (Some(period), Some((lo, hi))) = (domain.period[d], domain.range[d]) else { return false };
+                let round = 1e-9 * period;
+                let at = |points: &[[f64; 2]], side: f64| points.iter().all(|p| (p[d] - side).abs() <= round);
+                (at(&a_points, lo) && at(&b_points, hi)) || (at(&a_points, hi) && at(&b_points, lo))
+            });
+            assert!(on_cut, "face {fi}, seam edge {ei}: its uses must lie on the two sides of the base period");
+            seams += 1;
+        }
+    }
+    assert!(seams > 0, "the closed spline wall must have a seam edge");
 }
 
 /// The volume of the one solid `solidcore_step::topology` reads from `text` into schema 4,
 /// measured as the body of that record.
 pub(super) fn schema_4_volume(text: &str) -> f64 {
     let ex = solidcore_step::p21::parse(text).unwrap();
-    let r = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
+    let r = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibImportTrims);
     assert!(r.failures.is_empty() && r.solids.len() == 1, "{:?}", r.failures);
     measure(&Body::from_record(r.solids[0].brep.clone()).unwrap()).unwrap().volume
 }
@@ -5107,8 +5492,8 @@ fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
     let faces = body.face_count();
     assert_eq!(faces, 8);
     let origin: Vec<u64> = (100..100 + faces as u64).collect();
-    let part = Part { body, closed: true, file_faces: faces, face_origin: origin.clone(), refused: None };
-    let read = heal(&part, 7);
+    let part = Part { body, closed: true, file_faces: faces, face_origin: origin.clone(), refused: None, split_edges: 0 };
+    let read = heal(&part, 7, None);
     assert_eq!(part.body.record(), &source, "the part read stays as it was");
     let Healed::Kept(part, note, check, face_source) = read else { panic!("kept") };
     assert_eq!(part.body.face_count(), 7);
@@ -5147,8 +5532,8 @@ fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
     // a part whose check passes is left as it is, with no note
     let clean = hair_step_body(3e-3, 1e-3);
     assert_eq!(crate::validation::failing_check(&clean).unwrap(), None);
-    let part = Part { body: clean, closed: true, file_faces: 8, face_origin: origin.clone(), refused: None };
-    assert!(matches!(heal(&part, 7), Healed::NotKept));
+    let part = Part { body: clean, closed: true, file_faces: 8, face_origin: origin.clone(), refused: None, split_edges: 0 };
+    assert!(matches!(heal(&part, 7, None), Healed::NotKept));
 }
 
 /// Repair heals a part's tolerance-scale defects first: the hair step's riser, its end edges
@@ -5259,8 +5644,8 @@ fn a_stopped_heal_changes_nothing() {
     let stop = solidcraft_smlib::stop::Stop::new();
     stop.stop();
     assert_eq!(stop.within(|| crate::heal_tolerance_defects(&hair)).err(), Some(KernelError::Heal(crate::HealFailure::Stopped)));
-    let part = Part { closed: true, file_faces: 8, face_origin: (0..8).collect(), refused: None, body: hair.clone() };
-    assert!(matches!(stop.within(|| heal(&part, 7)), Healed::Stopped));
+    let part = Part { closed: true, file_faces: 8, face_origin: (0..8).collect(), refused: None, split_edges: 0, body: hair.clone() };
+    assert!(matches!(stop.within(|| heal(&part, 7, None)), Healed::Stopped));
     assert_eq!(part.body.record(), &source);
     // In the import's checks: a stopped run heals nothing and says it was stopped.
     for m in [IDENTITY, translation([10.0, 0.0, 0.0])] {
@@ -5272,7 +5657,7 @@ fn a_stopped_heal_changes_nothing() {
     let repaired = stop.within(|| crate::repair(&hair, &crate::RepairOptions { gap: 0.01, patch_holes: false, heal_first: true }));
     assert_eq!(repaired.err(), Some(KernelError::Heal(crate::HealFailure::Stopped)));
     // Not stopped, the same heal is kept.
-    let Healed::Kept(healed, ..) = heal(&part, 7) else { panic!("kept") };
+    let Healed::Kept(healed, ..) = heal(&part, 7, None) else { panic!("kept") };
     assert_eq!(healed.body.face_count(), 7);
 }
 
@@ -5289,6 +5674,79 @@ fn a_healed_part_keeps_its_regularization_protection() {
         let (repaired, report) = crate::repair(&hair, &crate::RepairOptions { gap: 0.01, patch_holes: false, heal_first: true }).unwrap();
         assert!(report.healed.is_some(), "Repair healed first");
         assert_eq!(repaired.regularization_protected, protected);
+    }
+}
+
+/// The hair-step box (`hair_step_body(3e-4, 1e-3)`) with its corner (10, 0, 0) lifted 4e-4 off
+/// the bottom: the heal takes the riser away, as on the hair step alone, and leaves the gaps
+/// at the lifted corner, which no tolerance-scale heal reaches (the corner sits off its edges
+/// and faces by more than their tolerance).
+fn hair_step_with_a_lifted_corner() -> Body {
+    let h = 10.0 + 3e-4;
+    let corners = [
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [0.0, 10.0, 0.0],
+        [0.0, 0.0, 10.0],
+        [10.0, 0.0, 10.0],
+        [10.0, 5.0, 10.0],
+        [0.0, 5.0, 10.0],
+        [0.0, 5.0, h],
+        [10.0, 5.0, h],
+        [10.0, 10.0, h],
+        [0.0, 10.0, h],
+    ];
+    let cycles: [&[usize]; 8] =
+        [&[0, 3, 2, 1], &[4, 5, 6, 7], &[7, 6, 9, 8], &[8, 9, 10, 11], &[0, 1, 5, 4], &[2, 3, 11, 10], &[1, 2, 10, 9, 6, 5], &[0, 4, 7, 8, 11, 3]];
+    // the corner is lifted after the faces are made, so their planes stay the box's
+    let mut rec = polyhedron_record(&corners, &cycles, 1e-3);
+    if let Some(v) = rec.vertices.iter_mut().find(|v| v.point == [10.0, 0.0, 0.0]) {
+        v.point = [10.0, 0.0, 4e-4];
+    }
+    Body::from_record(rec).unwrap()
+}
+
+/// The import's heal of a part it betters but leaves failing reuses the import's own check of
+/// the part, which the heal compares the healed part with, rather than run it again on the
+/// same body. SMLib's checks per import of such a part (each a `check` call of SMLib, counted
+/// by the profiler): the import's check of the part (1), the heal's check of the healed part
+/// (1; the import's check again of the healed part at the identity is that one), and the part's
+/// own check, which the heal used to run again (1, now 0): 2, was 3. The heal kept is the same
+/// either way: given the import's check or running its own, the heal decides on the same check
+/// of the same body.
+#[test]
+fn the_heal_of_an_imported_part_reuses_the_imports_check_of_it() {
+    let part = hair_step_with_a_lifted_corner();
+    let own = crate::validation::failing_check(&part).unwrap().expect("the part fails the check");
+    let kinds = |c: &crate::CheckFailure| c.tests.iter().map(|t| t.name.clone()).collect::<std::collections::BTreeSet<_>>();
+    // what the hair step alone fails, which the heal removes (`repair_heals_a_hair_step_that_fails_the_check`)
+    let hair = crate::validation::failing_check(&hair_step_body(3e-4, 1e-3)).unwrap().expect("the hair step fails");
+    let gaps: std::collections::BTreeSet<String> = kinds(&own).difference(&kinds(&hair)).cloned().collect();
+    assert!(!gaps.is_empty() && gaps.iter().all(|k| k.contains("Gap")), "the lifted corner fails gap tests: {own}");
+
+    // The heal given the import's check decides as the heal that runs it.
+    let (computed, given) = (crate::heal_tolerance_defects(&part).unwrap(), crate::tolerance_heal::heal_given_check(&part, Some(&own)).unwrap());
+    let ((by_itself, heal), (body, given)) = (computed.expect("kept"), given.expect("kept"));
+    assert_eq!(heal, given);
+    assert_eq!(by_itself.record(), body.record());
+    let left = heal.check.as_ref().expect("the healed part still fails");
+    assert_eq!(kinds(left), gaps, "the riser's failures go, the corner's stay");
+    // The check given is the one compared with: a given check the healed part does not better
+    // keeps the part as it was.
+    assert!(crate::tolerance_heal::heal_given_check(&part, Some(left)).unwrap().is_none());
+
+    solidcraft_profile::set_enabled(true);
+    for workers in [1, 2] {
+        let mark = solidcraft_profile::mark();
+        let (issues, heals) = heal_run(&part, &[IDENTITY], workers);
+        let rep = mark.report();
+        let checks = rep.rows.iter().filter(|r| r.category == "solidcore" && r.name == "check").map(|r| r.count).sum::<u64>();
+        assert_eq!(checks, 2, "{workers} workers: the import's check of the part and the heal's of the healed part");
+        assert_eq!(heals.expect("healed").body(0).expect("the instance is healed").body.record(), body.record());
+        let kinds: Vec<IssueKind> = issues.iter().map(|i| i.kind).collect();
+        assert_eq!(kinds, [IssueKind::Repaired, IssueKind::NeedsRepair], "{issues:?}");
+        assert!(issues[1].detail.ends_with(&format!("SMLib's check fails it: {left}")), "{issues:?}");
     }
 }
 
@@ -5418,6 +5876,7 @@ fn the_checks_heal_a_shared_import_once_they_end() {
             source_item: 7,
             face_origin: (0..8).collect(),
             name: "Hair".into(),
+            common_face_name: None,
             body: hair.clone(),
             color: None,
             path: Vec::new(),
@@ -5459,7 +5918,7 @@ fn a_placement_the_healed_part_fails_keeps_the_part_as_read() {
         source: first.source.clone(),
     };
     jobs.push(second);
-    let outcomes = vec![checks::Outcome::NeedsRepair("as read".into()), checks::Outcome::Passes];
+    let outcomes = vec![checks::Outcome::NeedsRepair(failed_as_read()), checks::Outcome::Passes];
     let run = ImportChecks::ran(&jobs, outcomes, &heals);
     assert!(!run.stopped());
     assert!(run.heals().is_none(), "the heal is not kept");
@@ -5468,7 +5927,7 @@ fn a_placement_the_healed_part_fails_keeps_the_part_as_read() {
     assert!(issues.iter().any(|i| i.kind == IssueKind::NeedsRepair && i.detail.contains("as read")), "{issues:?}");
     // The same part at the identity alone heals: the placement is what kept it as read.
     let (jobs, heals) = part_jobs(&hair, &[IDENTITY]);
-    let run = ImportChecks::ran(&jobs, vec![checks::Outcome::NeedsRepair("as read".into())], &heals);
+    let run = ImportChecks::ran(&jobs, vec![checks::Outcome::NeedsRepair(failed_as_read())], &heals);
     assert!(run.heals().is_some());
 }
 
@@ -5505,7 +5964,7 @@ fn a_heal_stopped_with_one_worker_fails_the_import_uncached() {
         // The part the read checks is the hair step, failing its check.
         let (jobs, heals) = part_jobs(&hair, &[IDENTITY]);
         reading.rd.check_jobs = jobs;
-        reading.rd.check_outcomes = vec![checks::Outcome::NeedsRepair("as read".into())];
+        reading.rd.check_outcomes = vec![checks::Outcome::NeedsRepair(failed_as_read())];
         reading.rd.instances = heals.instances;
         reading.rd.uses = heals.uses;
         (text_key(&text), reading)
@@ -5546,7 +6005,7 @@ fn with_the_heal_preference_off_a_failing_part_stays_as_read() {
             let (jobs, heals) = part_jobs(&hair, &[IDENTITY]);
             reading.rd.check_jobs = jobs;
             if reading.single {
-                reading.rd.check_outcomes = vec![checks::Outcome::NeedsRepair("SMLib's check fails it: as read".into())];
+                reading.rd.check_outcomes = vec![checks::Outcome::NeedsRepair(failed_as_read())];
             }
             reading.rd.instances = heals.instances;
             reading.rd.uses = heals.uses;
@@ -5609,4 +6068,165 @@ fn a_cap_whose_rim_is_one_closed_edge_measures_its_whole_volume() {
     let text = e.solid(&[cap, base]);
     // The hemisphere: 2 pi R^3 / 3.
     assert_closed_solid(&text, 2, 2.0 * std::f64::consts::PI * 100.0_f64.powi(3) / 3.0);
+}
+
+/// #20514: a thin tube (rings 0.1 mm wide) whose circles are each one closed edge, the inner top
+/// circle's vertex on the far side. The two circles of a ring are told apart by size, and a
+/// coarse polygon of the outer one came out smaller than one of the inner, so a ring was read as
+/// its own hole and its face turned over: the volume was right and the area short by both rings.
+#[test]
+fn a_thin_ring_with_a_far_side_vertex_keeps_both_rings_in_its_area() {
+    thin_ring(15.5, 15.4, false);
+}
+
+/// The same tube 3.1 m across with rings 0.05 mm wide, its inner circles written as two arcs
+/// each: a polygon of a fixed number of chords per edge misses a one-edge circle by four times
+/// what it misses a two-arc circle by, more than the ring's whole area here, so loops must be
+/// compared on areas with the sampling error taken out, not on finer polygons.
+#[test]
+fn a_wide_thin_ring_whose_inner_circles_are_two_arcs_keeps_both_rings_in_its_area() {
+    thin_ring(1550.0, 1549.95, true);
+}
+
+/// A thin tube of height 10 between radii `ro` and `ri`, imported and measured whole. Each outer
+/// circle is one closed edge; each inner circle is one closed edge (the top one's vertex on the far
+/// side), or two arcs when `split_inner`.
+fn thin_ring(ro: f64, ri: f64, split_inner: bool) {
+    let h = 10.0_f64;
+    let mut w = Entities::default();
+    // A circle at height `z` of radius `r` as its edges in order: one closed edge with its vertex at
+    // `x` on the x axis, or two arcs from `x` to `-x` and back.
+    let circle = |w: &mut Entities, z: f64, r: f64, x: f64, split: bool| -> Vec<usize> {
+        let a = w.axis([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let c = w.add(format!("CIRCLE('',#{a},{r:?})"));
+        let v = w.vertex([x, 0.0, z]);
+        if split {
+            let u = w.vertex([-x, 0.0, z]);
+            vec![w.add(format!("EDGE_CURVE('',#{v},#{u},#{c},.T.)")), w.add(format!("EDGE_CURVE('',#{u},#{v},#{c},.T.)"))]
+        } else {
+            vec![w.add(format!("EDGE_CURVE('',#{v},#{v},#{c},.T.)"))]
+        }
+    };
+    let bottom_outer = circle(&mut w, 0.0, ro, ro, false);
+    let top_outer = circle(&mut w, h, ro, ro, false);
+    let bottom_inner = circle(&mut w, 0.0, ri, ri, split_inner);
+    let top_inner = circle(&mut w, h, ri, -ri, split_inner);
+    // A face of several bounds: `(edges in order, orientation, outer)`; a bound used against its
+    // edges' direction runs them backwards.
+    let face = |w: &mut Entities, bounds: &[(&Vec<usize>, bool, bool)], surface: usize, same_sense: bool| {
+        let mut ids = Vec::new();
+        for &(edges, o, outer) in bounds {
+            let ordered: Vec<usize> = if o { edges.clone() } else { edges.iter().rev().copied().collect() };
+            let oes: Vec<String> =
+                ordered.iter().map(|e| format!("#{}", w.add(format!("ORIENTED_EDGE('',*,*,#{e},.{}.)", if o { "T" } else { "F" })))).collect();
+            let l = w.add(format!("EDGE_LOOP('',({}))", oes.join(",")));
+            let kind = if outer { "FACE_OUTER_BOUND" } else { "FACE_BOUND" };
+            ids.push(format!("#{}", w.add(format!("{kind}('',#{l},.T.)"))));
+        }
+        w.add(format!("ADVANCED_FACE('',({}),#{surface},.{}.)", ids.join(","), if same_sense { "T" } else { "F" }))
+    };
+    let plane_top = {
+        let a = w.axis([0.0, 0.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("PLANE('',#{a})"))
+    };
+    let plane_bottom = {
+        let a = w.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("PLANE('',#{a})"))
+    };
+    let cyl_outer = {
+        let a = w.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("CYLINDRICAL_SURFACE('',#{a},{ro:?})"))
+    };
+    let cyl_inner = {
+        let a = w.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("CYLINDRICAL_SURFACE('',#{a},{ri:?})"))
+    };
+    let top = face(&mut w, &[(&top_outer, true, true), (&top_inner, false, false)], plane_top, true);
+    let bottom = face(&mut w, &[(&bottom_outer, false, true), (&bottom_inner, true, false)], plane_bottom, false);
+    let outside = face(&mut w, &[(&bottom_outer, true, false), (&top_outer, false, false)], cyl_outer, true);
+    let inside = face(&mut w, &[(&bottom_inner, false, false), (&top_inner, true, false)], cyl_inner, false);
+    let text = w.solid(&[top, bottom, outside, inside]);
+    let pi = std::f64::consts::PI;
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.bodies[0].closed && imp.bodies[0].refused.is_none(), "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("turned over")), "{:?}", imp.warnings);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.volume, pi * (ro * ro - ri * ri) * h) < 1e-4, "volume {}", m.volume);
+    // The two walls, and a ring at each end.
+    let area = 2.0 * pi * (ro + ri) * h + 2.0 * pi * (ro * ro - ri * ri);
+    assert!(rel(m.area, area) < 1e-4, "area {} vs {area}", m.area);
+}
+
+#[test]
+fn one_solid_mapped_several_times_in_a_part_comes_in_at_each_placement() {
+    // A unit cube in its own representation (#60), placed at x = 0, 30 and 60 by three mapped
+    // items of the part's representation (#70); #5033 repeats the placement at x = 30.
+    let mut mapped = String::new();
+    for (i, x) in [0, 30, 60, 30].iter().enumerate() {
+        let b = 5000 + i * 10;
+        mapped += &format!("#{}=CARTESIAN_POINT('',({x}.,0.,0.));\n#{}=AXIS2_PLACEMENT_3D('',#{},$,$);\n", b, b + 1, b);
+        mapped += &format!("#{}=REPRESENTATION_MAP(#4000,#60);\n#{}=MAPPED_ITEM('',#{},#{});\n", b + 2, b + 3, b + 2, b + 1);
+    }
+    let text = format!(
+        "{HEAD}{}#4001=CARTESIAN_POINT('',(0.,0.,0.));\n#4000=AXIS2_PLACEMENT_3D('',#4001,$,$);\n#60=SHAPE_REPRESENTATION('cube',(#101,#4000),$);\n{mapped}#70=SHAPE_REPRESENTATION('row',(#5003,#5013,#5023,#5033,#4000),$);\n#80=PRODUCT_CONTEXT('',#81,'mechanical');\n#81=APPLICATION_CONTEXT('x');\n#82=PRODUCT_DEFINITION_CONTEXT('part definition',#81,'design');\n#83=PRODUCT('row','row','',(#80));\n#84=PRODUCT_DEFINITION_FORMATION('','',#83);\n#85=PRODUCT_DEFINITION('design','',#84,#82);\n#86=PRODUCT_DEFINITION_SHAPE('','',#85);\n#87=SHAPE_DEFINITION_REPRESENTATION(#86,#70);\n{TAIL}",
+        cube_entities()
+    );
+    let imp = step_import(&text).unwrap();
+    let mut xs: Vec<f64> = imp.bodies.iter().map(|b| measure(&b.body).unwrap().bbox.min.x).collect();
+    xs.sort_by(f64::total_cmp);
+    assert_eq!(xs.len(), 3, "{xs:?} {:?}", imp.warnings);
+    for (x, want) in xs.iter().zip([0.0, 30.0, 60.0]) {
+        assert!((x - want).abs() < 1e-6, "{xs:?}");
+    }
+}
+
+/// A cylinder (radius 2, height 3) whose top is one circle starting at angle 0 and whose bottom is
+/// four quarter arcs starting `shift` radians on from it, as a file written to its own rounding
+/// has them. The side face winds round its axis, so a seam is added between the two start vertices.
+fn cylinder_with_bottom_vertices_shifted(shift: f64) -> String {
+    let (r, h) = (2.0_f64, 3.0_f64);
+    let f = |x: f64| format!("{x:.17E}");
+    let mut t = String::from(HEAD);
+    t += "#10=CARTESIAN_POINT('',(0.,0.,0.));\n#11=CARTESIAN_POINT('',(0.,0.,3.));\n#12=DIRECTION('',(0.,0.,1.));\n#13=DIRECTION('',(1.,0.,0.));\n";
+    t += "#14=AXIS2_PLACEMENT_3D('',#10,#12,#13);\n#15=AXIS2_PLACEMENT_3D('',#11,#12,#13);\n";
+    t += &format!("#16=CYLINDRICAL_SURFACE('',#14,{});\n#17=PLANE('',#14);\n#18=PLANE('',#15);\n", f(r));
+    // The top's one vertex, then the bottom's four.
+    t += &format!("#20=CARTESIAN_POINT('',({},0.,{}));\n#21=VERTEX_POINT('',#20);\n", f(r), f(h));
+    t += &format!("#22=CIRCLE('',#15,{});\n#23=EDGE_CURVE('',#21,#21,#22,.T.);\n", f(r));
+    for k in 0..4 {
+        let a = shift + f64::from(k) * std::f64::consts::FRAC_PI_2;
+        t += &format!("#{}=CARTESIAN_POINT('',({},{},0.));\n#{}=VERTEX_POINT('',#{});\n", 30 + k, f(r * a.cos()), f(r * a.sin()), 40 + k, 30 + k);
+        t += &format!("#{}=CIRCLE('',#14,{});\n#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n", 50 + k, f(r), 60 + k, 40 + k, 40 + (k + 1) % 4, 50 + k);
+    }
+    let bottom = |sense: &str| (0..4).map(|k| format!("#{}=ORIENTED_EDGE('',*,*,#{},{});\n", 70 + k, 60 + k, sense)).collect::<String>();
+    t += "#80=ORIENTED_EDGE('',*,*,#23,.F.);\n#81=EDGE_LOOP('',(#80));\n#82=FACE_OUTER_BOUND('',#81,.T.);\n";
+    t += &bottom(".T.");
+    t += "#83=EDGE_LOOP('',(#70,#71,#72,#73));\n#84=FACE_BOUND('',#83,.T.);\n#85=ADVANCED_FACE('',(#82,#84),#16,.T.);\n";
+    t += "#86=ORIENTED_EDGE('',*,*,#23,.T.);\n#87=EDGE_LOOP('',(#86));\n#88=FACE_OUTER_BOUND('',#87,.T.);\n#89=ADVANCED_FACE('',(#88),#18,.T.);\n";
+    t += "#90=ORIENTED_EDGE('',*,*,#63,.F.);\n#91=ORIENTED_EDGE('',*,*,#62,.F.);\n#92=ORIENTED_EDGE('',*,*,#61,.F.);\n#93=ORIENTED_EDGE('',*,*,#60,.F.);\n";
+    t += "#94=EDGE_LOOP('',(#90,#91,#92,#93));\n#95=FACE_OUTER_BOUND('',#94,.T.);\n#96=ADVANCED_FACE('',(#95),#17,.F.);\n";
+    t += "#97=CLOSED_SHELL('',(#85,#89,#96));\n#98=MANIFOLD_SOLID_BREP('Cyl',#97);\n#99=SHAPE_REPRESENTATION('',(#98),#100);\n";
+    t += &context(100, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    t
+}
+
+/// A cylinder whose bottom circle's start vertices sit 7e-8 mm round the axis from the top
+/// circle's: the seam between them is the ruling through the top's vertex, and the bottom's
+/// vertex is put on it. Run between the two points, the seam slanted across the surface's seam by
+/// that hair, and SMLib's check failed the solid ("Face Near missing Seam"), so every boolean on
+/// it was refused (a salad fork from a public corpus did this).
+#[test]
+fn a_cylinder_whose_circles_start_a_hair_apart_gets_a_seam_that_passes_the_check() {
+    for shift in [0.0, 3.5e-8] {
+        let imp = step_import(&cylinder_with_bottom_vertices_shifted(shift)).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "shift {shift}: {:?}", imp.warnings);
+        assert!(imp.bodies[0].closed, "shift {shift}");
+        assert!(!imp.warnings.iter().any(|w| w.contains("needs repair")), "shift {shift}: {:?}", imp.warnings);
+        let body = &imp.bodies[0].body;
+        assert_eq!(crate::validation::failing_check(body).unwrap().map(|c| c.to_string()), None, "shift {shift}");
+        let m = measure(body).unwrap();
+        assert!(rel(m.volume, 12.0 * std::f64::consts::PI) < 1e-6, "shift {shift}: volume {}", m.volume);
+    }
 }
