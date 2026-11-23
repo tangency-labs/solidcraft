@@ -72,6 +72,50 @@ fn angle(a: f64, b: f64, near: Option<f64>) -> f64 {
     }
 }
 
+/// The first fundamental form of a surface at a point: `E = S_u·S_u`, `F = S_u·S_v`,
+/// `G = S_v·S_v`. Lengths and angles measured with it are the surface's own, not the chart's.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Metric {
+    /// `S_u·S_u`.
+    pub e: f64,
+    /// `S_u·S_v`.
+    pub f: f64,
+    /// `S_v·S_v`.
+    pub g: f64,
+}
+
+impl Metric {
+    /// `E G - F²`: positive where the parameterisation is regular.
+    #[must_use]
+    pub fn det(self) -> f64 {
+        self.e * self.g - self.f * self.f
+    }
+
+    /// The length of the tangent `(a, b)` in parameter directions: `√(E a² + 2F a b + G b²)`.
+    #[must_use]
+    pub fn norm(self, a: f64, b: f64) -> f64 {
+        (self.e * a * a + 2.0 * self.f * a * b + self.g * b * b)
+            .max(0.0)
+            .sqrt()
+    }
+
+    /// The inner product of two tangents `(a_u, a_v)` and `(b_u, b_v)`.
+    #[must_use]
+    pub fn dot(self, a: (f64, f64), b: (f64, f64)) -> f64 {
+        self.e * a.0 * b.0 + self.f * (a.0 * b.1 + a.1 * b.0) + self.g * a.1 * b.1
+    }
+
+    /// The unsigned angle between two tangents, in [0, π]. NaN when either has zero length.
+    #[must_use]
+    pub fn angle(self, a: (f64, f64), b: (f64, f64)) -> f64 {
+        let denom = self.norm(a.0, a.1) * self.norm(b.0, b.1);
+        if denom <= 0.0 || !denom.is_finite() {
+            return f64::NAN;
+        }
+        (self.dot(a, b) / denom).clamp(-1.0, 1.0).acos()
+    }
+}
+
 /// A surface ready to evaluate.
 #[derive(Clone, Debug, PartialEq)]
 #[allow(clippy::large_enum_variant)] // evaluated in place: a box would cost every evaluation a load
@@ -305,6 +349,20 @@ impl SurfaceEval {
     #[must_use]
     pub fn point(&self, uv: [f64; 2]) -> Option<Vec3> {
         self.derivs(uv[0], uv[1]).map(|d| d.0)
+    }
+
+    /// The first fundamental form at (u, v): `E = S_u·S_u`, `F = S_u·S_v`, `G = S_v·S_v`.
+    /// Lengths and angles measured with it are the surface's own. `None` when the point or a
+    /// derivative is not finite.
+    #[must_use]
+    pub fn metric(&self, u: f64, v: f64) -> Option<Metric> {
+        let (_, du, dv) = self.derivs(u, v)?;
+        let m = Metric {
+            e: du.dot(du),
+            f: du.dot(dv),
+            g: dv.dot(dv),
+        };
+        (m.e.is_finite() && m.f.is_finite() && m.g.is_finite()).then_some(m)
     }
 
     /// The second partial derivatives `(S_uu, S_uv, S_vv)` at (u, v): in closed form on the

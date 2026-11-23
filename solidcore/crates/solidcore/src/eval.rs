@@ -44,7 +44,7 @@ pub use spline::{
     EvalCurve, EvalSurface, Partials, MAX_EVAL_KNOTS, MAX_EVAL_POINTS, MAX_PARTIAL_ORDER,
     MAX_SPLINE_DEGREE,
 };
-pub use surface::{face_flux, Axes, SurfaceEval};
+pub use surface::{face_flux, Axes, Metric, SurfaceEval};
 pub use uv::{Domain, Starts};
 
 /// Why a curve or surface cannot be evaluated.
