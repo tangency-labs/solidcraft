@@ -1512,12 +1512,16 @@ pub(super) fn sheet_eval(
                 _ => no_sheet(body),
             })
         }
-        FeatureKind::SheetUnfold { body, refold } => {
+        FeatureKind::SheetUnfold { body, refold, fixed } => {
             let i = surface_sheet_for(st, body, |s| s.unfolded == *refold).ok_or_else(|| match body {
                 Some(_) => no_sheet(body),
                 None => DocError::Invalid(if *refold { "no unfolded sheet to refold".into() } else { "no sheet metal body to unfold".into() }),
             })?;
             if let Some(sk) = st.surface_sheets.get_mut(i) {
+                // The panel at `fixed` stays where it is: the flat lies in its plane from now on.
+                if let (Some(at), false) = (fixed, *refold) {
+                    sk.flat = sk.flat_at(at.0).ok_or_else(|| DocError::Invalid("the fixed point lies on no flat panel of the sheet".into()))?;
+                }
                 sk.unfolded = !*refold;
             }
             rebuild_surface_sheet(st, i)
