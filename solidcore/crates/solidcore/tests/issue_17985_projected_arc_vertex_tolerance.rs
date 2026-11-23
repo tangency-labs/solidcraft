@@ -267,7 +267,10 @@ fn the_projected_arcs_end_vertex_covers_its_gap() {
     // without the step the vertex keeps 1e-5, under twice the gap: AssertValid's half
     // tolerance (5e-6) is short of the gap
     assert!(gap > STEPPED_WITHOUT / 2.0, "gap {gap:e}");
-    // with it the tolerance is twice the gap (the step's own value; it only grows one)
+    // with it the tolerance is twice the gap (the step's own value; it only grows one).
+    // Allowance relative 1e-12: the gap is one distance, which rounding moves by a few ulp
+    // (about 1e-16 relative), and doubling is exact; without the step the tolerance is
+    // 1e-5, 7.4e-7 (7%) under twice the gap
     assert!(
         (tolerance - 2.0 * gap).abs() <= 1e-12 * tolerance,
         "gap {gap:e}"
