@@ -167,7 +167,7 @@ mod design_link;
 mod file;
 mod file_library;
 pub(crate) use file_library::uses_file as file_library_uses_file;
-mod frame;
+pub mod frame;
 mod frame_end_cap;
 mod frame_rotate_member;
 pub(crate) mod inspect;
