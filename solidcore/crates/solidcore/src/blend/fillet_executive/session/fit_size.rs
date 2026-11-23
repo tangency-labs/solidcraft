@@ -703,7 +703,8 @@ fn rolls_through(
 ///
 /// # Errors
 ///
-/// Those of the section solves, [`ball_through`] and the evaluations.
+/// Those of the section solves, [`ball_through`] and the evaluations; `SM_ERR_NULL_POINTER` without an offset
+/// surface the fit reads ([`SolverFailure::OffsetSurfaceMissing`]).
 pub fn bands_meet_at(
     k: &Kernel,
     target: &mut Brep,
@@ -883,7 +884,8 @@ pub struct OnFace<'s> {
 ///
 /// # Errors
 ///
-/// Those of the evaluations, [`ball_through`] and the topology lookups.
+/// Those of the evaluations, [`ball_through`] and the topology lookups; `SM_ERR_NULL_POINTER` without an offset
+/// surface the fit reads ([`SolverFailure::OffsetSurfaceMissing`]).
 pub fn polygon_fit(
     k: &Kernel,
     target: &Brep,
@@ -1039,7 +1041,8 @@ pub fn polygon_fit(
 ///
 /// # Errors
 ///
-/// Those of the evaluations, [`ball_through`] and the topology lookups.
+/// Those of the evaluations, [`ball_through`] and the topology lookups; `SM_ERR_NULL_POINTER` without an offset
+/// surface the fit reads ([`SolverFailure::OffsetSurfaceMissing`]).
 pub fn circle_top_fit(
     k: &Kernel,
     target: &Brep,

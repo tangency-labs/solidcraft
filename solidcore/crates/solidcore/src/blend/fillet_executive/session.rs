@@ -7212,7 +7212,9 @@ impl SolverLoadingAccess<FilletObject> for SessionObjects<'_> {
                 } else {
                     crate::error::Failure::new(
                         LOADER,
-                        crate::error::surface::SurfaceFailure::CurveCacheNotBuilt,
+                        crate::error::blend::BlendFailure::Solver(
+                            crate::error::blend::SolverFailure::EdgeCurveCacheNotBuilt { edge: id },
+                        ),
                     )
                     .caused_by(error)
                     .into_error()
