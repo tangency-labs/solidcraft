@@ -13451,7 +13451,7 @@ fn eval_feature_kind(
                     };
                 }
                 let Some(mut cell) = acc else {
-                    return Err(DocError::Invalid(format!("the point {p:?} is outside every tool: no enclosed cell there")));
+                    return Err(DocError::Invalid(format!("the point {} is outside every tool: no enclosed cell there", p.0)));
                 };
                 for (b, _) in tb.iter().zip(&inside).filter(|(_, i)| !**i) {
                     let cut = kernel::boolean(&cell.body, &b.body, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("a cell came out empty".into()))?;
@@ -13473,7 +13473,7 @@ fn eval_feature_kind(
             let mut picked: Vec<usize> = Vec::new();
             for p in faces {
                 let fi = crate::appearance::face_index_at(&mb, p.0)
-                    .ok_or_else(|| DocError::Invalid(format!("Split Face: no face of {} at {p:?}", mb.name)))?;
+                    .ok_or_else(|| DocError::Invalid(format!("Split Face: no face of {} at {}", mb.name, p.0)))?;
                 if !picked.contains(&fi) {
                     picked.push(fi);
                 }
@@ -14054,7 +14054,7 @@ fn eval_feature_kind(
             let mut picked: Vec<usize> = Vec::new();
             for p in faces {
                 let fi = crate::appearance::face_index_at(&mb, p.0)
-                    .ok_or_else(|| DocError::Invalid(format!("Delete Face: no face of {} at {p:?}", mb.name)))?;
+                    .ok_or_else(|| DocError::Invalid(format!("Delete Face: no face of {} at {}", mb.name, p.0)))?;
                 if !picked.contains(&fi) {
                     picked.push(fi);
                 }
