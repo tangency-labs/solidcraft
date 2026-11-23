@@ -478,6 +478,24 @@ fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
     Ok(StepOptions { y_up, names, folder, history, flatten: false, reader })
 }
 
+/// The warning, logged, for a STEP file that may need more memory than the machine can spare,
+/// before it is read (#15588). The file is opened all the same: a valid file is never refused.
+fn memory_warning(path: &str) -> Option<String> {
+    let size = solidcraft_io::vfs::len(path).ok()?;
+    solidcraft_io::limits::memory_warning(path, size)
+}
+
+/// Put a [`memory_warning`] first in a reply's `warnings`.
+fn with_memory_warning(mut reply: Value, warning: Option<String>) -> Value {
+    if let Some(warning) = warning {
+        match reply.get_mut("warnings").and_then(Value::as_array_mut) {
+            Some(warnings) => warnings.insert(0, json!(warning)),
+            None => reply["warnings"] = json!([warning]),
+        }
+    }
+    reply
+}
+
 /// Which way is up in a STEP or IGES file, from the program its header names: `("y", name)` for
 /// an exporter whose files have Y up, `("z", name)` for SolidCraft's own (its STEP and IGES exports both name it), else `None`. Only
 /// SolidWorks is listed as Y up: its STEP and IGES writers are well known to keep that program's
@@ -538,8 +556,9 @@ impl DesignSnapshot {
 /// `diagnostics.profile` reports it.
 fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions) -> Result<Value> {
     let profiled = solidcraft_profile::enabled().then(solidcraft_profile::mark);
+    let warning = memory_warning(path);
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    add_step_bytes(s, path, name, options, &bytes, profiled)
+    add_step_bytes(s, path, name, options, &bytes, profiled).map(|reply| with_memory_warning(reply, warning))
 }
 
 /// Add a STEP, IGES or native CAD file's `bytes`. A FreeCAD file's sketches and features come in
@@ -695,6 +714,7 @@ fn open_step(
         _ => return Err(bad("doc.open", "`reuse_import` must be a boolean")),
     };
     let cache = cache.filter(|_| reuse && !solidcraft_io::is_native_cad_path(path) && solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none());
+    let warning = memory_warning(path);
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     // Every `doc.open` option that changes the imported design is in the key: a reused import is
     // the one this open asks for. The tolerance heal preference too, named only when it is off
@@ -717,7 +737,7 @@ fn open_step(
             let report = crate::schema::diagnostics::ProfileReport::new(&mark.report(), 20);
             reply["profile"] = serde_json::to_value(report).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
         }
-        return Ok((fresh, reply));
+        return Ok((fresh, with_memory_warning(reply, warning)));
     }
     let mut fresh = Session::new(Document::new(&stem));
     fresh.set_validation(validation);
@@ -728,7 +748,8 @@ fn open_step(
     {
         write_import_cache(cache, key, &fresh.doc, saved, pending, &reply);
     }
-    Ok((fresh, reply))
+    // After the cache is written: the warning is this machine's, made again on every open.
+    Ok((fresh, with_memory_warning(reply, warning)))
 }
 
 /// Cache an opened import. While SMLib's check of its parts runs on (after the design shows),
