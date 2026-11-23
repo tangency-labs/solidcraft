@@ -84,7 +84,8 @@ impl FeatureKind {
             | FeatureKind::SurfaceMatch { .. }
             | FeatureKind::SurfaceFair { .. } => &["faces"],
             FeatureKind::SplitFace { .. } => &["faces", "tool"],
-            FeatureKind::Split { .. } | FeatureKind::SurfaceTrim { .. } => &["tool"],
+            FeatureKind::Split { .. } => &["tool", "tool_faces"],
+            FeatureKind::SurfaceTrim { .. } => &["tool"],
             FeatureKind::Hole { .. } => &["position", "to"],
             FeatureKind::Boss { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. } => &["position"],
             FeatureKind::Thread { .. } => &["face", "up_to"],

@@ -1498,7 +1498,7 @@ fn path_pattern_editor_restores_sources_path_expressions_and_options() {
             h.frames(8);
             assert!(!h.app.ui.palette_open, "Edit Feature must open the existing pattern dialog");
             let d = h.app.dialog.as_mut().expect("path pattern editor");
-            assert!(matches!(&d.kind, Kind::PathPattern { count, spacing } if count == "copies" && spacing == "pitch"));
+            assert!(matches!(&d.kind, Kind::PathPattern { count, spacing, .. } if count == "copies" && spacing == "pitch"));
             assert_eq!(d.inputs[0].accept, if as_features { crate::selection::FEATURES } else { crate::selection::BODIES });
             assert_eq!(d.inputs[0].items, if as_features { vec![Sel::Feature { id: seed }] } else { vec![Sel::Body { name: "Pin".into() }] });
             assert_eq!(
@@ -1530,7 +1530,7 @@ fn path_pattern_editor_applies_in_place_cancels_and_undoes() {
             h.step(&json!({"call":"ui.editFeature","params":{"feature":"Copies"}})).unwrap();
             h.frames(8);
             let d = h.app.dialog.as_mut().expect("path pattern editor");
-            let Kind::PathPattern { count, spacing } = &mut d.kind else { panic!("path pattern") };
+            let Kind::PathPattern { count, spacing, .. } = &mut d.kind else { panic!("path pattern") };
             *count = "5".into();
             *spacing = "12 mm".into();
             h.frames(4);
@@ -3259,6 +3259,63 @@ fn split_body_by_a_curved_face_sends_it_as_a_tool() {
     assert!(p["tool"]["point"].is_array() && p.get("plane").is_none(), "{p}");
 }
 
+/// #9305: the Split Body panel cuts with a surface body's picked faces as they are, or with the
+/// whole surface body. A 10 mm cube from (0, 0, 5), and a sheet of two faces across it: y = 5
+/// for x -3…5, then rising 1 in 2 to (13, 9), 20 mm high. "Whole surface body" sends the tool
+/// face alone; "Picked faces" sends the other face too, and the cube splits into
+/// 437.5 and 562.5 mm³ (the first face extended would halve it). Editing the split shows the
+/// choice and the other face again, and running it keeps the parts.
+#[test]
+fn split_body_panel_sends_picked_faces_or_the_whole_surface_body() {
+    use crate::dialogs::{Kind, SPLIT_TOOL_FACES};
+    let mut app = app_with(json!([
+        {"command": "solid.box", "params": {"corner": [0, 0, 5], "length": 10, "width": 10, "height": 10, "body_name": "Cube"}}
+    ]));
+    app.session.execute("sketch.create", &json!({"plane": "XY", "name": "Bend"})).unwrap();
+    let curves = app.session.execute("sketch.line", &json!({"points": [[-3, 5], [5, 5], [13, 9]]})).unwrap()["created"]["curves"].clone();
+    app.session.execute("sketch.finish", &json!({})).unwrap();
+    app.session.execute("surface.extrude", &json!({"sketch": "Bend", "curves": curves, "distance": 20, "body_name": "Sheet"})).unwrap();
+    let pick = |app: &SolveApp, p: Vec3| {
+        let st = app.session.model.state();
+        let index = solidcraft_engine::doc::appearance::face_index_at(st.body("Sheet").unwrap(), p).unwrap();
+        Sel::Face { body: "Sheet".into(), index, point: p }
+    };
+    let first = pick(&app, Vec3::new(1.0, 5.0, 10.0));
+    let second = pick(&app, Vec3::new(9.0, 7.0, 10.0));
+    let Sel::Face { index: second_index, .. } = second.clone() else { panic!("a face") };
+    let volumes = |app: &SolveApp| {
+        let state = app.session.model.state();
+        let mut v = ["Cube", "Cube (1)"].map(|name| solidcraft_engine::kernel::measure(&state.body(name).unwrap().body).unwrap().volume);
+        v.sort_by(f64::total_cmp);
+        v
+    };
+    let parts = |v: [f64; 2]| v.iter().zip([437.5, 562.5]).all(|(a, b)| (a - b).abs() < 1e-6);
+
+    let mut d = start(&mut app, vec![Sel::Body { name: "Cube".into() }, first], "solid.split_body");
+    d.kind = Kind::Split { sheet: 2 };
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_eq!((p["tool_sheet"].as_str(), p.get("tool_faces")), (Some("body"), None), "{p}");
+    d.kind = Kind::Split { sheet: 1 };
+    let mut more = crate::selection::SelInput::new(SPLIT_TOOL_FACES, crate::selection::FACES, true);
+    more.items = vec![second];
+    d.inputs.push(more);
+    let (command, p) = apply_commands(&app, &d).unwrap().remove(0);
+    let sent: Vec<f64> = p["tool_faces"][0].as_array().unwrap().iter().filter_map(serde_json::Value::as_f64).collect();
+    assert_eq!((p["tool_sheet"].as_str(), sent), (Some("faces"), vec![9.0, 7.0, 10.0]), "{p}");
+    let split = app.session.execute(&command, &p).unwrap()["feature"].as_u64().unwrap();
+    assert!(parts(volumes(&app)), "{:?}", volumes(&app));
+
+    app.edit_feature(split);
+    let d = app.dialog.take().unwrap();
+    assert!(matches!(d.kind, Kind::Split { sheet: 1 }));
+    let refilled = d.inputs.iter().find(|inp| inp.label == SPLIT_TOOL_FACES).map(|inp| inp.items.clone()).unwrap_or_default();
+    assert!(matches!(refilled.as_slice(), [Sel::Face { index, .. }] if *index == second_index), "{refilled:?}");
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    app.editing_state = None;
+    assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+    assert!(parts(volumes(&app)), "{:?}", volumes(&app));
+}
+
 /// Runs a primitive's dialog with `sels` pre-selected and returns the new body's centroid.
 fn primitive_on(app: &mut SolveApp, sels: Vec<Sel>, id: &str, edit: impl FnOnce(&mut Dialog)) -> (serde_json::Value, Vec3) {
     let mut d = start(app, sels, id);
@@ -3385,6 +3442,11 @@ fn patch_dialog_takes_continuity_and_points_and_brings_them_back() {
     }
     let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
     assert_eq!((id.as_str(), &p["continuity"], &p["points"]), ("surface.patch", &json!("g1"), &json!([[0.0, 0.0, 36.0]])), "{p}");
+    // A snap point (on no body: an edge's middle, a face's centre) passes through as a point too.
+    assert_ne!(d.inputs[1].accept & crate::selection::SNAP_POINTS, 0, "Pass through takes snap points");
+    let mut snapped = d.clone();
+    snapped.inputs[1].items = vec![Sel::Vertex { body: String::new(), point: Vec3::new(0.0, 0.0, 36.0) }];
+    assert_eq!(apply_commands(&app, &snapped).unwrap()[0].1["points"], json!([[0.0, 0.0, 36.0]]));
     app.session.execute(&id, &p).unwrap();
     let top = app.session.model.state().bodies.last().unwrap().mesh().bounds().max.z;
     assert!(top > 35.9, "the cap reaches the point: {top}");

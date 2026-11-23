@@ -341,6 +341,15 @@ While drawing a fit spline, click its starting point after three distinct sample
 it smoothly. Right-click finishes an ordinary natural fit. Offset accepts both ellipse
 handles and dense fitted curves; the second click sets the side and distance from the curve.
 
+**Fit Spline Within Tolerance** turns a contour of many points into one smooth spline: give
+the points (2 to 10000, plain coordinates, in order along the contour) and a tolerance
+(default 0.01 mm), and it fits the spline through as few of the points as keep every point
+within it, reporting the deviation it reached (`sketch.spline.fit_tolerance` from scripts and
+agents). Use it for a contour that comes from a computation — a traced outline, a scanned
+section or a generated shape — which is past the 500 points a fit point spline takes. When
+even 500 spline points cannot reach the tolerance it refuses, naming the deviation reached:
+the points may be too rough for a smooth spline, or the tolerance too tight.
+
 **Equation Curve** draws a curve from formulas instead of clicks: x(t) and y(t) over a range of
 t, or y = f(x) over a range of x, using the design's parameters. [Equation curves](equation-curves.md)
 walks through it step by step, with pictures and examples (a line, a parabola, a wave, a circle,
@@ -580,6 +589,12 @@ shared tool window. Click an input to change it; click a selected object again o
 it to remove it. Each input has its own Clear button. Source inputs show a count, and single
 references identify the chosen mirror line, direction, or centre. Box selection also works
 while the window is open. Sketch modify tools take geometry from the sketch being edited.
+
+A click inside a closed profile adds the curves of its outline to the entities. A shape drawn
+inside that profile is a profile of its own: click inside it to add it too. So a click between
+two nested rectangles picks the outer rectangle alone. To have the click also pick the shapes
+inside the profile, as earlier versions did, turn on **Preferences > Sketch > A click inside a
+profile also picks the shapes inside it**.
 
 If your preselection includes exactly one straight construction line of the active sketch,
 opening Mirror uses it as **Mirror line**, keeping your selected entities. Other construction

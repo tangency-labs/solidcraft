@@ -452,6 +452,20 @@ fn each_schema_type_becomes_its_field_with_limits_labels_and_defaults() {
 }
 
 #[test]
+fn shared_field_definitions_are_drawn_like_inline_fields() {
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],
+        "$defs":{"angle":{"type":"string","title":"Angle","enum":["14.5","20","25"],"default":"20"}},
+        "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"make","input_schema":{"type":"object",
+            "properties":{"pressure_angle":{"$ref":"#/$defs/angle","default":"25"}}}}]}});
+    let manifest = solidcraft_engine::plugin::parse_manifest(&serde_json::to_vec(&manifest).unwrap(), "sample").unwrap();
+    let schema = &manifest.runtime.unwrap().entries[0].input_schema;
+    let fields = form(schema).expect("a $ref field does not turn the dialog off");
+    let angles: Vec<String> = vec!["14.5".into(), "20".into(), "25".into()];
+    assert_eq!((fields[0].0.label.as_str(), &fields[0].0.kind), ("Angle", &Kind::Choice { values: angles.clone(), titles: angles }));
+    assert_eq!(fields[0].1, Input::Choice(Some(2)), "the default beside the $ref wins");
+}
+
+#[test]
 fn described_field_labels_and_values_show_the_same_tooltip() {
     for mut property in [
         json!({"type":"number","default":2}),
@@ -907,6 +921,41 @@ fn computed_hook_reply(dialog: &EntryDialog) -> solidcraft_engine::plugin::dialo
         false,
     )
     .unwrap()
+}
+
+#[test]
+fn exporter_dialog_keeps_hook_values_and_waits_for_its_session_before_showing_completion() {
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.writes = Some(vec!["smp".into()]);
+    let update = computed_hook_reply(dialog);
+    assert!(apply_hook_reply(dialog, 0, update));
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["width"], 24.0);
+    deliver_form_reply(&mut h.app, json!({"ok":true,"result":{"path":"bracket.smp","warnings":["export note"]}}));
+    crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+    poll(&mut h.app);
+    assert!(h.app.plugin_menu.dialog().unwrap().running.as_ref().unwrap().received.is_some());
+    crate::documents::switch(&mut h.app, 0);
+    poll(&mut h.app);
+    assert!(h.app.plugin_menu.dialogs.is_empty());
+    let (message, _, error) = h.app.status.as_ref().unwrap();
+    assert!(!*error);
+    assert!(message.contains("bracket.smp") && message.contains("export note"));
+}
+
+#[test]
+fn export_save_callback_queues_for_the_dialogs_original_session() {
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    let (id, session) = (dialog.id, dialog.session);
+    crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+    queue(&mut h.app, id, json!({"command":"file.export","params":{"path":"bracket.smp"}}));
+    let request = h.app.control_held.pop_back().unwrap();
+    assert_eq!(h.app.plugin_menu.pending.last(), Some(&(request.serial, session)));
+    assert!(check_dispatch(&mut h.app, &request).is_err(), "a file picker cannot redirect an export to another design");
+    h.app.plugin_menu.dialogs.clear();
+    queue(&mut h.app, id, json!({"command":"file.export","params":{}}));
+    assert!(h.app.control_held.is_empty(), "a dismissed dialog cannot queue an export");
 }
 
 #[test]

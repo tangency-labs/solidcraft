@@ -1103,6 +1103,28 @@ impl Body {
         dists.into_iter().enumerate().filter_map(|(f, row)| Some((row.first().copied().flatten()?, f))).min_by(|a, b| a.0.total_cmp(&b.0))
     }
 
+    /// Exact polyline samples for each non-seam edge bordering `face` of `self`.
+    pub fn face_edge_polylines(&self, face: usize) -> Vec<Vec<Vec3>> {
+        if self.is_mesh() {
+            return Vec::new();
+        }
+        let Some(f) = self.record.faces.get(face) else {
+            return Vec::new();
+        };
+        let chord = (self.size() * 1e-3).max(1e-4);
+        let mut out = Vec::new();
+        for l in &f.loops {
+            let brep::Loop::Edges { edges } = l else { continue };
+            for ue in edges {
+                let Some(e) = self.record.edges.get(ue.edge as usize) else { continue };
+                if let Ok(pts) = edge_points(e, chord) {
+                    out.push(pts);
+                }
+            }
+        }
+        out
+    }
+
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
     pub fn with_cylinder_certificate(mut self, producer: u64) -> Result<Self> {
         if producer == 0 {
@@ -1818,7 +1840,7 @@ impl Body {
     /// Edges `indices` (record edge indices) as planar curves in `plane`'s coordinates:
     /// lines, circular arcs and splines with their own knots and weights. An edge must lie
     /// in a plane parallel to `plane`, except a cylinder's rim read along its axis
-    /// ([`Body::projected_on_cylinder`]). Nonparallel curves, unreadable edges and mesh
+    /// ([`Body::cylinder_edge_projection`]). Nonparallel curves, unreadable edges and mesh
     /// bodies return `None`; drawing measurements must not measure a flattened image.
     pub fn planar_edges(&self, plane: &solidcore_record::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
         if self.is_mesh() {
@@ -1838,17 +1860,23 @@ impl Body {
     }
 
     /// The circle or arc of a cylinder bounded by this edge, viewed along its axis.
-    /// Uses the body's existing tolerance and the kernel's monotone-turn certificate.
+    /// Uses the body's existing tolerance and the kernel's monotone-turn certificate, then the
+    /// kernel's certified circular reading of the native curve.
     pub fn cylinder_edge_projection(&self, plane: &solidcore_record::Plane, edge: usize) -> Option<Vec<crate::PlanarPiece>> {
         if self.is_mesh() {
             return None;
         }
         let tol = self.planar_edges_tolerance();
-        if solidcore_ops::spline_projection::has_parallel_projection(&self.record, plane, edge, tol) {
-            return None;
+        if !solidcore_ops::spline_projection::has_parallel_projection(&self.record, plane, edge, tol) {
+            // An edge on a cylinder whose axis is the view, such as an intersection curve held
+            // only approximately: its image is that cylinder's circle (sampled, then proved by
+            // the turn).
+            let faces = crate::history::faces_of(self.record.edges.get(edge)?);
+            return self.projected_on_cylinder(plane, edge, &faces, tol).map(|segs| segs.into_iter().map(crate::PlanarPiece::Seg).collect());
         }
-        let faces = crate::history::faces_of(self.record.edges.get(edge)?);
-        self.projected_on_cylinder(plane, edge, &faces, tol).map(|segs| segs.into_iter().map(crate::PlanarPiece::Seg).collect())
+        // A planar rim readable in the view: the kernel's certified circular reading of the
+        // complete native curve, which finds a shelled wall's marched rim as its circle (#20280).
+        solidcore_ops::spline_projection::cylinder_edge_projection(&self.record, plane, edge, tol)
     }
 
     /// Edge `edge` projected on `plane` as the arc it covers of the circle of a cylinder it
