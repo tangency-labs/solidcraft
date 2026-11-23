@@ -1234,11 +1234,7 @@ fn press_pull_leaves_press_pull_as_the_running_command() {
     let mut app = boxed();
     crate::keymap::press(&mut app, "Q", false);
     assert!(app.dialog.as_ref().is_some_and(|d| d.press_pull), "Q opens the Press Pull panel");
-    assert_eq!(
-        app.last_command.as_ref().map(|c| c.0.as_str()),
-        Some("solid.press_pull"),
-        "Q leaves Press Pull as the running command"
-    );
+    assert_eq!(app.last_command.as_ref().map(|c| c.0.as_str()), Some("solid.press_pull"), "Q leaves Press Pull as the running command");
     assert!(crate::toolbar::shows_pressed(&app, "solid.press_pull"), "the Press Pull button is pressed");
     assert!(!crate::toolbar::shows_pressed(&app, "solid.extrude"), "the Extrude button is not pressed");
 
