@@ -396,6 +396,28 @@ fn a_level_is_read_back_from_its_name() {
 }
 
 #[test]
+fn ui_prefs_browser_scroll_wheel_schema_lists_supported_modes() {
+    use super::ui_prefs::{BrowserScrollWheel, PrefsParams};
+    let schema = input_schema_for::<PrefsParams>();
+    let schema = schema.as_value();
+    assert!(schema["properties"]["browser_scroll_wheel"].is_object());
+    for (id, expected) in
+        [("automatic", BrowserScrollWheel::Automatic), ("always_zoom", BrowserScrollWheel::AlwaysZoom), ("always_pan", BrowserScrollWheel::AlwaysPan)]
+    {
+        let value = json!({"browser_scroll_wheel":id});
+        let parsed = serde_json::from_value::<PrefsParams>(value.clone()).unwrap();
+        assert_eq!(parsed.browser_scroll_wheel, Some(expected));
+        assert!(conforms(schema, schema, &value), "{value}");
+    }
+    assert_eq!(serde_json::from_value::<PrefsParams>(json!({})).unwrap().browser_scroll_wheel, None);
+    for invalid in [json!("future"), json!(42), json!(true), json!(null)] {
+        let value = json!({"browser_scroll_wheel":invalid});
+        assert!(serde_json::from_value::<PrefsParams>(value.clone()).is_err());
+        assert!(!conforms(schema, schema, &value), "{value}");
+    }
+}
+
+#[test]
 fn ui_prefs_theme_options_input_schema_covers_updates_and_resets() {
     use super::ui_prefs::PrefsParams;
     let schema = input_schema_for::<PrefsParams>();
@@ -728,7 +750,8 @@ pub(super) fn names_of<T: serde::Serialize>(values: &[T]) -> Vec<String> {
 /// (strict's comes from `TypedContract::check` and serde), and the handler may stop first at
 /// one the contract can't see (against the design: a pick that finds nothing, a missing sketch,
 /// an expression that doesn't evaluate; one of two keys, such as `radius` or `diameter`; an
-/// empty list).
+/// empty list). A value a helper reads as another command's (the pick-up's `appearance.chain`
+/// target) names that command with the check off and the one that was called in strict.
 /// Each module's `strict_keeps_todays_errors` calls this with its commands' cases; each runs
 /// after `sketch_rectangle`.
 pub(super) fn assert_strict_keeps_todays_errors(cases: &[(&str, Value)]) {
@@ -1155,7 +1178,9 @@ fn axis_lines_match_the_axis_reader() {
         (json!("Bore"), true),
         (json!({"dir": [0, 0, 1]}), true),
         (json!({"origin": [1, 2, 3], "dir": {"x": 0, "y": 1, "z": 0}}), true),
-        (json!({"origin": ["1 mm", 0, 0], "dir": [0, 0, 1]}), false),
+        (json!({"origin": ["1 mm", "r - 2 mm", 0], "dir": [0, 0, 1]}), true),
+        (json!({"origin": [true, 0, 0], "dir": [0, 0, 1]}), false),
+        (json!({"origin": [0, 0], "dir": [0, 0, 1]}), false),
         (json!({"dir": [0, 0, 1], "type": "world", "axis": "X"}), true),
         (json!({"edge": [1, 2, 3]}), true),
         (json!({"face": [1, 2, 3], "dir": [0, 0, 1]}), true),
@@ -1275,7 +1300,7 @@ fn plane_names_match_check_plane_name() {
 fn sketch_edit_contracts_validate_markers_before_changing_the_session() {
     use crate::schema::sketch::{CancelResult, EditParams, EditResult, ExitParams, FinishResult};
     use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
-    assert_keys(input_schema_for::<EditParams>(), &["restore_marker", "sketch"]);
+    assert_keys(input_schema_for::<EditParams>(), &["restore_marker", "sketch", "view"]);
     assert_keys(input_schema_for::<ExitParams>(), &["restore_marker"]);
     let mut s = crate::Session::default();
     let run = |s: &mut crate::Session, id: &str, p: serde_json::Value| s.execute(id, &p).unwrap();

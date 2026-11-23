@@ -8,9 +8,10 @@ use solidcraft_engine::geom::prelude::*;
 use crate::scenario::Harness;
 
 #[test]
-fn same_body_select_other_refresh_survives_disappearing_semantic_owners() {
+fn select_other_feedback_is_local_when_the_browser_hover_expires() {
     let mut h = Harness::new();
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Body1"})).unwrap();
+    let view = crate::documents::view_beside(&mut h.app, None, solidcraft_views::Edge::Right).unwrap();
     h.frames(4);
     let body_row = crate::browser::drawn_rows().into_iter().find(|(label, ..)| label == "Body1").unwrap().1.center();
     h.step(&json!({"move":[body_row.x,body_row.y]})).unwrap();
@@ -30,7 +31,6 @@ fn same_body_select_other_refresh_survives_disappearing_semantic_owners() {
         revision: h.app.session.revision,
         dialog: false,
         include_hidden: h.app.preferences.select_other_hidden,
-        lit_body: false,
         held: Default::default(),
     });
     let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))), ..Default::default() };
@@ -41,14 +41,31 @@ fn same_body_select_other_refresh_survives_disappearing_semantic_owners() {
             // Its new body name is deliberately identical to the previous Browser contribution.
             super::hover_override(&mut h.app);
             assert_eq!(h.app.viewport.hover_bodies, ["Body1"]);
+            assert_eq!(super::hovered_body(&h.app), Some("Body1"));
             crate::semantic_content::finalize(&mut h.app, ui.ctx());
         })
         .textures_delta
         .clear();
-    assert_eq!(h.app.viewport.hover_bodies, ["Body1"], "fresh external ownership survives missing semantic owners");
+    assert!(h.app.viewport.hover_bodies.is_empty(), "the Browser's hover expires independently");
     assert!(crate::browser::drawn_rows().is_empty());
-    super::close(&mut h.app);
-    assert!(h.app.viewport.hover_bodies.is_empty(), "Select Other retains responsibility for clearing its own contribution");
+    assert!(h.app.session.selection.is_empty());
+    let focused_key = crate::viewport::highlight_key(&h.app);
+    let focused_lines = crate::viewport::build_highlight(&h.app).merged().lines.len();
+
+    h.app.viewport.card = true;
+    super::hover_override(&mut h.app);
+    assert!(super::hovered_body(&h.app).is_none());
+    let card_key = crate::viewport::highlight_key(&h.app);
+    let card_lines = crate::viewport::build_highlight(&h.app).merged().lines.len();
+    assert_ne!(card_key, focused_key);
+    assert!(card_lines < focused_lines, "the body's preview lines belong only to the focused tile");
+    h.app.viewport.card = false;
+
+    assert!(crate::documents::view_activate(&mut h.app, view));
+    assert!(!super::is_open(&h.app), "changing the focused tile closes the popup");
+    assert!(crate::documents::view_activate(&mut h.app, 1));
+    assert!(!super::is_open(&h.app), "returning to a tile must not restore its closed popup");
+    assert_eq!(crate::viewport::build_highlight(&h.app).merged().lines.len(), card_lines);
 }
 
 /// A sketch with two lines drawn on top of each other (l1, then l2), off the origin axes.
@@ -243,6 +260,31 @@ fn clicking_again_on_the_same_spot_selects_the_next_thing_under_it() {
     h.frames(30);
     h.step(&json!({"click": at})).unwrap();
     assert_eq!(curves(&h), ["l1"]);
+}
+
+/// A repeat click after the selection mode changed is a plain click in the new mode, not a step
+/// through the old mode's list (#4255): two blocks one behind the other, Bodies then Faces & edges.
+#[test]
+fn a_changed_selection_mode_starts_the_cycle_over() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 10, "height": 20, "corner": [0, 0, 0], "body_name": "Front"})).unwrap();
+    h.app.run("solid.box", json!({"length": 20, "width": 10, "height": 20, "corner": [0, 30, 0], "body_name": "Back"})).unwrap();
+    h.call("ui.view", json!({"view": "front"}));
+    h.call("ui.view", json!({"view": "fit"}));
+    h.frames(2);
+    let p = h.app.viewport.rect.unwrap().center();
+    let at = json!([p.x, p.y]);
+    h.call("ui.set", json!({"pickMode": "bodies"}));
+    h.step(&json!({"click": at})).unwrap();
+    assert_eq!(h.app.session.selection, [Sel::Body { name: "Front".into() }]);
+    h.frames(30);
+    h.call("ui.set", json!({"pickMode": "faces"}));
+    h.step(&json!({"click": at})).unwrap();
+    assert!(
+        matches!(h.app.session.selection.as_slice(), [Sel::Face { body, .. }] if body == "Front"),
+        "the front block's face, not the next row: {:?}",
+        h.app.session.selection
+    );
 }
 
 #[test]
@@ -476,6 +518,28 @@ fn a_click_picks_the_sketchs_own_curve_over_a_projected_one_under_it() {
     assert!(row_of(&h, &a) < row_of(&h, &projected), "{:?}", labels(&h));
     h.step(&json!({"click": {"handle": format!("select_other:{}", row_of(&h, &projected))}})).unwrap();
     assert_eq!(curves(&h), [projected]);
+}
+
+/// While a sketch is being edited, a click inside the closed zone of ANOTHER sketch of the same
+/// design must not select that zone: the zone keeps its pale tint instead of turning into a
+/// solid blue shape (#16197).
+#[test]
+fn a_click_in_sketch_mode_does_not_select_the_closed_zone_of_another_sketch() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Other"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let other = h.app.session.doc.find_feature("Other").unwrap().id;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Editing"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.step(&json!({"click":{"world":[20,15,0]}})).unwrap();
+    assert!(
+        !h.app.session.selection.contains(&Sel::Profile { sketch: other, index: 0 }),
+        "a click in sketch mode must not select the closed zone of another sketch: {:?}",
+        h.app.session.selection
+    );
 }
 
 /// Three plates stacked along Z (made bottom, top, middle, so model order isn't depth order),
@@ -954,9 +1018,10 @@ fn hidden_edge_mode_is_scoped_and_invalidates_hover_without_pointer_motion() {
     assert!(!pick_cached(&mut h.app, &proj, pos).iter().any(target));
     h.app.session.visibility.hidden_bodies.clear();
     // The section removes the target entirely: even hidden-edge mode must exclude it.
-    h.app.session.section = Some((solidcore_record::Vec3::new(0.0, 0.0, -5.0), solidcore_record::Vec3::Z));
+    h.app.session.section =
+        vec![solidcraft_engine::SectionPlane { id: 1, origin: solidcore_record::Vec3::new(0.0, 0.0, -5.0), normal: solidcore_record::Vec3::Z }];
     assert!(!pick_all(&h.app, &proj, pos).iter().any(target));
-    h.app.session.section = None;
+    h.app.session.section = Vec::new();
     h.call("ui.prefs", json!({"select_hidden_edges":false}));
     assert!(!pick_cached(&mut h.app, &proj, pos).iter().any(target));
 }
@@ -971,11 +1036,13 @@ fn hidden_edge_mode_keeps_section_caps_as_occluders() {
     let target = |hit: &Hit| matches!(hit, Hit::Edge { body, .. } if body == "Target");
     assert!(pick_all(&h.app, &proj, pos).iter().any(target), "an ordinary face permits hidden edges");
     // The target remains below the cut, but the section cap through the cover hides it.
-    h.app.session.section = Some((solidcore_record::Vec3::new(0.0, 0.0, 25.0), solidcore_record::Vec3::Z));
+    h.app.session.section =
+        vec![solidcraft_engine::SectionPlane { id: 1, origin: solidcore_record::Vec3::new(0.0, 0.0, 25.0), normal: solidcore_record::Vec3::Z }];
     assert!(!pick(&h.app, &proj, pos).iter().any(target), "ordinary picking must respect the cap");
     assert!(!pick_all(&h.app, &proj, pos).iter().any(target), "Select Other must respect the cap");
     // A plane between the bodies removes the cover without making a cap over the target.
-    h.app.session.section = Some((solidcore_record::Vec3::new(0.0, 0.0, 15.0), solidcore_record::Vec3::Z));
+    h.app.session.section =
+        vec![solidcraft_engine::SectionPlane { id: 1, origin: solidcore_record::Vec3::new(0.0, 0.0, 15.0), normal: solidcore_record::Vec3::Z }];
     assert!(pick_all(&h.app, &proj, pos).iter().any(target));
 }
 
@@ -995,7 +1062,8 @@ fn hidden_edge_mode_keeps_caps_behind_a_nearer_kept_face() {
     let pos = proj.to_screen(solidcore_record::Vec3::new(5.0, 0.02, 10.0)).unwrap();
     let target = |hit: &Hit| matches!(hit, Hit::Edge { body, .. } if body == "Target");
     assert!(pick_all(&h.app, &proj, pos).iter().any(target), "ordinary faces permit hidden edges");
-    h.app.session.section = Some((solidcore_record::Vec3::new(0.0, 0.0, 25.0), solidcore_record::Vec3::Z));
+    h.app.session.section =
+        vec![solidcraft_engine::SectionPlane { id: 1, origin: solidcore_record::Vec3::new(0.0, 0.0, 25.0), normal: solidcore_record::Vec3::Z }];
     for enabled in [false, true] {
         h.app.preferences.select_hidden_edges = enabled;
         for hits in [pick(&h.app, &proj, pos), pick_all(&h.app, &proj, pos)] {

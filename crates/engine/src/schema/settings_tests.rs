@@ -74,8 +74,9 @@ fn the_published_schemas_describe_what_the_readers_keep() {
     let root = root.as_value();
     let (name, path) = (resolved(root, "name"), resolved(root, "path"));
     // JSON Schema can't say "no control characters" or count bytes, so the description says it.
-    for (property, bound) in [(name, MAX_PROFILE_NAME), (path, MAX_PATH)] {
-        assert_eq!(property["type"], json!("string"), "{property}");
+    // The `name` these commands need is required and refuses null; `path` reads null as left out.
+    for (property, bound, types) in [(name, MAX_PROFILE_NAME, json!("string")), (path, MAX_PATH, json!(["string", "null"]))] {
+        assert_eq!(property["type"], types, "{property}");
         assert!(
             property["description"].as_str().unwrap_or_default().contains(&bound.to_string()),
             "the bound belongs in the description: {property}"
@@ -89,6 +90,10 @@ fn the_published_schemas_describe_what_the_readers_keep() {
     for good in ["/tmp/p.json", "C:\\tmp\\p.json"] {
         assert!(conforms(root, path, &json!(good)), "{good}");
     }
+    // A `null` the handler reads as the key being left out stays valid in the published schema; a
+    // name the command needs does not.
+    assert!(conforms(root, path, &Value::Null), "export takes a null path");
+    assert!(!conforms(root, name, &Value::Null), "export needs its name");
     let import = input_schema_for::<ProfileImportParams>();
     let import = import.as_value();
     let profile = &import["properties"]["profile"];
@@ -96,6 +101,12 @@ fn the_published_schemas_describe_what_the_readers_keep() {
     assert!(conforms(import, profile, &json!({ "format": "solidcraft-profile/1" })));
     assert!(conforms(import, profile, &Value::Null));
     assert!(!conforms(import, profile, &json!("text")));
+    // Import reads a null `path` or `name` as left out too, and its `name` is never needed.
+    for key in ["path", "name"] {
+        let property = resolved(import, key);
+        assert_eq!(property["type"], json!(["string", "null"]), "{key}: {property}");
+        assert!(conforms(import, &import["properties"][key], &Value::Null), "import takes a null {key}");
+    }
 }
 
 /// The schema a key's value must match, following the `$ref` the contract publishes for it.
@@ -127,6 +138,21 @@ fn strict_keeps_todays_errors() {
         ("settings.profile.import", json!({"path": "", "name": "A"})),
         ("settings.profile.import", json!({"path": "/tmp/p.json", "name": ""})),
     ]);
+}
+
+/// A `null` the handler reads as the key being left out stays accepted in strict, as the published
+/// schema now says: a call the handler takes must not be refused by the check.
+#[test]
+fn strict_takes_the_nulls_the_handler_takes() {
+    let doc = json!({ "format": "solidcraft-profile/1", "name": "Laptop" });
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    for (id, p) in [
+        ("settings.profile.export", json!({"name": "A", "path": null})),
+        ("settings.profile.import", json!({"path": null, "profile": doc})),
+        ("settings.profile.import", json!({"profile": doc, "name": null})),
+    ] {
+        s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    }
 }
 
 #[test]

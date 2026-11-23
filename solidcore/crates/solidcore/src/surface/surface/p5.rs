@@ -25,6 +25,13 @@
 //! | [`cs_identical_solutions`], [`cs_identical_solutions_in`], [`csi_identical_solutions`], [`csi_identical_solutions_in`] | `SmCSGlobalSolver::IdenticalSolutions`, `SmCSIGlobalSolver::IdenticalSolutions` |
 //!
 //! Deviations:
+//! - **A moved local foot (WR-56, #17773).** `DropPoint` keeps a converged local result
+//!   that `sm_GoodDropResult` refuses only for having moved from its guess, runs the
+//!   global solve, and returns the local result when the global solve found nothing or
+//!   the answer it would return from the global solve (the whole array, when solutions
+//!   are asked for and it has several) has no smaller solution value; upstream returns
+//!   the global answer alone. Only for intersect, minimise and normalise drops, whose
+//!   solution value is the distance; for the others the global solve decides alone.
 //! - **Solver classes without a Rust struct.** `SmCSGlobalSolver` and
 //!   `SmCSIGlobalSolver` have no struct yet (their constructors belong to unit
 //!   `surface.surface_p1`), so their `IdenticalSolutions` are free functions over the
@@ -66,8 +73,8 @@ use crate::curve::curve::p2::evaluate_geometric as curve_evaluate_geometric;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
-use crate::error::surface::SurfaceFailure;
-use crate::error::{ignored, ignored_or_pass_on, passed_on, Result, SolidError};
+use crate::error::surface::{SolveInput, SurfaceFailure};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -94,7 +101,7 @@ use super::p1::{
 use super::p2::{LsiGlobalSolver, SurfaceEval, B_SPLINE_SURFACE_TYPE};
 use super::p4::is_point_on_normal;
 use super::p4::NoObject;
-use super::p7::{good_drop_result, load_guesses, SpGlobalSolver};
+use super::p7::{drop_result_verdict, load_guesses, DropVerdict, SpGlobalSolver};
 use super::{Surface, SurfaceKind};
 
 const OP_SING: &str = "surface::surface::p5::Surface::is_singularity";
@@ -350,17 +357,13 @@ impl Surface {
 
             // when the surface has poles
             if sides != SS_NONE {
-                // with the opt-in fix a point that cannot be evaluated is not shown at a
-                // pole (WR-663, tangency-labs/smlib 21dcf69)
-                let srf_point = match ignored(self.evaluate_point(k, uv))? {
-                    Some(p) => p,
-                    None if k.fixes.query_statuses_pass_on => {
-                        return Ok(Singularity {
-                            singular: false,
-                            direction,
-                        });
-                    }
-                    None => Vec3::UNDEF,
+                // a point that cannot be evaluated is not shown at a pole, as the fork
+                // (WR-663, tangency-labs/smlib 21dcf69)
+                let Some(srf_point) = ignored(self.evaluate_point(k, uv))? else {
+                    return Ok(Singularity {
+                        singular: false,
+                        direction,
+                    });
                 };
                 let pole = |i: usize| -> Result<Point3> {
                     poles.get(i).copied().ok_or(SolidError::invalid_input(
@@ -454,9 +457,7 @@ impl Surface {
         norm_sum.unitize().map_err(|_| {
             SolidError::surface(
                 "surface::surface::p5::evaluate_normal_at_singularity",
-                SurfaceFailure::InvalidValue(
-                    "the sum of the normals around the singularity is zero",
-                ),
+                SurfaceFailure::NormalsCancel,
             )
         })
     }
@@ -645,11 +646,10 @@ impl Surface {
         // define the isoParameter Curve as an object
         let iso = iso_curve_of(k, self, param, iso_parameter, true)?;
 
-        // when asked - build OptUVIsoCurve (status ignored; passed on with the opt-in
-        // fix, WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        // when asked - build OptUVIsoCurve (status ignored upstream; passed on as the
+        // fork does, WR-663, tangency-labs/smlib 21dcf69)
         let uv_iso_curve = if want_uv_iso_curve {
-            ignored_or_pass_on(iso.create_uv_iso_line_with_nurb(k), pass)?
+            Some(iso.create_uv_iso_line_with_nurb(k)?)
         } else {
             None
         };
@@ -670,8 +670,9 @@ impl Surface {
             // adjust param range to match the surface Natural UVDomain or a given domain
             let mut uv_domain = self.natural_uv_domain_with_nurb(k)?;
             if let Some(d) = domain {
-                // upstream ignores the status: a disjoint domain leaves Init()
-                uv_domain = passed_on(uv_domain.intersect(d), pass)?.unwrap_or_default();
+                // upstream ignores the status (a disjoint domain leaves Init()); the
+                // fork passes it on
+                uv_domain = uv_domain.intersect(d)?;
             }
             let ivl = if param == SurfParamType::U {
                 uv_domain.v_interval()
@@ -679,7 +680,7 @@ impl Surface {
                 uv_domain.u_interval()
             };
             if !ivl.is_degenerate(0.0) {
-                crate::error::ignore_or_pass_on(curve.edit_parameterization(&ivl), pass)?;
+                curve.edit_parameterization(&ivl)?;
             }
             return Ok(IsoParametricCurve {
                 curve: Curve::from(curve),
@@ -825,7 +826,6 @@ fn find_ps_normal_solve(
     //           - specify boundary behavior
     let mut equations = FindPsNormalEnfo::new(k, test_point, surface, EFF_ZERO * EFF_ZERO, op);
     let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(&periodicities));
-    solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
     solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 3);
 
     // let solver look for an answer with a loose tolerance (SER)
@@ -879,13 +879,8 @@ fn finish_ps_solve<O: Copy>(
             is_point_on_normal(k, surface, None, uv, test_point, None, EFF_ZERO * 100.0)?;
         out.found = on_normal.good_point;
 
-        // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-        let d = ignored_or_pass_on(
-            evaluate_1st_derivatives(k, surface, uv, Side::Right, Side::Right),
-            k.fixes.query_statuses_pass_on,
-        )?
-        .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
-        let (pnt1, du, dv) = d;
+        // (passed on as the fork does, WR-663, tangency-labs/smlib 21dcf69)
+        let (pnt1, du, dv) = evaluate_1st_derivatives(k, surface, uv, Side::Right, Side::Right)?;
         let mut gap = pnt1 - test_point;
         let len_sq = gap.length_squared();
         if len_sq > EFF_ZERO {
@@ -1190,6 +1185,13 @@ impl Surface {
         }
 
         // Try LocalPointSolve if a guess was supplied.
+        // Not upstream (WR-56, #17773): a converged local result the last test of
+        // `good_drop_result` refuses for having moved from its guess is kept as a
+        // candidate, and returned after the global solve when that finds nothing or the
+        // answer the drop would return from it is farther (`keep_moved` below). Only for
+        // the operations whose solution value is a distance to minimise; for the others
+        // the global solve decides alone.
+        let mut moved_foot = false;
         if !success {
             if let Some(g) = guess {
                 match ignored(self.local_point_solve::<O>(k, domain, op, pt_to_drop, g))? {
@@ -1200,10 +1202,26 @@ impl Surface {
                     None => success = false,
                 }
 
+                // A converged closest point can still lie beyond an intersection's
+                // distance tolerance. Apply the global solve's bound before either
+                // accepting this foot or keeping it as a moved-foot candidate.
+                if success && op == SolverOperation::Intersect {
+                    let gap = sol.start.solution_value;
+                    success = gap.is_finite() && (0.0..=dist_tol).contains(&gap);
+                }
+
                 // Check whether we think that this solution is ok, i.e., was it a good
                 // enough guess?  [080206]
                 if success {
-                    success = good_drop_result(k, self, domain, pt_to_drop, g, &sol.start)?;
+                    let verdict = drop_result_verdict(k, self, domain, pt_to_drop, g, &sol.start)?;
+                    success = verdict == DropVerdict::Foot;
+                    moved_foot = verdict == DropVerdict::MovedFoot
+                        && matches!(
+                            op,
+                            SolverOperation::Intersect
+                                | SolverOperation::Minimize
+                                | SolverOperation::Normalize
+                        );
                 }
                 if success {
                     answer_in_sol = true;
@@ -1243,7 +1261,18 @@ impl Surface {
                 success = true;
                 answer_in_array = true;
             }
+
+            // Not upstream (WR-56, #17773): the moved local foot is the answer when the
+            // global solve found nothing (it can miss a foot on the domain's boundary).
+            if moved_foot && solutions.is_empty() {
+                success = true;
+                answer_in_sol = true;
+            }
         }
+        // Not upstream (WR-56, #17773): whether the moved local foot is nearer than the
+        // global answer of `value` (a local solve can stop at a local minimum the global
+        // solve beats). A value that is not a number is not nearer.
+        let keep_moved = |value: f64| moved_foot && sol.start.solution_value < value;
 
         // Check results of local and global drops.
         if answer_in_sol {
@@ -1260,7 +1289,14 @@ impl Surface {
                 is_multivalued = true;
             }
 
-            if opts.want_solutions && is_multivalued {
+            // (WR-56: the whole array is the answer here, so the moved foot is kept only
+            // when it is nearer than every solution of it)
+            let nearest = solutions
+                .as_slice()
+                .iter()
+                .map(|s| s.start.solution_value)
+                .fold(f64::INFINITY, f64::min);
+            if opts.want_solutions && is_multivalued && !keep_moved(nearest) {
                 return Ok(DropPoint {
                     success,
                     result_uv,
@@ -1320,17 +1356,10 @@ impl Surface {
                         // the best matching SurfTangent
                         if on_edge(u_type) || on_edge(v_type) {
                             // evaluate Surf(sThisUV) - eval with NonZero tangents
-                            // (passed on with the opt-in fix, WR-663,
+                            // (passed on as the fork does, WR-663,
                             // tangency-labs/smlib 21dcf69)
-                            let (_, du, dv) = ignored_or_pass_on(
-                                evaluate_1st_derivatives(k, self, this_uv, Side::Left, Side::Left),
-                                k.fixes.query_statuses_pass_on,
-                            )?
-                            .unwrap_or((
-                                Vec3::UNDEF,
-                                Vec3::UNDEF,
-                                Vec3::UNDEF,
-                            ));
+                            let (_, du, dv) =
+                                evaluate_1st_derivatives(k, self, this_uv, Side::Left, Side::Left)?;
                             let du = du.unitize_or_z();
                             let dv = dv.unitize_or_z();
 
@@ -1372,6 +1401,23 @@ impl Surface {
             } else {
                 // should never happen.
                 success = false;
+            }
+
+            // (WR-56: the moved foot against the answer just picked, or against the
+            // whole array when that was asked for)
+            let picked = if opts.want_solutions && is_multivalued {
+                nearest
+            } else if best.is_some() {
+                gap
+            } else {
+                f64::INFINITY
+            };
+            if keep_moved(picked) {
+                result_uv = Point2::new(sol.start.param(0)?, sol.start.param(1)?);
+                gap = sol.start.solution_value;
+                solutions = SolutionArray::<O>::new();
+                is_multivalued = false;
+                success = true;
             }
         }
 
@@ -1431,41 +1477,32 @@ impl Surface {
         get_surface_cache(kernel, surface2, None::<NoObject>)?;
         get_surface_cache(kernel, surface3, None::<NoObject>)?;
 
-        // nearest point of each surface (statuses ignored; passed on with the opt-in fix,
-        // WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        // nearest point of each surface (statuses ignored upstream; passed on as the
+        // fork does, WR-663, tangency-labs/smlib 21dcf69)
         let nearest =
             |s: &Self, domain: &Extent2d, fallback_domain: &Extent2d| -> Result<Option<Point2>> {
-                let mut sols = ignored_or_pass_on(
-                    s.global_point_solve::<O>(
-                        kernel,
-                        None,
-                        domain,
-                        SolverOperation::Minimize,
-                        xyz_guess1,
-                        new_tol,
-                        None,
-                        SolutionRequested::Single,
-                    ),
-                    pass,
-                )?
-                .unwrap_or_default();
+                let mut sols = s.global_point_solve::<O>(
+                    kernel,
+                    None,
+                    domain,
+                    SolverOperation::Minimize,
+                    xyz_guess1,
+                    new_tol,
+                    None,
+                    SolutionRequested::Single,
+                )?;
                 if sols.is_empty() {
                     if let Some(g2) = opt_xyz_guess2 {
-                        sols = ignored_or_pass_on(
-                            s.global_point_solve::<O>(
-                                kernel,
-                                None,
-                                fallback_domain,
-                                SolverOperation::Minimize,
-                                g2,
-                                new_tol,
-                                None,
-                                SolutionRequested::Single,
-                            ),
-                            pass,
-                        )?
-                        .unwrap_or_default();
+                        sols = s.global_point_solve::<O>(
+                            kernel,
+                            None,
+                            fallback_domain,
+                            SolverOperation::Minimize,
+                            g2,
+                            new_tol,
+                            None,
+                            SolutionRequested::Single,
+                        )?;
                     }
                 }
                 sols.get(0)
@@ -1485,14 +1522,12 @@ impl Surface {
             return Ok((false, Solution::new()));
         };
 
-        // find surf/surf/surf intersection in this neighborhood (status ignored: a
-        // failing solve leaves rbFoundAnswer FALSE and rSolution untouched)
+        // find surf/surf/surf intersection in this neighborhood (status ignored upstream:
+        // a failing solve leaves rbFoundAnswer FALSE and rSolution untouched; passed on
+        // as the fork does)
         let mut solution = Solution::new();
-        let Some(Some(sss)) = ignored_or_pass_on(
-            self.local_surface_surface_intersect(
-                k, uv_domain1, surface2, uv_domain2, surface3, uv_domain3, uv1, uv2, uv3,
-            ),
-            pass,
+        let Some(sss) = self.local_surface_surface_intersect(
+            k, uv_domain1, surface2, uv_domain2, surface3, uv_domain3, uv1, uv2, uv3,
         )?
         else {
             return Ok((false, solution));
@@ -2249,23 +2284,15 @@ pub fn filter_solution<O: SolutionObject>(
         // when the curve is continuous through this solution
         let g1g2 = ct(ContinuityType::G1G2);
         if (c0_curve_min && ct(t_conts[0]) >= g1g2) || (c0_curve_max && ct(t_conts[1]) >= g1g2) {
-            // get the surface's normal section evaluation (upstream ignores the status;
-            // outputs keep their default-constructed values)
-            // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-            let pass = k.fixes.query_statuses_pass_on;
-            let (surface_curvature, surface_normal) = ignored_or_pass_on(
-                surface_evaluate_normal_section(k, surface, uv, curve_tangent),
-                pass,
-            )?
-            .unwrap_or((0.0, Vec3::UNDEF));
+            // get the surface's normal section evaluation (upstream ignores the status
+            // and goes on with default-constructed outputs; passed on as the fork does,
+            // WR-663, tangency-labs/smlib 21dcf69)
+            let (surface_curvature, surface_normal) =
+                surface_evaluate_normal_section(k, surface, uv, curve_tangent)?;
 
             // compute the curve's position, tangent, curvature, and normal values (status
-            // ignored: the frame keeps its default-constructed vectors)
-            let frenet = ignored_or_pass_on(
-                curve_evaluate_geometric(k, curve, solution.start.param(0)?, 2, true),
-                pass,
-            )?
-            .unwrap_or_else(|| vec![Vec3::UNDEF; 3]);
+            // ignored upstream; passed on as the fork does)
+            let frenet = curve_evaluate_geometric(k, curve, solution.start.param(0)?, 2, true)?;
             let curv_vec = frenet.get(2).copied().unwrap_or(Vec3::UNDEF);
 
             // look for lines
@@ -2400,23 +2427,25 @@ fn surface_identical_solutions<O: SolutionObject>(
             || (sol1.solution_type == SolutionType::SingleValue
                 && sol2.solution_type == SolutionType::SingleValue))
     {
-        let surf = surface.ok_or_else(|| SolidError::surface_missing(OP_SING, "the surface"))?;
+        let surf = surface.ok_or_else(|| {
+            SolidError::surface(
+                OP_SING,
+                SurfaceFailure::InputNotGiven {
+                    what: SolveInput::Surface,
+                },
+            )
+        })?;
 
         // At a singularity, the same 3d point can have different uv values.
         let uv1 = Point2::new(sol1.start.param(uv_at)?, sol1.start.param(uv_at + 1)?);
         let uv2 = Point2::new(sol2.start.param(uv_at)?, sol2.start.param(uv_at + 1)?);
 
-        // Check positions (statuses ignored; with the opt-in fix points that cannot be
-        // evaluated are not shown the same, WR-663, tangency-labs/smlib 21dcf69).
-        let not_shown = k.fixes.query_statuses_pass_on;
-        let Some(pt1) =
-            ignored(surf.evaluate_point(k, uv1))?.or_else(|| (!not_shown).then_some(Vec3::UNDEF))
-        else {
+        // Check positions (points that cannot be evaluated are not shown the same, as
+        // the fork, WR-663, tangency-labs/smlib 21dcf69).
+        let Some(pt1) = ignored(surf.evaluate_point(k, uv1))? else {
             return Ok((SolutionPairType::DiffParameters, None));
         };
-        let Some(pt2) =
-            ignored(surf.evaluate_point(k, uv2))?.or_else(|| (!not_shown).then_some(Vec3::UNDEF))
-        else {
+        let Some(pt2) = ignored(surf.evaluate_point(k, uv2))? else {
             return Ok((SolutionPairType::DiffParameters, None));
         };
 
@@ -2706,6 +2735,117 @@ mod tests {
         assert!((r.result_uv.x - c.x).abs() < 1e-9 && (r.result_uv.y - c.y).abs() < 1e-9);
     }
 
+    /// A regular planar spline reaches the generic point-drop path. A guess can help find
+    /// its foot, but an intersection still needs a gap inside the drop's own tolerance.
+    #[test]
+    fn intersect_drop_respects_its_tolerance_with_or_without_a_guess() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::srf_basic::Surface as Net;
+
+        let k = Kernel::default();
+        let rows = [0.0, 1.0]
+            .into_iter()
+            .map(|x| {
+                [0.0, 1.0]
+                    .into_iter()
+                    .map(|y| CPoint::new(x, y, 0.0, NOW))
+                    .collect()
+            })
+            .collect();
+        let knots = vec![0.0, 0.0, 1.0, 1.0];
+        let net = Net::new(rows, 1, 1, knots.clone(), knots).unwrap();
+        let surface = Surface::from(BSplineSurface::from_gw_nurb(&net));
+        let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        let mut failures = Vec::new();
+        for gap in [0.5 * XSECT_TOL_3D, 1.5 * XSECT_TOL_3D] {
+            for (name, point, foot, moved_guess) in [
+                (
+                    "interior",
+                    Vec3::new(0.5, 0.5, gap),
+                    Point2::new(0.5, 0.5),
+                    Point2::new(0.375, 0.5),
+                ),
+                (
+                    "boundary",
+                    Vec3::new(-gap, 0.5, 0.0),
+                    Point2::new(0.0, 0.5),
+                    Point2::new(0.125, 0.5),
+                ),
+            ] {
+                let expected = gap <= XSECT_TOL_3D;
+                // The local solve may find a closest point beyond the intersection tolerance.
+                // Its caller must decide whether that point is an intersection.
+                let local = surface
+                    .local_point_solve::<Obj>(&k, &domain, SolverOperation::Intersect, point, foot)
+                    .unwrap();
+                assert!(local.found, "{name}, {gap:e}: {local:?}");
+                assert!(
+                    (local.solution.start.solution_value - gap).abs() < 1e-12,
+                    "{local:?}"
+                );
+                if name == "boundary" {
+                    assert_eq!(
+                        drop_result_verdict(
+                            &k,
+                            &surface,
+                            &domain,
+                            point,
+                            moved_guess,
+                            &local.solution.start
+                        )
+                        .unwrap(),
+                        DropVerdict::MovedFoot,
+                    );
+                }
+                for guess_uv in [None, Some(foot), Some(moved_guess)] {
+                    let options = DropPointOptions {
+                        guess_uv,
+                        operation: SolverOperation::Intersect,
+                        ..DropPointOptions::default()
+                    };
+                    let answer = surface
+                        .drop_point::<Obj>(&k, point, &domain, &options)
+                        .unwrap();
+                    if answer.success != expected {
+                        failures.push(format!(
+                            "{name}, gap {gap:e}, guess {guess_uv:?}: {answer:?}"
+                        ));
+                    }
+                    if answer.success {
+                        let measured =
+                            point.distance(surface.evaluate_point(&k, answer.result_uv).unwrap());
+                        assert!(
+                            (answer.gap - measured).abs() < 1e-12,
+                            "{answer:?}, actual gap {measured:e}"
+                        );
+                    }
+                }
+                let nearest = surface
+                    .drop_point::<Obj>(
+                        &k,
+                        point,
+                        &domain,
+                        &DropPointOptions {
+                            guess_uv: Some(foot),
+                            operation: SolverOperation::Minimize,
+                            ..DropPointOptions::default()
+                        },
+                    )
+                    .unwrap();
+                assert!(
+                    nearest.success && (nearest.gap - gap).abs() < 1e-12,
+                    "{nearest:?}"
+                );
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "intersection tolerance disagreed with:\n{}",
+            failures.join("\n")
+        );
+    }
+
     #[test]
     fn filter_keeps_exact_solutions() {
         let k = &Kernel::default();
@@ -2835,22 +2975,25 @@ mod tests {
     /// `Upstream` statuses they replace (a sample).
     #[test]
     fn typed_surface_failures_keep_their_upstream_answers() {
-        use crate::error::surface::SurfaceFailure;
-        let samples: [(&'static str, SurfaceFailure, i32); 2] = [
+        use crate::error::surface::{SolveInput, SurfaceFailure};
+        use crate::error::ErrorKind;
+        let samples: [(&'static str, SurfaceFailure, i32, ErrorKind); 2] = [
             (
                 OP_SING,
-                SurfaceFailure::Missing("the surface"),
+                SurfaceFailure::InputNotGiven {
+                    what: SolveInput::Surface,
+                },
                 crate::error::SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
             ),
             (
                 "surface::surface::p5::evaluate_normal_at_singularity",
-                SurfaceFailure::InvalidValue(
-                    "the sum of the normals around the singularity is zero",
-                ),
+                SurfaceFailure::NormalsCancel,
                 crate::error::SM_ERR_INVALID_INPUT,
+                ErrorKind::Degenerate,
             ),
         ];
-        for (operation, failure, code) in samples {
+        for (operation, failure, code, kind) in samples {
             let typed = SolidError::surface(operation, failure);
             let before = SolidError::Upstream {
                 operation,
@@ -2859,7 +3002,7 @@ mod tests {
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
             assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.kind(), kind, "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
             assert_eq!(typed.is_port_failure(), before.is_port_failure());

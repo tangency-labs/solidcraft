@@ -37,6 +37,7 @@ fn read(points: &[[f64; 2]], text: &str) -> Resolved {
         status: Status::Ok,
         measured: None,
         text: Some(text.into()),
+        number: None,
         label: None,
         members: Vec::new(),
         exact: true,

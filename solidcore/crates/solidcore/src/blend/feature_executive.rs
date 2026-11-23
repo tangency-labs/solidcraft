@@ -1273,7 +1273,20 @@ fn build_patch(
         let tgt = side_brep_mut(base, feature, target)?;
         let r = validate_patch(k, tgt, &mut patch, &curves, extended_by);
         put_patch(patches, pid, patch)?;
-        r
+        match r {
+            Err(e) => Err(extension_within_tolerance(
+                k,
+                side_brep(base, feature, source)?,
+                &edges,
+                tol::brep_zone_tol_3d(
+                    k,
+                    side_brep(base, feature, target)?,
+                    SmallTopoType::default(),
+                ),
+                e,
+            )?),
+            ok => ok,
+        }
     };
     keep_unported(stat.clone())?;
 
@@ -1288,6 +1301,56 @@ fn build_patch(
         l.limit = limit_of(e);
     }
     stat
+}
+
+/// Not upstream (#15718): a patch that does not enclose its loop after the faces along it
+/// were extended by `d`, no farther than the identity radius at the loop's vertices (the
+/// largest, over the vertices of the loop `edges` in `src`, of the vertex's zone tolerance
+/// summed with the patch's, `patch_zone`), is refused as
+/// [`DefeatureFailure::ExtensionWithinTolerance`] naming that radius, keeping `error` as the
+/// cause. Within it, a vertex of the extended boundary and the loop's vertex are one point,
+/// so the extension cannot be resolved (the merged vertex's tolerance covers it). Any other
+/// error is returned as it is.
+///
+/// # Errors
+///
+/// Those of the topology reads.
+fn extension_within_tolerance(
+    k: &Kernel,
+    src: &Brep,
+    edges: &[EdgeId],
+    patch_zone: f64,
+    error: SolidError,
+) -> Result<SolidError> {
+    let Some(DefeatureFailure::NotEnclosed {
+        extended_by: Some(d),
+    }) = limit_of(&error)
+    else {
+        return Ok(error);
+    };
+    let mut widest: Option<f64> = None;
+    for &e in edges {
+        for v in edge::vertices(src, e, None)?.into_iter().flatten() {
+            let zone = tol::zone_tol3d(k, src.vertex(v)?.tolerance);
+            widest = Some(widest.map_or(zone, |w| w.max(zone)));
+        }
+    }
+    let Some(widest) = widest else {
+        return Ok(error);
+    };
+    let identity_radius = tol::xsect_tol_3d_from_zones(k, widest, patch_zone);
+    // (a NaN radius or distance passes no test: the error is kept as it is)
+    let within = d <= identity_radius;
+    if !within {
+        return Ok(error);
+    }
+    Ok(limit_error(
+        DefeatureFailure::ExtensionWithinTolerance {
+            extended_by: d,
+            identity_radius,
+        },
+        Some(error),
+    ))
 }
 
 /// Not upstream (#3218): why a patch with a lamina edge off the loop does not close it. A

@@ -140,7 +140,20 @@ impl Tools for Agent {
 
     fn list(&mut self) -> Vec<Value> {
         self.listed = self.options();
-        tool_definitions_with(self.listed)
+        let mut tools = tool_definitions_with(self.listed);
+        // Every installed, enabled plugin's entries, read afresh: a plugin turned off or removed
+        // since the last listing is gone from this one.
+        tools.extend(crate::plugin_tools::definitions(self.backend.as_mut()));
+        tools
+    }
+
+    fn definition(&mut self, name: &str) -> Option<Value> {
+        self.listed = self.options();
+        if crate::plugin_tools::is_plugin_tool(name) {
+            crate::plugin_tools::definition_for(self.backend.as_mut(), name)
+        } else {
+            tool_definitions_with(self.listed).into_iter().find(|t| t["name"].as_str() == Some(name))
+        }
     }
 
     fn call(&mut self, name: &str, args: &Value) -> Value {
@@ -177,10 +190,8 @@ impl Tools for Agent {
 
     fn read_resource(&mut self, uri: &str) -> Option<Result<Contents, String>> {
         let read = match uri {
-            // The solvecraft:// URIs are what earlier releases listed (compatibility shim,
-            // docs/compatibility.md); clients that saved them still read the resource.
-            "solidcraft://design" | "solvecraft://design" => self.backend.call("document.inspect", json!({"measure": true})),
-            "solidcraft://commands" | "solvecraft://commands" => self.backend.call("engine.commands", json!({})),
+            "solidcraft://design" => self.backend.call("document.inspect", json!({"measure": true})),
+            "solidcraft://commands" => self.backend.call("engine.commands", json!({})),
             _ => return None,
         };
         Some(read.map(|v| Contents::json(&v)))

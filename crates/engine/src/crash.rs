@@ -706,12 +706,13 @@ pub(crate) fn command_done(
         }
         let kind = if p.recovered { "kernel_panic_recovered" } else { "command_panic" };
         let (openable, left_out) = drawing::openable(before);
-        let design = solidcraft_io::write_design(&openable);
+        // A container, as the design's own file is: it carries binary data a JSON design can't.
+        let design = solidcraft_io::write_design_container(&openable).ok();
         let replay = json!({ "commands": [{ "command": id, "params": params }], "ids": ids });
         let recent = if journaled { read_live_journal(state).recent } else { Vec::new() };
         let extra = Extra {
             command: Some(json!({ "command": id, "params": params })),
-            design: Some(design),
+            design,
             replay: Some(replay),
             recent,
             base: json!("the design as it was when the command started"),
@@ -983,6 +984,18 @@ fn unclean_exit(dir: &Path, build: &Build, journal: &Path) {
         (None, Some(c)) => format!("while running `{c}`"),
         (None, None) => "between commands".to_string(),
     };
+    // Another version that was up and idle, with nothing a crash handler caught: an update or an
+    // installer most likely closed it, which skips the clean exit (#17890). Not a crash to offer.
+    // Only when the journal shows it: a run that never recorded getting up, or whose journal
+    // stopped recording (it may have been in a command), is still reported.
+    let up = j.phase.as_ref().is_some_and(|(p, _)| p == RUNNING);
+    if up && j.complete && native.is_none() && doing.is_none() && was != "?" && was != build.version {
+        solidcraft_geom::note!(
+            "SolidCraft: {was} (started {when}) ended without a clean exit between commands; not reported, as this is {}",
+            build.version
+        );
+        return;
+    }
     let field = |k: &str| native.as_ref().and_then(|n| n.get(k)).and_then(Value::as_str).map(|v| limited(v, 300));
     let (message, location, signature_text, backtrace) = match &native {
         Some(_) => {

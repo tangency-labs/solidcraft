@@ -169,7 +169,7 @@ impl Product {
             Self::History => !render && !crate::drawing_workspace::active(app) && !app.preferences.history_in_browser,
             Self::Assistant => crate::agent_chat::shown(app) && !app.preferences.agent_chat_popped,
             Self::RenderBrowser | Self::RenderLibrary | Self::RenderInspector | Self::RenderShots => render && !crate::render_ui::focused(app),
-            Self::SketchOptions => !render && crate::sketch_palette::editing(app),
+            Self::SketchOptions => !render && (crate::sketch_palette::editing(app) || crate::sketch_palette::image_tool(app)),
             Self::Bom => crate::bom_panel::available(app),
             Self::DrawingSheets => {
                 crate::drawing_workspace::active(app)
@@ -223,7 +223,8 @@ impl Product {
             ],
             Self::RenderInspector => vec![("remove", "render.inspector_remove", "delete")],
             Self::DrawingSheets => vec![("add-sheet", "ui.drawing_sheets.add", "plus")],
-            Self::Browser | Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
+            Self::Browser => vec![("magnifier", "ui.browser_search_hint", "zoom")],
+            Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
         };
         entries.into_iter().map(|(id, key, icon)| HeaderActionSpec { id: ControlId(id.into()), label_key: key.into(), icon: icon.into() }).collect()
     }
@@ -256,7 +257,7 @@ impl Product {
                     let availability = crate::timeline::transport_availability(app, *control);
                     RuntimeAction {
                         id: ControlId(control.id().into()),
-                        label: control.label(app.timeline_playback.is_some(), crate::timeline::play_labels()).into(),
+                        label: control.label(app.timeline_playback.is_some(), crate::timeline::play_labels(app)).into(),
                         enabled: availability.is_ok(),
                         disabled_reason: availability.err(),
                         pressed: (*control == crate::ui_kit::HistoryTransport::Play).then_some(app.timeline_playback.is_some()),
@@ -330,7 +331,17 @@ impl Product {
                     })
                     .collect()
             }
-            Self::Browser | Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
+            Self::Browser => {
+                presentation.status = Some(crate::browser_search::body_count(app));
+                vec![RuntimeAction {
+                    id: ControlId("magnifier".into()),
+                    label: solidcraft_ui_text::tr("ui.browser_search_hint").into(),
+                    enabled: true,
+                    disabled_reason: None,
+                    pressed: Some(crate::browser_search::bar_shown(app)),
+                }]
+            }
+            Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
         };
         presentation
     }
@@ -372,6 +383,8 @@ impl PanelVisibilitySnapshot {
 struct PanelSnapshot {
     product: Product,
     available: bool,
+    /// Takes its column's whole height whatever it lists (the compact Browser holding the History, #14566).
+    fills: bool,
     presentation: PanelPresentation,
     extent: Option<ContentExtent>,
 }
@@ -388,6 +401,9 @@ struct ProductionSnapshot {
     document: DocumentId,
     sketch_owner: Option<(DocumentId, u64)>,
     sketch_placement_attempt: Option<(u64, LogicalRect, u64)>,
+    /// Canvas or Decal has shown the Sketch panel since it started in a sketch: the panel opens
+    /// and comes to the front once per run, so the tool's frame mode is in view (#18405).
+    image_tool_shown: bool,
     bom_focus_attempt: Option<(u64, LogicalRect)>,
     panel_addition_attempts: [Option<(u64, LogicalRect)>; Product::ALL.len()],
     visible: [bool; Product::ALL.len()],
@@ -417,11 +433,13 @@ impl ProductionState {
             visible: Product::all_map(|product| product.visible(app)),
             sketch_owner: None,
             sketch_placement_attempt: None,
+            image_tool_shown: false,
             bom_focus_attempt: None,
             visibility: Default::default(),
             panels: Product::all_map(|product| PanelSnapshot {
                 product,
                 available: product.available(app),
+                fills: product == Product::Browser && crate::browser::holds_compact_history(app),
                 presentation: product.presentation(app),
                 extent: None,
             }),
@@ -431,6 +449,16 @@ impl ProductionState {
 }
 
 pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
+    enable_production_for(app, VIEWPORT, None)
+}
+
+pub(super) fn enable_pop_out_production(app: &mut crate::SolveApp, window: &str, remembered: Option<Value>) -> PanelResult<()> {
+    let mut preferences = PanelLayoutPreferences::default();
+    preferences.record = remembered;
+    enable_production_for(app, window, Some(&preferences))
+}
+
+fn enable_production_for(app: &mut crate::SolveApp, window: &str, pop_out: Option<&PanelLayoutPreferences>) -> PanelResult<()> {
     if app.panel_runtime.is_some() {
         return Err(error(Rule::Lifecycle, "application panel runtime is already enabled"));
     }
@@ -438,7 +466,8 @@ pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
     let registry = registry()?;
     let workspace = WorkspaceId::new(WORKSPACES[0].0)?;
     let defaults = crate::prefs::Prefs::default();
-    let placement = if app.panel_layout_preferences.record.is_none() { &app.preferences } else { &defaults };
+    let settings = pop_out.unwrap_or(&app.panel_layout_preferences);
+    let placement = if settings.record.is_none() { &app.preferences } else { &defaults };
     let layout = default_layout(app, placement, workspace.clone(), &registry)?;
     let mut runtime = PanelRuntime::new(
         LayoutService::new(
@@ -446,15 +475,15 @@ pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
             layout,
             HostCapabilities {
                 persistence: true,
-                native_windows: cfg!(not(target_arch = "wasm32")),
-                max_native_hosts: if cfg!(target_arch = "wasm32") { 0 } else { MAX_SECTIONS },
+                native_windows: pop_out.is_none() && cfg!(not(target_arch = "wasm32")),
+                max_native_hosts: if pop_out.is_some() || cfg!(target_arch = "wasm32") { 0 } else { MAX_SECTIONS },
             },
         )?,
         RuntimeEnvironment {
             workspace: workspace.clone(),
             document: Some(DocumentId::new(app.session.document_id.clone())?),
-            window: HostId::new(VIEWPORT)?,
-            viewport: ViewportId::new(VIEWPORT)?,
+            window: HostId::new(window)?,
+            viewport: ViewportId::new(window)?,
             direction: crate::i18n::panel_direction(&app.preferences.language),
             motion: Motion::Animated,
         },
@@ -475,7 +504,7 @@ pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
         local: ProductionLocal {
             workspace,
             document: DocumentId::new(app.session.document_id.clone())?,
-            viewport: ViewportId(VIEWPORT.into()),
+            viewport: ViewportId(window.into()),
             keyboard: None,
         },
     };
@@ -497,10 +526,12 @@ pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
             default_preset: name.into(),
         })?;
     }
-    let repaired = super::preferences::configure_preferences(&mut integration, &app.panel_layout_preferences, &mut catalogue)?;
+    let repaired = super::preferences::configure_preferences(&mut integration, settings, &mut catalogue)?;
     app.panel_runtime = Some(integration);
-    crate::bom_panel::set_focus_pending(app, true);
-    if repaired {
+    if pop_out.is_none() {
+        crate::bom_panel::set_focus_pending(app, true);
+    }
+    if repaired && pop_out.is_none() {
         super::preferences::report_notice(app);
     }
     Ok(())
@@ -539,6 +570,7 @@ pub(crate) fn refresh_production(app: &crate::SolveApp) -> PanelResult<()> {
     }
     for panel in &mut snapshot.panels {
         panel.available = panel.product.available(app);
+        panel.fills = panel.product == Product::Browser && crate::browser::holds_compact_history(app);
         panel.presentation = panel.product.presentation(app);
     }
     Ok(())
@@ -596,7 +628,8 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
                     crate::drawing_workspace::start(app, "drawing.sheet.add");
                 }
             }
-            Product::Browser | Product::RenderShots | Product::SketchOptions | Product::Bom | Product::DrawingInspector => {}
+            Product::Browser => crate::browser::magnifier(app),
+            Product::RenderShots | Product::SketchOptions | Product::Bom | Product::DrawingInspector => {}
         }
     }
     Ok(())
@@ -687,7 +720,11 @@ fn place_compatibly(
         let section = if source.location.zone() != zone || needs_stack || needs_column {
             let section = next_section_id_with_reservations(layout, &reserved.sections)?;
             reserved.sections.insert(section.clone());
-            let size = Size { width: width.unwrap_or(source.size.width).clamp(240.0, 1200.0), height: source.size.height };
+            let registry = integration.runtime().layout().registry();
+            let min = registry.get(&layout.instance(&instance)?.kind)?.min_size.width;
+            let (min, max) =
+                below.and_then(|section| section.column.as_ref()).map_or(Ok((min, 1200.0)), |column| column_bounds(layout, registry, column))?;
+            let size = Size { width: width.unwrap_or(source.size.width).clamp(min, max), height: source.size.height };
             let destination = if let Some(browser) = below {
                 Destination::Relative {
                     section: browser.id.clone(),
@@ -710,6 +747,10 @@ fn place_compatibly(
             mutations.push(Mutation::Move { instance, destination });
             if width.is_some() && zone.side() {
                 mutations.push(Mutation::SetSize { section: section.clone(), size });
+                // Compatibility placement supplies a width, so it must not pin an automatic height.
+                if !source.location.zone().side() || source.preferred_extent.is_none() {
+                    mutations.push(Mutation::ResetSideHeight { section: section.clone() });
+                }
             }
             if zone == Zone::Bottom && source.collapsed {
                 mutations.push(Mutation::Collapse { section: section.clone(), collapsed: false });
@@ -717,7 +758,8 @@ fn place_compatibly(
             section
         } else {
             if let (Some(width), Some(column)) = (width, &source.column) {
-                mutations.push(Mutation::SetColumnWidth { column: column.clone(), width: width.clamp(240.0, 1200.0) });
+                let (min, max) = column_bounds(layout, integration.runtime().layout().registry(), column)?;
+                mutations.push(Mutation::SetColumnWidth { column: column.clone(), width: width.clamp(min, max) });
             }
             source.id.clone()
         };
@@ -902,6 +944,31 @@ fn sync_sketch_options(app: &mut crate::SolveApp) -> PanelResult<()> {
     let layout = integration.runtime().layout().layout();
     let instance = InstanceId::new(product.id())?;
     let existing = layout.instance(&instance).ok();
+    // Canvas or Decal started in the sketch: open the panel and bring it to the front once, so the
+    // tool's frame mode is in view even when the panel was closed, folded or behind another tab.
+    let image_tool = crate::sketch_palette::image_tool(app);
+    if !image_tool {
+        snapshot.image_tool_shown = false;
+    } else if !snapshot.image_tool_shown
+        && let Some(panel) = existing
+    {
+        snapshot.image_tool_shown = true;
+        let in_front = panel.requested_open && layout.containing(&instance).is_ok_and(|section| !section.collapsed && section.active == instance);
+        if !in_front {
+            let mutation = if panel.requested_open {
+                Mutation::Focus { instance }
+            } else {
+                Mutation::Open { kind: panel.kind.clone(), instance, destination: None }
+            };
+            let revision = integration.runtime().layout().inspect().revision;
+            drop(snapshot);
+            return match app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: Some(revision), mutations: vec![mutation] }) {
+                Ok(_) => Ok(()),
+                Err(reason) if reason.rule == Rule::NoSpace => Ok(()),
+                Err(reason) => Err(reason),
+            };
+        }
+    }
     if existing.is_some_and(|panel| panel.requested_open) {
         snapshot.sketch_owner = Some(owner);
         snapshot.sketch_placement_attempt = None;
@@ -982,7 +1049,7 @@ fn registry() -> PanelResult<PanelRegistry> {
                 _ => Zone::Left,
             },
             min_size: Size {
-                width: 240.0,
+                width: if history { crate::ui_kit::history_width(false) } else { 240.0 },
                 height: match product {
                     Product::RenderLibrary => 180.0,
                     Product::Bom => 200.0,
@@ -1008,6 +1075,10 @@ fn registry() -> PanelResult<PanelRegistry> {
             header_actions: product.header_actions(),
             text_heavy: assistant || bom || sketch,
         })?;
+        if history {
+            let strip = crate::ui_kit::history_width(false);
+            registry.set_side_widths(&PanelKind::new(product.kind())?, vec![(strip, strip), (crate::ui_kit::history_width(true), MAX_LOGICAL)])?;
+        }
     }
     Ok(registry)
 }
@@ -1127,6 +1198,7 @@ fn default_layout(app: &crate::SolveApp, placement: &crate::prefs::Prefs, worksp
             instance.memory.column_index = column_index;
         }
     }
+    normalize_column_widths(&mut layout, registry)?;
     validate(&layout, registry)?;
     Ok(layout)
 }
@@ -1161,10 +1233,12 @@ impl PanelController for ProductionController {
     }
     fn measure(&self, _owner: &ContentOwner, _models: &dyn PanelModels, spec: &PanelSpec) -> PanelResult<Arc<dyn HostContentMetrics>> {
         let snapshot = self.state.0.try_borrow().map_err(|_| error(Rule::Lifecycle, "content measurement is borrowed"))?;
+        let panel = snapshot.panels.iter().find(|panel| panel.product == self.product);
         Ok(Arc::new(ProductionMetrics {
-            extent: snapshot.panels.iter().find(|panel| panel.product == self.product).and_then(|panel| panel.extent),
+            extent: panel.and_then(|panel| panel.extent),
+            strip_width: (self.product == Product::History).then(|| crate::ui_kit::history_width(false)),
             inset: solidcraft_theme::Tokens::get().space_2 * 2.0,
-            policy: spec.side_height_policy,
+            policy: if panel.is_some_and(|panel| panel.fills) { SideHeightPolicy::Fill } else { spec.side_height_policy },
         }))
     }
     fn prepare_lifecycle(&self, event: &LifecycleEvent) -> PanelResult<()> {
@@ -1205,6 +1279,7 @@ impl PanelController for ProductionController {
 #[derive(Debug)]
 struct ProductionMetrics {
     extent: Option<ContentExtent>,
+    strip_width: Option<f32>,
     inset: f32,
     policy: SideHeightPolicy,
 }
@@ -1216,7 +1291,8 @@ impl HostContentMetrics for ProductionMetrics {
             .extent
             .filter(|extent| extent.width_independent || (extent.flow == Flow::Tall && (extent.width - request.width).abs() < 0.5))
             .map_or(MAX_LOGICAL, |extent| (request.chrome_height + extent.height + self.inset).min(MAX_LOGICAL));
-        Ok(SideContentMeasure { request: request.clone(), needed_height, policy: self.policy })
+        let policy = if self.strip_width == Some(request.width) { SideHeightPolicy::Fill } else { self.policy };
+        Ok(SideContentMeasure { request: request.clone(), needed_height, policy })
     }
     fn revision(&self) -> u64 {
         use std::hash::{Hash, Hasher};
@@ -1411,6 +1487,13 @@ impl FramePanelContent for ProductionFrame<'_> {
         _content: &mut dyn PanelController,
         services: &mut ContentServices<'_>,
     ) -> PanelResult<()> {
+        if slot == ContentSlot::Title {
+            // Only the Browser asks for the title's place (`set_header_content`): its search field.
+            if Product::from_instance(&context.instance)? == Product::Browser && crate::browser_search::bar_shown(self.app) {
+                crate::browser_search::header_field(self.app, ui);
+            }
+            return Ok(());
+        }
         if !matches!(slot, ContentSlot::Body | ContentSlot::Inline) {
             return Ok(());
         }
@@ -1475,7 +1558,9 @@ impl FramePanelContent for ProductionFrame<'_> {
         }
         let scope = LocalScope { workspace: context.workspace.clone(), document: context.document.clone(), viewport: context.viewport.clone() };
         if let Some(capture) = capture.filter(|_| !context.preview_geometry) {
-            if let Some(mut extent) = capture.extent {
+            if let Some(mut extent) = capture.extent
+                && !(product == Product::History && context.outer.size.width == crate::ui_kit::history_width(false))
+            {
                 extent.width = context.outer.size.width;
                 extent.flow = context.flow;
                 extent.composer = capture.composer;

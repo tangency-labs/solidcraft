@@ -227,7 +227,6 @@ fn rust(i: &Input) -> Result<Vec<f64>> {
         base: SweepGeometryCreation {
             eps: i.epsilon,
             make_analytics: i.analytics,
-            statuses_pass_on: false,
         },
     };
     let mut o = vec![0.];
@@ -447,5 +446,44 @@ impl UnitDiff for Runner {
             face_kind: if kind == 3 { 0 } else { rng.below(2) as u8 },
         };
         serde_json::to_value(i).ok()
+    }
+}
+
+/// #14246 G1 (WR-662 retired): the edge sweeps whose success became a refusal. Each sweeps
+/// an edge over an interval narrower than the effective zero (`[0.5, 0.5]` and
+/// `[0, 1e-14]`), so the swept face has no extent along the edge. Main recorded the same
+/// geometry for the zero and the 1e-14 interval of each curve kind: it swept the whole
+/// curve, not the interval asked for. The refusal is the curve trim's.
+#[cfg(test)]
+mod moved_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::*;
+
+    const ROWS: [&str; 6] = [
+        "interval_1_6_short",
+        "interval_1_6_zero",
+        "interval_2_6_short",
+        "interval_2_6_zero",
+        "interval_4_6_short",
+        "interval_4_6_zero",
+    ];
+
+    #[test]
+    fn each_moved_sweep_of_a_zero_interval_is_refused() {
+        for name in ROWS {
+            let i: Input = crate::case::regression_case(&Runner, name).parse().unwrap();
+            assert_eq!(i.op, 6, "{name}");
+            let width = i.interval[1] - i.interval[0];
+            assert!(
+                (0.0..solidcore::math::EFF_ZERO).contains(&width),
+                "{name}: width {width}"
+            );
+            let error = rust(&i).expect_err(name);
+            assert_eq!(
+                error.operation(),
+                "nurbs::b_spline_curve_n_lib::BSplineCurve::trim",
+                "{name}: {error:?}"
+            );
+        }
     }
 }

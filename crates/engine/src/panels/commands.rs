@@ -1,6 +1,7 @@
 //! Application-owned command execution shared by UI, control and headless MCP.
 //! No Session, document, geometry, dialogs or camera are reachable here.
 mod catalogue;
+pub use catalogue::{bytes_from_plain, plain_bytes, snapshot_from_value, snapshot_value};
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -66,6 +67,21 @@ pub struct WorkspaceDescriptor {
     pub id: WorkspaceId,
     pub title_key: String,
     pub default_preset: String,
+}
+
+/// A stored layout that `CatalogueState::hydrate_lenient` could not read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SkippedEntry {
+    Builtin(String, RawRecord),
+    User(String, RawRecord),
+    Remembered(WorkspaceId, RawRecord),
+}
+
+/// A stored layout exactly as read: its bytes and its recovery bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawRecord {
+    pub bytes: Vec<u8>,
+    pub rejected: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -712,7 +728,7 @@ fn merge_envelopes(current: &LayoutEnvelope, mut next: LayoutEnvelope, registry:
         }
     }
     next.section_order = order;
-    super::persistence::merge_retained_priority_context(&mut next, &current_priorities, &incoming_priorities)?;
+    merge_retained_priority_context(&mut next, &current_priorities, &incoming_priorities)?;
     let layout = next.layout.clone();
     with_live_layout(&next, layout, registry)
 }

@@ -40,6 +40,23 @@ Number measuring optical dispersion as `(nd - 1) / (nF - nC)` at the Fraunhofer 
 - **In SolidCraft:** Glass `model.dispersion.abbe_number`; larger values give less chromatic dispersion.
 - **For translators:** an optical material quantity, not a sample or photon count.
 
+### airfoil
+
+The cross-section shape of a wing, blade or fin, published as points along its outline with the
+chord running from 0 to 1.
+
+A file of those points (`.dat`, in the Selig or the Lednicer layout) is inserted into a sketch as
+one fit point spline through every point, scaled to the chord. The *chord* is the straight line
+from the leading edge (the nose) to the trailing edge; the *trailing edge* is open when the file's
+first and last point are apart, and a line then closes the profile.
+
+- **In SolidCraft:** `sketch.insert_airfoil`; its `chord`, `pivot`, `flip` and `format` keys; the
+  reply's `trailing_edge`, `te_gap`, `deviation` and `bulge`.
+- **Don't use:** profile (a sketch's closed region), section (a loft's or a view's), wing shape.
+- **Elsewhere:** aerofoil (UK), airfoil section, foil.
+- **For translators:** the aerodynamic shape, not a sketch profile and not a loft section; UK
+  English says aerofoil.
+
 ### appearance
 
 How a body, face or component looks on screen and in renders.
@@ -358,10 +375,23 @@ them. The *first moments* are the mass times the centre of mass.
 - **Elsewhere:** moment of inertia, inertia tensor, mass moment of inertia.
 - **For translators:** not the second moment of area of a cross-section, a different quantity.
 
+### multi-trim
+
+Cutting a frame member by the shapes of the other members it meets, so that it fits against them.
+
+A frame's corner cuts, copes, fitted ends, the pieces where members cross and the notches where they
+overlap are all multi-trims; `frame.multi_trim` sets how one corner of a frame is finished.
+
+- **In SolidCraft:** `frame.multi_trim` ("Multi-Trim Corner"); the Frame Member's `corners`
+  parameter and design-file key.
+- **Don't use:** cope (one kind of cut it makes), trim on its own.
+- **Elsewhere:** member trim, coping, end fitting.
+- **For translators:** not a sketch's trim of a curve and not a surface trim.
+
 ### note
 
 Text on a sheet or a view of a drawing, in its fields and its words, that may point at the model
-with a leader. A note on a view moves with the view.
+with a leader. A note on a view moves with the view. Its alignment (left, centre or right, as a title block's) says which end of its text sits at its place, each line standing that way. A note saved before alignments has none: its block is centred and its lines start at the block's left edge, as they always did.
 
 - **In SolidCraft:** `drawing.note.add`, `drawing.note.edit` and `drawing.note.inspect`; a drawing's
   `notes`.
@@ -505,6 +535,21 @@ are kept, not deleted.
 - **For translators:** "history" is the undo history, not the timeline. French had three names
   for this marker while English did.
 
+### section plane
+
+A plane of a Section Analysis; the view hides what lies beyond any section plane.
+
+One section plane hides its normal's side, and the view keeps what every plane keeps: two square
+to each other keep a quarter, three an eighth. A section has at most six.
+
+- **In SolidCraft:** `inspect.section` (`plane`, `add`, `replace`, `remove`, `hide`, `show`, `folder`, `clear`); the
+  `section_plane` of a `view.pick` hit on a cut face; the viewport menu's Section View, Edit Section View
+  and Turn Off Section View; the Analysis folder's Section 1, Section 2 rows.
+- **Don't use:** cutting plane, clip plane, section view (for the plane).
+- **Elsewhere:** section plane, cutting plane, clipping plane.
+- **For translators:** a view-only cut that changes no geometry, not a Split Body or a Plane
+  feature.
+
 ### settings profile
 
 A named set of input and interface preferences that can be switched, exported and imported as
@@ -634,6 +679,16 @@ A program that shows web pages, such as the one that runs SolidCraft's web build
 - **For translators:** not the *browser* panel. Where a language uses one word for both, use the
   CAD word for the panel.
 
+### weld gap
+
+The space left between frame members where they meet, for a weld to fill.
+
+- **In SolidCraft:** the `gap` parameter of `frame.member` and `frame.multi_trim` and of each
+  `corners` entry, and the same design-file keys; the Frame Member dialog's Gap rows.
+- **Don't use:** clearance; gap on its own where it could mean a hem gap.
+- **Elsewhere:** weld gap, root gap, root opening.
+- **For translators:** not a sheet metal hem gap and not a clearance.
+
 ## Words with more than one meaning
 
 An English word that means two things can be translated correctly for only one of them while both
@@ -655,6 +710,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | a named set of preferences | *settings profile* | `settings.profile.*`, Preferences › General |
 | Gap | the space a hem leaves | hem gap | the Hem dialog's Gap row |
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
+| | the space left between welded frame members | *weld gap* | the Frame Member dialog's Gap rows, `gap` |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
 | | a minimum distance field | clearance | the Interference and plastic rules dialogs |
 | | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
@@ -677,6 +733,12 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 Some translations show the clash today: Japanese and Chinese show a hole's flat bottom with the
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the
 Normal line type as "normal vector".
+
+## Mounting plate
+
+A separate, constant-thickness plate attached to a structural member's planar face,
+used as a base plate or bolted end plate. A bolt pattern describes the through holes
+in the plate; creating one does not drill or join the supporting member.
 
 ## Two commands, one label
 

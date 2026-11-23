@@ -26,6 +26,10 @@ use super::{R, Unsupported};
 /// Halvings one span's extent may take.
 const MAX_EXTENT_PIECES: usize = 4096;
 
+/// Knot spans an extruded circle's arc may be read over, and the samples taken in each.
+const MAX_SPANS: usize = 1 << 16;
+const SAMPLES_PER_SPAN: u32 = 8;
+
 const NOT_ANALYTIC: Unsupported = Unsupported::NotYet("revolved surfaces other than planes, cylinders, cones, spheres and tori");
 
 /// `brep` with every revolution and extruded circle replaced by its analytic surface (borrowed
@@ -48,11 +52,10 @@ pub(super) fn analytic(brep: &b::Brep) -> R<Cow<'_, b::Brep>> {
             }
             b::Surface::RationalSpline { u_knots, v_knots, homogeneous } => {
                 let found = extruded_circle(u_knots, v_knots, homogeneous, trimmed(brep, f)?, 1e-9 * size.max(1.0));
-                // A face's trims run at most one turn round a cylinder (SMLib refuses more).
-                if found.as_ref().is_some_and(|(_, range)| range[0][1] - range[0][0] > TAU * (1.0 + 1e-9)) {
-                    return Err(Unsupported::Invalid("a cylinder's face whose trims run more than one turn round"));
-                }
-                found
+                // A face's trims run at most one turn round a cylinder (SMLib refuses more): one
+                // that winds further (a thread's flank) stays the spline it is, which holds any
+                // number of turns.
+                found.filter(|(_, range)| range[0][1] - range[0][0] <= TAU * (1.0 + 1e-9))
             }
             _ => None,
         };
@@ -70,7 +73,11 @@ pub(super) fn analytic(brep: &b::Brep) -> R<Cow<'_, b::Brep>> {
         let flip = agree((&f.surface, f.domain), (&surface, range), tol)?;
         let face = out.get_or_insert_with(|| brep.clone()).faces.get_mut(i).ok_or(Unsupported::Invalid("face"))?;
         face.surface = surface;
-        face.domain = range;
+        // A face with a NURBS form keeps its domain: it is the form's (its trims are on the form),
+        // not the analytic surface's range.
+        if f.nurbs.is_none() {
+            face.domain = range;
+        }
         if flip {
             turned.push(i);
         }
@@ -116,20 +123,43 @@ fn extruded_circle(u_knots: &[f64], v_knots: &[f64], net: &[Vec<[f64; 4]>], trim
     }
     let x = (arc.point(arc_range[0])? - center).normalized()?;
     let y = z.cross(x);
-    // The arc's angles from x, unwrapped along its range.
+    // The arc's angles from x, unwrapped along its range one knot span at a time: a span of a
+    // rational circle is under half a turn, so a few samples in each advance by a small part of
+    // a turn however many turns the whole range winds (a count of samples over the whole range
+    // advances a turn or more between two where it winds far, and reads them as the same angle).
+    // A step of a quarter turn or more is no span of a circle: not an extruded circle.
+    let (low, high) = (arc_range[0].min(arc_range[1]), arc_range[0].max(arc_range[1]));
+    let mut cuts: Vec<f64> = arc_knots.iter().copied().filter(|k| *k > low && *k < high).collect();
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup();
+    if cuts.len() > MAX_SPANS {
+        return None;
+    }
+    let mut stations = vec![low];
+    stations.extend(cuts);
+    stations.push(high);
+    if arc_range[0] > arc_range[1] {
+        stations.reverse();
+    }
     let mut angle = 0.0;
     let mut prev = 0.0;
-    for i in 1..=32 {
-        let q = arc.point(arc_range[0] + (arc_range[1] - arc_range[0]) * f64::from(i) / 32.0)? - center;
-        let mut a = q.dot(y).atan2(q.dot(x));
-        while a - prev > std::f64::consts::PI {
-            a -= TAU;
+    for span in stations.windows(2) {
+        let (from, to) = (*span.first()?, *span.get(1)?);
+        for i in 1..=SAMPLES_PER_SPAN {
+            let q = arc.point(from + (to - from) * f64::from(i) / f64::from(SAMPLES_PER_SPAN))? - center;
+            let mut a = q.dot(y).atan2(q.dot(x));
+            while a - prev > std::f64::consts::PI {
+                a -= TAU;
+            }
+            while a - prev < -std::f64::consts::PI {
+                a += TAU;
+            }
+            if (a - prev).abs() >= FRAC_PI_2 {
+                return None;
+            }
+            prev = a;
+            angle = a;
         }
-        while a - prev < -std::f64::consts::PI {
-            a += TAU;
-        }
-        prev = a;
-        angle = a;
     }
     let height = |s: f64| (s - line_knots[1]) / (line_knots[2] - line_knots[1]) * d.len();
     let sorted = |a: f64, b: f64| if a <= b { [a, b] } else { [b, a] };

@@ -8,7 +8,7 @@ use solidcraft_engine::crash;
 
 /// The command's usage, from the same lines the top-level usage lists.
 fn usage() -> String {
-    crate::command_usage("crashes")
+    crate::command_usage("crashes", &[])
 }
 
 pub fn run(args: &[String]) -> Result<(), String> {

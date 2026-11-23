@@ -170,6 +170,50 @@ fn skip_within_leaves_out_a_components_own_pairs() {
     }
 }
 
+/// A bought assembly with its envelope, and a part beside it: a 10 mm housing with a 4 mm insert
+/// in a component, the envelope around both, and a bracket 1.5 mm clear of the housing.
+fn bought_with_envelope(s: &mut Session) {
+    run(s, "component.create", json!({"name": "Bought"}));
+    cube(s, "Housing", 10.0, [0.0, 0.0, 0.0]);
+    run(s, "component.create", json!({"name": "Insert part"}));
+    cube(s, "Insert", 4.0, [8.0, 3.0, 3.0]);
+    run(s, "component.activate", json!({"component": "root"}));
+    run(s, "solid.bounding_solid", json!({"component": "Bought", "body_name": "Envelope"}));
+    cube(s, "Bracket", 10.0, [13.5, 0.0, 0.0]);
+}
+
+/// A component's envelope is left out unless named; with `envelopes` it is checked instead of
+/// the bodies inside it, and it is never paired with a body inside it.
+#[test]
+fn an_envelope_stands_in_for_its_components_bodies_when_asked() {
+    let mut s = Session::default();
+    bought_with_envelope(&mut s);
+    // By default: the bodies themselves. The insert sits in the housing; the bracket is 1.5 mm
+    // past the insert (which reaches x = 12).
+    let all = run(&mut s, "inspect.clearance", json!({"clearance": 2}));
+    let overlaps: Vec<[String; 2]> = all["overlaps"].as_array().into_iter().flatten().map(pair).collect();
+    assert_eq!(overlaps, vec![["Housing".to_string(), "Insert".to_string()]], "{all}");
+    let near: Vec<[String; 2]> = all["near"].as_array().into_iter().flatten().map(pair).collect();
+    assert_eq!(near, vec![["Bracket".to_string(), "Insert".to_string()]], "{all}");
+    assert_eq!(all["bodies"], 3, "the envelope is left out: {all}");
+    // With envelopes: the envelope (0..12 along X) and the bracket, 1.5 mm apart, and nothing else.
+    let env = run(&mut s, "inspect.clearance", json!({"clearance": 2, "envelopes": true}));
+    assert_eq!(env["overlaps"].as_array().map(Vec::len), Some(0), "{env}");
+    let near: Vec<[String; 2]> = env["near"].as_array().into_iter().flatten().map(pair).collect();
+    assert_eq!(near, vec![["Bracket".to_string(), "Envelope".to_string()]], "{env}");
+    assert!((f(&env["near"][0]["distance_mm"]) - 1.5).abs() < 1e-6, "{env}");
+    assert_eq!(env["bodies"], 2, "{env}");
+    // A body named inside an envelope means the envelope; one named against it too.
+    let named = run(&mut s, "inspect.clearance", json!({"bodies": ["Bracket"], "against": ["Insert"], "clearance": 2, "envelopes": true}));
+    assert_eq!(pair(&named["near"][0]), ["Bracket", "Envelope"], "{named}");
+    // Named without `envelopes`, the envelope is checked, but never against what it encloses.
+    let named = run(&mut s, "inspect.clearance", json!({"bodies": ["Envelope", "Housing", "Bracket"], "clearance": 2}));
+    assert_eq!(named["overlaps"].as_array().map(Vec::len), Some(0), "{named}");
+    let near: Vec<[String; 2]> = named["near"].as_array().into_iter().flatten().map(pair).collect();
+    assert_eq!(near, vec![["Bracket".to_string(), "Envelope".to_string()]], "{named}");
+    assert!(s.execute("inspect.clearance", &json!({"envelopes": "yes"})).is_err());
+}
+
 /// Parameters out of range are refused, not guessed at.
 #[test]
 fn bad_parameters_are_refused() {
@@ -240,6 +284,34 @@ fn a_small_gap_past_a_corner_is_not_contact() {
     }
 }
 
+/// A part in the missing quarter of an L-shaped block is 0.3 mm from both inside walls.
+/// Its top corners are on the top's support plane, outside the trimmed face (#16393).
+#[test]
+fn a_small_gap_in_an_inside_corner_is_not_contact() {
+    for gap in [0.3, 0.0] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 200, "width": 200, "height": 10, "corner": [-100, -100, 0], "body_name": "Block"}));
+        run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 12, "corner": [0, 0, -1], "operation": "new", "body_name": "Cut"}));
+        run(&mut s, "solid.combine", json!({"operation": "cut", "target": "Block", "tools": ["Cut"]}));
+        run(&mut s, "solid.box", json!({"length": 90, "width": 90, "height": 10, "corner": [gap, gap, 0], "operation": "new", "body_name": "Part"}));
+        for params in [json!({"clearance": 1, "nearest": 1}), json!({"nearest": 1})] {
+            let r = run(&mut s, "inspect.clearance", params.clone());
+            assert_eq!(r["unchecked"], json!([]), "{gap}: {r}");
+            assert_eq!(r["overlaps"], json!([]), "{gap}: {r}");
+            for body in ["Block", "Part"] {
+                assert!((f(&r["nearest"][body][0]["distance_mm"]) - gap).abs() < 1e-9, "{gap}: {r}");
+            }
+            if params.get("clearance").is_some() {
+                assert_eq!(r["near"].as_array().map(Vec::len), Some(1), "{gap}: {r}");
+                assert!((f(&r["near"][0]["distance_mm"]) - gap).abs() < 1e-9, "{gap}: {r}");
+                assert!(r["near"][0].get("exact").is_none(), "{gap}: {r}");
+            } else {
+                assert_eq!(r["near"], json!([]), "{gap}: {r}");
+            }
+        }
+    }
+}
+
 /// #2283: a knuckle (Ø6, z 3.7 to 8.3, with a 150 mm arm) turning between two frame bands (Ø6,
 /// z -1.5 to 3.5 and 8.5 to 13.5) on a shared axis is 0.2 mm from them at every angle. Its axis
 /// tilted 1.5e-6 rad (as a STEP round trip leaves it), the band's rim lies on the knuckle's
@@ -269,7 +341,9 @@ fn a_hinge_gap_is_measured_on_the_trimmed_faces_at_every_angle() {
     for deg in 30..=80 {
         run(&mut s, "solid.move", json!({"bodies": ["Temple"], "axis": [0, 0, 1], "angle": "1 deg"}));
         let r = run(&mut s, "inspect.clearance", json!({"bodies": ["Temple"], "against": ["Frame"], "clearance": 0.5, "nearest": 1}));
+        assert_eq!(r["unchecked"], json!([]), "{deg}°: {r}");
         let near = &r["near"][0];
+        assert!(near.get("exact").is_none(), "{deg}°: measured on the exact faces: {r}");
         assert!((f(&near["distance_mm"]) - 0.2).abs() < 1e-4, "{deg}°: {r}");
         assert!((f(&r["nearest"]["Temple"][0]["distance_mm"]) - 0.2).abs() < 1e-4, "{deg}°: {r}");
         // The witness points lie on the bodies: the frame's at a band end, the knuckle's at one

@@ -38,11 +38,10 @@ pub fn default_dir() -> Option<PathBuf> {
     } else {
         env("XDG_DATA_HOME").or_else(|| env("HOME").map(|h| h.join(".local/share")))?
     };
-    let (dir, legacy) = dirs_under(&long_names(&root), cfg!(windows) || cfg!(target_os = "macos"));
-    // Compatibility shim (docs/compatibility.md): autosaves made before the rename (or, in the
-    // Flatpak sandbox, under an earlier app id) are copied to the new folder on first launch; the
-    // old folder is left as it was.
-    for old in solidcraft_io::legacy_flatpak_paths(&dir).into_iter().chain([legacy]) {
+    let dir = dir_under(&long_names(&root), cfg!(windows) || cfg!(target_os = "macos"));
+    // Compatibility shim (docs/compatibility.md): autosaves made in the Flatpak sandbox under an
+    // earlier app id are copied to the new folder on first launch; the old folder is left as it was.
+    for old in solidcraft_io::legacy_flatpak_paths(&dir) {
         if let Err(e) = solidcraft_io::adopt_legacy_dir(&dir, &old) {
             log::warn!("recovery: could not copy {} to {}: {e}", old.display(), dir.display());
         }
@@ -80,11 +79,10 @@ pub fn cache_dir() -> Option<PathBuf> {
     }
 }
 
-/// The recovery folder under the per-user data `root`, and the folder earlier releases used.
-/// Windows and macOS name the app's folder in title case, other systems in lower case.
-fn dirs_under(root: &Path, title_case: bool) -> (PathBuf, PathBuf) {
-    let (name, legacy) = if title_case { ("SolidCraft", "SolveCraft") } else { ("solidcraft", "solvecraft") };
-    (root.join(name).join("recovery"), root.join(legacy).join("recovery"))
+/// The recovery folder under the per-user data `root`. Windows and macOS name the app's folder
+/// in title case, other systems in lower case.
+fn dir_under(root: &Path, title_case: bool) -> PathBuf {
+    root.join(if title_case { "SolidCraft" } else { "solidcraft" }).join("recovery")
 }
 
 /// What an entry's `<id>.json` holds.
@@ -129,8 +127,7 @@ fn read_entry(path: &Path) -> Option<Entry> {
     serde_json::from_slice(&bytes).ok()
 }
 
-/// An entry's design: `<id>.sc`, or `<id>.solidcraft` / `<id>.solvecraft` for an autosave an
-/// earlier release wrote (compatibility shim, docs/compatibility.md).
+/// An entry's design: `<id>.sc`, or `<id>.solidcraft` for an autosave an earlier release wrote (compatibility shim, docs/compatibility.md).
 fn design_file(dir: &Path, id: &str) -> PathBuf {
     solidcraft_io::DESIGN_EXTS.iter().map(|ext| file(dir, id, ext)).find(|p| p.is_file()).unwrap_or_else(|| file(dir, id, solidcraft_io::DESIGN_EXT))
 }
@@ -484,15 +481,14 @@ impl Autosaver {
 mod tests {
     #[test]
     fn autosave_from_a_legacy_folder_is_listed_and_loads() {
-        // Autosaves written by earlier releases: `.solvecraft` (before the rename) and
-        // `.solidcraft` (before designs were saved as `.sc`).
+        // Autosaves written by earlier releases: `.solidcraft` (before designs were saved as `.sc`).
         for ext in solidcraft_io::LEGACY_DESIGN_EXTS {
             let d = std::env::temp_dir().join(format!("solidcraft-recovery-legacy-{ext}-{}", std::process::id()));
             let _ = fs::remove_dir_all(&d);
             fs::create_dir_all(&d).unwrap();
             let id = "1-2-3";
             let doc = Document::default();
-            fs::write(d.join(format!("{id}.{ext}")), solidcraft_io::write_design(&doc)).unwrap();
+            fs::write(d.join(format!("{id}.{ext}")), solidcraft_io::write_design(&doc).unwrap()).unwrap();
             let entry = Entry { id: id.into(), path: Some(format!("/d/part.{ext}")), name: "part".into(), saved_at: 1, features: 0 };
             fs::write(d.join(format!("{id}.json")), serde_json::to_vec(&entry).unwrap()).unwrap();
             assert_eq!(orphans(&d).iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), [id], ".{ext}");
@@ -519,11 +515,9 @@ mod tests {
     }
 
     #[test]
-    fn recovery_dirs_and_their_legacy_names() {
-        let (dir, legacy) = super::dirs_under(Path::new("/data"), false);
-        assert_eq!((dir.as_path(), legacy.as_path()), (Path::new("/data/solidcraft/recovery"), Path::new("/data/solvecraft/recovery")));
-        let (dir, legacy) = super::dirs_under(Path::new("/data"), true);
-        assert_eq!((dir.as_path(), legacy.as_path()), (Path::new("/data/SolidCraft/recovery"), Path::new("/data/SolveCraft/recovery")));
+    fn recovery_dirs_are_named_per_platform() {
+        assert_eq!(super::dir_under(Path::new("/data"), false), Path::new("/data/solidcraft/recovery"));
+        assert_eq!(super::dir_under(Path::new("/data"), true), Path::new("/data/SolidCraft/recovery"));
     }
 
     use super::*;
@@ -723,7 +717,7 @@ mod tests {
         let d = dir("discard");
         fs::create_dir_all(&d).unwrap();
         let part = d.join("part.solidcraft");
-        fs::write(&part, solidcraft_io::write_design(&Document::default())).unwrap();
+        fs::write(&part, solidcraft_io::write_design(&Document::default()).unwrap()).unwrap();
         let mut s = Session::default();
         let discard = |s: &mut Session, id: &str| s.execute("doc.recovery_discard", &json!({"dir": d.to_string_lossy(), "id": id}));
         let e = discard(&mut s, "part").unwrap_err();
@@ -757,7 +751,7 @@ mod tests {
         assert_eq!(r["features"], 1, "{r}");
         assert!(orphans(&d).is_empty() && !file(&d, &id, "json").exists() && !file(&d, &id, solidcraft_io::DESIGN_EXT).exists());
         let part = d.join("part.solidcraft");
-        fs::write(&part, solidcraft_io::write_design(&Document::default())).unwrap();
+        fs::write(&part, solidcraft_io::write_design(&Document::default()).unwrap()).unwrap();
         assert!(t.execute("doc.recover", &json!({"dir": d.to_string_lossy(), "id": "part", "discard": true})).is_err());
         assert!(part.exists());
         let _ = fs::remove_dir_all(&d);
@@ -797,7 +791,7 @@ mod tests {
         boundary.name = "x".repeat((1 << 20) - base_len);
         let oversized = Entry { id: "oversized".into(), name: "x".repeat(1 << 20), ..good.clone() };
         for entry in [&good, &boundary, &oversized] {
-            fs::write(file(&d, &entry.id, solidcraft_io::DESIGN_EXT), solidcraft_io::write_design(&Document::default())).unwrap();
+            fs::write(file(&d, &entry.id, solidcraft_io::DESIGN_EXT), solidcraft_io::write_design(&Document::default()).unwrap()).unwrap();
             fs::write(file(&d, &entry.id, "json"), serde_json::to_vec(entry).unwrap()).unwrap();
         }
         assert_eq!(fs::metadata(file(&d, "boundary", "json")).unwrap().len(), 1 << 20);
@@ -821,7 +815,7 @@ mod tests {
         let wrong = Entry { id: "other".into(), path: Some("/unrelated-design.solidcraft".into()), name: "wrong".into(), saved_at: 1, features: 0 };
         fs::write(file(&d, "actual", "json"), serde_json::to_vec(&wrong).unwrap()).unwrap();
         for id in ["actual", "other"] {
-            fs::write(file(&d, id, solidcraft_io::DESIGN_EXT), solidcraft_io::write_design(&Document::default())).unwrap();
+            fs::write(file(&d, id, solidcraft_io::DESIGN_EXT), solidcraft_io::write_design(&Document::default()).unwrap()).unwrap();
         }
         assert!(orphans(&d).is_empty(), "metadata under another ID must not be offered");
         assert!(load(&d, "actual").is_err(), "a mismatched path must not become the next save target");

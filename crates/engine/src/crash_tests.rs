@@ -525,6 +525,55 @@ fn a_journal_left_behind_by_a_second_install_is_not_reported_as_an_unclean_exit(
     let _ = fs::remove_dir_all(&d);
 }
 
+/// An idle session of another version that ended without a clean exit was most likely closed by
+/// an update or an installer: it is not reported (#17890). The same version idle, or another
+/// version in a command, while starting up, before its first startup step or with a journal
+/// that stopped recording, still is.
+#[test]
+fn an_idle_unclean_exit_of_another_version_is_not_reported() {
+    let d = fresh_dir("update-exit");
+    fs::create_dir_all(&d).unwrap();
+    let journal = |name: &str, version: &str, more: &[&str]| {
+        let p = d.join(format!("{name}.jsonl"));
+        let mut lines = vec![format!(r#"{{"start":"2026-11-15T16:01:58Z","version":"{version}"}}"#), r#"{"base":"new"}"#.to_string()];
+        lines.extend(more.iter().map(|l| l.to_string()));
+        fs::write(&p, lines.join("\n")).unwrap();
+        p
+    };
+    let running = format!(r#"{{"phase":"{RUNNING}","ms":900}}"#);
+    let idle = [running.as_str(), r#"{"run":"solid.box","params":{"length":1}}"#, r#"{"ok":true}"#];
+    unclean_exit(&d, &build(), &journal("older-idle", "9.9.8", &idle));
+    assert!(list(&d).is_empty(), "{:?}", list(&d));
+    let in_command = [running.as_str(), r#"{"run":"solid.fillet","params":{"radius":1}}"#];
+    unclean_exit(&d, &build(), &journal("older-busy", "9.9.8", &in_command));
+    let starting = [r#"{"phase":"device creation","ms":400}"#];
+    unclean_exit(&d, &build(), &journal("older-starting", "9.9.8", &starting));
+    unclean_exit(&d, &build(), &journal("same-idle", "9.9.9", &idle));
+    let mut messages: Vec<String> = list(&d).into_iter().map(|s| s.message).collect();
+    messages.sort();
+    assert_eq!(messages.len(), 3, "{messages:?}");
+    assert!(messages.iter().any(|m| m.starts_with("SolidCraft 9.9.8") && m.contains("while running `solid.fillet`")), "{messages:?}");
+    assert!(messages.iter().any(|m| m.starts_with("SolidCraft 9.9.8") && m.contains("during startup (device creation")), "{messages:?}");
+    assert!(messages.iter().any(|m| m.starts_with("SolidCraft 9.9.9") && m.contains("between commands")), "{messages:?}");
+    let _ = fs::remove_dir_all(&d);
+    // Each on its own, as they would share the report above (the signature leaves out numbers):
+    // a run with no startup step recorded never got up, so it did not end idle; and a journal
+    // that stopped recording may have missed the command the app was in.
+    let full = [running.as_str(), r#"{"full":true}"#];
+    for (name, more) in [("older-no-phase", &[][..]), ("older-full", &full[..])] {
+        let d = fresh_dir(name);
+        fs::create_dir_all(&d).unwrap();
+        let p = d.join(format!("{name}.jsonl"));
+        let mut lines = vec![r#"{"start":"2026-11-15T16:01:58Z","version":"9.9.8"}"#.to_string(), r#"{"base":"new"}"#.to_string()];
+        lines.extend(more.iter().map(|l| l.to_string()));
+        fs::write(&p, lines.join("\n")).unwrap();
+        unclean_exit(&d, &build(), &p);
+        let messages: Vec<String> = list(&d).into_iter().map(|s| s.message).collect();
+        assert!(messages.len() == 1 && messages[0].starts_with("SolidCraft 9.9.8"), "{name}: {messages:?}");
+        let _ = fs::remove_dir_all(&d);
+    }
+}
+
 #[test]
 fn an_abort_is_reported_at_the_next_start_with_a_replay() {
     let d = fresh_dir("abort");
@@ -768,7 +817,7 @@ fn fake_report(dir: &Path, secs: u64, sig: u64, kind: &str) -> String {
 fn a_report_from_an_earlier_release_still_finds_its_design() {
     let d = fresh_dir("legacy-design");
     let id = fake_report(&d, 1_700_000_000, 7, "command_panic");
-    fs::write(d.join(&id).join("design.solidcraft"), solidcraft_io::write_design(&solidcraft_doc::Document::default())).unwrap();
+    fs::write(d.join(&id).join("design.solidcraft"), solidcraft_io::write_design(&solidcraft_doc::Document::default()).unwrap()).unwrap();
     let v = read(&d, &id).unwrap();
     assert!(v["design_path"].as_str().unwrap().ends_with("design.solidcraft"), "{v}");
     let _ = fs::remove_dir_all(&d);
