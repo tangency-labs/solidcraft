@@ -37,14 +37,12 @@ use std::f64::consts::PI;
 const H: f64 = 12.0;
 const BIG: f64 = 3.0;
 
-/// Every flag on, as SolidCraft's backend runs blends (`fillet_refuse_rounds_breaking_through`
-/// off, its preset).
+/// Every flag on, as SolidCraft's backend runs blends.
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    let mut fixes = UpstreamFixes::all();
-    fixes.fillet_refuse_rounds_breaking_through = false;
-    k.fixes = fixes;
-    k
+    Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Default::default()
+    }
 }
 
 fn pick(k: &Kernel, b: &Brep, q: [f64; 3]) -> EdgeId {
