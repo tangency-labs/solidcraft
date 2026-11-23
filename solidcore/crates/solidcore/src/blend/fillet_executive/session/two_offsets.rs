@@ -500,6 +500,7 @@ impl FilletSession<'_> {
                 if !(d == d2 && d.is_finite() && d > 0.0) {
                     return Err(invalid("a knife edge's chamfer distances"));
                 }
+                below_resolution(id, [d, d2], self.objects.target.tolerance())?;
                 first.push(d);
                 second.push(d);
                 chamfers.push(None);
