@@ -79,6 +79,12 @@ pub struct InsertDrawingKeys {
     /// height). Default: geometry. "viewbox" is for SVG drawings that have a sheet; a DXF has none.
     #[serde(default)]
     pub size_from: Option<DrawingSizeFrom>,
+    /// The dots per inch an SVG's pixels (its user units, and lengths without a unit) are read at,
+    /// 1 to 10000: a file drawn at 72 dpi comes in at the size it was drawn at with 72. Lengths
+    /// with their own unit (`mm`, `in`, `pt`) keep it. Default: 96, as CSS has it. For SVG
+    /// drawings; a DXF has no pixels.
+    #[serde(default)]
+    pub dpi: Option<f64>,
     /// The distance in mm within which ends join into one point, 1e-9 to 10 (a value outside is
     /// brought inside; one that is not above 0 reads as the default). Default: 0.0001.
     #[serde(default)]
