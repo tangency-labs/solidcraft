@@ -98,6 +98,19 @@ pub fn edge_distance(body: &Body, edge: usize, at: Vec3) -> Result<Option<f64>> 
     })
 }
 
+/// The point of edge `edge` of `body` (its index in the body's edge order) at the middle of its
+/// parameter interval, on the edge's own curve: on that edge alone, clear of the vertices it
+/// shares with the edges beside it. `None` for an edge that is not there or whose curve does not
+/// evaluate.
+pub fn edge_middle(body: &Body, edge: usize) -> Result<Option<Vec3>> {
+    body.require_brep("an edge's middle")?;
+    crate::guard("edge middle", || {
+        let Some(edge) = body.record().edges.get(edge) else { return Ok(None) };
+        let [t0, t1] = edge.interval;
+        Ok(CurveEval::new(edge.parameters()).ok().and_then(|c| c.point(0.5 * (t0 + t1))).filter(|p| p.is_finite()))
+    })
+}
+
 /// Edge `edge`'s curve, and its nearest of [`PICK_SAMPLES`] + 1 even samples to `at` (how far, and
 /// which). `None` for a periodic face's own seam, a degenerate edge (a pole), or a curve that does
 /// not evaluate.

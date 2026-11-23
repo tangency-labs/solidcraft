@@ -73,7 +73,7 @@ pub use solidcore::sweep::api_brep::TaperCornerRefusal as CornerRefusal;
 use crate::body::{finish, Body, Expect};
 use crate::error::status;
 use crate::order::{self, Order};
-use crate::session::{run, with_body};
+use crate::session::{read_body, run, with_body};
 use crate::{Error, Result};
 
 /// A call's own refusal, else the value: as the kernel's calls answer inside [`run`].
@@ -1670,48 +1670,15 @@ pub fn drop_curves(
     if !tolerance_ok(tolerance) {
         return Err(Error::Argument);
     }
-    with_body("drop_curves", body, |k, b| {
+    read_body("drop_curves", body, |k, b| {
         let given = parsed!(parse(k, curves));
         let face = parsed!(face_of(b, order, face));
-        let domain = b.face(face)?.uv_domain;
-        let Some(owned) = b.face(face)?.surface.as_ref() else {
-            return Ok(Err(Error::Argument));
-        };
-        // A standalone copy (its owner not copied): the drop and lift work over the face's
-        // parameter box, and a face-owned surface's solves would ask for the face's trimmed
-        // cache, which they are not given here.
-        let surface = owned.copy(k)?;
+        let dropped = parsed!(dropped_on(k, b, face, &given.curves, tolerance)?);
         let mut out = Vec::new();
-        for c in &given.curves {
-            let dropped = match surface.drop_and_trim_curve::<NoObject>(
-                k,
-                &domain,
-                c,
-                &c.natural_interval(),
-                tolerance,
-                true,
-                false,
-                None,
-            ) {
-                Ok(d) => d,
-                Err(e) => return Ok(Err(status(e))),
-            };
-            for uv in &dropped.uv_curves {
-                let lifted = match surface.lift_curve(
-                    k,
-                    &domain,
-                    uv,
-                    &uv.natural_interval(),
-                    tolerance,
-                    false,
-                ) {
-                    Ok(l) => l,
-                    Err(e) => return Ok(Err(status(e))),
-                };
-                match put_curve(&lifted.curve)? {
-                    Ok(x) => out.push(x),
-                    Err(e) => return Ok(Err(e)),
-                }
+        for c in dropped.iter().flatten() {
+            match put_curve(c)? {
+                Ok(x) => out.push(x),
+                Err(e) => return Ok(Err(e)),
             }
         }
         Ok(if out.is_empty() {
@@ -1720,6 +1687,52 @@ pub fn drop_curves(
             Ok(out)
         })
     })?
+}
+
+/// The kernel's curves of [`drop_curves`]: for each curve of `given`, in order, its pieces
+/// dropped square onto the surface of `face` of `b` over the face's parameter box and lifted
+/// back to 3D, each within `tolerance`; none for a curve that does not land on the box. For
+/// the families outside this module that cut a face along them (`crate::trim`).
+pub(crate) fn dropped_on(
+    k: &Kernel,
+    b: &Brep,
+    face: FaceId,
+    given: &[KCurve],
+    tolerance: f64,
+) -> solidcore::Result<Out<Vec<Vec<KCurve>>>> {
+    let domain = b.face(face)?.uv_domain;
+    let Some(owned) = b.face(face)?.surface.as_ref() else {
+        return Ok(Err(Error::Argument));
+    };
+    // A standalone copy (its owner not copied): the drop and lift work over the face's
+    // parameter box, and a face-owned surface's solves would ask for the face's trimmed
+    // cache, which they are not given here.
+    let surface = owned.copy(k)?;
+    let mut out = Vec::new();
+    for c in given {
+        let dropped = match surface.drop_and_trim_curve::<NoObject>(
+            k,
+            &domain,
+            c,
+            &c.natural_interval(),
+            tolerance,
+            true,
+            false,
+            None,
+        ) {
+            Ok(d) => d,
+            Err(e) => return Ok(Err(status(e))),
+        };
+        let mut pieces = Vec::new();
+        for uv in &dropped.uv_curves {
+            match surface.lift_curve(k, &domain, uv, &uv.natural_interval(), tolerance, false) {
+                Ok(l) => pieces.push(l.curve),
+                Err(e) => return Ok(Err(status(e))),
+            }
+        }
+        out.push(pieces);
+    }
+    Ok(Ok(out))
 }
 
 /// A curve's record form ([`Curve::to_record`]): what it is, the NURBS form a circle's

@@ -738,8 +738,9 @@ preview. A Finish already running can still commit. Reconnect with a fresh Begin
 
 ### Reading the solved joint pose
 
-A client that follows a joint while someone adjusts Drive Joints asks `control.joint_pose`,
-which says what the preview shows: the joints it posed and the values the solver reached.
+A client that follows a joint while someone adjusts Drive Joints or drags a part along its
+joints asks `control.joint_pose`. The reply says what the preview shows: the joints it posed and
+the values the solver reached.
 
 ```text
 {"id":1,"method":"control.joint_pose","token":"…"}
@@ -752,9 +753,10 @@ which says what the preview shows: the joints it posed and the values the solver
 - `error` says why the current inputs make no preview (null when there is none).
 - `pose` is null when no solved joint preview is up. Otherwise:
   - `source` is what posed it: the command that opened the preview (`joint.drive` for Drive
-    Joints, `control.joint_drive` for a movement over this channel).
-  - `generation` counts the completed poses: it moves when the pose moves, and is not the
-    design's revision.
+    Joints, `control.joint_drive` for a movement over this channel, `joint.reach` for a part
+    dragged along its joints).
+  - `generation` counts the completed poses across all these sources. It moves when a new
+    completed pose is shown, and is not the design's revision.
   - `joints` are the joints the preview posed: the ones it drove and the ones it moved with
     them (a motion link's follower, a joint a closed loop moved). Each gives its id, its name
     and its values, as `joint.inspect` and `joint.drive` give them (`deg` for an angle, `mm` for
@@ -764,6 +766,12 @@ The pose is read, not computed: it is the state the viewport shows, so reading i
 nothing in the design, its history, its dirty state or its revision. A preview that poses no
 joint leaves no pose. Cancelling the movement, closing the dialog, switching design and
 changing the design all drop it.
+
+A native drag reports its completed CPU pose after the drag's existing solve. Reading does not
+advance the drag. Release clears the preview and keeps the drag's one Undo step; Escape clears
+it without applying it. A drag that already writes each frame to the design (for example, with
+contact sets enabled or uncaptured moves present) has no scratch pose: use the committed joint
+queries for those frames.
 
 ### Following the design
 
@@ -1110,7 +1118,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `browser_hover_shows_origin` (default true: an Origin plane, axis or point row under the pointer in the browser, the design's or a part's, shows that item in the view, and a hidden one only while the pointer is on its row, its eye and saved visibility unchanged and not pickable, #15658; false: only an origin plane already drawn lights up, as before; Preferences › Design › Origin)
 - `browser_scroll_wheel` (`automatic` default, `always_zoom` or `always_pan`; browser only; small vertical steps pan in automatic and always pan, and automatic shows a one-time notice offering always zoom when the first scrolls look like a steady smooth-scroll mouse wheel; always zoom treats unmodified vertical scroll as a wheel, so two-finger pan needs Shift or the navigation modifiers)
 - `browser_wheel_hint_dismissed` (default false; browser only: true once the one-time scroll-wheel notice was answered "Don't ask again"; no control in Preferences)
-- `check_updates` (default true; [updates](book/src/guide/updates.md)). When the organization's policy sets it ([managed deployment](book/src/guide/managed-deployment.md)), the reply has `policy: {locked: ["check_updates"], check_updates: bool}` with the value in force (any policy adds that object, with `organization` when it names one; `locked` lists what it locks), `check_updates` itself stays the person's stored choice, and a request that changes it is refused
+- `check_updates` (default true; [updates](book/src/guide/updates.md)). When the organization's policy sets it ([managed deployment](book/src/guide/managed-deployment.md)), the reply has `policy: {locked: ["check_updates"], check_updates: bool, settings: {check_updates: bool}}` with the value in force (any policy adds that object, with `organization` when it names one; `locked` lists every setting it sets and `settings` their values in force), `check_updates` itself stays the person's stored choice, and a request that changes it is refused
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
 - `constraint_glyph_scale` (1…3, default 1: how large the open sketch's constraint glyphs are drawn, a multiple of their 15-pixel badge, letter and icon included; Preferences › Sketch › Constraint glyph size, #10794)
 - `default_units`
@@ -1190,6 +1198,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `plugin_grants` (default `{}`): approved command groups and named folder grants by plugin id, at most 256 ids, four groups and 32 folders each; `plugin.install` validates and stores its optional `approve` object, and `plugin.remove` and `plugin.revoke` delete the record. The app also keeps the records in the plugins folder's grant store, shared with the command line and headless MCP when they run with `--keep-plugin-approvals` ([Headless use](plugins.md#headless-use)). Approval folders use `{name, path, read, write}`; stored folder grants use `folder` for the local path. Omitting `approve` grants nothing, including on replacement; explicit approvals replace the set, dropping stale grants. Package permissions still limit every run. Stored grants and removal survive closing or resetting Preferences. `dry_run: true` validates and describes the package without writing files or grants.
 - `print_face_highlight` (0…1, default 0.2: how strongly a print face is tinted and outlined in the view, #8429; 0 draws no highlight)
 - `quick_measure` (default false: the selection's length, area or distance in the view's bottom right corner, the rect `measure:quick`; #7000)
+- `region_pick_takes_holes` (default false: a click inside a closed profile for the Entities of Sketch Transform, Move/Copy, Scale, Mirror and the sketch patterns picks the curves of its outline, and a shape inside it is picked by a click inside that shape, #14496; true also picks the curves of its holes, as before)
 - `remember_stand_up` (default true: reuse the stand-up or Leave it answer per SHA-256 of the original file bytes, at most 500 answers with oldest-first eviction; false restores asking on every open)
 - `remember_toolbar_tab` (default true: each design tab comes back on the toolbar tab it showed when it was left, with its contextual tab and the tab a sketch returns to, also when `keep_work_on_tab_switch` is off; a new design starts on MODEL, and a tab no longer shown falls back as usual; false: a switch shows MODEL unless `keep_work_on_tab_switch` keeps the tab, as before)
 - `render_legacy_memory_admission` (Graphics, default false): Use previous render memory checks. True skips native available-RAM/cgroup fit refusals for future CPU/GPU admissions; shared/host software limits, device limits, checked allocation and all held reservations remain enforced. It is a machine preference, not saved image quality. The CLI equivalent is `solidcraft-cli render --legacy-memory-admission`.
@@ -1197,6 +1206,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `ribbon_menus_follow_hover` (default false). Click a ribbon panel label to open its menu. Hover another panel label to switch, or move outside the ribbon and open menu to close it.
 - `ribbon_reveal` (default false: hovering a result in Search commands switches the ribbon to the command's tab and marks its button, or opens the panel drop-down that holds it on its row, handle `ribbon:reveal`; leaving the results goes back to the tab before; a command started from the search blinks there, and a running command from a drop-down marks its panel label, `ribbon:running_section:<TAB>:<SECTION>`, #7287)
 - `right_drag_orbits` (default true; false: a right drag the mouse preset would orbit leaves the camera alone, #6492)
+- `nav_button_map` (default `{}`: every button follows the mouse mapping): what dragging a button does, by `left`, `middle`, `right`, `extra1` (side back) or `extra2` (side forward), as `orbit`, `pan`, `zoom` or `none`, after any keys held (`shift+`, `ctrl+`, `alt+`), e.g. `{"extra1": "orbit", "extra2": "shift+pan"}`. A mapped button replaces the preset's bindings for it; a plain click on a side button still goes Back
 - `save_prompt_one_at_a_time` (default false: closing several tabs or quitting with more than one unsaved design asks once, in one "Save changes to N designs?" list; true restores one "Save changes?" prompt per design, #11680)
 - `select_hidden_edges` (default false: v0.30.1 visible-only edge picking; true allows ordinary edge picks through faces in Shaded with hidden edges, including Fillet inputs; hidden bodies and section-clipped edges stay excluded)
 - `select_other_hidden` (default true: Select Other includes hidden geometry near the pointer; false restores the original visible-only list under the pointer)

@@ -53,7 +53,7 @@ const ON_CENTRE_MM: f64 = 1e-6;
 const DEFAULT_DECIMALS: u8 = 2;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new(ADD, "Add Drawing Dimension", crate::checked!("drawing.dimension.add", add))
+    CommandSpec::new(ADD, "Add Drawing Dimension", crate::checked!("drawing.dimension.add", add)).begins_edit()
         .icon("dimension")
         .in_drawing()
         .doc_only()
@@ -80,9 +80,9 @@ pub static COMMANDS: &[CommandSpec] = &[
              {value} is its measured number as it reads alone (Ø12.00), so `2× {value} THRU` follows the model, and {{ and }} are a brace each (not a \
              chain's); dry_run?: true to answer what it would add, adding nothing (no id is taken, no undo step) → what \
              drawing.dimension.inspect answers for it. Saved by the edges' names, never the points picked; one the \
-             view can't measure, or on a part it doesn't draw, is refused. One undo step; no model is evaluated.",
+             view can't measure, or on a part it doesn't draw, is refused. This is the way to dimension a view, never a free line or text note; drawing.dimension.from_model brings the model's own dimensions in. One undo step; no model is evaluated.",
         ),
-    CommandSpec::new(EDIT, "Edit Drawing Dimension", crate::checked!("drawing.dimension.edit", edit))
+    CommandSpec::new(EDIT, "Edit Drawing Dimension", crate::checked!("drawing.dimension.edit", edit)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("dimension")
         .in_drawing()
         .doc_only()
@@ -97,7 +97,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              {dimension, changed: [fields]}. What it measures stays: to measure something else, add a new one. One undo step, none \
              when nothing changes; no model is evaluated.",
         ),
-    CommandSpec::new(REPAIR, "Repair Drawing Dimension", crate::checked!("drawing.dimension.repair", repair))
+    CommandSpec::new(REPAIR, "Repair Drawing Dimension", crate::checked!("drawing.dimension.repair", repair)).begins_edit()
         .icon("dimension")
         .in_drawing()
         .doc_only()
