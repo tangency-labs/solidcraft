@@ -1486,7 +1486,7 @@ pub(super) fn run_export<H: PluginHost + 'static>(
     // An export never changes the app: what its commands did is always thrown away.
     let rolled_back = state.host.rollback_transaction();
     let outcome = rolled_back.and(outcome);
-    (state.host, outcome.map_err(|error| with_limits(error, limits)))
+    (state.host, outcome.map_err(|error| with_limits(error, limits.deadline_ms)))
 }
 
 #[cfg(test)]
