@@ -34,7 +34,7 @@ pub(crate) enum Piece {
 
 /// How near (mm) a cut may come to a piece's loops and still be a hole of it as it is: as near
 /// as the sew joins points.
-const CLEAR: f64 = 1e-6;
+pub(crate) const CLEAR: f64 = 1e-6;
 
 /// How far (mm) a piece's edge may lie off a zone's tangent line and still run along it.
 const ON_LINE: f64 = 1e-7;

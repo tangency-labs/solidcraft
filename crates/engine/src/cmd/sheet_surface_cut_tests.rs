@@ -1264,3 +1264,41 @@ fn a_hole_over_the_bend_next_to_an_earlier_cut_of_the_flat_is_the_bodys_cut() {
     let v = exact_volume(&s);
     assert!((v - drilled).abs() < 1e-6 * drilled, "{v} vs {drilled}");
 }
+
+/// Footprints cut from the flat that touch a piece's outline without crossing it lose what the
+/// same shapes cut as solids take: a round hole tangent to the plate's tangent line (y = 12), a
+/// notch with one edge on that line and its corners beyond the flat's edge, and a round hole whose
+/// edge runs through the point where the tangent line meets the flat's edge.
+#[test]
+fn footprints_touching_a_bend_line_or_the_flats_edge_cut_as_solids_do() {
+    let solid = |s: &mut Session, case: usize| match case {
+        0 => run(s, "solid.cylinder", json!({"radius": 3, "height": 30, "base": [40, 15, -10], "axis": "Z", "operation": "cut"})),
+        1 => run(s, "solid.box", json!({"corner": [-5, 12, -10], "length": 15, "width": 8, "height": 30, "operation": "cut"})),
+        _ => run(s, "solid.cylinder", json!({"radius": 5, "height": 30, "base": [3, 16, -10], "axis": "Z", "operation": "cut"})),
+    };
+    let drawn = |s: &mut Session, case: usize| match case {
+        0 => run(s, "sketch.circle.center", json!({"center": [40, 15], "diameter": 6})),
+        1 => run(s, "sketch.rectangle.two_point", json!({"p0": [-5, 12], "p1": [10, 20]})),
+        _ => run(s, "sketch.circle.center", json!({"center": [3, 16], "diameter": 10})),
+    };
+    for case in 0..3 {
+        let want = {
+            let mut s = wide_bend();
+            run(&mut s, "sheet.unfold", json!({}));
+            solid(&mut s, case);
+            run(&mut s, "sheet.refold", json!({}));
+            exact_volume(&s)
+        };
+        let mut s = wide_bend();
+        let whole = exact_volume(&s);
+        run(&mut s, "sheet.unfold", json!({}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": T, "name": "Cut"}));
+        drawn(&mut s, case);
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Cut", "distance": 3.0 * T, "direction": "symmetric", "operation": "cut"}));
+        run(&mut s, "sheet.refold", json!({}));
+        let v = exact_volume(&s);
+        assert!(want < whole - 1.0, "case {case}: the solid cuts something: {want} of {whole}");
+        assert!((v - want).abs() < 1e-6 * want, "case {case}: {v} vs {want}");
+    }
+}

@@ -1721,8 +1721,8 @@ fn takes_part(f: &Feature, targets: &[String], b: &ModelBody) -> bool {
 }
 
 /// How near a corner of a tool's footprint in an unfolded flat lies to a piece's outline (a bend
-/// line, a joint, the flat's edge) to count as on it, in mm: the grid the sew finds vertices on.
-const CORNER_ON_OUTLINE: f64 = 1e-6;
+/// line, a joint, the flat's edge) to count as on it, in mm: as near as the sew joins points.
+const CORNER_ON_OUTLINE: f64 = crate::sheet_surface::CLEAR;
 
 /// What an extrude cut takes from the sheets made from surfaces it reaches, of the bodies it takes
 /// part in (see [`takes_part`]), read straight into their outlines (#6748): each tool a prism
