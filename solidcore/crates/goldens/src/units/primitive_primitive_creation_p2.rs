@@ -526,6 +526,7 @@ impl UnitDiff for Runner {
 mod moved_rows {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
+    use solidcore::kernel::Kernel;
 
     /// Why no requested body exists for the row.
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -563,7 +564,7 @@ mod moved_rows {
     fn run(i: &Inputs) -> (Result<()>, usize, f64) {
         let d = &i.data;
         let b = BrepId::from_index(0);
-        let mut k = solidcore::kernel::Kernel::default();
+        let mut k = Kernel::default();
         let mut model = PrimitiveModel::new(&mut k, fixture_brep(d[0] != 0.).unwrap());
         let tolerance = model.brep(b).unwrap().tolerance();
         let mut primitive = PrimitiveCreation::new(Some(RegionId::from_index(0)), 0, false);
@@ -579,9 +580,7 @@ mod moved_rows {
                 d[5],
                 &frame(&d[6..15]),
             ),
-            2 => {
-                primitive.create_partial_sphere(&mut model, b, d[1], d[2], d[3], &frame(&d[4..13]))
-            }
+            2 => primitive.create_partial_sphere(&mut model, b, d[1], d[2], d[3], &frame(&d[4..13])),
             7 => primitive.create_pipe_sweep(
                 &mut model,
                 b,
@@ -650,9 +649,7 @@ mod moved_rows {
             }
             8 => {
                 let lines = ends(d);
-                let closed = lines
-                    .windows(2)
-                    .all(|w| w[0][2] == w[1][0] && w[0][3] == w[1][1])
+                let closed = lines.windows(2).all(|w| w[0][2] == w[1][0] && w[0][3] == w[1][1])
                     && lines.last().unwrap()[2..] == lines.first().unwrap()[..2];
                 if !closed {
                     return Reason::Open;
@@ -695,15 +692,9 @@ mod moved_rows {
         ("gen0216", Reason::NoArea),
         ("gen0230", Reason::Small),
         ("gen0235", Reason::NoArea),
-        (
-            "line_back_2_5e-5_off_the_last_mid_start_cap",
-            Reason::NoArea,
-        ),
+        ("line_back_2_5e-5_off_the_last_mid_start_cap", Reason::NoArea),
         ("review3_start_cap_bowtie", Reason::SelfCrossing),
-        (
-            "ub50_taper_end_cap_offsets_of_a_loop_enclosing_nothing",
-            Reason::NoArea,
-        ),
+        ("ub50_taper_end_cap_offsets_of_a_loop_enclosing_nothing", Reason::NoArea),
         ("ub50_taper_line_and_its_reverse", Reason::NoArea),
         ("ub50_taper_line_back_through_the_last_mid", Reason::NoArea),
         ("ub50_taper_two_identical_lines", Reason::Open),
