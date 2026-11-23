@@ -42,7 +42,7 @@ fn main() {
     }
 }
 
-/// `$OUT_DIR/locales/<id>.json.z`, which the app embeds (the JSON deflated: the 37 catalogs are
+/// `$OUT_DIR/locales/<id>.json.z`, which the app embeds (the JSON deflated: the 38 catalogs are
 /// 17 MB as text and under 5 MB packed, and a run reads one or two of them), and
 /// `$OUT_DIR/locales/<id>.json`, which the tests read: each catalog in `assets/locales` and the shared crates' catalogs
 /// in `crates/ui-text/locales` (the words of the kit's Preferences window and pages), merged per

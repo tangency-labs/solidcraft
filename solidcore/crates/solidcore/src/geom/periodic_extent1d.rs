@@ -47,6 +47,7 @@
 
 use core::cmp::Ordering;
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::tol::{self, ScaledZero};
 use crate::math::BIG_DOUBLE;
@@ -232,9 +233,13 @@ impl PeriodicExtent1d {
 
         // check input
         if !is_contained(from, 0.0, self.period) || !is_contained(to, 0.0, self.period) {
-            return Err(SolidError::geom_failed(
+            return Err(SolidError::geom(
                 OP,
-                "the span is outside the period",
+                GeomFailure::SpanOutsidePeriod {
+                    from,
+                    to,
+                    period: self.period,
+                },
             ));
         }
 
@@ -283,9 +288,12 @@ impl PeriodicExtent1d {
             SeamCase::Neither => {
                 // disjoint cases
                 if (to < self.min - sz) || (from > self.max + sz) {
-                    return Err(SolidError::geom_failed(
+                    return Err(SolidError::geom(
                         OP,
-                        "the span is disjoint from the extent",
+                        GeomFailure::Disjoint {
+                            a: [self.min, self.max],
+                            b: [from, to],
+                        },
                     ));
                 }
                 if from < self.min {
@@ -298,13 +306,19 @@ impl PeriodicExtent1d {
             SeamCase::SpanOnly => {
                 // disjoint case
                 if (from > self.max + sz) && (to < self.min - sz) {
+                    // the extent and the span as the caller gave them (case 2 swapped them)
+                    let (extent, span) = if swapped {
+                        ([from, to], [self.min, self.max])
+                    } else {
+                        ([self.min, self.max], [from, to])
+                    };
                     if swapped {
                         self.min = from;
                         self.max = to;
                     }
-                    return Err(SolidError::geom_failed(
+                    return Err(SolidError::geom(
                         OP,
-                        "the span is disjoint from the extent",
+                        GeomFailure::Disjoint { a: extent, b: span },
                     ));
                 }
                 // full case
