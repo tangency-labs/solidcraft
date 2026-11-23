@@ -521,24 +521,19 @@ fn section(
 /// other edges of `faces` of the distance from `p` to the edge's certified box less
 /// the edge's tolerance, and over the vertices of those edges and of `e` of the
 /// distance less the vertex's tolerance. `None` where an edge has no curve or no
-/// certified box, or where reading the faces' other edges fails ([`boundary_clearance`]).
+/// certified box, or where reading those boundaries or `e`'s vertices fails
+/// ([`boundary_clearance`]).
 ///
 /// # Errors
 ///
-/// Those of the lookups of `e`'s own vertices, which the edge check reads before
-/// (`tedge::vertices` for its tests 15 to 17), and the unported, cancelled and
-/// preparation errors [`ignored`] passes on.
+/// The unported, cancelled and preparation errors [`ignored`] passes on.
 fn clearance(k: &Kernel, b: &Brep, e: EdgeId, p: Point3, faces: &[FaceId]) -> Result<Option<f64>> {
-    let mut free = f64::INFINITY;
-    vertex_clearance(b, e, p, &mut free)?;
-    // The faces' other edges and their vertices: the edge check of `e` never reads them
-    // on WR-540's reading, so a failure there is inconclusive and keeps that reading.
-    // Their own checks (the face, loop and edge checks of the same run) read them as
-    // before, so no fault is hidden from the run.
-    let Some(others) = ignored(boundary_clearance(k, b, e, p, faces))? else {
-        return Ok(None);
-    };
-    Ok(others.map(|o| free.min(o)))
+    // The edge check of `e` never reads the faces' other edges or their vertices on
+    // WR-540's reading, nor `e`'s vertex records beyond the ones it looks up itself, so
+    // a failure here is inconclusive and keeps that reading. Their own checks (the face,
+    // loop, edge and vertex checks of the same run) read them as before, so no fault is
+    // hidden from the run.
+    Ok(ignored(boundary_clearance(k, b, e, p, faces))?.flatten())
 }
 
 /// Lowers `free` to the distance from `p` of each vertex of `edge` less its tolerance.
@@ -550,8 +545,8 @@ fn vertex_clearance(b: &Brep, edge: EdgeId, p: Point3, free: &mut f64) -> Result
     Ok(())
 }
 
-/// [`clearance`] over the edges of `faces` other than `e` and their vertices: `None`
-/// where an edge has no curve or no certified box.
+/// [`clearance`] over `e`'s vertices and the edges of `faces` other than `e` and their
+/// vertices: `None` where an edge has no curve or no certified box.
 ///
 /// # Errors
 ///
@@ -566,6 +561,7 @@ fn boundary_clearance(
 ) -> Result<Option<f64>> {
     let at = Extent3d::from_points(p, p);
     let mut free = f64::INFINITY;
+    vertex_clearance(b, e, p, &mut free)?;
     for &f in faces {
         for edge in tface::p4::edges(b, f, None, false, None)? {
             if edge == e {
@@ -591,14 +587,14 @@ fn boundary_clearance(
 /// edge is not a line, a face is not a plane or a cylinder along it, `sectors` (each
 /// sector's two edge uses and whether they leave the edge tangent) does not cover every
 /// edge use, a face's boundary comes within the step, reading the faces' other
-/// boundaries fails, a binormal fails, or no step is certified.
+/// boundaries or `e`'s vertices fails, a binormal fails, or no step is certified.
 ///
 /// # Errors
 ///
-/// Those of the lookups of `e`, its edge uses, their faces and `e`'s vertices, and of
-/// the evaluation of `e`'s curve at `t`: the edge check's own reading makes the same
-/// lookups and evaluation and passes their errors on. And the unported, cancelled and
-/// preparation errors [`ignored`] passes on.
+/// Those of the lookups of `e`, its edge uses and their faces, and of the evaluation of
+/// `e`'s curve at `t`: the edge check's own reading makes the same lookups and
+/// evaluation and passes their errors on. And the unported, cancelled and preparation
+/// errors [`ignored`] passes on.
 pub(super) fn tangent_directions(
     k: &Kernel,
     b: &mut Brep,
