@@ -3411,33 +3411,13 @@ mod wr661_open_sheets {
         keeps_the_filleted_sheet("stubs4-shell_fillet2-e5-r0.5", 3);
     }
 
-    /// The open-shell sheet is open too, and its stitched result has its ends on the
-    /// sheet's boundary, but it fails the level-2 check (nine gaps beyond tolerance, up to
-    /// 3.0e-5: main's known-failing entry for this case, tangency-labs/solidcraft#13733), so
-    /// the pass-over does not keep it: the orientation's failure (1005) is returned and the
-    /// body is put back as it was.
+    /// The open-shell sheet is open too, and its stitched result has its ends on the sheet's
+    /// boundary. Its nine level-2 gaps (up to 3.0e-5, tangency-labs/solidcraft#13733) were
+    /// vertex and edge gaps the healer had left under their tolerances; with them covered
+    /// (#18230 for edges, #17739 for vertices) the result passes the check and is kept.
     #[test]
-    fn an_open_shell_sheet_fillet_that_fails_level_2_is_refused() {
-        let name = "stubs4-open_shell-e5-r0.5";
-        let input = inputs(name).real_solid.expect("a real solid");
-        let mut k = Kernel::default();
-        let mut body = build(&mut k, &input).unwrap().unwrap();
-        let faces = p1::faces(&body, None).unwrap();
-        assert_eq!(faces.len(), 6, "{name}");
-        assert!(!solidcore::topology::brep::p2::is_manifold_solid(&body).unwrap(), "{name}");
-        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
-        let error = fillet_selected(&mut k, &mut body, &selected, &input)
-            .ok()
-            .unwrap()
-            .expect_err("the invalid open result is refused");
-        assert_eq!(solidcore::error::upstream_status(&error), Some(1005), "{name}: {error:?}");
-        // the closed-solid orientation's "gathered from both sides" failure, not another one
-        assert_eq!(
-            error.topology_failure(),
-            Some(&solidcore::error::topology::TopologyFailure::GatheredBothSides),
-            "{name}: {error:?}"
-        );
-        assert_eq!(p1::faces(&body, None).unwrap(), faces, "{name}: the body is put back");
+    fn an_open_shell_sheet_fillet_is_kept() {
+        keeps_the_filleted_sheet("stubs4-open_shell-e5-r0.5", 6);
     }
 }
 

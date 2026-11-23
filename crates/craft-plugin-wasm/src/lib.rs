@@ -44,6 +44,26 @@ pub fn run_with_options<H: PluginHost + 'static>(
     }
 }
 
+/// Run one read-only field hook with independent small budgets, capped by approved ceilings.
+pub fn dialog_fields<H: PluginHost + 'static>(
+    host: H,
+    manifest: &Manifest,
+    component: &[u8],
+    entry: &str,
+    values: &Value,
+    ceilings: craft_plugin::HostLimits,
+) -> (H, Result<String>) {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::dialog_fields(host, manifest, component, entry, values, ceilings)
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = (manifest, component, entry, values, ceilings);
+        (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires a native build".into() }))
+    }
+}
+
 /// Checks `component` against `manifest` the way a call would, without running any of its code:
 /// the runtime declaration, the component's size, that it is a component (not a core module) that
 /// compiles, imports nothing but this host's interfaces at its version (never WASI or the network),
@@ -96,6 +116,22 @@ pub fn run_import<H: PluginHost + 'static>(
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         let _ = (manifest, component, entry, options, request);
+        (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() }))
+    }
+}
+
+/// Runs an export slot on the app's open design in a fresh instance and returns the file's bytes.
+/// The plugin reads the design through the read-only commands its manifest lists, in a
+/// transaction that is always rolled back, and reaches no file: the app writes the bytes to the
+/// path the user chose, and only when the whole call succeeds. A trap fails this call alone.
+pub fn run_export<H: PluginHost + 'static>(host: H, manifest: &Manifest, component: &[u8], slot: &str, options: &Value) -> (H, Result<Vec<u8>>) {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::run_export(host, manifest, component, slot, options, RuntimeOptions::default())
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = (manifest, component, slot, options);
         (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() }))
     }
 }
