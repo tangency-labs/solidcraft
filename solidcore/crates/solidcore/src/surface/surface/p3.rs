@@ -92,6 +92,7 @@
 //!   within one period.
 
 use crate::curve::curve::p5::CurveMemoKey;
+use crate::error::surface::SurfaceFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::assert_array::labels;
 use crate::geom::extent1d::{Extent1d, ExtentNd};
@@ -2070,9 +2071,9 @@ impl EvalNFunctions for FindPsNormalEnfo<'_> {
     ) -> Result<bool> {
         let k = self.kernel;
         let (Some(&u), Some(&v)) = (x.first(), x.get(1)) else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_FIND_PS_NORMAL,
-                "the solver's variables are fewer than two",
+                SurfaceFailure::TooFewSolverVariables { needed: 2 },
             ));
         };
         if x.len() != 2 || f.len() != 2 {
@@ -2091,9 +2092,9 @@ impl EvalNFunctions for FindPsNormalEnfo<'_> {
         let mu = su.length();
         let mv = sv.length();
         if mu < EFF_ZERO || mv < EFF_ZERO {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_FIND_PS_NORMAL,
-                "a surface tangent has zero length",
+                SurfaceFailure::ZeroLengthTangent,
             ));
         }
 
@@ -2213,9 +2214,9 @@ impl EvalNFunctions for SssIntersectEnfo<'_> {
             .flatten()
             .any(|t| t.length_squared() < EFF_ZERO_SQ)
         {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_SSS_INTERSECT,
-                "a surface tangent has zero length",
+                SurfaceFailure::ZeroLengthTangent,
             ));
         }
 
@@ -3042,19 +3043,28 @@ mod tests {
     #[test]
     fn typed_surface_failures_keep_their_upstream_answers() {
         use crate::error::surface::SurfaceFailure;
-        let samples: [(&'static str, SurfaceFailure, i32); 2] = [
+        use crate::error::ErrorKind;
+        let samples: [(&'static str, SurfaceFailure, i32, ErrorKind); 3] = [
             (
                 OP_FIND_PS_NORMAL,
-                SurfaceFailure::Failed("a surface tangent has zero length"),
+                SurfaceFailure::ZeroLengthTangent,
                 crate::error::SM_ERR,
+                ErrorKind::Degenerate,
             ),
             (
                 OP_SSS_INTERSECT,
-                SurfaceFailure::Failed("a surface tangent has zero length"),
+                SurfaceFailure::ZeroLengthTangent,
                 crate::error::SM_ERR,
+                ErrorKind::Degenerate,
+            ),
+            (
+                OP_FIND_PS_NORMAL,
+                SurfaceFailure::TooFewSolverVariables { needed: 2 },
+                crate::error::SM_ERR,
+                ErrorKind::InvalidInput,
             ),
         ];
-        for (operation, failure, code) in samples {
+        for (operation, failure, code, kind) in samples {
             let typed = SolidError::surface(operation, failure);
             let before = SolidError::Upstream {
                 operation,
@@ -3063,7 +3073,7 @@ mod tests {
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
             assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.kind(), kind, "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
             assert_eq!(typed.is_port_failure(), before.is_port_failure());

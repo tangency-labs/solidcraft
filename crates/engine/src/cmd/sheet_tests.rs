@@ -3147,6 +3147,56 @@ fn flat_dxf_preserves_exact_cutout_entities() {
     assert!(read.iter().any(|g| matches!(g, solidcraft_io::Geom2::Arc { c, a, b } if arc(*c, *a, *b))), "{read:?}");
 }
 
+#[test]
+fn base_flange_default_profiles_keep_holes_and_explicit_picks() {
+    // Picking the center produces a disk with two planar caps and one cylindrical rim.
+    for (profiles, area, faces, cutouts) in
+        [(None, 10000.0 - 100.0 * PI, 7, 1), (Some(json!("all")), 10000.0, 6, 0), (Some(json!([{"point": [50, 50]}])), 100.0 * PI, 3, 0)]
+    {
+        for flip in [false, true] {
+            let mut s = Session::default();
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 100]}));
+            run(&mut s, "sketch.circle.center", json!({"center": [50, 50], "diameter": 20}));
+            run(&mut s, "sketch.finish", json!({}));
+            let mut params = json!({"sketch": "Blank", "flip": flip});
+            if let Some(profiles) = &profiles {
+                params["profiles"] = profiles.clone();
+            }
+            run(&mut s, "sheet.flange", params.clone());
+            let expected = area * 2.5;
+            let measured = run(&mut s, "inspect.measure", json!({}));
+            let actual = measured["total"]["volume_mm3"].as_f64().unwrap();
+            assert!((actual - expected).abs() < 1e-6, "{params}: expected {expected}, got {actual}");
+            assert_eq!(measured["total"]["faces"], faces);
+            assert_eq!(flat(&mut s)["cutouts"].as_array().unwrap().len(), cutouts);
+            run(&mut s, "edit.undo", json!({}));
+            assert!(s.model.state().bodies.is_empty());
+            run(&mut s, "edit.redo", json!({}));
+            assert!((volume(&mut s) - expected).abs() < 1e-6);
+            let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+            assert!((volume(&mut reopened) - expected).abs() < 1e-6);
+        }
+    }
+}
+
+#[test]
+fn base_flange_default_profiles_keep_nested_islands_and_separate_outlines() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+    for (p0, p1) in [([0, 0], [100, 100]), ([25, 25], [75, 75]), ([40, 40], [60, 60]), ([110, 0], [120, 10])] {
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": p0, "p1": p1}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Blank"}));
+    // The middle loop is a hole; the innermost loop and separate outline are material.
+    let expected = (10000.0 - 2500.0 + 400.0 + 100.0) * 2.5;
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    let actual = measured["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((actual - expected).abs() < 1e-6, "expected {expected}, got {actual}");
+    assert_eq!(measured["body_count"], 3);
+}
+
 // A profile chosen by a point outside its inner loop must keep that inner loop through
 // sheet construction, flattening and manufacturing export.
 #[test]

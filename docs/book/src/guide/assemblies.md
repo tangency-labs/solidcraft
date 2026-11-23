@@ -168,9 +168,11 @@ point, its x and y running along the two edges into the face. The edge, the face
 are found again by name, so a bracket set 40 mm in from a panel's corner (a planar joint with
 values `[40, 40, 0]`) stays 40 mm in from that corner when the panel changes size.
 
-A joint's Z offset, angle and values can be typed as expressions over the design's parameters
-(`"offset": "gap + 2"`, `"values": ["travel"]`). The joint keeps them and works them out again
-whenever the design changes, so a part seated `gap` above a panel moves with `gap`. Renaming a
+A joint's Z offset, angle, values and the minimum and maximum of its limits can be typed as
+expressions over the design's parameters (`"offset": "gap + 2"`, `"values": ["travel"]`,
+`"limits": [[0, "travel"]]`). The joint keeps them and works them out again whenever the design
+changes, so a part seated `gap` above a panel moves with `gap`, and a slider limited to `travel`
+stops at the new `travel` (its value is held inside the new limits). Renaming a
 parameter carries into the joints that use it, and deleting one they use is refused. If an
 expression stops working out (say a parameter becomes an angle), the joint is left out of the
 solve and `joint.solve` gives the reason, instead of placing the part from old numbers. Typing a

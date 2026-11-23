@@ -3645,3 +3645,27 @@ fn secondary_alignment_review_helper_markers_follow_their_occurrence_without_a_b
     }
     assert_eq!(app.session.doc, before);
 }
+
+/// Edit Joint shows a limit typed as an expression as that expression, and OK keeps it (#20242).
+#[test]
+fn edit_joint_keeps_a_limit_typed_as_an_expression() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run("parameters.add", json!({"name": "stop", "expression": "8 mm"})).unwrap();
+    let (fa, fb) = (json!({"occurrence": a, "face": [10, 10, 10]}), json!({"occurrence": b, "face": [40, 10, 0]}));
+    app.run("joint.create", json!({"type": "slider", "a": fa, "b": fb, "limits": [[0, "stop"]]})).unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        let (on, _, hi) = &f.limits[0];
+        assert!(*on);
+        assert_eq!(hi, "stop");
+        f.flip = true;
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints[0].exprs.limit(0), [None, Some("stop")]);
+    app.run("parameters.change", json!({"name": "stop", "expression": "12 mm"})).unwrap();
+    assert_eq!(app.session.doc.assembly.joints[0].limits[0], Some((0.0, 12.0)));
+}
