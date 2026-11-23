@@ -237,5 +237,6 @@ move
   moves: rotate_axis[1], rotate_axis[2]
 import
 mesh_convert
+mesh_reduce
 mesh_import
 repair

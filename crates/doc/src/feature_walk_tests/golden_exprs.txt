@@ -480,6 +480,7 @@ mesh_convert
   inputs:
     Tolerance = mesh_convert.tolerance (Length)
   expressions: mesh_convert.tolerance
+mesh_reduce
 mesh_import
 repair
   inputs:
