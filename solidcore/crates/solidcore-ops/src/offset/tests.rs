@@ -1601,6 +1601,7 @@ fn an_unsound_body_names_its_entity_by_record_index() {
     // record face 1 is kernel face 0, record edges 1 and 2 kernel edge 4, record vertex 2 kernel
     // vertex 3
     let order = Order {
+        split_edges: 0,
         faces: vec![FaceId::from_index(2), FaceId::from_index(0)],
         edges: vec![
             EdgeId::from_index(9),
