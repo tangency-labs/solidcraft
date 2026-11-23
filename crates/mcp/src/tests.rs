@@ -643,6 +643,14 @@ fn skill_reference_is_advertised_as_read_only() {
     assert_eq!(t["annotations"]["openWorldHint"], false);
     assert_eq!(t["inputSchema"]["required"], json!(["skill"]));
     assert_eq!(t["inputSchema"]["properties"]["file"]["default"], "reference.md");
+    // The description names every skill the tool serves, so an agent that trusts it finds them all (#19633).
+    let description = t["description"].as_str().unwrap();
+    let refused = raw_tool(&mut s, "skill_reference", json!({"skill": "unknown"}));
+    let text = refused["result"]["content"][0]["text"].as_str().unwrap();
+    let available = text.split("Available skills: ").nth(1).expect("list of available skills");
+    for skill in available.split(", ") {
+        assert!(description.contains(skill), "{skill} missing from: {description}");
+    }
 }
 
 /// A URDF goes through `export` with its own options (#719).
