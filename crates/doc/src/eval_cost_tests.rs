@@ -61,6 +61,8 @@ pub(crate) struct Counts {
     pub fit_searches: usize,
     pub classifications: usize,
     pub hole_points: usize,
+    /// Contact tests a join made to find which bodies its tool meets.
+    pub contact_tests: usize,
 }
 
 thread_local! {
@@ -96,6 +98,7 @@ thread_local! {
             fit_searches: 0,
             classifications: 0,
             hole_points: 0,
+            contact_tests: 0,
         })
     };
 }
@@ -1735,6 +1738,40 @@ fn a_mirror_of_a_round_with_nothing_placed_measures_no_box() {
     assert_eq!(model.result(mirror).and_then(|r| r.error.clone()), None);
     assert!(volume(&model, "A") < rounded - 1e-3, "the copy rounds A's other edge");
     assert_eq!(work.tight_boxes, 0, "{work:?}");
+}
+
+/// A join into the only body there is takes it without asking whether the tool meets it: the
+/// contact test meshes the body finely, and on a part of a few hundred faces it took longer than
+/// the join. With two bodies the tool picks the one it meets, as before.
+#[test]
+fn a_join_into_the_only_body_makes_no_contact_test() {
+    let boss = |corner: Vec3| FeatureKind::Box {
+        corner: point_expr(corner),
+        length: "4".into(),
+        width: "4".into(),
+        height: "4".into(),
+        operation: Operation::Join,
+        centred: false,
+    };
+    let mut doc = Document::new("one block");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    doc.add_feature(boss(Vec3::new(-2.0, -2.0, 10.0)), None).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(work.contact_tests, 0, "{work:?}");
+    assert!((volume(&model, "A") - (2000.0 + 64.0)).abs() < 1e-6, "{}", volume(&model, "A"));
+    // A second block: the boss joins the one it stands on.
+    let mut doc = Document::new("two blocks");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(-10.0, 20.0, 0.0), [20.0, 10.0, 10.0]);
+    doc.add_feature(boss(Vec3::new(-2.0, 23.0, 10.0)), None).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert!(work.contact_tests > 0, "{work:?}");
+    assert!((volume(&model, "A") - 2000.0).abs() < 1e-6, "{}", volume(&model, "A"));
+    assert!((volume(&model, "B") - (2000.0 + 64.0)).abs() < 1e-6, "{}", volume(&model, "B"));
 }
 
 /// `comps` parts, each with `bodies` boxes, `sketches` sketches and `taps` taps, placed `copies`
