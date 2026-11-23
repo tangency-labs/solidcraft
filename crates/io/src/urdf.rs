@@ -380,7 +380,7 @@ fn parts(doc: &Document, st: &ModelState, stem: &str, decals: &[UrdfDecal], name
 
 /// The placement `occurrence_world` resolves for an occurrence: through the first occurrence of
 /// each parent component.
-fn canonical(doc: &Document, occ: u64) -> Vec<u64> {
+pub(crate) fn canonical(doc: &Document, occ: u64) -> Vec<u64> {
     let mut path = Vec::new();
     let mut cur = doc.occurrences.iter().find(|o| o.id == occ);
     for _ in 0..1000 {

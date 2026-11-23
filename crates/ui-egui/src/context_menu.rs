@@ -2048,13 +2048,20 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.export" => {
             let body = bodies.first().map(String::as_str);
             let name = crate::export_name::offered(app, body, body.unwrap_or(&app.session.doc.name));
-            app.pick_save_command(
-                &format!("{name}.step"),
-                &["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz"],
-                "file.export",
-                // `hierarchy` is read for GLB only.
-                json!({"bodies": bodies, "hierarchy": app.preferences.glb_export_hierarchy}),
-            );
+            // cadmpeg's Rhino writer needs a temporary file, which the browser has not.
+            let formats: Vec<&str> = ["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm"]
+                .into_iter()
+                .filter(|f| *f != "3dm" || !cfg!(target_arch = "wasm32"))
+                .collect();
+            let bodies = bodies.clone();
+            app.pick_save(&format!("{name}.step"), &formats, move |app, path| {
+                let Some(path) = path else { return };
+                let mut params = json!({"bodies": bodies, "path": path, "hierarchy": app.preferences.glb_export_hierarchy});
+                crate::toolbar::with_export_writer(app, &path, &mut params);
+                if let Ok(result) = app.run("file.export", params) {
+                    crate::toolbar::exported(app, &path, &result);
+                }
+            });
         }
         "ui.findBrowser" => {
             if let Some(b) = p.get("body").and_then(Value::as_str) {
