@@ -1623,9 +1623,12 @@ pub(crate) fn polygons(s: &poles::Face, loops: &[seam::Loop], rules: &size::Rule
     for seam::Loop { uv: luv, pts } in &projected {
         let start = uvs.len();
         let n = luv.len();
-        // A loop with every node within the reach of a collapsed line (a face narrower than the
-        // reach all along, a sliver) has no node to split: it is meshed by its nodes as they are.
-        let sliver = all_at_pole(s, &seam::Loop { uv: luv.clone(), pts: Vec::new() }, reach);
+        // A loop with every node within the reach of a collapsed line, though not one point (a
+        // face narrower than the reach all along, a sliver) has no node to split: it is meshed
+        // by its nodes as they are. A loop that is one point is not a sliver: its nodes are
+        // split as at any pole, and [`pole_caps`] refuses it.
+        let whole = seam::Loop { uv: luv.clone(), pts: pts.clone() };
+        let sliver = all_at_pole(s, &whole, reach) && !collapsed_at_pole(s, &whole, reach);
         for (k, (q, p)) in luv.iter().zip(pts).enumerate() {
             if sliver {
                 uvs.push(*q);
@@ -1725,7 +1728,13 @@ struct PoleCap {
 /// to a collapsed side), the nodes of that stretch, each within the reach of a collapsed line
 /// of the surface, whatever its point. No ring could lie between two of them, so they are one
 /// cap, fanned from the run.
-fn pole_caps(s: &poles::Face, uvs: &[[f64; 2]], ranges: &[std::ops::Range<usize>], reach: f64) -> std::result::Result<Vec<PoleCap>, String> {
+fn pole_caps(
+    s: &poles::Face,
+    uvs: &[[f64; 2]],
+    fixed: &[Vec3],
+    ranges: &[std::ops::Range<usize>],
+    reach: f64,
+) -> std::result::Result<Vec<PoleCap>, String> {
     let is_pole = |k: usize| uvs.get(k).is_some_and(|q| (0..2).any(|d| s.pole(*q, d, reach)));
     let mut caps = Vec::new();
     for (lp, r) in ranges.iter().enumerate() {
@@ -1736,9 +1745,15 @@ fn pole_caps(s: &poles::Face, uvs: &[[f64; 2]], ranges: &[std::ops::Range<usize>
         let at = |k: usize| r.start + k % n;
         let pole: Vec<bool> = (0..n).map(|k| is_pole(at(k))).collect();
         let pole_at = |k: usize| pole.get(k % n).copied().unwrap_or(false);
-        // A loop with every node at a pole: a face narrower than the reach all along (a sliver,
-        // [`polygons`]) has no cap to fan, and is meshed by its boundary nodes.
         if pole.iter().all(|p| *p) {
+            // A loop that is one point in 3D bounds no area to fan or mesh: refused. A face
+            // narrower than the reach all along (a sliver, [`polygons`]) has its nodes at a
+            // pole too, but they are not one point: it has no cap to fan, and is meshed by its
+            // boundary nodes.
+            let one_point = fixed.get(r.clone()).is_some_and(|ps| ps.first().is_some_and(|f| ps.iter().all(|p| p.dist(*f) <= reach)));
+            if one_point {
+                return Err(format!("a loop of {n} nodes all at one pole"));
+            }
             continue;
         }
         for k in 0..n {
@@ -2127,8 +2142,9 @@ fn plan_face(
     // in 3D, is that point, not a boundary to mesh. Where the face lies on the side of it that
     // is outside the surface's parameter range, it bounds no area and the loop is left out; a
     // face with no other loop has no triangles. Where the face is the surface's patch on the
-    // other side, it has area: the loop is kept and the face goes on to be planned (or refused)
-    // as it is, never left empty.
+    // other side, it has area: the loop is kept and the face is refused as before ("a loop of N
+    // nodes all at one pole", [`pole_caps`]), never left empty or meshed from a boundary that is
+    // one point.
     let drops = |l: &seam::Loop| matches!(purpose, Purpose::Mesh(_)) && collapsed_at_pole(s, l, reach) && !point_loop_has_area(s, l);
     let kept: Vec<seam::Loop>;
     let loops = if loops.iter().any(&drops) {
@@ -2190,7 +2206,7 @@ fn plan_face(
         // by the rings instead. Nodes are numbered: the boundary's, the rings', then the ones
         // refinement adds.
         let nb = uvs.len();
-        let caps = pole_caps(s, &uvs, &ranges, reach).map_err(|why| fail(&why))?;
+        let caps = pole_caps(s, &uvs, &fixed, &ranges, reach).map_err(|why| fail(&why))?;
         // A ring through boundary nodes farther from the pole than a ring may lie would have
         // chords off the surface by more than the tolerance at the fan's angle: the edges take
         // nodes at the ring's reach first, and the face is planned again ([`plan_at`]).

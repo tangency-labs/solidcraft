@@ -664,10 +664,10 @@ fn a_loop_collapsed_at_a_pole_bounds_no_area_on_the_mesh_path() {
 }
 
 /// The same collapsed loop run the other way round the pole has the surface's whole patch on its
-/// left: the face has area, so the mesh path never gives it an empty plan (it meshes it or
-/// refuses it).
+/// left: the face has area, but its boundary is one point, so the mesh path refuses it with "a
+/// loop of 45 nodes all at one pole" rather than leave a silent hole of zero-area triangles.
 #[test]
-fn a_loop_collapsed_at_a_pole_with_the_patch_on_its_left_is_not_dropped() {
+fn a_loop_collapsed_at_a_pole_with_the_patch_on_its_left_is_refused() {
     let s = spline_sphere();
     let face = poles::Face::new(s.clone(), 0.0);
     let nodes: Vec<[f64; 2]> = (0..45).map(|k| [1.0 - f64::from(k) / 45.0, 1.0]).collect();
@@ -678,9 +678,30 @@ fn a_loop_collapsed_at_a_pole_with_the_patch_on_its_left_is_not_dropped() {
     let shape = Shape { min_angle: 20.0, side: None, size_at: None, sides: Sides::Split };
     let mut stats = PlanStats::default();
     let plan = plan_face(3, "rational spline", &face, std::slice::from_ref(&collapsed), &rules, (h, speed), 1e-6, &mut stats, Lenient::No, Purpose::Mesh(shape));
-    if let Ok(Planned::Face(fp)) = plan {
-        assert!(!fp.triangles.is_empty(), "a face with area was given no triangles");
+    match plan {
+        Err(why) => {
+            let why = format!("{why:?}");
+            assert!(why.contains("all at one pole") || why.contains("boundary winds around the surface"), "refused for another reason: {why}");
+        }
+        Ok(_) => panic!("a face whose boundary is one point was planned"),
     }
+}
+
+/// A loop with every node at a pole is refused ("a loop of N nodes all at one pole") when its
+/// nodes are one point in 3D, and is no cap to fan (a sliver, meshed by its boundary nodes) when
+/// they are spread along the collapsed line: the cap planner tells the two apart by the 3D points.
+#[test]
+fn an_all_pole_loop_is_refused_when_one_point_and_left_to_its_nodes_when_spread() {
+    let s = spline_sphere();
+    let face = poles::Face::new(s.clone(), 0.0);
+    let uvs: Vec<[f64; 2]> = (0..45).map(|k| [f64::from(k) / 45.0, 1.0]).collect();
+    let ranges = vec![0..uvs.len()];
+    let one_point: Vec<Vec3> = uvs.iter().map(|_| Vec3::new(0.0, 0.0, 1.0)).collect();
+    let why = super::pole_caps(&face, &uvs, &one_point, &ranges, 1e-3).err();
+    assert_eq!(why.as_deref(), Some("a loop of 45 nodes all at one pole"));
+    let spread: Vec<Vec3> = (0..45).map(|k| Vec3::new(f64::from(k), 0.0, 1.0)).collect();
+    let caps = super::pole_caps(&face, &uvs, &spread, &ranges, 1e-3).expect("a sliver is not refused");
+    assert!(caps.is_empty());
 }
 
 /// A sliver face narrower than the reach all along (a degree 1 patch 5.6 mm long and 0.0002 mm
