@@ -18,6 +18,7 @@ use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::primitive::api_primitives as api;
+use solidcore::primitive::primitive_creation::model::PrimitiveModel;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
@@ -915,7 +916,22 @@ fn a_tiny_sphere_and_a_box_whose_edge_crosses_it_twice_give_exact_volumes() {
         (Op::Difference, "difference", sphere - common, [3, 5, 4]),
     ] {
         let mut k = Kernel::default();
-        let a = api::create_sphere(&mut k, Point3::new(c[0], c[1], c[2]), r).unwrap();
+        // the sphere as the generated case gave it, with its negative radius:
+        // `create_sphere` refuses that now, so it is built as `create_sphere` built it,
+        // by the primitive creation itself (the sphere of the radius's magnitude from
+        // the mirrored profile, which is where this case's seam is)
+        let mut frame = Axis2Placement::default();
+        frame
+            .set_canonical(
+                Point3::new(c[0], c[1], c[2]),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            )
+            .unwrap();
+        let (a, ()) = PrimitiveModel::build_new(&mut k, |pc, model| {
+            pc.create_partial_sphere(model, PrimitiveModel::MAIN, r, 0.0, 360.0, &frame)
+        })
+        .unwrap();
         let b = api::create_box(&mut k, Point3::new(o[0], o[1], o[2]), d[0], d[1], d[2]).unwrap();
         let result = match op {
             Op::Union => boolean_union(&mut k, a, b),

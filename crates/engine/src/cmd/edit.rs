@@ -424,6 +424,9 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
         None => Snapshot { doc: drawings_from(snap.doc, &s.doc), active_sheet_sketch: s.active_sheet_sketch.clone(), ..snap },
     };
     snap.sketching_view = s.historical_sketch_owner(snap.active_sketch, snap.sketching_view);
+    if s.checked_sheet_sketch_owner(&s.view_context, snap.active_sheet_sketch.as_deref(), &snap.doc).is_err() {
+        snap.active_sheet_sketch = None;
+    }
     // History restores geometry in its own part, never a second editor beside the current one.
     if snap.active_sketch.is_some() && snap.active_sheet_sketch.is_some() {
         if snap.part.is_some() {
@@ -2367,6 +2370,21 @@ fn edge_of_key(key: &str) -> Option<&str> {
 
 fn input_keys(kind: &FeatureKind, edge_names: &[String]) -> Vec<(String, solidcraft_doc::expr::Kind)> {
     let mut keys: Vec<_> = kind.inputs().into_iter().map(|(label, _, unit)| (label.to_string(), unit)).collect();
+    // Rotation labels repeat across groups. Key each to its path and unordered line set, also
+    // in the canonical flat form, so deleting an earlier group cannot take the survivor's name.
+    if let FeatureKind::FrameMember { path_sketch, .. } = kind {
+        let mut rotations = solidcraft_doc::frame::member_groups(kind).into_iter().filter(|g| g.angle.is_some()).map(|mut g| {
+            g.lines.sort();
+            format!("frame.member.rotation.{path_sketch:?}.{:?}", g.lines)
+        });
+        for (key, _) in &mut keys {
+            if key == "Rotation"
+                && let Some(identity) = rotations.next()
+            {
+                *key = identity;
+            }
+        }
+    }
     if let FeatureKind::Fillet { style, .. } = kind {
         if let Some((key, _)) = keys.first_mut() {
             *key = "fillet.radius".into();
@@ -2476,6 +2494,26 @@ fn own_corner_members(corners: &mut [solidcraft_doc::frame::CornerOverride], own
     Ok(())
 }
 
+/// The name a frame member feature gives the member on `line` (its group's `body_name`); none:
+/// named after the profile.
+fn member_group_name(kind: &FeatureKind, line: &str) -> Option<String> {
+    let groups = solidcraft_doc::frame::member_groups(kind);
+    let group = groups.iter().find(|g| g.lines.is_empty() || g.lines.iter().any(|l| l == line))?;
+    group.body_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map(str::to_string)
+}
+
+/// The name `frame.member` parameters give the member on `line`, as [`member_group_name`].
+fn given_group_name(p: &serde_json::Map<String, Value>, line: &str) -> Option<String> {
+    let named = match p.get("groups").and_then(Value::as_array) {
+        Some(groups) => groups
+            .iter()
+            .find(|g| g.get("lines").and_then(Value::as_array).is_some_and(|ls| ls.iter().any(|l| l.as_str() == Some(line))))?
+            .get("body_name"),
+        None => p.get("body_name"),
+    };
+    named.and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()).map(str::to_string)
+}
+
 fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.redefine";
     let id = feature_id(s, p.get("feature"), cmd)?;
@@ -2572,7 +2610,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // doesn't hand its name to the next. Pair ids are never reused, so `next_pair` never goes
     // below the feature's own, nor to an id it has, whatever the edit says, and a removed pair's
     // id is never named again.
-    if let FeatureKind::FrameMember { names, body_name, next_pair, pairs, .. } = &old.kind
+    if let FeatureKind::FrameMember { names, next_pair, pairs, .. } = &old.kind
         && cid == "frame.member"
         && let Some(parameters) = params.as_object_mut()
     {
@@ -2599,9 +2637,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(given) = given {
             parameters.insert("next_pair".into(), json!(given.max(*next_pair).max(past_ids)));
         }
-        if parameters.get("body_name").and_then(Value::as_str) == body_name.as_deref() {
-            let names = (!old.body_names.is_empty()).then(|| super::browser::member_pins(s, id)).flatten().unwrap_or_else(|| names.clone());
-            parameters.entry("names").or_insert_with(|| json!(names));
+        let names = (!old.body_names.is_empty()).then(|| super::browser::member_pins(s, id)).flatten().unwrap_or_else(|| names.clone());
+        let kept: BTreeMap<&String, &String> =
+            names.iter().filter(|(line, _)| member_group_name(&old.kind, line) == given_group_name(parameters, line)).collect();
+        if !kept.is_empty() {
+            parameters.entry("names").or_insert_with(|| json!(kept));
         }
     }
     // A fold keeps the side that stays, decided when it was made, through an edit that names
@@ -2738,6 +2778,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         .map(|(((key, kind), (label, expression, _)), name)| (key, label.to_string(), kind, name.clone(), expression))
         .collect();
     let keys = input_keys(&new.kind, &edge_names(&new));
+    // Legacy flat edits have one rotation, even when their line selection or path sketch changes.
+    // Grouped edits keep each rotation on its own lines, without a label-only fallback.
+    let flat_rotation = matches!((&old.kind, &new.kind),
+        (FeatureKind::FrameMember { groups: a, .. },
+         FeatureKind::FrameMember { groups: b, .. }) if a.is_empty() && b.is_empty());
     // A pick that moved along its edge names the same edge, so the names on the edge and on its
     // stretches, and the expressions that read them, stay (#5927, #5928): the keys name the edge,
     // not where it was picked.
@@ -2795,10 +2840,17 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         if edge_of_key(key).is_some() {
             continue;
         }
+        if key.starts_with("frame.member.rotation.") && !flat_rotation {
+            continue;
+        }
         // Only inputs whose key names no edge are left: a label and a kind are all they carry, so
         // one of them is matched by those alone.
         if let Some(k) = old_inputs.iter().position(|(old_key, old_label, old_kind, _, _)| {
-            *old_label == new_labels[i] && old_kind == kind && segment_span(old_key).is_none() && edge_of_key(old_key).is_none()
+            *old_label == new_labels[i]
+                && old_kind == kind
+                && segment_span(old_key).is_none()
+                && edge_of_key(old_key).is_none()
+                && (flat_rotation || !old_key.starts_with("frame.member.rotation."))
         }) {
             param_names[i] = old_inputs.remove(k).3.clone();
         }

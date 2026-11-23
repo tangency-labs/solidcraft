@@ -49,7 +49,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("path, approval: exact hash from plugin.inspect after reviewing permissions, entry, params?: JSON, expected_design?: {document_id, revision} (refuse stale edits with both expected and actual tokens), named?: bool (refusals name the missing grant and how to approve it); explicit native Wasm component execution, one undo step; errors discard all edits"),
     CommandSpec::new("plugin.tools", "List Plugin Tools", checked!("plugin.tools", tools)).icon("inspect").noundo().read_only().doc_only()
         .contract(&TypedContract::<ToolsParams>::new()).output(output_schema_for::<ToolsResult>)
-        .params("name?: one tool, <plugin>.<entry>; every installed, enabled plugin's entries as tools for agents: name, kind (command or importer), the plugin's name, version and description, effect and strict input schema, and with name a command entry's approval hash; no plugin code runs"),
+        .params("name?: one tool, <plugin>.<entry>; every installed, enabled plugin's entries as tools for agents: name, kind (command, exporter or importer), the plugin's name, version and description, effect and strict input schema, and with name a command entry's approval hash; no plugin code runs"),
 ];
 fn check(s: &mut Session, p: &Value) -> Result<Value> {
     let p: CheckParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.check", e.to_string()))?;
@@ -66,7 +66,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         .runtime
         .as_ref()
         .and_then(|r| limits.check(&r.limits).err())
-        .map(|error| plugin::PluginFailure { plugin: package.manifest.name.clone(), file: None, error }.text());
+        .map(|error| plugin::PluginFailure { plugin: package.manifest.name.clone(), file: None, exporting: false, error }.text());
     serde_json::to_value(InspectResult {
         manifest: package.manifest,
         approval: package.approval,
@@ -154,8 +154,13 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         commands: runtime.map(|r| r.commands.iter().cloned().collect()).unwrap_or_default(),
         entries: runtime.map(|r| r.entries.iter().map(|e| format!("{}.{}", manifest.id, e.name)).collect()).unwrap_or_default(),
         entry_points: runtime.map(|r| r.entries.clone()).unwrap_or_default(),
+        opens: runtime
+            .map(|r| r.entries.iter().filter(|e| e.kind == plugin::EntryKind::Importer).flat_map(|e| e.extensions.iter().cloned()).collect())
+            .unwrap_or_default(),
+        writes: runtime
+            .map(|r| r.entries.iter().filter(|e| e.kind == plugin::EntryKind::Exporter).flat_map(|e| e.extensions.iter().cloned()).collect())
+            .unwrap_or_default(),
         listeners: runtime.map(|r| r.listeners.clone()).unwrap_or_default(),
-        opens: runtime.map(|r| r.entries.iter().flat_map(|e| e.extensions.iter().cloned()).collect()).unwrap_or_default(),
         replaces,
         installed,
         folder: folder.to_string_lossy().into_owned(),
@@ -275,8 +280,13 @@ fn list(s: &mut Session, _p: &Value) -> Result<Value> {
             plugins.push(ListedPlugin { disabled: s.disabled_plugins.contains(&package.manifest.id), manifest: package.manifest, commands });
         }
     }
-    serde_json::to_value(ListResult { plugins, importers: plugin::describe_importers(s), param_warnings: vec![] })
-        .map_err(|e| bad("plugin.list", e.to_string()))
+    serde_json::to_value(ListResult {
+        plugins,
+        importers: plugin::describe_importers(s),
+        exporters: plugin::describe_exporters(s),
+        param_warnings: vec![],
+    })
+    .map_err(|e| bad("plugin.list", e.to_string()))
 }
 
 fn import(s: &mut Session, p: &Value) -> Result<Value> {
