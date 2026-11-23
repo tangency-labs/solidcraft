@@ -244,14 +244,16 @@ fn sketch_outline(s: &mut Session, arcs: &[Arc], z0: f64, cmd: &str) -> Result<(
     use solidcraft_sketch::CurveKind;
     run(s, "sketch.create", json!({"plane": "XY", "offset": format!("{z0} mm")}))?;
     super::sketch::edit(s, &json!({}), cmd, false, |sk, _| {
-        // Arcs that meet share their end point (each ends exactly where the next begins).
+        // Arcs that meet share their end point (each ends exactly where the next begins, the same
+        // computed values). Adding 0.0 makes -0.0 the same key as 0.0.
+        let key = |p: [f64; 2]| ((p[0] + 0.0).to_bits(), (p[1] + 0.0).to_bits());
         let mut ends: std::collections::HashMap<(u64, u64), usize> = std::collections::HashMap::new();
         let mut end = |sk: &mut solidcraft_sketch::Sketch, p: [f64; 2]| -> Result<usize> {
-            if let Some(i) = ends.get(&(p[0].to_bits(), p[1].to_bits())) {
+            if let Some(i) = ends.get(&key(p)) {
                 return Ok(*i);
             }
             let i = sk.add_point(Vec2::new(p[0], p[1]), None)?;
-            ends.insert((p[0].to_bits(), p[1].to_bits()), i);
+            ends.insert(key(p), i);
             Ok(i)
         };
         for g in arcs {
@@ -303,7 +305,8 @@ fn insert_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     computed.active_component = s.active_component;
     computed.active_occurrence_path = s.active_occurrence_path.clone();
     computed.active_sketch = s.active_sketch.filter(|id| computed.doc.feature(*id).is_some());
-    s.accept_computed(computed);
+    computed.sketching_view = computed.active_sketch.and(s.sketching_view);
+    s.accept_computed(computed)?;
     Ok(result)
 }
 

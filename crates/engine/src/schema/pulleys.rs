@@ -34,8 +34,8 @@ pub struct PulleyInsertParams {
     #[serde(default)]
     #[schemars(schema_with = "bore_diameter_schema")]
     pub bore_diameter: Option<f64>,
-    /// The axle hole's centre along +X, in mm (default 0: on the axis).
     #[serde(default)]
+    #[schemars(schema_with = "bore_offset_schema")]
     pub bore_offset: Option<f64>,
     /// The component's name (default: the pulley's, such as `GT2 Pulley 20T 6mm`).
     #[serde(default)]
@@ -48,6 +48,16 @@ fn bore_diameter_schema(_: &mut SchemaGenerator) -> Schema {
         "description": "An axle hole's diameter in mm, more than 0 (default: no hole).",
         "type": ["number", "null"],
         "exclusiveMinimum": 0
+    })
+}
+
+/// Within ±160 mm (the largest pulley's grooves); `pulley.insert` also keeps the hole inside them.
+fn bore_offset_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "The axle hole's centre along +X, in mm (default 0: on the axis). The hole, offset and radius together, must stay at least 0.5 mm inside the grooves' bottoms.",
+        "type": ["number", "null"],
+        "minimum": -160,
+        "maximum": 160
     })
 }
 

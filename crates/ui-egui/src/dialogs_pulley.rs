@@ -75,7 +75,7 @@ fn value(app: &SolveApp, text: &str, kind: ValueKind, label: &str) -> Result<f64
 pub fn commands(app: &SolveApp, k: &Pulley) -> Result<Vec<(String, Value)>, String> {
     let profile = PROFILES.get(k.profile).map_or("gt2", |p| p.0);
     let teeth = value(app, &k.teeth, ValueKind::Unitless, "ui.pulley.teeth")?.round();
-    if !(1.0..=1000.0).contains(&teeth) {
+    if !(10.0..=200.0).contains(&teeth) {
         return Err(format!("{}: {teeth}", app.tr("ui.pulley.teeth")));
     }
     let mut params = json!({
