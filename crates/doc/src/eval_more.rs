@@ -1549,15 +1549,12 @@ pub(super) fn sheet_eval(
         }
         FeatureKind::SheetJog { sketch, curve, a, b, offset, measure, angle, radius, position, flip, fixed, stays, body } => {
             // The sketch line must still be a line; the sheet then takes it in its own frame.
-            match (sketch, curve) {
-                (Some(sk), Some(c)) => {
-                    let ss = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk}")))?;
-                    let ci = ss.sketch.curve_index(c).ok_or_else(|| DocError::Unknown(format!("curve `{c}`")))?;
-                    if !matches!(ss.sketch.segs(ci).as_slice(), [Seg2::Line { .. }]) {
-                        return Err(DocError::Invalid("the jog line must be a sketch line".into()));
-                    }
+            if let (Some(sk), Some(c)) = (sketch, curve) {
+                let ss = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk}")))?;
+                let ci = ss.sketch.curve_index(c).ok_or_else(|| DocError::Unknown(format!("curve `{c}`")))?;
+                if !matches!(ss.sketch.segs(ci).as_slice(), [Seg2::Line { .. }]) {
+                    return Err(DocError::Invalid("the jog line must be a sketch line".into()));
                 }
-                _ => {}
             }
             let (i, a, b) = surface_fold_sheet(doc, st, body, sketch, curve, a, b, f.component)
                 .ok_or_else(|| DocError::Invalid("the jog line must lie on a flat face of a sheet metal body".into()))?;
