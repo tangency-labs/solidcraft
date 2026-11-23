@@ -150,7 +150,7 @@ const NO_KERNEL: [&str; 16] = [
     "start",
 ];
 
-const ANSWERING: [&str; 69] = [
+const ANSWERING: [&str; 71] = [
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -185,6 +185,7 @@ const ANSWERING: [&str; 69] = [
     "untrim_face",
     "extend_sheet",
     "face_points",
+    "trim_by_dropped_curves",
     "stitch",
     "offset_sheet",
     "classify_point",
@@ -217,6 +218,7 @@ const ANSWERING: [&str; 69] = [
     "loft",
     "sweep_stations",
     "loft_to_point",
+    "loft_to_point_through",
     "screw_sweep",
     "screw_sweep_radial",
     "screw_sweep_with_options",
@@ -325,6 +327,7 @@ fn every_entry_point_answers() {
     says("untrim_face", sheet.untrim_face(p(5.0, 5.0, 5.0), 0.1, Holes::All, true, false));
     says("extend_sheet", sheet.extend_sheet(p(5.0, 5.0, 5.0), 0.1, 1.0, Continuation::Natural));
     says("face_points", a.face_points());
+    says("trim_by_dropped_curves", sheet.trim_by_dropped_curves(std::slice::from_ref(&lines), &[p(5.0, 5.0, 5.0)], 1e-6));
     says("stitch", sheet.stitch(0.1));
     says("offset_sheet", sheet.offset_sheet(1.0));
     says("classify_point", a.classify_point([1.0; 3]));
@@ -361,6 +364,8 @@ fn every_entry_point_answers() {
     let i3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     says("sweep_stations", Brep::sweep_stations(&lines, &[Affine { m: i3, t: [0.0; 3] }, Affine { m: i3, t: [0.0, 0.0, 2.0] }], Ends::Capped));
     says("loft_to_point", Brep::loft_to_point(&lines, p(5.0, 5.0, 12.0)));
+    // The base twice, at one height: its own refusal.
+    says("loft_to_point_through", Brep::loft_to_point_through(&[lines.clone(), lines.clone()], p(5.0, 5.0, 12.0), &[0.0, 0.5, 1.0]));
     says("screw_sweep", Brep::screw_sweep(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, 0.01));
     says("screw_sweep_radial", Brep::screw_sweep_radial(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, &[(0.0, 0.0), (1.0, 0.0)], 0.01));
     says(
