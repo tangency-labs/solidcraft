@@ -342,7 +342,12 @@
 //! what is known of the components meeting it ([`Overlap`]: across a seam or on opposite
 //! ends of the knots' range, line parameters apart without the tolerance's widening); for the
 //! foot rule, which step failed ([`FootWhy`]) and, for a stretch at the floor, which
-//! condition of its foot box ([`Stretch`]). A diagnosis only: nothing reads it.
+//! condition of its foot box ([`Stretch`]). A diagnosis only: nothing reads it. Apart from
+//! why, a component records whether it reaches a boundary side ([`Component::at_boundary`]:
+//! the surface's or the solve's border where the solve does not wrap, or a trim cull,
+//! answer10, Q2): a contact there may belong to the face across the edge, which no face's
+//! own solve can type against the exact data, so a consumer fires another ray for it; an
+//! undecided component that reaches none is a gap of the typing.
 //!
 //! The solutions of the solve are then typed ([`type_solutions`]). With a cull not placed
 //! or the components not built, every one is undecided, and so is every range. A point is
@@ -2097,6 +2102,7 @@ pub(crate) struct Touches {
 /// A connected part of what the passes of a solve did not prove farther than the
 /// tolerance (module docs, "Components").
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::struct_excessive_bools)] // independent facts of one component, each read alone
 pub(crate) struct Component {
     /// Its boxes, indices of [`Components::boxes`], ascending.
     pub boxes: Vec<usize>,
@@ -2108,6 +2114,19 @@ pub(crate) struct Component {
     /// [`Component::v`], or, in a direction it is joined across a seam in, the two pieces
     /// glued there (module docs, "The seam").
     pub hull: [Span; 2],
+    /// Whether it reaches a boundary side (answer10, Q2; set by [`type_components`] for
+    /// every component, decided or not, false until then): a box of it has a side on the
+    /// surface's or the solve's border where the solve does not wrap, or faces a stretch no
+    /// searched leaf or strip covers (a trim cull), or a root's enclosure reaches that
+    /// border; it lies in a leaf the trim crosses (not wholly inside the face); it touches a
+    /// stretch nothing searched; or its hull is not shown covered by the searched leaves and
+    /// strips (a trim cull inside it, or past the cover test's bound). An undecided
+    /// component that reaches one may straddle the face's edge, which one face's solve
+    /// cannot type (a consumer fires another ray); one that does not reaches no domain
+    /// border or trim cull through its boxes or hull, and its cause is in its type (a gap of
+    /// the typing: a seam not proved `C¹`, a foot box grown to a border, a chart or a
+    /// budget).
+    pub at_boundary: bool,
     /// Whether its boxes cover the whole knots' range in a direction the solve wraps in
     /// (joined across the seam or not): no lift of it is a rectangle less than a turn wide
     /// ([`Why::WholeTurn`]).
@@ -2377,6 +2396,7 @@ pub(crate) fn components(
                 u: b.u,
                 v: b.v,
                 hull: [Span::native(b.u), Span::native(b.v)],
+                at_boundary: false,
                 whole_turn: false,
                 t: b.t,
                 reaches_end: false,
@@ -3339,6 +3359,7 @@ pub(crate) fn type_components(
             .filter_map(|&i| comps.boxes.get(i).copied())
             .collect();
         let t = clipped.get(ci).copied().flatten();
+        c.at_boundary = reaches_a_boundary(net, line, (leaves, sides), c, &boxes);
         let typed = match (undecided_by_flags(c), &scratch, t) {
             (Some(why), _, _) => Typed::Undecided(why),
             (None, None, _) => Typed::Undecided(Why::NotRun),
@@ -3706,6 +3727,49 @@ fn overlap_reasons(
         }
     }
     out
+}
+
+/// Whether the component `c` (its boxes `boxes`) reaches a boundary side
+/// ([`Component::at_boundary`]): a box with a side of [`SideKind::Boundary`] (a box of a
+/// leaf with no record of what lies across it counts), a root's (or root not reported)
+/// enclosure reaching the knots' range or the solve's border where the solve does not wrap
+/// (as the count rule reads it), a box in a leaf the trim crosses (a culled strip is a
+/// distance cull, not one), a stretch nothing searched it touches, or its hull not shown
+/// covered.
+fn reaches_a_boundary(
+    net: &LineNet,
+    line: &PassLine,
+    (leaves, sides): (&[SearchedLeaf], &[LeafSides]),
+    c: &Component,
+    boxes: &[PlacedBox],
+) -> bool {
+    let seams = net.seams(&line.solve_domain);
+    let [[u0, u1], [v0, v1]] = seams.range;
+    let [wu, wv] = seams.wrap;
+    let (lo, hi) = (line.solve_domain.min(), line.solve_domain.max());
+    let on_one = boxes.iter().any(|b| {
+        let side = sides.get(b.leaf).is_none_or(|own| {
+            net.side_kinds(&line.solve_domain, own, Scratch { u: b.u, v: b.v })
+                .contains(&SideKind::Boundary)
+        });
+        let straddled = leaves.get(b.leaf).is_none_or(|l| !l.inside && !l.strip);
+        let root = match b.part {
+            Part::Floor(
+                FloorKind::Root { enclosure, .. } | FloorKind::Unshown { enclosure, .. },
+            ) => {
+                let [eu, ev, _] = enclosure;
+                (!wu && (eu.lo <= u0.max(lo.x) || eu.hi >= u1.min(hi.x)))
+                    || (!wv && (ev.lo <= v0.max(lo.y) || ev.hi >= v1.min(hi.y)))
+            }
+            _ => false,
+        };
+        side || straddled || root
+    });
+    on_one
+        || c.touches.unsearched
+        || !hull_pieces(&c.hull)
+            .iter()
+            .all(|&[u, v]| covered_by_leaves(u, v, leaves))
 }
 
 /// What makes a component undecided whatever its sides (answer to the typing's design: a
@@ -6150,6 +6214,25 @@ mod tests {
         let mut on_quadrant = floor.iter().filter(|r| r.u.hi == q);
         assert!(on_quadrant.clone().count() > 0);
         assert!(on_quadrant.all(|r| matches!(r.kind, FloorKind::Edge | FloorKind::Left)));
+        // (answer10, Q2: facing the stretch nothing searched, a trim cull, the component
+        // reaches a boundary side; with both leaves searched it reaches none, and in a leaf
+        // the trim crosses, not wholly inside the face, it does)
+        let (_, c) = typed_of(&k, &s, p, d, TOL, &doms[..1]);
+        assert!(c.list.iter().all(|x| x.at_boundary), "{:?}", c.list);
+        let (mut leaves, mut c) = typed_of(&k, &s, p, d, TOL, &doms);
+        assert!(!c.list[0].at_boundary, "{:?}", c.list[0]);
+        leaves[0].inside = false;
+        let net = LineNet::of(&k, &s).unwrap().unwrap();
+        let line = PassLine {
+            point: p,
+            vector: d,
+            span: [0.0, 1.0],
+            solve_domain: whole,
+            tol: TOL,
+        };
+        let sides = leaf_sides(&doms, &whole, net.seams(&whole));
+        type_components(&net, &line, &leaves, &sides, &mut c, None).unwrap();
+        assert!(c.list[0].at_boundary, "{:?}", c.list[0]);
     }
 
     /// A line tangent to the torus's crown circle at 45°, tolerance 1e-6, touches it once.
@@ -6767,6 +6850,8 @@ mod tests {
                 "step {step}: {:?}",
                 c.list
             );
+            // (a tangent inside the face reaches no boundary side)
+            assert!(!c.list[0].at_boundary, "step {step}: {:?}", c.list);
         }
         let (p, d) = across(1.0 - STEP);
         let (_, c) = typed_of(&k, &s, p, d, TOL, &[whole]);
@@ -6788,6 +6873,8 @@ mod tests {
                 "{:?}",
                 types(&c)
             );
+            // (each reaches the rim, the surface's boundary: another ray's case, answer10 Q2)
+            assert!(c.list.iter().all(|x| x.at_boundary), "{:?}", c.list);
         }
     }
 
@@ -7327,6 +7414,8 @@ mod tests {
             "{:?}",
             c.list[0]
         );
+        // (the seam is a crease, no boundary: a gap of the typing, not another ray's case)
+        assert!(!c.list[0].at_boundary, "{:?}", c.list[0]);
     }
 
     /// A component around the whole turn stays undecided (answer10, Q1, condition 7): a
