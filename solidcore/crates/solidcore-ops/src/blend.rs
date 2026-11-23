@@ -44,7 +44,7 @@ use solidcore::blend::blend_corner::rollover::{
     chain_off_seams, concave_chain, concave_chain_ends, has_end_arc, is_concave_chain, seams_back,
     RollOver,
 };
-use solidcore::blend::blend_corner::BlendCornerEvent;
+use solidcore::blend::blend_corner::{separate_ends::classify_separate_ends, BlendCornerEvent};
 use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
 use solidcore::blend::chamfer_side::{faces_along, wedge_at_middle};
 use solidcore::blend::definition_check::BlendFaceLog;
@@ -1216,6 +1216,147 @@ fn untagged(b: &mut Brep) -> solidcore::Result<()> {
     Ok(())
 }
 
+/// Picks at separated ends must have no second picked neighbour at their far end. Passes that
+/// already need a shared corner at another vertex stay together.
+fn separated_end_picks(
+    k: &Kernel,
+    b: &mut Brep,
+    picked: &[EdgeId],
+    sizes: &[f64],
+) -> solidcore::Result<HashMap<usize, [f64; 3]>> {
+    let mut at_vertex: HashMap<VertexId, Vec<usize>> = HashMap::new();
+    for (i, &e) in picked.iter().enumerate() {
+        let (start, end) = edge::start_end_vertices(b, e)?;
+        for v in start.into_iter().chain(end.filter(|&v| Some(v) != start)) {
+            at_vertex.entry(v).or_default().push(i);
+        }
+    }
+    let mut shared_ends = vec![0; picked.len()];
+    for group in at_vertex.values().filter(|g| g.len() > 1) {
+        for &i in group {
+            if let Some(count) = shared_ends.get_mut(i) {
+                *count += 1;
+            }
+        }
+    }
+    let mut trailing = HashMap::new();
+    let mut envelopes = Vec::new();
+    for v in b.vertex_list().to_vec() {
+        let Some([i, j]) = at_vertex.get(&v).map(Vec::as_slice) else {
+            continue;
+        };
+        let (Some(&a), Some(&z)) = (picked.get(*i), picked.get(*j)) else {
+            continue;
+        };
+        if shared_ends.get(*i) != Some(&1) || shared_ends.get(*j) != Some(&1) {
+            continue;
+        }
+        let (Some(&a_size), Some(&z_size)) = (sizes.get(*i), sizes.get(*j)) else {
+            continue;
+        };
+        let Some(envelope) = classify_separate_ends(k, b, v, [a, z], [a_size, z_size])? else {
+            continue;
+        };
+        if envelopes
+            .iter()
+            .any(|other| !envelope.are_disjoint(other, 0.0))
+        {
+            return Ok(HashMap::new());
+        }
+        envelopes.push(envelope);
+        // The two ends are independent. Use the body's order so reversing the picks does not
+        // change which blend is built first.
+        let last = if b.edge_list().iter().position(|&e| e == a)
+            < b.edge_list().iter().position(|&e| e == z)
+        {
+            *j
+        } else {
+            *i
+        };
+        let p = vertex::point(b, v)?;
+        trailing.insert(last, [p.x, p.y, p.z]);
+    }
+    Ok(trailing)
+}
+
+/// Build the two groups of separated ends with the ordinary end construction. The first
+/// pass's faces do not extend the second pass: at the cutout the two bands end independently.
+fn separated_end_passes(
+    k: &mut Kernel,
+    b: &mut Brep,
+    picked: &[EdgeId],
+    sizes: &[f64],
+    kind: Blend,
+    contract: Contract,
+) -> solidcore::Result<Option<Result<()>>> {
+    let trailing = separated_end_picks(k, b, picked, sizes)?;
+    // The other blend workflows may couple picks away from their endpoint. Partition only
+    // selections made entirely of the independent ends proved above.
+    if trailing.len().checked_mul(2) != Some(picked.len()) {
+        return Ok(None);
+    }
+    let pass_group = |k: &mut Kernel, b: &mut Brep, edges: &[EdgeId], sizes: &[f64]| {
+        let chamfers: Vec<_> = if kind == Blend::Chamfer {
+            sizes
+                .iter()
+                .map(|&d| ChamferSize::Distances([d, d]))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let section = if kind == Blend::Chamfer {
+            Section::Chamfer {
+                sizes: &chamfers,
+                along: &[],
+            }
+        } else {
+            Section::Round(sizes)
+        };
+        pass_or_refuse(k, b, together(edges, section, Turn::Mitre, &[], contract))
+    };
+    let (mut lead, mut lead_sizes) = (Vec::new(), Vec::new());
+    for (i, (&e, &size)) in picked.iter().zip(sizes).enumerate() {
+        if trailing.contains_key(&i) {
+            b.add_attribute(
+                EntityRef::Edge(e),
+                Attribute::application(PICKED_ID, Behavior::Copy, Picked(i)),
+            )?;
+        } else {
+            lead.push(e);
+            lead_sizes.push(size);
+        }
+    }
+    if let Err(e) = pass_group(k, b, &lead, &lead_sizes)? {
+        return Ok(Some(Err(e)));
+    }
+    let lost_pick = |i: usize| Error::CornerUnsupported {
+        why: Some(
+            "a selected edge at the opening does not survive the other blend as one edge".into(),
+        ),
+        at: trailing.get(&i).copied(),
+    };
+    let mut surviving = HashMap::new();
+    for &e in b.edge_list() {
+        if let Some((_, i)) = picked_on(b, e) {
+            if surviving.insert(i, e).is_some() {
+                return Ok(Some(Err(lost_pick(i))));
+            }
+        }
+    }
+    let (mut tail, mut tail_sizes) = (Vec::new(), Vec::new());
+    for (i, &size) in sizes.iter().enumerate() {
+        if trailing.contains_key(&i) {
+            let Some(&e) = surviving.get(&i) else {
+                return Ok(Some(Err(lost_pick(i))));
+            };
+            tail.push(e);
+            tail_sizes.push(size);
+        }
+    }
+    untagged(b)?;
+    Ok(Some(pass_group(k, b, &tail, &tail_sizes)?.map(|_| ())))
+}
+
 /// The rounds of [`blend`] when blends of several edges overflow their faces (the first call
 /// stopped in `b`, `edges` its edges, `sizes` theirs, `mitred` the mitred pairs it found): the
 /// blends that overflow on their own (each edge's alone, classified in `b`, where nothing was
@@ -1805,6 +1946,24 @@ fn blend_on_body(
     let contract = options.contract;
     let expect = Expect::under(k, b, Proof::default(), contract)?;
     let mut dropped = vec![false; edges.len()];
+    if picked.len() > 1
+        && back.is_empty()
+        && corners == Corners::Filled
+        && turn == Turn::Mitre
+        && options.chamfer_corner == ChamferCorner::Mitre
+        && matches!(kind, Blend::Chamfer | Blend::Round)
+    {
+        if let Some(made) = separated_end_passes(k, b, &picked, each, kind, contract)? {
+            if let Err(e) = made {
+                return Ok(Err(e));
+            }
+            return Ok(done(k, b, expect, contract)?.map(|()| Blended {
+                dropped,
+                holes: Vec::new(),
+                made: Vec::new(),
+            }));
+        }
+    }
     let section: fn(&[f64]) -> Section<'_> = match kind {
         Blend::Round => |s| Section::Round(s),
         Blend::Curvature => |s| Section::Curvature(s),

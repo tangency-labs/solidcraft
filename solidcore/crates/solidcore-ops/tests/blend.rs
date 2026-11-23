@@ -178,6 +178,222 @@ fn rounds_and_chamfers_take_their_closed_forms() {
     assert!(rel(volume(&b), ABC - (1.0 - PI / 4.0) * 4.0 * 30.0) < 1e-6);
 }
 
+/// A post on a plate. The aperture starts exactly at the shared endpoint of the foot edges.
+fn post_foot(cutout: bool) -> Body {
+    use solidcore_ops::{boolean::boolean, BooleanOp};
+
+    let plate = make_box([0.0; 3], [50.0, 50.0, 4.0]).unwrap();
+    let post = make_box([0.0, 0.0, 4.0], [10.0, 10.0, 30.0]).unwrap();
+    let joined = boolean(plate, post, BooleanOp::Union).unwrap().unwrap();
+    if cutout {
+        let aperture = make_box([10.0, 10.0, -1.0], [5.0, 5.0, 6.0]).unwrap();
+        boolean(joined, aperture, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap()
+    } else {
+        joined
+    }
+}
+
+fn post_foot_edges(body: &Body) -> [usize; 2] {
+    [
+        edge_at(body, [10.0, 5.0, 4.0]),
+        edge_at(body, [5.0, 10.0, 4.0]),
+    ]
+}
+
+#[test]
+fn post_foot_blends_stop_at_a_through_cut_corner() {
+    use solidcore_ops::PointClass;
+    all_fixes();
+    let chamfer = 5.0_f64;
+    let round = 2.0_f64;
+    for (kind, size, section, diagonal) in [
+        (
+            Blend::Chamfer,
+            chamfer,
+            chamfer.powi(2) / 2.0,
+            chamfer / 2.0,
+        ),
+        (
+            Blend::Round,
+            round,
+            round.powi(2) * (1.0 - PI / 4.0),
+            round * (1.0 - std::f64::consts::FRAC_1_SQRT_2),
+        ),
+    ] {
+        for reverse in [false, true] {
+            let body = post_foot(true);
+            let mut edges = post_foot_edges(&body);
+            if reverse {
+                edges.reverse();
+            }
+            let made = blend(&body, kind, &edges, &[size], &[], Corners::Filled).unwrap();
+            assert_eq!(made.dropped, [false, false]);
+            assert!(made.holes.is_empty());
+            assert_eq!(body.solid_count().unwrap(), 1);
+            assert_eq!(body.to_record().unwrap().0.shells.len(), 1);
+            assert!(body.check(CheckLevel::All).unwrap().is_valid());
+
+            // The two ten-unit extrusions occupy disjoint plan strips at the aperture.
+            let base = 50.0 * 50.0 * 4.0 + 10.0 * 10.0 * 30.0 - 5.0 * 5.0 * 4.0;
+            let expected = base + 20.0 * section;
+            let actual = volume(&body);
+            assert!(
+                rel(actual, expected) < 1e-9,
+                "{kind:?}: {actual} != {expected}"
+            );
+
+            // The aperture corner below the blend transition and the post corner above it
+            // remain distinct edges. Both blends end at the vertex on that vertical line.
+            let _ = vertex_at(&body, [10.0, 10.0, 4.0 + size]);
+            assert_ne!(
+                edge_at(&body, [10.0, 10.0, 2.0]),
+                edge_at(&body, [10.0, 10.0, 5.0 + size])
+            );
+            for (offset, expected) in [
+                (diagonal / 2.0, PointClass::Inside),
+                (diagonal, PointClass::OnBoundary),
+                (diagonal * 1.5, PointClass::Outside),
+            ] {
+                for point in [
+                    [10.0 + offset, 9.5, 4.0 + offset],
+                    [9.5, 10.0 + offset, 4.0 + offset],
+                ] {
+                    assert_eq!(
+                        body.classify_point(point).unwrap(),
+                        expected,
+                        "{kind:?} at {point:?}"
+                    );
+                }
+            }
+            for z in [2.0, 4.25] {
+                let point = [10.25, 10.25, z];
+                assert_eq!(
+                    body.classify_point(point).unwrap(),
+                    PointClass::Outside,
+                    "{kind:?} at {point:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn post_foot_blends_leave_the_body_intact_when_the_opening_is_too_short() {
+    all_fixes();
+    for kind in [Blend::Chamfer, Blend::Round] {
+        let body = post_foot(true);
+        let counts = body.counts().unwrap();
+        let result = blend(
+            &body,
+            kind,
+            &post_foot_edges(&body),
+            &[6.0],
+            &[],
+            Corners::Filled,
+        );
+        assert!(
+            matches!(result, Err(Error::CornerUnsupported { .. })),
+            "{result:?}"
+        );
+        assert_eq!(body.counts().unwrap(), counts);
+        assert!(rel(volume(&body), 12_900.0) < 1e-9);
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    }
+}
+
+#[test]
+fn post_foot_blends_keep_the_mitre_without_a_through_cut() {
+    use solidcore_ops::PointClass;
+    all_fixes();
+    for (kind, arms, mitre) in [
+        (Blend::Chamfer, 10.0, 1.0 / 3.0),
+        (Blend::Round, 20.0 * (1.0 - PI / 4.0), 5.0 / 3.0 - PI / 2.0),
+    ] {
+        let body = post_foot(false);
+        blend(
+            &body,
+            kind,
+            &post_foot_edges(&body),
+            &[1.0],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap();
+        // The ordinary mitre adds a square of the profile width at each height. For size one,
+        // integrating (1 - z)^2 or (1 - sqrt(1 - (z - 1)^2))^2 gives the mitre volume above.
+        let expected = 13_000.0 + arms + mitre;
+        let actual = volume(&body);
+        assert!(
+            rel(actual, expected) < 1e-9,
+            "{kind:?}: {actual} != {expected}"
+        );
+        assert_eq!(
+            body.classify_point([10.25, 10.25, 4.25]).unwrap(),
+            PointClass::Inside
+        );
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    }
+}
+
+#[test]
+fn post_foot_blends_stop_at_two_independent_cutout_corners_in_one_call() {
+    use solidcore_ops::PointClass;
+    use solidcore_ops::{boolean::boolean, BooleanOp};
+
+    all_fixes();
+    let chamfer = 5.0_f64;
+    let round = 2.0_f64;
+    for (kind, size, section) in [
+        (Blend::Chamfer, chamfer, chamfer.powi(2) / 2.0),
+        (Blend::Round, round, round.powi(2) * (1.0 - PI / 4.0)),
+    ] {
+        // Reflect the post and aperture across x = 25, leaving both on one plate.
+        let post = make_box([40.0, 0.0, 4.0], [10.0, 10.0, 30.0]).unwrap();
+        let aperture = make_box([35.0, 10.0, -1.0], [5.0, 5.0, 6.0]).unwrap();
+        let joined = boolean(post_foot(true), post, BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let body = boolean(joined, aperture, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let edges = [
+            [10.0, 5.0, 4.0],
+            [40.0, 5.0, 4.0],
+            [5.0, 10.0, 4.0],
+            [45.0, 10.0, 4.0],
+        ]
+        .map(|point| edge_at(&body, point));
+        let made = blend(&body, kind, &edges, &[size], &[], Corners::Filled).unwrap();
+        assert_eq!(made.dropped, [false; 4]);
+        assert!(made.holes.is_empty());
+        assert_eq!(body.solid_count().unwrap(), 1);
+        assert_eq!(body.to_record().unwrap().0.shells.len(), 1);
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+
+        // Four ten-unit arms have disjoint interiors. The two apertures leave the same void.
+        let base = 50.0 * 50.0 * 4.0 + 2.0 * (10.0 * 10.0 * 30.0 - 5.0 * 5.0 * 4.0);
+        let expected = base + 40.0 * section;
+        let actual = volume(&body);
+        assert!(
+            rel(actual, expected) < 1e-9,
+            "{kind:?}: {actual} != {expected}"
+        );
+        for x in [10.0, 40.0] {
+            let _ = vertex_at(&body, [x, 10.0, 4.0 + size]);
+        }
+        for x in [10.25, 39.75] {
+            let point = [x, 10.25, 4.25];
+            assert_eq!(
+                body.classify_point(point).unwrap(),
+                PointClass::Outside,
+                "{kind:?} at {point:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn three_rounds_meet_at_a_corner_filled_set_back_or_open() {
     all_fixes();
