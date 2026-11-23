@@ -312,14 +312,6 @@ type M4 = [[f64; 4]; 4];
 
 const IDENTITY: M4 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
 
-fn placement_key(m: &M4) -> [u64; 16] {
-    let mut key = [0; 16];
-    for (k, x) in key.iter_mut().zip(m.iter().flatten()) {
-        *k = (*x + 0.0).to_bits();
-    }
-    key
-}
-
 /// `a · b`.
 fn mat_mul(a: &M4, b: &M4) -> M4 {
     let mut out = [[0.0; 4]; 4];
@@ -955,22 +947,37 @@ impl Reader {
     }
 
     /// Shapes reached by a usable mapping, starting from product-owned representations.
-    /// Visit each shape at each distinct placement, within the depth of the import walk.
+    /// Count every visit as the import walk does, even if two mappings place the same
+    /// shape at the same position. The scan may decline to omit a source if the
+    /// remaining walk can reach a visit or body limit.
     fn mapped_shapes(&mut self, reps: impl Iterator<Item = u64>, work: &mut usize) -> Option<HashSet<u64>> {
-        let mut followed = HashSet::new();
-        let identity_key = placement_key(&IDENTITY);
-        let mut frontier: Vec<_> = reps.filter(|rep| followed.insert((*rep, identity_key))).map(|rep| (rep, IDENTITY)).collect();
+        let mut frontier: Vec<_> = reps.map(|rep| (rep, IDENTITY)).collect();
         let mut mapped = HashSet::new();
         let mut closures = HashMap::new();
-        for _ in 0..MAX_ASSEMBLY_DEPTH {
+        let mut bodies = 0usize;
+        let limit = MAX_CLOSURE_WORK.min(MAX_VISITS);
+        for depth in 0..=MAX_ASSEMBLY_DEPTH {
             let mut next = Vec::new();
             for (rep, world) in frontier {
                 let Some((items, _)) = self.reps.get(&rep) else { continue };
                 *work += items.len();
-                if *work > MAX_CLOSURE_WORK {
+                if *work > limit {
                     return None;
                 }
-                let maps: Vec<_> = items.iter().filter_map(|&item| self.mapped_item(item)).collect();
+                let mut maps = Vec::new();
+                for &item in items {
+                    let Some(entity) = self.ex.get(item) else { continue };
+                    match entity.name() {
+                        name if body_item(rep, name) => {
+                            bodies += solidcore_step::topology::items(&self.ex, item).len();
+                            if bodies > MAX_BODIES {
+                                return None;
+                            }
+                        }
+                        "MAPPED_ITEM" if depth < MAX_ASSEMBLY_DEPTH => maps.extend(self.mapped_item(item)),
+                        _ => {}
+                    }
+                }
                 if maps.is_empty() {
                     continue;
                 }
@@ -980,19 +987,16 @@ impl Reader {
                     // Only a regular placement covers a shape. A nested operator may
                     // still undo an ill-conditioned scale, so keep walking the map.
                     let regular = solidcore_ops::affine::inverse(&placement).is_ok();
-                    let key = placement_key(&placement);
                     let shapes = closures.entry(map.rep).or_insert_with(|| self.rep_closure(&[map.rep]));
                     *work += shapes.len();
-                    if *work > MAX_CLOSURE_WORK {
+                    if *work > limit {
                         return None;
                     }
                     for &shape in shapes.iter() {
                         if regular {
                             mapped.insert(shape);
                         }
-                        if followed.insert((shape, key)) {
-                            next.push((shape, placement));
-                        }
+                        next.push((shape, placement));
                     }
                 }
             }
@@ -1008,16 +1012,17 @@ impl Reader {
     /// its shapes are reached from a root that will be kept. A cycle alone cannot
     /// hide all its products.
     fn mapped_template_products(&mut self, roots: &[u64]) -> HashSet<u64> {
-        if roots.len() < 2 || !self.children.is_empty() {
+        let limit = MAX_CLOSURE_WORK.min(MAX_VISITS);
+        if !(2..=limit).contains(&roots.len()) || !self.children.is_empty() {
             return HashSet::new();
         }
         let mut products = Vec::new();
-        let mut work = 0;
+        let mut work = roots.len();
         for &pd in roots {
             let Some(reps) = self.pd_reps.get(&pd).filter(|reps| !reps.is_empty()) else { continue };
             let shapes = self.rep_closure(reps);
             work += shapes.len();
-            if work > MAX_CLOSURE_WORK {
+            if work > limit {
                 return HashSet::new();
             }
             products.push((pd, shapes));
@@ -1083,7 +1088,11 @@ impl Reader {
                         if self.node_items.contains(&item) {
                             continue;
                         }
-                        if !self.node_placed.insert((item, placement_key(m))) {
+                        let mut key = [0u64; 16];
+                        for (k, x) in key.iter_mut().zip(m.iter().flatten()) {
+                            *k = (*x + 0.0).to_bits();
+                        }
+                        if !self.node_placed.insert((item, key)) {
                             continue;
                         }
                         if self.bodies_so_far() >= MAX_BODIES {

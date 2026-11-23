@@ -7043,6 +7043,18 @@ fn mapped_template_product_adds_no_standalone_cube() {
 }
 
 #[test]
+fn repeated_mapped_placements_count_toward_the_discovery_limit() {
+    let text = mapped_cube_row(MAPPED_CUBE_PRODUCT);
+    let ex = Arc::new(p21::parse(&text).unwrap());
+    let mut reader = Reader::new(ex, 1);
+    reader.index();
+    // The row lists five items, then visits the two items of the cube four times.
+    // The four visits cost four more. The repeated placement still needs work.
+    let mut work = MAX_CLOSURE_WORK - 16;
+    assert!(reader.mapped_shapes(std::iter::once(70), &mut work).is_none());
+}
+
+#[test]
 fn roots_follow_nested_mappings_and_linked_representations() {
     // "row" places a module three times. The module's linked shape places the cube.
     let extra = format!(
