@@ -578,9 +578,7 @@ impl CurveFailure {
             | Self::PointOnCurveWhenMaximising { .. }
             | Self::SingleLinearCurve
             | Self::ZeroDirection(_)
-            | Self::ZeroTangent { .. } => {
-                ErrorKind::of_status(self.comparison_status())
-            }
+            | Self::ZeroTangent { .. } => ErrorKind::of_status(self.comparison_status()),
             Self::PieceOutsideSpan { .. } => ErrorKind::PortInvariant,
             Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
         }
