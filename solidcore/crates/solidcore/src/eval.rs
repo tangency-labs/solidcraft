@@ -41,7 +41,8 @@ pub mod vec;
 pub use collapse::{Collapse, OntoKnots};
 pub use curve::{CurveEval, CurveJet};
 pub use geodesic::{
-    distance, geodesic, Geodesic, GeodesicError, GeodesicSolver, DEFAULT_TOLERANCE,
+    arc, circle, distance, geodesic, Geodesic, GeodesicCircle, GeodesicError, GeodesicSolver,
+    DEFAULT_TOLERANCE,
 };
 pub use geometry::{Curve, Curve2, Frame, Surface};
 pub use spline::{

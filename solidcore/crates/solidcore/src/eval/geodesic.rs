@@ -14,6 +14,7 @@ use super::surface::{Metric, SurfaceEval};
 use super::uv::{self, Domain};
 use super::vec::VecExt;
 use crate::math::Vec3;
+use std::f64::consts::TAU;
 
 const STEPS: usize = 32;
 const MAX_NEWTON: usize = 24;
@@ -63,6 +64,17 @@ struct Jet {
     suu: Vec3,
     suv: Vec3,
     svv: Vec3,
+}
+
+/// A geodesic circle: the points at one intrinsic distance from a centre.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GeodesicCircle {
+    /// The centre in the surface's (u, v).
+    pub center: [f64; 2],
+    /// The intrinsic radius, in millimetres.
+    pub radius: f64,
+    /// The circle's points in the surface's (u, v), in angle order.
+    pub samples: Vec<[f64; 2]>,
 }
 
 /// Geodesics on one surface, at one tolerance.
@@ -370,6 +382,91 @@ impl<'a> GeodesicSolver<'a> {
         Ok(self.geodesic(from, to)?.length)
     }
 
+    /// A geodesic circle of `radius` around `center`, sampled `samples` times.
+    pub fn circle(
+        &self,
+        center: [f64; 2],
+        radius: f64,
+        samples: usize,
+    ) -> Result<GeodesicCircle, GeodesicError> {
+        if !(radius.is_finite() && radius > 0.0) || samples < 3 {
+            return Err(GeodesicError::NotConverged);
+        }
+        let center = self.inside(center)?;
+        let jet = self.jet(center)?;
+        let (e1, e2) = Self::basis(&jet)?;
+        let [cu, cv] = center;
+        let mut points = Vec::new();
+        for i in 0..samples {
+            let theta = TAU * i as f64 / samples as f64;
+            let w = e1 * theta.cos() + e2 * theta.sin();
+            let (a, b) = Self::parameter_direction(&jet, w)?;
+            let (_, state) = self.integrate([cu, cv, a, b], radius, STEPS)?;
+            let [u, v, _, _] = state;
+            points.push([u, v]);
+        }
+        Ok(GeodesicCircle {
+            center,
+            radius,
+            samples: points,
+        })
+    }
+
+    /// An arc of a geodesic circle, from angle `start` to `end` (radians).
+    pub fn arc(
+        &self,
+        center: [f64; 2],
+        radius: f64,
+        start: f64,
+        end: f64,
+        samples: usize,
+    ) -> Result<Geodesic, GeodesicError> {
+        if !(radius.is_finite() && radius > 0.0) || samples < 2 {
+            return Err(GeodesicError::NotConverged);
+        }
+        let center = self.inside(center)?;
+        let jet = self.jet(center)?;
+        let (e1, e2) = Self::basis(&jet)?;
+        let [cu, cv] = center;
+        let mut points = Vec::new();
+        let mut tan0 = [0.0, 0.0];
+        let mut tan1 = [0.0, 0.0];
+        for i in 0..samples {
+            let t = i as f64 / (samples - 1) as f64;
+            let theta = start + (end - start) * t;
+            let w = e1 * theta.cos() + e2 * theta.sin();
+            let (a, b) = Self::parameter_direction(&jet, w)?;
+            if i == 0 {
+                tan0 = [a, b];
+            }
+            if i + 1 == samples {
+                tan1 = [a, b];
+            }
+            let (_, state) = self.integrate([cu, cv, a, b], radius, STEPS)?;
+            let [u, v, _, _] = state;
+            points.push([u, v]);
+        }
+        let mut length = 0.0;
+        for pair in points.windows(2) {
+            let (Some(&[u0, v0]), Some(&[u1, v1])) = (pair.first(), pair.get(1)) else {
+                continue;
+            };
+            let (um, vm) = (0.5 * (u0 + u1), 0.5 * (v0 + v1));
+            let m = self
+                .surface
+                .metric(um, vm)
+                .ok_or(GeodesicError::OffDomain)?;
+            length += m.norm(u1 - u0, v1 - v0);
+        }
+        Ok(Geodesic {
+            samples: points,
+            length,
+            tan0,
+            tan1,
+            windings: [0, 0],
+        })
+    }
+
     /// The intrinsic length of a pcurve over `interval`.
     pub fn intrinsic_length(
         &self,
@@ -442,6 +539,28 @@ pub fn geodesic(
 /// The shortest geodesic's length, in millimetres.
 pub fn distance(surface: &SurfaceEval, from: [f64; 2], to: [f64; 2]) -> Result<f64, GeodesicError> {
     GeodesicSolver::new(surface, DEFAULT_TOLERANCE).distance(from, to)
+}
+
+/// A geodesic circle on `surface`.
+pub fn circle(
+    surface: &SurfaceEval,
+    center: [f64; 2],
+    radius: f64,
+    samples: usize,
+) -> Result<GeodesicCircle, GeodesicError> {
+    GeodesicSolver::new(surface, DEFAULT_TOLERANCE).circle(center, radius, samples)
+}
+
+/// An arc of a geodesic circle on `surface`.
+pub fn arc(
+    surface: &SurfaceEval,
+    center: [f64; 2],
+    radius: f64,
+    start: f64,
+    end: f64,
+    samples: usize,
+) -> Result<Geodesic, GeodesicError> {
+    GeodesicSolver::new(surface, DEFAULT_TOLERANCE).arc(center, radius, start, end, samples)
 }
 
 #[cfg(test)]
@@ -519,6 +638,33 @@ mod tests {
         let d = distance(&s, [0.1, 0.1], [0.9, 0.9]).expect("a geodesic");
         let expected = 2.0f64.sqrt() * 0.8;
         assert!((d - expected).abs() <= 1e-6, "{d} vs {expected}");
+    }
+
+    #[test]
+    fn a_sphere_circle_keeps_its_geodesic_radius() {
+        let s = sphere(2.0);
+        let solver = GeodesicSolver::new(&s, DEFAULT_TOLERANCE);
+        let c = solver.circle([0.0, 0.0], 0.5, 12).expect("a circle");
+        assert_eq!(c.samples.len(), 12);
+        for p in c.samples {
+            let d = solver.distance([0.0, 0.0], p).expect("a radius");
+            assert!((d - 0.5).abs() <= 1e-5, "{d}");
+        }
+    }
+
+    #[test]
+    fn an_arc_starts_and_ends_on_the_circle() {
+        let s = sphere(2.0);
+        let solver = GeodesicSolver::new(&s, DEFAULT_TOLERANCE);
+        let a = solver
+            .arc([0.0, 0.0], 0.5, 0.0, FRAC_PI_2, 8)
+            .expect("an arc");
+        assert_eq!(a.samples.len(), 8);
+        for p in [a.samples.first(), a.samples.last()].into_iter().flatten() {
+            let d = solver.distance([0.0, 0.0], *p).expect("a radius");
+            assert!((d - 0.5).abs() <= 1e-5, "{d}");
+        }
+        assert!(a.length > 0.0);
     }
 
     #[test]
