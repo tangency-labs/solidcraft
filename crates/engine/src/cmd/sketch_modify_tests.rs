@@ -2508,7 +2508,7 @@ fn a_relative_font_path_is_read_from_the_design_folder_not_the_working_folder() 
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("fonts")).unwrap();
     std::fs::copy(source, dir.join("fonts/Bold.ttf")).unwrap();
-    let design = dir.join("text.sc").to_string_lossy().into_owned();
+    let design = dir.join("text.json").to_string_lossy().into_owned();
     let near = |s: &Session, id: u64, want: f64| {
         let a: Vec<f64> = s.model.state().sketch(id).unwrap().profiles.iter().map(|p| p.area).collect();
         assert!(a.len() == 1 && (a[0] - want).abs() < 1e-3, "{a:?} against {want}");
@@ -2522,23 +2522,25 @@ fn a_relative_font_path_is_read_from_the_design_folder_not_the_working_folder() 
     near(&s, id, 17.6385);
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "file.save", json!({"path": design, "cache": false}));
-    // The file keeps the path as it was typed, so the folder with its fonts moves as one.
+    // A `.json` design is saved as plain JSON (a `.sc` one is a container), so the text can be read. The file keeps the path as it was typed, so the folder with its fonts moves as one.
     let saved = std::fs::read_to_string(&design).unwrap();
     assert!(saved.contains("\"fonts/Bold.ttf\""), "{saved}");
     // Opened again, from wherever the program runs, the text is still set in that font.
     let mut reopened = Session::default();
-    run(&mut reopened, "file.open", json!({"path": design}));
+    run(&mut reopened, "doc.open", json!({"path": design}));
     near(&reopened, id, 17.6385);
     let source = reopened.doc.sketch(id).unwrap().links.iter().find_map(|l| match &l.source {
         LinkSource::Text { font, .. } => font.clone(),
         _ => None,
     });
     assert!(source.is_some_and(|f| std::path::Path::new(&f).is_absolute() && f.ends_with("Bold.ttf")));
-    // A font file that is not there keeps the built-in font and its warning.
-    let missing = std::fs::remove_file(dir.join("fonts/Bold.ttf")).and_then(|()| std::fs::write(dir.join("fonts/other.txt"), b""));
-    assert!(missing.is_ok());
+    // A font file that is not there keeps the built-in font and its warning. The same design in a folder
+    // without `fonts/Bold.ttf` (a font file read once stays in memory, so the file is not removed in place).
+    let bare = dir.join("bare");
+    let copied = std::fs::create_dir_all(&bare).and_then(|()| std::fs::copy(&design, bare.join("text.json")));
+    assert!(copied.is_ok());
     let mut again = Session::default();
-    run(&mut again, "file.open", json!({"path": design}));
+    run(&mut again, "doc.open", json!({"path": bare.join("text.json").to_string_lossy()}));
     near(&again, id, 13.5557);
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -656,7 +656,10 @@ mod tests {
             assert_eq!(font_file_path("~/Foo.ttf"), Some(PathBuf::from(format!("{}/Foo.ttf", home.display()))));
         }
         assert_eq!(font_file_path("DejaVu Sans"), None);
-        assert_eq!(font_file_path(&format!("/{}.ttf", "a".repeat(MAX_FONT_NAME))), None);
+        // A font file path may be longer than a font name, up to MAX_FONT_PATH.
+        assert!(font_file_path(&format!("/{}.ttf", "a".repeat(MAX_FONT_NAME))).is_some());
+        assert_eq!(font_file_path(&format!("/{}.ttf", "a".repeat(MAX_FONT_PATH))), None);
+        assert_eq!(font_file_path(&"a".repeat(MAX_FONT_NAME + 1)), None);
     }
 
     #[test]
