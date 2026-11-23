@@ -1023,6 +1023,9 @@ fn global_point_solve(
     use crate::intersect::point_class::{PointClassType, PointClassification};
     use crate::query::face::p2::{face_surface_cache, point_classify, PointClassifyOptions};
 
+    // a face without loop uses has no trim boundaries: no test (asked of the face,
+    // not of when its cache was built)
+    let has_loopuses = crate::topology::face::p4::has_loopuses(b, f)?;
     let surface = face_surface(b, f)?.clone_for_evaluation()?;
     let lease = if surface.trim_cache_in_use() {
         None
@@ -1030,6 +1033,7 @@ fn global_point_solve(
         Some(face_surface_cache(k, b, f)?)
     };
     let test_on = point_test
+        && has_loopuses
         && lease.as_ref().is_some_and(|l| {
             l.trimmed && l.cache.base().point_test_enabled && !l.cache.base().face_was_modified
         });
