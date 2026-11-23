@@ -28,6 +28,12 @@ pub enum Error {
     Argument,
     /// The kernel reported success but the result has no faces (for a boolean: it is empty).
     Empty,
+    /// An empty boolean of solids refuted by the vertex `at` of an operand, which lies where the
+    /// result must hold material: an intersection of the operands was missed.
+    EmptyRefuted {
+        /// The operand's vertex the result must hold.
+        at: [f64; 3],
+    },
     /// The kernel reported success, but a solid input gave a result that is not a closed solid.
     NotSolid,
     /// A body that is not a closed solid facing out, and the test it fails (the kernel's
@@ -468,6 +474,7 @@ impl Error {
             Error::Refused { .. } => "Refused",
             Error::Argument => "Argument",
             Error::Empty => "Empty",
+            Error::EmptyRefuted { .. } => "EmptyRefuted",
             Error::NotSolid => "NotSolid",
             Error::NotSolidBecause(..) => "NotSolidBecause",
             Error::NoRoom => "NoRoom",
@@ -586,6 +593,14 @@ pub enum OffsetRefusal {
         /// How far the face could move and still meet the face beside it.
         largest: f64,
     },
+    /// In a local operation, the face (a band bounded by two faces, such as a narrow ring
+    /// between a countersink's cone and the well below it) closes to nothing as the faces
+    /// move: its two sides would pass over each other and turn it inside out. `largest` is
+    /// how far the faces could move before it closes.
+    FaceCloses {
+        /// How far the faces could move before the face closes.
+        largest: f64,
+    },
     /// How far the surfaces beside an edge or at a vertex of the face must be extended to
     /// meet has no certified bound (a pair or corner of kinds it does not bound yet): refused
     /// before anything changed.
@@ -659,6 +674,11 @@ impl std::fmt::Display for OffsetRefusal {
                 f,
                 "it would move past where the curved face beside it ends; it meets that face \
                  only while it moves less than {largest}"
+            ),
+            OffsetRefusal::FaceCloses { largest } => write!(
+                f,
+                "it closes to nothing between the faces beside it as they move; it stays open \
+                 only while they move less than {largest}"
             ),
             OffsetRefusal::ReachUncertified => {
                 write!(
@@ -910,6 +930,10 @@ impl std::fmt::Display for Error {
             Error::Refused { operation, reason } => write!(f, "{operation}: {reason}"),
             Error::Argument => write!(f, "invalid argument"),
             Error::Empty => write!(f, "the result is empty"),
+            Error::EmptyRefuted { at: [x, y, z] } => write!(
+                f,
+                "the result is empty, but the operand's vertex ({x}, {y}, {z}) lies where it must have material: an intersection was missed"
+            ),
             Error::NotSolid => write!(f, "the result is not a closed solid"),
             Error::NotSolidBecause(test) => {
                 write!(f, "the body is not a closed solid facing out: {test}")

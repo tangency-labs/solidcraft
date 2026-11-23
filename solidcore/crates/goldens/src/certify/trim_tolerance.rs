@@ -73,8 +73,8 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 ///   `u = 71.94`, `v` from 0 to 139.4, far outside the face's B-spline domain
 ///   `[-0.05, 1.05]^2`, so its image is the surface's extrapolation; the trim is in another
 ///   parameterisation than its face's, in both kernels, and no tolerance covers it);
-/// - `rounding-bound`: a vertex of `primitive.api_primitives`' `gen0244`, `gen0893` and
-///   `gen1157`, about 8e8 from the origin, where the evaluation's own error bound at that
+/// - `rounding-bound`: a vertex of `primitive.api_primitives`' `gen1157`, about 8e8 from
+///   the origin, where the evaluation's own error bound at that
 ///   scale exceeds what the tolerance can show: its edge ends evaluate onto its point, but
 ///   their curves' error bounds (1.4e-5 to 2.4e-5 a coordinate, times `sqrt 3`) exceed both
 ///   tolerances;
@@ -442,8 +442,8 @@ fn use_bound(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId) -> UseBound {
 /// curve and the surface moved by `-T`, where the move is exact: every distance of the copy
 /// is the original's, so its bound is a bound of the original pair (#18166: a body built at
 /// the origin, its tolerances proved there, then moved about 8e8 away, where the enclosures
-/// widen with the coordinates: `primitive.api_primitives`' `gen0244`, `gen0893` and `gen1157`,
-/// whose moved edges the body as built leaves uncertified are certified on this copy).
+/// widen with the coordinates: `primitive.api_primitives`' `gen1157`, whose moved edges the
+/// body as built leaves uncertified are certified on this copy).
 ///
 /// `T` is a sum of steps, each exact on its own, so the whole move is exact. A step is, per
 /// axis, the power of two at most the middle of the moved curve's control points' coordinate
@@ -1330,6 +1330,149 @@ certified_units! {
 /// kernel is main's).
 const MAIN: &str = include_str!("trim_tolerance_main.tsv");
 
+/// A later golden change independent of the tolerance changes in [`ROWS`]. Both hashes
+/// are FNV-1a of the whole canonical row, including its newline, as in [`expected_digest`].
+struct GoldenChange {
+    case: &'static str,
+    old_hash: u64,
+    new_hash: u64,
+    reason: &'static str,
+}
+
+/// The complete diff of `blend.fillet_executive_p3` from main at this PR's merge.
+/// These rows already moved in b318df14c; the merged tolerance change moved none of them,
+/// and none belongs to [`ROWS`]. The vertex crossing correction itself moves no golden.
+/// Derivation: `plan/findings/blend.fillet_solver_p5--issue-17016-non-tangent-rollover.md`,
+/// "Three goldens rows that move, and why". No topology or status changes in these rows.
+const FILLET_UV_CHANGES: &[GoldenChange] = &[
+    GoldenChange {
+        case: "issue-880-half-arc-rim-0-setbacks-1-1",
+        old_hash: 0xb0e61815c7d93b13,
+        new_hash: 0x2e7fdccee3201ccc,
+        reason: "Keep the domain-proved oblique UV jets on the procedural surface: the old \
+                 boundary fix-up flattened slopes of 5.3e-5 to 8.5e-4 and moved control \
+                 polygons by up to 2.2e-5 in UV without a bound on the procedural surface.",
+    },
+    GoldenChange {
+        case: "issue-880-half-arc-rim-0-setbacks-1-2",
+        old_hash: 0x9ae25a8b1d9a6a99,
+        new_hash: 0x40f0fbb85329c802,
+        reason: "Keep the domain-proved oblique UV jets on the procedural surface for the \
+                 unequal setbacks too; the old boundary flattening and polygon moves have \
+                 no bound on that surface, and preserving the jets moves the mass integral.",
+    },
+    GoldenChange {
+        case: "source-file-nurb_box-edge0",
+        old_hash: 0xddae5c6cc008ae31,
+        new_hash: 0xe3faf9d321c91634,
+        reason: "Preserve the procedural drop's transverse UV tangent (at most 7e-13) \
+                 instead of zeroing it in four spans. The polygon stays unchanged; the \
+                 resulting mass estimate moves far below its requested 1e-4 accuracy.",
+    },
+];
+
+/// The three original whole rows from origin/main (2f632eafb), also unchanged by #18166.
+/// Putting these back keeps [`MAIN`]'s original digest and every tolerance proof intact.
+const FILLET_UV_MAIN: &str = include_str!("trim_tolerance_fillet_uv_main.jsonl");
+
+/// Reverse exactly [`FILLET_UV_CHANGES`], rejecting a missing, duplicate, overlapping or
+/// differently changed row. Every other line is retained for the whole-file digest.
+fn put_back_fillet_uv_changes(text: &str, rows: &[Row]) -> Result<String, String> {
+    use crate::json::to_canonical_string;
+    let mut original = std::collections::BTreeMap::new();
+    for line in FILLET_UV_MAIN.lines() {
+        let v: serde_json::Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
+        let case = v["case"].as_str().ok_or("an original row has no case")?;
+        let change = FILLET_UV_CHANGES
+            .iter()
+            .find(|r| r.case == case)
+            .ok_or_else(|| format!("{case}: unlisted original row"))?;
+        if change.reason.trim().is_empty() || rows.iter().any(|r| r.case == case) {
+            return Err(format!(
+                "{case}: missing reason or overlap with tolerance rows"
+            ));
+        }
+        let got = crate::rng::fnv1a64(&to_canonical_string(&v));
+        if got != change.old_hash {
+            return Err(format!(
+                "{case}: original {got:016x}, row {:016x}",
+                change.old_hash
+            ));
+        }
+        if original.insert(case.to_string(), line).is_some() {
+            return Err(format!("{case}: duplicate original row"));
+        }
+    }
+    if original.len() != FILLET_UV_CHANGES.len() {
+        return Err("the independent changes and their original rows differ".into());
+    }
+    let mut out = String::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        let v: serde_json::Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
+        let change = v["case"]
+            .as_str()
+            .and_then(|case| FILLET_UV_CHANGES.iter().find(|r| r.case == case));
+        let line = if let Some(change) = change {
+            if !seen.insert(change.case) {
+                return Err(format!("{}: duplicate changed row", change.case));
+            }
+            let got = crate::rng::fnv1a64(&to_canonical_string(&v));
+            if got != change.new_hash {
+                return Err(format!(
+                    "{}: changed {got:016x}, row {:016x}",
+                    change.case, change.new_hash
+                ));
+            }
+            original
+                .remove(change.case)
+                .ok_or_else(|| format!("{}: no original row", change.case))?
+        } else {
+            line
+        };
+        out.push_str(line);
+        out.push('\n');
+    }
+    if let Some(change) = FILLET_UV_CHANGES.iter().find(|r| !seen.contains(r.case)) {
+        return Err(format!("{}: missing changed row", change.case));
+    }
+    Ok(out)
+}
+
+/// Whole-row pins reject an unrecorded field change, a missing or duplicate case, and a
+/// later change that would bypass one of the tolerance proofs.
+#[test]
+fn independent_golden_changes_cannot_hide_other_changes_or_tolerance_rows() {
+    let text = include_str!("../../expected/blend.fillet_executive_p3.jsonl");
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|line| {
+            let v: serde_json::Value = serde_json::from_str(line).expect("a golden row");
+            FILLET_UV_CHANGES.iter().any(|r| v["case"] == r.case)
+        })
+        .collect();
+    let changed = lines.join("\n") + "\n";
+    assert_eq!(
+        put_back_fillet_uv_changes(&changed, &[]).expect("the documented changes"),
+        FILLET_UV_MAIN
+    );
+    let first = lines[0];
+    let missing = lines[1..].join("\n");
+    assert!(put_back_fillet_uv_changes(&missing, &[]).is_err());
+    let duplicate = format!("{changed}{first}\n");
+    assert!(put_back_fillet_uv_changes(&duplicate, &[]).is_err());
+    let mut v: serde_json::Value = serde_json::from_str(first).expect("a golden row");
+    v["error"] = serde_json::json!("an unrecorded change");
+    let corrupted = changed.replacen(first, &serde_json::to_string(&v).expect("a row"), 1);
+    assert!(put_back_fillet_uv_changes(&corrupted, &[]).is_err());
+    let overlap = Row {
+        case: FILLET_UV_CHANGES[0].case.to_string(),
+        moved: Vec::new(),
+        entities: Vec::new(),
+    };
+    assert!(put_back_fillet_uv_changes(&changed, &[overlap]).is_err());
+}
+
 /// FNV-1a 64 of the canonical lines of the expected file `text` ([`crate::json`]: each line
 /// parsed and written again, so the digest is of the values, not of their spelling), with
 /// each moved value of `rows` (`key[index]` of its case, bit for bit its `n`) put back to its
@@ -1415,7 +1558,8 @@ fn row_units() -> std::collections::BTreeSet<String> {
 /// of [`ROWS`] put back to its old value, is main's file ([`MAIN`] holds the digest of every
 /// unit's expected file on main, each row case's line as main's kernel writes it). So no unit,
 /// case, moved value or other change is left out of the rows, and each row's new value is the
-/// expected one.
+/// expected one. Later independent changes are pinned separately ([`FILLET_UV_CHANGES`]);
+/// their exact original lines are restored before the tolerance changes are reversed.
 #[test]
 fn the_rows_are_the_whole_golden_diff_from_main() {
     let main: std::collections::BTreeMap<String, u64> = MAIN
@@ -1458,6 +1602,11 @@ fn the_rows_are_the_whole_golden_diff_from_main() {
             .into_iter()
             .partition(|r| known.contains_key(&r.case));
         left_out.extend(out.into_iter().map(|r| (unit.clone(), r.case)));
+        let text = if unit == "blend.fillet_executive_p3" {
+            put_back_fillet_uv_changes(&text, &rows).unwrap_or_else(|e| panic!("{unit}: {e}"))
+        } else {
+            text
+        };
         let mut replay = |case: &str| replay_case(unit, case);
         let got =
             expected_digest(&text, &rows, &mut replay).unwrap_or_else(|e| panic!("{unit}: {e}"));
