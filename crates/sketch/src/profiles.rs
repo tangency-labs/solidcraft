@@ -2933,6 +2933,43 @@ mod tests {
         assert!(lens.region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-6), "{:?}", lens.region.outer.segs);
     }
 
+    /// #20555: a region whose end runs along a spline split in two and a copy of it 0.0004 mm
+    /// away. The copies never cross, but their polylines do, so the loop changes curve many times
+    /// along its end. A junction whose crossing was found (a chord of one copy against the exact
+    /// other) moved its plain neighbour's end there; the exact run then gave up at its other end,
+    /// which put its polyline back and left the loop open by 0.0077 mm: the extrusion failed with
+    /// status 1001. The loop is closed, and its area is the drawing's: the end lies within the
+    /// copies' 0.00044 mm apart plus the 0.001 mm chord tolerance of the copy that bounds it,
+    /// over the region's 4 mm height, so within 0.006 mm2 of the area to the right of the copy.
+    #[test]
+    fn a_region_ending_on_two_near_copies_of_a_spline_is_a_closed_loop() {
+        let mut sk = Sketch::new();
+        sk.add_line(Vec2::new(10.0, -2.0006), Vec2::new(35.0, -2.0006), None, None, None).unwrap();
+        sk.add_line(Vec2::new(10.0, 1.9994), Vec2::new(35.0, 1.9994), None, None, None).unwrap();
+        sk.add_line(Vec2::new(35.0, -2.0006), Vec2::new(35.0, 1.9994), None, None, None).unwrap();
+        // A cubic quarter of the arc r = 20 about the origin from y = -2 to 0, the half from 0 to
+        // 2, and one cubic over the same arc about (0.0004, 0.0004), past both lines.
+        let splines: [[(f64, f64); 4]; 3] = [
+            [(19.89975, -2.0), (19.96654, -1.33543), (20.0, -0.66792), (20.0, 0.0)],
+            [(20.0, 0.0), (20.0, 0.66792), (19.96654, 1.33543), (19.89975, 2.0)],
+            [(19.8991, -2.01), (20.03515, -0.66338), (20.03416, 0.69358), (19.89613, 2.04)],
+        ];
+        for controls in splines {
+            let pts = controls.into_iter().map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
+            sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+        }
+        let profiles = find_profiles(&sk);
+        let region = profiles.iter().find(|p| p.contains(Vec2::new(30.0, 0.0))).expect("the region at (30, 0)");
+        let segs = &region.region.outer.segs;
+        for (a, b) in region.region.outer.joints() {
+            assert!(a.end().dist(b.start()) < 1e-9, "the loop is open at {:?} by {:e}: {segs:?}", a.end(), a.end().dist(b.start()));
+        }
+        // The area between the lines right of the copy, x = 35 - X(t) integrated against Y'(t)
+        // over the copy's cubic between the lines (Simpson's rule, 200 000 steps).
+        let right_of_copy = 60.131_932_8;
+        assert!((region.area - right_of_copy).abs() < 6e-3, "{} against {right_of_copy}", region.area);
+    }
+
     /// #17462: a spline crossing a circle bounds both regions with its exact sub-curve up to the
     /// true crossings. The polyline pieces the circle splits lost their spline's tag, so each
     /// loop bridged from the last whole piece to the crossing with a straight chord, a sliver
