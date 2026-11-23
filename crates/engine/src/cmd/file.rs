@@ -2374,6 +2374,11 @@ impl Session {
         let geometry = cache.then(|| saved_geometry(self, &design)).flatten();
         let preview = preview.then(|| saved_preview(self)).flatten();
         let thumbnail = cache.then(|| thumbnail::saved(self)).flatten();
+        // The container the design was opened from: its blobs whose content has not changed are
+        // copied as they are, instead of being encoded and compressed again. A blob's name is
+        // the SHA-256 of its content, so what is copied under a name is exactly the content this
+        // save hashes to it — the file written is the same either way.
+        let reuse = self.reuse_container();
         match provenance {
             Some(save) => solidcraft_io::write_design_container_with_provenance(
                 &design,
@@ -2383,10 +2388,37 @@ impl Session {
                 thumbnail.as_deref(),
                 save,
             ),
-            None => {
-                solidcraft_io::write_design_container_with_thumbnail(&design, compression, preview.as_ref(), geometry.as_ref(), thumbnail.as_deref())
-            }
+            None => match reuse.as_deref() {
+                Some(bytes) => solidcraft_io::write_design_container_reusing(
+                    &design,
+                    compression,
+                    preview.as_ref(),
+                    geometry.as_ref(),
+                    thumbnail.as_deref(),
+                    bytes,
+                ),
+                None => solidcraft_io::write_design_container_with_thumbnail(
+                    &design,
+                    compression,
+                    preview.as_ref(),
+                    geometry.as_ref(),
+                    thumbnail.as_deref(),
+                ),
+            },
         }
+    }
+
+    /// The container the design was opened from, read for a save to copy its unchanged blobs:
+    /// `None` when the design has never been saved, the file is not a container (a design script),
+    /// or nothing is imported (an import's source text is the part a save cannot encode cheaply).
+    /// Read here and dropped when the save returns, so nothing is kept between saves.
+    fn reuse_container(&self) -> Option<Vec<u8>> {
+        let path = self.path.as_deref()?;
+        let imported = self.doc.features.iter().any(|f| matches!(&f.kind, solidcraft_doc::FeatureKind::Import { .. }));
+        if !imported {
+            return None;
+        }
+        solidcraft_io::read_container_bytes(path)
     }
 }
 

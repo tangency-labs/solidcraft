@@ -187,6 +187,54 @@ impl Writer {
         self.part_with_digest(&name, bytes, compressed, Some(digest))?;
         Ok(Value::String(name))
     }
+
+    /// Copy a blob from `reader` exactly as it is stored there — its deflated bytes, its entry
+    /// options and all — instead of encoding the same content again. The caller is responsible
+    /// for having established that the blob is the content it means: a blob's name is the
+    /// SHA-256 of that content, so a name the reader holds is the content the caller hashed to
+    /// it. `false` when the reader holds no such part. Only a blob (`blobs/<hex>.<extension>`)
+    /// may be copied: a part without its digest in its name cannot be tracked for a signature.
+    pub fn copy_blob<R: Read + Seek>(&mut self, reader: &mut Reader<R>, name: &str) -> Result<bool, FormatError> {
+        let digest = blob_digest(name).ok_or_else(|| invalid("only a blob can be copied"))?;
+        if self.names.contains(name) {
+            return Ok(true);
+        }
+        let Ok(file) = reader.zip.by_name(name) else { return Ok(false) };
+        let size = file.size();
+        if size > (self.limits.part_limit)(name) as u64 {
+            return Err(invalid("part too large"));
+        }
+        self.expanded = self.expanded.checked_add(size as usize).ok_or_else(|| invalid("expanded size overflow"))?;
+        self.resolved = self.resolved.checked_add(size as usize).ok_or_else(|| invalid("resolved payloads too large"))?;
+        if self.expanded > (self.limits.max_expanded)() || self.resolved > (self.limits.max_expanded)() || self.names.len() >= self.limits.max_entries
+        {
+            return Err(invalid("package too large"));
+        }
+        if let Some((include, parts)) = &mut self.tracked
+            && include(name)
+        {
+            // The name is the digest: a signature binds the part without reading it back.
+            parts.push(PartDigest { name: name.to_owned(), len: size, digest });
+        }
+        self.names.insert(name.to_owned());
+        self.zip.raw_copy_file(file).map_err(invalid)?;
+        Ok(true)
+    }
+}
+
+/// The digest a blob's name carries (`blobs/<64 lowercase hex>.<extension>`), when it carries one.
+pub fn blob_digest(name: &str) -> Option<[u8; 32]> {
+    let rest = name.strip_prefix("blobs/")?;
+    let hex = rest.split('.').next()?;
+    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let mut digest = [0u8; 32];
+    for (i, byte) in digest.iter_mut().enumerate() {
+        let pair = hex.get(i * 2..i * 2 + 2)?;
+        *byte = u8::from_str_radix(pair, 16).ok()?;
+    }
+    Some(digest)
 }
 
 /// A container being read, over a seekable source. Opening checks the directory (the entry count,

@@ -65,3 +65,36 @@ fn a_thumbnail_is_keyed_to_its_file() {
     let mut reader = Reader::new(Cursor::new(writer.finish().unwrap()), LIMITS).unwrap();
     assert!(picture.read(&mut reader, 64).is_err(), "stale");
 }
+
+/// A blob copied from another container is written exactly as that container stores it: the file
+/// is byte for byte the one encoding the same content writes, so a save that reuses an unchanged
+/// import cannot produce a different design file.
+#[test]
+fn a_blob_copied_from_a_container_is_written_as_it_is_stored() {
+    let payload = vec![7u8; 512];
+    let mut writer = Writer::new(LIMITS);
+    writer.part("document.json", b"{}", true).unwrap();
+    let name = writer.blob(&payload, "bin", true).unwrap();
+    let source = writer.finish().unwrap();
+
+    let mut reader = Reader::new(Cursor::new(source.clone()), LIMITS).unwrap();
+    let mut copy = Writer::new(LIMITS);
+    copy.part("document.json", b"{}", true).unwrap();
+    let copied_name = Value::String(name.as_str().unwrap().to_string());
+    assert!(copy.copy_blob(&mut reader, name.as_str().unwrap()).unwrap());
+    let copied = copy.finish().unwrap();
+
+    let mut encoded = Writer::new(LIMITS);
+    encoded.part("document.json", b"{}", true).unwrap();
+    assert_eq!(encoded.blob(&payload, "bin", true).unwrap(), copied_name);
+    assert_eq!(copied, encoded.finish().unwrap(), "a copied blob writes the container encoding it writes");
+
+    // The copy reads back to the same content, and a name the source lacks is not copied.
+    let mut reader = Reader::new(Cursor::new(copied), LIMITS).unwrap();
+    let reference = serde_json::json!({"blob": copied_name});
+    assert_eq!(reader.blob(&reference, "blob", "bin").unwrap(), &payload);
+    let mut reader = Reader::new(Cursor::new(source), LIMITS).unwrap();
+    let mut copy = Writer::new(LIMITS);
+    let absent = format!("blobs/{}.bin", "0".repeat(64));
+    assert!(!copy.copy_blob(&mut reader, &absent).unwrap());
+}

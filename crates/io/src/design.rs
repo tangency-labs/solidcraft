@@ -209,7 +209,27 @@ pub fn write_design_container_with_thumbnail(
     thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design(), None)
+    write_container(doc, compression, preview, geometry, thumbnail, max_design(), None, None)
+}
+
+/// [`write_design_container_with_thumbnail`] reusing what `reuse` already holds: `reuse` is the
+/// container the design was opened from, and a blob of it whose name is the digest of content
+/// being written again is that content, compressed, and is copied instead of encoded again. A
+/// blob's name is the SHA-256 of its content, so a part found under it holds exactly the content
+/// this save would write; when that part was written by this writer the bytes are identical, and
+/// any other container's entry is the same content kept as it was saved, which reads back the
+/// same.
+#[allow(clippy::too_many_arguments)]
+pub fn write_design_container_reusing(
+    doc: &Document,
+    compression: DesignCompression,
+    preview: Option<&DesignPreview>,
+    geometry: Option<&solidcraft_doc::SavedModel>,
+    thumbnail: Option<&[u8]>,
+    reuse: &[u8],
+) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
+    write_container(doc, compression, preview, geometry, thumbnail, max_design(), None, Some(reuse))
 }
 
 /// Write a container with one signed provenance record appended to `save.chain` (see
@@ -224,11 +244,13 @@ pub fn write_design_container_with_provenance(
     save: &ProvenanceSave<'_>,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "write_design_container_with_provenance");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design(), Some(save))
+    write_container(doc, compression, preview, geometry, thumbnail, max_design(), Some(save), None)
 }
 
 /// The common container writer. `provenance` records a signed record when present; the budget
-/// bounds the optional caches (tests pass less).
+/// bounds the optional caches (tests pass less). `reuse` is the container the design was opened
+/// from, whose blobs are copied for content that has not changed since.
+#[allow(clippy::too_many_arguments)]
 fn write_container(
     doc: &Document,
     compression: DesignCompression,
@@ -237,8 +259,10 @@ fn write_container(
     thumbnail: Option<&[u8]>,
     budget: usize,
     provenance: Option<&ProvenanceSave<'_>>,
+    reuse: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     doc.render.validate().map_err(invalid)?;
+    let mut reuse = reuse.map(|bytes| PackageReader::new(Cursor::new(bytes))).transpose()?;
     let mut writer = PackageWriter::new();
     if provenance.is_some() {
         writer.track_parts(provenance::is_authoritative);
@@ -249,13 +273,13 @@ fn write_container(
             FeatureKind::Import { step, records, .. } => {
                 // STEP is text and shrinks several times: always compressed, so an import as large
                 // as MAX_STEP_BYTES still fits in a design file.
-                let blob = writer.blob(step.as_bytes(), "step", true)?;
+                let blob = blob_reusing(&mut writer, reuse.as_mut(), step.as_bytes(), "step", true)?;
                 let mut replaced = fields([("step", Value::String(String::new())), ("step_blob", blob)]);
                 // An import kept as records: they go in a part of their own, compressed as STEP.
                 if let Some(r) = records {
                     let text = solidcraft_kernel::records_text(r)?;
                     replaced.insert("records".into(), Value::Null);
-                    replaced.insert("records_blob".into(), writer.blob(text.as_bytes(), "records", true)?);
+                    replaced.insert("records_blob".into(), blob_reusing(&mut writer, reuse.as_mut(), text.as_bytes(), "records", true)?);
                 }
                 replaced
             }
@@ -642,6 +666,34 @@ impl<R: Read + Seek> std::ops::DerefMut for PackageReader<R> {
 }
 
 impl<R: Read + Seek> PackageReader<R> {
+    /// Copy `name` from this container into `writer` as it is stored here, when this container
+    /// holds it. The name is the blob's digest, so what it holds is what the caller hashed to it.
+    fn copy_blob(&mut self, writer: &mut PackageWriter, name: &str) -> Result<bool> {
+        writer.copy_blob(&mut self.0, name).map_err(IoError::from)
+    }
+}
+
+/// Add `bytes` as a blob, or copy it from `reuse` — the container the design was opened from —
+/// when that already holds it: the name is the digest of the content, so a part under it there
+/// is this content, compressed, and is copied as it is instead of being encoded again. The
+/// bytes written either way are the same.
+fn blob_reusing(
+    writer: &mut PackageWriter,
+    reuse: Option<&mut PackageReader<Cursor<&[u8]>>>,
+    bytes: &[u8],
+    extension: &str,
+    compressed: bool,
+) -> Result<Value> {
+    let name = format!("blobs/{}.{extension}", digest(bytes));
+    if let Some(reader) = reuse
+        && reader.copy_blob(writer, &name)?
+    {
+        return Ok(Value::String(name));
+    }
+    writer.blob(bytes, extension, compressed).map_err(IoError::from)
+}
+
+impl<R: Read + Seek> PackageReader<R> {
     fn new(source: R) -> Result<Self> {
         Ok(Self(Reader::new(source, LIMITS)?))
     }
@@ -946,6 +998,19 @@ pub struct DesignFile {
     pub chain: Option<ProvenanceChain>,
     /// The signature check, when asked for; `None` for a file without an entry.
     pub report: Option<ProvenanceReport>,
+}
+
+/// A container file's bytes, for a save to copy blobs whose content has not changed since the
+/// design was opened; `None` when the file is not a container or cannot be read. Bounded by the
+/// design limit, which bounds what a container can be.
+pub fn read_container_bytes(path: &str) -> Option<Vec<u8>> {
+    let mut source = open_regular_file(path).ok()?;
+    if !is_container_source(&mut source).ok()? {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    source.take((max_design() as u64).saturating_add(1)).read_to_end(&mut bytes).ok()?;
+    Some(bytes)
 }
 
 /// [`read_design_file`] for opening a design: the document, model, signature presence,
@@ -1554,6 +1619,43 @@ mod tests {
     use super::*;
     use solidcore_record::Vec2;
 
+    /// A save copies an import's source blob from the container the design came from when the
+    /// content has not changed: the file it writes is the one encoding the content writes, and an
+    /// edited import is a new blob, so a copied one can never carry old geometry into a design.
+    #[test]
+    fn a_save_reuses_an_unchanged_import_blob_and_an_edit_writes_a_new_one() {
+        let step = "ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n".repeat(64);
+        let mut doc = Document::new("Reuse");
+        doc.add_feature(
+            FeatureKind::Import { file: "reuse.step".into(), step: step.clone().into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
+        .unwrap();
+        let first = write_design_container(&doc).unwrap();
+        let reused = write_design_container_reusing(&doc, DesignCompression::Fast, None, None, None, &first).unwrap();
+        assert_eq!(first, reused, "a save that copies the blob writes the same container");
+        let back = DesignContainerReader::new(Cursor::new(reused)).unwrap().read_document().unwrap();
+        assert_eq!(back.to_json(), doc.to_json());
+
+        let mut edited = Document::new("Reuse");
+        edited
+            .add_feature(
+                FeatureKind::Import {
+                    file: "reuse.step".into(),
+                    step: format!("{step}/* edited */\n").into(),
+                    components: Vec::new(),
+                    skip: Vec::new(),
+                    records: None,
+                },
+                None,
+            )
+            .unwrap();
+        let fresh = write_design_container_reusing(&edited, DesignCompression::Fast, None, None, None, &first).unwrap();
+        assert_ne!(fresh, first, "an edited import is a new blob");
+        let back = DesignContainerReader::new(Cursor::new(fresh)).unwrap().read_document().unwrap();
+        assert_eq!(back.to_json(), edited.to_json(), "the edit is what the file holds");
+    }
+
     #[test]
     fn a_missing_design_file_is_a_check_error_not_an_unsigned_design() {
         let path = std::env::temp_dir().join(format!("solidcraft-check-missing-{}.sc", std::process::id()));
@@ -1990,13 +2092,14 @@ mod tests {
     #[test]
     fn a_model_cache_too_big_for_the_file_is_left_out_not_a_failed_save() {
         let doc = document();
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000, None).unwrap();
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000, None, None).unwrap();
         assert!(!parts(&bytes).contains_key("cache/model.json") && !parts(&bytes).contains_key("cache/bodies.bin"));
         assert!(!DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache(), "the omitted cache is observable without decoding");
         assert!(read_design_geometry(&bytes).is_none());
         assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         // With room for it, the same model is kept.
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES, None).unwrap();
+        let bytes =
+            write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES, None, None).unwrap();
         assert!(read_design_geometry(&bytes).is_some());
         assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
     }
