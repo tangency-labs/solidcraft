@@ -7,6 +7,7 @@
 pub mod anisotropic_surface;
 mod backend;
 mod curve_display;
+pub mod enhancement;
 pub mod film;
 mod gif;
 pub mod glass_model;
@@ -36,6 +37,10 @@ pub use backend::{
     resolve_request,
 };
 pub use curve_display::{PixelCurveView, SampledPath, SamplingBudget, SamplingQuality, sample_segment, sample_segment_unclipped};
+pub use enhancement::{
+    EnhancementError, EnhancementFeature, EnhancementInput, EnhancementOutcome, EnhancementProvider, EnhancementSelection, ResolvedEnhancement,
+    resolve_enhancement,
+};
 pub use gif::gif;
 pub use model_bounds::view_bounds;
 pub use product::{FaceAppearance, ProductMesh, ProductScene};
