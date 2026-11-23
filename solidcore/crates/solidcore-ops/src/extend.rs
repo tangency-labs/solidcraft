@@ -569,6 +569,7 @@ mod tests {
             .unwrap();
         let (b, _) = sheet_on(&mut k, Surface::from(c), 1e-6).unwrap();
         let order = Order {
+            split_edges: 0,
             faces: b.face_list().to_vec(),
             edges: b.edge_list().to_vec(),
             vertices: b.vertex_list().to_vec(),
@@ -636,6 +637,7 @@ mod tests {
         let order = {
             let b = sheet.lock();
             Order {
+                split_edges: 0,
                 faces: b.face_list().to_vec(),
                 edges: b.edge_list().to_vec(),
                 vertices: b.vertex_list().to_vec(),

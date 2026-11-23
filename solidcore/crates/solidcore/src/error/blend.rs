@@ -32,6 +32,7 @@
 //! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | [`BlendFailure::Solver`]               | its cause's ([`SolverFailure::class`])       |
 //! | the fillet executive's checks of the caller's arguments and body ([`BlendFailure::NoEdgesGiven`], [`BlendFailure::SizeBelowResolution`], [`BlendFailure::PerEdgeListLength`], [`BlendFailure::ParameterListSizes`], [`BlendFailure::FaceHasNoSurface`], [`BlendFailure::NoFirstBody`], [`BlendFailure::TargetNotGiven`], [`BlendFailure::EdgeNotInTarget`], [`BlendFailure::EdgeNotFilletable`], [`BlendFailure::GnSectionInvalid`], [`BlendFailure::CrossSectionTypeUnknown`], [`BlendFailure::RadiusTypeNotForEdges`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::VariableRadiusLawMissing`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::EdgeUseWithoutEdge`], [`BlendFailure::BoundSurfaceRemoved`]) | [`ErrorKind::InvalidInput`] (1) |
+//! | [`BlendFailure::ExactBlendAxisCannotPlaceEdge`], the rational round's check of the exact blend it is given | [`ErrorKind::InvalidInput`] (1) |
 //! | [`BlendFailure::LawHasNoValue`], [`BlendFailure::SequenceCurveNotBSpline`], [`BlendFailure::FilletCrossesItself`] | [`ErrorKind::Unsupported`] (5) |
 //! | [`BlendFailure::CornerRefused`], [`BlendFailure::ExecutiveStepFailed`], [`BlendFailure::EdgeSplitDeclined`] | [`ErrorKind::Failed`] (6): neither defect nor refusal, so a kept cause decides |
 //! | [`BlendFailure::CrossingInputMissing`] | [`ErrorKind::Missing`]: neither defect nor refusal |
@@ -52,7 +53,7 @@
 //! | Rust                                   | Status difftest compares          |
 //! |----------------------------------------|-----------------------------------|
 //! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::PlaneCurveTouches`], [`BlendFailure::PlaneCurveEndOff`], [`BlendFailure::PlaneCurveLeavesDomain`], [`BlendFailure::PlaneCurveStepVanished`], [`BlendFailure::PlaneCurveFitCap`] | `SM_ERR` |
-//! | [`BlendFailure::Failed`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::LawHasNoValue`], [`BlendFailure::FilletCrossesItself`], [`BlendFailure::CornerRefused`], [`BlendFailure::ExecutiveStepFailed`], [`BlendFailure::EdgeSplitDeclined`] | `SM_ERR` |
+//! | [`BlendFailure::Failed`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::LawHasNoValue`], [`BlendFailure::FilletCrossesItself`], [`BlendFailure::CornerRefused`], [`BlendFailure::ExecutiveStepFailed`], [`BlendFailure::EdgeSplitDeclined`], [`BlendFailure::ExactBlendAxisCannotPlaceEdge`] | `SM_ERR` |
 //! | [`BlendFailure::EaseNotBuilt`] | `SM_ERR` |
 //! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::SequenceCurveNotBSpline`], [`BlendFailure::LawCornerNotFound`], [`BlendFailure::EdgeUseWithoutEdge`], [`BlendFailure::BoundSurfaceRemoved`], [`BlendFailure::CornerPatchFaceNotFound`], [`BlendFailure::EaseInputMissing`], [`BlendFailure::EaseGeometryNotBSpline`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`], the fillet executive's other checks of the caller's arguments | `SM_ERR_INVALID_INPUT` |
@@ -97,6 +98,7 @@ use super::{
     SM_ERR_INVALID_INPUT, SM_ERR_NOT_CONVERGING, SM_ERR_NOT_WITHIN_TOLERANCE, SM_ERR_NULL_POINTER,
     SM_ERR_OUTSIDE_OF_DOMAIN,
 };
+use crate::blend::fillet_exact::BlendSpine;
 use crate::blend::fillet_executive::NoRoomReason;
 
 pub mod trace;
@@ -368,6 +370,25 @@ pub enum BlendFailure {
     /// the edge. A check of the caller's body ([`ErrorKind::InvalidInput`]); status
     /// `SM_ERR_NULL_POINTER`.
     EdgeWithoutCurve,
+    /// The exact blend given to the rational round cannot place the edge's middle round its
+    /// cylinder's or cone's axis: from where the axis crosses the conic's plane, the half-line
+    /// to the edge's middle (moved along the axis onto the plane) has no direction, or does
+    /// not cross the conic ahead of the axis. The plane's section of a cylinder or cone
+    /// encloses where its own axis crosses the plane, and an edge of that round lies off the
+    /// axis, so the exact blend is not the one of the edge the caller's solver names. A check
+    /// of the caller's input ([`ErrorKind::InvalidInput`]); status `SM_ERR`.
+    ExactBlendAxisCannotPlaceEdge {
+        /// The distance from where the axis crosses the plane to the edge's middle moved onto
+        /// it, in the conic's own coordinates (where it is the unit circle); at or below the
+        /// kernel's zero the half-line has no direction.
+        length: f64,
+        /// The discriminant of the half-line's line crossing the conic; negative: it misses
+        /// (meaningless when `length` is at or below the kernel's zero).
+        discriminant: f64,
+        /// Where the half-line crosses the conic, in half-line lengths from the axis, when
+        /// the crossing was computed; not positive: behind the axis.
+        crossing: Option<f64>,
+    },
     /// A base radius law, which has no value of its own, is evaluated. Unsupported
     /// ([`ErrorKind::Unsupported`]); status `SM_ERR`.
     LawHasNoValue,
@@ -1616,12 +1637,18 @@ pub enum RemovalRefusal {
     /// The tangent surfaces of a ring fillet do not meet in a closed curve near its rails
     /// within their domains: the sharp edge would lie on a continuation of one of them.
     TangentSurfacesDoNotMeet,
+    /// The support intersection has a shape the removal cannot rebuild as a sharp edge.
+    UnsupportedSharpSpine(BlendSpine),
+    /// The new sharp edge's UV trim could not be certified within the original rail tolerance.
+    RailTrimOutsideTolerance,
     /// A seam's UV trim, run on, does not reach the new vertex on its face's surface.
     SeamTrimMissesNewVertex,
     /// The fillet face does not have four edges.
     NotFourEdges,
     /// Two adjacent edges of the fillet face are both tangent.
     AdjacentEdgesTangent,
+    /// The selected faces do not form one connected strip with two rails.
+    NotOneTangentChain,
     /// The edge opposite the fillet face's tangent edge is not tangent.
     OppositeEdgeNotTangent,
     /// Neither of the fillet face's first two edges is tangent.
@@ -1667,9 +1694,12 @@ pub const fn removal_class(reason: RemovalRefusal) -> ErrorKind {
         | R::SideEdgeNotStraight
         | R::CornerOffSideLine
         | R::TangentSurfacesDoNotMeet
+        | R::UnsupportedSharpSpine(_)
+        | R::RailTrimOutsideTolerance
         | R::SeamTrimMissesNewVertex => ErrorKind::RemovalNotExact,
         R::NotFourEdges
         | R::AdjacentEdgesTangent
+        | R::NotOneTangentChain
         | R::OppositeEdgeNotTangent
         | R::NoTangentEdge
         | R::EdgeWithoutTwoVertices
@@ -1714,6 +1744,7 @@ impl BlendFailure {
             | Self::NotCertified { .. }
             | Self::WeldNotBuilt(_)
             | Self::LawIntervalEmpty
+            | Self::ExactBlendAxisCannotPlaceEdge { .. }
             | Self::LawHasNoValue
             | Self::FilletCrossesItself { .. }
             | Self::CornerRefused
@@ -1838,6 +1869,7 @@ impl BlendFailure {
             | Self::VariableRadiusLawMissing { .. }
             | Self::BevelVertexNotFilleted
             | Self::LawIntervalEmpty
+            | Self::ExactBlendAxisCannotPlaceEdge { .. }
             | Self::EdgeWithoutCurve
             | Self::EdgeUseWithoutEdge
             | Self::BoundSurfaceRemoved => ErrorKind::InvalidInput,
@@ -1903,6 +1935,7 @@ impl BlendFailure {
             | Self::VariableRadiusLawMissing { .. }
             | Self::BevelVertexNotFilleted
             | Self::LawIntervalEmpty
+            | Self::ExactBlendAxisCannotPlaceEdge { .. }
             | Self::EdgeWithoutCurve
             | Self::LawHasNoValue
             | Self::SequenceCurveNotBSpline { .. }
@@ -1986,6 +2019,7 @@ impl BlendFailure {
             | Self::VariableRadiusLawMissing { .. }
             | Self::BevelVertexNotFilleted
             | Self::LawIntervalEmpty
+            | Self::ExactBlendAxisCannotPlaceEdge { .. }
             | Self::EdgeWithoutCurve
             | Self::LawHasNoValue
             | Self::SequenceCurveNotBSpline { .. }
@@ -2197,6 +2231,22 @@ impl core::fmt::Display for BlendFailure {
                 "{}: the radius law is evaluated over an interval of zero length",
                 self.class()
             ),
+            Self::ExactBlendAxisCannotPlaceEdge {
+                length,
+                discriminant,
+                crossing,
+            } => {
+                write!(
+                    f,
+                    "{}: the exact blend given cannot place the edge's middle round the cylinder's or \
+                     cone's axis (distance {length}, discriminant {discriminant}",
+                    self.class()
+                )?;
+                if let Some(mu) = crossing {
+                    write!(f, ", crossing at {mu}")?;
+                }
+                write!(f, "), so the blend given does not match this edge")
+            }
             Self::EdgeWithoutCurve => write!(
                 f,
                 "{}: an edge of the body the fillet reads has no curve",
@@ -2791,9 +2841,15 @@ mod tests {
             (R::SideEdgeNotStraight, ErrorKind::RemovalNotExact),
             (R::CornerOffSideLine, ErrorKind::RemovalNotExact),
             (R::TangentSurfacesDoNotMeet, ErrorKind::RemovalNotExact),
+            (
+                R::UnsupportedSharpSpine(BlendSpine::Conic),
+                ErrorKind::RemovalNotExact,
+            ),
+            (R::RailTrimOutsideTolerance, ErrorKind::RemovalNotExact),
             (R::SeamTrimMissesNewVertex, ErrorKind::RemovalNotExact),
             (R::NotFourEdges, ErrorKind::NotARemovableFillet),
             (R::AdjacentEdgesTangent, ErrorKind::NotARemovableFillet),
+            (R::NotOneTangentChain, ErrorKind::NotARemovableFillet),
             (R::OppositeEdgeNotTangent, ErrorKind::NotARemovableFillet),
             (R::NoTangentEdge, ErrorKind::NotARemovableFillet),
             (R::EdgeWithoutTwoVertices, ErrorKind::NotARemovableFillet),
@@ -3311,6 +3367,16 @@ mod tests {
                 ErrorKind::InvalidInput,
                 SM_ERR,
             ),
+            // not the executive's: the rational round's check of the exact blend it is given
+            (
+                BlendFailure::ExactBlendAxisCannotPlaceEdge {
+                    length: 0.0,
+                    discriminant: 1.0,
+                    crossing: None,
+                },
+                ErrorKind::InvalidInput,
+                SM_ERR,
+            ),
             (
                 BlendFailure::EdgeWithoutCurve,
                 ErrorKind::InvalidInput,
@@ -3510,7 +3576,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 70;
+    const VARIANTS: usize = 71;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -3562,6 +3628,7 @@ mod tests {
             BlendFailure::VariableRadiusLawMissing { .. } => (42, None),
             BlendFailure::BevelVertexNotFilleted => (43, None),
             BlendFailure::LawIntervalEmpty => (44, None),
+            BlendFailure::ExactBlendAxisCannotPlaceEdge { .. } => (69, None),
             BlendFailure::EdgeWithoutCurve => (45, None),
             BlendFailure::LawHasNoValue => (46, None),
             BlendFailure::SequenceCurveNotBSpline { .. } => (47, None),
@@ -3586,7 +3653,7 @@ mod tests {
             BlendFailure::SectionInputInvalid(_) => (66, None),
             BlendFailure::Solver(_) => (67, None),
             BlendFailure::WeldNotBuilt(_) => (68, None),
-            BlendFailure::Trace(_) => (69, None),
+            BlendFailure::Trace(_) => (70, None),
         }
     }
 
@@ -3718,6 +3785,11 @@ mod tests {
             BlendFailure::VariableRadiusLawMissing { index: 2 },
             BlendFailure::BevelVertexNotFilleted,
             BlendFailure::LawIntervalEmpty,
+            BlendFailure::ExactBlendAxisCannotPlaceEdge {
+                length: 1.0,
+                discriminant: -1.0,
+                crossing: None,
+            },
             BlendFailure::EdgeWithoutCurve,
             BlendFailure::LawHasNoValue,
             BlendFailure::SequenceCurveNotBSpline { kind: "offset" },
