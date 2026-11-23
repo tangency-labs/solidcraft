@@ -5241,3 +5241,29 @@ fn hatch_lines_end_on_the_true_outline_within_the_flattening() {
         }
     }
 }
+
+/// #20733: a section the mesh projection draws (a modelled thread) shows its cut body: the bore's
+/// cut edges are drawn visible.
+#[test]
+fn a_section_drawn_from_the_mesh_draws_the_cut_body() {
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
+    let mut s = block();
+    run(&mut s, "solid.cylinder", json!({"diameter": 8.5, "height": 22, "base": [50, 25, -1], "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "solid.thread", json!({"face": [54.25, 25, 10], "designation": "M10", "modeled": true}));
+    let (mut s, views) = three_views_of(s);
+    let cut = section_of(&mut s, views[0], SectionKind::Full, &[[50.0, -10.0], [50.0, 70.0]], ArrowSide::Right);
+    let (_, _, lines) = drawn_lines(&s, cut);
+    assert_eq!(lines.made.exact, 0, "{:?}", lines.made);
+    let cut_edges = |side: f64| {
+        let pieces = lines.lines.iter().flat_map(|l| &l.pieces).filter(|p| p.visibility == Visibility::Visible);
+        pieces
+            .filter(|p| {
+                p.path.iter().all(|seg| match seg {
+                    solidcore_record::Seg2::Line { a, b } => [a.x, b.x].iter().all(|x| (2.0..=2.6).contains(&(x * side))),
+                    _ => false,
+                })
+            })
+            .count()
+    };
+    assert!(cut_edges(1.0) > 0 && cut_edges(-1.0) > 0, "{} {}", cut_edges(1.0), cut_edges(-1.0));
+}

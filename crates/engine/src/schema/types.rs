@@ -579,6 +579,14 @@ keyword_param!(
     "Where the section sits against the coil's diameter: center (the default; on and on_center are aliases) on it, inside it or outside it. Any case."
 );
 keyword_param!(
+    /// `solid.coil`'s `end_cut`.
+    CoilEndCutParam,
+    "end cut",
+    &["axial", "square"],
+    "axial or square",
+    "Where the wire ends: axial (the default), in a plane through the coil's axis, or square, across the wire. Any case."
+);
+keyword_param!(
     /// `solid.emboss`'s `mode`.
     EmbossModeParam,
     "mode",
