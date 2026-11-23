@@ -174,10 +174,13 @@ fn a_proof_made_under_other_fixes_is_not_taken() {
     assert_eq!(decided, 2);
 }
 
+/// A named read of a body.
+type Read = (&'static str, Box<dyn Fn(&Body)>);
+
 /// A pure read of the proved plate less drill 1, each of the measures that read the body
 /// through a shared reference, with the record order of an identically built body (a body's
 /// own `to_record` is an edit, which drops its proof).
-fn reads() -> Vec<(&'static str, Box<dyn Fn(&Body)>)> {
+fn reads() -> Vec<Read> {
     let (_, order) = cut(plate(), drill(1)).to_record().unwrap();
     let order2 = order.clone();
     let order3 = order.clone();
