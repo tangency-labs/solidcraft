@@ -518,7 +518,9 @@ fn regression_manifest_names_only_case_files() {
         .map(|p| root.join(p))
         .collect();
     let pins = |not: Value| serde_json::json!({"solidcraft": "c1", "solidcore": "c2", "not_expressible": not});
-    let valid = pins(serde_json::json!([{"case": "a/two", "why": ["x"]}, {"case": "ladder/tier/one", "why": []}]));
+    let valid = pins(
+        serde_json::json!([{"case": "a/two", "why": ["x"]}, {"case": "ladder/tier/one", "why": []}]),
+    );
     validate_manifest(root, &files, &valid);
     validate_manifest(root, &files, &pins(serde_json::json!([])));
     let mut totals = pins(serde_json::json!([]));
