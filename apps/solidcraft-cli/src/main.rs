@@ -7,6 +7,7 @@
 //! solidcraft-cli check <design.sc|script.json> [--drawing ID|NAME] [--sheet ID|NAME] [--json-out FILE] Check Drawing on its drawings; exit 1 on findings
 //! solidcraft-cli script <design.sc> [--out script.json]     the design's history as a command script
 //! solidcraft-cli textconv <design.sc|design.json|drawing.scdwg> a design or drawing file as text, for git diff
+//! solidcraft-cli diff <a.sc> <b.sc> [--json]                what changed from design A to design B (exit 0 same, 1 different, 2 error)
 //! solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] loading timings as JSON lines
 //! solidcraft-cli bench-agent [--scale F] [--save F] [--script-out F] a ~1,300-body design built command by command, timed
 //! solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N]
@@ -41,6 +42,7 @@ mod bench_agent;
 mod bench_assistant;
 mod check;
 mod crashes;
+mod diff;
 mod fuzz;
 mod kernel_cases;
 mod kernel_cases_export;
@@ -81,6 +83,8 @@ const USAGE_CHECK: &str = "  solidcraft-cli check <design.sc|script.json> [--dra
 const USAGE_SCRIPT: &str = "  solidcraft-cli script <design.sc|script.json> [--out script.json]\n      (the design's history as a command script that eval and run replay)\n";
 /// `textconv`'s lines in the usage.
 const USAGE_TEXTCONV: &str = "  solidcraft-cli textconv <design.sc|design.json|drawing.scdwg>\n      (prints a design or drawing file as text for git diff. A container's container.json comes first on one line, then\n       its design or drawing, laid out as a .json save lays it out. Then each other file it holds gets one line with its\n       size and SHA-256. The model cache, the preview and plugin caches are left out, since a save or a plugin writes them afresh. A file it cannot show prints\n       one line with its size and SHA-256 and still exits 0. The user guide's Designs in Git section has the git setup.)\n";
+/// `diff`'s lines in the usage.
+const USAGE_DIFF: &str = "  solidcraft-cli diff <a.sc|a.json> <b.sc|b.json> [--json]\n      (what changed from design A to design B. Features added, removed, moved, renamed, suppressed or changed, the\n       rollback marker, parameters, sketches and imported files by SHA-256, then the names of other changed\n       sections. Both designs are upgraded to this version's format and never evaluated, so a format upgrade alone\n       is no change. --json prints the reply of file.diff. Exits with 0 when the designs are the same, 1 when they\n       differ and 2 on an error.)\n";
 /// `bench-open`'s lines in the usage.
 const USAGE_BENCH_OPEN: &str = "  solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] [--profile] [--profile-out trace.json]\n      (--profile and --profile-out as for run)\n      (--ops: after opening, run each command of the script and undo it, timing the command, the\n       evaluations it caused and the view it leaves: placing and meshing what changed)\n";
 /// `bench-agent`'s lines in the usage.
@@ -153,6 +157,7 @@ const COMMANDS: &[Command] = &[
     Command { name: "check", usage: USAGE_CHECK, listed: true },
     Command { name: "script", usage: USAGE_SCRIPT, listed: true },
     Command { name: "textconv", usage: USAGE_TEXTCONV, listed: true },
+    Command { name: "diff", usage: USAGE_DIFF, listed: true },
     Command { name: "bench-open", usage: USAGE_BENCH_OPEN, listed: true },
     Command { name: "bench-agent", usage: USAGE_BENCH_AGENT, listed: true },
     Command { name: "bench-assistant", usage: USAGE_BENCH_ASSISTANT, listed: true },
@@ -179,6 +184,10 @@ const COMMANDS: &[Command] = &[
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     logger::init(&mut args);
+    // `diff` exits with 1 when the designs differ, so its errors exit with 2, as the standard diff
+    // tool does. The global flags may come before the command, so it is found without them.
+    let failure = if command_of(&args).as_deref() == Some("diff") { ExitCode::from(2) } else { ExitCode::FAILURE };
+    let mut differ = false;
     // The kernel's fix set, named to solidcore-ops before any call runs on it.
     solidcraft_engine::kernel::start();
     // `--profile` / `--profile-out` (run, eval, bench-open) or SOLIDCRAFT_PROFILE (any command):
@@ -191,20 +200,20 @@ fn main() -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {e}");
-            return ExitCode::FAILURE;
+            return failure;
         }
     };
     if let Err(e) = max_file_size(&mut args) {
         solidcraft_engine::note!("error: {e}");
-        return ExitCode::FAILURE;
+        return failure;
     }
     if let Err(e) = plugin_limits(&mut args) {
         eprintln!("error: {e}");
-        return ExitCode::FAILURE;
+        return failure;
     }
     if let Err(e) = plugins_dir(&mut args) {
         eprintln!("error: {e}");
-        return ExitCode::FAILURE;
+        return failure;
     }
     // Compiled plugins are kept in the per-user cache folder, as the desktop app keeps them.
     solidcraft_engine::plugin::configure_compile_cache();
@@ -221,6 +230,7 @@ fn main() -> ExitCode {
         Some("check") => check::run(&args[1..]),
         Some("script") => cmd_script(&args[1..]),
         Some("textconv") => textconv::run(&args[1..]),
+        Some("diff") => diff::run(&args[1..]).map(|same| differ = !same),
         Some("snapshot") => cmd_snapshot(&args[1..]),
         Some("render") => render::run(&args[1..]),
         Some("exec") => cmd_exec(&args[1..]),
@@ -278,22 +288,48 @@ fn main() -> ExitCode {
     // NVIDIA's Linux driver can crash in its exit handler after the work is done (#19431).
     solidcraft_viewport_gpu::capture::close_shared_before_exit();
     match r {
+        Ok(()) if differ => ExitCode::from(1),
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             solidcraft_engine::note!("error: {e}");
-            ExitCode::FAILURE
+            failure
         }
     }
+}
+
+/// The command the arguments name, once the global flags (`--max-file-size`, `--plugin-limits`,
+/// `--plugins-dir`, `--keep-plugin-approvals`) and their values are out, as `main` takes them out.
+/// Those flags may come anywhere, so the first argument is not always the command. Each take runs,
+/// whatever the one before it found, and takes out every one of its flags, a bad one too, so a bad
+/// flag never stands in for the command. The error is reported when `main` applies the flag.
+fn command_of(args: &[String]) -> Option<String> {
+    let mut rest = args.to_vec();
+    let _ = take_max_file_size(&mut rest);
+    let _ = take_plugin_limits(&mut rest);
+    let _ = take_plugins_dir(&mut rest);
+    rest.into_iter().next()
 }
 
 /// Take `--max-file-size SIZE` (or `--max-file-size=SIZE`), which any command takes, out of the
 /// arguments and raise the file size limits for this run (#4086). A bad size is an error.
 fn max_file_size(args: &mut Vec<String>) -> Result<(), String> {
+    let Some(size) = take_max_file_size(args)? else { return Ok(()) };
+    let bytes = solidcraft_engine::io::limits::parse_flag(&size).map_err(|e| format!("--max-file-size: {e}"))?;
+    solidcraft_engine::io::limits::set_override(Some(bytes))
+}
+
+/// The size `--max-file-size` names, taken out of the arguments. The last one counts. A flag with
+/// no size is taken out too, and is the error.
+fn take_max_file_size(args: &mut Vec<String>) -> Result<Option<String>, String> {
     let mut size = None;
     let mut i = 0;
     while let Some(arg) = args.get(i) {
         if arg == "--max-file-size" {
-            let value = args.get(i + 1).cloned().ok_or("--max-file-size needs a size, for example --max-file-size 2GB")?;
+            // With no size after it, the flag is the last argument, so nothing is left to take.
+            let Some(value) = args.get(i + 1).cloned() else {
+                args.remove(i);
+                return Err("--max-file-size needs a size, for example --max-file-size 2GB".into());
+            };
             args.drain(i..i + 2);
             size = Some(value);
         } else if let Some(value) = arg.strip_prefix("--max-file-size=") {
@@ -303,35 +339,12 @@ fn max_file_size(args: &mut Vec<String>) -> Result<(), String> {
             i += 1;
         }
     }
-    let Some(size) = size else { return Ok(()) };
-    let bytes = solidcraft_engine::io::limits::parse_flag(&size).map_err(|e| format!("--max-file-size: {e}"))?;
-    solidcraft_engine::io::limits::set_override(Some(bytes))
+    Ok(size)
 }
 
 /// Explicit host policy for local sessions only. A script or package cannot change this.
 fn plugin_limits(args: &mut Vec<String>) -> Result<(), String> {
-    let mut path = None;
-    let mut i = 0;
-    while let Some(arg) = args.get(i) {
-        let value = if arg == "--plugin-limits" {
-            let value = args.get(i + 1).filter(|v| !v.starts_with("--")).cloned().ok_or("--plugin-limits needs a JSON settings file")?;
-            args.drain(i..i + 2);
-            Some(value)
-        } else if let Some(value) = arg.strip_prefix("--plugin-limits=") {
-            let value = value.to_string();
-            args.remove(i);
-            Some(value)
-        } else {
-            i += 1;
-            None
-        };
-        if let Some(value) = value
-            && (value.is_empty() || path.replace(value).is_some())
-        {
-            return Err("provide one --plugin-limits JSON settings file".into());
-        }
-    }
-    let Some(path) = path else { return Ok(()) };
+    let Some(path) = take_plugin_limits(args)? else { return Ok(()) };
     if args.iter().any(|v| v == "--connect" || v.starts_with("--connect="))
         || (args.first().map(String::as_str) == Some("mcp") && !args.iter().any(|v| v == "--headless"))
     {
@@ -345,36 +358,44 @@ fn plugin_limits(args: &mut Vec<String>) -> Result<(), String> {
     solidcraft_engine::plugin::configure_process_host_limits(limits).map_err(|e| e.to_string())
 }
 
+/// The settings file `--plugin-limits` names, taken out of the arguments. More than one is an error.
+/// Every one is taken out, a bad one too, and the first problem is the error.
+fn take_plugin_limits(args: &mut Vec<String>) -> Result<Option<String>, String> {
+    let mut path = None;
+    let mut bad = None;
+    let mut i = 0;
+    while let Some(arg) = args.get(i) {
+        let value = if arg == "--plugin-limits" {
+            let value = args.get(i + 1).filter(|v| !v.starts_with("--")).cloned();
+            args.drain(i..i + 1 + usize::from(value.is_some()));
+            value.ok_or("--plugin-limits needs a JSON settings file")
+        } else if let Some(value) = arg.strip_prefix("--plugin-limits=") {
+            let value = value.to_string();
+            args.remove(i);
+            Ok(value)
+        } else {
+            i += 1;
+            continue;
+        };
+        if let Err(e) = only_one(&mut path, value, "provide one --plugin-limits JSON settings file") {
+            bad.get_or_insert(e);
+        }
+    }
+    bad.map_or(Ok(path), |e| Err(e.to_owned()))
+}
+
+/// Keep `value` as the one value a flag has. A flag with no value is its own error, and an empty
+/// value or a second one is `again`.
+fn only_one(slot: &mut Option<String>, value: Result<String, &'static str>, again: &'static str) -> Result<(), &'static str> {
+    let value = value?;
+    if value.is_empty() || slot.replace(value).is_some() { Err(again) } else { Ok(()) }
+}
+
 /// `--plugins-dir DIR` (or `--plugins-dir=DIR`): the local sessions' plugins folder.
 /// `--keep-plugin-approvals`: local sessions keep plugin approvals between runs in that folder's
 /// grant store. Without it, approvals last for the session, as they always did.
 fn plugins_dir(args: &mut Vec<String>) -> Result<(), String> {
-    let mut dir = None;
-    let mut keep = false;
-    let mut i = 0;
-    while let Some(arg) = args.get(i) {
-        let value = if arg == "--plugins-dir" {
-            let value = args.get(i + 1).filter(|v| !v.starts_with("--")).cloned().ok_or("--plugins-dir needs a folder")?;
-            args.drain(i..i + 2);
-            Some(value)
-        } else if let Some(value) = arg.strip_prefix("--plugins-dir=") {
-            let value = value.to_string();
-            args.remove(i);
-            Some(value)
-        } else if arg == "--keep-plugin-approvals" {
-            args.remove(i);
-            keep = true;
-            None
-        } else {
-            i += 1;
-            None
-        };
-        if let Some(value) = value
-            && (value.is_empty() || dir.replace(value).is_some())
-        {
-            return Err("provide one --plugins-dir folder".into());
-        }
-    }
+    let (dir, keep) = take_plugins_dir(args)?;
     if (dir.is_some() || keep)
         && (args.iter().any(|v| v == "--connect" || v.starts_with("--connect="))
             || (args.first().map(String::as_str) == Some("mcp") && !args.iter().any(|v| v == "--headless")))
@@ -398,6 +419,38 @@ fn plugins_dir(args: &mut Vec<String>) -> Result<(), String> {
         return Ok(());
     }
     solidcraft_engine::plugin::configure_process_plugins(dir, keep).map_err(|e| e.to_string())
+}
+
+/// The folder `--plugins-dir` names and whether `--keep-plugin-approvals` is given, both taken out
+/// of the arguments. More than one folder is an error. Every one is taken out, a bad one too, and
+/// the first problem is the error.
+fn take_plugins_dir(args: &mut Vec<String>) -> Result<(Option<String>, bool), String> {
+    let mut dir = None;
+    let mut keep = false;
+    let mut bad = None;
+    let mut i = 0;
+    while let Some(arg) = args.get(i) {
+        let value = if arg == "--plugins-dir" {
+            let value = args.get(i + 1).filter(|v| !v.starts_with("--")).cloned();
+            args.drain(i..i + 1 + usize::from(value.is_some()));
+            value.ok_or("--plugins-dir needs a folder")
+        } else if let Some(value) = arg.strip_prefix("--plugins-dir=") {
+            let value = value.to_string();
+            args.remove(i);
+            Ok(value)
+        } else if arg == "--keep-plugin-approvals" {
+            args.remove(i);
+            keep = true;
+            continue;
+        } else {
+            i += 1;
+            continue;
+        };
+        if let Err(e) = only_one(&mut dir, value, "provide one --plugins-dir folder") {
+            bad.get_or_insert(e);
+        }
+    }
+    bad.map_or(Ok((dir, keep)), |e| Err(e.to_owned()))
 }
 
 fn pretty(v: &Value) -> String {

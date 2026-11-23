@@ -830,6 +830,221 @@ pub struct VerifyResult {
     pub signature: SignatureReport,
 }
 
+/// Compare two design files. Both are read and upgraded to this build's format, never evaluated,
+/// so a format upgrade alone is no change.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DiffParams {
+    /// The design to compare from, a `.sc` or `.json` design file.
+    pub a: String,
+    /// The design to compare to, read the same way.
+    pub b: String,
+}
+
+/// One value on each side, `a` from the first design and `b` from the second.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Pair<T> {
+    pub a: T,
+    pub b: T,
+}
+
+/// A feature as `file.diff` names it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DiffFeature {
+    pub id: u64,
+    pub name: String,
+    /// Its design-file key, such as `extrude` or `fillet`.
+    #[serde(rename = "type")]
+    pub kind: String,
+}
+
+/// A feature only the second design has, and the feature it follows there (none at the start).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DiffFeatureAdded {
+    #[serde(flatten)]
+    pub feature: DiffFeature,
+    #[serde(default)]
+    pub after: Option<DiffFeature>,
+}
+
+/// A feature that changed places, as the second design names it, and the feature it follows on
+/// each side (none at the start).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DiffFeatureMoved {
+    #[serde(flatten)]
+    pub feature: DiffFeature,
+    #[serde(default)]
+    pub after_a: Option<DiffFeature>,
+    #[serde(default)]
+    pub after_b: Option<DiffFeature>,
+}
+
+/// A feature both designs have that differs, as the second design names it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DiffFeatureChanged {
+    #[serde(flatten)]
+    pub feature: DiffFeature,
+    /// Its name in the first design, when it was renamed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renamed_from: Option<String>,
+    /// Whether it is suppressed now, when that changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suppressed: Option<bool>,
+    /// Its other design-file keys whose values differ. A sketch's entities and an imported file's
+    /// contents are reported under `sketches` and `imports`.
+    #[serde(default)]
+    pub keys: Vec<String>,
+}
+
+/// Where the rollback marker is. Features after it are not evaluated.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffMarker {
+    /// After the last feature, so every feature is evaluated.
+    End,
+    /// Before the first feature.
+    Start,
+    /// After this feature.
+    After(DiffFeature),
+}
+
+/// The timeline's changes. Features match by id, never by name, since names are not unique.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DiffFeatures {
+    #[serde(default)]
+    pub added: Vec<DiffFeatureAdded>,
+    #[serde(default)]
+    pub removed: Vec<DiffFeature>,
+    /// Features outside the longest run of shared features that kept its order.
+    #[serde(default)]
+    pub moved: Vec<DiffFeatureMoved>,
+    #[serde(default)]
+    pub changed: Vec<DiffFeatureChanged>,
+    /// Ids that name a different type of feature on each side, as when two branches numbered
+    /// their own features alike. Each is reported as a removal and an addition.
+    #[serde(default)]
+    pub reused_ids: Vec<u64>,
+    /// Where the rollback marker is on each side, when that changed. It is placed by the feature
+    /// it follows, so deleting a feature before it is no change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marker: Option<Pair<DiffMarker>>,
+}
+
+/// A parameter row as the design stores it, or the comment of a feature input. Parameters are
+/// compared as stored and never evaluated, so no value is given.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DiffParameter {
+    pub name: String,
+    /// `user` or `sketch` for a number parameter (`sketch` when a dimension or feature made it,
+    /// its `model` flag in the design file), `text` for a text parameter, or `feature` for the
+    /// comment of a feature input.
+    pub source: String,
+    /// For the comment of a feature input, the id of the feature whose input has this name, when
+    /// exactly one input in that design has it. The feature's name is not repeated in each entry,
+    /// since one feature may have any number of inputs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feature: Option<u64>,
+    /// For the comment of a feature input, the input's label, given as `feature` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
+    /// The expression as stored, or the text of a text parameter. Empty for the comment of a
+    /// feature input, whose expression is a key of its feature under `features`.
+    pub expression: String,
+    /// `mm`, `deg`, empty (unit-less) or `text`. Empty for the comment of a feature input.
+    pub unit: String,
+    pub comment: String,
+    /// Which of its name's rows this is, from 1, when its section (number or text parameters) has
+    /// that name more than once on either side. The rows of one name match by this place, so each
+    /// row counts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row: Option<usize>,
+}
+
+/// Parameters as the design stores them, the number parameters, the text parameters and the
+/// comments of feature inputs. Rows match by name and then by their place among the rows of that
+/// name. A row counts as changed when anything stored in it differs (its expression or text, unit,
+/// comment or `model` flag), and one that only one side has is added or removed. A feature input's
+/// expression is a key of its feature under `features`, so only its comment is compared here.
+/// When the rows both sides have are in another order, `params` or `text_params` is named under
+/// `other`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DiffParameters {
+    #[serde(default)]
+    pub added: Vec<DiffParameter>,
+    #[serde(default)]
+    pub removed: Vec<DiffParameter>,
+    #[serde(default)]
+    pub changed: Vec<Pair<DiffParameter>>,
+}
+
+/// A sketch both designs have that differs, with how many entities it has on each side. Which
+/// entities changed is not listed yet.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DiffSketch {
+    #[serde(flatten)]
+    pub feature: DiffFeature,
+    pub points: Pair<usize>,
+    pub curves: Pair<usize>,
+    pub constraints: Pair<usize>,
+    /// The sketch's design-file keys whose values differ (`points`, `curves`, `constraints`,
+    /// `patterns`). A point that moved no more than 1e-6 mm counts as where it was.
+    #[serde(default)]
+    pub keys: Vec<String>,
+}
+
+/// What a design keeps of an imported file, one stored part. Its digest names the same part in a
+/// container (`blobs/<sha256>.<kind>`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DiffPayload {
+    /// `step`, `records` or `mesh`.
+    pub kind: String,
+    /// The SHA-256 of the stored bytes, in lowercase hex. For a UTF-8 STEP file it is the file's own.
+    pub sha256: String,
+    pub bytes: u64,
+}
+
+/// An imported file whose contents differ, or that only one design has.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DiffImport {
+    #[serde(flatten)]
+    pub feature: DiffFeature,
+    /// The file's name as it was imported.
+    pub file: String,
+    /// What each side keeps, empty on the side without the import.
+    pub a: Vec<DiffPayload>,
+    pub b: Vec<DiffPayload>,
+}
+
+/// What `file.diff` returns, what changed from design `a` to design `b`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DiffResult {
+    /// Whether nothing below differs. A difference in format alone is no change.
+    pub same: bool,
+    /// The format each file is saved in, before the upgrade.
+    pub format: Pair<String>,
+    /// What a newer SolidCraft saved that this build can't read, by file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+    pub features: DiffFeatures,
+    pub parameters: DiffParameters,
+    #[serde(default)]
+    pub sketches: Vec<DiffSketch>,
+    #[serde(default)]
+    pub imports: Vec<DiffImport>,
+    /// The other sections of the design that differ, by design-file key (`components`, `drawings`).
+    /// `newer_file` is what a newer SolidCraft saved that this build kept aside without reading it,
+    /// compared without its signatures or the format it names. `params` or `text_params` means the
+    /// parameter rows both sides have changed order.
+    #[serde(default)]
+    pub other: Vec<String>,
+    /// View state that differs (`visibility`, `browser_order`, `named_views`).
+    #[serde(default)]
+    pub view: Vec<String>,
+    /// In the warn parameter-check mode, what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// `file.gpg_keys` takes no parameters.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]

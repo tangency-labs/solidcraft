@@ -98,6 +98,11 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
     ("crates/engine/src/cmd/file.rs:mesh_data", "mesh bodies: copies a linked mesh body's data"),
     ("crates/engine/src/cmd/file.rs:saved_preview", "the preview picture saved in a design"),
     ("crates/engine/src/cmd/plugin.rs:mesh", "a plugin's model.mesh export: a bounded copy of a body's display tessellation"),
+    ("crates/engine/src/design_diff.rs:same_contents", "mesh bodies: compares the arrays two design files keep for one imported mesh"),
+    (
+        "crates/engine/src/design_diff.rs:shell",
+        "mesh bodies: leaves an imported mesh's arrays out of its feature's changed keys, since the imports compare them by digest",
+    ),
     ("crates/kernel/src/body.rs:Body::classify_point", "mesh bodies: its mesh-body branch (a B-rep is classified by SMLib)"),
     ("crates/kernel/src/body.rs:Body::mesh_untimed", "the mesher: a body's tessellation"),
     ("crates/kernel/src/body.rs:Body::retained_bytes", "the evaluation cache's memory estimate"),

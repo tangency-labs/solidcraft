@@ -475,6 +475,26 @@ cannot show prints one line with its size and SHA-256 instead, and Git goes on w
 diff. Web pages that show a repository's changes do not run textconv, so a `.sc` design still shows
 as binary there.
 
+## Comparing two designs
+
+`solidcraft-cli diff before.sc after.sc` lists what changed from one design file to another. It
+names the features added, removed, moved, renamed, suppressed or changed, where the rollback marker
+moved, the parameter rows added, removed or changed (number and text parameters, each row of a
+repeated name, and the comments of feature inputs), the sketches that changed (with how many
+points, curves and constraints each has) and the imported files whose contents changed
+(by SHA-256). Any other part of the design that differs is named too. Both files are upgraded to
+this version's format first and nothing is evaluated, so a format upgrade alone is no change.
+Signatures are not compared, so signing a design is no change either. Opening a design in the app can re-solve its sketches and pin its body names, so a design opened
+and saved again may still show a change. Features match by their id, so two copies of one design
+edited apart compare well, while two designs built apart do not. The command exits with 0 when the
+designs are the same, 1 when they differ and 2 on an error. `--json` prints the whole reply of the
+`file.diff` command, which scripts and agents can also run. To compare a design with an earlier
+commit, hand it to Git's difftool.
+
+```text
+git difftool -y -x "solidcraft-cli diff" HEAD~1 -- part.sc
+```
+
 ## Saving in the web app
 
 In Chrome, Edge and Opera, **Save As** opens your browser's save dialog and writes the

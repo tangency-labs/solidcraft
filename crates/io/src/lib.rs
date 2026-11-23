@@ -49,6 +49,7 @@ pub use design::file_kind;
 pub use design::has_design_provenance;
 pub use design::is_design_container;
 pub use design::large_file_text;
+pub use design::mesh_part_bytes;
 pub use design::read_design_file;
 pub use design::read_design_file_once;
 pub use design::read_design_geometry;
@@ -1905,6 +1906,20 @@ pub fn read_design(bytes: &[u8]) -> Result<Document> {
         Ok(FileKind::Drawing) => IoError::Invalid("this file is a SolidCraft drawing, not a design: open it as a drawing".into()),
         _ => e.into(),
     })
+}
+
+/// The format a design file says it is in (`solidcraft/61`), before any upgrade. [`read_design`]
+/// brings an older file up to this build's format, so the number it had is read here. A file that
+/// names no format is format 1.
+pub fn design_format(bytes: &[u8]) -> Result<String> {
+    #[derive(serde::Deserialize)]
+    struct Says {
+        format: Option<String>,
+    }
+    let says: std::result::Result<Says, _> =
+        if is_design_container(bytes) { serde_json::from_slice(&design::document_part(bytes)?) } else { serde_json::from_slice(bytes) };
+    let says = says.map_err(|e| IoError::Invalid(format!("design file: {e}")))?;
+    Ok(says.format.unwrap_or_else(|| solidcraft_doc::format::format_string(1)))
 }
 
 /// What a refused JSON save says, so a caller can offer a container instead.

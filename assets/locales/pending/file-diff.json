@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.file.diff": "Compare Design Files"
+  },
+  "ar": {
+    "cmd.file.diff": "مقارنة ملفات التصميم"
+  },
+  "de": {
+    "cmd.file.diff": "Konstruktionsdateien vergleichen"
+  },
+  "he": {
+    "cmd.file.diff": "השוואת קובצי תכנון"
+  },
+  "ja": {
+    "cmd.file.diff": "設計ファイルを比較"
+  },
+  "ko": {
+    "cmd.file.diff": "설계 파일 비교"
+  },
+  "vi": {
+    "cmd.file.diff": "So sánh các tệp thiết kế"
+  },
+  "zh": {
+    "cmd.file.diff": "比较设计文件"
+  }
+}

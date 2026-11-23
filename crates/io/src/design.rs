@@ -912,6 +912,17 @@ pub(super) fn read(bytes: &[u8]) -> Result<Document> {
     DesignContainerReader::new(Cursor::new(bytes))?.read_document()
 }
 
+/// A container's own `document.json`, within [`LIMITS`], read as it is with no upgrade.
+pub(super) fn document_part(bytes: &[u8]) -> Result<Arc<[u8]>> {
+    Ok(PackageReader::new(Cursor::new(bytes))?.document(max_design())?)
+}
+
+/// The bytes a container keeps a mesh in. Its part is named after their SHA-256, so a digest of
+/// them names the same mesh in a `.json` design and in a container.
+pub fn mesh_part_bytes(mesh: &MeshData) -> Result<Vec<u8>> {
+    encode_mesh(mesh)
+}
+
 /// Open from disk (or browser VFS), publishing only provisional display before
 /// authoritative blob hydration, with the model the file keeps when this build saved it for
 /// exactly this document ([`solidcraft_doc::Model::adopt`] takes it as the evaluation). Desktop

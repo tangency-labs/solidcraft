@@ -18,6 +18,7 @@ pub mod control_auth;
 pub mod control_pending;
 pub mod cosmetic_threads;
 pub mod crash;
+pub mod design_diff;
 pub mod drawing_balloon_paper;
 pub mod drawing_dimension_paper;
 pub mod drawing_note_paper;

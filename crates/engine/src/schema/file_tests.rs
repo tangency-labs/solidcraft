@@ -3,9 +3,9 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use super::{
-    Export3mfParams, ExportMeshParams, ExportParams, ExportSdfParams, ExportStepParams, ExportStlParams, ExportUrdfParams, FileExportResult,
-    NewerFileReport, OpenElsewhere, OpenParams, OpenResult, OpenedDesign, RecoverParams, RecoverResult, RecoveryDiscardParams, RecoveryDiscardResult,
-    RecoveryListParams, RecoveryListResult,
+    DiffParams, DiffResult, Export3mfParams, ExportMeshParams, ExportParams, ExportSdfParams, ExportStepParams, ExportStlParams, ExportUrdfParams,
+    FileExportResult, NewerFileReport, OpenElsewhere, OpenParams, OpenResult, OpenedDesign, RecoverParams, RecoverResult, RecoveryDiscardParams,
+    RecoveryDiscardResult, RecoveryListParams, RecoveryListResult,
 };
 use crate::Session;
 use crate::recovery::Autosaver;
@@ -64,6 +64,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<RecoveryListParams>(), &["dir"]);
     assert_keys(input_schema_for::<RecoverParams>(), &["dir", "discard", "id"]);
     assert_keys(input_schema_for::<RecoveryDiscardParams>(), &["all", "dir", "id"]);
+    assert_keys(input_schema_for::<DiffParams>(), &["a", "b"]);
 }
 
 /// The words the open contract takes are the ones the handler's readers take, and its limits
@@ -482,5 +483,34 @@ fn a_misspelt_or_wrong_typed_export_key_is_reported() {
     let e = s.execute("file.export", &json!({"path": at("c.stl"), "qualty": "fine"})).unwrap_err().to_string();
     assert!(e.contains("qualty"), "{e}");
     assert!(!dir.join("c.stl").exists(), "nothing written");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `file.diff` needs both files and takes nothing else. Its reply matches its schema, and a design
+/// compared with its own container form is the same, in the same format.
+#[test]
+fn file_diff_takes_two_designs_and_replies_as_its_schema_says() {
+    let dir = folder("diff");
+    let at = |name: &str| dir.join(name).to_string_lossy().to_string();
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    for (p, refused) in [(json!({"a": at("a.sc")}), "`b`"), (json!({"a": at("a.sc"), "b": at("b.sc"), "c": 1}), "unknown key `c`")] {
+        let e = s.execute("file.diff", &p).unwrap_err().to_string();
+        assert!(e.contains(refused), "{p}: {e}");
+    }
+    assert_strict_keeps_todays_errors(&[
+        ("file.diff", json!({"a": "", "b": at("b.sc")})),
+        ("file.diff", json!({"a": at("missing.sc"), "b": at("b.sc")})),
+    ]);
+    s.param_check = ParamCheck::Warn;
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "file.save_as", json!({"path": at("part.json")}));
+    run(&mut s, "file.save_as", json!({"path": at("part.sc")}));
+    let reply = run(&mut s, "file.diff", json!({"a": at("part.json"), "b": at("part.sc")}));
+    let schema = output_schema_for::<DiffResult>();
+    let schema = schema.as_value();
+    assert!(conforms(schema, schema, &reply), "{reply} doesn't match {schema}");
+    assert!(reply.get("param_warnings").is_none(), "{reply}");
+    let format = solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT);
+    assert_eq!((&reply["same"], &reply["format"]), (&json!(true), &json!({"a": format, "b": format})), "{reply}");
     let _ = std::fs::remove_dir_all(&dir);
 }
