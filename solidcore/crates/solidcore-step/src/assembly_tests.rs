@@ -646,3 +646,42 @@ fn a_wall_no_wider_than_the_tolerance_is_left_out() {
     let vol = volume(&solid);
     assert!((vol - 6000.0).abs() <= 1e-9 * 6000.0, "{vol}");
 }
+
+/// A circle of radius `r` about the origin as four rational quadratic quarter arcs, each with
+/// weights `[1, k/sqrt 2, k^2]`: the same circle for every `k > 0`, its parameter crowded towards
+/// the arcs' ends as `k` grows.
+fn rational_circle(r: f64, k: f64) -> Vec<Curve2> {
+    let corners = [[r, 0.0], [r, r], [0.0, r], [-r, r], [-r, 0.0], [-r, -r], [0.0, -r], [r, -r], [r, 0.0]];
+    let weights = [1.0, k * std::f64::consts::FRAC_1_SQRT_2, k * k];
+    (0..4)
+        .map(|q| Curve2::RationalSpline {
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            homogeneous: (0..3)
+                .map(|i| {
+                    let ([x, y], w) = (corners[2 * q + i], weights[i]);
+                    [x * w, y * w, w]
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+/// #20514: of two nested loops of nearly one size, the larger is told whatever the loops'
+/// parameterisation: a ring 3.1 m across and 0.05 mm wide, its inner circle's arcs parameterised
+/// fifty times more unevenly than its outer circle's. Each area is the circle's to well within the
+/// ring's own area, with an error bound to match, so the outer loop is certainly the largest.
+#[test]
+fn nested_loops_of_nearly_one_size_are_told_apart_whatever_their_parameterisation() {
+    let (ro, ri) = (1550.0_f64, 1549.95_f64);
+    let uses: Vec<(u32, bool)> = (0..4).map(|e| (e, true)).collect();
+    let pi = std::f64::consts::PI;
+    let outer = loop_area_integrated(&uses, &rational_circle(ro, 1.0), pi * ro * ro).unwrap();
+    let inner = loop_area_integrated(&uses, &rational_circle(ri, 50.0), pi * ri * ri).unwrap();
+    let ring = pi * (ro * ro - ri * ri);
+    for ((area, error), r) in [(outer, ro), (inner, ri)] {
+        assert!((area - pi * r * r).abs() < 1e-3 * ring && error < 1e-3 * ring, "r {r}: area {area}, error {error}");
+    }
+    assert_eq!(largest_loop(&[Some(inner), Some(outer)]), Some(1));
+    // Two loops the bounds can't tell apart leave the choice to the file.
+    assert_eq!(largest_loop(&[Some((100.0, 1.0)), Some((100.5, 1.0))]), None);
+}

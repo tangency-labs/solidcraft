@@ -2736,6 +2736,17 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         after.to_body_apart = before.to_body_apart;
     }
+    // A Pattern on Path saved before the rotation-minimising frame keeps its copies where they
+    // were through an edit that leaves its orientation as it was; choosing the orientation again
+    // gives the frame every pattern made now has.
+    if let (
+        FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Path { orient: was, follow_frame: before, .. }, .. },
+        FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Path { orient: is, follow_frame: after, .. }, .. },
+    ) = (&old.kind, &mut new.kind)
+        && was == is
+    {
+        *after = *before;
+    }
     keep_from_level_on_the_same_face(s, &old, &mut new);
     solidcraft_doc::keep_one_sided_direction(&s.model, &old, &mut new);
     // A boundary surface's loop of sketch curves and its curve network are one command's two

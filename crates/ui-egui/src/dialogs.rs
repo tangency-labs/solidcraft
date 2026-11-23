@@ -337,10 +337,15 @@ crate::dialog_descriptor::dialog_descriptors! {
             },
             /// Remove bodies from here on in the timeline.
             Remove,
-            /// Pattern bodies along a path of sketch curves.
+            /// Pattern bodies along a path of sketch curves. Orientation and Flip are kept in
+            /// `extra` (`orientation`, `flip`), as the command takes them.
             PathPattern {
                 count: String,
                 spacing: String,
+                /// The start point (empty: the path's start): a distance along the path, or with
+                /// `fraction` a fraction of its length.
+                start: String,
+                fraction: bool,
             },
             /// Physical material (and with it the appearance) of bodies.
             Material {
@@ -1059,7 +1064,7 @@ impl Dialog {
             }
             "solid.remove" => Dialog::new(Kind::Remove, vec![SelInput::new("Bodies", BODIES, true)]),
             "solid.pattern.path" => Dialog::new(
-                Kind::PathPattern { count: "4".into(), spacing: length_default(s, "20") },
+                Kind::PathPattern { count: "4".into(), spacing: length_default(s, "20"), start: String::new(), fraction: false },
                 vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
             ),
             "mesh.convert" => Dialog::new(
@@ -3323,7 +3328,7 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
                     vec![SelInput::new("Objects", BODIES, true), SelInput::new("Axis", AXIS_PICKS, false)],
                 ),
                 _ => (
-                    Kind::PathPattern { count: "4".into(), spacing: length_default(session, "20") },
+                    Kind::PathPattern { count: "4".into(), spacing: length_default(session, "20"), start: String::new(), fraction: false },
                     vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
                 ),
             };
@@ -6841,7 +6846,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "bodies")?;
             ("solid.remove", json!({"bodies": sels(d, 0).body_names()}))
         }
-        Kind::PathPattern { count, spacing } => {
+        Kind::PathPattern { count, spacing, start, fraction } => {
             need(0, "objects")?;
             need(1, "the path")?;
             let path = sels(d, 1).curve_ids();
@@ -6849,6 +6854,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut p = json!({"path_sketch": sketch, "path": path, "count": count});
             // A saved extent stays first-to-last distance when the quantity changes.
             p[if d.extra.contains_key("distance") { "distance" } else { "spacing" }] = json!(spacing);
+            put(&mut p, &[(if *fraction { "start_fraction" } else { "start" }, start)]);
             pattern_objects(s, sels(d, 0), &mut p);
             ("solid.pattern.path", p)
         }
@@ -7371,6 +7377,17 @@ fn pattern_objects(s: &Session, objects: &[Sel], p: &mut Value) {
         p["occurrences"] = json!(paths);
     } else if objects.iter().any(|x| matches!(x, Sel::Feature { .. })) {
         p["features"] = json!(pattern_features(s, objects));
+    } else if objects.iter().any(|x| matches!(x, Sel::Occurrence { .. })) {
+        let mut names = Vec::new();
+        for x in objects {
+            let Sel::Occurrence { path } = x else { continue };
+            let Ok(place) = s.occurrence_placement(path) else { continue };
+            let Some(name) = s.doc.components.iter().find(|c| c.id == place.component).map(|c| c.name.clone()) else { continue };
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        p["components"] = json!(names);
     } else {
         p["bodies"] = json!(objects.body_names());
     }
@@ -8747,7 +8764,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Pattern { features, pattern, bodies: copied, placements } => {
+        FeatureKind::Pattern { features, pattern, bodies: copied, placements, components, .. } => {
             let ids: Vec<u64> = features.iter().map(|f| f.0).collect();
             let bodies: Vec<Sel> = if copied.is_empty() {
                 st.bodies.iter().filter(|b| ids.contains(&b.feature)).map(|b| Sel::Body { name: b.name.clone() }).collect()
@@ -8761,6 +8778,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 };
                 copied.iter().enumerate().map(|(k, name)| Sel::Body { name: world(k, name) }).collect()
             };
+            let component_sels: Vec<Sel> =
+                components.iter().filter_map(|id| s.doc.occurrence_of(*id).map(|o| Sel::Occurrence { path: vec![o.id] })).collect();
             let mut d = match pattern {
                 PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
                     let mut d = start("solid.pattern.rectangular")?;
@@ -8822,13 +8841,16 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     }
                     d
                 }
-                PatternKind::Path { path_sketch, path, count, spacing, extent, flip, orient } => {
+                PatternKind::Path { path_sketch, path, count, spacing, extent, flip, orient, start: at, start_fraction, .. } => {
                     let mut d = start("solid.pattern.path")?;
-                    d.kind = Kind::PathPattern { count: count.to_string(), spacing: spacing.to_string() };
+                    let (at, fraction) = match (start_fraction, at) {
+                        (Some(f), _) => (f.to_string(), true),
+                        (None, at) => (at.as_deref().map(str::to_string).unwrap_or_default(), false),
+                    };
+                    d.kind = Kind::PathPattern { count: count.to_string(), spacing: spacing.to_string(), start: at, fraction };
                     if let Some(inp) = d.inputs.get_mut(1) {
                         inp.items = path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect();
                     }
-                    // Preserve options the current dialog does not expose as controls.
                     d.extra.insert("flip".into(), json!(flip));
                     d.extra.insert("orientation".into(), json!(if *orient { "path" } else { "identical" }));
                     if *extent {
@@ -8844,6 +8866,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     inp.accept = selection::FEATURES;
                     inp.label = objects_label(inp.accept);
                     inp.items = ids.iter().map(|id| Sel::Feature { id: *id }).collect();
+                } else if !component_sels.is_empty() {
+                    // Same accept as Align of components: bodies/occurrences resolve to placements.
+                    inp.accept = BODIES;
+                    inp.label = "Components";
+                    inp.items = component_sels;
                 } else {
                     inp.accept = BODIES;
                     inp.label = objects_label(inp.accept);
