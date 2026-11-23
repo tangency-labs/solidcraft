@@ -18,6 +18,7 @@ pub mod control_auth;
 pub mod control_pending;
 pub mod cosmetic_threads;
 pub mod crash;
+pub mod display_state;
 pub mod drawing_balloon_paper;
 pub mod drawing_dimension_paper;
 pub mod drawing_note_paper;
@@ -4076,6 +4077,8 @@ mod derived_units_tests;
 #[cfg(test)]
 mod display_mesh_tests;
 #[cfg(test)]
+mod display_state_tests;
+#[cfg(test)]
 mod drawing_dimension_tests;
 #[cfg(test)]
 mod exact_tool_tests;
@@ -4245,6 +4248,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         timeline_groups,
         browser_order,
         named_views,
+        display_states,
         notes,
         visibility,
         drawings,
@@ -4284,6 +4288,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *browser_groups == b.browser_groups
         && *timeline_groups == b.timeline_groups
         && *browser_order == b.browser_order
+        && *display_states == b.display_states
         && *named_views == b.named_views
         && *notes == b.notes
         && *visibility == b.visibility

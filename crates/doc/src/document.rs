@@ -4196,6 +4196,10 @@ pub struct Document {
     /// Named views: saved cameras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
+    /// Display states: named snapshots of what is shown and how the bodies look (no camera).
+    /// Saving, updating, renaming and deleting them are undo steps, and so is applying one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub display_states: Vec<crate::display_state::NamedDisplayState>,
     /// Notes: text anchored to points in model space, drawn as screen-facing callouts (#1631).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<crate::notes::Note>,
@@ -4261,6 +4265,12 @@ pub struct Visibility {
 }
 
 impl Visibility {
+    /// A body was renamed: its hidden entry follows.
+    pub fn rename_body(&mut self, old: &str, new: &str) {
+        for b in self.hidden_bodies.iter_mut().filter(|b| *b == old) {
+            *b = new.to_string();
+        }
+    }
     /// Nothing hidden or shown one by one (the default view).
     pub fn is_empty(&self) -> bool {
         self.hidden_bodies.is_empty()
@@ -4515,6 +4525,7 @@ impl Document {
             timeline_groups: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
+            display_states: Vec::new(),
             notes: Vec::new(),
             visibility: Visibility::default(),
             drawings: Vec::new(),
@@ -4562,6 +4573,9 @@ impl Document {
                 }
                 _ => {}
             }
+        }
+        for state in &mut self.display_states {
+            state.rename_body(old, new);
         }
         if let Some(o) = self.body_offsets.remove(old) {
             self.body_offsets.insert(new.to_string(), o);

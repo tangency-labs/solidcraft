@@ -168,6 +168,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         visibility,
         point_clouds,
         notes: _,
+        // Display states change no geometry.
+        display_states: _,
         // Plugin data is kept beside the design; no feature reads it.
         plugin_data: _,
     } = a;
