@@ -337,6 +337,9 @@ impl Backend for Remote {
 pub struct Auto {
     headless: Option<Headless>,
     remote: Option<Remote>,
+    /// True once the headless session has created or started its own design/layout work, even if a
+    /// subsequent `file.new` clears `doc.features` again (#21377).
+    had_work: bool,
     /// The port of the running app, when there is one.
     discover: Box<dyn FnMut() -> Option<u16>>,
     token: Option<String>,
@@ -344,16 +347,39 @@ pub struct Auto {
 
 impl Auto {
     pub fn new(headless: Headless, discover: Box<dyn FnMut() -> Option<u16>>, token: Option<&str>) -> Self {
-        Auto { headless: Some(headless), remote: None, discover, token: token.map(str::to_owned) }
+        let had_work = Self::headless_has_work(&headless);
+        Auto { headless: Some(headless), remote: None, had_work, discover, token: token.map(str::to_owned) }
+    }
+
+    fn headless_has_work(h: &Headless) -> bool {
+        !h.session.doc.features.is_empty()
+            || !h.session.doc.params.is_empty()
+            || !h.session.doc.components.is_empty()
+            || h.session.path.is_some()
+            || !h.panels.as_ref().is_ok_and(|panels| panels.service.inspect().revision == 0 && panels.catalogue.state().user_count() == 0)
+    }
+
+    fn call_starts_headless_work(method: &str, params: &Value) -> bool {
+        match method {
+            "engine.execute" | "command" => step_command(params) == Some("file.new"),
+            "engine.batch" | "engine.script" => params
+                .as_array()
+                .or_else(|| params.get("commands").and_then(Value::as_array))
+                .is_some_and(|steps| steps.iter().any(|step| step_command(step) == Some("file.new"))),
+            _ => false,
+        }
     }
 
     /// Switch to the app when the session is still empty and one is running.
     fn look_for_app(&mut self) {
-        let empty = self.headless.as_ref().is_some_and(|h| {
-            h.session.doc.features.is_empty()
-                && h.panels.as_ref().is_ok_and(|panels| panels.service.inspect().revision == 0 && panels.catalogue.state().user_count() == 0)
-        });
-        if !empty {
+        if self.had_work {
+            return;
+        }
+        if self.headless.as_ref().is_some_and(Self::headless_has_work) {
+            self.had_work = true;
+            return;
+        }
+        if self.headless.is_none() {
             return;
         }
         if let Some(port) = (self.discover)() {
@@ -380,9 +406,16 @@ impl Backend for Auto {
         if self.remote.is_none() {
             self.look_for_app();
         }
+        let starts_work = Self::call_starts_headless_work(method, &params);
         match (&mut self.remote, &mut self.headless) {
             (Some(r), _) => r.call(method, params),
-            (None, Some(h)) => h.call(method, params),
+            (None, Some(h)) => {
+                let out = h.call(method, params);
+                if Self::headless_has_work(h) || (out.is_ok() && starts_work) {
+                    self.had_work = true;
+                }
+                out
+            }
             (None, None) => Err("no session".into()),
         }
     }

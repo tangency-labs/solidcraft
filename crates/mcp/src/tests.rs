@@ -4656,6 +4656,40 @@ fn auto_session_bridges_to_a_late_app_only_while_empty() {
     assert!(!s.backend().has_ui());
 }
 
+/// Regression (#21377): starting a new headless design with `new_design` (`file.new`) clears
+/// `doc.features`, so a running desktop app appearing afterward must not hijack the session.
+#[test]
+fn auto_session_stays_headless_after_new_design() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let text = |r: &Value| r["result"]["content"].as_array().unwrap().iter().filter_map(|c| c["text"].as_str()).collect::<Vec<_>>().join("\n");
+
+    // 1) Headless work followed by `new_design` stays headless even after an app starts.
+    let port = Rc::new(Cell::new(None::<u16>));
+    let seen = port.clone();
+    let mut s = Server::new(Box::new(crate::Auto::new(Headless::default(), Box::new(move || seen.get()), None)));
+    let r = raw_tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+    assert_ne!(r["result"]["isError"], json!(true), "{r}");
+    let r = raw_tool(&mut s, "new_design", json!({"name": "PartB"}));
+    assert_ne!(r["result"]["isError"], json!(true), "{r}");
+    port.set(Some(1));
+    let r = raw_tool(&mut s, "inspect_design", json!({}));
+    assert!(!s.backend().has_ui());
+    assert!(text(&r).contains("headless session because the SolidCraft app was not found"), "{r}");
+
+    // 2) Calling `new_design` directly from a fresh headless session also commits the session to headless.
+    let port = Rc::new(Cell::new(None::<u16>));
+    let seen = port.clone();
+    let mut s = Server::new(Box::new(crate::Auto::new(Headless::default(), Box::new(move || seen.get()), None)));
+    let r = raw_tool(&mut s, "new_design", json!({}));
+    assert_ne!(r["result"]["isError"], json!(true), "{r}");
+    port.set(Some(1));
+    let r = raw_tool(&mut s, "inspect_design", json!({}));
+    assert!(!s.backend().has_ui());
+    assert!(text(&r).contains("headless session because the SolidCraft app was not found"), "{r}");
+}
+
 /// A server with no `Auto` backend (`--headless`, `--in`) adds no notice.
 #[test]
 fn plain_headless_adds_no_notice() {
