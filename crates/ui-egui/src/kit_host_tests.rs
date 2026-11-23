@@ -566,7 +566,7 @@ mod layout {
                                     paint_navigation_axes(p, rect, &crate::viewport::navigator_axes(&solidcraft_viewport::Camera::default()))
                                 },
                             },
-                            PictureChoice { key: "cube", label: "Cube (compact)", figure: paint_navigation_cube },
+                            PictureChoice { key: "custom", label: "Custom", figure: paint_navigation_custom },
                         ],
                     ),
                 ] {

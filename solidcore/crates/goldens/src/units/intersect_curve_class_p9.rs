@@ -497,6 +497,7 @@ fn rust(i: &Input) -> ScResult<Output> {
                     interval: Extent1d::from_min_max(0., 1.),
                     face_gap: None,
                     zone_tol_3d: 0.,
+                    seam: None,
                 },
                 trim_curve: Some(H::Trim(j)),
             });
@@ -528,6 +529,7 @@ fn rust(i: &Input) -> ScResult<Output> {
             interval: Extent1d::from_min_max(e.interval[0], e.interval[1]),
             face_gap: None,
             zone_tol_3d: live_zone,
+            seam: None,
         });
     }
     let interval = Extent1d::from_min_max(i.interval[0], i.interval[1]);

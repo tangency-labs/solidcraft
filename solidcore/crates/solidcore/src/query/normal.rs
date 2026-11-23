@@ -63,6 +63,7 @@
 use crate::blend::fillet_section::definition_box::{definition_partials_naive, gn_def_face_of};
 use crate::blend::fillet_section::interval::{round_up, Ivl};
 use crate::blend::fillet_section::station::{as_b_spline, Nurbs};
+use crate::error::query::QueryFailure;
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Vec3};
@@ -210,7 +211,7 @@ fn degenerate() -> SolidError {
 fn exact_of<'a>(k: &Kernel, surface: &'a Surface) -> Result<Exact<'a>> {
     let net = |b: &'a crate::nurbs::b_spline_surface::BSplineSurface| {
         b.gw_nurb()
-            .ok_or_else(|| SolidError::query_failed(OP, "the B-spline surface's NURBS net"))
+            .ok_or_else(|| SolidError::query(OP, QueryFailure::SurfaceWithoutNurbs))
     };
     let mut s = surface;
     for _ in 0..MAX_HOPS {
@@ -341,7 +342,7 @@ fn definition_jet(
         }
     })?;
     let bs = as_b_spline(k, s)?
-        .ok_or_else(|| SolidError::query_failed(OP, "the surface's B-spline form"))?;
+        .ok_or_else(|| SolidError::query(OP, QueryFailure::Defect { why: "a blend's definition is read only for a procedural blend, whose net is the B-spline form as_b_spline returns for it" }))?;
     let net = Nurbs::of(&bs)?;
     let ku = span(&net.u, net.p, net.nu.saturating_sub(1), uv.x)
         .ok_or_else(|| unsupported("(u, v) outside the blend's net"))?;

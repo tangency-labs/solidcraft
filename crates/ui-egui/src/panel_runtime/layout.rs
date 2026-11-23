@@ -577,6 +577,9 @@ pub struct HostGeometryPolicy {
     pub effective_surfaces: BTreeMap<SectionId, PanelSurface>,
     pub(crate) hidden_header_actions: BTreeMap<InstanceId, BTreeSet<ControlId>>,
     pub(crate) header_title_widths: BTreeMap<InstanceId, f32>,
+    /// Panels whose content takes the title's place in the header, with the narrowest width
+    /// that content takes (`ContentSlot::Title`).
+    pub(crate) header_content: BTreeMap<InstanceId, f32>,
     pub(crate) tab_title_widths: BTreeMap<InstanceId, f32>,
     pub content: Vec<SideContentMeasure>,
     pub content_revision: u64,
@@ -594,6 +597,7 @@ impl PartialEq for HostGeometryPolicy {
             && self.effective_surfaces == other.effective_surfaces
             && self.hidden_header_actions == other.hidden_header_actions
             && self.header_title_widths == other.header_title_widths
+            && self.header_content == other.header_content
             && self.tab_title_widths == other.tab_title_widths
             && self.identity_reservations == other.identity_reservations
             && self.content == other.content
@@ -617,6 +621,7 @@ impl Default for HostGeometryPolicy {
             effective_surfaces: BTreeMap::new(),
             hidden_header_actions: BTreeMap::new(),
             header_title_widths: BTreeMap::new(),
+            header_content: BTreeMap::new(),
             tab_title_widths: BTreeMap::new(),
             content: Vec::new(),
             content_revision: 0,
@@ -663,8 +668,11 @@ pub struct HostSection {
     pub body: Option<LogicalRect>,
     pub collapsed: bool,
     pub inline: bool,
+    pub side_strip: bool,
     /// Editable inline content is separate from the shared title drag region.
     pub inline_content: Option<LogicalRect>,
+    /// Content in the title's place, after the grip (`HostGeometryPolicy::header_content`).
+    pub header_content: Option<LogicalRect>,
     pub collapse: Option<LogicalRect>,
     pub close: Option<LogicalRect>,
     pub actions: Vec<(ControlId, LogicalRect)>,
@@ -842,6 +850,7 @@ impl HostLayout {
             valid_id(&section.instance.0)?;
             if (section.collapsed || section.inline) && (section.body.is_some() || section.footer.is_some())
                 || section.inline_content.is_some() && (!section.inline || section.collapsed)
+                || section.header_content.is_some() && (section.inline || section.side_strip || section.tab_strip.is_some())
                 || section.inline && section.header != section.outer
             {
                 return Err(error(Rule::Bounds, "collapsed/inline host has inconsistent content roles"));
@@ -880,6 +889,7 @@ impl HostLayout {
                 section.footer,
                 section.tab_overflow,
                 section.inline_content,
+                section.header_content,
             ]
             .into_iter()
             .flatten()
@@ -1203,12 +1213,31 @@ fn header_actions_below(
 ) -> bool {
     let count = spec.header_actions.iter().filter(|action| header_action_visible(policy, instance, &action.id)).count();
     let primary = 1 + usize::from(collapsible) + usize::from(spec.features.hot_closable);
+    // Content in the title's place needs the grip and its own narrowest width instead of the title's.
+    let title = match policy.header_content.get(instance) {
+        Some(content) => Some(grip_width(metrics) + content),
+        None => policy.header_title_widths.get(instance).copied(),
+    };
     count > 0
         && (section.tabs.len() > 1
-            || policy
-                .header_title_widths
-                .get(instance)
-                .is_some_and(|title| width < title + metrics.control_extent * (primary + count) as f32 + solidcraft_theme::Tokens::get().space_2))
+            || title.is_some_and(|title| width < title + metrics.control_extent * (primary + count) as f32 + solidcraft_theme::Tokens::get().space_2))
+}
+
+/// The drag grip that stands in for the title before tabs or header content.
+fn grip_width(metrics: HostMetrics) -> f32 {
+    let t = solidcraft_theme::Tokens::get();
+    metrics.control_extent.min(t.space_10 + t.space_8)
+}
+
+/// Splits a heading into the grip at its start and the rest, mirrored in RTL.
+fn split_grip(heading: LogicalRect, metrics: HostMetrics, direction: Direction) -> (Option<LogicalRect>, Option<LogicalRect>) {
+    let grip = grip_width(metrics).min(heading.size.width);
+    let grip_x = if direction == Direction::Ltr { heading.origin.x } else { right(heading) - grip };
+    let rest_x = if direction == Direction::Ltr { grip_x + grip } else { heading.origin.x };
+    (
+        positive_rect(grip_x, heading.origin.y, grip, heading.size.height),
+        positive_rect(rest_x, heading.origin.y, heading.size.width - grip, heading.size.height),
+    )
 }
 
 pub(super) fn sole_side_section(layout: &Layout, section: &Section, available: &[InstanceId]) -> bool {
@@ -1228,7 +1257,11 @@ fn append_section(
     outer.validate()?;
     let metrics = out.metrics;
     let spec = service.registry().get(&proposed.instance(instance)?.kind)?;
-    let collapsible = section_collapsible(proposed, service.registry(), section)?;
+    let side_strip = section.location.zone().side()
+        && !section.collapsed
+        && section.tabs.len() == 1
+        && service.registry().is_side_strip(&spec.kind, outer.size.width);
+    let collapsible = !side_strip && section_collapsible(proposed, service.registry(), section)?;
     let (flow, _) = responsive(section.location.zone(), outer.size, None)?;
     // A single row owns inline controls AND content; no hidden second body.
     let inline = !section.collapsed && flow == Flow::Wide && outer.size.height <= metrics.inline_max_height;
@@ -1238,7 +1271,10 @@ fn append_section(
     let action_count = visible_actions.clone().count();
     let primary_count = 1 + usize::from(collapsible) + usize::from(spec.features.hot_closable);
     let control_count = action_count + primary_count;
-    let split = !inline && !section.collapsed && header_actions_below(policy, metrics, section, instance, spec, collapsible, header.size.width);
+    let split = !side_strip
+        && !inline
+        && !section.collapsed
+        && header_actions_below(policy, metrics, section, instance, spec, collapsible, header.size.width);
     let action_bar = (split && !section.collapsed)
         .then(|| {
             positive_rect(
@@ -1249,6 +1285,7 @@ fn append_section(
             )
         })
         .flatten();
+    let control_count = if side_strip { primary_count + 1 } else { control_count };
     let extent = metrics.control_extent.min(header.size.height).min(header.size.width / control_count as f32);
     let primary_extent = if split { metrics.control_extent.min(header.size.height).min(header.size.width / primary_count as f32) } else { extent };
     let header_controls = if split { primary_count } else { control_count };
@@ -1256,14 +1293,29 @@ fn append_section(
     let mut cursor = if out.direction == Direction::Ltr { right(header) - edge_margin } else { header.origin.x + edge_margin };
     let take = |cursor: &mut f32, row: LogicalRect, extent: f32| {
         let x = if out.direction == Direction::Ltr { *cursor - extent } else { *cursor };
-        *cursor += if out.direction == Direction::Ltr { -extent } else { extent };
-        rect(x, row.origin.y + (row.size.height - extent) / 2.0, extent, extent)
+        let x = x.clamp(row.origin.x, (right(row) - extent).max(row.origin.x));
+        *cursor = if out.direction == Direction::Ltr { x } else { (x + extent).min(right(row)) };
+        rect(x, row.origin.y + (row.size.height - extent) / 2.0, extent.min(right(row) - x), extent)
     };
     let close = spec.features.hot_closable.then(|| take(&mut cursor, header, primary_extent));
     let collapse = collapsible.then(|| take(&mut cursor, header, primary_extent));
     let menu = take(&mut cursor, header, primary_extent);
     let mut actions = Vec::new();
-    let (heading, inline_content) = if inline {
+    let mut strip_bottom = bottom(header);
+    let (heading, inline_content) = if side_strip {
+        let extent = metrics.control_extent.min(header.size.width);
+        let x = header.origin.x + (header.size.width - extent) / 2.0;
+        for action in visible_actions.clone() {
+            if strip_bottom + extent >= bottom(outer) {
+                break;
+            }
+            actions.push((action.id.clone(), rect(x, strip_bottom, extent, extent)));
+            strip_bottom += extent;
+        }
+        let x = if out.direction == Direction::Ltr { header.origin.x } else { cursor };
+        let width = if out.direction == Direction::Ltr { cursor - x } else { right(header) - x };
+        (positive_rect(x, header.origin.y, width, header.size.height), None)
+    } else if inline {
         // Shared title/grip, declared custom actions, editable inline content,
         // then shared system actions. The whole sequence mirrors in RTL.
         let available = (header.size.width - edge_margin - extent * control_count as f32).max(0.0);
@@ -1313,23 +1365,18 @@ fn append_section(
     };
     // A group replaces the single title with one grip and text-only tabs in
     // that same slot. Collapsing never removes access to individual tabs.
-    let (title, tab_strip) = if section.tabs.len() > 1 {
-        if let Some(heading) = heading {
-            let t = solidcraft_theme::Tokens::get();
-            let grip_width = metrics.control_extent.min(t.space_10 + t.space_8).min(heading.size.width);
-            let grip_x = if out.direction == Direction::Ltr { heading.origin.x } else { right(heading) - grip_width };
-            let tabs_x = if out.direction == Direction::Ltr { grip_x + grip_width } else { heading.origin.x };
-            (
-                positive_rect(grip_x, heading.origin.y, grip_width, heading.size.height),
-                positive_rect(tabs_x, heading.origin.y, heading.size.width - grip_width, heading.size.height),
-            )
-        } else {
-            (None, None)
+    // A lone panel may put its own content there instead (a search field), folded or not.
+    let grouped = section.tabs.len() > 1;
+    let header_content = !grouped && !side_strip && !inline && policy.header_content.contains_key(instance);
+    let (title, tab_strip, header_content) = match heading {
+        Some(heading) if grouped || header_content => {
+            let (grip, rest) = split_grip(heading, metrics, out.direction);
+            if grouped { (grip, rest, None) } else { (grip, None, rest) }
         }
-    } else {
-        (heading, None)
+        Some(heading) => (Some(heading), None, None),
+        None => (None, None, None),
     };
-    let body_y = bottom(action_bar.unwrap_or(header)) + metrics.content_header_height;
+    let body_y = bottom(action_bar.unwrap_or(header)).max(strip_bottom) + metrics.content_header_height;
     let body = if section.collapsed || inline {
         None
     } else {
@@ -1492,7 +1539,9 @@ fn append_section(
         surface,
         collapsed: section.collapsed,
         inline,
+        side_strip,
         inline_content,
+        header_content,
         collapse,
         close,
         actions,

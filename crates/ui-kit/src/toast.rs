@@ -358,6 +358,124 @@ pub fn show(ui: &egui::Ui, free: Rect, place: Place, text: String, lead: Lead, a
     Some(Shown { rect: r, clicked, buttons, close, closed, card_clicked })
 }
 
+/// A short notice's visible lifetime; hovering or focusing it pauses the countdown.
+#[derive(Clone, Debug)]
+pub struct NoticeLifetime {
+    remaining: f64,
+    last: Option<f64>,
+    held: bool,
+}
+
+impl NoticeLifetime {
+    pub fn new(seconds: f64) -> Self {
+        Self { remaining: if seconds.is_finite() { seconds.max(0.0) } else { 0.0 }, last: None, held: false }
+    }
+
+    /// Advances from the UI clock and returns whether the notice has expired.
+    pub fn advance(&mut self, now: f64, held: bool) -> bool {
+        if now.is_finite()
+            && let Some(last) = self.last.replace(now)
+            && !self.held
+        {
+            self.remaining = (self.remaining - (now - last).max(0.0)).max(0.0);
+        }
+        self.held = held;
+        self.remaining <= 0.0
+    }
+
+    pub fn remaining(&self) -> f64 {
+        self.remaining
+    }
+}
+
+/// A compact completion notice's bounds and keyboard/pointer action.
+pub struct InlineNoticeShown {
+    pub rect: Rect,
+    pub link: Rect,
+    pub clicked: bool,
+    pub held: bool,
+}
+
+const INLINE_NOTICE_HEIGHT: f32 = 34.0;
+
+struct InlineNoticeLayout {
+    message: std::sync::Arc<egui::Galley>,
+    action: std::sync::Arc<egui::Galley>,
+    action_width: f32,
+    size: egui::Vec2,
+}
+
+fn layout_inline_notice(ui: &egui::Ui, text: &str, action: &str, max_width: f32) -> InlineNoticeLayout {
+    let t = Tokens::get();
+    let link_ink = solidcraft_theme::TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Main).ink;
+    let painter = ui.painter();
+    let action_text = painter.layout_no_wrap(action.to_owned(), crate::type_face::semibold(t.font_body), link_ink);
+    let action_width = (action_text.size().x + t.space_12).min(max_width - t.space_24);
+    let message_width = (max_width - action_width - t.space_24 - t.space_24).max(0.0);
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), crate::type_face::medium(t.font_body), t.text);
+    job.wrap = egui::text::TextWrapping { max_width: message_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+    let message = painter.layout_job(job);
+    let width = (t.space_24 + message.size().x + t.space_12 + action_width + t.space_12).min(max_width);
+    InlineNoticeLayout { message, action: action_text, action_width, size: vec2(width, INLINE_NOTICE_HEIGHT) }
+}
+
+/// Measure exactly the compact completion notice that [`inline_notice`] paints.
+/// Invalid widths or widths below the notice's minimum return zero size.
+pub fn measure_inline_notice(ui: &egui::Ui, text: &str, action: &str, max_width: f32) -> egui::Vec2 {
+    if !max_width.is_finite() || max_width < 80.0 {
+        return egui::Vec2::ZERO;
+    }
+    layout_inline_notice(ui, text, action, max_width).size
+}
+
+/// A completion message and inline action, bottom-centred in a window's free area.
+/// The status is a polite live region; the link participates in ordinary Tab order.
+pub fn inline_notice(ui: &egui::Ui, free: Rect, id: egui::Id, text: &str, action: &str) -> Option<InlineNoticeShown> {
+    if !free.is_finite() || !free.is_positive() || free.height() < INLINE_NOTICE_HEIGHT || free.width() < 80.0 {
+        return None;
+    }
+    let t = Tokens::get();
+    let link_ink = solidcraft_theme::TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Main).ink;
+    let painter = ui.painter().with_clip_rect(free);
+    let InlineNoticeLayout { message, action: action_text, action_width, size } = layout_inline_notice(ui, text, action, free.width());
+    let rect = Rect::from_center_size(pos2(free.center().x, free.bottom() - size.y / 2.0), size);
+    let frame = Container::completion_notice_frame(ui.ctx());
+    Container::paint_frame(ui.painter(), frame, rect.shrink(frame.stroke.width));
+    let status = ui.interact(rect, id.with("status"), Sense::hover());
+    status.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Status, ui.is_enabled(), text));
+    ui.ctx().accesskit_node_builder(status.id, |node| {
+        node.set_role(egui::accesskit::Role::Status);
+        node.set_live(egui::accesskit::Live::Polite);
+        node.set_live_atomic();
+    });
+    let check = rect.left_center() + vec2(t.space_12, 0.0);
+    painter
+        .add(egui::Shape::line(vec![check + vec2(-4.0, 0.0), check + vec2(-1.0, 3.0), check + vec2(5.0, -4.0)], Stroke::new(1.6, t.sketch_accent)));
+    painter.galley(rect.left_center() + vec2(t.space_24, -message.size().y / 2.0), message, t.text);
+    let link =
+        Rect::from_min_max(pos2(rect.right() - t.space_12 - action_width, rect.top() + 3.0), pos2(rect.right() - t.space_12, rect.bottom() - 3.0));
+    let blocked = crate::input_blocked() || !ui.is_enabled();
+    let response = ui.interact(link, id.with("link"), if blocked { Sense::hover() } else { Sense::click() });
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, !blocked, action));
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_role(egui::accesskit::Role::Link));
+    if response.has_focus() {
+        painter.rect_stroke(link, t.radius_sm, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+    }
+    if response.hovered() && !blocked {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    painter.with_clip_rect(link).galley(link.left_center() + vec2(t.space_6, -action_text.size().y / 2.0), action_text, link_ink);
+    // egui keeps interaction hits for the final release even after PointerGone. A retained
+    // hit is not a hovering pointer; only the current hover position can hold the notice.
+    let hovering = ui.input(|input| input.pointer.hover_pos().is_some_and(|at| rect.contains(at))) && (status.hovered() || response.hovered());
+    Some(InlineNoticeShown {
+        rect,
+        link,
+        clicked: response.clicked() && !blocked,
+        held: hovering || (ui.input(|input| input.focused) && response.has_focus()),
+    })
+}
+
 #[cfg(test)]
 #[path = "toast_tests.rs"]
 mod tests;

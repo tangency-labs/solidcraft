@@ -318,6 +318,17 @@ fn rows_skip_i_and_o_and_letters_go_on_past_z() {
     assert_eq!(rows, "ABCDEFGHIJ");
 }
 
+/// A view's letters (#13044) skip I, O and Q, then go on past Z as a grid's rows do.
+#[test]
+fn view_letters_skip_i_o_and_q() {
+    assert_eq!((0..23).filter_map(view_letter).collect::<String>(), "ABCDEFGHJKLMNPRSTUVWXYZ");
+    assert_eq!(view_letter(23).as_deref(), Some("AA"));
+    assert_eq!(view_letter(23 + 23 * 23).as_deref(), Some("AAA"));
+    for i in 0..2000 {
+        assert!(view_letter(i).is_some_and(|l| !l.contains(['I', 'O', 'Q'])), "{i}");
+    }
+}
+
 #[test]
 fn hostile_sizes_and_profiles_are_refused() {
     let custom = |a: f64, b: f64| Sheet { size: SheetSize::Custom { sides_mm: [a, b] }, orientation: Orientation::Landscape };
@@ -354,6 +365,10 @@ fn hostile_sizes_and_profiles_are_refused() {
         DrawingBorderProfile { grid_border_mm: -0.1, ..iso },
         DrawingBorderProfile { grid_border_mm: f64::NAN, ..iso },
         DrawingBorderProfile { grid_border_mm: 10.000_001, ..iso },
+        // ...on the drawing border or at least a field's shortest length (1 mm) outside it.
+        DrawingBorderProfile { grid_border_mm: 1e-9, ..iso },
+        DrawingBorderProfile { grid_border_mm: 1e-6, ..iso },
+        DrawingBorderProfile { grid_border_mm: 0.999_999, ..iso },
         // On every side: 5 mm is wider than a 4 mm bottom margin, or a 4 mm left one without the
         // filing margin.
         with_margins(20.0, 10.0, 10.0, 4.0),
@@ -424,6 +439,8 @@ fn hostile_sizes_and_profiles_are_refused() {
         DrawingBorderProfile { grid: GridRule::Equal { columns: 200, rows: 200 }, ..iso },
         DrawingBorderProfile { grid_border_mm: 0.0, centring_mark_mm: None, ..with_margins(0.0, 0.0, 0.0, 0.0) },
         DrawingBorderProfile { grid_border_mm: 10.0, ..iso },
+        DrawingBorderProfile { grid_border_mm: 1.0, ..iso },
+        DrawingBorderProfile { grid_border_mm: 1.000_001, ..iso },
         DrawingBorderProfile { centring_mark_mm: Some(138.5), ..iso },
         // With no grid reference border, a centring mark that reaches inside has a length, and so
         // does one from the sheet's edge.
@@ -441,6 +458,29 @@ fn hostile_sizes_and_profiles_are_refused() {
     ] {
         profile.layout(&a3).unwrap();
     }
+}
+
+/// Every grid reference border laid out lies on the drawing border or at least 1 mm outside it on
+/// every side, so no field mark is a sliver on the drawing border's line: borders from 0 through
+/// sub-micrometre values to the margin's width, on every size both ways.
+#[test]
+fn no_grid_reference_border_is_a_sliver_outside_the_drawing_border() {
+    let mut laid_out = 0;
+    for size in PaperSize::ALL {
+        for orientation in [Orientation::Landscape, Orientation::Portrait] {
+            for g in [0.0, 1e-12, 1e-9, 1e-6, 0.5, 0.999_999, 1.0, 1.000_001, 5.0, 10.0] {
+                let profile = DrawingBorderProfile { grid_border_mm: g, ..DrawingBorderProfile::iso() };
+                let Ok(layout) = profile.layout(&Sheet::standard(size, orientation)) else { continue };
+                laid_out += 1;
+                let (d, b) = (layout.drawing_border, layout.grid_border);
+                for gap in [d.min.x - b.min.x, d.min.y - b.min.y, b.max.x - d.max.x, b.max.y - d.max.y] {
+                    assert!(gap == 0.0 || gap >= MIN_FIELD_MM - EPS, "{size:?} {orientation:?}, {g} mm: a {gap} mm gap");
+                }
+            }
+        }
+    }
+    // 0, 1, 1.000001, 5 and 10 mm on all 40 sheets.
+    assert_eq!(laid_out, 200);
 }
 
 #[test]
@@ -609,4 +649,118 @@ fn rounding_past_a_whole_number_of_fields_leaves_no_sliver() {
         assert!(close(&widths, &[50.0; 7]), "{hair}: {widths:?}");
         assert_eq!(layout.columns.first().unwrap().from_mm, 60.0 - hair);
     }
+}
+
+/// A group's items as (each piece's ends in micrometres, closed, width) for strokes and (the
+/// outline's corners in micrometres) for fills: what hand-worked values are compared with.
+fn drawn(group: &Group) -> Vec<(Vec<[i64; 4]>, bool, f64)> {
+    let um = |v: f64| (v * 1000.0).round() as i64;
+    let ends = |segs: &[Seg2]| segs.iter().map(|s| [um(s.start().x), um(s.start().y), um(s.end().x), um(s.end().y)]).collect();
+    group
+        .items
+        .iter()
+        .map(|item| match item {
+            Item::Stroke { path, closed, width_mm, .. } => (ends(path), *closed, *width_mm),
+            Item::Fill { region } => (ends(&region.outer.segs), true, 0.0),
+            Item::Text(_) => panic!("a border has no text"),
+            Item::Picture(_) => panic!("a sheet draws no pictures"),
+        })
+        .collect()
+}
+
+/// A line from (x0, y0) to (x1, y1) mm, `width` wide.
+fn line(x0: f64, y0: f64, x1: f64, y1: f64, width: f64) -> (Vec<[i64; 4]>, bool, f64) {
+    let um = |v: f64| (v * 1000.0).round() as i64;
+    (vec![[um(x0), um(y0), um(x1), um(y1)]], false, width)
+}
+
+/// A rectangle (x0, y0)..(x1, y1) mm, anticlockwise from its lower-left corner: closed `width`
+/// wide, or a fill when `width` is 0.
+fn rect(x0: f64, y0: f64, x1: f64, y1: f64, width: f64) -> (Vec<[i64; 4]>, bool, f64) {
+    let um = |v: f64| (v * 1000.0).round() as i64;
+    let c = [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)];
+    (c.windows(2).map(|w| [um(w[0].0), um(w[0].1), um(w[1].0), um(w[1].1)]).collect(), true, width)
+}
+
+fn scene(layout: &SheetLayout, groups: Vec<Group>) -> crate::paper::Scene {
+    crate::paper::Scene::new(layout.sheet_border.max, groups)
+}
+
+/// A3 landscape, the built-in profile, by hand: the drawing border round 10..410 by 10..287, 0.7
+/// wide; the grid reference border 5 mm outside it and a 0.35 mark each side at every edge between
+/// two fields (60 to 360 across, 248.5 down to 48.5 up); the centring marks from the sheet's edge to
+/// the drawing border on the centre lines x = 210 and y = 148.5, 0.7 wide; no trimming marks.
+#[test]
+fn a3s_drawing_border_on_paper_is_its_border_grid_and_marks() {
+    let layout = iso_layout(PaperSize::A3, Orientation::Landscape);
+    let groups = layout.paper(4);
+    assert_eq!(groups.len(), 3);
+    assert!(groups.iter().all(|g| (g.object, g.kind) == (4, ObjectKind::DrawingBorder)));
+    assert_eq!(drawn(&groups[0]), [rect(10.0, 10.0, 410.0, 287.0, 0.7)]);
+    let mut grid = vec![rect(5.0, 5.0, 415.0, 292.0, 0.35)];
+    for x in [60.0, 110.0, 160.0, 210.0, 260.0, 310.0, 360.0] {
+        grid.extend([line(x, 5.0, x, 10.0, 0.35), line(x, 287.0, x, 292.0, 0.35)]);
+    }
+    for y in [248.5, 198.5, 148.5, 98.5, 48.5] {
+        grid.extend([line(5.0, y, 10.0, y, 0.35), line(410.0, y, 415.0, y, 0.35)]);
+    }
+    assert_eq!(drawn(&groups[1]), grid);
+    assert_eq!(
+        drawn(&groups[2]),
+        [
+            line(210.0, 0.0, 210.0, 10.0, 0.7),
+            line(210.0, 297.0, 210.0, 287.0, 0.7),
+            line(0.0, 148.5, 10.0, 148.5, 0.7),
+            line(420.0, 148.5, 410.0, 148.5, 0.7)
+        ]
+    );
+    scene(&layout, groups).validate().unwrap();
+}
+
+/// ISO 5457's full border: the filing margin moves the drawing border to x = 20, the centring
+/// marks run from the grid reference border to 10 mm inside, and the eight trimming marks are
+/// filled, each the layout's own rectangle.
+#[test]
+fn the_full_iso_5457_border_on_paper_fills_its_trimming_marks() {
+    let layout = full_iso_5457().layout(&Sheet::standard(PaperSize::A3, Orientation::Landscape)).unwrap();
+    let groups = layout.paper(1);
+    assert_eq!(groups.len(), 4);
+    assert_eq!(drawn(&groups[0]), [rect(20.0, 10.0, 410.0, 287.0, 0.7)]);
+    assert_eq!(drawn(&groups[1])[0], rect(15.0, 5.0, 415.0, 292.0, 0.35));
+    assert_eq!(drawn(&groups[2])[2], line(15.0, 148.5, 30.0, 148.5, 0.7));
+    let fills: Vec<_> = layout.trimming_marks.iter().map(|r| rect(r.min.x, r.min.y, r.max.x, r.max.y, 0.0)).collect();
+    assert_eq!((fills.len(), drawn(&groups[3])), (8, fills));
+    assert_eq!(drawn(&groups[3])[0], rect(0.0, 0.0, 10.0, 5.0, 0.0));
+    scene(&layout, groups).validate().unwrap();
+}
+
+/// The shapes: no grid, or a grid reference border on the drawing border, draws no grid group; no
+/// centring marks, no centring group; one field each way, the grid reference border alone; A4,
+/// labelled on two sides, still has its marks on all four (3 edges across, 5 down).
+#[test]
+fn a_border_on_paper_draws_only_what_its_profile_has() {
+    let a3 = Sheet::standard(PaperSize::A3, Orientation::Landscape);
+    let paper = |profile: DrawingBorderProfile, sheet: &Sheet| {
+        let layout = profile.layout(sheet).unwrap();
+        let groups = layout.paper(1);
+        scene(&layout, groups.clone()).validate().unwrap();
+        groups.iter().map(|g| g.items.len()).collect::<Vec<_>>()
+    };
+    let iso = DrawingBorderProfile::iso;
+    assert_eq!(paper(DrawingBorderProfile { grid: GridRule::None, ..iso() }, &a3), [1, 4]);
+    assert_eq!(paper(DrawingBorderProfile { grid_border_mm: 0.0, ..iso() }, &a3), [1, 4]);
+    assert_eq!(paper(DrawingBorderProfile { centring_mark_mm: None, ..iso() }, &a3), [1, 1 + 2 * 7 + 2 * 5]);
+    assert_eq!(paper(DrawingBorderProfile { grid: GridRule::Equal { columns: 1, rows: 1 }, ..iso() }, &a3), [1, 1, 4]);
+    assert_eq!(paper(iso(), &Sheet::standard(PaperSize::A4, Orientation::Portrait)), [1, 1 + 2 * 3 + 2 * 5, 4]);
+}
+
+#[test]
+fn alternate_letter_alphabets_share_the_bijective_sequence_and_reject_unbounded_work() {
+    assert_eq!(letters_from_alphabet(0, b"AB").as_deref(), Some("A"));
+    assert_eq!(letters_from_alphabet(2, b"AB").as_deref(), Some("AA"));
+    assert_eq!(letters_from_alphabet(5, b"AB").as_deref(), Some("BB"));
+    assert_eq!(letters_from_alphabet(6, b"AB").as_deref(), Some("AAA"));
+    assert_eq!(letters_from_alphabet(23, b"ABCDEFGHJKLMNPRSTUVWXYZ").as_deref(), Some("AA"));
+    assert_eq!(letters_from_alphabet(usize::MAX, b""), None);
+    assert_eq!(letters_from_alphabet(usize::MAX, b"A"), None);
 }

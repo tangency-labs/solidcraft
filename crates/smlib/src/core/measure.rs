@@ -9,7 +9,7 @@ use solidcore::geom::assert_array::{AssertArray, AssertReport, obj_type_string};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::tol::{SmallTopoType, context_xsect_tol_3d};
 use solidcore::heal::gap::GapFunction;
-use solidcore::mass::integrator::properties::{MassPropertyBehavior, PropertyAttributes, brep_properties, face_properties};
+use solidcore::mass::integrator::properties::{MassPropertyBehavior, PropertyAttributes, brep_properties_in_box, face_properties};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::query::api_queries::{brep_bounding_box, brep_is_manifold_solid, brep_material_census, face_bounding_box};
 use solidcore::topology::brep::p1 as bl;
@@ -106,9 +106,12 @@ pub(crate) fn mass_properties(body: &Body, relative_accuracy: f64) -> Result<Mas
         // density). Bodies here carry none: the attribute store passed in is empty.
         let store = AttributeStore::default();
         let attrs = PropertyAttributes { store: &store, key_of: &|_| ObjectKey(0) };
-        // Moments about the middle of the box, moved to the centroid below: about the world
-        // origin, a body far from it would lose its inertia to cancellation.
-        let o = brep_bounding_box(k, b, false)?.mid();
+        // Moments about the middle of the exact box, moved to the centroid below: about the world
+        // origin, a body far from it would lose its inertia to cancellation. The loose box would do
+        // the same: an edge on a circle of large radius stretches it a quarter of the circle away
+        // (#17361). Its size sets the integration's error scale too.
+        let bx = brep_bounding_box(k, b, true)?;
+        let o = bx.mid();
         if !finite(&[o.x, o.y, o.z]) {
             return Err(invalid("non-finite box"));
         }
@@ -123,7 +126,7 @@ pub(crate) fn mass_properties(body: &Body, relative_accuracy: f64) -> Result<Mas
             }
             return Ok(MassProperties { area, volume: 0.0, centroid: c, moments: [0.0; 3], products: [0.0; 3] });
         }
-        let p = brep_properties(k, b, accuracy, o, MassPropertyBehavior { density: 1.0, ..MassPropertyBehavior::default() }, &attrs)?;
+        let p = brep_properties_in_box(k, b, accuracy, o, MassPropertyBehavior { density: 1.0, ..MassPropertyBehavior::default() }, &attrs, &bx)?;
         let (mass, volume) = (p.mass, p.volume);
         if !mass.is_finite() || !(mass > 0.0) || !(volume > 0.0) {
             return Err(invalid("no mass"));
@@ -196,6 +199,30 @@ pub(crate) fn edge_face_distance(body: &Body, edge: usize, face: usize) -> Resul
         Ok(Some(d))
     })?;
     found.ok_or(Error::Argument)
+}
+
+/// A proved upper bound on the distance from the record curve `curve` (a spline or rational
+/// spline) over its parameters `interval` to the surface of face `face` (the body's face
+/// order): [`solidcore_ops::curve_gap::curve_face_gap_bound`]. `None` when the
+/// kernel does not enclose the gap or there is no such face.
+pub(crate) fn curve_face_gap_bound(
+    body: &Body,
+    curve: &solidcore_record::brep::Curve,
+    interval: [f64; 2],
+    face: usize,
+    floor: f64,
+) -> Result<Option<f64>> {
+    // a circle or ellipse is the kernel's exact rational spline, over its interval there
+    let (curve, interval) = match solidcore_ops::curve_gap::GapCurve::of_conic(curve, interval).map_err(|e| Error::Solidcore(e.to_string()))? {
+        Some(found) => found,
+        None => (solidcore_ops::curve_gap::GapCurve::new(curve).ok_or(Error::Argument)?, interval),
+    };
+    with_body("curve_face_gap_bound", body, |k, b| {
+        let Some(&f) = bl::faces(b, None)?.get(face) else {
+            return Ok(None);
+        };
+        solidcore_ops::curve_gap::curve_face_gap_bound(k, b, f, &curve, interval, floor)
+    })
 }
 
 /// `smlib_brep_classify_point`: `SmBrep::Point3DClassify` at the body's own zone tolerance

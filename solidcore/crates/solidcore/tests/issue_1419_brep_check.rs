@@ -227,6 +227,73 @@ fn vertex_ball_must_not_reach_non_incident_topology() {
     }
 }
 
+/// A prism 1 high on the z = 0 plane: 70 degrees of the circle of radius 10 about the z axis
+/// (from 100 to 170 degrees), and the two lines from the arc's ends to a corner `gap` inside
+/// the arc's middle. Returns it with the corner's vertex on the top face, which bounds neither
+/// the round wall nor its two rims.
+fn arc_prism(k: &mut Kernel, gap: f64) -> (Brep, solidcore::topology::VertexId) {
+    use solidcore::curve::curve::Curve;
+    use solidcore::curve::ellipse::Ellipse;
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::geom::extent1d::Extent1d;
+    use solidcore::primitive::api_curves::create_line_segment;
+    use solidcore::sweep::api_brep::create_linear_sweep;
+
+    let at = |radius: f64, degrees: f64| {
+        let a = degrees.to_radians();
+        Vec3::new(radius * a.cos(), radius * a.sin(), 0.0)
+    };
+    let frame = Axis2Placement::new(origin(), at(1.0, 100.0), at(1.0, 190.0));
+    let sweep = Extent1d::from_min_max(0.0, 70.0);
+    let arc = Ellipse::create_canonical_circle(k, &frame, 10.0, Some(&sweep), None).unwrap();
+    let corner = at(10.0 - gap, 135.0);
+    let outline = [
+        Curve::from(arc),
+        Curve::from(create_line_segment(at(10.0, 170.0), corner).unwrap()),
+        Curve::from(create_line_segment(corner, at(10.0, 100.0)).unwrap()),
+    ];
+    let refs: Vec<Option<&Curve>> = outline.iter().map(Some).collect();
+    let b = create_linear_sweep(k, &refs, Vec3::Z, 1.0, true).unwrap();
+    let top = Vec3::new(corner.x, corner.y, 1.0);
+    let v = b
+        .vertex_list()
+        .iter()
+        .copied()
+        .find(|&v| b.vertex(v).unwrap().point.distance(top) < 1e-9)
+        .unwrap();
+    (b, v)
+}
+
+/// A vertex past the ratio limit is held to its distance from the faces and edges it does not
+/// bound, wherever it sits in the boxes of their control points. The corner of [`arc_prism`]
+/// lies inside the box of the round wall's control net and of each rim's control polygon, the
+/// boxes Test #82's proof starts from, at `gap` from the wall and from the top rim. Its ball of
+/// radius 0.015 (the limit is 0.01) is clear of both at 5 and at 0.04, and reaches the wall at
+/// 0.01.
+#[test]
+fn a_wide_vertex_inside_a_round_wall_s_control_box_is_held_to_its_distance_from_the_wall() {
+    for (gap, accepted) in [(5.0, true), (0.04, true), (0.01, false)] {
+        let mut k = Kernel::default();
+        let (mut b, v) = arc_prism(&mut k, gap);
+        assert_eq!(b.tolerance(), 1e-5, "gap {gap}");
+        b.vertex_mut(v).unwrap().tolerance = 0.015;
+        let report = check(&mut k, &mut b);
+        if accepted {
+            assert!(report.is_valid(), "gap {gap}: {:?}", report.lines());
+        } else {
+            assert_eq!(
+                report.lines(),
+                vec![
+                    "SmBrep::Test #82 Tolerance: Vertex tolerance reaches a non-adjacent face (offset= 0.015, tolerance=  0.01) [owner SmVertex]",
+                    "AssertValid skipped: ValidatePointers failed",
+                ],
+                "gap {gap}"
+            );
+        }
+        assert_eq!(b.vertex(v).unwrap().tolerance, 0.015, "gap {gap}");
+    }
+}
+
 /// Same lines as the C++ capi sequence (difftest `topology.assert_valid`,
 /// `box_mutation{2,9}_capi`).
 type Mutation = Box<dyn Fn(&mut Brep)>;

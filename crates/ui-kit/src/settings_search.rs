@@ -47,6 +47,8 @@ struct NavStore {
 pub struct Reveal {
     pub page: usize,
     pub label: String,
+    /// When the outline ends, in milliseconds on egui's input clock (`InputState::time`). NaN
+    /// until the row is first drawn, which starts the outline's time.
     pub until: f64,
     /// What the outlined row's name starts with: `{prefix}:revealed`.
     pub prefix: String,
@@ -85,6 +87,9 @@ struct State {
     extras: HashMap<String, String>,
     open_blocks: HashSet<String>,
     seen_blocks: HashSet<String>,
+    /// The uis a control lives in, innermost first, when the last control this pass gated was
+    /// hidden. A control drawn since clears it.
+    hidden_in: Option<Vec<Id>>,
 }
 
 /// Held until the preferences body finishes. A dropdown value learned while a row was hidden
@@ -132,6 +137,7 @@ pub fn begin(ui: &Ui, filter: &str, prefix: &str) -> SearchFrame {
         state.nav.clear();
         state.dirty = false;
         state.child_matched = false;
+        state.hidden_in = None;
     });
     SearchFrame { ctx: ui.ctx().clone() }
 }
@@ -277,6 +283,7 @@ pub fn begin_page(ui: &Ui, index: usize, label: &str) {
         state.section_matches = false;
         state.section_shown.clear();
         state.heading_open = false;
+        state.hidden_in = None;
     });
 }
 
@@ -290,6 +297,7 @@ pub fn begin_section(ui: &Ui, title: &str) {
         // A dropdown with no row of its own must not store its value under the last row's key.
         state.key.clear();
         state.heading_open = false;
+        state.hidden_in = None;
     });
 }
 
@@ -410,14 +418,35 @@ pub fn note_unlabelled(ui: &Ui, texts: &[&str]) {
 /// off-screen when it needs the widget's current value.
 pub fn visible(ui: &mut Ui, texts: &[&str]) -> bool {
     let show = wanted(ui, texts);
+    let hiding = with(ui, |state| state.hiding > 0).unwrap_or(false);
     if show && querying(ui) {
-        if with(ui, |state| state.hiding > 0).unwrap_or(false) {
+        if hiding {
             with(ui, |state| state.child_matched = true);
         } else {
             reveal(ui);
+            with(ui, |state| state.hidden_in = None);
         }
+    } else if !show && !hiding {
+        let chain: Vec<Id> = ui.stack().iter().map(|node| node.unique_id).collect();
+        with(ui, |state| state.hidden_in = Some(chain));
     }
     show
+}
+
+/// Whether the last control the search gated was hidden and lives in `ui` or a ui inside it, so
+/// a help icon drawn in `ui` after it is hidden too. A control shown since clears this, so an
+/// icon after a shown control stays. The control may sit in a child layout of the row the icon
+/// is drawn in.
+pub fn follows_hidden(ui: &Ui) -> bool {
+    let me = ui.unique_id();
+    with(ui, |state| state.hidden_in.as_ref().is_some_and(|chain| chain.contains(&me))).unwrap_or(false)
+}
+
+/// The rectangle a search outline draws around a setting: the setting's own, with room on every
+/// side so the outline does not touch the checkbox or the end of the label (#16115).
+fn outline(rect: Rect) -> Rect {
+    let t = Tokens::get();
+    rect.expand2(vec2(t.space_4, t.space_2))
 }
 
 fn wanted(ui: &Ui, texts: &[&str]) -> bool {
@@ -679,7 +708,6 @@ fn keywords(text: &str) -> &'static [&'static str] {
         "model" => &["traced"],
         "view center" | "view centre" => &["classic"],
         "axes" | "axes (signed)" => &["axes", "signed axes", "axes (signed)"],
-        "cube" | "cube (compact)" => &["cube", "cube (compact)"],
         "under cursor" => &["under the cursor"],
         _ => &[],
     }
@@ -716,14 +744,17 @@ fn strip_mark(c: char) -> char {
 
 fn english_hit(query: &str, shown: &str) -> bool {
     use std::cell::RefCell;
+    type Map = HashMap<String, Vec<String>>;
     thread_local! {
-        static MAP: RefCell<(String, HashMap<String, Vec<String>>)> = RefCell::new((String::new(), HashMap::new()));
+        // (language, shown text -> English sources, English text -> shown text in the language)
+        static MAP: RefCell<(String, Map, Map)> = RefCell::new((String::new(), Map::new(), Map::new()));
     }
     MAP.with(|slot| {
         let lang = solidcraft_ui_text::language().to_string();
         let mut slot = slot.borrow_mut();
         if slot.0 != lang {
-            let mut map: HashMap<String, Vec<String>> = HashMap::new();
+            let mut map = Map::new();
+            let mut translated = Map::new();
             let locale = solidcraft_ui_text::Locale::for_language(&lang);
             solidcraft_ui_text::each_english_message(|id, english| {
                 if english.contains('{') {
@@ -732,12 +763,21 @@ fn english_hit(query: &str, shown: &str) -> bool {
                 let shown = locale.text(id);
                 if shown != english {
                     map.entry(shown.to_string()).or_default().push(english.to_string());
+                    translated.entry(english.to_lowercase()).or_default().push(shown.to_string());
                 }
             });
-            *slot = (lang, map);
+            *slot = (lang, map, translated);
         }
+        let translated = &slot.2;
         slot.1.get(shown).is_some_and(|lines| {
-            lines.iter().any(|english| setting_score(query, english) > 0 || keywords(english).iter().any(|word| setting_score(query, word) > 0))
+            lines.iter().any(|english| {
+                setting_score(query, english) > 0
+                    || keywords(english).iter().any(|word| {
+                        setting_score(query, word) > 0
+                            // The old label of a renamed setting, as the language wrote it.
+                            || translated.get(&word.to_lowercase()).is_some_and(|legacy| legacy.iter().any(|text| setting_score(query, text) > 0))
+                    })
+            })
         })
     })
 }
@@ -818,7 +858,7 @@ pub fn remember_matched(ui: &mut Ui, label: &str, hint: Option<&str>, rect: Rect
     .flatten();
     let Some(prefix) = selected else { return };
     let t = Tokens::get();
-    ui.painter().rect_stroke(rect, t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
+    ui.painter().rect_stroke(outline(rect), t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
     // Only when Up/Down moved the cursor: following it every frame pins the list to the match.
     if scroll {
         ui.scroll_to_rect(rect, Some(egui::Align::Center));
@@ -836,21 +876,44 @@ pub fn set_reveal(ctx: &Context, reveal: Option<Reveal>) {
     });
 }
 
+/// The reveal the context holds: the window's copy, with the outline's time once its row drew.
+pub fn current_reveal(ctx: &Context) -> Option<Reveal> {
+    ctx.data(|data| data.get_temp::<Reveal>(Id::unique(REVEAL_ID)))
+}
+
 pub fn reveal_for(page: usize, label: &str, prefix: &str) -> Reveal {
-    Reveal { page, label: label.to_string(), until: now_ms() + REVEAL_MS, prefix: prefix.to_string() }
+    Reveal { page, label: label.to_string(), until: f64::NAN, prefix: prefix.to_string() }
 }
 
 impl Reveal {
-    /// Whether the outline's time is up, on the same clock that set [`Reveal::until`].
-    pub fn expired(&self) -> bool {
-        now_ms() > self.until
+    /// Start the outline's time at `now_ms` on egui's input clock, if it hasn't started.
+    pub fn start(&mut self, now_ms: f64) {
+        if self.until.is_nan() {
+            self.until = now_ms + REVEAL_MS;
+        }
+    }
+
+    /// Whether the outline's time is up at `now_ms` on egui's input clock. One whose time has not
+    /// started (NaN) is not.
+    pub fn expired(&self, now_ms: f64) -> bool {
+        now_ms > self.until
     }
 }
 
 /// Scroll the opened setting into view and outline it until [`Reveal::until`].
 pub fn follow(ui: &Ui, label: &str, rect: Rect) {
-    let Some(reveal) = ui.data(|data| data.get_temp::<Reveal>(Id::unique(REVEAL_ID))) else { return };
-    if reveal.expired() || fold(label) != fold(&reveal.label) {
+    let Some(mut reveal) = ui.data(|data| data.get_temp::<Reveal>(Id::unique(REVEAL_ID))) else { return };
+    if fold(label) != fold(&reveal.label) {
+        return;
+    }
+    // egui's clock, not the wall's: a slow frame (a loaded machine, a test's harness) still shows
+    // the outline for its frames, and the outline's time starts when the row first draws.
+    let now = ui.input(|i| i.time) * 1000.0;
+    if reveal.until.is_nan() {
+        reveal.start(now);
+        ui.data_mut(|data| data.insert_temp(Id::unique(REVEAL_ID), reveal.clone()));
+    }
+    if reveal.expired(now) {
         return;
     }
     let page = with(ui, |state| state.page_index);
@@ -859,14 +922,8 @@ pub fn follow(ui: &Ui, label: &str, rect: Rect) {
     }
     ui.scroll_to_rect(rect, Some(egui::Align::Center));
     let t = Tokens::get();
-    ui.painter().rect_stroke(rect, t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
+    ui.painter().rect_stroke(outline(rect), t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
     solidcraft_ui_registry::publish_handle(&format!("{}:revealed", reveal.prefix), rect.center());
-}
-
-/// Wall clock in milliseconds, for how long a reveal stays outlined.
-fn now_ms() -> f64 {
-    use web_time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64() * 1000.0).unwrap_or(0.0)
 }
 
 #[cfg(test)]
@@ -876,6 +933,17 @@ mod tests {
     /// Two pages of a host's settings window.
     const PAGE_LAYOUT: usize = 2;
     const PAGE_GRAPHICS: usize = 3;
+
+    /// A renamed setting is still found by its old label in the user's language, not only in English.
+    #[test]
+    fn search_finds_a_renamed_setting_by_its_old_localized_label() {
+        // The kit's own test catalog holds the setting's current and former labels.
+        crate::test_support::install_catalog();
+        let _language = solidcraft_ui_text::scope("de");
+        let label = solidcraft_ui_text::tr("prefs.sketch.state_icons");
+        assert!(matches_text("Skizzensymbole", &[label]), "{label} is the former Skizzensymbole in der Farbe ihres Zustands");
+        assert!(!matches_text("Qqqq", &[label]));
+    }
 
     /// The search field and its empty result name the window they search (#8318): "Search
     /// settings" under a "Preferences" title read as two names for one window.
@@ -940,6 +1008,56 @@ mod tests {
                 assert_eq!(solidcraft_ui_registry::handle_at("prefs:revealed"), Some(response.rect.center()));
             });
         }
+    }
+
+    /// A help icon belongs to the control before it: when the search hides the setting, its icon
+    /// goes too, and with no search both stay (#16115). The checkbox is drawn straight in the row
+    /// (layout 0) or inside a child layout of the row, as the General page does (layout 1), and
+    /// the matching row comes first or last, so an icon after a shown control stays.
+    #[test]
+    fn a_help_icon_goes_with_the_setting_the_search_hides() {
+        for layout in 0..2 {
+            for order in [["Quality", "Performance"], ["Performance", "Quality"]] {
+                for filter in ["Quality", ""] {
+                    let ctx = crate::test_support::context();
+                    let mut icons = Vec::new();
+                    for _ in 0..3 {
+                        icons.clear();
+                        crate::test_support::raw_frame(&ctx, Default::default(), |ui| {
+                            let _search = begin(ui, filter, "prefs");
+                            begin_page(ui, PAGE_LAYOUT, "Layout");
+                            for label in order {
+                                ui.horizontal(|ui| {
+                                    let mut on = false;
+                                    if layout == 0 {
+                                        crate::checkbox(ui, label, &mut on);
+                                    } else {
+                                        let size = vec2(200.0, 20.0);
+                                        ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                            crate::checkbox(ui, label, &mut on);
+                                        });
+                                    }
+                                    icons.push(crate::help_icon(ui, "Help").rect);
+                                });
+                            }
+                            store_nav(ui);
+                        });
+                    }
+                    let shown: Vec<bool> = order.iter().map(|label| filter.is_empty() || *label == "Quality").collect();
+                    let drawn: Vec<bool> = icons.iter().map(|rect| rect.is_positive()).collect();
+                    assert_eq!(drawn, shown, "layout {layout}, order {order:?}, filter {filter:?}");
+                }
+            }
+        }
+    }
+
+    /// The outline around a result leaves room on every side of the setting (#16115).
+    #[test]
+    fn a_result_outline_leaves_room_around_the_whole_setting() {
+        let rect = Rect::from_min_size(egui::pos2(10.0, 10.0), vec2(100.0, 20.0));
+        let around = outline(rect);
+        assert!(around.left() < rect.left() && around.right() > rect.right(), "{around:?} around {rect:?}");
+        assert!(around.top() < rect.top() && around.bottom() > rect.bottom(), "{around:?} around {rect:?}");
     }
 
     #[test]

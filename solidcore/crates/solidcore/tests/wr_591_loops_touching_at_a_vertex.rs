@@ -3,8 +3,8 @@
 //! triangular hole whose corner touches it at (0, 3), as eight lines, ordered into loops
 //! by `OrderCurvesIntoLoops` from every rotation of the list, with the outline or the
 //! hole reversed (24 orders). Four curve ends meet at (0, 3). Upstream goes on from the
-//! first of them by index, so the order decides whether the loops close; with
-//! `loops_go_on_round_the_vertex` every order gives closed loops of areas {60, 1} (the
+//! first of them by index, so the order decides whether the loops close (15 of the 24
+//! orders failed); going on round the vertex, every order gives closed loops of areas {60, 1} (the
 //! outline and the hole apart) or {59} (one loop through the corner twice), never the
 //! hole run the wrong way round inside the outline.
 
@@ -113,8 +113,7 @@ fn sound(areas: &[f64]) -> bool {
 
 #[test]
 fn wr_591_on_every_order_closes_round_the_touching_vertex() {
-    let mut k = Kernel::default();
-    k.fixes.loops_go_on_round_the_vertex = true;
+    let k = Kernel::default();
     for (variant, turn, curves) in orders() {
         let areas = loop_areas(&k, &curves)
             .unwrap_or_else(|| panic!("variant {variant}, turn {turn}: no closed loops"));
@@ -125,37 +124,26 @@ fn wr_591_on_every_order_closes_round_the_touching_vertex() {
     }
 }
 
+/// Loops that touch nowhere close apart: the outline (area 60) and the triangle
+/// (3, 2) (5, 2) (4, 4) inside it (area 2).
 #[test]
-fn wr_591_off_the_input_order_decides() {
-    let k = Kernel::default();
-    let mut bad = Vec::new();
-    for (variant, turn, curves) in orders() {
-        match loop_areas(&k, &curves) {
-            Some(areas) if sound(&areas) => {}
-            other => bad.push((variant, turn, other)),
-        }
-    }
-    eprintln!("upstream order failures: {bad:?}");
-    assert_eq!(bad.len(), 15, "upstream order failures: {bad:?}");
-}
-
-/// Loops that touch nowhere are ordered the same with the fix on and off.
-#[test]
-fn wr_591_loops_apart_are_unchanged() {
+fn wr_591_loops_apart_close_apart() {
     let mut lines = polygon(&OUTLINE, false);
     lines.extend(polygon(&[[3.0, 2.0], [5.0, 2.0], [4.0, 4.0]], true));
     let curves: Vec<Curve> = lines
         .iter()
         .map(|&(a, b)| Curve::from(create_line_segment(a, b).unwrap()))
         .collect();
-    let off = order_curves_into_loops(&Kernel::default(), &curves, 1e-6).unwrap();
-    let mut k = Kernel::default();
-    k.fixes.loops_go_on_round_the_vertex = true;
-    let on = order_curves_into_loops(&k, &curves, 1e-6).unwrap();
-    assert_eq!(on.ordered, off.ordered);
-    assert_eq!(on.loop_counts, off.loop_counts);
-    assert_eq!(on.orients, off.orients);
-    assert!(on.closed && off.closed);
+    let k = Kernel::default();
+    let r = order_curves_into_loops(&k, &curves, 1e-6).unwrap();
+    assert!(r.closed);
+    let mut counts = r.loop_counts.clone();
+    counts.sort_unstable();
+    assert_eq!(counts, [3, 5]);
+    let areas = loop_areas(&k, &curves).expect("closed loops");
+    assert_eq!(areas.len(), 2, "{areas:?}");
+    assert!((areas[0] - 2.0).abs() < 1e-12, "{areas:?}");
+    assert!((areas[1] - 60.0).abs() < 1e-12, "{areas:?}");
 }
 
 /// The 32 input orders of two unit squares touching at the corner (1, 1) (the fork's
@@ -192,8 +180,7 @@ fn squares_orders() -> Vec<(bool, bool, usize, Vec<Curve>)> {
 /// of area 2) in 12 of the 32 orders.
 #[test]
 fn wr_591_loops_touching_from_outside_close_apart() {
-    let mut k = Kernel::default();
-    k.fixes.loops_go_on_round_the_vertex = true;
+    let k = Kernel::default();
     let mut bad = Vec::new();
     for (clockwise, high_first, turn, curves) in squares_orders() {
         match loop_areas(&k, &curves) {
