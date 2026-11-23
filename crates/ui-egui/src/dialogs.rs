@@ -7309,7 +7309,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     "solid.cylinder" | "solid.coil" | "solid.cone" => {
                         p.insert("base".into(), pt(point));
                         if let Some(n) = normal {
-                            p.insert("axis".into(), pt(n));
+                            // An axis of expressions (#18822) that still points along the face's
+                            // normal is kept as written, so it goes on following its parameters.
+                            let written = d
+                                .extra
+                                .get("axis")
+                                .filter(|a| a.as_array().is_some_and(|c| c.iter().any(Value::is_string)))
+                                .filter(|a| axis_now(s, a).is_some_and(|now| now.dot(n) > 1.0 - 1e-9));
+                            p.insert("axis".into(), written.cloned().unwrap_or_else(|| pt(n)));
                         }
                         // Reference edges (#6380) place the base by its distances from them.
                         let references = crate::hole_refs::params(d);
@@ -7323,6 +7330,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
             } else {
                 crate::primitive_placement::params(s, cmd, &d.extra, &mut p);
+                // A cylinder edited away from its face (an axis of expressions that isn't square
+                // to it now, #18822) keeps its reference edges, never none.
+                if *cmd == "solid.cylinder"
+                    && let Some((id, _)) = d.editing
+                    && let Some(references) = cylinder_references_now(s, id)
+                {
+                    p.insert("references".into(), json!(references));
+                }
             }
             p.insert("operation".into(), json!(OPS.get(*operation).copied().unwrap_or("new")));
             (cmd, Value::Object(p))
@@ -8264,6 +8279,44 @@ fn pt3(v: Vec3) -> Value {
     json!([v.x, v.y, v.z])
 }
 
+/// The reference edges of cylinder `id`, as OK sends them when the window didn't place it on its
+/// face: each edge found by its name where it is now, as `hole_refs::restore` finds them (else
+/// at its saved point), with its saved distance. `None` when it has none.
+fn cylinder_references_now(s: &Session, id: u64) -> Option<Vec<Value>> {
+    let f = s.doc.feature(id)?;
+    let FeatureKind::Cylinder { base, axis, references, .. } = &f.kind else { return None };
+    if references.is_empty() {
+        return None;
+    }
+    let st = crate::open_meshing::session_world(s);
+    let edges: Vec<(Vec3, Option<&str>)> = references.iter().enumerate().map(|(k, r)| (r.edge.0, f.edge_names.get(k).map(String::as_str))).collect();
+    let [x, y, z] = base.clone().map(|c| c.parse::<f64>().ok());
+    let found = match (x, y, z, axis_now(s, &pt_expr(axis))) {
+        (Some(x), Some(y), Some(z), Some(dir)) => {
+            solidcraft_engine::doc::hole_reference::reference_frame(&st, Vec3::new(x, y, z), -dir, &edges, false).ok()
+        }
+        _ => None,
+    };
+    let now = |k: usize| {
+        let f = found.as_ref()?;
+        let mesh = st.body(&f.body)?.mesh();
+        Some(crate::selection::polyline_mid(mesh.edges.get(*f.edges.get(k)?)?))
+    };
+    Some(references.iter().enumerate().map(|(k, r)| json!({"edge": pt3(now(k).unwrap_or(r.edge.0)), "distance": r.distance.to_string()})).collect())
+}
+
+/// The direction an axis saved as `[x, y, z]` of numbers or unitless expressions (#18822) has
+/// with the parameters as they are now.
+fn axis_now(s: &Session, axis: &Value) -> Option<Vec3> {
+    let c = axis.as_array().filter(|a| a.len() == 3)?;
+    let v = |i: usize| match c.get(i)? {
+        Value::Number(n) => n.as_f64(),
+        Value::String(e) => s.doc.eval(e, ValueKind::Unitless).ok(),
+        _ => None,
+    };
+    solidcraft_engine::doc::unit_direction(Vec3::new(v(0)?, v(1)?, v(2)?))
+}
+
 /// A point of expressions: numbers as numbers, expressions as strings.
 fn pt_expr(p: &solidcraft_engine::doc::PointExpr) -> Value {
     Value::Array(p.iter().map(|e| e.parse::<f64>().ok().filter(|x| x.is_finite()).map_or_else(|| json!(e), |x| json!(x))).collect())
@@ -8693,7 +8746,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 refs: Default::default(),
             };
             d.extra.insert("base".into(), pt_expr(base));
-            d.extra.insert("axis".into(), pt3(axis.0));
+            d.extra.insert("axis".into(), pt_expr(axis));
             // Standing on a flat face (a base of numbers there, square to it): placed there, so it
             // can take reference edges of that face (#6380), with its own picked again. Not the
             // picks a selection made when the window opened.
@@ -8702,10 +8755,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let (Some(x), Some(y), Some(z)) = (x, y, z)
                 && let Some(face @ Sel::Face { .. }) = face_sel(s, Vec3::new(x, y, z))
                 && let Sel::Face { body, index, .. } = &face
-                && planar_face(s, body, *index).is_some_and(|(_, n)| n.dot(axis.0) > 1.0 - 1e-9)
+                && let Some(now) = axis_now(s, &pt_expr(axis))
+                && planar_face(s, body, *index).is_some_and(|(_, n)| n.dot(now) > 1.0 - 1e-9)
                 && let Kind::Primitive { at, .. } = &mut d.kind
             {
-                *at = Some((Vec3::new(x, y, z), Some(axis.0)));
+                *at = Some((Vec3::new(x, y, z), Some(now)));
                 if let Some(inp) = d.inputs.first_mut() {
                     inp.items = vec![face];
                 }

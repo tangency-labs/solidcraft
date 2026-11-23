@@ -4995,6 +4995,16 @@ fn point(vals: &BTreeMap<String, Value>, p: &crate::PointExpr) -> Result<Vec3> {
     if [v.x, v.y, v.z].iter().all(|c| c.is_finite() && c.abs() < 1e9) { Ok(v) } else { Err(DocError::Invalid("the position is out of range".into())) }
 }
 
+/// A primitive's axis (#18822): its components evaluated as unitless numbers, normalized.
+fn direction(vals: &BTreeMap<String, Value>, d: &crate::DirExpr) -> Result<Vec3> {
+    let [x, y, z] = d;
+    let v = Vec3::new(val(vals, x, Kind::Unitless)?, val(vals, y, Kind::Unitless)?, val(vals, z, Kind::Unitless)?);
+    if ![v.x, v.y, v.z].iter().all(|c| c.is_finite()) {
+        return Err(DocError::Invalid("the axis is not a finite direction".into()));
+    }
+    crate::unit_direction(v).ok_or_else(|| DocError::Invalid("the axis is zero: give it a direction [x, y, z] that isn't [0, 0, 0]".into()))
+}
+
 pub(crate) fn val(vals: &BTreeMap<String, Value>, e: &str, k: Kind) -> Result<f64> {
     val_with(vals, e, k, None)
 }
@@ -7261,6 +7271,18 @@ fn blend_raw(
 /// `f` as the naming of its faces reads it: a revolve's explicit axis origin written as the values
 /// it has now (the naming has no parameter values to read an expression with).
 fn naming_feature<'a>(vals: &BTreeMap<String, Value>, f: &'a Feature) -> std::borrow::Cow<'a, Feature> {
+    // A cylinder's faces are named by its axis (top, bottom, side), so an axis of expressions
+    // goes in as the numbers it is now (#18822).
+    if let FeatureKind::Cylinder { axis, .. } = &f.kind
+        && crate::literal_dir(axis).is_none()
+        && let Ok(d) = direction(vals, axis)
+    {
+        let mut g = f.clone();
+        if let FeatureKind::Cylinder { axis, .. } = &mut g.kind {
+            *axis = crate::dir_expr(d);
+        }
+        return std::borrow::Cow::Owned(g);
+    }
     if let FeatureKind::Revolve { axis: AxisRef::Line { origin, .. }, .. } = &f.kind
         && let Ok(o) = point(vals, origin)
     {
@@ -9462,15 +9484,18 @@ fn feature_tools_with_constructor(
             let corner = box_low_corner(point(vals, corner)?, s, *centred);
             Ok(vec![crate::lineage::box_tool(kernel::box_solid(corner, corner + s)?).with_recipe(tool_recipe(doc, f, vals))])
         }
-        FeatureKind::Cylinder { base, axis, radius, height, .. } => Ok(vec![
-            crate::lineage::cylinder_tool(kernel::cylinder(
-                cylinder_base(vals, st, f, base, axis.0)?,
-                axis.0,
-                val(vals, radius, Kind::Length)?,
-                val(vals, height, Kind::Length)?,
-            )?)
-            .with_recipe(tool_recipe(doc, f, vals)),
-        ]),
+        FeatureKind::Cylinder { base, axis, radius, height, .. } => {
+            let axis = direction(vals, axis)?;
+            Ok(vec![
+                crate::lineage::cylinder_tool(kernel::cylinder(
+                    cylinder_base(vals, st, f, base, axis)?,
+                    axis,
+                    val(vals, radius, Kind::Length)?,
+                    val(vals, height, Kind::Length)?,
+                )?)
+                .with_recipe(tool_recipe(doc, f, vals)),
+            ])
+        }
         FeatureKind::Sphere { center, radius, .. } => Ok(unnamed(vec![kernel::sphere(point(vals, center)?, val(vals, radius, Kind::Length)?)?])),
         FeatureKind::Torus { center, major, minor, .. } => {
             Ok(unnamed(vec![kernel::torus(point(vals, center)?, val(vals, major, Kind::Length)?, val(vals, minor, Kind::Length)?)?]))
@@ -13912,9 +13937,10 @@ fn eval_feature_kind(
             apply_traced(doc, st, f, vec![crate::lineage::box_tool(b).with_recipe(tool_recipe(doc, f, vals))], *operation, &[])
         }
         FeatureKind::Cylinder { base, axis, radius, height, operation, .. } => {
-            let base = cylinder_base(vals, st, f, base, axis.0)?;
+            let axis = direction(vals, axis)?;
+            let base = cylinder_base(vals, st, f, base, axis)?;
             let (radius, height) = (val(vals, radius, Kind::Length)?, val(vals, height, Kind::Length)?);
-            let b = kernel::cylinder(base, axis.0, radius, height)?;
+            let b = kernel::cylinder(base, axis, radius, height)?;
             let b = if matches!(operation, Operation::NewBody | Operation::Join) { b.with_cylinder_certificate(f.id)? } else { b };
             apply_traced(doc, st, f, vec![crate::lineage::cylinder_tool(b).with_recipe(tool_recipe(doc, f, vals))], *operation, &[])
         }
@@ -15847,7 +15873,7 @@ mod chain_tests {
             doc.add_feature(plate, None).unwrap();
             let end = FeatureKind::Cylinder {
                 base: crate::point_expr(Vec3::new(40.0, 8.0, 0.0)),
-                axis: crate::Dir(Vec3::Z),
+                axis: crate::dir_expr(Vec3::Z),
                 radius: "8".into(),
                 height: "10".into(),
                 operation: Operation::Join,
