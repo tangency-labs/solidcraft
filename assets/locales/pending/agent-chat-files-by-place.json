@@ -10,7 +10,8 @@
     "ui.agent_chat_file_pdf_too_big": "{name}: a PDF can be at most {max} MB",
     "ui.ai_declined_read": "Declined: {title}. Claude Code reads only the files and folders you attach to this chat.",
     "ui.ai_request_too_big": "The pictures and PDFs on this message come to {size} MB, and one request takes at most {max} MB. Remove some, or send them over several messages.",
-    "ui.ai_media_message_dropped": "this message and its files were taken out of the conversation; send it again to retry"
+    "ui.ai_media_message_dropped": "this message and its files were taken out of the conversation; send it again to retry",
+    "ui.ai_unasked_read": "Stopped: Claude Code ran {tool} without asking first, so the chat couldn't check what it read. Its adapter may have changed; please report this."
   },
   "ar": {
     "ui.agent_chat_add_folder": "اختر مجلدات…",
@@ -23,7 +24,8 @@
     "ui.agent_chat_file_pdf_too_big": "{name}: يمكن أن يكون حجم ملف PDF {max} ميغابايت على الأكثر",
     "ui.ai_declined_read": "تم الرفض: {title}. يقرأ Claude Code فقط الملفات والمجلدات التي ترفقها بهذه الدردشة.",
     "ui.ai_request_too_big": "تبلغ الصور وملفات PDF في هذه الرسالة {size} ميغابايت، ويقبل الطلب الواحد {max} ميغابايت على الأكثر. أزل بعضها أو أرسلها على عدة رسائل.",
-    "ui.ai_media_message_dropped": "أُزيلت هذه الرسالة وملفاتها من المحادثة؛ أرسلها مرة أخرى لإعادة المحاولة"
+    "ui.ai_media_message_dropped": "أُزيلت هذه الرسالة وملفاتها من المحادثة؛ أرسلها مرة أخرى لإعادة المحاولة",
+    "ui.ai_unasked_read": "أُوقف: شغّل Claude Code الأداة {tool} دون أن يسأل أولًا، فلم تتمكن الدردشة من التحقق مما قرأه. ربما تغيّر محوّله؛ يُرجى الإبلاغ عن ذلك."
   },
   "de": {
     "ui.agent_chat_add_folder": "Ordner auswählen…",
@@ -36,7 +38,8 @@
     "ui.agent_chat_file_pdf_too_big": "{name}: Eine PDF darf höchstens {max} MB groß sein",
     "ui.ai_declined_read": "Abgelehnt: {title}. Claude Code liest nur die Dateien und Ordner, die Sie diesem Chat anhängen.",
     "ui.ai_request_too_big": "Die Bilder und PDFs dieser Nachricht umfassen {size} MB, eine Anfrage darf höchstens {max} MB enthalten. Entfernen Sie einige oder senden Sie sie auf mehrere Nachrichten verteilt.",
-    "ui.ai_media_message_dropped": "diese Nachricht und ihre Dateien wurden aus dem Gespräch entfernt; senden Sie sie erneut, um es noch einmal zu versuchen"
+    "ui.ai_media_message_dropped": "diese Nachricht und ihre Dateien wurden aus dem Gespräch entfernt; senden Sie sie erneut, um es noch einmal zu versuchen",
+    "ui.ai_unasked_read": "Angehalten: Claude Code hat {tool} ausgeführt, ohne vorher zu fragen, daher konnte der Chat nicht prüfen, was es gelesen hat. Sein Adapter hat sich möglicherweise geändert; bitte melden Sie das."
   },
   "he": {
     "ui.agent_chat_add_folder": "בחירת תיקיות…",
@@ -49,7 +52,8 @@
     "ui.agent_chat_file_pdf_too_big": "{name}: קובץ PDF יכול להיות לכל היותר {max} MB",
     "ui.ai_declined_read": "נדחה: {title}. Claude Code קורא רק את הקבצים והתיקיות שצירפת לצ'אט הזה.",
     "ui.ai_request_too_big": "התמונות וקובצי ה-PDF בהודעה הזו מגיעים ל-{size} MB, ובקשה אחת יכולה להכיל לכל היותר {max} MB. הסר חלק מהם או שלח אותם בכמה הודעות.",
-    "ui.ai_media_message_dropped": "ההודעה הזו והקבצים שלה הוצאו מהשיחה; שלח אותה שוב כדי לנסות שוב"
+    "ui.ai_media_message_dropped": "ההודעה הזו והקבצים שלה הוצאו מהשיחה; שלח אותה שוב כדי לנסות שוב",
+    "ui.ai_unasked_read": "נעצר: Claude Code הפעיל את {tool} בלי לשאול קודם, ולכן הצ'אט לא יכול היה לבדוק מה הוא קרא. ייתכן שהמתאם שלו השתנה; נא לדווח על כך."
   },
   "ja": {
     "ui.agent_chat_add_folder": "フォルダーを選択…",
@@ -62,7 +66,8 @@
     "ui.agent_chat_file_pdf_too_big": "{name}: PDF は {max} MB までです",
     "ui.ai_declined_read": "拒否しました: {title}。Claude Code が読むのは、このチャットに添付したファイルとフォルダーだけです。",
     "ui.ai_request_too_big": "このメッセージの画像と PDF は合計 {size} MB ですが、1 回のリクエストに入れられるのは最大 {max} MB です。いくつか外すか、複数のメッセージに分けて送ってください。",
-    "ui.ai_media_message_dropped": "このメッセージとそのファイルは会話から外されました。もう一度送ると再試行できます"
+    "ui.ai_media_message_dropped": "このメッセージとそのファイルは会話から外されました。もう一度送ると再試行できます",
+    "ui.ai_unasked_read": "停止しました: Claude Code が先に確認せずに {tool} を実行したため、チャットは読み取った内容を確認できませんでした。アダプターが変更された可能性があります。報告してください。"
   },
   "ko": {
     "ui.agent_chat_add_folder": "폴더 선택…",
@@ -75,7 +80,8 @@
     "ui.agent_chat_file_pdf_too_big": "{name}: PDF는 최대 {max}MB까지입니다",
     "ui.ai_declined_read": "거부됨: {title}. Claude Code는 이 채팅에 첨부한 파일과 폴더만 읽습니다.",
     "ui.ai_request_too_big": "이 메시지의 그림과 PDF는 {size}MB인데, 요청 하나에는 최대 {max}MB까지 담을 수 있습니다. 일부를 빼거나 여러 메시지로 나누어 보내세요.",
-    "ui.ai_media_message_dropped": "이 메시지와 파일은 대화에서 빠졌습니다. 다시 시도하려면 다시 보내세요"
+    "ui.ai_media_message_dropped": "이 메시지와 파일은 대화에서 빠졌습니다. 다시 시도하려면 다시 보내세요",
+    "ui.ai_unasked_read": "중지됨: Claude Code가 먼저 묻지 않고 {tool}을(를) 실행해서 채팅이 무엇을 읽었는지 확인할 수 없었습니다. 어댑터가 바뀌었을 수 있으니 신고해 주세요."
   },
   "vi": {
     "ui.agent_chat_add_folder": "Chọn thư mục…",
@@ -88,7 +94,8 @@
     "ui.agent_chat_file_pdf_too_big": "{name}: PDF chỉ được tối đa {max} MB",
     "ui.ai_declined_read": "Đã từ chối: {title}. Claude Code chỉ đọc các tệp và thư mục bạn đính kèm vào cuộc trò chuyện này.",
     "ui.ai_request_too_big": "Hình ảnh và PDF trong tin nhắn này tổng cộng {size} MB, mà một yêu cầu chỉ chứa tối đa {max} MB. Hãy bỏ bớt, hoặc gửi chúng qua nhiều tin nhắn.",
-    "ui.ai_media_message_dropped": "tin nhắn này và các tệp của nó đã bị đưa ra khỏi cuộc trò chuyện; hãy gửi lại để thử lại"
+    "ui.ai_media_message_dropped": "tin nhắn này và các tệp của nó đã bị đưa ra khỏi cuộc trò chuyện; hãy gửi lại để thử lại",
+    "ui.ai_unasked_read": "Đã dừng: Claude Code đã chạy {tool} mà không hỏi trước, nên cuộc trò chuyện không thể kiểm tra những gì nó đã đọc. Bộ điều hợp của nó có thể đã thay đổi; vui lòng báo cáo lỗi này."
   },
   "zh": {
     "ui.agent_chat_add_folder": "选择文件夹…",
@@ -101,6 +108,7 @@
     "ui.agent_chat_file_pdf_too_big": "{name}：PDF 最大为 {max} MB",
     "ui.ai_declined_read": "已拒绝：{title}。Claude Code 只读取你附加到本次聊天的文件和文件夹。",
     "ui.ai_request_too_big": "这条消息中的图片和 PDF 共 {size} MB，而一次请求最多只能包含 {max} MB。请移除一些，或分几条消息发送。",
-    "ui.ai_media_message_dropped": "这条消息及其文件已从对话中移除；重新发送即可重试"
+    "ui.ai_media_message_dropped": "这条消息及其文件已从对话中移除；重新发送即可重试",
+    "ui.ai_unasked_read": "已停止：Claude Code 未先询问就运行了 {tool}，因此聊天无法检查它读取了什么。它的适配器可能已更改；请报告此问题。"
   }
 }

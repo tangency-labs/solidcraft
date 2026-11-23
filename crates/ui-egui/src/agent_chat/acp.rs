@@ -301,31 +301,39 @@ pub fn system_note(instructions: &str) -> String {
 
 /// The Claude Code adapter's own tools that reach the computer rather than the design: turned off
 /// for the session (`_meta.claudeCode.options.disallowedTools`), so it works through SolidCraft's.
-/// Its read tools are not among them: they ask instead ([`CLAUDE_ASK_TOOLS`]).
+/// Its read tools are not among them when the session is for the adapter the chat recognises
+/// ([`is_claude_adapter`]): they ask instead ([`CLAUDE_ASK_TOOLS`]).
 pub const CLAUDE_DISALLOWED_TOOLS: &[&str] =
     &["Bash", "BashOutput", "KillShell", "Write", "Edit", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch", "Task"];
 
-/// The Claude Code adapter's read tools. They are on in every session, but every call asks (a
-/// `permissions.ask` rule in the session's settings), so the question reaches the panel: the chat
-/// allows it by itself for a path the user attached by path to this conversation ([`read_path`])
-/// and declines any other, whatever the mode.
+/// The Claude Code adapter's read tools. They are on only in a session for the adapter the chat
+/// recognises by its command ([`is_claude_adapter`], decided when the agent starts), and there
+/// every call asks (a `permissions.ask` rule in the session's settings), so the question reaches
+/// the panel: the chat allows it by itself for a path the user attached by path to this
+/// conversation ([`read_path`]) and declines any other, whatever the mode. Any other session keeps
+/// them off, so an adapter started some other way (a wrapper script, `node …/dist/index.js`)
+/// reads nothing.
 pub const CLAUDE_ASK_TOOLS: &[&str] = &["Read", "Glob", "Grep"];
 
 /// The `session/new` parameters. `init` is the agent's `initialize` reply: agents read the system
 /// note from different places (#9811), and the standard field may only go to an agent offering it.
-/// `note` is the system note ([`system_note`]).
-pub fn session_new_params(cwd: &std::path::Path, bridge: Option<&McpBridge>, init: &Value, note: &str) -> Value {
+/// `note` is the system note ([`system_note`]). `claude`: the agent was recognised as Claude Code's
+/// adapter when it started ([`is_claude_adapter`]), so its read tools are on, behind the ask rule.
+pub fn session_new_params(cwd: &std::path::Path, bridge: Option<&McpBridge>, init: &Value, note: &str, claude: bool) -> Value {
     let servers: Vec<Value> = bridge.map(McpBridge::to_json).into_iter().collect();
+    let off: Vec<&str> =
+        if claude { CLAUDE_DISALLOWED_TOOLS.to_vec() } else { CLAUDE_DISALLOWED_TOOLS.iter().chain(CLAUDE_ASK_TOOLS).copied().collect() };
     let mut meta = json!({
         // The Claude adapter's own key, for its versions without the standard field.
         "systemPrompt": {"append": note},
         // Hosts may opt a session out of "bypass permissions" (the Claude adapter reads it):
         // every tool call the agent asks about reaches the panel.
         // Its own shell and write tools are off: the agent works through SolidCraft's tools. Its
-        // read tools ask, so the chat sees every read.
+        // read tools ask, so the chat sees every read, or are off too when the adapter wasn't
+        // recognised.
         "claudeCode": {"options": {
             "allowDangerouslySkipPermissions": false,
-            "disallowedTools": CLAUDE_DISALLOWED_TOOLS,
+            "disallowedTools": off,
             "settings": {"permissions": {"ask": CLAUDE_ASK_TOOLS}},
         }},
     });
@@ -355,6 +363,55 @@ pub fn is_claude_adapter(argv: &[String]) -> bool {
         let name = arg.rsplit(['/', '\\']).next().unwrap_or(arg);
         name.starts_with("claude-agent-acp") || name.starts_with("claude-code-acp")
     })
+}
+
+/// Claude Code's own tool calls in the running turn, by id: which of its tools each one is (the
+/// adapter names it in `_meta.claudeCode.toolName` on the call's updates) and which asked first.
+/// With it a question about one of Claude Code's read tools is known as such whatever command
+/// started the adapter, and a read that completes without having asked is caught: the ask rule
+/// ([`CLAUDE_ASK_TOOLS`]) is what lets the chat check every read, and an adapter that stopped
+/// honouring it must not go unnoticed.
+#[derive(Debug, Default)]
+pub struct ClaudeCalls {
+    tools: std::collections::HashMap<String, String>,
+    asked: std::collections::HashSet<String>,
+}
+
+impl ClaudeCalls {
+    /// More calls than any turn makes; past it, nothing new is recorded and nothing is caught.
+    const MAX: usize = 4096;
+
+    /// An update of call `id` (`tool`: the Claude tool it names, `status`: its new status).
+    /// `Some(tool)` the first time one of Claude Code's read tools completes without having asked.
+    pub fn update(&mut self, id: &str, tool: Option<&str>, status: Option<ToolStatus>) -> Option<String> {
+        if let Some(tool) = tool
+            && (self.tools.len() < Self::MAX || self.tools.contains_key(id))
+        {
+            self.tools.insert(id.to_string(), tool.to_string());
+        }
+        let unasked = status == Some(ToolStatus::Completed)
+            && self.asked.len() < Self::MAX
+            && !self.asked.contains(id)
+            && self.tools.get(id).is_some_and(|tool| CLAUDE_ASK_TOOLS.contains(&tool.as_str()));
+        if unasked { self.tools.remove(id) } else { None }
+    }
+
+    /// A question about call `id` (`tool`: the Claude tool the question itself names): the Claude
+    /// tool it is about, from the question or from the call's updates.
+    pub fn question(&mut self, id: Option<&str>, tool: Option<&str>) -> Option<String> {
+        if let Some(id) = id
+            && self.asked.len() < Self::MAX
+        {
+            self.asked.insert(id.to_string());
+        }
+        tool.map(str::to_string).or_else(|| id.and_then(|id| self.tools.get(id)).cloned())
+    }
+
+    /// A new turn: the last one's calls are done.
+    pub fn clear(&mut self) {
+        self.tools.clear();
+        self.asked.clear();
+    }
 }
 
 /// The agent offers ACP's `systemPrompt` field on its sessions.
@@ -573,6 +630,9 @@ pub enum Incoming {
         status: Option<ToolStatus>,
         input: Option<Value>,
         output: Option<String>,
+        /// Which of Claude Code's own tools it is (`_meta.claudeCode.toolName`), when the Claude
+        /// adapter says.
+        claude_tool: Option<String>,
     },
     /// The agent's plan: each entry with its status.
     Plan(Vec<(String, String)>),
@@ -585,6 +645,11 @@ pub enum Incoming {
         options: Vec<PermissionOption>,
         /// The path it would read, when it is one of Claude Code's own read tools ([`read_path`]).
         reads: Option<std::path::PathBuf>,
+        /// The tool call it asks about (`toolCall.toolCallId`).
+        call: Option<String>,
+        /// Which of Claude Code's own tools it is, when the question says
+        /// (`toolCall._meta.claudeCode.toolName`; the adapter gives it only for some).
+        claude_tool: Option<String>,
     },
     /// The agent says whether it is logged in (an extension both adapters send).
     AuthStatus(String),
@@ -675,7 +740,9 @@ pub fn parse(line: &str) -> Option<Incoming> {
                 })
                 .unwrap_or_default();
             let reads = call.and_then(read_path);
-            Some(Incoming::Permission { rpc: id.clone(), title, kind, options, reads })
+            let text = |pointer: &str| call.and_then(|c| c.pointer(pointer)).and_then(Value::as_str).map(str::to_string);
+            let (claude_tool, call) = (text("/_meta/claudeCode/toolName"), text("/toolCallId"));
+            Some(Incoming::Permission { rpc: id.clone(), title, kind, options, reads, call, claude_tool })
         }
         (Some(m), Some(id)) => Some(Incoming::Unsupported { rpc: id.clone(), method: m.to_string() }),
         (Some("session/update"), None) => Some(update(params.get("update")?, params.get("sessionId").and_then(Value::as_str).unwrap_or(""))),
@@ -702,6 +769,7 @@ fn update(u: &Value, session: &str) -> Incoming {
                 // ACP's `rawInput`: the arguments the tool was called with.
                 input: u.get("rawInput").filter(|v| v.is_object()).cloned(),
                 output: tool_output(u),
+                claude_tool: u.pointer("/_meta/claudeCode/toolName").and_then(Value::as_str).map(str::to_string),
             },
             None => Incoming::Ignored,
         },
@@ -871,14 +939,14 @@ mod tests {
     #[test]
     fn the_session_gets_the_bridged_mcp_server_without_a_token_or_any_path() {
         let b = McpBridge { cli: "/opt/solidcraft/solidcraft-cli".into(), port: 41234 };
-        let p = session_new_params(std::path::Path::new("/home/u/designs"), Some(&b), &json!({}), SYSTEM_NOTE);
+        let p = session_new_params(std::path::Path::new("/home/u/designs"), Some(&b), &json!({}), SYSTEM_NOTE, true);
         let s = &p["mcpServers"][0];
         assert_eq!(s["name"], BRIDGE_NAME);
         assert_eq!(s["args"], json!(["mcp", "--connect", "127.0.0.1:41234"]));
         let text = p.to_string();
         assert!(!text.contains("allow-any-path") && !text.contains("TOKEN") && !text.contains("token"), "{text}");
         assert!(p["_meta"]["claudeCode"]["options"]["disallowedTools"].as_array().is_some_and(|t| t.iter().any(|x| x == "Bash")));
-        assert_eq!(session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE)["mcpServers"], json!([]));
+        assert_eq!(session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE, true)["mcpServers"], json!([]));
     }
 
     /// #9811: the note goes by the routes an agent's `initialize` reply offers, and the standard
@@ -887,7 +955,7 @@ mod tests {
     fn the_system_note_takes_every_route_the_agent_offers() {
         // With the user's custom instructions (#8220), which go wherever the note goes.
         let note = system_note("Sketch on XZ with explicit plane vectors.");
-        let params = |init: Value| session_new_params(std::path::Path::new("/tmp"), None, &init, &note);
+        let params = |init: Value| session_new_params(std::path::Path::new("/tmp"), None, &init, &note, true);
         let standard = json!({"mode": "append", "content": [{"type": "text", "text": note}]});
 
         let offers_standard = params(json!({"agentCapabilities": {"sessionCapabilities": {"systemPrompt": {}}}}));
@@ -949,7 +1017,7 @@ mod tests {
         assert_eq!(wsl(r"\\server\share\x"), r"\\server\share\x");
 
         let b = McpBridge { cli: r"C:\Program Files\SolidCraft\solidcraft-cli.exe".into(), port: 41234 };
-        let p = session_new_params(&wsl_path(std::path::Path::new(r"C:\Users\u\work")), Some(&b.in_wsl()), &json!({}), SYSTEM_NOTE);
+        let p = session_new_params(&wsl_path(std::path::Path::new(r"C:\Users\u\work")), Some(&b.in_wsl()), &json!({}), SYSTEM_NOTE, true);
         assert_eq!(p["cwd"], "/mnt/c/Users/u/work");
         assert_eq!(p["mcpServers"][0]["command"], "/mnt/c/Program Files/SolidCraft/solidcraft-cli.exe");
         assert_eq!(p["mcpServers"][0]["args"], json!(["mcp", "--connect", "127.0.0.1:41234"]));
@@ -1010,11 +1078,12 @@ mod tests {
                 kind: None,
                 status: Some(ToolStatus::Completed),
                 input: None,
-                output: Some("ok".into())
+                output: Some("ok".into()),
+                claude_tool: None,
             })
         );
         let perm = r#"{"jsonrpc":"2.0","id":7,"method":"session/request_permission","params":{"sessionId":"s","toolCall":{"toolCallId":"t1","title":"batch"},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},{"optionId":"reject","name":"Reject","kind":"reject_once"}]}}"#;
-        let Some(Incoming::Permission { rpc, title, kind, options, reads }) = parse(perm) else { panic!() };
+        let Some(Incoming::Permission { rpc, title, kind, options, reads, .. }) = parse(perm) else { panic!() };
         assert_eq!((title.as_str(), options.len(), options[1].kind.as_str()), ("batch", 2, "reject_once"));
         assert_eq!((kind, reads), (None, None));
         assert_eq!(permission_reply(rpc.clone(), Some("allow"))["result"]["outcome"], json!({"outcome": "selected", "optionId": "allow"}));
@@ -1094,11 +1163,11 @@ mod tests {
         assert_eq!(config_options(&json!({"configOptions":[{"type":"select","id":"broken"}]})), ConfigParse::Invalid);
     }
 
-    /// Claude Code's read tools are on in every session and ask before every call; its shell,
-    /// write and web tools stay off.
+    /// In a session for the adapter the chat recognises, Claude Code's read tools are on and ask
+    /// before every call; its shell, write and web tools stay off.
     #[test]
     fn claudes_read_tools_ask_and_its_other_tools_are_off() {
-        let p = session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE);
+        let p = session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE, true);
         let options = &p["_meta"]["claudeCode"]["options"];
         let off: Vec<&str> = options["disallowedTools"].as_array().map(|t| t.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
         for tool in ["Bash", "Write", "Edit", "WebFetch", "WebSearch", "Task"] {
@@ -1115,6 +1184,56 @@ mod tests {
         assert!(is_claude_adapter(&argv(&["npx", "-y", "@zed-industries/claude-code-acp"])));
         assert!(is_claude_adapter(&argv(&["C:\\npm\\claude-agent-acp.cmd"])));
         assert!(!is_claude_adapter(&argv(&["codex-acp"])) && !is_claude_adapter(&argv(&["opencode", "acp"])));
+    }
+
+    /// An agent whose command doesn't name the Claude adapter (a wrapper script, `node
+    /// …/dist/index.js`) keeps Claude Code's read tools off with its other tools, so the adapter
+    /// started that way reads nothing, whatever the mode (#16458 review).
+    #[test]
+    fn an_adapter_started_another_way_gets_no_read_tools() {
+        let argv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        for command in
+            [&["node", "/opt/claude/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js"][..], &["/home/u/bin/claude-wrapper.sh"]]
+        {
+            assert!(!is_claude_adapter(&argv(command)), "{command:?}");
+        }
+        let p = session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE, false);
+        let options = &p["_meta"]["claudeCode"]["options"];
+        let off: Vec<&str> = options["disallowedTools"].as_array().map(|t| t.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+        for tool in CLAUDE_ASK_TOOLS.iter().chain(CLAUDE_DISALLOWED_TOOLS) {
+            assert!(off.contains(tool), "{tool} off: {off:?}");
+        }
+        assert_eq!(options["allowDangerouslySkipPermissions"], json!(false));
+    }
+
+    /// The adapter names its own tool on a call's updates, and a question names the call: so the
+    /// chat knows a question about Claude Code's Read whatever started the adapter, and a read
+    /// that completes without having asked is caught, once (#16458 review).
+    #[test]
+    fn claude_calls_name_questions_and_catch_a_read_that_never_asked() {
+        let tool = json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s", "update": {
+            "sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Read /x", "kind": "read", "status": "pending",
+            "_meta": {"claudeCode": {"toolName": "Read"}}}}});
+        assert!(matches!(parse(&tool.to_string()), Some(Incoming::Tool { claude_tool: Some(t), .. }) if t == "Read"));
+        let perm = json!({"jsonrpc": "2.0", "id": 4, "method": "session/request_permission", "params": {"sessionId": "s",
+            "toolCall": {"toolCallId": "t1", "title": "Read /x", "kind": "read"}, "options": []}});
+        assert!(matches!(parse(&perm.to_string()), Some(Incoming::Permission { call: Some(c), claude_tool: None, .. }) if c == "t1"));
+
+        let mut calls = ClaudeCalls::default();
+        assert_eq!(calls.update("t1", Some("Read"), Some(ToolStatus::Pending)), None);
+        assert_eq!(calls.question(Some("t1"), None).as_deref(), Some("Read"), "named by its call");
+        assert_eq!(calls.update("t1", None, Some(ToolStatus::Completed)), None, "it asked");
+        assert_eq!(calls.question(Some("t9"), Some("Glob")).as_deref(), Some("Glob"), "named by the question");
+        assert_eq!(calls.question(Some("t8"), None), None, "another agent's call");
+
+        assert_eq!(calls.update("t2", Some("Grep"), Some(ToolStatus::Pending)), None);
+        assert_eq!(calls.update("t2", None, Some(ToolStatus::Completed)).as_deref(), Some("Grep"), "it never asked");
+        assert_eq!(calls.update("t2", None, Some(ToolStatus::Completed)), None, "caught once");
+        assert_eq!(calls.update("t3", Some("mcp__solidcraft-app__batch"), Some(ToolStatus::Completed)), None, "not a read tool");
+        assert_eq!(calls.update("t4", Some("Read"), Some(ToolStatus::Failed)), None, "a failed read read nothing");
+        assert_eq!(calls.update("t5", None, Some(ToolStatus::Completed)), None, "another agent's call");
+        calls.clear();
+        assert_eq!(calls.question(Some("t1"), None), None, "a new turn");
     }
 
     /// Only the Claude adapter's own Read, Glob and Grep questions, with an absolute path and a

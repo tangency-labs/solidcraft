@@ -614,7 +614,10 @@ saves, opens or inserts. A sweep's or pattern's `path` (curve ids) and an occurr
   **Always allow**: a file you didn't send, a search whose pattern starts at a root or your home
   folder or steps up with `..`, or a link in a folder you sent that leads out of it (a path counts
   once links are followed). To let it read another file, attach it. **New chat** starts with
-  nothing sent.
+  nothing sent. The read tools are on only when the agent's command names the Claude Code adapter
+  (`claude-agent-acp`, or the older `claude-code-acp`); started any other way, through a script
+  of your own say, it can't read at all. If it ever reads without asking first, the chat stops
+  the message and says so.
 
 When the panel's agent is stopped, another agent is picked, or SolidCraft quits, the agent and
 every program it started (the CLI it wraps, its MCP server) are stopped.

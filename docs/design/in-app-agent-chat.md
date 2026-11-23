@@ -227,7 +227,8 @@ ACP lets the client offer a file system and a terminal; the chat offers neither,
 agent in an empty working folder of SolidCraft's own (`<data>/agent-chat/work`), not the
 design's folder. The Claude Code adapter has shell, file and web tools of its own anyway: the
 session asks it to turn them off (`_meta.claudeCode.options.disallowedTools`) and not to offer
-"bypass permissions". Its read tools (Read, Glob, Grep) are on in every session, behind a
+"bypass permissions". Its read tools (Read, Glob, Grep) are on when the agent's command names the
+adapter (`acp::is_claude_adapter`, decided once when it starts), behind a
 `permissions.ask` rule (`_meta.claudeCode.options.settings`), so every read arrives as
 `session/request_permission` with the path in `rawInput` (`file_path` for Read, `path` and
 `pattern` for Glob, `path` or `file_path` and `glob` for Grep). `acp::read_path` accepts only
@@ -236,6 +237,14 @@ when the path, links followed, lies inside a file or folder sent by path in this
 (`AgentChat::by_path`, cleared by New chat), and declines any other read of Claude Code's (kind
 `read` or `search`) without asking, whatever the mode or a remembered answer. Checked with
 `claude-agent-acp` 0.107.0: without the rule these tools read any path without asking.
+
+It fails closed when the adapter runs some other way (a wrapper script, `node …/dist/index.js`).
+The session keeps the read tools in `disallowedTools`, and the chat still knows Claude Code's own
+read from the adapter's `_meta.claudeCode.toolName`, which it puts on every tool call's updates
+(the question carries the call's `toolCallId`): such a question is declined unless it reads what
+was sent, whatever command started the agent. The same names catch an adapter that stops
+honouring the ask rule: a read tool call that completes without having asked
+(`acp::ClaudeCalls`) stops the message with an error, so the rule can't be lost quietly.
 
 An earlier version kept the read tools off until a message first sent a file by path, then opened
 the session again with them on (`session/new` with `_meta.claudeCode.options.resume`). That

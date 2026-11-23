@@ -923,14 +923,14 @@ fn the_agents_own_questions_are_answered_by_the_mode_or_asked() {
             PermissionOption { id: "no".into(), name: "Reject".into(), kind: "reject_once".into() },
         ]
     };
-    on_permission(&mut app, 1, "mcp__solidcraft-app__batch".into(), Some("other"), opts(), None);
+    on_permission(&mut app, 1, "mcp__solidcraft-app__batch".into(), Some("other"), opts(), None, None);
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { text, .. }) if text.contains("mcp__solidcraft-app__batch")));
-    on_permission(&mut app, 2, "Run ls".into(), None, opts(), None);
+    on_permission(&mut app, 2, "Run ls".into(), None, opts(), None, None);
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, .. })));
     let n = app.agent_chat.items.len() - 1;
     answer_permission(&mut app, n, Some("always"));
     assert!(agents::always_allowed(&app.preferences, "claude", "Run ls"));
-    on_permission(&mut app, 3, "Run ls".into(), None, opts(), None);
+    on_permission(&mut app, 3, "Run ls".into(), None, opts(), None, None);
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "remembered");
 }
 
@@ -982,42 +982,86 @@ fn claude_code_reads_only_what_was_sent_by_path() {
     let declined = |key: u64| answer(key).as_deref() == Some(&*format!("permission: {key} Some(\"no\")"));
     let photo = photos.join("a.jpg");
     let secret = outside.join("secret.txt");
-    on_permission(&mut app, 1, "Read photos/a.jpg".into(), Some("read"), opts(), Some(&photo));
+    on_permission(&mut app, 1, "Read photos/a.jpg".into(), Some("read"), opts(), Some(&photo), None);
     assert!(declined(1), "nothing was sent by path yet: {:?}", script.calls());
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { text, error: false }) if text.contains("Read photos/a.jpg")));
     attach_path(&mut app, &photos.to_string_lossy()).unwrap();
     send(&mut app, &ctx, "look at these".into());
-    on_permission(&mut app, 2, "Read photos/a.jpg".into(), Some("read"), opts(), Some(&photo));
+    on_permission(&mut app, 2, "Read photos/a.jpg".into(), Some("read"), opts(), Some(&photo), None);
     assert_eq!(answer(2).as_deref(), Some("permission: 2 Some(\"allow\")"));
     assert!(
         matches!(app.agent_chat.items.last(), Some(Item::Notice { text, error: false }) if text.contains("Read photos/a.jpg") && text.contains("attached")),
         "answered at once"
     );
-    on_permission(&mut app, 3, "Find photos".into(), Some("search"), opts(), Some(&photos));
+    on_permission(&mut app, 3, "Find photos".into(), Some("search"), opts(), Some(&photos), None);
     assert_eq!(answer(3).as_deref(), Some("permission: 3 Some(\"allow\")"), "the folder itself");
     agents::remember(&mut app.preferences, "claude-test", "Read secret.txt");
-    on_permission(&mut app, 4, "Read secret.txt".into(), Some("read"), opts(), Some(&secret));
+    on_permission(&mut app, 4, "Read secret.txt".into(), Some("read"), opts(), Some(&secret), None);
     assert!(declined(4), "outside what was sent, though remembered and under Allow everything");
-    on_permission(&mut app, 5, "Read secret.txt".into(), Some("read"), opts(), Some(&photos.join("../outside/secret.txt")));
+    on_permission(&mut app, 5, "Read secret.txt".into(), Some("read"), opts(), Some(&photos.join("../outside/secret.txt")), None);
     assert!(declined(5), "stepping out of the folder");
-    on_permission(&mut app, 6, "Find /".into(), Some("search"), opts(), None);
+    on_permission(&mut app, 6, "Find /".into(), Some("search"), opts(), None, None);
     assert!(declined(6), "a pattern that can't be checked");
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink(&secret, photos.join("link.txt")).unwrap();
-        on_permission(&mut app, 7, "Read link.txt".into(), Some("read"), opts(), Some(&photos.join("link.txt")));
+        on_permission(&mut app, 7, "Read link.txt".into(), Some("read"), opts(), Some(&photos.join("link.txt")), None);
         assert!(declined(7), "a link in the folder that leads out of it");
     }
     assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::Permission { .. })), "nothing waits for the user");
     new_chat(&mut app);
-    on_permission(&mut app, 8, "Read photos/a.jpg".into(), Some("read"), opts(), Some(&photo));
+    on_permission(&mut app, 8, "Read photos/a.jpg".into(), Some("read"), opts(), Some(&photo), None);
     assert!(declined(8), "a new chat starts with nothing sent");
 
     app.agent_chat.running_id = "codex".into();
     app.preferences.agent_permissions.insert("codex".into(), agents::Mode::Ask);
     app.agent_chat.items.clear();
-    on_permission(&mut app, 9, "Read secret.txt".into(), Some("read"), opts(), Some(&secret));
+    on_permission(&mut app, 9, "Read secret.txt".into(), Some("read"), opts(), Some(&secret), None);
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, .. })), "another agent's read goes to the user");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// Claude Code's adapter started by a command that doesn't name it (a wrapper script, `node
+/// …/dist/index.js`) reads nothing unsent either, under Allow everything: a question the adapter
+/// names as one of its read tools is declined, while the same question from an agent that names
+/// no tool goes through the mode. A read that ran without asking stops the message (#16458 review).
+#[test]
+fn a_claude_adapter_started_another_way_reads_nothing_unsent() {
+    let d = attachable("wrapped");
+    let outside = d.join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    let secret = outside.join("secret.txt");
+    std::fs::write(&secret, b"x").unwrap();
+    let (mut app, script, ctx) = app_with_script();
+    app.preferences.agents.push(agents::AgentConfig {
+        id: "wrapped".into(),
+        name: "Claude Code (wrapper)".into(),
+        command: "node /opt/claude/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js".into(),
+        ..Default::default()
+    });
+    app.agent_chat.agent_id = Some("wrapped".into());
+    app.agent_chat.running_id = "wrapped".into();
+    app.preferences.agent_permissions.insert("wrapped".into(), agents::Mode::All);
+    assert!(!runs_claude_code(&app), "its command doesn't name the adapter");
+    let opts = || {
+        vec![
+            PermissionOption { id: "allow".into(), name: "Allow".into(), kind: "allow_once".into() },
+            PermissionOption { id: "no".into(), name: "Reject".into(), kind: "reject_once".into() },
+        ]
+    };
+    let answer = |key: u64| script.calls().into_iter().rev().find(|c| c.starts_with(&format!("permission: {key} ")));
+    on_permission(&mut app, 1, format!("Read {}", secret.display()), Some("read"), opts(), Some(&secret), Some("Read"));
+    assert_eq!(answer(1).as_deref(), Some("permission: 1 Some(\"no\")"), "Read /outside under Allow everything");
+    on_permission(&mut app, 2, "Find **".into(), Some("search"), opts(), None, Some("Glob"));
+    assert_eq!(answer(2).as_deref(), Some("permission: 2 Some(\"no\")"), "a listing it can't check");
+    on_permission(&mut app, 3, format!("Read {}", secret.display()), Some("read"), opts(), Some(&secret), None);
+    assert_eq!(answer(3).as_deref(), Some("permission: 3 Some(\"allow\")"), "an agent naming no tool: its mode answers");
+
+    send(&mut app, &ctx, "look".into());
+    script.report(Event::Unasked { tool: "Read".into() });
+    poll(&mut app, &ctx);
+    assert!(script.calls().iter().any(|c| c == "cancel"), "the message stops: {:?}", script.calls());
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, error: true } if text.contains("Read"))));
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -1038,17 +1082,17 @@ fn a_title_that_mentions_solidcraft_goes_through_the_users_mode() {
     for mode in [agents::Mode::Ask, agents::Mode::Edits] {
         app.preferences.agent_permissions.insert("codex".into(), mode);
         for (title, kind) in titles {
-            on_permission(&mut app, 1, title.into(), kind, opts(), None);
+            on_permission(&mut app, 1, title.into(), kind, opts(), None, None);
             assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, .. })), "{mode:?}: {title}");
             app.agent_chat.items.clear();
         }
         // The chat's own tool stays a single question, the gate's.
-        on_permission(&mut app, 2, "mcp__solidcraft-app__batch".into(), Some("other"), opts(), None);
+        on_permission(&mut app, 2, "mcp__solidcraft-app__batch".into(), Some("other"), opts(), None, None);
         assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "{mode:?}");
         app.agent_chat.items.clear();
     }
     app.preferences.agent_permissions.insert("codex".into(), agents::Mode::All);
-    on_permission(&mut app, 3, titles[0].0.into(), titles[0].1, opts(), None);
+    on_permission(&mut app, 3, titles[0].0.into(), titles[0].1, opts(), None, None);
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "Allow everything answers it");
 }
 
@@ -1223,6 +1267,7 @@ fn a_late_sign_in_retry_or_permission_cannot_restart_a_departed_turn() {
         kind: None,
         options: vec![PermissionOption { id: "allow".into(), name: "Allow".into(), kind: "allow_once".into() }],
         reads: None,
+        claude_tool: None,
     });
     ended(&script, "auth");
     script.report(Event::AuthRequired { methods: Vec::new() });

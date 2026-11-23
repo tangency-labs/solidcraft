@@ -1034,7 +1034,10 @@ impl AgentChat {
                     self.push(Item::Plan(entries));
                 }
             }
-            Event::Permission { key, title, kind, options, reads } => return Some(Outcome::Permission { key, title, kind, options, reads }),
+            Event::Permission { key, title, kind, options, reads, claude_tool } => {
+                return Some(Outcome::Permission { key, title, kind, options, reads, claude_tool });
+            }
+            Event::Unasked { tool } => return Some(Outcome::Unasked { tool }),
             Event::Modes { current, available } => {
                 if self.config_options.is_none() && !available.is_empty() {
                     self.modes = available;
@@ -1162,7 +1165,16 @@ enum Outcome {
     /// A message was answered (or the agent stopped): the turn's bookkeeping ends.
     TurnEnd,
     /// The agent asks before running something of its own: answered by the mode, or asked.
-    Permission { key: u64, title: String, kind: Option<String>, options: Vec<PermissionOption>, reads: Option<std::path::PathBuf> },
+    Permission {
+        key: u64,
+        title: String,
+        kind: Option<String>,
+        options: Vec<PermissionOption>,
+        reads: Option<std::path::PathBuf>,
+        claude_tool: Option<String>,
+    },
+    /// One of Claude Code's read tools ran without asking ([`Event::Unasked`]): the message stops.
+    Unasked { tool: String },
 }
 
 /// The AI features are on (the master switch in Settings → AI) and this is the desktop app.
@@ -2247,13 +2259,26 @@ pub fn answer_permission(app: &mut SolveApp, index: usize, option: Option<&str>)
 /// SolidCraft's gate, so they're allowed here (no double question, see [`acp::is_bridge_tool`]);
 /// so is a read of a file or folder the user attached by path in this conversation (`reads`, see
 /// [`acp::read_path`]); otherwise the mode or an earlier "always allow" may answer, and the chat
-/// says so; otherwise the user is asked.
-fn on_permission(app: &mut SolveApp, key: u64, title: String, kind: Option<&str>, options: Vec<PermissionOption>, reads: Option<&std::path::Path>) {
+/// says so; otherwise the user is asked. `claude_tool`: which of Claude Code's own tools the
+/// question is about, when its adapter says ([`acp::ClaudeCalls`]).
+fn on_permission(
+    app: &mut SolveApp,
+    key: u64,
+    title: String,
+    kind: Option<&str>,
+    options: Vec<PermissionOption>,
+    reads: Option<&std::path::Path>,
+    claude_tool: Option<&str>,
+) {
     let attached = reads.is_some_and(|path| app.agent_chat.attached_by_path(path));
-    // Claude Code's read tools are on in every session, but read only what was attached by path to
-    // this conversation: any other read, or one whose path or pattern can't be checked, is declined
-    // without asking, whatever the mode or a remembered answer.
-    if !attached && matches!(kind, Some("read" | "search")) && !acp::is_bridge_tool(&title, kind) && runs_claude_code(app) {
+    // Claude Code reads only what was attached by path to this conversation: any other read, or
+    // one whose path or pattern can't be checked, is declined without asking, whatever the mode or
+    // a remembered answer. A question is Claude Code's read when its adapter names one of its read
+    // tools, whatever command started it, or when the agent is that adapter and the question is
+    // of kind read or search (not one of the chat's own tools).
+    let claude_read = claude_tool.is_some_and(|tool| acp::CLAUDE_ASK_TOOLS.contains(&tool))
+        || (matches!(kind, Some("read" | "search")) && !acp::is_bridge_tool(&title, kind) && runs_claude_code(app));
+    if !attached && claude_read {
         let reject = options.iter().find(|o| o.kind == "reject_once").or_else(|| options.iter().find(|o| o.kind.starts_with("reject")));
         if let Some(b) = app.agent_chat.backend.as_mut() {
             b.answer_permission(key, reject.map(|o| o.id.as_str()));
@@ -2289,10 +2314,12 @@ fn on_permission(app: &mut SolveApp, key: u64, title: String, kind: Option<&str>
     }
 }
 
-/// The running agent is Claude Code's ACP adapter.
+/// The running agent is Claude Code's ACP adapter: its backend recognised it when it started, or
+/// its command says so now.
 fn runs_claude_code(app: &SolveApp) -> bool {
     let running = &app.agent_chat.running_id;
-    agents::entries(app).iter().any(|entry| &entry.id == running && acp::is_claude_adapter(&entry.argv))
+    app.agent_chat.backend.as_ref().is_some_and(|b| b.claude_code())
+        || agents::entries(app).iter().any(|entry| &entry.id == running && acp::is_claude_adapter(&entry.argv))
 }
 
 fn approve_with(app: &mut SolveApp, id: u64, allow: bool, why: &str) {
@@ -2616,8 +2643,16 @@ pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
                     b.answer_permission(key, None);
                 }
             }
-            Some(Outcome::Permission { key, title, kind, options, reads }) => {
-                on_permission(app, key, title, kind.as_deref(), options, reads.as_deref())
+            Some(Outcome::Permission { key, title, kind, options, reads, claude_tool }) => {
+                on_permission(app, key, title, kind.as_deref(), options, reads.as_deref(), claude_tool.as_deref())
+            }
+            Some(Outcome::Unasked { tool }) => {
+                // Claude Code's reads must ask (its session's ask rule) so that the chat can check
+                // each one; one that didn't means its adapter no longer honours the rule.
+                app.agent_chat.push(Item::Notice { text: trf("ui.ai_unasked_read", &[("tool", &tool)]), error: true });
+                if app.agent_chat.turn.is_some() {
+                    cancel(app);
+                }
             }
             None => {}
         }
