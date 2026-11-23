@@ -1018,6 +1018,12 @@ Only an importer may say `open`.
   delete: the next session compiles again. A changed plugin, SolidCraft version or setting gets its own
   entry; a damaged entry is compiled again, and a folder that can't be written only means compiling
   each session. The folder holds machine code SolidCraft runs, so it is as trusted as the app itself.
+- **First file of a new plugin version.** When nothing is cached yet, the first call compiles the
+  component with Wasmtime's quick baseline compiler (Winch), so a large importer starts in a second
+  or two rather than half a minute. Once that call is done, the optimising compiler (Cranelift)
+  compiles it again on one background thread; later files use its faster code, and it is what goes
+  into the cache, so the next session loads it at once. Nothing waits for it. Fuel, memory, the
+  deadline and Cancel hold the same under both compilers.
 - **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
   `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel and memory must fit the user's default limits in Preferences › Plugins
   unless the user approved more for this exact package at install. Build it for `wasm32-unknown-unknown` and wrap it with
