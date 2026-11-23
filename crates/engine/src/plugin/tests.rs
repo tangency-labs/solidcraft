@@ -506,7 +506,12 @@ fn disabled_ids_survive_scratch_and_new_design() {
 #[test]
 fn guest_deadline_messages_preserve_the_exact_millisecond_budget() {
     for (allowed, seconds) in [(1, "0.001"), (50, "0.05"), (5000, "5"), (u64::MAX, "18446744073709551.615")] {
-        let failure = PluginFailure { plugin: "Sample".into(), file: None, error: HostError::Exhausted { limit: "deadline_ms".into(), allowed } };
+        let failure = PluginFailure {
+            plugin: "Sample".into(),
+            file: None,
+            exporting: false,
+            error: HostError::Exhausted { limit: "deadline_ms".into(), allowed },
+        };
         let text = failure.text();
         assert!(text.contains(&format!("all {seconds} s of guest time")), "{text}");
         assert!(text.contains("runtime.limits.deadline_ms") && text.contains("max_deadline_ms"), "{text}");
