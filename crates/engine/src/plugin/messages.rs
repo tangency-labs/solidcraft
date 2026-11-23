@@ -12,7 +12,7 @@ pub const MESSAGES: &[(&str, &str)] = &[
     ("plugin_error.failed_file", "{plugin} could not open {file}: {reason}"),
     (
         "plugin_error.fuel_ceiling",
-        "it asks for {requested} fuel, and plugins may use {allowed}. Raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file).",
+        "it asks for {requested} fuel, and plugins may use {allowed}. Install the plugin again and allow its fuel request, or raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file).",
     ),
     (
         "plugin_error.memory_ceiling",
