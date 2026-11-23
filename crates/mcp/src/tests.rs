@@ -3629,12 +3629,14 @@ fn a_batch_the_app_could_not_roll_back_reports_it() {
 
 #[test]
 fn batch_falls_back_when_the_app_lacks_engine_batch() {
-    let (b, body, is_error) =
-        recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": [{"command": "a.one"}, {"command": "a.two"}]}));
+    let (b, body, is_error) = recorded_batch(
+        Err("unknown method `engine.batch`".into()),
+        json!({"commands": [{"command": "parameters.add"}, {"command": "parameters.list"}]}),
+    );
     assert!(!is_error, "{body}");
     let ran: Vec<&str> = b.calls.iter().filter(|(m, _)| m == "engine.execute").map(|(_, p)| p["command"].as_str().unwrap_or("")).collect();
-    assert!(ran.contains(&"a.one") && ran.contains(&"a.two"), "{ran:?}");
-    assert_eq!(body["results"], json!([{"ran": "a.one"}, {"ran": "a.two"}]));
+    assert!(ran.contains(&"parameters.add") && ran.contains(&"parameters.list"), "{ran:?}");
+    assert_eq!(body["results"], json!([{"ran": "parameters.add"}, {"ran": "parameters.list"}]));
 }
 
 #[test]
@@ -3669,6 +3671,31 @@ fn rollback_batch_does_not_retry_a_tab_switch_refused_by_a_newer_app() {
 }
 
 #[test]
+fn bridged_rollback_batch_refuses_unknown_commands_before_sequential_execution() {
+    let large_text = "x".repeat(solidcraft_engine::MAX_LINE / 2);
+    let oversized = json!([
+        {"command": "parameters.import", "params": {"text": large_text}},
+        {"command": "parameters.import", "params": {"text": large_text}},
+        {"command": "view.future_tab"},
+    ]);
+    let steps = json!([{"command": "parameters.add"}, {"command": "parameters.list"}, {"command": "view.future_tab"}]);
+    for (commands, calls) in [(&oversized, &[][..]), (&steps, &["engine.batch"][..])] {
+        let (b, body, is_error) = recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": commands}));
+        assert!(is_error, "{body}");
+        assert_eq!(methods(&b), calls);
+        assert_eq!(body["completed"], 0, "{body}");
+        assert_eq!(body["failed"]["index"], 2, "{body}");
+        assert_eq!(body["failed"]["command"], "view.future_tab", "{body}");
+        assert_eq!(body["not_run"], json!([0, 1, 2]), "{body}");
+        assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("rollback: false")), "{body}");
+    }
+    let (b, body, is_error) = recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": steps, "rollback": false}));
+    assert!(!is_error, "{body}");
+    assert_eq!(methods(&b), ["engine.batch", "engine.execute", "engine.execute", "engine.execute"]);
+    assert_eq!(body["results"][2]["ran"], "view.future_tab", "{body}");
+}
+
+#[test]
 fn rollback_batch_can_still_fall_back_for_a_loader_in_the_same_design() {
     let e = "engine.batch unavailable: step 0 (file.insert_step) loads a file";
     let (b, body, is_error) = recorded_batch(Err(e.into()), json!({"commands": [{"command": "file.insert_step", "params": {"path": "part.step"}}]}));
@@ -3680,9 +3707,9 @@ fn rollback_batch_can_still_fall_back_for_a_loader_in_the_same_design() {
 #[test]
 fn batch_falls_back_while_the_agent_cursor_is_shown() {
     let (b, body, is_error) =
-        recorded_batch(Err("engine.batch unavailable: the agent cursor is shown".into()), json!({"commands": [{"command": "a.one"}]}));
+        recorded_batch(Err("engine.batch unavailable: the agent cursor is shown".into()), json!({"commands": [{"command": "parameters.list"}]}));
     assert!(!is_error, "{body}");
-    assert!(b.calls.iter().any(|(m, p)| m == "engine.execute" && p["command"] == "a.one"), "{:?}", b.calls);
+    assert!(b.calls.iter().any(|(m, p)| m == "engine.execute" && p["command"] == "parameters.list"), "{:?}", b.calls);
 }
 
 /// The app may have run the batch: sending the steps again would apply them twice.
@@ -3699,10 +3726,10 @@ fn batch_does_not_resend_after_a_transport_error() {
 #[test]
 fn batch_too_large_for_one_control_line_goes_per_step() {
     let big = "x".repeat(solidcraft_engine::MAX_LINE);
-    let (b, body, is_error) = recorded_batch(Ok(json!({})), json!({"commands": [{"command": "a.one", "params": {"text": big}}]}));
+    let (b, body, is_error) = recorded_batch(Ok(json!({})), json!({"commands": [{"command": "parameters.import", "params": {"text": big}}]}));
     assert!(!is_error, "{body}");
     assert!(!methods(&b).contains(&"engine.batch"), "{:?}", methods(&b));
-    assert!(b.calls.iter().any(|(m, p)| m == "engine.execute" && p["command"] == "a.one"));
+    assert!(b.calls.iter().any(|(m, p)| m == "engine.execute" && p["command"] == "parameters.import"));
 }
 
 /// A fake app on a loopback port: counts connections and `engine.batch` lines, never replies to
@@ -3990,8 +4017,9 @@ fn batch_reports_timings_and_profile() {
     assert_eq!(b.calls[0].1["profile"], true);
     assert_eq!((body["timings"][0]["ms"].as_f64(), body["total_ms"].as_f64()), (Some(2.5), Some(2.6)), "{body}");
     // An app without engine.batch is timed step by step here, without a kernel split it can't measure.
-    let (_, body, _) = recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": [{"command": "a.one"}], "profile": true}));
-    assert_eq!(body["timings"][0]["command"], "a.one", "{body}");
+    let (_, body, _) =
+        recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": [{"command": "parameters.list"}], "profile": true}));
+    assert_eq!(body["timings"][0]["command"], "parameters.list", "{body}");
     assert!(body["timings"][0].get("profile").is_none(), "{body}");
 }
 
@@ -4318,7 +4346,8 @@ impl crate::backend::Backend for Stub {
 
 fn stub_batch(fail: Vec<(&'static str, String)>, restore_ok: bool, rollback: bool) -> (Stub, Value) {
     let mut b = Stub { calls: Vec::new(), fail, restore_ok };
-    let args = json!({"commands": [{"command": "a.one"}, {"command": "a.two"}, {"command": "a.three"}], "rollback": rollback});
+    let args =
+        json!({"commands": [{"command": "parameters.add"}, {"command": "parameters.change"}, {"command": "parameters.list"}], "rollback": rollback});
     let r = crate::tools::call_tool(&mut b, "batch", &args);
     assert_eq!(r["isError"], true, "{r}");
     let body = serde_json::from_str(r["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -4330,23 +4359,23 @@ fn stub_batch(fail: Vec<(&'static str, String)>, restore_ok: bool, rollback: boo
 /// step still running in the app counts as applied unless the rollback took it back.
 #[test]
 fn a_failed_batch_reports_what_really_happened() {
-    let still = format!("{} `engine.execute` (a.two) is still running in the app", crate::backend::STILL_RUNNING);
+    let still = format!("{} `engine.execute` (parameters.change) is still running in the app", crate::backend::STILL_RUNNING);
     // Still running, and the rollback could not restore the checkpoint.
-    let (b, body) = stub_batch(vec![("a.two", still.clone())], false, true);
+    let (b, body) = stub_batch(vec![("parameters.change", still.clone())], false, true);
     assert_eq!((&body["rolled_back"], &body["undone"]), (&json!(false), &json!(0)), "{body}");
     assert_eq!((&body["applied"], &body["not_run"]), (&json!([0, 1]), &json!([2])), "{body}");
     assert_eq!(body["failed"]["still_running"], true, "{body}");
-    assert!(!b.calls.iter().any(|(_, p)| p["command"] == "a.three"), "a step after the failure is never sent");
+    assert!(!b.calls.iter().any(|(_, p)| p["command"] == "parameters.list"), "a step after the failure is never sent");
     // Still running, and the rollback (after the backend waited for it) restored the checkpoint.
-    let (_, body) = stub_batch(vec![("a.two", still)], true, true);
+    let (_, body) = stub_batch(vec![("parameters.change", still)], true, true);
     assert_eq!((&body["rolled_back"], &body["undone"]), (&json!(true), &json!(1)), "{body}");
     assert_eq!((&body["applied"], &body["not_run"]), (&json!([]), &json!([2])), "{body}");
     assert!(body["failed"].get("still_running").is_none(), "{body}");
     // An ordinary failure whose rollback failed.
-    let (_, body) = stub_batch(vec![("a.two", "boom".into())], false, true);
+    let (_, body) = stub_batch(vec![("parameters.change", "boom".into())], false, true);
     assert_eq!((&body["rolled_back"], &body["applied"]), (&json!(false), &json!([0])), "{body}");
     // No rollback asked for: nothing is restored, and the reply does not say it was.
-    let (b, body) = stub_batch(vec![("a.two", "boom".into())], true, false);
+    let (b, body) = stub_batch(vec![("parameters.change", "boom".into())], true, false);
     assert_eq!((&body["rolled_back"], &body["applied"], &body["not_run"]), (&json!(false), &json!([0]), &json!([2])), "{body}");
     assert!(!b.calls.iter().any(|(_, p)| p["command"] == "edit.restore_checkpoint"), "{:?}", b.calls);
 

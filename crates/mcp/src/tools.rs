@@ -150,7 +150,8 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              measure (inspect.measure), compare_picture (inspect.compare_picture, numbers only: no overlay PNG), \
              inspect_design (document.inspect), undo, redo, export, save, open, new_design, crash_reports; screenshot, \
              body_topology, batch and pending can't be steps. On an error the steps already run are undone (unless \
-             rollback: false). Connected to the desktop, a batch with rollback can't open another design or switch design tabs. \
+             rollback: false). Connected to the desktop, rollback batches refuse known commands that open or switch design tabs. \
+             If the steps must run one at a time, this server must recognize every command in a rollback batch. \
              The reply names the failing step (index from 0), its error, \
              every result before it, whether the design really went back (rolled_back), the steps whose changes are in the \
              design (applied) and those never sent (not_run). The usual way to build a part: sketch, draw, dimension, \
@@ -1568,6 +1569,16 @@ fn atomic_layout_refusal(count: usize, rule: solidcraft_engine::panels::Rule, de
     (reply, true)
 }
 
+fn preflight_refusal(refusal: solidcraft_engine::batch_preflight::Refusal, count: usize, rollback: bool) -> (Value, bool) {
+    let mut reply = refusal.reply(count, rollback);
+    reply["ok"] = json!(false);
+    reply["applied"] = json!([]);
+    if let Some(command) = refusal.command.as_deref() {
+        reply["failed"]["error"] = Value::String(command_error(command, refusal.error));
+    }
+    (reply, true)
+}
+
 /// The batch itself: its reply and whether it failed.
 fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     let from_file = match script_file(a) {
@@ -1642,15 +1653,7 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     if b.in_process()
         && let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, b.param_check(), &[])
     {
-        let mut reply = refusal.reply(steps.len(), rollback);
-        if let Some(o) = reply.as_object_mut() {
-            o.insert("ok".into(), Value::Bool(false));
-            o.insert("applied".into(), json!([]));
-        }
-        if let (Some(command), Some(failed)) = (refusal.command.as_deref(), reply.get_mut("failed").and_then(Value::as_object_mut)) {
-            failed.insert("error".into(), Value::String(command_error(command, refusal.error.clone())));
-        }
-        return (reply, true);
+        return preflight_refusal(refusal, steps.len(), rollback);
     }
     // A tool step's result as the tool would reply it: a `list_commands` step's catalog filtered,
     // a `measure {summary: true}` step's reply summarised.
@@ -1717,6 +1720,17 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
                 "atomic layout batch exceeds transport size cap"
             },
         );
+    }
+    // Without the desktop's batch preflight, an unrecognized command could switch tabs.
+    // Check IDs here and leave parameter checking to the app that executes the steps.
+    if rollback
+        && b.has_ui()
+        && let Some(mut refusal) = solidcraft_engine::batch_preflight::check(steps, solidcraft_engine::schema::ParamCheck::Off, &[])
+    {
+        if let Some(command) = &refusal.command {
+            refusal.error = format!("this MCP server does not recognize `{command}`. Run it separately or use `rollback: false`");
+        }
+        return preflight_refusal(refusal, steps.len(), rollback);
     }
     let start = if rollback { Undo::begin(b) } else { Undo::None };
     let mut results = Vec::with_capacity(steps.len());

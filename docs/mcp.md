@@ -501,8 +501,11 @@ up. An older app without checkpoints undoes as many steps as the batch added to 
 Connected to the desktop app, rollback applies within one design tab. With rollback enabled,
 the server refuses `open` (`doc.open`), `file.import`, `view.next_tab` and `view.previous_tab`
 before any steps run. Run those commands separately, or use `rollback: false` to keep completed
-steps. A checkpoint restores the design data across `file.new` or a headless `doc.open`,
-while the file path follows the current session.
+steps. If the desktop batch endpoint is unavailable or the request is too large to send in one
+call, the MCP server must recognize every command before it runs a rollback batch step by step.
+Use an MCP server that recognizes the command, run it separately, or use `rollback: false`.
+A checkpoint restores the design data across `file.new` or a headless `doc.open`, while the file
+path follows the current session.
 
 A long batch, such as a polyline of hundreds of points, can be written to a JSON file and run with
 `path` instead of `commands`, so the steps don't have to go through the chat. The file holds an array
