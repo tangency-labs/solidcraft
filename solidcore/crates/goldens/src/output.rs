@@ -228,22 +228,38 @@ impl Topology {
     }
 }
 
-/// The status of an [`SolidError::Upstream`], or of a typed blend failure that replaced one
-/// (solidcore's `BlendFailure`, #13790), as the blend runners read a status: other errors,
-/// including other areas' typed failures, give `None`, as they did before the blend sites
-/// were converted, so a runner's rows stay as they were.
+/// The status of an [`SolidError::Upstream`], or of a typed failure that replaced one, as the
+/// blend runners read a status: a typed blend failure (solidcore's `BlendFailure`, #13790), or
+/// a typed failure of the B-spline curve methods (`nurbs::b_spline_curve::p1`, whose every
+/// failure but an invalid input was a bare `SM_ERR` before #19848). Other errors, including
+/// other areas' typed failures, give `None`, as they did before those sites were converted, so
+/// a runner's rows stay as they were.
 #[must_use]
 pub fn blend_status(e: &SolidError) -> Option<i32> {
     match e {
         SolidError::Upstream { code, .. } => Some(*code),
         e if e.blend_failure().is_some() => solidcore::error::upstream_status(e),
+        e if e.nurbs_failure().is_some()
+            && e.operation().starts_with("nurbs::b_spline_curve::p1::") =>
+        {
+            solidcore::error::upstream_status(e)
+        }
         _ => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::float_bits;
+    use super::{blend_status, float_bits};
+
+    /// A B-spline curve method's typed failure reads as the bare `SM_ERR` it replaced.
+    #[test]
+    fn blend_status_reads_a_b_spline_curve_failure_as_its_old_status() {
+        let mut empty = solidcore::nurbs::b_spline_curve::p1::BSplineCurve::new(3);
+        let e = empty.make_nurb().unwrap_err();
+        assert!(e.nurbs_failure().is_some(), "{e:?}");
+        assert_eq!(blend_status(&e), Some(1001));
+    }
 
     #[test]
     fn float_bits_records_one_nan_and_keeps_every_other_value() {
