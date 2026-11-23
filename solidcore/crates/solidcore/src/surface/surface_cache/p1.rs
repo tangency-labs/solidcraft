@@ -144,7 +144,8 @@
 //!   `Draw` functions (other units or debug output).
 
 use crate::curve::curve::p2::{Curve, CurveKind};
-use crate::error::{ignored, Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -257,7 +258,7 @@ pub fn copy_as_bspline(curve: &Curve) -> Result<Curve> {
     }
     bspline_curve_of(curve)
         .map(|b| Curve::from(b.clone()))
-        .ok_or_else(|| SolidError::surface_missing(OP_COPY, "the curve's B-spline"))
+        .ok_or_else(|| SolidError::surface(OP_COPY, SurfaceFailure::CurveNotBSplineKind))
 }
 
 /// `SM_CAST_PTR(SmBSplineCurve, curve)`: the B-spline (base) of the B-spline kinds.
@@ -310,9 +311,12 @@ fn create_iso_parametric_curve(
         | SurfaceKind::SrfInVolume(_)
             if !matches!(r.curve.kind(), CurveKind::BSpline(_)) =>
         {
-            Err(SolidError::surface_failed(
+            Err(SolidError::surface(
                 "surface::surface_cache::p1::create_iso_parametric_curve",
-                "the iso curve is not a B-spline",
+                SurfaceFailure::Defect {
+                    why: "the B-spline body of CreateIsoParametricCurve, which these kinds run, \
+                          makes a B-spline iso curve, so a curve of another kind is the kernel's",
+                },
             ))
         }
         _ => Ok(r.curve),
@@ -600,9 +604,9 @@ pub fn compute_plane_from_3_points(
 
     // Check for safety (should be OK):
     if p123.dot(p231) < 0.0 || p231.dot(p312) < 0.0 || p312.dot(p123) < 0.0 {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP_PLANE3,
-            "the three points do not turn one way",
+            SurfaceFailure::PointsDoNotTurnOneWay,
         ));
     }
 
@@ -633,9 +637,12 @@ pub fn check_bounding_plane_separating_halfspace(
     let control_points = canonical.control_points;
 
     if num_control_points != control_points.len() {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP_HALFSPACE,
-            "the control net's size does not match its point count",
+            SurfaceFailure::Defect {
+                why: "the canonical form of a B-spline surface holds one point per control \
+                      net entry, so a count that differs from the net's size is the kernel's",
+            },
         ));
     }
 
@@ -773,8 +780,9 @@ impl PatchBoundaryBoundingPlanes {
     ) -> Result<Curve> {
         let (spt, param) = self.iso_of(index);
         // SM_CAST_PTR(SmBSplineSurface, ..) and NER: the B-spline kinds
-        bspline_of(surface)
-            .ok_or_else(|| SolidError::surface_missing(OP_BOUNDARY, "the B-spline kind surface"))?;
+        bspline_of(surface).ok_or_else(|| {
+            SolidError::surface(OP_BOUNDARY, SurfaceFailure::SurfaceNotBSplineKind)
+        })?;
         // make the curve through the virtual (the SmPlane and SmSurfOfRevolution
         // overrides; 3D Tol SM_BIG_DOUBLE: not used by any of them)
         create_iso_parametric_curve(k, surface, spt, param, 0.0, None)
@@ -810,25 +818,32 @@ impl PatchBoundaryBoundingPlanes {
         let tolerance = 0.0001;
 
         // local
-        bspline_of(surface)
-            .ok_or_else(|| SolidError::surface_missing(OP_PLANES, "the B-spline kind surface"))?;
+        let checked = bspline_of(surface)
+            .ok_or_else(|| SolidError::surface(OP_PLANES, SurfaceFailure::SurfaceNotBSplineKind))?;
         // (the control point count and the canonical form read the NURB, made through
         // the virtual GetOrCreateGwNurbPointer when missing: a plane's, a cone's,
         // sphere's, torus's or surface of revolution's or extrusion's)
-        let bs =
-            match surface.kind_with_nurb(k)? {
-                SurfaceKind::Plane(p) => p.base_for_query(),
-                SurfaceKind::SurfOfExtrusion(_) => match surface.extrusion_base_with_nurb(k) {
-                    Ok(base) => base,
-                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    Err(_) => std::borrow::Cow::Borrowed(bspline_of(surface).ok_or_else(|| {
-                        SolidError::surface_missing(OP_PLANES, "the B-spline kind surface")
-                    })?),
-                },
-                made => std::borrow::Cow::Borrowed(bspline_of_kind(made).ok_or_else(|| {
-                    SolidError::surface_missing(OP_PLANES, "the surface's B-spline")
-                })?),
-            };
+        let bs = match surface.kind_with_nurb(k)? {
+            SurfaceKind::Plane(p) => p.base_for_query(),
+            SurfaceKind::SurfOfExtrusion(_) => match surface.extrusion_base_with_nurb(k) {
+                Ok(base) => base,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                // the kind check above already gave the extrusion's B-spline
+                Err(_) => std::borrow::Cow::Borrowed(checked),
+            },
+            made => std::borrow::Cow::Borrowed(bspline_of_kind(made).ok_or_else(|| {
+                Failure::new(
+                    OP_PLANES,
+                    SurfaceFailure::Defect {
+                        why: "the surface passed the B-spline kind check above and making \
+                                  its NURB keeps its kind, so a made kind without a B-spline \
+                                  is the kernel's",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })?),
+        };
 
         // for every boundary
         for ii in 0..4 {
@@ -1209,9 +1224,9 @@ impl<O> FaceContainmentClassifier<O> for BaseClassifier {
         _uv_point: Point2,
         _src_zone_tol_3d: f64,
     ) -> Result<(i32, Option<O>)> {
-        Err(SolidError::surface_failed(
+        Err(SolidError::surface(
             OP_CLASSIFY,
-            "only a trimmed surface cache classifies points",
+            SurfaceFailure::UnsupportedCacheKind,
         ))
     }
 }
@@ -1491,7 +1506,10 @@ impl AltSrfCache {
             let Some(cached) = cached else {
                 return (
                     out,
-                    Err(SolidError::surface_missing(OP_COPY, "the cached curves")),
+                    Err(SolidError::surface(
+                        OP_COPY,
+                        SurfaceFailure::CurvesNotCached,
+                    )),
                 );
             };
             let mut list = Vec::with_capacity(cached.len());
@@ -1499,9 +1517,9 @@ impl AltSrfCache {
                 let Some(bsc) = bspline_curve_of(c) else {
                     return (
                         out,
-                        Err(SolidError::surface_missing(
+                        Err(SolidError::surface(
                             OP_COPY,
-                            "the cached curve's B-spline",
+                            SurfaceFailure::CurveNotBSplineKind,
                         )),
                     );
                 };
@@ -2507,9 +2525,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         if !self.trimmed_dispatch {
             return self.point_classify(uv_point, src_zone_tol_3d);
         }
-        let face = self
-            .face()?
-            .ok_or_else(|| SolidError::surface_missing(OP_CLASSIFY, "the face"))?;
+        let face = self.face()?.ok_or_else(|| {
+            SolidError::surface(OP_CLASSIFY, SurfaceFailure::TrimmedCacheHasNoFace)
+        })?;
         let (class, object) = queries.face_point_classify(k, face, uv_point, src_zone_tol_3d)?;
         Ok((class, if class == 100 { None } else { object }))
     }
@@ -2524,9 +2542,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         _uv_point: Point2,
         _src_zone_tol_3d: f64,
     ) -> Result<(i32, Option<O>)> {
-        Err(SolidError::surface_failed(
+        Err(SolidError::surface(
             OP_CLASSIFY,
-            "only a trimmed surface cache classifies points",
+            SurfaceFailure::UnsupportedCacheKind,
         ))
     }
 
@@ -2536,9 +2554,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// Always `SM_ERR`.
     pub fn implant_edgeuse(&mut self, _edgeuse: O, _do_subdivision: bool) -> Result<()> {
-        Err(SolidError::surface_failed(
+        Err(SolidError::surface(
             OP_IMPLANT_EU,
-            "only a trimmed surface cache implants edge uses",
+            SurfaceFailure::UnsupportedCacheKind,
         ))
     }
 
@@ -2548,9 +2566,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// Always `SM_ERR`.
     pub fn implant_poly_edge(&mut self, _poly_edge: O, _node: NodeId) -> Result<()> {
-        Err(SolidError::surface_failed(
+        Err(SolidError::surface(
             OP_IMPLANT_PE,
-            "only a trimmed surface cache implants poly edges",
+            SurfaceFailure::UnsupportedCacheKind,
         ))
     }
 
@@ -4134,29 +4152,33 @@ mod tests {
         );
     }
 
-    /// The surface cache's failures keep the operation, status, kind and entity of the bare
-    /// `Upstream` statuses they replace (a sample).
+    /// The surface cache's failures keep the operation, status and entity of the bare
+    /// `Upstream` statuses they replace, with the class of their named cause (a sample).
     #[test]
     fn typed_surface_failures_keep_their_upstream_answers() {
         use crate::error::surface::SurfaceFailure;
-        let samples: [(&'static str, SurfaceFailure, i32); 3] = [
+        use crate::error::ErrorKind;
+        let samples: [(&'static str, SurfaceFailure, i32, ErrorKind); 3] = [
             (
                 OP_CLASSIFY,
-                SurfaceFailure::Failed("only a trimmed surface cache classifies points"),
+                SurfaceFailure::UnsupportedCacheKind,
                 crate::error::SM_ERR,
+                ErrorKind::Unsupported,
             ),
             (
                 OP_PLANES,
-                SurfaceFailure::Missing("the B-spline kind surface"),
-                crate::error::SM_ERR_NULL_POINTER,
+                SurfaceFailure::SurfaceNotBSplineKind,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::Unsupported,
             ),
             (
                 OP_IMPLANT_EU,
-                SurfaceFailure::Failed("only a trimmed surface cache implants edge uses"),
+                SurfaceFailure::UnsupportedCacheKind,
                 crate::error::SM_ERR,
+                ErrorKind::Unsupported,
             ),
         ];
-        for (operation, failure, code) in samples {
+        for (operation, failure, code, kind) in samples {
             let typed = SolidError::surface(operation, failure);
             let before = SolidError::Upstream {
                 operation,
@@ -4165,7 +4187,7 @@ mod tests {
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
             assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.kind(), kind, "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
             assert_eq!(typed.is_port_failure(), before.is_port_failure());
