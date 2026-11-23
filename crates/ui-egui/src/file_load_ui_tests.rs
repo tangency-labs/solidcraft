@@ -595,6 +595,69 @@ fn reloading_a_point_cloud_on_a_network_location_asks_first() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `doc.open` with `new_tab` over the control channel lands in a tab of its own, even where the
+/// shown design is blank (an ordinary open replaces that one), and one that fails opens no tab.
+#[test]
+fn a_control_open_with_new_tab_lands_in_a_tab_of_its_own() {
+    let dir = scratch("control-new-tab");
+    let paths: Vec<String> = [("a", 5), ("b", 6)]
+        .into_iter()
+        .map(|(name, side)| {
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length": side, "width": side, "height": side})).unwrap();
+            let path = dir.join(format!("{name}.solidcraft")).to_string_lossy().into_owned();
+            s.execute("file.save", &json!({"path": path})).unwrap();
+            path
+        })
+        .collect();
+    let mut w = Win::new();
+    let (tx, rx) = std::sync::mpsc::channel();
+    w.app.control_rx = Some(rx);
+    let open = |w: &mut Win, params: serde_json::Value| {
+        let (req, reply) = crate::control::ControlRequest::new("engine.execute", json!({"command": "doc.open", "params": params}));
+        tx.send(req).unwrap();
+        for _ in 0..100_000 {
+            w.frame(vec![]);
+            if let Ok(reply) = reply.try_recv() {
+                return reply;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        panic!("no reply");
+    };
+
+    let blank = w.app.session.document_id.clone();
+    let reply = open(&mut w, json!({"path": paths[0], "new_tab": true}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!((w.app.docs.count(), w.app.docs.active), (2, 1), "the blank design keeps its tab");
+    assert_eq!(w.app.session.path.as_deref(), Some(paths[0].as_str()));
+    let reply = open(&mut w, json!({"path": paths[1], "new_tab": true}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!((w.app.docs.count(), w.app.docs.active), (3, 2));
+    assert_eq!(w.app.session.path.as_deref(), Some(paths[1].as_str()));
+    let shown: Vec<_> = crate::documents::open_sessions(&w.app).iter().map(|s| (s.document_id.clone(), s.path.clone())).collect();
+    assert_eq!(shown[0], (blank, None), "the design that was open is as it was");
+    assert_eq!(shown[1].1.as_deref(), Some(paths[0].as_str()));
+
+    let missing = dir.join("missing.solidcraft").to_string_lossy().into_owned();
+    let reply = open(&mut w, json!({"path": missing, "new_tab": true}));
+    assert_eq!(reply["ok"], false, "{reply}");
+    assert_eq!((w.app.docs.count(), w.app.docs.active), (3, 2), "a failed open opens no tab");
+
+    // Without it a blank design is replaced, as before.
+    let mut w = Win::new();
+    let (tx2, rx2) = std::sync::mpsc::channel();
+    w.app.control_rx = Some(rx2);
+    let (req, reply) = crate::control::ControlRequest::new("engine.execute", json!({"command": "doc.open", "params": {"path": paths[0]}}));
+    tx2.send(req).unwrap();
+    while reply.try_recv().is_err() {
+        w.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert_eq!(w.app.docs.count(), 1, "the blank design was replaced");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A control-channel (MCP) open is answered when the file is in, with the synchronous
 /// command's reply, and the window draws frames while it waits. Commands sent meanwhile wait.
 #[test]
