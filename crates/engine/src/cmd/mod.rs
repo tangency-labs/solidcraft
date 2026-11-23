@@ -101,6 +101,7 @@ pub(crate) use features::edge_ref_form;
 pub(crate) use features::explicit_plane;
 pub use features::extrude_reach;
 pub use features::head_counterbore;
+pub use features::head_countersink;
 pub use features::large_thread_size;
 pub(crate) use features::move_matrix_params;
 pub(crate) use features::plane_name_problem;
