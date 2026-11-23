@@ -2926,12 +2926,19 @@ impl SolveApp {
             }
             let empty = sel.is_empty();
             self.start("solid.extrude");
+            let mut press_pull_panel = false;
             if let Some(d) = &mut self.dialog {
                 // Opened by Press Pull, so the dialog says so, whatever was picked (#11705).
                 d.press_pull = true;
                 if empty && let Some(input) = d.inputs.first_mut() {
                     input.accept |= selection::FACES | selection::EDGES;
                 }
+                press_pull_panel = true;
+            }
+            // The panel is the Extrude one, but Press Pull is the command that runs: the ribbon
+            // shows Press Pull as the running command, and Repeat repeats it (#14359).
+            if press_pull_panel && let Some(spec) = solidcraft_engine::find_command("solid.press_pull") {
+                self.last_command = Some((spec.id.to_string(), spec.label.to_string()));
             }
             return;
         }
