@@ -1896,6 +1896,10 @@ pub enum FeatureKind {
         body: Option<BodyName>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         refold: bool,
+        /// Unfold: a point on the flat panel that stays where it is, so the flat lies in its
+        /// plane (default: where the sheet's flat lies, its largest flat panel's plane).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fixed: Option<Position>,
     },
     /// Convert to sheet metal, of picked faces (#6748): the sheet is the faces picked at `face` and
     /// `faces`, and every face a bend joins to them, each a panel of the rule's thickness, however
@@ -3137,8 +3141,8 @@ pub enum PatternKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         axis_feature: Option<FeatureName>,
     },
-    /// Copies along a chain of sketch curves: instance k moves by path(k·spacing) − path(0),
-    /// measured along the path from its start.
+    /// Copies along a chain of sketch curves: instance k moves by path(s + k·spacing) − path(s),
+    /// measured along the path from its start, where s is the start point (0 by default).
     Path {
         path_sketch: SketchId,
         path: Vec<String>,
@@ -3156,6 +3160,22 @@ pub enum PatternKind {
         /// Turn copies with the path's direction (else they keep their orientation).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         orient: bool,
+        /// The start point: how far along the path (from the end `flip` starts at) the original
+        /// sits; the copies are measured from there. `None`: the path's start.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Start point")]
+        start: Option<Expr>,
+        /// The start point as a fraction of the path's length (0 to 1), so it keeps its place
+        /// when the path's length changes. Used instead of `start` when set.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Start point (0 to 1)")]
+        start_fraction: Option<Expr>,
+        /// With `orient`, carry the copies with a rotation-minimising frame along the path, so on
+        /// a 3D path they keep the original's relation to it. Every Pattern on Path made now sets
+        /// it; one saved before it existed turns its copies about the sketch's normal only, as it
+        /// did then (the same on a flat path).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        follow_frame: bool,
     },
 }
 

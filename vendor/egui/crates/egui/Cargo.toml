@@ -65,6 +65,10 @@ mint = ["epaint/mint"]
 ## (see [`GlyphRasterizer`] and [`FontProvider`]).
 monochrome_emoji_fonts = ["default_fonts", "epaint/monochrome_emoji_fonts"]
 
+## SolidCraft: `Context::record_nested_locks`, which reports a context locked inside its own lock
+## (#21091). For tests: enable it from dev-dependencies only.
+lock_nesting_report = []
+
 ## Enable persistence of memory (window positions etc).
 persistence = ["serde", "epaint/serde", "ron"]
 
