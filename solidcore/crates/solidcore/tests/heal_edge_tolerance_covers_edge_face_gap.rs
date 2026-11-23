@@ -484,18 +484,27 @@ fn vertex_gap(k: &Kernel, b: &mut Brep, v: solidcore::topology::VertexId) -> f64
 ///   is over that, to it (#17739), recorded in `floored`;
 /// - every edge covers its gap.
 ///
-/// The heal's tolerances are judged against the gaps the heal measured: those of the body
-/// as the heal saw it. On the rebuilding read that body is the plain read of the file, the
-/// same body before its UV trims are rebuilt: a rebuilt trim can move its edge's interval
-/// (`create_uv_trim_curve`'s interval recovery; on `Fillet/open_shell.smb` edge 17 goes
-/// from `[0, 1]` to `[3.9e-6, 1]`), which moves the edge's gap (there from 3.02e-5 to
-/// 1.25e-5) and its start vertex's gap after the heal. So `g` and the vertices' gaps are
-/// measured on the plain read, and the rebuilt body's current gaps must still be covered
-/// by its tolerances. Every gap is measured afresh, never read from a cache (#20939).
+/// The heal's tolerances are judged against the gaps the heal measured. Both reads build
+/// and heal the same body; the rebuilding read then rebuilds its UV trims, and a rebuilt
+/// trim can move its edge's interval (`create_uv_trim_curve`'s interval recovery; on
+/// `Fillet/open_shell.smb` edge 17 goes from `[0, 1]` to `[3.9e-6, 1]`), which moves the
+/// edge's gap (there from 3.02e-5 to 1.25e-5) and its start vertex's gap after the heal.
+/// So on the rebuilding read `g` and the vertices' gaps are measured on the plain read of
+/// the file, the healed body after the plain read's own trim check:
+/// - its edge/face gaps are the heal's by construction: they depend only on the edge's
+///   curve and interval and the face's surface, which nothing changes between the heal
+///   and the end of the plain read;
+/// - its vertex gaps are the heal's only as measured: the vertex/face gap starts its
+///   projection from the UV trim ends, which the plain read's trim check can change.
+///
+/// The rebuilt body's current gaps must still be covered by its tolerances. Every gap is
+/// measured afresh, never read from a cache (#20939).
 ///
 /// Returns the digest of the read with main's tolerances put back on those entries:
 /// face, edge and vertex tolerances, edge/face gaps, edge curves and the file's UV trims
-/// with the surface points along them. With `lazy`, also the digest of the UV trims
+/// with the surface points along them. On the rebuilding read the hashed edge/face gaps
+/// are the heal's, taken from the plain read, so the digest does not pin the rebuilt
+/// body's gaps; the coverage checks do. With `lazy`, also the digest of the UV trims
 /// `GetOrCreateUVTrimCurve` makes afterwards on the read as it is (raised).
 fn replay(
     name: &str,
@@ -520,6 +529,13 @@ fn replay(
         d.f64(f.tolerance);
     }
     let edges: Vec<EdgeId> = b.edges().iter().map(|(id, _)| id).collect();
+    if let Some(h) = healed.as_ref() {
+        // (the gaps of the plain read are taken by id)
+        let vertex_ids = |b: &Brep| b.vertices().iter().map(|(id, _)| id).collect::<Vec<_>>();
+        let healed_edges: Vec<EdgeId> = h.edges().iter().map(|(id, _)| id).collect();
+        assert_eq!(edges, healed_edges, "{name}: the reads' edges");
+        assert_eq!(vertex_ids(&b), vertex_ids(h), "{name}: the reads' vertices");
+    }
     let mut seen = 0;
     for &e in &edges {
         let tol = b.edge(e).unwrap().tolerance;
