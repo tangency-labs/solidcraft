@@ -68,7 +68,7 @@ impl OpenSteps {
         let signed = file.signed;
         let checked = verify.then_some(file.report);
         super::super::component_link::resolve_design_links(&mut doc, Some(path));
-        let which = super::super::component_link::LinkedRead::read(p)?;
+        let which = super::super::component_link::LinkedRead::read(p, "doc.open")?;
         let linked = super::super::component_link::read_left_out_bodies(&mut doc, Some(path), validation, which);
         let linked_bodies = !std::mem::take(&mut doc.linked_bodies_left_out);
         // What `Session::opened` does before it evaluates.

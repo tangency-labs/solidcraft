@@ -1694,7 +1694,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let file = read_design(s, path, verify)?;
     let mut doc = file.doc;
     super::component_link::resolve_design_links(&mut doc, Some(path));
-    let which = super::component_link::LinkedRead::read(p)?;
+    let which = super::component_link::LinkedRead::read(p, "doc.open")?;
     let linked = super::component_link::read_left_out_bodies(&mut doc, Some(path), s.validation(), which);
     let opened = Session::opened_validating(doc, file.model.as_ref(), s.validation()).located_with(Some(path), file.chain.clone());
     opened_design(s, opened, path, read_only, disk, verify.then_some(file.report), file.chain, linked)

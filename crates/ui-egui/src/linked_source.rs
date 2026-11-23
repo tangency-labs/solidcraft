@@ -276,6 +276,9 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
 pub(crate) fn read(app: &mut SolveApp, components: Vec<u64>) {
     let mut request = crate::file_load::Request::new("", crate::file_load::Kind::UpdateLinks);
     request.options.insert("components".into(), json!(components));
+    // A linked design saved without the bodies of its own links reads them no further than this
+    // design's folder and its own: the user allowed those two, not what the design names.
+    request.options.insert("linked_bodies".into(), json!("folder"));
     request.design.clone_from(&app.session.path);
     let _ = crate::file_load::begin_request(app, request);
 }

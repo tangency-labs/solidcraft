@@ -1735,3 +1735,106 @@ fn designs_saved_without_linked_bodies_that_link_each_other_open_with_the_loop_r
     assert!(volume(&mut opened) >= 6000.0 - 1e-5);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A link made before links recorded which file they read cannot tell whether its file is still
+/// that one, so a save without linked bodies keeps its bodies until Update Links makes the record.
+#[test]
+fn a_save_without_linked_bodies_keeps_the_bodies_of_a_link_with_no_record_of_its_file() {
+    let dir = folder("left-out-no-record");
+    let source = dir.join("part.json");
+    part(&source, 30);
+    let mut s = Session::default();
+    run(&mut s, "component.insert_design", json!({"path": source}));
+    s.doc_mut().links.values_mut().for_each(|l| l.file_sha256 = None);
+    let file = dir.join("assembly.json");
+    let saved = run(&mut s, "file.save", json!({"path": file, "linked_bodies": false}));
+    assert!(saved["warnings"][0].as_str().is_some_and(|w| w.contains("no record")), "{saved}");
+    assert_eq!(linked_payloads(&file), [true]);
+    run(&mut s, "component.update_links", json!({}));
+    let saved = run(&mut s, "file.save", json!({}));
+    assert!(saved.get("warnings").is_none(), "{saved}");
+    assert_eq!(linked_payloads(&file), [false]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Two linked designs, both saved without linked bodies, that link the same part: opening the
+/// design above them reads that part once, not once for each way to it.
+#[test]
+fn a_part_that_two_linked_designs_saved_without_bodies_share_is_read_once() {
+    let dir = folder("left-out-shared");
+    let source = dir.join("part.json");
+    part(&source, 30);
+    let (_, left) = saved_without_linked_bodies(&dir, &source, "left.json");
+    let (_, right) = saved_without_linked_bodies(&dir, &source, "right.json");
+    let mut s = Session::default();
+    run(&mut s, "component.insert_design", json!({"path": left}));
+    run(&mut s, "component.insert_design", json!({"path": right, "translate": [500, 0, 0]}));
+    let file = dir.join("top.json");
+    run(&mut s, "file.save", json!({"path": file, "linked_bodies": false}));
+    assert_eq!(linked_payloads(&file), [false, false]);
+
+    let read = || super::EVALUATED.with(|n| n.replace(0));
+    read();
+    let mut opened = Session::default();
+    assert_eq!(run(&mut opened, "doc.open", json!({"path": file}))["errors"], 0);
+    assert_eq!(read(), 3, "left, right and the part they share");
+    // Each of the two: its own 10 x 10 x 10 box and the 10 x 20 x 30 part.
+    assert!((volume(&mut opened) - 14_000.0).abs() < 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// `linked_bodies: folder` holds for the designs a linked design reads in its turn: one saved
+/// without the bodies of a link outside the design's folder and its own is not read in part.
+#[test]
+fn a_linked_design_saved_without_bodies_reads_no_further_than_the_folders_allowed() {
+    let dir = folder("left-out-nested-folder");
+    let (project, elsewhere) = (dir.join("project"), dir.join("elsewhere"));
+    std::fs::create_dir_all(project.join("parts")).unwrap();
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let (near, far) = (project.join("parts").join("near.json"), elsewhere.join("far.json"));
+    part(&near, 30);
+    part(&far, 30);
+    let top = |middle: &Path, name: &str| {
+        let mut s = Session::default();
+        let component = run(&mut s, "component.insert_design", json!({"path": middle}))["component"].as_u64().unwrap();
+        let file = project.join(name);
+        run(&mut s, "file.save", json!({"path": file, "linked_bodies": false}));
+        (file, component)
+    };
+
+    // The linked design reaches out of the project folder.
+    let (_, reaching) = saved_without_linked_bodies(&project, &far, "reaching.json");
+    let (file, component) = top(&reaching, "top-reaching.json");
+    let mut opened = Session::default();
+    let reply = run(&mut opened, "doc.open", json!({"path": file, "linked_bodies": "folder"}));
+    assert_eq!(reply["errors"], 1, "{reply}");
+    assert!(reply["warnings"][0].as_str().is_some_and(|w| w.contains("another folder")), "{reply}");
+    assert!(volume(&mut opened).abs() < 1e-5, "none of the linked design comes in, not the part of it in the folder");
+    let held = opened.execute("component.update_links", &json!({"components": [component], "linked_bodies": "folder"})).unwrap_err().to_string();
+    assert!(held.contains("another folder"), "{held}");
+    assert!(volume(&mut opened).abs() < 1e-5);
+    // Update Links as the user runs it reads every file.
+    run(&mut opened, "component.update_links", json!({}));
+    assert!((volume(&mut opened) - 7000.0).abs() < 1e-5);
+    let mut all = Session::default();
+    assert_eq!(run(&mut all, "doc.open", json!({"path": file}))["errors"], 0);
+    assert!((volume(&mut all) - 7000.0).abs() < 1e-5);
+
+    // The linked design stays inside the project folder.
+    let (_, staying) = saved_without_linked_bodies(&project, &near, "staying.json");
+    let (file, _) = top(&staying, "top-staying.json");
+    let mut opened = Session::default();
+    assert_eq!(run(&mut opened, "doc.open", json!({"path": file, "linked_bodies": "folder"}))["errors"], 0);
+    assert!((volume(&mut opened) - 7000.0).abs() < 1e-5);
+
+    // A linked design in another folder, read because the caller chose it, reads its own folder.
+    let (_, away) = saved_without_linked_bodies(&elsewhere, &far, "away.json");
+    let (file, component) = top(&away, "top-away.json");
+    let mut opened = Session::default();
+    assert_eq!(run(&mut opened, "doc.open", json!({"path": file, "linked_bodies": "folder"}))["errors"], 1);
+    let read = run(&mut opened, "component.update_links", json!({"components": [component], "linked_bodies": "folder"}));
+    assert_eq!(read["failed"].as_array().map_or(0, Vec::len), 0, "{read}");
+    assert!((volume(&mut opened) - 7000.0).abs() < 1e-5);
+    assert!(opened.execute("component.update_links", &json!({"linked_bodies": "some"})).is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}

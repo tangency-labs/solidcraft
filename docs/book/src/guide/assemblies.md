@@ -524,7 +524,8 @@ be there: a part that cannot be read has no bodies, its feature says so, and **U
 reads it once the file is back. The assembly keeps the choice: later saves, **Save As** included,
 leave the bodies out until a save with `linked_bodies: true` puts them back. A link whose part
 file cannot be read when the assembly is saved keeps its bodies in the file, and the save says
-which. A `.sc` assembly saved this way has no saved model, so it is evaluated when it opens. A
+which. So does a link whose part file changed since the assembly read it, and a link from an
+older SolidCraft that kept no record of the file it read: run **Update Links**, then save again. A `.sc` assembly saved this way has no saved model, so it is evaluated when it opens. A
 part that is a plain `.json` design is evaluated the first time it is read this way, and that
 evaluation is kept on this computer with the reused imports (**Clear Reused Imports** removes
 them), so later opens read an unchanged part without building it again. The
@@ -539,6 +540,9 @@ on; **Not now** leaves them out of date, and **Update Links** reads them wheneve
 An assembly saved without the bodies of its linked parts follows the same rule: parts in another
 folder have no bodies until you answer **Load**. A script or agent that opens it with `doc.open`
 reads every linked part it may read; `linked_bodies: "folder"` keeps to the assembly's own folder.
+A linked part that was itself saved without the bodies of its own linked parts follows the rule
+too: read by itself, it reads them only from the assembly's folder or its own. One that reaches
+further is not read in part; its feature says so, and **Update Links** reads all of it.
 The folders you allowed are kept in your own settings, never in a design, and are listed under
 Preferences › General › Files, where you can remove one or forget them all.
 A design opened by a program (the command line, an MCP client, the control channel or the
