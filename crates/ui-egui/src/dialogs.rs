@@ -5084,9 +5084,12 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
             opts.direction = fresh.direction;
         }
         (
-            Kind::Surface(crate::dialogs_surface::Surf::Trim { direction, .. }),
-            Kind::Surface(crate::dialogs_surface::Surf::Trim { direction: fresh, .. }),
-        ) => *direction = *fresh,
+            Kind::Surface(crate::dialogs_surface::Surf::Trim { direction, face_normal, .. }),
+            Kind::Surface(crate::dialogs_surface::Surf::Trim { direction: fresh, face_normal: fresh_normal, .. }),
+        ) => {
+            *direction = *fresh;
+            *face_normal = *fresh_normal;
+        }
         (Kind::Sheet(crate::dialogs_sheet::Sm::Flange { own, .. }), Kind::Sheet(crate::dialogs_sheet::Sm::Flange { own: fresh, .. })) => {
             *own = fresh.clone();
         }

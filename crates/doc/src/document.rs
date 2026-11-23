@@ -2714,7 +2714,7 @@ impl FilletStyle {
 
 /// Sketch curves a trim cuts with: chains of the curves `curves` (every curve of the sketch
 /// that is not construction geometry when empty) swept along `direction` (the sketch's normal
-/// when none) onto the surface.
+/// when none) onto the surface, or with `face_normal` dropped square onto it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 pub struct TrimCurves {
     pub sketch: SketchId,
@@ -2722,6 +2722,11 @@ pub struct TrimCurves {
     pub curves: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub direction: Option<Dir>,
+    /// The curves are projected along the surface's own normal, not along one direction: each
+    /// point of a curve goes to its foot on the surface (its nearest point there), wherever
+    /// the sketch lies. `direction` then has no say.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub face_normal: bool,
 }
 
 /// What of the tool body cuts in a Split Body by a face (#9305).
