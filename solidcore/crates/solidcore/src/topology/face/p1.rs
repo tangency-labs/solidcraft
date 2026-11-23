@@ -2806,34 +2806,40 @@ pub fn complete_imported_face_seams(
         // would leave a loop's consecutive uses a whole period apart. The edit is then
         // undone and the seam kept, as it was imported.
         let replaced = b.with_rollback(
-            |b| complete_face_seams_edit(k, b, f, &redundant),
-            |r| matches!(r, Ok((_, true))),
+            |b| complete_face_seams_edit(k, b, f, &redundant, false),
+            |r| matches!(r, Ok(Some((_, true)))),
         )?;
-        if replaced.1 {
-            return Ok(Some(replaced.0));
+        if let Some((faces, true)) = replaced {
+            return Ok(Some(faces));
         }
         if !needs_completion {
             return Ok(None);
         }
         // With its seam kept the face's trims may still not be movable one by one into the
         // base period (a loop continuing across the cut with no edge there): the face is
-        // then left as imported, and the caller's own checks decide about the record.
-        let kept = b.with_rollback(|b| complete_face_seams_edit(k, b, f, &[]), Result::is_ok);
-        return Ok(kept.ok().map(|(faces, _)| faces));
+        // then left as imported, and the caller's own checks decide about the record. Any
+        // other failure (a cancellation, say) is the caller's, and the body is put back.
+        let kept = b.with_rollback(
+            |b| complete_face_seams_edit(k, b, f, &[], true),
+            |r| matches!(r, Ok(Some(_))),
+        )?;
+        return Ok(kept.map(|(faces, _)| faces));
     }
-    complete_face_seams_edit(k, b, f, &[]).map(|(faces, _)| Some(faces))
+    Ok(complete_face_seams_edit(k, b, f, &[], false)?.map(|(faces, _)| faces))
 }
 
 /// The edit of [`complete_imported_face_seams`]: delete the `redundant` internal seams,
 /// insert the natural seam where the classification finds one missing or crossed, and
 /// translate every trim piece into the base period. Returns the pieces of `f` and whether a
-/// seam was inserted.
+/// seam was inserted; `None` where `untranslatable_is_none` and a trim cannot be moved into
+/// the base period (the one failure that is not an error then).
 fn complete_face_seams_edit(
     k: &mut Kernel,
     b: &mut Brep,
     f: FaceId,
     redundant: &[EdgeId],
-) -> Result<(Vec<FaceId>, bool)> {
+    untranslatable_is_none: bool,
+) -> Result<Option<(Vec<FaceId>, bool)>> {
     use crate::topology::brep::p1::HealLoopHandle;
     use crate::topology::brep::p4::{delete_edge, DeleteEnv};
 
@@ -2882,20 +2888,23 @@ fn complete_face_seams_edit(
         }
         if !redundant.is_empty() && !inserted {
             // Nothing replaces the deleted seams: the caller undoes this edit.
-            return Ok((faces, false));
+            return Ok(Some((faces, false)));
         }
         for &face in &faces {
             for eu in super::p4::upward_edgeuses(b, face, false, None)? {
                 let mut trim = get_or_create_uv_trim_curve(k, b, eu)?;
-                let shift = imported_trim_shift(k, b, face, &trim)?.ok_or_else(|| {
-                    SolidError::topology(
+                let Some(shift) = imported_trim_shift(k, b, face, &trim)? else {
+                    if untranslatable_is_none {
+                        return Ok(None);
+                    }
+                    return Err(SolidError::topology(
                         OP,
                         TopologyFailure::Defect {
                             why: "the imported face's seam edit left a trim crossing the base \
                                   period, though the seam classification split its boundary",
                         },
-                    )
-                })?;
+                    ));
+                };
                 if shift != Vec3::ZERO {
                     let mut axis = Axis2Placement::default();
                     axis.set_canonical(shift, Vec3::X, Vec3::Y)?;
@@ -2944,7 +2953,7 @@ fn complete_face_seams_edit(
                 calculate_uv_domain_from_uv_trim_curves(k, b, face, true, false, false)?.domain;
             fp2::set_uv_domain(b, face, &domain)?;
         }
-        Ok((faces, inserted))
+        Ok(Some((faces, inserted)))
     })
 }
 
