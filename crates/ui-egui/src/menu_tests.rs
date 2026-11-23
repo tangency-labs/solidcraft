@@ -1503,14 +1503,16 @@ fn origin_point_in_browser_picks_into_snap_points_input() {
     let mut h = crate::scenario::Harness::new();
     h.settle();
 
-    // Start Offset Plane dialog: input 0 is Plane (PLANES), input 1 is "Through point" (SNAP_POINTS).
+    // Start Offset Plane dialog: input 0 is Plane (PLANES); "Through point" (SNAP_POINTS) comes
+    // after the Axis it shares with Plane at Angle (#12038).
     h.app.start("construct.plane.offset");
     h.frames(1);
     assert!(h.app.dialog.is_some(), "Offset Plane dialog is open");
 
     // Activate the "Through point" input which accepts SNAP_POINTS
     let d = h.app.dialog.as_mut().unwrap();
-    d.active = 1;
+    let through = d.inputs.iter().position(|i| i.label == "Through point").expect("a Through point input");
+    d.active = through;
 
     // Ensure the Origin folder is open
     if !crate::browser::is_open(&h.app, "origin", false) {
@@ -1522,7 +1524,7 @@ fn origin_point_in_browser_picks_into_snap_points_input() {
 
     let d = h.app.dialog.as_ref().unwrap();
     assert_eq!(
-        d.inputs[1].items,
+        d.inputs[through].items,
         vec![solidcraft_engine::Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }],
         "Through point input (SNAP_POINTS) takes the origin point O"
     );
