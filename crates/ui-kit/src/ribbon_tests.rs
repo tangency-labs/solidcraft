@@ -515,7 +515,7 @@ fn the_selected_tab_highlight_slides_dimmed_to_a_new_tab_and_lands_at_full_stren
 /// new tab at full strength.
 #[test]
 fn without_motion_the_highlight_jumps_to_the_clicked_tab() {
-    let rig = TabsRig::new();
+    let rig = TabsRig::with_slide(900.0, crate::SlidingHighlight::new(0.0));
     rig.click("t:tab_rect:TWO");
     let two = solidcraft_ui_registry::rect_of("t:tab_rect:TWO").expect("the second tab is drawn");
     assert_eq!(rig.active.get(), "TWO");
