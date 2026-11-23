@@ -3483,10 +3483,11 @@ pub(crate) mod tests {
     #[test]
     fn a_failed_boundary_intersection_keeps_its_cause() {
         let cause = SolidError::query(OP_CURVE, QueryFailure::FaceWithoutSurface);
-        let refused = cause.is_refusal();
+        // invalid input is neither a refusal nor a defect, so neither is the wrapper
+        assert!(!cause.is_refusal() && !cause.is_defect());
         let e = boundary_not_intersected(cause);
         assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
-        assert_eq!(e.is_refusal(), refused);
+        assert!(!e.is_refusal());
         assert!(!e.is_defect());
         assert_eq!(
             e.query_failure(),
@@ -3507,6 +3508,17 @@ pub(crate) mod tests {
         let e = boundary_not_intersected(defect);
         assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
         assert!(e.is_defect());
+        // a refusal cause makes the wrapper a refusal, keeping its own class
+        let refusal = SolidError::blend(
+            "blend::op",
+            crate::error::blend::BlendFailure::NoRoom(
+                crate::blend::fillet_executive::NoRoomReason::TangentContinuationEndUnsupported,
+            ),
+        );
+        assert!(refusal.is_refusal());
+        let e = boundary_not_intersected(refusal);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert!(e.is_refusal() && !e.is_defect());
     }
 
     /// Each broken link of the caller's body the boundary walk reads is named, keeping
