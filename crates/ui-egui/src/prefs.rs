@@ -2129,6 +2129,17 @@ preference_settings! {
     /// How large constraint glyphs are drawn: a multiple of their 15-pixel badge, letter and icon
     /// included, so they can be read at any zoom (#10794). 1 (the default) is the size they always had.
     constraint_glyph_scale: f32 = 1.0, PAGE_SKETCH, accept(crate::sketch_tools::GLYPH_SCALES) => slider("prefs.constraint_glyph_size", crate::sketch_tools::GLYPH_SCALES, 0.25, |v| format!("{:.0}%", v * 100.0), "prefs:constraint_glyph_size");
+    /// Group constraint glyphs on the same curve or coincident point cluster when more than this
+    /// many share the geometry (`10` = Never, preserving the ungrouped view).
+    constraint_group_threshold: u8 = 2, PAGE_SKETCH, accept(crate::sketch_tools::CONSTRAINT_GROUP_THRESHOLD_RANGE) => slider("prefs.constraint_group_threshold", crate::sketch_tools::CONSTRAINT_GROUP_THRESHOLD_RANGE, 1.0, crate::sketch_tools::format_group_threshold, "prefs:constraint_group_threshold");
+    /// Right-clicking a constraint glyph deletes it directly instead of opening its context menu.
+    right_click_deletes_constraint: bool = true, PAGE_SKETCH;
+    /// Hovering over a sketch curve or point for 400 ms highlights its constraints and expands any
+    /// collapsed groups containing them.
+    show_constraints_on_geometry_hover: bool = true, PAGE_SKETCH;
+    /// When `show_constraints_on_geometry_hover` is enabled, hide healthy unselected constraints
+    /// until a geometry is hovered for 400 ms (or locked via selection).
+    only_show_constraints_on_geometry_hover: bool = false, PAGE_SKETCH;
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
     drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
     /// While Move's triad drags a component drawn as a layer of its own, what is under the pointer
@@ -4627,6 +4638,9 @@ pub fn migrate(mut p: Prefs) -> Prefs {
     if !accepted::constraint_glyph_scale(&p) {
         p.constraint_glyph_scale = Prefs::default().constraint_glyph_scale;
     }
+    if !accepted::constraint_group_threshold(&p) {
+        p.constraint_group_threshold = Prefs::default().constraint_group_threshold;
+    }
     if !accepted::dimension_text_scale(&p) {
         p.dimension_text_scale = Prefs::default().dimension_text_scale;
     }
@@ -4878,6 +4892,9 @@ fn prepare_preferences(
     }
     if !accepted::constraint_glyph_scale(&new) {
         return Err("`constraint_glyph_scale` must be 1…3".into());
+    }
+    if !accepted::constraint_group_threshold(&new) {
+        return Err("`constraint_group_threshold` must be 1…10 (10 = Never)".into());
     }
     if !accepted::dimension_text_scale(&new) {
         return Err("`dimension_text_scale` must be 0.5…2.5".into());
@@ -7528,6 +7545,10 @@ mod tests {
             ("sketch_conflict_colour", json!(false), PAGE_SKETCH),
             ("hide_constraint_glyphs_zoomed_out", json!(false), PAGE_SKETCH),
             ("constraint_glyph_scale", json!(2.0), PAGE_SKETCH),
+            ("constraint_group_threshold", json!(5), PAGE_SKETCH),
+            ("right_click_deletes_constraint", json!(false), PAGE_SKETCH),
+            ("show_constraints_on_geometry_hover", json!(false), PAGE_SKETCH),
+            ("only_show_constraints_on_geometry_hover", json!(true), PAGE_SKETCH),
             ("suppress_sketch_snap", json!(ModifierCombo::NONE), PAGE_SKETCH),
             ("sketch_state_icons", json!(false), PAGE_SKETCH),
             ("sketch_mirror_auto_line", json!(false), PAGE_SKETCH),
@@ -9153,6 +9174,9 @@ mod tests {
                 ("prefer_free_sketch_points", "prefs.sketch.prefer_free_points"),
                 ("select_3d_curve_points", "prefs.sketch.select_3d_curve_points"),
                 ("select_other_hidden", "prefs.sketch.select_other_hidden"),
+                ("right_click_deletes_constraint", "prefs.right_click_deletes_constraint"),
+                ("only_show_constraints_on_geometry_hover", "prefs.only_show_constraints_on_geometry_hover"),
+                ("show_constraints_on_geometry_hover", "prefs.show_constraints_on_geometry_hover"),
                 ("manipulator_free_alt", "prefs.alt_frees_manipulators"),
             ] {
                 h.app.prefs_window.shell.filter = h.app.tr(label).into();
@@ -13055,6 +13079,23 @@ mod tests {
         }
         assert_eq!(app.preferences.constraint_glyph_scale, 2.0, "a refused value changes nothing");
         assert_eq!(migrate(lenient(&json!({"constraint_glyph_scale": 40.0}))).constraint_glyph_scale, 1.0);
+    }
+
+    #[test]
+    fn constraint_group_threshold_stays_in_range_and_formats_never() {
+        assert_eq!(Prefs::default().constraint_group_threshold, 2);
+        assert!(Prefs::default().right_click_deletes_constraint);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        set(&mut app, &json!({"constraint_group_threshold": 10})).unwrap();
+        assert_eq!(app.preferences.constraint_group_threshold, 10);
+        assert_eq!(crate::sketch_tools::format_group_threshold(10.0), app.tr("prefs.constraint_group_never"));
+        assert_eq!(crate::sketch_tools::format_group_threshold(3.0), "3");
+        for bad in [0, 11, 255] {
+            assert!(set(&mut app, &json!({"constraint_group_threshold": bad})).is_err(), "{bad} is refused");
+        }
+        assert_eq!(app.preferences.constraint_group_threshold, 10);
+        assert_eq!(migrate(lenient(&json!({"constraint_group_threshold": 0}))).constraint_group_threshold, 2);
+        assert_eq!(migrate(lenient(&json!({"constraint_group_threshold": 99}))).constraint_group_threshold, 2);
     }
 
     #[test]
