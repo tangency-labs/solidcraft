@@ -951,6 +951,29 @@ fn one_corner_is_coped_by_its_override() {
     }
 }
 
+/// Angle iron coped at a rectangle's butts fills each corner: an angle is open on one side, and a cope that stopped
+/// halfway through the through member would leave its upright leg short of the other's. Each post runs on to both
+/// rails' far faces (450 mm of section, 50 × 5 + 45 × 5) less what lies in each rail there: where both bottom legs
+/// are (5 mm high) 50 × 50, above it the two upright legs' 5 × 5, 45 mm high. The rails run through, 650 mm whole.
+#[test]
+fn a_coped_angle_fills_the_corner_without_gaps() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let angle = json!({"kind": "angle", "width": 50, "height": 50, "thickness": 5, "root_radius": 0, "toe_radius": 0});
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": angle, "corner": "butt", "coped": true}));
+    let area = 475.0;
+    let corner = 50.0 * 50.0 * 5.0 + 5.0 * 5.0 * 45.0;
+    let b = bodies(&mut s);
+    for rail in [&b[0], &b[2]] {
+        assert!(rel(rail.1, area * 650.0) < 1e-9, "{rail:?}");
+    }
+    for post in [&b[1], &b[3]] {
+        assert!(rel(post.1, area * 450.0 - 2.0 * corner) < 1e-9, "the post fills each corner: {post:?}");
+        // Its upright leg reaches the rails' upright legs (outer faces at y = -25 and 425, 5 mm thick).
+        assert!((post.2[1] + 20.0).abs() < 1e-6 && (post.3[1] - 420.0).abs() < 1e-6, "{post:?}");
+    }
+}
+
 #[test]
 fn a_coped_round_tube_is_fishmouthed() {
     let mut s = Session::default();
