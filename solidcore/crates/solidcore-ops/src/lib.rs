@@ -104,7 +104,8 @@ pub use blend::{
     EndRoom, Hole, HoleEdge, Room, SetBack, Turn,
 };
 pub use body::{
-    make_box, make_cone, make_cylinder, make_sphere, make_torus, Body, Contract, TurnedOver,
+    backward_sheet_faces, make_box, make_cone, make_cylinder, make_sphere, make_torus, Body,
+    Contract, TurnedOver,
 };
 pub use boolean::BooleanOp;
 pub use check::{CheckLevel, CheckReport};
