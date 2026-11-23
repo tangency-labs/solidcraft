@@ -257,10 +257,10 @@ fn thin_extrude_picked_by_curves_takes_a_parallel_plane_as_its_to_object() {
     h.frames(4);
     assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
     let state = crate::open_meshing::session_world(&h.app.session);
-    let volume: f64 = state.bodies.iter().filter_map(|b| solidcraft_engine::doc::kernel::measure(&b.body).ok()).map(|m| m.volume).sum();
-    // The box, the cylinder and a 2 mm wall centred on the 10 x 10 outline, 12.345678 mm deep.
-    let expected = 8000.0 + std::f64::consts::PI * 25.0 * 30.0 + (12.0 * 12.0 - 8.0 * 8.0) * 12.345678;
-    assert!((volume - expected).abs() < 1.0, "{volume}");
+    let volume: f64 = state.bodies.iter().map(|b| solidcraft_engine::doc::kernel::measure(&b.body).unwrap().volume).sum();
+    // The box (8000), the cylinder (750 pi) and a 2 mm wall centred on the 10 x 10 outline,
+    // 12.345678 mm deep ((12^2 - 8^2) x 12.345678): a fixed reference, mm^3.
+    assert!((volume - 11343.848730).abs() < 1.0, "{volume}");
 }
 
 /// A snap point (the end of a sketch line, woken by hovering the line) reaches the dialog as a
