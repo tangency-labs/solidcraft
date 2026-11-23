@@ -3420,6 +3420,75 @@ fn access_texture(device: &wgpu::Device, queue: Option<&wgpu::Queue>, bgl: &wgpu
 
 pub const SHADER: &str = include_str!("../shaders/viewport.wgsl");
 
+/// A surface's position marked `@invariant` in both stages, as the viewport shader marks it.
+const INVARIANT_PROBE: &str = r#"
+struct O { @invariant @builtin(position) pos: vec4<f32>, @location(0) c: vec4<f32> };
+@vertex
+fn vs(@builtin(vertex_index) i: u32) -> O {
+    var o: O;
+    o.pos = vec4<f32>(f32(i & 1u), f32(i >> 1u), 0.0, 1.0);
+    o.c = vec4<f32>(1.0);
+    return o;
+}
+@fragment
+fn fs(i: O) -> @location(0) vec4<f32> {
+    return i.c * i.pos.w;
+}
+"#;
+
+/// The OpenGL driver refuses a program whose fragment stage reads an invariant position. naga
+/// declares `invariant gl_FragCoord;` there on desktop GL, which GLSL before 4.20 does not allow
+/// on an input; some older drivers (Radeon HD 6000 and HD 7500 on Windows, #11357) reject it, and
+/// every pipeline of the viewport shader fails, so nothing but the overlay draws. Only GL asks:
+/// every other backend, and a GL driver that links the probe, keeps the shader as it is.
+fn gl_refuses_invariant(device: &wgpu::Device) -> bool {
+    let info = device.adapter_info();
+    if info.backend != wgpu::Backend::Gl {
+        return false;
+    }
+    let built = allocated(device, || {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("sc_invariant_probe"),
+            source: wgpu::ShaderSource::Wgsl(INVARIANT_PROBE.into()),
+        });
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("sc_invariant_probe"),
+            layout: None,
+            vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), buffers: &[], compilation_options: Default::default() },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs"),
+                targets: &[Some(wgpu::TextureFormat::Rgba8Unorm.into())],
+                compilation_options: Default::default(),
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
+    });
+    match built {
+        Ok(_) => false,
+        Err(e) => {
+            log::warn!("the viewport is drawn without invariant positions on {} (its OpenGL driver refuses them): {e}", info.name);
+            true
+        }
+    }
+}
+
+/// [`SHADER`] for `device`: as written, or without `@invariant` where the GL driver refuses it
+/// ([`gl_refuses_invariant`]). Without it the AO term pass may lose a fragment to a depth that
+/// differs in its last bit, as before #9335; with it nothing draws there at all.
+pub(crate) fn viewport_shader(device: &wgpu::Device) -> std::borrow::Cow<'static, str> {
+    if gl_refuses_invariant(device) { without_invariant(SHADER).into() } else { SHADER.into() }
+}
+
+/// `source` with no position marked `@invariant`.
+fn without_invariant(source: &str) -> String {
+    source.replace("@invariant", "")
+}
+
 /// The layout of group 0 (the uniform, a palette and its materials, the studio, the motions)
 /// with the studio and the motion table every group-0 bind group carries.
 pub(crate) struct Group0 {
@@ -3640,7 +3709,8 @@ impl Renderer {
     /// kind. When the two differ (a 1× window pass with no depth, say, and a multisampled scene
     /// target), the scene is always drawn offscreen and blitted into the window's pass.
     pub fn with_window_target(device: &wgpu::Device, t: GpuTarget, window: GpuTarget, tess: Option<crate::TessGpu>) -> Self {
-        let source = format!("{SHADER}\n{}", pbr::SOURCE);
+        let shader = viewport_shader(device);
+        let source = format!("{shader}\n{}", pbr::SOURCE);
         let module =
             device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("sc_viewport"), source: wgpu::ShaderSource::Wgsl(source.into()) });
         let studio_layout = Environment::layout_entries();
@@ -4250,7 +4320,7 @@ impl Renderer {
             // which read a storage buffer in the vertex stage), only where the device can.
             let edge_layout = edges::supported(device).then(|| edges::bind_layout(device));
             let edge_pipes = edge_layout.as_ref().map(|edge_bgl| {
-                let source = format!("{SHADER}\n{}\n{}", pbr::SOURCE, edges::SHADER);
+                let source = format!("{shader}\n{}\n{}", pbr::SOURCE, edges::SHADER);
                 let module = device
                     .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("sc_edges"), source: wgpu::ShaderSource::Wgsl(source.into()) });
                 let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -6465,6 +6535,78 @@ mod tests {
     fn shader_is_valid() {
         let module = naga::front::wgsl::parse_str(super::SHADER).unwrap_or_else(|e| panic!("{}", e.emit_to_string(super::SHADER)));
         naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
+    }
+
+    /// The shader a GL driver that refuses invariant positions gets (#11357) still validates, and
+    /// no stage of it has an invariant position left for naga to declare on `gl_FragCoord`.
+    #[test]
+    fn the_shader_without_invariant_positions_is_valid_and_has_none() {
+        let source = format!("{}\n{}", super::without_invariant(super::SHADER), crate::pbr::SOURCE);
+        let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
+        let invariant = |ty: naga::Handle<naga::Type>, binding: Option<&naga::Binding>| {
+            let own = matches!(binding, Some(naga::Binding::BuiltIn(naga::BuiltIn::Position { invariant: true })));
+            let member = match &module.types[ty].inner {
+                naga::TypeInner::Struct { members, .. } => {
+                    members.iter().any(|m| matches!(m.binding, Some(naga::Binding::BuiltIn(naga::BuiltIn::Position { invariant: true }))))
+                }
+                _ => false,
+            };
+            own || member
+        };
+        let mut stages = 0;
+        for ep in &module.entry_points {
+            stages += 1;
+            assert!(!ep.function.arguments.iter().any(|a| invariant(a.ty, a.binding.as_ref())), "{} reads an invariant position", ep.name);
+            if let Some(r) = &ep.function.result {
+                assert!(!invariant(r.ty, r.binding.as_ref()), "{} writes an invariant position", ep.name);
+            }
+        }
+        assert!(stages > 10, "the shader's entry points were read");
+        // The full shader does mark them, so the test above checks something.
+        assert!(super::SHADER.contains("@invariant"));
+    }
+
+    /// Each fragment stage of `source` as wgpu's desktop GL backend hands it to a GLSL 4.10 driver
+    /// (the Radeon HD 6290 and HD 7500 report 4.x), by entry point name.
+    fn desktop_gl_fragments(source: &str) -> Vec<(String, String)> {
+        use naga::back::glsl;
+        let module = naga::front::wgsl::parse_str(source).unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)));
+        let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all()).validate(&module).unwrap();
+        let options = glsl::Options { version: glsl::Version::Desktop(410), ..Default::default() };
+        module
+            .entry_points
+            .iter()
+            .filter(|ep| ep.stage == naga::ShaderStage::Fragment)
+            .map(|ep| {
+                let pipeline = glsl::PipelineOptions { shader_stage: naga::ShaderStage::Fragment, entry_point: ep.name.clone(), multiview: None };
+                let mut out = String::new();
+                glsl::Writer::new(&mut out, &module, &info, &options, &pipeline, naga::proc::BoundsCheckPolicies::default())
+                    .and_then(|mut w| w.write().map(|_| ()))
+                    .unwrap_or_else(|e| panic!("{}: {e}", ep.name));
+                (ep.name.clone(), out)
+            })
+            .collect()
+    }
+
+    /// The line older OpenGL drivers refuse (#11357): GLSL before 4.20 allows `invariant` only on
+    /// outputs, and naga declares the fragment's `gl_FragCoord` invariant when its position is.
+    const REFUSED: &str = "invariant gl_FragCoord";
+
+    /// The probe asks the driver about the exact line the full shader's fragments carry, and the
+    /// fallback shader carries it in no fragment stage. If naga stops writing the line, the first
+    /// two checks say the probe and the fallback are no longer needed.
+    #[test]
+    fn on_desktop_gl_the_fallback_has_no_invariant_frag_coord_and_the_probe_does() {
+        let probe = desktop_gl_fragments(super::INVARIANT_PROBE);
+        assert!(probe.iter().all(|(_, glsl)| glsl.contains(REFUSED)), "the probe's fragment declares {REFUSED}");
+        let full = desktop_gl_fragments(&format!("{}\n{}", super::SHADER, crate::pbr::SOURCE));
+        assert!(full.iter().any(|(_, glsl)| glsl.contains(REFUSED)), "the viewport shader's fragments declare {REFUSED} today");
+        let fallback = desktop_gl_fragments(&format!("{}\n{}", super::without_invariant(super::SHADER), crate::pbr::SOURCE));
+        assert_eq!(fallback.len(), full.len());
+        for (name, glsl) in &fallback {
+            assert!(!glsl.contains(REFUSED), "{name} still declares {REFUSED}");
+        }
     }
 
     /// The ambient occlusion sample count rides in the uniform's `ao.y`, beside the radius, kept

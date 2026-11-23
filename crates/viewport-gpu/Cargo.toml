@@ -29,5 +29,5 @@ wgpu = { workspace = true, features = ["metal", "vulkan", "dx12"] }
 wgpu = { workspace = true, features = ["gles"] }
 
 [dev-dependencies]
-# The HLSL the D3D12 backend compiles (tests check it suits FXC).
-naga = { workspace = true, features = ["wgsl-in", "hlsl-out"] }
+# The HLSL the D3D12 backend compiles (tests check it suits FXC), and the GLSL the GL backend does.
+naga = { workspace = true, features = ["wgsl-in", "hlsl-out", "glsl-out"] }

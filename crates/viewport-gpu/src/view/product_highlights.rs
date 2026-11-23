@@ -77,7 +77,7 @@ impl DepthPipelines {
         // Its palette may be translucent, unlike ordinary opaque model instances.
         let feedback_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("sc_product_highlight_instanced"),
-            source: wgpu::ShaderSource::Wgsl(format!("{SHADER}\n{}", pbr::SOURCE).into()),
+            source: wgpu::ShaderSource::Wgsl(format!("{}\n{}", viewport_shader(device), pbr::SOURCE).into()),
         });
         let feedback = |source: TriSource| {
             let fragment = source.fragment("fs_tri");
