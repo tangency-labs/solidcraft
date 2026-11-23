@@ -1096,6 +1096,41 @@ fn prism(n: u32) -> Session {
     mesh_design(positions, triangles)
 }
 
+/// A slot's outline as a mesh without normals, 30 mm tall: a 30 mm bottom, a round of radius 3
+/// that runs on tangentially into one of radius 6, the top, and a flat left side; each side a
+/// quad of two triangles, a fan at each end. Its rounds' facets stray 3·(1 − cos 2.25°) = 0.0023
+/// mm from them, within an STL export's chord.
+fn slot_with_two_rounds() -> Session {
+    let mut outline: Vec<[f64; 2]> = vec![[0., 0.]];
+    let arc = |c: [f64; 2], r: f64, from: f64| {
+        (0..20).map(move |k| (from + 4.5 * f64::from(k)).to_radians()).map(move |a| [c[0] + r * a.cos(), c[1] + r * a.sin()])
+    };
+    outline.extend(arc([30., 3.], 3., -90.));
+    outline.extend(arc([27., 3.], 6., 0.));
+    outline.extend([[27., 9.], [0., 9.]]);
+    let n = u32::try_from(outline.len()).unwrap();
+    let ring = |z: f64| outline.clone().into_iter().flat_map(move |[x, y]| [x, y, z]);
+    let positions: Vec<f64> = ring(0.).chain(ring(30.)).chain([15., 4.5, 0., 15., 4.5, 30.]).collect();
+    let (bottom, top) = (2 * n, 2 * n + 1);
+    let mut triangles = Vec::new();
+    for k in 0..n {
+        let j = (k + 1) % n;
+        triangles.extend([k, j, n + j, k, n + j, n + k, bottom, j, k, top, n + k, n + j]);
+    }
+    mesh_design(positions, triangles)
+}
+
+/// Where two rounds of a mesh without normals meet, each arc ends on its own fitted circle, a
+/// few microns from the other's end: the outline did not close, and the sketch had nothing to
+/// extrude. The two ends now meet, and each arc keeps its radius.
+#[test]
+fn a_mesh_section_closes_where_two_rounds_meet() {
+    let si = fit_section_at(&mut slot_with_two_rounds(), "Mesh", 10.0);
+    assert!(ends_meet(&si), "{si}");
+    let radii: Vec<f64> = si["curves"].as_array().unwrap().iter().filter(|c| c["type"] == "arc").map(|c| c["radius"].as_f64().unwrap()).collect();
+    assert!([3., 6.].iter().all(|r| radii.iter().any(|q| (q - r).abs() < 0.01)), "{si}");
+}
+
 /// A prism's mesh cut across. With 48 sides it stands for a cylinder: its facets stray from one
 /// by 7·(1 − cos 3.75°) = 0.015 mm, within an STL export's chord (2e-4 of its 36.2 mm box
 /// diagonal) of the surface the section takes from them, and its section is one circle through

@@ -1916,6 +1916,8 @@ fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
             },
             None,
         )
@@ -1964,6 +1966,8 @@ fn a_patterned_modelled_thread_reuses_its_final_check() {
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
             },
             None,
         )
@@ -2824,6 +2828,81 @@ fn many_copies_cut_in_groups_leave_what_one_cut_leaves() {
     assert_eq!(names, one_names);
 }
 
+/// A 60 x 60 x 3 plate cut through by one sketch of `n` x `n` separate 2 mm squares, 4 mm apart,
+/// with at most `shells` shells in one joined tool: the plate's volume, its face count and the
+/// extrude's error.
+fn plate_cut_by_squares(n: usize, shells: usize) -> (f64, usize, Option<String>) {
+    super::JOINED_SHELLS_LIMIT.with(|l| l.set(shells));
+    let mut doc = Document::new("squares");
+    let kind = FeatureKind::Box {
+        corner: point_expr(Vec3::ZERO),
+        length: "60".into(),
+        width: "60".into(),
+        height: "3".into(),
+        operation: Operation::NewBody,
+        centred: false,
+    };
+    doc.add_feature(kind, Some("Plate")).unwrap();
+    let mut sk = Sketch::new();
+    for (i, j) in (0..n).flat_map(|i| (0..n).map(move |j| (i, j))) {
+        let (x, y) = (2.0 + 4.0 * i as f64, 2.0 + 4.0 * j as f64);
+        let p = [(x, y), (x + 2.0, y), (x + 2.0, y + 2.0), (x, y + 2.0)].map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap());
+        for k in 0..4 {
+            sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+        }
+    }
+    let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+    let kind = FeatureKind::Extrude {
+        thin: None,
+        sketch: SketchId(sketch),
+        profiles: ProfileSel::All,
+        extent: serde_json::from_value(serde_json::json!({"distance": "3"})).unwrap(),
+        operation: Operation::Cut,
+        targets: vec![],
+    };
+    doc.add_feature(kind, Some("Squares")).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    super::JOINED_SHELLS_LIMIT.with(|l| l.set(super::MAX_JOINED_SHELLS));
+    let error = model.results.iter().find_map(|r| r.error.clone());
+    let st = model.state();
+    let faces = st.bodies.first().map_or(0, |b| b.body.face_count());
+    (disc_volume(&model), faces, error)
+}
+
+#[test]
+fn profiles_apart_past_one_tools_shells_cut_in_groups() {
+    // 25 squares apart, joined into tools of at most 8 shells: four tools, each cut in turn, as
+    // more than 1024 squares are cut with the kernel's own limit (#20398: 1369 squares ended in
+    // "pieces: portable B-rep: shell count"). The plate comes out as one cut of all of them
+    // leaves it.
+    let (volume, faces, error) = plate_cut_by_squares(5, 8);
+    let (one_volume, one_faces, one_error) = plate_cut_by_squares(5, usize::MAX);
+    assert_eq!((error, one_error), (None, None));
+    let plate = 60.0 * 60.0 * 3.0 - 25.0 * 4.0 * 3.0;
+    assert!((volume - plate).abs() < 1e-6 * plate && (one_volume - plate).abs() < 1e-6 * plate, "{volume} {one_volume} vs {plate}");
+    assert_eq!((faces, one_faces), (6 + 25 * 4, 6 + 25 * 4));
+}
+
+#[test]
+fn more_profiles_apart_than_one_record_holds_join_into_several_tools() {
+    // 1100 boxes apart, each one shell: more than one body's record takes, so they come out as
+    // two tools, each of at most that many shells, together all the boxes' faces.
+    let tools: Vec<crate::lineage::Traced> = (0..1100)
+        .map(|i| {
+            let (x, y) = (3.0 * (i % 40) as f64, 3.0 * (i / 40) as f64);
+            crate::lineage::Traced::unnamed(kernel::box_solid(Vec3::new(x, y, 0.0), Vec3::new(x + 1.0, y + 1.0, 1.0)).unwrap())
+        })
+        .collect();
+    let bodies: Vec<kernel::Body> = tools.iter().map(|t| t.body.clone()).collect();
+    let one = kernel::join_apart(&bodies).map(|_| ()).map_err(|e| e.to_string());
+    assert!(one.as_ref().is_err_and(|e| e.contains("shell count")), "{one:?}");
+    let joined = super::join_apart_tools(tools).unwrap();
+    let shells: Vec<usize> = joined.iter().map(|t| t.body.record().shells.len()).collect();
+    assert_eq!(shells, vec![550, 550]);
+    assert_eq!(joined.iter().map(|t| t.body.face_count()).sum::<usize>(), 6 * 1100);
+}
+
 /// A ring (25 mm outside, 16 mm bore, 55 mm high) with a blind groove, 8 mm wide and 30 mm deep,
 /// cut into its bore from below, in a circular pattern of ten about Z: their boxes, grown as the
 /// kernel grows them, meet, their exact shapes are 1.9 mm apart. The ring's faces counted as its
@@ -3490,7 +3569,8 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
         vec![kernel::HealedBody { index: 0, body: healed, face_origin, face_source: face_source.clone() }],
     );
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks: checks.clone() }));
+    r.import_report =
+        Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks: checks.clone() }));
 
     assert!(model.settle_import_checks(), "a heal changes the import");
     assert!(model.settle_import_checks(), "until an evaluation brings it in, it is still owed");
@@ -3509,7 +3589,7 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
 
     // The same heal settled again: nothing to do.
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
     assert!(!model.settle_import_checks());
     model.evaluate(&doc);
     assert_eq!(model.last_recomputed, 0);
@@ -3553,7 +3633,8 @@ fn a_heal_the_next_read_finds_again_is_told_once() {
     };
     let ended = |model: &mut Model, checks: kernel::ImportChecks| {
         let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-        r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+        r.import_report =
+            Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
     };
     ended(&mut model, run());
     assert!(model.settle_import_checks());
@@ -3581,7 +3662,7 @@ fn a_save_while_an_import_is_checked_keeps_no_model_and_does_not_wait() {
     let import = doc.features[0].id;
     let (checks, end) = kernel::ImportChecks::running_for_tests();
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
     assert!(model.checking_imports());
     // (were it to wait, this would never return: nothing else ends the check)
     assert!(model.saved_if_checked(&doc).is_none(), "no model while the check runs");
@@ -3679,7 +3760,7 @@ fn a_heal_that_ends_after_the_preference_turned_off_leaves_no_healed_note() {
         vec![kernel::HealedBody { index: 0, body: healed, face_origin: vec![0; n], face_source: (0..n).collect() }],
     );
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
 
     assert!(model.settle_import_checks_under(false), "an evaluation is owed: the import is read again");
     assert!(!model.has_import_heals(), "the heal is not taken");

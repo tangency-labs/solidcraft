@@ -550,6 +550,7 @@ fn patterns_of_components_place_occurrences() {
     run(&mut s, "component.activate", json!({"component": "root"}));
     let r = run(&mut s, "solid.pattern.rectangular", json!({"components": ["Peg"], "dir1": [0, 0, 1], "count1": 3, "spacing1": 20}));
     assert_eq!(r["occurrences"].as_array().map(Vec::len), Some(2), "{r}");
+    assert!(r.get("feature").and_then(|v| v.as_u64()).is_some(), "component pattern records a Pattern feature: {r}");
     let m = run(&mut s, "inspect.measure", json!({}));
     assert_eq!(m["body_count"], 3, "{m}");
     let zs: Vec<f64> = m["bodies"].as_array().unwrap().iter().filter_map(|b| b["bbox"]["min"][2].as_f64()).collect();
@@ -557,6 +558,50 @@ fn patterns_of_components_place_occurrences() {
         assert!(zs.iter().any(|x| (x - z).abs() < 1e-6), "{zs:?}");
     }
     assert!(s.execute("solid.pattern.circular", &json!({"components": ["Nope"], "axis": "Z", "count": 2})).is_err());
+}
+
+/// #12116: a Pattern of a component keeps its count expression, so changing the parameter
+/// adds or removes placements the way a body or feature pattern does. Survivors keep their ids.
+#[test]
+fn component_pattern_follows_its_count_parameter() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "2", "unit": ""}));
+    run(&mut s, "component.create", json!({"name": "Unit"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new", "body_name": "Block"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let r = run(&mut s, "solid.pattern.rectangular", json!({"components": ["Unit"], "dir1": [1, 0, 0], "count1": "n", "spacing1": 30}));
+    assert_eq!(r["occurrences"].as_array().map(Vec::len), Some(1), "{r}");
+    let first_copy = r["occurrences"][0].as_u64().expect("copy id");
+    let names = |s: &Session| -> Vec<String> { s.doc.occurrences.iter().filter(|o| o.component != 0).map(|o| o.name.clone()).collect() };
+    assert_eq!(names(&s), ["Unit:1", "Unit:2"], "{:?}", names(&s));
+
+    let change = run(&mut s, "parameters.change", json!({"name": "n", "expression": "4"}));
+    assert!(change["recomputed"].as_u64().unwrap_or(0) >= 1, "pattern must rebuild: {change}");
+    assert_eq!(names(&s), ["Unit:1", "Unit:2", "Unit:3", "Unit:4"], "{:?}", names(&s));
+    assert!(s.doc.occurrences.iter().any(|o| o.id == first_copy), "survivor keeps its id");
+    // The box is centred on each placement: centres at 0, 30, 60, 90 (bbox min is 5 mm left).
+    let xs: Vec<f64> = run(&mut s, "inspect.measure", json!({}))["bodies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|b| {
+            let lo = b["bbox"]["min"][0].as_f64()?;
+            let hi = b["bbox"]["max"][0].as_f64()?;
+            Some((lo + hi) / 2.0)
+        })
+        .collect();
+    for x in [0.0_f64, 30.0, 60.0, 90.0] {
+        assert!(xs.iter().any(|v| (v - x).abs() < 1e-6), "want centre x={x} in {xs:?}");
+    }
+
+    let shrink = run(&mut s, "parameters.change", json!({"name": "n", "expression": "2"}));
+    assert!(shrink["recomputed"].as_u64().unwrap_or(0) >= 1, "{shrink}");
+    assert_eq!(names(&s), ["Unit:1", "Unit:2"], "{:?}", names(&s));
+    assert!(s.doc.occurrences.iter().any(|o| o.id == first_copy), "survivor keeps its id after shrink");
+
+    run(&mut s, "parameters.change", json!({"name": "n", "expression": "4"}));
+    assert_eq!(names(&s).len(), 4, "{:?}", names(&s));
+    assert!(s.doc.occurrences.iter().any(|o| o.id == first_copy), "survivor keeps its id after grow again");
 }
 
 /// #4763: a body of a component moved 60 mm along X, patterned from the root. The copy goes
@@ -1514,6 +1559,76 @@ fn mirror_of_a_join_on_a_hollow_part_copies_the_whole_boss_across_a_custom_plane
     let mut s = hollow_box_with_join_boss();
     run(&mut s, "solid.mirror", json!({"features": ["Join Boss"], "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0]}, "name": "Mirror Boss"}));
     assert!(rel(volume(&mut s), 79500.0) < 1e-6, "mirrored copy lost material");
+}
+
+#[test]
+fn a_mirrored_join_keeps_a_detached_or_edge_touching_tab_separate() {
+    for left in [-10, -7, -6, -4] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10-left, "width": 8, "height": 4, "corner": [left, -4, 0], "body_name": "Plate"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Tab"}));
+        // The seed overlaps x=6..8. Its copy runs from x=-8 to -6, with the
+        // bottom of its extrusion on the plate's top. At x=-6 it shares an
+        // edge, and at x=-4 it is detached. Neither contact joins the pieces.
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [6, -1], "p1": [8, 1]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(
+            &mut s,
+            "solid.extrude",
+            json!({
+                "sketch": "Tab", "start_offset": 4, "distance": 3, "operation": "join",
+                "targets": ["Plate"], "name": "Join Tab"
+            }),
+        );
+        let seed_volume = f64::from(10 - left) * 8.0 * 4.0 + 12.0;
+        assert!(rel(volume(&mut s), seed_volume) < 1e-9);
+        let reply = run(&mut s, "solid.mirror", json!({"features": ["Join Tab"], "plane": "YZ"}));
+        assert!(rel(volume(&mut s), seed_volume + 12.0) < 1e-9);
+        let bodies = &s.model.state().bodies;
+        match left {
+            -6 => {
+                assert_eq!(bodies.len(), 2);
+                assert_eq!(bodies[1].name, "Plate (1)");
+                assert!(rel(bodies[1].body.volume_at(1e-8).unwrap(), 12.0) < 1e-9);
+                assert!(reply["notice"]["message"].as_str().is_some_and(|message| message.contains("edge")), "{reply}");
+            }
+            -4 => {
+                assert_eq!(bodies.len(), 1);
+                assert_eq!(bodies[0].body.lumps().unwrap().len(), 2);
+                assert!(reply["warning"].as_str().is_some_and(|warning| warning.contains("`Plate` is now in 2 separate pieces")), "{reply}");
+            }
+            _ => {
+                assert_eq!(bodies.len(), 1);
+                assert_eq!(bodies[0].body.lumps().unwrap().len(), 1);
+                assert!(reply["warning"].is_null(), "{reply}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_later_mirrored_extrusion_can_connect_an_earlier_copy() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 14, "width": 8, "height": 4, "corner": [-4, -4, 0], "body_name": "Plate"}));
+    for (name, p0, p1) in [("Tab", [6, -1], [8, 1]), ("Bridge", [3, -1], [7, 1])] {
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": name}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": p0, "p1": p1}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(
+            &mut s,
+            "solid.extrude",
+            json!({"sketch": name, "start_offset": 3, "distance": 3, "operation": "join", "targets": ["Plate"], "name": format!("Join {name}")}),
+        );
+    }
+    let reply = run(&mut s, "solid.mirror", json!({"features": ["Join Tab", "Join Bridge"], "plane": "YZ"}));
+    assert!(reply["warning"].is_null(), "{reply}");
+    let bodies = &s.model.state().bodies;
+    assert_eq!(bodies.len(), 1);
+    assert_eq!(bodies[0].body.lumps().unwrap().len(), 1);
+    // The plate is 448 mm³. At z=3..4,
+    // only the reflected x=-8..-4 strip adds material. At z=4..6 both 5-by-2
+    // footprints add material.
+    assert!(rel(volume(&mut s), 496.0) < 1e-9);
 }
 
 /// A pure translation loses the same slice: the copy must be congruent to the original,

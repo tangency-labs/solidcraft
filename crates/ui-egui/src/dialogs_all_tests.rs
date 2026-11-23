@@ -1535,6 +1535,27 @@ fn coil_from_a_profile_hides_the_primitive_section() {
     assert!(p.get("operation").is_some(), "{p}");
 }
 
+/// A square-ended coil edited onto a sketch profile is accepted: the profile's plane is the
+/// section, so the end cut it kept from the coil is not sent (#20737).
+#[test]
+fn a_square_ended_coil_edited_onto_a_profile_is_accepted() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "YZ", "name": "Section"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let sketch = crate::open_meshing::session_world(&h.app.session).sketches[0].feature;
+    let made = h.app.run("solid.coil", json!({"diameter": 40, "revolutions": 3, "pitch": 8, "section_size": 2, "end_cut": "square"})).unwrap();
+    let feature = made["feature"].as_u64().unwrap();
+    let mut d = for_feature(&h.app, feature, None).unwrap();
+    assert_eq!(d.extra.get("end_cut"), Some(&json!("square")), "the edit keeps the end cut");
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    for (command, params) in apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params.clone()).unwrap_or_else(|e| panic!("{command} {params}: {e}"));
+    }
+    let kind = &h.app.session.doc.feature(feature).unwrap().kind;
+    assert!(matches!(kind, FeatureKind::Coil { sketch: Some(_), .. }), "{kind:?}");
+}
+
 /// The Revolutions field steps by whole turns like the other counts (#7481).
 #[test]
 fn coil_revolutions_arrows_step_whole_turns() {
