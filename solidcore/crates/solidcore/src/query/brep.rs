@@ -1069,6 +1069,10 @@ pub enum LazyBrep<'a> {
         /// Its private copy, made at the first edit.
         copy: Option<Box<Brep>>,
     },
+    /// A B-rep read only, with its UV trim curves made: an edit is not made, on it or on
+    /// a copy; the query that would make one returns
+    /// [`SolidError::PreparationRequired`] instead.
+    Prepared(&'a Brep),
 }
 
 impl<'a> From<&'a mut Brep> for LazyBrep<'a> {
@@ -1090,6 +1094,7 @@ impl LazyBrep<'_> {
         match self {
             Self::Own(b) => b,
             Self::Shared { source, copy } => copy.as_deref().unwrap_or(source),
+            Self::Prepared(b) => b,
         }
     }
 
@@ -1098,7 +1103,8 @@ impl LazyBrep<'_> {
     ///
     /// # Errors
     ///
-    /// Those of [`Brep::clone_standing_for_self`], at the first edit of a shared B-rep.
+    /// Those of [`Brep::clone_standing_for_self`], at the first edit of a shared B-rep;
+    /// [`SolidError::PreparationRequired`] for a [`LazyBrep::Prepared`] one.
     pub fn get_mut(&mut self) -> Result<&mut Brep> {
         match self {
             Self::Own(b) => Ok(b),
@@ -1106,6 +1112,9 @@ impl LazyBrep<'_> {
                 Some(c) => Ok(c),
                 slot @ None => Ok(slot.insert(Box::new(source.clone_standing_for_self()?))),
             },
+            Self::Prepared(_) => Err(SolidError::PreparationRequired {
+                operation: OP_TIGHT_BOX,
+            }),
         }
     }
 }
