@@ -24,14 +24,25 @@
 //! with one name in one impl type (trait impls) are one site.
 //!
 //! [`LIST`] holds one site a line, `<path>:<function> <the operations it uses>`, sorted (the
-//! kernel rig's known-failing format; the operations are for the reader and are not graded). The
-//! check fails on a site the list does not name, and on a listed site that no longer computes
-//! geometry or no longer exists: its refactor removes its line, as with
-//! `xtask/mesh-decisions.txt`. `--print` writes the current sites in the list's format, to see
-//! what a change did; it is not a way to refresh the list.
+//! kernel rig's known-failing format; the operations are for the reader and are not graded).
+//!
+//! The check judges a change by what it adds, so drift on main never fails a branch or a merge
+//! group. It scans the tree at the base the change started from, [`base`]: `git merge-base HEAD
+//! origin/main`, else `HEAD~1` (a pull request's merge commit or a merge-queue group's squash
+//! commit, whose first parent is the code it lands on; CI fetches two commits for that), else,
+//! with no git history at all, the ledger itself. Then:
+//! - a site the tree has and the base does not FAILS, unless the ledger names it (a rename moves
+//!   its line);
+//! - a site the base already had and the ledger does not name is reported (it came from main);
+//! - a listed site that no longer computes geometry or is gone is a warning: its refactor removes
+//!   its line.
+//!
+//! `--print` writes the current sites in the list's format, to regenerate the list or see what a
+//! change did.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 use syn::visit::{self, Visit};
 
@@ -82,7 +93,7 @@ impl Call {
 }
 
 pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
-    let found = scan(root)?;
+    let found = scan(root, false)?;
     if args.contains(&"--print") {
         for (site, uses) in &found {
             println!("{site} {}", uses.join(","));
@@ -90,16 +101,70 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
         return Ok(());
     }
     let text = std::fs::read_to_string(root.join(LIST)).map_err(|e| format!("{LIST}: {e}"))?;
-    println!("{}", grade(&text, &found).map_err(|e| format!("{LIST}: {e}"))?);
+    let base = match base(root) {
+        Ok((rev, sites)) => {
+            println!("app-geometry: judging what this tree adds to {rev}");
+            Some(sites)
+        }
+        Err(e) => {
+            println!("app-geometry: no git base ({e}); judging against {LIST}");
+            None
+        }
+    };
+    println!("{}", grade(&text, &found, base.as_ref()).map_err(|e| format!("{LIST}: {e}"))?);
     Ok(())
 }
 
-/// Every site under `root`: `<path>:<function>` with the operations it uses, sorted.
-fn scan(root: &Path) -> Result<BTreeMap<String, Vec<&'static str>>, String> {
+/// The base this tree started from, and its sites: the first of `git merge-base HEAD
+/// origin/main` and `HEAD~1` that git has, its crates read with `git archive`.
+fn base(root: &Path) -> Result<(String, BTreeSet<String>), String> {
+    let git = |args: &[&str]| -> Option<String> {
+        let out = Command::new("git").arg("-C").arg(root).args(args).stderr(Stdio::null()).output().ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_owned()).filter(|s| !s.is_empty())
+    };
+    let (rev, how) = git(&["merge-base", "HEAD", "origin/main"])
+        .map(|r| (r, "merge base with origin/main"))
+        .or_else(|| git(&["rev-parse", "--verify", "-q", "HEAD~1^{commit}"]).map(|r| (r, "HEAD~1")))
+        .ok_or("neither `git merge-base HEAD origin/main` nor HEAD~1 is available")?;
+    let dir = std::env::temp_dir().join(format!("xtask-app-geometry-{}", std::process::id()));
+    let sites = sites_at(root, &rev, &dir);
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok((format!("{} ({how})", &rev[..rev.len().min(10)]), sites?))
+}
+
+/// The sites of revision `rev`, its Rust extracted into `dir`.
+fn sites_at(root: &Path, rev: &str, dir: &Path) -> Result<BTreeSet<String>, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let mut archive = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["archive", "--format=tar", rev, "--"])
+        // The crates' Rust, and the assets' Rust their `#[path]` modules include.
+        .args(CRATES.iter().chain(&["assets"]).map(|c| format!(":(glob){c}/**/*.rs")))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("git archive: {e}"))?;
+    let stdout = archive.stdout.take().ok_or("git archive: no output")?;
+    let tar = Command::new("tar").arg("-x").arg("-C").arg(dir).stdin(stdout).status().map_err(|e| format!("tar: {e}"))?;
+    let archived = archive.wait().map_err(|e| format!("git archive: {e}"))?;
+    if !archived.success() || !tar.success() {
+        return Err(format!("cannot read the crates at {rev}"));
+    }
+    Ok(scan(dir, true)?.into_keys().collect())
+}
+
+/// Every site under `root`: `<path>:<function>` with the operations it uses, sorted. With
+/// `missing_ok` (an older revision), a crate that did not exist yet is skipped.
+fn scan(root: &Path, missing_ok: bool) -> Result<BTreeMap<String, Vec<&'static str>>, String> {
     let mut found = BTreeMap::new();
     for krate in CRATES {
+        let lib = root.join(krate).join("src/lib.rs");
+        if missing_ok && !lib.exists() {
+            continue;
+        }
         let mut files = Vec::new();
-        module_files(&root.join(krate).join("src/lib.rs"), true, &mut files)?;
+        module_files(&lib, true, &mut files)?;
         files.sort();
         files.dedup();
         for path in files {
@@ -276,13 +341,24 @@ fn counts<'a>(sites: impl Iterator<Item = &'a str>) -> String {
     CRATES.iter().map(|c| c.trim_start_matches("crates/")).map(|c| format!("{c} {}", n.get(c).unwrap_or(&0))).collect::<Vec<_>>().join(", ")
 }
 
-/// The gate: every site in `found` is listed in `list`, and every listed site is still found.
-fn grade(list: &str, found: &BTreeMap<String, Vec<&'static str>>) -> Result<String, String> {
+/// The gate. A site in `found` that `base` lacks and `list` does not name fails: this change
+/// added it. A site `base` already had that `list` does not name is reported, and a listed site
+/// that is not found is a warning; neither fails. Without a base, the list is the base.
+fn grade(list: &str, found: &BTreeMap<String, Vec<&'static str>>, base: Option<&BTreeSet<String>>) -> Result<String, String> {
     let listed = crate::kernel_cases::known_failing(list)?;
-    let mut problems = Vec::new();
+    let named = |site: &str| listed.iter().any(|(s, _)| *s == site);
+    let (mut new, mut from_main, mut stale) = (Vec::new(), Vec::new(), Vec::new());
     for (site, uses) in found {
-        if !listed.iter().any(|(s, _)| s == site) {
-            problems.push(format!(
+        if named(site) {
+            continue;
+        }
+        if base.is_some_and(|b| b.contains(site)) {
+            from_main.push(format!(
+                "UNLISTED: {site} ({}) was already at the base; `cargo xtask app-geometry --print` regenerates the list",
+                uses.join(", ")
+            ));
+        } else {
+            new.push(format!(
                 "NEW: {site} computes geometry ({}): call the kernel (solidcore ops) for it instead; apps hold state and compute no geometry",
                 uses.join(", ")
             ));
@@ -290,14 +366,16 @@ fn grade(list: &str, found: &BTreeMap<String, Vec<&'static str>>) -> Result<Stri
     }
     for (site, _) in &listed {
         if !found.contains_key(*site) {
-            problems.push(format!("FIXED: {site} no longer computes geometry (or is gone): remove its line"));
+            stale.push(format!("warning: STALE: {site} no longer computes geometry (or is gone): remove its line"));
         }
     }
     let by_crate = counts(listed.iter().map(|(s, _)| *s));
-    if problems.is_empty() {
-        Ok(format!("app-geometry: {} sites compute geometry ({by_crate}); no new ones", listed.len()))
+    let notes: Vec<String> = from_main.into_iter().chain(stale).collect();
+    let notes = if notes.is_empty() { String::new() } else { format!("\n  {}", notes.join("\n  ")) };
+    if new.is_empty() {
+        Ok(format!("app-geometry: {} sites compute geometry ({by_crate}); no new ones{notes}", listed.len()))
     } else {
-        Err(format!("{} problem(s) (listed: {by_crate}):\n  {}", problems.len(), problems.join("\n  ")))
+        Err(format!("{} new site(s) (listed: {by_crate}):\n  {}{notes}", new.len(), new.join("\n  ")))
     }
 }
 
@@ -338,30 +416,55 @@ mod tests {
         names.iter().map(|n| (n.to_string(), vec!["dot"])).collect()
     }
 
+    fn base(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+
+    const BOTH: [&str; 2] = ["crates/doc/src/a.rs:tilt", "crates/ui-egui/src/b.rs:near"];
+
     #[test]
     fn listed_sites_pass_and_counts_are_per_crate() {
-        let ok = grade(LISTED, &found(&["crates/doc/src/a.rs:tilt", "crates/ui-egui/src/b.rs:near"])).unwrap();
+        let ok = grade(LISTED, &found(&BOTH), Some(&base(&BOTH))).unwrap();
         assert!(ok.contains("doc 1, engine 0, ui-egui 1, io 0, kernel 0, geom 0"), "{ok}");
     }
 
     #[test]
-    fn a_new_site_fails() {
-        let e = grade(LISTED, &found(&["crates/doc/src/a.rs:tilt", "crates/ui-egui/src/b.rs:near", "crates/doc/src/a.rs:pick"])).unwrap_err();
+    fn a_site_the_branch_adds_fails() {
+        let now = found(&["crates/doc/src/a.rs:tilt", "crates/ui-egui/src/b.rs:near", "crates/doc/src/a.rs:pick"]);
+        let e = grade(LISTED, &now, Some(&base(&BOTH))).unwrap_err();
         assert!(e.contains("NEW: crates/doc/src/a.rs:pick"), "{e}");
+        let e = grade(LISTED, &now, None).unwrap_err();
+        assert!(e.contains("NEW: crates/doc/src/a.rs:pick"), "without a base the list is the base: {e}");
     }
 
     #[test]
-    fn a_gone_site_still_listed_fails() {
-        let e = grade(LISTED, &found(&["crates/doc/src/a.rs:tilt"])).unwrap_err();
-        assert!(e.contains("FIXED: crates/ui-egui/src/b.rs:near"), "{e}");
+    fn a_site_already_at_the_base_only_reports() {
+        let now = found(&["crates/doc/src/a.rs:tilt", "crates/ui-egui/src/b.rs:near", "crates/io/src/c.rs:merged"]);
+        let ok = grade(LISTED, &now, Some(&base(&["crates/io/src/c.rs:merged"]))).unwrap();
+        assert!(ok.contains("UNLISTED: crates/io/src/c.rs:merged"), "{ok}");
+    }
+
+    #[test]
+    fn a_stale_listed_site_warns_but_passes() {
+        let ok = grade(LISTED, &found(&["crates/doc/src/a.rs:tilt"]), Some(&base(&BOTH))).unwrap();
+        assert!(ok.contains("warning: STALE: crates/ui-egui/src/b.rs:near"), "{ok}");
+        assert!(grade(LISTED, &found(&["crates/doc/src/a.rs:tilt"]), None).is_ok());
+    }
+
+    #[test]
+    fn a_renamed_site_passes_once_its_line_moves() {
+        let listed = "crates/doc/src/a.rs:tilt_to dot\n";
+        assert!(grade(listed, &found(&["crates/doc/src/a.rs:tilt_to"]), Some(&base(&["crates/doc/src/a.rs:tilt"]))).is_ok());
     }
 
     #[test]
     fn the_list_is_sorted_with_a_reason_each() {
-        assert!(grade("b.rs:near x\na.rs:tilt x\n", &found(&["a.rs:tilt", "b.rs:near"])).is_err());
-        assert!(grade("a.rs:tilt\n", &found(&["a.rs:tilt"])).is_err());
+        assert!(grade("b.rs:near x\na.rs:tilt x\n", &found(&["a.rs:tilt", "b.rs:near"]), None).is_err());
+        assert!(grade("a.rs:tilt\n", &found(&["a.rs:tilt"]), None).is_err());
     }
 
+    /// Judged against the base this tree started from (in a merge-queue group, the code it lands
+    /// on), so only this change's own additions can fail it, never drift on main.
     #[test]
     fn the_workspace_has_no_new_app_geometry() {
         run(Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap(), &[]).unwrap();

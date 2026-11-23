@@ -1,8 +1,9 @@
 # Functions that compute geometry in the app crates today, one a line: `<path>:<function>
 # <the operations it uses>`. Sorted. `cargo xtask app-geometry` (xtask/src/app_geometry.rs)
-# fails on a function that does vector maths, solves or mesh queries and is not listed here, and
-# on a listed one that no longer does or is gone: a refactor PR removes its lines in the same
-# pull request. Never add a line: call the kernel (solidcore ops) for the geometry instead.
+# fails on a function a change adds (new since its merge base with main) that does vector maths,
+# solves or mesh queries and is not listed here; a listed one that no longer does or is gone is a
+# warning, and its refactor PR removes the line. Never add a line: call the kernel (solidcore
+# ops) for the geometry instead. `--print` regenerates the sites below.
 # See solidcore/docs/layers.md §4 and docs/rfcs/0003-solidcore-consolidation.md row 0.1.
 crates/doc/src/appearance.rs:closest_on_triangle dot
 crates/doc/src/appearance.rs:nearest_face closest_on_triangle,triangles

@@ -138,10 +138,11 @@ commands:
                   that no longer does (the list only shrinks)
   app-geometry [--print]
                   check that apps compute no geometry: fails on a function in crates/doc, engine,
-                  ui-egui, io, kernel or geom that does vector maths, solves or mesh queries and
-                  xtask/app-geometry.txt does not list, and on a listed one that no longer does
-                  (the list only shrinks); prints the listed count per crate. --print writes the
-                  sites found, in the list's format
+                  ui-egui, io, kernel or geom that does vector maths, solves or mesh queries, is
+                  new since the base (git merge-base HEAD origin/main, else HEAD~1) and
+                  xtask/app-geometry.txt does not list; reports unlisted sites from main and warns
+                  on stale lines; prints the listed count per crate. --print writes the sites
+                  found, in the list's format
   test [CARGO ARGS] [-- TEST ARGS]
                   build the tests with the ci profile, then run every test binary at once
                   (and the doc tests alongside); SOLIDCRAFT_TEST_JOBS=N bounds concurrent test
