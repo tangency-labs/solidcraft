@@ -125,6 +125,12 @@ fn unit_of(k: Kind) -> &'static str {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The `dN` names [`Document::name_all_feature_inputs`] has tried on this thread.
+    pub(crate) static INPUT_NAME_TRIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl Document {
     /// Every (name, expression, kind) the expressions can refer to: stored parameters and the
     /// named feature inputs.
@@ -180,26 +186,37 @@ impl Document {
         }
     }
 
-    /// Repair a loaded timeline in one pass. Reserve even later features' names, just as
-    /// `name_feature_inputs` does, without restarting a document scan for every `dN` candidate.
+    /// Repair a loaded timeline in one pass, with the names `name_feature_inputs` gives feature
+    /// by feature. Each input without a name takes the lowest free `dN`, counting the names of
+    /// parameters and of every feature (later ones too) as taken, without a document scan for
+    /// every `dN` candidate and without a search that starts again from a low number.
     pub(crate) fn name_all_feature_inputs(&mut self) {
         let mut taken: BTreeMap<String, usize> = BTreeMap::new();
         for name in self.params.iter().map(|p| &p.name).chain(self.features.iter().flat_map(|f| &f.param_names)) {
             *taken.entry(name.clone()).or_default() += 1;
         }
+        // `next` never goes down. Every `dN` with N below it is taken or in `freed` (the names
+        // that surplus names gave back), so the lowest free name is the lowest of `freed`, or else
+        // the first free one from `next` up. The search passes each taken name at most once.
         let mut next = 1usize;
+        let mut freed: BTreeSet<usize> = BTreeSet::new();
         for f in &mut self.features {
             let n = f.kind.inputs().len();
             for k in 0..n {
                 if f.param_names.get(k).is_some_and(|name| !name.is_empty()) {
                     continue;
                 }
-                let name = loop {
-                    let name = format!("d{next}");
-                    next += 1;
-                    if !taken.contains_key(&name) {
-                        break name;
-                    }
+                let name = match freed.pop_first() {
+                    Some(i) => format!("d{i}"),
+                    None => loop {
+                        #[cfg(test)]
+                        INPUT_NAME_TRIES.set(INPUT_NAME_TRIES.get() + 1);
+                        let name = format!("d{next}");
+                        next += 1;
+                        if !taken.contains_key(&name) {
+                            break name;
+                        }
+                    },
                 };
                 if f.param_names.len() <= k {
                     f.param_names.resize(k + 1, String::new());
@@ -217,11 +234,13 @@ impl Document {
                     *count -= 1;
                     if *count == 0 {
                         taken.remove(&name);
+                        // A freed name at or above `next` is left to the search, which reads `taken`.
                         if let Some(i) = name.strip_prefix('d').and_then(|s| s.parse::<usize>().ok())
                             && name == format!("d{i}")
                             && i > 0
+                            && i < next
                         {
-                            next = next.min(i);
+                            freed.insert(i);
                         }
                     }
                 }
