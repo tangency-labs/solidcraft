@@ -6300,7 +6300,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-icon-svg"
-version = "0.46.2"
+version = "0.47.0"
 dependencies = [
  "tiny-skia",
 ]
