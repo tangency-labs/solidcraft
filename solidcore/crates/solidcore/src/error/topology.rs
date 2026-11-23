@@ -116,6 +116,16 @@
 //! | [`TopologyFailure::NoFiniteRegion`] | `SM_ERR` |
 //! | [`TopologyFailure::FaceStitchFailed`] | `SM_ERR` |
 //! | [`TopologyFailure::SurfaceNotTransformable`] | `SM_ERR` |
+//! | [`TopologyFailure::SurfaceWithoutGenerator`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::EdgeWithoutEdgeuses`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::CurveOwnerUnresolved`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::SurfaceWithoutOwningFace`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::SolveViewWithoutCache`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::CacheTargetNotBrep`] | `SM_ERR` |
+//! | [`TopologyFailure::NoInputStream`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::RecordTypeUnknown`] | `SM_ERR` |
+//! | [`TopologyFailure::AttributeSlotEmpty`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::BlendRecordNotProved`] | `SM_ERR` |
 //! | [`TopologyFailure::NoTrimmedBSpline`] | `SM_ERR_INVALID_INPUT` |
 //! | [`TopologyFailure::FaceListedTwice`] | `SM_ERR` |
 //! | [`TopologyFailure::EdgesNotSharingVertices`] | `SM_ERR` |
@@ -561,6 +571,41 @@ pub enum TopologyFailure {
         /// The face whose surface could not be transformed.
         entity: Option<EntityRef>,
     },
+    /// A surface of revolution or extrusion has no generator curve, which its record
+    /// needs (only the `empty()` constructors leave it out). [`ErrorKind::InvalidInput`].
+    SurfaceWithoutGenerator,
+    /// An edge of the caller's body has no edge use, so it is on no loop or wire (an edge
+    /// added and never linked, or one no edge-use record of a file names).
+    /// [`ErrorKind::InvalidInput`].
+    EdgeWithoutEdgeuses,
+    /// An edge's curve resolves to no owning edge: it has no owner, or the caller's owner
+    /// map does not resolve the edge use or generated curve that owns it.
+    /// [`ErrorKind::InvalidInput`].
+    CurveOwnerUnresolved,
+    /// A face's surface has no owning face. [`ErrorKind::InvalidInput`].
+    SurfaceWithoutOwningFace,
+    /// The topology solver asked for the B-rep's cache on a view the caller made without
+    /// one. [`ErrorKind::InvalidInput`].
+    SolveViewWithoutCache,
+    /// A B-rep cache was asked for a type that is neither a B-rep nor a poly B-rep.
+    /// [`ErrorKind::InvalidInput`].
+    CacheTargetNotBrep,
+    /// The database reader has no input stream: nothing was opened for reading.
+    /// [`ErrorKind::InvalidInput`].
+    NoInputStream,
+    /// The file holds a curve or surface record of a type the read does not take.
+    /// [`ErrorKind::InvalidInput`].
+    RecordTypeUnknown {
+        /// The record's type code.
+        type_code: i64,
+    },
+    /// The file names an attribute whose slot in the attribute table is empty.
+    /// [`ErrorKind::InvalidInput`].
+    AttributeSlotEmpty,
+    /// A procedural blend read from the file is not proved within its bound of its
+    /// definition; the proof's failure is the cause. Class `failed`; whether it is a
+    /// defect or a refusal is its cause's.
+    BlendRecordNotProved,
 }
 
 /// What a B-rep constructor call works in ([`TopologyFailure::ConstructorNotOpen`],
@@ -674,6 +719,9 @@ impl TopologyFailure {
             | Self::NoFiniteRegion
             | Self::FaceStitchFailed
             | Self::SurfaceNotTransformable { .. }
+            | Self::CacheTargetNotBrep
+            | Self::RecordTypeUnknown { .. }
+            | Self::BlendRecordNotProved
             | Self::FaceListedTwice
             | Self::EdgesNotSharingVertices
             | Self::NoSectorForNewEdgeuse
@@ -699,7 +747,14 @@ impl TopologyFailure {
             | Self::NoFaceGiven
             | Self::InfiniteRegionNotFound
             | Self::VerticesShareNoRegion
-            | Self::NoVertexSector { .. } => SM_ERR_NULL_POINTER,
+            | Self::NoVertexSector { .. }
+            | Self::SurfaceWithoutGenerator
+            | Self::EdgeWithoutEdgeuses
+            | Self::CurveOwnerUnresolved
+            | Self::SurfaceWithoutOwningFace
+            | Self::SolveViewWithoutCache
+            | Self::NoInputStream
+            | Self::AttributeSlotEmpty => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_)
             | Self::NoBrepGiven
             | Self::NoTrimmedBSpline
@@ -781,6 +836,15 @@ impl TopologyFailure {
             | Self::VerticesShareNoRegion
             | Self::NoRegionsToKeepGiven
             | Self::NoFiniteRegion
+            | Self::SurfaceWithoutGenerator
+            | Self::EdgeWithoutEdgeuses
+            | Self::CurveOwnerUnresolved
+            | Self::SurfaceWithoutOwningFace
+            | Self::SolveViewWithoutCache
+            | Self::CacheTargetNotBrep
+            | Self::NoInputStream
+            | Self::RecordTypeUnknown { .. }
+            | Self::AttributeSlotEmpty
             | Self::FaceListedTwice
             | Self::EdgesNotSharingVertices => ErrorKind::InvalidInput,
             Self::CurveNotBSpline { .. }
@@ -804,7 +868,8 @@ impl TopologyFailure {
             | Self::InfiniteRegionNotFound
             | Self::NoVertexSector { .. }
             | Self::CurvesNotJoined
-            | Self::FaceStitchFailed => ErrorKind::Failed,
+            | Self::FaceStitchFailed
+            | Self::BlendRecordNotProved => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -1040,6 +1105,32 @@ impl core::fmt::Display for TopologyFailure {
             Self::SurfaceNotTransformable { entity: Some(e) } => {
                 write!(f, "a face's surface could not be transformed ({e})")
             }
+            Self::SurfaceWithoutGenerator => {
+                f.write_str("the swept surface has no generator curve")
+            }
+            Self::EdgeWithoutEdgeuses => f.write_str("the edge has no edge use"),
+            Self::CurveOwnerUnresolved => {
+                f.write_str("the edge's curve resolves to no owning edge")
+            }
+            Self::SurfaceWithoutOwningFace => f.write_str("the face's surface has no owning face"),
+            Self::SolveViewWithoutCache => {
+                f.write_str("the solve needs the B-rep's cache, and the view has none")
+            }
+            Self::CacheTargetNotBrep => {
+                f.write_str("a B-rep cache is only for a B-rep or a poly B-rep")
+            }
+            Self::NoInputStream => f.write_str("the database has no input stream"),
+            Self::RecordTypeUnknown { type_code } => write!(
+                f,
+                "the file holds a record of type {type_code}, which the read does not take"
+            ),
+            Self::AttributeSlotEmpty => {
+                f.write_str("the file names an attribute whose table slot is empty")
+            }
+            Self::BlendRecordNotProved => f.write_str(
+                "a procedural blend read from the file is not proved within its bound of its \
+                 definition",
+            ),
             Self::NoTrimmedBSpline => {
                 f.write_str("an edge gave no B-spline of its curve trimmed to its interval")
             }
@@ -1532,6 +1623,73 @@ mod tests {
         assert_eq!(e.upstream_status(), Some(SM_ERR));
     }
 
+    /// The named causes of the B-rep cache and the file reads and writes keep the status of
+    /// the phrase each replaced, and have their class.
+    #[test]
+    fn the_cache_and_file_causes_keep_their_status_and_have_their_class() {
+        use ErrorKind as K;
+        use TopologyFailure as T;
+        let op = "topology::op";
+        let cases = [
+            (
+                T::SurfaceWithoutGenerator,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (T::EdgeWithoutEdgeuses, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (
+                T::CurveOwnerUnresolved,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                T::SurfaceWithoutOwningFace,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                T::SolveViewWithoutCache,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (T::CacheTargetNotBrep, SM_ERR, K::InvalidInput),
+            (T::NoInputStream, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (
+                T::RecordTypeUnknown { type_code: 7 },
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (T::AttributeSlotEmpty, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (T::BlendRecordNotProved, SM_ERR, K::Failed),
+        ];
+        for (failure, status, kind) in cases {
+            let e = SolidError::topology(op, failure);
+            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.topology_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+        }
+        // the blend proof's failure stays the cause, and decides defect or refusal
+        let why = "a step the kernel got wrong";
+        let cause = SolidError::topology(op, T::Defect { why });
+        let e = Failure::new(op, T::BlendRecordNotProved)
+            .caused_by(cause.clone())
+            .into_error();
+        assert_eq!(e.cause(), Some(&cause));
+        assert!(e.is_defect());
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        // a net the proof refuses as input (`recertify`'s `InvalidInput`) reads as no defect
+        let cause = SolidError::invalid_input(op, "the net is not within its bound");
+        let e = Failure::new(op, T::BlendRecordNotProved)
+            .caused_by(cause.clone())
+            .into_error();
+        assert_eq!(e.cause(), Some(&cause));
+        assert!(!e.is_defect(), "{e:?}");
+        assert_eq!(e.kind(), K::Failed);
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+    }
+
     /// The topology routines describe their failures: their library code builds no bare
     /// `Upstream` status, except the file listed (with the bare sites it may still hold).
     #[test]
@@ -1882,12 +2040,6 @@ mod tests {
             ("solidcore/src/topology/brep/validation/assert_valid/seams.rs", 1),
             ("solidcore/src/topology/brep/validation/pointers.rs", 2),
             ("solidcore/src/topology/brep/vertex_fans.rs", 6),
-            ("solidcore/src/topology/brep_cache.rs", 17),
-            ("solidcore/src/topology/brep_data.rs", 5),
-            ("solidcore/src/topology/brep_data_write.rs", 5),
-            ("solidcore/src/topology/database_io.rs", 3),
-            ("solidcore/src/topology/geometry_write.rs", 2),
-            ("solidcore/src/topology/part_file.rs", 1),
             ("solidcore/src/topology/proto_topology/p1/proto.rs", 16),
             ("solidcore/src/topology/proto_topology/p2.rs", 8),
             ("solidcore/src/topology/proto_topology/p3.rs", 6),

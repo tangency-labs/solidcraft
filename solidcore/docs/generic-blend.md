@@ -627,7 +627,7 @@ The case gallery shows every fillet and chamfer case of the kernel corpus
 (`crates/solidcore/tests/kernel_cases/fillets/`) with its render and its status: passes, refused as
 the case expects, or known failing with its reason. It is the site's
 [Kernel cases page](https://tangency-labs.github.io/solidcore/cases.html), which `site/build.py`
-generates from the case entries, the renders beside them and `known_failing.json`; this page keeps
+generates from the case entries, the renders beside them and `kernel_cases_known_failing/`; this page keeps
 nothing about any case.
 
 ## 8. For contributors
@@ -678,7 +678,7 @@ is on [#2243](https://github.com/tangency-labs/solidcore/issues/2243).
 fillet and chamfer case with its state: passes, refused as expected, or known failing (with its
 reason). When a pull request makes a case pass, or turns a known failure into a correct refusal, it
 updates the case's entry (its expectation, and its `gallery_note` where the gallery needs to say
-more), its line in `known_failing.json` and its render
+more), its file in `kernel_cases_known_failing/` and its render
 (`crates/solidcore/tests/kernel_cases/<area>/<case>.jpg`) in the same pull request, never this page.
 The render shows the case's issue: the view is chosen for it (the corner, the seam, the edge's end,
 the spot refused or fixed), framed close on that region, with an inset of the whole part where it

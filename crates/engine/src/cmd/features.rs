@@ -145,7 +145,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("pattern_path")
         .contract(&PATTERN_PATH_CONTRACT)
         .output(output_schema_for::<PatternResult>)
-        .params("features: [names] | bodies: [names]; path_sketch: sketch; path: [curve ids in order]; count; spacing (between instances) | distance (first to last); orientation?: identical|path; flip?: bool"),
+        .params("features: [names] | bodies: [names]; path_sketch: sketch; path: [curve ids in order]; count; spacing (between instances) | distance (first to last); start?: expr (start point: how far along the path the original sits, the copies measured on from there; default 0, the path's start) | start_fraction?: expr (the start point as 0…1 of the path's length, kept as the path changes); orientation?: identical (copies keep the original's orientation, the default)|path (copies turn with the path, keeping the original's relation to it); flip?: bool (run from the path's other end)"),
     CommandSpec::new("solid.mirror", "Mirror", crate::checked!("solid.mirror", mirror)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("mirror")
@@ -3179,7 +3179,37 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
         Some(o) => return Err(bad(cmd, format!("unknown orientation `{o}` (identical or path)"))),
     };
     let flip = bool_(p, "flip").unwrap_or(false);
-    let pattern = solidcraft_doc::PatternKind::Path { path_sketch: SketchId(path_sketch), path, count, spacing, extent, flip, orient };
+    // The start point: a distance along the path, or a fraction of its length. A value given
+    // that isn't a number or an expression is refused rather than read as the path's start.
+    for key in ["start", "start_fraction"] {
+        if p.get(key).is_some_and(|v| !v.is_null()) && expr(p, key).is_none() {
+            return Err(bad(cmd, format!("`{key}` {}", expr_problem(p.get(key)))));
+        }
+    }
+    let (start, start_fraction) = match (expr(p, "start"), expr(p, "start_fraction")) {
+        (Some(_), Some(_)) => return Err(bad(cmd, "give `start` (a distance along the path) or `start_fraction` (0…1 of its length), not both")),
+        (Some(x), None) => {
+            check_expr(s, &x, Kind::Length, cmd, "start")?;
+            (Some(x), None)
+        }
+        (None, Some(x)) => {
+            check_expr(s, &x, Kind::Unitless, cmd, "start_fraction")?;
+            (None, Some(x))
+        }
+        (None, None) => (None, None),
+    };
+    let pattern = solidcraft_doc::PatternKind::Path {
+        path_sketch: SketchId(path_sketch),
+        path,
+        count,
+        spacing,
+        extent,
+        flip,
+        orient,
+        start,
+        start_fraction,
+        follow_frame: true,
+    };
     finish_pattern(s, p, features, pattern, bodies)
 }
 
