@@ -2,8 +2,7 @@
 //! 14 x 6 x 10 post, each 6 mm face carrying two of them. Past r = 3 the two rails on a
 //! face have crossed and SMLib builds an open body; the default kernel refuses that result,
 //! as it does any fillet of a closed manifold solid whose result is none (WR-212), and puts
-//! the post back. With SolidCraft's fix list the band
-//! test (`fixes.fillet_refuse_overlapping_bands`, WR-542) refuses it before the post is
+//! the post back. The band test (WR-542, no longer a flag) refuses it before the post is
 //! edited, naming the largest radius that builds. (The crossing-rails refusal
 //! `fillet_refuse_crossing_rails`, which refused it with a bare 1001 after the fillet's
 //! B-rep was built, is retired: the band test is the one test of two bands on a face.)
