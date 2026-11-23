@@ -188,9 +188,10 @@ fn ease_stop(stop: EaseStop) -> SolidError {
 /// to at most 2 and hold a row per order.
 const WHY_ORDER: &str =
     "the setback fill's order, checked on entry, is 1 or 2, and its jets are taken to it";
-/// The elimination's pivots lie in the rows and columns it scaled first.
+/// [`affine_solutions`]'s one caller sizes `b` with a row per row of `A`, and the pivot row
+/// is one of them.
 const WHY_PIVOT: &str =
-    "the elimination scaled every row of A and b, and its pivots lie within them";
+    "the setback fill's conditions give b one entry per row of A, and the pivot row is one of those rows";
 
 // ---- the ease of a round into another section before its setback ----------------------
 
@@ -1966,9 +1967,6 @@ fn affine_solutions(
         }
         if pi != r {
             for j in 0..n {
-                if a.get(pi * n + j).is_none() || a.get(r * n + j).is_none() {
-                    return Err(defect(WHY_PIVOT));
-                }
                 a.swap(pi * n + j, r * n + j);
             }
             if b.get(pi).is_none() || b.get(r).is_none() {
@@ -1978,13 +1976,7 @@ fn affine_solutions(
         }
         if pj != r {
             for i in 0..m {
-                if a.get(i * n + pj).is_none() || a.get(i * n + r).is_none() {
-                    return Err(defect(WHY_PIVOT));
-                }
                 a.swap(i * n + pj, i * n + r);
-            }
-            if col.get(pj).is_none() || col.get(r).is_none() {
-                return Err(defect(WHY_PIVOT));
             }
             col.swap(pj, r);
         }
