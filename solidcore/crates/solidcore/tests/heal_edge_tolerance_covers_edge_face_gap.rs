@@ -438,11 +438,12 @@ fn digest_curve(d: &mut Digest, k: &Kernel, b: &Brep, e: solidcore::topology::Ed
     }
 }
 
-/// The largest edge/face gap of an edge's uses (0 with none).
+/// The largest edge/face gap of an edge's uses (0 with none), measured afresh
+/// (`force_calc`), never read from a use's cache.
 fn edge_gap(k: &Kernel, b: &mut Brep, e: solidcore::topology::EdgeId) -> f64 {
     let mut gap = 0.0f64;
     for eu in b.edge(e).unwrap().edgeuses.clone() {
-        if let Some(g) = max_edge_face_gap(k, b, eu, false).unwrap() {
+        if let Some(g) = max_edge_face_gap(k, b, eu, true).unwrap() {
             gap = gap.max(g.gap_3d);
         }
     }
@@ -457,15 +458,16 @@ fn entries(table: &[(&str, &'static [(u32, u64)])], name: &str) -> &'static [(u3
         .map_or(&[], |(_, t)| *t)
 }
 
-/// The largest vertex/edge or vertex/face gap of `v`'s uses (`0` without one).
+/// The largest vertex/edge or vertex/face gap of `v`'s uses (`0` without one), measured
+/// afresh (`force_calc`), never read from a use's cache.
 fn vertex_gap(k: &Kernel, b: &mut Brep, v: solidcore::topology::VertexId) -> f64 {
     use solidcore::topology::{vertex, vertexuse};
     let mut gap = 0.0f64;
     for vu in vertex::vertexuses(b, v).unwrap() {
-        if let Some(g) = vertexuse::vertex_edge_gap(k, b, vu, false).unwrap() {
+        if let Some(g) = vertexuse::vertex_edge_gap(k, b, vu, true).unwrap() {
             gap = gap.max(g.gap_3d);
         }
-        if let Some(g) = vertexuse::vertex_face_gap(k, b, vu, false).unwrap() {
+        if let Some(g) = vertexuse::vertex_face_gap(k, b, vu, true).unwrap() {
             gap = gap.max(g.gap_3d);
         }
     }
@@ -482,9 +484,27 @@ fn vertex_gap(k: &Kernel, b: &mut Brep, v: solidcore::topology::VertexId) -> f64
 ///   is over that, to it (#17739), recorded in `floored`;
 /// - every edge covers its gap.
 ///
+/// The heal's tolerances are judged against the gaps the heal measured. Both reads build
+/// and heal the same body; the rebuilding read then rebuilds its UV trims, and a rebuilt
+/// trim can move its edge's interval (`create_uv_trim_curve`'s interval recovery; on
+/// `Fillet/open_shell.smb` edge 17 goes from `[0, 1]` to `[3.9e-6, 1]`), which moves the
+/// edge's gap (there from 3.02e-5 to 1.25e-5) and its start vertex's gap after the heal.
+/// So on the rebuilding read `g` and the vertices' gaps are measured on the plain read of
+/// the file, the healed body after the plain read's own trim check:
+/// - its edge/face gaps are the heal's by construction: they depend only on the edge's
+///   curve and interval and the face's surface, which nothing changes between the heal
+///   and the end of the plain read;
+/// - its vertex gaps are the heal's only as measured: the vertex/face gap starts its
+///   projection from the UV trim ends, which the plain read's trim check can change.
+///
+/// The rebuilt body's current gaps must still be covered by its tolerances. Every gap is
+/// measured afresh, never read from a cache (#20939).
+///
 /// Returns the digest of the read with main's tolerances put back on those entries:
 /// face, edge and vertex tolerances, edge/face gaps, edge curves and the file's UV trims
-/// with the surface points along them. With `lazy`, also the digest of the UV trims
+/// with the surface points along them. On the rebuilding read the hashed edge/face gaps
+/// are the heal's, taken from the plain read, so the digest does not pin the rebuilt
+/// body's gaps; the coverage checks do. With `lazy`, also the digest of the UV trims
 /// `GetOrCreateUVTrimCurve` makes afterwards on the read as it is (raised).
 fn replay(
     name: &str,
@@ -500,21 +520,35 @@ fn replay(
     use solidcore::topology::{vertex, EdgeId, VertexId};
     let mut k = Kernel::default();
     let mut b = read_corpus(&mut k, name, rebuild);
+    // the body the heal measured its gaps on: on the rebuilding read, the plain read
+    let mut healed_k = Kernel::default();
+    let mut healed = rebuild.then(|| read_corpus(&mut healed_k, name, false));
     let gain = gap_gain(&k);
     let mut d = Digest::new();
     for (_, f) in b.faces().iter() {
         d.f64(f.tolerance);
     }
     let edges: Vec<EdgeId> = b.edges().iter().map(|(id, _)| id).collect();
+    if let Some(h) = healed.as_ref() {
+        // (the gaps of the plain read are taken by id)
+        let vertex_ids = |b: &Brep| b.vertices().iter().map(|(id, _)| id).collect::<Vec<_>>();
+        let healed_edges: Vec<EdgeId> = h.edges().iter().map(|(id, _)| id).collect();
+        assert_eq!(edges, healed_edges, "{name}: the reads' edges");
+        assert_eq!(vertex_ids(&b), vertex_ids(h), "{name}: the reads' vertices");
+    }
     let mut seen = 0;
     for &e in &edges {
         let tol = b.edge(e).unwrap().tolerance;
-        let g = edge_gap(&k, &mut b, e);
-        if tol < g {
+        let now = edge_gap(&k, &mut b, e);
+        if tol < now {
             failures.push(format!(
-                "{name}: {e:?} tolerance {tol:e} under its gap {g:e}"
+                "{name}: {e:?} tolerance {tol:e} under its gap {now:e}"
             ));
         }
+        let g = match healed.as_mut() {
+            Some(h) => edge_gap(&healed_k, h, e),
+            None => now,
+        };
         match raised.iter().find(|&&(i, _)| i == e.index()) {
             Some(&(_, main)) => {
                 seen += 1;
@@ -550,7 +584,11 @@ fn replay(
                     .fold(0.0f64, f64::max);
                 // (#17739: a vertex whose gap needs more than its largest edge tolerance
                 // rises to `zone_tol3d(gain * 2 * gap)`, so the check's half rule holds)
-                let gap = vertex_gap(&k, &mut b, v);
+                let now = vertex_gap(&k, &mut b, v);
+                let gap = match healed.as_mut() {
+                    Some(h) => vertex_gap(&healed_k, h, v),
+                    None => now,
+                };
                 let cover = zone_tol3d(&k, gain * 2.0 * gap);
                 let step = if cover > largest {
                     let read = if rebuild { "rebuilding read" } else { "read" };
@@ -559,17 +597,11 @@ fn replay(
                 } else {
                     largest
                 };
-                // (the rebuilding read measures the gap on the trims rebuilt after the heal,
-                // 6e-10 relative off the gap the heal saw on `open_shell` v14)
-                let held = if rebuild && step == cover {
-                    (tol - cover).abs() <= 1e-9 * cover
-                } else {
-                    tol.to_bits() == step.to_bits()
-                };
-                if !(main < tol && held) {
+                // (the check's half rule on the rebuilt body's current gap)
+                if !(main < tol && tol.to_bits() == step.to_bits() && 2.0 * now <= tol) {
                     failures.push(format!(
                         "{name}: {v:?} main {main:e}, now {tol:e}, largest edge {largest:e}, \
-                         gap {gap:e}, cover {cover:e}"
+                         gap {gap:e}, current gap {now:e}, cover {cover:e}"
                     ));
                 }
                 d.f64(main);
@@ -693,6 +725,14 @@ fn corpus_mass(name: &str, lower: Option<(Tolerances<'_>, Tolerances<'_>)>) -> (
 /// points move, each by at most 1.86e-17 times its point's magnitude: below one unit
 /// roundoff of that magnitude, at rounding (MEASURED; the same test pins the net on a grid
 /// of `2^-44` of each point's magnitude).
+///
+/// `Fillet/sphere_plane.smb`'s rebuilding-read digest and `Solids/revolution_mold.smb`'s
+/// lazy-trims and rebuilding-read digests and area bits are #18490's: with upstream's
+/// fitted sphere NURB put back ([`with_fitted_spheres`]) the read drops the file's trims
+/// onto that sphere and rebuilds them, and #18490 subdivides the drop's spans that its
+/// enclosure proves off the curve, so those rebuilt sphere trims carry more control
+/// points (`revolution_mold`'s area, integrated over them, moves by 1 ulp). The as-read
+/// digests, which keep the file's NURB and trims, are unchanged.
 const MAIN: [(&str, [u64; 5]); 28] = [
     (
         "Fillet/blade_hub_1.smb",
@@ -859,7 +899,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
         [
             0xb3a46ba2e4d3817b,
             0x894d776ca5ba209d,
-            0xfea47f8f2838bbe2,
+            0xf6a7f474bf962518,
             0x40735d27cb8cc80f,
             0x7ff8000000000000,
         ],
@@ -968,9 +1008,9 @@ const MAIN: [(&str, [u64; 5]); 28] = [
         "Solids/revolution_mold.smb",
         [
             0x462faca60ad813f0,
-            0x88a9396a602fe93c,
-            0x692f780f5f318bf3,
-            0x40d2a6a844e34874,
+            0xaf0de1993588154f,
+            0xc0352fed2c49b9a0,
+            0x40d2a6a844e34873,
             0x40f8a3124b22bf69,
         ],
     ),
@@ -1168,6 +1208,82 @@ fn corpus_reads_change_only_the_covered_tolerances() {
         "{volume_classes:?}"
     );
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// #20939 on a corpus file: the rebuilding read of `Fillet/open_shell.smb` rebuilds edge
+/// 17's UV trims after the heal, and the rebuilt trim moves the edge's interval from
+/// `[0, 1]` to `[3.9e-6, 1]` (`create_uv_trim_curve`'s interval recovery, through
+/// `edge::set_interval`). The edge/face gap and the start vertex's vertex/edge gap
+/// cached over the old interval no longer hold: each use's gap as read equals the gap
+/// measured afresh. (Before #20939 the cache kept the edge's 3.02e-5, measured over
+/// `[0, 1]`, against a gap of 1.25e-5 over the edge's interval, and vertex 14's 3.02e-5
+/// against 3.18e-5.)
+#[test]
+fn open_shell_rebuilt_trim_leaves_no_stale_gap() {
+    use solidcore::topology::{edge, vertexuse, EdgeId, VertexId};
+    let name = "Fillet/open_shell.smb";
+    let mut k = Kernel::default();
+    let mut b = read_corpus(&mut k, name, true);
+    let e = EdgeId::from_index(17);
+    let ivl = b.edge(e).unwrap().interval;
+    assert!(
+        ivl.min() > 0.0 && ivl.min() < 1e-5,
+        "{name}: e17 interval {ivl:?}"
+    );
+    let plain = {
+        let mut k = Kernel::default();
+        let b = read_corpus(&mut k, name, false);
+        b.edge(e).unwrap().interval
+    };
+    assert_eq!(
+        (plain.min(), plain.max()),
+        (0.0, 1.0),
+        "{name}: e17 as healed"
+    );
+    let mut checked = 0;
+    for eu in edge::edgeuses(&b, e, None, None).unwrap() {
+        let read = max_edge_face_gap(&k, &mut b, eu, false)
+            .unwrap()
+            .unwrap()
+            .gap_3d;
+        let fresh = max_edge_face_gap(&k, &mut b, eu, true)
+            .unwrap()
+            .unwrap()
+            .gap_3d;
+        assert_eq!(
+            read.to_bits(),
+            fresh.to_bits(),
+            "{name}: {eu:?} gap {read:e}, measured {fresh:e}"
+        );
+        checked += 1;
+    }
+    let v = VertexId::from_index(14);
+    for vu in solidcore::topology::vertex::vertexuses(&b, v).unwrap() {
+        let read = vertexuse::vertex_edge_gap(&k, &mut b, vu, false).unwrap();
+        let fresh = vertexuse::vertex_edge_gap(&k, &mut b, vu, true).unwrap();
+        let read_face = vertexuse::vertex_face_gap(&k, &mut b, vu, false).unwrap();
+        let fresh_face = vertexuse::vertex_face_gap(&k, &mut b, vu, true).unwrap();
+        for (what, read, fresh) in [
+            (
+                "vertex/edge",
+                read.map(|g| g.gap_3d),
+                fresh.map(|g| g.gap_3d),
+            ),
+            (
+                "vertex/face",
+                read_face.map(|g| g.gap_3d),
+                fresh_face.map(|g| g.gap_3d),
+            ),
+        ] {
+            assert_eq!(
+                read.map(f64::to_bits),
+                fresh.map(f64::to_bits),
+                "{name}: {vu:?} {what} gap {read:?}, measured {fresh:?}"
+            );
+            checked += usize::from(read.is_some());
+        }
+    }
+    assert!(checked > 2, "{name}: {checked} gaps checked");
 }
 
 /// The files of [`MAIN`] with a sphere found in a NURBS, whose reads the WR-493
