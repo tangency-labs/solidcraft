@@ -11,8 +11,9 @@ use crate::blend::fillet_exact::{
 use crate::curve::curve::Curve;
 use crate::curve::ellipse::Ellipse;
 use crate::curve::line::Line;
-use crate::error::blend::RemovalRefusal as R;
-use crate::error::Result;
+use crate::error::blend::{BlendFailure, RemovalRefusal as R};
+use crate::error::{Result, SolidError};
+use crate::geom::context::Context;
 use crate::geom::geom_utility::p2::{intersect_two_planes, PlanesIntersection};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, EFF_ZERO};
@@ -48,42 +49,59 @@ pub fn delete_fillet_faces(
     let tol = match tol_3d {
         Some(t) => t,
         None => selected.iter().try_fold(0_f64, |t, &id| -> Result<f64> {
-            Ok(t.max(face::p2::tolerance(b, id)?))
+            let face_tol = face::p2::tolerance(b, id)?;
+            if !face_tol.is_finite() || face_tol < 0.0 {
+                return Err(null("invalid fillet removal tolerance"));
+            }
+            Ok(t.max(face_tol))
         })?,
     };
     if !tol.is_finite() || tol <= 0.0 {
         return Err(null("invalid fillet removal tolerance"));
     }
-    b.with_rollback_untouched(
-        |b| {
-            if faces.len() == 1 {
-                return delete_fillet_face(k, b, first, Some(tol));
-            }
-            let mut bands = BTreeMap::new();
-            for &id in &selected {
-                bands.insert(id, Band::read(k, b, id, &selected)?);
-            }
-            check_connected(first, &bands)?;
-            let mut sections = Vec::new();
-            let mut junctions = BTreeMap::new();
-            for (&id, band) in &bands {
-                sections.push(band.plan(k, b, id, tol, &mut junctions)?);
-            }
-            let input = validation::standing(k, &mut b.clone_standing_for_self()?)?;
-            let junctions: Vec<_> = junctions.into_values().collect();
-            remove_chain(k, b, &sections, &junctions, tol)?;
-            b.refresh_cached_topology();
-            let found = validation::standing(k, &mut b.clone_standing_for_self()?)?;
-            if !found.check.failures_beyond(&input.check).is_empty()
-                || found.check.assert_valid.is_none()
-                || (input.manifold && !found.manifold)
-            {
-                return Err(stage_failed());
-            }
-            Ok(())
-        },
-        Result::is_ok,
-    )
+    let edit = |k: &mut Kernel| {
+        b.with_rollback_untouched(
+            |b| {
+                if faces.len() == 1 {
+                    return delete_fillet_face(k, b, first, Some(tol));
+                }
+                let mut bands = BTreeMap::new();
+                for &id in &selected {
+                    bands.insert(id, Band::read(k, b, id, &selected)?);
+                }
+                check_connected(first, &bands)?;
+                let mut sections = Vec::new();
+                let mut junctions = BTreeMap::new();
+                for (&id, band) in &bands {
+                    sections.push(band.plan(k, b, id, tol, &mut junctions)?);
+                }
+                let input = validation::standing(k, &mut b.clone_standing_for_self()?)?;
+                let junctions: Vec<_> = junctions.into_values().collect();
+                remove_chain(k, b, &sections, &junctions, tol)?;
+                b.refresh_cached_topology();
+                let found = validation::standing(k, &mut b.clone_standing_for_self()?)?;
+                validate_chain(&input, &found)
+            },
+            Result::is_ok,
+        )
+    };
+    Context::with_committed_notifications(k, edit)
+}
+
+fn validate_chain(input: &validation::Standing, found: &validation::Standing) -> Result<()> {
+    let why = if let Some(check) = found.check.first_new_failure_name(&input.check) {
+        check
+    } else if found.check.assert_valid.is_none() {
+        "the edited body's geometry could not be checked"
+    } else if input.manifold && !found.manifold {
+        "the chain edit made a manifold solid non-manifold"
+    } else {
+        return Ok(());
+    };
+    Err(SolidError::blend(
+        "blend::fillet_removal::validate_chain",
+        BlendFailure::Defect { why },
+    ))
 }
 
 fn neighbour(b: &Brep, edge_id: EdgeId, face_id: FaceId) -> Result<FaceId> {
@@ -255,7 +273,7 @@ impl Band {
                     k, from, interior, to, 3, false,
                 )?)
             }
-            _ => return Err(refused(R::TangentSurfacesDoNotMeet)),
+            other => return Err(refused(R::UnsupportedSharpSpine(other))),
         };
         // Prove the entire new trim lies on both supports, including a long arc
         // across the parameter seam. A pair of accepted endpoints is insufficient.
@@ -267,9 +285,15 @@ impl Band {
                 return Err(refused(R::TangentSurfacesDoNotMeet));
             }
         }
+        let [first, second] = self.rails;
+        let budgets = [edge::tolerance(b, first)?, edge::tolerance(b, second)?];
+        if !budgets.iter().all(|t| t.is_finite() && *t >= 0.0) {
+            return Err(refused(R::RailTrimOutsideTolerance));
+        }
         Ok(Section {
             face: id,
             rails: self.rails,
+            rail_tolerance: budgets[0].min(budgets[1]),
             sharp,
             rail_orientation: orientation,
         })
@@ -308,7 +332,7 @@ fn sharp_corner(spine: &ExactBlend, near: Point3, origin: Point3, normal: Vec3) 
                 z
             })
         }
-        _ => Err(missing()),
+        other => Err(refused(R::UnsupportedSharpSpine(other))),
     }
 }
 
@@ -325,4 +349,58 @@ fn check_connected(first: FaceId, bands: &BTreeMap<FaceId, Band>) -> Result<()> 
         return Err(refused(R::NotOneTangentChain));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::assert_array::{labels::SURFACE_TYPE, AssertArray, AssertReport, ReportSpec};
+
+    #[test]
+    fn a_conic_support_intersection_names_the_unsupported_sharp_curve() {
+        let spine = ExactBlend {
+            spine: BlendSpine::Conic,
+            ..Default::default()
+        };
+        let err = sharp_corner(&spine, Point3::ZERO, Point3::ZERO, Vec3::Z).unwrap_err();
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::RemovalRefused(R::UnsupportedSharpSpine(
+                BlendSpine::Conic
+            )))
+        );
+    }
+
+    #[test]
+    fn chain_validation_identifies_the_check_that_refused_the_edit() {
+        let input = validation::Standing {
+            check: validation::BrepCheck {
+                pointers_status: crate::error::SM_SUCCESS,
+                pointer_reports: AssertArray::new(),
+                assert_valid: Some(true),
+                reports: AssertArray::new(),
+            },
+            manifold: true,
+        };
+        let check_reason = |found: &validation::Standing, why| {
+            let err = validate_chain(&input, found).unwrap_err();
+            assert_eq!(err.blend_failure(), Some(&BlendFailure::Defect { why }));
+        };
+        let mut found = input.clone();
+        found.manifold = false;
+        check_reason(&found, "the chain edit made a manifold solid non-manifold");
+        found.check.assert_valid = None;
+        check_reason(&found, "the edited body's geometry could not be checked");
+        let report = AssertReport::new(ReportSpec {
+            test_class: SURFACE_TYPE,
+            test_index: 4,
+            ..Default::default()
+        })
+        .unwrap();
+        let name = report.name;
+        found.check.assert_valid = Some(false);
+        assert!(found.check.reports.add_unique_delete_duplicate(report));
+        check_reason(&found, name);
+        assert!(validate_chain(&found, &found).is_ok());
+    }
 }

@@ -8,8 +8,8 @@ use super::{
 };
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
-use crate::error::blend::RemovalRefusal as R;
-use crate::error::Result;
+use crate::error::blend::{BlendFailure, RemovalRefusal as R};
+use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
@@ -36,6 +36,8 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(super) struct Section {
     pub(super) face: FaceId,
     pub(super) rails: [EdgeId; 2],
+    /// Both supporting trims must fit the tighter of the original rails' budgets.
+    pub(super) rail_tolerance: f64,
     pub(super) sharp: Curve,
     pub(super) rail_orientation: OrientType,
 }
@@ -506,6 +508,11 @@ pub(super) fn remove_chain(
         install_curve(k, b, remove, None)?;
         edge::set_interval(b, keep, &span)?;
         edge::set_interval(b, remove, &span)?;
+        // GlueEdges normally encloses the *larger* of the two tolerances. The old
+        // rails are gone here: the new curve and both trims share the tighter budget.
+        for rail in section.rails {
+            edge::set_tolerance(b, rail, section.rail_tolerance, false, false)?;
+        }
         with_kernel_callbacks(k, b, |k, b, env| {
             glue_edges(k, b, env, keep, section.rail_orientation, 0.0, remove)
         })?;
@@ -513,11 +520,38 @@ pub(super) fn remove_chain(
     b.refresh_cached_topology();
     for section in sections {
         let [keep, _] = section.rails;
-        let span = edge::interval(b, keep)?;
+        let span = section.sharp.natural_interval();
+        let budget = section.rail_tolerance;
         for use_id in b.edge(keep)?.edgeuses.clone() {
+            // The two members of a mated pair share one trim on the same support.
+            if eu::orientation(b, use_id)? != OrientType::Same {
+                continue;
+            }
             get_or_create_uv_trim_curve(k, b, use_id, false, false, true)?.status?;
             let f = ner(eu::face(b, use_id)?)?;
             let uv = ner(eu::uv_trim_curve(b, use_id)?.0)?;
+            let refusal = || {
+                Failure::new(
+                    super::OP,
+                    BlendFailure::RemovalRefused(R::RailTrimOutsideTolerance),
+                )
+                .at(EntityRef::Edge(keep))
+            };
+            if edge::tolerance(b, keep)? > budget || edge::interval(b, keep)? != span {
+                return Err(refusal().into_error());
+            }
+            certified_lift(
+                k,
+                ner(face::surface(b, f)?)?,
+                uv,
+                &section.sharp,
+                span,
+                budget,
+            )
+            .map_err(|e| match e {
+                e @ SolidError::Unsupported { .. } => refusal().caused_by(e).into_error(),
+                e => e,
+            })?;
             let bounds = ner(uv.certified_bounding_box(k, &span)?)?;
             let domain = domains.get_mut(&f).ok_or_else(stage_failed)?;
             *domain = domain.union(&Extent2d::from_extent3d(&bounds));

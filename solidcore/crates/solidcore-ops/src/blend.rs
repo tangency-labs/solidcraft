@@ -95,11 +95,12 @@ pub struct RemovedFilletChain {
 }
 
 /// Remove the selected chain as one edit. `faces` names faces in the input record's `order`.
-/// A selection that is not a removable chain gives `None`. The input stays as it was.
+/// An empty or single-index selection gives `None` before index validation. A larger
+/// selection gives `None` if the kernel does not recognize a fillet chain. The edit uses a copy.
 ///
 /// # Errors
-/// [`Error::Argument`] for an invalid or repeated index; the copy's, the removal's or the
-/// result's solid check and conversion errors.
+/// [`Error::Argument`] for an invalid or repeated index in a selection of two or more.
+/// Copying, removal, the solid check and record conversion can also return errors.
 pub fn delete_fillet_chain(
     body: &Body,
     order: &crate::Order,

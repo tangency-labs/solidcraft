@@ -187,6 +187,98 @@ fn removes_a_split_toroidal_round_from_a_hemisphere() {
     removes_split_ring(&mut k, b, 5.0, 0.0, [250.0 * PI / 3.0, 75.0 * PI]);
 }
 
+/// One round patch and its neighbour share two cross edges. Its other two
+/// edges are the rails to be sewn together on the plane and on the sphere.
+fn hemisphere_with_rails(k: &mut Kernel) -> (Brep, Vec<FaceId>, [solidcore::EdgeId; 2]) {
+    let mut b = spherical_cap(k, 0.0, 0.0);
+    round_edges(k, &mut b, 1.0, |p| p.iter().all(|p| p.z.abs() < 1e-7));
+    let patches = round_faces(&b, 0.0);
+    let rails: Vec<_> = solidcore::topology::face::p4::edges(&b, patches[0], None, false, None)
+        .unwrap()
+        .into_iter()
+        .filter(|&e| {
+            edge::faces(&b, e, None)
+                .unwrap()
+                .iter()
+                .any(|f| !patches.contains(f))
+        })
+        .collect();
+    b.set_editing_enabled(true);
+    (b, patches, rails.try_into().unwrap())
+}
+
+#[test]
+fn both_sides_of_a_sharp_rail_keep_the_tighter_source_tolerance() {
+    let mut k = Kernel::default();
+    let (b, patches, rails) = hemisphere_with_rails(&mut k);
+    for loose in rails {
+        let mut copy = b.clone_standing_for_self().unwrap();
+        let budget = edge::tolerance(&copy, loose).unwrap();
+        edge::set_tolerance(&mut copy, loose, 10.0 * budget, false, true).unwrap();
+        assert!(check_brep(&mut k, &mut copy, CheckLevel::Level2)
+            .unwrap()
+            .is_valid());
+        delete_fillet_faces(&mut k, &mut copy, &patches, None).unwrap();
+        let surviving: Vec<_> = rails
+            .iter()
+            .copied()
+            .filter(|&e| copy.edge(e).is_ok())
+            .collect();
+        assert_eq!(surviving.len(), 1);
+        assert_eq!(edge::tolerance(&copy, surviving[0]).unwrap(), budget);
+    }
+}
+
+#[test]
+fn a_sharp_rail_trim_without_a_certificate_restores_the_original_rails() {
+    use solidcore::error::blend::{BlendFailure, RemovalRefusal};
+    use solidcore::error::Reason;
+    let mut k = Kernel::default();
+    let (mut b, patches) = rounded_block(&mut k);
+    b.set_editing_enabled(true);
+    // The straight rail along the front wall joins (3, 0, 7) to (17, 0, 7).
+    let tight = *b
+        .edge_list()
+        .iter()
+        .find(|&&e| {
+            let (s, t) = edge::start_end_vertices(&b, e).unwrap();
+            [s.unwrap(), t.unwrap()].into_iter().all(|v| {
+                let p = vertex::point(&b, v).unwrap();
+                p.y.abs() < 1e-7 && (p.z - 7.0).abs() < 1e-7
+            })
+        })
+        .unwrap();
+    // A stored rail claims a sub-roundoff budget for its coordinates.
+    // Its opposite rail's normal tolerance must not mask this bad input.
+    edge::set_tolerance(&mut b, tight, f64::EPSILON, false, false).unwrap();
+    let before = mass(&k, &mut b);
+    let topology = |b: &Brep| {
+        b.edge_list()
+            .iter()
+            .map(|&e| {
+                (
+                    e,
+                    edge::tolerance(b, e).unwrap(),
+                    edge::start_end_vertices(b, e).unwrap(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let edges = topology(&b);
+    let err = delete_fillet_faces(&mut k, &mut b, &patches, None).unwrap_err();
+    assert!(
+        matches!(
+            err.failure().map(|f| &f.reason),
+            Some(Reason::Blend(BlendFailure::RemovalRefused(
+                RemovalRefusal::RailTrimOutsideTolerance
+            )))
+        ),
+        "{err:?}"
+    );
+    assert_eq!(topology(&b), edges);
+    assert_eq!(mass(&k, &mut b), before);
+}
+
 #[test]
 fn removes_a_concave_split_round_from_a_ball_on_a_plate() {
     let mut k = Kernel::default();
@@ -337,5 +429,65 @@ fn incomplete_and_repeated_selections_leave_the_rounded_block_intact() {
         assert!(check_brep(&mut k, &mut block, CheckLevel::Level2)
             .unwrap()
             .is_valid());
+    }
+}
+
+#[test]
+fn a_valid_tolerance_on_one_round_cannot_mask_an_invalid_neighbour() {
+    let mut k = Kernel::default();
+    let (mut block, rim) = rounded_block(&mut k);
+    block.set_editing_enabled(true);
+    let original_faces = block.face_list().to_vec();
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1e-5] {
+        solidcore::topology::face::p3::set_tolerance(&mut block, rim[0], bad, false, false)
+            .unwrap();
+        let err = delete_fillet_faces(&mut k, &mut block, &rim, None).unwrap_err();
+        assert_eq!(err.kind(), solidcore::error::ErrorKind::InvalidInput);
+        assert_eq!(block.face_list(), original_faces.as_slice());
+    }
+}
+
+#[test]
+fn observers_see_only_committed_fillet_removals() {
+    use solidcore::error::EntityRef;
+    use solidcore::kernel::CancelToken;
+    use solidcore::topology::brep::p3::{notify_serial, topology_ref};
+    use solidcore::topology::topology::TrackTopologyChanges;
+    use solidcore::{BrepId, SolidError};
+
+    // Measure the last poll of this edit, so cancellation is inside final validation,
+    // after the Euler edits, without relying on a fixed count of solver iterations.
+    let mut budget = u64::MAX;
+    for commit in [true, false] {
+        let mut k = Kernel::default();
+        let (mut block, rim) = rounded_block(&mut k);
+        block.set_editing_enabled(true);
+        let before = block.face_list().to_vec();
+        let serial = notify_serial(&mut k.context, &mut block).unwrap();
+        let tracker =
+            TrackTopologyChanges::new(Some(BrepId::from_index(0)), 1, true, Some(&mut k.context));
+        let token = CancelToken::after_polls(budget);
+        k.set_cancel_token(token.clone());
+        let result = delete_fillet_faces(&mut k, &mut block, &rim, None);
+        assert!(tracker.is_tracking(Some(&k.context)));
+        if commit {
+            result.unwrap();
+            let removed = tracker.rm_list();
+            for f in rim {
+                assert!(removed.contains(&topology_ref(serial, EntityRef::Face(f)).key));
+                assert!(!block.face_list().contains(&f));
+            }
+            budget = token.polls().unwrap();
+        } else {
+            assert!(
+                matches!(result, Err(SolidError::Cancelled { .. })),
+                "{result:?}"
+            );
+            assert_eq!(block.face_list(), before);
+            assert!(
+                tracker.lists().notify_events.is_empty(),
+                "observer saw a refused edit"
+            );
+        }
     }
 }

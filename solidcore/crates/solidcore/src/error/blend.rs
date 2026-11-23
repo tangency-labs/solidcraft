@@ -81,6 +81,7 @@ use super::{
     SM_ERR_INVALID_INPUT, SM_ERR_NOT_CONVERGING, SM_ERR_NOT_WITHIN_TOLERANCE, SM_ERR_NULL_POINTER,
     SM_ERR_OUTSIDE_OF_DOMAIN,
 };
+use crate::blend::fillet_exact::BlendSpine;
 use crate::blend::fillet_executive::NoRoomReason;
 
 /// Why a blend fails: the cause of the typed blend failure record. Its class is
@@ -701,6 +702,10 @@ pub enum RemovalRefusal {
     /// The tangent surfaces of a ring fillet do not meet in a closed curve near its rails
     /// within their domains: the sharp edge would lie on a continuation of one of them.
     TangentSurfacesDoNotMeet,
+    /// The support intersection has a shape the removal cannot rebuild as a sharp edge.
+    UnsupportedSharpSpine(BlendSpine),
+    /// The new sharp edge's UV trim could not be certified within the original rail tolerance.
+    RailTrimOutsideTolerance,
     /// A seam's UV trim, run on, does not reach the new vertex on its face's surface.
     SeamTrimMissesNewVertex,
     /// The fillet face does not have four edges.
@@ -754,6 +759,8 @@ pub const fn removal_class(reason: RemovalRefusal) -> ErrorKind {
         | R::SideEdgeNotStraight
         | R::CornerOffSideLine
         | R::TangentSurfacesDoNotMeet
+        | R::UnsupportedSharpSpine(_)
+        | R::RailTrimOutsideTolerance
         | R::SeamTrimMissesNewVertex => ErrorKind::RemovalNotExact,
         R::NotFourEdges
         | R::AdjacentEdgesTangent
@@ -1717,6 +1724,11 @@ mod tests {
             (R::SideEdgeNotStraight, ErrorKind::RemovalNotExact),
             (R::CornerOffSideLine, ErrorKind::RemovalNotExact),
             (R::TangentSurfacesDoNotMeet, ErrorKind::RemovalNotExact),
+            (
+                R::UnsupportedSharpSpine(BlendSpine::Conic),
+                ErrorKind::RemovalNotExact,
+            ),
+            (R::RailTrimOutsideTolerance, ErrorKind::RemovalNotExact),
             (R::SeamTrimMissesNewVertex, ErrorKind::RemovalNotExact),
             (R::NotFourEdges, ErrorKind::NotARemovableFillet),
             (R::AdjacentEdgesTangent, ErrorKind::NotARemovableFillet),
