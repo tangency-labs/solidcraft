@@ -615,6 +615,41 @@ mod smlib {
         }
     }
 
+    /// #20781's situation: the largest wall the kernel names is a face's own radius of
+    /// curvature, a wall that itself collapses. A post of radius 0.8276550758693992 stands on a
+    /// plate whose rim is many small flat faces (a curve cut as flat pieces). Shelled 2 mm
+    /// open at the post's top, the wall is refused, and whatever the refusal offers is strictly under
+    /// that radius and builds when used; where no wall builds it says so plainly.
+    #[test]
+    fn a_shell_wall_named_under_a_radius_limit_builds_when_used() {
+        const R: f64 = 0.8276550758693992;
+        let rim: Vec<Vec2> = (0..96)
+            .map(|i| {
+                let a = std::f64::consts::TAU * f64::from(i) / 96.0;
+                Vec2::new(8.0 * a.cos(), 8.0 * a.sin())
+            })
+            .collect();
+        let plate = extrude(&Plane::XY, &[Region2 { outer: Loop2::polygon(&rim), holes: vec![] }], 0.0, 10.0).unwrap().pop().unwrap();
+        let post = cylinder(Vec3::new(0.0, 0.0, 9.0), Vec3::Z, R, 7.0).unwrap();
+        let body = boolean(&plate, &post, BoolOp::Union).unwrap().unwrap();
+        let top = Vec3::new(0.1, 0.1, 16.0);
+        // The wall that is the radius itself collapses: it is never a wall to name.
+        assert!(offset_backend::shell(&body, &[top], R).is_err(), "a wall of the post's own radius builds");
+        let e = offset_backend::shell(&body, &[top], 2.0).unwrap_err().to_string();
+        let named = e.rfind("a wall of ").and_then(|i| e[i + 10..].find(" mm builds").map(|j| e[i + 10..i + 10 + j].to_string()));
+        match named {
+            Some(w) => {
+                let w: f64 = w.parse().unwrap();
+                assert!(w > 0.0 && w < R, "the wall named is not under the radius: {e}");
+                assert!(offset_backend::shell(&body, &[top], w).is_ok(), "the wall named does not build: {e}");
+            }
+            None => {
+                assert!(e.contains("no thinner wall builds either"), "{e}");
+                assert!(!e.contains("shell_brep") && !e.contains("status") && !e.contains("1001"), "{e}");
+            }
+        }
+    }
+
     #[test]
     fn draft_tilts_a_side_and_keeps_its_name() {
         let b = cube();
