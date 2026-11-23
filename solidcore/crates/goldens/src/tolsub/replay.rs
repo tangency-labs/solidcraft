@@ -652,26 +652,28 @@ fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usiz
 /// case, and the hash of main's committed line (`origin/main` ee673a19bf's expected file).
 /// #18490 moves these four rows (the round sits on the sphere drop's finer trims), so each
 /// hash is of the row with that change, from Linux CI.
+/// Each hash is of the line without the `fillet_point_step` key, which recorded the retired
+/// step latch (#18916).
 const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0xbab5_3857_5f4c_54b2,
+        0x9e43_eafe_0171_4c09,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x0879_39f6_c276_2c27,
+        0xe2ec_b89d_309a_54a8,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0xaa56_e948_548e_16f9,
+        0x9fc9_deff_361b_7066,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x87dc_a442_4a0e_39cd,
+        0x5669_c3ab_dde7_2e76,
     ),
 ];
 
