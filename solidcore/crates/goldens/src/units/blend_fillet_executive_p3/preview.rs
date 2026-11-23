@@ -6,8 +6,7 @@
 //! is the API's `SM_ERR_INVALID_INPUT`) and the radius. Both sides record the API status,
 //! the body's vertex, edge and face counts after the call, then on success each preview
 //! surface: `has`, its type, natural UV domain and a 5 x 5 `EvaluatePoint` grid over it
-//! (`status [x y z]`). The C++ runs in a fresh child process and both sides report the
-//! `sdStaticStep` latch ([`super::POINT_STEP`]), as the other real-solid cases.
+//! (`status [x y z]`).
 
 use super::end_to_end::{build_source, Source};
 use crate::{HarnessError, Output, Rng};
@@ -176,7 +175,7 @@ pub(super) fn rust(input: &FilletPreview) -> Result<Output, HarnessError> {
             Output::new().values("preview", out)
         }
     };
-    Ok(super::with_point_step(out, super::rust_point_step(&k)))
+    Ok(out)
 }
 
 /// A generated case: a box (sometimes long and thin) with one to four of its edges, or

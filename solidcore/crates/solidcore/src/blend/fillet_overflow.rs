@@ -49,8 +49,8 @@
 //! - **Refusals.** `rcWhy` is the returned [`ExtendOutcome::Refused`] comment.
 
 use crate::curve::curve::Curve;
-use crate::error::blend::{BlendFailure, CliffInput};
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::blend::{BlendFailure, CliffInput, OverflowDrop, OverflowInput};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
@@ -76,6 +76,50 @@ use crate::topology::{edge, face, vertex, Brep, BrepId, EdgeId, FaceId, VertexId
 
 const OP: &str = "blend::fillet_overflow";
 
+/// A face or edge the overflow reads lacks `input` ([`BlendFailure::OverflowInputMissing`]).
+/// The helpers read the caller's body and the executive's sheet alike, so the failure names
+/// no entity: the executive's refusal carries the error's entity as the target's.
+#[track_caller]
+fn input_missing(input: OverflowInput) -> SolidError {
+    SolidError::blend(OP, BlendFailure::OverflowInputMissing(input))
+}
+
+/// A step that cannot fail did ([`BlendFailure::Defect`], status `SM_ERR`), `why` saying
+/// why it is the kernel's fault.
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    SolidError::blend(OP, BlendFailure::Defect { why })
+}
+
+/// A missing thing this module built ([`BlendFailure::Defect`] keeping the upstream `NER`
+/// status `SM_ERR_NULL_POINTER`), `why` saying why it is always there.
+#[track_caller]
+fn null_defect(why: &'static str) -> SolidError {
+    Failure::new(OP, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// Why `IsPlanar`'s normal of a planar surface is never zero.
+pub(crate) const PLANAR_NORMAL: &str =
+    "a surface found planar has a zero normal: `IsPlanar` gives a \
+     plane's unit z axis, or its pseudo box's normal across a flat interval, the cross product \
+     of two of the box's unit axes";
+
+/// Why a unit normal crossed with the coordinate axis it leans on least is never zero.
+pub(crate) const PLANE_AXIS: &str =
+    "a plane's first axis, its unit normal crossed with the coordinate \
+     axis it leans on least, is zero: that axis holds at most 1/sqrt(3) of the normal, so the \
+     cross product is at least sqrt(2/3) long";
+
+/// Why every run index of a chain is a run.
+const CHAIN_RUNS: &str = "a chain of a rail's runs off the face names no run: a chain starts \
+     from a run and is extended only by runs it found in the list of runs";
+
+/// Why every vertex of a way round the face is there.
+const WAY_VERTS: &str = "a way round the face's boundary lacks a vertex: a way starts with \
+     its start vertex and pushes one vertex with each edge it takes";
+
 /// `smos_Max` of two doubles.
 fn smos_max(a: f64, b: f64) -> f64 {
     if a > b {
@@ -99,16 +143,17 @@ fn smos_min(a: f64, b: f64) -> f64 {
 /// it is not planar (`IsPlanar(SM_EFF_ZERO, &at, &normal)`).
 ///
 /// # Errors
-/// `SM_ERR` for a zero normal; those of `IsPlanar`.
+/// A [`BlendFailure::Defect`] (`SM_ERR`) for a zero normal; those of `IsPlanar`.
 pub fn plane_of(k: &Kernel, surface: &Surface) -> Result<Option<(Point3, Vec3)>> {
     let planar = surface.is_planar(k, EFF_ZERO)?;
     if !planar.is_planar {
         return Ok(None);
     }
-    let normal = planar
-        .normal
-        .unitize()
-        .map_err(|_| SolidError::blend_failed(OP, "the plane's normal is zero"))?;
+    let normal = planar.normal.unitize().map_err(|e| {
+        Failure::new(OP, BlendFailure::Defect { why: PLANAR_NORMAL })
+            .caused_by(e)
+            .into_error()
+    })?;
     Ok(Some((planar.point, normal)))
 }
 
@@ -135,10 +180,11 @@ pub(crate) fn outward_plane(k: &Kernel, body: &Brep, f: FaceId) -> Result<(Point
 /// drop fails).
 ///
 /// # Errors
-/// `SM_ERR_NULL_POINTER` for a face without surface; those of the drop.
+/// [`BlendFailure::OverflowInputMissing`] (`SM_ERR_NULL_POINTER`) for a face without
+/// surface; those of the drop.
 pub fn distance_to_surface(k: &Kernel, b: &Brep, f: FaceId, point: Point3) -> Result<f64> {
-    let surface = face::p2::surface(b, f)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
+    let surface =
+        face::p2::surface(b, f)?.ok_or_else(|| input_missing(OverflowInput::FaceSurface))?;
     if let Some((at, normal)) = plane_of(k, surface)? {
         return Ok((point - at).dot(normal).abs());
     }
@@ -156,7 +202,8 @@ pub fn distance_to_surface(k: &Kernel, b: &Brep, f: FaceId, point: Point3) -> Re
 /// ends and three points between within `tol`.
 ///
 /// # Errors
-/// `SM_ERR_NULL_POINTER` for an edge without curve; those of the distances.
+/// [`BlendFailure::OverflowInputMissing`] (`SM_ERR_NULL_POINTER`) for an edge without curve;
+/// those of the distances.
 pub fn edge_on_surface(
     k: &Kernel,
     eb: &Brep,
@@ -165,8 +212,7 @@ pub fn edge_on_surface(
     f: FaceId,
     tol: f64,
 ) -> Result<bool> {
-    let curve =
-        edge::curve(eb, e)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+    let curve = edge::curve(eb, e)?.ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
     let ivl = edge::interval(eb, e)?;
     let mut on = true;
     let mut i = 0_u32;
@@ -200,8 +246,8 @@ pub fn curve_on_surface(k: &Kernel, curve: &Curve, fb: &Brep, f: FaceId, tol: f6
 /// points left out. The 3D curves.
 ///
 /// # Errors
-/// `SM_ERR_NULL_POINTER` for a face without surface; those of the section and the
-/// intersection.
+/// [`BlendFailure::OverflowInputMissing`] (`SM_ERR_NULL_POINTER`) for a face without
+/// surface; those of the section and the intersection.
 pub fn creases(
     k: &Kernel,
     sheet_b: &mut Brep,
@@ -211,10 +257,10 @@ pub fn creases(
     tol: f64,
 ) -> Result<Vec<Curve>> {
     let sheet_surface = face::p2::surface(sheet_b, sheet)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the sheet face's surface"))?
+        .ok_or_else(|| input_missing(OverflowInput::FaceSurface))?
         .clone_for_evaluation()?;
     let other = face::p2::surface(fb, f)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
+        .ok_or_else(|| input_missing(OverflowInput::FaceSurface))?
         .clone_for_evaluation()?;
     let sheet_domain = face::p2::uv_domain(sheet_b, sheet)?;
     if let Some((at, normal)) = plane_of(k, &other)? {
@@ -361,7 +407,10 @@ fn material_location(k: &Kernel, b: &mut Brep, point: Point3) -> Result<Material
     let zone = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
     let id = match b.notify_serial() {
         Some(serial) => BrepId::from_index(u32::try_from(serial).map_err(|_| {
-            SolidError::blend_failed(OP, "the B-rep's serial number does not fit an id")
+            defect(
+                "a B-rep's notification serial does not fit an id: a context issues serials \
+                 up to `MAX_BREP_SERIAL` (2^26 - 1)",
+            )
         })?),
         None => BrepId::from_index(0),
     };
@@ -392,7 +441,7 @@ pub struct LoopCurve {
 /// `sm_Extension`: a support face continued to the rails that run past its foot into the
 /// material: the loop on its plane and the face's edges along that loop.
 #[derive(Debug, Clone)]
-pub struct Extension {
+pub(crate) struct Extension {
     /// A point of the face's plane.
     pub at: Point3,
     /// The plane's unit normal.
@@ -453,10 +502,10 @@ fn add_curve(
 /// `sm_EdgeCurve`: a copy of the edge's curve over the edge's interval.
 ///
 /// # Errors
-/// `SM_ERR_NULL_POINTER` for an edge without curve; those of the copy and the trim.
+/// [`BlendFailure::OverflowInputMissing`] (`SM_ERR_NULL_POINTER`) for an edge without curve;
+/// those of the copy and the trim.
 pub fn edge_curve(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Curve> {
-    let curve =
-        edge::curve(b, e)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+    let curve = edge::curve(b, e)?.ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
     let mut copy = curve.copy(k)?;
     let ivl = edge::interval(b, e)?;
     if ivl != copy.natural_interval() {
@@ -468,16 +517,16 @@ pub fn edge_curve(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Curve> {
 
 /// The start and end vertices of an edge (`GetStartVertex`, `GetEndVertex`).
 fn ends_of(b: &Brep, e: EdgeId) -> Result<(VertexId, VertexId)> {
-    let s = edge::start_vertex(b, e)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's start vertex"))?;
-    let t = edge::end_vertex(b, e)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's end vertex"))?;
+    let s =
+        edge::start_vertex(b, e)?.ok_or_else(|| input_missing(OverflowInput::EdgeStartVertex))?;
+    let t = edge::end_vertex(b, e)?.ok_or_else(|| input_missing(OverflowInput::EdgeEndVertex))?;
     Ok((s, t))
 }
 
 /// `sm_SideLineThrough`: the side edge of face `f` whose line holds `point` (a straight
 /// edge of the face that is not blended, `point` within `tol` of the line it lies on), and
-/// its end nearer `point`. `None` when none; `SM_ERR` for two.
+/// its end nearer `point`. `None` when none; [`BlendFailure::ExtensionEndOnTwoSideLines`]
+/// (`SM_ERR`) for two.
 fn side_line_through(
     k: &Kernel,
     b: &Brep,
@@ -511,10 +560,10 @@ fn side_line_through(
             continue;
         }
         if found.is_some() {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "two side lines pass through one point",
-            )); // two side lines through one point
+                BlendFailure::ExtensionEndOnTwoSideLines,
+            ));
         }
         let foot = if point.distance(a) <= point.distance(bb) {
             sv
@@ -538,8 +587,8 @@ struct OffRun {
 }
 
 /// The drop of `point` onto `curve` over its natural interval (`DropPoint(.., NULL,
-/// SM_BIG_DOUBLE, NULL, ..)`): its parameter, or `SM_ERR` when it fails or lies more than
-/// `10 tol` off.
+/// SM_BIG_DOUBLE, NULL, ..)`): its parameter, or [`BlendFailure::OverflowPointDoesNotDrop`]
+/// (`SM_ERR`) when it fails or lies more than `10 tol` off.
 fn param_on(k: &Kernel, curve: &Curve, point: Point3, tol: f64) -> Result<f64> {
     let dropped = curve.drop_point(
         k,
@@ -551,9 +600,9 @@ fn param_on(k: &Kernel, curve: &Curve, point: Point3, tol: f64) -> Result<f64> {
         SolverOperation::Minimize,
     )?;
     if !dropped.success || dropped.distance > 10.0 * tol {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the point does not drop onto the curve",
+            BlendFailure::OverflowPointDoesNotDrop(OverflowDrop::EdgePieceEndOntoEdge),
         ));
     }
     Ok(dropped.parameter)
@@ -697,10 +746,11 @@ fn plane_axes(normal: Vec3) -> Result<(Vec3, Vec3)> {
     } else if normal.z.abs() < normal.x.abs() {
         axis = Vec3::new(0.0, 0.0, 1.0);
     }
-    let x = normal
-        .cross(axis)
-        .unitize()
-        .map_err(|_| SolidError::blend_failed(OP, "the plane's axis is parallel to its normal"))?;
+    let x = normal.cross(axis).unitize().map_err(|e| {
+        Failure::new(OP, BlendFailure::Defect { why: PLANE_AXIS })
+            .caused_by(e)
+            .into_error()
+    })?;
     let y = normal.cross(x);
     Ok((x, y))
 }
@@ -708,7 +758,7 @@ fn plane_axes(normal: Vec3) -> Result<(Vec3, Vec3)> {
 /// A kept rail of the sheet that lies on the face [`extend`] continues: its curve over its
 /// interval ([`edge_curve`]) and its start and end vertices in the sheet.
 #[derive(Debug, Clone)]
-pub struct Rail {
+pub(crate) struct Rail {
     /// The rail's curve over its edge's interval.
     pub curve: Curve,
     /// Its start vertex in the sheet.
@@ -723,7 +773,7 @@ pub struct Rail {
 
 /// What [`extend`] makes of one face.
 #[derive(Debug)]
-pub enum ExtendOutcome {
+pub(crate) enum ExtendOutcome {
     /// The extensions (none when no rail runs off the face into the material).
     Extended(Vec<Extension>),
     /// Not an extension this builds: the fork's `rcWhy`.
@@ -746,11 +796,19 @@ struct Way {
 /// side edges, the way round whose inside, beside the chain, lies in the material.
 ///
 /// # Errors
-/// `SM_ERR` for two side lines through a chain's end, a zero axis or tangent, a chain end
-/// that no blended edge drops onto, and a piece of an edge its end is not on; those of the
-/// classifications, drops, copies and trims.
+/// [`BlendFailure::ExtensionEndOnTwoSideLines`] for two side lines through a chain's end,
+/// [`BlendFailure::NoBlendedEdgeNearExtension`] for a chain that no blended edge drops onto,
+/// [`BlendFailure::OverflowPointDoesNotDrop`] for a piece of an edge its end is not on and
+/// [`BlendFailure::OverflowInputMissing`] for a face without surface or an edge without
+/// curve or vertex (all `SM_ERR`, the last `SM_ERR_NULL_POINTER`); a
+/// [`BlendFailure::Defect`] for a zero axis or tangent; those of the classifications, drops,
+/// copies and trims.
+///
+/// Crate-private: its rails come only from the trim at creases, which keeps the sheet's
+/// rails that lie on the face (`edge_on_surface`), so no caller hands it the rail off the
+/// plane its tangent Defect names.
 #[allow(clippy::too_many_lines)] // one fork routine
-pub fn extend(
+pub(crate) fn extend(
     k: &Kernel,
     target: &mut Brep,
     f: FaceId,
@@ -841,8 +899,8 @@ pub fn extend(
         return Ok(ExtendOutcome::Extended(Vec::new()));
     }
 
-    let surface = face::p2::surface(target, f)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
+    let surface =
+        face::p2::surface(target, f)?.ok_or_else(|| input_missing(OverflowInput::FaceSurface))?;
     let Some((at, normal)) = plane_of(k, surface)? else {
         return Ok(ExtendOutcome::Refused(
             "Fillet Error: a blend's rail runs past the boundary of a face that is not planar into the material",
@@ -851,10 +909,7 @@ pub fn extend(
     let (x, y) = plane_axes(normal)?;
     let face_edges = face::p4::edges(target, f, None, false, None)?;
 
-    let run = |i: usize| -> Result<&OffRun> {
-        runs.get(i)
-            .ok_or_else(|| SolidError::blend_missing(OP, "the chain's run"))
-    };
+    let run = |i: usize| -> Result<&OffRun> { runs.get(i).ok_or_else(|| null_defect(CHAIN_RUNS)) };
     let mut extensions = Vec::new();
     // the chains of runs, joined at the sheet's vertices; each run once
     let mut used = vec![false; runs.len()];
@@ -875,7 +930,7 @@ pub fn extend(
                 } else {
                     chain.first().copied()
                 }
-                .ok_or_else(|| SolidError::blend_missing(OP, "the chain's end run"))?;
+                .ok_or_else(|| null_defect(CHAIN_RUNS))?;
                 let end = if side == 0 {
                     usize::from(!at_rev)
                 } else {
@@ -912,12 +967,8 @@ pub fn extend(
             }
         }
         // the chain's two ends: [0] its start, [1] its end
-        let &(first, first_rev) = chain
-            .first()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the chain's first run"))?;
-        let &(last, last_rev) = chain
-            .last()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the chain's last run"))?;
+        let &(first, first_rev) = chain.first().ok_or_else(|| null_defect(CHAIN_RUNS))?;
+        let &(last, last_rev) = chain.last().ok_or_else(|| null_defect(CHAIN_RUNS))?;
         let (rf, rl) = (run(first)?, run(last)?);
         let ends = [pick(&rf.ends, first_rev), pick(&rl.ends, !last_rev)];
         let verts = [pick(&rf.vertices, first_rev), pick(&rl.vertices, !last_rev)];
@@ -963,7 +1014,13 @@ pub fn extend(
                 starts.push(s);
                 starts.push(t);
             }
-            (None, None) => return Err(SolidError::blend_missing(OP, "the chain's end edges")),
+            (None, None) => {
+                return Err(null_defect(
+                    "a chain's end neither crosses the face's boundary nor has a side line's \
+                     foot: an end that crosses no edge either finds its side line's foot or \
+                     the extension is refused before the ways are walked",
+                ))
+            }
         }
         let touches = |e: EdgeId, v: VertexId| -> Result<bool> {
             let (s, t) = ends_of(target, e)?;
@@ -1044,7 +1101,7 @@ pub fn extend(
                     }
                     way.edges.push(e);
                     at_v = edge::other_vertex(target, e, Some(at_v))?
-                        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's other vertex"))?;
+                        .ok_or_else(|| input_missing(OverflowInput::EdgeOtherVertex))?;
                     way.verts.push(at_v);
                     from = Some(e);
                     next = None;
@@ -1116,10 +1173,7 @@ pub fn extend(
             chain_loop(&mut ext)?;
             // the end to the way's first vertex
             let here = ends[1];
-            let first_v = way
-                .verts
-                .first()
-                .ok_or_else(|| SolidError::blend_missing(OP, "the way's first vertex"))?;
+            let first_v = way.verts.first().ok_or_else(|| null_defect(WAY_VERTS))?;
             let first_p = vertex::point(target, *first_v)?;
             if here.distance(first_p) > tol {
                 let piece = if let Some(c) = crosses[1] {
@@ -1139,22 +1193,15 @@ pub fn extend(
             for (i, &e) in way.edges.iter().enumerate() {
                 let curve = edge_curve(k, target, e)?;
                 let (va, vb) = (
-                    way.verts
-                        .get(i)
-                        .ok_or_else(|| SolidError::blend_missing(OP, "the way's vertex"))?,
-                    way.verts
-                        .get(i + 1)
-                        .ok_or_else(|| SolidError::blend_missing(OP, "the way's next vertex"))?,
+                    way.verts.get(i).ok_or_else(|| null_defect(WAY_VERTS))?,
+                    way.verts.get(i + 1).ok_or_else(|| null_defect(WAY_VERTS))?,
                 );
                 let (pa, pb) = (vertex::point(target, *va)?, vertex::point(target, *vb)?);
                 add_curve(k, &mut ext.lp, curve, pa, pb)?;
                 ext.along.push(e);
             }
             // the way's last vertex to the start
-            let last_v = way
-                .verts
-                .last()
-                .ok_or_else(|| SolidError::blend_missing(OP, "the way's last vertex"))?;
+            let last_v = way.verts.last().ok_or_else(|| null_defect(WAY_VERTS))?;
             let last_p = vertex::point(target, *last_v)?;
             if last_p.distance(ends[0]) > tol {
                 let piece = if let Some(c) = crosses[0] {
@@ -1212,26 +1259,32 @@ fn takes_off(
     let mut uv = Vec::new();
     loop_polygon(k, &ext.lp, at, x, y, &mut uv)?;
     let area = twice_area(&uv);
-    let &(r, rev) = chain
-        .first()
-        .ok_or_else(|| SolidError::blend_missing(OP, "the chain's first run"))?;
-    let mid_run = runs
-        .get(r)
-        .ok_or_else(|| SolidError::blend_missing(OP, "the middle run"))?;
+    let &(r, rev) = chain.first().ok_or_else(|| null_defect(CHAIN_RUNS))?;
+    let mid_run = runs.get(r).ok_or_else(|| null_defect(CHAIN_RUNS))?;
     let ivl = mid_run.curve.natural_interval();
     let d = mid_run
         .curve
         .evaluate(k, ivl.evaluate(0.5), 1, true, false)?;
     let [p, d1, ..] = *d.as_slice() else {
-        return Err(SolidError::blend_failed(
-            OP,
-            "the run's curve has no derivative",
+        return Err(defect(
+            "a run's curve evaluated with one derivative gives no derivative: a curve's \
+             evaluation returns its point and each derivative asked for",
         ));
     };
     let tan = if rev { -d1 } else { d1 };
     let len = mid_run.ends[0].distance(mid_run.ends[1]);
-    let inward = normal.cross(tan).unitize().map_err(|_| {
-        SolidError::blend_failed(OP, "the run's tangent is parallel to the plane's normal")
+    let inward = normal.cross(tan).unitize().map_err(|e| {
+        Failure::new(
+            OP,
+            BlendFailure::Defect {
+                why: "a run's tangent at its middle is zero or parallel to its face's normal: the \
+                      run is a piece of a rail of the executive's sheet, which the fillet trace \
+                      builds as a regular curve (its tangent never vanishes), on the face's plane \
+                      over more than the tolerance, so its tangent is nonzero and in the plane",
+            },
+        )
+        .caused_by(e)
+        .into_error()
     })?; // left of the run in the plane, as the loop runs
     let side = if area > 0.0 { 1.0 } else { -1.0 };
     // the probe a hundredth of the run's length beside it lands on or past the loop's far
@@ -1260,8 +1313,8 @@ fn takes_off(
     let mut nearest = BIG_DOUBLE;
     let mut toward = Vec3::UNDEF;
     for &e in blended {
-        let curve = edge::curve(target, e)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the blended edge's curve"))?;
+        let curve =
+            edge::curve(target, e)?.ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
         let dropped = curve.drop_point(
             k,
             &edge::interval(target, e)?,
@@ -1278,9 +1331,9 @@ fn takes_off(
         toward = curve.evaluate_point(k, dropped.parameter)?;
     }
     if nearest == BIG_DOUBLE {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "no blended edge is near the extension",
+            BlendFailure::NoBlendedEdgeNearExtension,
         ));
     }
     let mut off = toward - p;
@@ -1296,9 +1349,14 @@ fn takes_off(
 /// over the loop's box, notified through `env` (a hundredth of its diagonal and ten tolerances more), the loop
 /// anticlockwise.
 ///
+/// Crate-private: its extensions come only from [`extend`], whose loops hold their chain's
+/// runs and whose normals are unit (from [`plane_of`]), so no caller builds the empty loop or
+/// zero normal its Defects name.
+///
 /// # Errors
-/// `SM_ERR` for an empty loop or a zero axis; those of `MakeFaceWithCurves`.
-pub fn make_extension_face(
+/// A [`BlendFailure::Defect`] for an empty loop or a zero axis; those of
+/// `MakeFaceWithCurves`.
+pub(crate) fn make_extension_face(
     k: &mut Kernel,
     b: &mut Brep,
     env: &mut NotifyEnv<'_>,
@@ -1310,9 +1368,10 @@ pub fn make_extension_face(
     let mut uv = Vec::new();
     loop_polygon(k, &ext.lp, ext.at, x, y, &mut uv)?;
     let Some(&p0) = uv.first() else {
-        return Err(SolidError::blend_failed(
-            OP,
-            "the extension's loop has no points",
+        return Err(defect(
+            "an extension's loop gives no points: only `extend` (crate-private) builds an \
+             extension, its loop starting with its chain's runs (a chain holds at least one), \
+             each sampled at 16 points",
         ));
     };
     let mut bbox = Extent2d::from_points(p0, p0);
@@ -1362,8 +1421,13 @@ pub fn make_extension_face(
         &face_ref,
         env,
     )?;
-    made.face
-        .ok_or_else(|| SolidError::blend_missing(OP, "the extension face"))
+    made.face.ok_or_else(|| {
+        null_defect(
+            "making the extension face from its loop succeeded without a face: \
+             `MakeFaceWithCurves` hands back the face its face construction made, which \
+             fails where it makes none",
+        )
+    })
 }
 
 #[cfg(test)]

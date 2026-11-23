@@ -25,14 +25,14 @@ mod glb;
 pub use design::{
     DesignCompression, DesignContainerReader, DesignFile, DesignPreview, FileKind, ImportCache, OpenPgpSignature, OpenPgpSigner, ProvenanceChain,
     ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus, ProvenanceSummary, SignatureSource, Signer,
-    THUMBNAIL_SIZE, file_kind, has_design_provenance, is_design_container, read_design_file, read_design_file_once, read_design_geometry,
-    read_design_preview, read_design_provenance, read_design_provenance_chain, read_design_provenance_chain_file, read_design_provenance_file,
-    read_design_provenance_file_checked, read_design_provenance_summary_file, read_design_thumbnail, read_design_thumbnail_file,
-    read_design_with_model, read_drawing, read_drawing_file, write_design_container, write_design_container_with_cache,
+    THUMBNAIL_SIZE, design_text, file_kind, has_design_provenance, is_design_container, large_file_text, read_design_file, read_design_file_once,
+    read_design_geometry, read_design_preview, read_design_provenance, read_design_provenance_chain, read_design_provenance_chain_file,
+    read_design_provenance_file, read_design_provenance_file_checked, read_design_provenance_summary_file, read_design_thumbnail,
+    read_design_thumbnail_file, read_design_with_model, read_drawing, read_drawing_file, write_design_container, write_design_container_with_cache,
     write_design_container_with_compression, write_design_container_with_preview, write_design_container_with_provenance,
     write_design_container_with_thumbnail, write_drawing_container,
 };
-pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};
+pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, GlbOptions, MAX_GLB_BYTES, export_glb};
 mod legacy_dir;
 pub mod library_files;
 pub mod limits;
@@ -184,7 +184,8 @@ pub fn is_iges_path(path: &str) -> bool {
 /// nothing), so the caller chooses.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum StepNames {
-    /// Keep meaningful solid names; replace placeholders with the nearest named product.
+    /// Keep meaningful solid names; use a shared face label for `NONE`, otherwise replace
+    /// placeholders with the nearest named product.
     #[default]
     Auto,
     /// The solid's own name in the file, else the name of the product that holds it.
@@ -229,6 +230,7 @@ fn generic_name(n: &str) -> bool {
 fn body_name(b: &solidcraft_kernel::ImportedBody, names: StepNames) -> String {
     let usable = |n: &&String| !generic_name(n);
     let chosen = match names {
+        StepNames::Auto if b.name.trim().eq_ignore_ascii_case("none") => b.common_face_name.as_ref().filter(usable),
         StepNames::Auto if !generic_name(&b.name) => Some(&b.name),
         StepNames::Auto => b.path.iter().rev().find(usable).or_else(|| b.instance.as_ref().filter(usable)),
         StepNames::Solid => None,
@@ -297,8 +299,8 @@ pub struct StepFeature {
     pub import: std::sync::Arc<solidcraft_kernel::StepImport>,
 }
 
-/// Bytes the encoding detector sees at most: the strings that are not UTF-8, which in a STEP or
-/// IGES file are names and descriptions.
+/// Bytes the encoding detector sees at most: the lines with 8-bit bytes in the strings that are
+/// not UTF-8, which in a STEP or IGES file are names and descriptions.
 const ENCODING_SAMPLE_BYTES: usize = 64 << 10;
 
 /// STEP or IGES bytes as text. UTF-8 stays as it is. Some exporters write names in the system's
@@ -322,14 +324,18 @@ fn step_text(bytes: &[u8]) -> String {
     }
     let mut detector = chardetng::EncodingDetector::new();
     let mut fed = 0;
-    for piece in step_pieces(bytes).filter(|piece| std::str::from_utf8(piece).is_err()) {
+    let legacy_lines = step_pieces(bytes)
+        .filter(|piece| std::str::from_utf8(piece).is_err())
+        .flat_map(|piece| piece.split(|b| *b == b'\n'))
+        .filter(|line| !line.is_ascii());
+    for line in legacy_lines {
         if fed >= ENCODING_SAMPLE_BYTES {
             break;
         }
-        let piece = piece.get(..piece.len().min(ENCODING_SAMPLE_BYTES - fed)).unwrap_or_default();
-        detector.feed(piece, false);
+        let line = line.get(..line.len().min(ENCODING_SAMPLE_BYTES - fed)).unwrap_or_default();
+        detector.feed(line, false);
         detector.feed(b"\n", false);
-        fed += piece.len() + 1;
+        fed += line.len() + 1;
     }
     detector.feed(&[], true);
     let encoding = detector.guess(None, false);
@@ -2236,6 +2242,14 @@ mod tests {
         assert_eq!(body(&sjis("諢階"), &sjis("ネジ穴の面取り"), b""), ["諢階"], "Shift_JIS, three-byte UTF-8 by chance");
         // Beside a single-byte encoding, UTF-8 reads as UTF-8.
         assert_eq!(body("Größe".as_bytes(), &encoding_rs::WINDOWS_1252.encode("Gehäuse").0, b""), ["Größe"], "UTF-8 beside windows-1252");
+        // A piece longer than the detector's sample, with its legacy text after an ASCII start
+        // (a long comment here; an IGES file without quotes is one such piece): the detector
+        // sees the piece's lines with 8-bit bytes, not its start.
+        let comment = [b"/* ".as_slice(), &vec![b'a'; ENCODING_SAMPLE_BYTES + 10], b"\n", &gbk("说明"), b" */\n"].concat();
+        let solid = with_name(&step, "MANIFOLD_SOLID_BREP", &gbk("切除-拉伸3"));
+        let at = solid.windows(5).position(|w| w == b"DATA;").unwrap();
+        let bytes = [&solid[..at], &comment, &solid[at..]].concat();
+        assert_eq!(step_import_feature(&bytes, "t.step").unwrap().body_names, ["切除-拉伸3"], "legacy text after a long ASCII start");
         // Strings and comments are pieces of their own; a doubled quote stays inside its string.
         let text: &[u8] = b"#1=A('it''s',/* a 'note' */'x');'open";
         let pieces: Vec<&[u8]> = step_pieces(text).collect();
@@ -2328,6 +2342,30 @@ mod tests {
         assert_eq!(names(&generic, StepNames::Solid), ["Body1", "Body 2 (3)", "Body 2 (3)"]);
         let named = generic.replace("'Body1'", "'Body housing'");
         assert_eq!(names(&named, StepNames::Auto), ["Body housing", "Post", "Post"]);
+        // Some surface exports label only the faces, leaving their owning models `NONE`.
+        let faces = text.replace("ADVANCED_FACE('',", "ADVANCED_FACE('Inspection surface',");
+        assert_ne!(faces, text, "the fixture has named faces");
+        assert_eq!(names(&faces, StepNames::Auto), ["Cut-Extrude3", "Boss-Extrude1", "Boss-Extrude1"]);
+        let surfaces = faces.replace("'Cut-Extrude3'", "' nOnE '").replace("'Boss-Extrude1'", "'NONE'");
+        assert_eq!(names(&surfaces, StepNames::Auto), ["Inspection surface", "Inspection surface", "Inspection surface"]);
+        assert_eq!(names(&surfaces, StepNames::Solid), ["nOnE", "NONE", "NONE"]);
+        assert_eq!(names(&surfaces, StepNames::Product), ["Plate", "Post", "Post"]);
+        assert_eq!(names(&surfaces, StepNames::Instance), ["Plate-1", "Post-1", "Post-2"]);
+        let mixed = surfaces.replacen("ADVANCED_FACE('Inspection surface',", "ADVANCED_FACE('Other surface',", 1);
+        assert_eq!(names(&mixed, StepNames::Auto), ["nOnE", "Inspection surface", "Inspection surface"]);
+        let missing = surfaces.replacen("ADVANCED_FACE('Inspection surface',", "ADVANCED_FACE('',", 1);
+        assert_eq!(names(&missing, StepNames::Auto), ["nOnE", "Inspection surface", "Inspection surface"]);
+        for label in ["Body1", " NoNe ", "  "] {
+            let unnamed = surfaces.replace("ADVANCED_FACE('Inspection surface',", &format!("ADVANCED_FACE('{label}',"));
+            assert_eq!(names(&unnamed, StepNames::Auto), ["nOnE", "NONE", "NONE"]);
+        }
+        let mut body = step_import_feature(mixed.as_bytes(), "frame.step").unwrap().import.bodies[0].clone();
+        assert_eq!(body.common_face_name, None);
+        body.path = vec!["Part".into()];
+        body.instance = Some("Part-1".into());
+        assert_eq!(body_name(&body, StepNames::Auto), "nOnE", "without a shared face name, preserve the source label");
+        body.path.clear();
+        assert_eq!(body_name(&body, StepNames::Auto), "nOnE", "an instance does not replace an unchanged source label");
         // The timeline entry is the root product's name whatever the bodies are called.
         for choice in [StepNames::Auto, StepNames::Solid, StepNames::Product, StepNames::Instance] {
             assert_eq!(step_import_feature_named(text.as_bytes(), "frame.step", choice).unwrap().name, "Frame");

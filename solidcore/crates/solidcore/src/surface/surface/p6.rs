@@ -809,6 +809,7 @@ impl Surface {
             objects,
             None,
             None,
+            false,
         )
     }
 
@@ -840,11 +841,16 @@ impl Surface {
             objects,
             cache,
             Some(context),
+            false,
         )
     }
 
+    /// The body of [`Surface::simple_coincidence_checker_with_context`] (with a
+    /// `context`) or [`Surface::simple_coincidence_checker`]; `point_test_off` runs
+    /// the initial point solve with the solve's point testing off (its fast drop keeps
+    /// every solution).
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
-    fn simple_coincidence_checker_from<O: SolutionObject>(
+    pub(super) fn simple_coincidence_checker_from<O: SolutionObject>(
         &self,
         k: &Kernel,
         uv_domain: &Extent2d,
@@ -855,6 +861,7 @@ impl Surface {
         objects: [Option<O>; 2],
         cache: Option<&crate::surface::surface_cache::SurfaceCache<O>>,
         context: Option<&mut dyn super::p1::SurfaceSolveContext<O>>,
+        point_test_off: bool,
     ) -> Result<Option<Solution<O>>> {
         // First try boxing (statuses ignored upstream; passed on as the fork does,
         // WR-663, tangency-labs/smlib 21dcf69).
@@ -890,19 +897,35 @@ impl Surface {
         let mut mid_pt1 = vec_at(&mid_pt, 1)?;
         let solutions = if let Some(context) = context {
             let mut found = SolutionArray::<O>::new();
-            self.global_point_solve_into_with_context(
-                k,
-                objects[1],
-                cache,
-                context,
-                uv_domain,
-                SolverOperation::Minimize,
-                mid_pt0,
-                tol_3d,
-                None,
-                SolutionRequested::Single,
-                &mut found,
-            )?;
+            if point_test_off {
+                self.global_point_solve_into_with_context_point_test_off(
+                    k,
+                    objects[1],
+                    cache,
+                    context,
+                    uv_domain,
+                    SolverOperation::Minimize,
+                    mid_pt0,
+                    tol_3d,
+                    None,
+                    SolutionRequested::Single,
+                    &mut found,
+                )?;
+            } else {
+                self.global_point_solve_into_with_context(
+                    k,
+                    objects[1],
+                    cache,
+                    context,
+                    uv_domain,
+                    SolverOperation::Minimize,
+                    mid_pt0,
+                    tol_3d,
+                    None,
+                    SolutionRequested::Single,
+                    &mut found,
+                )?;
+            }
             found.as_slice().iter().map(|s| s.start).collect()
         } else {
             global_point_solve_single(k, self, uv_domain, mid_pt0, tol_3d)?
