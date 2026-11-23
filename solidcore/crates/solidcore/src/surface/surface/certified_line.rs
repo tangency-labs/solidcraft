@@ -242,7 +242,41 @@
 //!   roots over `H × [t₀, t₁]` are this component's. A hull reaching a sphere's pole is
 //!   undecided (the net over it is not off the axis, so no chart's domain holds it), and so
 //!   is one spanning a whole turn (no half-plane holds its edges) and a cone's apex.
-//!   Any other kind with a box left is undecided.
+//! - **A box left at the floor, no side function** (a B-spline, an extrusion, a general
+//!   surface of revolution, and a sphere, cone or torus [`Revolved`] does not take; the
+//!   1-D profile foot is valid only on a net exactly rotational,
+//!   and no net here is: its control points are rounded, so the foot is the 2-D one
+//!   everywhere): the foot `(u*(t), v*(t))` of `L(t)` solves `G = ((S − L) · S_u,
+//!   (S − L) · S_v) = 0`, and its side is `s(t) = n · (L(t) − S(u*, v*))`, `n = S_u × S_v`
+//!   ([`by_foot`]). With 2 and 3 as above:
+//!   1. `[t₀, t₁]` is covered by stretches `T_k` (halved within [`MAX_FOOT_BOXES`] tests),
+//!      each with a box `U_k` strictly inside the net's knots and the solve's domain (clear
+//!      of a seam, which is not joined), on which Krawczyk's operator of `G` with `t` an
+//!      interval parameter over `T_k` lies strictly inside `U_k` ([`foot_box`]): every `t`
+//!      in `T_k` has exactly one foot in `U_k` (`S` is `C¹` over `U_k`, so `G` is Lipschitz,
+//!      piecewise `C¹`, and the mean-value form reads the hull of the one-sided second
+//!      partials across a knot line the net is `C¹` across; a crease is refused);
+//!   2. neighbours are chained: at their common `t`, the tight box of one's foot (its
+//!      operator at that `t` alone, taken again on its meet with the box) lies in the
+//!      other's box, so the two feet are one;
+//!   3. every box of the component whose line parameters meet `T_k` lies in `U_k`, and
+//!      `U_k` is covered by searched leaves and strips;
+//!   4. `n` is enclosed apart from 0 over every `U_k`;
+//!   5. `s(t₀)` and `s(t₁)` are enclosed apart from 0 (over the tight foot box there).
+//!
+//!   Then `s(t) = 0` exactly at a root (by 4, `S_u`, `S_v` and `n` span space, and `L − S`
+//!   is orthogonal to all three); every root over the component is a foot (a root is a
+//!   critical point of the distance), so by the boxes' condition (3) and uniqueness the
+//!   branch's; a zero of `s` is a root at a foot in a searched leaf or strip, recorded in a
+//!   box whose line parameters hold `t`, so, no other component's line parameters meeting
+//!   these, of this component; and `n` is one continuous function along the
+//!   chained branch (no crease inside a box, neighbours sharing the foot), so the parity of
+//!   the crossings is that of `s`'s sign change: `Bᵀ Φ = (G, −ŝ)` with `B = [S_u S_v n]`
+//!   invertible, and the homotopy of `ŝ(x, t)` to `s(t)` along the branch keeps the zero
+//!   set. Opposite signs make a crossing, one sign touching (answer8, Q1). A branch
+//!   leaving the domain (a crossing just past the patch's edge), feet jumping between two
+//!   critical points (a saddle) or a second sheet in the hull the foot does not follow (a
+//!   fold) fail 1, 2 or 3.
 //!
 //! The distinct roots of a component are counted from its root boxes: one where an
 //! enclosure lies in the other's unique box, two where the enclosures are apart, and the
@@ -279,8 +313,8 @@
 //! [`MAX_MEETING_TESTS`] pairs of boxes tested in one sweep, [`MAX_SOLVE_BOXES`] boxes in
 //! one solve's drop and components, past which nothing is dropped, the components are not
 //! built and the whole line is undecided, and [`MAX_DROP_ENCLOSURES`] side enclosures in
-//! one solve's drop; at most [`MAX_SIDE_PIECES`] piece enclosures in one component's side
-//! test, [`MAX_COVER_RECTS`] leaves in its coverage test and [`MAX_ROOT_BOXES`] root boxes
+//! one solve's drop; at most [`MAX_SIDE_PIECES`] piece and edge enclosures in one
+//! component's side test, [`MAX_FOOT_BOXES`] foot tests in its foot rule, [`MAX_COVER_RECTS`] leaves in its coverage test and [`MAX_ROOT_BOXES`] root boxes
 //! told apart.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
@@ -2628,6 +2662,8 @@ pub(crate) enum Typed {
     Count(usize),
     /// The side function at its two ends.
     Sides,
+    /// The side of the foot at its two ends (no side function: the foot rule).
+    Foot,
     /// Undecided, and why.
     Undecided(Why),
 }
@@ -2652,8 +2688,8 @@ pub(crate) enum Why {
     OnABoundary,
     /// Every box regular, but two of its certified roots are neither shown one nor apart.
     RootsNotTold,
-    /// No side function for the kind (a B-spline, an extrusion, a general surface of
-    /// revolution).
+    /// No side function for the kind (not reached: a surface without one takes the foot
+    /// rule).
     NoSideFunction,
     /// The net over its hull is not shown within a quarter of the tolerance of the closed
     /// form (a patch without a certified bound, or one too large).
@@ -2673,6 +2709,9 @@ pub(crate) enum Why {
     OutsideHull,
     /// The side test ran out of its budget.
     Budget,
+    /// The foot's branch is not certified over its line parameters (the foot rule: a
+    /// stretch with no foot box, or two neighbours not chained).
+    FootNotShown,
 }
 
 /// Types every component of `comps` (module docs, "Typing"): the solve's `leaves`, `sides`
@@ -2718,6 +2757,9 @@ pub(crate) fn type_components(
                 c.classes = classes;
                 if c.holds.left == 0 {
                     by_count(net, line, sides, &boxes, n)
+                } else if net.revolved.is_none() {
+                    let others = overlapped.get(ci).copied().unwrap_or(true);
+                    by_foot(net, scratch, leaves, &boxes, c, others)
                 } else {
                     let others = overlapped.get(ci).copied().unwrap_or(true);
                     let bounds = bounds.get_or_insert_with(|| net.side_bounds());
@@ -2728,7 +2770,7 @@ pub(crate) fn type_components(
         c.contact = match typed {
             Typed::Count(n) if n % 2 == 1 => Contact::Crossing,
             Typed::Count(_) => Contact::Touching,
-            Typed::Sides => c.contact,
+            Typed::Sides | Typed::Foot => c.contact,
             _ => Contact::Undecided,
         };
         c.typed = typed;
@@ -2965,6 +3007,288 @@ fn by_sides(
     Typed::Sides
 }
 
+/// `a × b` of two vectors of intervals, enclosed.
+fn cross_i(a: &I3, b: &I3) -> I3 {
+    let [ax, ay, az] = *a;
+    let [bx, by, bz] = *b;
+    [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx]
+}
+
+/// `a · b` of two vectors of intervals, enclosed.
+fn dot_i(a: &I3, b: &I3) -> Ivl {
+    a.iter()
+        .zip(b)
+        .fold(Ivl::from(0.0), |s, (&x, &y)| s + x * y)
+}
+
+/// The most Krawczyk tests one component's foot rule makes (module docs, "Typing"): the
+/// side test's own bound.
+pub(crate) const MAX_FOOT_BOXES: usize = MAX_SIDE_PIECES;
+
+/// The most widenings of one foot box's Krawczyk test (epsilon-inflation).
+const FOOT_WIDENINGS: usize = 6;
+
+/// One stretch `T` of a component's line parameters with its foot box `U` (module docs,
+/// "Typing", the foot rule): for every `t` in `T` exactly one foot in `U`, held in `k`.
+#[derive(Debug, Clone, Copy)]
+struct FootBox {
+    t: Ivl,
+    u: [Ivl; 2],
+    k: [Ivl; 2],
+}
+
+/// The foot system `G(u, v, t) = ((S − L(t)) · S_u, (S − L(t)) · S_v)` and its Jacobian in
+/// `(u, v)` over the box `u` (`[u, v]`) and the line parameters `t`, enclosed: `G` at the
+/// box's middle, the Jacobian over the box (rows), and `S_u × S_v` over it; `None` where the
+/// net refuses the box (it leaves the knots' range, or crosses a knot line the net is not
+/// `C¹` across: the second partials' mean-value form needs `S` to be `C¹`).
+#[allow(clippy::type_complexity)]
+fn foot_system(
+    net: &LineNet,
+    line: &ScratchLine,
+    u: [Ivl; 2],
+    t: Ivl,
+) -> Option<([Ivl; 2], [[Ivl; 2]; 2], I3)> {
+    let [bu, bv] = u;
+    let (mu, mv) = (bu.mid(), bv.mid());
+    let [s_m, su_m, sv_m] = net.over(Ivl::from(mu), Ivl::from(mv), line.p)?;
+    let gap_m = less(&s_m, t, line.d);
+    let g = [dot_i(&gap_m, &su_m), dot_i(&gap_m, &sv_m)];
+    let [s, s_u, s_v] = net.over(bu, bv, line.p)?;
+    let [s_uu, s_uv, s_vv] = net.second(bu, bv, line.p)?;
+    let gap = less(&s, t, line.d);
+    let j_uv = dot_i(&s_u, &s_v) + dot_i(&gap, &s_uv);
+    let jac = [
+        [dot_i(&s_u, &s_u) + dot_i(&gap, &s_uu), j_uv],
+        [j_uv, dot_i(&s_v, &s_v) + dot_i(&gap, &s_vv)],
+    ];
+    let normal = cross_i(&s_u, &s_v);
+    let finite = g.iter().chain(jac.iter().flatten()).all(|x| x.is_finite());
+    finite.then_some((g, jac, normal))
+}
+
+/// Krawczyk's operator of the foot system over the box `u` with the line parameters `t`
+/// (`t` an interval parameter): `None` where it cannot be formed.
+fn foot_operator(net: &LineNet, line: &ScratchLine, u: [Ivl; 2], t: Ivl) -> Option<([Ivl; 2], I3)> {
+    let (g, jac, normal) = foot_system(net, line, u, t)?;
+    let mids = u.map(Ivl::mid);
+    let [[a, b], [c, d]] = jac;
+    let y = inverse_of_columns2(&[[a.mid(), c.mid()], [b.mid(), d.mid()]])?;
+    let (cm, _) = contraction(&y, &jac);
+    Some((k_operator(&mids, &y, &g, &cm, &u), normal))
+}
+
+/// The foot at the single line parameter `t` in the foot box `u` (whose operator over a
+/// stretch holding `t` lies strictly inside it), enclosed tightly: the operator at `t` alone
+/// strictly inside `u`, then taken again on its meet with the box a few times (each box
+/// holding the one foot holds it in its operator). `None` where it cannot be formed.
+fn tight_foot(net: &LineNet, line: &ScratchLine, u: [Ivl; 2], t: f64) -> Option<[Ivl; 2]> {
+    let (k, _) = foot_operator(net, line, u, Ivl::from(t))?;
+    if !inside2(&k, &u) {
+        return None;
+    }
+    let mut x = k;
+    for _ in 0..FOOT_WIDENINGS {
+        let Some((k, _)) = foot_operator(net, line, x, Ivl::from(t)) else {
+            break;
+        };
+        let [ku, kv] = k;
+        let [xu, xv] = x;
+        let (Some(a), Some(b)) = (meet(ku, xu), meet(kv, xv)) else {
+            break;
+        };
+        if [a, b] == x {
+            break;
+        }
+        x = [a, b];
+    }
+    Some(x)
+}
+
+/// Whether `a` lies strictly inside `b` in both directions.
+fn inside2(a: &[Ivl; 2], b: &[Ivl; 2]) -> bool {
+    a.iter().zip(b).all(|(x, y)| x.lo > y.lo && x.hi < y.hi)
+}
+
+/// Whether `a` lies in `b` in both directions, ends included.
+fn within2(a: &[Ivl; 2], b: &[Ivl; 2]) -> bool {
+    a.iter().zip(b).all(|(&x, &y)| within(x, y))
+}
+
+/// The foot box of the stretch `t` of the component whose boxes are `boxes` (module docs,
+/// "Typing", the foot rule): a box `U` strictly inside the net's knots and the solve's
+/// domain, holding every box of the component whose line parameters meet `t` and Newton's
+/// foot at `t`'s middle, covered by the searched leaves and strips, with `S_u × S_v` apart
+/// from 0 over it and Krawczyk's operator of the foot system over `U × t` strictly inside
+/// it (each `t` then has exactly one foot in `U`). `None` where none is found within the
+/// widenings and the budget.
+#[allow(clippy::too_many_arguments)]
+fn foot_box(
+    net: &LineNet,
+    line: &ScratchLine,
+    leaves: &[SearchedLeaf],
+    boxes: &[PlacedBox],
+    t: Ivl,
+    start: [f64; 2],
+    budget: &mut usize,
+) -> Option<FootBox> {
+    let [[u0, u1], [v0, v1]] = net.range;
+    let (lo, hi) = (line.solve_domain.min(), line.solve_domain.max());
+    let (du, dv) = ([u0.max(lo.x), u1.min(hi.x)], [v0.max(lo.y), v1.min(hi.y)]);
+    // the component's boxes meeting `t`, and Newton's foot at its middle
+    let held: Option<[Ivl; 2]> = boxes
+        .iter()
+        .filter(|b| b.t.lo <= t.hi && t.lo <= b.t.hi)
+        .map(|b| [b.u, b.v])
+        .reduce(|[a, b], [c, d]| [a.hull(c), b.hull(d)]);
+    let foot = newton_foot(net, line, t.mid(), start)?;
+    let [fu, fv] = foot;
+    let mut u = match held {
+        Some([a, b]) => [a.hull(Ivl::from(fu)), b.hull(Ivl::from(fv))],
+        None => [Ivl::from(fu), Ivl::from(fv)],
+    };
+    let grow = |x: Ivl| {
+        let r = 0.1 * (x.hi - x.lo) + 1.0e-9 * (1.0 + x.lo.abs().max(x.hi.abs()));
+        Ivl::new(round_down(x.lo - r), round_up(x.hi + r))
+    };
+    u = u.map(grow);
+    for _ in 0..FOOT_WIDENINGS {
+        if *budget == 0 {
+            return None;
+        }
+        *budget = budget.saturating_sub(1);
+        let [bu, bv] = u;
+        let inside_domain = bu.lo > du[0] && bu.hi < du[1] && bv.lo > dv[0] && bv.hi < dv[1];
+        if !inside_domain {
+            return None;
+        }
+        let (k, normal) = foot_operator(net, line, u, t)?;
+        if inside2(&k, &u) {
+            let regular = length_squared(&normal).lo > 0.0;
+            let holds_boxes = held.is_none_or(|h| within2(&h, &u));
+            let covered = covered_by_leaves(bu, bv, leaves);
+            return (regular && holds_boxes && covered).then_some(FootBox { t, u, k });
+        }
+        let [ku, kv] = k;
+        if !(ku.is_finite() && kv.is_finite()) {
+            return None;
+        }
+        u = [bu.hull(ku), bv.hull(kv)].map(grow);
+    }
+    None
+}
+
+/// Newton's foot of `L(t)` on the net from `start`: `None` where the steps do not settle.
+fn newton_foot(net: &LineNet, line: &ScratchLine, t: f64, start: [f64; 2]) -> Option<[f64; 2]> {
+    let at = |p: [f64; 2]| -> Result<Linearised<2>> {
+        let [u, v] = p;
+        let (bu, bv) = (Ivl::from(u), Ivl::from(v));
+        let (Some([s, s_u, s_v]), Some([s_uu, s_uv, s_vv])) =
+            (net.over(bu, bv, line.p), net.second(bu, bv, line.p))
+        else {
+            return Ok(None);
+        };
+        let gap = less(&s, Ivl::from(t), line.d);
+        let j_uv = dot_i(&s_u, &s_v) + dot_i(&gap, &s_uv);
+        let g = [dot_i(&gap, &s_u).mid(), dot_i(&gap, &s_v).mid()];
+        // (columns)
+        let cols = [
+            [(dot_i(&s_u, &s_u) + dot_i(&gap, &s_uu)).mid(), j_uv.mid()],
+            [j_uv.mid(), (dot_i(&s_v, &s_v) + dot_i(&gap, &s_vv)).mid()],
+        ];
+        Ok(Some((g, cols)))
+    };
+    let p = newton(start, &at, &inverse_of_columns2).ok().flatten()?;
+    let [pu, pv] = p;
+    net.holds(Ivl::from(pu), Ivl::from(pv)).then_some(p)
+}
+
+/// The side of the foot at the line parameter `t` in the foot box `f` (`t` in `f.t`):
+/// `s = (S_u × S_v) · (L(t) − S)` over the tight box Krawczyk's operator gives for that `t`
+/// alone, enclosed; `None` where it cannot be formed or does not lie in `f.u`.
+fn foot_side(net: &LineNet, line: &ScratchLine, f: &FootBox, t: f64) -> Option<Ivl> {
+    let [ku, kv] = tight_foot(net, line, f.u, t)?;
+    let [s, s_u, s_v] = net.over(ku, kv, line.p)?;
+    let gap = less(&s, Ivl::from(t), line.d);
+    // (L − S = −gap)
+    Some(Ivl::from(0.0) - dot_i(&cross_i(&s_u, &s_v), &gap))
+}
+
+/// The foot rule of a component holding a box left at the floor on a surface with no side
+/// function (a B-spline, an extrusion, a general surface of revolution; module docs,
+/// "Typing"): `[t₀, t₁]` covered by stretches, each with a foot box ([`foot_box`]), each two
+/// neighbours chained (at their common `t`, the tight foot box of one lies in the other's
+/// box), and the side of the foot ([`foot_side`]) proved apart from 0 at `t₀` and `t₁`.
+/// With no other component's line parameters meeting its own (`others`) and its hull
+/// covered by searched leaves and strips. Sets the component's contact (crossing for
+/// opposite sides, touching for one) and returns [`Typed::Foot`], or why it is undecided.
+fn by_foot(
+    net: &LineNet,
+    line: &ScratchLine,
+    leaves: &[SearchedLeaf],
+    boxes: &[PlacedBox],
+    c: &mut Component,
+    others: bool,
+) -> Typed {
+    if others {
+        return Typed::Undecided(Why::Overlapped);
+    }
+    if !covered_by_leaves(c.u, c.v, leaves) {
+        return Typed::Undecided(Why::Uncovered);
+    }
+    let mut budget = MAX_FOOT_BOXES;
+    let mut start = [c.u.mid(), c.v.mid()];
+    let mut work = vec![c.t];
+    let mut chain: Vec<FootBox> = Vec::new();
+    while let Some(t) = work.pop() {
+        if budget == 0 {
+            return Typed::Undecided(Why::Budget);
+        }
+        // (a stretch costs one test, whatever its Newton step does)
+        budget = budget.saturating_sub(1);
+        if let Some(f) = foot_box(net, line, leaves, boxes, t, start, &mut budget) {
+            if let Some(prev) = chain.last() {
+                // (the stretches tile the line parameters left to right)
+                let at = prev.t.hi;
+                // (the two feet at the common `t` are one: each box holds one foot)
+                let joined = tight_foot(net, line, prev.u, at).is_some_and(|k| within2(&k, &f.u))
+                    || tight_foot(net, line, f.u, at).is_some_and(|k| within2(&k, &prev.u));
+                if !(joined && at == t.lo) {
+                    return Typed::Undecided(Why::FootNotShown);
+                }
+            }
+            start = f.k.map(Ivl::mid);
+            chain.push(f);
+            continue;
+        }
+        let mid = t.mid();
+        if !(mid > t.lo && mid < t.hi) {
+            return Typed::Undecided(Why::FootNotShown);
+        }
+        work.push(Ivl::new(mid, t.hi));
+        work.push(Ivl::new(t.lo, mid));
+    }
+    let (Some(first), Some(last)) = (chain.first(), chain.last()) else {
+        return Typed::Undecided(Why::FootNotShown);
+    };
+    let (Some(lo), Some(hi)) = (
+        foot_side(net, line, first, c.t.lo),
+        foot_side(net, line, last, c.t.hi),
+    ) else {
+        return Typed::Undecided(Why::FootNotShown);
+    };
+    let apart = |s: Ivl| s.lo > 0.0 || s.hi < 0.0;
+    if !(apart(lo) && apart(hi)) {
+        return Typed::Undecided(Why::EndNotShown);
+    }
+    c.contact = if (lo.lo > 0.0) == (hi.lo > 0.0) {
+        Contact::Touching
+    } else {
+        Contact::Crossing
+    };
+    Typed::Foot
+}
+
 /// The certified bound `ε` on the side function over the net above the `(u, v)` hull
 /// `[u, v]` (module docs, "Typing"): the largest bound on `|F|` of the Bézier patches the
 /// hull meets ([`side_bounds`]; a hull on a patch's edge reads the patch it lies in) over
@@ -3180,7 +3504,7 @@ pub(crate) fn type_solutions(
         .collect();
     for (c, comp) in comps.list.iter().enumerate() {
         let decided = matches!(comp.contact, Contact::Crossing | Contact::Touching)
-            && matches!(comp.typed, Typed::Count(_) | Typed::Sides);
+            && matches!(comp.typed, Typed::Count(_) | Typed::Sides | Typed::Foot);
         if !decided {
             continue;
         }
@@ -3211,7 +3535,7 @@ pub(crate) fn type_solutions(
             }
         }
         let carried = carriers.iter().all(|l| l.len() == 1);
-        let straddles = comp.typed == Typed::Sides && !comp.inside;
+        let straddles = matches!(comp.typed, Typed::Sides | Typed::Foot) && !comp.inside;
         // (what the boxes left at the floor hold, beyond the roots, as a parity)
         let parity = usize::from(comp.contact == Contact::Crossing);
         let rest = (parity + comp.classes.len()) % 2;
@@ -5339,6 +5663,119 @@ mod tests {
                 types(&c)
             );
         }
+    }
+
+    /// A B-spline surface of degrees `(p, q)` from its control points (rows along u) on
+    /// clamped knots over `[0, 1]` with no interior knot.
+    fn bezier(rows: Vec<Vec<[f64; 3]>>, p: usize, q: usize) -> Surface {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        let knots = |d: usize| {
+            let mut k = vec![0.0; d + 1];
+            k.extend(vec![1.0; d + 1]);
+            k
+        };
+        let net = rows
+            .into_iter()
+            .map(|r| {
+                r.into_iter()
+                    .map(|[x, y, z]| CPoint::new(x, y, z, NOW))
+                    .collect()
+            })
+            .collect();
+        Surface::from(BSplineSurface::from_nurb(
+            NlSurface::new(net, p, q, knots(p), knots(q)).unwrap(),
+            false,
+        ))
+    }
+
+    /// The foot rule (module docs, "Typing"), on a B-spline dome `z = (1 − x²)(1 − y²)` over
+    /// `[−1, 1]²` (biquadratic: the only control height not 0 is the middle one, 4, since
+    /// `1 − x² = 2 B₁(u)` with `x = 2u − 1`), peak `(0, 0, 1)` at `(u, v) = (½, ½)`: the line
+    /// `z = 1` along x touches it there, and so does the line half the tolerance above (each
+    /// end above the dome, `S_u × S_v` upward: both feet's sides positive), touching by the
+    /// foot. The line along the dome's edge `y = −1, z = 0` lies in its boundary curve: its
+    /// feet sit on the patch's border, where no foot box lies strictly inside the patch, so it
+    /// is undecided (the edge counterexample of answer8: a branch leaving the domain). On a
+    /// fold, `S(u, v) = (4u(1 − u), v, u)` (the profile `x = 4z(1 − z)` turns back at
+    /// `x = 1, z = ½`), the line along z through the tip touches it from outside (`S_u × S_v
+    /// = (−1, 0, 4 − 8u)`, `L − S` along +x at both ends: both sides negative), touching by
+    /// the foot.
+    #[test]
+    fn the_foot_rule_types_b_spline_tangencies() {
+        let k = Kernel::default();
+        let tol = 1.0e-6;
+        let z = |i: usize, j: usize| if i == 1 && j == 1 { 4.0 } else { 0.0 };
+        #[allow(clippy::cast_precision_loss)]
+        let dome = bezier(
+            (0..3)
+                .map(|i| {
+                    (0..3)
+                        .map(|j| [i as f64 - 1.0, j as f64 - 1.0, z(i, j)])
+                        .collect()
+                })
+                .collect(),
+            2,
+            2,
+        );
+        let whole = dome.natural_uv_domain_with_nurb(&k).unwrap();
+        for gap in [0.0, 0.5 * tol] {
+            let (_, c) = typed_of(
+                &k,
+                &dome,
+                Vec3::new(-2.0, 0.0, 1.0 + gap),
+                Vec3::new(4.0, 0.0, 0.0),
+                tol,
+                &[whole],
+            );
+            assert_eq!(
+                types(&c),
+                vec![(Contact::Touching, Typed::Foot)],
+                "gap {gap}: {:?}",
+                c.list
+            );
+        }
+        let (_, c) = typed_of(
+            &k,
+            &dome,
+            Vec3::new(-2.0, -1.0, 0.0),
+            Vec3::new(4.0, 0.0, 0.0),
+            tol,
+            &[whole],
+        );
+        assert!(!c.list.is_empty());
+        assert!(
+            c.list
+                .iter()
+                .all(|x| x.typed == Typed::Undecided(Why::FootNotShown)),
+            "{:?}",
+            types(&c)
+        );
+        let fold = bezier(
+            vec![
+                vec![[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                vec![[2.0, 0.0, 0.5], [2.0, 1.0, 0.5]],
+                vec![[0.0, 0.0, 1.0], [0.0, 1.0, 1.0]],
+            ],
+            2,
+            1,
+        );
+        let whole = fold.natural_uv_domain_with_nurb(&k).unwrap();
+        let (_, c) = typed_of(
+            &k,
+            &fold,
+            Vec3::new(1.0, 0.5, -1.0),
+            Vec3::new(0.0, 0.0, 3.0),
+            tol,
+            &[whole],
+        );
+        assert_eq!(
+            types(&c),
+            vec![(Contact::Touching, Typed::Foot)],
+            "{:?}",
+            c.list
+        );
     }
 
     /// A line along a cone's axis through its apex: the component about the apex is
