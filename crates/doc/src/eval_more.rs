@@ -313,7 +313,7 @@ pub(super) fn planar_normal_at(b: &Body, p: Vec3) -> Option<Vec3> {
 
         let is_inside = if let Some(outer) = loops.iter().max_by(|a, b| a.signed_area().abs().total_cmp(&b.signed_area().abs())) {
             let inside_outer = outer.contains(local_p);
-            let inside_hole = loops.iter().filter(|lp| *lp as *const _ != outer as *const _).any(|hole| hole.contains(local_p));
+            let inside_hole = loops.iter().filter(|lp| !std::ptr::eq(*lp, outer)).any(|hole| hole.contains(local_p));
             inside_outer && !inside_hole
         } else {
             false
