@@ -2965,8 +2965,9 @@ fn circle_just_inside_hexagon_corners_keeps_the_regions() {
 /// as for a circle well inside the corners.
 #[test]
 fn circle_crossing_hexagon_sides_near_the_corners_finds_every_region() {
-    let big = 1.0 / (PI / 6.0).cos();
-    let corners: Vec<Vec2> = (0..6).map(|k| v(big * (k as f64 * PI / 3.0).cos(), big * (k as f64 * PI / 3.0).sin())).collect();
+    // The corners of a regular hexagon of apothem 1, at radius 2/sqrt(3) = 1.1547005383792515.
+    let (big, half) = (1.154_700_538_379_251_5, 0.577_350_269_189_625_8);
+    let corners = [v(big, 0.0), v(half, 1.0), v(-half, 1.0), v(-big, 0.0), v(-half, -1.0), v(half, -1.0)];
     for radius in [1.1, 1.1545, 1.15469] {
         let mut sk = Sketch::new();
         let pts: Vec<usize> = corners.iter().map(|c| sk.add_point(*c, None).unwrap()).collect();
