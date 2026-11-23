@@ -915,7 +915,9 @@ pub fn make_faces_with_curves(
         SurfParamType::U
     };
     let knots_at_split = if u_knots.is_empty() { v_knots } else { u_knots };
-    let zone_tol = tol::context_zone_tol_3d(k, Some(&k.context), SmallTopoType::NormalSize);
+    // (upstream asks the B-rep's context, there this model's: the zone tolerance of
+    // this B-rep's own model size estimate)
+    let zone_tol = tol::brep_size_zone_tol_3d(k, b);
     let curve_dim: u32 = if input.uv_curves.is_some() { 2 } else { 3 };
 
     // The curve store of the SmCurveLoops (its curves are keys into it).
