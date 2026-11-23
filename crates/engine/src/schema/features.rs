@@ -153,7 +153,8 @@ pub struct ExtrudeParams {
     /// On a Join To Object, leave the body the `to` pick is on as its own body, so the join
     /// changes only the bodies in `targets`. Needs a Join with `to`. Default: a call that names
     /// its targets leaves that body apart; a call that names none takes it too.
-    #[serde(default, deserialize_with = "present")]
+    // `skip_serializing_if` keeps schemars from writing `default: null`, which `bool` refuses.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub to_body_apart: Option<bool>,
     /// Start at this face or point (From Object). On a flat face at a slant the start follows the
