@@ -183,15 +183,15 @@ pub(crate) fn failure_with_status(cause: TopologyFailure, status: i32) -> SolidE
     Failure::new(OP, cause).with_status(status).into_error()
 }
 
-/// A defect of the B-rep's own links ([`TopologyFailure::Defect`]), with the status
-/// `SM_ERR_NULL_POINTER` of the `NER` it replaces.
+/// A defect ([`TopologyFailure::Defect`]): a link of the B-rep or a surface the trim holds
+/// is gone, with the status `SM_ERR_NULL_POINTER` of the `NER` it replaces.
 fn broken_link(why: &'static str) -> SolidError {
     failure_with_status(TopologyFailure::Defect { why }, SM_ERR_NULL_POINTER)
 }
 
-/// Why the trim's surface is gone after the early checks read it.
-const SURFACE_CHECKED: &str = "the surface to trim is gone, though the early checks just read \
-                               it and nothing between takes it";
+/// Why the retained transfer is gone after the early checks read its surface.
+const SURFACE_CHECKED: &str = "the retained transfer is gone, though the early checks just \
+                               read its surface and nothing between takes it";
 
 /// The identity a face or loop has in an assert report (upstream compares pointers):
 /// its `SmTopoTypes.h` code in the high bits and its arena index in the low ones.
@@ -507,16 +507,14 @@ impl TrimSurfaceTransfer {
 }
 
 enum TrimSurfaceBackend<'a> {
-    Legacy(&'a mut Option<Surface>),
+    Legacy(Box<Surface>),
     Retained(&'a mut TrimSurfaceTransfer),
 }
 
 impl TrimSurfaceBackend<'_> {
     fn surface(&self) -> Result<&Surface> {
         match self {
-            Self::Legacy(surface) => surface
-                .as_ref()
-                .ok_or_else(|| failure(TopologyFailure::NoSurfaceGiven)),
+            Self::Legacy(surface) => Ok(&**surface),
             Self::Retained(transfer) => transfer
                 .transfer
                 .as_ref()
@@ -599,7 +597,6 @@ pub fn trim_surface_with_model_space_curves(
         uv_domain,
         surface_orientation,
     } = input;
-    let mut surface = Some(surface);
     trim_surface_impl(
         k,
         b,
@@ -613,7 +610,7 @@ pub fn trim_surface_with_model_space_curves(
             uv_domain,
             surface_orientation,
         },
-        TrimSurfaceBackend::Legacy(&mut surface),
+        TrimSurfaceBackend::Legacy(Box::new(surface)),
         first_is_outer,
         oriented_correctly,
         may_cross_seam,
@@ -664,13 +661,12 @@ fn trim_surface_impl(
     // Native clears the temporary cleanup immediately before MakeFace(s).
     let mut new_faces = match surface {
         TrimSurfaceBackend::Legacy(surface) => {
-            let surface = surface.take().ok_or_else(|| broken_link(SURFACE_CHECKED))?;
             let input = TrimInput {
                 loop_counts: input.loop_counts,
                 curves: input.curves,
                 orientations: input.orientations,
                 loop_points: input.loop_points,
-                surface,
+                surface: *surface,
                 uv_domain: input.uv_domain,
                 surface_orientation: input.surface_orientation,
             };
@@ -1933,7 +1929,7 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
             jj += 2;
         }
         let loop_normal = loop_normal.unitize().map_err(|_| {
-            failure_with_status(TopologyFailure::LoopWithoutArea, SM_ERR_INVALID_INPUT)
+            failure_with_status(TopologyFailure::LoopWithoutNormal, SM_ERR_INVALID_INPUT)
         })?;
 
         // Update the plane data for all loops
@@ -1962,7 +1958,7 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
     out.plane_normal = out
         .plane_normal
         .unitize()
-        .map_err(|_| failure(TopologyFailure::NoCurvesGiven))?;
+        .map_err(|_| failure(TopologyFailure::NoCurveGiven))?;
 
     // test every curve to see if it's on the plane
     for c in curves {
@@ -2341,7 +2337,7 @@ pub fn check_face(
 
         // Also check for zero-area loop.
         if lo == OrientType::Unknown {
-            return Err(failure(TopologyFailure::LoopWithoutArea));
+            return Err(failure(TopologyFailure::LoopOrientationUndecided));
         }
     }
     Ok(())
@@ -2706,7 +2702,7 @@ pub fn check_loop(
                     closure = 1;
                 }
                 if closure >= 2 {
-                    return Err(failure(TopologyFailure::LoopCrossesClosure));
+                    return Err(failure(TopologyFailure::LoopJumpsInUv));
                 }
             }
         }

@@ -526,15 +526,10 @@ impl CurveLoops {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_INVALID_INPUT` for a loop index out of range; [`SolidError::InvalidInput`]
-    /// for counts past `other`'s curves.
+    /// `SM_ERR_INVALID_INPUT` for a loop index out of range (from
+    /// [`Self::loop_start_index`]); [`SolidError::InvalidInput`] for counts past `other`'s
+    /// curves.
     pub fn append_loop(&mut self, other: &Self, other_loop: usize) -> Result<()> {
-        if other_loop >= other.num_loops() {
-            return Err(failure(TopologyFailure::LoopIndexOutOfRange {
-                index: other_loop,
-                loops: other.num_loops(),
-            }));
-        }
         let start = other.loop_start_index(other_loop)?;
         let count = get(&other.loop_counts, other_loop)?;
         let next = start.wrapping_add(count);
@@ -776,6 +771,13 @@ impl CurveLoops {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR;
+
+    fn cause(r: Result<impl core::fmt::Debug>, want: TopologyFailure, status: i32) {
+        let e = r.unwrap_err();
+        assert_eq!(e.topology_failure(), Some(&want));
+        assert_eq!(e.upstream_status(), Some(status));
+    }
 
     fn loops(counts: &[usize]) -> CurveLoops {
         let n: usize = counts.iter().sum();
@@ -787,11 +789,19 @@ mod tests {
     fn start_index_and_start_end() {
         let l = loops(&[3, 4]);
         assert_eq!(l.loop_start_index(1).unwrap(), 3);
-        assert!(l.loop_start_index(2).is_err());
+        cause(
+            l.loop_start_index(2),
+            TopologyFailure::LoopIndexOutOfRange { index: 2, loops: 2 },
+            SM_ERR_INVALID_INPUT,
+        );
         assert_eq!(l.loop_start_end(1).unwrap(), (0, 2));
         // the second loop holds curves 3..=6 (upstream started it at 2, WR-96)
         assert_eq!(l.loop_start_end(4).unwrap(), (3, 6));
-        assert!(l.loop_start_end(7).is_err());
+        cause(
+            l.loop_start_end(7),
+            TopologyFailure::CurveIndexOutOfRange { index: 7 },
+            SM_ERR,
+        );
     }
 
     #[test]
@@ -800,8 +810,21 @@ mod tests {
         assert_eq!(l.find_entering_and_leaving(1, 2).unwrap(), (1, 2));
         assert_eq!(l.find_entering_and_leaving(2, 1).unwrap(), (1, 2));
         assert_eq!(l.find_entering_and_leaving(0, 3).unwrap(), (3, 0));
-        assert!(l.find_entering_and_leaving(0, 2).is_err());
-        assert!(CurveLoops::new().find_entering_and_leaving(0, 1).is_err());
+        cause(
+            l.find_entering_and_leaving(0, 2),
+            TopologyFailure::CurvesNotAdjacent,
+            SM_ERR,
+        );
+        cause(
+            loops(&[2, 2]).find_entering_and_leaving(0, 3),
+            TopologyFailure::CurvesNotInOneLoop,
+            SM_ERR,
+        );
+        cause(
+            CurveLoops::new().find_entering_and_leaving(0, 1),
+            TopologyFailure::NoLoops,
+            SM_ERR,
+        );
     }
 
     #[test]
@@ -817,8 +840,16 @@ mod tests {
             vec![CurveKey(2), CurveKey(3), CurveKey(9), CurveKey(4)]
         );
         assert_eq!(b.loop_counts, vec![4]);
-        assert!(b.insert_into_loops(CurveKey(9), CurveKey(7)).is_err());
-        assert!(b.append_loop(&a, 2).is_err());
+        cause(
+            b.insert_into_loops(CurveKey(9), CurveKey(7)),
+            TopologyFailure::CurveNotInLoops,
+            SM_ERR_INVALID_INPUT,
+        );
+        cause(
+            b.append_loop(&a, 2),
+            TopologyFailure::LoopIndexOutOfRange { index: 2, loops: 2 },
+            SM_ERR_INVALID_INPUT,
+        );
     }
 
     #[test]

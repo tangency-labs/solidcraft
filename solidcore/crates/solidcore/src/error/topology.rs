@@ -128,10 +128,10 @@
 //! | [`TopologyFailure::FaceWithoutLoops`] | `SM_ERR` |
 //! | [`TopologyFailure::LoopsNotClosedOrPlanar`] | `SM_ERR` |
 //! | [`TopologyFailure::CurveEndWithoutTangent`] | `SM_ERR` |
-//! | [`TopologyFailure::LoopWithoutArea`] | `SM_ERR` |
-//! | [`TopologyFailure::NoCurvesGiven`] | `SM_ERR_INVALID_INPUT` |
+//! | [`TopologyFailure::LoopWithoutNormal`] | `SM_ERR` |
+//! | [`TopologyFailure::LoopOrientationUndecided`] | `SM_ERR` |
 //! | [`TopologyFailure::LoopsMisoriented`] | `SM_ERR` |
-//! | [`TopologyFailure::LoopCrossesClosure`] | `SM_ERR` |
+//! | [`TopologyFailure::LoopJumpsInUv`] | `SM_ERR` |
 //! | [`TopologyFailure::SurfaceDiscontinuous`] | `SM_ERR` |
 //! | [`TopologyFailure::LoopIndexOutOfRange`] | `SM_ERR_INVALID_INPUT` |
 //! | [`TopologyFailure::CurveIndexOutOfRange`] | `SM_ERR` |
@@ -478,16 +478,19 @@ pub enum TopologyFailure {
     /// A curve meeting a loop vertex has a zero tangent at its end there, so the curves round
     /// the vertex cannot be ordered by direction. [`ErrorKind::Unsupported`].
     CurveEndWithoutTangent,
-    /// A loop encloses no area (its points give no normal). [`ErrorKind::InvalidInput`].
-    LoopWithoutArea,
-    /// The caller gave no curves. [`ErrorKind::InvalidInput`].
-    NoCurvesGiven,
+    /// A loop's sample points (each curve's ends and middle) give no normal: they lie on
+    /// one line, or the area they span is below the zero test. [`ErrorKind::InvalidInput`].
+    LoopWithoutNormal,
+    /// The orientation of a face's loop is undecided: its area is zero or unresolved, or
+    /// the walk that measures it failed. Class `failed`.
+    LoopOrientationUndecided,
     /// The face's first loop is not outer, or a later loop is not inner.
     /// [`ErrorKind::InvalidInput`].
     LoopsMisoriented,
-    /// A loop crosses the surface's closure more than once without a singular side.
+    /// Between two consecutive edge uses a loop's UV jumps more than a tenth of the
+    /// surface's domain, with neither end singular and the gap not certified.
     /// [`ErrorKind::InvalidInput`].
-    LoopCrossesClosure,
+    LoopJumpsInUv,
     /// The surface is discontinuous in a parameter direction, which the trim does not take.
     /// [`ErrorKind::Unsupported`].
     SurfaceDiscontinuous,
@@ -752,9 +755,10 @@ impl TopologyFailure {
             | Self::FaceWithoutLoops
             | Self::LoopsNotClosedOrPlanar { .. }
             | Self::CurveEndWithoutTangent
-            | Self::LoopWithoutArea
+            | Self::LoopWithoutNormal
+            | Self::LoopOrientationUndecided
             | Self::LoopsMisoriented
-            | Self::LoopCrossesClosure
+            | Self::LoopJumpsInUv
             | Self::SurfaceDiscontinuous
             | Self::CurveIndexOutOfRange { .. }
             | Self::CurveNotInLoops
@@ -792,7 +796,6 @@ impl TopologyFailure {
             | Self::NoCurveGiven
             | Self::PartNotEmpty
             | Self::NoRegionGiven
-            | Self::NoCurvesGiven
             | Self::LoopIndexOutOfRange { .. } => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) | Self::GatheredBothSides => SM_ERR_ASSERT_FAILURE,
             Self::OutOfMemory(_) | Self::TooManyOutputSlots { .. } | Self::AllocationFailed => {
@@ -870,10 +873,9 @@ impl TopologyFailure {
             | Self::NoRegionGiven
             | Self::FaceWithoutLoops
             | Self::LoopsNotClosedOrPlanar { .. }
-            | Self::LoopWithoutArea
-            | Self::NoCurvesGiven
+            | Self::LoopWithoutNormal
             | Self::LoopsMisoriented
-            | Self::LoopCrossesClosure
+            | Self::LoopJumpsInUv
             | Self::LoopIndexOutOfRange { .. }
             | Self::CurveIndexOutOfRange { .. }
             | Self::CurveNotInLoops
@@ -897,6 +899,7 @@ impl TopologyFailure {
             | Self::CurveEndWithoutTangent
             | Self::SurfaceDiscontinuous => ErrorKind::Unsupported,
             Self::CurveNotApproximated
+            | Self::LoopOrientationUndecided
             | Self::NoTrimmedBSpline
             | Self::AllocationFailed
             | Self::NoProjectedCurves
@@ -1158,17 +1161,34 @@ impl core::fmt::Display for TopologyFailure {
                 f.write_str("a requested face has no copy, or more than one")
             }
             Self::NoRegionGiven => f.write_str("no region was given"),
-            Self::UnorientedLoopsOnNonG1Surface => f.write_str("the surface is not G1 and the loops are not oriented"),
+            Self::UnorientedLoopsOnNonG1Surface => {
+                f.write_str("the surface is not G1 and the loops are not oriented")
+            }
             Self::FaceWithoutLoops => f.write_str("the face has no loops"),
-            Self::LoopsNotClosedOrPlanar { closed, on_plane } => write!(f, "the curves do not form closed loops in one plane (closed: {closed}, on the plane: {on_plane})"),
+            Self::LoopsNotClosedOrPlanar { closed, on_plane } => write!(
+                f,
+                "the curves do not form closed loops in one plane \
+                 (closed: {closed}, on the plane: {on_plane})"
+            ),
             Self::CurveEndWithoutTangent => f.write_str("a curve has a zero tangent at its end"),
-            Self::LoopWithoutArea => f.write_str("a loop encloses no area"),
-            Self::NoCurvesGiven => f.write_str("no curves were given"),
-            Self::LoopsMisoriented => f.write_str("the first loop is not outer, or a later loop is not inner"),
-            Self::LoopCrossesClosure => f.write_str("a loop crosses the surface's closure more than once"),
+            Self::LoopWithoutNormal => f.write_str("a loop's sample points give no normal"),
+            Self::LoopOrientationUndecided => {
+                f.write_str("a loop's orientation on the face is undecided")
+            }
+            Self::LoopsMisoriented => {
+                f.write_str("the first loop is not outer, or a later loop is not inner")
+            }
+            Self::LoopJumpsInUv => f.write_str(
+                "a loop's UV jumps more than a tenth of the surface's domain between two \
+                 edge uses",
+            ),
             Self::SurfaceDiscontinuous => f.write_str("the surface is discontinuous"),
-            Self::LoopIndexOutOfRange { index, loops } => write!(f, "loop index {index} is past the last of {loops} loops"),
-            Self::CurveIndexOutOfRange { index } => write!(f, "curve index {index} lies in no loop"),
+            Self::LoopIndexOutOfRange { index, loops } => {
+                write!(f, "loop index {index} is past the last of {loops} loops")
+            }
+            Self::CurveIndexOutOfRange { index } => {
+                write!(f, "curve index {index} lies in no loop")
+            }
             Self::CurveNotInLoops => f.write_str("the curve is not in the loops"),
             Self::NoLoops => f.write_str("there are no loops"),
             Self::CurvesNotInOneLoop => f.write_str("the curves are not in one loop"),
@@ -1961,14 +1981,10 @@ mod tests {
                 SM_ERR,
                 K::Unsupported,
             ),
-            (TopologyFailure::LoopWithoutArea, SM_ERR, K::InvalidInput),
-            (
-                TopologyFailure::NoCurvesGiven,
-                SM_ERR_INVALID_INPUT,
-                K::InvalidInput,
-            ),
+            (TopologyFailure::LoopWithoutNormal, SM_ERR, K::InvalidInput),
+            (TopologyFailure::LoopOrientationUndecided, SM_ERR, K::Failed),
             (TopologyFailure::LoopsMisoriented, SM_ERR, K::InvalidInput),
-            (TopologyFailure::LoopCrossesClosure, SM_ERR, K::InvalidInput),
+            (TopologyFailure::LoopJumpsInUv, SM_ERR, K::InvalidInput),
             (
                 TopologyFailure::SurfaceDiscontinuous,
                 SM_ERR,
