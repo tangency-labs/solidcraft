@@ -168,6 +168,47 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
                     handles: Vec::new(),
                 })
             }
+            // A spline with its own knots keeps every control point, as the knots count them
+            // (#9355): only its two ends join other curves' ends; the points between are its own,
+            // even where two of them coincide. One that is no valid sketch spline (too many
+            // points for one) is drawn as before, evenly spaced over a share of its points.
+            Geom2::Nurbs { pts, degree, knots, weights } => {
+                let nurbs = solidcraft_sketch::Nurbs { knots: knots.clone(), weights: weights.clone() };
+                match (pts.first(), pts.last()) {
+                    (Some(first), Some(last)) if nurbs.check(pts.len(), *degree).is_ok() => {
+                        let mut idx = Vec::with_capacity(pts.len());
+                        idx.push(pt(sk, *first)?);
+                        for p in pts.iter().take(pts.len() - 1).skip(1) {
+                            idx.push(sk.add_point(f(*p), None)?);
+                        }
+                        idx.push(pt(sk, *last)?);
+                        Some(CurveKind::Spline { pts: idx, control: true, degree: *degree, periodic: false, nurbs: Some(nurbs), handles: Vec::new() })
+                    }
+                    _ => {
+                        let cap = solidcraft_sketch::MAX_SPLINE_POINTS;
+                        let keep: Vec<&Vec2> = if pts.len() > cap {
+                            (0..cap).map(|k| &pts[(k * (pts.len() - 1) + (cap - 1) / 2) / (cap - 1)]).collect()
+                        } else {
+                            pts.iter().collect()
+                        };
+                        let mut idx = Vec::new();
+                        for p in keep {
+                            let i = pt(sk, *p)?;
+                            if idx.last() != Some(&i) {
+                                idx.push(i);
+                            }
+                        }
+                        (idx.len() >= 2).then_some(CurveKind::Spline {
+                            pts: idx,
+                            control: true,
+                            degree: *degree,
+                            periodic: false,
+                            nurbs: None,
+                            handles: Vec::new(),
+                        })
+                    }
+                }
+            }
             Geom2::Conic { a, apex, b, rho } => {
                 let (a, x, b) = (pt(sk, *a)?, pt(sk, *apex)?, pt(sk, *b)?);
                 (a != b && x != a && x != b).then_some(CurveKind::Conic { a, b, apex: x, rho: *rho })
@@ -187,7 +228,7 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
 }
 
 /// The box around a drawing's geometry (arcs, circles and curves by their extent).
-fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
+pub(super) fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
     let mut pts: Vec<Vec2> = Vec::new();
     for g in geom {
         match g {
@@ -216,7 +257,8 @@ fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
                 let r = c.dist(*major).max(*minor);
                 pts.extend([*c + Vec2::new(r, r), *c - Vec2::new(r, r)]);
             }
-            Geom2::Spline { pts: sp, .. } => pts.extend(sp.iter().copied()),
+            // A spline lies inside its control points' hull (weights are positive).
+            Geom2::Spline { pts: sp, .. } | Geom2::Nurbs { pts: sp, .. } => pts.extend(sp.iter().copied()),
             // Points along the curve, not its apex, which can lie well outside it (an elliptical
             // arc of a DXF comes in as conics, #8155).
             Geom2::Conic { a, apex, b, rho } if *rho > 0.0 && *rho < 1.0 => {
@@ -232,16 +274,25 @@ fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
     (lo.x.is_finite() && lo.y.is_finite() && hi.x.is_finite() && hi.y.is_finite()).then_some((lo, hi))
 }
 
+/// A drawing as read: its geometry, the box around it, its text, and what the reading warns
+/// about (an SVG cubic kept as drawn that the curve check refuses, #16190).
+type Drawing = (Vec<Geom2>, (Vec2, Vec2), String, Vec<String>);
+
 /// The drawing's geometry and the box around it; a drawing with none is an error that says why
 /// (#9641).
-fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<(Vec<Geom2>, (Vec2, Vec2), String)> {
+fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<Drawing> {
     let text = source_text(p, cmd, svg)?;
-    let geom = if svg { solidcraft_io::read_svg(&text) } else { solidcraft_io::read_dxf(&text) }.map_err(|e| drawing_error(p, svg, e.to_string()))?;
+    let (geom, warnings) = if svg {
+        solidcraft_io::read_svg_drawing(&text).map(|d| (d.geometry, d.warnings.iter().map(ToString::to_string).collect()))
+    } else {
+        solidcraft_io::read_dxf(&text).map(|g| (g, Vec::new()))
+    }
+    .map_err(|e| drawing_error(p, svg, e.to_string()))?;
     let Some(bounds) = bounds_of(&geom) else {
         let why = if svg { solidcraft_io::svg_nothing_to_import(&text) } else { "the DXF has no entities SolidCraft reads".to_string() };
         return Err(drawing_error(p, svg, why));
     };
-    Ok((geom, bounds, text))
+    Ok((geom, bounds, text, warnings))
 }
 
 /// The box around a drawing, as the reply describes it: `min`, `max` and the span between them.
@@ -257,14 +308,14 @@ fn drawing_bounds(_s: &mut Session, p: &Value) -> Result<Value> {
         Some(f) => !f.eq_ignore_ascii_case("dxf"),
         None => !name_is_dxf,
     };
-    let (_, bounds, text) = read_drawing(p, cmd, svg)?;
+    let (_, bounds, text, _) = read_drawing(p, cmd, svg)?;
     // Only an SVG names a sheet, and only when it says how big its sheet is.
     let sheet = svg.then(|| solidcraft_io::svg_sheet(&text)).flatten().map(drawing_box);
     reply(cmd, DrawingBoundsResult { drawing: drawing_box(bounds), sheet, param_warnings: Vec::new() })
 }
 
 fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
-    let (geom, (lo, hi), text) = read_drawing(p, cmd, svg)?;
+    let (geom, (lo, hi), text, warnings) = read_drawing(p, cmd, svg)?;
     // What `width`, `height` and `align: center` refer to: the drawn geometry, or the SVG sheet.
     let (lo, hi) = match str_(p, "size_from") {
         None | Some("geometry") => (lo, hi),
@@ -367,6 +418,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
             fixed: fixed.then_some(n_fixed),
             info,
             created: None,
+            warnings,
             param_warnings: Vec::new(),
         },
     )
@@ -765,6 +817,7 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use solidcore_record::Vec2;
     use solidcraft_geom::prelude::*;
     use solidcraft_io::Geom2;
 
@@ -886,6 +939,115 @@ EOF
         assert_eq!(sk.profiles.len(), 1, "the loop closes into one profile: {r}");
         let want = std::f64::consts::PI * 900.0;
         assert!((sk.profiles[0].area - want).abs() < want * 0.01, "{} vs {want}", sk.profiles[0].area);
+    }
+
+    /// A DXF SPLINE of `degree` over `ctrl` with `knots` and `weights` (none: no 41 codes).
+    fn spline_dxf(flags: u32, degree: u8, ctrl: &[(f64, f64)], knots: &[f64], weights: &[f64]) -> String {
+        let mut e = format!("0\nSPLINE\n70\n{flags}\n71\n{degree}\n72\n{}\n73\n{}\n", knots.len(), ctrl.len());
+        for k in knots {
+            e.push_str(&format!("40\n{k}\n"));
+        }
+        for w in weights {
+            e.push_str(&format!("41\n{w}\n"));
+        }
+        for (x, y) in ctrl {
+            e.push_str(&format!("10\n{x}\n20\n{y}\n30\n0\n"));
+        }
+        e
+    }
+
+    /// The splines `sketch.insert_dxf` makes of `entities`: points, degree and knots and weights.
+    fn imported_splines(entities: &str) -> Vec<(Vec<Vec2>, u8, Option<solidcraft_sketch::Nurbs>)> {
+        let mut s = Session::default();
+        let dxf = format!("0\nSECTION\n2\nENTITIES\n{entities}0\nENDSEC\n0\nEOF\n");
+        let r = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap();
+        let sk = s.model.state().sketch(r["sketch"].as_u64().unwrap()).unwrap().clone();
+        sk.sketch
+            .curves
+            .iter()
+            .filter_map(|c| match &c.kind {
+                solidcraft_sketch::CurveKind::Spline { pts, control: true, degree, nurbs, .. } => {
+                    Some((pts.iter().map(|i| sk.sketch.point(*i).unwrap()).collect(), *degree, nurbs.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The point at `t` in [0, 1] of an imported spline, as the sketch draws it.
+    fn at(spline: &(Vec<Vec2>, u8, Option<solidcraft_sketch::Nurbs>), t: f64) -> Vec2 {
+        solidcraft_sketch::spline_point_mode(&spline.0, true, spline.1, false, spline.2.as_ref(), t)
+    }
+
+    /// #9355: a SPLINE keeps its own knots and weights, so it comes in as the file's curve, not
+    /// the evenly spaced, unweighted spline over its points it used to become.
+    #[test]
+    fn a_spline_keeps_its_knots_and_weights() {
+        // A rational quadratic quarter circle of radius 10: every point lies on the circle.
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let quarter = imported_splines(&spline_dxf(8, 2, &[(10.0, 0.0), (10.0, 10.0), (0.0, 10.0)], &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0], &[1.0, w, 1.0]));
+        let [arc] = &quarter[..] else { panic!("{quarter:?}") };
+        assert_eq!(arc.2.as_ref().map(|n| n.weights.clone()), Some(vec![1.0, w, 1.0]));
+        for i in 0..=20 {
+            let r = at(arc, f64::from(i) / 20.0).len();
+            assert!((r - 10.0).abs() < 1e-9, "t {i}/20: radius {r}");
+        }
+        // A cubic with a triple knot in the middle passes through its fourth control point there,
+        // a sharp corner (a font's, in a logo); two of its control points coincide, and all seven
+        // stay. Evenly spaced knots would round the corner off.
+        let ctrl = [(0.0, 0.0), (10.0, 0.0), (20.0, 0.0), (20.0, 0.0), (20.0, 10.0), (20.0, 20.0), (10.0, 30.0)];
+        let knots = [0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0];
+        let cornered = imported_splines(&spline_dxf(8, 3, &ctrl, &knots, &[]));
+        let [corner] = &cornered[..] else { panic!("{cornered:?}") };
+        assert_eq!(corner.0.len(), 7, "every control point is kept");
+        assert_eq!(corner.2.as_ref().map(|n| n.knots.clone()), Some(knots.to_vec()));
+        assert!(at(corner, 0.5).dist(Vec2::new(20.0, 0.0)) < 1e-9, "{:?}", at(corner, 0.5));
+        // Evenly spaced, unweighted knots are the spline the sketch draws anyway: stored as before.
+        let plain = imported_splines(&spline_dxf(8, 3, &ctrl[3..], &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0], &[]));
+        assert!(matches!(&plain[..], [(pts, 3, None)] if pts.len() == 4), "{plain:?}");
+    }
+
+    /// #9355: a periodic SPLINE (open knots, its first control points repeated at the end) comes
+    /// in as the same closed curve with clamped knots, and closes into a profile.
+    #[test]
+    fn a_periodic_spline_comes_in_closed_with_clamped_knots() {
+        let ring: Vec<(f64, f64)> = (0..6)
+            .map(|i| {
+                let a = std::f64::consts::TAU * f64::from(i) / 6.0;
+                (20.0 * a.cos(), 20.0 * a.sin())
+            })
+            .collect();
+        let ctrl: Vec<(f64, f64)> = ring.iter().chain(&ring[..3]).copied().collect();
+        let knots: Vec<f64> = (0..13).map(f64::from).collect();
+        let mut s = Session::default();
+        let dxf = format!("0\nSECTION\n2\nENTITIES\n{}0\nENDSEC\n0\nEOF\n", spline_dxf(11, 3, &ctrl, &knots, &[]));
+        let r = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap();
+        let sk = s.model.state().sketch(r["sketch"].as_u64().unwrap()).unwrap().clone();
+        assert_eq!(sk.profiles.len(), 1, "{r}");
+        let spline = &imported_splines(&spline_dxf(11, 3, &ctrl, &knots, &[]))[0];
+        let nurbs = spline.2.as_ref().unwrap();
+        assert!(nurbs.knots[..4].iter().all(|k| *k == 3.0) && nurbs.knots[nurbs.knots.len() - 4..].iter().all(|k| *k == 9.0), "{:?}", nurbs.knots);
+        // The same curve: the uniform cubic B-spline over the ring, at its knots.
+        for i in 0..6 {
+            let (p0, p1, p2) = (ring[i], ring[(i + 1) % 6], ring[(i + 2) % 6]);
+            let want = Vec2::new((p0.0 + 4.0 * p1.0 + p2.0) / 6.0, (p0.1 + 4.0 * p1.1 + p2.1) / 6.0);
+            let got = at(spline, f64::from(i as u32) / 6.0);
+            assert!(got.dist(want) < 1e-9, "knot {i}: {got:?} vs {want:?}");
+        }
+    }
+
+    /// #9355: a knot repeated more than the degree breaks the curve (here it jumps from the third
+    /// control point to the fourth), so it comes in as two splines;
+    /// knots that aren't a spline (decreasing) come in as before, evenly spaced over the points.
+    #[test]
+    fn a_broken_or_invalid_knotted_spline_still_comes_in() {
+        let ctrl = [(0.0, 0.0), (10.0, 5.0), (20.0, 0.0), (30.0, 10.0), (40.0, 0.0), (50.0, 5.0)];
+        let broken = imported_splines(&spline_dxf(8, 2, &ctrl, &[0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0], &[]));
+        assert_eq!(broken.len(), 2, "{broken:?}");
+        assert!(broken.iter().all(|(pts, degree, nurbs)| pts.len() == 3 && *degree == 2 && nurbs.is_some()), "{broken:?}");
+        assert!(broken[0].0[2].dist(Vec2::new(20.0, 0.0)) < 1e-9 && broken[1].0[0].dist(Vec2::new(30.0, 10.0)) < 1e-9, "{broken:?}");
+        let decreasing = imported_splines(&spline_dxf(8, 2, &ctrl, &[0.0, 0.0, 0.0, 0.7, 0.3, 0.5, 1.0, 1.0, 1.0], &[]));
+        assert!(matches!(&decreasing[..], [(pts, 2, None)] if pts.len() == 6), "{decreasing:?}");
     }
 
     /// The sketch limit is process-wide: the tests that depend on it take turns.

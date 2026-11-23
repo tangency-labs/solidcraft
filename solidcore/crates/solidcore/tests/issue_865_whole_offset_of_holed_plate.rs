@@ -19,6 +19,8 @@
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 
 use core::f64::consts::PI;
 
@@ -322,7 +324,8 @@ fn upstream_holes_crossing_the_sides_unmerged_are_refused() {
 /// The real defect still caught beside the refusals above, and the cases next to them
 /// still built: the other eight configurations of the same three parts, whose loops do
 /// not cross, offset unmerged as before into valid manifold solids (`check_brep` Level 2
-/// clean) of the volumes main gives them.
+/// clean) of the volumes main gives them, each moved by at most the old integrator's leak
+/// through the tolerant edges' gaps that `brep_volume` now closes (#16735).
 #[test]
 fn upstream_holes_clear_of_the_sides_still_offset_unmerged() {
     let cases = [
@@ -348,10 +351,8 @@ fn upstream_holes_clear_of_the_sides_still_offset_unmerged() {
         assert!(lines.is_empty(), "{label}: {lines:?}");
         assert!(brep_is_manifold_solid(&b).unwrap(), "{label}");
         let v = volume(&k, &mut b).unwrap();
-        assert!(
-            (v - main_volume).abs() <= 1e-9 * main_volume,
-            "{label}: volume {v}, main {main_volume}"
-        );
+        eprintln!("{label}: volume {v}, main {main_volume}");
+        volume_leak::assert_moved_by_the_old_leak(&k, &mut b, *main_volume, v, 1e-6);
     }
 }
 

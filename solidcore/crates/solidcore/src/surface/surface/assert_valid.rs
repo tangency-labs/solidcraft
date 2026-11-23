@@ -64,6 +64,9 @@
 //!   solution found (`no_tangent_along`).
 //! - **Warnings.** `SmBSplineSurface::AssertValid`'s repeated-end-control-point
 //!   check only issues a `WARN`, so `HasRepeatedEndControlPoints` is not run.
+//! - **Interior poles (WR-788).** Both knot walks decide from the active control
+//!   points. Upstream's U-only Greville check can lie off the knot line and miss
+//!   an iso span whose control points coincide exactly.
 //! - **Undefined behaviour.** Index arithmetic of `HasInternalPole` that leaves the
 //!   control net (unclamped knot vectors), the first/last polar angle of an empty
 //!   table, missing iso boundaries and a continuity output `CalculateContinuities`
@@ -885,14 +888,10 @@ fn count(v: usize) -> Result<i64> {
     i64::try_from(v).map_err(|_| invalid("count out of range"))
 }
 
-fn index(v: i64) -> Result<usize> {
-    usize::try_from(v).map_err(|_| invalid("index before the start of the net"))
-}
-
 /// `SmBSplineSurface::HasInternalPole`: some interior knot line has a patch boundary
 /// span whose control points all lie within `tol` (`<= 0`: `SM_ZONE_TOL_3D`) of one
-/// another (for the u lines, also a singularity, `IsSingularity` of `s` at a Greville
-/// point; the v lines have no such check, as upstream). `false` without NURB.
+/// reference point. Coincident active control points prove that the iso span
+/// collapses; no singularity query away from the knot is needed. `false` without NURB.
 ///
 /// At each interior knot it tests the rows whose basis functions are nonzero at the
 /// knot, starting at the row through the knot, where upstream moves one row further for
@@ -903,9 +902,9 @@ fn index(v: i64) -> Result<usize> {
 ///
 /// # Errors
 ///
-/// Those of the knot, Greville and singularity queries; [`SolidError::InvalidInput`]
+/// Those of the knot and control-net queries; [`SolidError::InvalidInput`]
 /// where upstream's index arithmetic leaves the control net.
-pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) -> Result<bool> {
+pub fn has_internal_pole(_k: &Kernel, _s: &Surface, b: &BSplineSurface, tol: f64) -> Result<bool> {
     // init return
     let mut rtn = false;
 
@@ -1007,18 +1006,6 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
                 kk -= 1;
             }
 
-            // These tests don't guarantee a singularity: check the point.  [B597]
-            if test {
-                // Get uv for the first control point tested.
-                let uv = Point2::new(
-                    b.greville_abscissa(SurfParamType::U, index(cp_index_u + row_cnt_u - 1)?)?,
-                    b.greville_abscissa(SurfParamType::V, index(cp_index_v + degree_v)?)?,
-                );
-                if !s.is_singularity(k, uv, tolerance, false)?.singular {
-                    test = false;
-                }
-            }
-
             // remember when patch is degenerate
             rtn |= test;
             jj += 1;
@@ -1091,10 +1078,6 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
                 }
                 kk -= 1;
             }
-
-            // As upstream, no singularity check here (the U walk's [B597] check evaluates
-            // at a Greville point off the knot line when row_cnt > 1, so it misses real
-            // poles; see WR-788)
 
             // remember when patch is degenerate
             rtn |= test;
@@ -3166,11 +3149,18 @@ mod tests {
 
     /// #17056 review: rows 1 and 2 collapsed to one point `P` make the iso line at the
     /// simple v knot 0.5 the point `(N_1 + N_2)(0.5) P = P`, a pole, and the V walk finds
-    /// it. A singularity check at the U walk's Greville point (v = greville(2) = 0.75, off
-    /// the knot line) would reject it, so the V walk keeps upstream's (none).
+    /// it. A singularity check at v = greville(2) = 0.75, off the knot line, would
+    /// reject it despite the coincident active control points.
     #[test]
     fn a_collapsed_span_at_a_simple_v_knot_is_a_pole() {
         assert!(simple_knot(false, collapse_simple_knot_rows));
+    }
+
+    /// At the simple U knot, only rows 1 and 2 contribute, so the whole iso line
+    /// equals their common point. The Greville parameter 0.75 is off that knot.
+    #[test]
+    fn a_collapsed_span_at_a_simple_u_knot_is_a_pole() {
+        assert!(simple_knot(true, collapse_simple_knot_rows));
     }
 
     /// The #17056 review case: degree 2 by 4, one clamped span by the double knot 0.5

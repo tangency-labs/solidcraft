@@ -37,7 +37,7 @@
 //! | [`Plane::step_uv_domain`], [`Plane::position`], [`Plane::uv_scale`] | `GetSTEPUVDomain`, `GetPosition`, `GetUVScale` |
 //! | [`Plane::is_kind_of`], [`Plane::TYPE`], [`Plane::type_string`], [`Plane::class_string`] | `IsKindOf`, `GetType`, `GetTypeString`, `GetClassString` (`SM_COMMON`) |
 //! | [`Plane::base`], [`Plane::base_with_nurb`], [`Plane::natural_uv_domain`] | the `SmBSplineSurface` part, `GetOrCreateGwNurbPointer`, `GetNaturalUVDomain` (inherited) |
-//! | [`Plane::max_analytic_domain`], [`Plane::is_parallel_to_vector`], [`Plane::is_parallel_to_vector_opt_in`], [`Plane::is_parallel_to_vector_with_kernel`], [`Plane::reverse`], [`Plane::swap_uv`] | `SmBSplineSurface::GetMaxAnalyticDomain`, `IsParallelToVector`, `Reverse`, `SwapUV` (inherited, re-dispatched) |
+//! | [`Plane::max_analytic_domain`], [`Plane::is_parallel_to_vector`], [`Plane::reverse`], [`Plane::swap_uv`] | `SmBSplineSurface::GetMaxAnalyticDomain`, `IsParallelToVector`, `Reverse`, `SwapUV` (inherited, re-dispatched) |
 //!
 //! Deviations:
 //! - **`SwapUV` keeps the plane's definition (WR-701).** The swap keeps the axes, domain
@@ -84,10 +84,8 @@
 //!   inform owners and are omitted, as for B-splines.
 //! - **`IsParallelToVector`** (inherited from `SmBSplineSurface`) returns the failed
 //!   `Unitize` status (`SM_ERR_INVALID_INPUT`, nonzero) as `SmBoolean` for a zero
-//!   vector, so upstream callers see `TRUE`. The port keeps `true` by default, with an
-//!   opt-in fix `Kernel::fixes.surface_parallel_to_vector_checks` (WR-39, #2145) via
-//!   [`Plane::is_parallel_to_vector_opt_in`] and
-//!   [`Plane::is_parallel_to_vector_with_kernel`] that returns `false`.
+//!   vector, so upstream callers see `TRUE`; [`Plane::is_parallel_to_vector`] returns
+//!   `false`: no plane is parallel to a vector with no direction (WR-39, #2145).
 //! - **Co-ported callees.** `SmTol::MapTo2d(SmTol3d, SmVector2d, SmSurface)` (unit
 //!   `geom.tol`, waiting on `SmSurface::Evaluate1stDerivatives`) is ported here for a
 //!   plane (the only surface it is called with). `Evaluate1stDerivatives` /
@@ -558,25 +556,12 @@ impl Plane {
 
     /// `SmBSplineSurface::IsParallelToVector` (inherited), its `SmPlane` branch: the
     /// normal is perpendicular to `vector` within `SM_EFF_ZERO * (1 + |O|max)`;
-    /// `true` for a zero vector (upstream returns the failed `Unitize` status).
+    /// `false` for a vector that cannot be unitised (upstream returns the failed
+    /// `Unitize` status, read as `TRUE`; WR-39).
     #[must_use]
     pub fn is_parallel_to_vector(&self, vector: Vec3) -> bool {
-        self.is_parallel_to_vector_opt_in(vector, false)
-    }
-
-    /// [`Plane::is_parallel_to_vector`] with kernel opt-in fixes applied
-    /// (`IsParallelToVector`).
-    #[must_use]
-    pub fn is_parallel_to_vector_with_kernel(&self, k: &Kernel, vector: Vec3) -> bool {
-        self.is_parallel_to_vector_opt_in(vector, k.fixes.surface_parallel_to_vector_checks)
-    }
-
-    /// [`Plane::is_parallel_to_vector`], optionally returning `false` when `vector`
-    /// cannot be unitised (`fix_checks` `true`, WR-39).
-    #[must_use]
-    pub fn is_parallel_to_vector_opt_in(&self, vector: Vec3, fix_checks: bool) -> bool {
         let Ok(test_vec) = vector.unitize() else {
-            return !fix_checks;
+            return false;
         };
         let z_axis = self.position.z_axis();
         let tol1 = EFF_ZERO * (1.0 + self.position.origin().max_dimension());
@@ -1049,9 +1034,9 @@ impl Plane {
             && operation != SolverOperation::Normalize
             && operation != SolverOperation::Intersect
         {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_DROP,
-                "the operation is neither minimize, normalize nor intersect",
+                SurfaceFailure::OperationNotTaken,
             ));
         }
 
@@ -1208,7 +1193,7 @@ impl Plane {
         if line_vector.length_squared() < EFF_ZERO_SQ {
             return Err(SolidError::surface(
                 OP_LINE,
-                SurfaceFailure::InvalidValue("the line direction is the zero vector"),
+                SurfaceFailure::LineDirectionZero,
             ));
         }
 
@@ -1352,10 +1337,11 @@ impl Plane {
 
             let det = pu.cross(pv).dot(lt);
             if det.abs() < EFF_ZERO {
-                // should never happen, we're in the non-parallel case here.
-                return Err(SolidError::surface_failed(
+                // the angle test above passed, so a direction or a scale too small to solve
+                // with makes the determinant this small
+                return Err(SolidError::surface(
                     OP_LINE,
-                    "the line is parallel to the plane",
+                    SurfaceFailure::LineCrossingSingular,
                 ));
             }
 
@@ -2645,10 +2631,63 @@ mod tests {
             false,
             1e-6,
         );
+        let e = r.err().unwrap();
+        assert_eq!(e.sm_status(), Some(SM_ERR_INVALID_INPUT));
         assert_eq!(
-            r.err().and_then(|e| e.sm_status()),
-            Some(SM_ERR_INVALID_INPUT)
+            e.surface_failure(),
+            Some(&SurfaceFailure::LineDirectionZero)
         );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+    }
+
+    /// A line square to a plane whose u and v scales are 1e-7 crosses it at a determinant
+    /// of 1e-14, below the kernel's zero: the crossing is singular to solve for, with
+    /// upstream's `SM_ERR`; the fast drop refuses an operation it does not take.
+    #[test]
+    fn a_crossing_too_small_to_solve_and_an_operation_not_taken_are_named() {
+        use crate::geom::global_solver::SolverOperation;
+        use crate::surface::surface::p4::NoObject;
+        let tiny = Plane::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(1e-7, 1e-7),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        );
+        let e = tiny
+            .global_line_intersect::<NoObject>(
+                &Kernel::default(),
+                NoObject,
+                &tiny.step_uv_domain(),
+                Point3::new(0.0, 0.0, 1.0),
+                Vec3::new(0.0, 0.0, 1.0),
+                None,
+                false,
+                1e-6,
+            )
+            .unwrap_err();
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::LineCrossingSingular)
+        );
+        let p = unit_plane();
+        let e = p
+            .drop_point_fast::<NoObject>(
+                &p.step_uv_domain(),
+                SolverOperation::Maximize,
+                Point3::new(1.0, 2.0, 4.0),
+                1e-6,
+                None,
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::OperationNotTaken)
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
     }
 
     #[test]

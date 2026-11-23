@@ -193,9 +193,9 @@ fn stl_export_is_closed_where_faces_meet() {
 #[test]
 fn save_mesh_rejects_unknown_format_and_slicer_without_writing() {
     let mut s = imported_box();
-    // Its own file name: `save_mesh_writes_stl_and_3mf` writes `solvecraft-save-mesh-<pid>.stl`, and
+    // Its own file name: `save_mesh_writes_stl_and_3mf` writes `solidcraft-save-mesh-<pid>.stl`, and
     // sharing it made this one fail when the two ran together.
-    let path = std::env::temp_dir().join(format!("solvecraft-save-mesh-rejected-{}.stl", std::process::id()));
+    let path = std::env::temp_dir().join(format!("solidcraft-save-mesh-rejected-{}.stl", std::process::id()));
     let _ = std::fs::remove_file(&path);
     for params in
         [json!({"path":path,"format":"nope"}), json!({"path":path,"slicer":"no such slicer anywhere"}), json!({"path":path,"slicer":"/bin/sh"})]
@@ -210,7 +210,7 @@ fn save_mesh_writes_stl_and_3mf() {
     let mut s = imported_box();
     let dir = std::env::temp_dir();
     for (ext, format) in [("stl", None), ("3mf", None), ("dat", Some("3mf"))] {
-        let path = dir.join(format!("solvecraft-save-mesh-{}.{ext}", std::process::id()));
+        let path = dir.join(format!("solidcraft-save-mesh-{}.{ext}", std::process::id()));
         let mut params = json!({"path": path});
         if let Some(f) = format {
             params["format"] = json!(f);
@@ -282,6 +282,7 @@ impl Drop for MadeUp {
     fn drop(&mut self) {
         *crate::slicers::TEST_DETECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         *crate::slicers::TEST_BUSCTL.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        *crate::slicers::TEST_READY_LIMIT.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         crate::slicers::set_chosen_programs(&[]);
     }
 }
@@ -340,26 +341,73 @@ fn save_mesh_accepts_the_path_of_a_listed_appimage_and_refuses_the_others() {
 #[cfg(unix)]
 #[test]
 fn save_mesh_with_a_cold_prusaslicer_3_waits_for_it_before_sending() {
-    use crate::slicers::{Slicer, TEST_BUSCTL, TEST_DETECTED, test_support::fake_program};
+    save_mesh_to_a_cold_prusaslicer_3("cold", 0.0, 0.0);
+}
+
+/// The same on a slow machine: the slicer takes a second to start and to take the file, and each
+/// look at the bus takes a second. Whether the file waits must not depend on how fast that is.
+#[cfg(unix)]
+#[test]
+fn save_mesh_with_a_slow_cold_prusaslicer_3_still_waits_for_it_before_sending() {
+    save_mesh_to_a_cold_prusaslicer_3("slow", 1.0, 1.0);
+}
+
+/// The same where the temporary folder's name has a space and a quote in it: the made-up
+/// slicer and bus still write inside the test's own folder.
+#[cfg(unix)]
+#[test]
+fn save_mesh_with_a_cold_prusaslicer_3_in_a_folder_with_a_space_waits_for_it_before_sending() {
+    save_mesh_to_a_cold_prusaslicer_3("in a folder with a space and a ' quote", 0.0, 0.0);
+}
+
+/// `file.save_mesh` to a made-up PrusaSlicer 3 that is not running: its launcher takes `start`
+/// seconds before it logs what it was started with, and each look at the bus takes `look` seconds.
+///
+/// Nothing here depends on how fast the machine is. The slicer is on the bus only once it has
+/// started (it has logged its start) and has been looked for twice, so the file can only follow the
+/// start; the log is read once both lines are in; and the slicer is waited for longer than
+/// [`crate::slicers::READY_LIMIT`], which is there for a slicer that hangs, not one that is slow.
+/// The limits below are for a hang only.
+#[cfg(unix)]
+fn save_mesh_to_a_cold_prusaslicer_3(tag: &str, start: f64, look: f64) {
+    use crate::slicers::test_support::{fake_program, sh_quote};
+    use crate::slicers::{Slicer, TEST_BUSCTL, TEST_DETECTED, TEST_READY_LIMIT};
+    use std::time::{Duration, Instant};
     let _turn = CHOSEN_PROGRAMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let _reset = MadeUp;
-    let dir = std::env::temp_dir().join(format!("solidcraft-save-mesh-cold-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("solidcraft-save-mesh-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let launcher_dir = dir.join("slic3r-app-launcher");
     std::fs::create_dir_all(&launcher_dir).unwrap();
-    let log = dir.join("log");
-    let launcher = fake_program(&launcher_dir, "PrusaSlicer", &format!("echo \"$@\" >> {}", log.display()));
+    let (log, up, early) = (dir.join("log"), dir.join("up"), dir.join("sent-early"));
+    let pause = |seconds: f64| if seconds > 0. { format!("sleep {seconds}; ") } else { String::new() };
+    // Given a file before the bus said the slicer was up: noted when it is started, before its own delay.
+    let launcher = fake_program(
+        &launcher_dir,
+        "PrusaSlicer",
+        &format!(
+            "[ $# -gt 1 ] && [ ! -e {u} ] && : > {e}; {p}echo \"$@\" >> {l}",
+            u = sh_quote(&up),
+            e = sh_quote(&early),
+            p = pause(start),
+            l = sh_quote(&log)
+        ),
+    );
     let count = dir.join("count");
-    // Not on the bus the first two looks, there after that.
+    // Not on the bus the first two looks, nor before it has started; there after that.
     let busctl = fake_program(
         &dir,
         "busctl",
         &format!(
-            "n=$(cat {c} 2>/dev/null || echo 0); echo $((n+1)) > {c}; echo ':1.5 1 x'; [ $n -ge 2 ] && echo 'com.prusa3d.prusaslicer.BroadcastListener.ab 2 y'; exit 0",
-            c = count.display()
+            "n=$(cat {c} 2>/dev/null || echo 0); echo $((n+1)) > {c}; {p}echo ':1.5 1 x'; if [ $n -ge 2 ] && [ -s {l} ]; then : > {u}; echo 'com.prusa3d.prusaslicer.BroadcastListener.ab 2 y'; fi; exit 0",
+            c = sh_quote(&count),
+            p = pause(look),
+            l = sh_quote(&log),
+            u = sh_quote(&up)
         ),
     );
     *TEST_BUSCTL.lock().unwrap() = Some(busctl);
+    *TEST_READY_LIMIT.lock().unwrap() = Some(Duration::from_secs(120));
     *TEST_DETECTED.lock().unwrap() =
         Some(vec![Slicer { id: "prusa".into(), name: "PrusaSlicer".into(), command: vec![launcher], icon: None, prusa_major: Some(3) }]);
     let mut s = imported_box();
@@ -367,11 +415,17 @@ fn save_mesh_with_a_cold_prusaslicer_3_waits_for_it_before_sending() {
     let r = s.execute("file.save_mesh", &json!({"path": out, "slicer": "prusa", "single_instance": false})).unwrap();
     assert!(out.exists());
     assert!(r.get("slicer").is_some() && r.get("slicer_timeout").is_none(), "{r}");
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    let lines: Vec<String> = std::fs::read_to_string(&log).unwrap().lines().map(String::from).collect();
+    // The launcher it was sent to runs on its own: read the log once it has written its line.
+    let read = || std::fs::read_to_string(&log).unwrap_or_default().lines().map(String::from).collect::<Vec<_>>();
+    let hang = Instant::now() + Duration::from_secs(60);
+    while read().len() < 2 && Instant::now() < hang {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let lines = read();
     // Started with no file, then sent the file, both with the flag (the preference could not take it away).
     assert_eq!(lines, ["--single-instance".to_string(), format!("--single-instance {}", out.display())]);
     assert!(std::fs::read_to_string(&count).unwrap().trim().parse::<u32>().unwrap() >= 3, "it looked until it was up");
+    assert!(!early.exists(), "the file was sent before the slicer was on the bus");
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -674,4 +728,35 @@ fn a_second_placements_mesh_body_converts_by_the_name_the_world_shows() {
         }
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #18465: a file of another CAD program (a zip as a `.f3d`, text as a `.x_t`) is not a design;
+/// Open says it does not open that kind of file, not what the design reader made of it. A design
+/// under its own extension keeps the reader's words, and a design under an odd name still opens.
+#[test]
+fn open_names_an_unsupported_file_instead_of_the_design_readers_complaint() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-open-unsupported-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let write = |name: &str, bytes: &[u8]| {
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        path.to_string_lossy().into_owned()
+    };
+    let mut s = Session::default();
+    for (name, bytes) in [("part.f3d", &b"PK\x03\x04not a design"[..]), ("part.x_t", b"**ABCDEFGHIJKLMNOPQRSTUVWXYZ\n"), ("part.xyz123", b"{")] {
+        let error = s.execute("doc.open", &json!({"path": write(name, bytes)})).unwrap_err().to_string();
+        let ext = name.rsplit('.').next().unwrap();
+        assert!(error.contains(&format!("can't open .{ext} files")), "{error}");
+        assert!(error.contains("export STEP") && error.contains("importer plugin") && error.contains("Preferences › Plugins"), "{error}");
+    }
+    let broken = s.execute("doc.open", &json!({"path": write("broken.sc", b"PK\x03\x04not a design")})).unwrap_err().to_string();
+    assert!(!broken.contains("can't open"), "{broken}");
+    // A design that was copied under another name opens as it did.
+    let mut saved = Session::default();
+    let design = dir.join("design.sc");
+    saved.execute("file.save_as", &json!({"path": design.to_string_lossy()})).unwrap();
+    let copy = dir.join("design.sc.bak");
+    std::fs::copy(&design, &copy).unwrap();
+    assert!(s.execute("doc.open", &json!({"path": copy.to_string_lossy()})).is_ok());
+    std::fs::remove_dir_all(dir).unwrap();
 }

@@ -11,18 +11,29 @@
 #![forbid(unsafe_code)]
 
 mod backend;
+mod mesh_warnings;
 mod options;
+mod plugin_tools;
 mod server;
 mod skill_reference;
 mod tools;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use backend::{Auto, Remote};
-pub use backend::{Backend, Headless};
-pub use options::{COMPACT_ENV, COMPACT_FLAG, Options};
+pub use backend::Auto;
+pub use backend::Backend;
+pub use backend::Headless;
+#[cfg(not(target_arch = "wasm32"))]
+pub use backend::Remote;
+pub use options::COMPACT_ENV;
+pub use options::COMPACT_FLAG;
+pub use options::Options;
 pub use server::Server;
-pub use solidcraft_mcp_server::{PROTOCOL_VERSION, SUPPORTED_VERSIONS};
-pub use tools::{call_tool, call_tool_with, tool_definitions, tool_definitions_with};
+pub use solidcraft_mcp_server::PROTOCOL_VERSION;
+pub use solidcraft_mcp_server::SUPPORTED_VERSIONS;
+pub use tools::call_tool;
+pub use tools::call_tool_with;
+pub use tools::tool_definitions;
+pub use tools::tool_definitions_with;
 
 use std::path::PathBuf;
 

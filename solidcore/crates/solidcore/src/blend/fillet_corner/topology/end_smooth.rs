@@ -16,13 +16,13 @@
 //! the vertex across the square plane; where one does, it holds that face's end ([`end_cap`]).
 //! No recursion (WR-697).
 
-use super::{need, new_corner_vertex, radial};
+use super::{defect, missing_defect, need, new_corner_vertex, radial, NO_SOLVER_OF_BLENDED_EU};
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_executive::session::SolverObject;
 use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletBrep, FilletCornerId, FilletEdgeType, FilletSolverId, FilletVertexType,
 };
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::{EntityRef, Result};
 use crate::geom::extent2d::Extent2d;
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
@@ -68,6 +68,8 @@ struct EndAt {
     onto: Vec3,
     radius: f64,
     crease_rad: f64,
+    /// The corner's 3D tolerance.
+    tol_3d: f64,
     /// The cosine of the corner's tangency tolerance: an edge leaving the vertex within it of
     /// the blended edge's line is tangent to it there.
     tangent_cos: f64,
@@ -138,8 +140,14 @@ fn end_cap(k: &Kernel, target: &mut Brep, at: &EndAt) -> Result<Vec3> {
                 // face's end closing to a cusp, which no rail reaches
                 continue;
             }
-            if lean <= 0.0 {
-                // the square plane's trace stays on the face: this end does not bound the cap
+            if lean <= 0.0 || reach * lean <= at.tol_3d * (1.0 - lean * lean).sqrt() {
+                // the square plane's trace stays on the face: this end does not bound the cap.
+                // Not the fork's (tangency-labs/solidcraft#17715): nor does an end that leans
+                // over the round so little that the plane holding it meets the end at the
+                // rail's distance within the corner's 3D tolerance of the square plane
+                // (`reach lean / sqrt(1 - lean^2)`, the rail `reach` from the edge): a ring's
+                // rim circle where the blended edge, its meridian arc, ends, square to it and
+                // leaning only by its tangent's rounding
                 continue;
             }
             // where the rail meets the face's end: the end at the rail's distance from the edge
@@ -212,6 +220,10 @@ fn is_crease_at(
     Ok(off.asin() > angle_rad)
 }
 
+/// Why a blended edge use at a smooth vertex without a face is the kernel's fault.
+const NO_BLEND_FACE: &str = "the blended edge use or its radial has no face, though the blend's \
+     solver was set up on the faces of both";
+
 impl FilletCorner {
     /// The fork's `SmBlendCorner::MakeEndAtSmoothVertex` (41a39ec): the End at a smooth
     /// vertex (`SM_BEND_AT_SMOOTH`). The blend is cut by the plane P through the vertex
@@ -228,9 +240,9 @@ impl FilletCorner {
     /// visible if a later operation fails.
     ///
     /// # Errors
-    /// `SM_ERR_NULL_POINTER` without solver, geometry, side faces or edge curve; `SM_ERR`
-    /// for a rail index past 1; those of the evaluation, the unitizations, the tight
-    /// boxes, the plane's NURB, the cap's queries and the pseudo-topology operations.
+    /// A reviewed defect (`SM_ERR_NULL_POINTER`) without solver, side faces or edge curve;
+    /// those of the evaluation, the unitizations, the tight boxes, the plane's NURB, the
+    /// cap's queries and the pseudo-topology operations.
     #[allow(clippy::too_many_lines)] // one fork routine
     pub fn make_end_at_smooth_vertex(&mut self, env: EndAtSmoothTopologyEnv<'_>) -> Result<()> {
         let EndAtSmoothTopologyEnv {
@@ -241,7 +253,7 @@ impl FilletCorner {
             solvers,
             solver_eu_solver,
         } = env;
-        let nul = |what: &'static str| SolidError::blend_missing(OP, what);
+        let nul = |why: &'static str| missing_defect(OP, why);
         let fil_eu = need(
             self.solver_eus
                 .as_deref()
@@ -253,20 +265,23 @@ impl FilletCorner {
             .and_then(|id| solvers.get(id.0 as usize))
             .and_then(Option::as_ref)
             .map(SolverObject::base)
-            .ok_or_else(|| nul("the blended edge's solver"))?;
+            .ok_or_else(|| nul(NO_SOLVER_OF_BLENDED_EU))?;
         let geom = solver.first_fillet_geom()?;
         let faces = [
-            eu1::face(target, fil_eu)?.ok_or_else(|| nul("the blended edge use's face"))?,
-            eu1::face(target, radial(target, fil_eu)?)?
-                .ok_or_else(|| nul("the blended edge's other face"))?,
+            eu1::face(target, fil_eu)?.ok_or_else(|| nul(NO_BLEND_FACE))?,
+            eu1::face(target, radial(target, fil_eu)?)?.ok_or_else(|| nul(NO_BLEND_FACE))?,
         ];
         let corner_vertex = need(self.vertex, "corner without vertex")?;
 
         // P: through the vertex, where the first rail reaches its face's end
-        let e = eu1::edge(target, fil_eu)?.ok_or_else(|| nul("the blended edge use's edge"))?;
+        let e = eu1::edge(target, fil_eu)?.ok_or_else(|| {
+            nul("the blended edge use has no edge, though its solver was made for that edge")
+        })?;
         let ivl = edge::interval(target, e)?;
         let at_start = edge::start_vertex(target, e)? == Some(corner_vertex);
-        let curve = edge::curve(target, e)?.ok_or_else(|| nul("the blended edge's curve"))?;
+        let curve = edge::curve(target, e)?.ok_or_else(|| {
+            nul("the blended edge has no curve, though its solver's rails were set up along it")
+        })?;
         let pv = curve.evaluate(
             k,
             if at_start { ivl.min() } else { ivl.max() },
@@ -278,7 +293,12 @@ impl FilletCorner {
         let tangent = pv
             .get(1)
             .copied()
-            .ok_or_else(|| nul("the edge curve's tangent"))?
+            .ok_or_else(|| {
+                nul(
+                    "the edge curve's evaluation asked for its first derivative returned no \
+                     tangent, though it returns the point and each derivative asked for",
+                )
+            })?
             .unitize()?;
         // the round's radius, and the angle at which a face's end is a crease, not a tangent
         // edge the rail rolls over: the corner's 3D tolerance over the radius
@@ -300,6 +320,7 @@ impl FilletCorner {
             onto: if at_start { tangent } else { -tangent },
             radius,
             crease_rad,
+            tol_3d: self.approx_tol_3d,
             tangent_cos: self.tangency_tol_radians.cos(),
         };
         let normal = end_cap(k, target, &at)?;
@@ -333,13 +354,8 @@ impl FilletCorner {
             v.set_point_class(PointClassType::Face, Some(EntityRef::Face(face)));
             v.set_fillet_vertex_type(FilletVertexType::RailXExtendedEdgeuse);
             self.vertices.push(fv);
+            // 0 or 1: the rail whose first edge use is on the face, else the other
             let rail = solver.find_index_of_rail_on_face(target, Some(face))?;
-            if rail > 1 {
-                return Err(SolidError::blend_failed(
-                    OP,
-                    "the blend has no rail on a face beside its edge",
-                ));
-            }
             pseudo.make_rail_edgeuse_on(
                 geom,
                 rail,
@@ -358,9 +374,10 @@ impl FilletCorner {
             }
         }
         let [Some(end0), Some(end1)] = ends else {
-            return Err(SolidError::blend_failed(
+            return Err(defect(
                 OP,
-                "the rails' ends on the end cap were not made",
+                "the rails' ends on the end cap were not made, though the loop above makes one \
+                 for each of the blend's two faces",
             ));
         };
         let on_vertex = new_corner_vertex(k, pseudo, corner)?;

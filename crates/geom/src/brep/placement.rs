@@ -137,9 +137,13 @@ impl Rigid {
         })
     }
 
-    /// Whether the rotation is orthonormal to rounding: a blend's net and its definition then
-    /// move together within the rounding its bound takes in. A looser rotation moves them apart
-    /// (by up to [`ORTHONORMAL`] of their size), which only the kernel's rebuild can certify.
+    /// Whether the rotation is orthonormal to rounding: a motion [`moved`] moves blend
+    /// definitions by (beyond that it leaves them to the kernel). Faces that are not blends by
+    /// their definition move by any rigid motion.
+    pub fn is_exact(&self) -> bool {
+        self.exact()
+    }
+
     fn exact(&self) -> bool {
         const ROUNDING: f64 = 16.0 * f64::EPSILON;
         let column = |j: usize| [self.rotation[0][j], self.rotation[1][j], self.rotation[2][j]];

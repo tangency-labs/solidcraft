@@ -40,10 +40,27 @@ pub struct GpgSignature {
     pub user_id: Option<String>,
 }
 
+/// Lets a test act as a computer without GnuPG (this thread only).
+#[cfg(test)]
+pub(crate) mod tests_without_gpg {
+    use std::cell::Cell;
+    thread_local!(static ABSENT: Cell<bool> = const { Cell::new(false) });
+    pub fn get() -> bool {
+        ABSENT.with(Cell::get)
+    }
+    pub fn set(absent: bool) {
+        ABSENT.with(|a| a.set(absent));
+    }
+}
+
 impl Gpg {
     /// GnuPG on this computer, if one can be run. The common install locations are tried because
     /// a window launched from the desktop does not always have the shell's `PATH`.
     pub fn find() -> Option<Gpg> {
+        #[cfg(test)]
+        if tests_without_gpg::get() {
+            return None;
+        }
         for program in candidates() {
             let Ok(status) = Command::new(&program).arg("--version").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status() else {
                 continue;

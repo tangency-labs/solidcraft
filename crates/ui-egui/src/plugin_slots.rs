@@ -13,6 +13,10 @@ pub(crate) struct Item {
     pub entry: String,
     pub label: String,
     pub slot: Slot,
+    /// An importer chooses its own file, so it needs no open design.
+    pub importer: bool,
+    /// The command's icon: its own from the package, else the generic plugin icon.
+    pub icon: String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Slot {
@@ -91,6 +95,8 @@ fn declared(plugin: &plugins::Plugin) -> Vec<Item> {
                 entry: entry.name.clone(),
                 label: format!("{} · {}", plugin.name, entry.name),
                 slot,
+                importer: entry.kind == solidcraft_engine::plugin::EntryKind::Importer,
+                icon: crate::plugin_menu::command_icon(plugin, entry).to_owned(),
             });
         }
     }
@@ -160,6 +166,23 @@ pub(crate) fn items(app: &SolveApp, slot: Slot) -> Vec<Item> {
         .collect()
 }
 
+/// The File menu's Export rows for the installed, enabled plugins' export slots (RFC 0015 §4):
+/// each slot's `plugin_id.entry` and its row label, "Export <label> (.ext)…", where the label is
+/// the slot's own or the plugin's name. From the discovered inventory: no file is read here.
+pub(crate) fn export_slots(app: &SolveApp) -> Vec<(String, String)> {
+    let Some(inventory) = app.plugin_slots.inventory.as_ref() else { return Vec::new() };
+    let mut rows = Vec::new();
+    for plugin in inventory.plugins.iter().filter(|p| plugins::enabled(app, &p.id)) {
+        for entry in plugin.entries.iter().filter(|e| e.kind == solidcraft_engine::plugin::EntryKind::Exporter) {
+            let label = if entry.label.is_empty() { plugin.name.as_str() } else { entry.label.as_str() };
+            let extensions = entry.extensions.iter().map(|e| format!(".{e}")).collect::<Vec<_>>().join(", ");
+            let label = solidcraft_ui_text::format("plugin_export.menu", &[("format", label), ("extensions", &extensions)]);
+            rows.push((format!("{}.{}", plugin.id, entry.name), label));
+        }
+    }
+    rows
+}
+
 /// Open the same input-schema dialog as the Plugins menu, resolving the namespaced entry id.
 pub(crate) fn begin(app: &mut SolveApp, command: &str) {
     if solidcraft_engine::find_command(command).is_some() {
@@ -184,7 +207,7 @@ pub(crate) fn menu_rows(app: &mut SolveApp, ui: &mut egui::Ui, name: &'static st
     }
     ui.separator();
     for item in entries {
-        let row = ui_kit::Item::action(&item.command, &item.label, "prefs_plugins");
+        let row = ui_kit::Item::action(&item.command, &item.label, &item.icon);
         if ui_kit::menu::list_row(ui, &row).is_some() {
             begin(app, &item.command);
             return true;
@@ -234,6 +257,7 @@ impl RibbonGroup {
                     name: &entry.label,
                     icon: "prefs_plugins",
                     size: ribbon::ButtonSize { width: ribbon::button_width(ui.painter(), &entry.entry), min_width: ribbon::BUTTON_MIN_WIDTH },
+                    planned: false,
                     enabled: true,
                     pressed: false,
                     exit: false,
@@ -287,7 +311,7 @@ impl RibbonGroup {
                 ui_kit::Menu::show_frame(ui, ui_kit::Menu::frame(), |ui| {
                     ui_kit::Menu::heading(ui, &self.name);
                     for item in &self.entries {
-                        if ui_kit::menu::list_row(ui, &ui_kit::Item::action(&item.command, &item.label, "prefs_plugins")).is_some() {
+                        if ui_kit::menu::list_row(ui, &ui_kit::Item::action(&item.command, &item.label, &item.icon)).is_some() {
                             chosen = Some(item.command.clone());
                         }
                     }
@@ -358,6 +382,8 @@ mod tests {
             approval: String::new(),
             disabled: false,
             groups: Default::default(),
+            images: Default::default(),
+            swatches: Default::default(),
             entries: serde_json::from_value(json!([
                 {"name":"report","effect":"read","slots":[
                     {"kind":"menu","name":"Manufacturing"}, {"kind":"menu","name":"Plugins"},

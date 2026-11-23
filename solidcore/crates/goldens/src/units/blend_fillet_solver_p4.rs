@@ -16,9 +16,7 @@
 //!   call (80 values, whatever the status) and both offset distances. Surfaces of
 //!   revolution are built as unit `surface.surf_of_revolution_p1` builds them (cylinder,
 //!   cone, sphere and torus shapes from line and circle generators); the build status is
-//!   compared when one fails. Every case runs on a fresh [`Kernel`], where the
-//!   library's `sdStaticStep` starts unlatched as on a first call; the step the case
-//!   leaves latched is compared (`fillet_point_step`, ND-3).
+//!   compared when one fails. Every case runs on a fresh [`Kernel`].
 //! - `calc_geom`: `CalcFilletGeom` on a rectangle sheet's edge (the reference wrapper's layout):
 //!   a non-B-spline (`SmHermiteCurve`) edge curve, and a B-spline edge curve with the
 //!   solver's bare fillet geometry (the one the `SmFilletSolver` constructor adds; no
@@ -211,11 +209,6 @@ fn point_values(p: &PointIn) -> Vec<f64> {
 }
 
 // ---- outputs ------------------------------------------------------------------------------
-
-// ---- C++ side -----------------------------------------------------------------------------
-
-/// Compared key: the `sdStaticStep` latch (ND-3) after the case.
-const POINT_STEP: &str = "fillet_point_step";
 
 // ---- Rust side ----------------------------------------------------------------------------
 
@@ -726,7 +719,7 @@ fn rust_calc_case(k: &Kernel, c: &CalcCase) -> Result<Output, Fail> {
         .values("knots_in", knots_in))
 }
 
-/// Every case runs on a fresh kernel, whose `sdStaticStep` latch sets itself.
+/// Every case runs on a fresh kernel.
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let k = Kernel::default();
     let r = match i {
@@ -734,8 +727,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Inputs::CalcGeom(c) => rust_calc_case(&k, c),
     };
     match r {
-        // read as the C++ probe reads `sdStaticStep` (its crossing point latches 1e-5)
-        Ok(o) => Ok(o.values(POINT_STEP, vec![k.fillet_point_step.get().unwrap_or(1.0e-5)])),
+        Ok(o) => Ok(o),
         Err(Fail::Deferred(d)) => Ok(*d),
         Err(Fail::Harness(e)) => Err(e),
     }
@@ -1691,9 +1683,6 @@ impl UnitDiff for Runner {
         }
         Ok(v)
     }
-
-    // ND-3: every C++ case runs in a fresh child, which inherits this process's
-    // `sdStaticStep`; it must still be unlatched before the unit's cases and after them.
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         rust(&case.parse()?)

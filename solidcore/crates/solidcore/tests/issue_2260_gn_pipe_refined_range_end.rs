@@ -6,8 +6,8 @@
 //! `sm_RefineCCSolutions` passed on `Inversion`'s `SM_ERR` for a curve/curve range solution's end refined
 //! 2e-15 past the range (12.149466823226815 against the range's max 12.149466823226813,
 //! while the round's insertion classifies a curve on a face), so the fillet failed with
-//! 1001. The body the boolean builds with `keep_operand_uv_trims` and the offset extension
-//! flags is what puts an end there. The fork's later 8ea6a20 takes such a parameter as
+//! 1001. The body the boolean builds with the operand's exact trims (WR-361, always on
+//! now) and the offset extension flags is what puts an end there. The fork's later 8ea6a20 takes such a parameter as
 //! the answer it is and leaves an end alone only for a range with no fraction; solidcore
 //! now does that too (#2264).
 //!
@@ -46,92 +46,52 @@ use solidcore::Kernel;
 /// The flags SolidCraft's `fixes()` turns on at tangency-labs/solidcraft c494a18.
 const SOLIDCRAFT_C494A18: &[&str] = &[
     "analytic_copy_keeps_parameterization",
-    "analytic_inversion_answers_apart",
-    "boolean_union_refuses_solid_leak",
-    "boolean_vertex_by_best_crossing",
-    "box_face_failures_propagate",
-    "brep_edit_statuses_pass_on",
     "bspline_trim_preserves_uv_spans",
-    "classify_edge_interval",
-    "cone_create_canonical_preserves_inside_out_and_checks_height",
-    "corner_patch_face_side_twist",
-    "curve_contacts_at_curve_ends",
     "curve_loop_normal_from_area",
-    "degenerate_proto_edge_in_one_vertex",
-    "degen_param_tiebreak_uses_actual_param",
     "edgeuse_convexity_propagates_step_off_failure",
-    "face_tight_box_searches_trim",
     "fillet_chamfer_cone_on_arc",
     "fillet_cleanup_keeps_target_faces",
     "fillet_exact_round_classes",
     "fillet_knife_edge_rounds",
-    "fillet_mitre_concave_face_corners",
     "fillet_patch_keeps_fillet_edges",
-    "fillet_point_step_per_point",
     "fillet_rail_trim_at_near_knot",
     "fillet_refuse_face_consuming_blends",
     "fillet_refuse_overlapping_bands",
-    "fillet_removal_takes_ring_fillets",
-    "fillet_statuses_pass_on",
     "fillet_trace_reaches_rails",
-    "fillet_trim_status",
     "fillet_variable_span_follows_fillet",
-    "found_torus_sphere_keep_tested_nurb",
-    "geometric_g2_continuity",
-    "good_drop_result_distances_in_order",
-    "imprint_extends_edge_to_proto_vertex",
-    "imprint_reuses_coincident_face_edge",
     "join_touching_loops",
-    "keep_operand_uv_trims",
     "linear_sweep_arc_is_cylinder",
-    "local_operation_box_holds_new_surfaces",
-    "local_operation_refuses_loose_tangent_edges",
-    "local_operation_step_walls",
     "local_surface_intersect_guards_max_boundary_retry",
     "new_edge_vertex_tolerance_covers_gap",
     "offset_analytic_mate_edges",
-    "offset_edges_keep_source_tolerance",
     "offset_extension_as_itself",
     "offset_extension_from_base",
-    "offset_keep_cavity_regions",
-    "offset_open_edge_second_trim_point",
     "point_class_gap_3d_propagates_no_drop_error",
-    "point_solve_keeps_triangle_guess",
-    "proto_edge_self_loop_on_vertex_degenerate",
-    "proto_edge_splits_at_captured_vertices",
-    "proto_edge_split_upper_keeps_the_old_max",
     "proto_vertex_miss_is_false",
-    "revolution_round_offset_collapses",
     "revolve_analytic_profile_faces",
-    "revolve_holed_profile_void",
     "shell_edges_on_analytics_exact",
     "simple_coincidence_crossing_is_point",
-    "ssi_low_angle_start_on_probation",
-    "ssi_pole_point_keeps_its_tangent",
     "ssi_proto_topology_statuses_pass_on",
-    "ssi_split_curves_at_singular_points",
-    "ssi_tangent_contact_points",
     "ssi_tangent_curve_tracer",
-    "ssi_trace_tangent_curves_once",
     "surface_continuity_checks_last_v_knot",
-    "surface_parallel_to_vector_checks",
-    "sweep_statuses_pass_on",
-    "transform_model_size_from_body_box",
-    "transform_scales_each_tolerance",
     "uv_trim_corner_end_points_only",
-    "validation_does_not_make_uv_trims",
 ];
 
 /// The volume 729f893 gives the rounded body at accuracy 1e-7.
 const FORK_VOLUME: f64 = 40_267.709_270_590_589;
 
+/// A kernel with the fixes `names` on and the rest off. A name the kernel no longer has is a
+/// retired flag, whose fix is now the default behaviour: it is skipped, so retiring a flag
+/// edits none of these lists. The lists are frozen snapshots of past profiles, so a misspelt
+/// name is skipped silently too; a check against a list of retired names would bring back
+/// an edit here for every retirement.
 fn kernel(names: &[&str]) -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = UpstreamFixes::default();
     for name in names {
-        *k.fixes
-            .flag_mut(name)
-            .unwrap_or_else(|| panic!("no flag {name}")) = true;
+        if let Some(on) = k.fixes.flag_mut(name) {
+            *on = true;
+        }
     }
     k
 }
@@ -191,12 +151,9 @@ fn solidcraft_profile_pipe_gn_round_completes() {
 }
 
 /// The flags the failure needed together with the passed-on query statuses
-/// (`keep_operand_uv_trims`, `offset_extension_from_base`, `offset_extension_as_itself`).
+/// (`offset_extension_from_base`, `offset_extension_as_itself`; it also needed
+/// `keep_operand_uv_trims`, always on since that flag was retired).
 #[test]
 fn reduced_profile_pipe_gn_round_completes() {
-    check_round(&[
-        "keep_operand_uv_trims",
-        "offset_extension_from_base",
-        "offset_extension_as_itself",
-    ]);
+    check_round(&["offset_extension_from_base", "offset_extension_as_itself"]);
 }

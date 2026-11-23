@@ -264,3 +264,52 @@ mod exact_only_tests {
         assert!(exact > 0, "no fixture face was removed exactly");
     }
 }
+
+/// WR-605's ring test on a face that is no ring: `nurb_fillet.smb` face 7 (the row
+/// `nurb_fillet_face7`) has two closed manifold rails that are not tangent, so it is no
+/// ring and is refused. The refusal leaves the B-rep's sampled geometry (every edge
+/// curve, edge use UV trim and face surface, as the row records it) bit for bit as the
+/// four-sided removal's own refusal leaves it: the ring test reads the rails' tangency,
+/// which makes UV trim curves, on a copy standing for the B-rep.
+#[cfg(test)]
+mod ring_test_tests {
+    use super::{geometry, path, Inputs};
+    use solidcore::blend::fillet_removal::{delete_fillet_face, FilletRemoval};
+    use solidcore::kernel::Kernel;
+    use solidcore::topology::brep::p1 as bp1;
+    use solidcore::topology::face::p2 as face2;
+
+    /// Face 7 of `nurb_fillet.smb` removed by `DeleteFilletFace` (`delete`) or by the
+    /// four-sided removal alone: asserts it is refused, and gives the sampled geometry
+    /// after.
+    fn refused(delete: bool) -> Vec<f64> {
+        let i = Inputs {
+            file: "Solids/nurb_fillet.smb".into(),
+            ..Inputs::default()
+        };
+        let mut k = Kernel::default();
+        let mut b = crate::own_reader::read_file_rebuild(&mut k, &path(&i).unwrap(), false)
+            .unwrap()
+            .unwrap();
+        let f = bp1::faces(&b, None).unwrap()[7];
+        b.set_editing_enabled(true);
+        let r = if delete {
+            delete_fillet_face(&mut k, &mut b, f, None)
+        } else {
+            let tol = face2::tolerance(&b, f).unwrap();
+            FilletRemoval::new(f, tol).remove_face(&mut k, &mut b)
+        };
+        b.refresh_cached_topology();
+        assert!(r.is_err(), "face 7 removed");
+        geometry(&k, &b, true).unwrap()
+    }
+
+    #[test]
+    fn a_face_that_is_no_ring_is_refused_as_the_four_sided_removal_refuses_it() {
+        let (delete, four_sided) = (refused(true), refused(false));
+        assert_eq!(delete.len(), four_sided.len());
+        for (i, (a, b)) in delete.iter().zip(&four_sided).enumerate() {
+            assert_eq!(a.to_bits(), b.to_bits(), "sample {i}: {a} != {b}");
+        }
+    }
+}

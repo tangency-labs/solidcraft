@@ -20,6 +20,7 @@ pub mod face_evaluation;
 pub mod face_surface;
 pub mod from_parameters;
 pub mod implicit;
+pub mod normal_cone;
 pub mod offset_surface;
 pub mod plane;
 pub mod procedural_blend;

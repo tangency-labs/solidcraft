@@ -26,6 +26,8 @@
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use offset_fixture::{api_shell, planar_faces_at, report, volume, Notifications};
 use solidcore::boolean::api_brep as boolean;
 use solidcore::curve::curve::Curve;
@@ -118,8 +120,11 @@ fn shell_open_at_the_top_is_valid_on_the_default_split_path() {
         ),
         (16, 36, 24)
     );
+    // 9655.150751213405 until `brep_volume` closed tolerant edges' gaps (#16735)
+    let (old, new) = (9655.150751213405, 9655.150509633053);
+    volume_leak::assert_moved_by_the_old_leak(&k, &mut r, old, new, 1e-6);
     let label = "1795 shell 2 open at z 27.5";
-    assert!(report(&k, label, Ok(r), Some(9655.150751213405), 1e-9));
+    assert!(report(&k, label, Ok(r), Some(new), 1e-9));
 }
 
 /// The default split path builds the side-open shell, rather than preserving the

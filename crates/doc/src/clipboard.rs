@@ -12,10 +12,6 @@ pub fn remap_topology(name: &str, ids: &BTreeMap<u64, u64>, bodies: &BTreeMap<St
     if let Some(old) = crate::naming::legacy_name(name) {
         return format!("{}{}", crate::naming::LEGACY_MARK, remap_topology(old, ids, bodies));
     }
-    // A flat face of a sheet: `sheet:<body>:<panel>:<side>`, the panel a flange's feature token.
-    if let Some((body, face)) = crate::sheet::split_sheet_face_name(name) {
-        return crate::sheet::sheet_face_name(bodies.get(body).map_or(body, String::as_str), &remap_topology(face, ids, bodies));
-    }
     // Imported names belong to the complete canonical body prefix, even when that prefix
     // happens to contain text resembling a feature token.
     let body_face = name.rsplit_once(":face:").and_then(|(body, suffix)| Some((bodies.get(body)?, body, suffix)));
@@ -46,9 +42,10 @@ pub fn remap_topology(name: &str, ids: &BTreeMap<u64, u64>, bodies: &BTreeMap<St
     let mut at = 0;
     while at < name.len() {
         let rest = &name[at..];
-        // A feature token starts a name, or one inside it: after `@`, `:` or `|`, or in a
-        // piece's list of the faces around it (`[`, `,`).
-        if rest.starts_with('F') && (at == 0 || matches!(name.as_bytes().get(at - 1), Some(b'@' | b':' | b'|' | b'[' | b','))) {
+        // A feature token starts a name, or one inside it: after `@`, `:` or `|`, in a piece's
+        // list of the faces around it (`[`, `,`), or in a sheet panel's name after the panel it
+        // was made on (`.`: `F15.F12.base.l2.far`).
+        if rest.starts_with('F') && (at == 0 || matches!(name.as_bytes().get(at - 1), Some(b'@' | b':' | b'|' | b'[' | b',' | b'.'))) {
             let end = rest.as_bytes().iter().skip(1).take_while(|b| b.is_ascii_digit()).count() + 1;
             if end > 1
                 && matches!(rest.as_bytes().get(end), Some(b':') | Some(b'.'))
@@ -361,7 +358,8 @@ impl crate::Feature {
                     checked_plane(&end.plane, 0)?;
                 }
             }
-            K::ConstructionPlane { plane }
+            K::FramePlate { plane, .. }
+            | K::ConstructionPlane { plane }
             | K::Split { plane, .. }
             | K::SplitFace { plane, .. }
             | K::Mirror { plane, .. }
@@ -382,7 +380,14 @@ impl crate::Feature {
             }
             K::Revolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
-            | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. } => checked_geo(geo, 0)?,
+            | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. }
+            | K::Move { rotate_about: Some(geo), .. } => checked_geo(geo, 0)?,
+            K::FrameMember { pairs, .. } => {
+                for p in pairs {
+                    checked_geo(&p.a, 0)?;
+                    checked_geo(&p.b, 0)?;
+                }
+            }
             K::Scale { about: Some(crate::ScaleAbout::Pick { at }), .. } => checked_geo(at, 0)?,
             _ => {}
         }
@@ -411,10 +416,8 @@ impl crate::Feature {
         match &mut self.kind {
             K::Sketch { plane, sketch } => {
                 remap_plane(plane, ids, bodies, 0, occurrences, doc)?;
-                for c in &mut sketch.constraints {
-                    if let Some(n) = &mut c.param {
-                        mapped_name(n, parameters);
-                    }
+                for n in sketch.dimension_params_mut().into_iter().flatten() {
+                    mapped_name(n, parameters);
                 }
                 for e in sketch.text_exprs_mut() {
                     *e = clone_expression(e, parameters);
@@ -427,7 +430,12 @@ impl crate::Feature {
                 }
                 for link in &mut sketch.links {
                     remap_link(&mut link.source, ids, names, bodies, 0);
-                    for n in link.face_name.iter_mut().chain(&mut link.edge_name).chain(&mut link.vertex_name) {
+                    for pin in &mut link.sketch_placements {
+                        if let Some(id) = ids.get(&pin.sketch) {
+                            pin.sketch = *id;
+                        }
+                    }
+                    for n in link.face_name.iter_mut().chain(&mut link.edge_name).chain(&mut link.vertex_name).chain(&mut link.curve_edges) {
                         *n = remap_topology(n, ids, bodies);
                     }
                 }
@@ -437,7 +445,8 @@ impl crate::Feature {
                     remap_plane(&mut end.plane, ids, bodies, 0, occurrences, doc)?;
                 }
             }
-            K::ConstructionPlane { plane }
+            K::FramePlate { plane, .. }
+            | K::ConstructionPlane { plane }
             | K::Split { plane, .. }
             | K::SplitFace { plane, .. }
             | K::Mirror { plane, .. }
@@ -458,8 +467,13 @@ impl crate::Feature {
             }
             K::Revolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
-            | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. } => {
-                remap_geo(geo, ids, bodies, 0, occurrences, doc)?
+            | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. }
+            | K::Move { rotate_about: Some(geo), .. } => remap_geo(geo, ids, bodies, 0, occurrences, doc)?,
+            K::FrameMember { pairs, .. } => {
+                for p in pairs {
+                    remap_geo(&mut p.a, ids, bodies, 0, occurrences, doc)?;
+                    remap_geo(&mut p.b, ids, bodies, 0, occurrences, doc)?;
+                }
             }
             K::Scale { about: Some(crate::ScaleAbout::Pick { at }), .. } => remap_geo(at, ids, bodies, 0, occurrences, doc)?,
             // An Align frame's joint origin finds its faces and edges by name, as the feature's
@@ -503,7 +517,7 @@ fn checked_plane(p: &PlaneRef, depth: usize) -> crate::Result<()> {
                 checked_geo(g, depth + 1)?;
             }
         }
-        PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } | PlaneRef::AxisPoint { axis: a, point: b } => {
+        PlaneRef::Midplane { a, b, .. } | PlaneRef::TwoEdges { a, b } | PlaneRef::AxisPoint { axis: a, point: b } => {
             checked_geo(a, depth + 1)?;
             checked_geo(b, depth + 1)?;
         }
@@ -591,14 +605,6 @@ mod clone_tests {
         assert_eq!(remap_topology("A|B:face:0", &ids, &bodies), "A|B (copy):face:0");
     }
     #[test]
-    fn a_sheet_face_follows_its_body_and_its_flange() {
-        let ids = BTreeMap::from([(1, 2), (10, 20)]);
-        let bodies = BTreeMap::from([("Body1".into(), "Body1 (copy)".into())]);
-        assert_eq!(remap_topology("sheet:Body1:F1.0:top", &ids, &bodies), "sheet:Body1 (copy):F2.0:top");
-        assert_eq!(remap_topology("sheet:Body1:base:bottom", &ids, &bodies), "sheet:Body1 (copy):base:bottom");
-        assert_eq!(remap_topology("sheet:Other:F10.1:top", &ids, &bodies), "sheet:Other:F20.1:top");
-    }
-    #[test]
     fn frozen_face_references_follow_nested_names_and_later_pieces() {
         let faces = BTreeMap::from([
             ("F1:+z".into(), Some("F8:face:5".into())),
@@ -627,7 +633,7 @@ mod clone_tests {
         assert_eq!(remap_topology_faces("F1:+z|F11:side", &ids, &BTreeMap::new(), &faces).unwrap(), "F8:face:5|F1:side");
         assert_eq!(remap_topology_faces("F1:+z@F11.1", &ids, &BTreeMap::new(), &faces).unwrap(), "F8:face:5@F1.1");
         let bodies = BTreeMap::from([("Body1".into(), "Body1 (copy)".into()), ("F11:Housing".into(), "F11:Housing (copy)".into())]);
-        for name in ["sheet:Body1:F11.0:top", "F11:Housing:face:0", "Body1:face:0"] {
+        for name in ["F11:Housing:face:0", "Body1:face:0"] {
             assert_eq!(remap_topology_faces(name, &ids, &bodies, &faces).unwrap(), remap_topology(name, &ids, &bodies));
         }
         assert_eq!(remap_topology_faces("F1:+z|F11:Housing:face:0", &ids, &bodies, &faces).unwrap(), "F8:face:5|F11:Housing (copy):face:0");

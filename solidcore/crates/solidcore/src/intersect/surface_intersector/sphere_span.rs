@@ -14,6 +14,8 @@
 //! | [`sphere_span_image`]      | none     |
 //! | [`sphere_bezier_image`]    | none     |
 //! | `net_box` (private)        | none     |
+//! | [`sphere_span_sweep`], [`sphere_bezier_sweep`], [`SpanSweep`] (#17110) | none |
+//! | [`fit_monotone_sweep`], [`SweepRefusal`] (#17110) | none |
 //!
 //! Deviations: the bisection of the span's parameter is bounded at [`MAX_DEPTH`] levels (at
 //! most `2^MAX_DEPTH − 1` bisections, so at most 511 piece bounds and 257 point values per
@@ -21,13 +23,19 @@
 //! not certified, and the trace shortens its step. That fixed budget (at most 511 piece
 //! bounds, 257 point values and one pass over the net's double knots per span) is why the
 //! certificate does not poll for cancellation (`Kernel::check_cancelled`); its callers do,
-//! once per trace step or try.
+//! once per trace step or try. The monotone-sweep fit (#17110) makes at most `spans + 1`
+//! passes over a flushed curve's spans and certifies each changed span: its work grows
+//! with the square of the trace's point count, so it polls once per pass and once per
+//! certified span. Its longitude test takes the sphere's frame axes as exact
+//! (point intervals); the net is built from that frame, and a span the test decides by a
+//! margin below the frame's rounding is one passing within rounding of the axis (ARGUED).
 
 use std::collections::VecDeque;
 
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::station::{ders_basis, Nurbs};
 use crate::geom::vector3d::Vec3;
+use crate::kernel::Kernel;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 /// The deepest bisection of a span's parameter [`sphere_span_image`] makes: at most
@@ -119,8 +127,475 @@ pub fn sphere_bezier_image(
     xyz: [Vec3; 4],
     tol: f64,
 ) -> SpanImage {
-    let iv = |v: Vec3| [Ivl::from(v.x), Ivl::from(v.y), Ivl::from(v.z)];
-    certify(surface, uv.map(iv), xyz.map(iv), tol)
+    certify(surface, uv.map(iv3), xyz.map(iv3), tol)
+}
+
+/// What [`sphere_span_sweep`] found: whether a span's UV sweep coordinate (the longitude
+/// parameter of the sphere's net) is monotone where its 3D span's longitude is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpanSweep {
+    /// The surface is not an analytic sphere: no certificate is made.
+    NotASphere,
+    /// No constraint: an end of the UV span lies on a side of the net's domain across the
+    /// sweep (a pole of the canonical net, where the sweep coordinate is a free choice and
+    /// the longitude has no value), or the 3D span's longitude is not certified strictly
+    /// monotone over the span (it may turn).
+    Free,
+    /// The 3D span's longitude is strictly monotone and the UV sweep coordinate is
+    /// certified monotone over the whole span.
+    Monotone,
+    /// The 3D span's longitude is strictly monotone but the UV sweep coordinate is not
+    /// certified monotone: its image may turn back in longitude where the 3D span does not
+    /// (or the enclosures could not tell).
+    TurnsBack,
+}
+
+/// The binomial weights `C(3, i) C(2, j) / C(5, i + j)` of the product of a cubic's and a
+/// quadratic's Bernstein coefficients `i` and `j` in the quintic's coefficient `i + j`.
+const C3: [f64; 4] = [1.0, 3.0, 3.0, 1.0];
+/// See [`C3`].
+const C2: [f64; 3] = [1.0, 2.0, 1.0];
+/// See [`C3`].
+const C5: [f64; 6] = [1.0, 5.0, 10.0, 10.0, 5.0, 1.0];
+
+/// Not upstream (#17110): whether the UV Hermite span `uv` (layout as
+/// [`sphere_span_image`]) is monotone in the sphere's sweep coordinate wherever the 3D
+/// Hermite span `xyz` is monotone in longitude. Next to a pole a back-and-forth of the UV
+/// span in its sweep coordinate moves its image by only `ρ Δu` (`ρ` the distance from the
+/// axis), so [`sphere_span_image`] accepts a span whose trim zigzags in u while its 3D span
+/// runs one way round the axis: the trim then has a 2D cusp (`SmBSplineCurve` test 13).
+///
+/// With `x`, `y` the coordinates of a point less the sphere's centre along its frame's X
+/// and Y axes, the 3D span's longitude rate has the sign of `ω = x y' − y x'`, a quintic
+/// whose Bernstein coefficients are the products of the cubic's and its derivative's
+/// (`ω_k = Σ_{i+j=k} C(3,i) C(2,j) / C(5,k) (x_i y'_j − y_i x'_j)`), enclosed. When every
+/// coefficient is positive (or every one negative) the longitude is strictly monotone over
+/// the span (PROVEN: the Bernstein basis is non-negative and sums to one, so `ω` lies
+/// between its least and greatest coefficient). The sweep coordinate is u (v when the
+/// surface of revolution swaps its UV); the rational quadratic net is monotone in
+/// longitude along it (each segment of the rational quadratic circle is), and the clamp to
+/// the domain the evaluator applies is monotone, so the image is monotone in longitude
+/// wherever the UV span is monotone in its sweep coordinate `c`. Its derivative is the
+/// quadratic with Bernstein coefficients `b_i = 3 (c_{i+1} − c_i)`, which keeps one sign on
+/// `[0, 1]` exactly when `b_0` and `b_2` have that sign (or vanish) and either `b_1` does
+/// too or `b_1² ≤ b_0 b_2` (its extreme value `(b_0 b_2 − b_1²) / (b_0 − 2 b_1 + b_2)` at
+/// the interior vertex when `b_1` has the other sign).
+///
+/// The direction is not imposed: a span passing the axis closer than the tolerance may be
+/// trimmed on either side of the pole, and [`sphere_span_image`] bounds where the image
+/// lies. Nor is a span with an end on a side of the net's v range (u when swapped)
+/// constrained: on the canonical net that side is a pole, where the trace places a point
+/// the curve passes within tolerance and gives it the sweep parameter of the curve's
+/// direction, so the trim's sweep coordinate there is a choice, not a longitude, and the
+/// 3D span's longitude swings through up to half a turn within the point's distance from
+/// the axis. On a net whose side is not a pole, that span is only left unconstrained, as
+/// before this certificate.
+///
+/// Every comparison is on outward-rounded enclosures and is written so that a NaN
+/// enclosure certifies nothing: a NaN 3D span is [`SpanSweep::Free`], a NaN UV span on a
+/// certified-monotone 3D span is [`SpanSweep::TurnsBack`].
+#[must_use]
+pub fn sphere_span_sweep(surface: &Surface, uv: [Vec3; 4], xyz: [Vec3; 4]) -> SpanSweep {
+    match SweepNet::of(surface) {
+        Some(Ok(net)) => net.sweep(bezier(uv), bezier(xyz)),
+        Some(Err(())) => SpanSweep::Free,
+        None => SpanSweep::NotASphere,
+    }
+}
+
+/// Not upstream (#17110): [`sphere_span_sweep`] for spans given as cubic Bezier control
+/// points, as a curve's control polygon holds them after knot insertion.
+#[must_use]
+pub fn sphere_bezier_sweep(surface: &Surface, uv: [Vec3; 4], xyz: [Vec3; 4]) -> SpanSweep {
+    match SweepNet::of(surface) {
+        Some(Ok(net)) => net.sweep(uv.map(iv3), xyz.map(iv3)),
+        Some(Err(())) => SpanSweep::Free,
+        None => SpanSweep::NotASphere,
+    }
+}
+
+/// The point interval enclosure of a point.
+fn iv3(v: Vec3) -> Iv3 {
+    [Ivl::from(v.x), Ivl::from(v.y), Ivl::from(v.z)]
+}
+
+/// What [`sphere_span_sweep`] reads of a sphere: its sweep coordinate (`along`, 0 for u),
+/// the other coordinate (`across`) and that one's knot range `[lo, hi]`, and its frame's
+/// origin and X and Y axes, enclosed.
+struct SweepNet {
+    along: usize,
+    across: usize,
+    lo: f64,
+    hi: f64,
+    o: Iv3,
+    ex: Iv3,
+    ey: Iv3,
+}
+
+impl SweepNet {
+    /// The sphere's data; `None` for a surface that is not an analytic sphere,
+    /// `Some(Err(()))` for one whose net has no NURBS data or knot range.
+    fn of(surface: &Surface) -> Option<Result<Self, ()>> {
+        let SurfaceKind::Sphere(sphere) = surface.kind() else {
+            return None;
+        };
+        let revolution = sphere.base();
+        let (along, across) = if revolution.swap_uv() { (1, 0) } else { (0, 1) };
+        let Ok(nurbs) = Nurbs::of(revolution.base()) else {
+            return Some(Err(()));
+        };
+        let range = if across == 1 {
+            knot_range(&nurbs.v, nurbs.q, nurbs.nv)
+        } else {
+            knot_range(&nurbs.u, nurbs.p, nurbs.nu)
+        };
+        let Some((lo, hi)) = range else {
+            return Some(Err(()));
+        };
+        let frame = revolution.position();
+        Some(Ok(Self {
+            along,
+            across,
+            lo,
+            hi,
+            o: iv3(frame.origin()),
+            ex: iv3(frame.x_axis()),
+            ey: iv3(frame.y_axis()),
+        }))
+    }
+
+    /// The certificate of [`sphere_span_sweep`] for enclosed Bezier control points `n` (UV)
+    /// and `h` (3D).
+    fn sweep(&self, n: [Iv3; 4], h: [Iv3; 4]) -> SpanSweep {
+        let (lo, hi) = (self.lo, self.hi);
+        // an end on a side across the sweep (or a coordinate that is not there)
+        let at_side = |p: Iv3| p.get(self.across).is_none_or(|c| c.lo <= lo || c.hi >= hi);
+        let [n0, _, _, n3] = n;
+        if at_side(n0) || at_side(n3) || self.rate(h).is_none() {
+            return SpanSweep::Free;
+        }
+        let along = self.along;
+        let c = n.map(|p| p.get(along).copied().unwrap_or(Ivl::whole()));
+        // the derivative's Bernstein coefficients over 3 (the sign test is homogeneous)
+        let b = [
+            difference(c[1], c[0]),
+            difference(c[2], c[1]),
+            difference(c[3], c[2]),
+        ];
+        if keeps_either_sign(b) {
+            SpanSweep::Monotone
+        } else {
+            SpanSweep::TurnsBack
+        }
+    }
+
+    /// The sign of the 3D span `h`'s longitude rate when it is certified strictly one sign
+    /// over the span (`Some(true)` rising, `Some(false)` falling), else `None`: the six
+    /// enclosed Bernstein coefficients of `ω = x y' − y x'`.
+    fn rate(&self, h: [Iv3; 4]) -> Option<bool> {
+        let (o, ex, ey) = (self.o, self.ex, self.ey);
+        let dot = |a: Iv3, b: Iv3| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        // the plane coordinates of a control point less the centre
+        let xy = h.map(|p| {
+            let a = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
+            (dot(a, ex), dot(a, ey))
+        });
+        let three = Ivl::from(3.0);
+        let mut d = [(Ivl::from(0.0), Ivl::from(0.0)); 3];
+        for (slot, w) in d.iter_mut().zip(xy.windows(2)) {
+            if let [(x0, y0), (x1, y1)] = *w {
+                *slot = (three * (x1 - x0), three * (y1 - y0));
+            }
+        }
+        // the 3D span's longitude rate ω = x y' − y x', its quintic Bernstein coefficients
+        let mut omega = [Ivl::from(0.0); 6];
+        for (i, (&(x, y), &ci)) in xy.iter().zip(&C3).enumerate() {
+            for (j, (&(dx, dy), &cj)) in d.iter().zip(&C2).enumerate() {
+                let (Some(&ck), Some(slot)) = (C5.get(i + j), omega.get_mut(i + j)) else {
+                    return None;
+                };
+                let weight = Ivl::from(ci) * Ivl::from(cj) / Ivl::from(ck);
+                *slot = *slot + weight * (x * dy - y * dx);
+            }
+        }
+        let rising = omega.iter().all(|w| w.lo > 0.0);
+        let falling = omega.iter().all(|w| w.hi < 0.0);
+        (rising || falling).then_some(rising)
+    }
+}
+
+/// An enclosure of `a − b`: the point difference when both are points and their
+/// floating-point difference is exact (Knuth's two-sum error is zero), so that equal
+/// control points give exactly 0 and not an interval about it; otherwise the outward
+/// rounded difference.
+fn difference(a: Ivl, b: Ivl) -> Ivl {
+    let points = a.lo == a.hi && b.lo == b.hi;
+    if points {
+        let (x, y) = (a.lo, -b.lo);
+        let sum = x + y;
+        let y_part = sum - x;
+        let error = (x - (sum - y_part)) + (y - y_part);
+        if error == 0.0 && sum.is_finite() {
+            return Ivl::from(sum);
+        }
+    }
+    a - b
+}
+
+/// Whether the quadratic with the enclosed Bernstein coefficients `b` is non-negative over
+/// `[0, 1]`, certified: `b_0 ≥ 0`, `b_2 ≥ 0`, and `b_1 ≥ 0` or `b_1² ≤ b_0 b_2`. A NaN
+/// enclosure fails every comparison.
+fn keeps_sign([b0, b1, b2]: [Ivl; 3]) -> bool {
+    let ends = b0.lo >= 0.0 && b2.lo >= 0.0;
+    let middle = b1.lo >= 0.0 || (b1 * b1).hi <= (b0 * b2).lo;
+    ends && middle
+}
+
+/// Whether the quadratic with the enclosed Bernstein coefficients `b` keeps one sign over
+/// `[0, 1]` ([`keeps_sign`] of `b` or of `−b`). The negation is exact: an outward-rounded
+/// `0 − x` would widen an exact 0 coefficient past 0 and refuse a falling sweep that
+/// stalls at an end.
+fn keeps_either_sign(b: [Ivl; 3]) -> bool {
+    keeps_sign(b) || keeps_sign(b.map(|x| Ivl::new(-x.hi, -x.lo)))
+}
+
+/// The share of a span's sweep change `Δ` a handle of a refitted span keeps at most: a
+/// little under `|Δ|`. With both handle offsets `a`, `b` in `[0, Δ]` the span's derivative
+/// coefficients `(a, Δ − a − b, b)` pass the sign test (`(a + b − Δ)² ≤ a b` there, the
+/// Fritsch–Carlson square), and the margin keeps the rounding of the control points from
+/// pushing a handle past `Δ`; the refit is then certified by the sign test itself.
+const HANDLE_SHARE: f64 = 1.0 - 1.0 / 1024.0;
+
+/// What [`fit_monotone_sweep`] did.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct SweepFit {
+    /// The count of spans refitted.
+    pub refitted: usize,
+    /// The largest certified distance of a changed span's image from its 3D span (each at
+    /// most the tolerance; 0 when no span changed): the trim's deviation the fit adds.
+    pub bound: f64,
+}
+
+/// The operation [`fit_monotone_sweep`] names when it is cancelled.
+const OP_FIT: &str = "intersect::surface_intersector::sphere_span::fit_monotone_sweep";
+
+/// Why [`fit_monotone_sweep`] refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SweepRefusal {
+    /// A refitted span's image is not certified within the tolerance of its 3D span
+    /// ([`sphere_bezier_image`]), for the reason given.
+    Off(Refusal),
+    /// A refitted span still turns back in the sweep coordinate: its rounded enclosures
+    /// could not certify it.
+    TurnsBack,
+    /// A handle of a joint whose factor is 0 (a chain end included) falls on the joint
+    /// point (no offset left across the sweep either): the trim would have a zero
+    /// derivative there.
+    Degenerate,
+    /// The chains of control points do not hold whole cubic spans of the same count.
+    Shape,
+}
+
+/// Not upstream (#17110): makes each span of a traced curve's UV trim on an analytic
+/// sphere monotone in the sweep coordinate wherever its 3D span is monotone in longitude,
+/// with a certificate (a joint where the trace's own points run back keeps that turn; see
+/// below), and returns how many spans it refitted with the largest certified distance of
+/// a changed span's image from its 3D span (both 0 on any other surface, or when no span
+/// turns back).
+///
+/// `uv` and `xyz` are the control points of the UV curve and the 3D curve, chains of
+/// cubic Bezier spans joined end to end (span `j` is `[3j, 3j + 3]`), as the trace flushes
+/// them from its Hermite points: at each joint the two handles are the joint point ∓ the
+/// trace's tangent times a third of each span's parameter length. Each span that
+/// [`sphere_bezier_sweep`] finds [`SpanSweep::TurnsBack`] is refitted by shortening the
+/// sweep component of its handles: the handle offsets of the sweep coordinate at each of
+/// its joints are scaled by a factor `λ ∈ [0, 1]`, the same on both sides of the joint (so
+/// the joint keeps the trace's tangent direction in the other coordinate and stays G1 in
+/// the sweep coordinate wherever `λ > 0`), the largest that leaves the span's handle
+/// offsets of the sign of its sweep change `Δ` and at most `HANDLE_SHARE |Δ|` long (0 for a
+/// handle pointing against `Δ`). The span is then monotone in the sweep coordinate (see
+/// [`HANDLE_SHARE`]; ARGUED there, and certified below). A neighbouring span whose
+/// shortened handle makes it turn back is refitted in the next pass; a factor only ever
+/// decreases, and a refitted span that turns back again is refused, so there are at most
+/// `spans + 1` passes of `spans` spans each (bounded work; the caller polls for
+/// cancellation per trace step).
+///
+/// Every span a factor changed must then be certified: its image within `tol` of its 3D
+/// span ([`sphere_bezier_image`]) and not [`SpanSweep::TurnsBack`], and a joint whose
+/// factor is 0 (a chain end included) must keep a handle offset across the sweep on each
+/// side it has. Otherwise the fit
+/// is refused, with the reason ([`SweepRefusal`]), and the caller refuses the whole
+/// intersection. The 3D curve and the points (every `uv[3j]`) are not moved, so where
+/// the points the trace placed themselves run back in the sweep coordinate (within the
+/// trace's tolerance of the curve, as next to a pole, where a longitude error costs only
+/// `ρ Δu`) the trim keeps that turn at the joint, with each span on either side
+/// monotone: a factor of 0 there flattens the sweep handles into the joint. Refusing such
+/// a joint would refuse traces whose every point and span is within tolerance (the
+/// thickened pole caps of #1502, the trace into a pole of WR-550). A joint no span needed
+/// refitting is not checked: its spans were each accepted as they are.
+///
+/// The fit polls `kernel`'s cancellation once per pass and once per certified span: the passes
+/// are at most `spans + 1` scans of every span, and a certificate costs up to 511 piece
+/// bounds, so the work grows with the square of the span count.
+///
+/// # Errors
+///
+/// [`SolidError::Cancelled`](crate::SolidError) from `kernel`'s cancellation; otherwise `Ok`
+/// with the [`SweepFit`], or the [`SweepRefusal`].
+pub fn fit_monotone_sweep(
+    kernel: &Kernel,
+    surface: &Surface,
+    uv: &mut [Vec3],
+    xyz: &[Vec3],
+    tol: f64,
+) -> crate::Result<Result<SweepFit, SweepRefusal>> {
+    // another surface, or a sphere without a net to read: no span is constrained
+    let Some(Ok(net)) = SweepNet::of(surface) else {
+        return Ok(Ok(SweepFit::default()));
+    };
+    let along = net.along;
+    let sweep = |q: [Vec3; 4], h: [Vec3; 4]| net.sweep(q.map(iv3), h.map(iv3));
+    if uv.len() != xyz.len() || uv.len() < 4 || (uv.len() - 1) % 3 != 0 {
+        return Ok(Err(SweepRefusal::Shape));
+    }
+    let spans = (uv.len() - 1) / 3;
+    let span = |c: &[Vec3], j: usize| -> Option<[Vec3; 4]> {
+        Some([
+            *c.get(3 * j)?,
+            *c.get(3 * j + 1)?,
+            *c.get(3 * j + 2)?,
+            *c.get(3 * j + 3)?,
+        ])
+    };
+    let sweep_of = |p: Vec3| if along == 0 { p.x } else { p.y };
+    let original = uv.to_vec();
+    // the sweep offsets of each joint's handles before the fit: (into it, out of it)
+    let offset = |k: usize| -> (f64, f64) {
+        let q = original.get(3 * k).map_or(0.0, |&p| sweep_of(p));
+        let into = k
+            .checked_sub(1)
+            .and_then(|_| original.get(3 * k - 1))
+            .map_or(0.0, |&p| q - sweep_of(p));
+        let out = original.get(3 * k + 1).map_or(0.0, |&p| sweep_of(p) - q);
+        (into, out)
+    };
+    let mut lambda = vec![1.0_f64; spans + 1];
+    let mut fitted = vec![false; spans];
+    let apply = |uv: &mut [Vec3], lambda: &[f64]| {
+        for (k, &l) in lambda.iter().enumerate() {
+            let (into, out) = offset(k);
+            let Some(q) = original.get(3 * k).map(|&p| sweep_of(p)) else {
+                continue;
+            };
+            let mut set = |i: usize, value: f64| {
+                if let Some(p) = uv.get_mut(i) {
+                    if along == 0 {
+                        p.x = value;
+                    } else {
+                        p.y = value;
+                    }
+                }
+            };
+            if k > 0 {
+                set(3 * k - 1, q - l * into);
+            }
+            if k < spans {
+                set(3 * k + 1, q + l * out);
+            }
+        }
+    };
+    for _ in 0..=spans {
+        kernel.check_cancelled(OP_FIT)?;
+        let mut changed = false;
+        for j in 0..spans {
+            let (Some(q), Some(h)) = (span(uv, j), span(xyz, j)) else {
+                return Ok(Err(SweepRefusal::Shape));
+            };
+            if sweep(q, h) != SpanSweep::TurnsBack {
+                continue;
+            }
+            if fitted.get(j) == Some(&true) {
+                // a refitted span that still turns back: its rounding could not certify it
+                return Ok(Err(SweepRefusal::TurnsBack));
+            }
+            let Some([o0, _, _, o3]) = span(&original, j) else {
+                return Ok(Err(SweepRefusal::Shape));
+            };
+            let delta = sweep_of(o3) - sweep_of(o0);
+            let room = HANDLE_SHARE * delta.abs();
+            // the largest factor leaving a handle offset `o` of the sign of Δ, within room
+            let limit = |o: f64| {
+                if o == 0.0 {
+                    1.0
+                } else if o * delta > 0.0 && o.abs() > room {
+                    room / o.abs()
+                } else if o * delta > 0.0 {
+                    1.0
+                } else {
+                    0.0
+                }
+            };
+            let (_, out) = offset(j);
+            let (into, _) = offset(j + 1);
+            for (k, o) in [(j, out), (j + 1, into)] {
+                if let Some(l) = lambda.get_mut(k) {
+                    *l = l.min(limit(o));
+                }
+            }
+            if let Some(f) = fitted.get_mut(j) {
+                *f = true;
+            }
+            changed = true;
+        }
+        if !changed {
+            break;
+        }
+        apply(uv, &lambda);
+    }
+    // the joints a factor collapsed (the chain's ends included): a handle offset across
+    // the sweep kept on each side. A joint where the sweep turns is left as the points the
+    // trace placed have it: each span is monotone, the points are on the curve within the
+    // trace's tolerance, and no choice of handles moves them (see the function doc).
+    let across_of = |p: Vec3| if along == 0 { p.y } else { p.x };
+    for (k, &l) in lambda.iter().enumerate() {
+        if l != 0.0 {
+            continue;
+        }
+        let Some(q) = original.get(3 * k).map(|&p| across_of(p)) else {
+            return Ok(Err(SweepRefusal::Shape));
+        };
+        let into = k.checked_sub(1).and_then(|i| original.get(3 * i + 2));
+        let out = original.get(3 * k + 1).filter(|_| k < spans);
+        if [into, out].iter().flatten().any(|&&p| across_of(p) == q) {
+            return Ok(Err(SweepRefusal::Degenerate));
+        }
+    }
+    // certify every span a factor changed
+    let mut fit = SweepFit::default();
+    for j in 0..spans {
+        let touched = [j, j + 1]
+            .iter()
+            .any(|&k| lambda.get(k).is_some_and(|&l| l < 1.0));
+        if !touched {
+            continue;
+        }
+        kernel.check_cancelled(OP_FIT)?;
+        let (Some(q), Some(h)) = (span(uv, j), span(xyz, j)) else {
+            return Ok(Err(SweepRefusal::Shape));
+        };
+        match sphere_bezier_image(surface, q, h, tol) {
+            SpanImage::Certified(bound) => fit.bound = fit.bound.max(bound),
+            SpanImage::NotASphere => {}
+            SpanImage::NotCertified(why) => return Ok(Err(SweepRefusal::Off(why))),
+        }
+        if sweep(q, h) == SpanSweep::TurnsBack {
+            return Ok(Err(SweepRefusal::TurnsBack));
+        }
+        if fitted.get(j) == Some(&true) {
+            fit.refitted += 1;
+        }
+    }
+    Ok(Ok(fit))
 }
 
 /// The certificate of [`sphere_span_image`] for enclosed Bezier control points.
@@ -917,5 +1392,303 @@ mod tests {
         );
         let z = [Vec3::ZERO; 4];
         assert_eq!(sphere_span_image(&s, z, z, 1.0), SpanImage::NotASphere);
+        assert_eq!(sphere_span_sweep(&s, z, z), SpanSweep::NotASphere);
+        let mut uv = [Vec3::ZERO; 4];
+        assert_eq!(
+            fit_monotone_sweep(&Kernel::default(), &s, &mut uv, &z, 1.0).unwrap(),
+            Ok(SweepFit::default())
+        );
+    }
+
+    /// The least of the UV Hermite span's sweep derivative `u'` at `n + 1` parameters, as a
+    /// share of its chord `u(1) − u(0)`: negative where it turns back.
+    fn least_rate(uv: [Vec3; 4], n: u32) -> f64 {
+        let du = |t: f64| {
+            let [p0, d0, p1, d1] = uv;
+            let (t2,) = (t * t,);
+            p0.x * (6.0 * t2 - 6.0 * t)
+                + d0.x * (3.0 * t2 - 4.0 * t + 1.0)
+                + p1.x * (-6.0 * t2 + 6.0 * t)
+                + d1.x * (3.0 * t2 - 2.0 * t)
+        };
+        let chord = uv[2].x - uv[0].x;
+        (0..=n)
+            .map(|i| du(f64::from(i) / f64::from(n)) / chord)
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    /// #17110: next to a pole a UV span whose sweep handle overshoots its chord turns back in
+    /// u (sampled `u' < 0`) while its image stays within the tolerance of the 3D span, whose
+    /// longitude is monotone: the image certificate accepts it, the sweep certificate does
+    /// not. The same span with its chord as both handles is monotone.
+    #[test]
+    fn a_span_zigzagging_in_u_next_to_a_pole_turns_back() {
+        let k = &Kernel::default();
+        let s = ball(k);
+        let (mut uv, xyz) = spans(k, &s, Point2::new(0.30, 0.995), Point2::new(0.32, 0.996));
+        assert_eq!(sphere_span_sweep(&s, uv, xyz), SpanSweep::Monotone);
+        assert!(least_rate(uv, 1000) > 0.0);
+        uv[1].x *= 6.0;
+        assert!(least_rate(uv, 1000) < 0.0, "the span turns back");
+        assert!(
+            matches!(
+                sphere_span_image(&s, uv, xyz, 1e-2),
+                SpanImage::Certified(_)
+            ),
+            "the image certificate does not see it"
+        );
+        assert_eq!(sphere_span_sweep(&s, uv, xyz), SpanSweep::TurnsBack);
+        // a start tangent of 2.99 chords (handle offset 0.997 of the chord; the end handle
+        // is a third of it): the polygon is not monotone, but the span is (the derivative's
+        // vertex stays positive)
+        uv[1].x = 0.02 * 2.99;
+        assert_eq!(sphere_span_sweep(&s, uv, xyz), SpanSweep::Monotone);
+    }
+
+    /// No constraint where the 3D span's longitude turns (a span leaving a meridian and
+    /// coming back to it, its 3D tangents the chain rule of its UV tangents), nor on a span
+    /// ending at the pole v = 1, though both UV spans turn back in u.
+    #[test]
+    fn a_turning_span_and_a_span_to_the_pole_are_free() {
+        let k = &Kernel::default();
+        let s = ball(k);
+        let image = |p: Point2, d: Vec3| {
+            let m = s.evaluate(k, p, 1, 1, EvaluateFlags::default()).unwrap();
+            (m[0][0], m[1][0] * d.x + m[0][1] * d.y)
+        };
+        let (a, b) = (Point2::new(0.3, 0.5), Point2::new(0.3, 0.6));
+        let (da, db) = (Vec3::new(0.05, 0.1, 0.0), Vec3::new(-0.05, 0.1, 0.0));
+        let ((p0, d0), (p1, d1)) = (image(a, da), image(b, db));
+        let uv = [Vec3::new(a.x, a.y, 0.0), da, Vec3::new(b.x, b.y, 0.0), db];
+        assert_eq!(sphere_span_sweep(&s, uv, [p0, d0, p1, d1]), SpanSweep::Free);
+        let (mut uv, xyz) = spans(k, &s, Point2::new(0.30, 0.995), Point2::new(0.32, 1.0));
+        uv[1].x *= 6.0;
+        assert!(least_rate(uv, 1000) < 0.0);
+        assert_eq!(sphere_span_sweep(&s, uv, xyz), SpanSweep::Free);
+    }
+
+    /// The sign test of a quadratic's Bernstein coefficients: either side of the interior
+    /// vertex touching zero (`b_1² = b_0 b_2`, which the outward rounding leaves undecided),
+    /// and a NaN certifies nothing.
+    #[test]
+    fn the_sign_test_holds_either_side_of_the_vertex() {
+        let q = |a: f64, b: f64, c: f64| keeps_sign([Ivl::from(a), Ivl::from(b), Ivl::from(c)]);
+        assert!(q(1.0, 2.0, 0.5));
+        assert!(q(1.0, -0.9, 1.0));
+        assert!(q(4.0, -2.0 + 1e-12, 1.0));
+        assert!(!q(4.0, -2.0, 1.0));
+        assert!(!q(4.0, -2.0 - 1e-12, 1.0));
+        assert!(!q(-1e-300, 1.0, 1.0));
+        assert!(!q(f64::NAN, 1.0, 1.0));
+        // a constant sweep coordinate is monotone: equal points differ by exactly 0
+        let c = Ivl::from(9.261_725_223_348_444);
+        assert_eq!(difference(c, c), Ivl::from(0.0));
+        assert!(keeps_sign([difference(c, c); 3]));
+        assert!(difference(Ivl::from(1.0), Ivl::from(1e-30)).lo < 1.0);
+        assert!(!q(1.0, f64::NAN, 1.0));
+        // a falling sweep stalled at its start (#17686 gate: a meridian span of the
+        // thickened pole cap whose first handle sits on its point) keeps one sign
+        let e = -2.775_557_561_562_891_4e-17;
+        assert!(keeps_either_sign([
+            Ivl::from(0.0),
+            Ivl::from(e),
+            Ivl::from(e)
+        ]));
+        assert!(keeps_either_sign([
+            Ivl::from(0.0),
+            Ivl::from(-e),
+            Ivl::from(-e)
+        ]));
+        assert!(!keeps_either_sign([
+            Ivl::from(1.0),
+            Ivl::from(-3.0),
+            Ivl::from(1.0)
+        ]));
+    }
+
+    /// Cubic Bezier chains of the UV and 3D Hermite spans through the UV points `pts` of the
+    /// ball (chord handles, chain-rule 3D tangents of the same chords), joined end to end,
+    /// each span of parameter length 1: one 3D tangent per point, from the mean chord.
+    fn chain(k: &Kernel, s: &Surface, pts: &[Point2]) -> (Vec<Vec3>, Vec<Vec3>) {
+        let n = pts.len();
+        let tangent = |i: usize| {
+            let (a, b) = (pts[i.saturating_sub(1)], pts[(i + 1).min(n - 1)]);
+            let span = ((i + 1).min(n - 1) - i.saturating_sub(1)) as f64;
+            (b - a) / span
+        };
+        let (mut uv, mut xyz) = (Vec::new(), Vec::new());
+        for (i, &p) in pts.iter().enumerate() {
+            let d = tangent(i);
+            let m = s.evaluate(k, p, 1, 1, EvaluateFlags::default()).unwrap();
+            let (q, dq) = (m[0][0], m[1][0] * d.x + m[0][1] * d.y);
+            let (pu, du) = (Vec3::new(p.x, p.y, 0.0), Vec3::new(d.x, d.y, 0.0));
+            if i > 0 {
+                uv.push(pu - du / 3.0);
+                xyz.push(q - dq / 3.0);
+            }
+            uv.push(pu);
+            xyz.push(q);
+            if i + 1 < n {
+                uv.push(pu + du / 3.0);
+                xyz.push(q + dq / 3.0);
+            }
+        }
+        (uv, xyz)
+    }
+
+    /// #17110: a chain next to a pole whose middle handles overshoot in u is refitted: the
+    /// spans that turned back are monotone in u after the fit, every refitted span's image
+    /// is certified within the tolerance of its 3D span, the points and the 3D chain are
+    /// unchanged, and the joint keeps its handles collinear (G1). A chain that is already
+    /// monotone is left as it is.
+    #[test]
+    fn a_zigzagging_chain_next_to_a_pole_is_refitted_monotone() {
+        let k = &Kernel::default();
+        let s = ball(k);
+        let pts = [
+            Point2::new(0.30, 0.995),
+            Point2::new(0.32, 0.996),
+            Point2::new(0.33, 0.997),
+        ];
+        let (mut uv, xyz) = chain(k, &s, &pts);
+        let before = uv.clone();
+        assert_eq!(
+            fit_monotone_sweep(k, &s, &mut uv, &xyz, 1e-2).unwrap(),
+            Ok(SweepFit::default())
+        );
+        assert_eq!(uv, before);
+        // the middle joint's u handles overshoot the second span's chord
+        let q = uv[3];
+        uv[2].x = q.x - 0.06;
+        uv[4].x = q.x + 0.06 * (uv[4].y - q.y) / (q.y - uv[2].y);
+        let span = |c: &[Vec3], j: usize| [c[3 * j], c[3 * j + 1], c[3 * j + 2], c[3 * j + 3]];
+        assert_eq!(
+            sphere_bezier_sweep(&s, span(&uv, 1), span(&xyz, 1)),
+            SpanSweep::TurnsBack
+        );
+        let zig = uv.clone();
+        let fitted = fit_monotone_sweep(k, &s, &mut uv, &xyz, 1e-2)
+            .unwrap()
+            .unwrap();
+        assert!(fitted.refitted >= 1 && fitted.bound > 0.0 && fitted.bound <= 1e-2);
+        for j in 0..2 {
+            assert_eq!(
+                sphere_bezier_sweep(&s, span(&uv, j), span(&xyz, j)),
+                SpanSweep::Monotone
+            );
+            assert!(matches!(
+                sphere_bezier_image(&s, span(&uv, j), span(&xyz, j), 1e-2),
+                SpanImage::Certified(_)
+            ));
+        }
+        for i in [0, 3, 6] {
+            assert_eq!(uv[i], zig[i], "point {i} moved");
+        }
+        for i in [1, 2, 4, 5] {
+            assert_eq!(uv[i].y, zig[i].y, "the v handle {i} moved");
+        }
+        let (l, r) = (uv[3] - uv[2], uv[4] - uv[3]);
+        assert!((l.x * r.y - l.y * r.x).abs() <= 1e-15, "G1 at the joint");
+    }
+
+    /// #17110: a chain next to a pole whose points run back in u at the middle joint while
+    /// the 3D curve's longitude keeps running one way keeps the points' turn at that joint
+    /// and has every span refitted monotone; the 3D chain is the chain of the monotone
+    /// points, the UV chain's middle point moved back past the first.
+    #[test]
+    fn a_chain_whose_points_run_back_in_u_keeps_the_turn_at_the_joint() {
+        let k = &Kernel::default();
+        let s = ball(k);
+        let pts = [
+            Point2::new(0.30, 0.995),
+            Point2::new(0.32, 0.996),
+            Point2::new(0.34, 0.997),
+        ];
+        let (mut uv, xyz) = chain(k, &s, &pts);
+        // the middle point and its handles move back in u by 0.03: the first span's chord
+        // turns negative, the second's stays positive
+        for p in &mut uv[2..=4] {
+            p.x -= 0.03;
+        }
+        let joints = [uv[0], uv[3], uv[6]];
+        let fit = fit_monotone_sweep(k, &s, &mut uv, &xyz, 1.0)
+            .unwrap()
+            .unwrap();
+        assert!(fit.refitted > 0 && fit.bound <= 1.0);
+        assert_eq!([uv[0], uv[3], uv[6]], joints);
+        // the first span runs back in u, the second forward: the turn is at the joint
+        assert!(uv[3].x < uv[0].x && uv[6].x > uv[3].x);
+        for j in 0..2 {
+            let q = [uv[3 * j], uv[3 * j + 1], uv[3 * j + 2], uv[3 * j + 3]];
+            let h = [xyz[3 * j], xyz[3 * j + 1], xyz[3 * j + 2], xyz[3 * j + 3]];
+            assert_eq!(sphere_bezier_sweep(&s, q, h), SpanSweep::Monotone);
+        }
+    }
+
+    /// #17110 (review of #17686): a chain end whose only handle points back in u with
+    /// no offset across it gets the factor 0, which would put the handle on the end point
+    /// (a zero derivative there): refused (`Degenerate`), as at an interior joint.
+    #[test]
+    fn a_chain_end_whose_handle_collapses_is_refused() {
+        let k = &Kernel::default();
+        let s = ball(k);
+        let pts = [
+            Point2::new(0.30, 0.995),
+            Point2::new(0.32, 0.996),
+            Point2::new(0.34, 0.997),
+        ];
+        let (mut uv, xyz) = chain(k, &s, &pts);
+        uv[1] = Vec3::new(uv[0].x - 0.005, uv[0].y, 0.0);
+        let q = [uv[0], uv[1], uv[2], uv[3]];
+        let h = [xyz[0], xyz[1], xyz[2], xyz[3]];
+        assert_eq!(sphere_bezier_sweep(&s, q, h), SpanSweep::TurnsBack);
+        assert_eq!(
+            fit_monotone_sweep(k, &s, &mut uv, &xyz, 1.0).unwrap(),
+            Err(SweepRefusal::Degenerate)
+        );
+        // with an offset across the sweep the same end is refitted
+        let (mut uv, xyz) = chain(k, &s, &pts);
+        uv[1] = Vec3::new(uv[0].x - 0.005, uv[0].y + 1e-4, 0.0);
+        assert!(fit_monotone_sweep(k, &s, &mut uv, &xyz, 1.0)
+            .unwrap()
+            .is_ok());
+    }
+
+    /// The fit polls the kernel's cancellation and reports it apart from its refusals.
+    #[test]
+    fn a_cancelled_fit_is_cancelled_not_refused() {
+        let mut kernel = Kernel::default();
+        let s = ball(&kernel);
+        let pts = [Point2::new(0.30, 0.995), Point2::new(0.32, 0.996)];
+        let (mut uv, xyz) = chain(&kernel, &s, &pts);
+        uv[1].x = uv[0].x - 0.005;
+        let token = crate::kernel::CancelToken::new();
+        token.cancel();
+        kernel.set_cancel_token(token);
+        let error = fit_monotone_sweep(&kernel, &s, &mut uv, &xyz, 1.0).unwrap_err();
+        assert!(error.is_cancelled());
+    }
+
+    /// A refit that cannot keep the image within the tolerance is refused: far from the
+    /// pole, the refit's u parametrization differs from the 3D span's by a share of the
+    /// chord, about 0.1 on the ball, past the tolerance of 1e-3 that the span with its
+    /// chord handles meets.
+    #[test]
+    fn a_refit_off_the_3d_curve_is_refused() {
+        let k = &Kernel::default();
+        let s = ball(k);
+        let (uv, xyz) = spans(k, &s, Point2::new(0.30, 0.5), Point2::new(0.32, 0.5));
+        let mut b = [uv[0], uv[0] + uv[1] * 2.0, uv[2] - uv[3] / 3.0, uv[2]];
+        let h = [xyz[0], xyz[0] + xyz[1] / 3.0, xyz[2] - xyz[3] / 3.0, xyz[2]];
+        let chord = [uv[0], uv[0] + uv[1] / 3.0, uv[2] - uv[3] / 3.0, uv[2]];
+        assert!(matches!(
+            sphere_bezier_image(&s, chord, h, 1e-3),
+            SpanImage::Certified(_)
+        ));
+        assert_eq!(sphere_bezier_sweep(&s, b, h), SpanSweep::TurnsBack);
+        assert!(matches!(
+            fit_monotone_sweep(k, &s, &mut b, &h, 1e-3).unwrap(),
+            Err(SweepRefusal::Off(_))
+        ));
     }
 }

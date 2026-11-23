@@ -91,6 +91,14 @@ pub enum BlendCornerEvent {
     Turn,
     /// `SM_BCE_JOIN`: two blends whose edges continue each other (G1) at the vertex.
     Join,
+    /// The section continues across a tangent rim. The two pieces of the rim
+    /// and their common cliff bound the material added by this chamfer.
+    CliffJoin {
+        /// The two pieces of the original rim that meet at this contact.
+        rim: [EdgeId; 2],
+        /// The common cliff face bounded by both pieces.
+        cliff: crate::topology::FaceId,
+    },
     /// `SM_BCE_BALL` (the fork's 79d4763): three rounds of one radius and convexity, the
     /// common ball's sphere between them ([`ball`]).
     Ball,
@@ -137,7 +145,7 @@ pub enum BlendTurn {
 }
 
 /// The two ways the blend corner closes chamfers meeting at a vertex
-/// ([`chamfer`], `Kernel::fixes.fillet_chamfer_corner`), as [`BlendTurn`] is a Turn's.
+/// ([`chamfer`]), as [`BlendTurn`] is a Turn's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BlendChamferCorner {
     /// Each chamfer plane runs on until it meets the others: three meet at one point,
@@ -172,7 +180,13 @@ impl BlendCorner {
     /// section ([`FilletCorner::make_join_topology`]).
     #[must_use]
     pub fn is_join(self) -> bool {
-        self.event == BlendCornerEvent::Join
+        self.event == BlendCornerEvent::Join || self.is_cliff_join()
+    }
+
+    /// Whether the shared section lies on the continued supports at a tangent cliff.
+    #[must_use]
+    pub fn is_cliff_join(self) -> bool {
+        matches!(self.event, BlendCornerEvent::CliffJoin { .. })
     }
 
     /// `m_eEvent == SM_BCE_END` (the fork's 53c47b8): the End ([`BlendEnd`]).
@@ -191,7 +205,7 @@ impl BlendCorner {
     /// itself (`solver_eus`, the corner's `m_pSolverEUs`).
     #[must_use]
     pub fn is_closed_join(self, solver_eus: Option<&[EdgeuseId]>) -> bool {
-        self.event == BlendCornerEvent::Join && solver_eus.is_some_and(|eus| eus.len() == 1)
+        self.is_join() && solver_eus.is_some_and(|eus| eus.len() == 1)
     }
 
     /// Not the fork's (#2349): a Turn of one closed blended edge meeting itself at an

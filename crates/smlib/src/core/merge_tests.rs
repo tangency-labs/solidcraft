@@ -62,7 +62,7 @@ fn loose_faces(sides: &[usize], lift: f64) -> Body {
         b.refresh_cached_topology();
         Ok(b)
     })
-    .map(Body::new)
+    .map(Body::from_kernel)
     .unwrap()
 }
 
@@ -250,7 +250,7 @@ fn cube_and_sheet(sheet: impl FnOnce(&mut Kernel) -> solidcore::Result<Brep>) ->
         cube.refresh_cached_topology();
         Ok(cube)
     })
-    .map(Body::new)
+    .map(Body::from_kernel)
     .unwrap()
 }
 

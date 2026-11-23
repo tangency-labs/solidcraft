@@ -340,6 +340,10 @@ impl JsonSchema for InsidePlane {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CreateKeys {
+    /// Open Model view to edit in; defaults to the focused or most recent Model view.
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 9007199254740992_u64))]
+    pub view: Option<u64>,
     /// The plane to sketch on: XY, XZ or YZ (also Top, Front, Right), a construction plane's
     /// name or id, a picked planar face `{face: [x, y, z], body?, index?, path?, fixed?}`, or an
     /// explicit plane `{origin?, x_dir, y_dir}` in mm. Default: XY. On XY, the sketch's x and y
@@ -447,19 +451,16 @@ impl JsonSchema for CreateParams {
     }
 }
 
-/// How a new sketch is attached to its plane: `exact_face`, `sheet_face`, `internal_legacy_face`
-/// or `fixed`.
+/// How a new sketch is attached to its plane: `exact_face`, `internal_legacy_face` or `fixed`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Attachment {
     // `exact_face`: a planar face of a body, exactly, so the sketch follows the face;
-    // `sheet_face`: the panel of a sheet metal body's flat pattern;
     // `internal_legacy_face`: a face picked by a command that starts a sketch on a face
     // (Extrude, Revolve, Press Pull);
     // `fixed`: where the plane is (an origin, construction or explicit plane, or a face kept
     // with `fixed`).
     ExactFace,
-    SheetFace,
     InternalLegacyFace,
     Fixed,
 }
@@ -476,6 +477,8 @@ pub struct Activated {
 /// What `sketch.create` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct CreateResult {
+    /// The Model view owning this sketch edit. Runtime identity, not a design feature.
+    pub sketching_view: u64,
     /// The new sketch's feature id.
     pub sketch: u64,
     /// Its name.
@@ -1125,8 +1128,14 @@ pub struct SolveResult {
     pub status: SolveOutcome,
     /// The degrees of freedom left (0: fully constrained).
     pub dof: usize,
+    /// The planar sketch's own degrees of freedom, its drawn 3D curves' left out (#10608).
+    pub planar_dof: usize,
     /// The constraints still violated after a failed solve, by id.
     pub failing: Vec<String>,
+    /// The 3D constraints' solve (#10608): `{ok, dof, failing, ...}`, or null for a sketch with no
+    /// drawn 3D curves. Its freedoms are counted in `dof`.
+    #[schemars(with = "Option<serde_json::Map<String, Value>>")]
+    pub wires_solve: Value,
     /// How many profiles the sketch has.
     pub profiles: usize,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

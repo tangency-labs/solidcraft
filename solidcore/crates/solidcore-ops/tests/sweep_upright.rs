@@ -11,6 +11,9 @@
     clippy::float_arithmetic
 )]
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use std::f64::consts::PI;
 
 use solidcore_ops::sweep::{sweep_placed, Curve, SweepFrame, SweepRoute};
@@ -20,14 +23,7 @@ const Z: [f64; 3] = [0.0, 0.0, 1.0];
 
 /// The kernel rig's fixes, as the sweep tests run them.
 fn rig_fixes() {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../solidcore/tests/kernel_cases/fixes.json"
-    );
-    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
-    // A flat JSON array of flag names: every other piece between quotes.
-    let names: Vec<&str> = text.split('"').skip(1).step_by(2).collect();
-    solidcore_ops::session::set_thread_fixes(names).unwrap();
+    solidcore_ops::session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
 }
 
 /// A D in the plane z = 0: the half circle of radius 5 about the origin from (0, -5) over

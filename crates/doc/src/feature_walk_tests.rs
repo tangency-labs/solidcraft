@@ -235,7 +235,7 @@ fn construction_reference_walk_keeps_its_depth_limit_across_geometry() {
     use crate::construct::GeoRef;
     use crate::walk::{Ref, Walk};
 
-    let mut plane = crate::PlaneRef::Construction { feature: crate::FeatureId(7) };
+    let mut plane = crate::PlaneRef::Construction { feature: crate::FeatureId(7), placement: None };
     for _ in 0..80 {
         plane = crate::PlaneRef::Perpendicular { plane: Box::new(GeoRef::Plane { plane }), line: Box::new(GeoRef::Axis { name: "Side".into() }) };
     }
@@ -274,5 +274,18 @@ fn the_record_covers_every_variant() {
             let variant = t.split(|c: char| !c.is_alphanumeric()).next().unwrap_or("").to_lowercase();
             assert!(names.contains(&variant), "FeatureKind::{t} has no fixture in feature_walk_tests");
         }
+    }
+}
+
+/// A conversion's first face is a face pick with bends or without (#6748): it gets a persistent
+/// name and follows its face as the model changes, like the faces picked after it. `main` walked
+/// it as a bare position when no bends were given, from the flat model's plate conversion.
+#[test]
+fn a_conversion_without_bends_still_picks_its_first_face() {
+    let o = serde_json::json!([1.0, 2.0, 3.0]);
+    for bends in [serde_json::json!([]), serde_json::json!([[4.0, 5.0, 6.0]])] {
+        let v = serde_json::json!({"type": "sheet_convert", "body": "B", "face": o, "faces": [o], "bends": bends});
+        let kind: FeatureKind = serde_json::from_value(v).unwrap();
+        assert_eq!(kind.face_points().len(), 2, "bends {bends}: both picked faces are face picks");
     }
 }

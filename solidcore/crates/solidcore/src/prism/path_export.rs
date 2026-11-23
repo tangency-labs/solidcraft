@@ -25,12 +25,14 @@ pub struct PathRefusal {
 }
 
 /// Caller-supplied scalar encoding used only to certify representability.
-/// Results retain their original coordinates and controls. The callback must be
+/// Results retain their original coordinates and controls. Each callback must be
 /// deterministic and return the decoded scalar actually written by the caller.
 #[derive(Clone, Copy, Debug)]
 pub struct ScalarEncoding {
-    /// Encode and decode one scalar, or refuse an unrepresentable value.
-    pub round_trip: fn(f64) -> Option<f64>,
+    /// Encode and decode one length (a coordinate, axis or radius), or refuse it.
+    pub length: fn(f64) -> Option<f64>,
+    /// Encode and decode one dimensionless scalar (an angle, parameter or weight), or refuse it.
+    pub dimensionless: fn(f64) -> Option<f64>,
     /// Smallest minor-to-major ratio supported by the caller's representation.
     pub min_ellipse_ratio: f64,
     /// Parameters this close to a full turn are represented as zero by the caller.
@@ -261,6 +263,13 @@ pub fn recognized_path(
     if let Some(lp) = closed {
         if let Some((c, r)) = loop_circle(lp) {
             // Every circular piece was admitted, including its support bounds.
+            if encoded_point(c, encoding).is_none() {
+                return Err(Piece {
+                    index: 0,
+                    total: segs.len(),
+                }
+                .invalid("circle centre cannot be encoded"));
+            }
             encoded_positive(
                 r,
                 Piece {
@@ -268,7 +277,7 @@ pub fn recognized_path(
                     total: segs.len(),
                 },
                 "circle radius",
-                encoding,
+                encoding.length,
             )?;
             return Ok(Some(DxfShape::Circle { c, r }));
         }
@@ -405,10 +414,11 @@ fn ellipse_representable(
     {
         return false;
     }
-    let (Some(encoded_major), Some(encoded_t0), Some(encoded_t1)) = (
+    let (Some(_), Some(encoded_major), Some(encoded_t0), Some(encoded_t1)) = (
+        encoded_point(c, encoding),
         encoded_point(major, encoding),
-        encoded_scalar(t0, encoding),
-        encoded_scalar(t1, encoding),
+        encoded_scalar(t0, encoding.dimensionless),
+        encoded_scalar(t1, encoding.dimensionless),
     ) else {
         return false;
     };
@@ -490,7 +500,9 @@ fn exact(seg: &Seg2, piece: Piece, encoding: ScalarEncoding) -> Result<DxfShape>
             start,
             sweep,
         } => {
-            encoded_positive(radius, piece, "arc radius", encoding)?;
+            encoded_point(center, encoding)
+                .ok_or_else(|| piece.invalid("arc centre cannot be encoded"))?;
+            encoded_positive(radius, piece, "arc radius", encoding.length)?;
             // Admission already refused >TAU. A shorter arc must not acquire a closing edge.
             if sweep.abs() == TAU {
                 return Ok(DxfShape::Circle {
@@ -513,9 +525,9 @@ fn exact(seg: &Seg2, piece: Piece, encoding: ScalarEncoding) -> Result<DxfShape>
                 );
             }
             let (a0, a1) = (d0, d1);
-            let encoded_a0 = encoded_scalar(a0, encoding)
+            let encoded_a0 = encoded_scalar(a0, encoding.dimensionless)
                 .ok_or_else(|| piece.invalid("arc angle cannot be encoded"))?;
-            let encoded_a1 = encoded_scalar(a1, encoding)
+            let encoded_a1 = encoded_scalar(a1, encoding.dimensionless)
                 .ok_or_else(|| piece.invalid("arc angle cannot be encoded"))?;
             if encoded_a0.rem_euclid(360.0) == encoded_a1.rem_euclid(360.0) {
                 return Err(piece.invalid("arc endpoints collapse in the angular representation"));
@@ -552,7 +564,7 @@ fn exact(seg: &Seg2, piece: Piece, encoding: ScalarEncoding) -> Result<DxfShape>
             }
             // Recognition failure is not invalid input. Positive weights keep this spline
             // inside the finite control hull even if ellipse extraction would overflow.
-            encoded_positive(w, piece, "conic weight", encoding)?;
+            encoded_positive(w, piece, "conic weight", encoding.dimensionless)?;
             bezier_spline(&[a, apex, b], (w != 1.0).then(|| vec![1.0, w, 1.0]))
         }
         Seg2::Cubic { p0, p1, p2, p3 } => bezier_spline(&[p0, p1, p2, p3], None),
@@ -581,19 +593,24 @@ fn exact(seg: &Seg2, piece: Piece, encoding: ScalarEncoding) -> Result<DxfShape>
     Ok(shape)
 }
 
-fn encoded_scalar(value: f64, encoding: ScalarEncoding) -> Option<f64> {
-    (encoding.round_trip)(value).filter(|decoded| decoded.is_finite())
+fn encoded_scalar(value: f64, round_trip: fn(f64) -> Option<f64>) -> Option<f64> {
+    round_trip(value).filter(|decoded| decoded.is_finite())
 }
 
 fn encoded_point(point: Vec2, encoding: ScalarEncoding) -> Option<Vec2> {
     Some(Vec2::new(
-        encoded_scalar(point.x, encoding)?,
-        encoded_scalar(point.y, encoding)?,
+        encoded_scalar(point.x, encoding.length)?,
+        encoded_scalar(point.y, encoding.length)?,
     ))
 }
 
-fn encoded_positive(value: f64, piece: Piece, name: &str, encoding: ScalarEncoding) -> Result<()> {
-    if !encoded_scalar(value, encoding).is_some_and(|v| v > 0.0) {
+fn encoded_positive(
+    value: f64,
+    piece: Piece,
+    name: &str,
+    round_trip: fn(f64) -> Option<f64>,
+) -> Result<()> {
+    if !encoded_scalar(value, round_trip).is_some_and(|v| v > 0.0) {
         return Err(piece.invalid(format_args!("{name} is not positive at writer precision")));
     }
     Ok(())
@@ -699,7 +716,11 @@ fn polylines(segs: &[Seg2], closed: bool, encoding: ScalarEncoding) -> Result<Ve
             total: segs.len(),
         };
         match *seg {
-            Seg2::Line { a, b } => out.edge(a, b, 0.0, piece)?,
+            Seg2::Line { a, b } => {
+                // The exact conversion refuses endpoints that cannot be written or collapse.
+                exact(seg, piece, encoding)?;
+                out.edge(a, b, 0.0, piece)?;
+            }
             Seg2::Arc {
                 center,
                 radius,
@@ -721,6 +742,8 @@ fn polylines(segs: &[Seg2], closed: bool, encoding: ScalarEncoding) -> Result<Ve
                     };
                     if !can_pack(a, mid, bulge, center, radius, sweep * 0.5)
                         || !can_pack(mid, b, bulge, center, radius, sweep * 0.5)
+                        || !survives(a, mid, bulge, encoding)
+                        || !survives(mid, b, bulge, encoding)
                     {
                         out.exact(exact(seg, piece, encoding)?)?;
                         continue;
@@ -732,7 +755,9 @@ fn polylines(segs: &[Seg2], closed: bool, encoding: ScalarEncoding) -> Result<Ve
                     out.edge(a, mid, bulge, piece)?;
                     out.edge(mid, b, bulge, piece)?;
                 } else if let Some(bulge) = arc_bulge(sweep) {
-                    if can_pack(a, b, bulge, center, radius, sweep) {
+                    if can_pack(a, b, bulge, center, radius, sweep)
+                        && survives(a, b, bulge, encoding)
+                    {
                         out.edge(a, b, bulge, piece)?;
                     } else {
                         out.exact(exact(seg, piece, encoding)?)?;
@@ -760,6 +785,14 @@ fn polylines(segs: &[Seg2], closed: bool, encoding: ScalarEncoding) -> Result<Ve
     Ok(out.shapes)
 }
 
+// A packed arc edge as written: both ends encodable and still distinct, and its bulge still an
+// arc. Otherwise the arc is written exactly instead.
+fn survives(a: Vec2, b: Vec2, bulge: f64, encoding: ScalarEncoding) -> bool {
+    let ends = encoded_point(a, encoding).zip(encoded_point(b, encoding));
+    ends.is_some_and(|(a, b)| a != b)
+        && encoded_scalar(bulge, encoding.dimensionless).is_some_and(|w| w != 0.0)
+}
+
 fn arc_bulge(sweep: f64) -> Option<f64> {
     // A semicircle has bulge exactly +/-1; all other admitted pieces use tan(sweep/4).
     let bulge = if sweep.abs() == PI {
@@ -775,7 +808,8 @@ fn arc_bulge(sweep: f64) -> Option<f64> {
 // allowance would hide local distortion (for example radius .75 at centre (2^52, 2^52)).
 // This is an operational acceptance policy at arithmetic roundoff scale, not an identity
 // proof or a universal error guarantee for sin/cos/tan. No coordinates or parameters are
-// adjusted to pass it. Serialization must round-trip these same f64 vertices and bulges.
+// adjusted to pass it. `survives` then checks these vertices and bulges as the caller's
+// encoding writes them.
 fn can_pack(a: Vec2, z: Vec2, bulge: f64, center: Vec2, radius: f64, sweep: f64) -> bool {
     if !radius.is_normal() || bulge.signum() != sweep.signum() || sweep.abs() > PI {
         return false;

@@ -19,9 +19,9 @@
 //! | [`Cone::base_mut`]                           | `GetGwNurbPointer` (non-`const`, inherited)      |
 //!
 //! Deviations:
-//! - **Opt-in fix** ([`UpstreamFixes::analytic_inversion_answers_apart`](crate::kernel::UpstreamFixes::analytic_inversion_answers_apart),
-//!   WR-662, the SolidCraft fork's tangency-labs/smlib dfc7cb6): the ellipse-trim
-//!   classification passes a failed cone inversion on instead of reading it as exterior.
+//! - **Inversion answers apart** (WR-662, the SolidCraft fork's tangency-labs/smlib
+//!   dfc7cb6): the ellipse-trim classification passes a failed cone inversion on
+//!   instead of reading it as exterior.
 //! - **Out-params** become return values: the offset is `None` where upstream succeeds
 //!   without a surface (both new radii below the tolerance); the recogniser's cone is
 //!   `Some` when upstream returns `TRUE`; the trim intervals are returned.
@@ -296,6 +296,158 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
         return Ok(None);
     };
     let x_axis = start_tangent.cross(normal);
+    // the segments run one way round: each starts where the one before it ends
+    if segments.windows(2).any(|w| match w {
+        [a, b] => a.q2.distance(b.q0) > scaled_zero,
+        _ => false,
+    }) {
+        return Ok(None);
+    }
+    let end_ang = sweep.to_degrees();
+    if !(end_ang > 0.0 && end_ang <= 360.0 + EFF_ZERO_SQRT) {
+        return Ok(None);
+    }
+    Ok(Some(IsoArc {
+        frame: Axis2Placement::new(centre, x_axis, normal.cross(x_axis)),
+        radius,
+        start_ang: 0.0,
+        end_ang: end_ang.min(360.0),
+    }))
+}
+
+/// The circle of a rational quadratic iso curve recovered from each segment's chord and
+/// normalised middle weight `w = cos α` instead of its legs: `r = |Q2 − Q0| / (2 sin α)`, the
+/// centre `r cos α` from the chord's midpoint, square to the chord in the circle's plane
+/// (The NURBS Book, Piegl and Tiller, §7.3). When the end nets are translates of each other,
+/// `axis`, the form's linear direction, gives the plane normal, and the arc's control points
+/// must be within `scaled_zero` of the plane square to it through the start of the first
+/// segment at least half as wide as the widest (#17462). A very
+/// short arc's legs and point angles amplify coordinate rounding past the tolerance; its
+/// chord, weight and plane distances do not. The other checks are [`iso_arc_exact`]'s. Used only where [`iso_arc_exact`]'s circles make no
+/// cylinder, so a form that was recognised keeps its circles to the last bit.
+///
+/// # Errors
+///
+/// Those of the degeneracy test and the Bézier decomposition.
+fn iso_arc_from_chord(
+    k: &Kernel,
+    curve: &BSplineCurve,
+    scaled_zero: f64,
+    axis: Option<Vec3>,
+) -> Result<Option<IsoArc>> {
+    /// One Bézier segment: its Euclidean control points, half sweep and plane normal.
+    struct Segment {
+        q0: Point3,
+        q1: Point3,
+        q2: Point3,
+        half: f64,
+        weight: f64,
+        normal: Option<Vec3>,
+    }
+    if curve.is_degenerate(k, scaled_zero, None)? {
+        return Ok(None);
+    }
+    let Some(nurb) = curve.nurb.as_ref() else {
+        return Ok(None);
+    };
+    let mut segments = Vec::new();
+    for segment in nurb.decompose_bez()? {
+        if segment.degree() != 2 {
+            return Ok(None);
+        }
+        let points = segment.cpts();
+        let (Some(&a), Some(&b), Some(&c)) = (points.first(), points.get(1), points.get(2)) else {
+            return Ok(None);
+        };
+        if !(a.w > 0.0 && b.w > 0.0 && c.w > 0.0) {
+            return Ok(None);
+        }
+        let (q0, q1, q2) = (to_euclid(a), to_euclid(b), to_euclid(c));
+        let (leg0, leg1, chord) = (q1 - q0, q2 - q1, q2 - q0);
+        if (leg0.length() - leg1.length()).abs() > scaled_zero {
+            return Ok(None);
+        }
+        // the legs made unit before their cross product: a short arc's legs are short, and
+        // the product of their lengths would fall under the unit vector's absolute floor
+        let (Ok(tangent), Ok(next)) = (leg0.unitize(), leg1.unitize()) else {
+            return Ok(None);
+        };
+        // the half sweep, from the leg and the chord
+        let half = tangent.cross(chord).length().atan2(tangent.dot(chord));
+        let weight = b.w / (a.w * c.w).sqrt();
+        if (weight - half.cos()).abs() > EFF_ZERO_SQRT {
+            return Ok(None);
+        }
+        segments.push(Segment {
+            q0,
+            q1,
+            q2,
+            half,
+            weight,
+            normal: tangent.cross(next).unitize().ok(),
+        });
+    }
+    // The circle is made from a segment of large sweep, well conditioned: a segment a hair
+    // long (an arc's extension past its face) fixes its centre only to the rounding of its
+    // points over its sweep. The first segment at least half as wide as the widest is taken,
+    // so equal sweeps (a whole circle's quarters) take the first. Every segment must then
+    // lie on that circle.
+    let widest = segments.iter().fold(0.0_f64, |m, s| m.max(s.half));
+    let Some(base) = segments.iter().find(|s| s.half >= 0.5 * widest) else {
+        return Ok(None);
+    };
+    let Some(plane_normal) = base.normal else {
+        return Ok(None);
+    };
+    let normal = if let Some(axis) = axis {
+        // The arc lies on a plane square to the ruling when its control points are within
+        // the distance zero of the plane through the start of `base` (the first segment at
+        // least half as wide as the widest). Not the angle of the legs'
+        // normal to the ruling: that normal carries the rounding of the points over the
+        // sweep, 2e-8 rad on a 0.005 degree arc of radius 88 mm (#17462), past an angular
+        // zero, where the ruling is the form's own direction to the last bits.
+        let off = |p: Point3| (p - base.q0).dot(axis).abs() > scaled_zero;
+        if segments.iter().any(|s| off(s.q0) || off(s.q1) || off(s.q2)) {
+            return Ok(None);
+        }
+        if plane_normal.dot(axis) < 0.0 {
+            -axis
+        } else {
+            axis
+        }
+    } else {
+        plane_normal
+    };
+    let (leg0, leg1, chord) = (base.q1 - base.q0, base.q2 - base.q1, base.q2 - base.q0);
+    let Ok(across) = chord.unitize() else {
+        return Ok(None);
+    };
+    let radius = chord.length() / (2.0 * ((1.0 - base.weight) * (1.0 + base.weight)).sqrt());
+    // as `IsArc`: a radius too large for the arc's length makes no accurate circle
+    if radius.is_nan() || radius > (leg0.length() + leg1.length()) / EFF_ZERO_SQRT {
+        return Ok(None);
+    }
+    let centre = base.q0 + chord * 0.5 + normal.cross(across) * (radius * base.weight);
+    let mut sweep = 0.0_f64;
+    for s in &segments {
+        let on = |p: Point3| ((p - centre).length() - radius).abs() <= scaled_zero;
+        // the middle point is where the end tangents meet, r / cos α from the centre
+        let corner = ((s.q1 - centre).length() * s.weight - radius).abs() <= scaled_zero;
+        let flat = s
+            .normal
+            .is_none_or(|n| n.dot(normal) >= 1.0 - EFF_ZERO_SQRT);
+        if !(on(s.q0) && on(s.q2) && corner && flat) {
+            return Ok(None);
+        }
+        sweep += 2.0 * s.half;
+    }
+    let Some(first) = segments.first() else {
+        return Ok(None);
+    };
+    // X toward the start point on the recovered circle.
+    let Ok(x_axis) = (first.q0 - centre).unitize() else {
+        return Ok(None);
+    };
     // the segments run one way round: each starts where the one before it ends
     if segments.windows(2).any(|w| match w {
         [a, b] => a.q2.distance(b.q0) > scaled_zero,
@@ -624,18 +776,29 @@ impl Cone {
             // The kept cone runs between its new apex (where the offset radius reaches
             // zero) and the surviving end, at the original's slope: the radius spans
             // `old_top_radius - old_bot_radius` over `height`.
+            // (The ends are at the STEP domain's heights, not at the origin and `height`
+            // above it as upstream takes them: an unbounded cone runs from its apex, and an
+            // adjusted one from any height. Upstream placed the kept cone's origin as if the
+            // bottom were at the origin, off its apex by the bottom height, so the offset
+            // was another cone: the base radius at the wrong height. With the bottom at
+            // the origin, `0 + h` is `h` and nothing changes.)
+            let bot_height = self.bot_height();
             let (new_height, bot_origin, collapsed_at_base) = if new_bot_radius < approx_tol_3d {
                 let new_height = new_top_radius * height / (old_top_radius - old_bot_radius);
                 new_bot_radius = 0.0;
                 (
                     new_height,
-                    origin + (height + off_z_dist - new_height) * z_axis,
+                    origin + (bot_height + height + off_z_dist - new_height) * z_axis,
                     true,
                 )
             } else {
                 let new_height = new_bot_radius * height / (old_bot_radius - old_top_radius);
                 new_top_radius = 0.0;
-                (new_height, origin + off_z_dist * z_axis, false)
+                (
+                    new_height,
+                    origin + (bot_height + off_z_dist) * z_axis,
+                    false,
+                )
             };
 
             // New Cone Position - truncated at new apex position
@@ -800,10 +963,24 @@ impl Cone {
         })?;
         ignore_status(gen.transform(k, &mv, None))?;
 
+        // (The polar converter's circle is rebuilt on the offset cone, as the truncated
+        // branch above does: upstream's copy kept the original's circle, off the offset
+        // by the offset distance, so conversions through it named the original's
+        // parameters.) (status ignored)
+        ignore_status(off_cone.rebuild_cone_polar_converter(k))?;
+
         Ok(Some(off_cone))
     }
 
     // ---- IsNurbSurfaceCone -------------------------------------------------------
+
+    /// The height (the distance between its end circles' centres) below which
+    /// [`Self::is_nurb_surface_cone`] refuses a NURB as a disk, not a cone, and
+    /// [`Self::rebuild_step_from_nurb_parameters`] refuses to rebuild one. Named so that the
+    /// rotational sweep, which builds no analytic cone lower than this, and these tests use
+    /// the same number (tangency-labs/solidcraft#17085). Above it a form can still be refused
+    /// by the other tests.
+    pub(crate) const MIN_HEIGHT: f64 = EFF_ZERO_SQRT;
 
     /// The cone `test_surface` is (`IsNurbSurfaceCone`), or `None`: the surface must be
     /// rational, of degree 1 with two control points in one direction and degree 2 in
@@ -920,7 +1097,7 @@ impl Cone {
         let height = nurb_z_axis.length();
 
         // not a cone - height of cone is degenerate (cone is a disk)
-        if height < EFF_ZERO_SQRT {
+        if height < Self::MIN_HEIGHT {
             return Ok(None);
         }
         nurb_z_axis = nurb_z_axis.unitize_or_z();
@@ -1040,6 +1217,22 @@ impl Cone {
         test_surface: &BSplineSurface,
         tolerance_scale: f64,
     ) -> Result<Option<Self>> {
+        if let Some(cylinder) =
+            Self::nurb_surface_cylinder(k, test_surface, tolerance_scale, false)?
+        {
+            return Ok(Some(cylinder));
+        }
+        Self::nurb_surface_cylinder(k, test_surface, tolerance_scale, true)
+    }
+
+    /// [`Self::is_nurb_surface_cylinder`] with its end circles from [`iso_arc_exact`], or with
+    /// `from_chord` from [`iso_arc_from_chord`].
+    fn nurb_surface_cylinder(
+        k: &Kernel,
+        test_surface: &BSplineSurface,
+        tolerance_scale: f64,
+        from_chord: bool,
+    ) -> Result<Option<Self>> {
         let deg_u = test_surface.degree(SurfParamType::U);
         let deg_v = test_surface.degree(SurfParamType::V);
         if deg_u + deg_v != 3
@@ -1073,23 +1266,52 @@ impl Cone {
             )
         };
 
+        // The form's ruling: the start corners of its top and bottom arcs (see below).
+        let top_start = if swap_uv {
+            Point2::new(uv_domain.max().x, uv_domain.min().y)
+        } else {
+            Point2::new(uv_domain.min().x, uv_domain.max().y)
+        };
+        let top_corner = test_surface.evaluate_point(top_start)?;
+        let min_corner = test_surface.evaluate_point(uv_domain.min())?;
+        let ruling = top_corner - min_corner;
         let top_iso = test_surface
             .create_iso_parametric_curve(k, surf_param, top_knot, IsoCurveOptions::default())?
             .curve;
         if top_iso.is_degenerate(k, pt_tol, None)? {
             return Ok(None);
         }
-        let Some(top) = iso_arc_exact(k, &top_iso, pt_tol)? else {
-            return Ok(None);
-        };
-
         let bot_iso = test_surface
             .create_iso_parametric_curve(k, surf_param, bot_knot, IsoCurveOptions::default())?
             .curve;
         if bot_iso.is_degenerate(k, pt_tol, None)? {
             return Ok(None);
         }
-        let Some(bot) = iso_arc_exact(k, &bot_iso, pt_tol)? else {
+        // The arcs' plane normal is the ruling when the end nets are translates of each other:
+        // a short arc's normal found from its legs amplifies coordinate rounding. A small twist
+        // is allowed by the angular tolerance, and its ruling is not the axis, so a twisted form
+        // keeps the normal from the legs.
+        let axis = top_iso
+            .nurb
+            .as_ref()
+            .zip(bot_iso.nurb.as_ref())
+            .filter(|(top, bot)| {
+                top.cpts().iter().zip(bot.cpts()).all(|(top, bot)| {
+                    (to_euclid(*top) - to_euclid(*bot) - ruling).length() <= pt_tol
+                })
+            })
+            .and_then(|_| ruling.unitize().ok());
+        let arc = |curve: &BSplineCurve| {
+            if from_chord {
+                iso_arc_from_chord(k, curve, pt_tol, axis)
+            } else {
+                iso_arc_exact(k, curve, pt_tol)
+            }
+        };
+        let Some(top) = arc(&top_iso)? else {
+            return Ok(None);
+        };
+        let Some(bot) = arc(&bot_iso)? else {
             return Ok(None);
         };
 
@@ -1118,14 +1340,6 @@ impl Cone {
         // it ran 3.3e-8 mm off the form. The ruling is required: a form with none (a
         // degenerate one, or one whose rows are not translates of each other) is no cylinder.
         // The arcs start at angle 0 by `iso_arc_exact`'s construction.
-        let top_start = if swap_uv {
-            Point2::new(uv_domain.max().x, uv_domain.min().y)
-        } else {
-            Point2::new(uv_domain.min().x, uv_domain.max().y)
-        };
-        let top_corner = test_surface.evaluate_point(top_start)?;
-        let min_corner = test_surface.evaluate_point(uv_domain.min())?;
-        let ruling = top_corner - min_corner;
         let height = ruling.length();
         if !height.is_finite() || height < EFF_ZERO || top.start_ang != 0.0 || bot.start_ang != 0.0
         {
@@ -1199,6 +1413,24 @@ impl Cone {
         let equal_radii = (bot.radius - top.radius).abs() < pt_tol;
         if !equal_radii {
             return Ok(None);
+        }
+        // Not upstream (#17462, #18415 review): the chord recovery holds the arcs to the
+        // circle and to the plane square to the ruling only within `pt_tol`, so the copied
+        // net is kept as this cylinder's form only when `implicit::lies_on` certifies it on
+        // the cylinder, to the rounding of storing it. That tolerance does not also cover the
+        // rounding of the recovered origin and radius or of the Bezier decomposition's knot
+        // insertion, so a net off by only those may be refused: conservative, never unsound.
+        // Otherwise the surface is no cylinder here and stays a B-spline.
+        if from_chord {
+            let certificate = implicit::Implicit::Cone {
+                origin,
+                axis: z_axis,
+                radius: bot.radius,
+                tan_angle: 0.0,
+            };
+            if !implicit::lies_on(test_surface, &certificate)? {
+                return Ok(None);
+            }
         }
 
         let mut cylinder = Self::new_cylinder_bounded(
@@ -1434,7 +1666,7 @@ impl Cone {
         let height = nurb_z_axis.length();
 
         // not a cone - height of cone is degenerate (cone is a disk)
-        if height < EFF_ZERO_SQRT {
+        if height < Self::MIN_HEIGHT {
             return Err(SolidError::surface_failed(
                 OP_REBUILD,
                 "the cone's height is degenerate",
@@ -1576,10 +1808,10 @@ impl Cone {
 /// The location and STEP parameters the cone's `STEPInversion` writes for `point` (its
 /// status is ignored upstream). The parameters are only read for a location other
 /// than `SM_LT_EXTERIOR`; they are `SM_UNDEF_DOUBLE` where a failure sets that location.
-/// With [`UpstreamFixes::analytic_inversion_answers_apart`](crate::kernel::UpstreamFixes::analytic_inversion_answers_apart)
-/// only the answer "off the generator" reads as exterior; a failed start-plane
-/// transform is returned (the SolidCraft fork, tangency-labs/smlib dfc7cb6, in
-/// `sm_GetEllipseTrimIntervals` and `sm_IsConePointInTrimDomain`).
+/// Only the answer "off the generator" reads as exterior; any other failure (a failed
+/// start-plane transform) is returned, where upstream read some as exterior (WR-662;
+/// the SolidCraft fork, tangency-labs/smlib dfc7cb6, in `sm_GetEllipseTrimIntervals`
+/// and `sm_IsConePointInTrimDomain`).
 fn cone_inversion(
     k: &Kernel,
     cone: &Cone,
@@ -1588,28 +1820,17 @@ fn cone_inversion(
 ) -> Result<(LocationType, Point2)> {
     match cone.step_inversion(k, point, tol, None) {
         Ok(inv) => Ok((inv.location, inv.uv)),
-        Err(e) if e.is_unported_or_cancelled() => Err(e),
         // rotated point not on the generator: upstream sets SM_LT_EXTERIOR
         // (by its status, so also a typed failure that replaced the `Upstream`, #13790)
-        Err(e) if crate::surface::surf_of_revolution::p2::is_off_generator(&e) => {
+        Err(e)
+            if !e.is_unported_or_cancelled()
+                && crate::surface::surf_of_revolution::p2::is_off_generator(&e) =>
+        {
             Ok((LocationType::Exterior, Point2::UNDEF))
         }
         // the fork (tangency-labs/smlib dfc7cb6, `SER` unless `STEPInversionAnswered`):
-        // a failure is passed on instead of read as SM_LT_EXTERIOR
-        Err(e) if k.fixes.analytic_inversion_answers_apart => Err(e),
-        Err(e) => {
-            // a failed TransformPointToStartPlane returns after SM_LT_EXTERIOR is set
-            let pos = cone.positive_point(k, point)?;
-            if cone
-                .rev
-                .transform_point_to_start_plane(pos.point, tol, false)
-                .is_err()
-            {
-                Ok((LocationType::Exterior, Point2::UNDEF))
-            } else {
-                Err(e)
-            }
-        }
+        // any other failure is passed on instead of read as SM_LT_EXTERIOR
+        Err(e) => Err(e),
     }
 }
 
@@ -2044,6 +2265,96 @@ mod tests {
         }
     }
 
+    /// The #17462 wall's NURBS form (see the test below), its middle control points moved
+    /// by `nudge` (in both rows, so the rows stay translates).
+    fn short_arc_wall(nudge: Vec3) -> BSplineSurface {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as Nurb;
+        let w = 0.999_999_998_985_303_8;
+        // (x w, y w, z w, w), as the record holds them
+        let row = |p: [[f64; 3]; 3]| -> Vec<CPoint> {
+            p.iter()
+                .zip([(1.0, Vec3::ZERO), (w, nudge * w), (1.0, Vec3::ZERO)])
+                .map(|(&[x, y, z], (w, d))| CPoint::new(x + d.x, y + d.y, z + d.z, w))
+                .collect()
+        };
+        let net = vec![
+            row([
+                [4.770_516_121_717_348, -29.0, 58.638_980_067_614_24],
+                [
+                    4.774_450_686_714_966,
+                    -28.999_999_970_573_803,
+                    58.639_563_676_146_95,
+                ],
+                [4.778_385_209_010_169, -29.0, 58.640_147_758_206_49],
+            ]),
+            row([
+                [4.770_516_121_717_353, -82.0, 58.638_980_067_614_24],
+                [
+                    4.774_450_686_714_971,
+                    -81.999_999_916_794_9,
+                    58.639_563_676_146_95,
+                ],
+                [4.778_385_209_010_175, -82.0, 58.640_147_758_206_49],
+            ]),
+        ];
+        let knot = 0.007_955_252_114_514_06;
+        let nurb = Nurb::new(
+            net,
+            1,
+            2,
+            vec![0.0, 0.0, 53.0, 53.0],
+            vec![0.0, 0.0, 0.0, knot, knot, knot],
+        )
+        .unwrap();
+        BSplineSurface::from_nurb(nurb, false)
+    }
+
+    /// #17462: the wall a linear sweep made from 0.008 mm of a spline, a 0.005 degree arc of
+    /// radius 88 mm swept 53 mm along -y, its NURBS form as the app's flat arrays carry it
+    /// (rows exact translates). The legs' normal of so short an arc is 2e-8 rad off the
+    /// ruling, past the angular zero both recoveries held it to, so the form, which is the
+    /// cylinder's own, was refused. It is a cylinder on the form with the ruling's axis.
+    #[test]
+    fn a_very_short_extruded_arc_is_a_cylinder_whatever_its_legs_normal() {
+        use crate::surface::implicit::{lies_on, AnalyticSupport};
+        let k = kernel();
+        let form = short_arc_wall(Vec3::ZERO);
+        let cone = Cone::is_nurb_surface_cylinder(&k, &form, 1.0)
+            .unwrap()
+            .expect("a cylinder");
+        let surface = crate::surface::surface::Surface::from(cone);
+        let support = AnalyticSupport::of(&surface).expect("an analytic surface");
+        assert!(lies_on(&form, &support.implicit()).unwrap(), "{support:?}");
+        let (AnalyticSupport::Cylinder { placement, .. } | AnalyticSupport::Cone { placement, .. }) =
+            support
+        else {
+            panic!("{support:?}");
+        };
+        let axis = placement.z_axis();
+        assert!(axis.x.abs() < 1e-15 && axis.z.abs() < 1e-15, "{axis:?}");
+    }
+
+    /// #18415 review: the chord recovery holds the arc's control points to the circle only
+    /// within `pt_tol` (1.4e-8 here). The #17462 wall with its middle control points moved
+    /// 5e-9 mm off the circle, square to the chord in the arc's plane, passes every one of
+    /// those checks, but its net is not the cylinder's: the copy is refused rather than
+    /// labelled as that cylinder, and the surface stays a B-spline.
+    #[test]
+    fn a_short_arc_wall_off_its_circle_by_less_than_the_zero_is_no_cylinder() {
+        let k = kernel();
+        let chord = Vec3::new(
+            4.778_385_209_010_169 - 4.770_516_121_717_348,
+            0.0,
+            58.640_147_758_206_49 - 58.638_980_067_614_24,
+        );
+        let across = Vec3::new(-chord.z, 0.0, chord.x).unitize().unwrap();
+        let wall = short_arc_wall(across * 5e-9);
+        assert!(Cone::is_nurb_surface_cylinder(&k, &wall, 1.0)
+            .unwrap()
+            .is_none());
+    }
+
     /// #16488: a form whose rows are not exact translates. A unit-radius arc of 1 rad about
     /// the x axis, extruded 1 mm along x, whose top row is turned about the axis by `turn`.
     /// The recogniser holds the arcs' X axes to `EFF_ZERO_SQRT` radians, so a turn of half
@@ -2114,27 +2425,24 @@ mod tests {
 
     /// fork dfc7cb6 (`sm_GetEllipseTrimIntervals` / `sm_IsConePointInTrimDomain`,
     /// `if(!SmSurface::STEPInversionAnswered(eInv)) { SER(eInv) ; }`): a point off the
-    /// generator is an answer, read as exterior for either setting, and a point on the
-    /// cone inverts. Coverage only: the failure the fix passes on (a failed
-    /// start-plane transform, `CCWAngleBetween` on a zero projection) is screened out
-    /// by the transform's own axis and projection checks for every finite input.
+    /// generator is an answer, read as exterior, and a point on the cone inverts.
+    /// Coverage only: the failure passed on (a failed start-plane transform,
+    /// `CCWAngleBetween` on a zero projection) is screened out by the transform's own
+    /// axis and projection checks for every finite input.
     #[test]
-    fn cone_inversion_answers_read_for_either_setting() {
-        for apart in [false, true] {
-            let mut k = kernel();
-            k.fixes.analytic_inversion_answers_apart = apart;
-            let cone = canonical(&k, 2.0, 2.0, 3.0, false, false);
-            let off = Point3::new(3.0, 0.0, 1.0);
-            assert_eq!(
-                cone_inversion(&k, &cone, off, 1e-9).unwrap().0,
-                LocationType::Exterior
-            );
-            let on = Point3::new(0.0, 2.0, 1.0);
-            assert_ne!(
-                cone_inversion(&k, &cone, on, 1e-9).unwrap().0,
-                LocationType::Exterior
-            );
-        }
+    fn cone_inversion_answers_read_as_locations() {
+        let k = kernel();
+        let cone = canonical(&k, 2.0, 2.0, 3.0, false, false);
+        let off = Point3::new(3.0, 0.0, 1.0);
+        assert_eq!(
+            cone_inversion(&k, &cone, off, 1e-9).unwrap().0,
+            LocationType::Exterior
+        );
+        let on = Point3::new(0.0, 2.0, 1.0);
+        assert_ne!(
+            cone_inversion(&k, &cone, on, 1e-9).unwrap().0,
+            LocationType::Exterior
+        );
     }
 
     #[test]
@@ -3047,5 +3355,58 @@ mod tests {
         }
         // a radius that would go through the axis is refused
         assert!(cylinder.lean_cylinder(&k, 2.0, 4.0).is_err());
+    }
+
+    /// Two end arcs of a short cylinder differ by two ulps at one control point. Their
+    /// weights still describe the same circle; recovering each radius from point angles
+    /// amplifies that rounding enough to refuse the cylinder.
+    #[test]
+    fn short_cylinder_with_rounded_end_arcs_keeps_its_exact_class() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as Nurb;
+        use crate::surface::implicit::{lies_on, AnalyticSupport};
+
+        let k = kernel();
+        let (radius, half, start) = (300.0, 0.0009_f64, -0.4);
+        let weight = half.cos();
+        let mut net = Vec::new();
+        for y in [0.0, -80.0] {
+            let mut row = Vec::new();
+            for (i, (angle, w)) in [
+                (start, 1.0),
+                (start + half, weight),
+                (start + 2.0 * half, 1.0),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let mut x = 10.0 + radius * angle.cos() / w;
+                let z = 30.0 + radius * angle.sin() / w;
+                if y < 0.0 && i == 1 {
+                    x = x.next_up().next_up();
+                }
+                row.push(CPoint::new(x * w, y * w, z * w, w));
+            }
+            net.push(row);
+        }
+        let form = BSplineSurface::from_nurb(
+            Nurb::new(
+                net,
+                1,
+                2,
+                vec![0.0, 0.0, 80.0, 80.0],
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            false,
+        );
+        let cylinder = Cone::is_nurb_surface_cylinder(&k, &form, 1.0)
+            .unwrap()
+            .expect("a short cylinder");
+        assert!((cylinder.base_radius() - radius).abs() < 1e-6);
+        assert_eq!(cylinder.rev().base().gw_nurb(), form.gw_nurb());
+        let support =
+            AnalyticSupport::of(&crate::surface::surface::Surface::from(cylinder)).unwrap();
+        assert!(lies_on(&form, &support.implicit()).unwrap(), "{support:?}");
     }
 }

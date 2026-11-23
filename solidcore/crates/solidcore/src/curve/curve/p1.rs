@@ -1449,7 +1449,17 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
                     target_distance: Some(self.base.at_distance_sq),
                     vectors: opt_slice,
                 };
-                match curve.local_point_solve::<O>(k, &bez_ivl, local_op, test_pnt, &opts, guess) {
+                // (not upstream, #17735) an intersection's minimisation is held to the gap
+                let intersecting = op == SolverOperation::Intersect;
+                match curve.local_point_solve_held::<O>(
+                    k,
+                    &bez_ivl,
+                    local_op,
+                    test_pnt,
+                    &opts,
+                    guess,
+                    intersecting,
+                ) {
                     Ok((f, s)) => {
                         found_solution = f;
                         merge_point_solution(&mut solution, f, &s, local_op);

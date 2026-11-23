@@ -52,3 +52,62 @@ fn every_builtin_theme_loads_under_a_host_with_other_tabs() {
     let onyx = read.iter().find(|theme| theme.id == "onyx").expect("Onyx is built in");
     assert!(onyx.tabs.is_empty(), "{:?}", onyx.tabs.keys());
 }
+
+/// Text and icons read on the surfaces the UI paints them on, in Dark, Light and every built-in
+/// theme (#9468): 4.5:1 for body text, 3:1 for dim labels, icons, bold labels and marks. Inks the
+/// kit chooses for a fill go through `ink_on`; the rest are the theme's own pairs.
+#[test]
+fn every_builtin_theme_keeps_text_and_icons_readable_on_their_surfaces() {
+    install_tables();
+    let read = theme_files::read_builtin(themes::BUILTIN).unwrap_or_else(|e| panic!("the built-in themes read: {e}"));
+    let mut themes = vec![("dark".to_string(), solidcraft_theme::Tokens::dark()), ("light".to_string(), solidcraft_theme::Tokens::light())];
+    themes.extend(read.iter().map(|t| (t.id.clone(), theme_files::resolve(t))));
+    let c = solidcraft_theme::contrast_ratio;
+    let over = solidcraft_theme::composite;
+    let ink_on = solidcraft_ui_kit::ink_on;
+    let mut failures = Vec::new();
+    for (id, t) in &themes {
+        let selected = over(t.selected_bg, t.dialog_body);
+        let pairs = [
+            ("text on panel", t.text, t.panel, 4.5),
+            ("form_ink on dialog_body", t.form_ink, t.dialog_body, 4.5),
+            ("text_dim on panel", t.text_dim, t.panel, 3.0),
+            ("text_dim on toolbar", t.text_dim, t.toolbar, 3.0),
+            ("text_dim on hover", t.text_dim, over(t.hover, t.panel), 3.0),
+            ("form_dim on hover", t.form_dim, over(t.hover, t.dialog_body), 3.0),
+            ("form_success on dialog_body", t.form_success, t.dialog_body, 3.0),
+            ("selected_ink on selected_bg", t.selected_ink, selected, 4.5),
+            ("navigation menu: selected row", ink_on(t, selected, t.form_primary, 3.0), selected, 3.0),
+            ("navigation menu: selected row's detail", ink_on(t, selected, t.form_dim, 3.0), selected, 3.0),
+            ("suggestions: picked row", ink_on(t, selected, t.form_primary, 4.5), selected, 4.5),
+            ("footer toggle that is on", ink_on(t, selected, t.form_ink, 4.5), selected, 4.5),
+        ];
+        for (what, ink, fill, floor) in pairs {
+            let ratio = c(ink, fill);
+            if ratio < floor {
+                failures.push(format!("{id}: {what} {ratio:.2}:1 (floor {floor})"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "below the floor:\n{}", failures.join("\n"));
+}
+
+/// The app bar's edit palette keeps its three levels apart and its hovered text readable on Onyx,
+/// which sets the app bar's own colours over Dark. The kit checks its Dark and Light the same way
+/// (`app_bar_edit_palette_has_three_distinct_levels_and_readable_foreground`), and the theme files
+/// are the look's, so this half of the check lives here.
+#[test]
+fn app_bar_edit_palette_reads_on_onyx() {
+    install_tables();
+    let read = theme_files::read_builtin(themes::BUILTIN).unwrap_or_else(|e| panic!("the built-in themes read: {e}"));
+    let onyx_file = read.iter().find(|theme| theme.id == "onyx").expect("Onyx is built in");
+    let color = |name: &str| {
+        onyx_file.colors.get(name).and_then(|v| v.as_str()).and_then(theme_files::parse_color).unwrap_or_else(|| panic!("Onyx's {name}"))
+    };
+    let t = solidcraft_theme::Tokens { app_bar: color("app_bar"), app_bar_text: color("app_bar_text"), ..solidcraft_theme::Tokens::dark() };
+    let c = solidcraft_theme::contrast_ratio;
+    let p = solidcraft_ui_kit::app_bar::edit_palette(t);
+    let (a, b, foreground) = (c(p.card, p.item), c(p.item, p.hover), c(t.app_bar_text, p.hover));
+    assert!(a >= 1.25 && b >= 1.25, "Onyx: separate levels {a}/{b}");
+    assert!(foreground >= 4.5, "Onyx: hovered text remains legible {foreground}");
+}

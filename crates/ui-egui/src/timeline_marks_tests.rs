@@ -313,3 +313,71 @@ fn a_failed_features_tooltip_shows_its_whole_error_in_the_error_colour_wherever_
         assert_eq!((colour, cut), (red, false), "left History {width} wide");
     }
 }
+
+/// #17697: SMLib's check of an inserted STEP part runs on after the design shows. When it ends
+/// with a part to repair, the import's History chip warns and the status line says so, once.
+#[test]
+fn a_part_the_check_fails_after_the_import_shows_raises_the_chip_and_the_status_once() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-17697-ui-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("block.step");
+    std::fs::write(&path, include_str!("../../../tests/step-regressions/block_edge_off_its_face.step")).unwrap();
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.insert_path_with(&path.to_string_lossy(), &Default::default(), false).unwrap();
+    let id = app.session.doc.features.iter().find(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Import { .. })).expect("the import").id;
+    let report = app.session.model.result(id).and_then(|r| r.import_report.clone()).expect("the import's check");
+    report.settled().expect("the check ends");
+    app.status = None;
+    let ctx = crate::fonts::test_context();
+    crate::timeline::tick_import_checks(&mut app, &ctx);
+    let result = app.session.model.result(id).unwrap();
+    assert!(crate::timeline::has_warning(result), "the chip warns");
+    assert!(matches!(crate::timeline::feature_status(&app, id), Some(crate::ui_kit::Status::Warning)));
+    let summary = crate::timeline::import_summary(result.import_report.as_deref().unwrap());
+    let (text, _, error) = app.status.clone().expect("the status line says so");
+    assert_eq!((text, error), (crate::i18n::tr_diagnostic(&summary), false));
+    let details = crate::timeline::feature_message(&app, id).unwrap();
+    assert!(details.contains("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: "), "{details}");
+    app.status = None;
+    crate::timeline::tick_import_checks(&mut app, &ctx);
+    assert!(app.status.is_none(), "once");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #20633: an import's check of its parts runs for minutes after the design shows, and the window
+/// is asked for no frames while it does. Its end asks for exactly one frame, the one whose tick
+/// settles the result; nothing is asked for after that.
+#[test]
+fn a_running_imports_check_asks_for_no_frames_and_its_end_wakes_the_window_once() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-20633-ui-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("block.step");
+    std::fs::write(&path, include_str!("../../../tests/step-regressions/block_edge_off_its_face.step")).unwrap();
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.insert_path_with(&path.to_string_lossy(), &Default::default(), false).unwrap();
+    let id = app.session.doc.features.iter().find(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Import { .. })).expect("the import").id;
+    // The check of a file this small ends at once: hold one running to ask of the tick what it
+    // asks of the window while a large one runs.
+    let end = app.session.model.running_import_check_for_tests(id);
+    assert!(app.session.model.checking_imports(), "a check is in flight");
+    let ctx = crate::fonts::test_context();
+    fn frame(app: &mut SolveApp, ctx: &egui::Context, time: f64) -> Option<std::time::Duration> {
+        let raw = egui::RawInput { time: Some(time), ..Default::default() };
+        let mut out = ctx.run_ui(raw, |ui| {
+            crate::timeline::tick_import_checks(app, ui.ctx());
+        });
+        out.textures_delta.clear();
+        out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.repaint_delay)
+    }
+    frame(&mut app, &ctx, 0.0);
+    frame(&mut app, &ctx, 0.01);
+    let running = frame(&mut app, &ctx, 0.02);
+    assert!(running.is_some_and(|d| d.as_secs_f64() > 1.0), "a running check asked for a frame after {running:?}: it must ask for none");
+    end(vec![]);
+    let woke = frame(&mut app, &ctx, 0.04);
+    assert!(woke.is_some_and(|d| d.is_zero()), "the end of the check asks for the next frame at once, got {woke:?}");
+    assert!(!app.session.model.checking_imports(), "the frame it asked for settles the result");
+    let after = frame(&mut app, &ctx, 0.06);
+    assert!(after.is_some_and(|d| d.as_secs_f64() > 1.0), "and asks for no more after that, got {after:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
