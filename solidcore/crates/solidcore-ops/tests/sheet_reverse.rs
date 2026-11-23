@@ -233,8 +233,17 @@ fn a_face_used_backward_keeps_its_side_through_the_kernel() {
             );
         }
     }
-    let ends = |r: &Brep| r.vertices.iter().map(|v| v.point).collect::<Vec<_>>();
-    assert_eq!(ends(&again).len(), ends(&back).len());
+    // numbered as the record numbers them: each vertex where it was, each edge between the
+    // same vertices along the same curve
+    let points = |r: &Brep| r.vertices.iter().map(|v| v.point).collect::<Vec<_>>();
+    assert_eq!(points(&again), points(&back));
+    let ends = |r: &Brep| {
+        r.edges
+            .iter()
+            .map(|e| (e.vertices, e.curve.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ends(&again), ends(&back));
     // turned over by ops, the record's front again
     let (turned, _) = reverse_sheet(&back).unwrap();
     let n = shell_normal(

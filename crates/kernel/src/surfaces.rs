@@ -784,12 +784,8 @@ pub(crate) fn stitch_no_worse(bodies: &[&Body], tol: f64, exempt: &[u32]) -> Res
 /// ([`crate::offset_backend::thicken`]).
 pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
     body.require_brep("thicken")?;
-    // SMLib holds a sheet's faces with both sides and thickens along their surfaces' natural
-    // normals; a sheet turned to its back (every face used against its natural normal) grows the
-    // other way.
-    let sides = face_sides(body.record());
-    let turned = !sides.is_empty() && sides.iter().all(|forward| !forward);
-    imp::thicken(body, if turned { -thickness } else { thickness }, symmetric)
+    // SMLib's import gives each face its record's side in its surface, which SMLib thickens along.
+    imp::thicken(body, thickness, symmetric)
 }
 
 /// The faces `picked` of `body` (indices in its face order) offset one by one by SMLib, each onto
@@ -802,12 +798,8 @@ pub(crate) fn offset_faces(body: &Body, picked: &[usize], distance: f64, toleran
     if distance == 0.0 {
         return taken(body, r, &picked.iter().map(|f| (*f, false)).collect::<Vec<_>>());
     }
-    // SMLib offsets along the surface's normal, so a face the body uses from its surface's back moves the other way.
-    let sides = face_sides(r);
-    let moved = picked
-        .iter()
-        .map(|f| imp::offset_face(r, *f, if sides.get(*f).copied().unwrap_or(true) { distance } else { -distance }))
-        .collect::<Result<Vec<_>>>()?;
+    // SMLib offsets along the surface's normal, which its import turns to the face's side.
+    let moved = picked.iter().map(|f| imp::offset_face(r, *f, distance)).collect::<Result<Vec<_>>>()?;
     let (parts, offsets) = Parts::joined(&moved.iter().collect::<Vec<_>>())?;
     let c = parts.canonical()?;
     let (result, h) = imp::stitched(&c.brep, tolerance.max(c.brep.tolerance))?;
@@ -1985,6 +1977,46 @@ mod tests {
         let down = measure(&thicken(&turned, 2.0, false).unwrap()).unwrap().bbox;
         assert!((up.min.z - down.min.z - 2.0).abs() < 1e-9 && (up.max.z - down.max.z - 2.0).abs() < 1e-9, "{up:?} vs {down:?}");
         assert!(reverse_faces(&box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap(), &[]).is_err());
+    }
+
+    /// A half tube wall (the arc of radius 5 from 0 to π, swept 10 up z) thickens out by 1 to the
+    /// half tube between radii 5 and 6, π/2·(36 − 25)·10; turned over, in to the one between 4
+    /// and 5, π/2·(25 − 16)·10, and so does its half x > 0 trimmed off after the turn, half of
+    /// that (#13640). A square patch of 10 with a hole of 2 at its middle, turned over and
+    /// trimmed at x = 5, keeps (100 − 4)/2 = 48, and thickened by 1 it grows on its turned side.
+    #[test]
+    fn a_turned_tube_wall_and_a_turned_holed_patch_keep_their_sides() {
+        use std::f64::consts::PI;
+        let arc = vec![Seg2::Arc { center: Vec2::new(0.0, 0.0), radius: 5.0, start: 0.0, sweep: PI }];
+        let wall = extrude_sheet(&Plane::XY, &[arc], 0.0, 10.0).unwrap();
+        let volume = |b: &Body| measure(&thicken(b, 1.0, false).unwrap()).unwrap().volume;
+        let (out, inward) = (PI / 2.0 * 11.0 * 10.0, PI / 2.0 * 9.0 * 10.0);
+        assert!(rel(volume(&wall), out) < 1e-9, "{} vs {out}", volume(&wall));
+        let turned = reverse_faces(&wall, &[]).unwrap();
+        assert!(rel(volume(&turned), inward) < 1e-9, "{} vs {inward}", volume(&turned));
+        let cut = crate::SplitTool::Plane(Plane::new(Vec3::ZERO, Vec3::Y, Vec3::Z).unwrap());
+        let quarter = trim(&turned, &cut, Vec3::new(4.0, 3.0, 5.0)).unwrap();
+        assert!(rel(measure(&quarter).unwrap().area, 25.0 * PI) < 1e-6, "{}", measure(&quarter).unwrap().area);
+        assert!(rel(volume(&quarter), inward / 2.0) < 1e-9, "{} vs {}", volume(&quarter), inward / 2.0);
+
+        let square = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)]);
+        let hole = Loop2::polygon(&[Vec2::new(4.0, 4.0), Vec2::new(4.0, 6.0), Vec2::new(6.0, 6.0), Vec2::new(6.0, 4.0)]);
+        let patch = patch_region(&Plane::XY, &Region2 { outer: square, holes: vec![hole] }).unwrap();
+        let z = |b: &Body| {
+            let bb = measure(&thicken(b, 1.0, false).unwrap()).unwrap().bbox;
+            (bb.min.z, bb.max.z)
+        };
+        let (lo, hi) = z(&patch);
+        let up: f64 = if hi > 0.5 { 1.0 } else { -1.0 };
+        assert!((lo.min(hi) - up.min(0.0)).abs() < 1e-9 && (lo.max(hi) - up.max(0.0)).abs() < 1e-9, "{lo}..{hi}");
+        let turned = reverse_faces(&patch, &[]).unwrap();
+        let cut = crate::SplitTool::Plane(Plane::new(Vec3::new(5.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap());
+        let half = trim(&turned, &cut, Vec3::new(1.0, 1.0, 0.0)).unwrap();
+        assert!(rel(measure(&half).unwrap().area, 48.0) < 1e-9, "{}", measure(&half).unwrap().area);
+        for b in [&turned, &half] {
+            let (lo, hi) = z(b);
+            assert!((lo - (-up).min(0.0)).abs() < 1e-9 && (hi - (-up).max(0.0)).abs() < 1e-9, "{lo}..{hi} vs up {up}");
+        }
     }
 
     /// A wall (the line y = 0 from x = 0 to 10, swept 10 up z) offset by 2 moves to y = ±2 along
