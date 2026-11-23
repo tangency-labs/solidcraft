@@ -126,6 +126,10 @@ fn named_tool_refusals_keep_plugin_file_and_budget_details() {
                 HostError::OverCeiling { limit: "memory_mib".into(), requested: 2048, allowed: 128 },
                 json!({"plugin":"sample","grant":"memory_mib","approve":tools::APPROVE}),
             ),
+            (
+                HostError::OverCeiling { limit: "fuel".into(), requested: MAX_APPROVED_FUEL, allowed: 100_000_000_000 },
+                json!({"plugin":"sample","grant":"fuel","approve":tools::APPROVE}),
+            ),
         ] {
             let failure = PluginFailure { plugin: "Sample".into(), file: file.map(String::from), exporting: false, error };
             let original = failure.text();
@@ -133,16 +137,20 @@ fn named_tool_refusals_keep_plugin_file_and_budget_details() {
             assert!(explained.starts_with(&original), "{explained}");
             assert_eq!(structured_tool_error(&explained), Some(structured), "{explained}");
         }
-        let failure = PluginFailure {
-            plugin: "Sample".into(),
-            file: file.map(String::from),
-            exporting: false,
-            error: HostError::Exhausted { limit: "fuel".into(), allowed: 100000 },
-        };
-        let original = failure.text();
-        let unchanged = explain_named(&session, &manifest, "make", EngineError::PluginFailed(Box::new(failure)));
-        assert!(matches!(unchanged, EngineError::PluginFailed(_)));
-        assert_eq!(unchanged.to_string(), original);
+        for error in [
+            HostError::Exhausted { limit: "fuel".into(), allowed: 100000 },
+            HostError::OverCeiling { limit: "fuel".into(), requested: MAX_APPROVED_FUEL + 1, allowed: 100_000_000_000 },
+        ] {
+            let unchanged = explain_named(&session, &manifest, "make", error.clone().into());
+            assert!(matches!(&unchanged, EngineError::Plugin(actual) if actual == &error));
+            assert!(structured_tool_error(&unchanged.to_string()).is_none());
+            let failure = PluginFailure { plugin: "Sample".into(), file: file.map(String::from), exporting: false, error };
+            let original = failure.text();
+            let unchanged = explain_named(&session, &manifest, "make", EngineError::PluginFailed(Box::new(failure)));
+            assert!(matches!(unchanged, EngineError::PluginFailed(_)));
+            assert_eq!(unchanged.to_string(), original);
+            assert!(structured_tool_error(&unchanged.to_string()).is_none());
+        }
     }
     assert!(matches!(explain_named(&session, &manifest, "make", HostError::Cancelled.into()), EngineError::Plugin(HostError::Cancelled)));
 }
@@ -877,7 +885,7 @@ mod native {
         let inspection = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
         assert_eq!(inspection["within_host_limits"], false);
         assert_eq!(inspection["host_limits"]["max_memory_mib"], 128);
-        let refusal = "Sample: it asks for 200000000000 fuel, and plugins may use 100000000000. Raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file).";
+        let refusal = "Sample: it asks for 200000000000 fuel, and plugins may use 100000000000. Install the plugin again and allow its fuel request, or raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file).";
         assert_eq!(inspection["limits_error"], refusal);
         let before = s.doc.to_json();
         let error = f.run(&mut s).unwrap_err();
@@ -908,6 +916,34 @@ mod native {
         assert!(f.run(&mut s).is_err());
         assert_eq!(s.doc.to_json(), before);
     }
+    #[test]
+    fn approved_fuel_runs_without_changing_other_plugins_default_limit() {
+        let f = Fixture::new("call $box");
+        let path = f.0.join("sample/plugin.json");
+        let mut m = manifest();
+        let fuel = 10_000_000_000_000_u64;
+        m["runtime"]["limits"]["fuel"] = json!(fuel);
+        std::fs::write(&path, m.to_string()).unwrap();
+        let mut s = Session::default();
+        let installed = f.install(&mut s, json!({"fuel":fuel}));
+        let inspection = s.execute("plugin.inspect", &json!({"path":installed})).unwrap();
+        assert_eq!(inspection["within_host_limits"], true);
+        s.execute("plugin.run", &json!({"path":installed,"approval":inspection["approval"],"entry":"make"})).unwrap();
+        assert_eq!(s.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"], 24.);
+        m["runtime"]["limits"]["fuel"] = json!(fuel - 1);
+        std::fs::write(Path::new(&installed).join("plugin.json"), m.to_string()).unwrap();
+        let changed = s.execute("plugin.inspect", &json!({"path":installed})).unwrap();
+        assert_eq!(changed["within_host_limits"], false);
+        assert!(s.execute("plugin.run", &json!({"path":installed,"approval":changed["approval"],"entry":"make"})).is_err());
+        // An omitted limits object still uses the manifest's default fuel under Max plugin fuel.
+        m["runtime"].as_object_mut().unwrap().remove("limits");
+        std::fs::write(&path, m.to_string()).unwrap();
+        let installed = f.install(&mut s, json!({}));
+        let approval = read_package(&installed).unwrap().approval;
+        assert_eq!(host_limits_for(&s, "sample", &approval).max_fuel, HostLimits::default().max_fuel);
+        s.execute("plugin.run", &json!({"path":installed,"approval":approval,"entry":"make"})).unwrap();
+    }
+
     #[test]
     fn a_plugin_prepared_under_an_old_host_policy_is_not_adopted() {
         for command in ["plugin.run", "PLUGIN.RUN"] {
@@ -1896,6 +1932,7 @@ mod native {
                         package_hash: Some(read_package(&f.path()).unwrap().approval),
                         command_groups: BTreeSet::new(),
                         folders: s.plugin_state.file_grants.clone(),
+                        fuel: None,
                         memory_mib: None,
                         input_folder: false,
                     },
@@ -2035,7 +2072,7 @@ mod native {
             (|m: &mut Value| m["capabilities"] = json!(["commands@0.3"]), "capabilities"),
             (|m: &mut Value| m["runtime"]["commands"] = json!(["file.export"]), "runtime.commands"),
             (|m: &mut Value| m["runtime"]["limits"]["deadline_ms"] = json!(60_000), "runtime.limits.deadline_ms"),
-            (|m: &mut Value| m["runtime"]["limits"]["fuel"] = json!(200_000_000_000_u64), "runtime.limits.fuel"),
+            (|m: &mut Value| m["runtime"]["limits"]["fuel"] = json!(10_000_000_000_001_u64), "runtime.limits.fuel"),
             (|m: &mut Value| m["runtime"]["module"] = json!("missing.wasm"), "runtime.module"),
             (|m: &mut Value| m["surprise"] = json!(true), "manifest"),
         ] {
@@ -2051,6 +2088,9 @@ mod native {
         m["runtime"]["limits"]["memory_mib"] = json!(512);
         let reply = check(&mut s, &zip(&m, &component));
         assert_eq!((reply["ok"].as_bool(), fields(&reply)), (Some(true), vec![("warning".to_string(), "runtime.limits.memory_mib".to_string())]));
+        m["runtime"]["limits"] = json!({"fuel":10_000_000_000_000_u64,"memory_mib":64,"deadline_ms":5000});
+        let reply = check(&mut s, &zip(&m, &component));
+        assert_eq!((reply["ok"].as_bool(), fields(&reply)), (Some(true), vec![("warning".to_string(), "runtime.limits.fuel".to_string())]));
         // A core module, and a command component declared as an importer, do not link.
         let core = wat::parse_str("(module)").unwrap();
         let reply = check(&mut s, &zip(&manifest(), &core));
@@ -3422,6 +3462,65 @@ mod install_zip {
     }
 
     #[test]
+    fn approved_fuel_is_stored_for_the_exact_package_and_replacement_asks_again() {
+        let (mut s, root) = session("fuel");
+        let fuel = 10_000_000_000_000_u64;
+        let mut m = manifest();
+        m["runtime"]["limits"]["fuel"] = json!(fuel);
+        let path = put(&root, "fuel.zip", &zip(&[("plugin.json", &serde_json::to_vec(&m).unwrap()), ("plugin.wasm", b"inert bytes")]));
+        let dry = s.execute("plugin.install", &json!({"path":path,"dry_run":true})).unwrap();
+        assert_eq!(dry["limits"]["fuel"], fuel);
+        assert_eq!(dry["host_limits"]["max_fuel"], 100_000_000_000_u64);
+        assert!(s.plugin_state.grants.is_empty());
+        for wrong in [json!(fuel - 1), json!(fuel + 1), json!(0), json!(-1), json!("10000000000000")] {
+            assert!(s.execute("plugin.install", &json!({"path":path,"approve":{"fuel":wrong}})).is_err(), "{wrong}");
+            assert!(!root.join("plugins").exists());
+        }
+        s.plugin_state.stored = Some(Default::default());
+        s.execute("plugin.install", &json!({"path":path,"approval":dry["approval"],"approve":{"fuel":fuel}})).unwrap();
+        let installed = root.join("plugins/sample");
+        let approval = read_package(&installed.to_string_lossy()).unwrap().approval;
+        assert_eq!(serde_json::to_value(&s.plugin_state.grants["sample"]).unwrap()["fuel"], fuel);
+        assert_eq!(host_limits_for(&s, "sample", &approval).max_fuel, fuel);
+        assert_eq!(host_limits_for(&s, "other", &approval).max_fuel, s.plugin_limits.max_fuel);
+        assert_eq!(s.plugin_limits.max_fuel, 100_000_000_000);
+        let mut later = Session::default();
+        later.plugin_state.plugins_dir = Some(root.join("plugins"));
+        later.plugin_state.stored = Some(Default::default());
+        later.plugin_state.refresh_stored();
+        assert_eq!(later.execute("plugin.grants", &json!({})).unwrap()["grants"][0]["fuel"], fuel);
+        assert_eq!(host_limits_for(&later, "sample", &approval).max_fuel, fuel);
+        m["runtime"]["limits"]["fuel"] = json!(fuel - 1);
+        std::fs::write(installed.join("plugin.json"), m.to_string()).unwrap();
+        let changed = read_package(&installed.to_string_lossy()).unwrap().approval;
+        assert_ne!(approval, changed);
+        assert_eq!(host_limits_for(&later, "sample", &changed).max_fuel, later.plugin_limits.max_fuel);
+        assert_eq!(later.execute("plugin.grants", &json!({})).unwrap()["grants"][0]["status"], "changed");
+        s.execute("plugin.install", &json!({"path":path,"replace":true})).unwrap();
+        assert_eq!(host_limits_for(&s, "sample", &approval).max_fuel, s.plugin_limits.max_fuel);
+        s.execute("plugin.revoke", &json!({"id":"sample"})).unwrap();
+        assert!(s.execute("plugin.grants", &json!({})).unwrap()["grants"].as_array().unwrap().is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fuel_above_the_hard_ceiling_is_refused_before_installation() {
+        let (mut s, root) = session("fuel-hard-ceiling");
+        let mut m = manifest();
+        let ceiling = 10_000_000_000_000_u64;
+        m["runtime"]["limits"]["fuel"] = json!(ceiling + 1);
+        let path = put(&root, "fuel.zip", &zip(&[("plugin.json", &serde_json::to_vec(&m).unwrap()), ("plugin.wasm", b"inert bytes")]));
+        s.plugin_limits.max_fuel = u64::MAX;
+        for args in [json!({"path":path,"dry_run":true}), json!({"path":path,"approve":{"fuel":ceiling + 1}})] {
+            let error = s.execute("plugin.install", &args).unwrap_err();
+            assert_eq!(error.host_error(), Some(&HostError::OverCeiling { limit: "fuel".into(), requested: ceiling + 1, allowed: ceiling }));
+            assert!(error.to_string().contains(&(ceiling + 1).to_string()) && error.to_string().contains(&ceiling.to_string()));
+            assert!(!root.join("plugins").exists() && s.plugin_state.grants.is_empty());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn installs_without_approval_grant_nothing_and_replacement_drops_stale_grants() {
         let (mut s, root) = session("stale");
         let path = requested_package(&root);
@@ -3742,6 +3841,8 @@ mod stored_grants {
             ("unknown.json", record(json!({"command_groups":["file"],"net":true}))),
             ("group.json", record(json!({"command_groups":["everything"]}))),
             ("memory.json", record(json!({"memory_mib":1_000_000}))),
+            ("fuel.json", record(json!({"fuel":10_000_000_000_001_u64}))),
+            ("zero-fuel.json", record(json!({"fuel":0}))),
             ("hash.json", record(json!({"package_hash":"not a hash"}))),
             ("relative.json", record(json!({"folders":[{"name":"out","folder":"out","read":true,"write":true}]}))),
             ("Bad_Id.json", record(json!({}))),
