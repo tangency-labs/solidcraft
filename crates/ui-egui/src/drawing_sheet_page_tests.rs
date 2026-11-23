@@ -1451,6 +1451,32 @@ fn a_chain_line_keeps_its_dots_under_round_caps() {
     assert!(ends.len() == expected.len() && ends.iter().zip(expected).all(|(a, b)| (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9), "{ends:?}");
 }
 
+/// A line that starts exactly on a dot draws it, and none exactly at its end, as the writers do:
+/// 0.5 mm wide, 0.5, 1.5 from 0.25 is stroked 0, 2 from 0, so along 4 mm the dots are at 0 and 2.
+#[test]
+fn a_dotted_line_starts_on_its_dot() {
+    let dotted = Item::Stroke {
+        path: vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(4.0, 0.0) }],
+        closed: false,
+        width_mm: 0.5,
+        pattern: Some(Dashes { lengths_mm: vec![0.5, 1.5], phase_mm: 0.25 }),
+    };
+    let scene = Scene {
+        size_mm: Vec2::new(100.0, 100.0),
+        groups: vec![Group { object: 1, kind: ObjectKind::View, items: vec![dotted] }],
+        fonts: Vec::new(),
+        clips: Vec::new(),
+    };
+    let marks = Marks::of(&scene, 7, 0.01);
+    assert!(marks.error.is_none(), "{:?}", marks.error);
+    let ends: Vec<(f64, f64)> = marks
+        .marks
+        .iter()
+        .filter_map(|m| if let Mark::Line { points, .. } = m { Some((points.first()?.x, points.last()?.x)) } else { None })
+        .collect();
+    assert_eq!(ends, [(0.0, 0.0), (2.0, 2.0)]);
+}
+
 /// The plate's sheet draws its border, views, dimension and title block text: every text run's
 /// glyphs are filled, and all of it lies on the paper.
 #[test]

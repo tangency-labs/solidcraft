@@ -1636,7 +1636,9 @@ fn a_views_hidden_lines_are_dashed_strokes_under_its_outline() {
     assert!((dashed.1 - 100.0).abs() < 1e-6 && (solid - 240.0).abs() < 1e-6, "{dashed:?} {solid}");
     let (svg, _) = solidcraft_io::paper::paper_svg(&scene.prepare().unwrap(), &NoPictures, DEFAULT_DPI).unwrap();
     let svg = String::from_utf8(svg).unwrap();
-    assert_eq!(svg.matches("stroke-dasharray=\"3 0.75\"").count(), 4, "{svg}");
+    // Under the round caps each dash is stroked a line width shorter about its middle: 2.75 and 1,
+    // from 3.75 - 0.125 into the pattern.
+    assert_eq!(svg.matches("stroke-dasharray=\"2.75 1\" stroke-dashoffset=\"3.625\"").count(), 4, "{svg}");
     let plain = snap(&mut s, json!({"scale": "1:1", "scene": true}));
     assert!(strokes(&plain).iter().all(|(_, _, width)| *width == 0.5), "{plain}");
     assert_eq!(plain["scene"].to_string().matches("lengths_mm").count(), 0, "{plain}");

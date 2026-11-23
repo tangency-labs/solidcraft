@@ -1418,11 +1418,12 @@ fn dashed(points: &[Vec2], closed: bool, dashes: &Dashes, budget: &mut usize) ->
     if closed && let Some(first) = points.first() {
         path.push(*first);
     }
-    // Where in the pattern the line starts.
+    // Where in the pattern the line starts: on a dot when the phase ends exactly at one, as the
+    // writers start.
     let mut into = dashes.phase_mm.rem_euclid(period);
     let mut index = 0usize;
     while let Some(l) = lengths.get(index)
-        && into >= *l
+        && (into > *l || (into == *l && *l > 0.0))
     {
         into -= l;
         index = (index + 1) % lengths.len();

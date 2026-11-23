@@ -549,3 +549,15 @@ fn a_dashed_stroke_has_its_dasharray_and_offset() {
     assert_eq!(path(0.0), "<path stroke-width=\"1\" stroke-dasharray=\"3.2 2.05\" stroke-dashoffset=\"4.75\" d=\"M5 287L105 287\"/>");
     assert_eq!(path(0.5), "<path stroke-width=\"1\" stroke-dasharray=\"3.2 2.05\" d=\"M5 287L105 287\"/>");
 }
+
+/// A chain line's dot, a dash no longer than the line is wide, is written a nanometre long and not
+/// 0: Qt's SVG renderer draws nothing for a dash 0 long (#20988). At 0.5 mm wide, [12, 1.5, 0.5,
+/// 1.5] is [11.5, 2, 0, 2] from 15.25.
+#[test]
+fn a_dot_is_a_dash_one_nanometre_long() {
+    let pattern = Some(Dashes { lengths_mm: vec![12.0, 1.5, 0.5, 1.5], phase_mm: 0.0 });
+    let scene = sheet(vec![Item::Stroke { path: vec![line(p(5.0, 10.0), p(105.0, 10.0))], closed: false, width_mm: 0.5, pattern }]);
+    let (text, _) = svg(&scene);
+    let path = text.lines().find(|l| l.starts_with("<path")).unwrap();
+    assert_eq!(path, "<path stroke-width=\"0.5\" stroke-dasharray=\"11.5 2 0.000001 2\" stroke-dashoffset=\"15.25\" d=\"M5 287L105 287\"/>");
+}

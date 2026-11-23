@@ -167,7 +167,9 @@ fn a_view_with_hidden_lines_exports_dashed() {
     let statuses: Vec<_> = reply["views"].as_array().unwrap().iter().map(|v| v["status"].clone()).collect();
     assert_eq!(statuses, [json!("drawn"), json!("drawn")], "{reply}");
     let svg = reply["svg"].as_str().unwrap();
-    assert_eq!(svg.matches("stroke-dasharray=\"3 0.75\"").count(), 7, "{svg}");
+    // A hidden line's 3 mm dash and 0.75 mm gap at 0.25 mm wide are stroked 2.75 and 1 under the
+    // round caps (`Dashes::under_round_caps`).
+    assert_eq!(svg.matches("stroke-dasharray=\"2.75 1\" stroke-dashoffset=\"3.625\"").count(), 7, "{svg}");
     assert_eq!(svg.as_bytes(), scene_svg(&s, sheet).as_slice());
 }
 
