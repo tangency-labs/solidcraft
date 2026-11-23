@@ -1050,8 +1050,7 @@ mod tests {
         check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
         strip(&mut b);
         assert!(
-            !crate::topology::trimming_tools::face_uv_curves_present(&b, b.face_list()[0])
-                .unwrap()
+            !crate::topology::trimming_tools::face_uv_curves_present(&b, b.face_list()[0]).unwrap()
         );
         assert!(
             pass_whole(&k, &b),
@@ -1121,7 +1120,11 @@ mod tests {
         let mut out = Vec::new();
         for &e in b.edge_list() {
             let edge = b.edge(e).unwrap();
-            out.push(format!("{e:?} {:x} {:?}", edge.tolerance.to_bits(), edge.interval));
+            out.push(format!(
+                "{e:?} {:x} {:?}",
+                edge.tolerance.to_bits(),
+                edge.interval
+            ));
             for &eu in &edge.edgeuses {
                 let u = b.edgeuse(eu).unwrap();
                 out.push(format!(
@@ -1138,7 +1141,10 @@ mod tests {
             }
         }
         for &v in b.vertex_list() {
-            out.push(format!("{v:?} {:x}", b.vertex(v).unwrap().tolerance.to_bits()));
+            out.push(format!(
+                "{v:?} {:x}",
+                b.vertex(v).unwrap().tolerance.to_bits()
+            ));
         }
         out
     }
@@ -1151,9 +1157,9 @@ mod tests {
     fn a_first_check_on_faces_without_trims_runs_one_pointer_pass() {
         let (mut k, mut b) = box_and_cylinder(true);
         assert!(
-            b.face_list().iter().any(
-                |&f| !crate::topology::trimming_tools::face_uv_curves_present(&b, f).unwrap()
-            ),
+            b.face_list()
+                .iter()
+                .any(|&f| !crate::topology::trimming_tools::face_uv_curves_present(&b, f).unwrap()),
             "the united body already has every trim"
         );
         let (once, passes) = check_counting(&mut k, &mut b);
