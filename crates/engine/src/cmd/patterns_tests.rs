@@ -626,6 +626,8 @@ fn inactive_component_patterns_keep_their_occurrences_and_joints() {
         assert_eq!(children.iter().any(|child| child.occurrence == copy), expected);
         let measured = run(s, "inspect.measure", json!({}));
         assert_eq!(measured["body_count"], if expected { 3 } else { 2 });
+        let mass = s.mass_properties().expect("active assembly mass");
+        assert_eq!(mass.occurrences.iter().any(|row| row.occurrence == copy), expected);
         let solved = run(s, "joint.solve", json!({}));
         assert_eq!(solved["errors"], json!([]));
         let dof = solved["dof"].as_array().expect("degrees of freedom");
@@ -702,8 +704,27 @@ fn an_inactive_pattern_does_not_drive_an_active_joints_reported_value() {
     check(&mut s, 7.0);
     run(&mut s, "timeline.suppress", json!({"feature": pattern["feature"], "suppressed": true}));
     check(&mut s, 0.0);
+    let target = solidcraft_doc::joints::Reach {
+        occurrence: seed,
+        point: solidcore_record::Vec3::ZERO,
+        to: solidcore_record::Vec3::new(0.0, 0.0, 3.0),
+        axis: None,
+        joints: None,
+    };
+    let reached = solidcraft_doc::joints::reach(&s.doc, &s.model.state(), &target).unwrap();
+    assert_eq!(reached.values.keys().copied().collect::<Vec<_>>(), [follower]);
     run(&mut s, "timeline.suppress", json!({"feature": pattern["feature"], "suppressed": false}));
     check(&mut s, 7.0);
+
+    // Replacing the dormant link preserves the active slider's solved position, even though
+    // the old link would have driven it to 7 mm if its pattern were active.
+    run(&mut s, "timeline.suppress", json!({"feature": pattern["feature"], "suppressed": true}));
+    run(&mut s, "component.create", json!({"name": "Rotor", "activate": false, "grounded": false}));
+    let spin = run(&mut s, "joint.as_built", json!({"type": "revolute", "a": 0, "b": "Rotor"}))["joint"].as_u64().expect("revolute driver");
+    let before = s.occurrence_placement(&[seed]).unwrap().world;
+    run(&mut s, "joint.screw", json!({"a": spin, "b": follower, "link": 0, "pitch": 2}));
+    check(&mut s, 0.0);
+    assert_eq!(s.occurrence_placement(&[seed]).unwrap().world, before);
 }
 
 /// #4763: a body of a component moved 60 mm along X, patterned from the root. The copy goes

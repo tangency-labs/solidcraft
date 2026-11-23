@@ -2304,8 +2304,10 @@ fn couple(s: &mut Session, p: &Value, cmd: &str, mut l: MotionLink) -> Result<Co
     }
     (l.ratio, l.lift) =
         joints::coupling_values(&s.doc, &s.model.state(), &l).unwrap_or(Ok((l.ratio, Vec::new()))).map_err(|e| bad(cmd, e.to_string()))?;
-    let vals = joints::joint_values(&s.doc.assembly);
-    let value = |id: u64, i: usize| vals.get(&id).and_then(|q| q.get(i)).copied().unwrap_or(0.0);
+    let vals = active_joint_values(&s.doc);
+    let value = |id: u64, i: usize| {
+        vals.get(&id).or_else(|| s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| &j.values)).and_then(|q| q.get(i)).copied().unwrap_or(0.0)
+    };
     // New or put in place of another (turned the other way, a ring gear now), b keeps where it
     // is: the gears stay in mesh at the pose they are in. (A radius edited in the design keeps
     // the offset instead, so the gears turn from where they meshed when they were coupled.)
