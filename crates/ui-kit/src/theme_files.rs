@@ -419,15 +419,14 @@ pub fn export_icon_palette(palette: Option<Palette>) -> BTreeMap<String, Value> 
     let mut out = BTreeMap::new();
     let Some(palette) = palette else { return out };
     let data = crate::icons::installed().data();
-    let hex = |[r, g, b]: [u8; 3]| format!("#{r:02x}{g:02x}{b:02x}");
     for (name, color) in data.role_names.iter().zip(palette.roles) {
         if let Some(rgb) = color {
-            out.insert((*name).into(), json!(hex(rgb)));
+            out.insert((*name).into(), json!(solidcraft_color::hex::format(rgb)));
         }
     }
     for (name, ramp) in std::iter::once("solid").chain(data.accent_names.iter().copied()).zip(palette.accents) {
         if let Some(colors) = ramp {
-            out.insert(name.into(), json!(colors.map(hex)));
+            out.insert(name.into(), json!(colors.map(solidcraft_color::hex::format)));
         }
     }
     out
@@ -506,13 +505,13 @@ theme_keys! {
         sketch_point, sketch_point_free, dialog_bg, dialog_border, chip, section_cap,
         profile_fill, glyph_bg, glyph_edge, glyph_text, overlay, rubber_band, app_bar_text, app_bar_hover, timeline_item,
         timeline_item_error, timeline_marker, field, box_window, box_crossing, sketch_projected, sketch_lost,
-        sketch_construction, sketch_centerline, bend_up, bend_down, interference, comb_envelope, comb_teeth,
+        sketch_construction, sketch_centerline, bend_up, bend_down, paper_white, paper_ink, paper_blueprint, paper_blueprint_ink, paper_prussian_blue, paper_prussian_blue_ink, paper_dark, paper_dark_ink, interference, comb_envelope, comb_teeth,
         sketch_ink, sketch_soft, surface_fill, surface_ink, surface_soft, mesh_fill, mesh_ink, mesh_soft, form_fill, form_tab_ink, form_soft, sheet_fill, sheet_ink, sheet_soft, render_fill, render_ink, render_soft, tab_on_fill_dark,
         app_bar_separator, surface_accent, mesh_accent, form_accent, render_accent, on_accent, agent_ok, agent_busy, app_bar_hover_subtle,
         app_bar_hover_button, app_bar_hover_strong, app_bar_tab_active,
         form_ink, form_dim, form_primary, form_primary_fill, form_error, form_error_fill, form_success, form_success_fill, dialog_body, dialog_footer, dialog_rule, control_fill, control_border, dialog_label, selected_ink, selected_bg,
     ],
-    many: [continuity, logo, section_hatch],
+    many: [continuity, logo, library_highlights, section_hatch],
     icons: [highlight, agent, marker_halo],
 }
 
@@ -528,18 +527,13 @@ const RENAMED_COLORS: [(&str, &str); 4] =
 
 /// `#rrggbb` or `#rrggbbaa` (alpha not premultiplied).
 pub fn parse_color(s: &str) -> Option<Color32> {
-    let hex = s.trim().strip_prefix('#')?;
-    if !(hex.len() == 6 || hex.len() == 8) || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return None;
-    }
-    let byte = |i: usize| hex.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok());
-    let a = if hex.len() == 8 { byte(6)? } else { 255 };
-    Some(Color32::from_rgba_unmultiplied(byte(0)?, byte(2)?, byte(4)?, a))
+    let ([r, g, b], a) = solidcraft_color::hex::parse(s.trim())?;
+    Some(Color32::from_rgba_unmultiplied(r, g, b, a.unwrap_or(255)))
 }
 
 fn format_color(c: Color32) -> String {
     let [r, g, b, a] = c.to_srgba_unmultiplied();
-    if a == 255 { format!("#{r:02x}{g:02x}{b:02x}") } else { format!("#{r:02x}{g:02x}{b:02x}{a:02x}") }
+    if a == 255 { solidcraft_color::hex::format([r, g, b]) } else { solidcraft_color::hex::format_alpha([r, g, b], a) }
 }
 
 /// The colours a value gives for a slot of `len` colours, or why not.

@@ -193,6 +193,9 @@ pub struct PanelView {
     /// The open design's revision: a message's changes can be undone from the chat while they
     /// left this very design.
     pub revision: super::Revision,
+    /// The undo history as a message's changes left it, while it still is: their Undo is offered
+    /// only then, so it never takes a step made after them.
+    pub undo_history: Option<super::Revision>,
     /// Length units and decimals for the summaries of what the agent did.
     pub units: String,
     pub decimals: u8,
@@ -237,6 +240,7 @@ impl PanelView {
             shown: shown(app),
             document: app.session.doc.name.clone(),
             revision: super::Revision::of(&app.session.doc),
+            undo_history: super::UndoMark::current(&app.agent_chat.items, &app.session.undo),
             units: app.session.doc.units.clone(),
             decimals: app.preferences.length_decimals,
             agents: agents::entries(app),
@@ -413,7 +417,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         refresh_gone(app);
         let view = PanelView::of(app, &ctx);
         let mut prefs = AgentPanelPrefs::read(&app.preferences);
-        window(&mut app.agent_chat, &view, &ctx, &mut prefs);
+        window(&mut app.agent_chat, &view, &ctx, &mut prefs, &mut app.blur);
         prefs.write(&mut app.preferences);
         hand_over(app, ui);
         light_hovered(app);
@@ -834,12 +838,14 @@ pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs) -> 
 /// go to another screen, or a window floating inside the app where the system can't open one.
 /// The system's close button closes the chat (it opens there again); Dock puts it back.
 #[cfg(not(target_arch = "wasm32"))]
-fn window(chat: &mut AgentChat, view: &PanelView, ctx: &egui::Context, prefs: &mut AgentPanelPrefs) {
+fn window(chat: &mut AgentChat, view: &PanelView, ctx: &egui::Context, prefs: &mut AgentPanelPrefs, blur: &mut crate::blur::State) {
     let builder = window_builder(&view.document, chat.window_placed, prefs);
     chat.window_placed = true;
     // The side panel isn't drawn: its place no longer counts as "in the chat".
     chat.panel_rect = None;
     ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("sc_agent_chat_window"), builder, |ui, class| {
+        // A window drawn inside the main one shares its frame; a native one begins its own.
+        let _blur = (class != egui::ViewportClass::EmbeddedWindow).then(|| blur.begin(ui.ctx()));
         // Root/embedded inputs are handled by SolveApp::logic. A native chat window owns
         // its input and must see the toggle before its text editor can consume the chord.
         // The window holds the panel, not the shared host, so the toggle works on the panel's
@@ -2025,7 +2031,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                 // A picture-only prompt has no text to copy: no action rather than an empty copy (#10675).
                 let copyable = !text.is_empty();
                 let before = ui.cursor();
-                ui_kit::assistant_bubble(ui, |ui| {
+                let bubble = ui_kit::assistant_bubble(ui, |ui| {
                     let gone = chat.gone.sent.get(&n).map_or(&[][..], Vec::as_slice);
                     if !text.is_empty()
                         && let Some(group) = user_text(ui, text, context, gone, &format!("agent_chat:sent:{n}"), all_selected)
@@ -2050,8 +2056,9 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                     files_line(ui, files.iter().map(String::as_str));
                     if copyable || stamp.known() {
                         // Top-aligned: a row centred across its height takes all the height left in
-                        // the conversation's view, which stretched a prompt near the top.
-                        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                        // the conversation's view, which stretched a prompt near the top. Through the
+                        // bubble's footer, so the row's own width counts, not the room it spans (#14738).
+                        ui_kit::assistant_bubble_footer(ui, |ui| {
                             if copyable {
                                 copy_message_button(ui, n, text);
                             }
@@ -2059,6 +2066,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                         });
                     }
                 });
+                crate::scenario::publish_rect(&format!("agent_chat:bubble:{n}"), bubble.response.rect);
                 if copyable {
                     let drawn = egui::Rect::from_x_y_ranges(before.x_range(), before.min.y..=ui.cursor().min.y);
                     let resp = ui.interact(drawn, Id::unique(("agent_chat_msg", n)), Sense::hover());
@@ -2149,40 +2157,50 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                 }
             }
             Item::Permission { title, options, answer: given, .. } => {
-                ui_kit::assistant_approval(ui, &trf("ui.agent_chat_permission", &[("title", title)]), |ui| match given {
-                    Some(a) => {
-                        ui.label(RichText::new(trf("ui.agent_chat_answered", &[("option", a)])).color(t.text_dim));
-                    }
-                    None => {
-                        ui_kit::assistant_actions(ui, |ui| {
-                            for o in options.iter().filter(|o| o.kind == "allow_once").chain(options.iter().filter(|o| o.kind == "allow_always")) {
-                                let r = if o.kind == "allow_once" {
-                                    ui_kit::primary_button(ui, &o.name)
-                                } else {
-                                    ui_kit::button(ui, &o.name, ui_kit::Button::Normal)
-                                };
-                                solidcraft_ui_registry::publish_handle(&format!("agent_chat:permission:{}", o.id), r.rect.center());
-                                if r.clicked() {
-                                    answer = Some((n, Some(o.id.clone())));
-                                }
-                            }
-                            ui.with_layout(Layout::left_to_right(Align::Center).with_main_wrap(true), |ui| {
-                                for o in options.iter().filter(|o| !matches!(o.kind.as_str(), "allow_once" | "allow_always")) {
-                                    let r = ui_kit::button(ui, &o.name, ui_kit::Button::Normal);
+                ui_kit::assistant_approval(
+                    ui,
+                    &trf("ui.agent_chat_permission", &[("title", &crate::agent_label::card_title(solidcraft_ui_text::locale(), title))]),
+                    |ui| match given {
+                        Some(a) => {
+                            ui.label(RichText::new(trf("ui.agent_chat_answered", &[("option", a)])).color(t.text_dim));
+                        }
+                        None => {
+                            ui_kit::assistant_actions(ui, |ui| {
+                                for o in options.iter().filter(|o| o.kind == "allow_once").chain(options.iter().filter(|o| o.kind == "allow_always"))
+                                {
+                                    let r = if o.kind == "allow_once" {
+                                        ui_kit::primary_button(ui, &o.name)
+                                    } else {
+                                        ui_kit::button(ui, &o.name, ui_kit::Button::Normal)
+                                    };
                                     solidcraft_ui_registry::publish_handle(&format!("agent_chat:permission:{}", o.id), r.rect.center());
                                     if r.clicked() {
                                         answer = Some((n, Some(o.id.clone())));
                                     }
                                 }
+                                ui.with_layout(Layout::left_to_right(Align::Center).with_main_wrap(true), |ui| {
+                                    for o in options.iter().filter(|o| !matches!(o.kind.as_str(), "allow_once" | "allow_always")) {
+                                        let r = ui_kit::button(ui, &o.name, ui_kit::Button::Normal);
+                                        solidcraft_ui_registry::publish_handle(&format!("agent_chat:permission:{}", o.id), r.rect.center());
+                                        if r.clicked() {
+                                            answer = Some((n, Some(o.id.clone())));
+                                        }
+                                    }
+                                });
                             });
-                        });
-                    }
-                });
+                        }
+                    },
+                );
             }
             Item::Approval { id, title, tool, answer: given } => {
                 ui_kit::assistant_approval(ui, tr("ui.agent_chat_approval"), |ui| {
                     ui_kit::assistant_tool_detail(ui, |ui| {
-                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(title).monospace().size(t.font_caption)).wrap(), false);
+                        super::markdown_view::selectable(
+                            ui,
+                            egui::Label::new(RichText::new(crate::agent_label::card_title(solidcraft_ui_text::locale(), title)).size(t.font_caption))
+                                .wrap(),
+                            false,
+                        );
                     });
                     match given {
                         Some(true) => {
@@ -2218,13 +2236,13 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                     }
                 });
             }
-            Item::Changes { steps, revision, undone } => {
+            Item::Changes { steps, revision, history, undone } => {
                 ui.horizontal(|ui| {
                     let text = trf("ui.agent_chat_changes", &[("n", &steps.to_string())]);
                     ui.label(RichText::new(text).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
                     if *undone {
                         ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
-                    } else if revision.same(current) {
+                    } else if revision.same(current) && view.undo_history.as_ref().is_some_and(|h| history.same(h)) {
                         let b =
                             ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.ai_undo_tip"));
                         solidcraft_ui_registry::publish_handle("agent_chat:undo", b.rect.center());
@@ -2813,6 +2831,11 @@ fn tool_card(ui: &mut egui::Ui, n: usize, call: &ToolCall) {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     let text = match call.summary {
                         Some(words) => RichText::new(words).size(t.font_caption).color(t.text),
+                        None if crate::agent_label::is_mcp_id(call.title.split_whitespace().next().unwrap_or_default()) => {
+                            RichText::new(crate::agent_label::name(call.title.split_whitespace().next().unwrap_or_default()))
+                                .size(t.font_caption)
+                                .color(t.text)
+                        }
                         None => RichText::new(summary::plain_title(call.title)).monospace().size(t.font_caption).color(t.text),
                     };
                     ui.add(egui::Label::new(text).truncate().selectable(false)).backing_on_hover_text(call.title);
@@ -3065,6 +3088,7 @@ mod tests {
             shown: true,
             document: "Plate".into(),
             revision: Revision::of(&solidcraft_engine::Session::default().doc),
+            undo_history: None,
             units: "mm".into(),
             decimals: 2,
             agents: Vec::new(),

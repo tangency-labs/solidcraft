@@ -23,6 +23,9 @@ enum K {
     Pick,
     /// A list of picks: `[[x,y,z]…]` or `[{point|face|edge: [x,y,z], body?}…]`.
     Picks,
+    /// A list of picks on the body `tool.body` names, not `body`: Split Body's other tool faces
+    /// lie on its tool, and `body` is what it cuts (#9305).
+    ToolPicks,
     /// A point that places new geometry: into the active component's frame.
     Make,
     /// A direction: turned with the command's frame.
@@ -71,13 +74,13 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.box" | "solid.sphere" => &[("corner", Make), ("center", Make)],
         "solid.cylinder" | "solid.coil" | "solid.torus" | "solid.cone" => &[("base", Make), ("center", Make), ("axis", Dir)],
         "solid.fillet" | "solid.chamfer" => &[("edges", Picks), ("body", Body)],
-        "solid.hole" => &[("position", Pick), ("direction", Dir), ("body", Body)],
+        "solid.hole" => &[("position", Pick), ("references", Picks), ("direction", Dir), ("body", Body)],
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
-        "solid.offset_face" | "solid.shell" => &[("faces", Picks), ("body", Body)],
+        "solid.offset_face" | "solid.shell" | "face.delete" => &[("faces", Picks), ("body", Body)],
         "solid.thread" => &[("face", Pick), ("faces", Picks), ("from", Pick), ("up_to", Plane)],
         "solid.emboss" => &[("face", Make)],
         "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
-        "solid.press_pull" => &[("face", Pick), ("edges", Picks), ("body", Body)],
+        "solid.press_pull" => &[("face", Pick), ("edges", Picks), ("body", Body), ("face_body", Body)],
         "solid.replace_face" => &[("faces", Picks), ("target_face", Pick), ("target", Plane), ("body", Body)],
         // Align finds its picks where they are shown and takes both ends into the moved bodies'
         // frame itself: a pick mapped into the frame of the body under it would put the two ends
@@ -86,12 +89,14 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         // A mirror keeps the placement its bodies were picked at (`cmd::features::placed_bodies`);
         // its plane is in the active component, where the copies go.
         "solid.mirror" => &[("plane", HerePlane)],
-        "solid.split_body" => &[("plane", Plane), ("bodies", Body), ("body", Body)],
+        "solid.split_body" => &[("plane", Plane), ("tool", Picks), ("tool_faces", ToolPicks), ("bodies", Body), ("body", Body)],
         "plastic.boss" | "plastic.snap_fit" | "plastic.rest" => {
             &[("position", Pick), ("direction", Dir), ("hook", Dir), ("along", Dir), ("body", Body)]
         }
         "plastic.lip" => &[("face", Pick), ("body", Body)],
-        "sheet.convert" => &[("face", Pick), ("bends", Picks), ("body", Body)],
+        "sheet.convert" => &[("face", Pick), ("faces", Picks), ("skip", Picks), ("engrave", Picks), ("bends", Picks), ("body", Body)],
+        "sheet.recognize" => &[("face", Pick), ("skip", Picks), ("bends", Picks), ("body", Body)],
+        "sheet.measure_body" => &[("face", Pick), ("body", Body)],
         "sheet.flange" | "sheet.hem" => &[("edges", Picks), ("body", Body)],
         "sheet.fold" => &[("points", Picks), ("fixed", Pick), ("body", Body)],
         "sheet.path_flange" => &[("edge", Pick), ("body", Body)],
@@ -109,7 +114,9 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "parts.insert" | "parts.fastener" => &[("point", Make), ("direction", Dir)],
         "appearance.assign" => &[("faces", Picks), ("bodies", Body), ("body", Body)],
         "solid.move" => &[("bodies", Body), ("translate", Delta), ("axis", Dir), ("origin", Moved)],
-        "solid.combine" => &[("target", Body), ("tools", Body)],
+        // A combine's tools keep the names of further placements (`Drill (Hinge:2)`): each cuts
+        // where its own occurrence puts it, not at the component's first placement (#20040).
+        "solid.combine" => &[("target", Body)],
         "solid.remove" | "solid.bounding_solid" | "material.assign" => &[("bodies", Body)],
         _ => &[],
     }
@@ -343,6 +350,22 @@ impl Mapper<'_> {
             m.insert("origin".into(), x);
         }
         for k in ["normal", "x_dir", "y_dir"] {
+            if let Some(x) = o.get(k).and_then(|x| self.dir(x)) {
+                m.insert(k.into(), x);
+            }
+        }
+        Some(Value::Object(m))
+    }
+
+    /// An explicit plane whose `origin` has length expressions: the origin (kept as expressions)
+    /// and the directions in the active frame, none of them evaluated.
+    fn expressed_plane(&mut self, v: &Value) -> Option<Value> {
+        let o = v.as_object()?;
+        let mut m = o.clone();
+        if let Some(x) = o.get("origin").and_then(|x| self.make(x)) {
+            m.insert("origin".into(), x);
+        }
+        for k in ["x_dir", "y_dir"] {
             if let Some(x) = o.get(k).and_then(|x| self.dir(x)) {
                 m.insert(k.into(), x);
             }
@@ -924,13 +947,14 @@ fn map_local_with_input(
     for pass in [true, false] {
         for (k, kind) in keys {
             let Some(v) = obj.get(*k) else { continue };
-            let is_pick = matches!(kind, Pick | Picks | Plane | Here | HerePlane);
+            let is_pick = matches!(kind, Pick | Picks | ToolPicks | Plane | Here | HerePlane);
             if is_pick != pass {
                 continue;
             }
             let new = match kind {
                 Pick => m.pick(v, body.as_deref()),
                 Picks => m.picks(v, body.as_deref()),
+                ToolPicks => m.picks(v, obj.get("tool").and_then(|t| t.get("body")).and_then(Value::as_str)),
                 Make => m.make(v),
                 Dir => m.dir(v),
                 Delta => m.dir(v).or_else(|| {
@@ -980,7 +1004,10 @@ fn map_local_with_input(
                     }
                     m.here = true;
                     // Body names stay: the sketch's view of the model keeps them.
-                    let r = if *kind == HerePlane { m.plane(v) } else { m.picks(v, None) };
+                    // A plane whose origin has length expressions (#8192) is mapped without
+                    // evaluating them: the origin stays expressions, written in the frame.
+                    let expressed = v.get("origin").and_then(Value::as_array).is_some_and(|a| a.iter().any(Value::is_string));
+                    let r = if *kind == HerePlane { if expressed { m.expressed_plane(v) } else { m.plane(v) } } else { m.picks(v, None) };
                     m.here = false;
                     m.f.sketch = keep;
                     r

@@ -15,8 +15,9 @@
 //!
 //! One half edge alone (the issue's pick: offsets from setbacks 1 on the cut face and 2
 //! down the wall, as the fork's `sides_offsets` derives them) builds a closed solid with a
-//! clean check (4 faces to 7), since the generic blend's sections and checks are the
-//! default (WR-685 addendum 2026-11-06); main's default kernel refused it with 1001. The
+//! clean check (4 faces to 8: the chamfer is two faces, split at its crease), since the
+//! generic blend's sections and checks are the default (WR-685 addendum 2026-11-06);
+//! main's default kernel refused it with 1001. The
 //! whole chain, both halves in one session, builds a closed solid (4 faces to 6).
 #![allow(
     clippy::unwrap_used,
@@ -30,24 +31,18 @@ use solidcore::blend::fillet_solver::p1::FilletSurfaceGenerator;
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::axis2_placement::Axis2Placement;
-use solidcore::intersect::point_class::{PointClassType, PointClassification};
-use solidcore::mass::integrator::properties::face_area;
 use solidcore::math::{Point2, Point3, Vec3, PI};
 use solidcore::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use solidcore::primitive::api_curves::create_arc;
 use solidcore::primitive::api_primitives::create_box;
-use solidcore::query::face::p2::{point_classify, PointClassifyOptions};
 use solidcore::surface::procedural_blend::ProceduralBlend;
 use solidcore::surface::surface::p2::SurfaceKind;
-use solidcore::surface::surface::p4::NoObject;
-use solidcore::surface::surface::p5::DropPointOptions;
 use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p1;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, transform, StitchAndOrientOptions};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
-use solidcore::topology::face::p1::calculate_uv_domain_from_uv_trim_curves;
 use solidcore::topology::{edge, EdgeId, EdgeuseId, FaceId};
 use solidcore::{Brep, Kernel};
 
@@ -169,7 +164,8 @@ fn issue_880_whole_rim_chamfers() {
 }
 
 /// The issue's own pick: one rim half chamfered by the offsets of setbacks 1 on the cut face
-/// and 2 down the wall builds a closed solid (4 faces to 7) that SMLib's check passes.
+/// and 2 down the wall builds a closed solid (4 faces to 8, the chamfer split at its crease
+/// where its wall foot crosses the wall's G1 boundary) that SMLib's check passes.
 #[test]
 fn issue_880_one_half_chamfers() {
     let mut k = Kernel::default();
@@ -178,7 +174,7 @@ fn issue_880_one_half_chamfers() {
     let e = rims(&k, &b)[0];
     let u = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
     chamfer(&mut k, &mut b, &[(e, u)], (1.0, 2.0)).unwrap();
-    assert_eq!(finish(&mut k, &mut b, before), (4, 7, true));
+    assert_eq!(finish(&mut k, &mut b, before), (4, 8, true));
     let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
         .unwrap()
         .lines();
@@ -199,7 +195,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 /// The first rim half chamfered by the equal offsets the setbacks 1 and 1 give
 /// (1.4437..., the goldens' `issue-880-half-arc-rim-0-setbacks-1-1`) builds a closed solid
-/// (4 faces to 7) that the check passes, as the setbacks 1 and 2 do. It was refused with
+/// (4 faces to 8) that the check passes, as the setbacks 1 and 2 do. It was refused with
 /// 1001: at the half's End on the seam line through (6.78, 4.09, 10), the rail on the wall
 /// crossed the End's plane off the wall by more than its zone and less than the rail's
 /// tolerance, so the rail end read as off its face (#15906). The End is capped there; at
@@ -239,7 +235,7 @@ fn issue_880_one_half_chamfers_at_equal_setbacks() {
         .unwrap();
     let u = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
     chamfer(&mut k, &mut b, &[(e, u)], (d, d)).unwrap();
-    assert_eq!(finish(&mut k, &mut b, originals.len()), (4, 7, true));
+    assert_eq!(finish(&mut k, &mut b, originals.len()), (4, 8, true));
     let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
         .unwrap()
         .lines();
@@ -343,6 +339,193 @@ fn issue_880_one_half_chamfers_at_equal_setbacks() {
     );
 }
 
+// ---- #16735: `brep_volume` closes the tolerant edges' gaps ------------------------------
+//
+// The integrator closes each face onto its edges' curves and vertices with ruled strips
+// and corner fans, so the faces bound one closed surface and every volume integral is
+// that of the region it bounds, whatever the origin. That region differs from any solid
+// whose faces are these faces outside the edges' tolerance tubes and the vertices'
+// tolerance balls by at most the tubes' and balls' volume ([`tolerance_volume`]).
+
+/// The B-rep's mass properties about `origin` to `accuracy`.
+fn properties_about(
+    k: &Kernel,
+    b: &mut Brep,
+    origin: Point3,
+    accuracy: f64,
+) -> solidcore::mass::integrator::properties::PreciseProperties {
+    use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+    use solidcore::mass::integrator::properties::{
+        brep_properties, MassPropertyBehavior, PropertyAttributes,
+    };
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    brep_properties(
+        k,
+        b,
+        accuracy,
+        origin,
+        MassPropertyBehavior::default(),
+        &attrs,
+    )
+    .unwrap()
+}
+
+/// The volume the tolerances leave open: every edge's tube, pi tol^2 times its length,
+/// and every vertex's ball, 4/3 pi tol^3.
+fn tolerance_volume(k: &Kernel, b: &Brep) -> f64 {
+    use solidcore::mass::integrator::properties::edge_length;
+    use solidcore::topology::vertex;
+    let mut v = 0.0;
+    for e in p1::edges(b, None).unwrap() {
+        let t = edge::tolerance(b, e).unwrap();
+        v += PI * t * t * edge_length(k, b, e, 1e-9).unwrap();
+    }
+    for x in p1::vertices(b, None).unwrap() {
+        let t = vertex::tolerance(b, x).unwrap();
+        v += 4.0 / 3.0 * PI * t * t * t;
+    }
+    v
+}
+
+/// The part, with the first rim half chamfered by `offsets` when given.
+fn part(offsets: Option<(f64, f64)>) -> (Kernel, Brep) {
+    let mut k = Kernel::default();
+    let mut b = cut_cylinder(&mut k);
+    if let Some(offsets) = offsets {
+        let before = p1::faces(&b, None).unwrap().len();
+        let e = rims(&k, &b)[0];
+        let u = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
+        chamfer(&mut k, &mut b, &[(e, u)], offsets).unwrap();
+        let _ = finish(&mut k, &mut b, before);
+    }
+    (k, b)
+}
+
+/// The equal offsets the setbacks 1 and 1 give.
+const EQUAL: f64 = 1.443_730_684_954_035_7;
+
+/// #16735: the cut cylinder's volume is its closed form, 250 sqrt(5) pi (the disc of
+/// radius 5 times the axis length 20 sqrt 5 / 2 at its centre), to the volume its
+/// tolerances leave open plus the integrator's requested accuracy (1e-10 of the volume,
+/// requested, not certified). It read 3.6e-4 low before: x / 3 leaked through every
+/// edge's gap.
+#[test]
+fn issue_16735_the_original_part_is_its_closed_form() {
+    let (k, mut b) = part(None);
+    let exact = 250.0 * 5.0_f64.sqrt() * PI;
+    let open = tolerance_volume(&k, &b);
+    let v = volume_to(&k, &mut b, 1e-10);
+    eprintln!(
+        "the original part: {v} against {exact} ({:e}), open {open:e}",
+        v - exact
+    );
+    assert!(
+        (v - exact).abs() <= open + 1e-10 * exact,
+        "{v} against {exact}"
+    );
+}
+
+/// [`volume`] to `accuracy`.
+fn volume_to(k: &Kernel, b: &mut Brep, accuracy: f64) -> f64 {
+    use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+    use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    brep_volume(k, b, accuracy, &attrs).unwrap()
+}
+
+/// #16735: the volume and the first moments about the world origin do not depend on the
+/// origin the integrals are taken about, checked on `offsets`' part.
+fn volume_does_not_depend_on_the_origin(offsets: Option<(f64, f64)>) {
+    let (k, mut b) = part(offsets);
+    let mut seen: Vec<(f64, Vec3)> = Vec::new();
+    for o in [
+        Point3::new(0.0, 0.0, 0.0),
+        Point3::new(0.0, 0.0, -100.0),
+        Point3::new(37.0, -20.0, 55.0),
+    ] {
+        let p = properties_about(&k, &mut b, o, 1e-10);
+        // the first moments about o, moved to the world origin
+        seen.push((p.volume, p.moments[4] + o * p.volume));
+    }
+    let (v0, m0) = seen[0];
+    for &(v, m) in &seen[1..] {
+        eprintln!(
+            "{offsets:?}: volume {v} against {v0} ({:e}); first moments {:e} apart",
+            v - v0,
+            (m - m0).length()
+        );
+        assert!(
+            (v - v0).abs() <= 1e-10 * v0,
+            "{offsets:?}: {v} against {v0}"
+        );
+        assert!(
+            (m - m0).length() <= 1e-10 * v0 * 50.0,
+            "{offsets:?}: {m:?} against {m0:?}"
+        );
+    }
+}
+
+/// [`volume_does_not_depend_on_the_origin`] on the uncut part. MEASURED: the volumes agree
+/// to 1.1e-8 (6e-12 of the volume) at the accuracy 1e-10, the integrator's quadrature, so
+/// 1e-10 of the volume has a 15x margin, and the first moments to 2.6e-7 against 1e-10 of
+/// the volume times 50 (the part's size), a 30x margin. Before, each origin read the
+/// tolerant edges' leak differently.
+#[test]
+fn issue_16735_the_volume_does_not_depend_on_the_origin() {
+    volume_does_not_depend_on_the_origin(None);
+}
+
+/// [`volume_does_not_depend_on_the_origin`] on the half-chamfered parts, whose chamfer face
+/// is evaluated by its definition. It fails today: at (1, 2) the volume about (0, 0, -100)
+/// reads 5.0e-7 below the one about the world origin, and the first moments differ by
+/// 2.6e-5 (#17778: suspected to be the clamped integration `Unclamped::where_trims_may_leave`
+/// documents for a face kind with no B-spline part). The fitted net these parts were built
+/// as before #16580 agreed to 1.9e-8 and 8.5e-7.
+#[test]
+#[ignore = "#17778: a procedural blend face's volume depends on the integration origin"]
+fn issue_16735_the_chamfered_volume_does_not_depend_on_the_origin() {
+    for offsets in [(1.0, 2.0), (EQUAL, EQUAL)] {
+        volume_does_not_depend_on_the_origin(Some(offsets));
+    }
+}
+
+/// #16735: the half chamfers' volumes against #16726's by their definitions
+/// (1743.4242016449 and 1741.1795726555, converged to 6e-8).
+/// The chamfer's faces are the definitions, so its volume is theirs to the volume its
+/// tolerances leave open plus that convergence (1e-7). (The build that fitted the
+/// definitions to a distance d, bounded by d A, went with `fillet_round_as_definition`,
+/// #16580.)
+///
+/// They read 2.4e-4 to 1.9e-3 low before.
+#[test]
+fn issue_16735_the_half_chamfers_match_their_definitions() {
+    for (offsets, by_definitions) in [
+        ((1.0, 2.0), 1_743.424_201_644_9),
+        ((EQUAL, EQUAL), 1_741.179_572_655_5),
+    ] {
+        let (k, mut b) = part(Some(offsets));
+        let open = tolerance_volume(&k, &b);
+        let v = volume_to(&k, &mut b, 1e-10);
+        let bound = open + 1e-7;
+        eprintln!(
+            "{offsets:?}: {v} against {by_definitions} ({:e}), bound {bound:e}",
+            v - by_definitions
+        );
+        assert!(
+            (v - by_definitions).abs() <= bound,
+            "{offsets:?}: {v} against {by_definitions}"
+        );
+    }
+}
+
 /// The largest sine of the angle between the u tangents on the two sides of an interior
 /// knot of `net`, over every such knot and all of v, bounded from the control net (not
 /// sampled), for a polynomial net of degree 1 in v whose interior u knots have full
@@ -410,27 +593,6 @@ fn u_knot_g1_sine(net: &BSplineSurface) -> f64 {
     worst
 }
 
-/// The points of a 41 x 41 grid over face `f`'s trims' uv box that the face classifies
-/// inside.
-fn face_points(k: &Kernel, b: &mut Brep, f: FaceId) -> Vec<Point3> {
-    let bx = calculate_uv_domain_from_uv_trim_curves(k, b, f, true, false, false)
-        .unwrap()
-        .domain;
-    let s = b.face(f).unwrap().surface.clone().unwrap();
-    let mut out = Vec::new();
-    for i in 0..=40 {
-        for j in 0..=40 {
-            let uv = bx.evaluate(f64::from(i) / 40.0, f64::from(j) / 40.0);
-            let mut pc = PointClassification::new(1e-6);
-            point_classify(k, b, f, uv, &mut pc, PointClassifyOptions::default()).unwrap();
-            if pc.point_class() == PointClassType::Face {
-                out.push(s.evaluate_point(k, uv).unwrap());
-            }
-        }
-    }
-    out
-}
-
 /// The distance from `x` to the segment from `p` to `q`.
 fn segment_distance(x: Point3, p: Point3, q: Point3) -> f64 {
     let e = q - p;
@@ -471,13 +633,13 @@ fn crease_degrees(
 /// it. The chamfer by its definition creases there (its one net held a C0 knot,
 /// `check_brep`'s Test #4). It is now split there into two chamfers by the definition, one
 /// each side, joined by an edge along the chord: closed, clean, every knot inside each face
-/// G1 by the control net's bound, one face more than without the flag per crease, and the
-/// edge's dihedral, from the definitions' own sided partials, more than the G1 angle at
-/// the wall's end (7.78 and 4.78 degrees) and none at the cut face's, whose foot does not
-/// jump; the edge on the definition's ruling; and the volume by the definitions within
-/// d A of the build without the flag's (d the measured largest distance from its chamfer
-/// to the definitions, A the chamfer's area), both by the divergence theorem with
-/// F = (z - 10) a, which no tolerant edge of the cut plane or the wall enters (#16725).
+/// G1 by the control net's bound, one face more per crease than the chamfer as one face,
+/// and the edge's dihedral, from the definitions' own sided partials, more than the G1
+/// angle at the wall's end (7.78 and 4.78 degrees) and none at the cut face's, whose foot
+/// does not jump; and the edge on the definition's ruling. (The volume of the half rim
+/// chamfered at these setbacks is certified in the goldens, `blend.fillet_executive_p3`'s
+/// `round_definition_rows`: the integrator's converged volume lies in the body's certified
+/// enclosure; and by its definitions in `issue_880_one_half_chamfer_volume_by_its_definitions`.)
 #[test]
 fn issue_880_one_half_chamfer_splits_at_its_crease_as_a_definition() {
     let sin_g1 = (0.5_f64).to_radians().sin(); // SM_CONTINUITY_ANGLE
@@ -485,18 +647,13 @@ fn issue_880_one_half_chamfer_splits_at_its_crease_as_a_definition() {
         (1.0, 2.0),
         (1.443_730_684_954_035_7, 1.443_730_684_954_035_7),
     ] {
-        let built = |definition: bool| {
-            let mut k = Kernel::default();
-            k.fixes.fillet_round_as_definition = definition;
-            let mut b = cut_cylinder(&mut k);
-            let originals = p1::faces(&b, None).unwrap();
-            let e = rims(&k, &b)[0];
-            let u = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
-            chamfer(&mut k, &mut b, &[(e, u)], offsets).unwrap();
-            let outcome = finish(&mut k, &mut b, originals.len());
-            (k, b, originals, outcome)
-        };
-        let (mut k, mut b, originals, outcome) = built(true);
+        let mut k = Kernel::default();
+        let mut b = cut_cylinder(&mut k);
+        let originals = p1::faces(&b, None).unwrap();
+        let e = rims(&k, &b)[0];
+        let u = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
+        chamfer(&mut k, &mut b, &[(e, u)], offsets).unwrap();
+        let outcome = finish(&mut k, &mut b, originals.len());
         let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
             .unwrap()
             .lines();
@@ -580,79 +737,19 @@ fn issue_880_one_half_chamfer_splits_at_its_crease_as_a_definition() {
                 creases += 1;
             }
         }
-        assert!(
-            creases >= 1,
-            "{offsets:?}: no crease among {} faces",
+        assert_eq!(
+            creases,
+            1,
+            "{offsets:?}: one crease, where the run-on's wall foot crosses the wall's G1 \
+             boundary, among {} faces",
             chamfers.len()
         );
-        // one face more than without the flag (one chamfer face, smoothed across it) for
-        // each crease
-        let (k0, mut b0, originals0, off) = built(false);
+        // one face more for each crease than the 4 faces to 7 the chamfer builds as one face
         assert_eq!(
-            outcome.1,
-            off.1 + creases,
-            "{offsets:?}: {outcome:?} against {off:?}"
+            outcome,
+            (originals.len(), 7 + creases, true),
+            "{offsets:?}: {outcome:?} with {creases} creases"
         );
-        // the volume (MEASURED bound): the two builds differ only by their chamfers, which
-        // share their boundary curves to within the edges' tolerances, so the volumes
-        // differ by at most the chamfer's area times the largest distance d between the
-        // chamfer without the flag (a G1 fit across the crease) and the definitions (each
-        // within its certified bound of its net). d is measured: the largest gap from the
-        // points of a 41 x 41 grid inside each face without the flag to the nearer net,
-        // plus the larger certified bound.
-        let mut area = 0.0;
-        let mut bound = 0.0_f64;
-        for (f, pb, _) in &chamfers {
-            area += face_area(&k, &mut b, *f, 1e-9).unwrap();
-            bound = bound.max(pb.bound());
-        }
-        let nets: Vec<Surface> = chamfers
-            .iter()
-            .map(|(_, pb, _)| Surface::from(pb.net().copy()))
-            .collect();
-        let mut d = 0.0_f64;
-        let mut judged = 0;
-        for f in p1::faces(&b0, None).unwrap() {
-            if originals0.contains(&f) {
-                continue;
-            }
-            let s = b0.face(f).unwrap().surface.clone().unwrap();
-            if !matches!(s.kind(), SurfaceKind::BSpline(_)) {
-                continue;
-            }
-            for x in face_points(&k0, &mut b0, f) {
-                let gap = nets
-                    .iter()
-                    .map(|n| {
-                        let nd = n.natural_uv_domain_with_nurb(&k).unwrap();
-                        n.drop_point::<NoObject>(&k, x, &nd, &DropPointOptions::default())
-                            .unwrap()
-                            .gap
-                    })
-                    .fold(f64::INFINITY, f64::min);
-                d = d.max(gap);
-                judged += 1;
-            }
-        }
-        assert!(judged > 100, "{offsets:?}: judged {judged}");
-        d += bound;
-        // the volumes by the divergence theorem with F = (z - 10) a (#16725), which the
-        // cut plane's and the wall's trims do not enter: the definitions' over their exact
-        // regions, the build without the flag's over its faces' trims
-        let (v, v0) = (
-            definition_volume(&k, &mut b, &originals, 24),
-            trims_volume(&k0, &mut b0, &originals0, 64),
-        );
-        eprintln!(
-            "{offsets:?}: volume {v} against {v0} without the flag: {:e} of d A = {:e} \
-             (d {d:e} over {judged} points, area {area})",
-            (v - v0).abs(),
-            d * area
-        );
-        // MEASURED, not proven: d is sampled, and the volume between the two builds' faces
-        // near the wall's rail is not bounded by d A; the bound holds with margins of 6.7x
-        // and 11x at the two setbacks
-        assert!((v - v0).abs() <= d * area, "{offsets:?}: {v} against {v0}");
     }
 }
 
@@ -1196,11 +1293,9 @@ fn trims_volume(k: &Kernel, b: &mut Brep, originals: &[FaceId], panels: usize) -
 ///   cells, which only the trims check below bounds), and out of the bevel cap
 ///   (Green's theorem on its B-rep face's edges).
 ///
-/// Both B-reps bound that volume to within their faces' fit: the trims of either build
-/// are within 1e-4 of it (MEASURED, a 1.47x margin). `brep_volume` reads both low, by
-/// 3.8e-4 and 1.7e-3 at the setbacks 1 and 2, and the original part by 3.6e-4: its x / 3
-/// crosses every tolerant edge's gap. The 1.3e-3 between the two builds is that error,
-/// not a difference in their shapes.
+/// The B-rep bounds that volume to within its faces' fit: its trims are within 1e-4 of it
+/// (MEASURED, a 1.47x margin). `brep_volume` reads low, as it reads the original part low
+/// by 3.6e-4: its x / 3 crosses every tolerant edge's gap.
 #[test]
 fn issue_880_one_half_chamfer_volume_by_its_definitions() {
     for offsets in [
@@ -1208,7 +1303,6 @@ fn issue_880_one_half_chamfer_volume_by_its_definitions() {
         (1.443_730_684_954_035_7, 1.443_730_684_954_035_7),
     ] {
         let mut k = Kernel::default();
-        k.fixes.fillet_round_as_definition = true;
         let mut b = cut_cylinder(&mut k);
         let originals = p1::faces(&b, None).unwrap();
         // the method: the original part over its trims is its closed form
@@ -1265,26 +1359,11 @@ fn issue_880_one_half_chamfer_volume_by_its_definitions() {
             "{offsets:?}: its trims {on} against {v32}"
         );
         let integrator = volume(&k, &mut b);
-        // and the build without the flag
-        let mut k0 = Kernel::default();
-        let mut b0 = cut_cylinder(&mut k0);
-        let e0 = rims(&k0, &b0)[0];
-        let u0 = edge::blend_edgeuse(&k0, &mut b0, e0).unwrap().unwrap();
-        chamfer(&mut k0, &mut b0, &[(e0, u0)], offsets).unwrap();
-        let _ = finish(&mut k0, &mut b0, originals.len());
-        let off = trims_volume(&k0, &mut b0, &originals, 64);
-        let integrator0 = volume(&k0, &mut b0);
         eprintln!(
-            "{offsets:?}: by its definitions {v32:.10}; over the trims {on:.10} with the flag, \
-             {off:.10} without; brep_volume {integrator:.10} ({:e}) with, {integrator0:.10} \
-             ({:e}) without; the original part {:e}",
+            "{offsets:?}: by its definitions {v32:.10}; over the trims {on:.10}; brep_volume \
+             {integrator:.10} ({:e}); the original part {:e}",
             integrator - v32,
-            integrator0 - v32,
             original_by_integrator - exact
-        );
-        assert!(
-            (off - v32).abs() <= 1e-4,
-            "{offsets:?}: without the flag {off} against {v32}"
         );
     }
 }

@@ -9,7 +9,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<InterferenceParams>(), &["bodies", "budget_s", "exclude_pairs"]);
+    assert_keys(input_schema_for::<InterferenceParams>(), &["bodies", "budget_s", "envelopes", "exclude_pairs"]);
 }
 
 /// #12874: calls that fail today get the same message in strict: `string_list`'s for `bodies`
@@ -19,6 +19,7 @@ fn schemas_and_the_key_check_agree() {
 fn strict_keeps_todays_errors() {
     let too_many = vec![json!("A"); 10_001];
     assert_strict_keeps_todays_errors(&[
+        ("inspect.interference", json!({"envelopes": 1})),
         ("inspect.interference", json!({"bodies": 5})),
         ("inspect.interference", json!({"bodies": {"name": "A"}})),
         ("inspect.interference", json!({"bodies": ["A", 1]})),

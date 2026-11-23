@@ -1,0 +1,134 @@
+{
+  "case": "14283-chamfer-tangent-bore-edges",
+  "area": "fillets",
+  "sources": [
+    "tangency-labs/solidcraft#14283"
+  ],
+  "what": "Apply a 1 mm equal-distance chamfer to both curves where the cylindrical bore meets the revolved cut. The two rails share a point on the periodic seam and reach tangential ends. The pre-blend body is the only input record.",
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  -24.999999999999982,
+                  0.0,
+                  70.71067811865474
+                ],
+                [
+                  -2.2880030238660857e-08,
+                  25.0,
+                  -1.530808498934202e-15
+                ]
+              ],
+              "index": 18
+            },
+            {
+              "at": [
+                [
+                  -24.999999999999982,
+                  0.0,
+                  70.71067811865474
+                ],
+                [
+                  -9.553449451715018e-06,
+                  -24.999999999998174,
+                  3.0616169978681598e-15
+                ]
+              ],
+              "index": 17
+            }
+          ],
+          "points": [
+            [
+              -8.920266366476916,
+              23.353199686113832,
+              42.23357370337894
+            ],
+            [
+              -8.920266239232022,
+              -23.353199910526428,
+              42.23357404687319
+            ]
+          ],
+          "tolerance": 8.661254037844387
+        },
+        "kind": "chamfer",
+        "sizes": [
+          1.0,
+          1.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "records": "14283-chamfer-tangent-bore-edges.bodies.json.gz",
+  "result": [
+    {
+      "made": "b16"
+    }
+  ],
+  "expected": {
+    "body_count": 1,
+    "faces": 10,
+    "edges": 24,
+    "vertices": 15,
+    "source": "analytic",
+    "method": "Integrate the volume of both symmetric offset wedges between the cylindrical bore and the revolved cut. Subtract 272.7938832 mm³ from the unchamfered analytic volume of 741105.5166023 mm³. Two chamfer faces connect the existing eight faces.",
+    "volume_mm3": 740832.7227191,
+    "tolerance": {
+      "abs_mm": 0.03
+    }
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "ungraded": []
+}

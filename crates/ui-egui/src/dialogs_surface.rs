@@ -16,7 +16,7 @@ use solidcraft_engine::kernel::{Construction, Continuity};
 use crate::SolveApp;
 use crate::dialogs::{Kind, OP_LABELS, OPS, combo, form_row, op_index};
 use crate::selection::{
-    AXES, AXIS_PICKS, BODIES, CURVES, EDGES, FACES, PLANES, PROFILES, SelInput, SelectionExt as _, VERTICES, items, point_value as pt,
+    AXES, AXIS_PICKS, BODIES, CURVES, EDGES, FACES, PLANES, PROFILES, SNAP_POINTS, SelInput, SelectionExt as _, VERTICES, items, point_value as pt,
 };
 use crate::ui_kit;
 
@@ -241,7 +241,9 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
         }
         Surf::Blend { .. } => vec![SelInput::new("From edges", EDGES, true), SelInput::new("To edges", EDGES, true)],
         Surf::Boundary { .. } => vec![SelInput::new("Curves", CURVES | EDGES, true), SelInput::new("Cross curves", CURVES | EDGES, true)],
-        Surf::Patch { .. } => vec![SelInput::new("Boundary", PROFILES | CURVES | EDGES, true), SelInput::new("Pass through", VERTICES | FACES, true)],
+        Surf::Patch { .. } => {
+            vec![SelInput::new("Boundary", PROFILES | CURVES | EDGES, true), SelInput::new("Pass through", VERTICES | FACES | SNAP_POINTS, true)]
+        }
         Surf::Unstitch => vec![SelInput::new("Body, or faces to take out", BODIES | FACES, true)],
         Surf::ReverseNormal => vec![SelInput::new("Surface, or faces to turn over", BODIES | FACES, true)],
         Surf::Ruled { .. } => {
@@ -1203,7 +1205,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 Some(solidcraft_engine::doc::ExtendTo::Plane(PlaneRef::Origin { name })) => {
                     extra.insert("up_to".into(), json!(name));
                 }
-                Some(solidcraft_engine::doc::ExtendTo::Plane(PlaneRef::Construction { feature })) => {
+                Some(solidcraft_engine::doc::ExtendTo::Plane(PlaneRef::Construction { feature, .. })) => {
                     let shown = s.doc.feature(feature.0).map(|f| json!(f.name)).unwrap_or_else(|| json!(feature.0));
                     extra.insert("up_to".into(), shown);
                 }

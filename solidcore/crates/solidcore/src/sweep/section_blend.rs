@@ -15,6 +15,8 @@
 //! | [`SectionBlendDefinition`], [`section_blend_surface`] | (none; the face's definition kept, #3140) |
 //! | [`section_frames`], [`FrameOptions`] | (none; SolidCraft's `section_frames`, `bridge::frames`) |
 //! | [`section_frames_outward`] | (none; the frames leaving each edge outward, for a blend between edges) |
+//! | [`point_frames`]   | (none; SolidCraft's `chain_frames`, a section with no face behind it) |
+//! | [`open_section_turns`] | (none; SolidCraft's `open_sections`, the turn of each open section) |
 //!
 //! **The surface.** The sections run along u, each sampled at the same stations along v. Section
 //! `i` sits at `u = i / (n - 1)` and the surface passes through every station of it: each
@@ -906,6 +908,121 @@ pub fn section_frames_outward(
         .collect()
 }
 
+const OP_POINTS: &str = "sweep::section_blend::point_frames";
+
+/// The frames of a cross-section given by its points in order, the polyline through them: at
+/// `stations` stations of even arc length along it, its first and last point included, the
+/// station's point, `leave` as given, and no bend. Nothing lies behind such a section for the
+/// blend to continue, so it leaves along the run with no curvature to repeat. A point repeating
+/// the one before it adds no length.
+///
+/// # Errors
+/// `InvalidInput` for stations out of range, a point or `leave` not finite, or a chain whose
+/// length is not positive and finite (fewer than two points, all of them at one place, or a
+/// length past the largest float).
+pub fn point_frames(points: &[Point3], leave: Vec3, stations: usize) -> Result<Vec<SectionFrame>> {
+    let invalid = |reason| SolidError::invalid_input(OP_POINTS, reason);
+    if !(MIN_STATIONS..=MAX_STATIONS).contains(&stations) {
+        return Err(invalid("a section's frames take 2 to 257 stations"));
+    }
+    if !finite(leave) {
+        return Err(invalid("a leave direction that is not finite"));
+    }
+    if !points.iter().all(|&p| finite(p)) {
+        return Err(invalid("a point that is not finite"));
+    }
+    let lengths: Vec<f64> = points
+        .iter()
+        .zip(points.iter().skip(1))
+        .map(|(a, b)| a.distance(*b))
+        .collect();
+    let total: f64 = lengths.iter().sum();
+    let (Some(&first), Some(&end)) = (points.first(), points.last()) else {
+        return Err(invalid("a chain of no length"));
+    };
+    if !(total.is_finite() && total > 0.0) {
+        return Err(invalid("a chain of no length"));
+    }
+    #[allow(clippy::cast_precision_loss)] // at most MAX_STATIONS
+    let last = (stations - 1) as f64;
+    let (mut walked, mut seg) = (0.0, 0);
+    let mut out = Vec::new();
+    for i in 0..stations {
+        let p = if i == 0 {
+            first
+        } else if i + 1 == stations {
+            end
+        } else {
+            #[allow(clippy::cast_precision_loss)] // at most MAX_STATIONS
+            let want = total * (i as f64) / last;
+            // past every segment that ends short of the station
+            while let Some(&l) = lengths.get(seg) {
+                if walked + l < want && seg + 1 < lengths.len() {
+                    walked += l;
+                    seg += 1;
+                } else {
+                    break;
+                }
+            }
+            let (Some(&a), Some(&b), Some(&l)) =
+                (points.get(seg), points.get(seg + 1), lengths.get(seg))
+            else {
+                return Err(invalid("a chain of no length"));
+            };
+            let t = if l > 0.0 {
+                ((want - walked) / l).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            a + (b - a) * t
+        };
+        out.push(SectionFrame {
+            p,
+            leave,
+            bend: Vec3::ZERO,
+            bend_change: Vec3::ZERO,
+        });
+    }
+    Ok(out)
+}
+
+const OP_TURNS: &str = "sweep::section_blend::open_section_turns";
+
+/// Which open cross-sections of a blend to turn round, given each one's first and last point in
+/// the blend's order (`ends`), so that each runs the way the one before it runs once that one is
+/// turned: a blend joins its sections' stations in order, so a section drawn the other way round
+/// would twist the blend through itself. The first stays; a later one is turned where its ends
+/// lie further from the one before's as they are than crosswise (`|s - s'| + |e - e'|` greater
+/// than `|s - e'| + |e - s'|`, `s'` and `e'` the one before's ends once turned); a tie keeps it.
+///
+/// # Errors
+/// `InvalidInput` for a point not finite; `Unsupported` for a closed section, its ends within the
+/// kernel's zone tolerance of each other (where two points are one): it has no ends to pair, and
+/// its winding and seam would have to be matched, which a turn does not do.
+pub fn open_section_turns(k: &crate::kernel::Kernel, ends: &[[Point3; 2]]) -> Result<Vec<bool>> {
+    let invalid = |reason| SolidError::invalid_input(OP_TURNS, reason);
+    let zone = crate::geom::tol::zone_tol_3d(k, crate::geom::tol::SmallTopoType::NormalSize);
+    let mut out = Vec::new();
+    let mut before: Option<[Point3; 2]> = None;
+    for &[s, e] in ends {
+        if !(finite(s) && finite(e)) {
+            return Err(invalid("a section end that is not finite"));
+        }
+        if s.distance(e) <= zone {
+            return Err(SolidError::Unsupported {
+                operation: OP_TURNS,
+                reason: "a closed section: its winding and seam are not matched by a turn",
+            });
+        }
+        let turn = before.is_some_and(|[ps, pe]| {
+            s.distance(ps) + e.distance(pe) > s.distance(pe) + e.distance(ps)
+        });
+        before = Some(if turn { [e, s] } else { [s, e] });
+        out.push(turn);
+    }
+    Ok(out)
+}
+
 /// Face `f`'s direction out across edge `e` at the edge's parameter `t`: the binormal of `f`'s
 /// first use of `e`, reversed.
 fn outward(
@@ -1137,89 +1254,85 @@ fn frame_at(
     leave: Vec3,
 ) -> Result<SectionFrame> {
     use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+    use crate::nurbs::knots::Side;
     let foot = crate::query::api_queries::surface_closest_point(k, surf, p)?;
     let uv = *foot
         .uvs
         .first()
         .ok_or_else(|| frames_invalid("a station with no foot on the support face"))?;
-    let d = surf.evaluate(
-        k,
-        uv,
-        3,
-        3,
-        EvaluateFlags {
-            non_zero_tangents: false,
-            ..EvaluateFlags::default()
-        },
-    )?;
-    let at = |i: usize, j: usize| -> Result<Vec3> {
-        d.get(i)
-            .and_then(|r| r.get(j))
-            .copied()
-            .ok_or_else(|| frames_invalid("a surface's derivatives"))
-    };
-    let (su, sv) = (at(1, 0)?, at(0, 1)?);
-    let n = su
-        .cross(sv)
-        .unitize()
-        .map_err(|_| frames_invalid("a support surface singular at a station"))?;
-    let w = (leave - n * leave.dot(n))
-        .unitize()
-        .map_err(|_| frames_invalid("a leave direction normal to the support face at a station"))?;
-    // S_u du + S_v dv = w, by its normal equations
-    let (a, bb, c) = (su.dot(su), su.dot(sv), sv.dot(sv));
-    let det = a * c - bb * bb;
-    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
-    if !(det > 0.0) {
-        return Err(frames_invalid("a support surface singular at a station"));
-    }
-    let du = (c * w.dot(su) - bb * w.dot(sv)) / det;
-    let dv = (a * w.dot(sv) - bb * w.dot(su)) / det;
-    // the higher derivatives on the spans the line runs into: at a knot (a rational circle's
-    // quarter) a surface's second and third derivatives differ from one span to the next, and
-    // the line leaves along `w`, as SolidCraft's samples read it
-    let side = |d: f64| {
-        if d < 0.0 {
-            crate::nurbs::knots::Side::Right
-        } else {
-            crate::nurbs::knots::Side::Left
+    // A geometrically smooth knot may change parameter speed. Choose the outgoing span
+    // with its own Jacobian, then use that same span for all three derivatives.
+    let mut sides = (Side::Left, Side::Left);
+    for _ in 0..4 {
+        let d = surf.evaluate(
+            k,
+            uv,
+            3,
+            3,
+            EvaluateFlags {
+                u_side: sides.0,
+                v_side: sides.1,
+                non_zero_tangents: false,
+                ..EvaluateFlags::default()
+            },
+        )?;
+        let at = |i: usize, j: usize| -> Result<Vec3> {
+            d.get(i)
+                .and_then(|r| r.get(j))
+                .copied()
+                .ok_or_else(|| frames_invalid("a surface's derivatives"))
+        };
+        let (su, sv) = (at(1, 0)?, at(0, 1)?);
+        let n = su
+            .cross(sv)
+            .unitize()
+            .map_err(|_| frames_invalid("a support surface singular at a station"))?;
+        let w = (leave - n * leave.dot(n)).unitize().map_err(|_| {
+            frames_invalid("a leave direction normal to the support face at a station")
+        })?;
+        // S_u du + S_v dv = w, by its normal equations
+        let (a, bb, c) = (su.dot(su), su.dot(sv), sv.dot(sv));
+        let det = a * c - bb * bb;
+        #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+        if !(det > 0.0) {
+            return Err(frames_invalid("a support surface singular at a station"));
         }
-    };
-    let sided = surf.evaluate(
-        k,
-        uv,
-        3,
-        3,
-        EvaluateFlags {
-            u_side: side(du),
-            v_side: side(dv),
-            non_zero_tangents: false,
-            ..EvaluateFlags::default()
-        },
-    )?;
-    let at = |i: usize, j: usize| -> Result<Vec3> {
-        sided
-            .get(i)
-            .and_then(|r| r.get(j))
-            .copied()
-            .ok_or_else(|| frames_invalid("a surface's derivatives"))
-    };
-    let c1 = at(1, 0)? * du + at(0, 1)? * dv;
-    let c2 = at(2, 0)? * (du * du) + at(1, 1)? * (2.0 * du * dv) + at(0, 2)? * (dv * dv);
-    let c3 = at(3, 0)? * (du * du * du)
-        + at(2, 1)? * (3.0 * du * du * dv)
-        + at(1, 2)? * (3.0 * du * dv * dv)
-        + at(0, 3)? * (dv * dv * dv);
-    let (bend, bend_change) = shape(c1, c2, c3)?;
-    if !(finite(bend) && finite(bend_change)) {
-        return Err(frames_invalid("a station's shape is not finite"));
+        let du = (c * w.dot(su) - bb * w.dot(sv)) / det;
+        let dv = (a * w.dot(sv) - bb * w.dot(su)) / det;
+        let side = |d: f64, current| {
+            if d < 0.0 {
+                Side::Right
+            } else if d > 0.0 {
+                Side::Left
+            } else {
+                current
+            }
+        };
+        let outgoing = (side(du, sides.0), side(dv, sides.1));
+        if outgoing != sides {
+            sides = outgoing;
+            continue;
+        }
+        let c1 = at(1, 0)? * du + at(0, 1)? * dv;
+        let c2 = at(2, 0)? * (du * du) + at(1, 1)? * (2.0 * du * dv) + at(0, 2)? * (dv * dv);
+        let c3 = at(3, 0)? * (du * du * du)
+            + at(2, 1)? * (3.0 * du * du * dv)
+            + at(1, 2)? * (3.0 * du * dv * dv)
+            + at(0, 3)? * (dv * dv * dv);
+        let (bend, bend_change) = shape(c1, c2, c3)?;
+        if !(finite(bend) && finite(bend_change)) {
+            return Err(frames_invalid("a station's shape is not finite"));
+        }
+        return Ok(SectionFrame {
+            p,
+            leave: w,
+            bend,
+            bend_change,
+        });
     }
-    Ok(SectionFrame {
-        p,
-        leave: w,
-        bend,
-        bend_change,
-    })
+    Err(frames_invalid(
+        "no consistent outgoing span for the support frame",
+    ))
 }
 
 /// The curvature vector of a curve with derivatives `c1`, `c2`, `c3`, and its arc-length
