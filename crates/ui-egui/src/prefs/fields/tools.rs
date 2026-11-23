@@ -69,12 +69,6 @@ macro_rules! tools_preferences {
             /// then placed by its click only, as before, and its Position input takes faces only; a
             /// primitive by its fields, its inputs or the selection it opened with.
             placement_handles: bool = false, PAGE_TOOLS => check_tr("ui.placement_handles");
-            /// While the Frame Member dialog is open, the member's section is drawn at the start of the
-            /// first chosen line with a hot point at each anchor: a click puts that point on the line, and
-            /// the line's marker drags to any other point of the section (`locate`;
-            /// `place_gizmo::frame_anchor`). Off: the section is placed by the dialog's Anchor alone, as
-            /// before.
-            frame_hot_points: bool = true, PAGE_TOOLS => check_id("prefs.frame_hot_points");
             /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
             drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
             /// While Move's triad drags a component drawn as a layer of its own, what is under the pointer

@@ -6557,7 +6557,6 @@ mod tests {
             ("extrude_view_return", json!(true), PAGE_TOOLS),
             ("auto_operation", json!(false), PAGE_TOOLS),
             ("placement_handles", json!(true), PAGE_TOOLS),
-            ("frame_hot_points", json!(false), PAGE_TOOLS),
             ("assembly_move_handles", json!(false), PAGE_TOOLS),
             ("joint_rotation_coarse", json!(12.0), PAGE_TOOLS),
             ("joint_rotation_fine", json!(0.2), PAGE_TOOLS),

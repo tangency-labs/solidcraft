@@ -10,8 +10,8 @@
 //!
 //! The section comes from the engine (`member_section_view`), laid out by the code that makes
 //! the member, so what is drawn is where the member goes. Unfinished or refused dialog values show
-//! nothing. The hot points are behind the `frame_hot_points` preference (Preferences > Tools),
-//! on by default: off, the dialog places the section by its Anchor alone, as before. The handles
+//! nothing. The hot points are always on while the Frame Member dialog is open: placing the
+//! section by dragging it is what the dialog is for, so there is no option. The handles
 //! are published as `frame_anchor:<anchor>` and `frame_anchor:position` for `ui.handles`.
 
 use std::cell::RefCell;
@@ -55,14 +55,9 @@ const OUTLINE: f32 = 1.4;
 const DOT_TIP: &str = "ui.frame_hot_point_tip";
 const MARKER_TIP: &str = "ui.frame_locate_tip";
 
-/// Are the hot points on (Preferences > Tools > Frame Member)?
-pub(crate) fn on(app: &SolveApp) -> bool {
-    app.preferences.frame_hot_points
-}
-
-/// Is this a Frame Member dialog with its hot points on?
-fn serves(app: &SolveApp, d: &Dialog) -> bool {
-    on(app) && matches!(d.kind, Kind::Frame(_))
+/// Is this a Frame Member dialog (whose hot points are drawn)?
+fn serves(_app: &SolveApp, d: &Dialog) -> bool {
+    matches!(d.kind, Kind::Frame(_))
 }
 
 /// A hot point: its index in the dialog's `ANCHORS` (= `Anchor::ALL`), its name, label and point.

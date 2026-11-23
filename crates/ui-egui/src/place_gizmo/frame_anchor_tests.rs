@@ -86,7 +86,6 @@ fn the_dialog_order_of_anchors_is_the_engines() {
 #[test]
 fn the_hot_points_and_the_marker_are_published_on_the_first_line() {
     let mut h = post();
-    assert!(h.app.preferences.frame_hot_points, "on by default");
     for name in ["origin", "top_left", "top", "top_right", "left", "right", "bottom_left", "bottom", "bottom_right", "position"] {
         assert!(h.at(&json!({"handle": format!("frame_anchor:{name}")})).is_ok(), "frame_anchor:{name} is published");
     }
@@ -276,19 +275,6 @@ fn a_press_in_a_hot_points_corner_is_owned() {
     let corner = c + vec2(REACH - 0.5, REACH - 0.5);
     assert!(c.distance(corner) > REACH, "outside the circle of reach");
     assert!(contains_pointer(&h.app, corner));
-}
-
-/// Off, the dialog behaves as before: no section, no hot points, no marker.
-#[test]
-fn with_the_preference_off_nothing_is_drawn() {
-    let mut h = post();
-    h.app.preferences.frame_hot_points = false;
-    h.settle();
-    for name in ["origin", "top_left", "position"] {
-        assert!(h.at(&json!({"handle": format!("frame_anchor:{name}")})).is_err(), "frame_anchor:{name} is not published");
-    }
-    assert_eq!(member(&mut h).anchor, 0);
-    assert_eq!(locate(&h), None);
 }
 
 /// Unfinished or refused values show nothing and never panic: no line picked, a dimension that

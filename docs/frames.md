@@ -57,8 +57,7 @@ the selected body (or the last body of the active component).
   (`locate`, rounded to 0.1 mm; hold Alt or Ctrl for no rounding; Offset A and B follow); let go
   near a dot and it takes that anchor instead. A click on a dot empties Offset A and B. Only the first line
   of the group shown gets the section; the anchor is the same on every line of the group. Nothing is drawn until the lines and
-  the profile make a member. Turn the hot points off in Preferences › Tools › Frame Member (the
-  `frame_hot_points` preference, on by default); off, the section is placed by **Anchor** alone.
+  the profile make a member.
 - **Groups**: one feature can lay several groups of lines in the same profile, each with its own
   lines, **Anchor**, **Angle**, **Mirror** and **Name** (uprights turned one way, rails another).
   **New Group** starts an empty group and shows it; click a group to show and edit it, **Remove

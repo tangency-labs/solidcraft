@@ -19,7 +19,6 @@ Each group is a 120x64 figure at the left of its checkboxes, with a group name u
 | Extrude: Turn the view to isometric when Extrude opens | Checkbox | `Prefs.extrude_view_isometric` | `false` | none | `tool-extrude` | Retained newer control, directly after automatic operation in the same group. |
 | Extrude: Go back to the earlier view when Extrude closes | Checkbox | `Prefs.extrude_view_return` | `false` | none | `tool-extrude` | Directly after isometric; disabled unless isometric is on. |
 | Placed features: Placement handles | Checkbox | `Prefs.placement_handles` | `false` | "A marker to drag the feature across the model and, where the feature can turn, a ring to turn it." | `tool-placement` | |
-| Frame Member: Hot points on the section | Checkbox | `Prefs.frame_hot_points` | `true` | "While Frame Member is open, the section is drawn at the start of the first line with a point at each anchor. Click a point to put it on the line, or drag the line's marker to any point of the section. Off: the section is placed by the Anchor in the dialog only." | `frame_member` | Off: the dialog's Anchor alone, as before. |
 
 ## Assembly Move
 
