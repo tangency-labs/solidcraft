@@ -315,6 +315,7 @@ fn the_visibility_reply_type_matches_the_design_s() {
         shown_dimensions: vec![8],
         locked_bodies: vec!["B".into()],
         hidden_folders: vec!["c0/bodies".into()],
+        prev_visibility: None,
     };
     assert_eq!(serde_json::to_value(VisibilityState::from(&v)).unwrap(), serde_json::to_value(&v).unwrap());
     let empty = solidcraft_doc::Visibility::default();

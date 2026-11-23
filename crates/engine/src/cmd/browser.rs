@@ -604,6 +604,8 @@ fn isolate_bodies(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
     if keys.is_empty() {
         return Err(bad(cmd, "isolate needs `paths` or `items` (bodies)"));
     }
+    // Save current visibility state before isolating.
+    s.visibility.prev_visibility = Some(Box::new(s.visibility.clone()));
     let world = s.world_state()?;
     let keep: Vec<String> = keys
         .iter()
@@ -744,31 +746,33 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
                 Ok(path)
             })
             .collect::<Result<_>>()?;
-        if bool_(p, "isolate").unwrap_or(false) {
-            if !visible {
-                return Err(bad(cmd, "isolate requires visible:true"));
-            }
-            let mut hidden = Vec::new();
-            let mut ancestor_bodies = Vec::new();
-            let mut stack = vec![Vec::<u64>::new()];
-            let mut count = 0;
-            while let Some(parent) = stack.pop() {
-                for child in s.occurrence_children(&parent)? {
-                    count += 1;
-                    if count > 100_000 {
-                        return Err(bad(cmd, "isolate exceeds 100000 placements"));
-                    }
-                    if paths.iter().any(|selected| child.path.starts_with(selected)) {
-                        continue;
-                    }
-                    if paths.iter().any(|selected| selected.starts_with(&child.path)) {
-                        ancestor_bodies.extend(child.bodies.into_iter().map(|b| b.world));
-                        stack.push(child.path);
-                    } else {
-                        hidden.push(child.path);
-                    }
-                }
-            }
+                    if bool_(p, "isolate").unwrap_or(false) {
+                        if !visible {
+                            return Err(bad(cmd, "isolate requires visible:true"));
+                        }
+                        // Save current visibility state before isolating.
+                        s.visibility.prev_visibility = Some(Box::new(s.visibility.clone()));
+                        let mut hidden = Vec::new();
+                        let mut ancestor_bodies = Vec::new();
+                        let mut stack = vec![Vec::<u64>::new()];
+                        let mut count = 0;
+                        while let Some(parent) = stack.pop() {
+                            for child in s.occurrence_children(&parent)? {
+                                count += 1;
+                                if count > 100_000 {
+                                    return Err(bad(cmd, "isolate exceeds 100000 placements"));
+                                }
+                                if paths.iter().any(|selected| child.path.starts_with(selected)) {
+                                    continue;
+                                }
+                                if paths.iter().any(|selected| selected.starts_with(&child.path)) {
+                                    ancestor_bodies.extend(child.bodies.into_iter().map(|b| b.world));
+                                    stack.push(child.path);
+                                } else {
+                                    hidden.push(child.path);
+                                }
+                            }
+                        }
             let mut root_bodies: Vec<String> =
                 s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == 0).map(|b| b.name.clone()).collect();
             root_bodies.extend(ancestor_bodies);

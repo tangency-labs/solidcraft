@@ -4098,6 +4098,9 @@ pub struct Visibility {
     /// once the folder is shown.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hidden_folders: Vec<String>,
+    /// The visibility state before the last isolation, for un-isolate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prev_visibility: Option<Box<Visibility>>,
 }
 
 impl Visibility {
