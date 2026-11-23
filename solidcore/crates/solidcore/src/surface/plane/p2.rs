@@ -365,10 +365,14 @@ impl Plane {
                         return Err(unmeasurable.into_error());
                     }
                 }
-                Err(e) if e.is_status_answer() => {
-                    return Err(unmeasurable.caused_by(e).into_error());
-                }
-                Err(e) => return Err(e),
+                // main swallowed the evaluation's error and failed with `SM_ERR`: only an
+                // unported call, a cancellation or a missing preparation goes out as itself
+                Err(
+                    e @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::PreparationRequired { .. }),
+                ) => return Err(e),
+                Err(e) => return Err(unmeasurable.caused_by(e).into_error()),
             }
         }
         // Something wrong here if scaling a plane does not produce a plane.
