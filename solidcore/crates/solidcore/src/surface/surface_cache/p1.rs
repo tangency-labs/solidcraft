@@ -1708,7 +1708,13 @@ pub struct SurfaceCache<O> {
     pub face_was_modified: bool,
     /// `m_bProcessBoundaryCurves`: local solvers also look on the boundary curves.
     pub process_boundary_curves: bool,
-    /// `m_bPointTestEnabled`: keep only solutions inside the trim boundaries.
+    /// `m_bPointTestEnabled`: keep only solutions inside the trim boundaries, unless a
+    /// caller switched point testing off for a scope (a tree build, a trace, a
+    /// solver's copy of the cache). On a trimmed cache it is on outside such scopes,
+    /// and no build writes it: whether a trimmed cache tests a point also needs its
+    /// face to have loop uses, which the readers ask of the face each time (not
+    /// upstream, where the build stores that answer, so it depended on when and in
+    /// which mode the cache was built). A plain cache has it off.
     pub point_test_enabled: bool,
     /// `m_bFaceContainmentDone`.
     pub face_containment_done: FaceContainment,
@@ -2406,12 +2412,14 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
 
     /// Whether `uv_point` passes the trim boundary test (`PointTest`): always with
     /// point testing disabled, else when it lies in the cache domain for an
-    /// untrimmed cache. Trimmed classification requires [`Self::point_test_with`].
+    /// untrimmed cache. A trimmed cache whose surface has no face has no trim
+    /// boundaries and keeps every point. Trimmed classification requires
+    /// [`Self::point_test_with`].
     ///
     /// # Errors
     ///
-    /// A trimmed cache with testing enabled cannot fall back to its rectangle:
-    /// it reports a missing face or an unported operation-scoped classifier.
+    /// A trimmed cache of a face with testing enabled cannot fall back to its
+    /// rectangle: it reports an unported operation-scoped classifier.
     pub fn point_test(&self, uv_point: Point2) -> Result<bool> {
         self.point_test_under(self.solve_modes(), uv_point)
     }
@@ -2426,8 +2434,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             return Ok(true);
         }
         if self.trimmed_dispatch {
-            self.face()?
-                .ok_or_else(|| SolidError::surface_missing(OP_CLASSIFY, "the face"))?;
+            if self.face()?.is_none() {
+                return Ok(true);
+            }
             return Err(SolidError::unported(
                 "prepared face classifier for bound trim",
                 "query.face_p2",
@@ -2436,8 +2445,10 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         Ok(self.uv_domain.contains_point(uv_point, 0.0))
     }
 
-    /// Point test with trimmed-cache dispatch. Bound trimmed caches fail closed when
-    /// the operation-scoped face-query service is absent.
+    /// Point test with trimmed-cache dispatch. A trimmed cache tests only when its
+    /// surface has a face with loop uses (asked of the face through `queries`); a
+    /// face without loop uses, or no face, keeps every point. Bound trimmed caches
+    /// fail closed when the operation-scoped face-query service is absent.
     pub fn point_test_with(
         &self,
         k: &Kernel,
@@ -2467,12 +2478,15 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         if !modes.point_test_enabled || self.face_was_modified {
             return Ok((true, None));
         }
-        let face = self
-            .face()?
-            .ok_or_else(|| SolidError::surface_missing(OP_CLASSIFY, "the face"))?;
+        let Some(face) = self.face()? else {
+            return Ok((true, None));
+        };
         let service = queries.ok_or_else(|| {
             SolidError::unported("prepared face classifier for bound trim", "query.face_p2")
         })?;
+        if !service.face_has_loopuses(face)? {
+            return Ok((true, None));
+        }
         let tol = match opt_tol {
             Some(t) => t,
             None => service.face_zone_tol_3d(face)?,

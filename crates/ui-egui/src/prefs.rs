@@ -2030,6 +2030,11 @@ preference_settings! {
     /// Pressing an active tool or dialog's shortcut again closes it, as Esc does. Off: the key
     /// starts the tool or dialog again.
     shortcut_again_ends_tool: bool = true, PAGE_SKETCH;
+    /// A click inside a region for the Entities of Transform, Move/Copy, Scale, Mirror and the
+    /// sketch patterns also picks the curves of the region's holes (#8390). Off (the default):
+    /// it picks the region's outline, and a shape inside it is picked by a click inside that
+    /// shape (#14496).
+    region_pick_takes_holes: bool = false, PAGE_SKETCH;
     /// A sketch tool's shortcut pressed again before the first point steps to the tool's next
     /// creation mode (#2459). Off (the default): the key starts the tool again, as it always has.
     shortcut_cycles_modes: bool = false, PAGE_SKETCH;
@@ -10075,8 +10080,8 @@ mod tests {
 
     /// #17689: the tolerance heal is on by default, a saved choice reads back as saved, and the
     /// preference reaches the kernel, which every STEP read and Repair consult: set off, the
-    /// kernel stops healing; set on, it heals again. (The kernel's switch is the process's: the
-    /// test holds it, as every test that turns it does.)
+    /// kernel stops healing; set on, it heals again. (The test holds the kernel's switch, as
+    /// every test that turns it does, so it turns for the test's thread alone.)
     #[test]
     fn heal_tolerance_defects_is_on_by_default_and_reaches_the_kernel() {
         use serde_json::json;

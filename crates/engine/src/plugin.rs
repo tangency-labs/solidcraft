@@ -28,6 +28,13 @@ pub fn configure_process_plugins(plugins: Option<PathBuf>, keep_grants: bool) ->
     }
     PROCESS_PLUGINS.set((plugins, keep_grants)).map_err(|_| error("the process plugins folder is already configured"))
 }
+/// Keeps compiled plugin components between sessions in the `plugin-compile` folder of the per-user
+/// cache folder ([`crate::recovery::cache_dir`]), so a large importer compiles once per version
+/// rather than at the first file of every session. Call it once at startup, before any plugin runs.
+pub fn configure_compile_cache() {
+    #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+    craft_plugin_wasm::set_compile_cache_dir(crate::recovery::cache_dir().map(|dir| dir.join("plugin-compile")));
+}
 pub fn configure_process_host_limits(limits: HostLimits) -> Result<()> {
     limits.validate()?;
     PROCESS_HOST_LIMITS.set(limits).map_err(|_| error("process plugin host limits are already configured"))
