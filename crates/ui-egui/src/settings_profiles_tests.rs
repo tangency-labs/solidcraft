@@ -924,7 +924,8 @@ fn profile_keys_cover_the_current_portable_preferences() {
     actual.sort_unstable();
     // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
     // Test change: one more portable key, nav_button_map (what each mouse button drags).
-    assert_eq!(expected.len(), 109);
+    // Test change: one more portable key, ribbon_motion (whether ribbon tab changes animate).
+    assert_eq!(expected.len(), 110);
     assert_eq!(actual, expected);
 }
 

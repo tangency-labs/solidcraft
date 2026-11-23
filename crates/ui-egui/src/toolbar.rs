@@ -7234,7 +7234,9 @@ mod persistent_ribbon_tests {
         for id in PERSISTENT_COMMANDS {
             crate::toolbar_custom::pin(&mut h.app, "INSPECT", id).unwrap();
         }
-        h.frames(3);
+        // Past the switch to INSPECT's cross-fade (0.2 s at 60 frames a second), so the paint
+        // checked below is at full strength.
+        h.frames(16);
         h
     }
 
