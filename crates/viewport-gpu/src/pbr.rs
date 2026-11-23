@@ -28,7 +28,7 @@ fn pbr_encode(c: vec3<f32>) -> vec3<f32> {
 @vertex
 fn vs_pbr(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) base: vec3<f32>, @location(3) parameters: vec3<f32>) -> PbrOut {
     var o: PbrOut;
-    o.pos = u.vp * vec4<f32>(p, 1.0);
+    o.pos = face_pushed(u.vp * vec4<f32>(p, 1.0));
     o.n = n;
     o.base = base;
     o.wp = p;
@@ -85,7 +85,7 @@ fn vs_pbr_inst(
     let wp = placed_by(m, vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
     let at = vec2<u32>(c & 2047u, (c >> 11u) * 2u);
     var o: PbrOut;
-    o.pos = u.vp * vec4<f32>(wp, 1.0);
+    o.pos = face_pushed(u.vp * vec4<f32>(wp, 1.0));
     o.n = turned_by(m, vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n)));
     o.base = textureLoad(pbr_materials, at, 0).xyz;
     o.wp = wp;
@@ -103,7 +103,7 @@ fn vs_pbr_palette(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @locatio
     let m = motion_at(c);
     let wp = placed_by(m, p);
     var o: PbrOut;
-    o.pos = u.vp * vec4<f32>(wp, 1.0);
+    o.pos = face_pushed(u.vp * vec4<f32>(wp, 1.0));
     o.n = turned_by(m, n);
     o.base = textureLoad(pbr_materials, at, 0).xyz;
     o.wp = wp;

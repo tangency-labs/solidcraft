@@ -39,3 +39,5 @@ offset.offset_geometry_creation	gen0642	5	0	UNCOVERED	-	1.4892598495536596e-2
 offset.offset_geometry_creation	gen0642	5	v0	UNCOVERED	-	1.4892598495536596e-2
 offset.offset_geometry_creation	gen0642	6	0	UNCOVERED	-	1.4892598495536596e-2
 offset.offset_geometry_creation	gen0642	6	v0	UNCOVERED	-	1.4892598495536596e-2
+topology.brep_p10	gen0026	0	20	UNCOVERED	1.875254385907965e-5	1.345444275102642e-5
+topology.brep_p10	gen0026	0	33	UNCOVERED	1.8752543532229993e-5	1.3454442544978595e-5
