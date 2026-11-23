@@ -2188,6 +2188,22 @@ impl SurfaceSheet {
         })
     }
 
+    /// The place of the flat panel whose material holds `p` (a point on or in the folded sheet),
+    /// for [`Self::flat`]: where that panel lies, so an unfold keeps it where it is. `None` where
+    /// no flat panel the maker placed holds it.
+    pub fn flat_at(&self, p: Vec3) -> Option<Rigid3> {
+        let t = self.sheet.thickness;
+        let tol = 1e-4 * (1.0 + p.len());
+        let dev = self.develop().ok()?;
+        let folded = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places).ok()?;
+        self.sheet.panels.iter().zip(&folded.places).enumerate().find_map(|(i, (panel, place))| {
+            let (Surface::Plane, Some(place)) = (&panel.surface, place) else { return None };
+            let q = place.inverse().point(p);
+            let on = q.z >= -tol && q.z <= t + tol && crate::sheet_surface_cuts::region_holds(&panel.region, Vec2::new(q.x, q.y));
+            on.then(|| self.places.get(i).copied().flatten()).flatten()
+        })
+    }
+
     /// The far edge of the flange whose bend is joint `j`: its panel's straight edge farthest from
     /// the bend, run with the panel's material on its left; where a further bend starts.
     pub fn far_edge(&self, j: usize) -> Result<FreeEdge> {

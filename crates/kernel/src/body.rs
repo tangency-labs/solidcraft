@@ -1103,6 +1103,28 @@ impl Body {
         dists.into_iter().enumerate().filter_map(|(f, row)| Some((row.first().copied().flatten()?, f))).min_by(|a, b| a.0.total_cmp(&b.0))
     }
 
+    /// Exact polyline samples for each non-seam edge bordering `face` of `self`.
+    pub fn face_edge_polylines(&self, face: usize) -> Vec<Vec<Vec3>> {
+        if self.is_mesh() {
+            return Vec::new();
+        }
+        let Some(f) = self.record.faces.get(face) else {
+            return Vec::new();
+        };
+        let chord = (self.size() * 1e-3).max(1e-4);
+        let mut out = Vec::new();
+        for l in &f.loops {
+            let brep::Loop::Edges { edges } = l else { continue };
+            for ue in edges {
+                let Some(e) = self.record.edges.get(ue.edge as usize) else { continue };
+                if let Ok(pts) = edge_points(e, chord) {
+                    out.push(pts);
+                }
+            }
+        }
+        out
+    }
+
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
     pub fn with_cylinder_certificate(mut self, producer: u64) -> Result<Self> {
         if producer == 0 {
