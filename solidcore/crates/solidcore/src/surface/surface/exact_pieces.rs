@@ -775,13 +775,15 @@ pub(crate) fn exact_nurbs_curve_data(
         if !(w.is_finite() && w > 0.0 && cp.x.is_finite() && cp.y.is_finite() && z.is_finite()) {
             return Err(bad());
         }
-        let (ux, vy) = if rational {
+        // Division by one is exact. Preserve a coordinate on a periodic seam when
+        // a record stores a polynomial trim with explicit unit weights.
+        let (ux, vy) = if w == 1.0 {
+            (Ivl::from(cp.x), Ivl::from(cp.y))
+        } else {
             (
                 Ivl::from(cp.x) / Ivl::from(w),
                 Ivl::from(cp.y) / Ivl::from(w),
             )
-        } else {
-            (Ivl::from(cp.x), Ivl::from(cp.y))
         };
         if !(ux.lo.is_finite() && ux.hi.is_finite() && vy.lo.is_finite() && vy.hi.is_finite()) {
             return Err(bad());
@@ -1638,9 +1640,9 @@ fn eval_plane_part(
 ) -> LiftPart {
     let (ux, vy) = (ev.w0.x, ev.w0.y);
     let (umx, umy) = (ev.wm0.x, ev.wm0.y);
-    let in_dom = ivl_inside(ux, step_dom.min().x, step_dom.max().x)
-        && ivl_inside(vy, step_dom.min().y, step_dom.max().y);
-    if oob || in_dom {
+    let in_u = ivl_inside(ux, step_dom.min().x, step_dom.max().x);
+    let in_v = ivl_inside(vy, step_dom.min().y, step_dom.max().y);
+    if oob || (in_u && in_v) {
         let s_m_0 = v_add(origin, v_add(v_scale(su, umx), v_scale(sv, umy)));
         let g_m = v_sub(s_m_0, ev.cm0);
         let dg_m = v_sub(v_add(v_scale(su, ev.wm1.x), v_scale(sv, ev.wm1.y)), ev.cm1);
@@ -1657,11 +1659,15 @@ fn eval_plane_part(
         let g_m = v_sub(s_m_0, ev.cm0);
         let su_eff = if ux.hi <= step_dom.min().x || ux.lo >= step_dom.max().x {
             VZ
+        } else if in_u {
+            su
         } else {
             v_hull(su, VZ)
         };
         let sv_eff = if vy.hi <= step_dom.min().y || vy.lo >= step_dom.max().y {
             VZ
+        } else if in_v {
+            sv
         } else {
             v_hull(sv, VZ)
         };
@@ -2034,6 +2040,25 @@ pub(crate) fn certified_lift(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_unit_weight_ruling_stays_on_the_exact_periodic_seam() {
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::CPoint;
+
+        let net = NlCurve::new(
+            vec![
+                CPoint::new(1.0, 0.0, NOZ, 1.0),
+                CPoint::new(1.0, 2.0, NOZ, 1.0),
+            ],
+            1,
+            vec![0.0, 0.0, 2.0, 2.0],
+        )
+        .unwrap();
+        let curve = BSplineCurve::from_nurb(net, 2, false);
+        let (_, _, _, min, max) = exact_nurbs_curve_data(&curve, true).unwrap();
+        assert_eq!((min.x, max.x), (1.0, 1.0));
+    }
 
     /// Of a piece and its UV curves, only the last trimmed has a knot a rounding past the
     /// interval's end, which its trim snaps the end onto. The three are trimmed to the one
@@ -2528,6 +2553,40 @@ mod tests {
         let k = Kernel::default();
         let bound = bumped_lift(&k, 0.0).unwrap();
         assert!((0.0..=EXACT_LIFT_ROUNDING).contains(&bound), "{bound}");
+    }
+
+    #[test]
+    fn a_clamped_plane_keeps_the_derivative_along_its_boundary() {
+        use crate::curve::line::Line;
+        let mut plane = Plane::create_canonical(&Axis2Placement::IDENTITY).unwrap();
+        plane
+            .adjust_step_uv_domain(&Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0))
+            .unwrap();
+        plane.set_out_of_bounds_enabled(false);
+        let plane = Surface::from(plane);
+        let k = Kernel::default();
+        let span = Extent1d::from_raw(0.0, 1.0);
+        let tol = 1e-7;
+        for swap in [false, true] {
+            let point = |along, across| {
+                if swap {
+                    Vec3::new(across, along, 0.0)
+                } else {
+                    Vec3::new(along, across, 0.0)
+                }
+            };
+            let line = |a, b, dim| Curve::from(Line::from_points(a, b, dim));
+            // Only the transverse parameter crosses the boundary. Its clamped
+            // displacement is at most 1e-12 along the entire affine segment.
+            let uv = line(point(0.125, -1e-12), point(0.875, 1e-12), 2);
+            let boundary = line(point(0.125, 0.0), point(0.875, 0.0), 3);
+            assert!(certified_lift(&k, &plane, &uv, &boundary, span, tol).unwrap() <= tol);
+            let offset = line(point(0.125, 2.0 * tol), point(0.875, 2.0 * tol), 3);
+            assert_eq!(
+                certified_lift(&k, &plane, &uv, &offset, span, tol).unwrap_err(),
+                lift_too_far()
+            );
+        }
     }
 
     #[test]
