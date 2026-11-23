@@ -140,8 +140,8 @@ that triggered the notification. Each invocation uses a fresh guest instance.
 Handler results use the existing 1 MiB JSON reply limit; retained panel data is
 limited to 16 MiB in total. Exceeding either limit reports a typed limit error.
 
-Panel support from #19516 is not present here. The host keeps the handler's
-bounded JSON result through a plain function for a future panel adapter.
+A handler of a plugin that declares `ui@0.1` may refresh that plugin's panel data with
+`ui.set-data` (see Docked panels below).
 
 ## Classifying points and reading surface normals
 
@@ -176,7 +176,14 @@ leaves the design and undo history unchanged.
 **Install plugin…** in **Preferences > Plugins** (desktop only) picks a plugin `.zip`.
 One confirmation screen shows its name, version, summary, requested permissions and entry placements.
 Each command group explains its access in plain words: files, designs, application settings or other plugins.
-Enter an absolute local path for each requested folder. Each folder shows its requested read/write access.
+Use **Browse…** to choose each requested folder, or type or paste its absolute local path.
+Each folder shows its requested read/write access. When updating an installed plugin, a stored folder
+with the same name is kept as the editable starting value only when the requested access is the same
+or lower, with read access lower than write access (including read and write). Read-to-read and write-to-read updates keep the
+folder; read-to-write updates start empty so you choose the folder again. You can change any kept
+folder before approving it with **Install**. If a kept folder no longer exists, **Install** reports
+the folder error; choose a folder again. The plugin gets only the folders displayed and approved with
+**Install**; choosing or editing a folder grants nothing on its own.
 When the plugin asks for more memory than the ceiling in **Preferences > Plugins** (128 MiB unless
 changed), the screen says how much it asks for and what the ceiling is.
 **Install** approves the displayed command groups, folders and memory, publishes the package and stores the
@@ -385,8 +392,10 @@ From the application control surface, use:
 }}}
 ```
 
-Plugins-menu entry forms use this same form implementation. The panel work in #19516 is not
-on main yet: its future Edit row action can call the plain opening function or `ui.start` above.
+Plugins-menu entry forms use this same form implementation. A docked panel's table row action
+(`on_edit`, see Docked panels) runs the declared entry as an ordinary command with the typed
+event; it does not open this form itself. To edit a stored operation from a panel, call the plain
+opening function or `ui.start` above.
 An entry that already has an unsubmitted form is refused rather than replacing its values.
 
 Scripts and MCP use explicit parameters to call `<plugin>.<entry>` or `plugin.run`.
@@ -747,9 +756,9 @@ reports progress and cancellation, reads named files and a clock, and exports th
 `plugin.json` lists what it needs, for example `"capabilities": ["commands@0.2"]`; the host refuses
 an unknown or newer capability when it reads the manifest, with a plain message such as "needs
 commands 0.3; update SolidCraft or the plugin". `formats@0.2` adds file-format slots: importers and
-exporters; `evaluate@0.2` lets an importer check its result, and `storage@0.1` keeps data in a
-design (below). `ui` and `viewport` arrive later as their own versioned interfaces. While a version
-is 0.x, a minor version may break the one before it.
+exporters; `evaluate@0.2` lets an importer check its result, `storage@0.1` keeps data in a design
+(below), and `ui@0.1` adds host-drawn docked panels. `viewport` arrives later as its own versioned
+interface. While a version is 0.x, a minor version may break the one before it.
 
 0.2 added one error, `plugin-error.unsupported(string)`: the input is valid, but this plugin does
 not handle it, such as a file with no solids or a newer version of its format. Use it instead of
@@ -759,6 +768,60 @@ bracket.smp: ..." instead of an "invalid" file. Plugins built against 0.1 (`comm
 component's own imports and exports, and serves the frozen 0.1 WIT
 (`crates/craft-plugin/wit-0.1/plugin.wit`) to those. A component that names a version the host does
 not run, or two versions at once, is refused before any of its code runs.
+
+## Docked panels
+
+Add `"ui@0.1"` alongside `"commands@0.2"`, declare `runtime.ui`, and target `panel-plugin` in
+`crates/craft-plugin/wit/plugin.wit`. The `ui` and `ui-provider` records follow
+[RFC 0015 section 1](rfcs/0015-plugin-ui-workspaces.md#1-panels). The manifest declarations are
+listed during installation. The component's `ui-provider.describe` must return those declarations.
+The host owns the controls, theme, docking and plugin badge; plugins ship data and layouts.
+Panels belong to command plugins; the importer world remains separate.
+
+For example, `runtime.ui` can declare a job table whose row action runs the entry `edit`:
+
+```json
+{
+  "ui_version": 1,
+  "panels": [{
+    "id": "jobs", "title": "Jobs", "zones": ["right", "bottom"],
+    "layout": {"root": 0, "nodes": [{"widget": {"table": {
+      "bind": "/jobs", "row_id": "id",
+      "columns": [{"key": "name", "label": "Operation", "unit": null}],
+      "select": "single", "on_select": null, "on_edit": "edit"
+    }}}]}
+  }],
+  "workspaces": []
+}
+```
+
+Every action names an entry in `runtime.entries`. Buttons, toolbar items, list selection,
+table selection or editing, and form changes invoke ordinary `<plugin>.<entry>` commands.
+Panel clicks put the event in the host command envelope's `ui_event` field and pass the same
+event as the entry's `params`. `ui-provider.on-event` receives the typed event in the same
+transaction. For the table above, the event is
+`{"panel":"jobs","event":"edit","path":"/jobs","row":"op1","value":null}`.
+An MCP caller uses `execute` with the same `<plugin>.<entry>` command and an envelope containing
+`approval`, `params` and `ui_event`. Ordinary entry parameters, including fields named `panel`
+and `event`, remain entry data and do not invoke `ui-provider.on-event`. Programmatic calls open
+no forms.
+
+The component updates cells with `ui.set-data`, for example `/jobs/0/id` = `text("op1")` and
+`/jobs/0/name` = `text("Pocket")`. Values are typed scalars, with lengths in mm and angles in
+degrees. Slash paths identify cells; no JSON arrays cross the UI WIT interface. Successful calls
+merge into the panel once per frame. A failing entry discards its updates. `clear-data` replaces
+the panel data with an empty set; `show-panel` requests visibility in the current workspace.
+Calling `show-panel(true)` again reopens a panel the user closed. Closing a panel keeps the
+other workspaces' placements and does not cancel a command already running.
+
+The phase 2 host draws groups, tabs, splits, forms, buttons, toolbars, lists, tables, text,
+progress and empty states. Trees, charts and newer widget versions show a placeholder.
+Panels are transient view state, cleared when a design closes or the plugin is disabled.
+The host remembers placement by plugin id, panel id and dock zones. Code and data updates keep
+that placement. Changing the allowed zones or initial zone opens a new section in a legal dock.
+Limits are eight panels per plugin, 512 widgets per layout, 1 MiB of data per panel and 100,000
+rows. The widget count includes every layout node, toolbar button, form field and table column.
+Lists and tables scroll virtually.
 
 ## Commands and permissions
 
@@ -912,7 +975,14 @@ Only an importer may say `open`.
 - **Failures.** A failure fails that one import, named with the plugin and the file ("Sample
   could not open bracket.smp: ...", or "Sample does not support bracket.smp: ..." for
   `unsupported`), and the next one gets a fresh instance. The compiled component stays in memory, so the next file opens
-  without compiling again; nothing compiled is written to disk.
+  without compiling again.
+- **Compiled plugins are kept.** A plugin compiles once per version: SolidCraft keeps the compiled
+  code with Wasmtime's compilation cache in the `plugin-compile` folder of its per-user cache folder
+  (`%LOCALAPPDATA%\SolidCraft\plugin-compile`, `~/Library/Caches/SolidCraft/plugin-compile`, or
+  `~/.cache/solidcraft/plugin-compile`), never in the plugin's or a design's folder. It is safe to
+  delete: the next session compiles again. A changed plugin, SolidCraft version or setting gets its own
+  entry; a damaged entry is compiled again, and a folder that can't be written only means compiling
+  each session. The folder holds machine code SolidCraft runs, so it is as trusted as the app itself.
 - **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
   `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel has to fit the user's ceiling in Preferences › Plugins, and
   its memory too unless the user approved more at install. Build it for `wasm32-unknown-unknown` and wrap it with

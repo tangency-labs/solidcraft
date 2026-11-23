@@ -11,7 +11,7 @@ use std::io::Read as _;
 
 use serde_json::Value;
 use solidcore::topology::vertex::corner;
-use solidcore_ops::boolean::{boolean, imprint, union_all};
+use solidcore_ops::boolean::{boolean, imprint, union_all, union_copies};
 use solidcore_ops::prism::extrude_planar_regions;
 use solidcore_ops::sweep::{extrude, join_arcs, revolve, zone_tolerance, Curve, DraftCorner, Join};
 use solidcore_ops::{
@@ -45,6 +45,32 @@ fn two_overlapping_boxes() {
     assert!(near(volume(&d), 7.0), "{}", volume(&d));
     let i = boolean(a(), b(), BooleanOp::Intersect).unwrap().unwrap();
     assert!(near(volume(&i), 1.0), "{}", volume(&i));
+}
+
+/// The public repro in solidcraft#20408 joins two swept parts along their matching collars.
+#[test]
+fn a_union_of_overlapping_collars_keeps_both_input_bodies() {
+    all_fixes();
+    let a = Body::from_smb(include_bytes!("data/issue_20408_hoop.smb").to_vec(), false).unwrap();
+    let b = Body::from_smb(include_bytes!("data/issue_20408_back.smb").to_vec(), false).unwrap();
+    let before = [volume(&a), volume(&b)];
+    let joined = union_copies(&a, &b).unwrap().unwrap();
+    assert_eq!(joined.solid_count().unwrap(), 1);
+    assert!(joined.check(CheckLevel::Geometry).unwrap().is_valid());
+    // The operands overlap in their coaxial 1.3 mm-radius collars over exactly 2 mm.
+    let overlap = PI * 1.3 * 1.3 * 2.0;
+    assert!(near(volume(&joined), before[0] + before[1] - overlap));
+    assert_eq!(joined.counts().unwrap(), [25, 70, 46]);
+    // The outside of the surviving collar at x=4.75 + 1.3 is 0.1 mm from the probe.
+    let (_, order) = joined.to_record().unwrap();
+    let faces: Vec<usize> = (0..25).collect();
+    let closest = joined
+        .closest_to_point(&order, &faces, &[], [6.15, 15.25, 18.375])
+        .unwrap()
+        .unwrap();
+    assert!(near(closest.distance, 0.1));
+    assert!(near(volume(&a), before[0]));
+    assert!(near(volume(&b), before[1]));
 }
 
 #[test]

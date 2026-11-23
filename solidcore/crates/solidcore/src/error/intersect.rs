@@ -164,9 +164,10 @@ pub enum IntersectFailure {
     /// The surface has no normal at the point (the cross product of its tangents and
     /// the evaluated normal are both shorter than the kernel's zero). [`ErrorKind::Degenerate`].
     NoSurfaceNormal,
-    /// The curve to drop has no tangent to step along: its first derivative is zero where
-    /// the curve is not marked degenerate, or its tangent projected onto the surface's tangent
-    /// plane is zero at the first point. [`ErrorKind::Degenerate`].
+    /// The curve has no tangent to step along: the curve to drop has a zero first derivative
+    /// where it is not marked degenerate, or its tangent projected onto the surface's tangent
+    /// plane is zero at the first point, or the silhouette's tangent is zero at the point.
+    /// [`ErrorKind::Degenerate`].
     DegenerateTangent,
     /// The curve's tangent is `degrees` from the surface normal, within the 3 degrees under
     /// which its drop onto the tangent plane has no direction. [`ErrorKind::Degenerate`].
@@ -313,6 +314,29 @@ pub enum IntersectFailure {
     /// The basic intersector was asked for a law point's delta step, which only the
     /// advanced intersectors compute. [`ErrorKind::Unsupported`].
     DeltaStepUnsupported,
+    /// A silhouette point coincides with the perspective eye point, where the view direction
+    /// it is classified by has no length. [`ErrorKind::Degenerate`].
+    PointAtEye,
+    /// The tracer does not compute point values: the base tracer leaves the step to the
+    /// tracers that override it. [`ErrorKind::Unsupported`].
+    TracerHasNoPointValues,
+    /// The tracer does not solve for a next point: the base tracer leaves the step to the
+    /// tracers that override it. [`ErrorKind::Unsupported`].
+    TracerHasNoPointSolve,
+    /// The tracer does not drop a boundary curve for start points: the base tracer and the
+    /// drop-curve tracer leave it to the tracers that override it. [`ErrorKind::Unsupported`].
+    TracerHasNoBoundaryDrop,
+    /// A boundary iso curve dropped onto `found` UV curves, neither one nor two (two along a
+    /// seam). Class `failed`.
+    BoundaryDropNotOneOrTwo {
+        /// The number of UV curves the drop gave.
+        found: usize,
+    },
+    /// A tracer's reversal succeeded but left the curve with no points. The default
+    /// `SurfaceTrace::reverse_curve_direction` keeps every point, so only an outside
+    /// implementor's override reaches it (upstream's `SM_ERR_NULL_POINTER`).
+    /// [`ErrorKind::InvalidInput`].
+    ReversalLeftNoPoints,
     /// The touches of a curve against a face's loops do not pair into arrivals and
     /// departures: there are `count`, an odd number, or the curve is closed and has fewer
     /// than four touches or its last is not on the seam its first is on. Class `failed`.
@@ -320,6 +344,12 @@ pub enum IntersectFailure {
         /// The number of touches.
         count: usize,
     },
+    /// A touch the loop crossing found on the face's seam drops to a uv point that is not on
+    /// the surface's seam. Class `failed`.
+    SeamTouchOffSeam,
+    /// The uv sector of a vertex use, computed with its status ignored as upstream, names no
+    /// edge use on the side the classified curve leaves along. Class `missing`.
+    NoSectorEdgeuse,
     /// Squeezing out the smallest interval of a classification left its number of intervals
     /// unchanged, so the two classifications of one curve cannot be brought to the same
     /// number of intervals (the squeeze's error, where it gave one, is the cause). Class
@@ -344,6 +374,14 @@ pub enum IntersectFailure {
     /// in: the curve does not classify to that face consistently at its ends. Class
     /// `missing`.
     NoEndSector,
+    /// The two classifications of one curve, which are combined interval by interval, have
+    /// different numbers of intervals (`this` and `other`). Class `failed`.
+    IntervalCountsDiffer {
+        /// The number of intervals of this classification.
+        this: usize,
+        /// The number of intervals of the other classification.
+        other: usize,
+    },
 }
 
 impl IntersectFailure {
@@ -389,13 +427,20 @@ impl IntersectFailure {
             | Self::ApproachHitBoundary
             | Self::ApproachNotCertified { .. }
             | Self::DeltaStepUnsupported
+            | Self::PointAtEye
+            | Self::TracerHasNoPointValues
+            | Self::TracerHasNoPointSolve
+            | Self::TracerHasNoBoundaryDrop
+            | Self::BoundaryDropNotOneOrTwo { .. }
             | Self::NoClassFace
             | Self::IntervalIndexPastEnd { .. }
             | Self::ParameterOutsideRange { .. }
+            | Self::SeamTouchOffSeam
             | Self::SqueezeStalled
             | Self::RepairDidNotSettle { .. }
             | Self::IntervalEndMisplaced
-            | Self::PointClassNotInserted => SM_ERR,
+            | Self::PointClassNotInserted
+            | Self::IntervalCountsDiffer { .. } => SM_ERR,
             Self::Missing(_)
             | Self::CurveCacheNotBuilt
             | Self::FaceWithoutSurface
@@ -405,10 +450,12 @@ impl IntersectFailure {
             | Self::PolyFaceWithoutEdges
             | Self::CurveNotBSpline
             | Self::SurfaceCacheNotBuilt
+            | Self::NoSectorEdgeuse
             | Self::NoSurfaceCaches
             | Self::SurfaceNotOffset { .. }
             | Self::NoCurveToReverse
             | Self::StartPointLost
+            | Self::ReversalLeftNoPoints
             | Self::NoSourceCurve
             | Self::NoEndSector => SM_ERR_NULL_POINTER,
             Self::OutsideDomain(_) | Self::SeamJumpNotSnapped => SM_ERR_OUTSIDE_OF_DOMAIN,
@@ -449,6 +496,7 @@ impl IntersectFailure {
             | Self::PointNotOnBothSurfaces
             | Self::NoCurveToReverse
             | Self::StartPointLost
+            | Self::ReversalLeftNoPoints
             | Self::NoSourceCurve
             | Self::NoClassFace
             | Self::IntervalIndexPastEnd { .. }
@@ -460,12 +508,16 @@ impl IntersectFailure {
             | Self::SelfIntersectionUnsupported
             | Self::TraceTooLong { .. }
             | Self::SurfaceNotOffset { .. }
-            | Self::DeltaStepUnsupported => ErrorKind::Unsupported,
+            | Self::DeltaStepUnsupported
+            | Self::TracerHasNoPointValues
+            | Self::TracerHasNoPointSolve
+            | Self::TracerHasNoBoundaryDrop => ErrorKind::Unsupported,
             Self::PointOutsideDomain { .. } => ErrorKind::OutsideDomain,
             Self::NoSurfaceNormal
             | Self::DegenerateTangent
             | Self::TangentAlongNormal { .. }
-            | Self::DegenerateDomain => ErrorKind::Degenerate,
+            | Self::DegenerateDomain
+            | Self::PointAtEye => ErrorKind::Degenerate,
             Self::CurveCacheNotBuilt => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
@@ -534,7 +586,7 @@ impl core::fmt::Display for IntersectFailure {
                 "the dropped curve reached {limit} control points, more than the drop builds"
             ),
             Self::NoSurfaceNormal => f.write_str("the surface has no normal at the point"),
-            Self::DegenerateTangent => f.write_str("the curve to drop has no tangent there"),
+            Self::DegenerateTangent => f.write_str("the curve has no tangent there"),
             Self::TangentAlongNormal { degrees } => write!(
                 f,
                 "the curve's tangent is {degrees} degrees from the surface normal, within 3"
@@ -567,6 +619,12 @@ impl core::fmt::Display for IntersectFailure {
                 f,
                 "the {count} touches of the curve against the loops do not pair into arrivals and departures"
             ),
+            Self::SeamTouchOffSeam => {
+                f.write_str("the seam touch does not drop onto the surface's seam")
+            }
+            Self::NoSectorEdgeuse => {
+                f.write_str("the vertex use's uv sector names no edge use on the curve's side")
+            }
             Self::SqueezeStalled => f.write_str(
                 "squeezing out the smallest interval did not shorten the classification",
             ),
@@ -583,6 +641,10 @@ impl core::fmt::Display for IntersectFailure {
             Self::NoEndSector => {
                 f.write_str("no vertex use at an end of the edge has a sector of the face")
             }
+            Self::IntervalCountsDiffer { this, other } => write!(
+                f,
+                "the two classifications have different numbers of intervals ({this} and {other})"
+            ),
             Self::NoSurfaceCaches => f.write_str("no surface caches were given"),
             Self::SelfIntersectionUnsupported => {
                 f.write_str("the basic intersector does not test self intersection")
@@ -627,9 +689,24 @@ impl core::fmt::Display for IntersectFailure {
                 f,
                 "no trace step toward the snapped point passes in {tries} tries"
             ),
+            Self::PointAtEye => f.write_str("the surface point is at the eye point"),
+            Self::TracerHasNoPointValues => {
+                f.write_str("this tracer does not compute point values")
+            }
+            Self::TracerHasNoPointSolve => f.write_str("this tracer does not step to a next point"),
+            Self::TracerHasNoBoundaryDrop => {
+                f.write_str("this tracer does not drop a boundary curve")
+            }
+            Self::BoundaryDropNotOneOrTwo { found } => write!(
+                f,
+                "the boundary curve dropped onto {found} uv curves, neither one nor two"
+            ),
             Self::NoCurveToReverse => f.write_str("the curve to reverse has no points"),
             Self::StartPointLost => {
                 f.write_str("the start point added for the trace was gone when the trace began")
+            }
+            Self::ReversalLeftNoPoints => {
+                f.write_str("the tracer's reversal left the curve with no points")
             }
             Self::DeltaStepUnsupported => {
                 f.write_str("the basic intersector does not compute a law point's delta step")
@@ -1017,6 +1094,16 @@ pub(super) mod tests {
             (F::NoCurveToReverse, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::StartPointLost, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::DeltaStepUnsupported, SM_ERR, K::Unsupported),
+            (F::PointAtEye, SM_ERR, K::Degenerate),
+            (F::TracerHasNoPointValues, SM_ERR, K::Unsupported),
+            (F::TracerHasNoPointSolve, SM_ERR, K::Unsupported),
+            (F::TracerHasNoBoundaryDrop, SM_ERR, K::Unsupported),
+            (F::BoundaryDropNotOneOrTwo { found: 3 }, SM_ERR, K::Failed),
+            (
+                F::ReversalLeftNoPoints,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::intersect(op, failure);
@@ -1082,11 +1169,18 @@ pub(super) mod tests {
                 SM_ERR_ASSERT_FAILURE,
                 K::Failed,
             ),
+            (F::SeamTouchOffSeam, SM_ERR, K::Failed),
+            (F::NoSectorEdgeuse, SM_ERR_NULL_POINTER, K::Missing),
             (F::SqueezeStalled, SM_ERR, K::Failed),
             (F::RepairDidNotSettle { restarts: 4 }, SM_ERR, K::Failed),
             (F::IntervalEndMisplaced, SM_ERR, K::Failed),
             (F::PointClassNotInserted, SM_ERR, K::Failed),
             (F::NoEndSector, SM_ERR_NULL_POINTER, K::Missing),
+            (
+                F::IntervalCountsDiffer { this: 2, other: 3 },
+                SM_ERR,
+                K::Failed,
+            ),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::intersect(op, failure);
@@ -1148,15 +1242,10 @@ pub(super) mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/intersect/adv_surface_intersector.rs", 10),
             ("solidcore/src/intersect/curve_class/p3.rs", 19),
-            ("solidcore/src/intersect/curve_class/p4.rs", 26),
-            ("solidcore/src/intersect/curve_class/p5.rs", 8),
             ("solidcore/src/intersect/curve_class/p7.rs", 17),
             ("solidcore/src/intersect/curve_class/p8.rs", 17),
             ("solidcore/src/intersect/curve_class/p9.rs", 17),
-            ("solidcore/src/intersect/surface_silhouette.rs", 7),
-            ("solidcore/src/intersect/surface_tracer.rs", 6),
             ("solidcore/src/intersect/topology_solver/p1.rs", 12),
             ("solidcore/src/intersect/topology_solver/p2.rs", 24),
         ];
