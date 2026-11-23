@@ -387,13 +387,84 @@ pub enum BSplineFailure {
         /// The columns given.
         columns: usize,
     },
+    /// The curve to approximate has `given` breakpoints, and its interval needs two.
+    /// [`ErrorKind::InvalidInput`].
+    TooFewBreakpoints {
+        /// The breakpoints given.
+        given: usize,
+    },
+    /// The approximation of a tangent field used up its `limit` subdivisions before every
+    /// piece fit; the field may fit with more, or not at all (a jump in it).
+    /// [`ErrorKind::NotWithinTolerance`].
+    SubdivisionCap {
+        /// The subdivisions allowed.
+        limit: usize,
+    },
+    /// The approximation's interval [`lo`, `hi`] has no floating-point midpoint strictly
+    /// inside it (or one that is not finite), and its piece still does not fit.
+    /// [`ErrorKind::NotWithinTolerance`].
+    IntervalNotSplittable {
+        /// The interval's start.
+        lo: f64,
+        /// The interval's end.
+        hi: f64,
+    },
+    /// A corner blend is bounded by at least four curves, and `given` are given.
+    /// [`ErrorKind::InvalidInput`].
+    TooFewBoundaryCurves {
+        /// The curves given.
+        given: usize,
+    },
+    /// A boundary curve comes without its parameter curve or neighbouring surface where the
+    /// corner blend needs them (all of them for more than four sides, all but one for four).
+    /// [`ErrorKind::InvalidInput`]; status `SM_ERR_NULL_POINTER`.
+    BoundaryWithoutSurface,
+    /// A boundary curve of the corner blend is not given. [`ErrorKind::InvalidInput`];
+    /// status `SM_ERR_NULL_POINTER`.
+    BoundaryCurveMissing,
+    /// The first rail is to be the spine, and no first rail is given.
+    /// [`ErrorKind::InvalidInput`]; status `SM_ERR_NULL_POINTER`.
+    SpineRailMissing,
+    /// Rails are given (or the first is the spine) without the sections' intersections with
+    /// them. [`ErrorKind::InvalidInput`]; status `SM_ERR_NULL_POINTER`, or `SM_ERR` where
+    /// upstream reports that for rails without a spine.
+    RailIntersectionsMissing,
+    /// The trim domain is not inside the surface's domain. [`ErrorKind::InvalidInput`].
+    TrimDomainOutside,
+    /// A first derivative vanishes at the point, and no point nearby has both long enough to
+    /// stand in for them. [`ErrorKind::Degenerate`].
+    TangentsVanish,
+    /// The corner patch has fewer than two distinct knots in a direction: its domain there is
+    /// a single value, so it has no span to refine or halve. [`ErrorKind::Degenerate`].
+    PatchWithoutSpan,
+    /// The corner patch has `u_count` x `v_count` control points of degrees `u_degree`,
+    /// `v_degree`, and the projection of its side rows needs at least five control points
+    /// and degree 1 in each direction (a patch whose domain collapses in a direction is not
+    /// refined there). [`ErrorKind::Degenerate`].
+    PatchTooCoarse {
+        /// Control points in u.
+        u_count: usize,
+        /// Control points in v.
+        v_count: usize,
+        /// Degree in u.
+        u_degree: usize,
+        /// Degree in v.
+        v_degree: usize,
+    },
+    /// A boundary curve without a neighbouring surface is taken only when it is degenerate
+    /// (a point), and this one is not. [`ErrorKind::InvalidInput`].
+    FreeBoundaryNotDegenerate,
 }
 
 impl BSplineFailure {
     /// The status the C++ method returns for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Missing(_) => SM_ERR_NULL_POINTER,
+            Self::Missing(_)
+            | Self::BoundaryWithoutSurface
+            | Self::BoundaryCurveMissing
+            | Self::SpineRailMissing
+            | Self::RailIntersectionsMissing => SM_ERR_NULL_POINTER,
             Self::ZeroAxis => SM_ERR_INVALID_INPUT,
             _ => SM_ERR,
         }
@@ -431,14 +502,27 @@ impl BSplineFailure {
             | Self::NetIndexOutside { .. }
             | Self::DirectionNotUOrV { .. }
             | Self::DegreeTooLarge { .. }
-            | Self::EmptyGrid { .. } => ErrorKind::InvalidInput,
+            | Self::EmptyGrid { .. }
+            | Self::TooFewBreakpoints { .. }
+            | Self::TooFewBoundaryCurves { .. }
+            | Self::BoundaryWithoutSurface
+            | Self::BoundaryCurveMissing
+            | Self::SpineRailMissing
+            | Self::RailIntersectionsMissing
+            | Self::TrimDomainOutside
+            | Self::FreeBoundaryNotDegenerate => ErrorKind::InvalidInput,
             Self::NotRational | Self::NotIntersectionCurve | Self::ArcKindUnsupported => {
                 ErrorKind::Unsupported
             }
-            Self::ArcLoopDegenerate { .. } | Self::GeneratorOnAxis => ErrorKind::Degenerate,
-            Self::DegreeNotReducible { .. } | Self::PointOffSurface { .. } => {
-                ErrorKind::NotWithinTolerance
-            }
+            Self::ArcLoopDegenerate { .. }
+            | Self::GeneratorOnAxis
+            | Self::TangentsVanish
+            | Self::PatchWithoutSpan
+            | Self::PatchTooCoarse { .. } => ErrorKind::Degenerate,
+            Self::DegreeNotReducible { .. }
+            | Self::PointOffSurface { .. }
+            | Self::SubdivisionCap { .. }
+            | Self::IntervalNotSplittable { .. } => ErrorKind::NotWithinTolerance,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -582,6 +666,48 @@ impl core::fmt::Display for BSplineFailure {
             }
             Self::EmptyGrid { rows, columns } => {
                 write!(f, "the grid has {rows} rows and {columns} columns")
+            }
+            Self::TooFewBreakpoints { given } => {
+                write!(f, "the curve has {given} breakpoints, fewer than two")
+            }
+            Self::SubdivisionCap { limit } => {
+                write!(f, "the tangent field needs more than {limit} subdivisions")
+            }
+            Self::IntervalNotSplittable { lo, hi } => write!(
+                f,
+                "the parameter interval [{lo}, {hi}] cannot be subdivided further"
+            ),
+            Self::TooFewBoundaryCurves { given } => write!(
+                f,
+                "a corner blend needs at least four boundary curves, not {given}"
+            ),
+            Self::BoundaryWithoutSurface => {
+                f.write_str("a boundary's parameter curve or neighbouring surface is missing")
+            }
+            Self::BoundaryCurveMissing => f.write_str("a boundary curve is missing"),
+            Self::SpineRailMissing => f.write_str("the spine rail is missing"),
+            Self::RailIntersectionsMissing => {
+                f.write_str("the rails are given without their intersections")
+            }
+            Self::TrimDomainOutside => {
+                f.write_str("the trim domain is not inside the surface's domain")
+            }
+            Self::TangentsVanish => f.write_str("both first derivatives cannot be made nonzero"),
+            Self::PatchWithoutSpan => {
+                f.write_str("the corner patch has fewer than two knots in a direction")
+            }
+            Self::PatchTooCoarse {
+                u_count,
+                v_count,
+                u_degree,
+                v_degree,
+            } => write!(
+                f,
+                "the corner patch has {u_count} x {v_count} control points of degrees \
+                 {u_degree}, {v_degree}, fewer than five or degree 0 in a direction"
+            ),
+            Self::FreeBoundaryNotDegenerate => {
+                f.write_str("a boundary curve without a surface is not degenerate")
             }
         }
     }
@@ -867,6 +993,10 @@ mod tests {
                 rows: 0,
                 columns: 4,
             },
+            BSplineFailure::TooFewBreakpoints { given: 1 },
+            BSplineFailure::TooFewBoundaryCurves { given: 3 },
+            BSplineFailure::TrimDomainOutside,
+            BSplineFailure::FreeBoundaryNotDegenerate,
         ];
         let unsupported = [
             BSplineFailure::NotRational,
@@ -880,6 +1010,14 @@ mod tests {
                 tolerance: 1e-6,
             },
             BSplineFailure::GeneratorOnAxis,
+            BSplineFailure::TangentsVanish,
+            BSplineFailure::PatchWithoutSpan,
+            BSplineFailure::PatchTooCoarse {
+                u_count: 4,
+                v_count: 9,
+                u_degree: 3,
+                v_degree: 3,
+            },
         ];
         let tolerance = [
             BSplineFailure::DegreeNotReducible {
@@ -890,7 +1028,20 @@ mod tests {
                 residual: 0.5,
                 tolerance: 1e-8,
             },
+            BSplineFailure::SubdivisionCap { limit: 8192 },
+            BSplineFailure::IntervalNotSplittable { lo: 1.0, hi: 1.0 },
         ];
+        // the caller's missing inputs keep upstream's `NER` status
+        for cause in [
+            BSplineFailure::BoundaryWithoutSurface,
+            BSplineFailure::BoundaryCurveMissing,
+            BSplineFailure::SpineRailMissing,
+            BSplineFailure::RailIntersectionsMissing,
+        ] {
+            let e = SolidError::b_spline("nurbs::op", cause);
+            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{cause:?}");
+            assert_eq!(e.kind(), ErrorKind::InvalidInput, "{cause:?}");
+        }
         for (causes, kind) in [
             (&invalid[..], ErrorKind::InvalidInput),
             (&unsupported[..], ErrorKind::Unsupported),
@@ -974,7 +1125,6 @@ mod tests {
         const PINNED: &[(&str, usize)] = &[
             ("solidcore/src/nurbs/b_spline_surface/p1.rs", 2),
             ("solidcore/src/nurbs/b_spline_surface_n_lib/p1.rs", 7),
-            ("solidcore/src/nurbs/b_spline_surface_n_lib/p2.rs", 33),
         ];
         assert_pinned(
             "B-spline phrase-cause sites",

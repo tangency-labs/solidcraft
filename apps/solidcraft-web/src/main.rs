@@ -27,6 +27,8 @@ mod linked;
 mod mouse_buttons;
 #[cfg(any(target_arch = "wasm32", test))]
 mod space_mouse;
+#[cfg(target_arch = "wasm32")]
+mod tickets;
 #[cfg(all(target_arch = "wasm32", feature = "usage-stats"))]
 mod usage;
 #[cfg(target_arch = "wasm32")]
@@ -1422,6 +1424,8 @@ mod web {
                             download_design: Some(Box::new(files::download)),
                             open_bytes: Some(Box::new(files::open_in_tab)),
                             easyprint_upload: Some(std::sync::Arc::new(crate::easyprint::upload)),
+                            tickets_http: Some(std::sync::Arc::new(crate::tickets::http)),
+                            ticket_secrets: Some(std::sync::Arc::new(crate::tickets::BrowserSecrets)),
                             browser_files: Some(Box::new(move || shown.panel.set(true))),
                             install_app: Some(crate::install::service(&cc.egui_ctx)),
                             #[cfg(feature = "usage-stats")]

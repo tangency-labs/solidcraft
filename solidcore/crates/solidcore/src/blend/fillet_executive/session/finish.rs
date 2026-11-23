@@ -883,11 +883,19 @@ impl FilletSession<'_> {
     /// (`SmTol::GetApproxTol3d`, its solvers' and its merge's), so a face it rolls on that
     /// is a blend by its definition evaluates as its certified net wherever the net's
     /// bound is within that tolerance ([`NetScope::within`]); a step that asks for more
-    /// (a station of a definition) takes S.
+    /// (a station of a definition) takes S. [`Self::do_filleting`], called on its own after
+    /// [`Self::create_corners`] as solidcore-ops does, opens the same scope.
     pub fn do_fillet(&mut self, k: &mut Kernel) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::session::do_fillet");
-        let tolerance = approx_tol3d(k, 0.5 * self.objects.target.tolerance());
+        let tolerance = self.net_tolerance(k);
         NetScope::within_mut(k, tolerance, |k| self.do_fillet_within(k))
+    }
+
+    /// The tolerance the fillet is built to, the target's approximation tolerance
+    /// (`SmTol::GetApproxTol3d`): the [`NetScope`] [`Self::do_fillet`] and
+    /// [`Self::do_filleting`] run in.
+    fn net_tolerance(&self, k: &Kernel) -> f64 {
+        approx_tol3d(k, 0.5 * self.objects.target.tolerance())
     }
 
     /// The body of [`Self::do_fillet`], in its tolerance's [`NetScope`].
@@ -959,14 +967,19 @@ impl FilletSession<'_> {
     /// A round whose radius law has a corner is split there (the fork's
     /// `SplitFilletFacesAtRadiusCorners`, which its `DoFillet` runs), so a session filleted
     /// step by step, its corners set between [`Self::create_corners`] and this, builds the
-    /// law's corners as [`Self::do_fillet`] does.
+    /// law's corners as [`Self::do_fillet`] does. It runs in [`Self::do_fillet`]'s
+    /// [`NetScope`] too, so a session filleted step by step reads a round kept as its
+    /// definition through its certified net as [`Self::do_fillet`] does.
     pub fn do_filleting(
         &mut self,
         k: &mut Kernel,
         error_out: Option<&mut ErrorInfo<FilletObject>>,
     ) -> Result<()> {
-        let (status, split_and_logged) = self.filleting_split_and_logged(k, error_out);
-        status.and(split_and_logged)
+        let tolerance = self.net_tolerance(k);
+        NetScope::within_mut(k, tolerance, |k| {
+            let (status, split_and_logged) = self.filleting_split_and_logged(k, error_out);
+            status.and(split_and_logged)
+        })
     }
 
     /// The filleting's status, then the split at the radius law's corners and the blend
@@ -1078,22 +1091,31 @@ impl FilletSession<'_> {
         // setback set on a made corner (SetSetBackDist) that builds none (neither the
         // Setback nor an N x N corner) would be dropped silently, so it is refused, as
         // `create_corners` refuses one asked with SetSetBackFill at such a corner
-        if self
+        // (not the fork, #2933) otherwise a corner at a vertex marked set back is classified
+        // now, where the setback set on it is first read: the Setback where it is one. A corner
+        // that is the Setback already builds the setback set on it (#16408); one beside a
+        // curved face asked an ease, which its G1 fill cannot take, is refused rather than
+        // built without the ask. Both refusals end in the one failure below.
+        let not_built = if self
             .objects
             .corners
             .iter()
             .any(crate::blend::blend_corner::setback::asked_setback_not_built)
         {
+            Some(crate::blend::blend_corner::setback::SETBACK_NOT_BUILT)
+        } else if self.set_back_marked_corners(k)?.is_some() {
+            Some(crate::blend::blend_corner::setback::SETBACK_EASE_NOT_BUILT)
+        } else {
+            None
+        };
+        if let Some(comment) = not_built {
             self.note_refusal(Refusal {
                 code: FilletErrorType::CornerUnsupported,
                 reason: None,
-                comment: crate::blend::blend_corner::setback::SETBACK_NOT_BUILT,
+                comment,
             });
             return Err(failure("an asked setback is not built"));
         }
-        // (not the fork, #2933) a corner at a vertex marked set back is classified now, where
-        // the setback set on it is first read: the Setback where it is one
-        self.set_back_marked_corners(k)?;
         // not the fork's (#3145): setbacks that overlap on an edge, before the trace
         if let Some((vertex, refusal)) = crate::blend::blend_corner::setback::overlapping_setbacks(
             k,

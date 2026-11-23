@@ -4,7 +4,7 @@
 //!
 //! | Rust | Upstream |
 //! |------|----------|
-//! | [`cross`], [`dot`], [`norm`] | none |
+//! | [`cross`], [`dot`], [`square`], [`norm`] | none |
 //!
 //! Deviations: no upstream counterpart. No recursion.
 
@@ -24,12 +24,14 @@ pub(crate) fn dot(a: [Ivl; 3], b: [Ivl; 3]) -> Ivl {
     ax * bx + ay * by + az * bz
 }
 
+/// `x^2`, enclosed with a nonnegative lower bound.
+pub(crate) fn square(x: Ivl) -> Ivl {
+    let s = x * x;
+    Ivl::new(s.lo.max(0.0), s.hi)
+}
+
 /// `|a|`, enclosed with nonnegative squared components.
 pub(crate) fn norm(a: [Ivl; 3]) -> Ivl {
-    let square = |x: Ivl| {
-        let s = x * x;
-        Ivl::new(s.lo.max(0.0), s.hi)
-    };
     let [x, y, z] = a;
     (square(x) + square(y) + square(z)).sqrt()
 }

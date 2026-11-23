@@ -429,6 +429,7 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
     // Test its geometry before navigation, including the first frame entering a handle.
     crate::joint_handles::owns_pointer(app, proj, p)
         || app.dialog.as_ref().and_then(|d| crate::dialogs_move::triad(app, d)).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p))
+        || app.dialog.as_ref().and_then(|d| sketch_move_triad(app, d, anchor(app, d)?.0)).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p))
         || app
             .dialog
             .as_ref()
@@ -535,6 +536,39 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         crate::place_gizmo::show(app, ui, painter, proj);
         return;
     }
+    if let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. }) = d.kind
+        && !app.preferences.sketch_move_classic
+        && let Some((pivot, _)) = anchor(app, &d)
+    {
+        let mut dragging = false;
+        // Picking comes first: a click picks sketch geometry even under a handle of the triad.
+        let picked = d.inputs.first().map(|i| i.items.as_slice()).unwrap_or_default();
+        let unpicked = match &app.viewport.hover {
+            Some(crate::viewport::Hit::SketchCurve { id, .. }) => !picked.iter().any(|s| matches!(s, Sel::SketchCurve { id: p, .. } if p == id)),
+            Some(crate::viewport::Hit::SketchPoint { id, .. }) => !picked.iter().any(|s| matches!(s, Sel::SketchPoint { id: p } if p == id)),
+            _ => false,
+        };
+        crate::gizmo::give_way(unpicked);
+        if let Some(t) = sketch_move_triad(app, &d, pivot)
+            && let Some(g) = crate::gizmo::show(ui, painter, proj, egui::Id::unique("sc_sketch_move_triad"), &t, snap_step(app.cam.half_height()))
+        {
+            sketch_move_drag(app, &mut d, &t, g);
+            dragging = true;
+        }
+        crate::gizmo::give_way(false);
+        let triad = sketch_move_triad(app, &d, pivot);
+        let at = triad.as_ref().map_or(pivot, |t| t.center);
+        let mut place = box_place(app, proj);
+        place.handles = triad.as_ref().and_then(|t| crate::gizmo::handles_region(proj, t));
+        let focus = std::mem::take(&mut d.focus);
+        if let Some(bs) = proj.to_screen(at)
+            && let Some((label, _, value)) = d.primary()
+        {
+            value_box(ui, label, value, bs + vec2(crate::gizmo::LEN_PX as f32 + 16.0, -12.0), focus || dragging, place);
+        }
+        app.dialog = Some(d);
+        return;
+    }
     if let Some((base, dir)) = anchor(app, &d)
         && let Some(bs) = proj.to_screen(base)
     {
@@ -609,6 +643,73 @@ fn draw_move_rotation(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter
     Some((end, *angle != before))
 }
 
+/// Move/Copy Sketch Entities' triad at `pivot` moved so far, in the sketch's x, y and normal.
+pub(crate) fn sketch_move_triad(app: &SolveApp, d: &Dialog, pivot: Vec3) -> Option<crate::gizmo::Triad> {
+    if app.preferences.sketch_move_classic {
+        return None;
+    }
+    let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { x, y, z, angle, three_d, .. }) = &d.kind else { return None };
+    let st = crate::open_meshing::session_world(&app.session);
+    let plane = app.session.active_sketch.and_then(|id| st.sketch(id))?.plane;
+    let (px, py, pn) = (plane.x, plane.y, plane.normal());
+    let len = |v: &String| sketch_move_len(app, v);
+    let dz = if *three_d { len(z) } else { 0.0 };
+    let turn = crate::length_input::eval(&app.session.doc, angle, ValueKind::Angle).ok().filter(|v| v.is_finite()).unwrap_or(0.0);
+    let centre = d
+        .inputs
+        .get(1)
+        .and_then(|i| i.items.first())
+        .and_then(|sel| crate::sketch_modify_ui::point_id(&app.session, sel))
+        .and_then(|id| sketch_point_at(app, &st, id))
+        .unwrap_or(plane.origin);
+    // The command turns the in-plane part about the centre, then moves it.
+    let from = pivot - centre;
+    let (u, v) = (from.dot(px), from.dot(py));
+    let (sin, cos) = turn.sin_cos();
+    let turned = pivot + px * ((u * cos - v * sin) - u) + py * ((u * sin + v * cos) - v);
+    Some(crate::gizmo::Triad {
+        center: turned + px * len(x) + py * len(y) + pn * dz,
+        translate: true,
+        rotate: true,
+        frame: [px, py, pn],
+        axes: [true, true, *three_d],
+        rings: [false, false, true],
+    })
+}
+
+/// A Move/Copy Sketch Entities distance field in mm, read as the command reads it (design units).
+fn sketch_move_len(app: &SolveApp, text: &str) -> f64 {
+    crate::length_input::eval(&app.session.doc, text, ValueKind::Length).ok().filter(|v| v.is_finite()).unwrap_or(0.0)
+}
+
+/// A triad drag on Move/Copy Sketch Entities, added to the values it had when the drag began.
+fn sketch_move_drag(app: &SolveApp, d: &mut Dialog, t: &crate::gizmo::Triad, g: crate::gizmo::Drag) {
+    let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { x, y, z, angle, .. }) = &d.kind else { return };
+    if g.started || !d.extra.contains_key("drag0") {
+        let len = |v: &String| sketch_move_len(app, v);
+        let deg = crate::length_input::eval(&app.session.doc, angle, ValueKind::Angle).ok().filter(|v| v.is_finite()).unwrap_or(0.0).to_degrees();
+        d.extra.insert("drag0".into(), serde_json::json!([len(x), len(y), len(z), deg]));
+    }
+    let v0: [f64; 4] = d.extra.get("drag0").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+    let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { x, y, z, angle, three_d, .. }) = &mut d.kind else { return };
+    match g.change {
+        crate::gizmo::Change::Translate(v) => {
+            *x = format_len(&app.session.doc, v0[0] + v.dot(t.frame[0]));
+            *y = format_len(&app.session.doc, v0[1] + v.dot(t.frame[1]));
+            if *three_d {
+                *z = format_len(&app.session.doc, v0[2] + v.dot(t.frame[2]));
+            }
+        }
+        crate::gizmo::Change::Rotate { angle: a, .. } => {
+            let deg = v0[3] + a.to_degrees();
+            *angle = format!("{} deg", (deg * 100.0).round() / 100.0);
+        }
+    }
+    if g.done {
+        d.extra.remove("drag0");
+    }
+}
+
 /// A round step for dragged values at this zoom (1, 2 or 5 times a power of ten).
 pub fn snap_step(half_height: f64) -> f64 {
     let raw = (half_height / 40.0).max(1e-4);
@@ -651,6 +752,11 @@ fn sketch_point_at(app: &SolveApp, st: &solidcraft_engine::doc::ModelState, id: 
         None => (app.session.active_sketch?, id),
     };
     let ss = st.sketch(sketch)?;
+    // A drawn 3D point, `<wire>@<index>` (Move/Copy in a 3D sketch picks these).
+    if let Some((wire, index)) = point.split_once('@') {
+        let fit = &ss.sketch.wires.iter().find(|w| w.id == wire)?.fit;
+        return fit.get(index.parse::<usize>().ok()?).copied();
+    }
     Some(ss.plane.to_world(ss.sketch.point(ss.sketch.resolve_point(point)?)?))
 }
 

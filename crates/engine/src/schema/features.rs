@@ -16,10 +16,10 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, AxisDir, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FaceRefs, FacesParam,
-    FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr, NumberExpr,
-    OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef,
-    StringList, ThinSideParam, ToPoint, TouchingParam, feature_common, present,
+    AngleExpr, AxisDir, AxisDirExpr, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation,
+    FaceRefs, FacesParam, FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName,
+    LengthExpr, NumberExpr, OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam,
+    ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint, TouchingParam, feature_common, present,
 };
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
@@ -310,10 +310,13 @@ pub struct CylinderParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointExpr3")]
     pub base: Option<PointExpr3>,
-    /// The direction from the bottom to the top. Default: Z.
+    /// The direction from the bottom to the top: X, Y, Z or `[x, y, z]`, each a number or an
+    /// expression with no unit (`["0", "-sin(t)", "-cos(t)"]`), which the cylinder follows as
+    /// the parameters change. A parameter added as a plain number is a length: divide it by its
+    /// unit (`"n / 1 mm"`). Default: Z.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "AxisDir")]
-    pub axis: Option<AxisDir>,
+    #[schemars(with = "AxisDirExpr")]
+    pub axis: Option<AxisDirExpr>,
     /// Up to two straight edges of the face it stands on, each `{edge: [x, y, z], distance: expr}`
     /// (as `solid.hole`'s): the base centre goes that far from each edge's line, in the face's
     /// plane, and follows the edges. With a numeric `base` only.
@@ -469,6 +472,20 @@ pub struct SweepParams {
     /// whole drawn profile. The dialogs send `true`: they highlight the regions they pick.
     #[serde(default)]
     pub exact_regions: Option<bool>,
+    /// A point on a planar body face to sweep instead of a sketch profile.
+    #[serde(default)]
+    pub face: Option<Point3>,
+    /// The body whose face to use, where faces of several bodies meet at `face`.
+    #[serde(default)]
+    pub face_body: Option<String>,
+    /// With `face`: the face's plane as a fixed plane, as `solid.extrude`'s.
+    #[serde(default)]
+    pub fixed: Option<bool>,
+    /// With `face`, among placed instances: the body whose placement `face` is read in (read by
+    /// the engine's frame mapping, before the command runs). Default: `face_body`, else the
+    /// body nearest the point.
+    #[serde(default)]
+    pub body: Option<String>,
     /// The sketch holding the path, by id or name. Not needed when the path is a body's edges.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]
@@ -1368,6 +1385,13 @@ pub struct PatternPathParams {
     /// The length along the path from the first copy to the last, instead of `spacing`.
     #[serde(default)]
     pub distance: Option<LengthExpr>,
+    /// The start point: how far along the path the original sits, the copies measured on from
+    /// there. Default 0, the path's start. Give this or `start_fraction`, not both.
+    #[serde(default)]
+    pub start: Option<LengthExpr>,
+    /// The start point as a fraction, 0 to 1, of the path's length, kept as the path changes.
+    #[serde(default)]
+    pub start_fraction: Option<NumberExpr>,
     /// How each copy is turned. Default: identical.
     #[serde(default)]
     pub orientation: Option<PathOrientationParam>,

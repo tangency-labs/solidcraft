@@ -2243,8 +2243,8 @@ fn surface_global_point_solve(
 /// The fast drop's trim test of face `f`'s surface (`pFace->PointClassify(uv, tol,
 /// TRUE, FALSE, ..)` in `SmSurface::GlobalPointSolve`) with the face's B-rep at hand:
 /// `true` keeps the solution. Whether the test runs at all (the face's surface cache is
-/// trimmed, point testing is on and its face was not modified; `GetOwner()` is not
-/// cleared) is decided on the first call and kept in `test_on`. The face's trimmed
+/// trimmed, point testing is on, its face was not modified and has loop uses;
+/// `GetOwner()` is not cleared) is decided on the first call and kept in `test_on`. The face's trimmed
 /// surface cache is made when it has none
 /// ([`crate::query::face::p2::face_surface_cache`]).
 ///
@@ -2268,7 +2268,8 @@ pub(crate) fn live_face_fast_drop_test(
             let base = lease.cache.base();
             let on = lease.trimmed && base.point_test_enabled && !base.face_was_modified;
             lease.release();
-            on
+            // a face without loop uses has no trim boundaries: no test
+            on && face::p4::has_loopuses(b, f)?
         };
         *test_on = Some(on);
         on
@@ -2568,6 +2569,8 @@ fn owner_face<'g, O>(
 /// Whether `smsurf_GetSurfaceCache(pFace->GetSurface())` is a trimmed surface cache
 /// with point testing on (`m_bPointTestEnabled`) whose face was not modified
 /// (`m_bFaceWasModified`): the condition of `GlobalPointSolve`'s fast-drop trim test.
+/// A face without loop uses is never tested (upstream's stored bit depended on when
+/// the cache was built; here it is asked of the face, #20179).
 /// A face whose surface owner is cleared (inside `CreateUVTrimCurve(s)`) has no face
 /// upstream, so no test. The lookup reuses the trimmed cache the surface keeps, as
 /// [`crate::query::face::p2::face_surface_cache`] does.
@@ -2579,6 +2582,10 @@ fn owner_face<'g, O>(
 /// creates the face's UV trim curves, which read-only topology cannot.
 fn face_point_test_on(b: &Brep, f: FaceId, surface: &Surface) -> Result<bool> {
     if b.is_surface_owner_cleared(f) {
+        return Ok(false);
+    }
+    // a face without loop uses has no trim boundaries: no test, whatever its cache
+    if !face::p4::has_loopuses(b, f)? {
         return Ok(false);
     }
     let kept = match surface.take_trim_cache() {

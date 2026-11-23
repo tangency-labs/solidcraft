@@ -28,6 +28,30 @@ fn answer(ui: &mut Ui, label: &str, hint: &str, text: &mut String, id: &str, row
     response
 }
 
+fn restore_answers(app: &mut SolveApp, draft: &mut Draft, ui: &mut Ui) {
+    if app.issue_report.earlier.is_none() || !draft.can_restore_answers() {
+        return;
+    }
+    if !draft.focus_requested {
+        // A closed draft may have left the scroll area far below the recovery offer.
+        ui.scroll_to_cursor(Some(egui::Align::Min));
+        draft.focus_requested = true;
+    }
+    ui_kit::text(ui, solidcraft_ui_text::tr("ui.report_saved_answers"), ui_kit::Text::Note("saved-answers"));
+    ui.horizontal_wrapped(|ui| {
+        if ui_kit::button(ui, solidcraft_ui_text::tr("ui.report_restore_answers"), ui_kit::Button::Normal).clicked()
+            && let Some(answers) = app.issue_report.earlier.take()
+        {
+            answers.restore(draft);
+        }
+        if ui_kit::button(ui, solidcraft_ui_text::tr("ui.report_discard_answers"), ui_kit::Button::Normal).clicked() {
+            app.issue_report.earlier = None;
+            draft.focus_requested = false;
+        }
+    });
+    ui_kit::divider(ui, "saved-answers");
+}
+
 fn screenshot_actions(app: &mut SolveApp, draft: &mut Draft, ui: &mut Ui) -> bool {
     let mut retake = false;
     ui.horizontal_wrapped(|ui| {
@@ -146,6 +170,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                     .min_scrolled_height(scroll)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
+                        restore_answers(app, draft, ui);
                         let body = draft.report_body();
                         let (_, copy_needed) = draft_url(&draft.report_title(), &body);
                         let guidance = if draft.opened_github {
