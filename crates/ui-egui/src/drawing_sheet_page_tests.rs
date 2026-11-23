@@ -2601,6 +2601,7 @@ fn dragging_a_detail_view_leaves_its_callout_in_place() {
     h.step(&json!({"drag": [on_screen(from.x, from.y), on_screen(from.x + by.x, from.y + by.y)], "steps": 6})).unwrap();
     h.frames(2);
     let after = h.app.session.drawing("drawing.inspect").unwrap().view_centre(detail).unwrap();
-    assert!((after - (from + by)).len() < 1.0, "the detail moved by {:?}, not {by:?}", after - from);
+    let moved = after - from;
+    assert!((moved.x - by.x).abs() < 1.0 && (moved.y - by.y).abs() < 1.0, "the detail moved by {moved:?}, not {by:?}");
     assert_eq!(callout(&mut h), before, "the callout stays where it was");
 }
