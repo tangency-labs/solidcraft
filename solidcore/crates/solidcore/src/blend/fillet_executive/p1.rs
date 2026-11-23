@@ -1514,7 +1514,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     },
                     ..crate::kernel::KernelOptions::default()
                 });
-                tk.rng = k.rng.clone();
+                tk.seed = k.seed;
                 tk.cancel.clone_from(&k.cancel);
                 let mut trim_ivl = edge_ivl;
                 let crv = edge_curve_mut(OP, target, edge_id)?;
@@ -1550,7 +1550,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     let crv = edge_curve_mut(OP, target, edge_id)?;
                     // fork 873c7c9 passes this on (SER)
                     crv.edit_parameterization(k, &edge_ivl)?;
-                    target.edge_mut(edge_id)?.interval = edge_ivl;
+                    topo_edge::set_interval(target, edge_id, &edge_ivl)?;
                 }
 
                 let curr_crv = edge_curve(OP, target, edge_id)?;

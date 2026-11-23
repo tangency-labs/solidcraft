@@ -1244,8 +1244,8 @@ pub(crate) fn make_vertex_split_edge_with_curve_identity_state(
             "split edge without primary use",
         )?;
         let same = b.edgeuse(primary)?.orientation == OrientType::Same;
-        b.edge_mut(edge_id)?.interval = if same { ivl1 } else { ivl2 };
-        b.edge_mut(new_edge)?.interval = if same { ivl2 } else { ivl1 };
+        edge::set_interval(b, edge_id, if same { &ivl1 } else { &ivl2 })?;
+        edge::set_interval(b, new_edge, if same { &ivl2 } else { &ivl1 })?;
         let mut copied =
             required(b.edge(edge_id)?.curve.as_ref(), "split edge without curve")?.copy(k)?;
         let old_curve_ref = state.with_env(k, |env| {
@@ -1303,8 +1303,8 @@ pub(crate) fn make_vertex_split_edge_with_curve_identity_state(
                 &mut ivl2,
                 crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
             )?;
-            b.edge_mut(edge_id)?.interval = ivl1;
-            b.edge_mut(new_edge)?.interval = ivl2;
+            edge::set_interval(b, edge_id, &ivl1)?;
+            edge::set_interval(b, new_edge, &ivl2)?;
         } else {
             required(
                 b.edge_mut(edge_id)?.curve.as_mut(),
@@ -1325,8 +1325,8 @@ pub(crate) fn make_vertex_split_edge_with_curve_identity_state(
                 &mut ivl1,
                 crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
             )?;
-            b.edge_mut(edge_id)?.interval = ivl2;
-            b.edge_mut(new_edge)?.interval = ivl1;
+            edge::set_interval(b, edge_id, &ivl2)?;
+            edge::set_interval(b, new_edge, &ivl1)?;
         }
         let point = required(b.edge(edge_id)?.curve.as_ref(), "split edge without curve")?
             .evaluate_point(k, split_parameter)?;
