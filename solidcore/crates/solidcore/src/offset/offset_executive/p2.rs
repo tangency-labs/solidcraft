@@ -850,8 +850,8 @@ impl OffsetExecutive {
                             continue;
                         }
                     }
-                    // SE upstream: propagate Unported, ignore other errors.
-                    crate::error::ignore_status(self.mapped_edge_prefix(
+                    // SE upstream: propagate Unported, ignore other errors but a defect.
+                    super::p1::ignored_unless_defect(self.mapped_edge_prefix(
                         kernel,
                         original,
                         edgeuse,
@@ -875,7 +875,7 @@ impl OffsetExecutive {
                             attributes: &mut *notifications.attributes,
                             key_of: notifications.result_key_of,
                         };
-                        crate::error::ignore_status(self.build_side_wall_of_edgeuse_with(
+                        super::p1::ignored_unless_defect(self.build_side_wall_of_edgeuse_with(
                             kernel,
                             original,
                             Some(edgeuse),
@@ -1024,18 +1024,19 @@ impl OffsetExecutive {
                         attributes: &mut *notifications.attributes,
                         key_of: notifications.original_key_of,
                     };
-                    let mated = crate::error::ignored(self.mate_edges_across_with_marked(
-                        kernel,
-                        original,
-                        edgeuse,
-                        across,
-                        offset_edgeuse,
-                        offset_across,
-                        mark_type,
-                        &marked,
-                        &mut stores,
-                        notifications.result_key_of,
-                    ))?;
+                    let mated =
+                        super::p1::ignored_unless_defect(self.mate_edges_across_with_marked(
+                            kernel,
+                            original,
+                            edgeuse,
+                            across,
+                            offset_edgeuse,
+                            offset_across,
+                            mark_type,
+                            &marked,
+                            &mut stores,
+                            notifications.result_key_of,
+                        ))?;
                     if mated.is_none() {
                         unbridged =
                             unbridged.or(Some(required(eu::face(original, radial)?, OP_EXTENDED)?));
@@ -1274,13 +1275,14 @@ impl OffsetExecutive {
                     kernel.check_cancelled(OP_EXTENDED)?;
                     let edge = required(eu::edge(original, edgeuse)?, OP_EXTENDED)?;
                     if eu::edge_is_lamina(original, edge)? {
-                        // SE, not SER, upstream: propagate Unported, ignore other errors.
+                        // SE, not SER, upstream: propagate Unported, ignore other errors but
+                        // a defect.
                         let mut stores = NotificationStores {
                             records: &mut *notifications.records,
                             attributes: &mut *notifications.attributes,
                             key_of: notifications.result_key_of,
                         };
-                        crate::error::ignore_status(self.build_side_wall_of_edgeuse_with(
+                        super::p1::ignored_unless_defect(self.build_side_wall_of_edgeuse_with(
                             kernel,
                             original,
                             Some(edgeuse),
