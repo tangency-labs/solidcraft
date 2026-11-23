@@ -38,7 +38,7 @@ pub struct Drag {
 }
 
 /// The placement a drag on `body` moves: the one on its path just inside the active placement.
-fn placement_of(app: &SolveApp, body: &str) -> Option<Vec<u64>> {
+pub(crate) fn placement_of(app: &SolveApp, body: &str) -> Option<Vec<u64>> {
     let s = &app.session;
     let (_, _, path, _) = s.doc.body_frames(&s.model.state()).into_iter().find(|f| f.0 == body)?;
     let active = if s.active_component == 0 {

@@ -627,6 +627,10 @@ pub fn move_face_cvs(
 /// point of its boundary row moves by any weight, and a spline neighbour's tied points move with
 /// their twins.
 ///
+/// The falloff does not cross a seam yet: a spline neighbour's seam row follows its twins, but
+/// its inner rows take no weight of the falloff, so the seam stays shut but its tangency is not
+/// kept (a smooth edit up to a seam creases there on the neighbour's side).
+///
 /// # Errors
 /// As [`move_face_cvs`] and [`move_net`].
 pub fn move_face_net(

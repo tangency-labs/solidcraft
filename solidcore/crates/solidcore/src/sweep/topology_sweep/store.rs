@@ -1085,11 +1085,7 @@ impl SweepAccess for SweepStore<'_> {
                 .ok_or_else(|| invalid("unknown context"))?
                 .kernel;
             if let Body::Hcr(hcr) = &mut e.body {
-                let p = k.fixes.sweep_statuses_pass_on; // fork c8f6a31 (WR-662)
-                crate::error::ignore_status(crate::error::passed_on(
-                    hcr.compute_global_visibility(k),
-                    p,
-                )?)?;
+                hcr.compute_global_visibility(k)?;
             }
             Ok(super::access::SweepScene { brep: scene })
         })();

@@ -1152,10 +1152,7 @@ impl FilletSolver {
         // CreateConePatch() makes a STEP-parameterized cone,
         // we go the other way: u along the edge, v around the fillet surface.
         // fork 66b02de passes this on (SER)
-        ignore_status(crate::error::passed_on(
-            cone_patch.swap_uv(),
-            k.fixes.fillet_statuses_pass_on,
-        )?)?;
+        cone_patch.swap_uv()?;
 
         // Copy pConePatch, when possible as an analytic surface. Not the fork (#2405): the
         // class's cylinder is the analytic cone CopyAndAddAnalytics recognises in the patch,
@@ -1318,10 +1315,7 @@ impl FilletSolver {
         cone.adjust_step_uv_domain(k, &step_domain)?;
         let mut cone = Surface::from(cone);
         // fork 66b02de passes this on (SER)
-        ignore_status(crate::error::passed_on(
-            cone.swap_uv(k),
-            k.fixes.fillet_statuses_pass_on,
-        )?)?;
+        cone.swap_uv(k)?;
 
         let uv_domain = cone.natural_uv_domain_with_nurb(k)?;
         let ivl = Extent1d::from_min_max(uv_domain.min.x, uv_domain.max.x);
@@ -1588,8 +1582,15 @@ impl FilletSolver {
         };
 
         // Determine if we need to reverse the axis of revolution
+        // Not upstream (#17594, WR-422): as for the end section below, a rail point on the
+        // axis carries no direction about it, not only one at the origin: where a face's
+        // offset collapses onto the axis (a cylinder of the ball's radius beside a plane
+        // square to it) the plane's rail point is the ball's pole, on the axis a radius above
+        // the origin, and the turn and the axis's sense were taken from that point. On the
+        // axis is within the solver's tolerance (`center_tol`), as WR-592 snaps a rail point
+        // above, not within an absolute 1e-8, which rounding far from the origin exceeds
         let mut vec = p0 - origin;
-        if vec.length() < ANALYTIC_TOL {
+        if axis_of_revolution.cross(vec).length() < center_tol {
             vec = p1 - origin;
         }
         let dir = axis_of_revolution.cross(vec); // Start direction of rail curves
@@ -1646,28 +1647,15 @@ impl FilletSolver {
         let mut end_vec = end_p0 - origin;
 
         // If sEndVec is zero or parallel to sAxisOfRev, use sEndP1.
+        // (#17594: on the axis within the solver's tolerance, as the start section's)
         let temp_cross = axis_of_revolution.cross(end_vec);
-        if temp_cross.length() < ANALYTIC_TOL {
+        if temp_cross.length() < center_tol {
             end_vec = end_p1 - origin;
         }
 
         // CCWAngleBetween status ignored upstream: dSpanAng stays 0 on a failure
         // fork 66b02de passes this on (SER)
-        let mut span_ang = match crate::error::passed_on(
-            axis_of_revolution.ccw_angle_between(vec, end_vec),
-            k.fixes.fillet_statuses_pass_on,
-        )? {
-            Ok(a) => a,
-            Err(e)
-                if matches!(
-                    e,
-                    SolidError::Unported { .. } | SolidError::Cancelled { .. }
-                ) || e.is_not_certified() =>
-            {
-                return Err(e)
-            }
-            Err(_) => 0.0,
-        };
+        let mut span_ang = axis_of_revolution.ccw_angle_between(vec, end_vec)?;
         if span_ang < ANG_TOL_RAD {
             span_ang += 2.0 * PI;
         }
@@ -1791,10 +1779,7 @@ impl FilletSolver {
             cs.rotate_about_axis(PI, ref_frame.z_axis());
             cs.translate(ref_frame.origin());
             // fork 66b02de passes this on (SER)
-            ignore_status(crate::error::passed_on(
-                arc.transform(&cs, None),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            arc.transform(&cs, None)?;
         }
 
         // create surface of revolution
@@ -2860,10 +2845,7 @@ impl FilletSolver {
                 let tk = edge_zone_kernel(k, edge::tolerance(pseudo.brep(), cross_section)?);
                 // Set the cross section curve interval (status ignored upstream)
                 // fork 66b02de passes this on (SER)
-                ignore_status(crate::error::passed_on(
-                    cs_curve.trim(&tk, &mut trim_ivl, TrimMode::Notify),
-                    k.fixes.fillet_statuses_pass_on,
-                )?)?;
+                cs_curve.trim(&tk, &mut trim_ivl, TrimMode::Notify)?;
                 if let Some(c) = pseudo.brep_mut().edge_mut(cross_section)?.curve.as_mut() {
                     *c = cs_curve.clone();
                 }
@@ -2876,10 +2858,7 @@ impl FilletSolver {
                 for e_u in [prim, mate] {
                     if let Some(uv) = pseudo.brep_mut().edgeuse_mut(e_u)?.uv_trim_curve.as_mut() {
                         // fork 66b02de passes this on (SER)
-                        ignore_status(crate::error::passed_on(
-                            uv.trim(&tk, &mut trim_ivl, TrimMode::Notify),
-                            k.fixes.fillet_statuses_pass_on,
-                        )?)?;
+                        uv.trim(&tk, &mut trim_ivl, TrimMode::Notify)?;
                     }
                 }
             }
@@ -3312,8 +3291,13 @@ pub fn find_rollover_side_edge<O: ClassObject>(
 
             // Check whether the side edge we hit is a tangent edge, and whether it's
             // convex.
-            let (tangent, opposite) =
-                test_manifold_tangent_rollover(k, b, side_edge, tangency_tol_rad)?;
+            let (tangent, opposite) = super::p1::test_manifold_tangent_rollover_at(
+                k,
+                b,
+                side_edge,
+                end_pc.t_param(),
+                tangency_tol_rad,
+            )?;
             io.is_tangential_side_edge = tangent;
             io.opposite_normals = opposite;
             let convex_side_edge =
@@ -3454,8 +3438,13 @@ pub fn find_rollover_side_edge<O: ClassObject>(
         let side_edge = edge_object(&ivl.start, edge_of)?;
 
         // Check whether the side edge we hit is tangent, or concave/convex.
-        let (tangent, opposite) =
-            test_manifold_tangent_rollover(k, b, side_edge, tangency_tol_rad)?;
+        let (tangent, opposite) = super::p1::test_manifold_tangent_rollover_at(
+            k,
+            b,
+            side_edge,
+            start_pc.t_param(),
+            tangency_tol_rad,
+        )?;
         io.is_tangential_side_edge = tangent;
         io.opposite_normals = opposite;
         let convex_side_edge =

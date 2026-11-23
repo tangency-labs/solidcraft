@@ -1,9 +1,10 @@
 # Managing SolidCraft in an organization
 
-An administrator can set some SolidCraft settings for everyone who uses a computer, with Group
-Policy or Microsoft Intune. A setting under policy shows in Preferences as **Set by your
+An administrator can set some SolidCraft settings for everyone who uses a computer: with Group
+Policy or Microsoft Intune on Windows, a configuration profile or MDM on macOS, and a file in
+`/etc` on Linux and FreeBSD. A setting under policy shows in Preferences as **Set by your
 organization**, and people cannot change it. While any policy is set, SolidCraft says it is
-**Managed by** the organization. This works on Windows today.
+**Managed by** the organization.
 
 A computer without a policy behaves exactly as before. SolidCraft only reads the policy: it
 writes nothing, and it sends nothing about the policy anywhere.
@@ -19,22 +20,23 @@ can run it.
 | Policy | Registry value | Type | Values |
 |---|---|---|---|
 | Check for updates | `CheckForUpdates` | `REG_DWORD` | `1`: checks at start and once a day, and people cannot turn them off. `0`: no checks at all, as with `SOLIDCRAFT_UPDATE_CHECK=0` ([Updates and privacy](updates.md)). |
+| Anonymous usage statistics | `UsageStatistics` | `REG_DWORD` | `0`: SolidCraft sends no usage statistics, keeps none to send later and shows no notice about them, and people cannot turn them on. `1`: each person chooses. SolidCraft 0.46 or later; what is sent is in [Privacy](https://github.com/tangency-labs/solidcraft/blob/main/docs/privacy.md). |
 | Organization name | `OrganizationName` | `REG_SZ` | The name shown as **Managed by** and the name, up to 64 characters on one line. It changes no setting. |
-| Units of new designs | `DefaultUnits` | `REG_SZ` | `mm`, `cm`, `m`, `in` or `ft` (Preferences, Design). Designs that already exist keep their units. |
-| Interface language | `Language` | `REG_SZ` | `system` to follow Windows, or the code of a language SolidCraft has, such as `en`, `de`, `fr`, `pt-BR` or `zh-TW` (Preferences, General, Language lists them). |
-| Reopen designs at start | `ReopenDesigns` | `REG_DWORD` | `1`: reopens the designs that were open when SolidCraft closed. `0`: does not, for example on shared computers. |
-| Show the Discord button | `ShowDiscordButton` | `REG_DWORD` | `1`: the application bar shows it and people cannot hide it. `0`: hidden. The Help menu keeps the link. |
-| Show the Donate button | `ShowDonateButton` | `REG_DWORD` | `1`: the application bar shows it and people cannot hide it. `0`: hidden. The Help menu keeps the link. |
-| Show AI features | `AiFeatures` | `REG_DWORD` | `1`: the Assistant button, shortcut, menu entry and chat panel show. `0`: no AI features, and SolidCraft looks for or starts no AI agent. |
-| Show the Assistant button | `AiToolbarButton` | `REG_DWORD` | `1`: the application bar shows it and people cannot hide it. `0`: hidden; the shortcut and View menu stay. |
-| AI agent permissions | `AiPermissions` | `REG_SZ` | `ask` (every change asks first), `edits` (modelling runs, files and destructive actions ask) or `all` (nothing asks). An agent's own permissions and the **Always allowed** answers don't apply while it is set. |
-| Changes per message | `AgentTurnLimit` | `REG_DWORD` | `1` to `200`: the most changes an agent in the chat makes for one message. `0`: no limit. |
-| Let AI agents connect | `AgentControl` | `REG_DWORD` | `1`: the control channel (MCP, this computer only) is on. `0`: SolidCraft opens no port for agents, not even one named with `--control` or `SOLIDCRAFT_CONTROL_PORT`. |
-| Allow Open with EasyPrint | `AllowEasyPrint` | `REG_DWORD` | `0`: SolidCraft offers no EasyPrint and sends no model to Printables, whoever asks. `1` or not set: people can use it after agreeing once. |
-| Allow problem reports | `AllowProblemReports` | `REG_DWORD` | `0`: no problem report opens or is sent, to SolidCraft's ticket server or GitHub. Help, About SolidCraft, **Copy diagnostic information** still copies the details. `1` or not set: people can send reports. |
-| Add SolidCraft to AI apps | `ConnectAiApps` | `REG_DWORD` | `1`: SolidCraft adds its MCP server to the AI apps on the computer at start. `0`: it adds none and takes out the entries it added. |
+| Units of new designs | `DefaultUnits` | `REG_SZ` | `mm`, `cm`, `m`, `in` or `ft` (Preferences, Design). Designs that already exist keep their units. SolidCraft 0.46 or later. |
+| Interface language | `Language` | `REG_SZ` | `system` to follow the operating system, or the code of a language SolidCraft has, such as `en`, `de`, `fr`, `pt-BR` or `zh-TW` (Preferences, General, Language lists them). SolidCraft 0.46 or later. |
+| Reopen designs at start | `ReopenDesigns` | `REG_DWORD` | `1`: reopens the designs that were open when SolidCraft closed. `0`: does not, for example on shared computers. SolidCraft 0.46 or later. |
+| Show the Discord button | `ShowDiscordButton` | `REG_DWORD` | `1`: the application bar shows it and people cannot hide it. `0`: hidden. The Help menu keeps the link. SolidCraft 0.46 or later. |
+| Show the Donate button | `ShowDonateButton` | `REG_DWORD` | `1`: the application bar shows it and people cannot hide it. `0`: hidden. The Help menu keeps the link. SolidCraft 0.46 or later. |
+| Show AI features | `AiFeatures` | `REG_DWORD` | `1`: the Assistant button, shortcut, menu entry and chat panel show. `0`: no AI features, and SolidCraft looks for or starts no AI agent. SolidCraft 0.46 or later. |
+| Show the Assistant button | `AiToolbarButton` | `REG_DWORD` | `1`: the application bar shows it and people cannot hide it. `0`: hidden; the shortcut and View menu stay. SolidCraft 0.46 or later. |
+| AI agent permissions | `AiPermissions` | `REG_SZ` | `ask` (every change asks first), `edits` (modelling runs, files and destructive actions ask) or `all` (nothing asks). An agent's own permissions and the **Always allowed** answers don't apply while it is set. SolidCraft 0.46 or later. |
+| Changes per message | `AgentTurnLimit` | `REG_DWORD` | `1` to `200`: the most changes an agent in the chat makes for one message. `0`: no limit. SolidCraft 0.46 or later. |
+| Let AI agents connect | `AgentControl` | `REG_DWORD` | `1`: the control channel (MCP, this computer only) is on. `0`: SolidCraft opens no port for agents, not even one named with `--control` or `SOLIDCRAFT_CONTROL_PORT`. SolidCraft 0.46 or later. |
+| Allow Open with EasyPrint | `AllowEasyPrint` | `REG_DWORD` | `0`: SolidCraft offers no EasyPrint and sends no model to Printables, whoever asks. `1` or not set: people can use it after agreeing once. SolidCraft 0.46 or later. |
+| Allow problem reports | `AllowProblemReports` | `REG_DWORD` | `0`: no problem report opens or is sent, to SolidCraft's ticket server or GitHub. Help, About SolidCraft, **Copy diagnostic information** still copies the details. `1` or not set: people can send reports. SolidCraft 0.46 or later. |
+| Add SolidCraft to AI apps | `ConnectAiApps` | `REG_DWORD` | `1`: SolidCraft adds its MCP server to the AI apps on the computer at start. `0`: it adds none and takes out the entries it added. SolidCraft 0.46 or later. |
 
-The values live in the key `Software\Policies\SolidCraft`:
+On Windows the values live in the key `Software\Policies\SolidCraft`:
 
 - under `HKEY_LOCAL_MACHINE` for everyone on the computer, or
 - under `HKEY_CURRENT_USER` for one person.
@@ -82,6 +84,29 @@ reg add HKLM\Software\Policies\SolidCraft /v ShowDonateButton /t REG_DWORD /d 0 
 reg add HKLM\Software\Policies\SolidCraft /v AiPermissions /t REG_SZ /d ask /f
 ```
 
+## macOS
+
+SolidCraft 0.46 and later read the same value names as managed preferences of the domain
+`io.tangencylabs.solidcraft`, which a configuration profile installs: numbers as `integer`, the
+name as `string`. `packaging/macos/policies/solidcraft.mobileconfig` in the source is a sample
+profile; remove the keys you don't set and give it your own identifiers before you deploy it with
+your MDM (or install it by opening it). A profile for the computer (`/Library/Managed
+Preferences/io.tangencylabs.solidcraft.plist`) wins over one for the user, value by value.
+Values under a `Recommended` dictionary are reserved, as on Windows.
+
+## Linux and FreeBSD
+
+SolidCraft 0.46 and later read `/etc/solidcraft/policy.json`, a JSON object of the same value
+names (`packaging/linux/policies/policy.json` in the source is a sample):
+
+```json
+{ "CheckForUpdates": 0, "UsageStatistics": 0, "OrganizationName": "Example Corp" }
+```
+
+Make it owned by root and not writable by others (`chmod 644`): a file anyone may write is
+ignored. A Flatpak or Snap sees its own `/etc`, not the computer's, so use the distribution's
+package (deb, rpm, AppImage or the FreeBSD package) where you need the policy to apply.
+
 ## Keeping data inside the organization
 
 These are the features that send something from SolidCraft to a server outside your
@@ -90,6 +115,7 @@ organization, and the policy that turns each off:
 | What leaves the computer | Where it goes | Policy |
 |---|---|---|
 | Update checks | SolidCraft's update feed | `CheckForUpdates` = `0` |
+| Anonymous usage statistics | SolidCraft's metrics server (`metrics.solidcraft.io`, [Privacy](https://github.com/tangency-labs/solidcraft/blob/main/docs/privacy.md)) | `UsageStatistics` = `0` |
 | What a person asks an AI agent, and what the agent sees | The AI provider the agent uses | `AiFeatures` = `0`, `AgentControl` = `0`, `ConnectAiApps` = `0` |
 | Problem reports, with what the person ticks | SolidCraft's ticket server, or GitHub | `AllowProblemReports` = `0` |
 | A model sent to Open with EasyPrint | Printables | `AllowEasyPrint` = `0` |

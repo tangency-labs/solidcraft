@@ -518,7 +518,7 @@ fn join_up_to_a_cylinder_from_a_face_it_cuts_adds_the_sliver_between() {
     let touch = |s: &Session, x: f64| {
         let state = s.model.state();
         let b = &state.body("Body1").unwrap().body;
-        b.record().vertices.iter().any(|v| (v.point[0] - 15. * x).hypot(v.point[1] + 75.).hypot(v.point[2]) < 1e-6)
+        b.record().vertices.iter().any(|v| [v.point[0] - 15. * x, v.point[1] + 75., v.point[2]].iter().all(|d| d.abs() < 1e-6))
     };
     // Profile 0 is the crescent on +x, profile 1 the one on -x.
     for (profile, x) in [(0, 1.), (1, -1.)] {

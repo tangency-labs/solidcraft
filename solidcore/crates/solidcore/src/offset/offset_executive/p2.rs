@@ -95,7 +95,6 @@ use crate::sweep::topology_sweep::store::SweepIdentities;
 use crate::topology::edge::{NotificationStores, NotifyState};
 use crate::topology::edgeuse::{p1 as eu, p2 as eu2};
 use crate::topology::face::p2 as face;
-#[cfg(test)]
 use crate::topology::topology::Topology;
 use crate::topology::{Brep, BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, RegionId, VertexId};
 
@@ -269,6 +268,169 @@ fn refuse_singular_offset(
                 face,
                 distance,
                 radius: singular.radius,
+            },
+        )
+        .into_error()),
+        _ => Ok(()),
+    }
+}
+
+/// Not upstream (#18239): refuses an inset of `wall` of the closed solid `original` (its
+/// faces `open` left open) where two of its planar faces face each other across material
+/// exactly twice the wall apart, so that their offsets meet on one plane (a square boss
+/// inset by exactly half its width): the material between them has no offset left, a change
+/// of topology the offset does not make, while the body still has a cavity elsewhere (an
+/// inset that leaves no cavity at all is the shell's empty-cavity refusal, WR-454). It is
+/// [`OffsetFailure::WallsMeetAcross`], in the class of a round's collapse, naming half the
+/// narrowest such distance: the largest wall that fits.
+///
+/// Two faces qualify when their inward normals are opposite to within the B-rep's tolerance
+/// over the faces' extent, the second lies ahead of the first along its inward normal by a
+/// gap `g` with `tolerance < g` and `|g - 2 wall| <= tolerance` (where the insets cross, as
+/// across a rib or floor thinner than two walls, the offset leaves that material solid), and
+/// an interior point of one projects strictly inside the other (`face_classify_uv`), so the
+/// faces overlap across the gap, and a
+/// planar face shares an edge with each and has its interior strictly between their planes:
+/// the cap of the protrusion the two bound, both its edges with them convex (a floor between
+/// a recess and a cut below it has no such cap, and its shell builds). The
+/// cavity is [`crate::offset::wall_room::shell_wall_room`]'s certified witness. Each test
+/// is a witness: a pair or a cavity none shows leaves the inset to the offset.
+fn refuse_meeting_planar_insets(
+    kernel: &mut Kernel,
+    original: &mut Brep,
+    open: &[FaceId],
+    wall: f64,
+    operation: &'static str,
+) -> Result<()> {
+    use crate::intersect::point_class::PointClassType;
+    use crate::math::{Point2, Point3};
+    use crate::nurbs::knots::Side;
+    use crate::offset::wall_room::{shell_wall_room, WallRoom};
+    use crate::query::api_queries::{face_bounding_box, face_classify_uv, face_internal_point};
+    use crate::surface::surface::{Surface, SurfaceKind};
+    if !(wall.is_finite() && wall > 0.0 && brep_is_manifold_solid(original)?) {
+        return Ok(());
+    }
+    let tolerance = original.tolerance();
+    // the projection of `p` onto planar face `f`'s plane, in the face's parameters
+    let plane_uv = |b: &Brep, f: FaceId, p: Point3| -> Result<Option<Point2>> {
+        Ok(match b.face(f)?.surface.as_ref().map(Surface::kind) {
+            Some(SurfaceKind::Plane(plane)) => Some(plane.project_point_to_uv_domain(p)),
+            _ => None,
+        })
+    };
+    // each planar face: an interior point, its unit inward normal, its box, its edges and
+    // whether it is offset (not open)
+    let mut planar = Vec::new();
+    for f in bp1::faces(original, None)? {
+        kernel.check_cancelled(operation)?;
+        let is_plane = matches!(
+            original.face(f)?.surface.as_ref().map(Surface::kind),
+            Some(SurfaceKind::Plane(_))
+        );
+        if !is_plane {
+            continue;
+        }
+        let Some(fu) = face::outer_faceuse(original, f)? else {
+            continue;
+        };
+        let inward = if original.faceuse(fu)?.orientation == OrientType::Same {
+            -1.0
+        } else {
+            1.0
+        };
+        let at = match face_internal_point(kernel, original, f) {
+            Ok(at) => at,
+            Err(e) if e.sm_status().is_some() => continue,
+            Err(e) => return Err(e),
+        };
+        let Some(uv) = plane_uv(original, f, at)? else {
+            continue;
+        };
+        let Some(surface) = original.face(f)?.surface.as_ref() else {
+            continue;
+        };
+        let n = surface.evaluate_normal(kernel, uv, Side::Left, Side::Left)?;
+        let len = n.length();
+        if !(len.is_finite() && len > 0.0) {
+            continue;
+        }
+        let extent = face_bounding_box(kernel, original, f, false)?;
+        let edges = crate::topology::face::p4::edges(original, f, None, false, None)?;
+        planar.push((f, at, n * (inward / len), extent, edges, !open.contains(&f)));
+    }
+    // a planar face sharing an edge with both `a` and `b` whose interior lies strictly between
+    // their planes (the cap of the protrusion they bound: its edges with both are convex)
+    let capped = |a: usize, b: usize, pa: Point3, ma: Vec3, gap: f64| {
+        let (Some((_, _, _, _, ea, _)), Some((_, _, _, _, eb, _))) = (planar.get(a), planar.get(b))
+        else {
+            return false;
+        };
+        planar.iter().any(|(_, pc, _, _, ec, _)| {
+            let depth = (*pc - pa).dot(ma);
+            depth > tolerance
+                && depth < gap - tolerance
+                && ec.iter().any(|e| ea.contains(e))
+                && ec.iter().any(|e| eb.contains(e))
+        })
+    };
+    // the narrowest gap between two faces whose offsets meet, and the first face of it
+    let mut narrowest: Option<(FaceId, f64)> = None;
+    for (i, &(a, pa, ma, ea, _, offset_a)) in planar.iter().enumerate() {
+        kernel.check_cancelled(operation)?;
+        if !offset_a {
+            continue;
+        }
+        for (j, &(b, pb, mb, eb, _, offset_b)) in planar.iter().enumerate().skip(i + 1) {
+            if !offset_b {
+                continue;
+            }
+            // opposite to within the tolerance over both faces' extent
+            if (ma + mb).length() * ea.union(&eb).max_dimension() > tolerance {
+                continue;
+            }
+            let gap = (pb - pa).dot(ma);
+            // the two insets land on one plane: where they cross instead (a rib or floor
+            // thinner than two walls) the offset leaves that material solid and builds
+            if !(gap > tolerance && (gap - 2.0 * wall).abs() <= tolerance) {
+                continue;
+            }
+            if narrowest.is_some_and(|(_, g)| g <= gap) || !capped(i, j, pa, ma, gap) {
+                continue;
+            }
+            let mut overlap = false;
+            for (from, normal, onto) in [(pa, ma, b), (pb, mb, a)] {
+                let Some(uv) = plane_uv(original, onto, from + normal * gap)? else {
+                    continue;
+                };
+                match face_classify_uv(kernel, original, onto, uv) {
+                    Ok(PointClassType::Face) => {
+                        overlap = true;
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(e) if e.sm_status().is_some() => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            if overlap {
+                narrowest = Some((a, gap));
+            }
+        }
+    }
+    let Some((face, gap)) = narrowest else {
+        return Ok(());
+    };
+    if !crate::topology::brep::is_outward_solid(kernel, original)? {
+        return Ok(());
+    }
+    match shell_wall_room(kernel, original, open, wall)? {
+        WallRoom::Room { .. } => Err(Failure::new(
+            operation,
+            OffsetFailure::WallsMeetAcross {
+                face,
+                distance: wall,
+                largest: gap / 2.0,
             },
         )
         .into_error()),
@@ -807,6 +969,17 @@ impl OffsetExecutive {
     ) -> Result<Brep> {
         let original = required(original, OP_EXTENDED)?;
         self.check_resolvable(OP_EXTENDED, original)?;
+        // Not upstream (#18239): an inset whose opposite planar walls meet (a square boss
+        // inset by half its width) is refused, as a round's collapse is below.
+        if self.inset()
+            && self.extend_convex_edges()
+            && self.local_faces.is_empty()
+            && self.operation() != OffsetOperation::LocalOperation
+        {
+            let wall = self.offset_distance();
+            let open = self.shell_faces().to_vec();
+            refuse_meeting_planar_insets(kernel, original, &open, wall, OP_EXTENDED)?;
+        }
         self.allocate_offset_brep(kernel, notifications)?;
         let faces = bp1::faces(original, None)?;
         for id in faces {
@@ -819,6 +992,7 @@ impl OffsetExecutive {
             }
         }
 
+        self.remove_extinct_branches(kernel, original, notifications)?;
         let mapped = order_edgeuses_by_brep(original, &self.mapped_original_edgeuses())?;
         // (not upstream) a local operation's edges whose surfaces all stay are kept
         self.keep_unmoved_edges(original)?;
@@ -1060,6 +1234,7 @@ impl OffsetExecutive {
             // offset's vertex where two consecutive edges' offsets run parallel), then split
             // the edges that run past a step wall's corner (after WR-531's caps below, in the
             // fork's order)
+            self.reconstruct_periodic_boundaries(kernel, original, notifications)?;
             self.close_loop_gaps(kernel, original, notifications)?;
 
             // Not upstream (WR-531; the fork's tangency-labs/smlib@d5dadaa): a vertex where
@@ -1212,13 +1387,41 @@ impl OffsetExecutive {
                     select = false;
                 }
             }
+            // (not upstream, #18570) a local operation (Offset Face, Draft) keeps the body's
+            // cavities: `make_manifold` with no regions given keeps every finite region and
+            // deletes the faces between two of them, the walls of a hollowed body's cavity
+            // among them, which filled the cavity in. The regions kept are the material
+            // ones, read from the faces ([`p5::alternating_void_flags`]); the cavity's
+            // walls stay, between a kept region and one that is not.
+            let material: Vec<RegionId> =
+                if !select && self.operation() == OffsetOperation::LocalOperation {
+                    crate::topology::brep::p5::alternating_void_flags(&result)?
+                        .filter(|flags| flags.values().filter(|&&v| v).count() > 1)
+                        .map(|flags| {
+                            flags
+                                .into_iter()
+                                .filter(|&(_, v)| !v)
+                                .map(|(r, _)| r)
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+            let keep = if select {
+                Some(cavities.as_slice())
+            } else if material.is_empty() {
+                None
+            } else {
+                Some(material.as_slice())
+            };
             // MakeManifold exists in p5, but its remaining metadata/topology
             // adapters must still propagate Unported even though native ignores
             // ordinary errors. Do not turn that partial path into empty success.
             if crate::error::ignored(crate::topology::brep::p5::make_manifold(
                 kernel,
                 &mut result,
-                select.then_some(cavities.as_slice()),
+                keep,
                 false,
             ))?
             .is_some()
@@ -1239,6 +1442,10 @@ impl OffsetExecutive {
                 for region in bp1::regions(&result, None)? {
                     let is_void = Some(region) == result.infinite_region();
                     result.region_mut(region)?.is_void = i32::from(is_void);
+                }
+                // (not upstream, #18570) the cavities kept above are void again
+                if !material.is_empty() {
+                    crate::topology::brep::p5::set_alternating_void_flags(&mut result)?;
                 }
             }
             let _ = self.take_offset_brep();
@@ -1955,7 +2162,9 @@ pub fn offset_brep_simple(
 /// with notification identities of its own, as [`offset_brep_simple`]: for a caller that
 /// keeps no notification stores (`SmBrep::LocalOperation` on a B-rep of the caller's).
 /// The B-rep's attributes stay on its faces as upstream's notifications carry them; its
-/// [`Brep::key`] is restored.
+/// [`Brep::key`] is restored. A complete inward cylindrical draft with fixed axial
+/// end planes uses its exact closed radial removal volume before the executive;
+/// this also trims intervening walls against the drafted support.
 ///
 /// # Errors
 ///
@@ -1966,6 +2175,13 @@ pub fn local_operation_simple(
     faces: &[FaceId],
     surfaces: Vec<crate::surface::surface::Surface>,
 ) -> Result<()> {
+    if crate::topology::brep::local_operation::contract_complete_cylinder(
+        kernel, b, faces, &surfaces,
+    )?
+    .is_some()
+    {
+        return Ok(());
+    }
     let saved_key = b.key();
     b.set_key(attributes::original_key(EntityRef::Brep(BrepId::from_index(0))).key);
     let mut records = attributes::simple_records(b);
@@ -1992,6 +2208,34 @@ pub fn local_operation_simple(
     result
 }
 
+/// Carries the selected face's own attributes onto a static local operation's
+/// swept wall, using the normal Copy handlers and disjoint source/result identities.
+pub(crate) fn copy_local_sweep_attributes(
+    kernel: &mut Kernel,
+    source: &Brep,
+    face: FaceId,
+    target: &mut Brep,
+    wall: FaceId,
+) -> Result<()> {
+    let mut store = AttributeStore::default();
+    attributes::seed_attributes(source, &attributes::original_key, &mut store)?;
+    let from = attributes::original_key(EntityRef::Face(face));
+    let to = attributes::result_key(EntityRef::Face(wall));
+    let mut records = attributes::simple_records(source);
+    records.insert(to.key, Topology::new());
+    crate::topology::topology::notify(
+        &mut records,
+        &mut store,
+        Some(&mut kernel.context),
+        NotifyOperation::Copy,
+        from,
+        Some(to),
+        None,
+        None,
+    )?;
+    attributes::write_back_attributes(target, &attributes::result_key, &store)
+}
+
 /// (not upstream) [`api_shell_brep_full`] with notification identities of its own,
 /// on faces of `original` (`faces` removed: open faces; empty: a closed shell). The
 /// source's attributes reach the result as upstream's notifications carry them; the
@@ -2007,7 +2251,10 @@ pub fn shell_brep_simple(
     faces: &[FaceId],
 ) -> Result<Brep> {
     let source_id = BrepId::from_index(0);
-    let mut source = original.clone_standing_for_self()?;
+    // The working copy keeps the faces' definitions (not upstream: an exact round's
+    // definition rides beside its net, #2485), so that a round offsets by its definition
+    // (#2487: the round of the moved radius on the offset supports), never by its net.
+    let mut source = original.clone_standing_for_self_keeping_definitions()?;
     source.set_key(attributes::original_key(EntityRef::Brep(source_id)).key);
     let mut records = attributes::simple_records(&source);
     let mut store = AttributeStore::default();

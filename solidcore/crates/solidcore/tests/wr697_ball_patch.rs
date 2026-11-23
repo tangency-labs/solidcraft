@@ -52,14 +52,12 @@ use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{edge, EdgeId, EdgeuseId, FaceId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity`.
+/// Every fix.
 fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k

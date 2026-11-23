@@ -3,32 +3,43 @@ use super::CommandSpec;
 use crate::{
     EngineError, Result, Session,
     params::{bad, str_},
+    schema::file_library::{FileTransferParams, FileTransferResult, FileTrashParams, FileTrashResult},
+    schema::{TypedContract, output_schema_for},
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::path::Path;
 
+const TRANSFER_CONTRACT: TypedContract<FileTransferParams> = TypedContract::new();
+const TRASH_CONTRACT: TypedContract<FileTrashParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("file.copy", "Copy Design File", copy)
+    CommandSpec::new("file.copy", "Copy Design File", crate::checked!("file.copy", copy))
         .icon("copy")
         .noundo()
         .doc_only()
+        .contract(&TRANSFER_CONTRACT)
+        .output(output_schema_for::<FileTransferResult>)
         .params("path, destination; copies the saved design without replacing an existing file; rebases linked designs"),
-    CommandSpec::new("file.move", "Move Design File", move_file)
+    CommandSpec::new("file.move", "Move Design File", crate::checked!("file.move", move_file))
         .icon("move")
         .noundo()
         .doc_only()
+        .contract(&TRANSFER_CONTRACT)
+        .output(output_schema_for::<FileTransferResult>)
         .params("path, destination; also renames; refuses the current design or its linked files; never replaces an existing file"),
-    CommandSpec::new("file.trash", "Move Design File to Trash", trash)
+    CommandSpec::new("file.trash", "Move Design File to Trash", crate::checked!("file.trash", trash))
         .icon("delete")
         .noundo()
         .doc_only()
+        .contract(&TRASH_CONTRACT)
+        .output(output_schema_for::<FileTrashResult>)
         .params("path; refuses the current design or its linked files; system Trash only, never permanent deletion"),
 ];
 
+/// One of the two path parameters. The command is not named here: the engine names the one that
+/// ran (`Session::execute`, #6651), which is also what the contract check uses.
 fn arg<'a>(p: &'a Value, key: &str) -> Result<&'a str> {
-    str_(p, key)
-        .filter(|s| !s.trim().is_empty() && s.len() < 4096 && !s.contains('\0'))
-        .ok_or_else(|| bad("file", format!("A valid {key} is required")))
+    str_(p, key).filter(|s| !s.trim().is_empty() && s.len() < 4096 && !s.contains('\0')).ok_or_else(|| bad("", format!("A valid {key} is required")))
 }
 
 pub(crate) fn same_file(a: &str, b: &str) -> bool {
@@ -36,23 +47,30 @@ pub(crate) fn same_file(a: &str, b: &str) -> bool {
         return true;
     }
     #[cfg(not(target_arch = "wasm32"))]
-    if let (Ok(a), Ok(b)) = (Path::new(a).canonicalize(), Path::new(b).canonicalize()) {
+    if let (Ok(a), Ok(b)) = (solidcraft_io::vfs::canonicalize(a), solidcraft_io::vfs::canonicalize(b)) {
         return a == b;
     }
     false
 }
 
-/// Refuse removal of an open design or a file referenced by its linked components.
+/// Refuse removal of an open design or a file referenced by its linked components. A link the
+/// design-path rules refuse (a network location not allowed, a device) is not compared with the
+/// file: it names no file this design may reach, and comparing would ask the disk or the network
+/// about it.
 pub(crate) fn uses_file(s: &Session, path: &str) -> bool {
+    let design = s.path.as_deref();
     s.path.as_deref().is_some_and(|own| same_file(own, path))
         || s.doc.links.values().any(|link| {
+            if solidcraft_io::vfs::design_path_refusal(&link.path, design).is_some() {
+                return false;
+            }
             let link_path = Path::new(&link.path);
             let resolved = if link_path.is_relative() {
-                s.path.as_deref().and_then(|p| Path::new(p).parent()).unwrap_or_else(|| Path::new(".")).join(link_path)
+                design.and_then(|p| Path::new(p).parent()).unwrap_or_else(|| Path::new(".")).join(link_path)
             } else {
                 link_path.to_path_buf()
             };
-            resolved.to_str().is_some_and(|p| same_file(p, path))
+            resolved.to_str().is_some_and(|p| solidcraft_io::vfs::design_path_refusal(p, design).is_none() && same_file(p, path))
         })
 }
 
@@ -71,22 +89,24 @@ fn transfer(s: &mut Session, p: &Value, moving: bool) -> Result<Value> {
     }
     if !solidcraft_io::is_design_path(path) || !solidcraft_io::is_design_path(destination) {
         let extensions = solidcraft_io::DESIGN_EXTS.iter().copied().chain(["json"]).map(|ext| format!(".{ext}")).collect::<Vec<_>>().join(", ");
-        return Err(bad("file", format!("Keep a supported design extension ({extensions})")));
+        return Err(bad("", format!("Keep a supported design extension ({extensions})")));
     }
     let original = solidcraft_io::vfs::read(path, solidcraft_io::MAX_DESIGN_BYTES).map_err(|e| EngineError::Other(e.to_string()))?;
     // Validate before a filesystem mutation, and keep external component links pointing
     // to the same originals when moving a saved assembly to another folder.
-    let mut doc = solidcraft_io::read_design(&original)?;
-    let links = super::design_link::rebased(&doc, Some(path), destination);
-    let contents = if links != doc.links {
-        doc.links = links;
-        if destination.to_lowercase().ends_with(".json") { solidcraft_io::write_design(&doc) } else { solidcraft_io::write_design_container(&doc)? }
+    // Its drawings' sources follow the same rule as its component links.
+    let doc = solidcraft_io::read_design(&original)?;
+    let mut moved = std::borrow::Cow::Borrowed(&doc);
+    super::design_link::filed(&mut moved, Some(path), destination);
+    let contents = if let std::borrow::Cow::Owned(doc) = moved {
+        if destination.to_lowercase().ends_with(".json") { solidcraft_io::write_design(&doc)? } else { solidcraft_io::write_design_container(&doc)? }
     } else {
         original.clone()
     };
     solidcraft_io::library_files::transfer(path, destination, &original, &contents, moving)
         .map_err(|e| EngineError::Other(format!("File operation failed: {e}")))?;
-    Ok(json!({"path":path, "destination":destination}))
+    let reply = FileTransferResult { path: path.into(), destination: destination.into(), param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     transfer(s, p, false)
@@ -101,13 +121,15 @@ fn trash(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("file.trash", "Choose a design file"));
     }
     solidcraft_io::library_files::trash(path).map_err(|e| EngineError::Other(e.to_string()))?;
-    Ok(json!({"path":path,"trashed":true}))
+    let reply = FileTrashResult { path: path.into(), trashed: true, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use serde_json::json;
     static NEXT_FIXTURE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     struct Fixture(std::path::PathBuf);
     impl Fixture {
@@ -121,7 +143,7 @@ mod tests {
         }
         fn design(&self, name: &str) -> std::path::PathBuf {
             let path = self.0.join(name);
-            std::fs::write(&path, solidcraft_io::write_design(&solidcraft_doc::Document::new(name))).unwrap();
+            std::fs::write(&path, solidcraft_io::write_design(&solidcraft_doc::Document::new(name)).unwrap()).unwrap();
             path
         }
     }
@@ -205,13 +227,34 @@ mod tests {
     }
 
     #[test]
+    fn library_copy_keeps_authored_bytes_and_model_cache_with_a_fresh_session_identity() {
+        let f = Fixture::new();
+        let source = f.0.join("Source.sc");
+        let destination = f.0.join("Copy.sc");
+        let mut original = session();
+        original.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        let source_bytes = original.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
+        std::fs::write(&source, &source_bytes).unwrap();
+        session().execute("file.copy", &json!({"path": source, "destination": destination})).unwrap();
+        assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
+        let copied_bytes = std::fs::read(&destination).unwrap();
+        assert_eq!(copied_bytes, source_bytes);
+        let mut reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(copied_bytes)).unwrap();
+        let saved = reader.geometry().unwrap();
+        let copied = reader.read_document().unwrap();
+        let reopened = Session::opened(copied, Some(&saved));
+        assert_ne!(reopened.design_token().document_id, original.design_token().document_id);
+        assert_eq!(reopened.model.last_recomputed, 0, "the saved model remains adoptable");
+    }
+
+    #[test]
     fn library_guards_open_and_linked_files_and_rebases_assemblies() {
         let f = Fixture::new();
         let original = f.design("Part.solidcraft");
         let assembly = f.0.join("Assembly.solidcraft");
         let mut doc = solidcraft_doc::Document::new("Assembly");
         doc.links.insert(1, solidcraft_doc::DesignLink { path: "Part.solidcraft".into(), feature: 1, ..Default::default() });
-        std::fs::write(&assembly, solidcraft_io::write_design(&doc)).unwrap();
+        std::fs::write(&assembly, solidcraft_io::write_design(&doc).unwrap()).unwrap();
         let mut s = session();
         s.path = Some(original.to_string_lossy().into_owned());
         assert!(s.execute("file.move", &json!({"path":original,"destination":f.0.join("Other.solidcraft")})).is_err());
@@ -229,6 +272,26 @@ mod tests {
         let relocated = solidcraft_io::read_design(&std::fs::read(&moved).unwrap()).unwrap();
         let link = relocated.links.get(&1).unwrap();
         assert_eq!(destination.join(&link.path).canonicalize().unwrap(), original.canonicalize().unwrap());
+    }
+
+    /// A link to a network location the user has not allowed (or to a device) is never resolved
+    /// to compare it with the file being moved or trashed: on Windows that connects to the host.
+    #[test]
+    fn library_guard_never_resolves_refused_link_paths() {
+        let f = Fixture::new();
+        let part = f.design("Part.solidcraft");
+        let mut s = session();
+        s.path = Some(f.0.join("Assembly.solidcraft").to_string_lossy().into_owned());
+        for (id, path) in [(1, r"\\server\share\part.sc"), (2, "//server/share/part.sc"), (3, r"\\?\UNC\server\share\p.sc"), (4, r"\\.\pipe\p.sc")] {
+            s.doc_mut().links.insert(id, solidcraft_doc::DesignLink { path: path.into(), feature: 1, ..Default::default() });
+        }
+        let calls = solidcraft_io::vfs::file_calls();
+        assert!(!uses_file(&s, part.to_str().unwrap()));
+        // Only the open design itself and the file were resolved: two calls, none for a link.
+        assert_eq!(solidcraft_io::vfs::file_calls() - calls, 2, "a refused link path was resolved");
+        // An allowed link is still compared, and still guards its file.
+        s.doc_mut().links.insert(5, solidcraft_doc::DesignLink { path: "Part.solidcraft".into(), feature: 1, ..Default::default() });
+        assert!(uses_file(&s, part.to_str().unwrap()));
     }
 
     #[test]

@@ -12,6 +12,18 @@ pub(crate) use solidcore::eval::uv::Starts;
 /// Why a record cannot be evaluated: it does not convert (too deep), or the kernel refuses it.
 pub(crate) type Error = String;
 
+/// The kernel's geometric radial order of the faces leaving an edge. Record uses
+/// are returned as a permutation, with their side flags unchanged.
+pub(crate) fn radial_order(curve: &Curve, interval: [f64; 2], faces: &[(&Surface, &Curve2, bool)]) -> Result<Vec<usize>, Error> {
+    let curve = c::curve(curve).map_err(|e| e.to_string())?;
+    let converted = faces
+        .iter()
+        .map(|&(surface, pcurve, forward)| Ok((c::surface(surface).map_err(|e| e.to_string())?, c::curve2(pcurve), forward)))
+        .collect::<Result<Vec<_>, Error>>()?;
+    let faces: Vec<_> = converted.iter().map(|(surface, pcurve, forward)| k::pcurve::RadialFace { surface, pcurve, forward: *forward }).collect();
+    k::pcurve::radial_order(&curve, interval, &faces).map_err(|e| e.to_string())
+}
+
 /// A curve record ready to evaluate.
 pub(crate) struct CurveEval(k::CurveEval);
 
@@ -95,6 +107,25 @@ pub(crate) fn face_flux(s: &SurfaceEval, v0: f64, loops: &[Vec<(&Curve2, bool)>]
     let converted: Vec<Vec<(k::Curve2, bool)>> = loops.iter().map(|l| l.iter().map(|(pc, fwd)| (c::curve2(pc), *fwd)).collect()).collect();
     let borrowed: Vec<Vec<(&k::Curve2, bool)>> = converted.iter().map(|l| l.iter().map(|(pc, fwd)| (pc, *fwd)).collect()).collect();
     k::face_flux(&s.0, v0, &borrowed, &|p| c::vec3(field(c::record_vec3(p))))
+}
+
+/// The sign of one closed shell, certified by the kernel's volume enclosure.
+/// No numerical estimate decides a repaired shell's absolute direction.
+pub(crate) fn shell_volume_positive(record: &solidcore_record::brep::Brep, shell: usize) -> Result<bool, Error> {
+    use solidcore::mass::enclosure::{VolumeSign, volume_sign};
+    use solidcore_record::brep::Region;
+
+    let shell = u32::try_from(shell).map_err(|_| "too many shells".to_string())?;
+    let mut single = record.clone();
+    single.regions = vec![Region { shells: vec![shell], void: false }, Region { shells: vec![shell], void: false }];
+    let single = single.canonical().map_err(|e| e.to_string())?.brep;
+    let mut kernel = solidcore::kernel::Kernel::default();
+    let mut body = c::brep::to_kernel_body(&mut kernel, &single, true).map_err(|e| e.to_string())?;
+    match volume_sign(&kernel, &mut body).map_err(|e| e.to_string())? {
+        VolumeSign::Positive(_) => Ok(true),
+        VolumeSign::Negative(_) => Ok(false),
+        VolumeSign::Undecided(_) => Err("the repaired shell's volume sign is not certified".into()),
+    }
 }
 
 /// The exact NURBS forms of the analytic kinds ([`k::form`]), over records.

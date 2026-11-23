@@ -15,6 +15,8 @@ pub(crate) struct Item {
     pub slot: Slot,
     /// An importer chooses its own file, so it needs no open design.
     pub importer: bool,
+    /// The command's icon: its own from the package, else the generic plugin icon.
+    pub icon: String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Slot {
@@ -94,6 +96,7 @@ fn declared(plugin: &plugins::Plugin) -> Vec<Item> {
                 label: format!("{} · {}", plugin.name, entry.name),
                 slot,
                 importer: entry.kind == solidcraft_engine::plugin::EntryKind::Importer,
+                icon: crate::plugin_menu::command_icon(plugin, entry).to_owned(),
             });
         }
     }
@@ -187,7 +190,7 @@ pub(crate) fn menu_rows(app: &mut SolveApp, ui: &mut egui::Ui, name: &'static st
     }
     ui.separator();
     for item in entries {
-        let row = ui_kit::Item::action(&item.command, &item.label, "prefs_plugins");
+        let row = ui_kit::Item::action(&item.command, &item.label, &item.icon);
         if ui_kit::menu::list_row(ui, &row).is_some() {
             begin(app, &item.command);
             return true;
@@ -237,6 +240,7 @@ impl RibbonGroup {
                     name: &entry.label,
                     icon: "prefs_plugins",
                     size: ribbon::ButtonSize { width: ribbon::button_width(ui.painter(), &entry.entry), min_width: ribbon::BUTTON_MIN_WIDTH },
+                    planned: false,
                     enabled: true,
                     pressed: false,
                     exit: false,
@@ -290,7 +294,7 @@ impl RibbonGroup {
                 ui_kit::Menu::show_frame(ui, ui_kit::Menu::frame(), |ui| {
                     ui_kit::Menu::heading(ui, &self.name);
                     for item in &self.entries {
-                        if ui_kit::menu::list_row(ui, &ui_kit::Item::action(&item.command, &item.label, "prefs_plugins")).is_some() {
+                        if ui_kit::menu::list_row(ui, &ui_kit::Item::action(&item.command, &item.label, &item.icon)).is_some() {
                             chosen = Some(item.command.clone());
                         }
                     }
@@ -361,6 +365,8 @@ mod tests {
             approval: String::new(),
             disabled: false,
             groups: Default::default(),
+            images: Default::default(),
+            swatches: Default::default(),
             entries: serde_json::from_value(json!([
                 {"name":"report","effect":"read","slots":[
                     {"kind":"menu","name":"Manufacturing"}, {"kind":"menu","name":"Plugins"},
