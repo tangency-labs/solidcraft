@@ -881,7 +881,7 @@ impl core::fmt::Display for SurfaceFailure {
                 f.write_str("an end point is outside the surface's UV domain")
             }
             Self::TooFewUniqueKnots => {
-                f.write_str("the surface has fewer than two distinct knots in the direction")
+                f.write_str("the surface has fewer than two unique knots in the other direction")
             }
             Self::UnsupportedTangencyType => {
                 f.write_str("the tangency type has no derivative surface")
