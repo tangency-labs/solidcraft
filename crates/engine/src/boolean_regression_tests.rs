@@ -604,7 +604,8 @@ fn ls_extruded_up_and_down_from_one_grid_join() {
 }
 
 /// This process's CPU time (all threads) and peak resident memory, where the system says
-/// (Linux: /proc/self); `None` elsewhere.
+/// (Linux: /proc/self); `None` elsewhere. Both are the whole process's: a test that bounds its
+/// own work by them runs alone in a child process ([`in_own_process`]).
 fn cpu_and_peak_memory() -> Option<(std::time::Duration, u64)> {
     let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
     // utime and stime, in clock ticks (100 a second on Linux), after the command's name.
@@ -615,24 +616,94 @@ fn cpu_and_peak_memory() -> Option<(std::time::Duration, u64)> {
     Some((std::time::Duration::from_millis(ticks * 10), kb * 1024))
 }
 
+/// Set in the child process that [`in_own_process`] runs a test in.
+const OWN_PROCESS: &str = "SOLIDCRAFT_TEST_OWN_PROCESS";
+/// The child's line on stdout when its measurement has started ([`OwnProcess::measuring`]).
+const MEASURING: &str = "own process: measuring";
+
+/// A test running alone in a child process of this test binary.
+struct OwnProcess;
+
+impl OwnProcess {
+    /// Says the measurement has started and waits until the parent has run its neighbour, so the
+    /// neighbour's memory goes up inside every measurement.
+    fn measuring(&self) {
+        println!("{MEASURING}");
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+    }
+}
+
+/// `Some` in a child process of this test binary that runs `test` alone. Otherwise runs that
+/// child, fails unless it passed, and returns `None`. A test that bounds its own work by the
+/// whole process's peak memory or CPU time measures only that work there: under `cargo test`
+/// every other test in the binary runs in the same process, and one raised the peak by over a
+/// gigabyte. Once the child says it is measuring, this process (where the other tests
+/// run) writes more memory than any such bound before the child goes on: a measurement that is
+/// not the child's own fails every time.
+fn in_own_process(test: &str) -> Option<OwnProcess> {
+    use std::io::{BufRead, Read, Write};
+    if std::env::var_os(OWN_PROCESS).is_some() {
+        return Some(OwnProcess);
+    }
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", test, "--nocapture", "--test-threads=1"])
+        .env(OWN_PROCESS, "1")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stderr = child.stderr.take().unwrap();
+    let errors = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = stderr.read_to_string(&mut text);
+        text
+    });
+    let mut stdin = child.stdin.take();
+    let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+    let (mut text, mut line, mut neighbour) = (String::new(), String::new(), None);
+    while stdout.read_line(&mut line).unwrap_or(0) > 0 {
+        // libtest's "test <name> ... " can open the line.
+        if line.trim_end().ends_with(MEASURING) {
+            // The other tests in this process: 1.1 GiB written page by page, held until the child exits.
+            neighbour = Some(std::hint::black_box(vec![1u8; (1 << 30) + (100 << 20)]));
+            if let Some(mut stdin) = stdin.take() {
+                let _ = stdin.write_all(b"go\n");
+            }
+        }
+        text.push_str(&line);
+        line.clear();
+    }
+    drop(stdin);
+    let status = child.wait().unwrap();
+    drop(neighbour);
+    text.push_str(&errors.join().unwrap());
+    // `--exact` matches nothing (and passes) if the name is wrong: the child must have run it.
+    assert!(status.success() && text.contains(MEASURING) && text.contains("1 passed"), "{test} in its own process:\n{text}");
+    None
+}
+
 /// Press/pull on the sensor enclosure's lid top: joining the pulled face's prism imprints the
 /// contact (#825), and boxing the lid's faces by dividing their curved edges down to the
 /// contact tolerance ran away (over 24 GB and many minutes). It takes about 9 s of CPU here and
 /// no memory beyond the design's. The budgets are work, not wall time, which a loaded runner
-/// stretches (61-87 s for the same work on CI).
+/// stretches (61-87 s for the same work on CI). The test runs in its own process, so the
+/// budgets are its own work's, not other tests'.
 #[test]
 fn press_pull_on_the_enclosure_lid_is_prompt() {
+    let Some(own) = in_own_process("boolean_regression_tests::press_pull_on_the_enclosure_lid_is_prompt") else { return };
     let mut s = Session::default();
     let script: Value = serde_json::from_str(include_str!("../../../examples/acceptance/sensor_enclosure.json")).unwrap();
     s.run_script(&script).unwrap();
     let total = |s: &Session| -> f64 { s.model.state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum() };
     let before = total(&s);
     let start = cpu_and_peak_memory();
+    own.measuring();
     s.execute("solid.press_pull", &json!({"face": [-12.0, 27.4, 23.0], "distance": 5.0})).unwrap();
     if let (Some((cpu0, peak0)), Some((cpu1, peak1))) = (start, cpu_and_peak_memory()) {
         let grew = peak1.saturating_sub(peak0);
         assert!(grew < 1 << 30, "the press/pull grew the peak memory by {} MB", grew >> 20);
-        // Other tests in this process (cargo test) count too, so the bound is generous.
         assert!(cpu1 - cpu0 < std::time::Duration::from_secs(300), "the press/pull took {:?} of CPU", cpu1 - cpu0);
     }
     assert!(total(&s) > before, "{before} -> {}", total(&s));
