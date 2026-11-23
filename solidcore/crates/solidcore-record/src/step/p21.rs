@@ -868,7 +868,7 @@ pub fn parse_with_budget(
 
 /// Whether reading a STEP text of `len` bytes fits in `memory` bytes: [`Error::NeedsMemory`],
 /// naming [`PEAK_PER_BYTE`] times `len`, when it doesn't. A caller can ask this before it reads
-/// the file, and ask the person before going ahead anyway.
+/// the file, to warn that it may need more memory than there is.
 pub fn check_memory(len: usize, memory: usize) -> Result<(), Error> {
     let needed = len.saturating_mul(PEAK_PER_BYTE);
     if needed > memory {

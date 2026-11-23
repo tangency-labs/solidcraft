@@ -57,13 +57,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&OPEN_CONTRACT)
         .output(output_schema_for::<OpenResult>)
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.pcd/.e57/.xyz/.pts/.asc point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); force?: bool (a .step/.stp file that may need more memory than half of this computer's is refused before it is read, naming the memory; true reads it anyway); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); reader?: solidcraft|cadmpeg for a STEP, FreeCAD or Rhino file (see file.insert_step); geometry?: meshes|exact for an OpenUSD file (see file.insert_mesh); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
+        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.pcd/.e57/.xyz/.pts/.asc point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); reader?: solidcraft|cadmpeg for a STEP, FreeCAD or Rhino file (see file.insert_step); geometry?: meshes|exact for an OpenUSD file (see file.insert_mesh); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
     CommandSpec::new("file.insert_step", "Insert STEP", crate::checked!("file.insert_step", insert_step))
         .at("SOLID", "INSERT")
         .icon("import")
         .contract(&INSERT_STEP_CONTRACT)
         .output(output_schema_for::<StepInserted>)
-        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_members?: the occurrences its rigid group holds, group?: the folder); force?: bool (a .step/.stp file that may need more memory than half of this computer's is refused before it is read, naming the memory; true reads it anyway); folder?: bool (default false; true: an assembly's import, which has subcomponents, goes into a new history folder named `Group #N`); flatten?: bool (default false; true: every solid comes in as a body of the import's own component, with no subcomponents, occurrences, joints or rigid group: a part placed several times is one body per placement where the file places it, and, as no component says which part a body belongs to, its name is prefixed with the outermost named part holding it (`R63: Terminal`), a placeholder name (empty, a bare number, or an exporter's `… STEP translator …`) giving way to its nearest named product's); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); reader?: solidcraft|cadmpeg for a .step/.stp, FreeCAD or Rhino file (default solidcraft: SolidCraft's own STEP reader, which keeps the STEP text, a FreeCAD or Rhino file's solids restated as STEP by cadmpeg's STEP writer first; cadmpeg: cadmpeg's model read straight into B-rep records, with no STEP text in between, a STEP file decoded by cadmpeg's STEP decoder, to compare the two; `flatten` works with either); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move; envelope?: \"box\" (also add the import's envelope, a hidden box around every body it placed, in its component, as solid.bounding_solid with `component` makes it → envelope: the body; inspect.clearance and inspect.interference check it instead of the parts with `envelopes: true`)"),
+        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_members?: the occurrences its rigid group holds, group?: the folder); folder?: bool (default false; true: an assembly's import, which has subcomponents, goes into a new history folder named `Group #N`); flatten?: bool (default false; true: every solid comes in as a body of the import's own component, with no subcomponents, occurrences, joints or rigid group: a part placed several times is one body per placement where the file places it, and, as no component says which part a body belongs to, its name is prefixed with the outermost named part holding it (`R63: Terminal`), a placeholder name (empty, a bare number, or an exporter's `… STEP translator …`) giving way to its nearest named product's); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); reader?: solidcraft|cadmpeg for a .step/.stp, FreeCAD or Rhino file (default solidcraft: SolidCraft's own STEP reader, which keeps the STEP text, a FreeCAD or Rhino file's solids restated as STEP by cadmpeg's STEP writer first; cadmpeg: cadmpeg's model read straight into B-rep records, with no STEP text in between, a STEP file decoded by cadmpeg's STEP decoder, to compare the two; `flatten` works with either); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move; envelope?: \"box\" (also add the import's envelope, a hidden box around every body it placed, in its component, as solid.bounding_solid with `component` makes it → envelope: the body; inspect.clearance and inspect.interference check it instead of the parts with `envelopes: true`)"),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", crate::checked!("file.insert_mesh", insert_mesh))
         .at("SOLID", "INSERT")
         .icon("import")
@@ -307,9 +307,6 @@ struct StepOptions {
     /// `folder: true`: an import that brings more than one item gets a `Group #N` history folder
     /// (`import_folder`). `false` (the default) makes none, as before the option.
     folder: bool,
-    /// `force: true`: read a STEP file even when it may need more memory than the machine can
-    /// spare ([`check_memory`]). The desktop app passes it once the person chose to open anyway.
-    force: bool,
     /// A FreeCAD file's feature history is rebuilt as features (else only its solids come in).
     history: bool,
     /// `flatten: true` (`file.insert_step` only): every solid a body of the import's component,
@@ -343,13 +340,7 @@ fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
             ));
         }
     };
-    let force = match p.get("force") {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(force)) => *force,
-        Some(_) => {
-            return Err(bad(cmd, "`force` must be true (read the file even if it may need more memory than this computer can spare) or false"));
-        }
-    };
+
     let history = match p.get("history") {
         None | Some(Value::Null) => true,
         Some(v) => match v.as_str().map(|h| h.trim().to_ascii_lowercase()).as_deref() {
@@ -367,14 +358,25 @@ fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
         None | Some(Value::Null) => solidcraft_io::StepReader::default(),
         Some(v) => v.as_str().and_then(solidcraft_io::StepReader::parse).ok_or_else(|| bad(cmd, READER_MESSAGE))?,
     };
-    Ok(StepOptions { y_up, names, folder, history, force, flatten: false, reader })
+    Ok(StepOptions { y_up, names, folder, history, flatten: false, reader })
 }
 
-/// Refuse a STEP file that may need more memory than the machine can spare, naming the memory,
-/// before it is read, unless the caller said `force` (#15588).
-fn check_memory(path: &str, options: &StepOptions) -> Result<()> {
-    let Ok(size) = solidcraft_io::vfs::len(path) else { return Ok(()) };
-    solidcraft_io::limits::check_memory(path, size, options.force).map_err(|e| EngineError::Other(format!("{path}: {e}")))
+/// The warning, logged, for a STEP file that may need more memory than the machine can spare,
+/// before it is read (#15588). The file is opened all the same: a valid file is never refused.
+fn memory_warning(path: &str) -> Option<String> {
+    let size = solidcraft_io::vfs::len(path).ok()?;
+    solidcraft_io::limits::memory_warning(path, size)
+}
+
+/// Put a [`memory_warning`] first in a reply's `warnings`.
+fn with_memory_warning(mut reply: Value, warning: Option<String>) -> Value {
+    if let Some(warning) = warning {
+        match reply.get_mut("warnings").and_then(Value::as_array_mut) {
+            Some(warnings) => warnings.insert(0, json!(warning)),
+            None => reply["warnings"] = json!([warning]),
+        }
+    }
+    reply
 }
 
 /// Which way is up in a STEP or IGES file, from the program its header names: `("y", name)` for
@@ -428,9 +430,9 @@ impl DesignSnapshot {
 /// `diagnostics.profile` reports it.
 fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions) -> Result<Value> {
     let profiled = solidcraft_profile::enabled().then(solidcraft_profile::mark);
-    check_memory(path, options)?;
+    let warning = memory_warning(path);
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    add_step_bytes(s, path, name, options, &bytes, profiled)
+    add_step_bytes(s, path, name, options, &bytes, profiled).map(|reply| with_memory_warning(reply, warning))
 }
 
 /// Add a STEP, IGES or native CAD file's `bytes`. A FreeCAD file's sketches and features come in
@@ -586,7 +588,7 @@ fn open_step(
         _ => return Err(bad("doc.open", "`reuse_import` must be a boolean")),
     };
     let cache = cache.filter(|_| reuse && !solidcraft_io::is_native_cad_path(path) && solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none());
-    check_memory(path, &options)?;
+    let warning = memory_warning(path);
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     // Every `doc.open` option that changes the imported design is in the key: a reused import is
     // the one this open asks for. The tolerance heal preference too, named only when it is off
@@ -607,7 +609,7 @@ fn open_step(
             let report = crate::schema::diagnostics::ProfileReport::new(&mark.report(), 20);
             reply["profile"] = serde_json::to_value(report).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
         }
-        return Ok((fresh, reply));
+        return Ok((fresh, with_memory_warning(reply, warning)));
     }
     let mut fresh = Session::new(Document::new(&stem));
     fresh.set_validation(validation);
@@ -618,7 +620,8 @@ fn open_step(
     {
         write_import_cache(cache, key, &fresh.doc, saved, pending, &reply);
     }
-    Ok((fresh, reply))
+    // After the cache is written: the warning is this machine's, made again on every open.
+    Ok((fresh, with_memory_warning(reply, warning)))
 }
 
 /// Cache an opened import. While SMLib's check of its parts runs on (after the design shows),
@@ -834,7 +837,6 @@ fn add_usd_exact(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<b
         names: solidcraft_io::StepNames::default(),
         folder: false,
         history: false,
-        force: false,
         flatten: false,
         reader: solidcraft_io::StepReader::Cadmpeg,
     };

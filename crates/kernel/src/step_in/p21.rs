@@ -31,9 +31,9 @@ pub fn max_bytes() -> usize {
 }
 
 /// [`solidcore_step::p21::parse`] under the current [`crate::watch`], up to [`max_bytes`]. It
-/// doesn't check the memory: an import reads its text again on every rebuild, and a file the
-/// person chose to open anyway must not be refused then. Opening and inserting a file ask
-/// [`check_memory`] first (#15588).
+/// doesn't check the memory: a valid file is never refused, on opening or when an import reads
+/// its text again on a rebuild. Opening and inserting a file ask [`check_memory`] first, to warn
+/// when it may need more than there is (#15588).
 pub fn parse(text: &str) -> Result<Exchange, String> {
     let watch = crate::watch::current().map(Watched);
     let watch = watch.as_ref().map(|w| w as &dyn solidcore_step::p21::Progress);
@@ -47,8 +47,8 @@ pub fn check_memory(len: usize) -> Result<(), solidcore_step::p21::Error> {
 }
 
 /// The memory a STEP import may take: half of the machine's memory (of a container's limit when
-/// that is lower), so a large file opens without a question on a machine that can hold it, and
-/// on one that can't the person is asked first, told the memory it needs. Half of the total, not of what the system reports
+/// that is lower): a large file opens without a warning on a machine that can hold it, and on
+/// one that can't it opens with a warning naming the memory it needs. Half of the total, not of what the system reports
 /// available: that leaves out the caches and compressed memory the system hands back when asked
 /// (on a 32 GB Mac it read about 10 GB, and half of it refused a 200 MB file that opens there
 /// with 5.5 GB). With no reading of the machine's memory, and in the browser, there is no such
@@ -117,8 +117,8 @@ mod tests {
 
     /// #15588: a file whose reading would take more than the machine can spare is named with
     /// the memory it needs before it is read; the reporter's 350 MB files read on their 32 GB
-    /// machine, and a file at the 512 MB size limit does too. The parse itself never asks, so a
-    /// file opened anyway reads again on a rebuild.
+    /// machine, and a file at the 512 MB size limit does too. The parse itself never checks, so a
+    /// file opened with the warning reads again on a rebuild.
     #[test]
     fn a_step_file_too_large_for_the_memory_is_named_before_it_is_read() {
         let text = "ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n";

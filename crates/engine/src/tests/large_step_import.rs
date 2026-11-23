@@ -191,25 +191,28 @@ fn raised_file_limits_let_larger_step_and_design_files_be_read() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// #15588: a STEP file that may need more memory than the machine can spare is refused, before
-/// it is read, with the memory it needs, unless the caller says `force: true`; then it opens,
-/// and later rebuilds read its text again without asking.
+/// #15588: a STEP file that may need more memory than the machine can spare opens all the same,
+/// with a warning naming that memory; a valid file is never refused. Later rebuilds read its text
+/// again without asking.
 #[test]
-fn a_step_file_too_large_for_the_memory_opens_only_when_forced() {
+fn a_step_file_too_large_for_the_memory_opens_with_a_warning() {
     let path = step_file("memory", 4);
     let size = std::fs::metadata(&path).unwrap().len() as usize;
     solidcraft_kernel::step_with_memory_to_spare(size, || {
-        for cmd in ["doc.open", "file.insert_step"] {
+        // `doc.open` without the import cache, so the file itself is read.
+        for (cmd, params) in [("doc.open", json!({"path": path, "reuse_import": false})), ("file.insert_step", json!({"path": path}))] {
             let mut s = Session::default();
-            let e = s.execute(cmd, &json!({"path": path})).unwrap_err().to_string();
-            assert!(e.contains("STEP file needs about") && e.contains("`force: true`"), "{cmd}: {e}");
-            assert!(s.doc.features.is_empty(), "{cmd}: nothing is read");
-            assert!(s.execute(cmd, &json!({"path": path, "force": "yes"})).is_err(), "{cmd}: `force` is a boolean");
-            s.execute(cmd, &json!({"path": path, "force": true})).unwrap();
+            let reply = s.execute(cmd, &params).unwrap();
+            let warning = reply["warnings"][0].as_str().unwrap_or_default();
+            assert!(warning.contains("STEP file needs about") && warning.contains("opening it anyway"), "{cmd}: {reply}");
             assert_eq!(s.model.state().bodies.len(), 4, "{cmd}");
             // A rebuild reads the Import feature's text again, and is not refused.
             assert!(solidcraft_kernel::step_import(&step_text(&s)).is_ok(), "{cmd}");
         }
     });
+    // With the memory there, no warning.
+    let mut s = Session::default();
+    let reply = s.execute("file.insert_step", &json!({"path": path})).unwrap();
+    assert!(!reply["warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains("STEP file needs about")))), "{reply}");
     let _ = std::fs::remove_file(path);
 }
