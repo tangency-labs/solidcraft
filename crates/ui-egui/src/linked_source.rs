@@ -323,9 +323,12 @@ fn inside_design_folder(design: Option<&str>, link: &str) -> bool {
     target.starts_with(&dir) || std::fs::canonicalize(&dir).is_ok_and(|real| target.starts_with(real))
 }
 
-/// Whether `folder` is `allowed` or below it. Windows paths compare without case, as Windows does.
+/// Whether `folder` is `allowed` or below it. Windows paths compare without case, as Windows does,
+/// and a drive path matches its `\\?\` spelling (`\\?\C:\parts` is `C:\parts`), the form
+/// `canonicalize` and some folder pickers return.
 fn folder_within(folder: &Path, allowed: &Path) -> bool {
-    let allowed = lexical(allowed);
+    let plain = |p: &Path| PathBuf::from(solidcraft_engine::agent_setup::plain_path(p));
+    let (folder, allowed) = (&plain(folder), lexical(&plain(allowed)));
     if allowed.as_os_str().is_empty() || !allowed.is_absolute() {
         return false;
     }
@@ -959,8 +962,9 @@ mod tests {
         app.run("file.save", json!({"path": case})).unwrap();
         drop(app);
         save_part(&housing, [10.0, 20.0, 30.0], true);
-        // The folder as the engine reads it, symlinks in it resolved.
-        let folder = root.join("parts").canonicalize().unwrap().to_string_lossy().into_owned();
+        // The folder as the engine reads it, symlinks in it resolved, without the `\\?\` that
+        // `canonicalize` adds on Windows.
+        let folder = solidcraft_engine::agent_setup::plain_path(&root.join("parts").canonicalize().unwrap());
         (root, case, folder)
     }
 
@@ -1036,7 +1040,12 @@ mod tests {
     #[test]
     fn a_link_in_an_allowed_folder_loads_without_asking() {
         let (root, case, folder) = outside_link("allowed");
-        for allowed in [folder.clone(), root.canonicalize().unwrap().to_string_lossy().into_owned()] {
+        let mut allowed_folders = vec![folder.clone(), solidcraft_engine::agent_setup::plain_path(&root.canonicalize().unwrap())];
+        // The same folder as `canonicalize` spells it on Windows, `\\?\C:\…`, is the same folder.
+        if cfg!(windows) {
+            allowed_folders.push(format!(r"\\?\{folder}"));
+        }
+        for allowed in allowed_folders {
             let mut app = SolveApp::new(Session::default(), Default::default());
             app.preferences.linked_file_folders = vec![allowed];
             open(&mut app, &case, false);
