@@ -2230,15 +2230,19 @@ fn evaluated_mesh_transfer_refuses_an_oversized_input_without_truncation() {
     assert_eq!(s.doc.to_json(), before);
 }
 
-/// A session holding one mesh body, "Strip": a flat strip of `triangles` triangles over the
-/// points (k, 0, 0) and (k, 1, 0), each triangle with three corners of its own, as an STL gives
-/// them; `-0` is written for the zero coordinates of every other corner.
-fn strip_of_unshared_triangles(triangles: u32) -> Session {
-    let point = |k: u32| {
-        let zero = if k.is_multiple_of(2) { 0. } else { -0. };
-        [f64::from(k / 2), f64::from(k % 2) + zero, zero]
-    };
-    let positions: Vec<f64> = (0..triangles).flat_map(|t| [point(t), point(t + 1), point(t + 2)]).flatten().collect();
+/// A session holding one mesh body, "Strip": a flat strip of `triangles` triangles, triangle `t`
+/// over the points (k, 0, 0) and (k, 1, 0) numbered `t % period` to `t % period + 2`, each
+/// triangle with three corners of its own, as an STL gives them. Every other triangle writes its
+/// zero coordinates as `-0` (the import writes them as 0, so the body holds one sign).
+fn strip_of_unshared_triangles(triangles: u32, period: u32) -> Session {
+    let point = |k: u32, zero: f64| [f64::from(k / 2), f64::from(k % 2) + zero, zero];
+    let positions: Vec<f64> = (0..triangles)
+        .flat_map(|t| {
+            let (k, zero) = (t % period, if t.is_multiple_of(2) { 0. } else { -0. });
+            [point(k, zero), point(k + 1, zero), point(k + 2, zero)]
+        })
+        .flatten()
+        .collect();
     let mut doc = solidcraft_doc::Document::default();
     doc.add_feature(
         solidcraft_doc::FeatureKind::MeshImport {
@@ -2262,13 +2266,13 @@ fn strip_of_unshared_triangles(triangles: u32) -> Session {
 fn evaluated_mesh_transfer_shares_the_corners_of_an_unshared_mesh_body() {
     // 3000 triangles hand over 9000 corners, past the 8192-vertex budget unshared (#20627); at
     // 3002 distinct points the body fits
-    let mut s = strip_of_unshared_triangles(3000);
+    let mut s = strip_of_unshared_triangles(3000, 3000);
     let before = s.doc.to_json();
     let result = s.execute("model.mesh", &json!({"body":"Strip"})).unwrap();
     let positions: Vec<[f64; 3]> = serde_json::from_value(result["positions"].clone()).unwrap();
     let triangles: Vec<[usize; 3]> = serde_json::from_value(result["triangles"].clone()).unwrap();
     assert_eq!(triangles.len(), 3000);
-    assert_eq!(positions.len(), 3002, "one vertex per distinct point, -0 and 0 the same");
+    assert_eq!(positions.len(), 3002, "one vertex per distinct point");
     let mut distinct = positions.iter().map(|p| p.map(|c| (c + 0.).to_bits())).collect::<Vec<_>>();
     distinct.sort_unstable();
     distinct.dedup();
@@ -2294,11 +2298,34 @@ fn evaluated_mesh_transfer_shares_the_corners_of_an_unshared_mesh_body() {
 }
 
 #[test]
-fn evaluated_mesh_transfer_past_the_triangle_budget_names_its_counts() {
-    let mut s = strip_of_unshared_triangles(16385);
+fn shared_corners_count_both_zeros_as_one_point_and_never_share_what_is_not_finite() {
+    // a mesh body arrives with -0 already written as 0, so -0 is tested on the sharing itself: a
+    // tessellation can compute either sign at a point two faces share
+    let corners = [[0., 1., 0.], [-0., 1., -0.], [f64::NAN, 0., 0.], [f64::NAN, 0., 0.], [2., 0., 0.]];
+    let (positions, triangles) = crate::cmd::plugin_shared_corners(corners.into_iter(), &[[0, 1, 4], [2, 3, 4]]).unwrap();
+    assert_eq!(positions.len(), 4, "{positions:?}");
+    assert_eq!(triangles, vec![[0, 0, 3], [1, 2, 3]]);
+    assert_eq!(positions[0], [0., 1., 0.]);
+    assert!(crate::cmd::plugin_shared_corners(corners.into_iter(), &[[0, 1, 5]]).is_err(), "a corner it does not have");
+}
+
+#[test]
+fn evaluated_mesh_transfer_past_the_triangle_budget_names_its_count() {
+    // 16385 triangles over 3002 distinct points: only the triangle limit is passed
+    let mut s = strip_of_unshared_triangles(16385, 3000);
     let before = s.doc.to_json();
     let message = s.execute("model.mesh", &json!({"body":"Strip"})).unwrap_err().to_string();
-    assert!(message.contains("transfer budget: 16387 vertices and 16385 triangles, at most 8192 and 16384"), "{message}");
+    assert!(message.contains("transfer budget: 16385 triangles, at most 16384"), "{message}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn evaluated_mesh_transfer_past_the_vertex_budget_after_sharing_is_refused() {
+    // 8200 triangles over 8202 distinct points: past the vertex limit even shared
+    let mut s = strip_of_unshared_triangles(8200, 8200);
+    let before = s.doc.to_json();
+    let message = s.execute("model.mesh", &json!({"body":"Strip"})).unwrap_err().to_string();
+    assert!(message.contains("transfer budget: more than 8192 distinct vertices"), "{message}");
     assert_eq!(s.doc.to_json(), before);
 }
 
