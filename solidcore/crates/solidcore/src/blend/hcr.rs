@@ -700,14 +700,12 @@ fn silhouette_cache(
     // `m_bProcessBoundaryCurves = TRUE`, `m_bPointTestEnabled = FALSE` and
     // `m_bHaveTSurfaceCache = FALSE`, and restores `m_bFaceContainmentDone`. Here no
     // build writes the point test bit (whether a cache tests a point is asked of its face
-    // each time), so this is the one place those values are set for the trace: it keeps
-    // them (its `DoTrace` sets the same two flags and restores them), so each rebuild it
-    // would make is that reset. The containment guard keeps the built tree instead of rebuilding; no
-    // trace path reads the guard (only `GetTree` and the trimmed point classifications,
-    // which the trace runs with point testing off). The cache is dropped after the trace.
+    // each time), and no step of the trace reads the two flags (its solves carry their
+    // own modes), so each rebuild it would make changes nothing the trace sees. The
+    // containment guard keeps the built tree instead of rebuilding; no trace path reads
+    // the guard (only `GetTree` and the trimmed point classifications, which the trace
+    // does not run). The cache is dropped after the trace.
     if !cache.have_t_surface_cache {
-        cache.process_boundary_curves = true;
-        cache.point_test_enabled = false;
         cache.face_containment_done = FaceContainment::UnderConstruction;
     }
     Ok(Some(cache))

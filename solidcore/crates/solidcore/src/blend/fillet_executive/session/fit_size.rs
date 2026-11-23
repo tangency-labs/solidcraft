@@ -37,7 +37,8 @@ use crate::blend::fillet_executive::FitKind;
 use crate::blend::fillet_solver::p1::{
     test_manifold_tangent_rollover, FilletSolverType, SeamDomain,
 };
-use crate::error::{Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
 use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
@@ -47,9 +48,42 @@ use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu;
-use crate::topology::{edge, Brep, EdgeId, FaceId, VertexId};
+use crate::topology::{edge, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
 const OP: &str = "blend::fillet_executive::session::fit_size";
+
+/// Why a rail of [`Through`] has its base surface and domain: [`ball_through_at`] refuses a
+/// face index past 1, and both arrays hold one entry per face of the solver.
+const RAIL_IS_A_FACE: &str =
+    "the ball's face index is checked to be 0 or 1, and the bases and domains hold one per face";
+
+/// Why the solver's offset surface is there when [`Through::toward`] reads it:
+/// [`ball_through_at`] reads both before it builds a `Through`, and the drops remove neither.
+const SURFACES_CHECKED: &str =
+    "both offset surfaces of the solver are read before the ball's search starts, and the search removes neither";
+
+/// Why a curve's evaluation holds its tangent: the evaluation asks for the first derivative,
+/// and returns the point and each derivative asked for.
+const FIRST_DERIVATIVE_ASKED: &str =
+    "the curve is evaluated with its first derivative, which the evaluation returns after the point";
+
+/// A reviewed defect, `why` saying why the missing thing is there (status
+/// `SM_ERR_NULL_POINTER`, the fork's `NER`, as the phrase cause it replaces had).
+fn null_defect(why: &'static str) -> SolidError {
+    Failure::new(OP, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// The target's edge use `id` without its edge: caller-body state.
+fn edgeuse_without_edge(id: EdgeuseId) -> SolidError {
+    SolidError::blend_at(OP, BlendFailure::EdgeUseWithoutEdge, EntityRef::Edgeuse(id))
+}
+
+/// The target's edge `id` without a curve: caller-body state.
+fn edge_without_curve(id: EdgeId) -> SolidError {
+    SolidError::blend_at(OP, BlendFailure::EdgeWithoutCurve, EntityRef::Edge(id))
+}
 
 /// `lSteps`: the steps along an edge or the search.
 const STEPS: usize = 32;
@@ -95,12 +129,12 @@ impl Through {
         let base = self
             .bases
             .get(rail)
-            .ok_or_else(|| SolidError::blend_missing(OP, "the rail's base surface"))?;
+            .ok_or_else(|| null_defect(RAIL_IS_A_FACE))?;
         let mut on = base.evaluate_point(k, uv)?;
         let slot = solver
             .base_mut()
             .surface_mut(rail)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
+            .ok_or_else(|| null_defect(SURFACES_CHECKED))?;
         let off = slot.surface.surface.evaluate_point_extending(k, uv)?;
         if let Some(extended) = slot.surface.surface.extended_base_surface() {
             if !base.natural_uv_domain_with_nurb(k)?.contains_point(uv, 0.0)
@@ -127,7 +161,9 @@ impl Through {
 /// # Errors
 ///
 /// Those of the drops and evaluations; `SM_ERR_NULL_POINTER` without both offset surfaces
-/// or an edge curve.
+/// or an edge curve;
+/// [`BlendFailure::SolverFaceIndexInvalid`](crate::error::blend::BlendFailure::SolverFaceIndexInvalid)
+/// for `lk` past 1.
 pub fn ball_through(
     k: &Kernel,
     target: &Brep,
@@ -151,6 +187,12 @@ fn ball_through_at(
     max: f64,
     ratio: Option<[f64; 2]>,
 ) -> Result<Option<(f64, f64, f64)>> {
+    if lk > 1 {
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::SolverFaceIndexInvalid { index: lk },
+        ));
+    }
     let ratio = ratio.unwrap_or([1.0, 1.0]);
     let (bases, radii) = {
         let base = solver.base();
@@ -193,10 +235,7 @@ fn ball_through_at(
         foot_at: Point3::UNDEF,
     };
     let (Some(base_k), Some(domain_k)) = (st.bases.get(lk), st.domains.get(lk)) else {
-        return Err(SolidError::blend_missing(
-            OP,
-            "the rail's base surface and domain",
-        ));
+        return Err(null_defect(RAIL_IS_A_FACE));
     };
     let drop = base_k.drop_point::<NoObject>(k, q, domain_k, &DropPointOptions::default())?;
     if !drop.success {
@@ -211,10 +250,7 @@ fn ball_through_at(
     let h = |st: &mut Through, solver: &mut SolverObject, rho: f64| -> Result<Option<f64>> {
         let c = q + n * (rho * ratio_k);
         let (Some(base_j), Some(domain_j)) = (st.bases.get(lj), st.domains.get(lj)) else {
-            return Err(SolidError::blend_missing(
-                OP,
-                "the other rail's base surface and domain",
-            ));
+            return Err(null_defect(RAIL_IS_A_FACE));
         };
         let foot = base_j.drop_point::<NoObject>(
             k,
@@ -269,10 +305,8 @@ fn ball_through_at(
             .base()
             .edgeuse(0)?
             .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
-        let e = eu::edge(target, edgeuse)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
-        let curve = edge::evaluation_curve(target, e)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+        let e = eu::edge(target, edgeuse)?.ok_or_else(|| edgeuse_without_edge(edgeuse))?;
+        let curve = edge::evaluation_curve(target, e)?.ok_or_else(|| edge_without_curve(e))?;
         let ivl = edge::interval(target, e)?;
         let dropped = curve.drop_point(
             k,
@@ -349,8 +383,7 @@ pub fn largest_size_on_its_faces(
     } else {
         return Ok(None);
     }
-    let blended = eu::edge(target, eu0)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
+    let blended = eu::edge(target, eu0)?.ok_or_else(|| edgeuse_without_edge(eu0))?;
     let v0 = edge::vertex(target, blended)?;
     let ends = [v0, edge::other_vertex(target, blended, v0)?];
     let rolled = solver.base().rolled_faces;
@@ -575,10 +608,9 @@ pub fn bands_meet_at(
     if !((other_own - own).abs() <= EFF_ZERO * (1.0 + own)) {
         return Ok(None); // no single size: their radii differ
     }
-    let e = eu::edge(target, edgeuse)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
+    let e = eu::edge(target, edgeuse)?.ok_or_else(|| edgeuse_without_edge(edgeuse))?;
     let curve = edge::evaluation_curve(target, e)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?
+        .ok_or_else(|| edge_without_curve(e))?
         .clone();
     let ivl = edge::interval(target, e)?;
     let side = if mine == 0 {
@@ -753,8 +785,7 @@ pub fn polygon_fit(
     let mut middle = Point3::new(0.0, 0.0, 0.0);
     let mut ends: Vec<(Point3, Point3)> = Vec::new();
     for &e in &edges {
-        let curve = edge::evaluation_curve(target, e)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+        let curve = edge::evaluation_curve(target, e)?.ok_or_else(|| edge_without_curve(e))?;
         let ivl = edge::interval(target, e)?;
         let a = curve.evaluate_point(k, ivl.min())?;
         let b = curve.evaluate_point(k, ivl.max())?;
@@ -764,8 +795,7 @@ pub fn polygon_fit(
     // t (ax x + ay y + b) is edge i's ball radius at (x, y)
     let mut lines: Vec<[f64; 4]> = Vec::new();
     for (&e, &(pa, pb)) in edges.iter().zip(&ends) {
-        let curve = edge::evaluation_curve(target, e)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+        let curve = edge::evaluation_curve(target, e)?.ok_or_else(|| edge_without_curve(e))?;
         let half = curve.evaluate_point(k, edge::interval(target, e)?.evaluate(0.5))?;
         // straight: its middle on the chord
         let chord = pb - pa;
@@ -996,7 +1026,7 @@ pub fn corner_takes_per_radius(
         let tangent = pv
             .get(1)
             .copied()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the curve's tangent"))?;
+            .ok_or_else(|| null_defect(FIRST_DERIVATIVE_ASKED))?;
         *d = (if at_start { tangent } else { -tangent }).unitize()?;
     }
     let Some(&along) = dir.get(this) else {
@@ -1480,5 +1510,48 @@ mod tests {
         assert!((at(-TIP, 0.0) - TIP * TIP / (4.0 * R)).abs() <= 1e-12 * TIP * TIP);
         assert!((at(-R, -R) - R).abs() <= 1e-12 * R);
         assert!((at(-TIP, -R) - 184.033_068_783_068_8).abs() < 1e-9);
+    }
+
+    /// A face index past the solver's two is the caller's input, refused before it is read:
+    /// `1 - lk` would underflow (a debug panic, a release wrap to a missing surface's
+    /// `SM_ERR_NULL_POINTER`). Review of #20927.
+    #[test]
+    fn a_face_index_past_the_solvers_two_is_invalid_input() {
+        use crate::blend::fillet_executive::session::SolverObject;
+        use crate::blend::fillet_solver::p1::FilletSolver;
+        use crate::blend::fillet_standard_solver::p1::ConstantDistanceFs;
+        let k = crate::Kernel::default();
+        let target = crate::Brep::new();
+        let mut solver = SolverObject::ConstantDistance(Box::new(ConstantDistanceFs {
+            solver: FilletSolver::new(1e-6, 0.5, 0.03),
+            distance: 1.0,
+        }));
+        for lk in [2, 7, usize::MAX] {
+            let e = super::ball_through(
+                &k,
+                &target,
+                &mut solver,
+                lk,
+                crate::math::Point3::new(0.0, 0.0, 0.0),
+                1.0,
+                None,
+            )
+            .unwrap_err();
+            assert_eq!(
+                e.blend_failure(),
+                Some(&crate::error::blend::BlendFailure::SolverFaceIndexInvalid { index: lk }),
+                "{e:?}"
+            );
+            assert_eq!(
+                e.kind(),
+                crate::error::ErrorKind::InvalidInput,
+                "lk {lk}: {e:?}"
+            );
+            assert_eq!(
+                e.upstream_status(),
+                Some(crate::error::SM_ERR_INVALID_INPUT),
+                "lk {lk}: {e:?}"
+            );
+        }
     }
 }
