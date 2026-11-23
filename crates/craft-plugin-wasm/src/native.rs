@@ -52,6 +52,8 @@ const O_NONBLOCK: i32 = 0o4000;
 const O_NONBLOCK: i32 = 0x4;
 const MAX_LOG_BYTES: usize = 64 * 1024;
 const EPOCH_POLL: Duration = Duration::from_millis(10);
+/// The most components a path inside a granted or input folder may have.
+const MAX_PATH_COMPONENTS: usize = 64;
 static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 
 fn limit(name: &str) -> HostError {
@@ -176,6 +178,13 @@ impl<H: PluginHost> State<H> {
         let granted = self.folders.get(grant).is_some_and(|f| if write { f.write } else { f.read });
         if !valid || !granted {
             return Err(self.fail(HostError::PermissionDenied { permission: format!("files.{}:{grant}", if write { "write" } else { "read" }) }));
+        }
+        // The same limit `folders.read` puts on a path inside a folder.
+        if path.len() > 4096 || Path::new(path).components().count() > MAX_PATH_COMPONENTS {
+            return Err(self.fail(HostError::InvalidInput {
+                field: "path".into(),
+                reason: format!("files.{}:{grant}: a path may have at most {MAX_PATH_COMPONENTS} components", if write { "write" } else { "read" }),
+            }));
         }
         if let Some(folder) = self.folders.get(grant) {
             if let Err(error) = refuse_links(&folder.dir, Path::new(path)) {
@@ -460,7 +469,7 @@ impl<H: PluginHost> State<H> {
         let relative: PathBuf = Path::new(path).components().collect();
         let plain = path.len() <= 4096
             && !relative.as_os_str().is_empty()
-            && relative.components().count() <= 64
+            && relative.components().count() <= MAX_PATH_COMPONENTS
             && relative.components().all(|c| matches!(c, PathComponent::Normal(name) if !name.to_string_lossy().starts_with('.')));
         if !plain {
             return Err(self.fail(HostError::PermissionDenied { permission: format!("input_folder: {path} is not a plain path inside the folder") }));

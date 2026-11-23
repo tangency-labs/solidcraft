@@ -99,7 +99,7 @@ path on every read and write; hidden paths require explicit authorization. Decla
 name does not itself grant access. Reading a file that does not exist returns `invalid-input`
 (field `path`, reason "no such file") without failing the run, so an entry can create its file
 on first use. A write into a sub-folder that does not exist yet makes that folder inside the
-grant; if the run does not publish, the folders it made are removed again while still empty.
+grant (under `--allow-path` when its nearest existing folder is allowed, however many levels are missing; a path may have at most 64 components); if the run does not publish, the folders it made are removed again while still empty.
 Only a refusal by the system is reported as `permission-denied`; another write failure, such as a
 file where a folder should be, is `invalid-input` for `path`. Writes use temporary sibling files,
 and reads in the same call see their staged content. Targets are replaced only after successful guest execution and app
