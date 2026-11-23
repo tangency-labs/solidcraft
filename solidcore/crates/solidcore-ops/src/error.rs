@@ -28,11 +28,18 @@ pub enum Error {
     Argument,
     /// The kernel reported success but the result has no faces (for a boolean: it is empty).
     Empty,
+    /// An empty boolean of solids refuted by the vertex `at` of an operand, which lies where the
+    /// result must hold material: an intersection of the operands was missed.
+    EmptyRefuted {
+        /// The operand's vertex the result must hold.
+        at: [f64; 3],
+    },
     /// The kernel reported success, but a solid input gave a result that is not a closed solid.
     NotSolid,
     /// A body that is not a closed solid facing out, and the test it fails (the kernel's
     /// [`SolidTest`], the first that fails in the order the tests run). [`Error::NotSolid`]
-    /// stays for the calls that return it; [`crate::Body::check_solid`] returns this one.
+    /// stays for the calls that return it; [`crate::Body::check_solid`] and the result check of
+    /// an operation under [`crate::Contract::Proved`] return this one.
     #[non_exhaustive]
     NotSolidBecause(SolidTest),
     /// No room for the operation: an inward offset (a shell's wall, faces moved in) leaves none
@@ -459,6 +466,19 @@ impl std::fmt::Display for FailureCode {
 }
 
 impl Error {
+    /// The test a body failed where this is [`Error::NotSolidBecause`], and `None` for every
+    /// other error. A caller can then tell a body that is not a solid from one whose volume's
+    /// sign the kernel could not prove ([`SolidTest::VolumeUndecided`]), which is undecided
+    /// rather than refused. The variant is `#[non_exhaustive]`, so this is how a caller outside
+    /// this crate reads its test without naming its field.
+    #[must_use]
+    pub const fn not_solid_test(&self) -> Option<SolidTest> {
+        match self {
+            Error::NotSolidBecause(test) => Some(*test),
+            _ => None,
+        }
+    }
+
     /// The variant's name (`"TooLarge"`, `"Status"`, ...): a stable static string with nothing
     /// of the failure's values in it. A variant keeps its name once released.
     #[must_use]
@@ -468,6 +488,7 @@ impl Error {
             Error::Refused { .. } => "Refused",
             Error::Argument => "Argument",
             Error::Empty => "Empty",
+            Error::EmptyRefuted { .. } => "EmptyRefuted",
             Error::NotSolid => "NotSolid",
             Error::NotSolidBecause(..) => "NotSolidBecause",
             Error::NoRoom => "NoRoom",
@@ -586,6 +607,21 @@ pub enum OffsetRefusal {
         /// How far the face could move and still meet the face beside it.
         largest: f64,
     },
+    /// In a local operation, the face (a band bounded by two faces, such as a narrow ring
+    /// between a countersink's cone and the well below it) closes to nothing as the faces
+    /// move: its two sides would pass over each other and turn it inside out. `largest` is
+    /// how far the faces could move before it closes.
+    FaceCloses {
+        /// How far the faces could move before the face closes.
+        largest: f64,
+    },
+    /// A draft that would carry the drafted face (a cone or cylinder about the pull) into
+    /// another shell of the body, a cavity's wall or another lump, closing the wall between
+    /// them. `largest` is the largest draft angle that keeps a wall, radians.
+    DraftClosesWall {
+        /// The largest draft angle that keeps a wall, radians.
+        largest: f64,
+    },
     /// How far the surfaces beside an edge or at a vertex of the face must be extended to
     /// meet has no certified bound (a pair or corner of kinds it does not bound yet): refused
     /// before anything changed.
@@ -659,6 +695,16 @@ impl std::fmt::Display for OffsetRefusal {
                 f,
                 "it would move past where the curved face beside it ends; it meets that face \
                  only while it moves less than {largest}"
+            ),
+            OffsetRefusal::FaceCloses { largest } => write!(
+                f,
+                "it closes to nothing between the faces beside it as they move; it stays open \
+                 only while they move less than {largest}"
+            ),
+            OffsetRefusal::DraftClosesWall { largest } => write!(
+                f,
+                "the drafted face would reach another shell of the body, closing the wall \
+                 between them; the largest draft angle that keeps a wall is {largest} rad"
             ),
             OffsetRefusal::ReachUncertified => {
                 write!(
@@ -910,6 +956,10 @@ impl std::fmt::Display for Error {
             Error::Refused { operation, reason } => write!(f, "{operation}: {reason}"),
             Error::Argument => write!(f, "invalid argument"),
             Error::Empty => write!(f, "the result is empty"),
+            Error::EmptyRefuted { at: [x, y, z] } => write!(
+                f,
+                "the result is empty, but the operand's vertex ({x}, {y}, {z}) lies where it must have material: an intersection was missed"
+            ),
             Error::NotSolid => write!(f, "the result is not a closed solid"),
             Error::NotSolidBecause(test) => {
                 write!(f, "the body is not a closed solid facing out: {test}")

@@ -54,7 +54,7 @@ mod inspect;
 pub(crate) mod constraint;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("joint.origin", "Joint Origin", crate::checked!("joint.origin", joint_origin))
+    CommandSpec::new("joint.origin", "Joint Origin", crate::checked!("joint.origin", joint_origin)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("joint_origin")
         .contract(&ORIGIN_CONTRACT)
@@ -62,7 +62,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "name?, occurrence?: id|name (default: from the pick, or the named face's component), path?: [occurrence ids from the root] (the placement picked on, ending at the occurrence: a part in a sub-assembly placed more than once is then on that copy; default: the occurrence's first placement, or with no occurrence the placement nearest the pick), face: [x,y,z] | \"<name>\" (centre of a planar face) | circle: [x,y,z] | \"<name>\" (centre of a round end: a point on its wall or rim, the end's centre, or the round face's name as model.faces lists it) | edge: [x,y,z] (a point on an edge of a planar face: the edge's middle, z out of the face, y into it; on?: [x,y,z] a point on the face (default: the larger planar face beside the edge); corner?: [x,y,z] near one end: the corner there, x and y along its two edges into the face; found again by name, so it follows the face as it changes size; z?: [x,y,z] the frame's z instead of the face's normal, along the edge when it runs that way, x chosen from z: an edge or corner picked as it is, kept as a point where it can't be found by name) | point: [x,y,z], z?: [x,y,z] | plane: \"XY\"|\"XZ\"|\"YZ\"|\"o:<ids>/origin/<item>\"|\"<name>\" | axis: \"X\"|\"Y\"|\"Z\"|\"o:<ids>/origin/<item>\"|\"<name>\"; a circle's z?: [x,y,z] (a round edge's centre with the way out of it: its end by name when that is the frame it shows, else a point there); body?: the named face's body; end?: \"<name>\" (a circle's end: the face across its rim there; default the end nearer the pick); x?: [x,y,z] (a direction, world) | \"<face name>\" | {face: [x,y,z]} (the frame's x: a direction, a plane's normal, or the way to another hole's axis; keeps a round origin's turn; a point's x is a direction, laid square to its z, default: chosen from z alone). Faces are kept by name: the origin follows its face, and a circle its end, when the design changes",
     ),
-    CommandSpec::new("joint.create", "Joint", crate::checked!("joint.create", joint))
+    CommandSpec::new("joint.create", "Joint", crate::checked!("joint.create", joint)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("joint")
         .key("J")
@@ -81,7 +81,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          kept with the joint and worked out again whenever the design changes, so the joint follows the parameters it names; a joint whose \
          expression no longer works out (a parameter deleted) is left out of the solve with the reason in its errors",
     ),
-    CommandSpec::new("joint.as_built", "As-Built Joint", crate::checked!("joint.as_built", as_built))
+    CommandSpec::new("joint.as_built", "As-Built Joint", crate::checked!("joint.as_built", as_built)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("as_built")
         .contract(&AS_BUILT_CONTRACT)
@@ -90,7 +90,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "type, a: occurrence, b: occurrence (stay where they are); at?: joint origin (default: b's origin) — the joint's frame; one on a or b is kept on its face or hole there, so the joint follows it as the design changes; \
          name?; limits?: [[min, max] | null…]; quiet?: bool",
     ),
-    CommandSpec::new("joint.rigid_group", "Rigid Group", crate::checked!("joint.rigid_group", rigid_group))
+    CommandSpec::new("joint.rigid_group", "Rigid Group", crate::checked!("joint.rigid_group", rigid_group)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("rigid_group")
         .contract(&RIGID_GROUP_CONTRACT)
@@ -117,13 +117,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "occurrence: id|name; point: [x,y,z] (where its point goes, world); at?: [x,y,z] (its point, in the world where it is now; default: the centre of          its bodies' box); z?: [x,y,z] (the way its axis then points); axis?: [x,y,z] (that axis, in the world now; default: its own z); joints?: [ids          or names] (only these move toward the point; the other joints of a closed loop they are in follow); quiet?: bool; continuous?: bool (a frame          of a drag: the answer says continuous, and the app's command line doesn't echo it). Moves the values of the joints          on its chain from where they are to the nearest pose, within their limits, through motion links, keeping closed loops closed as joint.drive does;          with contact sets on, they stop where two parts of a set would pass into each other; from?: [{joint, values}] (the values those joints start from instead of the design's, as joint.list gives them: the pose a drag's last frame showed; with contact sets on, refused unless every value is already the design's) → reached; error_mm (and error_deg with z): how close it got; point: where its point is; values: [{joint, name,          values}] of the joints that moved, as joint.list gives them; moved; stopped_by_limit: [{joint, value, limit: min|max}]: the limits it rests on          short of the point; stopped_by_loop: {joint}: the closed loop that stopped it (its chain alone gets closer); stopped_by_contact: the pair of a contact set that stopped it, as joint.drive says; reason: why nothing can move",
     ),
-    CommandSpec::new("joint.motion_link", "Motion Link", crate::checked!("joint.motion_link", motion_link))
+    CommandSpec::new("joint.motion_link", "Motion Link", crate::checked!("joint.motion_link", motion_link)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("motion_link")
         .contract(&MOTION_LINK_CONTRACT)
         .output(output_schema_for::<MotionLinkResult>)
         .params("a, b: joints; ratio (b = ratio · a + offset): b's units per a's (mm per deg for an angle driving a distance); offset?: in b's units (deg for an angle, mm for a distance, or an expression); ia?, ib?: value indices (default 0); link?: index (put this link in place of that motion link, as the gear and cam commands do) → link: the link's index, as joint.list numbers them"),
-    CommandSpec::new("joint.gear", "Gear", crate::checked!("joint.gear", gear))
+    CommandSpec::new("joint.gear", "Gear", crate::checked!("joint.gear", gear)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("gear")
         .contract(&GEAR_CONTRACT)
@@ -135,7 +135,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          link?: index (replace that motion link; a radius left out then keeps the old gear's, picked round face included) → link, ratio (b's degrees per a's); b keeps where it is, also when the link replaces \
          another (at the current pose)",
     ),
-    CommandSpec::new("joint.rack_pinion", "Rack and Pinion", crate::checked!("joint.rack_pinion", rack_pinion))
+    CommandSpec::new("joint.rack_pinion", "Rack and Pinion", crate::checked!("joint.rack_pinion", rack_pinion)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("rack_pinion")
         .contract(&RACK_PINION_CONTRACT)
@@ -146,7 +146,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          radians; reverse?: bool; link?: index (replace that motion link; the radius left out then keeps the old pinion's, picked round face included) → link, ratio (mm per degree, or degrees per mm); b keeps \
          where it is, also when the link replaces another (at the current pose)",
     ),
-    CommandSpec::new("joint.screw", "Screw", crate::checked!("joint.screw", screw))
+    CommandSpec::new("joint.screw", "Screw", crate::checked!("joint.screw", screw)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("screw")
         .contract(&SCREW_CONTRACT)
@@ -157,7 +157,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          ratio (mm per degree, or degrees per mm); b keeps where it is, also when the link replaces another (at the current \
          pose)",
     ),
-    CommandSpec::new("joint.cam", "Cam", crate::checked!("joint.cam", cam_cmd))
+    CommandSpec::new("joint.cam", "Cam", crate::checked!("joint.cam", cam_cmd)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("cam")
         .contract(&CAM_CONTRACT)
@@ -169,8 +169,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("joint")
         .contract(&LIMITS_CONTRACT)
         .output(output_schema_for::<SolveResult>)
-        .params("joint; index?: value index (default 0); min?, max? (omit both to clear)"),
-    CommandSpec::new("joint.edit", "Edit Joint", crate::checked!("joint.edit", edit))
+        .params("joint; index?: value index (default 0); min?, max? (numbers, or expressions the limit then follows as the parameters change; omit both to clear)"),
+    CommandSpec::new("joint.edit", "Edit Joint", crate::checked!("joint.edit", edit)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("edit")
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<EditJointResult>)
@@ -245,7 +245,7 @@ pub fn place(s: &mut Session) -> joints::Solution {
     place_holding(s, &BTreeMap::new())
 }
 
-/// Work out the offsets, angles and values joints were given as expressions again (a parameter
+/// Work out the offsets, angles, values and limits joints were given as expressions again (a parameter
 /// may have changed). One that can't be worked out (its parameter gone) keeps its numbers; the
 /// solve leaves that joint out and says why. A tangent constraint's offset is its gap plus the
 /// radius of its round face as the face is now, so the part keeps resting on the plane when the
@@ -257,11 +257,11 @@ fn reexpress(s: &mut Session) {
     }
 }
 
-/// The joints whose expressions now give other offsets, angles or values: (index, new ones).
-type Reexpressed = Vec<(usize, (f64, f64, Vec<f64>))>;
+/// The joints whose expressions now give other offsets, angles, values or limits: (index, new ones).
+type Reexpressed = Vec<(usize, (f64, f64, Vec<f64>, Vec<Option<(f64, f64)>>))>;
 
 /// The joints of `doc` whose expressions (and, for a tangent constraint, round face in `st`) now
-/// give other offsets, angles or values than the ones stored.
+/// give other offsets, angles, values or limits than the ones stored.
 fn reexpressed(doc: &Document, st: &ModelState) -> Reexpressed {
     let params = joints::Params::new(doc);
     doc.assembly
@@ -274,17 +274,23 @@ fn reexpressed(doc: &Document, st: &ModelState) -> Reexpressed {
             if j.constraint == Some(joints::Constraint::Tangent) {
                 o += doc.origin_radius(st, &j.b).ok()?;
             }
-            joints::clamp(j, &mut q);
-            ((o, a) != (j.offset, j.angle) || q != j.values).then_some((i, (o, a, q)))
+            // The limits first, so the values are held to the limits as they are now (#20242).
+            let limits = joints::expressed_limits(&params, j).ok()?;
+            for (v, l) in q.iter_mut().zip(&limits) {
+                if let Some((lo, hi)) = l {
+                    *v = v.clamp(lo.min(*hi), hi.max(*lo));
+                }
+            }
+            ((o, a) != (j.offset, j.angle) || q != j.values || limits != j.limits).then_some((i, (o, a, q, limits)))
         })
         .collect()
 }
 
-/// Store the offsets, angles and values [`reexpressed`] worked out.
+/// Store the offsets, angles, values and limits [`reexpressed`] worked out.
 fn set_reexpressed(doc: &mut Document, changed: Reexpressed) {
-    for (i, (o, a, q)) in changed {
+    for (i, (o, a, q, limits)) in changed {
         if let Some(j) = doc.assembly.joints.get_mut(i) {
-            (j.offset, j.angle, j.values) = (o, a, q);
+            (j.offset, j.angle, j.values, j.limits) = (o, a, q, limits);
         }
     }
 }
@@ -439,13 +445,12 @@ fn effective_value_list(s: &Session, id: u64) -> Option<Vec<NamedValue>> {
 /// commands changed (a motion link's follower, a joint a closed loop moved). Their values are
 /// as the solver placed them, after motion links and limits, as `joint.inspect` and
 /// `joint.drive` give them.
-pub(crate) fn posed_joints(before: &Session, after: &Session, replies: &[Value]) -> Vec<ReachedJoint> {
-    let was = joints::joint_values(&before.doc.assembly);
-    let now = joints::joint_values(&after.doc.assembly);
-    let mut ids: std::collections::BTreeSet<u64> = replies.iter().filter_map(|r| r.get("joint").and_then(Value::as_u64)).collect();
-    ids.extend(after.doc.assembly.joints.iter().filter(|j| was.get(&j.id) != now.get(&j.id)).map(|j| j.id));
+pub fn posed_joints(before: &Document, after: &Document, driven: impl IntoIterator<Item = u64>) -> Vec<ReachedJoint> {
+    let was = joints::joint_values(&before.assembly);
+    let now = joints::joint_values(&after.assembly);
+    let mut ids: std::collections::BTreeSet<u64> = driven.into_iter().collect();
+    ids.extend(after.assembly.joints.iter().filter(|j| was.get(&j.id) != now.get(&j.id)).map(|j| j.id));
     after
-        .doc
         .assembly
         .joints
         .iter()
@@ -1166,6 +1171,25 @@ fn value_exprs(p: &Value) -> Vec<Option<String>> {
     out
 }
 
+/// The expressions among `limits`' minimums and maximums, by value index (#20242).
+fn limit_exprs(p: &Value) -> Vec<[Option<String>; 2]> {
+    let mut out: Vec<[Option<String>; 2]> = match p.get("limits") {
+        // A pair given one end sets no limit (limits_param leaves it out), so it keeps no expression.
+        Some(Value::Array(a)) => a
+            .iter()
+            .map(|l| match (l.get(0), l.get(1)) {
+                (Some(_), Some(_)) => [typed(l.get(0)), typed(l.get(1))],
+                _ => [None, None],
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    while out.last().is_some_and(|l| l == &[None, None]) {
+        out.pop();
+    }
+    out
+}
+
 fn values_param(s: &Session, p: &Value, kind: JointKind, cmd: &str) -> Result<Vec<f64>> {
     let n = kind.dofs().len();
     let list: Vec<Value> = match (p.get("values"), p.get("value")) {
@@ -1489,7 +1513,7 @@ fn new_joint(s: &mut Session, p: &Value, kind: JointKind, a: JointOrigin, b: Joi
         offset,
         angle: angle.unwrap_or(0.0),
         suppressed: false,
-        exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p) },
+        exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p), limits: limit_exprs(p) },
         offset_xy,
         captured: None,
         constraint: None,
@@ -1537,7 +1561,7 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
         offset: 0.0,
         angle: 0.0,
         suppressed: false,
-        exprs: Default::default(),
+        exprs: JointExprs { limits: limit_exprs(p), ..Default::default() },
         offset_xy: [0.0; 2],
         captured: None,
         constraint: None,
@@ -2351,6 +2375,8 @@ fn limits(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(slot) = j.limits.get_mut(i) {
         *slot = lim;
     }
+    // An end typed as an expression keeps it, so the limit follows its parameters (#20242).
+    j.exprs.set_limit(i, [typed(p.get("min")), typed(p.get("max"))]);
     let mut q = j.values.clone();
     q.resize(kind.dofs().len(), 0.0);
     joints::clamp(j, &mut q);
@@ -2440,11 +2466,17 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
         j.values.resize(k.dofs().len(), 0.0);
         j.limits.resize(k.dofs().len(), None);
         j.exprs.values.truncate(k.dofs().len());
+        j.exprs.limits.truncate(k.dofs().len());
         // A value that changes unit with the type (a slide becoming a turn) drops its expression,
         // which would no longer work out and leave the joint out of the solve.
         for i in 0..j.exprs.values.len() {
             if was.is_angle(i) != k.is_angle(i) {
                 j.exprs.set_value(i, None);
+            }
+        }
+        for i in 0..j.exprs.limits.len() {
+            if was.is_angle(i) != k.is_angle(i) {
+                j.exprs.set_limit(i, [None, None]);
             }
         }
     }

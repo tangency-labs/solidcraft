@@ -5,8 +5,16 @@ pub mod environment_input;
 pub mod environment_sampling;
 mod hdr;
 mod task;
-pub use hdr::{HdrInfo, HdrSource, MAX_HDR_BYTES, MAX_HDR_HEIGHT, MAX_HDR_PIXELS, MAX_HDR_WIDTH};
-pub use task::{DecodedHdr, HdrDecodeTask, HdrProgress, HdrTaskPoll};
+pub use hdr::HdrInfo;
+pub use hdr::HdrSource;
+pub use hdr::MAX_HDR_BYTES;
+pub use hdr::MAX_HDR_HEIGHT;
+pub use hdr::MAX_HDR_PIXELS;
+pub use hdr::MAX_HDR_WIDTH;
+pub use task::DecodedHdr;
+pub use task::HdrDecodeTask;
+pub use task::HdrProgress;
+pub use task::HdrTaskPoll;
 
 use serde::Serialize;
 use std::fmt;

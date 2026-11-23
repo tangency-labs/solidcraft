@@ -393,15 +393,13 @@ fn forced_record(
             for drop in &drops {
                 put_curve(k, &mut forced, Some(drop));
                 put_nurb(&mut forced, drop);
-                match surface.lift_curve_with_context(
+                match surface.lift_curve(
                     k,
                     &uv_domain,
                     drop,
                     &drop.natural_interval(),
                     face_tol / 3.0,
                     true,
-                    &mut services,
-                    handle,
                 ) {
                     Ok(lifted) => {
                         forced.extend([0., lifted.max_approx_dev]);
