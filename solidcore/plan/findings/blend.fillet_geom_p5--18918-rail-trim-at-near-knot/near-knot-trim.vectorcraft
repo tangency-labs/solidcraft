@@ -1,0 +1,2792 @@
+{
+  "format": "vectorcraft",
+  "version": 4,
+  "generator": "VectorCraft 0.24.1",
+  "pdfCompatible": true,
+  "pdf": {
+    "mime": "application/pdf",
+    "blob": [
+      0,
+      28201
+    ]
+  },
+  "document": {
+    "version": 3,
+    "title": "Untitled-1",
+    "units": "Points",
+    "rulers": "artboard",
+    "color_mode": "Rgb",
+    "artboards": [
+      {
+        "id": 1,
+        "name": "Artboard 1",
+        "rect": {
+          "x0": 0.0,
+          "y0": 0.0,
+          "x1": 612.0,
+          "y1": 330.0
+        },
+        "show_center_mark": false,
+        "show_cross_hairs": false
+      }
+    ],
+    "layers": [
+      {
+        "id": 1,
+        "name": "Layer 1",
+        "kind": {
+          "type": "layer",
+          "color": {
+            "Preset": 0
+          },
+          "template": false,
+          "printable": true,
+          "children": [
+            {
+              "id": 2,
+              "name": "background",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 1.0,
+                        "g": 1.0,
+                        "b": 1.0
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            0.0,
+                            0.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            612.0,
+                            0.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            612.0,
+                            330.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            0.0,
+                            330.0
+                          ]
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "rectangle",
+                  "w": 612.0,
+                  "h": 330.0,
+                  "radii": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0
+                  ]
+                }
+              }
+            },
+            {
+              "id": 4,
+              "name": "rail kept A",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.12156863,
+                        "g": 0.30588236,
+                        "b": 0.6039216
+                      }
+                    },
+                    "width": 3.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            40.0,
+                            100.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            524.0,
+                            100.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 5,
+              "name": "rail cut A",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.6039216,
+                        "g": 0.6039216,
+                        "b": 0.6039216
+                      }
+                    },
+                    "width": 2.0,
+                    "dash": {
+                      "pattern": [
+                        5.0,
+                        4.0
+                      ],
+                      "offset": 0.0,
+                      "align_corners": false
+                    }
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            524.0,
+                            100.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            585.0,
+                            100.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 7,
+              "name": "knots",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.13333334,
+                        "g": 0.13333334,
+                        "b": 0.13333334
+                      }
+                    },
+                    "width": 1.5
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            116.0,
+                            92.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            116.0,
+                            108.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    },
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            216.0,
+                            92.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            216.0,
+                            108.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    },
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            316.0,
+                            92.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            316.0,
+                            108.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    },
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            416.0,
+                            92.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            416.0,
+                            108.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    },
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            516.0,
+                            90.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            516.0,
+                            110.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    },
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            116.0,
+                            237.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            116.0,
+                            253.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    },
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            216.0,
+                            237.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            216.0,
+                            253.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    },
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            316.0,
+                            237.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            316.0,
+                            253.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    },
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            416.0,
+                            237.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            416.0,
+                            253.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    },
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            516.0,
+                            235.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            516.0,
+                            255.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 8,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  100.0,
+                  124.0
+                ],
+                "runs": [
+                  {
+                    "text": "knots",
+                    "style": {
+                      "font_family": "Arial",
+                      "font_style": "Regular",
+                      "size": 11.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.33333334,
+                          "g": 0.33333334,
+                          "b": 0.33333334
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 13,
+              "name": "divider",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.8666667,
+                        "g": 0.8666667,
+                        "b": 0.8666667
+                      }
+                    },
+                    "width": 1.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            16.0,
+                            182.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            596.0,
+                            182.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 16.0,
+                    "y": 182.0
+                  },
+                  "b": {
+                    "x": 596.0,
+                    "y": 182.0
+                  }
+                }
+              }
+            },
+            {
+              "id": 15,
+              "name": "rail kept B",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.12156863,
+                        "g": 0.30588236,
+                        "b": 0.6039216
+                      }
+                    },
+                    "width": 3.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            40.0,
+                            245.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            516.0,
+                            245.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 16,
+              "name": "rail cut B",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.6039216,
+                        "g": 0.6039216,
+                        "b": 0.6039216
+                      }
+                    },
+                    "width": 2.0,
+                    "dash": {
+                      "pattern": [
+                        5.0,
+                        4.0
+                      ],
+                      "offset": 0.0,
+                      "align_corners": false
+                    }
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            516.0,
+                            245.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            585.0,
+                            245.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 17,
+              "name": "end vertex B",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 1.0,
+                        "g": 1.0,
+                        "b": 1.0
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.13333334,
+                        "g": 0.13333334,
+                        "b": 0.13333334
+                      }
+                    },
+                    "width": 1.5
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            511.0,
+                            245.0
+                          ],
+                          "in": [
+                            511.0,
+                            247.76142374915398
+                          ],
+                          "out": [
+                            511.0,
+                            242.23857625084602
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            516.0,
+                            240.0
+                          ],
+                          "in": [
+                            513.238576250846,
+                            240.0
+                          ],
+                          "out": [
+                            518.761423749154,
+                            240.0
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            521.0,
+                            245.0
+                          ],
+                          "in": [
+                            521.0,
+                            242.23857625084602
+                          ],
+                          "out": [
+                            521.0,
+                            247.76142374915398
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            516.0,
+                            250.0
+                          ],
+                          "in": [
+                            518.761423749154,
+                            250.0
+                          ],
+                          "out": [
+                            513.238576250846,
+                            250.0
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 10.0,
+                  "h": 10.0,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    511.0,
+                    240.0
+                  ]
+                }
+              }
+            },
+            {
+              "id": 18,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "area",
+                  "frame": {
+                    "subpaths": [
+                      {
+                        "anchors": [
+                          {
+                            "p": [
+                              0.0,
+                              0.0
+                            ]
+                          },
+                          {
+                            "p": [
+                              250.0,
+                              0.0
+                            ]
+                          },
+                          {
+                            "p": [
+                              250.0,
+                              25.4890625
+                            ]
+                          },
+                          {
+                            "p": [
+                              0.0,
+                              25.4890625
+                            ]
+                          }
+                        ],
+                        "closed": true
+                      }
+                    ]
+                  }
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  250.0,
+                  271.0
+                ],
+                "runs": [
+                  {
+                    "text": "last span runs from knot to knot; the face curves are trimmed at the same parameter",
+                    "style": {
+                      "font_family": "Arial",
+                      "font_style": "Regular",
+                      "size": 11.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.12156863,
+                          "g": 0.30588236,
+                          "b": 0.6039216
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                },
+                "area": {
+                  "rows": 1,
+                  "columns": 1,
+                  "gutter": 18.0,
+                  "inset": 0.0,
+                  "firstBaseline": "ascent",
+                  "firstBaselineMin": 0.0,
+                  "verticalAlign": "top",
+                  "fit": "autoHeight"
+                }
+              }
+            },
+            {
+              "id": 20,
+              "name": "tiny end span (drawn enlarged)",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.7764706,
+                        "g": 0.15686275,
+                        "b": 0.15686275
+                      }
+                    },
+                    "width": 5.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            516.0,
+                            100.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            532.0,
+                            100.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 21,
+              "name": "end vertex A",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 1.0,
+                        "g": 1.0,
+                        "b": 1.0
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.13333334,
+                        "g": 0.13333334,
+                        "b": 0.13333334
+                      }
+                    },
+                    "width": 1.5
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            532.0,
+                            100.0
+                          ],
+                          "in": [
+                            532.0,
+                            102.76142374915396
+                          ],
+                          "out": [
+                            532.0,
+                            97.23857625084604
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            537.0,
+                            95.0
+                          ],
+                          "in": [
+                            534.238576250846,
+                            95.0
+                          ],
+                          "out": [
+                            539.761423749154,
+                            95.0
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            542.0,
+                            100.0
+                          ],
+                          "in": [
+                            542.0,
+                            97.23857625084604
+                          ],
+                          "out": [
+                            542.0,
+                            102.76142374915396
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            537.0,
+                            105.0
+                          ],
+                          "in": [
+                            539.761423749154,
+                            105.0
+                          ],
+                          "out": [
+                            534.238576250846,
+                            105.0
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 10.0,
+                  "h": 10.0,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    532.0,
+                    95.0
+                  ]
+                }
+              }
+            },
+            {
+              "id": 22,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  498.0,
+                  82.0
+                ],
+                "runs": [
+                  {
+                    "text": "end vertex's drop",
+                    "style": {
+                      "font_family": "Arial",
+                      "font_style": "Regular",
+                      "size": 11.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.13333334,
+                          "g": 0.13333334,
+                          "b": 0.13333334
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 23,
+              "name": "leader A",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.7764706,
+                        "g": 0.15686275,
+                        "b": 0.15686275
+                      }
+                    },
+                    "width": 1.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            524.0,
+                            104.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            524.0,
+                            132.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            506.0,
+                            132.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 24,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  24.0,
+                  208.0
+                ],
+                "runs": [
+                  {
+                    "text": "this PR: the end moves to that knot (the rail between them is within the zone tolerance)",
+                    "style": {
+                      "font_family": "Arial",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.13333334,
+                          "g": 0.13333334,
+                          "b": 0.13333334
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 25,
+              "name": "old drop B",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.6039216,
+                        "g": 0.6039216,
+                        "b": 0.6039216
+                      }
+                    },
+                    "width": 1.0,
+                    "dash": {
+                      "pattern": [
+                        2.0,
+                        2.0
+                      ],
+                      "offset": 0.0,
+                      "align_corners": false
+                    }
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            532.0,
+                            245.0
+                          ],
+                          "in": [
+                            532.0,
+                            247.76142374915398
+                          ],
+                          "out": [
+                            532.0,
+                            242.23857625084602
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            537.0,
+                            240.0
+                          ],
+                          "in": [
+                            534.238576250846,
+                            240.0
+                          ],
+                          "out": [
+                            539.761423749154,
+                            240.0
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            542.0,
+                            245.0
+                          ],
+                          "in": [
+                            542.0,
+                            242.23857625084602
+                          ],
+                          "out": [
+                            542.0,
+                            247.76142374915398
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            537.0,
+                            250.0
+                          ],
+                          "in": [
+                            539.761423749154,
+                            250.0
+                          ],
+                          "out": [
+                            534.238576250846,
+                            250.0
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 10.0,
+                  "h": 10.0,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    532.0,
+                    240.0
+                  ]
+                }
+              }
+            },
+            {
+              "id": 26,
+              "name": "snap arrow",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.13333334,
+                        "g": 0.13333334,
+                        "b": 0.13333334
+                      }
+                    },
+                    "width": 1.2
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            537.0,
+                            236.0
+                          ],
+                          "out": [
+                            535.0,
+                            222.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            517.0,
+                            235.0
+                          ],
+                          "in": [
+                            520.0,
+                            222.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    },
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            513.0,
+                            230.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            517.0,
+                            236.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            521.0,
+                            230.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 27,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  24.0,
+                  318.0
+                ],
+                "runs": [
+                  {
+                    "text": "Schematic, not to scale: the red span is drawn enlarged.",
+                    "style": {
+                      "font_family": "Arial",
+                      "font_style": "Regular",
+                      "size": 10.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.46666667,
+                          "g": 0.46666667,
+                          "b": 0.46666667
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 28,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  24.0,
+                  34.0
+                ],
+                "runs": [
+                  {
+                    "text": "main: the rail is cut where its vertex drops, a hair before or past a knot",
+                    "style": {
+                      "font_family": "Arial",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.13333334,
+                          "g": 0.13333334,
+                          "b": 0.13333334
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 29,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "area",
+                  "frame": {
+                    "subpaths": [
+                      {
+                        "anchors": [
+                          {
+                            "p": [
+                              0.0,
+                              0.0
+                            ]
+                          },
+                          {
+                            "p": [
+                              250.0,
+                              0.0
+                            ]
+                          },
+                          {
+                            "p": [
+                              250.0,
+                              65.0890625
+                            ]
+                          },
+                          {
+                            "p": [
+                              0.0,
+                              65.0890625
+                            ]
+                          }
+                        ],
+                        "closed": true
+                      }
+                    ]
+                  }
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  250.0,
+                  126.0
+                ],
+                "runs": [
+                  {
+                    "text": "end span 2e-8 to 1e-6 long, shorter than the zone tolerance 1e-5: its control points coincide, a point singularity of the rail and of the face curves trimmed with it (drawn here at the end; the measured rails start 9.5e-7 before a knot)",
+                    "style": {
+                      "font_family": "Arial",
+                      "font_style": "Regular",
+                      "size": 11.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.7764706,
+                          "g": 0.15686275,
+                          "b": 0.15686275
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                },
+                "area": {
+                  "rows": 1,
+                  "columns": 1,
+                  "gutter": 18.0,
+                  "inset": 0.0,
+                  "firstBaseline": "ascent",
+                  "firstBaselineMin": 0.0,
+                  "verticalAlign": "top",
+                  "fit": "autoHeight"
+                }
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "swatches": [
+      {
+        "name": "[None]",
+        "paint": {
+          "type": "none"
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "White",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 1.0,
+            "g": 1.0,
+            "b": 1.0
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Black",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.0,
+            "g": 0.0,
+            "b": 0.0
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Red",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.92941177,
+            "g": 0.10980392,
+            "b": 0.14117648
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Orange Red",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.94509804,
+            "g": 0.3529412,
+            "b": 0.14117648
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Orange",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.96862745,
+            "g": 0.5764706,
+            "b": 0.11764706
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Amber",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.9843137,
+            "g": 0.6901961,
+            "b": 0.23137255
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Yellow",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.9882353,
+            "g": 0.93333334,
+            "b": 0.12941177
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Yellow Green",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.8509804,
+            "g": 0.8784314,
+            "b": 0.12941177
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Lime",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.54901963,
+            "g": 0.7764706,
+            "b": 0.24705882
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Green",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.22352941,
+            "g": 0.70980394,
+            "b": 0.2901961
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Emerald",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.0,
+            "g": 0.57254905,
+            "b": 0.27058825
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Teal",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.0,
+            "g": 0.40784314,
+            "b": 0.21568628
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Aqua",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.13333334,
+            "g": 0.70980394,
+            "b": 0.4509804
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Cyan Green",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.0,
+            "g": 0.6627451,
+            "b": 0.6156863
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Cyan",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.16078432,
+            "g": 0.67058825,
+            "b": 0.8862745
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Azure",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.0,
+            "g": 0.44313726,
+            "b": 0.7372549
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Blue",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.18039216,
+            "g": 0.19215687,
+            "b": 0.57254905
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Indigo",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.105882354,
+            "g": 0.078431375,
+            "b": 0.39215687
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Violet",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.4,
+            "g": 0.1764706,
+            "b": 0.5686275
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Purple",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.5764706,
+            "g": 0.15294118,
+            "b": 0.56078434
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Magenta",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.61960787,
+            "g": 0.0,
+            "b": 0.3647059
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Rose",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.83137256,
+            "g": 0.078431375,
+            "b": 0.3529412
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Pink",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.92941177,
+            "g": 0.11764706,
+            "b": 0.4745098
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Brown",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.78039217,
+            "g": 0.69803923,
+            "b": 0.6
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Tan",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.6,
+            "g": 0.5254902,
+            "b": 0.45882353
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Coffee",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.4509804,
+            "g": 0.3882353,
+            "b": 0.34117648
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Chocolate",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.3254902,
+            "g": 0.2784314,
+            "b": 0.25490198
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Sand",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.7764706,
+            "g": 0.6117647,
+            "b": 0.42745098
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Copper",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.6509804,
+            "g": 0.4862745,
+            "b": 0.32156864
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Rust",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.54901963,
+            "g": 0.38431373,
+            "b": 0.22352941
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Walnut",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.45882353,
+            "g": 0.29803923,
+            "b": 0.14117648
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Espresso",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.3764706,
+            "g": 0.21960784,
+            "b": 0.07450981
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "White, Black",
+        "paint": {
+          "type": "gradient",
+          "gradient": {
+            "kind": "Linear",
+            "stops": [
+              {
+                "offset": 0.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 1.0,
+                  "g": 1.0,
+                  "b": 1.0
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              },
+              {
+                "offset": 1.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.0,
+                  "g": 0.0,
+                  "b": 0.0
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              }
+            ]
+          },
+          "angle": 0.0
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Radial White, Black",
+        "paint": {
+          "type": "gradient",
+          "gradient": {
+            "kind": "Radial",
+            "stops": [
+              {
+                "offset": 0.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 1.0,
+                  "g": 1.0,
+                  "b": 1.0
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              },
+              {
+                "offset": 1.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.0,
+                  "g": 0.0,
+                  "b": 0.0
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              }
+            ]
+          },
+          "angle": 0.0
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Sunset",
+        "paint": {
+          "type": "gradient",
+          "gradient": {
+            "kind": "Linear",
+            "stops": [
+              {
+                "offset": 0.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.9843137,
+                  "g": 0.6901961,
+                  "b": 0.23137255
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              },
+              {
+                "offset": 1.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.83137256,
+                  "g": 0.078431375,
+                  "b": 0.3529412
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              }
+            ]
+          },
+          "angle": 0.0
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Ocean",
+        "paint": {
+          "type": "gradient",
+          "gradient": {
+            "kind": "Linear",
+            "stops": [
+              {
+                "offset": 0.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.16078432,
+                  "g": 0.67058825,
+                  "b": 0.8862745
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              },
+              {
+                "offset": 1.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.18039216,
+                  "g": 0.19215687,
+                  "b": 0.57254905
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              }
+            ]
+          },
+          "angle": 0.0
+        },
+        "global": false,
+        "spot": false
+      }
+    ],
+    "swatch_groups": [
+      {
+        "name": "Grays",
+        "swatches": [
+          {
+            "name": "K=90",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.9
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=80",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.8
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=70",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.7
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=60",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.6
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=50",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.5
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=40",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.4
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=30",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.3
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=20",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.2
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=10",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.1
+              }
+            },
+            "global": false,
+            "spot": false
+          }
+        ]
+      },
+      {
+        "name": "Brights",
+        "swatches": [
+          {
+            "name": "Bright Red",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "rgb",
+                "r": 1.0,
+                "g": 0.11372549,
+                "b": 0.14509805
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "Bright Yellow",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "rgb",
+                "r": 1.0,
+                "g": 0.9019608,
+                "b": 0.0
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "Bright Green",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "rgb",
+                "r": 0.0,
+                "g": 0.9019608,
+                "b": 0.4627451
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "Bright Blue",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "rgb",
+                "r": 0.16078432,
+                "g": 0.4745098,
+                "b": 1.0
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "Bright Violet",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "rgb",
+                "r": 0.8352941,
+                "g": 0.0,
+                "b": 0.9764706
+              }
+            },
+            "global": false,
+            "spot": false
+          }
+        ]
+      }
+    ],
+    "graphic_styles": [
+      {
+        "name": "Default Graphic Style",
+        "appearance": {
+          "items": [
+            {
+              "kind": "fill",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 1.0,
+                  "g": 1.0,
+                  "b": 1.0
+                }
+              }
+            },
+            {
+              "kind": "stroke",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.0,
+                  "g": 0.0,
+                  "b": 0.0
+                }
+              },
+              "width": 1.0
+            }
+          ]
+        },
+        "id": 1,
+        "unit_box": true
+      },
+      {
+        "name": "Black Outline",
+        "appearance": {
+          "items": [
+            {
+              "kind": "fill",
+              "paint": {
+                "type": "none"
+              }
+            },
+            {
+              "kind": "stroke",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.0,
+                  "g": 0.0,
+                  "b": 0.0
+                }
+              },
+              "width": 1.0
+            }
+          ]
+        },
+        "id": 2,
+        "unit_box": true
+      },
+      {
+        "name": "Heavy Ink",
+        "appearance": {
+          "items": [
+            {
+              "kind": "fill",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.105882354,
+                  "g": 0.078431375,
+                  "b": 0.39215687
+                }
+              }
+            },
+            {
+              "kind": "stroke",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.0,
+                  "g": 0.0,
+                  "b": 0.0
+                }
+              },
+              "width": 4.0
+            }
+          ]
+        },
+        "id": 3,
+        "unit_box": true
+      },
+      {
+        "name": "Sunshine",
+        "appearance": {
+          "items": [
+            {
+              "kind": "fill",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.9843137,
+                  "g": 0.6901961,
+                  "b": 0.23137255
+                }
+              }
+            },
+            {
+              "kind": "stroke",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.94509804,
+                  "g": 0.3529412,
+                  "b": 0.14117648
+                }
+              },
+              "width": 2.0
+            }
+          ]
+        },
+        "id": 4,
+        "unit_box": true
+      }
+    ],
+    "symbols": [],
+    "guides": [],
+    "grid": {
+      "spacing": 72.0,
+      "subdivisions": 8
+    },
+    "raster_effects_ppi": 72.0,
+    "images": {},
+    "next_id": 30,
+    "metadata": {
+      "author": "",
+      "authorTitle": "",
+      "description": "",
+      "keywords": [],
+      "rating": 0,
+      "copyrightStatus": "unknown",
+      "copyrightNotice": "",
+      "copyrightUrl": "",
+      "created": 1794994867,
+      "modified": null
+    }
+  },
+  "images": {}
+}
+ VCBLOBS %PDF-1.7
+%€€€€
+
+1 0 obj
+<</Type/Pages/Count 1/Kids[6 0 R]>>
+endobj
+2 0 obj
+<</ProcSet[/PDF/Text/ImageC/ImageB]/Font<</f0 3 0 R>>>>
+endobj
+3 0 obj
+<</Type/Font/Subtype/Type0/BaseFont/UFOODE+ArialMT/Encoding/Identity-H/DescendantFonts[4 0 R]/ToUnicode 8 0 R>>
+endobj
+4 0 obj
+<</Type/Font/Subtype/CIDFontType2/BaseFont/UFOODE+ArialMT/CIDSystemInfo<</Registry(Adobe)/Ordering(Identity)/Supplement 0>>/FontDescriptor 5 0 R/DW 0/CIDToGIDMap/Identity/W[0 0 750 1 1 500 2 3 556.15234 4 4 277.83203 5 5 500 6 6 222.16797 7 7 556.15234 8 8 277.83203 9 9 556.15234 10 10 333.0078 11 11 556.15234 12 12 277.83203 13 13 833.0078 14 14 277.83203 15 16 556.15234 17 18 500 19 19 222.16797 20 20 556.15234 21 21 500 22 22 190.91797 23 23 666.9922 24 24 722.16797 25 25 277.83203 26 26 333.0078 27 27 556.15234 28 28 722.16797 29 29 500 30 30 333.0078 31 31 666.9922 32 32 277.83203 33 33 556.15234 34 34 277.83203 35 35 556.15234 36 36 333.0078 37 40 556.15234 41 41 500 42 43 556.15234]>>
+endobj
+5 0 obj
+<</Type/FontDescriptor/FontName/UFOODE+ArialMT/Flags 131076/FontBBox[2.9296875 -210.44922 768.5547 728.02734]/ItalicAngle 0/Ascent 728.02734/Descent -210.44922/CapHeight 716.3086/StemV 95.4/CIDSet 7 0 R/FontFile2 9 0 R>>
+endobj
+6 0 obj
+<</Type/Page/Resources 2 0 R/MediaBox[0 0 612 330]/BleedBox[0 0 612 330]/TrimBox[0 0 612 330]/Parent 1 0 R/Contents 10 0 R>>
+endobj
+7 0 obj
+<</Length 14/Filter/FlateDecode>>
+stream
+xœûÿÿÿÿÿ âì
+endstream
+endobj
+8 0 obj
+<</Length 539/Type/CMap/Filter/FlateDecode/WMode 0>>
+stream
+xœm”Iâ0Fïù5‡Hô‰HºBb‹Ä¡5­™sˆ&q"'9ğïGñgº[£9 zv¹ªâoÇéÚ4'êŸ‚Ş¹kWòtû\´Qïšr¨Ùö/Ì†Í}¶[Pëš²ã¶‡İÁV}Ç[^Ã÷˜ÿ…løRÙ¯€±m‡®oê(?ªşÊš`€|Ot0lûª¿‘xˆâø»®jì‚dÇ{k¶M=6×EI¨AÉ›kÊ#÷t®¬q¡Æº‘Tdª²ä¿Ëºhıâã­ë¹>ØsCQfhC$QòÎ—ªëİ&¾±2|ÆÌ«3ì*{¡É½Ùo“Ç¡m¯<6IÂ²5ş7å_Šš)	ÂŸ£Á’ä×ĞÇ­å ùıÜ˜;H´X6†»¶(ÙöÂÑR!V´Ìó<_ÿ™Ÿi,;Ë?…óárEK!ÒÍÊ“íA”ƒf²hÒ ‘[P’ GOJ€°.Ğ¤@Ğ´E–´í@{O:tcîÑ“7@ˆYdğCŸ~rÊà÷‚_
+?üBNø©¿9$üæpğÓküTÈ¿4DÂ/9á—…uğS¡3øÍá à§°×*ø!‹‚ŸÂù)øiÔSğSØA?Îü4NLÁOc—ü4öS…óCg
+~:ütæ¯^¸cã%ßÚç­/çØöş©ù+>ŞçÊòç›m›v\å?ş±ßÿ7FzÍÿ›ó<w
+endstream
+endobj
+9 0 obj
+<</Length 23038/Filter/FlateDecode>>
+stream
+xœŒ¼|TÅù7şÌœÛsö\÷~I²›Ín›„Ëb$¹‰È¬	Iä"W!€
+Š
+õÆúk½ÕV¬Ö[µ.$À‚´¦-µ­5…VkÚª´ÅJm£¼})µj²ÿÏÌÙ›^şŸ7°ç<gfÎ™93Ï<Ï3ßç™ dØ	Ô-¿~kä¥W?¸ ğ×®ÚtÍ†‰ßö&„j 9sÍúí«r·^`ş`éc«Wv®øb×±z€Û `üêÕ+;ÍÇ9€ ¨X½aë¶oÿÀ°ñ- øîúË;KğÀ¦Û`É†Îm›ørío ›N@äÚÎ+k?ıÎ ] _½iã–­¹ÑğÀC«Iş¦Í+7=yàÌÇ ípÖrG!À… ÷,ØøräÎóĞšÜ’OÎøc Èæ ÏÁKh¼¯ÂÑYğÃËpzá§àƒiğ8ì€¯Ânàa	üî‚…°8˜_E\/ÔÂ“ÀÀ“Ğ>¸n£àEşÜŸáV¸ƒyvÃ @9Lù°îE—ç®ƒ¥ğ{L€ËáZØ„væZs÷åÌ=ß†#ÌOsƒ C–ÃrèÏ}ÂıoîwPKákğ(|€‚WÀN8Â|6ÃcL;‹r×ä>¢pôs õá$\+á#äG;˜©ÜÿæÊerÇ0´Ãjx¢qh&rKssrıà…Ø;áQ8 ‡àdá{ğ.rrgsOçÎB ªaÜ
+½ğÔÇîj ü0
+R06Â÷á'pÅĞğFÎÉÕswcî-pÃXh+àYè…?¡à[ğ-øVæ5vFîPáx€ô6ü~‚¨ÍCi<
+oÄßd6ƒªa,Œ…°î‚Gà'ğ>J¢CØ‰O0O±ßa¿àK†NåTà!_‡oÀ‚ü(‚¶ ¯ ·ÑñT¼ÿù*û<û+¡Âpl€{á;ğd¢‰hº­F;Ğnô zõ£“è‚ãuøSf5ÓÅ|½„½„]ÄnaoãîäîæÏµúåĞ?rõ¹;aì€]ğ |¾	½pNÀ;ğ| @’‘ŠTAQÔ‚nB7¡[Ğ½è[è9ô<êE'ÑIôôgô7ôwô˜Ç!Åå¸Çğf|ş*~ŸÀ'ğIüWüOÆÇ”3IfÓÄ´1™.f7³—ÙËd~ÏÙl«çê¹‡¸'¸ç¸ïp?äÎòNá+p¼ñåSƒ£ß‚¡=CêÍı<€ „¡š`tB'¬…mğ|^†7‘ùQF“ÑåhZ†Ö¢.´}İCß¦mÿ.:†úÑoĞ§°‚Ã´Ícğ8|	‡çá«ğJÜ…÷âq/~ÎŒÌhŒ‡ÍÌdÚ™•ÌVf;ó“aŞ`ŞcşÀœg¾d¾dr¬Ä–±ål‚M²3Ùeìuì7ÙØ¸¥ÜÏ¹y‰ßÀßÉgùÿ#Œ&ó…B»p¿pHxËÑ‡àGpCÑ:Åìb¦3á>ÜÀğ/ğ/ –Á
+fnÀÏ¡=øfÔ‹+¸müEø"4Î²	üUü~ŸÇ1sĞl´Öâ±öÓx7û 4±?‚ö^‰Á„m¼İ‚?åp N 3ul’ù9¼Ë|€öIø-+!ÀÏ2ó‘Œ¾ÇNæZ!Ê<ßeºĞÍpO¾pÜƒ’h.zvÃbT>crÀà¹Ğ˜?Âm°ÿ/À°F+Økà>h@;à#x“Å]Ëæ=ègxÛ]¨0û< N¡
+Äpn¸µ3ñŸâwà:8ÁJğ>ó"{ŸÀßeæ°g¹…h5l€›áNèÊí‚í\+û+t0(qö|v0õl¾
+·ÂfX
+µpüp²0…™›Áep9Z‹ZàQxƒGà °°Ö€®€káĞË/ÆY¸†SÑJø€ıùĞBX’{Í]×æ„šÜ[°;·²ğ|÷Ãsè¡›`”Â;ğ>ºœ›Op3r5¸¿ƒá‡F/ Š#?|Ãw`2÷
+t³¿EĞœ»'÷kğ@”Ã£p5\§a|Â¥L4ÍÅûs3˜M°û äÍ•!	VçÖÃ<8ß8è’0ÀfĞ¯àÜ+ñÂÜVfåĞø*ÜKÁ‚;á:¸îb»ØÛØÂ=ğ <_‡}ğmx^¦s¬+ïØºes×¦×nX¿níšÕ×¬Zyu{ëé–ÅóæN±š'_ÜtÑ¤ÔÄ	ãêÇÖÕ©©NUU™ˆWÄÊ£‘²Ò’p(ğû¼·Ë4tMUœ²$:cŒ zzlFG$“èÈ°‰Ø¥—ÖëXg$“è,JèÈD:#™#Ëd"ä¾ÎLddI«3’Yõ/%-»¤5\é‘&hª©LE2ıÓb‘,Z² 5ÉÜ;-ÖÉPz¥÷RZ™k‹Fkª#‘éşÕÓ"Ô™™qıêîéÓjªÑ~Yš›ºRª©†ı’<56U®©†Œ/¶i?òMF”À¾é“öcp(5ÕÓ3ÁØ´é™@liA†‰Oï\‘™¿ uú´P4ÚVSAS—Ç®Î@ì’Œ–¤E`*­&ÃOÍ´šÈò6pwdu_÷=Y®îH:WÄVt.mÍ0m¤#™ñÅ¦e|7ö_¸¬©Î˜S[wç†˜îéş5rÙİ½;’Ù· µ87JmmşšêšêÏèè‘±:ï¹´¦zö¢ÈÒÖ¾£­5ƒîh«©7!oe¿ßÊØt’Ò±6’c—ÄVw¯íèŒd‚İX¸=z ´äNApz¤{qk,šiÅÚ:§…÷»¡{áö€	ŒÌ©©Ş¯vÇîWµ<áTŠ‰•Ãy”¢Å	5{ápÏ"Ò¢Ø¬ŒÕ‘‰,d`ak,ƒãÉaåDè^>1%m¨¦zvfÅ‚Öék2âÔn}I'÷g¸¸‹tÿ2¨#6ğ×‘)ù>®ÿIød˜Õ2¨³@g’ÉÌèÑ„E„©¼Ádz=®¦úú,Å6é‘,&İó[3¨³mR­¿¦:%|wÖ‚«kª£™Zíë\: Vm²-ƒ;HN_!ÇÓBrvr†oïˆEkª{˜ÀŒ#1ü_Ó½®é«'e÷ÿ'{¥?{Qlö‚%­‘éİù¾½xÄ•?q8/Oe\S[™ÎS8ÄĞÜŒ9uéparÑêÌ°ñç)S¯È
+­v
+ŠÌÈè—ÚÇ6)ı¼)›;Kî¢§·å›™™”y}ÑˆëÍsv3³gØ½xIw·4"oöÂ|…³ò§ÎH·F#S3ĞÒšaâ&ÍõM$¿¶PÆZÜJr·f0Mnå/Gåé¶¶¶6Â5Õ3b3:º»gÄ"3º;º;³¹WÇ"z¬ûş!şa÷¦éÆÉæŞÊÌ¸§-£w¬F“jªc$§»{Å~`â‹[3Vh?¢Ä„©w·eæ%Ûb™«“±h¬ue[MõşIàŒ.î˜ZS½Ã%ûchÏ‚ıÚ³hIë ²gqëŒğÔKÚöW =ZD ,šŠI*I$r³Ñì…­°ƒ–± vÒ\–&ĞëåY4Í.tÄË³ØNÓíŠ´"0,Ï²vU(ÍÂò¬ÃNÛi—®Ê—vÀò¬NrF 4ÓşÛxêâVKš`M².²&ãfÚHÒ	Ö¤£à"=“Q3
+íß‰§.¤ÉY´sÿEVè}’tí„‹IÛ9œ–Å@Š=¨­Í~Ñ=-Ş eIkÏdhF!zlkk»„üI;uqkñ¢‚‰ğùÉV'î½(Ã&H¦41$eGÈË,‹m‹’·Ë¤cÛ£<5–‰D–¶F£Ñı03ÜÖİétÇ²:,O·ÚG’…ªÃm¡h[fçÕ…²¡p[¬èÒnë¦|Õ&2d¸¶›
+µmm§Dw¡ºÌòÿX[†MdĞ•äHÿÓæï1»~6‘¯´{i÷’X4Í”ŠóíˆE3j˜¢-y„¶Qå´<éXEæR„¹«kªc—íÇs“ôŒè¹û²Øô'¿Î™qS¶F#+ÚH©™4„ñÿk!TTˆ(úğnı¢ÂÊ_ÙÓ·;sÍÈËÕÃ—3È¯#ÃÆÇØb"Ã&è”fÖ†2ëÛ’ÃE:É;wGôØ$2Á'Ñ›g’_G†‹ÏÌì\Ş™ÁñŸµ<–áâ—ev.´^m÷ QÔİÄrZŞYSM{9_SæÚäˆGÆ"´¸5šÁqò:™ó#m‘H-hFC‘· 5YÕ™±bDnÌ·ßgş’VòÖİ‹Z£ ÃÊ‹[#«:WÆˆpÍ~·{Ÿ´‘_–E­uwÇº3¨-ÃÆgDVuF2\"Ã'f‘—ÈlJÆ:WËn1ìVÚ&G¤Ûîò´ĞôX´­seÇi_²‰HÃÕä°¼›ØíÉ7ºÍîHª»õ(´ë lbyº#‹FôÈŒêÎP,J:a¹j»¨¦Ú.(ÆIÁ§ÿ™ÉıíBüB
+ı¿1ivĞ§R#"3¿PD ÿ¹x¦+™Á¾‰XH^-\BõŸE:‹Ïêˆd¬…­Ñ¹;’Á‹ójÃ¾¹5T0û6ì£òŸ*€hMõş8Ú3¿X.Í˜³^Ê ¶*ä€€.éÅè4/dñ£–8ö4’ÀFpğÜiÌÃcAD¢1àOêç››æêçšæ6AsÓ`“şeÓ`ÓØº¨5âQ#Š€…/#Lß—_@„í@°€ùŒ;
+2cfîH¶ö0ª,Oq!Ò æş2È”vÑlîMN§3K¾@p6a…Ó¼SQøOóKDFSş/wgD§®ã>›;×ëtâ©@ˆ‚ÉæÎX:¹±…¹AÂ&qEÙÜÙ³²QÌæÎöš•&G¢4Áºİ¬läY–cù	âL–‹ó5R«tsô.óG^x†G1>!Ä)~¢Ø¬ÌSÚØ6¾Uhof·sŠ¯ñ¿bßæOóşÁÿÓá1%‰có¼ ŠIâD‡#.ğnAà–s’›ã$IäÖ0°/8²›Eš%r¬ÓÉ·pårå‰Ít’$÷*H‘UY¦}$;Å&ìÎ:œ–ã€¹¸‹ó]©¦q¡½€ša`Èæ†¬±ªŠ[@Wr$ı’,ã0e™o“Ô	Ò‹p*¿Î\åO&çKÚí]Msôd2Isõ®óÉö9ç’ĞÜ¤7éMÍMÍM†/µ›“doÖïæÆø“êÍúqAw49šzÜÏSÕ«ÌQ™x;ƒE¿b4B²½«mlšº´Õ’Äê’”è()iâ³¹÷”¤ølî­zÚMÑ†´µCW;ê‚drêÒÖ#ÀçúDSL6×wÀKNïĞIqr¢WNzÚ/Û7'ÛP’Şh™ï±Èáö¦D‡ÛİD|6wş€ŸÜü×ı!»8joƒö<Õe? ’É¥IŒÈ³À:$Xø››››Ó—ªÛÖ`4¨¡Œ=½è…?­E¯¾?ôä­ÜÑ/¡ÌĞõƒ+pÙCW‚İ ÌŸØÉàE"óÈrqïÂÏéYıÌG®³ÌyÏn-—•Æí:zD?é?åÏùÙˆÃ­º½f˜ïU$EuªSôÜg €B'›Z4ñÔÜ9p‚“Î.µÂo‘¹ä·ÈÀËU„–İ„-älî¯–AXCf	kÈå´D6wÎ’	{Èn]çÉõ?-™°ˆ,i½>oQÆ‘­†ñ9åd$Ïõgs}V°q|cÆÖ7ù÷ù3ş>?ëgpƒÇ[`Tou½)à#ÈæÎ÷nlîó^Ò<BX>Ê¹lÏ²”gIA˜r/K¹—Ôn6Œo<KÖ38	§€…¹>ı|aÉ_Ó 9œkÒÛ»’#2’É$áğ&ˆÃææ#…ÌÔØº©Û-/oˆ’C$†×¯†&™!I”LŞ…Ú»+‡,Q‘¼âÎÌ2uÖsø›“õÍÍÍ6oxÆ7Ô{½>¯Çˆ‰D¬œ÷»¿uİ{OÎ×¥ŞÑë.İò,›xøåé›æÔß<¸ßyí†)¾1x0LËa+ÙÉ @ å¿òøÉ»²¹3½„Ğˆ\I¨ Í0)àœÉ_êHómkø5G£>ÉœäçŸ®Ï6g{§û—rKÅ…z»Ùî]èßÀmWèÌŞşGä9åJf1·XºÒ¹YÉ­”Ö;%_˜Œ°,»§èE,æ.°¥ólhéiwEÈ",¢ì&ds“ÑÂ-‚Ÿ¤
+z>õl/LJPáO2¨” ’Œ¨Zo¬ºá•Ü9»Ciaì!"eäÒXc]…Ô“©ŞRmn³¦¤Õ
+pª{T:)S…)S©”©TÊDNÂïà¥leUÄË 08óÏ%·å	úÜCilœ@Ô)‘•#8IïJ¶ŸO¶_H¤©Ğ<Ğ<0¶uµC‘Gâ"n‘x5wµÈ¡CJ…öËF–©í]/Ë¬/ËÔXÏRVjNÖmséÆ7ÔƒÇÍó±rp¹½õãÇ5nšöô]?ş-òŞô—»?8r`÷zîØ} »På}×ı~°ÿ/_A¥HyãçoüòÇ?Täş†Gs‚]KxjJœ¹¡áá”‹hG-Ñ|-åúzb	¢cû¬ŠX¢qg r*bÀ«‹IMâ½aFÖôr(GŠY&³ LÉÖ^åi3îD9Á1]œŞ!lv
+{„ˆ°OÈ}ÂI²¹O¨€ˆ@¹*›û[/B6÷Y/å0Bñlib³”%SæâóœeOá(^~4~ÿªü´Ş¹Óú€-+ôÓçšÈ¨56)3e44è?[‡
+ãÚÏx³L}ïzFFeê-q=’ÅP%1ËÔX/ñdğêëkóC÷ñ±òDbœ×`L0<1Ãíõ6Ôc=xyÓÕë«o¿½çàAW²ªôÉ'ôÉ+¿…—ßƒ„õC÷Ş3ø?sªƒÄ
+kÎaö³“¡-¥V˜¯Ğ‹ş vÙ:0UEs´²ˆNÑñ"º¢ˆÑåEt´ˆ«™i¶Ü]>I¼LœV‘._Y¾C¼O¼½â×wªÈ(¢/è÷ÕÍ®~ÛÇ…pÆz=’üKKÅ¥ÒRy©s©²Ö±V\+­•×:×*½‰ŞJ­2QQY1j|Å©M^‘XQµ5¶µbgÅÿH;¬z¸úkuOKÏ;Ÿª|ºª'ñã„·Š0Ïò+‚–!ƒ_^ b¢¢@”dsï[fij‰£2î”Ø`$áaå1%Á,~Á*TiQhÌ,¼8àµ@Y`càƒ [¸?€ßÃ-àÀ/ ÊõYnR\GÂ::‰0 a”Íõõ¸½äléªÑˆĞ˜¥%ëKpIØ#°¤ä&6›ûå[BX.Â·lxŒ\DÁŠ€åò7Ö“Ûë	÷üö‘ğ}ÀK˜>!w"ä® µ(^ª¼Nç‘Z _	BA÷¤…ŠÑÙ\ßÁpêäh4šTM3šLòlJÇŒÎæ>¦=9ú•Â ÷¤Gi[¢•£;êûêqsıÎz\¯#„*€6Š|DìaÀ-” -$ÄaÒÈH^F{Ó‘
+*¾ˆ!å5¢ìİ¤!šJZ¡Ñ•‚ÆÛÃHkåŒİÀX"ŠçêçÚ»æœ+’¹I=™Ø<—ª|šØ•œ3,” …6C3)Ø<Ğe¦jÉôßœ<­Ò“a¦3…ˆ‘G­«²¦4Æ¹«†nê.áË•HÄ*!„¸!„Jİ‘DÕXÊcŠÓ1J
+¡ªJQâ“lÊôb7$‰álˆYšÜµk	Ô¾¹«ıB)²$@¨DN$JÆ°Y¦öğú1r ô”Pá±Ú†æ¤‘2ŒTmQˆ\?®±2Q9k?a¼m„¶ıáöy}^_)¶µI¢ù€v×M;¶‹ÿÏkÎ›2qô‹nşŞ#ãÜ²fÇZ¯·6tû«§×¼vó‰wĞÅáu›WN»8æ×ÏÚ5wæöª²ä¥7]ã_¸tá„X¸Ä%U4LÙ±tÉW¼n@¸£À ]TZa)/¤I–§Øv+Ê}9lT@îMc9¯mÙé.:8,{ @÷¦1›W)«(EO-XÆP §¹ñ„Å82'Ll¤çÆqö¹n¬}.Ó³÷ø5®Œ{‚û€cçqpg9¦ŒÛÄíär‹ $ÌPÛ•>‰ÚŸ†qO êƒ³€/¡Dµ%ÿfÔº©ıá –G67Dçds9:ë ›ûÒ’(5—9ÿ_ÔÔfbÑ6As3ÑHäê_ÿB= Ù•üå¶^îèç3 0\–;Ã†ÙÉP˜rº©qt@	¥ŒRÆ{&„&5º]i½VY3º£®[¹sÔcŞ¯ŸW<UD,†Wë3@¨g/T
+¼Ru<p¢êW÷ªÓ¼¨”,%Ò|“.È’Ÿo—Í²æªÌWæOVnL±©êYì¥ÕiG[r•cMòzçnçÏœÿTş™4&4ªˆÕk+}õQ·Ù¨£ğ¨p­Ú¬Ş¯>¡æTî	õeõS•Q_É}nsÎá´ê$C%‹ô»JAW2*•*Oäš(X‹~ÊgÓªf|YüB¿ÚIjÚ_-I—´ø¿æ‡~˜^)Õ‡yT§Ş	SôÜù"öı¬ˆ?óLgÉià©0ŒG+²¹¿ÒF‚,ªpKe†Šlî4•şT‘ş¬Èæ~gÉ¤Ù´ÁÙÜ—y}…¯´ÔJz"’¨K¼œàRÙ\µ‚ÙÜÛ61l*÷¤cI¾¥;9Õ—ÂûR(å#ò—<Üç°e©˜öÅıåµã¬¶`ëÖæå³‘®­x•?Áã2¾™Ç¼;?ywş>ÿœ1i^%İO0ÜÂûÉËñNòfäÈ·ğÔÒæ©jâÇN,âçd{Ãç’É‚°n–ÓÔK~ø!1ÆN'›“T:×İÜeKë‚¸¶ñ¨«=™„®Ğa`’I§S•ej¯WÕp¥ÄÔSš‘ı>_ØMEiø‚(m6RµI"NM²¾S!9®qüø	ô«±r^¨œŒó+;Ûë‹%^P±‡ZæÆcšVYûò±™[.·îİkPÃô=·n/Éø¯=y×æë¢¯üXØwõñKë7¬Yı­DÉm-3¾sÇÜ]sİª¬ˆK×Ö\ÜÖåïº{¶ÕyÙ˜mg¿¸ãâ‰è½ª°^5§öÒ+ç]|™Ç»‡Ö°Qv2˜PŠ~MçñV§^£_¬ÏÖÙæH&‚Ë"£œ±’zO}É%%›"{#I¾I¡Ë|—…ÚW:—ú–†Ö:Ö9×è|ëB}‘7İïùß¾YzÚ}ºôT$ñÆØ¤ôŒc'é3ØËô%ú‡ò_J†tÙPo8Ì$"¬Ê F,E&b`xiN*NJH—,©CÚ)±º@ŒĞÅ¢DL™ğDí‰ØîyÜï:( HæD$FØGÚŠ\¸á?,(òpX mÆúÚ‹ö¡:‹Ø2ÔŒæ!±JE1¢È¢È¢æ¢lŠ&Aæ-ê%#*¼IøÊfNğ#bnËã¦9:aÓs§é©ˆ©¡¹y€Â
+U€v"­¡+Ôª¡z©>WeÄ3|˜.øxL¹í"ğUİ7&\Xi0EK¿İOOzpõ“k¯ûà¦%÷1¹~ÛwİºeÿĞî{İÜ“{ä©¡/î¾|ÒàÌÓıÇşëŸ¿ş@p ~(Ï\TëB:‹bl#;•]Ä®b·²¼h8D‡¨¸QÆd:Ü ‰U{ÈQq!.7
+]nÁ(ÃV–ş¯ L‘>üÌ2Šô!Oõ!syexÎîxà‹PÊ¹æÌãÅj°½Ë§õös›OC3íå”A¥@*úÏv«7'}¾µ‡ƒ„x‘áå,3~¸Ÿë/€4ãê}×¼Ç¸ã[“×4_yÕäK.¹è*w)›x²ëÒIÏVÎlîØ<øY‰İ–;Ãœ"q™è0éÃ#ÌõY¢Ç×ˆ#.o£FÓİ˜t¡
+‡ËëD.¯Ìƒd„¼#;oÑÜñ!wŞ¸ßG ¶ Åï|¹ó™¤Ç|ÃêÃGûÎ7ŒÙù¨¦ó‘¾¥˜ÏIºĞG0;…tcÎ‡ú|È77HÆÆKàºàÙ ŞÜÌsA6è,¤³0´N{D{ÒÎ¸8< "1"O‰¬XPqx@EÚ(Q"IÕtEŠ×‰˜4KœaÎ´wÙ°É¿söà©ßÜd*5Äƒ¬®*š‚yÁÁ;8Ãë¬3ŠÃæFŞíÔrî	1F–©;´‘½<]7“ÙU7¶-:.Æ+ãŒÃí£öòxB3Í;~}ÕSót¹W6®]°à¾‹zï½tÃ¼q[ğƒƒ=÷¹`Ñı{pê‹w ïäŞºŠÎ¤R·ˆ´@m .`6¾î|\y^q•*%è°ÒeÁ²Æ‡Â8µ°„<8év±ÒnäÎ¹ì^?œvYìğÒŞW_^°Éi_œ?ˆltlŞ M†Ë÷
+XtYh)dn¹é\«")PNg[55F²¹¿Y2w¶j›K”ø´Ä^=LgŞSşÀ1t¢pIàOæ×Qù# É¹&½)ï&h‡ææ¦¦¦Á¦æ”a–[7xQà<æuÑÁk!DFi×.”ìj‡Í¡ƒ y]Î25½ë^Ò²Lıõ²‘¯:X2×8áÂ$õx|rà‰'\ÁÛ®¿|ihbıÂi'N0İÓµ®qÆæ7¤Wßóå*2Wwğ	v2Ä˜ïz\Es®Xw™E´QD—­'ÂEt¨ˆÑ¤|A†‹èP,¢‹ñ7¥ˆV‹h­ˆ&í/ĞzmÑ¤ıÊ_7Å²Ç,¢"ZÉ'‚"fsÿkÍ‘•Æ8{š=-şŞ÷a„û5w>‚}HLô‡""ÃÄJÃ¼',ËDSÄ‚]:G{ãûâ8îóÕø^,aGƒâb„%7aDƒhvQ&,iP8Ö Ö¯a” 8!P{ß¶:‹Ğ/¿½´”´?¾7„B´¦ĞpM!ZS(›ûÄ2HM!êSI¤¦ñ—Q¡¢B3T°¸CYÔ~pC¬PI¬0!cù	éNÇâè$ ½°0AçCİo%ÿæ~£¶0xós®H×¹é¤³{6¨ˆgÑ¶(‘”œryKÃVzE‰Ôx.š˜ƒs§¯œö§®Í@¦cs3ñäé†ÊĞ¼UnWÂí4BÈT<y§Æ.ÔN-g
+Nü§¿%éRP"ªTöPÁ*"Ã—RÇÇ°NMçX‘^õúÈ¡ØÿA¨X9O<!OÖ?³öú‡Ënyı›/ôÄ–NŞôÕŞÖ—ïšÄ&¾6wÙÕ­G_>4X‰¿±~Ù¤¯==ø0>°mÛüÇ|‡X¿/½ncÀ€
+OPù[»E¾Mşù)ù¬ÌŒÒi†”–VJ¥?H‚,©Ë4!¡‰ç9••¿#eÑ|+Æ5±ˆg%¼€ã…&Vš(OâjÙfGXÄ>©=ùˆ?I€¥&bÙÏç 47ëƒƒÆ!İJú(2Ü›»B‡e‰c`!ğ×û›ûkû‰7®ÁÃŒkğ¸y¡rüø	‡úûûç_QŸÏ0mıı_>ÛßßuwbN óÊ¼¼bÈş7ú™m[xs}=_#C–Î”9âì8f:sTai’Çhô9§áf8Z˜Ü²äad8‹„™sØÈ¨$ZºñDÔ'"/µÉ½ÔŞ©½!RO¡8ì)Ì«ö )GU;µ:DjuP€N ‘z
+Iş!ªóçz‰zòsÃ{Ö‹7y÷y3Şœ—õbwa*¹†£»0ËÜÿİ‚ü/nBÇ¿¸	½EnBjvÀ\ÏH¥`>R—`Ñì¶Hˆ?p ÙH]ğª¼*ÄUŞBŠC+LH¶'Q2tH–@b8-ËÔõ®ç{I¦†ñÛŒ/fıŞ[ú®ÿîìŞëÖÍ¿·‰;:ø·ÛŸ~|p~r÷M‹î»yğÀ0;w†-e'ƒJ°—ò¸¯ÂÜÂ´síb‹¼’YÇmWÊÁlÑ˜;m-$TI˜+Íw¸ÏİçƒìXsR`lxŠ9'8%¼À\Xî47;ÃÛømóø¼_/ÒŸo¾·Ã»ÉËxÃÚ^}Ÿu…%ÚØ6í{Ša«dÔ	Üû5W˜•}SôÜÙa…ã+â7_{Ò>KÉæ~GÁ`…¬íHûb{ARÈCÅÊÑ)Á2bÚÄä|˜€e¨ÌûJAÇJ{ô‚ø×<£Ûìd¹Òz…`UŒn,š…y3~"ØŞ<+™"ÔI
+!L]GÔ(„©“ˆÂæB 4*_°wlÉK¢!’ÉóÔT“÷í¶'“§›ÌTm{Ó`W]¦)HÔ®Í!«`>l‚°¸º<Ñ'`u²´”õ:èu:v1ºÄº¨3•¥Å'¤¼3ĞL-»ª½6i4Ô¶wÕmC>ê4th¨Ã-D©)‹¢	
+R0W­şäÈŸ‡>Eîßı©èË3Ò;–ß3ø.^àœ˜¾kÇó(í{ª•!9QÕĞûCÿÔ#/]¾vçÔÕÏi4?w†`'Cwş;¾Â8÷¦¥ÂˆB”a8œÎ#„öcÒ¨Şª!°é
+X3,ş0+#Õ#8¨7¢GdĞ†]Æééë5êCÕ·×“ßØº5St¢²ğT×Tß"×"_‡«Ã÷uüuæ1åiıi²š	Hkñf-ws“²SyÆyP<$t:½Î;ÄŒZ¾LÛ¨İª1"nDFuÀ& ªüœ4M†mkH›"!ZÑ--­U/4ß¢–‡ Áˆbûd¸TÈÉ2„ !d©IÚGÈÊËAdå{·‘·HY’°(q)E!‚…˜öÄ§§Àà<`M{*Nˆğ?Î36µrŠÄæ§Áp\q¨‡/¬¬mØ¢HNnÎ©!`bÛ@2¹ùÄyBYŞHÕêí§õöÓd±İ…Ú»hÔm/  SÕ4“õçÙY6);Ëyv&.‹¼Û¢ÀÊ&5
+Î
+ÂÏLÓş’O¿ûîĞ?6ÿù®—~WöràÖ%{^xúöµ÷¡;|‡O $½ˆğ®—Ÿ­[ÿ£7ßşáW AèQ6^nsîptZoš„QåûxXO:
+to{‡İ	P4’Üõ‘œíã 9xÄKÀ‰a®‚ØŸ\mò½~ı½~£¡ D&„ã”)‰x#%zÍp£ƒp6÷q&nBz–ˆå-–F¡ª4J®ÎXby¼¼åqrõ®uKÕ˜FˆTiÔœ£ JLH)']
+3¥4Jã6G«¸
+­ÂkkÄmpºowlov£İøNæ.a£[ü<"> ½ß’¾‡…ıÒÏàÇÒ»ğké¯ğGé8'UKÀI~ğJU@ªy`I"g™ŞFÎ’•Æ|„—È! ¯ª³4Â ‰à[H_4
+‘^¡©˜ãœ2pßKöëä×ŸìOB-	©"ıcM‡#.JnQ”€Á8Àp’’èp`ŒxA@\­9Ë–e‰;E,fQè Åíä0—E!KŒ`•ËÿŠ°ö@00Ø>Øôœn·…sj8’Í al»o>¾{ŒŸœÚÆÖA>¾ğí®N&C‡8{¬)¢@x7Š\^ßø	®„¾;´şû§ãeşä_]Ë&o¿fãâëñ/ŞL")QñŠ€¥÷‹Ùxzˆ§,ğß=e®ˆfÿ‹Í~hˆO-ğß}jô¡hö¿øÚì‡xßÿİû–oi&-µ‘á	i‘ºåæ‰{Å}bFì?ÏŠˆeâ&q§øD>é”˜¥2XÌˆ<óJ®/ÿ„Ñiæ<Ç³/Ä9`Ÿ`÷±¶=Åò}ìYaO²§X–- Uì°ñÈRã‘¥î8–‚!la9vØÇÎuü«	¹ÙöÂ55$©Î'?¢õ7Œ0±ˆ:ÌJOVàoöS‘.ŒcOoo/û—'¾ğ°	Ê/3rg˜¸£`@	vQp‡„Y%®4*Ónœ{\ø
+¼XZè^¾¯àVŠËİá¾²·¸_»Ş|èúĞı©ï/KN•åÊ¼eeÉ`“·)8;¸©lo™0W(c¼“ğ8e6®ÌpÏ
+_!¥•k”ù¼Ÿ£sª<Œ*ë„Â²`€ä	3²ŠT´¬ğ\^½i‚W.ÈWˆÚˆˆö•fEZ‹ëúIé†et;¶Œ.BÊ¨cÀ0)^@}o3à)^@…°(R@QƒØ“#1‚W
+­;”6¶^pteŞcp(mVğ[›‹uÛ@¼(ıªpBø@È	lÁ†,-2Km…êU;|9Hõj ´q~‘ÁH°Lj;ì°Z;ªv0ÙtÚ
+#‹Œ&ƒpõ ±Ğ~ÆCìA‰©*H2±{×Ë‚f/+šÌ*Êã˜ãò:“„¢9˜‰+ßúëëÖ¾u[ÇCµ=ƒ‘¯»şÛÏİ´íÉ;¿yÏO=˜îS°úùl¾ñú^{÷ãÄâÓ ˜ÿÃ&@ÇI[o*Æ•ØÚßöİ›&ÁàÅŠĞ£!™g±Èc^‘@Ò(£ÕGHs³AÜs¡Ãš‰´ò ÜµæRK´‡Ø‡ªi}\ß'ü\5Ë›
+2.Ñ£õqh’¼İ';jÍ+Ø6¡MnUFHÈ‡qÖùSùuõı]æ×â/•ßêJ¦™WJ²LCó+:ObÉÏX*¡4°’„y²ºk"Ó5iÏÜµŠçÁ!ŠˆçEeYÓtUQ¦)ºŒ@ÄŠÌ8u‰×°&é¯Ák"Öã ºD+¯)H‰;·ÓÉH¢È0˜×Åéi‰ÌYÊ-ÎrIëäÅ[,)‹B‡-~>¿“gø,j©æ\>Ì2vP3¬ıœ­­‚şıCıÜÀŸÚ‡U9eÕ×Ví7ëÇ4_Óv;ïVõãöñ¸ã¸ êMM¦|¬u¯ê/IÉ¤¿å’”³Ü—bÊ}ôú@4¥“µ—äI¡òhJ´ÂùĞizMB\iX´mÍ9i÷%Ìc[÷Mƒ jğ8DB3•HC·=úû§Æ„«ã=¿z İıŞ»“†şŒ«ĞĞ?gÖ]ÒğÅsğè²¶¡vÂsK˜TÉš¨Œó Ç îÌ®Ú‹0ZËw=K{f š)âB¸è ‹ÀÂ¶¥pŒ…Ù3¦¿éAæßÿ>ô	`ø& ;ÈühŒÓ¯4Ö¹ñl}¶ûJıJ7+;K5UŸ¿#sŠ^„µcÂÃxiOÚL8^ÉÏk 5íˆHpèD$Øæ`$ˆ"Aô+8/a”ÂbU‘œTÔ¨i%‚"€ ’G5ÎÓØ+Jä±úÏóX=8 É‡‡œµ$jbµ.ZZìO±Q¹zWûù¢%*‰c4Sµt³Y•†ö«Î,Ó@âÈŸe¬G˜ZåÄ¹Na‹h=ÂÑ¨aD©T©LÄ¢ßÄ£œ³şÁ¶O†~6´İtì›í—½}è.î¨j®<´á•¡ÁÁtÏ­Koó(©{€{‰;
+~(Ç·Òˆš²ŠÌñá%e«ÊX‘†Š9è‘È`ñĞGÀJaÏ‡³@ÈÂÌæşĞcM²Ï£¼²Ñ ×%•zş¬åÏf6÷¿=%	;ßÚùfæ[³Ì`c\½,|Yd‘¼4¼!¼YÜ¦n×îöh+ÏkYíŒú‘¦«NgÄĞÜ†¡šS4C8ôJ¼ièŠ“ó‹¢×”ú¾Ÿë+=ú,uÉù ZNùÊï×4ÕQ:‚¹J‹˜«4wœ„¦KêãDbQNàœÀ°/@c*xGÑ©ØT±³‚©(÷ãƒÂ‡ÙËÿÿÊ^|½şQ`¯Ï
+ì»è¹b¤İ ›t›½§ıy°Ì–P”Ë’I‚•¦jM‚9ûR»Õ1IîfıxQølŞ¨&Ï£;A––ÒôI†9‰îÚ 1ÒG@Í½o)£<2Ë)Õ
+§ôrwJ//Kéå‚œj>‚+¯ ip rêGÊó3‘RµI{³F”zÓy„À¹bÌ\™ˆÅ(wS¥}wãÆ×ßœSÕryîÜ[®½¢&:û÷èÉ;šûğSCuÜÑy?İşøÛ%ñŠ¹×u¡±·ß3Q¯c&lŸ¹úNÀäk
+èNŠK0—r{„å€DÌ7ü™€ÍMµ$ºœŒË“ÀLpå<œœÊË·@rŒ|¤¿¿¿€‚Cp÷&èùú¤Jn
+]Ï¢†xBudQƒeO¨W£3†a^4¾q¨ƒçôódSO3•¡Ğâ|#V)J`£qÂø	¼@Üâ:B|ís–Ûµ½òâX%‡CŸ!õ“w¿8ÙÖıĞ+ß*Šgî[ÆJ0İ1fİ„8§VÁã¦s\sY¦—••‡Â—„‰-ÊOrÃôrïåÁvG»Òªµ{¯
+®u¬WVk×z¯ö•½ã|×÷nà®¿úşø#µf®V«u×qÍšÅ]®ÍçVqï–üı\wê•å1„HÌ‚ä	«²„%ê/²DıÃ–hyÚ_qRFºlÉòN™µ-P™F“ÉÔâ$[_
+òÇŞÀ@Q~WÌ):iìí3t»ÌVdàBX„…Jdë•½ ïªr¥óğµ½“¥)˜§LÌ¤™8Æÿ9e¨€ÆZœE-æˆ€–Ïş5 ÅO¡$·ĞR:s$ĞYĞBÓNS{u8«°ÁÇG†µ IW‰ézp½*³¼mµò.€áyç{ÌÆÃK±G‡Xy%ãö]°YQÍ³½›÷_ır—5ô·ï[‡[¸şÅo_wı‹ÜÑÁ¿ß?ïş×·}:ôö7ĞC¯¶Üİÿó“¯‘Àp‡Ù˜Ü_\0MÕa{Õv{ØĞ“ÊÆŞ´^X½rÃëY<Œú0#–±Ã¸nÇ÷¦y~84UÌ}^ä³ÍÓ½iíB	³¨„ãB	²'¡Ğ¼Ø”İ<¾€°Ãh•X´Ü'½ò÷hÎáf!•V5\B¸P‚ “âyº7m”•8S*äéŞ´)pt¹Ó9EÍ}¿*¦í¥ÀÒÛw$Øaô(esoõ:º?cÉ„2"ä(ÑXF{ŞgÕÊ°èµd0œ¼À#^“@Rœ<µ	„Y‰5¤¼ÙŞbÔ&“ııúÛıú[É~ºè ;õ(¦s!ªÚ«¹Ñhv”„/3®4î3òr4ÂìTaÑo±³Ä²h£.±7—Z‡Ë*YŞ)ºø09X^eÕaêàbÜBØ’KÔ
+ˆ£IµÆ	“©Ó˜™¼%ÌqÌ–§j3ËÌ+µ…æ:a…ãs;£°Õq„?ª2ÿÎ!VÉFT)•j•ViÖº'ÂóÇG˜‡Ï¢çğsò3Îƒpˆ?ªş”}›G<ÃÑ>2ÏñŸ‹a™NzÔéQ¥Gë¢¤j¬	†CpÄ-®’@9U`äŒ+ÙÜÛÖ"3G£©ğPÛÅK²‘’Æbv¡´ÔXoì0ºÉX{`.tu;UbµÉsµÉsäZ?MşÙ!š†™
+Yn†ã0/œ(IÙé”tÃĞ²¹Ù=˜‘ln–µJÒÔÈÁÓLr‚›ãUr:ãŠêVÕahZRr¸%ÉÜ0>	&ëĞ§ªĞæ™ŠÓépMXù’û¼® …8%‹µ¤È<	m”n•°”Å-–8Ï@[l+YçPüf¸,zö :ï:¿ŠÊÊÀœsííşÁö®Áö.²Xk÷ÿiÄ"ü£Ö­ÎzÜ=§fyJ&“dáFVmäGhò›)[”ÁS3Öü%­½JÄÁÇr§ åNš;ÙuZÄÌæN¡‰ù¿¶Ù™ÆáòGÀ‘;¹_¨C4=ºhv¦aÁ’âÌSû…ˆi.š)-ÎTs'iR¡#›;y@¨#Õ€‰ø¨]ıpÃ·ûŠo7r§z¤’Ÿ_‚’‡¾uÈLAµ™²Ã×E,¸¶íÔìj/lˆ­ÿí€®suùğc*4{è•£Ï7³ÏybÜÅ‡^ê}åùQ¿aƒ_?m¼¯|äçıxÕïâ¿<AVU Ì[lTô	Ec‰b´E²#w&ï(WÓfÿÌMToúÈ>ó_X¢ékD“Ké®óZ—•FGá*±VO¡”4ÍÀ3³ÄyúR´/v,çëëÑr¼Ü±V¼	muÜ$ŞîpÜ%şÃ¡€#F9’bÊñmÇo@Vâ‡uO#®6Sb6÷–3SO%ì¤8Ân„0RT;¹¤ÀóR§d‰d‰tÒ&U	g‘Öëpÿ
+¾ JI¡ªreŸŠ@µÔu§zVåhp|ÉR·‚tB/š!øéb  é[£’ (ö†p}§“4îK$Ûgšô››?¤¦@G×ÕãÉ±udèòÛY¦.m=8
+%d”İ{Ò—(›ûáaÒ‹¤+iAÔÕ†È‚€pçû4Ò	ùÓ™Ã¡”èğ†.&2ø€$}fIŞv{S8è½ ZÛ=g–©;¸àôõ8ñö†<¢Bã‹‹z0¾!ê©ÂOoišÇ¬üÁÆíkÑ_düƒ7^u“øõöõÔšuVá*‹’À‰-=Á ,jè…'˜«Tb æw|F—[ªí§Ä_-M’È¦2«/šy+œ4üß,q¤‰KÜƒìæIT6€sîBÉdùÅ•7î:¶dÎ‰¡èúı±#u/ùÕƒï~2ô·!áî¥¹Ø¿poB3…Æ¾PYd
+'ŠèxîMûph @u§sJY>6ì‚ià,¢å":\D‡.˜Œ¿ğí‚lÂªJ/g–³[˜­,¯Ç¤ÂS™YÂå%ÓË¦UÌ¨\Ä´	KK®¨ºË¥ÆÈÏü
+›ˆˆD¨,1ºÆµÛD¼@$
+D%‰b™A¨*%Q+˜Êøx­16->½vI$k‰¯—×*ëÔUî•şíòÊÚÍúu[âw2İò]J·v¯~GÅmñ•‡´‡<¥yíZM˜¡DPLŒB	€QA“­›€•€A©Ùº+„Cq¯RSZGqÎË‘)HcË¹Ò±´ÔËP—jÒ0SÄI•?uêKÕØÿBVM¼BUd..)9e0âåª"ó\i¨&hsèş 
+x¡†k˜$EG4u Mh/âQe,gMiÄåº¤…TÌxA!W¤)¡Dğ2qŠ^´V*şÎ‡X`–Ci1£Ğ(â3!+QtD*¬Ö2Ñ‚Eµ5‡ÒÑ„‰&ÙCî2h„I¦´F±Ådq»üJ{_ßœÓd·^şSç“äSt¿‘?ÍI}°îÛ³ÍÃgï1})âÉ+)ş¬Ã0ú:ŒB¨&ä­á²LCïúÙ[J‘0/SğO›©ÚZº©®Ó a‚UTÌıßvÕ±>Š-ğ±òŠÄÒÃÊ²ŸŞ¼ñ…Eó—^4´~ÁšknùÛWŸúçÜQí¥ç3O¦&¢wZwŞxçßøÉĞÿ}ıF¿öŞ+.Ù2mú51_grÂS+7ş`Åš7v©wß·ëÊyëª.:xıu'¶lı3™Õ4òúA‚dV”¾Ã“h¶bš0Fj"[ÔÓüDaÒ<XáVØì“óxİçL¾y@D®Sä È÷´ªJƒ×Š×ì°µk.ZÀ|ÌN†RGQéØ!Ëœ»Z»/—§»y±$PR-'ÜÕ±”<Ş}™<ÃZåÕòçÒß=ê˜XuåäØäÊË+÷Vï«ÆGÇj®!ÏˆNµ8ºxÔaytù¨êÕïV‰~û´ÒğyyOïï­
+»·¡G Fmì¤Á4dñÍ–Î…Ãš4½<ì”¼†xƒ4b“ŠT;ìĞ²*ÒRÜï?éCºÏòuøvúØjKvâ–jŠø¨7Ê7ìòQo”ÏKóÈ—ì|3‚o{£|$Ê“†âO‘Š–€¾Üçù:ißVÅ¡¼¬0GÊ
+ª²||©/]VñªvBû@Ëil™Ö¬ÍÓ­0µ´¼ÇjLZ£!MZn -§hI4naÛ,õPidõÖhãÈÒö®ü\º°Ä/8ªh´ÓyÂ#§I„Óir¦º©È‡/$ äe \a¢`®k’³œniqJ^Şãª¢j×U´¥%i¦j—]Õ^7¶ÍG¶ ÒR•|¬Ûş+ß¸ÃŞ’ZüƒU/ËõS·Ş¼Ç¯¢ë3¿={í/ï=vã3+»ïû?úÌÍ;{éÆmÏµÄëW,™¹5½÷B÷<²óËµŸØöfô/û^}ãG¯ıˆÌ›£ h7ô(Ÿú1™&MöäxØ}€`KçÇùvêi[êù©p´¿¿Ÿ<­	€¸>(Å•äi…HCWü.g;×k”øÄ	[(¥n®”:“¥¥$·4¬ê|K)¤Ò,~ÅrbÉç‹”éÆ‘2[¾ÕOıPKw4ÓíÊÇIğSŞÛF*tš¦”[¢fàB=§,Ùtá–R7I#Ï>€%Ÿ½y3¿‹D¥ÌûjK&íúHm´2kæEÜEü+Ü«ü+ÂO?³œmÎÅê:ç
+õFóF×]æ1óÃà‡¡³Aç«òa.•tÏ¿ºÃá #dvÃŒRªgñÓ=ódd‘ÿ i'†õ ì”FhiÄl-ÌP%-mñ½	€¬h¬½‚wAt4Ñr›ñ2¼ßŠY|W@ºÿİyOš~ìRÈCÔdkÂ`ûi¢%¨R%À4ùj‘-ûìåK«%†ô°^¢—êü÷sgAÈ¢q?bî,YÍL¤+Ÿ6ymnk‘¡UB‚ `¢7z×c§[¡|ïæ
+
+Äh0SDƒÄ=ÑÄ²‹0ÏØD¤’Àh7Ï</°Â—°/şÔcŸ>÷èM_yq}öË7Ï_úì¿µ´ô¥—¦4-ï»åø‡«ÖıÏãİ®ï|üRëÇŞÓ9–Äš¡,^‹7 S¾lÂ›<ÍÁÅ ¹MD—²›î%ºôt»ş'¨30¶ºP;ùª¨0Sx9ê™‚G¡ìÁƒÀÀ¢ÜGl€ëÄ ¿Fyœ²\¯B¥chP¯Ë…[ÆŒ1£¥<WUj*¥¢³ğ®C4`8I¶BQX+0!h¦æg
+†2S(Å\¦ÂC£åIl9’4‰ìqè/„ %(dnÏÂÃ´!|¡!¼İÓ¬%MË×OÒ‚‹–“DR-¹“THäM/¼_¡²T
+‘Ê‹d’ÌçE£¼³¼³rş¹ëĞÍp3ÚÁnutÉ›×)7úî†nt{§c—|»óNå^ßÆk.Ó	¥~p†JÇìƒŠ:sÄ„é*6¿J·¼*"qŠ‰¯dQédQéäğô1ÒÉ-š‰5Öi4]ÃZ=Ğ[ïwş›÷¨`§ù·dÄdñ5=…B…Bv¡tÅÆ#Ëƒ={ÇşÄ|4Šúİ@<E—ùl§]i»só“ï”çNG‚nˆDjÉ©&’ÈæNíE°Š<ä@"l «­-ÔÎĞª~B!Ş$*§w½©ğQ{É7<k“ÔCŒ¨ÙfO:Øj+‡qã‹õC¿ÊR@£×nZÿ§Wû>^·a÷½CçßygèüWß¹nõw­ºfÏ¤Y{ízî¥¯Üú,õÈÚ}ï~°oÕÃ£ªï9–„úîÿZ¼úöÛ–-ß}û—¹9{ç=³ó+/<G4Ç ø®$¤RÌAºğq¡<!:™|¢ÈN)˜d/¤ãÉXŠÑ¸½ßu°/²HÃŒÈ!'F¯K4~^ŠÆë€z 	 ™wæ?Ëaêz Z€º“4fîÏÎ½#èä,E³?Š@¸CÎâ0¢&tØ"¥«(^”„ÕÓo6[ub$òÇ‰È)’Ñ!¾æ Q:¶_€ç…qãÇOhÀ_ôNysñÃ¨İÊŞ4yGÙwg¾¾0ÌÉ}Äz¸>(ÑèÏ$’U¦¡2´1(TUj)HQÜ\iˆ+/u+R)‚¸>,VôRŸN­7ê$ñQ±âË“ş·úõ¦x;‰3&sºf] M,Ï´À´Èsqd³BXáXk®ˆlu\¾ÃqgømÇ[^C ğqe5õ"T”ffÍW°¢¸CèÍed4ğjK,4eÑÄp0>bÆÇ‹æğğêÜ2Òñ-:Qu:]×±Í¥[õô½ÕRMì)-0QiwJŠòŠ-9PÊRš}Ë|}·úXŸ^Ød¨¼Å>ú,bÕãWô$í©L–L\¢N3™XHyuJ:¬h
+¹S½•‘X$Z€&)ÈG¡-t!NRÈD=¸^QBnb1ö®w+!¥	MÙz[o"³I¦™ÿ–A?‰åEÅÓ•ù¢Ç_=k]zJËÕxÊ±kzo8yûï‡Nã®3/½78aŞ}s7?ı­›n|]¤®­›S7ù“ß-ïúÇ¯ºnA³Ñôüûá—ïµ¿Ğ–ıæ#/¿Zr±Qî(Åt¯tk8z¬@¸ìï‘”<á*„W›NE)Š‹¢ÑÓ–B]taU*õxÂ&1ødeKÃŠŠ@ğ“u4aOJ’~ª^úkl9x\'ÈZÈj$O/X÷³ƒÛKºKr=ëú‘ómçoCÑåWG—ä1]®×UÍ­ºÜª¦dñÓ–‹Tm©ûT¬ªšåAùfÖXô&ùsù-ƒ4ÈX¦oÔoÕï×Y}§0‚3‡¿ Déœ)lñSÎô#ğë~ì'ß™ Íóï˜ÇĞ8ĞĞ×@A¨ÑQ4€|À( Ÿ8İ[–Eæ¶äÀ¹j¸ë²¡ÂiFª¶]ĞOïvØQ$şi˜ùzÅ:®N& 5Sà=ÈÛ6,€ ÂŠKU…õH”=-L>­Ó»>¬h&]ıkì.¤êä[6
+PÄmB¥+ê‰2ö‡Ù²niùçÑõ_é}é+î©zş>üÎàáy·?Ğ‡[ï=÷ÓA´Sï¾ûø·;0¯Ù‹ÿÏ‹C×/:ÿËŸ<pà ˆ-`>aÄ?¦œ¦ù‡÷FGù>¤X 4VQ¾?ìôË£wäC'v„Qp—ş8^P
+Ùè]xÔ°'Òù/}%’[cd&ĞL^æ]–©EdËÉøj“Á÷‚şş`@''ºŸºİB=Zi$òlK8UåNk/KŒ¥XÖ"Uu:9NÑô*~³R®tV*ãã•qê£†\eV¹.õ¶™m®6Ïskg;½²İ¸Ñ}£ç¥Û¸Ç¼Çu—ûé9ù˜şŠqÔı±ô‘ûïÊ şOw.\jºüªzIK~]æuÉá«MÓn×-0üöGlˆ„ NĞ4§n˜¦LÀírÅMÉmš’æÔg\–Ü²,¹Èçld< Âz×†_ãp7Ô\–i¹³x±%7›–‰—™¯šØÌ¢Ki¨ş¿ö®:ªã:3óVÿ+$!­ö=ı-?+^0B€Ñ®Xñc$Kk	è#$™• vm³nê8®ã“¦nCrBâ¶1‰Ëje“8©l“´öi(Í±M¬Ø9ùk(±ã:µ[£{ßÛÕJNâsÒ“œÃ‚fî›¹3÷Î½wî7;ïm]a*U±Ì¼Fú’ôÆtÕ”>‘.Ó£¢v¸2KdEeÍ³…Æ}»òİsíŞıîwä_*˜k¿”o÷Çs)Ê^*È·_bùth4vĞ–øVšóÑ¿êÃ™-õáüÉïeN›{¶?£/}´EÏ[í³'~x²ª:µ¤ª:3:ñ³çæTg[‡kÙq÷±€‰[g…CsUT-õ¦öÌÍÊJMeiòixó}…óÌ»ûªåU“'ãé6§´äğìU«7äe»f¥]ÙÿOİ%ºû­g¯ôøÊ–Ü·uÙ•İOÛç—îË*Òæø¹Áï;(÷ıÏ·OÔZè\Éë„öš¶MŞu=MÏ(ÏÎ7Ï7%‘ÿ4Ÿ\Î§eÍ|ŠiùÙì*³yu“Ÿ]áN›ï¤]øÆL•™9MBğVi†=;i‹ XB·§äw_pßI‘èÎKë{M7­ì´^¸øbüN<‰I'î]È^œŞŒ!¯Eu*­i¤*	y×¯,Ø”ë-ıXî¥»TOîş‚İ¥÷Üï|¬àQçÑÜ§/øEîOŒ÷Œ›nÍıbî3¹jå‚®$9ßÙ˜¹ƒ¼½ƒˆˆï7™«g‰¬îK|5 à×õ„ïtQ´¼´„×¥%à¥‰Şì©!à‰
+ZÛ<‡çÊc¦<¶*)İ?”³ã÷ÙŞl™ı„{ÊıÃ%~‘+/>bÏÚY`rÉqó&ÆQ:1>\l$™·	~)À--Ó\pdfÎ»z^y$Ş§Ç¦“_#oY6VŞ²K=¹9Ùv~‹X6ù\Rÿ3¹÷µ·Üß´\,?½ÿäÿŠä—\úÓ{ß~êk¯ÊïşİÀŸD¾ïş/‹û½½›ÿ ?=ë>aûÁÂ~ôÊ[WŞ¹òÓ+Ãÿ8ª–}şä_xìÄ	º3h´ÜYÿ€<Êwò™/d-ChÒ¦¥¨Ğra‰ZJzFP)I’nä}%²lÁ”ÿ@£Ø!vHU#vˆ>qXhbn¦Vùíx«7¿{©Áş­Ğù9æÕ®¦§[9~Š»ï,|6%]ÑË,é$(GÀ¥æÃ	Ås’ ’’K—çäTµ«ç»r©~yÖˆú³_?¢}ğÌcu%çÊÿD_{FüBœııÌ}í˜ıKÕ §íÈZı_¶BÿúÑSoÍ[HùON¯ØõÁ‰wÛa»@
+ãóÏ#Ék®4`­œøà^»ÙSâÇz?9>¥ñ°„_V£LjÄY|Bâ6úM+ª“ÇñÄ'd5nJ:‡e5[mê5 I
+ÄYîgd‰‡±mÖV|qÖY|YVcDÇ}ZŸœuI0Ÿ®gmÅv«ŸZYSZ«åqø´ Z´ ŞĞ‚Ø¬±EŠ)'mÒoŠWåÛšC{?¹ÉV”*REš#í›éßÊølV(ë—öwr–ŞôÄì×æü:¯"Wşgçn)ø^á¬ÂÇ'õ¿5Nç”|Xê/û\Ù×,×’yçß» ²ğ§÷.úÅâÍ–œ+äsXsH†„ë	³òÒ+1‹^C‡J¹ô†x ²€¹!X •¯–È”e¬à—Öpf!_´à$dÊÇ-8]òlÃ&CI
+şB-±àŒLMÑÓNBSô:İìo2LÜÙ³Ï1œÄå¯2Ì£Èş	Ã6†ßc8Îœ$6ù7a“6ù7a“6ù7a“NFÇìX[“6ù7áŒÌÙ³?ÉpjÿiÄ[ÉQ†ÓÊ3	.9Î°x+9ÉğMÈ)¡_.Úìü9ÜÏ†sÊçr[S…Œó.ÃE	8z\Fø¥ÃÎaxÃÁ¶şm	´ÒÊÓccy<X–Ã@+ö 6£½èÃ îA?—¬E ŸÓv`/c,†zĞÍØ‹İØƒùªAtã ¢]Œ™l@7:p İ8Ü{/Zãt6¡÷ ƒ€ôa7ö¢:Ñ‡~Üƒq:Fœû%X
+®øU*˜‡vô {``ÚÑË}tbŸ…{ú°½\;ˆ.ãc"9ìåqô\“Ÿ],µØ‹ôp)Ñ3¦Ñì§Ï©ÁTq <^ºÚ…B;·00ˆ^t±äÄõ±­,¢BılWqûnÆèÆ~t°¤©móšˆkpy,¿ş¸'ÇAõhÇ^ô ˆÅğ1&ˆt¹ƒ,‹WÙÆÊLc®ùØÌ|@_|¬°•ÇŒóP…Å¬µÉ6£uJ¿19¶³TÈ‰ßıL…ôI=ûı][\7i»~Æ<„½èÅn¶î]ØeiÁÀ"–N:¸Ş@×ìAË*ÈÛÄ”hÔ<r-hO°’ÀÍ¨Æ
+xf+YÃ úÑÏº7­€´Û‹¶ê [ÁR»‡-Í´²2Sº1l*ëã9G6I<u3ôû¦AîŸz šUD§Ÿ¹6ÛÒ,#¨Ûº¦Ñ`?öb€ë¨Uó³òé;`µ0çÏ«JvÅÇP¿œ1WK‡xìCÑ‰nóP&İŠ8é#05vˆåD:›Yf4‡ƒv'zØ§Ä|ßtÙS›†æc/L™Á3÷nòğQe›èböIºÆí-fá3 Fıj¾V%Ø Äñ°?>w¨s¬]èÃ!yÏàëÙ^û«2ı¡©>kT&L¹ßòÏÄmL›±~“¢ÀõlÔŒc½–f&{Í“CÓ~ˆ_šÃ¦œsT‹yECeLÊS­šl¬ƒµfÊÕôÓıüô™0Ÿãs%*QÉ5‹™Æ>öæÔù‹Å,¡İ¨Œ×UZ}î˜;X³wÒ[ã‹qó»Dçß2i}lŠõaÅ­ù.ôYzŠYi•´hFÑIë¾^„Yåµ£<i®)>s‚	ñÈÔ·iİ­İlË¦Ít±ôvqmwÜ÷g kßmé9fÇ¦]™sÔ¤N-:¬hÛ·”ö„UÎtö{ĞE\B$uâËŒ91ÿAsµƒØoÍ‘ÉHhF›63?ÆãµuËqlÊ:Ç(²,Ğ”iØäpÒÏ\=ÆëôÇŞ—æä8öÌŞ­bšw‹É~zk’šéOÇãkr:9k&#QL‡ïçˆ³»â×İ	B~ËÔP{"¬ÉuóbbRdï˜Á—˜:¬´4N¥æjÜä!6¯§ÚÒo/ÕÄo21ÒLµéIIPœìÃş¨ÇX4 5r¯%™XT4m…R¢9)—»ĞÍ:îÁfòÇ¦ç'9OF¼•S¼x;:ĞÇgæ»sı‹2“ò‰E²ş}ÊÔV4ªvKW—¯sÛ¯¡ÑñÑ“½˜)¶Z6#obDÿ¨‹oPÇµX‡VÜš¹d#ZxİÚŒFlÅFøQ?Ìƒk¨~kêCĞˆ-ãÌ>šáCZ`·ãp_Õc#àç¶uhcuhá^ÑÌ}oF6a#Ó$<j±›°~†×³4é5 Ñº‡¢vÄ‹Éi+95G8•+ê¹%ÎÙfÔ¡k±Áªõ¡¹?âŸè¯c¸!Îç:‹SËˆz¦>×b6ñ•nA3šĞˆ¦O=û-nxëĞl¥9 Ê½¨ÌÄ#ùlµjHGÄß&lJ•e@²oNßZ4¢	î=6pkÂÙÄZ41k¹=‘F»‰¯&GejŠ$îc©’üğa3|Ìï$­F‹—æ„Ş¦Êî®ŸÄ2Çç³Òµ,9’ILÄ=¸Ùª­°tI2¾š*YI˜°Hòt³’p£Å}Ì:M1;kˆÓ#İ&ò³jã:sÄì%V¿ÅÒôÕr!©“æL¾ÌÙÓp£ç9İSëÀ="İ¸½ø9û›X]‹å!ºxVw©£jH}Cªo¨uJ}íÿy(•ÿnìıñíı¾vanìeÜØË¸±—ñ‡°—aúæûœû¦önìiÜØÓ¸±§qcOcº7¿±¯1u_#&{7ö6nìmüáîmĞšhoüúGè™²ïÑ=ewƒ÷7¦Ô÷âÍ©İ¬Õkëµ[µz­zJO½èFÚqïeÍ»Õ=",¾¬ÀûÅtï{€ïÄ‰|&æáIÌğj}È—¦*èŸ,AtåV±ºZI*Ò£jş°+_åyµ ãj¤Zqé#j*Š¬Ò½QU:œ3Ç“å[¤è1JNe O8¡Œ*v('ìÊ‰ÃÊ‰râ„rbT9ñŠrÒ²”“kåDŸrâ˜rbœjT‘rDİî›§æâ°¢£GY*—U&Tt•‡J•‡F•‡*GT©<$1•ô©<VyUyø×xU^ä3K½Q•y”³á»z<|Ùn^n¿“/‡ï˜ùæÛÍÜ¿ÑD[i¢İ¼Ì,^\kæó*Ì<§Ü¢<5ÃsÆ—«rñŠ¢3Mı*B¾€,! ãKjÂj¤J²J¼*g¸Ìå96ª4%•@ô‰3JD2²=¾T9!/#ºüOyÉ¬‘—†3³=Ç|·É7qB¾‰Qù&”|S¾)$„Ã’îÛå8jä8ÉqŒÊq¼,ÇqY#IËqù†|CşPşYò"*åEÔÈ‹Ø!/â˜¼ˆQy—åE$Ë‹ò"ìòu:ÒÇ)Á5òuHùº|vù„|M¾†,ù*„|U¾:qF~?RUíaÀ]iz¹äZ@N®'*ÿ5òş}D¹”ƒ,ê´*Á,U%‘ò›õ¨Ê¬Ş«Gå[Ã†[ÿ’o‰<°<OÇåyØåyò<šäyì”çÑ/Ï#	;åôËÉxB^À—ä„å²2yvy†<C~†¼€%ò¼òšäØä+Ã­GåËW­îË•ÿ"Ï"ºügùmÎ¿'_âü»òEÎ¿#_„º<'_Š8uøÒäK€<»|	vy•òEÌ’ß.ËÑ'|ÙrºE¥EE£Å9Š#rIrT–Dºô_š<s6@—üœó¿ÇS6xïÒ½®µ=^ƒ×Ê[=^cå­cÆ1—ôºüœÇkPâzü3¯A‰ëÏóxJ\÷>èñ”¸zz¼%®®»<^ƒ×¶¯A‰«±Õã5[=QùÅ¯—ÍÓ«÷	Ã—%a‰<¯<„&yš<Dÿğ¾F¼}>²p¡•G½îõĞ)z^„šEè)ê¡DèAZ-B!·9DÈ)B^:-V@ $¼ÏN¹¬öæ‹Ğ9zF„‚"ä¡r*!CTy£²8²q)guœûhÒÉâá[×x²|Y²5²‡e1Fe1^–Å˜à+¯,6JLä¹NÊK†Ö˜×‹Wzú|·É1–c8"Çğ†ƒ†J9†r/Ë1(dÉ1ÔÈ1ìc8#ÇpYaB!	oÈá4K– R– F–`‡,ÁaY‚Ë²IÌÎeY‰>‹ÅÌ1]i1Ş(‹¡É19&Kd‰,–ÅŞ"»Ãî¶oPG"Ë)NY…Ü\ 9Ù¶ì¨È8ù›ŒÿşMR|)òqy„\·|ÂÊDŞ/Ò£âo"®Óºoøk85Áå]¢ºX _ß‡òepÈ¯Bˆc«YW…~JdR«“úûë?wD¥8©ÿÌqZÿw#ª‰ˆşo¨üêIı¼ãı;•Q›ˆèÏ»¢BDôS£8VèÏœcÔ]Qq4¢?@ÙIı~Çz}Ÿƒ+ºÍŠ£šğféÍ®múÇ#ºßÑ¡{ƒQ›8©×8>®¯6±n¡6'õ%ÓºÛ:¶êL´ÔÕÄ³ú-[¶TEÅoEò“ÉmÉÉË“=ÉÉÅÉzrQraòl[ÍnË´¥ÛRm6[’M³Il³éYH7;ÄgºéDµ€Æ°]RJg•ùõm6‰Û¾IÕËú–ZQ>Ó‰ú#ü^KiT¤Ş¾-<«´V„sêQßZ^á®&O4‡«Üõáä¦µ	ñx ¼Â–ŸŠ
+´¶EÅ=TÎYKOß‰ì‡>]Hùü‡> ?÷`M~MÎšìêuş’VšğÌKş¸¨6üd}K[ä–ãÇ‹jaÃEµúğ_¶ÛÛFÄ;âWuşñ6e¶µF¼S×Låj?¨Š­ŒC¼]ç‹²@ÛˆÍ	ƒğ`Øœ&ŞQ¯\¼Cxe”ÚFRRPÎxå))Œ§	Â
+–Õù‡ÊÊ'Ï@q‚yF"Î¹ò:ÿPy9ãä†pqÎå†'¼†Q:ÿÓÁ(¢ FqˆFÙ:‰Ri¡<Gy„))1‰CI m$c<†“1îL{¤è:ŸîZ·[¯
+tn¯ë.­ÛYZ×½³´ngøÑƒ{òÃ¡ÃêP…V®{(oïJ»ıáÎR¿1´jûÕÛ©zU©ÛëZÛ†¶{»ı‘UŞUu¥íşÀğú¦eUSh=§µ¬i†Îš¨³eDk}ÕÕUT½hU­*¢µŞ»iM½©mÈ†ÚÀÚíf>,ÓRsÖ¶í,,ÔæÚû×°¯*Î ğ”ñ¤¹áôÒÚpFi-W-ò-òQ•®Ê,­gYUù¬*.<%¾bUÙKkÃÙ¥µp‘_·×oşƒÁÁàÀ 	ÜLİÁk}Ünw]ØÛî õá…-õášÛ·µ%'×…½;iHá•±²´´ºèÄ³pqK}x%*G¤²ÕT–’b!^­“~ÜBôÂ¯S Pag}«çÔ·nç¬İ¾­íq¬à
+· Vãc‰¿õ‰2sìo`Ğ‚,YX¹ÙÒw0&’ø‡„Å	Wp·,N÷ö6_¦Z®*áƒ®–¨J,‚®©Jx +ªôæ¸t%«ô[•–ê×““üz¬×€ÿ]SG
+endstream
+endobj
+10 0 obj
+<</Length 1207/Filter/FlateDecode>>
+stream
+xœÍXKoÜ6¾ï¯˜¤iš´¨2œáCºôVgov.ŞÂéaw,øï|®HQ/[-²LjD~$çñÍPßA Âï¶aF8œ@¸¿Ë7÷âZ ]kGÃHÛ"wÿìwí¾W€°$”n56Œªm‰5`£‘;no€á$‚@»’"ézÇİ—QÄ8·Ö»½‚ç;ò+Âß	îªU³À‚İOtoo@4
+AÁÉu¶pŠ"J""N"E2‰”¹Z‘°:µ¨Ä&à“â€ïe”dœdœd2Éd’YdbÖ ¥†J°š!Ô^|={­{ù¶ûcûË§G!`ÿØ×&Âşt÷áïEh)´ZZõñëşÏİçı¨IZm¦Ú³öĞ Z«PÕùŞ¤yz"É¤+©6óÄ ç=q8EŸ"íÆö¨!n•%Øö,"d„(Ñ6FéÅ”ÍpOÊr=ãroŠ
+HÊ#Åœ8Ÿ¦£~a(ıè',LdË®A)º–xÕš`Ñ¡518²`yÈ¤OÅXê9{™à"øToÌcdËK¶Îtè>Ì+æ¢Ğ5ÎB8Øg:'‰Ê˜$'§"ÊÆ¦óW)Ç–UÓJÑµ[ÛÕd»ÂÊÙã»¾.ùî)×»™²FU“W2ü‡ŠW'Æ§µÂóyÈÑÒ U¡S+ÕïŞŞ€g›]6dšI×W’Cı¤Î8>hA±ôŞ)Plls Å'+”ıÑÒƒBÜ0ºNèal{¸‚{q># mÃ?îá
+ÃÈ®’í¢ã­ˆäo1š3/bü\õM¤àù¤+Ls.|z½?»ÒSÆš–ÉVb¨}oW$¢—èNN1OÉ\=xËA[,–sÊ¤u.9ûññd&)Vá½E¹ŠiÁ‰rÎ»j,ËXÌu.äÒïríLk4Ë¾uK%ü2Ÿ–»]²^ÄŒY¡¨ªyê:JWã.¯FÊl¬ç¢jº ¾# _L3ÅªÑõR™Ë•‡lbÕyÎ‰e6Ã=9Ös½T¦)* ùª1-àÄùŒ€4¤Æ•¼O÷ØŠÃP"ô­°oÜ±¿;úÑG_ûÚ›y•aü¤NW©Z· œ .Ê²ªK—A›ÜÔÏ‚ÌÏ^RmFvÅr¹®áµódí5_1mi"ïÊ*BÁ¬ÅíÀa¼©móm½¾•@Ş8Áö-èç
+Ÿ¦İ¥æÅIúõU«ÅxI«Å:kJÉÒ¢{¿é?•9/lï<‘‰âm)¿åL>DyZtï4Ë2îèíJtÒß›—ÔO›ˆóÁúSæı÷óç¼Lù%›C5‹‡7Cs«ÂĞ™ÙÊÖT,ÕIh,âÆMÔbÓJÚØ@ÿc…1bû5Bš	÷èáåW”ZHçD-Æfaf½rV:i|Ÿ¹ÌYV›FonÙŒ–ºÌÙÃé1y%åÌö1ƒån–wN'_µæÌ'­q*ÙÈÿ‚@W}={İw«™L=2‹ûÛš*jIÚÉ·´‘¤³ğËæ¸‰¥hh{—ŸîŠD_+†›“Ò9ò¢üœØÃıÕş{ë³lîXû·Ìøë…KÀ¿^Mÿfûƒ.
+endstream
+endobj
+11 0 obj
+<</Title(Untitled-1)/Creator(VectorCraft)/Producer(VectorCraft)/ModDate(D:20261118094107Z)/CreationDate(D:20261118094107Z)>>
+endobj
+12 0 obj
+<</Length 1060/Type/Metadata/Subtype/XML>>
+stream
+<?xpacket begin="ï»¿" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="xmp-writer"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"  xmlns:xmp="http://ns.adobe.com/xap/1.0/"  xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/"  xmlns:xmpTPg="http://ns.adobe.com/xap/1.0/t/pg/"  xmlns:pdf="http://ns.adobe.com/pdf/1.3/" ><dc:title><rdf:Alt><rdf:li xml:lang="x-default">Untitled-1</rdf:li></rdf:Alt></dc:title><xmp:CreatorTool>VectorCraft</xmp:CreatorTool><pdf:Producer>VectorCraft</pdf:Producer><xmp:ModifyDate>2026-11-18T09:41:07+00:00</xmp:ModifyDate><xmp:CreateDate>2026-11-18T09:41:07+00:00</xmp:CreateDate><xmpTPg:NPages>1</xmpTPg:NPages><dc:format>application/pdf</dc:format><xmpMM:InstanceID>0ufDWbniVL/dEJdvh0vZ7Q==</xmpMM:InstanceID><xmpMM:DocumentID>0ufDWbniVL/dEJdvh0vZ7Q==</xmpMM:DocumentID><xmpMM:RenditionClass>default</xmpMM:RenditionClass><pdf:PDFVersion>1.7</pdf:PDFVersion></rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="r"?>
+endstream
+endobj
+13 0 obj
+<</Type/Catalog/Pages 1 0 R/Metadata 12 0 R>>
+endobj
+xref
+0 14
+0000000000 65535 f
+0000000016 00000 n
+0000000067 00000 n
+0000000138 00000 n
+0000000265 00000 n
+0000000981 00000 n
+0000001217 00000 n
+0000001357 00000 n
+0000001438 00000 n
+0000002063 00000 n
+0000025171 00000 n
+0000026448 00000 n
+0000026589 00000 n
+0000027726 00000 n
+trailer
+<</Size 14/Root 13 0 R/Info 11 0 R/ID[(0ufDWbniVL/dEJdvh0vZ7Q==)(0ufDWbniVL/dEJdvh0vZ7Q==)]>>
+startxref
+27788
+%%EOF

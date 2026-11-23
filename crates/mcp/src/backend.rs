@@ -15,6 +15,11 @@ use solidcraft_viewport::StandardView;
 /// `{pending: what | null, done?, reply?, lost?, running_s?}`).
 pub trait Backend {
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String>;
+    /// Whether this session supports `plugin.tools`. A remote backend asks the app's
+    /// capabilities before sending this optional command; an older app gets no lookup.
+    fn supports_plugin_tools(&mut self) -> bool {
+        false
+    }
     /// True when a real window is attached (`ui.screenshot` can capture it).
     fn has_ui(&self) -> bool;
     fn describe(&self) -> String;
@@ -67,6 +72,10 @@ pub use remote::{Auto, Remote};
 /// How a tool error starts when no app listens at the bridged address. The agent reads it, and
 /// `batch` uses it to tell "never sent" from "sent, reply lost".
 pub(crate) const NOT_RUNNING: &str = "no SolidCraft app is listening at";
+
+/// What a call refused at the app's connection limit says (#10967): the app ran nothing, so
+/// `batch` says that, not that the steps may have run.
+pub(crate) const REFUSED_UNRUN: &str = "refused this call without running it";
 
 /// An in-process headless session (no window); renders with the CPU rasterizer.
 pub struct Headless {
@@ -213,7 +222,7 @@ impl Headless {
                 let path = str_p("path").ok_or("missing `path`")?;
                 // A path outside the agent's folders is refused before anything is drawn.
                 solidcraft_engine::io::vfs::check(path).map_err(|e| format!("{path}: {e}"))?;
-                let scene = solidcraft_engine::view::scene_with_guides(s, &cam, s.section, guides).map_err(|e| e.to_string())?;
+                let scene = solidcraft_engine::view::scene_with_guides(s, &cam, &s.section, guides).map_err(|e| e.to_string())?;
                 // Drawn on the GPU by the renderer the host installed (`solidcraft-cli mcp`).
                 let png = solidcraft_engine::capture::png(&scene, &cam, w, h)?;
                 solidcraft_engine::io::vfs::write(path, &png.bytes).map_err(|e| format!("{path}: {e}"))?;
@@ -237,6 +246,9 @@ impl Headless {
     }
 }
 impl Backend for Headless {
+    fn supports_plugin_tools(&mut self) -> bool {
+        true
+    }
     fn call(&mut self, method: &str, p: Value) -> Result<Value, String> {
         let own = self.session.param_check;
         if matches!(method, "engine.execute" | "command" | "engine.batch" | "engine.script")

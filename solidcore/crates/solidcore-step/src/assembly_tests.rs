@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 
 use super::*;
+use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve as BCurve, Frame, Surface as BSurface};
 
 /// The box's corner `c`: bit 0 is x (10 mm), bit 1 y (20 mm), bit 2 z (30 mm).
@@ -26,6 +27,15 @@ const FACES: [([usize; 4], [f64; 3], [f64; 3]); 6] = [
 /// The box assembled, its edge from corner 0 to corner 1 written with its line running from 1
 /// to 0 while its vertices are given as (0, 1).
 fn assembled_box() -> R<(Solid, Vec<bool>)> {
+    assembled_box_as(Kind::Solid)
+}
+
+/// [`assembled_box`] finished as a record of `kind`.
+fn assembled_box_as(kind: Kind) -> R<(Solid, Vec<bool>)> {
+    assembled_box_with(kind, |from, to| Ok(BCurve::Line { start: corner(from), end: corner(to) }))
+}
+
+fn assembled_box_with(kind: Kind, curve: impl Fn(usize, usize) -> R<BCurve>) -> R<(Solid, Vec<bool>)> {
     let mut asm = Assembly::new(1e-6, None);
     let mut vertices = Vec::new();
     for c in 0..8 {
@@ -46,8 +56,7 @@ fn assembled_box() -> R<(Solid, Vec<bool>)> {
                     let (a, z) = key;
                     // The one edge written backwards: its line runs from its second vertex.
                     let (from, to) = if key == (0, 1) { (z, a) } else { (a, z) };
-                    let line = BCurve::Line { start: corner(from), end: corner(to) };
-                    let (e, along) = asm.add_edge(key.0 as u64 * 8 + key.1 as u64, line, [0.0, 1.0], [vertices[a], vertices[z]])?;
+                    let (e, along) = asm.add_edge(key.0 as u64 * 8 + key.1 as u64, curve(from, to)?, [0.0, 1.0], [vertices[a], vertices[z]])?;
                     alongs.push(along);
                     let start = if along { a } else { z };
                     edges.insert(key, (e, start));
@@ -59,7 +68,7 @@ fn assembled_box() -> R<(Solid, Vec<bool>)> {
         let plane = BSurface::Plane { origin: corner(corners[0]), u_axis, v_axis };
         faces.push((asm.add_face(f as u64, plane, vec![Bound::Edges(uses)], Some(0), true)?, true));
     }
-    Ok((asm.finish(0, "box".into(), vec![faces], Kind::Solid)?, alongs))
+    Ok((asm.finish(0, "box".into(), vec![faces], kind)?, alongs))
 }
 
 #[test]
@@ -78,6 +87,131 @@ fn a_box_assembled_from_its_parts_is_a_closed_solid_record() {
     origins.sort_unstable();
     assert_eq!(origins, vec![0, 1, 2, 3, 4, 5]);
     assert!(solid.turned.is_empty(), "no face disagrees with its loops: {:?}", solid.turned);
+}
+
+/// The top face's cubic edge lies off its plane only between the 16 even gap samples (#11652).
+#[test]
+fn a_spline_edge_off_its_plane_between_the_even_samples_keeps_its_face() {
+    let knots = vec![0.0, 0.0, 0.0, 0.0, 0.95, 0.96, 0.97, 0.98, 0.99, 1.0, 1.0, 1.0, 1.0];
+    let lift = 1e-3;
+    let bent = |from: usize, to: usize| {
+        if (from, to) != (4, 5) {
+            return Ok(BCurve::Line { start: corner(from), end: corner(to) });
+        }
+        let points: Vec<[f64; 3]> = (0..9)
+            .map(|j| {
+                let x = 10.0 * knots[j + 1..j + 4].iter().sum::<f64>() / 3.0;
+                [x, 0.0, if j == 5 { 30.0 + lift } else { 30.0 }]
+            })
+            .collect();
+        spline_curve(3, knots.clone(), &points, None)
+    };
+    let (solid, _) = assembled_box_with(Kind::Solid, bent).unwrap();
+    assert!(!solid.sheet, "{:?}", solid.notes);
+    let brep = &solid.brep;
+    assert_eq!((brep.faces.len(), brep.edges.len(), brep.vertices.len()), (6, 12, 8));
+    let spline = brep.edges.iter().find(|e| matches!(e.curve, BCurve::Spline { .. })).unwrap();
+    assert!(spline.tolerance >= 0.667 * lift, "the tolerance {} covers the 0.667 µm the edge lies off its plane", spline.tolerance);
+}
+
+/// A solid's shell still closed when faces are left out bounds a region of its own: the
+/// material inside it where it is the outer shell, a cavity where it is a void, and a cavity
+/// still where it is a void left first because every face of the outer shell was left out.
+#[test]
+fn a_closed_shell_of_an_open_solid_keeps_its_role() {
+    for (voids, outer, void) in [(false, true, false), (true, true, false), (true, false, true)] {
+        let (solid, _) = assembled_box_as(Kind::Open { voids, outer }).unwrap();
+        assert!(solid.sheet);
+        let bounded: Vec<bool> = solid.brep.regions.iter().skip(1).map(|r| r.void).collect();
+        assert_eq!(bounded, vec![void], "voids {voids}, outer {outer}");
+    }
+}
+
+/// Two diagonal 1 × 1 × 2 lobes touch along x = y = 0, 0 <= z <= 1. A unit
+/// cube joins them above z = 1: volume 2 + 2 + 1 = 5. Two of the contact faces
+/// continue above the contact and share another edge there. Face-list order is
+/// deliberately different from radial order round the four-face contact edge.
+#[test]
+fn a_partial_edge_contact_is_ordered_by_geometry_instead_of_face_order() {
+    let polygons: &[&[[f64; 3]]] = &[
+        &[[0., 0., 0.], [0., 0., 1.], [0., 0., 2.], [1., 0., 2.], [1., 0., 0.]],
+        &[[0., -1., 0.], [0., -1., 1.], [0., 0., 1.], [0., 0., 0.]],
+        &[[0., 0., 0.], [0., 1., 0.], [0., 1., 2.], [0., 0., 2.], [0., 0., 1.]],
+        &[[-1., 0., 0.], [0., 0., 0.], [0., 0., 1.], [-1., 0., 1.]],
+        &[[0., -1., 0.], [0., 0., 0.], [1., 0., 0.], [1., -1., 0.]],
+        &[[-1., 0., 0.], [-1., 1., 0.], [0., 1., 0.], [0., 0., 0.]],
+        &[[-1., -1., 2.], [1., -1., 2.], [1., 0., 2.], [0., 0., 2.], [0., 1., 2.], [-1., 1., 2.]],
+        &[[0., -1., 0.], [1., -1., 0.], [1., -1., 2.], [-1., -1., 2.], [-1., -1., 1.], [0., -1., 1.]],
+        &[[-1., 0., 0.], [-1., 0., 1.], [-1., -1., 1.], [-1., -1., 2.], [-1., 1., 2.], [-1., 1., 0.]],
+        &[[0., 1., 0.], [-1., 1., 0.], [-1., 1., 2.], [0., 1., 2.]],
+        &[[1., -1., 0.], [1., 0., 0.], [1., 0., 2.], [1., -1., 2.]],
+        &[[-1., -1., 1.], [-1., 0., 1.], [0., 0., 1.], [0., -1., 1.]],
+    ];
+    let mut asm = Assembly::new(1e-6, None);
+    let mut points = Vec::new();
+    let mut vertices = Vec::new();
+    let mut edges = HashMap::new();
+    let mut faces = Vec::new();
+    for (f, polygon) in polygons.iter().enumerate() {
+        let mut corners = Vec::new();
+        for &p in *polygon {
+            let c = points.iter().position(|&q| p == q).unwrap_or_else(|| {
+                points.push(p);
+                vertices.push(asm.add_vertex(p).unwrap());
+                points.len() - 1
+            });
+            corners.push(c);
+        }
+        let mut uses = Vec::new();
+        for i in 0..corners.len() {
+            let (a, b) = (corners[i], corners[(i + 1) % corners.len()]);
+            let key = (a.min(b), a.max(b));
+            let e = *edges.entry(key).or_insert_with(|| {
+                asm.add_edge(
+                    (key.0 * 100 + key.1) as u64,
+                    BCurve::Line { start: points[key.0], end: points[key.1] },
+                    [0., 1.],
+                    [vertices[key.0], vertices[key.1]],
+                )
+                .unwrap()
+                .0
+            });
+            uses.push((e, a == key.0));
+        }
+        let p = |i: usize| {
+            let [x, y, z] = polygon[i];
+            solidcore::Vec3::new(x, y, z)
+        };
+        // The first side may contain the contact's collinear split vertex.
+        let u = (p(1) - p(0)).unitize().unwrap();
+        let n = u.cross(p(polygon.len() - 1) - p(0)).unitize().unwrap();
+        let v = n.cross(u);
+        let surface = BSurface::Plane { origin: polygon[0], u_axis: [u.x, u.y, u.z], v_axis: [v.x, v.y, v.z] };
+        faces.push((asm.add_face(f as u64, surface, vec![Bound::Edges(uses)], Some(0), true).unwrap(), true));
+    }
+    let solid = asm.finish(0, "partial contact".into(), vec![faces], Kind::Solid).unwrap();
+    assert_eq!(solid.brep.edges.iter().filter(|e| e.uses.len() == 4).count(), 1);
+    let contact = solid.brep.edges.iter().find(|e| e.uses.len() == 4).unwrap();
+    let ends = |e: &solidcore_record::brep::Edge| e.vertices.map(|v| solid.brep.vertices[v as usize].point);
+    assert_eq!(ends(contact), [[0., 0., 0.], [0., 0., 1.]]);
+    let continuation = solid.brep.edges.iter().find(|e| ends(e) == [[0., 0., 1.], [0., 0., 2.]]).unwrap();
+    assert_eq!(continuation.uses.iter().map(|u| solid.face_origin[u.face as usize]).collect::<Vec<_>>(), [0, 2]);
+    // About +z the inward rays are +x, +y, -x, -y, with material in the
+    // southeast and northwest quadrants. The two faces ending at z = 1
+    // must separate the two faces that continue above it.
+    assert_eq!(contact.uses.iter().map(|u| solid.face_origin[u.face as usize]).collect::<Vec<_>>(), [0, 2, 3, 1]);
+    // Restoring the file's face order reproduces the old export refusal on the
+    // very same geometry. A material-alternation check cannot repair that order.
+    let mut unordered = solid.brep.clone();
+    unordered.edges.iter_mut().find(|e| e.uses.len() == 4).unwrap().uses.sort_unstable_by_key(|u| u.face);
+    let (bad, _) = solidcore_ops::Body::from_record(&unordered, false).unwrap();
+    let refused = bad.to_record().unwrap_err().to_string();
+    assert!(refused.contains("faces do not alternate between material and space"), "{refused}");
+    let (body, _) = solidcore_ops::Body::from_record(&solid.brep, false).unwrap();
+    let (record, _) = body.to_record().unwrap();
+    record.validate_built().unwrap();
+    assert_eq!(record.faces.len(), 12);
+    assert!((body.volume(1e-9).unwrap() - 5.).abs() < 1e-9);
 }
 
 #[test]
@@ -339,4 +473,176 @@ fn a_cone_of_nearly_a_right_angle_is_its_plane_and_a_steeper_one_a_cone() {
     let (steep, reversed) =
         asm.swept_surface(&SweptSurface::Cone { frame, radius: 1.0, half_angle: std::f64::consts::FRAC_PI_4 }, &[Bound::Vertex(corners[0])]).unwrap();
     assert!(matches!(steep, BSurface::Cone { .. }) && !reversed, "{steep:?}");
+}
+
+/// An edge on a periodic spline whose interval runs past the spline's range and across its seam
+/// (a producer evaluating it modulo its period) is the same piece of curve: a degree-one square
+/// on knots -1..5 is at (5, 0, 0) at parameter 4.5, a period on from 0.5.
+#[test]
+fn an_edge_across_a_periodic_splines_seam_keeps_its_points() {
+    let square = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]];
+    let curve = spline_curve(1, vec![-1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0], &square, None).unwrap();
+    for (interval, ends) in [([3.5, 4.5], [[0.0, 5.0, 0.0], [5.0, 0.0, 0.0]]), ([4.25, 4.75], [[2.5, 0.0, 0.0], [7.5, 0.0, 0.0]])] {
+        let (c, [t0, t1]) = periodic_edge(curve.clone(), interval).unwrap();
+        let eval = crate::kernel::CurveEval::new(&c).unwrap();
+        for (t, want) in [(t0, ends[0]), (t1, ends[1])] {
+            let p = eval.point(t).unwrap();
+            assert!(p.dist(Vec3::new(want[0], want[1], want[2])) < 1e-12, "{interval:?} at {t}: {p:?}");
+        }
+    }
+    assert!(periodic_edge(curve, [0.0, 4.5]).is_err(), "longer than one period");
+}
+
+/// An edge a rounding from the seam: one a whole number of periods from it, where moving it into
+/// the range by whole periods rounds (1.2 / 0.4 is 2.999…), keeps its points; one all the way
+/// round whose end is a rounding past the range's end is the curve as it is.
+#[test]
+fn an_edge_a_rounding_from_the_seam_starts_at_the_seam() {
+    let square = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]];
+    let curve = spline_curve(1, vec![-0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5], &square, None).unwrap();
+    let (c, [t0, t1]) = periodic_edge(curve, [1.2, 1.25]).unwrap();
+    let eval = crate::kernel::CurveEval::new(&c).unwrap();
+    for (t, want) in [(t0, [0.0, 0.0, 0.0]), (t1, [5.0, 0.0, 0.0])] {
+        let p = eval.point(t).unwrap();
+        assert!(p.dist(Vec3::new(want[0], want[1], want[2])) < 1e-9, "at {t}: {p:?}");
+    } // An edge all the way round whose end the producer wrote a rounding past the range's end (a
+    // closed spline from its start to its end, as one of the Prusa Core One's is): the curve as it
+    // is, not a restart at its start, which no spline can be restarted at.
+    let curve = spline_curve(1, vec![-0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5], &square, None).unwrap();
+    let (c, [t0, t1]) = periodic_edge(curve.clone(), [0.0, 0.4 + 1e-16]).unwrap();
+    assert_eq!(c, curve, "not restarted");
+    assert_eq!([t0, t1], [0.0, 0.4]);
+    // A short edge a rounding short of the range's end, ending before it: where it is, in order.
+    let (c, [t0, t1]) = periodic_edge(curve.clone(), [0.4 - 1e-11, 0.4 - 5e-12]).unwrap();
+    assert_eq!(c, curve, "not restarted");
+    assert!(t0 < t1 && t1 <= 0.4, "{t0} {t1}");
+}
+
+/// A parabola edge is the exact spline over its interval, its ends where the parabola is at the
+/// interval's ends (`f t² x + 2 f t y` from its vertex); a hyperbola's likewise.
+#[test]
+fn parabola_and_hyperbola_edges_lie_on_their_conics() {
+    let (o, z, x) = ([1.0, 2.0, 3.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let (f, [t0, t1]) = (2.0, [-1.5, 0.5]);
+    let c = parabola_curve(o, z, x, f, [t0, t1]);
+    let eval = crate::kernel::CurveEval::new(&c).unwrap();
+    for t in [t0, t1] {
+        let want = Vec3::new(1.0 + f * t * t, 2.0 + 2.0 * f * t, 3.0);
+        assert!(eval.point(t).unwrap().dist(want) < 1e-9, "parabola at {t}");
+    }
+    let (r, [t0, t1]) = ([3.0, 2.0], [-0.5, 1.0]);
+    let c = hyperbola_curve(o, z, x, r, [t0, t1]);
+    let eval = crate::kernel::CurveEval::new(&c).unwrap();
+    for t in [t0, t1] {
+        let want = Vec3::new(1.0 + r[0] * f64::cosh(t), 2.0 + r[1] * f64::sinh(t), 3.0);
+        assert!(eval.point(t).unwrap().dist(want) < 1e-9, "hyperbola at {t}");
+    }
+}
+
+/// An edge bounded by its vertices alone (`add_edge_on`) on a closed spline whose vertex is not
+/// where the spline starts runs all the way round from that vertex: no gap at its ends. So does
+/// one between two vertices at that one point.
+#[test]
+fn a_closed_spline_edge_starts_at_its_vertex() {
+    let square = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]];
+    let curve = spline_curve(1, vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0], &square, None).unwrap();
+    for two in [false, true] {
+        let mut asm = Assembly::new(1e-6, None);
+        let v = asm.add_vertex([10.0, 10.0, 0.0]).unwrap();
+        let w = if two { asm.add_vertex([10.0, 10.0, 0.0]).unwrap() } else { v };
+        let (e, _) = asm.add_edge_on(1, curve.clone(), [v, w]).unwrap_or_else(|m| panic!("two vertices {two}: {m}"));
+        let edge = &asm.edges[e as usize];
+        let eval = crate::kernel::CurveEval::new(&edge.curve).unwrap();
+        for t in edge.interval {
+            assert!(eval.point(t).unwrap().dist(Vec3::new(10.0, 10.0, 0.0)) < 1e-12, "two vertices {two}: at {t}");
+        }
+        assert!((edge.interval[1] - edge.interval[0] - 4.0).abs() < 1e-12, "two vertices {two}: the whole square, {:?}", edge.interval);
+    }
+}
+
+/// A line edge bounded by its vertices alone is as long as the vertices are apart, whatever the
+/// line's parameter scale: a 1 mm edge on a line 1e13 mm long between its points is taken.
+#[test]
+fn a_line_edges_length_does_not_depend_on_its_parameter_scale() {
+    for end in [1.0, 1e13] {
+        let mut asm = Assembly::new(1e-6, None);
+        let (a, b) = (asm.add_vertex([0.0, 0.0, 0.0]).unwrap(), asm.add_vertex([1.0, 0.0, 0.0]).unwrap());
+        let line = BCurve::Line { start: [0.0, 0.0, 0.0], end: [end, 0.0, 0.0] };
+        assert!(asm.add_edge_on(1, line, [a, b]).is_ok(), "a line to {end}");
+    }
+}
+
+/// solidcore#3292 ([T-24](https://tickets.solidcraft.io/t/24)): a wall no wider than the
+/// tolerance, its two sides one line written twice, its ends closed edges that stay within the
+/// tolerance of their vertex, is left out. The 10 x 20 x 30 box at 0.01 mm with such a wall at
+/// its edge from corner 1 to corner 5: a cylinder 0.002 in radius touching that edge, bounded by
+/// the edge written twice (the y = 0 side uses one, the x = 10 side the other) and its two end
+/// circles, each closed at the edge's end and part of the top's and the bottom's loops. Kept,
+/// the face has coincident edges and the body fails the check whatever is done with it; left
+/// out, the circles drop out of the top and the bottom, the edge is one, and the record is the
+/// box: 6 faces, 12 edges, 8 vertices, 6000 mm³.
+#[test]
+fn a_wall_no_wider_than_the_tolerance_is_left_out() {
+    let tol = 0.01;
+    let mut asm = Assembly::new(tol, None);
+    let mut v = Vec::new();
+    for c in 0..8 {
+        v.push(asm.add_vertex(corner(c)).unwrap());
+    }
+    let line = || BCurve::Line { start: corner(1), end: corner(5) };
+    let (side_y, y_along) = asm.add_edge(100, line(), [0.0, 1.0], [v[1], v[5]]).unwrap();
+    let (side_x, x_along) = asm.add_edge(101, line(), [0.0, 1.0], [v[1], v[5]]).unwrap();
+    assert!(y_along && x_along);
+    let r = 0.002;
+    let frame = |z: f64| Frame { origin: [10.0 + r, 0.0, z], x_axis: [-1.0, 0.0, 0.0], y_axis: [0.0, -1.0, 0.0] };
+    let (bottom_ring, _) = asm.add_edge(102, BCurve::Circle { frame: frame(0.0), radius: r }, [0.0, TAU], [v[1], v[1]]).unwrap();
+    let (top_ring, _) = asm.add_edge(103, BCurve::Circle { frame: frame(30.0), radius: r }, [0.0, TAU], [v[5], v[5]]).unwrap();
+    let mut edges: HashMap<(usize, usize), u32> = HashMap::new();
+    let mut faces = Vec::new();
+    for (f, (corners, u_axis, v_axis)) in FACES.into_iter().enumerate() {
+        let mut uses = Vec::new();
+        for k in 0..4 {
+            let (i, j) = (corners[k], corners[(k + 1) % 4]);
+            let key = (i.min(j), i.max(j));
+            let e = if key == (1, 5) {
+                if f == 2 { side_y } else { side_x }
+            } else if let Some(e) = edges.get(&key) {
+                *e
+            } else {
+                let (e, _) = asm
+                    .add_edge(
+                        key.0 as u64 * 8 + key.1 as u64,
+                        BCurve::Line { start: corner(key.0), end: corner(key.1) },
+                        [0.0, 1.0],
+                        [v[key.0], v[key.1]],
+                    )
+                    .unwrap();
+                edges.insert(key, e);
+                e
+            };
+            uses.push((e, i < j));
+            // the rings, out at the edge's ends and back
+            if j == 1 && f == 0 {
+                uses.push((bottom_ring, true));
+            }
+            if j == 5 && f == 1 {
+                uses.push((top_ring, true));
+            }
+        }
+        let plane = BSurface::Plane { origin: corner(corners[0]), u_axis, v_axis };
+        faces.push((asm.add_face(f as u64, plane, vec![Bound::Edges(uses)], Some(0), true).unwrap(), true));
+    }
+    let wall = BSurface::Cylinder { frame: frame(0.0), radius: r };
+    let bound = Bound::Edges(vec![(side_y, true), (top_ring, true), (side_x, false), (bottom_ring, false)]);
+    faces.push((asm.add_face(6, wall, vec![bound], Some(0), true).unwrap(), true));
+    let solid = asm.finish(0, "box".into(), vec![faces], Kind::Solid).unwrap();
+    let brep = &solid.brep;
+    assert_eq!((brep.faces.len(), brep.edges.len(), brep.vertices.len()), (6, 12, 8));
+    assert!(!solid.sheet);
+    assert!(solid.notes.iter().any(|n| n.contains("1 walls no wider than 0.01 mm left out")), "{:?}", solid.notes);
+    let mut origins = solid.face_origin.clone();
+    origins.sort_unstable();
+    assert_eq!(origins, vec![0, 1, 2, 3, 4, 5]);
+    let vol = volume(&solid);
+    assert!((vol - 6000.0).abs() <= 1e-9 * 6000.0, "{vol}");
 }

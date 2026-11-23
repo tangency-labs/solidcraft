@@ -1,6 +1,6 @@
 [
  {
-  "note": "Moving a component with the Browser's Move shortcut carries its sketches, and a sketch on a body face follows the body (#3580)."
+  "note": "Moving a component with Move/Copy (its M shortcut) carries its sketches, and a sketch on a body face follows the body (#3580). OK captures: Capture All Positions is ticked at first."
  },
  {
   "start": "component.create"
@@ -148,8 +148,8 @@
   "key": "M"
  },
  {
-  "widget": "0.00 mm",
-  "near": "X distance"
+  "widget": "0 mm",
+  "near": "X Distance"
  },
  {
   "key": "A",
@@ -160,9 +160,6 @@
  },
  {
   "key": "Enter"
- },
- {
-  "widget": "Capture All Positions"
  },
  {
   "expect": {

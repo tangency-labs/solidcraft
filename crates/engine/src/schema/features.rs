@@ -5,6 +5,8 @@
 //! fields whose descriptions say so; the contracts don't check the combinations, and the
 //! handlers ignore those keys otherwise.
 
+use std::borrow::Cow;
+
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -14,10 +16,10 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, AxisDir, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FacesParam,
+    AngleExpr, AxisDir, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FaceRefs, FacesParam,
     FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr, NumberExpr,
-    OperationParam, PatternAxis, PlaneCommon, PlaneOrFace, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam,
-    ToPoint, TouchingParam, feature_common, present,
+    OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef,
+    StringList, ThinSideParam, ToPoint, TouchingParam, feature_common, present,
 };
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
@@ -133,6 +135,10 @@ pub struct ExtrudeParams {
     /// Start this far from the sketch plane, along its normal.
     #[serde(default)]
     pub start_offset: Option<LengthExpr>,
+    /// When symmetric extrude is offset, offset both directions symmetrically away from the sketch
+    /// plane, leaving a clearance gap between the two sides.
+    #[serde(default)]
+    pub symmetric_offset: Option<bool>,
     /// How a symmetric distance is read. Default: total_distance.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "ConventionParam")]
@@ -144,7 +150,8 @@ pub struct ExtrudeParams {
     /// How far past `to` to go.
     #[serde(default)]
     pub to_offset: Option<LengthExpr>,
-    /// Start at this face or point (From Object).
+    /// Start at this face or point (From Object). On a flat face at a slant the start follows the
+    /// face, and a distance moves it along the extrusion.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "FromPoint")]
     pub from: Option<FromPoint>,
@@ -466,10 +473,12 @@ pub struct SweepParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]
     pub path_sketch: Option<SketchRef>,
-    /// The path's curve ids, in order along the path. Not needed when the path is a body's edges.
+    /// The path's curve ids, in order along the path; an entry may be `{"sketch": <sketch>,
+    /// "curve": <id>}` for a curve of another sketch (#16168). Not needed when the path is a
+    /// body's edges.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "StringList")]
-    pub path: Option<StringList>,
+    #[schemars(with = "PathList")]
+    pub path: Option<PathList>,
     /// The name of the body whose edges are the path, instead of a sketch's curves.
     #[serde(default, deserialize_with = "path_body_opt", skip_serializing_if = "Option::is_none")]
     pub path_body: Option<String>,
@@ -585,6 +594,10 @@ pub struct BoundingSolidParams {
     /// negative one sets that side into the bodies, but not past their opposite side.
     #[serde(default)]
     pub margins: Option<[LengthExpr; 6]>,
+    /// Instead of `bodies`: an envelope of this component, a box around every body placed inside
+    /// it (its subcomponents' at any depth, every placement), added to the component in its axes.
+    #[serde(default)]
+    pub component: Option<super::component_link::ComponentRef>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -780,6 +793,35 @@ pub struct PlaneAtAngleParams {
     pub common: PlaneCommon,
 }
 
+/// Copy features or bodies across a plane: the features replayed mirrored, or the bodies copied
+/// mirrored, each copy a body of its own unless `combine` joins it to its original. Give
+/// `features` or `bodies`: a call with neither is the handler's to refuse, with its message.
+/// Whether each name exists is the handler's to check.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MirrorParams {
+    /// The features to mirror, by name. Read when `bodies` lists none.
+    #[serde(default)]
+    pub features: Option<NameList>,
+    /// The bodies to mirror, by name as the viewport shows them: a further instance's copy goes
+    /// where that instance is.
+    #[serde(default)]
+    pub bodies: Option<NameList>,
+    /// The plane to mirror across. The mirror follows a construction plane, and an explicit
+    /// plane's origin given as length expressions.
+    pub plane: PlaneParam,
+    /// Join each copy to its original. Default: false.
+    #[serde(default)]
+    pub combine: Option<bool>,
+    /// What a replayed join makes of pieces that share no face: the copies of a join among
+    /// `features` are joined with this setting, not their source's. Mirrored bodies don't use it.
+    /// Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
 /// Round edges of a body: a constant radius by default, or a chord, a curvature-continuous
 /// section or a radius varying along each edge (`type`).
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -798,6 +840,11 @@ pub struct FilletParams {
     /// picked edges.
     #[serde(default)]
     pub tangent_chain: Option<bool>,
+    /// Each picked edge's own radius, one per edge in the order of `edges`, all rounded in one
+    /// fillet (`radius` is then the nominal one, usually the first). Takes a constant, exact, rolling-corner,
+    /// mitred round with `tangent_chain: false`.
+    #[serde(default)]
+    pub edge_radii: Option<Vec<LengthExpr>>,
     #[serde(default, rename = "type")]
     pub kind: Option<FilletTypeParam>,
     /// `type: variable`: the radius at the end away from `start`; it or `radius` may be 0, where
@@ -1075,6 +1122,12 @@ pub struct MoveParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "Point3")]
     pub axis: Option<Point3>,
+    /// The edge or round face of the model the turn was picked on, `{edge|face: [x,y,z], body?}`:
+    /// the move keeps turning about it where it is, when an earlier step moves the body
+    /// (#17974). `axis` and `origin` give the line where it is now and the turn's sense.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "GeoRefParam")]
+    pub about: Option<GeoRefParam>,
     /// Angle expression; default zero.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "AngleExpr")]
@@ -1321,6 +1374,124 @@ pub struct PatternPathParams {
     /// Run along the path from its other end. Default: false.
     #[serde(default)]
     pub flip: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+// ---- Shell and Draft (#12752) ----
+//
+// Both read their faces with `features::face_points` ([`FaceRefs`]), Draft its neutral plane
+// with `features::plane_param` ([`PlaneParam`]). The keys a handler needs are optional in the
+// types and required in the schemas, so a call without one gets the handler's own message; a
+// `null` goes to the key's type (`present`), which refuses it with that message.
+
+/// Shell's `faces`: the faces to open, as [`FaceRefs`] reads them, or an empty list for a closed
+/// hollow body, its void sealed inside.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShellFaces(pub Option<FaceRefs>);
+
+impl<'de> Deserialize<'de> for ShellFaces {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::Array(list) if list.is_empty() => Ok(ShellFaces(None)),
+            v => FaceRefs::deserialize(v).map(|faces| ShellFaces(Some(faces))).map_err(D::Error::custom),
+        }
+    }
+}
+
+impl JsonSchema for ShellFaces {
+    fn schema_name() -> Cow<'static, str> {
+        "ShellFaces".into()
+    }
+    fn inline_schema() -> bool {
+        true
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The faces to open, 1 to 1000 points or face names; or an empty list for a closed hollow body, its void sealed inside.",
+            "anyOf": [{"type": "array", "maxItems": 0}, generator.subschema_for::<FaceRefs>()]
+        })
+    }
+}
+
+/// The values of Shell's `direction` (lowercased), as the handler reads them: empty text is
+/// inside, the default.
+const SHELL_DIRECTIONS: [&str; 4] = ["inside", "outside", "both", ""];
+
+/// Shell's `direction`, with the handler's message for a word it doesn't know. The handler reads
+/// a `direction` that isn't text as left out; the contract refuses it.
+fn shell_direction<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::String(s) if SHELL_DIRECTIONS.contains(&s.to_ascii_lowercase().as_str()) => Ok(Some(s.to_ascii_lowercase())),
+        _ => Err(D::Error::custom(whole("`direction` must be inside, outside or both"))),
+    }
+}
+
+fn shell_direction_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Which way the walls grow from the body's faces: inside (the default; empty text too), outside or both. Matching ignores case.",
+        "type": ["string", "null"],
+        "enum": [SHELL_DIRECTIONS[0], SHELL_DIRECTIONS[1], SHELL_DIRECTIONS[2], SHELL_DIRECTIONS[3], null]
+    })
+}
+
+fn faces_required(schema: &mut Schema) {
+    require(schema, "faces");
+}
+
+/// Hollow a solid into walls of a thickness, opening the faces picked (none: a closed hollow
+/// body). One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = faces_required)]
+pub struct ShellParams {
+    // Optional in the type, required in the schema: left out, the handler refuses the call with
+    // its own message; a `null` goes to `ShellFaces` (`present`), which refuses it the same way.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "ShellFaces")]
+    pub faces: Option<ShellFaces>,
+    /// The walls' thickness.
+    pub thickness: LengthExpr,
+    #[serde(default, deserialize_with = "shell_direction")]
+    #[schemars(schema_with = "shell_direction_schema")]
+    pub direction: Option<String>,
+    /// The body to hollow, by name. Needed with no faces when the design has several bodies.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// True: each face picked opens its whole chain of smoothly joined faces too. Default: false.
+    #[serde(default)]
+    pub tangent_chain: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+fn faces_and_neutral_required(schema: &mut Schema) {
+    require(schema, "faces");
+    require(schema, "neutral");
+}
+
+/// Tilt faces by an angle about where they meet a neutral plane, so the part comes out of its
+/// mould along the pull direction. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = faces_and_neutral_required)]
+pub struct DraftParams {
+    // Required in the schema (`faces_and_neutral_required`), optional in the type, as Shell's.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "FaceRefs")]
+    pub faces: Option<FaceRefs>,
+    /// The draft angle.
+    pub angle: AngleExpr,
+    // As `faces`. The handler names this key `plane` in its messages, and so does `PlaneParam`.
+    /// The neutral plane: the faces keep their size where they cross it.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PlaneParam")]
+    pub neutral: Option<PlaneParam>,
+    /// The pull direction, [x, y, z]. Default: the neutral plane's normal.
+    #[serde(default)]
+    pub pull: Option<Point3>,
+    /// The body the faces are on, by name. Default: the body at each face.
+    #[serde(default)]
+    pub body: Option<String>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

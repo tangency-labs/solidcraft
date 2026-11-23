@@ -10,6 +10,7 @@
 //! | Rust                                              | Upstream                                         |
 //! |---------------------------------------------------|--------------------------------------------------|
 //! | [`Surface::calculate_continuities`]               | `SmSurface::CalculateContinuities` (virtual; no surface kind overrides it) |
+//! | [`Surface::continuities`], [`SurfaceContinuities`] | not upstream: the continuity arrays `SmSurfaceCache::BuildTreeBase` stores, as a memo on the surface |
 //! | [`Surface::create_natural_uv_trim_curves`], [`NaturalUvTrimCurves`] | `SmSurface::CreateNaturalUVTrimCurves` |
 //! | [`DerivSurfDefinition::sample_values`], [`SampleOptions`], [`DerivSampleValues`] | `SmDerivSurfDefinition::GetSampleValues` (from a surface boundary curve) |
 //! | [`Surface::local_curve_intersect`], [`CurveIntersection`] | `SmSurface::LocalCurveIntersect` (virtual; not overridden) |
@@ -68,8 +69,18 @@
 //!   outputs otherwise grow as samples are computed. No function here recurses.
 //! - **[`LOCAL_CURVE_INTERSECT_STEPS`]** (not upstream) names the 20 iterations of
 //!   `LocalCurveIntersect`'s solve, for callers that report them.
+//! - **Continuity arrays.** Upstream's surface cache fills its U and V continuity arrays
+//!   only when its tree is built (`BuildTreeBase`), so a cache made during a Boolean
+//!   operation answers empty arrays to a reader that calls no `GetTree`
+//!   (`GetDomainWithContinuity`, `LiftCurve`) until something builds it. The arrays are
+//!   a function of the surface alone, so here every cache answers them the same, built
+//!   or not, whatever ran before: [`Surface::continuities`] computes them on first use
+//!   and keeps them in the surface's [`ContinuityMemo`].
+
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::curve::curve::p3::PointSolveOptions;
+use crate::curve::curve::p5::CurveMemoKey;
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
 use crate::curve::line::Line;
@@ -127,6 +138,99 @@ const OP_SC: &str = "surface::surface::p6::sc_local_solve";
 /// `SM_CONTINUITY_ANGLE` (`SM_ANG_TOL_DEG`, degrees): the default angle tolerance of
 /// `SmCurve::CalculateContinuities`.
 const CONTINUITY_ANGLE: f64 = 0.5;
+
+/// A surface's continuity at each of its unique knots, in each direction
+/// ([`Surface::calculate_continuities`] in U and in V): the arrays a surface cache
+/// stores (`GetUContinuitiesArray`, `GetVContinuitiesArray`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SurfaceContinuities {
+    /// The continuity across each unique U knot.
+    pub u: Vec<ContinuityType>,
+    /// The continuity across each unique V knot.
+    pub v: Vec<ContinuityType>,
+}
+
+/// The memo of a surface's [`SurfaceContinuities`] (not upstream): computed on first use
+/// through `&self` and kept with the kernel inputs it was computed under
+/// ([`CurveMemoKey::of_kernel`]). The arrays are a function of the surface's value, so an
+/// exact copy (an evaluation copy, [`Surface::clone_exact_bounded`]) shares the memo, a
+/// [`Clone`] (the copy constructor, which may fix the knot vectors up) starts an empty
+/// one, and an edit through `&mut` replaces it with an empty one. A hit gives what a
+/// fresh computation gives, so no result depends on the memo or on who filled it.
+#[derive(Default)]
+pub(crate) struct ContinuityMemo(OnceLock<Arc<Mutex<Option<ContinuityMemoEntry>>>>);
+
+/// One memoised computation: its key and its arrays.
+#[derive(Debug)]
+struct ContinuityMemoEntry {
+    key: CurveMemoKey,
+    continuities: Arc<SurfaceContinuities>,
+}
+
+impl core::fmt::Debug for ContinuityMemo {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // the memo is not part of the surface's observable state
+        f.write_str("ContinuityMemo")
+    }
+}
+
+impl ContinuityMemo {
+    /// An empty memo of its own.
+    pub(crate) const fn new() -> Self {
+        Self(OnceLock::new())
+    }
+
+    /// A memo shared with this one (for an exact copy of the surface).
+    pub(crate) fn share(&self) -> Self {
+        let slot = Arc::clone(self.0.get_or_init(Arc::default));
+        let shared = OnceLock::new();
+        let _ = shared.set(slot);
+        Self(shared)
+    }
+
+    fn get(&self, key: &CurveMemoKey) -> Option<Arc<SurfaceContinuities>> {
+        let slot = self.0.get()?;
+        let entry = slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        entry
+            .as_ref()
+            .filter(|e| e.key == *key)
+            .map(|e| Arc::clone(&e.continuities))
+    }
+
+    fn put(&self, key: &CurveMemoKey, continuities: &Arc<SurfaceContinuities>) {
+        let slot = self.0.get_or_init(Arc::default);
+        let mut entry = slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *entry = Some(ContinuityMemoEntry {
+            key: *key,
+            continuities: Arc::clone(continuities),
+        });
+    }
+}
+
+/// The key of a memoised [`Surface::continuities`], or `None` when it must not be
+/// memoised: the memo is off ([`Kernel::memoize_curve_caches`]), or the surface is not a
+/// pure value. B-spline, plane, cone, sphere and torus surfaces are computed on their own
+/// value only (the kinds the singularities memo takes too); the other kinds hold curves,
+/// other surfaces or volumes with state of their own, and are computed each time.
+fn continuity_memo_key(k: &Kernel, surface: &Surface) -> Option<CurveMemoKey> {
+    let pure_kind = matches!(
+        surface.kind(),
+        SurfaceKind::BSpline(_)
+            | SurfaceKind::Plane(_)
+            | SurfaceKind::Cone(_)
+            | SurfaceKind::Sphere(_)
+            | SurfaceKind::Torus(_)
+    );
+    if pure_kind {
+        CurveMemoKey::of_kernel(k)
+    } else {
+        None
+    }
+}
 
 /// `SM_DEG2RAD`.
 fn deg2rad(adeg: f64) -> f64 {
@@ -220,6 +324,31 @@ pub struct ScLocalSolveNodes<'a> {
 // ---- SmSurface members -------------------------------------------------------------------
 
 impl Surface {
+    /// The surface's continuity arrays ([`Surface::calculate_continuities`] in U and in
+    /// V), the ones a cache of the surface stores when its tree is built
+    /// (`BuildTreeBase`). A function of the surface alone: every reader gets the same
+    /// arrays, whether a cache of the surface has its tree or not and whatever ran
+    /// before. Computed on first use and kept in the surface's memo
+    /// ([`ContinuityMemo`]); a failure is not kept.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::calculate_continuities`].
+    pub(crate) fn continuities(&self, k: &Kernel) -> Result<Arc<SurfaceContinuities>> {
+        let key = continuity_memo_key(k, self);
+        if let Some(hit) = key.as_ref().and_then(|key| self.continuity_memo().get(key)) {
+            return Ok(hit);
+        }
+        let continuities = Arc::new(SurfaceContinuities {
+            u: self.calculate_continuities(k, SurfParamType::U)?.1,
+            v: self.calculate_continuities(k, SurfParamType::V)?.1,
+        });
+        if let Some(key) = key {
+            self.continuity_memo().put(&key, &continuities);
+        }
+        Ok(continuities)
+    }
+
     /// The continuity of the surface across its unique knots in `surf_param`'s
     /// direction (`CalculateContinuities`): the iso-parametric curves in that direction
     /// at up to five sample values of the other direction's knots (a single span is
@@ -2671,5 +2800,78 @@ mod tests {
             assert_eq!(typed.is_status_answer(), before.is_status_answer());
             assert_eq!(typed.surface_failure(), Some(&failure));
         }
+    }
+
+    /// The roof `S(u, v) = (2u, v, 1 - |2u - 1|)`: degree 1, a C0 crease at u = 1/2.
+    fn roof() -> Surface {
+        let row = |x: f64, z: f64| vec![CPoint::new(x, 0.0, z, 1.0), CPoint::new(x, 1.0, z, 1.0)];
+        Surface::from(
+            BSplineSurface::from_data(
+                2,
+                1,
+                1,
+                1,
+                4,
+                3,
+                &[row(0.0, 0.0), row(1.0, 1.0), row(2.0, 0.0)],
+                &[0.0, 0.0, 0.5, 1.0, 1.0],
+                &[0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+        )
+    }
+
+    /// [`Surface::continuities`] is `CalculateContinuities` in U and in V, the arrays a
+    /// cache's tree build stores, and the same answer from every route: computed fresh,
+    /// from the memo, through an evaluation copy (which shares the memo), after a copy
+    /// constructor or an edit (which start their own), and during a Boolean operation,
+    /// while a cache of the surface made then has no tree and empty arrays (#20054).
+    #[test]
+    fn continuities_are_a_function_of_the_surface() {
+        use crate::surface::surface::p1::get_surface_cache;
+        let mut k = Kernel::default();
+        let s = roof();
+        let want = SurfaceContinuities {
+            u: s.calculate_continuities(&k, SurfParamType::U).unwrap().1,
+            v: s.calculate_continuities(&k, SurfParamType::V).unwrap().1,
+        };
+        assert_eq!(
+            want.u,
+            [
+                ContinuityType::Discontinuous,
+                ContinuityType::C0,
+                ContinuityType::Discontinuous
+            ]
+        );
+        let first = s.continuities(&k).unwrap();
+        assert_eq!(*first, want);
+        // a second request is the memo's (the same arrays, not computed again)
+        assert!(Arc::ptr_eq(&first, &s.continuities(&k).unwrap()));
+        let copy = s.clone_for_evaluation().unwrap();
+        assert!(Arc::ptr_eq(&first, &copy.continuities(&k).unwrap()));
+        assert_eq!(*s.clone().continuities(&k).unwrap(), want);
+
+        // a cache whose tree is built stores them; one made without tree has none, and
+        // the surface's answer is unchanged
+        let built = get_surface_cache::<()>(&k, &s, None).unwrap();
+        assert!(built.tree().is_some());
+        assert_eq!(built.u_continuities(), want.u.as_slice());
+        assert_eq!(built.v_continuities(), want.v.as_slice());
+        k.context.set_doing_boolean(true);
+        let fresh = roof();
+        let unbuilt = get_surface_cache::<()>(&k, &fresh, None).unwrap();
+        assert!(unbuilt.tree().is_none());
+        assert!(unbuilt.u_continuities().is_empty() && unbuilt.v_continuities().is_empty());
+        assert_eq!(*fresh.continuities(&k).unwrap(), want);
+
+        // an edit starts a memo of its own: a reversed roof's arrays are its own
+        k.context.set_doing_boolean(false);
+        let mut edited = s.clone_for_evaluation().unwrap();
+        edited.detach_for_edit();
+        edited.reverse(&k, SurfParamType::V).unwrap();
+        let after = edited.continuities(&k).unwrap();
+        assert!(!Arc::ptr_eq(&first, &after));
+        assert_eq!(*after, want);
+        assert!(Arc::ptr_eq(&first, &s.continuities(&k).unwrap()));
     }
 }

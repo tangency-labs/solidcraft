@@ -410,7 +410,7 @@ impl RecoveryOps for Script {
     fn trim_rails(&mut self, _: &mut Recovery<'_>, _: FilletGeomId) -> Result<()> {
         self.call("trim")
     }
-    fn tangent(&mut self, _: &mut Recovery<'_>, _: EdgeId) -> Result<bool> {
+    fn tangent(&mut self, _: &mut Recovery<'_>, _: EdgeId, _: Point3) -> Result<bool> {
         self.call("tangent")?;
         Ok(true)
     }
@@ -639,8 +639,10 @@ fn failed_end_connection_retains_completed_mutations_and_stops_the_walk() {
     assert_eq!(fb.fillet_edge(r).unwrap().curve_class().unwrap().size(), 2);
 }
 
+/// The bare `Copy`'s status is returned (fork 66b02de `SER`, WR-661; upstream ignores it
+/// and uses the copy): nothing after the copy runs.
 #[test]
-fn ignored_copy_status_does_not_discard_its_completed_output() {
+fn a_failed_copy_status_is_returned() {
     let mut f = Fixture::new([&[0.4, 1.0], &[1.0]], true);
     let id = f.geom;
     let mut script = Script {
@@ -649,14 +651,11 @@ fn ignored_copy_status_does_not_discard_its_completed_output() {
         fail: Some("copy_offset"),
         ..Script::default()
     };
-    f.context().process(id, &mut vec![], &mut script).unwrap();
     assert_eq!(
-        f.fb.geom(FilletGeomId(1)).unwrap().off_surfs[0]
-            .as_ref()
-            .unwrap()
-            .offset_distance(),
-        0.25
+        f.context().process(id, &mut vec![], &mut script),
+        Err(SolidError::sm_err("regression"))
     );
+    assert_eq!(script.calls.last().map(String::as_str), Some("copy_offset"));
 }
 
 #[test]
@@ -1098,14 +1097,16 @@ fn rollover_topology_split_preserves_actual_solver_id_and_partial_edits() {
     let end_use = f.fb.brep().edge(rail).unwrap().edgeuses[1];
     let count = f.fb.geoms().len();
     let err = Missing.topology_split(&mut f.context(), id).unwrap_err();
-    // a typed blend failure that keeps the bare `Upstream`'s status (#13790)
+    // a stage failure (#15034) that keeps the bare `Upstream`'s status (#13790)
     assert_eq!(
-        (err.operation(), err.blend_failure(), err.upstream_status()),
+        (
+            err.operation(),
+            err.kind() == crate::error::ErrorKind::StageFailed && err.is_defect(),
+            err.upstream_status()
+        ),
         (
             "blend::fillet_geom::p5::FilletBrep::make_rail_edgeuse",
-            Some(&crate::error::blend::BlendFailure::Missing(
-                "the other base edge use"
-            )),
+            true,
             Some(crate::error::SM_ERR_NULL_POINTER)
         ),
         "{err:?}"
@@ -1127,12 +1128,14 @@ fn rollover_recalc_uses_the_real_solver_and_reports_missing_edge_curve() {
         .recalc(&mut f.context(), id, false, Some(Vec3::Y))
         .unwrap_err();
     assert_eq!(
-        (err.operation(), err.blend_failure(), err.upstream_status()),
+        (
+            err.operation(),
+            err.kind() == crate::error::ErrorKind::StageFailed && err.is_defect(),
+            err.upstream_status()
+        ),
         (
             "blend::fillet_geom::p3::FilletBrep::re_calc_fillet_geom",
-            Some(&crate::error::blend::BlendFailure::Missing(
-                "the solver edge's curve"
-            )),
+            true,
             Some(crate::error::SM_ERR_NULL_POINTER)
         ),
         "{err:?}"
@@ -1170,9 +1173,9 @@ fn landed_p3_refinement_is_a_noop_without_small_intervals_and_restores_errors() 
         .unwrap_err();
     assert_eq!(
         error,
-        SolidError::blend_failed(
+        SolidError::blend_solver(
             "blend::fillet_solver::p3::refine_rail_curve_classification",
-            "a small classification interval could not be removed"
+            crate::error::blend::SolverFailure::ShortIntervalsNotRemoved { count: 1 }
         )
     );
     let cc = f.fb.fillet_edge(rail).unwrap().curve_class().unwrap();
@@ -1195,9 +1198,9 @@ fn landed_p3_rail_intersection_reports_the_actual_missing_face_use() {
         .unwrap_err();
     assert_eq!(
         error,
-        SolidError::blend_missing(
+        SolidError::blend_solver(
             "blend::fillet_solver::p3::calc_rail_x_edge",
-            "the side edge's edge use on the rail's face"
+            crate::error::blend::SolverFailure::SideEdgeNotOnRailFace
         )
     );
     assert!(f.owners.notifications.is_empty());

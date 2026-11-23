@@ -445,6 +445,126 @@ fn selected_second_occurrence_emboss_copy_remaps_target_and_author_paths_and_reo
     near(volume(&mut reopened, new), clone_volume);
 }
 
+fn construction_plane_anchor(s: &Session, feature: u64) -> &solidcraft_doc::FaceAnchor {
+    let solidcraft_doc::FeatureKind::ConstructionPlane { plane } = &s.doc.feature(feature).unwrap().kind else { panic!("construction plane") };
+    super::super::sketch::face::anchor(plane).unwrap()
+}
+
+fn construction_plane_z(s: &Session, feature: u64) -> f64 {
+    let state = s.model.state();
+    let plane = state.construct.iter().find(|c| c.feature == feature).unwrap();
+    let solidcraft_doc::construct::ConstructGeom::Plane(plane) = &plane.geom else { panic!("construction plane") };
+    plane.origin.z
+}
+
+#[test]
+fn construction_plane_copy_from_second_occurrence_keeps_an_independent_face_attachment() {
+    let mut s = Session::default();
+    let part = component(&mut s, "Part");
+    let source_box = box2(&mut s);
+    let second = run(&mut s, "occurrence.copy", json!({"component":part,"translate":[80,0,0]}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component":part,"occurrence":second,"path":[second]}));
+    let source_plane =
+        run(&mut s, "construct.plane.offset", json!({"base":{"face":[81,1,2]},"offset":2,"name":"Above"}))["feature"].as_u64().unwrap();
+    let original_anchor = construction_plane_anchor(&s, source_plane).clone();
+    assert_eq!(original_anchor.path, vec![second]);
+    assert_eq!(original_anchor.author_path, vec![second]);
+
+    let copied = run(&mut s, "component.paste_new", json!({"component":part,"occurrence":second,"path":[second],"translate":[20,0,0]}));
+    let new = copied["component"].as_u64().unwrap();
+    let placement = copied["occurrence"].as_u64().unwrap();
+    let copied_box = s.doc.features.iter().find(|f| f.component == new && matches!(f.kind, solidcraft_doc::FeatureKind::Box { .. })).unwrap().id;
+    let copied_plane =
+        s.doc.features.iter().find(|f| f.component == new && matches!(f.kind, solidcraft_doc::FeatureKind::ConstructionPlane { .. })).unwrap().id;
+    let anchor = construction_plane_anchor(&s, copied_plane);
+    assert_eq!(anchor.component, new);
+    assert_eq!(anchor.path, vec![placement]);
+    assert_eq!(anchor.author_path, vec![placement]);
+    assert_eq!(anchor.target.body, "Cube (2)");
+    assert_eq!(anchor.target.origin_feature, copied_box);
+    assert_eq!(construction_plane_anchor(&s, source_plane), &original_anchor);
+    near(construction_plane_z(&s, source_plane), 4.0);
+    near(construction_plane_z(&s, copied_plane), 4.0);
+    near(volume(&mut s, new), 8.0);
+
+    let source_height = s.doc.feature(source_box).unwrap().param_names[2].clone();
+    run(&mut s, "parameters.change", json!({"name":source_height,"expression":"3 mm"}));
+    near(construction_plane_z(&s, source_plane), 5.0);
+    near(construction_plane_z(&s, copied_plane), 4.0);
+    let copied_height = s.doc.feature(copied_box).unwrap().param_names[2].clone();
+    run(&mut s, "parameters.change", json!({"name":copied_height,"expression":"4 mm"}));
+    near(construction_plane_z(&s, source_plane), 5.0);
+    near(construction_plane_z(&s, copied_plane), 6.0);
+
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.doc.features.iter().all(|f| reopened.model.result(f.id).is_some_and(|r| r.error.is_none())));
+    near(construction_plane_z(&reopened, source_plane), 5.0);
+    near(construction_plane_z(&reopened, copied_plane), 6.0);
+    assert_eq!(construction_plane_anchor(&reopened, copied_plane), construction_plane_anchor(&s, copied_plane));
+}
+
+#[test]
+fn construction_plane_move_copy_on_an_imported_face_survives_undo_and_reopen() {
+    let path = three_box_step("construction-plane", false);
+    let mut s = Session::default();
+    let imported = run(&mut s, "file.insert_step", json!({"path":path.to_string_lossy(),"reuse_import":false}));
+    let part = imported["component"].as_u64().unwrap();
+    let occurrence = imported["occurrence"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component":part,"occurrence":occurrence,"path":[occurrence]}));
+    let plane = run(&mut s, "construct.plane.offset", json!({"base":{"face":[5,5,10]},"offset":2,"name":"Above"}))["feature"].as_u64().unwrap();
+    assert!(construction_plane_anchor(&s, plane).target.certificate.is_some());
+    let before = s.doc.to_json();
+    run(&mut s, "solid.move", json!({"copy":true,"bodies":[],"occurrences":[[occurrence]],"translate":[20,0,0]}));
+    let copied_plane =
+        s.doc.features.iter().find(|f| f.component != part && matches!(f.kind, solidcraft_doc::FeatureKind::ConstructionPlane { .. })).unwrap().id;
+    let copied_part = s.doc.feature(copied_plane).unwrap().component;
+    let check = |s: &Session| {
+        let anchor = construction_plane_anchor(s, copied_plane);
+        assert_eq!(anchor.component, copied_part);
+        assert_eq!(s.doc.feature(anchor.target.origin_feature).unwrap().component, copied_part);
+        assert_eq!(anchor.target.body, "Aa (2)");
+        assert_eq!(anchor.path, vec![s.doc.occurrence_of(copied_part).unwrap().id]);
+        assert_eq!(anchor.author_path, anchor.path);
+        near(construction_plane_z(s, copied_plane), 12.0);
+        assert!(s.doc.features.iter().all(|f| s.model.result(f.id).is_some_and(|r| r.error.is_none())));
+    };
+    check(&s);
+    near(volume(&mut s, copied_part), 3000.0);
+    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "edit.redo", json!({}));
+    check(&s);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn construction_plane_copy_retains_and_reports_an_external_face_attachment() {
+    let mut s = Session::default();
+    let source_box = box2(&mut s);
+    let part = component(&mut s, "Planes");
+    let source_plane = run(&mut s, "construct.plane.offset", json!({"base":{"face":[1,1,2]},"offset":2,"name":"Above"}))["feature"].as_u64().unwrap();
+    let original = construction_plane_anchor(&s, source_plane).clone();
+    let copied = copy(&mut s, part);
+    let new = copied["component"].as_u64().unwrap();
+    let copied_plane =
+        s.doc.features.iter().find(|f| f.component == new && matches!(f.kind, solidcraft_doc::FeatureKind::ConstructionPlane { .. })).unwrap().id;
+    let anchor = construction_plane_anchor(&s, copied_plane);
+    assert_eq!(anchor.target, original.target);
+    assert_eq!(anchor.component, original.component);
+    assert_eq!(anchor.path, original.path);
+    assert_eq!(anchor.author_path, vec![copied["occurrence"].as_u64().unwrap()]);
+    assert!(
+        copied["notices"].as_array().unwrap().iter().any(|n| n.as_str().unwrap().contains("retains external exact face attachment to Cube")),
+        "{copied}"
+    );
+    let height = s.doc.feature(source_box).unwrap().param_names[2].clone();
+    run(&mut s, "parameters.change", json!({"name":height,"expression":"3 mm"}));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    near(construction_plane_z(&reopened, source_plane), 5.0);
+    near(construction_plane_z(&reopened, copied_plane), 5.0);
+}
+
 #[test]
 fn reassigned_sample_plate_paste_new_preserves_complex_frozen_geometry() {
     let mut s = Session::default();
@@ -894,4 +1014,21 @@ fn cloned_datum_references_follow_the_copy() {
         s.execute("component.paste_new", &json!({"component": parent, "translate": [40, 0, 0]})).is_err(),
         "a datum into another tree cannot follow the copy"
     );
+}
+
+/// Paste New of an imported assembly: the copy's parts are held by a rigid group of its own,
+/// so the copy moves as one too, and unlocking one leaves the other held.
+#[test]
+fn paste_new_of_an_imported_assembly_copies_its_rigid_group() {
+    let path = format!("{}/../../tests/step-conformance/cylinder_twice.step", env!("CARGO_MANIFEST_DIR"));
+    let mut s = Session::default();
+    let import = run(&mut s, "file.insert_step", json!({"path": path}))["component"].as_u64().unwrap();
+    assert_eq!(s.doc.assembly.rigid_groups.len(), 1);
+    let copied = run(&mut s, "component.paste_new", json!({"component": import}))["component"].as_u64().unwrap();
+    let [first, second] = s.doc.assembly.rigid_groups.as_slice() else { panic!("{:?}", s.doc.assembly.rigid_groups) };
+    assert_eq!((first.component, second.component), (import, copied));
+    assert_ne!(first.id, second.id);
+    assert_eq!(s.doc.rigid_group_members(first).len(), s.doc.rigid_group_members(second).len());
+    run(&mut s, "component.unlock", json!({"component": import}));
+    assert!(s.doc.rigid_group_of(copied).is_some() && s.doc.rigid_group_of(import).is_none());
 }

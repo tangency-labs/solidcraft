@@ -98,7 +98,10 @@ use solidcore::mass::integrator::properties::{
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
 use solidcore::nurbs::math::{CPoint, NOW};
+use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::math::EFF_ZERO;
 use solidcore::primitive::api_primitives as primitives;
+use solidcore::primitive::primitive_creation::model::PrimitiveModel;
 use solidcore::sweep::api_brep::{
     non_manifold_rotational_sweep, non_manifold_sweep, RegionBrep, SweepSelection,
 };
@@ -537,6 +540,24 @@ fn build(k: &mut Kernel, b: &BrepIn) -> Result<Brep, Stop> {
     build_at(k, b, 0)
 }
 
+/// A sphere operand. The generator gives one sphere in ten a negative radius (as
+/// upstream's harness did, `SmApiCreateSphere` letting it through), which
+/// `create_sphere` now refuses. Such an operand is built as `SmApiCreateSphere` built
+/// it, by `SmPrimitiveCreation::CreateSphere(radius, 0, 360, frame)` itself, so these
+/// cases keep the operands their goldens were made with: the sphere of the radius's
+/// magnitude from the mirrored profile. Every other radius goes to `create_sphere`.
+fn sphere_operand(k: &mut Kernel, center: Point3, radius: f64) -> solidcore::Result<Brep> {
+    if !(radius.is_finite() && radius < -EFF_ZERO) {
+        return primitives::create_sphere(k, center, radius);
+    }
+    let mut frame = Axis2Placement::default();
+    let _ = frame.set_canonical(center, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+    PrimitiveModel::build_new(k, |pc, model| {
+        pc.create_partial_sphere(model, PrimitiveModel::MAIN, radius, 0.0, 360.0, &frame)
+    })
+    .map(|(brep, ())| brep)
+}
+
 fn build_at(k: &mut Kernel, b: &BrepIn, depth: usize) -> Result<Brep, Stop> {
     if depth >= MAX_DEPTH {
         return Err(Stop::Harness(harness("operand nested too deep")));
@@ -545,7 +566,7 @@ fn build_at(k: &mut Kernel, b: &BrepIn, depth: usize) -> Result<Brep, Stop> {
         &BrepIn::Box { origin, size } => {
             primitives::create_box(k, p3(origin), size[0], size[1], size[2])
         }
-        &BrepIn::Sphere { center, radius } => primitives::create_sphere(k, p3(center), radius),
+        &BrepIn::Sphere { center, radius } => sphere_operand(k, p3(center), radius),
         &BrepIn::Cylinder {
             origin,
             radius,
@@ -1156,6 +1177,59 @@ fn two_ints(out: &api::BooleanOutcome, kept: bool) -> Result<Vec<i64>, Stop> {
         put_brep(&mut o, other)?;
     }
     Ok(o)
+}
+
+/// A `rotational_sweep` case's kernel and its swept B-rep, swept as the runner sweeps it
+/// (#18325's certificates, `tests/issue_18325_moved_rows.rs`); `None` for any other case, an
+/// attributed one or a failed sweep.
+///
+/// # Errors
+///
+/// A case that does not parse, or an operand the runner cannot build.
+pub fn rotational_sweep_scene(case: &Case) -> Result<Option<(Kernel, Brep)>, HarnessError> {
+    let i: Inputs = case.parse()?;
+    let Inputs::RotationalSweep {
+        brep,
+        base,
+        axis,
+        angle_deg,
+        stitch,
+        merge,
+        region,
+        selection: sel,
+        attributed: None,
+    } = &i
+    else {
+        return Ok(None);
+    };
+    let of = |s: Stop| match s {
+        Stop::Harness(e) => e,
+        Stop::Deferred(_) | Stop::Torus(_) => harness("the sweep's operand deferred"),
+    };
+    let mut kernel = Kernel::default();
+    let k = &mut kernel;
+    let mut b = build(k, brep).map_err(of)?;
+    let (f, e, v) = picked(&b, sel).map_err(of)?;
+    let other = region_other(k, *region).map_err(of)?;
+    let selection = SweepSelection {
+        faces: f.as_deref(),
+        edges: e.as_deref(),
+        vertices: v.as_deref(),
+    };
+    let axis = Vec3::new(axis[0], axis[1], axis[2]);
+    let region = region_arg(*region, other.as_ref());
+    let r = non_manifold_rotational_sweep(
+        k,
+        &mut b,
+        region,
+        p3(*base),
+        axis,
+        *angle_deg,
+        *stitch,
+        *merge,
+        selection,
+    );
+    Ok(r.ok().map(|()| (kernel, b)))
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {

@@ -6,7 +6,7 @@ parameter to watch the timeline rebuild. [Documentation](https://docs.solidcraft
 `solidcraft-cli mcp` ([how](https://docs.solidcraft.io/guide/mcp.html)).
 
 **What's new** in SolidCraft {version} is listed below, and the
-[ROADMAP](https://github.com/bherbruck/solidcraft/blob/main/ROADMAP.md#known-limitations) lists
+[roadmap detail](https://github.com/bherbruck/solidcraft/blob/main/docs/roadmap-detail.md#known-limitations) lists
 the known limitations. Designs from every earlier version open in this one.
 
 **New app ID.** The app ID is now `io.tangencylabs.solidcraft` (it was `ai.storyteller.solidcraft`): `flatpak update` offers to replace the old app, the
@@ -23,7 +23,8 @@ Documentation, the browser app and the Flatpak feed use the SolidCraft project P
 
 **Which file?**
 - **Windows:** `SolidCraft-{version}-windows-x64.exe` runs as is. Or install the `.msi`, or unzip the
-  `-portable.zip` (x64, x86 and arm64).
+  `-portable.zip` (x64, x86 and arm64). IT admins: `solidcraft-{version}-windows-policy-templates.zip`
+  holds the Intune and Group Policy templates ([Managing SolidCraft in an organization](https://github.com/tangency-labs/solidcraft/blob/main/docs/book/src/guide/managed-deployment.md)).
 - **macOS 11+** (Apple silicon and Intel): open the `.dmg` and drag `SolidCraft.app` onto Applications.
   The CLI is in `solidcraft-cli-{version}-macos-universal.zip`.
 - **Linux** (x86_64 and aarch64, glibc 2.35+): the `.AppImage` (`chmod +x`, then run it), the

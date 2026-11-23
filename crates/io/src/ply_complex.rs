@@ -26,6 +26,8 @@ pub(crate) struct PlyCloud {
     pub bad_faces: usize,
     /// Edges and faces in the file, left out because its vertices were thinned.
     pub cells_left_out: u64,
+    /// Points left out before thinning because they have no position (PCD, E57).
+    pub skipped: u64,
 }
 
 fn integer(s: Scalar) -> bool {
@@ -63,8 +65,15 @@ pub(crate) fn read_ply_cloud(bytes: &[u8], max_points: usize) -> Result<PlyCloud
     let whole = stride == 1;
     let body = bytes.len().saturating_sub(h.body) as u64;
     let mut rows = Rows::new(&h, bytes);
-    let mut out =
-        PlyCloud { positions: Vec::new(), colors: None, complex: Complex::default(), vertices: vertex.count, bad_faces: 0, cells_left_out: 0 };
+    let mut out = PlyCloud {
+        positions: Vec::new(),
+        colors: None,
+        complex: Complex::default(),
+        vertices: vertex.count,
+        bad_faces: 0,
+        cells_left_out: 0,
+        skipped: 0,
+    };
     let mut columns: Vec<(On, Vec<f32>, Column)> = Vec::new();
     let (mut segments, mut triangles) = (Vec::new(), Vec::new());
     let mut row = vec![0.0f64; e_max(&h.elements)];
