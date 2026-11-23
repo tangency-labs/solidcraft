@@ -64,26 +64,39 @@ fn the_kernel_after_a_panic_is_configured_as_before() {
     );
 }
 
-/// Every call starts from the default seed: a call that draws, and so leaves its kernel's
-/// generator moved on, changes nothing for the call that takes that kernel next, whose first
-/// draws are a fresh kernel's.
+/// Seven sample points of a face of a 1 x 2 x 3 box made on `k`: what a call's random draws
+/// decide (each point's place across the face is dithered by one draw).
+fn sampled(k: &mut Kernel) -> solidcore::Result<Vec<[f64; 2]>> {
+    use solidcore::math::Point3;
+    let mut b = solidcore::primitive::api_primitives::create_box(
+        k,
+        Point3::new(0.0, 0.0, 0.0),
+        1.0,
+        2.0,
+        3.0,
+    )?;
+    let f = solidcore::topology::brep::faces(&b, None)?[0];
+    let points = solidcore::topology::face::p2::points_in_face(k, &mut b, f, 7)?;
+    Ok(points.uv.iter().map(|uv| [uv.x, uv.y]).collect())
+}
+
+/// Every call draws from the start of the default seed's sequence: a call that draws changes
+/// nothing for the call that takes that kernel next, whose draws are a fresh kernel's.
 #[test]
 fn a_call_draws_the_same_whatever_ran_on_its_kernel_before() {
     all_fixes();
-    let mut fresh = Rng::new(KernelOptions::default().seed);
-    let expected = [fresh.next_u64(), fresh.next_u64()];
-    let draws = |call| run(call, |k| Ok(Some([k.rng.next_u64(), k.rng.next_u64()]))).unwrap();
-    assert_eq!(draws("draws first"), Some(expected));
-    let moved = run("leaves its generator moved on", |k| {
-        Ok((0..5).map(|_| k.rng.next_u64()).count())
-    });
-    assert_eq!(moved.unwrap(), 5);
+    let expected = sampled(&mut Kernel::new(&KernelOptions::default())).unwrap();
+    assert_eq!(expected.len(), 7);
+    let draws = |call| run(call, |k| sampled(k).map(Some)).unwrap();
+    assert_eq!(draws("draws first"), Some(expected.clone()));
+    let more = run("draws more", |k| Ok(sampled(k)?.len() + sampled(k)?.len()));
+    assert_eq!(more.unwrap(), 14);
     assert_eq!(draws("draws after"), Some(expected));
 }
 
-/// A solid test on an operand leaves the kernel's random draws where they stood, so the
-/// operation that follows draws the same as on an operand that brought its proof. The operand
-/// is a box with a void inside: the test of which shell is the inner one draws.
+/// A solid test on an operand changes nothing in what the operation that follows draws, so it
+/// draws the same as on an operand that brought its proof. The operand is a box with a void
+/// inside: the test of which shell is the inner one draws.
 #[test]
 fn a_solid_test_of_an_operand_moves_no_random_draw() {
     use crate::body::Expect;
@@ -96,10 +109,10 @@ fn a_solid_test_of_an_operand_moves_no_random_draw() {
     .unwrap()
     .unwrap();
     let unmoved = run("tests its operand", |k| {
-        let before = k.rng.clone();
+        let before = sampled(k)?;
         let (mut operand, _proof) = hollow.take_held();
         let solid = Expect::of(k, &mut operand)?.solid();
-        Ok(solid && k.rng == before)
+        Ok(solid && sampled(k)? == before)
     });
     assert!(unmoved.unwrap());
 }

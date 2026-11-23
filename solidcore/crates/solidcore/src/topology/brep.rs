@@ -53,7 +53,9 @@ pub use p10::{
     make_topology_from_data, merge_curves_on_surface_through_surface, MakeTopologyOptions,
     TopologyEnv, HEALER_VERSION,
 };
-pub use p2::{is_manifold_solid, is_sheet, shell_vertices, ArenaNotifyState};
+pub use p2::{
+    create_missing_uv_trim_curves, is_manifold_solid, is_sheet, shell_vertices, ArenaNotifyState,
+};
 pub use p3::{
     api_brep_copy, delete_face, new_brep, orient_trimmed_surfaces, topology_ref,
     with_kernel_callbacks, DeleteFaceOptions,

@@ -10,7 +10,7 @@ use super::{
     begin_face_marker, edge_attribute_users, end_face_marker, FaceMarker, TargetTopologyChanges,
 };
 use crate::blend::fillet_executive::p3::{FilletExecutive, TopologyInsertionAccess};
-use crate::blend::fillet_geom::p1::FilletErrorType;
+use crate::blend::fillet_geom::p1::{FilletEdgeType, FilletErrorType};
 use crate::blend::fillet_geom::p1::{FilletGeomId, FilletSolverId, FilletSurfaceStorage};
 use crate::blend::fillet_geom::p4::{IntersectionFaceRole, IntersectionTopologyContext};
 use crate::blend::fillet_solver::p1::FilletSolver;
@@ -432,7 +432,22 @@ impl IntersectionTopologyContext for LiveGeometryInsertion<'_> {
         let uv = pseudo
             .original_uv_curve(edge)?
             .map(|_| FilletObject::UvCurve(FilletBody::Pseudo, mate));
-        self.merge_actual_curve(
+        // An open rail's isolated contact with a hole must be imprinted, even
+        // though it does not cross the rim. MergeInterval splits the rim there;
+        // its first span joins the outer and inner loops, and its next span cuts
+        // off the removed face. The kept boundary visits the shared vertex twice
+        // in one loop (docs/validity-and-tolerances.md, section 4). Ignoring the
+        // contact instead leaves two touching loops, which fail Face 38.
+        // Only a face with a hole has a hole's edge to touch; any other face
+        // keeps ignoring tangent contacts as before.
+        let open_rail = pseudo.fillet_edge(edge)?.fillet_edge_type() == FilletEdgeType::Rail
+            && !crate::topology::edge::is_closed(pseudo.brep(), edge)?
+            && crate::topology::face::p2::loops(target, face, false, None)?.len() > 1;
+        let ignore_tangency = self.ti.ignore_tangency;
+        if open_rail {
+            self.ti.ignore_tangency = false;
+        }
+        let result = self.merge_actual_curve(
             pseudo,
             target,
             face,
@@ -441,7 +456,9 @@ impl IntersectionTopologyContext for LiveGeometryInsertion<'_> {
             uv,
             managed,
             deleted,
-        )
+        );
+        self.ti.ignore_tangency = ignore_tangency;
+        result
     }
     fn update_topology(
         &mut self,

@@ -111,6 +111,7 @@ the selected body (or the last body of the active component).
 
 Curved and continuous stock currently requires **Corner Type: None**, no corner overrides,
 Fit Ends, Coped, Flip or gap. Unsupported combinations are refused before changing the design.
+Curved and continuous members cannot yet be combined with multiple placement groups.
 Separate curved members may share a plain None feature with point-pair members. Ordinary straight
 members and point pairs retain Auto, corner, fitting and gap behavior described below.
 - **Section (optional)**: pick the section's region in another sketch (the ring between two
@@ -118,9 +119,19 @@ members and point pairs retain Auto, corner, fitting and gap behavior described 
   dimensions follow; optional ones left empty take their defaults.
 - **Corner Type**, **Flip** and **Corner Overrides** cut the members where two of them meet, as
   under Corners below, and **Gap** leaves a weld gap at each welded end (see Multi-trim and the weld
-  gap). A new Frame Member starts on Auto (see Auto below); the command's own default stays None.
+  gap). A new Frame Member and the command both start on None.
 - **Anchor**, **Angle** and **Mirror** place the section on each line, as below. **Name** names
   the members (default: after the profile).
+- **Groups**: one feature can lay several groups of lines in the same profile, each with its own
+  lines, **Anchor**, **Angle**, **Mirror** and **Name** (uprights turned one way, rails another).
+  **New Group** starts an empty group and shows it; click a group to show and edit it, **Remove
+  Group** removes the one shown. A line belongs to one group only.
+  Several groups currently require **None**, with no corner overrides, point pairs, **Flip**,
+  **Fit Ends**, **Coped** or weld gap. Unsupported combinations report an error and keep the
+  selected settings; they are not silently dropped. Use separate Frame Members for joined
+  corners or point pairs. A single group uses the normal flat form and retains all corner,
+  pair and finishing options. Later flat frames can fit their ends to earlier grouped members,
+  using each group's actual anchor, mirror and rotation.
 - The preview shows the members as you change the values. **Edit Feature** reopens the dialog with
   the feature's values; the members keep their names through the edit, and a new **Name**
   renames them all. A member made with a whole profile sketch keeps it (the **Section** row shows
@@ -493,6 +504,12 @@ row whose Flip is left alone goes back in its saved order on OK.
   them unless the edit changes `body_name`.
   A continuous member uses `names: {"$path": "Main hoop"}` so its name survives reversing
   the path or changing the first selected segment.
+
+- `groups` (`[{lines, anchor?, locate?, angle?, mirror?, body_name?}]`): several groups of lines
+  in the feature's one profile, each placed and named its own way. Each group lists its lines, and
+  no line is in two groups. With `groups`, give `lines`, `anchor`, `locate`, `angle`, `mirror` and
+  `body_name` in each group, not beside them. A feature with one group saves as before, so designs without
+  groups don't change.
 
 ### A bent chassis tube
 
