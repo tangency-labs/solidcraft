@@ -21,7 +21,8 @@ use crate::{Result, Session};
 pub(crate) const WORKERS: usize = 8;
 #[cfg(target_arch = "wasm32")]
 pub(crate) const WORKERS: usize = 1;
-const MESH_BYTES: usize = 512 * 1024 * 1024;
+const MESH_MIB: usize = 512;
+const MESH_BYTES: usize = MESH_MIB * 1024 * 1024;
 const MAX_BODIES: usize = 100_000;
 
 pub(crate) struct Placement {
@@ -165,7 +166,7 @@ pub(crate) fn prepare(
             mesh.sharp_edges = Vec::new();
             mesh.edge_faces = Vec::new();
             if !claim(&bytes, buffer_bytes(&mesh), MESH_BYTES) {
-                return Ok(Err(Refused::Memory));
+                return Ok(Err(Refused::MeshBuffers(MESH_MIB)));
             }
             Some(Arc::new(mesh))
         } else {
