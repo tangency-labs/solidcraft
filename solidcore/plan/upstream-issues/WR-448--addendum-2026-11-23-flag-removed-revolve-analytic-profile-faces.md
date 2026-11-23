@@ -1,0 +1,10 @@
+Updates: WR-448
+
+#### WR-448 (update, 2026-11-23). `revolve_analytic_profile_faces` is removed
+
+A line or circle coplanar with the axis now always sweeps a cylinder, cone, sphere or torus in place of the B-spline surface of revolution (fork tangency-labs/smlib 0b143f7, 9853e54). That holds for every profile curve and for a partial turn as well as a whole one. A one-curve profile no longer takes upstream's `sm_CreateAnalyticRotationalSweep` special case. The fix is now unconditional and the flag is gone; SolidCraft already ran with it on (tangency-labs/solidcraft#14425).
+
+- **Removed:** the field `UpstreamFixes::revolve_analytic_profile_faces` and its doc, `RotationalSweepGeometry::set_analytic_revolutions` and its field (the analytic surface now follows `make_analytics` alone), the flag's gate in `create_rotational_sweep` and in the partial cone, cylinder and torus primitives, and every test setting of it.
+- **Defaults:** the default kernel now gives the result SolidCraft has had. No valid input becomes a refusal. The two `ub215_degenerate_faces` cones whose height is below tolerance were refused before and are still refused.
+- **Goldens:** 132 rows move, across `primitive.api_primitives` (97), `primitive.primitive_creation_p3` (12), `sweep.topology_sweep` (10), `sweep.rotational_sweep_geometry` (9), `sweep.api_brep` (2) and `primitive.primitive_creation_p2` (2). The surface is the same, but its parameterisation (angle by meridian) differs, so samples taken at fixed fractions of the domain land elsewhere on it. Each unit carries a test proving its moved rows against the closed form of the solid of revolution: the samples lie on the face carriers, the bodies are sound and closed with the closed-form volume, the tolerances cover their gaps, the trims bound the domain and the loop closes, and the normal is the parameterisation's.
+- **Tests:** `tests/sweep_cornered.rs` (the torus test no longer ignored, and its B-spline twin now expects a torus), `tests/issue_1491_revolve_circle_seam_at_profile.rs` (the seam is at the profile with no flag set), and the revolve regression tests that used to set the flag.

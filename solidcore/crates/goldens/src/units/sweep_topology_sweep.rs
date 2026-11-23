@@ -1556,3 +1556,110 @@ mod tests {
         Ok(())
     }
 }
+
+/// tangency-labs/solidcraft#14425 (WR-448's `revolve_analytic_profile_faces` retired): the
+/// rotational rows whose vertex points moved. A rotational sweep moves no vertex but to the
+/// image of an input vertex: each output vertex (and so each edge end, which the record
+/// takes from the vertex list) is an input vertex or that vertex turned through the sweep's
+/// angle about its axis (`R(theta) v = c + cos theta (v - c) + sin theta (a x (v - c)) +
+/// (1 - cos theta) (a . (v - c)) a`). The rows are replayed and every point of `points` is
+/// checked against those closed-form images.
+#[cfg(test)]
+mod moved_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::*;
+    use solidcore::math::Vec3;
+    use solidcore::sweep::topology_sweep::store::SweepIdentities;
+
+    /// The rows #14425 moved.
+    const ROWS: [&str; 10] = [
+        "nl_pc21_rotate_one_face_higher_axis_through_edge",
+        "nl_test_edges_higher_rotation",
+        "nm_box_rotation_y_30",
+        "nm_face_only_rotation_neg_y_36",
+        "nm_faces_higher_box_rotation_full_turn",
+        "nm_faces_higher_test_rotation_neg_y_36",
+        "nm_faces_higher_test_rotation_x_36_tagging",
+        "whole_rotation_x_30",
+        "whole_rotation_y_90",
+        "whole_rotation_z_45",
+    ];
+
+    /// `v` turned through `deg` degrees about the line through `c` along the unit `a`.
+    fn turned(v: Point3, c: Point3, a: Vec3, deg: f64) -> Point3 {
+        let (s, co) = deg.to_radians().sin_cos();
+        let d = v - c;
+        c + d * co + a.cross(d) * s + a * ((1.0 - co) * a.dot(d))
+    }
+
+    /// The input body's vertices, the axis point, the unit axis and the angle.
+    fn input(i: &Input) -> (Vec<Point3>, Point3, Vec3, f64) {
+        if let Some([l, w, h, _, vx, vy, vz, angle, ..]) = i.whole {
+            let mut corners = Vec::new();
+            for x in [0.0, l] {
+                for y in [0.0, w] {
+                    for z in [0.0, h] {
+                        corners.push(Point3::new(x, y, z));
+                    }
+                }
+            }
+            return (corners, Point3::ZERO, Vec3::new(vx, vy, vz).unitize_or_z(), angle);
+        }
+        let [body, _, vx, vy, vz, angle, cx, cy, cz, ..] = i.body.unwrap();
+        let mut k = Kernel::default();
+        let mut records = solidcore::topology::topology::NotifyRecords::new();
+        let mut attributes = AttributeStore::new();
+        let handle = BrepId::from_index(0);
+        let key_of = |e: solidcore::error::EntityRef| WholeIdentities.topology(handle, e);
+        let mut env = solidcore::topology::edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &key_of,
+        };
+        let key = key_of(solidcore::error::EntityRef::Brep(handle)).key;
+        let b = build_body(&mut k, body, key, &mut env).unwrap();
+        let vertices = b
+            .vertex_list()
+            .iter()
+            .map(|&v| solidcore::topology::vertex::point(&b, v).unwrap())
+            .collect();
+        (vertices, Point3::new(cx, cy, cz), Vec3::new(vx, vy, vz).unitize_or_z(), angle)
+    }
+
+    /// Each output point is within `64 eps s` of an input vertex or its turned image, `s`
+    /// the largest coordinate magnitude of the input and the axis point (at least 1). The
+    /// allowance: the kernel's rotation (a 3x3 matrix of rounded `cos`/`sin` terms applied
+    /// to `v - c`, then `+ c`) and [`turned`] each round every coordinate by at most
+    /// `(3 + 3) eps` of the summed magnitudes, at most `3 s` each, so `2 * 6 * 3 = 36 eps s`
+    /// per coordinate, under `64 eps s` with the difference of the two.
+    #[test]
+    fn every_moved_point_is_an_input_vertex_or_its_turned_image() {
+        for name in ROWS {
+            let i: Input = crate::case::regression_case(&Runner, name).parse().unwrap();
+            let (vertices, c, a, angle) = input(&i);
+            let out = rust(&i).unwrap();
+            assert_eq!(out.ints["whole"][0], 0, "{name}: a success");
+            let s = vertices
+                .iter()
+                .chain([&c])
+                .flat_map(|p| [p.x, p.y, p.z])
+                .fold(1.0_f64, |m, x| m.max(x.abs()));
+            let allowance = 64.0 * f64::EPSILON * s;
+            let images: Vec<Point3> = vertices
+                .iter()
+                .flat_map(|&v| [v, turned(v, c, a, angle)])
+                .collect();
+            let points = &out.values["points"];
+            assert!(!points.is_empty(), "{name}");
+            for p in points.chunks(3) {
+                let p = Point3::new(p[0], p[1], p[2]);
+                let d = images
+                    .iter()
+                    .map(|q| (p - *q).max_dimension())
+                    .fold(f64::INFINITY, f64::min);
+                assert!(d <= allowance, "{name}: {p:?} is {d:e} from every image ({allowance:e})");
+            }
+        }
+    }
+}

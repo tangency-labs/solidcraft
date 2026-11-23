@@ -1,6 +1,6 @@
 //! tangency-labs/solidcore#1672 (SolidCraft rig sweeps/4007): the outer half of a disc
-//! of radius 14 centred 14 from the z axis, revolved 270 degrees about -z with
-//! `fixes.revolve_analytic_profile_faces`, has an `SmTorus` face that `orient_body`
+//! of radius 14 centred 14 from the z axis, revolved 270 degrees about -z, has an
+//! `SmTorus` face that `orient_body`
 //! swaps (`SwapUV`). Upstream's swap rebuilt the torus from its NURB; the swap now keeps
 //! the torus as it was made (WR-701), so the body is valid without the torus fixes below,
 //! which hold for the rebuilds that remain (`Reverse`).
@@ -33,11 +33,10 @@ use solidcore::{Brep, Kernel, Vec3};
 /// 14 + 4 * 14 / (3 pi) from the axis) over three quarters of a turn.
 const EXPECTED_VOLUME: f64 = 28_932.176_098_892_29;
 
-/// The kernel SolidCraft runs: the analytic profile faces and the torus fixes.
+/// The kernel SolidCraft runs: the torus fixes (the analytic profile faces are the only
+/// path since tangency-labs/solidcraft#14425).
 fn fixed_kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.revolve_analytic_profile_faces = true;
-    k
+    Kernel::default()
 }
 
 /// The half disc revolved 270 degrees about `axis` through the origin, capped.
@@ -142,6 +141,5 @@ fn issue_1672_revolve_without_fixes_is_valid() {
 #[test]
 fn issue_1672_swapped_torus_keeps_its_definition() {
     let mut k = Kernel::default();
-    k.fixes.revolve_analytic_profile_faces = true;
     assert_valid_with_volume(&mut k, Vec3::new(0.0, 0.0, -1.0));
 }

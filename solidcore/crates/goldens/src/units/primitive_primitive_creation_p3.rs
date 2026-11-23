@@ -807,3 +807,214 @@ mod tests {
         }
     }
 }
+
+/// tangency-labs/solidcraft#14425 (WR-448's `revolve_analytic_profile_faces` retired): the
+/// rotational rows it moved, replayed and checked against the exact solid of revolution.
+///
+/// Every moved row's profile lies in a plane containing the turn axis. The faces of the
+/// solid of revolution then lie on the turned carriers of the profile curves (a segment's
+/// line, an arc's circle) and on the two end planes, the profile's plane turned through 0
+/// and `theta`. A point `P` is on a turned carrier exactly when, with `h = a . (P - c)`,
+/// `r = |P - c - h a|` and `u = n x a` (`n` the profile plane's normal), one fold
+/// `c + h a +- r u` is on the carrier. The check takes the record's every vertex, edge
+/// sample and face sample (a face sample is taken across the face's parameter box, so it
+/// is on the face's surface though not always inside its trim).
+#[cfg(test)]
+mod moved_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+    use super::*;
+
+    /// The rows #14425 moved whose samples moved (all profiles in a plane through the axis).
+    const SAMPLE_ROWS: [&str; 11] = [
+        "capped_rot_half_disc_axis_on_chord_270",
+        "capped_rot_half_disc_axis_on_chord_90",
+        "capped_rot_half_disc_axis_y_outside_270",
+        "capped_rot_half_disc_axis_y_outside_90",
+        "capped_rot_square_axis_diag_vertex_touch_270",
+        "capped_rot_square_axis_diag_vertex_touch_90",
+        "capped_rot_square_axis_y_on_edge_270",
+        "capped_rot_square_axis_y_on_edge_90",
+        "capped_rot_square_axis_y_outside_270",
+        "capped_rot_square_axis_y_outside_90",
+        "partial_rotation_line",
+    ];
+
+    fn case(name: &str) -> Inputs {
+        let ctx = crate::CaseContext {
+            root: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."),
+            seeds: 0,
+        };
+        let cases = ctx.fixture_cases(Runner.id()).unwrap();
+        cases
+            .iter()
+            .find(|c| c.name == name)
+            .unwrap_or_else(|| panic!("{name}"))
+            .parse()
+            .unwrap()
+    }
+
+    /// A profile curve as the fixture gives it: a segment, or an arc about `centre` in the
+    /// `xy` plane of radius `radius`.
+    enum Piece {
+        Segment(Vec3, Vec3),
+        Arc { centre: Vec3, radius: f64 },
+    }
+
+    impl Piece {
+        fn new(v: &[f64]) -> Self {
+            if v[0] == 0. {
+                Self::Segment(Vec3::new(v[1], v[2], v[3]), Vec3::new(v[4], v[5], v[6]))
+            } else {
+                Self::Arc { centre: Vec3::new(v[1], v[2], v[3]), radius: v[4] }
+            }
+        }
+
+        /// The distance from `q` to the piece's carrier (closed form: to a segment's line,
+        /// or to an arc's whole circle).
+        fn distance(&self, q: Vec3) -> f64 {
+            match *self {
+                Self::Segment(p0, p1) => {
+                    let d = p1 - p0;
+                    let t = (q - p0).dot(d) / d.dot(d);
+                    (q - (p0 + d * t)).length()
+                }
+                Self::Arc { centre, radius, .. } => {
+                    let w = q - centre;
+                    let radial = (w.x * w.x + w.y * w.y).sqrt() - radius;
+                    (radial * radial + w.z * w.z).sqrt()
+                }
+            }
+        }
+    }
+
+    /// `v` turned through `deg` degrees about the line through `c` along the unit `a`.
+    fn turned(v: Vec3, c: Vec3, a: Vec3, deg: f64) -> Vec3 {
+        let (s, co) = deg.to_radians().sin_cos();
+        let d = v - c;
+        c + d * co + a.cross(d) * s + a * ((1.0 - co) * a.dot(d))
+    }
+
+    /// The record's points: vertices, then each edge's five samples and each face's nine.
+    fn points(record: &[f64]) -> Vec<Vec3> {
+        let (faces, edges, vertices) = (record[6] as usize, record[7] as usize, record[8] as usize);
+        let mut at = 9;
+        let mut out = Vec::new();
+        let take = |at: &mut usize, n: usize, flagged: bool, out: &mut Vec<Vec3>| {
+            for _ in 0..n {
+                if flagged {
+                    assert_eq!(record[*at], 0.0, "an evaluated point");
+                    *at += 1;
+                }
+                out.push(Vec3::new(record[*at], record[*at + 1], record[*at + 2]));
+                *at += 3;
+            }
+        };
+        for _ in 0..vertices {
+            assert_eq!(record[at], 1.0);
+            at += 1;
+            take(&mut at, 1, false, &mut out);
+        }
+        for _ in 0..edges {
+            assert_eq!(record[at], 1.0, "an edge with a curve");
+            at += 3;
+            take(&mut at, 5, true, &mut out);
+        }
+        for _ in 0..faces {
+            assert_eq!(record[at], 1.0, "a face with a surface");
+            at += 5;
+            take(&mut at, 9, true, &mut out);
+        }
+        assert_eq!(at, record.len(), "the whole record read");
+        out
+    }
+
+    /// Every vertex, edge sample and face sample of each moved row is on a face carrier of
+    /// the exact solid of revolution, within `64 eps s` (`s` the largest coordinate of the
+    /// profile and axis point, at least 1). The allowance: evaluating an analytic surface
+    /// or curve point (its frame products and `sin`/`cos`) rounds each coordinate by at most
+    /// about `10 eps s`, the fold here (dot products, a square root) and the closed-form
+    /// distance to a segment or arc another `10 eps s` each, under `32 eps s`; twice that is
+    /// allowed.
+    #[test]
+    fn every_moved_sample_is_on_a_face_carrier_of_the_exact_solid() {
+        for name in SAMPLE_ROWS {
+            let i = case(name);
+            let d = &i.data;
+            let (c, a, theta) = (
+                Vec3::new(d[0], d[1], d[2]),
+                Vec3::new(d[3], d[4], d[5]).unitize().unwrap(),
+                d[6],
+            );
+            let pieces: Vec<Piece> = d[10..].chunks(7).map(Piece::new).collect();
+            // the profile plane's normal: z for the `xy`-plane profiles, else the plane of
+            // the axis and the first segment
+            let n = match pieces[0] {
+                Piece::Segment(p0, p1) if (p0.z, p1.z) != (0.0, 0.0) || a.z != 0.0 => {
+                    a.cross(p1 - p0).unitize().unwrap_or_else(|_| a.cross(p0 - c).unitize().unwrap())
+                }
+                _ => Vec3::Z,
+            };
+            assert!(n.dot(a).abs() < 1e-15, "{name}: the axis in the profile's plane");
+            let u = n.cross(a);
+            let s = d[..3]
+                .iter()
+                .chain(&d[10..])
+                .fold(1.0_f64, |m, x| m.max(x.abs()));
+            let allowance = 64.0 * f64::EPSILON * s;
+            let record = entry(&i).unwrap();
+            assert_eq!(record[0], 0.0, "{name}: a success");
+            let pts = points(&record);
+            assert!(!pts.is_empty());
+            for p in pts {
+                let w = p - c;
+                let h = a.dot(w);
+                let r = (w - a * h).length();
+                let side = [1.0, -1.0].iter().any(|&sg| {
+                    let q = c + a * h + u * (sg * r);
+                    pieces.iter().any(|pc| pc.distance(q) <= allowance)
+                });
+                let cap = [0.0, theta]
+                    .iter()
+                    .any(|&ang| (turned(p, c, a, -ang) - c).dot(n).abs() <= allowance);
+                assert!(side || cap, "{name}: {p:?} on no face carrier");
+            }
+        }
+    }
+
+    /// `full_rotation_line`'s one moved value, the B-rep's editing state after the sweep:
+    /// the sweep restores the caller's state, so every successful rotational row (whole or
+    /// part turn) ends with the editing state of the fresh B-rep it was given.
+    #[test]
+    fn a_rotational_sweep_leaves_the_callers_editing_state() {
+        let mut k = Kernel::default();
+        let fresh = solidcore::topology::brep::p3::new_brep(
+            &mut k,
+            solidcore::geom::tol::USE_DEFAULT,
+            solidcore::geom::tol::USE_DEFAULT,
+        )
+        .unwrap();
+        let want = f64::from(fresh.editing_enabled());
+        let ctx = crate::CaseContext {
+            root: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."),
+            seeds: 0,
+        };
+        let mut seen = 0;
+        for c in ctx.fixture_cases(Runner.id()).unwrap() {
+            let i: Inputs = c.parse().unwrap();
+            if !(i.op == 2 || i.op == 3) || !layout_ok(i.op, &i.data) {
+                continue;
+            }
+            let record = entry(&i).unwrap();
+            if record[0] == 0.0 {
+                assert_eq!(record[1], want, "{}", c.name);
+                seen += 1;
+            }
+        }
+        assert!(seen > 10, "{seen}");
+        assert_eq!(
+            entry(&case("full_rotation_line")).unwrap()[..2],
+            [0.0, want],
+            "full_rotation_line"
+        );
+    }
+}

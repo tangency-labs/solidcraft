@@ -1600,3 +1600,65 @@ mod moved_rows {
         }
     }
 }
+
+/// tangency-labs/solidcraft#14425 (WR-448's `revolve_analytic_profile_faces` retired): the
+/// two WR-471 whole-sphere rows it moved. A half circle of radius 5 centred `d` off the
+/// axis (0 or `3e-7`), its ends `(d, +-5, 0)`, turned a whole turn about Y is the sphere
+/// about the base through those ends, of radius `R = sqrt(d^2 + 25)`, within `d` (the
+/// distance from the arc to that sphere is at most the arc centre's offset, by the triangle
+/// inequality), under the B-rep's tolerance. Upstream's one-curve special case built that
+/// sphere with its poles off the turn axis; now the sphere's poles are on the axis and its
+/// seam is the profile (as tangency-labs/solidcore#1491). The moved values are checked
+/// against that closed form.
+#[cfg(test)]
+mod revolve_analytic_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+    use super::*;
+
+    /// The poles `(0, +-R, 0)` are the two vertices, the seam edge's samples are on the
+    /// sphere in the profile's half-plane (`z = 0`, `x > 0`), and both recorded volumes are
+    /// `4 pi R^3 / 3`, each within `64 eps` of its size (a sphere point's evaluation and
+    /// the norm here round by a few `eps R`; the volume's integration of the sphere face
+    /// by a few `eps V`).
+    #[test]
+    fn the_whole_sphere_rows_are_the_sphere_through_the_profile_ends() {
+        let data: Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/sweep.api_brep/wr471-rotational-whole-sphere-volume.json"
+        ))
+        .unwrap();
+        let cases = data["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 2);
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let d = case["inputs"]["curves"][0]["center"][0].as_f64().unwrap();
+            assert!(d <= 1e-5, "{name}: the arc within the B-rep's tolerance of the sphere");
+            let r = (d * d + 25.0).sqrt();
+            let allowance = 64.0 * f64::EPSILON * r;
+            let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
+            let out = rust(&i).unwrap();
+            assert_eq!(out.values["status"], [0.0], "{name}");
+            assert_eq!(out.values["counts"], [1.0, 1.0, 2.0], "{name}");
+            let vertices = out.values["linear_vertices"].as_chunks::<3>().0.to_vec();
+            assert_eq!(vertices.len(), 2, "{name}");
+            for (v, sign) in vertices.iter().zip([1.0, -1.0]) {
+                let off = Vec3::new(v[0], v[1] - sign * r, v[2]).length();
+                assert!(off <= allowance, "{name}: vertex {v:?} {off:e} off the pole");
+            }
+            let samples = out.values["linear_edge_samples"].as_chunks::<3>().0.to_vec();
+            assert_eq!(samples.len(), 3, "{name}");
+            for p in &samples {
+                let q = Vec3::new(p[0], p[1], p[2]);
+                assert!((q.length() - r).abs() <= allowance, "{name}: {p:?} off the sphere");
+                assert!(p[2].abs() <= allowance && p[0] > 0.0, "{name}: {p:?} off the profile");
+            }
+            let want = 4.0 * std::f64::consts::PI * r * r * r / 3.0;
+            for key in ["linear_volume", "rotational_volume_1e8"] {
+                let got = out.values[key][0];
+                assert!(
+                    (got - want).abs() <= 64.0 * f64::EPSILON * want,
+                    "{name}: {key} {got} against {want}"
+                );
+            }
+        }
+    }
+}

@@ -675,6 +675,42 @@ mod moved_rows {
         }
     }
 
+    /// tangency-labs/solidcraft#14425 (WR-448's `revolve_analytic_profile_faces` retired)
+    /// moved two cone rows from one refusal to another (1007 to 1006): their side face is
+    /// now the analytic cylinder, which `is_degenerate_curve` no longer takes as degenerate,
+    /// so the call refuses one step later (tangency-labs/solidcraft#15350 tracks that test's
+    /// dependence on the parametrisation). The cone's height is within the B-rep's
+    /// tolerance of zero, so its base and top circles, and each vertex of one with the
+    /// vertex above it, are one within tolerance: no solid of that height has a valid
+    /// B-rep, and the call is refused either way (the API drops the B-rep it was
+    /// building on a refusal, so no body reaches the caller).
+    #[test]
+    fn the_cones_below_tolerance_height_stay_refused() {
+        let data: Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/primitive.primitive_creation_p2/ub215_degenerate_faces.json"
+        ))
+        .unwrap();
+        let mut seen = 0;
+        for name in [
+            "ub215_degenerate_face_side_line_5e-7",
+            "ub215_degenerate_face_side_line_9.9e-7",
+        ] {
+            let case = data["cases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|c| c["name"] == name)
+                .unwrap();
+            let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
+            assert_eq!(i.op, 1, "{name}: a partial cone");
+            let (result, _, tolerance) = run(&i);
+            assert!(i.data[1] > 0.0 && i.data[1] <= tolerance, "{name}: height {}", i.data[1]);
+            assert_eq!(error(&result.expect_err(name)), 1006.0, "{name}");
+            seen += 1;
+        }
+        assert_eq!(seen, 2);
+    }
+
     /// (row, reason)
     const ROWS: [(&str, Reason); 21] = [
         ("gen0027", Reason::Small),

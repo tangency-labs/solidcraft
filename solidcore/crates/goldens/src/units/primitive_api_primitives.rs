@@ -1684,3 +1684,192 @@ mod moved_rows {
         }
     }
 }
+
+/// tangency-labs/solidcraft#14425 (WR-448's `revolve_analytic_profile_faces` retired): the
+/// partial cone, cylinder and torus rows it moved. Their walls are now the analytic cone,
+/// cylinder and torus rather than B-spline surfaces of revolution, so the samples taken at
+/// fixed fractions of each edge interval and face domain moved along the same solid, the
+/// vertex and edge tolerances moved by rounding, and three edges keep one stored UV trim
+/// rather than two. Each row is replayed and checked against the solid's closed form:
+/// every recorded point is on a face carrier, the body is sound with its volume enclosure
+/// holding the closed-form volume, and every tolerance covers its certified gaps.
+#[cfg(test)]
+mod revolve_analytic_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+    use super::*;
+    use std::f64::consts::PI;
+
+    /// The moved rows: 39 partial cones, 30 partial cylinders and 28 partial tori.
+    const ROWS: [&str; 97] = ["gen0012", "gen0015", "gen0049", "gen0052", "gen0068", "gen0070", "gen0080", "gen0107", "gen0115", "gen0129", "gen0153", "gen0194", "gen0203", "gen0220", "gen0238", "gen0246", "gen0251", "gen0253", "gen0261", "gen0285", "gen0290", "gen0307", "gen0313", "gen0327", "gen0329", "gen0337", "gen0423", "gen0438", "gen0454", "gen0460", "gen0466", "gen0471", "gen0475", "gen0479", "gen0526", "gen0529", "gen0533", "gen0534", "gen0542", "gen0562", "gen0589", "gen0590", "gen0600", "gen0607", "gen0637", "gen0642", "gen0643", "gen0660", "gen0700", "gen0714", "gen0716", "gen0724", "gen0749", "gen0880", "gen0885", "gen0895", "gen0905", "gen0909", "gen0919", "gen0929", "gen0940", "gen0959", "gen0977", "gen0988", "gen0989", "gen1013", "gen1036", "gen1042", "gen1085", "gen1120", "gen1122", "gen1126", "gen1133", "gen1159", "gen1163", "gen1165", "gen1183", "gen1189", "gen1210", "gen1242", "gen1246", "gen1300", "gen1323", "gen1337", "gen1349", "gen1375", "gen1377", "gen1391", "gen1398", "gen1404", "gen1405", "gen1418", "gen1439", "gen1450", "gen1463", "gen1464", "gen1484"];
+
+    /// The solid's closed form in its frame (`w` the point less the origin, `rho` its
+    /// distance from Z): the radial distance off the wall, and the volume.
+    #[derive(Debug, Clone, Copy)]
+    enum Solid {
+        /// The sector of the cone (a cylinder: equal radii) from `base` at `w.z = 0` to
+        /// `top` at `w.z = height`.
+        Cone { base: f64, top: f64, height: f64 },
+        /// The sector of the torus `(rho - major)^2 + w.z^2 = minor^2`.
+        Torus { major: f64, minor: f64 },
+    }
+
+    impl Solid {
+        /// Whether `w` is within `allowance` of one of the solid's face carriers: its wall
+        /// (by the exact distance for the torus, and for the cone the radial gap measured
+        /// along the line `w.z` constant scaled by the wall's slope, which bounds the
+        /// distance), its end planes, and its sector planes through Z at `angles`.
+        fn on_carrier(&self, w: Vec3, angles: [f64; 2], allowance: f64) -> bool {
+            let rho = (w.x * w.x + w.y * w.y).sqrt();
+            let wall = match *self {
+                Self::Cone { base, top, height } => {
+                    let r = base + (top - base) * w.z / height;
+                    let slope = (top - base) / height;
+                    (rho - r).abs() / (1.0 + slope * slope).sqrt() <= allowance
+                        || w.z.abs() <= allowance
+                        || (w.z - height).abs() <= allowance
+                }
+                Self::Torus { major, minor } => {
+                    let d = rho - major;
+                    ((d * d + w.z * w.z).sqrt() - minor).abs() <= allowance
+                }
+            };
+            wall || angles.iter().any(|&deg| {
+                let (s, c) = deg.to_radians().sin_cos();
+                (c * w.y - s * w.x).abs() <= allowance
+            })
+        }
+
+        /// The volume of the sector through `theta` radians: `theta h (b^2 + b t + t^2) / 6`
+        /// for the cone, `theta pi R r^2` for the torus.
+        fn volume(&self, theta: f64) -> f64 {
+            match *self {
+                Self::Cone { base, top, height } => {
+                    theta * height * (base * base + base * top + top * top) / 6.0
+                }
+                Self::Torus { major, minor } => theta * PI * major * minor * minor,
+            }
+        }
+    }
+
+    /// The row's solid, its angles in degrees and its size (the largest of the origin's
+    /// coordinates and the solid's dimensions).
+    fn solid(i: &Inputs) -> (Solid, [f64; 2], f64) {
+        let a = |n: usize| i.arg(n).unwrap();
+        let (solid, angles) = match i.op {
+            OpName::PartialCone => (
+                Solid::Cone { base: a(3), top: a(4), height: a(5) },
+                [a(6), a(7)],
+            ),
+            OpName::PartialCylinder => (
+                Solid::Cone { base: a(3), top: a(3), height: a(4) },
+                [a(5), a(6)],
+            ),
+            OpName::PartialTorus => (Solid::Torus { major: a(3), minor: a(4) }, [a(5), a(6)]),
+            op => panic!("{op:?}"),
+        };
+        let s = i.args.iter().fold(1.0_f64, |m, x| m.max(x.0.abs()));
+        (solid, angles, s)
+    }
+
+    /// The record's vertex points, edge samples and face samples (`util::primitive::append`'s
+    /// layout after the success flags and counts).
+    fn points(record: &[f64]) -> Vec<Vec3> {
+        let (faces, edges, vertices) = (record[2] as usize, record[3] as usize, record[4] as usize);
+        let mut at = 5;
+        let mut out = Vec::new();
+        let sample = |at: &mut usize, out: &mut Vec<Vec3>| {
+            assert_eq!(record[*at], 0.0, "an evaluated point");
+            out.push(Vec3::new(record[*at + 1], record[*at + 2], record[*at + 3]));
+            *at += 4;
+        };
+        for _ in 0..vertices {
+            out.push(Vec3::new(record[at], record[at + 1], record[at + 2]));
+            at += 4;
+        }
+        for _ in 0..edges {
+            assert_eq!(record[at + 3], 1.0, "an edge with a curve");
+            at += 4;
+            for _ in 0..3 {
+                sample(&mut at, &mut out);
+            }
+            at += 2;
+        }
+        for _ in 0..faces {
+            assert_eq!(record[at + 5], 1.0, "a face with a surface");
+            at += 6;
+            for _ in 0..3 {
+                sample(&mut at, &mut out);
+            }
+        }
+        assert_eq!(at, record.len(), "the whole record read");
+        out
+    }
+
+    /// Every vertex, edge sample and face sample is on a face carrier of the exact solid
+    /// within `64 eps s` (`s` the row's largest argument, at least 1): evaluating an
+    /// analytic point (frame products, `sin`/`cos`) rounds each coordinate by about
+    /// `10 eps s` and the closed-form distance here (a difference, a square root, a
+    /// product) by about as much again, under `32 eps s`; twice that is allowed. A face
+    /// sample is taken across the face's parameter box, so it is on its surface though not
+    /// always inside its trim.
+    #[test]
+    fn every_moved_sample_is_on_a_face_carrier() {
+        for name in ROWS {
+            let i: Inputs = crate::case::regression_case(&Runner, name).parse().unwrap();
+            let (solid, angles, s) = solid(&i);
+            let origin = i.point(0).unwrap();
+            let allowance = 64.0 * f64::EPSILON * s;
+            let out = rust(&i).unwrap();
+            let record = &out.values["rec"];
+            assert_eq!(record[..2], [0.0, 1.0], "{name}: a success");
+            let pts = points(record);
+            assert!(!pts.is_empty());
+            for p in pts {
+                assert!(
+                    solid.on_carrier(p - origin, angles, allowance),
+                    "{name}: {p:?} on no face carrier of {solid:?} {angles:?}"
+                );
+            }
+        }
+    }
+
+    /// Each row's body is sound (`check_brep` level 2 clean, a manifold solid), its volume
+    /// enclosure ([`enclose_volume`] to a relative width of `1e-6`) holds the closed-form
+    /// volume, and every edge and vertex tolerance covers its certified gaps
+    /// ([`crate::certify::tolerance_covers`]: an edge's tolerance at least the certified
+    /// upper end of its uses' edge-face gaps, a vertex's at least the distance to its
+    /// edges' curve ends plus that distance's rounding).
+    ///
+    /// [`enclose_volume`]: solidcore::mass::enclosure::enclose_volume
+    #[test]
+    fn every_moved_body_is_the_exact_solid_and_covers_its_gaps() {
+        for name in ROWS {
+            let i: Inputs = crate::case::regression_case(&Runner, name).parse().unwrap();
+            let (solid, angles, _) = solid(&i);
+            let want = solid.volume((angles[1] - angles[0]).to_radians());
+            crate::certify::watch_written();
+            rust(&i).unwrap();
+            let mut bodies = crate::certify::take_written();
+            assert_eq!(bodies.len(), 1, "{name}");
+            let b = &mut bodies[0];
+            let mut k = Kernel::default();
+            let found = solidcore::topology::brep::validation::soundness(&mut k, b).unwrap();
+            assert!(found.check.lines().is_empty(), "{name}: {:?}", found.check.lines());
+            assert!(found.manifold, "{name}: a manifold solid");
+            let enc = solidcore::mass::enclosure::enclose_volume(&k, b, 1e-6 * want).unwrap();
+            assert!(
+                enc.lo <= want && want <= enc.hi,
+                "{name}: volume {want} outside [{}, {}]",
+                enc.lo,
+                enc.hi
+            );
+            let (edges, vertices) = crate::certify::tolerance_covers(&k, b);
+            for e in &edges {
+                assert!(e.needed_hi <= e.tolerance, "{name}: {e:?}");
+            }
+            for v in &vertices {
+                assert!(v.distance + v.slack <= v.tolerance, "{name}: {v:?}");
+            }
+        }
+    }
+}
