@@ -6,6 +6,9 @@
 //! The layout works on serde_json's compact text and only adds whitespace outside strings. Keys
 //! keep their order and every number and string keeps serde_json's exact text, so the file reads
 //! back as the same design and saving it again gives the same bytes.
+//!
+//! [`compact`] takes that whitespace out again, so `pretty(&compact(text))` lays out any JSON text
+//! the same way, whatever layout it was saved in (`solidcraft-cli textconv` uses it for `git diff`).
 
 /// The most numbers a list may hold and still stay on one line. A longer list keeps one number a
 /// line, so changing one of its numbers still changes one line.
@@ -13,12 +16,28 @@ const MAX_INLINE: usize = 16;
 
 /// `compact`, serde_json's compact text of a value, laid out for reading and diffing. Text that is
 /// not compact JSON comes back laid out as far as it goes, never a panic.
-pub(crate) fn pretty(compact: &str) -> String {
+pub fn pretty(compact: &str) -> String {
+    layout(compact, usize::MAX).unwrap_or_default()
+}
+
+/// [`pretty`], or `None` once the laid-out text would pass `budget` bytes. Each line is indented two
+/// spaces a level, so text from a file can lay out to many times its size. A caller laying out text
+/// it did not write gives a budget.
+pub fn pretty_within(compact: &str, budget: usize) -> Option<String> {
+    layout(compact, budget)
+}
+
+fn layout(compact: &str, budget: usize) -> Option<String> {
     let b = compact.as_bytes();
     let mut out = String::with_capacity(compact.len() + compact.len() / 2);
     let mut depth = 0usize;
     let mut i = 0;
     while let Some(&c) = b.get(i) {
+        // One step adds at most a string of the input or one indented line, so this stops soon
+        // after the budget is passed.
+        if out.len() > budget {
+            return None;
+        }
         match c {
             b'"' => {
                 let end = string_end(b, i);
@@ -65,7 +84,62 @@ pub(crate) fn pretty(compact: &str) -> String {
             }
         }
     }
+    (out.len() <= budget).then_some(out)
+}
+
+/// `text` with the whitespace outside its strings taken out (spaces, tabs, line feeds and carriage
+/// returns). Keys keep their order, and numbers and strings keep their exact text. For a JSON text
+/// that is serde_json's compact text of the same value. Text that is not JSON comes back with the
+/// same whitespace taken out, never a panic.
+pub fn compact(text: &str) -> String {
+    let b = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while let Some(&c) = b.get(i) {
+        match c {
+            b'"' => {
+                let end = string_end(b, i);
+                out.push_str(text.get(i..end).unwrap_or_default());
+                i = end;
+            }
+            b' ' | b'\t' | b'\n' | b'\r' => i += 1,
+            _ => {
+                // Up to the next quote or whitespace byte. Both are ASCII, so the run ends on a
+                // character boundary.
+                let start = i;
+                while b.get(i).is_some_and(|c| !matches!(c, b'"' | b' ' | b'\t' | b'\n' | b'\r')) {
+                    i += 1;
+                }
+                out.push_str(text.get(start..i).unwrap_or_default());
+            }
+        }
+    }
     out
+}
+
+/// How deeply `text` nests its lists and objects, counting the brackets outside strings. Laying out
+/// text indents each level, so text nested `n` deep lays out to about `n * n` bytes. A caller that
+/// lays out text from a file checks this first.
+pub fn depth(text: &str) -> usize {
+    let b = text.as_bytes();
+    let (mut depth, mut deepest) = (0usize, 0usize);
+    let mut i = 0;
+    while let Some(&c) = b.get(i) {
+        match c {
+            b'"' => {
+                i = string_end(b, i);
+                continue;
+            }
+            b'[' | b'{' => {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            b']' | b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        i += 1;
+    }
+    deepest
 }
 
 fn new_line(out: &mut String, depth: usize) {
@@ -165,11 +239,51 @@ mod tests {
     }
 
     /// Text that is not compact JSON, cut short or with an open string, is laid out as far as it
-    /// goes without a panic.
+    /// goes without a panic. Taking its whitespace out never panics either.
     #[test]
     fn broken_text_never_panics() {
-        for broken in ["", "[", "{\"a\":[1,2", "\"open", "\"esc\\", "]]}}", "[1,2,", "{\"k\":\"\u{e9}\"", "\u{e9}[1]"] {
+        for broken in ["", "[", "{\"a\":[1,2", "\"open", "\"esc\\", "]]}}", "[1,2,", "{\"k\":\"\u{e9}\"", "\u{e9}[1]", " \u{e9} \"x"] {
             let _ = pretty(broken);
+            let _ = compact(broken);
         }
+    }
+
+    /// Within a budget the text is the same as without one. Past it there is no text, and the layout
+    /// stops near the budget instead of finishing.
+    #[test]
+    fn a_budget_stops_the_layout() {
+        let v = json!({"a": [1, 2], "b": [{"c": "d"}, {"e": [[1, 0], [0, 1]]}]});
+        let text = serde_json::to_string(&v).unwrap();
+        let full = pretty(&text);
+        assert_eq!(pretty_within(&text, full.len()).as_deref(), Some(full.as_str()));
+        assert_eq!(pretty_within(&text, full.len() - 1), None);
+        let wide = format!("[{}0]", "[1,\"x\"],".repeat(100_000));
+        assert_eq!(pretty_within(&wide, 1000), None);
+    }
+
+    /// The depth counts brackets outside strings only, and broken text never panics.
+    #[test]
+    fn depth_counts_brackets_outside_strings() {
+        assert_eq!(depth("{\"a\": [1, {\"b\": \"[[[{{\"}]}"), 3);
+        assert_eq!(depth("[]"), 1);
+        assert_eq!(depth("12"), 0);
+        assert_eq!(depth(&format!("{}{}", "[".repeat(500), "]".repeat(500))), 500);
+        for broken in ["]]]", "[\"open", "\"esc\\", "\u{e9}["] {
+            let _ = depth(broken);
+        }
+    }
+
+    /// Taking the whitespace out of laid-out text gives serde_json's compact text back, also from a
+    /// copy with Windows line endings and from serde_json's own pretty text. So laying it out
+    /// again gives the same bytes, whatever layout the file had. Spaces inside strings stay.
+    #[test]
+    fn compact_undoes_any_layout() {
+        let v = json!({"name": "a b\tc\r\nd", "pos": [40.0, 6.0], "rows": [[1, 0], [0, 1]], "f": [{"x": "{ [ , ] }"}], "e": {}});
+        let compact_text = serde_json::to_string(&v).unwrap();
+        let laid_out = pretty(&compact_text);
+        assert_eq!(compact(&laid_out), compact_text);
+        assert_eq!(compact(&laid_out.replace('\n', "\r\n")), compact_text);
+        assert_eq!(compact(&serde_json::to_string_pretty(&v).unwrap()), compact_text);
+        assert_eq!(pretty(&compact(&serde_json::to_string_pretty(&v).unwrap())), laid_out);
     }
 }

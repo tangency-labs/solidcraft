@@ -93,7 +93,7 @@ pub fn set_mode(app: &mut SolveApp, m: u8) {
         3 => "Infinite mode: new lines are infinite construction lines",
         _ => "Normal mode",
     };
-    app.set_status(hint, false);
+    app.set_tool_hint(hint);
 }
 
 /// X / the toolbar's Construction: convert the selected curves, or with nothing selected
@@ -249,7 +249,8 @@ const LINE_TYPES: [(&str, &str, &str); 4] = [
 
 /// Is a sketch being edited? That is the palette's own condition.
 pub fn editing(app: &SolveApp) -> bool {
-    app.session.active_sketch.and_then(|s| crate::open_meshing::session_world(&app.session).sketch(s).map(|_| ())).is_some()
+    crate::workspace::tool_receives_input(app)
+        && app.session.active_sketch.and_then(|s| crate::open_meshing::session_world(&app.session).sketch(s).map(|_| ())).is_some()
 }
 
 /// Is the Canvas or Decal tool running? The palette then shows the tool's frame mode (#18405),
@@ -262,7 +263,7 @@ pub fn image_tool(app: &SolveApp) -> bool {
 fn image_tool_presentation(app: &SolveApp) -> Option<crate::panel_runtime::PanelPresentation> {
     let spec = solidcraft_engine::find_command(app.tool.as_ref()?.cmd)?;
     Some(crate::panel_runtime::PanelPresentation {
-        title: app.tr_label(spec.label).to_owned(),
+        title: app.tr_command(spec.id, spec.label).to_owned(),
         icon: spec.icon.into(),
         status: None,
         attention: false,
@@ -471,7 +472,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .map(|spec| crate::ui_kit::ToolChoice {
                         key: spec.id,
                         icon: spec.icon,
-                        label: app.tr_label(spec.label),
+                        label: app.tr_command(spec.id, spec.label),
                         enabled: spec.info(&app.session).enabled,
                     })
                     .collect();

@@ -14,5 +14,5 @@ pub mod p3;
 
 pub use p1::{
     AltSrfCache, AltSrfCacheType, BezierAux2d, BezierPatch, PatchBoundaryBoundingPlanes,
-    SurfaceCache, SurfaceCacheOptions,
+    SolveModes, SurfaceCache, SurfaceCacheOptions, SurfaceCacheState,
 };

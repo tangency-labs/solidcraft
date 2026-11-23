@@ -21,24 +21,27 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_heading(ui, app.tr("prefs.design"), app.tr("prefs.design_note"));
         ui_kit::settings_section(ui, "units", app.tr("prefs.units_precision"), |ui| {
             ui_kit::settings_form(ui, label_width, |ui| {
+                let locked = app.policy.locks("default_units");
                 ui_kit::row(ui, app.tr("ui.units_of_new_designs"), |ui| {
                     let mut selected = UNITS.iter().position(|u| *u == app.preferences.default_units).unwrap_or(0);
-                    ui_kit::segmented(
-                        ui,
-                        &mut selected,
-                        UNITS,
-                        ui_kit::Segments {
-                            intrinsic: true,
-                            targets: &[
-                                "prefs:default_units:mm",
-                                "prefs:default_units:cm",
-                                "prefs:default_units:m",
-                                "prefs:default_units:in",
-                                "prefs:default_units:ft",
-                            ],
-                            ..Default::default()
-                        },
-                    );
+                    crate::policy::row(ui, locked, |ui| {
+                        ui_kit::segmented(
+                            ui,
+                            &mut selected,
+                            UNITS,
+                            ui_kit::Segments {
+                                intrinsic: true,
+                                targets: &[
+                                    "prefs:default_units:mm",
+                                    "prefs:default_units:cm",
+                                    "prefs:default_units:m",
+                                    "prefs:default_units:in",
+                                    "prefs:default_units:ft",
+                                ],
+                                ..Default::default()
+                            },
+                        )
+                    });
                     if let Some(unit) = UNITS.get(selected)
                         && app.preferences.default_units != *unit
                     {
@@ -53,11 +56,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::scenario::publish_target("prefs:length_decimals", response.rect);
                     });
                     ui.add_space(t.space_6);
-                    let sample = format_length(
-                        12.5 * unit_scale(&app.preferences.default_units).0,
-                        &app.preferences.default_units,
-                        app.preferences.length_decimals,
-                    );
+                    let sample = length_decimals_sample(&app.preferences.default_units, app.preferences.length_decimals);
                     ui_kit::settings_precision_sample(ui, &sample);
                 });
                 ui_kit::row(ui, app.tr("ui.angle_decimals"), |ui| {
@@ -254,6 +253,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:names_from_file", response.rect);
         });
         ui_kit::settings_section(ui, "assemblies", app.tr("prefs.assemblies"), |ui| {
+            let response = setting::joint_moving_first(app, ui);
+            crate::scenario::publish_target("prefs:joint_moving_first", response.rect);
+
             ui.horizontal_wrapped(|ui| {
                 let response = setting::joint_drag_trackball(app, ui).backing_on_hover_text(app.tr("prefs.joint_drag_trackball_help"));
                 crate::scenario::publish_target("prefs:joint_drag_trackball", response.rect);
@@ -285,6 +287,14 @@ fn export_name(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
                 ui_kit::Text::Hint("export_name"),
             );
         }
+        // GLB export's node tree (#5296); off writes the flat file of SolidCraft 0.40.
+        ui.horizontal_wrapped(|ui| {
+            let response = setting::glb_export_hierarchy(app, ui);
+            crate::scenario::publish_target("prefs:glb_export_hierarchy", response.rect);
+            if !crate::ui_kit::settings_search::suppress_chrome(ui) {
+                ui_kit::help_icon(ui, app.tr("ui.glb_export_hierarchy_help"));
+            }
+        });
     });
 }
 
@@ -328,4 +338,9 @@ fn origin_plane_names(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
         let response = setting::browser_hover_shows_origin(app, ui).backing_on_hover_text(app.tr("prefs.browser_hover_shows_origin_help"));
         crate::scenario::publish_target("prefs:browser_hover_shows_origin", response.rect);
     });
+}
+
+/// The Length decimals example: 12.5 in `units` (not 12.5 mm), with `decimals`.
+pub(super) fn length_decimals_sample(units: &str, decimals: u8) -> String {
+    format_length(12.5 / unit_scale(units).0, units, decimals)
 }

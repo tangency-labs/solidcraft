@@ -54,7 +54,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_exact_round_classes",
     "fillet_knife_edge_rounds",
     "fillet_patch_keeps_fillet_edges",
-    "fillet_point_step_per_point",
     "fillet_rail_trim_at_near_knot",
     "fillet_refuse_face_consuming_blends",
     "fillet_refuse_overlapping_bands",

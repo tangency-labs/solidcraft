@@ -3,15 +3,15 @@ use crate::{ImportRequest, Imported, RuntimeOptions};
 use cap_std::fs::OpenOptionsExt;
 use cap_std::fs::{Dir, OpenOptions};
 use craft_plugin::{
-    CommandSchema, Effect, HostError, Limits, LossReport, MAX_IMPORT_CHUNK_BYTES, MAX_IMPORT_DESIGN_BYTES, MAX_IMPORT_INPUT_BYTES, MAX_JSON_BYTES,
-    Manifest, PluginHost, Result,
+    CommandSchema, Effect, HostError, Limits, LossReport, MAX_EXPORT_FILE_BYTES, MAX_IMPORT_CHUNK_BYTES, MAX_IMPORT_DESIGN_BYTES,
+    MAX_IMPORT_INPUT_BYTES, MAX_JSON_BYTES, Manifest, PluginHost, Result,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::path::{Component as PathComponent, Path, PathBuf};
 use std::sync::{
-    Arc, Mutex,
+    Arc, Mutex, OnceLock,
     atomic::{AtomicU64, Ordering},
     mpsc,
 };
@@ -37,6 +37,8 @@ mod dialog_bindings {
 }
 include!(concat!(env!("OUT_DIR"), "/aliases.rs"));
 include!(concat!(env!("OUT_DIR"), "/importer.rs"));
+include!(concat!(env!("OUT_DIR"), "/panels.rs"));
+include!(concat!(env!("OUT_DIR"), "/exporter.rs"));
 
 const MAX_CALLS: usize = 256;
 /// An importer streams its file in chunks and reports progress as it goes.
@@ -118,6 +120,9 @@ struct State<H> {
     design_tokens: bool,
     folders: BTreeMap<String, Folder>,
     staged: BTreeMap<(String, PathBuf), PendingWrite>,
+    /// Folders `write-file` made inside a grant for a staged file, in the order they were made.
+    /// A run that does not publish removes the ones still empty.
+    created_dirs: Vec<(String, PathBuf)>,
     clock: bool,
     forms: bool,
     limits: StoreLimits,
@@ -128,6 +133,7 @@ struct State<H> {
     deadline: Instant,
     /// The file an importer reads and the design it writes; `None` for a command.
     import: Option<ImportState>,
+    panels: Option<craft_plugin::ui::Declarations>,
 }
 struct ImportState {
     /// The folder of the file being imported, opened by the app's authority.
@@ -186,6 +192,12 @@ impl<H: PluginHost> State<H> {
                 let _ = folder.dir.remove_file(pending.temporary);
             }
         }
+        // Newest first, so a folder's sub-folders go before it; a folder that now holds anything stays.
+        for (grant, dir) in std::mem::take(&mut self.created_dirs).into_iter().rev() {
+            if let Some(folder) = self.folders.get(&grant) {
+                let _ = folder.dir.remove_dir(dir);
+            }
+        }
     }
     fn publish_writes(&mut self) -> Result<()> {
         let mut writes: Vec<_> = self.staged.iter().collect();
@@ -196,6 +208,8 @@ impl<H: PluginHost> State<H> {
                 permission: format!("files.write:{grant}: publication failed after app commit; files may have changed: {error}"),
             })?;
         }
+        // The published files now live in the folders made for them.
+        self.created_dirs.clear();
         Ok(())
     }
 }
@@ -377,9 +391,25 @@ impl<H: PluginHost> files::Host for State<H> {
         if data.len() > MAX_JSON_BYTES {
             return Err(self.fail(limit("file write size")));
         }
+        let mut created = Vec::new();
         let write = (|| -> std::io::Result<PathBuf> {
             let folder = self.folders.get(&grant).ok_or_else(|| std::io::Error::other("grant disappeared"))?;
             let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+            // A file in a sub-folder that does not exist yet gets that folder, inside the grant
+            // (#20493). Each step was checked above: plain names, no links, the whole path allowed.
+            let mut prefix = PathBuf::new();
+            for component in parent.components().filter(|c| matches!(c, PathComponent::Normal(_))) {
+                prefix.push(component);
+                match folder.dir.symlink_metadata(&prefix) {
+                    Ok(metadata) if metadata.is_dir() => {}
+                    Ok(_) => return Err(std::io::Error::other(format!("{} is a file, not a folder", prefix.display()))),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        folder.dir.create_dir(&prefix)?;
+                        created.push(prefix.clone());
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
             let temp = parent.join(format!(".craft-plugin-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
             let mut options = OpenOptions::new();
             options.write(true).create_new(true);
@@ -394,7 +424,15 @@ impl<H: PluginHost> files::Host for State<H> {
             }
             result.map(|()| temp)
         })();
-        let temporary = write.map_err(|e| self.fail(HostError::PermissionDenied { permission: format!("files.write:{grant}: {e}") }))?;
+        self.created_dirs.extend(created.into_iter().map(|dir| (grant.clone(), dir)));
+        // Only a refusal by the system is a denied permission; anything else is about this path.
+        let temporary = write.map_err(|e| {
+            self.fail(if e.kind() == std::io::ErrorKind::PermissionDenied {
+                HostError::PermissionDenied { permission: format!("files.write:{grant}: {e}") }
+            } else {
+                HostError::InvalidInput { field: "path".into(), reason: format!("files.write:{grant}: {e}") }
+            })
+        })?;
         if let Some(previous) = self.staged.insert((grant.clone(), path), PendingWrite { temporary, order: self.calls })
             && let Some(folder) = self.folders.get(&grant)
         {
@@ -619,8 +657,11 @@ fn refuse_links(dir: &Dir, path: &Path) -> std::io::Result<()> {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(std::io::Error::other(format!("{} is a link; links are not followed", prefix.display())));
             }
+            // Nothing lies past a plain file, so no link can either: the caller reports a file
+            // where a folder should be as a wrong path, not as a refused permission (#20493).
+            Ok(metadata) if !metadata.is_dir() => return Ok(()),
             Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => return Ok(()),
             Err(error) => return Err(error),
         }
     }
@@ -743,7 +784,19 @@ pub(super) fn run<H: PluginHost + 'static>(
     params: &Value,
     options: RuntimeOptions,
 ) -> (H, Result<Value>) {
-    run_mode(host, manifest, bytes, entry, params, options, false)
+    run_call(host, manifest, bytes, entry, params, None, options)
+}
+
+pub(super) fn run_call<H: PluginHost + 'static>(
+    host: H,
+    manifest: &Manifest,
+    bytes: &[u8],
+    entry: &str,
+    params: &Value,
+    event: Option<&craft_plugin::ui::UiEvent>,
+    options: RuntimeOptions,
+) -> (H, Result<Value>) {
+    run_mode(host, manifest, bytes, entry, params, event, options, false)
 }
 
 pub(super) fn dialog_fields<H: PluginHost + 'static>(
@@ -775,7 +828,7 @@ pub(super) fn dialog_fields<H: PluginHost + 'static>(
         file.write = false;
     }
     runtime.permissions.files.retain(|file| file.read);
-    let (host, result) = run_mode(host, &manifest, bytes, entry, params, RuntimeOptions::default(), true);
+    let (host, result) = run_mode(host, &manifest, bytes, entry, params, None, RuntimeOptions::default(), true);
     (host, result.and_then(|value| value.as_str().map(str::to_owned).ok_or_else(|| component_error("hook result is not text"))))
 }
 
@@ -786,6 +839,7 @@ fn run_mode<H: PluginHost + 'static>(
     bytes: &[u8],
     entry: &str,
     params: &Value,
+    event: Option<&craft_plugin::ui::UiEvent>,
     options: RuntimeOptions,
     dialog: bool,
 ) -> (H, Result<Value>) {
@@ -801,8 +855,18 @@ fn run_mode<H: PluginHost + 'static>(
             .as_ref()
             .ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "no executable runtime".into() })?;
         runtime.validate()?;
+        ui::validate_manifest(manifest, runtime)?;
+        if let Some(event) = event {
+            event.validate()?;
+            if !ui::enabled(runtime) {
+                return Err(HostError::PermissionDenied { permission: "ui capability is not declared".into() });
+            }
+        }
         if runtime.is_importer() && !dialog {
             return Err(HostError::InvalidInput { field: "entry".into(), reason: "an importer converts a file; open the file instead".into() });
+        }
+        if runtime.is_exporter() && !dialog {
+            return Err(HostError::InvalidInput { field: "entry".into(), reason: "an exporter writes a file; export the design instead".into() });
         }
         if bytes.len() > runtime.max_component_bytes() {
             return Err(limit("component size"));
@@ -847,6 +911,7 @@ fn run_mode<H: PluginHost + 'static>(
         runtime,
         entry,
         params,
+        event,
         compiled,
         commands,
         folders,
@@ -879,6 +944,7 @@ fn execute<H: PluginHost + 'static>(
     runtime: &craft_plugin::RuntimeManifest,
     entry: &craft_plugin::Entry,
     params: String,
+    event: Option<&craft_plugin::ui::UiEvent>,
     (engine, component, stack): (Engine, Component, usize),
     (commands, groups, design_tokens): (BTreeMap<String, CommandSchema>, BTreeSet<String>, bool),
     folders: BTreeMap<String, Folder>,
@@ -894,6 +960,7 @@ fn execute<H: PluginHost + 'static>(
         design_tokens,
         folders,
         staged: BTreeMap::new(),
+        created_dirs: Vec::new(),
         clock: runtime.permissions.clock,
         forms: forms && !dialog,
         failed: None,
@@ -903,11 +970,16 @@ fn execute<H: PluginHost + 'static>(
         deadline: Instant::now() + Duration::from_millis(limits.deadline_ms),
         limits: store_limits(limits, 10_000),
         import: None,
+        panels: None,
     };
     let mut store = Store::new(&engine, state);
     let outcome = (|| {
         prepare_store(&mut store, limits)?;
         let wit = check_imports(&engine, &component)?;
+        ui::check_imports(&engine, &component, runtime)?;
+        if wit == Wit::V0_1 && ui::enabled(runtime) {
+            return Err(component_error("ui requires the current WIT version"));
+        }
         let response = with_interrupts(&engine, || match wit {
             Wit::V0_1 if dialog => v0_1::call_dialog(&engine, &mut store, &component, &entry.name, &params, runtime.is_importer()),
             Wit::V0_1 => v0_1::call_entry(&engine, &mut store, &component, &entry.name, &params),
@@ -915,6 +987,10 @@ fn execute<H: PluginHost + 'static>(
                 let mut linker = Linker::new(&engine);
                 if runtime.is_importer() {
                     importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
+                } else if runtime.is_exporter() {
+                    exporter_bindings::ExporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
+                } else if ui::enabled(runtime) {
+                    panel_bindings::PanelPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 } else {
                     // Command hooks may also import design-state or forms; the hook-only WIT world stays unchanged.
                     bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
@@ -922,6 +998,7 @@ fn execute<H: PluginHost + 'static>(
                 let guest = dialog_bindings::DialogPlugin::instantiate(&mut store, &component, &linker)?;
                 Ok(guest.craft_plugin_dialog_provider().call_update_fields(&mut store, &entry.name, &params)?.map_err(host_error))
             }
+            Wit::Current if ui::enabled(runtime) => ui::call_entry(&engine, &mut store, &component, runtime, &entry.name, &params, event),
             Wit::Current => {
                 let mut linker = Linker::new(&engine);
                 bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
@@ -1081,6 +1158,7 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
     let runtime =
         manifest.runtime.as_ref().ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "no executable runtime".into() })?;
     runtime.validate()?;
+    ui::validate_manifest(manifest, runtime)?;
     if bytes.len() > runtime.max_component_bytes() {
         return Err(limit(&format!("component size: {} bytes is over {} MiB", bytes.len(), runtime.max_component_bytes() >> 20)));
     }
@@ -1088,17 +1166,30 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
         return Err(component_error("this is a core WebAssembly module, not a component"));
     }
     let importer = runtime.is_importer();
-    let (engine, component) = compile_with(bytes, stack_bytes(&runtime.limits, options, importer)?)?;
+    let (engine, component) = compile_with(bytes, stack_bytes(&runtime.limits, options, importer || runtime.is_exporter())?, disk_cache())?;
     let wit = check_imports(&engine, &component)?;
+    ui::check_imports(&engine, &component, runtime)?;
     let link = |e: wasmtime::Error| component_error(format!("{e:#}"));
     let hook = check_dialog_export(manifest, &engine, &component)?;
     if wit == Wit::V0_1 {
+        if ui::enabled(runtime) {
+            return Err(component_error("ui requires the current WIT version"));
+        }
+        if runtime.is_exporter() {
+            return Err(component_error("an exporter needs the exporter-plugin world from WIT 0.2"));
+        }
         return v0_1::check_link::<Inert>(&engine, &component, importer, hook).map_err(link);
     }
     if hook {
         let mut linker = Linker::<State<Inert>>::new(&engine);
         if importer {
             importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        } else if runtime.is_exporter() {
+            exporter_bindings::ExporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        } else if ui::enabled(runtime)
+            || manifest.capabilities.iter().any(|capability| capability.split_once('@').is_some_and(|(name, _)| name == "ui"))
+        {
+            panel_bindings::PanelPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         } else {
             bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         }
@@ -1108,6 +1199,13 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
     if importer {
         importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         importer_bindings::ImporterPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
+    } else if runtime.is_exporter() {
+        exporter_bindings::ExporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        exporter_bindings::ExporterPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
+    } else if ui::enabled(runtime) || manifest.capabilities.iter().any(|capability| capability.split_once('@').is_some_and(|(name, _)| name == "ui"))
+    {
+        panel_bindings::PanelPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        panel_bindings::PanelPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
     } else {
         bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         bindings::CommandPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
@@ -1117,9 +1215,39 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
 
 type Compiled = (Arc<[u8]>, usize, Engine, Component);
 /// The most recently compiled component. Compiling a large importer takes tens of seconds; keeping
-/// the compiled code in memory (never on disk, which would need unsafe deserialization) lets the
-/// next file open at once. Every call still gets a fresh instance and store.
+/// the compiled code in memory lets the next file open at once, and [`disk_cache`] lets the next
+/// session skip the compile too. Every call still gets a fresh instance and store.
 static COMPILED: Mutex<Option<Compiled>> = Mutex::new(None);
+
+/// The folder the app chose for compiled components ([`crate::set_compile_cache_dir`]).
+static COMPILE_CACHE_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+/// Wasmtime's compilation cache in that folder, opened on first use.
+static DISK_CACHE: OnceLock<Option<wasmtime::Cache>> = OnceLock::new();
+
+pub(super) fn set_compile_cache_dir(dir: Option<PathBuf>) -> bool {
+    COMPILE_CACHE_DIR.set(dir).is_ok()
+}
+
+/// Wasmtime's own compilation cache, in the folder the app set, or none. The key covers the
+/// component's bytes, Wasmtime's version and every compile setting (fuel, epoch interruption, the
+/// processor's features), so a changed plugin, a new SolidCraft or another setting never reads
+/// another one's code. An entry that is missing, damaged or from another version is compiled
+/// again; a folder that can't be created or written leaves the compile as it was.
+fn disk_cache() -> Option<wasmtime::Cache> {
+    DISK_CACHE.get_or_init(|| COMPILE_CACHE_DIR.get().cloned().flatten().and_then(|dir| open_disk_cache(&dir))).clone()
+}
+
+fn open_disk_cache(dir: &Path) -> Option<wasmtime::Cache> {
+    let mut config = wasmtime::CacheConfig::new();
+    config.with_directory(dir);
+    match wasmtime::Cache::new(config) {
+        Ok(cache) => Some(cache),
+        Err(e) => {
+            ::log::warn!(target: "craft_plugin_wasm", "compiled plugins are not kept between sessions: {e:#}");
+            None
+        }
+    }
+}
 
 fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
     if let Ok(cache) = COMPILED.lock()
@@ -1129,7 +1257,7 @@ fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
     {
         return Ok((engine.clone(), component.clone()));
     }
-    let (engine, component) = compile_with(bytes, stack_bytes)?;
+    let (engine, component) = compile_with(bytes, stack_bytes, disk_cache())?;
     if let Ok(mut cache) = COMPILED.lock() {
         *cache = Some((Arc::from(bytes), stack_bytes, engine.clone(), component.clone()));
     }
@@ -1185,10 +1313,12 @@ fn check_outer_interfaces(bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Compiles `bytes` under the host's configuration, without the cache.
-fn compile_with(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
+/// Compiles `bytes` under the host's configuration, without the in-memory cache, reading and
+/// filling `disk` when there is one.
+fn compile_with(bytes: &[u8], stack_bytes: usize, disk: Option<wasmtime::Cache>) -> Result<(Engine, Component)> {
     check_outer_interfaces(bytes)?;
     let mut config = Config::new();
+    config.cache(disk);
     config.consume_fuel(true).epoch_interruption(true).wasm_memory64(false).wasm_multi_memory(false).max_wasm_stack(stack_bytes);
     // Wasmtime refuses a Wasm stack larger than its async stack, even for synchronous calls.
     config.async_stack_size(stack_bytes.saturating_add(1 << 20));
@@ -1218,6 +1348,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
             .as_ref()
             .ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "no executable runtime".into() })?;
         runtime.validate()?;
+        ui::validate_manifest(manifest, runtime)?;
         if !runtime.is_importer() {
             return Err(HostError::InvalidInput { field: "entry".into(), reason: "this plugin is not an importer".into() });
         }
@@ -1280,6 +1411,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         design_tokens: false,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
+        created_dirs: Vec::new(),
         clock: runtime.permissions.clock,
         forms: false,
         failed: None,
@@ -1290,11 +1422,13 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         // A large converter has a large indirect-call table.
         limits: store_limits(limits, 1_000_000),
         import: Some(import),
+        panels: None,
     };
     let mut store = Store::new(&engine, state);
     let outcome = (|| {
         prepare_store(&mut store, limits)?;
         let wit = check_imports(&engine, &component)?;
+        ui::check_imports(&engine, &component, runtime)?;
         let response = with_interrupts(&engine, || match wit {
             Wit::V0_1 => v0_1::call_import(&engine, &mut store, &component, &entry.name, &file, &options),
             Wit::Current => {
@@ -1333,6 +1467,115 @@ pub(super) fn run_import<H: PluginHost + 'static>(
     (state.host, outcome.map_err(|error| with_limits(error, limits)))
 }
 
+/// Runs an export slot in a fresh instance. The plugin reads the design only through the
+/// read-only commands its manifest lists, inside a transaction that is always rolled back, and
+/// reaches no file: it returns the bytes, and the caller writes them where the user chose.
+pub(super) fn run_export<H: PluginHost + 'static>(
+    mut host: H,
+    manifest: &Manifest,
+    bytes: &[u8],
+    slot: &str,
+    options: &Value,
+    runtime_options: RuntimeOptions,
+) -> (H, Result<Vec<u8>>) {
+    let prepared = (|| {
+        let runtime = manifest
+            .runtime
+            .as_ref()
+            .ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "no executable runtime".into() })?;
+        runtime.validate()?;
+        if !runtime.is_exporter() {
+            return Err(HostError::InvalidInput { field: "format".into(), reason: "this plugin is not an exporter".into() });
+        }
+        if bytes.len() > runtime.max_component_bytes() {
+            return Err(limit("component size"));
+        }
+        let entry = runtime
+            .entries
+            .iter()
+            .find(|e| e.name == slot)
+            .ok_or_else(|| HostError::InvalidInput { field: "format".into(), reason: "unknown export slot".into() })?;
+        let options = serde_json::to_string(options).map_err(|e| trap(e.to_string()))?;
+        if options.len() > MAX_JSON_BYTES {
+            return Err(limit("options exceed 1 MiB"));
+        }
+        let stack = stack_bytes(&runtime.limits, runtime_options, true)?;
+        let (engine, component) = compile(bytes, stack)?;
+        check_dialog_export(manifest, &engine, &component)?;
+        // Read-only commands the manifest lists, and no sensitive group: nothing reaches a file.
+        let commands: BTreeMap<String, CommandSchema> = host
+            .command_catalog()
+            .into_iter()
+            .filter(|s| runtime.commands.contains(&s.name) && s.effect == Effect::Read && s.group.is_none())
+            .map(|s| (s.name.clone(), s))
+            .collect();
+        if host.is_cancelled() {
+            return Err(HostError::Cancelled);
+        }
+        host.begin_transaction()?;
+        Ok((runtime, entry, options, engine, component, commands, stack))
+    })();
+    let (runtime, entry, options, engine, component, commands, stack) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => return (host, Err(error)),
+    };
+    let limits = &runtime.limits;
+    let state = State {
+        host,
+        commands,
+        groups: BTreeSet::new(),
+        effect: Effect::Read,
+        design_tokens: false,
+        folders: BTreeMap::new(),
+        staged: BTreeMap::new(),
+        created_dirs: Vec::new(),
+        clock: runtime.permissions.clock,
+        forms: false,
+        failed: None,
+        calls: 0,
+        max_calls: MAX_IMPORT_CALLS,
+        log_bytes: 0,
+        deadline: Instant::now() + Duration::from_millis(limits.deadline_ms),
+        limits: store_limits(limits, 1_000_000),
+        import: None,
+        panels: None,
+    };
+    let mut store = Store::new(&engine, state);
+    let outcome = (|| {
+        prepare_store(&mut store, limits)?;
+        check_imports(&engine, &component)?;
+        let mut linker = Linker::new(&engine);
+        exporter_bindings::ExporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)
+            .map_err(|e| trap(e.to_string()))?;
+        let response = with_interrupts(&engine, || {
+            let guest = exporter_bindings::ExporterPlugin::instantiate(&mut store, &component, &linker)?;
+            call_export!(guest, &mut store, &entry.name, &options)
+        })?;
+        if let Some(error) = store.data().failed.clone() {
+            return Err(error);
+        }
+        let response = response.map_err(|e| execution_error(&e, store.get_fuel().ok(), limits, stack))?;
+        let file = response.map_err(host_error)?;
+        if file.len() > MAX_EXPORT_FILE_BYTES {
+            return Err(limit("export: a file of more than 256 MiB"));
+        }
+        if store.data().host.is_cancelled() {
+            return Err(HostError::Cancelled);
+        }
+        // A last host call can finish after the deadline, before the next epoch tick sees it.
+        if Instant::now() >= store.data().deadline {
+            return Err(deadline());
+        }
+        Ok(file)
+    })();
+    let mut state = store.into_data();
+    // An export never changes the app: what its commands did is always thrown away.
+    let rolled_back = state.host.rollback_transaction();
+    let outcome = rolled_back.and(outcome);
+    (state.host, outcome.map_err(|error| with_limits(error, limits)))
+}
+
 #[cfg(test)]
 mod tests;
+pub(crate) mod ui;
 mod v0_1;
