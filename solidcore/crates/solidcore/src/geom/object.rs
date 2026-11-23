@@ -72,7 +72,7 @@ use std::collections::BTreeSet;
 
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
-use crate::geom::context::{with_mark_lock, Context, ALL_MARKS};
+use crate::geom::context::{with_mark_lock, CallbackEvent, Context, ALL_MARKS};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::tree::{NodeGeomType, Tree};
 use crate::kernel::Kernel;
@@ -224,14 +224,11 @@ pub fn notify(
     let Some(context) = context else {
         return;
     };
-    // Call user callback if present.
-    if let Some(ucb) = context.user_notify_callback_mut() {
-        let _status = ucb.execute(operation, caller, data1, data2, data3);
-    }
-    // Call system callback if present.
-    if let Some(scb) = context.sys_notify_callback_mut() {
-        let _status = scb.execute(operation, caller, data1, data2, data3);
-    }
+    context.notify_observers(CallbackEvent::Notify(
+        operation,
+        caller,
+        [data1, data2, data3],
+    ));
 }
 
 /// Reports to the context's user and system notify callbacks (each only if set) that
@@ -247,12 +244,7 @@ pub fn report_owner_link(
     let Some(context) = context else {
         return;
     };
-    if let Some(ucb) = context.user_notify_callback_mut() {
-        ucb.owner_link(object, owner);
-    }
-    if let Some(scb) = context.sys_notify_callback_mut() {
-        scb.owner_link(object, owner);
-    }
+    context.notify_observers(CallbackEvent::OwnerLink(object, owner));
 }
 
 /// A scoped change of a value (`SmTemporaryChangeValue<TYPE>`): sets the value on
@@ -945,6 +937,67 @@ mod tests {
         assert_eq!(l[1].1, NotifyOperation::Split);
         assert_eq!(l[1].2, obj(1));
         assert_eq!(l[1].3, [Some(obj(2)), Some(obj(3)), None]);
+    }
+
+    #[test]
+    fn an_atomic_edit_commits_owner_links_in_order_and_discards_them_on_unwind() {
+        use crate::topology::brep::p3::with_lent_context;
+        use crate::topology::topology::TrackTopologyChanges;
+        use crate::BrepId;
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        let mut k = Kernel::default();
+        let tracker =
+            TrackTopologyChanges::new(Some(BrepId::from_index(0)), 1, true, Some(&mut k.context));
+        let log: Log = Arc::default();
+        k.context.set_user_notify_callback(Some(Box::new(Recorder {
+            tag: 1,
+            log: log.clone(),
+        })));
+        let curve = ObjectRef {
+            type_code: crate::curve::curve::p2::LINE_TYPE,
+            key: ObjectKey(1),
+        };
+        let edge_ref = |key| ObjectRef {
+            type_code: edge::TYPE,
+            key: ObjectKey(key),
+        };
+
+        Context::with_committed_notifications(&mut k, |k| {
+            report_owner_link(Some(&mut k.context), curve.key, Some(edge_ref(2)));
+            let panicked = catch_unwind(AssertUnwindSafe(|| {
+                Context::with_committed_notifications(k, |k| -> Result<()> {
+                    with_lent_context(k, |_, ctx| {
+                        report_owner_link(Some(ctx), curve.key, Some(edge_ref(3)));
+                        notify(
+                            Some(ctx),
+                            NotifyOperation::PostEdit,
+                            curve,
+                            Some(curve),
+                            None,
+                            None,
+                        );
+                        panic!("discard the nested edit")
+                    })?
+                })
+            }));
+            assert!(panicked.is_err());
+            notify(
+                Some(&mut k.context),
+                NotifyOperation::PostEdit,
+                curve,
+                Some(curve),
+                None,
+                None,
+            );
+            assert!(tracker.lists().notify_events.is_empty());
+            assert!(log.lock().unwrap().is_empty());
+            Ok(())
+        })
+        .unwrap();
+        assert!(tracker.failure().is_none());
+        assert_eq!(tracker.lists().chg_list, [edge_ref(2).key]);
+        assert_eq!(log.lock().unwrap().len(), 1);
     }
 
     #[test]
