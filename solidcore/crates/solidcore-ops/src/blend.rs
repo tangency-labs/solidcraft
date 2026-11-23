@@ -44,7 +44,8 @@ use solidcore::blend::blend_corner::rollover::{
     chain_off_seams, concave_chain, concave_chain_ends, has_end_arc, is_concave_chain, seams_back,
     RollOver,
 };
-use solidcore::blend::blend_corner::{separate_ends::classify_separate_ends, BlendCornerEvent};
+use solidcore::blend::blend_corner::separate_ends::{independent_separate_ends, SeparateEndPair};
+use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
 use solidcore::blend::chamfer_side::{faces_along, wedge_at_middle};
 use solidcore::blend::definition_check::BlendFaceLog;
@@ -1223,7 +1224,7 @@ fn separated_end_picks(
     b: &mut Brep,
     picked: &[EdgeId],
     sizes: &[f64],
-) -> solidcore::Result<HashMap<usize, [f64; 3]>> {
+) -> solidcore::Result<Option<HashMap<usize, [f64; 3]>>> {
     let mut at_vertex: HashMap<VertexId, Vec<usize>> = HashMap::new();
     for (i, &e) in picked.iter().enumerate() {
         let (start, end) = edge::start_end_vertices(b, e)?;
@@ -1239,8 +1240,8 @@ fn separated_end_picks(
             }
         }
     }
-    let mut trailing = HashMap::new();
-    let mut envelopes = Vec::new();
+    let mut trailing = Vec::new();
+    let mut pairs = Vec::new();
     for v in b.vertex_list().to_vec() {
         let Some([i, j]) = at_vertex.get(&v).map(Vec::as_slice) else {
             continue;
@@ -1254,16 +1255,11 @@ fn separated_end_picks(
         let (Some(&a_size), Some(&z_size)) = (sizes.get(*i), sizes.get(*j)) else {
             continue;
         };
-        let Some(envelope) = classify_separate_ends(k, b, v, [a, z], [a_size, z_size])? else {
-            continue;
-        };
-        if envelopes
-            .iter()
-            .any(|other| !envelope.are_disjoint(other, 0.0))
-        {
-            return Ok(HashMap::new());
-        }
-        envelopes.push(envelope);
+        pairs.push(SeparateEndPair {
+            vertex: v,
+            edges: [a, z],
+            sizes: [a_size, z_size],
+        });
         // The two ends are independent. Use the body's order so reversing the picks does not
         // change which blend is built first.
         let last = if b.edge_list().iter().position(|&e| e == a)
@@ -1273,10 +1269,22 @@ fn separated_end_picks(
         } else {
             *i
         };
-        let p = vertex::point(b, v)?;
-        trailing.insert(last, [p.x, p.y, p.z]);
+        trailing.push((last, v));
     }
-    Ok(trailing)
+    // Other blend workflows can couple picks away from their endpoints. Partition only
+    // selections made entirely of independent pairs.
+    if pairs.len().checked_mul(2) != Some(picked.len()) || !independent_separate_ends(k, b, &pairs)?
+    {
+        return Ok(None);
+    }
+    let trailing = trailing
+        .into_iter()
+        .map(|(i, v)| {
+            let p = vertex::point(b, v)?;
+            Ok((i, [p.x, p.y, p.z]))
+        })
+        .collect::<solidcore::Result<_>>()?;
+    Ok(Some(trailing))
 }
 
 /// Build the two groups of separated ends with the ordinary end construction. The first
@@ -1289,12 +1297,9 @@ fn separated_end_passes(
     kind: Blend,
     contract: Contract,
 ) -> solidcore::Result<Option<Result<()>>> {
-    let trailing = separated_end_picks(k, b, picked, sizes)?;
-    // The other blend workflows may couple picks away from their endpoint. Partition only
-    // selections made entirely of the independent ends proved above.
-    if trailing.len().checked_mul(2) != Some(picked.len()) {
+    let Some(trailing) = separated_end_picks(k, b, picked, sizes)? else {
         return Ok(None);
-    }
+    };
     let pass_group = |k: &mut Kernel, b: &mut Brep, edges: &[EdgeId], sizes: &[f64]| {
         let chamfers: Vec<_> = if kind == Blend::Chamfer {
             sizes

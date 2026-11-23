@@ -28,6 +28,42 @@ struct Fan {
     sectors: [FaceId; 6],
 }
 
+/// Two selections that meet at a candidate cutout corner.
+pub struct SeparateEndPair {
+    /// Where the selected edges share an endpoint.
+    pub vertex: VertexId,
+    /// The two edges to blend.
+    pub edges: [EdgeId; 2],
+    /// Offsets or radii in the same order as the edges.
+    pub sizes: [f64; 2],
+}
+
+/// Whether every pair can use separate Ends and the pairs' blend envelopes are disjoint.
+///
+/// # Errors
+/// Propagates failures reading or evaluating the candidate geometry.
+pub fn independent_separate_ends(
+    k: &Kernel,
+    b: &mut Brep,
+    pairs: &[SeparateEndPair],
+) -> Result<bool> {
+    let mut envelopes = Vec::with_capacity(pairs.len());
+    for pair in pairs {
+        let Some(envelope) = classify_separate_ends(k, b, pair.vertex, pair.edges, pair.sizes)?
+        else {
+            return Ok(false);
+        };
+        if envelopes
+            .iter()
+            .any(|other| !envelope.are_disjoint(other, 0.0))
+        {
+            return Ok(false);
+        }
+        envelopes.push(envelope);
+    }
+    Ok(true)
+}
+
 /// Certifies separate Ends with square trim supports at `v`, for the given sizes.
 ///
 /// A right-angle concave blend fits its trim support only up to the neighboring
@@ -42,7 +78,7 @@ struct Fan {
 ///
 /// # Errors
 /// Propagates failures reading the B-rep and evaluating the incident edges.
-pub fn classify_separate_ends(
+fn classify_separate_ends(
     k: &Kernel,
     b: &mut Brep,
     v: VertexId,
