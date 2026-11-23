@@ -101,6 +101,38 @@
 //! | [`TopologyFailure::OwnerListOverCount`] | `SM_ERR` |
 //! | [`TopologyFailure::NothingToLink`] | `SM_ERR` |
 //! | [`TopologyFailure::NotOnOwnerList`] | `SM_ERR` |
+//! | [`TopologyFailure::NoVertexGiven`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::NoFaceGiven`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::NoInfiniteRegion`] | `SM_ERR` |
+//! | [`TopologyFailure::VertexLoopInSharedFace`] | `SM_ERR` |
+//! | [`TopologyFailure::VertexNotOnTwoEdges`] | `SM_ERR` |
+//! | [`TopologyFailure::EdgeNotOnVertex`] | `SM_ERR` |
+//! | [`TopologyFailure::EdgeCurveNotJoinable`] | `SM_ERR` |
+//! | [`TopologyFailure::CurvesNotJoined`] | `SM_ERR` |
+//! | [`TopologyFailure::InfiniteRegionNotFound`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::VerticesShareNoRegion`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::NoVertexSector`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::NoRegionsToKeepGiven`] | `SM_ERR` |
+//! | [`TopologyFailure::NoFiniteRegion`] | `SM_ERR` |
+//! | [`TopologyFailure::FaceStitchFailed`] | `SM_ERR` |
+//! | [`TopologyFailure::SurfaceNotTransformable`] | `SM_ERR` |
+//! | [`TopologyFailure::SurfaceWithoutGenerator`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::EdgeWithoutEdgeuses`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::CurveOwnerUnresolved`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::SurfaceWithoutOwningFace`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::SolveViewWithoutCache`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::CacheTargetNotBrep`] | `SM_ERR` |
+//! | [`TopologyFailure::NoInputStream`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::RecordTypeUnknown`] | `SM_ERR` |
+//! | [`TopologyFailure::AttributeSlotEmpty`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::BlendRecordNotProved`] | `SM_ERR` |
+//! | [`TopologyFailure::NoTrimmedBSpline`] | `SM_ERR_INVALID_INPUT` |
+//! | [`TopologyFailure::FaceListedTwice`] | `SM_ERR` |
+//! | [`TopologyFailure::EdgesNotSharingVertices`] | `SM_ERR` |
+//! | [`TopologyFailure::NoSectorForNewEdgeuse`] | `SM_ERR` |
+//! | [`TopologyFailure::NoClassifiablePoint`] | `SM_ERR` |
+//! | [`TopologyFailure::UvTrimCurvesNotMade`] | `SM_ERR` |
+//! | [`TopologyFailure::FacesNotCopiedOnce`] | `SM_ERR` |
 //!
 //! A named cause keeps the status of the phrase it replaced, unless its site overrides it
 //! through `with_status`.
@@ -192,6 +224,15 @@ pub enum TopologyFailure {
         /// The face the surface belongs to, where it has one.
         entity: Option<EntityRef>,
     },
+    /// An edge gave no B-spline copy of its curve trimmed to its interval: it has no curve,
+    /// its curve has no B-spline form, or the trim failed. Class `failed`.
+    NoTrimmedBSpline,
+    /// A face the caller listed to copy is listed more than once.
+    /// [`ErrorKind::InvalidInput`].
+    FaceListedTwice,
+    /// The two edges the caller gave to glue do not share both their vertices.
+    /// [`ErrorKind::InvalidInput`].
+    EdgesNotSharingVertices,
     /// The face's upward face use has no edge use (its loops are vertex loops, or it has
     /// none), so no edge gives a direction to vote with. [`ErrorKind::Unsupported`].
     FaceWithoutEdges,
@@ -210,6 +251,12 @@ pub enum TopologyFailure {
     /// orientable, or it is an open sheet the closed-solid orientation does not take. Class
     /// `failed`.
     GatheredBothSides,
+    /// The caller gave no vertex. [`ErrorKind::InvalidInput`].
+    NoVertexGiven,
+    /// The caller gave no face. [`ErrorKind::InvalidInput`].
+    NoFaceGiven,
+    /// The B-rep the caller gave has no infinite region. [`ErrorKind::InvalidInput`].
+    NoInfiniteRegion,
     /// The edge to delete is neither a wire, a lamina nor a manifold edge (for example a
     /// spine edge, which more than two faces share): the deletion takes only those.
     /// [`ErrorKind::Unsupported`].
@@ -393,6 +440,20 @@ pub enum TopologyFailure {
     /// The edge use has no UV trim curve and making one failed; the error of the fetch that tried
     /// is kept as the cause.
     UvTrimCurveNotMade,
+    /// No radial sector of an edge takes a new face's edge use there; the face is still
+    /// made. Class `failed`.
+    NoSectorForNewEdgeuse,
+    /// No point stepped off the face use's first edge could be classified against the
+    /// shells: the step leaves the face (a face narrower than the step) or the
+    /// classification fails, at every step tried. Class `failed`.
+    NoClassifiablePoint,
+    /// The UV trim curves of a face could not be made; the error that stopped them, where
+    /// there is one, is the cause. Class `failed`; whether it is a defect or a refusal is
+    /// its cause's.
+    UvTrimCurvesNotMade,
+    /// A requested face has no copy, or more than one, after the copy: the merge passed
+    /// over a face it failed to make, or split one. Class `failed`.
+    FacesNotCopiedOnce,
     /// The caller gave no file contents to read. [`ErrorKind::InvalidInput`].
     NoDataGiven,
     /// The caller gave no curve. [`ErrorKind::InvalidInput`].
@@ -459,6 +520,92 @@ pub enum TopologyFailure {
     NothingToLink,
     /// The object to remove is not on this owner's list. [`ErrorKind::InvalidInput`].
     NotOnOwnerList,
+    /// The two vertices to combine share a face in which the surviving vertex is a vertex
+    /// loop, so no edge between them can be made in that face. [`ErrorKind::Unsupported`].
+    VertexLoopInSharedFace,
+    /// The vertex to delete between two edges is on `edges` edges, not two.
+    /// [`ErrorKind::InvalidInput`].
+    VertexNotOnTwoEdges {
+        /// The number of edges at the vertex.
+        edges: usize,
+    },
+    /// The edge the caller chose to delete is not one of the vertex's two edges.
+    /// [`ErrorKind::InvalidInput`].
+    EdgeNotOnVertex,
+    /// The curve of the edge (`entity`) has no exact B-spline form over the edge, so the two edges' curves
+    /// cannot be joined (WR-598): it is neither of a B-spline kind nor an iso line of a
+    /// B-spline surface, or it is an iso line of a procedural blend whose net is not within
+    /// the joined edge's tolerance of the blend's definition. [`ErrorKind::Unsupported`].
+    EdgeCurveNotJoinable {
+        /// The edge whose curve has no B-spline form.
+        entity: Option<EntityRef>,
+    },
+    /// Joining the two edges' B-spline copies at the deleted vertex failed; the join's
+    /// failure is the cause. Class `failed`; whether it is a defect or a refusal is its
+    /// cause's ([`crate::SolidError::is_defect`] follows the chain).
+    CurvesNotJoined,
+    /// The search for the infinite region found no region outside every shell. Class
+    /// `failed`.
+    InfiniteRegionNotFound,
+    /// The two vertices to glue have no region in common: no shell of one is in a region
+    /// with a shell of the other. [`ErrorKind::InvalidInput`].
+    VerticesShareNoRegion,
+    /// No sector of the vertex at the curve's start (its end, with `at_end`) takes the
+    /// curve into the face. Class `failed`.
+    NoVertexSector {
+        /// Whether the search was at the curve's end.
+        at_end: bool,
+    },
+    /// The caller's list of regions to keep is empty. [`ErrorKind::InvalidInput`].
+    NoRegionsToKeepGiven,
+    /// The caller's B-rep has no region but the infinite one to keep.
+    /// [`ErrorKind::InvalidInput`].
+    NoFiniteRegion,
+    /// Stitching the squeezed face's vertices and edges into their neighbours failed; the
+    /// first stitch step's failure is the cause. Class `failed`.
+    FaceStitchFailed,
+    /// The surface of the face (`entity`) could not be transformed in place, and its kind has no
+    /// B-spline base to transform instead (a curve-bounded, STEP, offset or in-volume
+    /// surface); the in-place transform's failure is the cause. [`ErrorKind::Unsupported`].
+    SurfaceNotTransformable {
+        /// The face whose surface could not be transformed.
+        entity: Option<EntityRef>,
+    },
+    /// A surface of revolution or extrusion has no generator curve, which its record
+    /// needs (only the `empty()` constructors leave it out). [`ErrorKind::InvalidInput`].
+    SurfaceWithoutGenerator,
+    /// An edge of the caller's body has no edge use, so it is on no loop or wire (an edge
+    /// added and never linked, or one no edge-use record of a file names).
+    /// [`ErrorKind::InvalidInput`].
+    EdgeWithoutEdgeuses,
+    /// An edge's curve resolves to no owning edge: it has no owner, or the caller's owner
+    /// map does not resolve the edge use or generated curve that owns it.
+    /// [`ErrorKind::InvalidInput`].
+    CurveOwnerUnresolved,
+    /// A face's surface has no owning face. [`ErrorKind::InvalidInput`].
+    SurfaceWithoutOwningFace,
+    /// The topology solver asked for the B-rep's cache on a view the caller made without
+    /// one. [`ErrorKind::InvalidInput`].
+    SolveViewWithoutCache,
+    /// A B-rep cache was asked for a type that is neither a B-rep nor a poly B-rep.
+    /// [`ErrorKind::InvalidInput`].
+    CacheTargetNotBrep,
+    /// The database reader has no input stream: nothing was opened for reading.
+    /// [`ErrorKind::InvalidInput`].
+    NoInputStream,
+    /// The file holds a curve or surface record of a type the read does not take.
+    /// [`ErrorKind::InvalidInput`].
+    RecordTypeUnknown {
+        /// The record's type code.
+        type_code: i64,
+    },
+    /// The file names an attribute whose slot in the attribute table is empty.
+    /// [`ErrorKind::InvalidInput`].
+    AttributeSlotEmpty,
+    /// A procedural blend read from the file is not proved within its bound of its
+    /// definition; the proof's failure is the cause. Class `failed`; whether it is a
+    /// defect or a refusal is its cause's.
+    BlendRecordNotProved,
 }
 
 /// What a B-rep constructor call works in ([`TopologyFailure::ConstructorNotOpen`],
@@ -561,7 +708,26 @@ impl TopologyFailure {
             | Self::OwnerListBroken
             | Self::OwnerListOverCount { .. }
             | Self::NothingToLink
-            | Self::NotOnOwnerList => SM_ERR,
+            | Self::NotOnOwnerList
+            | Self::NoInfiniteRegion
+            | Self::VertexLoopInSharedFace
+            | Self::VertexNotOnTwoEdges { .. }
+            | Self::EdgeNotOnVertex
+            | Self::EdgeCurveNotJoinable { .. }
+            | Self::CurvesNotJoined
+            | Self::NoRegionsToKeepGiven
+            | Self::NoFiniteRegion
+            | Self::FaceStitchFailed
+            | Self::SurfaceNotTransformable { .. }
+            | Self::CacheTargetNotBrep
+            | Self::RecordTypeUnknown { .. }
+            | Self::BlendRecordNotProved
+            | Self::FaceListedTwice
+            | Self::EdgesNotSharingVertices
+            | Self::NoSectorForNewEdgeuse
+            | Self::NoClassifiablePoint
+            | Self::UvTrimCurvesNotMade
+            | Self::FacesNotCopiedOnce => SM_ERR,
             Self::Missing(_)
             | Self::RadialFaceWithoutSurface
             | Self::RadialRimWithoutEdge
@@ -576,9 +742,22 @@ impl TopologyFailure {
             | Self::FaceUseWithoutShell
             | Self::ShellHasNoFaceUses
             | Self::UvTrimCurveNotMade
-            | Self::NoSurfaceGiven => SM_ERR_NULL_POINTER,
+            | Self::NoSurfaceGiven
+            | Self::NoVertexGiven
+            | Self::NoFaceGiven
+            | Self::InfiniteRegionNotFound
+            | Self::VerticesShareNoRegion
+            | Self::NoVertexSector { .. }
+            | Self::SurfaceWithoutGenerator
+            | Self::EdgeWithoutEdgeuses
+            | Self::CurveOwnerUnresolved
+            | Self::SurfaceWithoutOwningFace
+            | Self::SolveViewWithoutCache
+            | Self::NoInputStream
+            | Self::AttributeSlotEmpty => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_)
             | Self::NoBrepGiven
+            | Self::NoTrimmedBSpline
             | Self::EdgeUseNotInLoop
             | Self::NewPrimaryNotOnEdge
             | Self::NotFourEdgeUses { .. }
@@ -648,7 +827,26 @@ impl TopologyFailure {
             | Self::OwnerListBroken
             | Self::OwnerListOverCount { .. }
             | Self::NothingToLink
-            | Self::NotOnOwnerList => ErrorKind::InvalidInput,
+            | Self::NotOnOwnerList
+            | Self::NoVertexGiven
+            | Self::NoFaceGiven
+            | Self::NoInfiniteRegion
+            | Self::VertexNotOnTwoEdges { .. }
+            | Self::EdgeNotOnVertex
+            | Self::VerticesShareNoRegion
+            | Self::NoRegionsToKeepGiven
+            | Self::NoFiniteRegion
+            | Self::SurfaceWithoutGenerator
+            | Self::EdgeWithoutEdgeuses
+            | Self::CurveOwnerUnresolved
+            | Self::SurfaceWithoutOwningFace
+            | Self::SolveViewWithoutCache
+            | Self::CacheTargetNotBrep
+            | Self::NoInputStream
+            | Self::RecordTypeUnknown { .. }
+            | Self::AttributeSlotEmpty
+            | Self::FaceListedTwice
+            | Self::EdgesNotSharingVertices => ErrorKind::InvalidInput,
             Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
             | Self::FaceWithoutEdges
@@ -658,11 +856,20 @@ impl TopologyFailure {
             | Self::LaminaEdgeIsStrut
             | Self::RadialSweepNeedsCones
             | Self::TooManyTangentFaces
-            | Self::NoPlaneProjection => ErrorKind::Unsupported,
+            | Self::NoPlaneProjection
+            | Self::VertexLoopInSharedFace
+            | Self::EdgeCurveNotJoinable { .. }
+            | Self::SurfaceNotTransformable { .. } => ErrorKind::Unsupported,
             Self::CurveNotApproximated
+            | Self::NoTrimmedBSpline
             | Self::AllocationFailed
             | Self::NoProjectedCurves
-            | Self::NoFootOnCurve => ErrorKind::Failed,
+            | Self::NoFootOnCurve
+            | Self::InfiniteRegionNotFound
+            | Self::NoVertexSector { .. }
+            | Self::CurvesNotJoined
+            | Self::FaceStitchFailed
+            | Self::BlendRecordNotProved => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -723,6 +930,9 @@ impl core::fmt::Display for TopologyFailure {
             Self::GatheredBothSides => {
                 f.write_str("more face uses are connected than faces remain to be oriented")
             }
+            Self::NoVertexGiven => f.write_str("no vertex was given"),
+            Self::NoFaceGiven => f.write_str("no face was given"),
+            Self::NoInfiniteRegion => f.write_str("the B-rep has no infinite region"),
             Self::EdgeNotDeletable => {
                 f.write_str("only a wire, lamina or manifold edge can be deleted")
             }
@@ -861,6 +1071,83 @@ impl core::fmt::Display for TopologyFailure {
             }
             Self::NothingToLink => f.write_str("an object to link is missing"),
             Self::NotOnOwnerList => f.write_str("the object is not on this list"),
+            Self::VertexLoopInSharedFace => f.write_str(
+                "the vertices share a face in which the surviving vertex is a vertex loop",
+            ),
+            Self::VertexNotOnTwoEdges { edges } => {
+                write!(f, "the vertex is on {edges} edges, not two")
+            }
+            Self::EdgeNotOnVertex => f.write_str("the edge to delete is not on the vertex"),
+            Self::EdgeCurveNotJoinable { entity: None } => {
+                f.write_str("an edge's curve has no exact B-spline form to join")
+            }
+            Self::EdgeCurveNotJoinable { entity: Some(e) } => {
+                write!(
+                    f,
+                    "an edge's curve has no exact B-spline form to join ({e})"
+                )
+            }
+            Self::CurvesNotJoined => f.write_str("the edges' curves could not be joined"),
+            Self::InfiniteRegionNotFound => f.write_str("no infinite region was found"),
+            Self::VerticesShareNoRegion => f.write_str("the vertices share no region"),
+            Self::NoVertexSector { at_end: false } => {
+                f.write_str("no sector of the vertex at the curve's start takes the curve")
+            }
+            Self::NoVertexSector { at_end: true } => {
+                f.write_str("no sector of the vertex at the curve's end takes the curve")
+            }
+            Self::NoRegionsToKeepGiven => f.write_str("no regions to keep were given"),
+            Self::NoFiniteRegion => f.write_str("the B-rep has no finite region to keep"),
+            Self::FaceStitchFailed => f.write_str("stitching the face's vertices and edges failed"),
+            Self::SurfaceNotTransformable { entity: None } => {
+                f.write_str("a face's surface could not be transformed")
+            }
+            Self::SurfaceNotTransformable { entity: Some(e) } => {
+                write!(f, "a face's surface could not be transformed ({e})")
+            }
+            Self::SurfaceWithoutGenerator => {
+                f.write_str("the swept surface has no generator curve")
+            }
+            Self::EdgeWithoutEdgeuses => f.write_str("the edge has no edge use"),
+            Self::CurveOwnerUnresolved => {
+                f.write_str("the edge's curve resolves to no owning edge")
+            }
+            Self::SurfaceWithoutOwningFace => f.write_str("the face's surface has no owning face"),
+            Self::SolveViewWithoutCache => {
+                f.write_str("the solve needs the B-rep's cache, and the view has none")
+            }
+            Self::CacheTargetNotBrep => {
+                f.write_str("a B-rep cache is only for a B-rep or a poly B-rep")
+            }
+            Self::NoInputStream => f.write_str("the database has no input stream"),
+            Self::RecordTypeUnknown { type_code } => write!(
+                f,
+                "the file holds a record of type {type_code}, which the read does not take"
+            ),
+            Self::AttributeSlotEmpty => {
+                f.write_str("the file names an attribute whose table slot is empty")
+            }
+            Self::BlendRecordNotProved => f.write_str(
+                "a procedural blend read from the file is not proved within its bound of its \
+                 definition",
+            ),
+            Self::NoTrimmedBSpline => {
+                f.write_str("an edge gave no B-spline of its curve trimmed to its interval")
+            }
+            Self::FaceListedTwice => f.write_str("a face to copy is listed twice"),
+            Self::EdgesNotSharingVertices => {
+                f.write_str("the edges to glue do not share both vertices")
+            }
+            Self::NoSectorForNewEdgeuse => {
+                f.write_str("no radial sector of the edge takes the new edge use")
+            }
+            Self::NoClassifiablePoint => {
+                f.write_str("no point stepped off the face use could be classified")
+            }
+            Self::UvTrimCurvesNotMade => f.write_str("the face's UV trim curves could not be made"),
+            Self::FacesNotCopiedOnce => {
+                f.write_str("a requested face has no copy, or more than one")
+            }
         }
     }
 }
@@ -1240,6 +1527,169 @@ mod tests {
         );
     }
 
+    /// The named causes of the B-rep edits of `brep/p5` keep the status of the phrase each
+    /// replaced, and have their class.
+    #[test]
+    fn the_brep_p5_causes_keep_their_status_and_have_their_class() {
+        use crate::topology::{EdgeId, FaceId};
+        use ErrorKind as K;
+        let op = "topology::op";
+        let edge = Some(EntityRef::Edge(EdgeId::from_index(2)));
+        let face = Some(EntityRef::Face(FaceId::from_index(1)));
+        let cases = [
+            (
+                TopologyFailure::NoVertexGiven,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                TopologyFailure::NoFaceGiven,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (TopologyFailure::NoInfiniteRegion, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::VertexLoopInSharedFace,
+                SM_ERR,
+                K::Unsupported,
+            ),
+            (
+                TopologyFailure::VertexNotOnTwoEdges { edges: 3 },
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (TopologyFailure::EdgeNotOnVertex, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::EdgeCurveNotJoinable { entity: edge },
+                SM_ERR,
+                K::Unsupported,
+            ),
+            (TopologyFailure::CurvesNotJoined, SM_ERR, K::Failed),
+            (
+                TopologyFailure::EdgeWithoutCurve,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                TopologyFailure::InfiniteRegionNotFound,
+                SM_ERR_NULL_POINTER,
+                K::Failed,
+            ),
+            (
+                TopologyFailure::VerticesShareNoRegion,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                TopologyFailure::NoVertexSector { at_end: true },
+                SM_ERR_NULL_POINTER,
+                K::Failed,
+            ),
+            (
+                TopologyFailure::NoRegionsToKeepGiven,
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (TopologyFailure::NoFiniteRegion, SM_ERR, K::InvalidInput),
+            (TopologyFailure::FaceStitchFailed, SM_ERR, K::Failed),
+            (
+                TopologyFailure::SurfaceNotTransformable { entity: face },
+                SM_ERR,
+                K::Unsupported,
+            ),
+        ];
+        for (failure, status, kind) in cases {
+            let e = SolidError::topology(op, failure);
+            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.topology_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+        }
+        // the entity a cause carries is in its message, not the failure's entity
+        let e = SolidError::topology(op, TopologyFailure::EdgeCurveNotJoinable { entity: edge });
+        assert_eq!(e.entity(), None);
+        assert!(e
+            .to_string()
+            .contains(&EntityRef::Edge(EdgeId::from_index(2)).to_string()));
+        // the ignored step's failure stays the cause, and decides defect or refusal
+        let why = "a step the kernel got wrong";
+        let step = SolidError::topology(op, TopologyFailure::Defect { why });
+        let e = Failure::new(op, TopologyFailure::FaceStitchFailed)
+            .caused_by(step.clone())
+            .into_error();
+        assert_eq!(e.cause(), Some(&step));
+        assert!(e.is_defect());
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+    }
+
+    /// The named causes of the B-rep cache and the file reads and writes keep the status of
+    /// the phrase each replaced, and have their class.
+    #[test]
+    fn the_cache_and_file_causes_keep_their_status_and_have_their_class() {
+        use ErrorKind as K;
+        use TopologyFailure as T;
+        let op = "topology::op";
+        let cases = [
+            (
+                T::SurfaceWithoutGenerator,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (T::EdgeWithoutEdgeuses, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (
+                T::CurveOwnerUnresolved,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                T::SurfaceWithoutOwningFace,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                T::SolveViewWithoutCache,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (T::CacheTargetNotBrep, SM_ERR, K::InvalidInput),
+            (T::NoInputStream, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (
+                T::RecordTypeUnknown { type_code: 7 },
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (T::AttributeSlotEmpty, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (T::BlendRecordNotProved, SM_ERR, K::Failed),
+        ];
+        for (failure, status, kind) in cases {
+            let e = SolidError::topology(op, failure);
+            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.topology_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+        }
+        // the blend proof's failure stays the cause, and decides defect or refusal
+        let why = "a step the kernel got wrong";
+        let cause = SolidError::topology(op, T::Defect { why });
+        let e = Failure::new(op, T::BlendRecordNotProved)
+            .caused_by(cause.clone())
+            .into_error();
+        assert_eq!(e.cause(), Some(&cause));
+        assert!(e.is_defect());
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        // a net the proof refuses as input (`recertify`'s `InvalidInput`) reads as no defect
+        let cause = SolidError::invalid_input(op, "the net is not within its bound");
+        let e = Failure::new(op, T::BlendRecordNotProved)
+            .caused_by(cause.clone())
+            .into_error();
+        assert_eq!(e.cause(), Some(&cause));
+        assert!(!e.is_defect(), "{e:?}");
+        assert_eq!(e.kind(), K::Failed);
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+    }
+
     /// The topology routines describe their failures: their library code builds no bare
     /// `Upstream` status, except the file listed (with the bare sites it may still hold).
     #[test]
@@ -1507,6 +1957,47 @@ mod tests {
         assert!(asserted.is_defect());
     }
 
+    /// The named causes of the later B-rep edits (face copy and surface transfer) keep the
+    /// status of the phrase each replaced, and have their class.
+    #[test]
+    fn the_face_copy_causes_keep_their_status_and_have_their_class() {
+        use ErrorKind as K;
+        let op = "topology::op";
+        let cases = [
+            (
+                TopologyFailure::NoTrimmedBSpline,
+                SM_ERR_INVALID_INPUT,
+                K::Failed,
+            ),
+            (TopologyFailure::FaceListedTwice, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::EdgesNotSharingVertices,
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (TopologyFailure::NoSectorForNewEdgeuse, SM_ERR, K::Failed),
+            (TopologyFailure::NoClassifiablePoint, SM_ERR, K::Failed),
+            (TopologyFailure::UvTrimCurvesNotMade, SM_ERR, K::Failed),
+            (TopologyFailure::FacesNotCopiedOnce, SM_ERR, K::Failed),
+        ];
+        for (failure, status, kind) in cases {
+            let e = SolidError::topology(op, failure);
+            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.topology_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+        }
+        // the trim curves' failure stays their cause, and decides defect or refusal
+        let why = "a step the kernel got wrong";
+        let cause = SolidError::topology(op, TopologyFailure::Defect { why });
+        let e = Failure::new(op, TopologyFailure::UvTrimCurvesNotMade)
+            .caused_by(cause.clone())
+            .into_error();
+        assert_eq!(e.cause(), Some(&cause));
+        assert!(e.is_defect());
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+    }
+
     /// The sites that build a topology phrase cause only fall:
     /// per file, in the library code of `solidcore` and `solidcore-ops`, as
     /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
@@ -1541,9 +2032,6 @@ mod tests {
             ("solidcore/src/topology/brep/p1.rs", 42),
             ("solidcore/src/topology/brep/p10.rs", 10),
             ("solidcore/src/topology/brep/p2.rs", 16),
-            ("solidcore/src/topology/brep/p5.rs", 61),
-            ("solidcore/src/topology/brep/p6.rs", 29),
-            ("solidcore/src/topology/brep/p7.rs", 13),
             ("solidcore/src/topology/brep/p8.rs", 15),
             ("solidcore/src/topology/brep/p9.rs", 18),
             ("solidcore/src/topology/brep/planar_section.rs", 3),
@@ -1552,12 +2040,6 @@ mod tests {
             ("solidcore/src/topology/brep/validation/assert_valid/seams.rs", 1),
             ("solidcore/src/topology/brep/validation/pointers.rs", 2),
             ("solidcore/src/topology/brep/vertex_fans.rs", 6),
-            ("solidcore/src/topology/brep_cache.rs", 17),
-            ("solidcore/src/topology/brep_data.rs", 5),
-            ("solidcore/src/topology/brep_data_write.rs", 5),
-            ("solidcore/src/topology/database_io.rs", 3),
-            ("solidcore/src/topology/geometry_write.rs", 2),
-            ("solidcore/src/topology/part_file.rs", 1),
             ("solidcore/src/topology/proto_topology/p1/proto.rs", 16),
             ("solidcore/src/topology/proto_topology/p2.rs", 8),
             ("solidcore/src/topology/proto_topology/p3.rs", 6),
