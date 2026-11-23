@@ -83,7 +83,7 @@ The section joins the two rails. It is one of three kinds, chosen by its order n
 
 | n | section | surface |
 |---|---|---|
-| 0 | the chord | the chamfer |
+| 0 | the chord, or the circular arc over it at a sagitta h | the chamfer and the flat weld bead (h = 0), a weld bead's section (h ≠ 0) |
 | 1 | the circle of the ball between the rails | the exact canal surface, the envelope of the balls [35] |
 | 2 to 4 | the Gⁿ section | Hartmann's blend between the rails [14, 17] |
 
@@ -91,6 +91,15 @@ The section joins the two rails. It is one of three kinds, chosen by its order n
 
 *Figure 2. The section family on one cross-section, both rails set back s: chord (n = 0), circle
 (n = 1), order-2 section (n = 2, drawn without thumbweight).*
+
+**The order-0 section may bulge.** Its chord can carry a sagitta h: the circular arc between the
+rails whose middle stands h off the chord's middle, away from the edge for h > 0 (convex) and towards
+it for h < 0 (concave); the chord is h = 0. This is a weld bead's section
+(`surface::procedural_blend::bead::BeadDefinition`). With c the chord and β1, β2 the angles at
+which the chord leaves the faces, a concave arc stays off the faces below (c/2) tan(min βi / 2) and
+a convex one below (c/2) tan((π − max βi) / 2) (`BeadDefinition::bound`); a convex arc past
+(c/2) tan((π/2 − max βi) / 2) leans back over its toe (`BeadDefinition::overhang_bound`). Between
+planes along a straight edge it is a circular cylinder, an exact class (§4).
 
 **The circle (n = 1)** is the default round. It is stored as an exact rational circle: the rational
 quadratic arc with middle weight cos(θ/2), θ the angle between the contact normals [6, 7]. It is
@@ -267,6 +276,22 @@ first class: curve-dropping and face orientation take the first non-zero derivat
 model check accepts the s^(−1/2) curvature growth at that vertex only. Where E osculates F (Δκ = 0),
 the end is refused. A round fading to nothing (its two contacts merging) is singular in the round's
 own system and is refused until its own chart is derived.
+
+**A tangent end at a touch.** The seam T may be one the model holds as a touch within its
+tolerance: an end face a hair inside or outside F's tangent plane, joined to F along one line
+([booleans.md](booleans.md) §6). P, where the rail crosses T, is then on S and λ0 off E along E's
+normal n there, and S ∩ E misses P: with E inside by δ it reaches the rail √(2δ/Δκ) along it from P,
+and with E outside it stops short of the rail. No curve from P is within the tolerance of that curve,
+and the certificate refuses one (§2.4). Where |λ0| is within what the model allows between T and E,
+the gap the edge check takes for T's tolerance and E's
+([validity-and-tolerances.md](validity-and-tolerances.md) §5.2), the end is the rib of the standoff:
+the point X of the section σ(t) of S with X + λ(t) n on E, λ(t) = λ0 (1 − ŝ^q), ŝ the section
+parameter normalised to [0, 1] and q the contact order. It passes through P, where E moved by λ0 n
+touches S and the end is a true tangent end, and it ends on S ∩ E at the far rail, so it runs between
+the two vertices the model has; q ≥ k keeps a ∝ s^(k/2) at P. Every point of it is within
+|λ(t)| ≤ |λ0| of E. It is built only where the rib of the surfaces as they are is not certified, and
+is certified as that rib is, against E moved by λ(t) n at the section t; a standoff past what the
+model allows is refused as before (`blend::fillet_geom::tangent_end_rib::Standoff`).
 
 ### 3.2 Corners
 
@@ -503,7 +528,9 @@ rolling ball on a surface with rational offsets along a rational rail is rationa
 degrees with the two rails as boundary are in [27], and the variable-radius cylinder and cone cases
 in [24]. A pair whose offsets happen to touch at one radius is not taken as exact unless proved for
 that radius. Between planes, the Gⁿ section is rational too (the feet are linear), and a Gⁿ section
-with rotational symmetry is that section revolved; both are stored as rational surfaces.
+with rotational symmetry is that section revolved; both are stored as rational surfaces. Between
+planes the chord is the plane through the feet, and the chord with a sagitta (§2.2) the circular
+cylinder through the feet's lines; both are exact, stored with bound 0.
 
 ## 5. Design decisions that shape behaviour
 

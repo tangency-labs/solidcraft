@@ -738,8 +738,9 @@ preview. A Finish already running can still commit. Reconnect with a fresh Begin
 
 ### Reading the solved joint pose
 
-A client that follows a joint while someone adjusts Drive Joints asks `control.joint_pose`,
-which says what the preview shows: the joints it posed and the values the solver reached.
+A client that follows a joint while someone adjusts Drive Joints or drags a part along its
+joints asks `control.joint_pose`. The reply says what the preview shows: the joints it posed and
+the values the solver reached.
 
 ```text
 {"id":1,"method":"control.joint_pose","token":"…"}
@@ -752,9 +753,10 @@ which says what the preview shows: the joints it posed and the values the solver
 - `error` says why the current inputs make no preview (null when there is none).
 - `pose` is null when no solved joint preview is up. Otherwise:
   - `source` is what posed it: the command that opened the preview (`joint.drive` for Drive
-    Joints, `control.joint_drive` for a movement over this channel).
-  - `generation` counts the completed poses: it moves when the pose moves, and is not the
-    design's revision.
+    Joints, `control.joint_drive` for a movement over this channel, `joint.reach` for a part
+    dragged along its joints).
+  - `generation` counts the completed poses across all these sources. It moves when a new
+    completed pose is shown, and is not the design's revision.
   - `joints` are the joints the preview posed: the ones it drove and the ones it moved with
     them (a motion link's follower, a joint a closed loop moved). Each gives its id, its name
     and its values, as `joint.inspect` and `joint.drive` give them (`deg` for an angle, `mm` for
@@ -764,6 +766,12 @@ The pose is read, not computed: it is the state the viewport shows, so reading i
 nothing in the design, its history, its dirty state or its revision. A preview that poses no
 joint leaves no pose. Cancelling the movement, closing the dialog, switching design and
 changing the design all drop it.
+
+A native drag reports its completed CPU pose after the drag's existing solve. Reading does not
+advance the drag. Release clears the preview and keeps the drag's one Undo step; Escape clears
+it without applying it. A drag that already writes each frame to the design (for example, with
+contact sets enabled or uncaptured moves present) has no scratch pose: use the committed joint
+queries for those frames.
 
 ### Following the design
 

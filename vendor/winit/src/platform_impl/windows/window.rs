@@ -815,19 +815,29 @@ impl Window {
                         Fullscreen::Borderless(None) => monitor::current_monitor(window),
                     };
 
-                    let position: (i32, i32) = monitor.position().into();
-                    let size: (u32, u32) = monitor.size().into();
+                    let mut position: (i32, i32) = monitor.position().into();
+                    let mut size: (u32, u32) = monitor.size().into();
+
+                    // SolidCraft: a monitor that has gone away reports 0x0 (#20645). Fill the
+                    // monitor the window is on instead, and never apply a zero-area size.
+                    if size.0 == 0 || size.1 == 0 {
+                        let current = monitor::current_monitor(window);
+                        position = current.position().into();
+                        size = current.size().into();
+                    }
 
                     unsafe {
-                        SetWindowPos(
-                            window,
-                            0,
-                            position.0,
-                            position.1,
-                            size.0 as i32,
-                            size.1 as i32,
-                            SWP_ASYNCWINDOWPOS | SWP_NOZORDER,
-                        );
+                        if size.0 > 0 && size.1 > 0 {
+                            SetWindowPos(
+                                window,
+                                0,
+                                position.0,
+                                position.1,
+                                size.0 as i32,
+                                size.1 as i32,
+                                SWP_ASYNCWINDOWPOS | SWP_NOZORDER,
+                            );
+                        }
                         InvalidateRgn(window, 0, false.into());
                     }
                 },
