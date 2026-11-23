@@ -1,8 +1,7 @@
-//! WR-75 (fork tangency-labs/smlib ef4ab25, e9fde8f, d8c61db, 1693c9d): with
-//! `Kernel::fixes.ssi_tangent_curve_tracer` the surface/surface intersection traces the
-//! curves along which the surfaces touch, and reports the singular points where crossing
-//! branches meet. Two ssi-corpus cases (jyviko/ssi-corpus), the surfaces rebuilt here
-//! from their definitions:
+//! WR-75 (fork tangency-labs/smlib ef4ab25, e9fde8f, d8c61db, 1693c9d): the
+//! surface/surface intersection traces the curves along which the surfaces touch, and
+//! reports the singular points where crossing branches meet. Two ssi-corpus cases
+//! (jyviko/ssi-corpus), the surfaces rebuilt here from their definitions:
 //!
 //! - `c2n_quartic_circle`: the quartic `z = (x^2 + y^2 - 1)^2` over `[-2, 2]^2` (a
 //!   degree 4 Bezier patch, its control net computed below) against the plane `z = 0`.
@@ -130,9 +129,8 @@ fn cylinder(origin: Vec3, x: Vec3, y: Vec3) -> Surface {
 }
 
 /// `GlobalSurfaceIntersect` at the corpus tolerance (1e-6).
-fn intersect(fix: bool, s1: &Surface, s2: &Surface) -> SurfaceIntersection {
-    let mut k = Kernel::default();
-    k.fixes.ssi_tangent_curve_tracer = fix;
+fn intersect(s1: &Surface, s2: &Surface) -> SurfaceIntersection {
+    let k = Kernel::default();
     let d1 = s1.natural_uv_domain_with_nurb(&k).unwrap();
     let d2 = s2.natural_uv_domain_with_nurb(&k).unwrap();
     let tol = approx_tol3d(&k, 1e-6);
@@ -166,10 +164,7 @@ fn circle_sectors(x: &SurfaceIntersection) -> usize {
 #[test]
 fn wr75_quartic_touching_a_plane_along_a_circle() {
     let (q, p) = (quartic(), plane());
-    let upstream = intersect(false, &q, &p);
-    assert!(circle_sectors(&upstream) < 18, "{:?}", upstream.curve_types);
-
-    let fixed = intersect(true, &q, &p);
+    let fixed = intersect(&q, &p);
     assert_eq!(circle_sectors(&fixed), 36, "{:?}", fixed.curve_types);
     assert!(
         fixed.curve_types.contains(&TsectCurveType::Tangent),
@@ -196,14 +191,7 @@ fn wr75_steinmetz_crossing_points_are_reported() {
     let b = cylinder(Vec3::new(-2.0, 0.0, 0.0), Vec3::Y, Vec3::Z);
     let nodes = [Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, -1.0, 0.0)];
 
-    let upstream = intersect(false, &a, &b);
-    assert!(
-        !nodes.iter().all(|&n| touches_at(&upstream, n)),
-        "{:?}",
-        upstream.curve_types
-    );
-
-    let fixed = intersect(true, &a, &b);
+    let fixed = intersect(&a, &b);
     for n in nodes {
         assert!(touches_at(&fixed, n), "{n:?}: {:?}", fixed.curve_types);
     }

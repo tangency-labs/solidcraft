@@ -28,8 +28,9 @@ pub enum LineGroup {
     Mm2,
 }
 
-/// What a line shows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// What a line shows. Saved by its name in lower case (`visible`), as a symbol's strokes are.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum LineKind {
     Visible,
     Hidden,

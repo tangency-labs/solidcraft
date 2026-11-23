@@ -247,6 +247,8 @@ impl Drawing {
             let named = || format!("it lists source {}, which the drawing doesn't have", ids::encode(list.of.source));
             require(self.sources.iter().any(|s| s.id == list.of.source), named)?;
             require(list.mass.decimals <= MAX_MASS_DECIMALS, || format!("a mass shows at most {MAX_MASS_DECIMALS} decimals"))?;
+        } else {
+            require(t.table.filter.ballooned.is_none(), || "only a parts list has rows a balloon reads".to_string())?;
         }
         let [x, y] = match t.place {
             Place::Anchor { offset_mm, .. } => offset_mm,

@@ -1,0 +1,347 @@
+{
+  "baseline_revision": "be6ecb06420d501a8362d6de3d0de7ef324dafb9",
+  "toolchain": "Rust 1.99.1",
+  "profile": "ci",
+  "cases": {
+    "main-ci-off-off": {
+      "label": "main-ci-off-off",
+      "provenance": "main be6ecb06420d501a8362d6de3d0de7ef324dafb9, profile ci, Rust1.99.1",
+      "old_options": {
+        "oscillating_skips_failed_guesses": false,
+        "refine_cc_range_ends": false
+      },
+      "input": {
+        "editing": true,
+        "file": "Solids/revolution.smb",
+        "matrix": [
+          [
+            0.8058680190465212,
+            -0.29026436029085756,
+            0.0,
+            0.0
+          ],
+          [
+            -0.10430573503780678,
+            0.141964763216248,
+            0.9843608686062126,
+            0.0
+          ],
+          [
+            5.828353536945563e-11,
+            -7.932649432106016e-11,
+            1.7616378843798325e-11,
+            0.0
+          ],
+          [
+            43.871017221482376,
+            4.321056959395637,
+            5.973499327348293,
+            1.0
+          ]
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rebuild": false,
+        "scale_tol": true,
+        "x": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y": [
+          0.0,
+          1.0,
+          0.0
+        ]
+      },
+      "status": "Ok(())",
+      "level2_valid": false,
+      "level2_assert_report_count": 16,
+      "level2_failure_count": 17,
+      "mesh_error": null,
+      "mesh_triangles": 2086,
+      "mesh_refused": [
+        [
+          1,
+          "node 6 at (15.807925266206363, 20.85468005058979): no normal at the pole (15.807925266206363, 20.85468005058979)"
+        ]
+      ],
+      "scope": "Actual kernel geometry display only. Neither image nor mesh conversion is a validity proof.",
+      "camera": {
+        "azimuth": -160.19156514528365,
+        "elevation": 5.698029155488025,
+        "offset": [
+          3247.737992448544,
+          1410.5122862646701
+        ],
+        "reason": "Look along cross(matrix row0,row1), normal to the nearly flattened transformed body",
+        "scale": 59.6597183311073,
+        "shared_bbox": [
+          [
+            42.30643119632327,
+            1.9854070245068862,
+            5.971991675047354
+          ],
+          [
+            51.51247447179637,
+            6.450528407084068,
+            20.738912356705736
+          ]
+        ],
+        "shared_fit_anchors": [
+          [
+            42.30643119632327,
+            1.9854070245068862,
+            5.971991675047354
+          ],
+          [
+            42.30643119632327,
+            1.9854070245068862,
+            20.738912356705736
+          ],
+          [
+            42.30643119632327,
+            6.450528407084068,
+            5.971991675047354
+          ],
+          [
+            42.30643119632327,
+            6.450528407084068,
+            20.738912356705736
+          ],
+          [
+            51.51247447179637,
+            1.9854070245068862,
+            5.971991675047354
+          ],
+          [
+            51.51247447179637,
+            1.9854070245068862,
+            20.738912356705736
+          ],
+          [
+            51.51247447179637,
+            6.450528407084068,
+            5.971991675047354
+          ],
+          [
+            51.51247447179637,
+            6.450528407084068,
+            20.738912356705736
+          ]
+        ],
+        "view_normal": [
+          -0.3372020359976083,
+          -0.9361822322780194,
+          0.0992855220362578
+        ]
+      },
+      "display": {
+        "paired_native_wireframe": false,
+        "sampling_only_for_display": true
+      }
+    },
+    "main-ci-both-old-options-on-on": {
+      "label": "main-ci-both-old-options-on-on",
+      "provenance": "main be6ecb06420d501a8362d6de3d0de7ef324dafb9, profile ci, Rust1.99.1",
+      "old_options": {
+        "oscillating_skips_failed_guesses": true,
+        "refine_cc_range_ends": true
+      },
+      "input": {
+        "editing": true,
+        "file": "Solids/revolution.smb",
+        "matrix": [
+          [
+            0.8058680190465212,
+            -0.29026436029085756,
+            0.0,
+            0.0
+          ],
+          [
+            -0.10430573503780678,
+            0.141964763216248,
+            0.9843608686062126,
+            0.0
+          ],
+          [
+            5.828353536945563e-11,
+            -7.932649432106016e-11,
+            1.7616378843798325e-11,
+            0.0
+          ],
+          [
+            43.871017221482376,
+            4.321056959395637,
+            5.973499327348293,
+            1.0
+          ]
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rebuild": false,
+        "scale_tol": true,
+        "x": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y": [
+          0.0,
+          1.0,
+          0.0
+        ]
+      },
+      "status": "Ok(())",
+      "level2_valid": false,
+      "level2_assert_report_count": 17,
+      "level2_failure_count": 18,
+      "mesh_error": null,
+      "mesh_triangles": 2234,
+      "mesh_refused": [
+        [
+          1,
+          "node 6 at (15.807925266206363, 20.85468005058979): no normal at the pole (15.807925266206363, 20.85468005058979)"
+        ]
+      ],
+      "scope": "Actual kernel geometry display only. Neither image nor mesh conversion is a validity proof.",
+      "camera": {
+        "azimuth": -160.19156514528365,
+        "elevation": 5.698029155488025,
+        "offset": [
+          3247.737992448544,
+          1410.5122862646701
+        ],
+        "reason": "Look along cross(matrix row0,row1), normal to the nearly flattened transformed body",
+        "scale": 59.6597183311073,
+        "shared_bbox": [
+          [
+            42.30643119632327,
+            1.9854070245068862,
+            5.971991675047354
+          ],
+          [
+            51.51247447179637,
+            6.450528407084068,
+            20.738912356705736
+          ]
+        ],
+        "shared_fit_anchors": [
+          [
+            42.30643119632327,
+            1.9854070245068862,
+            5.971991675047354
+          ],
+          [
+            42.30643119632327,
+            1.9854070245068862,
+            20.738912356705736
+          ],
+          [
+            42.30643119632327,
+            6.450528407084068,
+            5.971991675047354
+          ],
+          [
+            42.30643119632327,
+            6.450528407084068,
+            20.738912356705736
+          ],
+          [
+            51.51247447179637,
+            1.9854070245068862,
+            5.971991675047354
+          ],
+          [
+            51.51247447179637,
+            1.9854070245068862,
+            20.738912356705736
+          ],
+          [
+            51.51247447179637,
+            6.450528407084068,
+            5.971991675047354
+          ],
+          [
+            51.51247447179637,
+            6.450528407084068,
+            20.738912356705736
+          ]
+        ],
+        "view_normal": [
+          -0.3372020359976083,
+          -0.9361822322780194,
+          0.0992855220362578
+        ]
+      },
+      "display": {
+        "paired_native_wireframe": false,
+        "sampling_only_for_display": true
+      }
+    }
+  },
+  "exact_measurement_equivalence": {
+    "all_exact": true,
+    "meaning": "Baseline CI old-option render metrics agree exactly with the corresponding goldens-profile metrics; provenance remains main-ci old options. Full Level2 Debug normalized only by the Result Ok wrapper.",
+    "cases": [
+      {
+        "render_label": "main-ci-off-off",
+        "typed_phase": "main",
+        "checks": {
+          "input": true,
+          "status": true,
+          "vertices": true,
+          "edges": true,
+          "surfaces": true,
+          "all_uv_trims_and_endpoint_gaps": true,
+          "full_level2_debug": true
+        }
+      },
+      {
+        "render_label": "main-ci-both-old-options-on-on",
+        "typed_phase": "after",
+        "checks": {
+          "input": true,
+          "status": true,
+          "vertices": true,
+          "edges": true,
+          "surfaces": true,
+          "all_uv_trims_and_endpoint_gaps": true,
+          "full_level2_debug": true
+        }
+      }
+    ]
+  },
+  "same_frame_bits": true,
+  "compiler_opt_level": 2,
+  "renderer_source_sha256": "052d1f3626170d587a2e2bb2ebfc2a815235634d5a8c2ae3c025a54ac6de0c6b",
+  "externs": {
+    "solidcore": {
+      "artifact": "libsolidcore-007483027c21e9d1.rlib",
+      "sha256": "ca3a6022cd33af286306b1909588da73cbce43f8748c110d512ac1611896e0f6"
+    },
+    "solidcore_convert": {
+      "artifact": "libsolidcore_convert-0e3ddf9163eac5bd.rlib",
+      "sha256": "0f0709bca59ce54de1e949dd8fc4548ec73c6a5b7767c400d207553a0f1d1e64"
+    },
+    "solidcore_tess": {
+      "artifact": "libsolidcore_tess-83cc2e7b370d6d94.rlib",
+      "sha256": "0f3d905124ae4bcbeb09a02d0b723f1146f2d003429e1bd5df69d86448134524"
+    },
+    "serde_json": {
+      "artifact": "libserde_json-657c1b8441a6134d.rlib",
+      "sha256": "ad755d3f94159b8b3c7fb0d492ea93d3a1ca4a94108d3e1ac7bbde8cb80d6f1a"
+    },
+    "miniz_oxide": {
+      "artifact": "libminiz_oxide-edd4f680ce14643e.rlib",
+      "sha256": "325fea20cc7303a678fb6f297126a078114bcb4b35ef58788a0ab6f633cdedd6"
+    }
+  },
+  "archive_note": "Private renderer helper and complete geometry Debug dumps omitted. Images preserve main CI old-option provenance, never relabelled as current default."
+}

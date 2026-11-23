@@ -519,8 +519,9 @@ impl SurfOfRevolution {
     /// takes the STEP start point), else to its start; when that point is on the axis,
     /// to its start, and when that is on the axis too, to its point at 45%. A point is
     /// on the axis by its distance from it (upstream: within 1 degree of its
-    /// direction). The domain is `[0, 360]` by the curve's STEP interval; the NURB is
-    /// made by
+    /// direction): [`Self::create_canonical_off_axis`] with no distance of its own,
+    /// only `SM_EFF_ZERO`. The domain is `[0, 360]` by the curve's STEP interval; the
+    /// NURB is made by
     /// [`Self::make_nurb`]. A zero axis (squared length below `SM_EFF_ZERO_SQ`) is
     /// taken as `(0, 0, 1)`, as upstream's unchecked `Unitize`.
     ///
@@ -535,6 +536,40 @@ impl SurfOfRevolution {
         axis_direction: Vec3,
         swap_uv: bool,
     ) -> Result<Self> {
+        Self::create_canonical_off_axis(k, swept_curve, axis_point, axis_direction, swap_uv, 0.0)
+    }
+
+    /// [`Self::create_canonical`] with a point on the axis when it lies within
+    /// `on_axis_tol` of it (never less than `SM_EFF_ZERO`; not upstream, #17204): a
+    /// revolve passes its B-rep's tolerance, within which the profile's vertex is on
+    /// the axis for the body (its circle a pole). The frame's X axis is the direction
+    /// from the axis to a point of the curve, so it must come from a point off the
+    /// axis by more than that: a profile end left a hair past the axis (a sketch
+    /// solver's 3e-11 mm) points the other way, the frame then faces away from the
+    /// profile, half a turn from the polar converter's sweep circle (which already
+    /// takes the pole for degenerate and starts at the 45% point), and the face's
+    /// edges lie half a turn off its surface.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::create_canonical`], and `on_axis_tol` not finite or negative.
+    pub fn create_canonical_off_axis(
+        k: &Kernel,
+        swept_curve: Curve,
+        axis_point: Point3,
+        axis_direction: Vec3,
+        swap_uv: bool,
+        on_axis_tol: f64,
+    ) -> Result<Self> {
+        // a tolerance is a finite distance, never negative (a NaN would fall through to
+        // the default and an infinite one would put every point on the axis)
+        if !on_axis_tol.is_finite() || on_axis_tol < 0.0 {
+            return Err(SolidError::surface_failed(
+                OP_CANONICAL,
+                "the on-axis tolerance is not a finite, non-negative distance",
+            ));
+        }
+
         // unitize the rotation axis (status ignored upstream)
         let z_vec = axis_direction.unitize_or_z();
 
@@ -554,7 +589,13 @@ impl SurfOfRevolution {
         // on the axis by the point's distance from the axis, `|Z x x_vec|`, under the
         // bound the Y axis below is checked against (upstream: within 1 degree of its
         // direction, which takes a point far along the axis for one on it)
-        let on_axis = |x_vec: Vec3| z_vec.cross(x_vec).length_squared() < crate::math::EFF_ZERO_SQ;
+        // (or within `on_axis_tol` of it, #17204)
+        let on_axis_sq = if on_axis_tol > EFF_ZERO {
+            on_axis_tol * on_axis_tol
+        } else {
+            crate::math::EFF_ZERO_SQ
+        };
+        let on_axis = |x_vec: Vec3| z_vec.cross(x_vec).length_squared() < on_axis_sq;
 
         // a profile origin on the axis gives way to the start first, the point upstream
         // takes (a segment through the axis whose origin and 45% point are both on it,

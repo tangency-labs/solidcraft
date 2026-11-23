@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="760" height="430" viewBox="0 0 760 430">
+  <title>wr588-13753</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="760" height="430" fill="#ffffff"/>
+    <rect id="enclosure" x="80" y="160" width="600" height="225" fill="#dce9f5"/>
+    <line id="front_face_y_0" data-name="front face y=0" x1="60" y1="160" x2="700" y2="160" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <polyline id="section_of_L" data-name="section of L" points="80,104.73 120,151 160,191.16 200,225.23 240,253.21 280,275.1 320,290.9 360,300.63 400,304.27 440,301.84 480,293.35 520,278.79 560,258.17 600,231.5 640,198.77 680,160" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle id="solve_point" data-name="solve point" cx="680" cy="160" r="4" fill="#555555"/>
+    <circle id="dip" cx="403.4" cy="304.3" r="4" fill="#000000"/>
+    <line id="leader_solve" data-name="leader solve" x1="680" y1="136" x2="680" y2="153" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 40 42)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">Face L of the peg: a cell set aside on its solve, kept on its control points</tspan></text>
+    <text transform="matrix(1 0 0 1 150 150)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">y = 0, the front face: best = 0, from the face&apos;s edges</tspan></text>
+    <text transform="matrix(1 0 0 1 404 332)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">the face&apos;s least y: -7.2151e-4, at (u, v) = (0.6979, 0.9655)</tspan></text>
+    <text transform="matrix(1 0 0 1 380 368)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">the control points reach y = -9.52e-3, off the figure: this PR keeps the cell and divides it</tspan></text>
+    <text transform="matrix(1 0 0 1 80 405)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">v = 0.925</tspan></text>
+    <text transform="matrix(1 0 0 1 680 405)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">v = 1</tspan></text>
+    <text transform="matrix(1 0 0 1 380 405)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">section u = 0.6979 across v; y drawn 200 000 times its size</tspan></text>
+    <text transform="matrix(1 0 0 1 690 112)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="end"><tspan x="0" y="0">the solve over the whole face ends on the side v = 1, y = 0</tspan></text>
+    <text transform="matrix(1 0 0 1 690 128)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="end"><tspan x="0" y="0">main: within 1e-6 of best, the whole face is set aside</tspan></text>
+  </g>
+</svg>

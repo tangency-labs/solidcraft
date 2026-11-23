@@ -667,3 +667,74 @@ fn orbit_after_the_navigators_home_turns_the_model_in_place() {
         assert!(after.distance(before) < 0.5, "{case}: spinning, the model's middle went from {before:?} to {after:?}");
     }
 }
+
+/// Continuous orbit turns about the same point an orbit drag does: after a pan, the point the drag orbit
+/// holds still (the view's middle) holds still through a spin too.
+#[test]
+fn spin_after_a_pan_holds_the_drag_orbit_pivot_still() {
+    for (browser, perspective) in [(true, false), (false, false), (true, true)] {
+        let case = format!("browser {browser}, perspective {perspective}");
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        moved_block(&mut h);
+        h.app.ui.show_browser = browser;
+        h.app.ui.perspective = perspective;
+        h.settle();
+        h.app.animate_view("home");
+        h.settle();
+        let p = spot(&h);
+        // Middle button drag: pan in the default preset.
+        h.call("ui.drag", json!({"x0": p.x, "y0": p.y, "x1": p.x + 90.0, "y1": p.y - 40.0, "button": "middle", "steps": 6}));
+        h.settle();
+        let rect = h.app.viewport.rect.unwrap();
+        let proj = |h: &Harness| crate::viewport::projection(&h.app, rect);
+        let pivot = crate::navigation::view_middle(&h.app, rect).unwrap_or(h.app.cam.target);
+        let before = proj(&h).to_screen(pivot).unwrap();
+        let yaw = h.app.cam.yaw;
+        h.app.viewport.spin = true;
+        h.frames(60);
+        assert!(h.app.viewport.spin && (h.app.cam.yaw - yaw).abs() > 0.05, "{case}: the view spins");
+        let after = proj(&h).to_screen(pivot).unwrap();
+        assert!(after.distance(before) < 0.5, "{case}: spinning, the orbit pivot went from {before:?} to {after:?}");
+    }
+}
+
+/// An orbit about the view's centre keeps the point it began with for the whole drag, also while
+/// the view tilts up to the top view and then turns sideways there (#16091). Home's framing point
+/// moves as the model's outline turns, and choosing the pivot again whenever it moved swung a wide,
+/// flat model sideways out of the view. The pivot holds still on screen, with the Browser shown and
+/// hidden, zoomed in and not.
+#[test]
+fn orbit_up_to_the_top_view_and_around_keeps_one_pivot() {
+    for (browser, zoom) in [(true, 1.0), (true, 0.6), (false, 1.0), (false, 0.6)] {
+        let case = format!("browser {browser}, zoom {zoom}");
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [-60, -20], "p1": [60, 20]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"distance": 3})).unwrap();
+        h.app.preferences.look_at_anim = false;
+        h.app.ui.show_browser = browser;
+        h.settle();
+        assert_eq!(h.app.preferences.orbit_around, crate::prefs::OrbitAround::ViewCentre);
+        h.app.animate_view("home");
+        h.settle();
+        h.app.cam.zoom_at(zoom, None);
+        h.settle();
+        let rect = h.app.viewport.rect.unwrap();
+        let proj = |h: &Harness| crate::viewport::projection(&h.app, rect);
+        crate::navigation::orbit(&mut h.app, rect, 0.0, 0.0, None);
+        let pivot = h.app.viewport.orbit_pivot.unwrap_or(h.app.cam.target);
+        let held = proj(&h).to_screen(pivot).unwrap();
+        for i in 0..400 {
+            // Up to the top view's limit first, then sideways there.
+            let (dx, dy) = if i < 100 { (0.0, 3.0) } else { (4.0, 0.0) };
+            crate::navigation::orbit(&mut h.app, rect, dx, dy, None);
+            assert_eq!(h.app.viewport.orbit_pivot.unwrap_or(h.app.cam.target), pivot, "{case}, step {i}: the pivot is chosen once");
+            let at = proj(&h).to_screen(pivot).unwrap();
+            assert!(at.distance(held) < 0.5, "{case}, step {i}: the pivot moved from {held:?} to {at:?}");
+        }
+        assert!(std::f64::consts::FRAC_PI_2 - h.app.cam.pitch < 1e-3, "{case}: the drag reached the top view");
+    }
+}

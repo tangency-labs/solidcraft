@@ -943,6 +943,169 @@ mod tests {
         }
     }
 
+    /// The side test of one edge use (`SmEdgeuse::IsEdgeuseSideInSurface`, 6 samples, the
+    /// case's periodic flags) with every drop replaced by the foot the B-rep's construction
+    /// defines. The face is the surface over the box `dom`, its edges the box's sides (iso
+    /// curves, no UV trim curves): the edge is the side and orientation whose iso point,
+    /// at the edge parameter mapped linearly onto the side, is the edge's point at every
+    /// sample (to the evaluation's rounding, [`crate::certify::evaluation_slack`], doubled
+    /// for the edge curve's own), and exactly one side and orientation must be. Those iso
+    /// points are the feet. The classification and the step rule are the function's.
+    fn side_from_construction(
+        k: &Kernel,
+        b: &Brep,
+        eu: EdgeuseId,
+        dom: [f64; 4],
+        periodic_u: bool,
+        periodic_v: bool,
+    ) -> bool {
+        use solidcore::geom::extent2d::{SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
+        use solidcore::geom::extent3d::Extent3d;
+        use solidcore::geom::vector2d::{Point2, Vec2};
+        use solidcore::surface::surface::p1::{map_to_2d_dir, zone_tol_3d};
+        use solidcore::topology::edgeuse::p1 as eu1;
+        const SAMPLES: u64 = 6;
+        let face = eu1::face(b, eu).expect("face").expect("a face");
+        let surface = b.face(face).expect("face").surface.as_ref().expect("surface");
+        let edge = eu1::edge(b, eu).expect("edge").expect("an edge");
+        let curve = b.edge(edge).expect("edge").curve.as_ref().expect("curve");
+        let interval = b.edge(edge).expect("edge").interval;
+        assert!(eu1::uv_trim_curve(b, eu).expect("trim").0.is_none(), "a UV trim curve");
+        let same = eu1::orientation(b, eu).expect("orientation") == OrientType::Same;
+        let domain = surface.natural_uv_domain_with_nurb(k).expect("domain");
+        let slack = 2.0 * crate::certify::evaluation_slack(k, surface);
+        let zone = zone_tol_3d(k, surface).expect("zone");
+        let [u0, v0, u1, v1] = dom;
+        let params: Vec<f64> = (0..SAMPLES)
+            .map(|ii| {
+                let s = ii as f64 / (SAMPLES - 1) as f64;
+                interval.evaluate(if same { s } else { 1.0 - s })
+            })
+            .collect();
+        let points: Vec<_> = params
+            .iter()
+            .map(|&t| curve.evaluate_point(k, t).expect("edge point"))
+            .collect();
+        let (t0, t1) = (interval.evaluate(0.0), interval.evaluate(1.0));
+        // the side's iso point at edge parameter `t`: side 0..4 = u0, u1, v0, v1; `rev`
+        // runs the side's parameter against the edge's
+        let iso = |side: usize, rev: bool, t: f64| {
+            let f = (t - t0) / (t1 - t0);
+            let f = if rev { 1.0 - f } else { f };
+            match side {
+                0 => Point2::new(u0, v0 + f * (v1 - v0)),
+                1 => Point2::new(u1, v0 + f * (v1 - v0)),
+                2 => Point2::new(u0 + f * (u1 - u0), v0),
+                _ => Point2::new(u0 + f * (u1 - u0), v1),
+            }
+        };
+        let mut found = Vec::new();
+        for side in 0..4 {
+            for rev in [false, true] {
+                let on = params.iter().zip(&points).all(|(&t, at)| {
+                    let q = surface.evaluate_point(k, iso(side, rev, t)).expect("iso point");
+                    at.distance(q) <= slack
+                });
+                if on {
+                    found.push((side, rev));
+                }
+            }
+        }
+        assert_eq!(found.len(), 1, "the edge's side: {found:?}");
+        let (side, rev) = found[0];
+        let mut classify = SS_UMIN | SS_VMIN | SS_UMAX | SS_VMAX;
+        let (mut up_u, mut down_u, mut up_v, mut down_v) = (0, 0, 0, 0);
+        let mut boxed = Extent3d::default();
+        let mut prev: Option<Point2> = None;
+        for (&t, &at) in params.iter().zip(&points) {
+            let uv = iso(side, rev, t);
+            let tu = map_to_2d_dir(k, zone, uv, Vec2::new(1.0, 0.0), surface).expect("u tol");
+            let tv = map_to_2d_dir(k, zone, uv, Vec2::new(0.0, 1.0), surface).expect("v tol");
+            classify &= (domain.point_boundaries(uv, 2.0 * tu) & (SS_UMIN | SS_UMAX))
+                | (domain.point_boundaries(uv, 2.0 * tv) & (SS_VMIN | SS_VMAX));
+            boxed.add_point(at);
+            if let Some(p) = prev {
+                up_u += u64::from(p.x < uv.x);
+                down_u += u64::from(p.x > uv.x);
+                up_v += u64::from(p.y < uv.y);
+                down_v += u64::from(p.y > uv.y);
+            }
+            prev = Some(uv);
+            if classify == 0 {
+                return true;
+            }
+        }
+        if boxed.max_dimension() < 2.0 * zone {
+            return true;
+        }
+        // no UV trim curve: the function's periodic either-way branches apply
+        let need = SAMPLES - 2;
+        if classify & SS_UMIN != 0 {
+            down_v >= need || (periodic_u && up_v >= need)
+        } else if classify & SS_UMAX != 0 {
+            up_v >= need || (periodic_u && down_v >= need)
+        } else if classify & SS_VMIN != 0 {
+            up_u >= need || (periodic_v && down_u >= need)
+        } else if classify & SS_VMAX != 0 {
+            down_u >= need || (periodic_v && up_u >= need)
+        } else {
+            true
+        }
+    }
+
+    /// WR-56 (#17467), the moved rows `level0_gen_020` and `level0_gen_026` (op
+    /// `periodic_u = 0, periodic_v = 1`): one face over a box of a B-spline's domain whose
+    /// `u = 0` side is pinched onto a line (the side's points vary only in z, and not
+    /// monotonically, so a 3D point there has several feet). Each loop use's side record
+    /// must be the function's rule applied to the feet the B-rep's construction defines
+    /// ([`side_from_construction`]): the face's own loop use, running the box's boundary
+    /// anticlockwise, has its inside in the surface (`1`); its mate, running it the other
+    /// way, has not (`0`). Before WR-56 both recorded `0`.
+    #[test]
+    fn wr56_loop_side_follows_the_construction_feet() {
+        for name in ["level0_gen_020", "level0_gen_026"] {
+            let case = crate::case::regression_case(&Runner, name);
+            let row = Runner.run_rust(&case).expect("rust").values["out"].clone();
+            let brep: super::super::topology_vertexuse::BrepIn =
+                serde_json::from_value(case.inputs["brep"].clone()).expect("brep");
+            let super::super::topology_vertexuse::BrepIn::Face { dom, .. } = &brep else {
+                panic!("{name}: not a face B-rep");
+            };
+            assert_eq!(case.inputs["level0"]["periodic_u"], 0, "{name}");
+            assert_eq!(case.inputs["level0"]["periodic_v"], 1, "{name}");
+            let Ok((b, c)) = super::super::topology_face_p1::own_brep(&brep, false, false)
+                .expect("build")
+            else {
+                panic!("{name}: the face did not build");
+            };
+            let k = Kernel::default();
+            assert_eq!(row[1] as usize, c[4], "{name}: loop use count");
+            let mut sides = Vec::new();
+            for l in 0..c[4] {
+                let lu = LoopuseId::from_index(l as u32);
+                let mut expect = (true, 0);
+                for (ii, eu) in lu1::edgeuses(&b, lu, None, None)
+                    .expect("edge uses")
+                    .into_iter()
+                    .enumerate()
+                {
+                    if !side_from_construction(&k, &b, eu, *dom, false, true) {
+                        expect = (false, ii);
+                        break;
+                    }
+                }
+                eprintln!("{name}: loop use {l}: row {:?} construction {expect:?}", &row[2 + 3 * l..5 + 3 * l]);
+                assert_eq!(
+                    (row[2 + 3 * l] == 1.0, row[4 + 3 * l] as usize),
+                    expect,
+                    "{name}: loop use {l}"
+                );
+                sides.push(expect.0);
+            }
+            assert_eq!(sides, [true, false], "{name}");
+        }
+    }
+
     #[test]
     fn inputs_round_trip() {
         let mut rng = Rng::new(7);

@@ -15,6 +15,7 @@ use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 use solidcraft_doc::drawing::dimension::{CornerPick, EdgePick, MAX_CHAIN_POINTS, TextPlace};
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading, SilhouetteSide};
 
+use super::Point2;
 use super::drawing_view::ViewIdParam;
 use crate::params;
 
@@ -305,7 +306,7 @@ pub enum KindParam {
         #[schemars(with = "String")]
         reading: Option<Reading>,
     },
-    /// A straight edge's length.
+    /// A straight edge's length, or the length of the line a round edge the view sees edge-on draws.
     Length {
         edge: EdgeParam,
         #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
@@ -407,6 +408,17 @@ pub struct AddParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub override_text: Option<String>,
+    /// Where its text's centre goes, in paper mm from the sheet's lower-left corner, as edit's drag
+    /// takes it: it sets `offset_mm` and `text`, so the Dimension tool places a new one where the
+    /// pointer is.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub text_to_mm: Option<Point2>,
+    /// A point its dimension line, arc or leader passes through, as `text_to_mm` and as edit's drag
+    /// takes it: it sets `offset_mm`, or a radial one's `text`.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub line_through_mm: Option<Point2>,
     /// True to answer what it would add, adding nothing: no id is taken and no undo step made.
     /// Default: false.
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
@@ -464,6 +476,16 @@ pub struct DimensionSet {
     #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub diameter: Option<bool>,
+    /// A drag: where the text's centre goes, in paper mm from the sheet's lower-left corner. It sets
+    /// `offset_mm` and `text`.
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub text_to_mm: Option<Point2>,
+    /// A drag: a point the dimension line passes through, as `text_to_mm`. It sets `offset_mm`, or a
+    /// radial one's `text`, which turns with its leader.
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub line_through_mm: Option<Point2>,
 }
 
 /// What `drawing.dimension.repair` takes: the dimension, which of its references, and what that
@@ -551,10 +573,14 @@ pub struct DimensionResult {
     /// Whether a measured line leaves the view's plane, so the view shows it shorter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub foreshortened: Option<bool>,
-    /// What it shows: the text given, else the number in the drawing's units; none for a chain,
-    /// which shows its members'.
+    /// What it shows: its text with `{value}` filled in, else the number in the drawing's units;
+    /// none for a chain, which shows its members'.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// Its measured number as it reads with no text of its own, whenever it is measured: what a
+    /// dimension whose text hides it would show again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub measured_text: Option<String>,
     /// A chain's members, from its first point to its last.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub members: Vec<MemberResult>,

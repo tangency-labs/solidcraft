@@ -105,8 +105,6 @@
 //!   otherwise solves globally on the base, which finds a point on a closed surface's seam
 //!   once at each end of the period and refuses the two answers.
 
-use std::borrow::Cow;
-
 use crate::blend::fillet_custom_solver::{
     face_owner, offset_compute_inward_vector, offset_evaluate_1st, offset_evaluate_point,
     offset_local_point_solve, surface_global_point_solve, ConstantRadiusAssistedFs, InitialValues,
@@ -117,7 +115,8 @@ use crate::blend::fillet_geom::p1::{
 };
 use crate::blend::fillet_intersector::FilletIntersector;
 use crate::blend::fillet_solver::p1::{
-    FilletSolver, FilletSolverOps, FilletSphereSolveEnfo, OffsetSurfaceSlot,
+    seam_periods, wrap_closed_directions, FilletSolver, FilletSolverOps, FilletSphereSolveEnfo,
+    OffsetSurfaceSlot, SeamDomain,
 };
 use crate::blend::fillet_solver::p3::StepSolveOutcome;
 use crate::blend::fillet_solver::p4::IntersectorSolver;
@@ -210,6 +209,8 @@ fn interval_at<'a>(ivls: &'a mut ExtentNd, i: usize, op: &'static str) -> Result
 /// out of bounds) are kept.
 fn as_sm_err(e: SolidError, op: &'static str) -> SolidError {
     match e {
+        // a certificate's work budget spent: never flattened into a status
+        e if e.is_not_certified() => e,
         SolidError::Unported { .. }
         | SolidError::Cancelled { .. }
         | SolidError::InvalidInput { .. }
@@ -510,6 +511,20 @@ pub fn constant_radius_load_initial_values<S: ConstantRadiusOps + ?Sized>(
     r
 }
 
+/// One direction of the extended `domain` of an offset continued as itself, on its closed
+/// turn `closed` (`closed_turn`, wrapping there when `wraps`): the interval the rail-end solve
+/// takes and whether it wraps. Where the extension spans the closed turn, the closed turn,
+/// wrapped as it says; otherwise the extension cut to the closed turn, not wrapped: the
+/// extension names each of its points once, and a turn wider than it reaches round to the far
+/// side of the circle.
+fn within_closed_turn(domain: Extent1d, closed: Extent1d, wraps: bool) -> (Extent1d, bool) {
+    let slack = EFF_ZERO * (1.0 + closed.length().abs());
+    if domain.min() <= closed.min() + slack && domain.max() >= closed.max() - slack {
+        return (closed, wraps);
+    }
+    (domain.intersect(&closed).unwrap_or(domain), false)
+}
+
 /// [`constant_radius_load_initial_values`] inside the temporary change.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
@@ -759,12 +774,30 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
     // parameter pair inside its closed turn (`closed_turn`): round the axis it wraps there
     // (WR-650), along a circle generator it ends there. Solved on the extension's multiple
     // turns, a rail end found the right point by another turn's parameters, which the face's
-    // trim reads as off the face.
+    // trim reads as off the face. The closed turn only narrows the extension
+    // ([`within_closed_turn`]): where the extension is shorter than the turn (a face of less
+    // than half a turn, extended by half its length either side) it already names each point
+    // once, and the solve keeps upstream's interval, not wrapped. Widened to the whole turn,
+    // the rail ends of an R 5 round along a 45 degree chamfer round a block's R 7 corners
+    // (quarter-turn cylinders and cones) were solved off the extension and the round was
+    // refused ("Corner Edge Computation Failure").
     if let Some(dirs) = closed_turn(k, base2)? {
         for ((ivl, p), dir) in ivls.iter_mut().zip(periodic.iter_mut()).zip(dirs) {
             if let Some((closed, wraps)) = dir {
-                *ivl = closed;
-                *p = wraps;
+                (*ivl, *p) = within_closed_turn(*ivl, closed, wraps);
+            }
+        }
+    }
+    // Not upstream (#15767): the ball's section solve wraps a closed base across its seam
+    if fs.solver.seam_domain == SeamDomain::Wrapped {
+        for ((ivl, p), period) in ivls
+            .iter_mut()
+            .zip(periodic.iter_mut())
+            .zip(seam_periods(k, base2)?)
+        {
+            if let Some(period) = period {
+                *ivl = period;
+                *p = true;
             }
         }
     }
@@ -987,15 +1020,13 @@ impl EvalNFunctions for GuessSphereEnfo<'_> {
 
 /// `SmLocalSolveNd(sEvalFun, &sIntervals, &sPeriodicities)` set up as both plane
 /// solves do: desired accuracy `SM_EFF_ZERO_SQ`, at most 8 total boundary hits, 30
-/// iterations; `k`'s `fixes.oscillating_skips_failed_guesses` is passed on.
+/// iterations.
 fn plane_local_solver<'a, E: EvalNFunctions + ?Sized>(
-    k: &Kernel,
     eval: &'a mut E,
     intervals: &'a ExtentNd,
     periodicities: &'a [bool],
 ) -> LocalSolveNd<'a, E> {
     let mut ls = LocalSolveNd::new(eval, Some(intervals), Some(periodicities));
-    ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
     ls.set_desired_accuracy(EFF_ZERO_SQ);
     ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
     ls.set_maximum_iterations(30);
@@ -1091,7 +1122,7 @@ impl ConstantRadiusAssistedFs {
         let plane_d = -plane_orig.dot(plane_normal);
         let approx_tol_3d = self.solver.approx_tol_3d;
         let mut eval = GuessSphereEnfo::new(k, plane_normal, plane_d, self);
-        let mut ls = plane_local_solver(k, &mut eval, &intervals, &periodicities);
+        let mut ls = plane_local_solver(&mut eval, &intervals, &periodicities);
 
         // Solve it
         let mut sol = ls.solve_it(&guess_t, approx_tol_3d)?;
@@ -1149,6 +1180,12 @@ pub fn point_on_plane_solve(
     let jacobian_size = solver.jacobian_size()?;
     let mut intervals = plane_intervals(jacobian_size, uv_domain1, uv_domain2)?;
     let mut periodicities = vec![false; 2];
+    // Not upstream (#15767): the ball's section solve wraps a closed base across its seam (the
+    // second surface's in `LoadInitialValues`)
+    if solver.solver().seam_domain == SeamDomain::Wrapped {
+        let base = rail_offset(solver.solver(), 0)?.base_surface().clone();
+        wrap_closed_directions(k, &base, &mut intervals, &mut periodicities, 0)?;
+    }
     let mut guess_t = vec![uv1.x, uv1.y];
 
     let mut surface1 = rail_offset(solver.solver(), 0)?.clone();
@@ -1282,7 +1319,7 @@ fn fillet_sphere_solve(
     let approx_tol_3d = solver.solver().approx_tol_3d;
     // (the constructor's "sphere centre and radius" are the plane normal and D)
     let mut eval = SphereEquations(k, FilletSphereSolveEnfo::new(plane_normal, plane_d, solver));
-    let mut ls = plane_local_solver(k, &mut eval, intervals, periodicities);
+    let mut ls = plane_local_solver(&mut eval, intervals, periodicities);
 
     // Solve equations with NewtonRaphson iteration
     let mut sol = ls.solve_it(guess_t, approx_tol_3d)?;
@@ -2551,10 +2588,7 @@ impl CircularCrossSectionFsg {
         // ball changes its radius along the round (a radius law, or a constant chord
         // between faces whose angle changes); the others' balls touch the round along
         // their great circles.
-        let ball_radius_varies = matches!(
-            solver_type,
-            FilletSolverType::VariableRadius | FilletSolverType::ConstDist
-        );
+        let ball_radius_varies = solver_type.ball_radius_varies();
         // the centre line is a plain SmBSplineCurve here, so its virtuals are the
         // B-spline ones
         let mut cl = Curve::from(core::mem::take(center_line));
@@ -3061,40 +3095,9 @@ pub fn law_in_parameter(lb: &LawBall) -> Result<Option<BSplineCurve>> {
 
 const OP_LAW: &str = "blend::fillet_standard_solver::p2::law_in_parameter";
 
-/// Not the fork's: the face a round's ball rolls on, for the round by its definition: the
-/// surface the trace rolled the ball on. Past its domain the offset of a B-spline, surface
-/// of revolution or surface of extrusion is evaluated on its extended base
-/// (`m_pExtendedSurface`: the base's tangent extension, or a surface of revolution of a
-/// circle's arc carried on as its circle), while the base itself continues otherwise (a
-/// B-spline's end spans carried on, a revolved generator's extrapolation). A round whose
-/// rails run on past the face (an edge's round run on past the edge's ends, or out to an
-/// End round a tube) had no foot on the plain base there: its first station missed the
-/// rails (by more than 1 on a twisted wall) and the round was built as the trace's skinned
-/// B-spline, which is the walls' round only at its sections. So where the offset holds an
-/// extension (the one it holds now, pending or stored, which contains every point the
-/// trace evaluated), the definition rolls on it. A plane, cylinder, cone, sphere or torus
-/// continues as itself and keeps its analytic kind in the definition, and a blend by its
-/// definition keeps its definition.
-fn rolled_on(offset: &crate::surface::offset_surface::OffsetSurface) -> Cow<'_, Surface> {
-    use crate::surface::surface::SurfaceKind;
-    let base = offset.base_surface();
-    let extends = matches!(
-        base.kind(),
-        SurfaceKind::BSpline(_)
-            | SurfaceKind::SurfOfRevolution(_)
-            | SurfaceKind::SurfOfExtrusion(_)
-    );
-    let extended = if extends {
-        offset.with_extended_base_surface(|e| e.map(Surface::clone_keeping_owner))
-    } else {
-        None
-    };
-    extended.map_or(Cow::Borrowed(base), Cow::Owned)
-}
-
 impl CircularCrossSectionFsg {
-    /// The fork's `SmGnSectionFSG::CircleSurface` gate (cc08236, 308cc40, c596548; with
-    /// `fixes.fillet_round_as_definition`, WR-698): a ball of one radius between faces that are NURBS surfaces is the round by
+    /// The fork's `SmGnSectionFSG::CircleSurface` gate (cc08236, 308cc40, c596548;
+    /// WR-698): a ball of one radius between faces that are NURBS surfaces is the round by
     /// its definition, the order-1 section's `Build` with the rails and uv curves
     /// replaced ([`GnSectionFsg::build_given_ball`]), unless the rails or the centre line
     /// turn at a knot (`sm_FilletCurveCorners`: the pieces are built as before), a face is
@@ -3133,14 +3136,13 @@ impl CircularCrossSectionFsg {
         use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
         use crate::blend::fillet_section::definition_box::definition_enclosable;
         use crate::blend::fillet_section::interval::Ivl;
-        use crate::blend::fillet_section::section::{ArcSection, GnLawRound, GnSectionFsg};
+        use crate::blend::fillet_section::section::{
+            rolled_on, ArcSection, GnLawRound, GnSectionFsg,
+        };
         use crate::blend::fillet_standard_solver::touch_circle::{
             corner_angle, fillet_curve_corners,
         };
         use crate::surface::surface::SurfaceKind;
-        if !k.fixes.fillet_round_as_definition {
-            return Ok(None);
-        }
         let [rail1, rail2] = rails;
         let corners =
             fillet_curve_corners(center_line, rail1, rail2, corner_angle(ball.ang_tol_rad))?;
@@ -3422,15 +3424,17 @@ impl CircularCrossSectionFsg {
 }
 
 impl super::p1::LinearCrossSectionFsg {
-    /// A chamfer by its definition (solidcore's, #2486; with
-    /// `fixes.fillet_round_as_definition`): the
+    /// A chamfer by its definition (solidcore's, #2486): the
     /// section generator's chord, order 0, between the feet of the point at the solver's
     /// offsets off the two faces ([`GnSectionFsg::build_chord`]), keeping the chamfer's
     /// sizes: those the solver was made for, else its two offsets' setbacks at the wedge
     /// at the rails' start, or a constant-distance solver's chord between planes. The
     /// rails and uv curves become the stations' feet. `None` (built as before): a face
     /// that is not an offset of a NURBS surface (or is a blend by its definition), rails
-    /// or a centre line that turn at a knot, rails that meet at an end, a
+    /// or a centre line that turn at a knot, rails that meet at an end, a centre line or a
+    /// rail of no length (the offsets meet on an axis: a cylinder's rim chamfered by its
+    /// radius is a cone to its apex, whose centre line and rail on the top are one point,
+    /// and a section has no length to run along), a
     /// constant-distance solver on a face that is not a plane (its offsets vary along
     /// the edge), a solver of another kind, or rails that are not those feet.
     ///
@@ -3449,16 +3453,22 @@ impl super::p1::LinearCrossSectionFsg {
         uv: [&mut BSplineCurve; 2],
         ball: &CircleBall,
     ) -> Result<Option<Surface>> {
-        use crate::blend::fillet_section::section::GnSectionFsg;
+        use crate::blend::fillet_section::section::{rolled_on, GnSectionFsg};
         use crate::blend::fillet_standard_solver::touch_circle::{
             corner_angle, fillet_curve_corners,
         };
         use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
         use crate::surface::surface::SurfaceKind;
-        if !k.fixes.fillet_round_as_definition {
+        let [rail1, rail2] = rails;
+        // a centre line or a rail of no length: the stations along it are one (a
+        // cylinder's rim chamfered by its radius, a cone to its apex: built as before, a
+        // traced net the blend definition ledger lists, #17875)
+        if center_line.is_degenerate(k, approx_tol_3d, None)?
+            || rail1.is_degenerate(k, approx_tol_3d, None)?
+            || rail2.is_degenerate(k, approx_tol_3d, None)?
+        {
             return Ok(None);
         }
-        let [rail1, rail2] = rails;
         let corners =
             fillet_curve_corners(center_line, rail1, rail2, corner_angle(ball.ang_tol_rad))?;
         if !corners.is_empty() {
@@ -3964,6 +3974,19 @@ pub struct SurfaceSurfaceStart {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A G^n section certificate that spent its work budget is not flattened to `SM_ERR`.
+    #[test]
+    fn a_certificate_past_its_budget_is_not_flattened_to_sm_err() {
+        let e = SolidError::blend(
+            "t",
+            crate::error::blend::BlendFailure::NotCertified {
+                halvings: 1,
+                stations: 2,
+            },
+        );
+        assert_eq!(as_sm_err(e.clone(), "op"), e);
+    }
     use crate::blend::fillet_standard_solver::p1::{
         FilletLawKind, CONSTANT_RADIUS_FS_TYPE, SURFACE_SURFACE_FS_TYPE, VARIABLE_RADIUS_FS_TYPE,
     };

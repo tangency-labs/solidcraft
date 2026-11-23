@@ -39,6 +39,28 @@ fn row(key: &str, kind: RowKind, purchased: bool, fields: &[(&str, &str)]) -> Ro
     Row { key: key.into(), kind, purchased, fields: fields.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() }
 }
 
+/// A filter by balloon shows the rows whose ballooned count is over 0, numbered and counted as they are;
+/// none is the heading alone, and a count of 0 or one that isn't a number is none. The word is saved only when
+/// it is set.
+#[test]
+fn a_filter_by_balloon_hides_rows_and_changes_none() {
+    let mut table = table();
+    table.filter.ballooned = Some(Ballooned::Sheet);
+    let mut listed = rows();
+    assert!(table.layout(&listed, Vec2::ZERO, &fixed).unwrap().rows.is_empty());
+    for (row, count) in listed.iter_mut().zip(["0", "2", "x"]) {
+        row.fields.insert(BALLOONED.into(), count.into());
+    }
+    let layout = table.layout(&listed, Vec2::ZERO, &fixed).unwrap();
+    assert_eq!(layout.rows.iter().map(|r| r.key.as_deref()).collect::<Vec<_>>(), [Some("pin")]);
+    table.filter.ballooned = None;
+    assert_eq!(table.layout(&listed, Vec2::ZERO, &fixed).unwrap().rows.len(), 3);
+    assert!(!serde_json::to_string(&table).unwrap().contains("ballooned"));
+    table.filter.ballooned = Some(Ballooned::Drawing);
+    let read: Table = serde_json::from_str(&serde_json::to_string(&table).unwrap()).unwrap();
+    assert_eq!(read, table);
+}
+
 /// A plate, a bought pin and a frame.
 fn rows() -> Vec<Row> {
     vec![
@@ -181,16 +203,17 @@ fn filters_hide_rows_and_never_change_a_value() {
         layout.rows.iter().map(|r| (r.key.clone().unwrap(), texts(&r.cells[0]).concat(), texts(&r.cells[2]).concat())).collect::<Vec<_>>()
     };
     let all = shown(Filter::default());
-    let only = |only: Only| shown(Filter { only: Some(only), text: vec![] });
+    let only = |only: Only| shown(Filter { only: Some(only), ..Filter::default() });
     let keys = |rows: Vec<(String, String, String)>| rows.into_iter().map(|r| r.0).collect::<Vec<_>>();
     assert_eq!(keys(only(Only::Parts)), ["plate", "pin"]);
     assert_eq!(keys(only(Only::Assemblies)), ["frame"]);
     assert_eq!(keys(only(Only::Purchased)), ["pin"]);
-    let text = |column: &str, contains: &str| Filter { only: None, text: vec![TextFilter { column: column.into(), contains: contains.into() }] };
+    let text =
+        |column: &str, contains: &str| Filter { text: vec![TextFilter { column: column.into(), contains: contains.into() }], ..Filter::default() };
     assert_eq!(keys(shown(text("part_number", "pl-"))), ["plate"], "ignoring case");
     assert_eq!(keys(shown(text("part_number", "-"))), ["plate", "pin", "frame"]);
     assert!(shown(text("part_number", "nothing")).is_empty());
-    let both = Filter { only: Some(Only::Parts), text: vec![TextFilter { column: "quantity".into(), contains: "2".into() }] };
+    let both = Filter { only: Some(Only::Parts), text: vec![TextFilter { column: "quantity".into(), contains: "2".into() }], ..Filter::default() };
     assert_eq!(keys(shown(both)), ["pin"]);
     // Every row shown keeps its item and quantity as the rows give them.
     for filtered in [only(Only::Parts), only(Only::Assemblies), only(Only::Purchased), shown(text("part_number", "pn"))] {
@@ -489,7 +512,7 @@ fn with_the_heading_at_the_bottom_the_lines_are_the_same_rule() {
 /// column has no line down; one row has one line across.
 #[test]
 fn a_heading_alone_and_one_column_have_only_the_lines_they_need() {
-    let none = Table { filter: Filter { only: Some(Only::Assemblies), text: vec![] }, ..table() };
+    let none = Table { filter: Filter { only: Some(Only::Assemblies), ..Filter::default() }, ..table() };
     let heading_alone = none.layout(&rows()[..2], Vec2::new(400.0, 280.0), &fixed).unwrap().paper(1, ObjectKind::PartsList);
     let down = |x| piece(x, 273.0, x, 280.0, 0.35);
     assert_eq!(strokes(&heading_alone), [outline(365.6, 273.0, 400.0, 280.0), down(374.125), down(392.975)]);

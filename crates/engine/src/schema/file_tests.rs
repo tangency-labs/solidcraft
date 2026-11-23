@@ -3,8 +3,8 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use super::{
-    Export3mfParams, ExportMeshParams, ExportParams, ExportStepParams, ExportStlParams, ExportUrdfParams, FileExportResult, NewerFileReport,
-    OpenElsewhere, OpenParams, OpenResult, OpenedDesign, RecoverParams, RecoverResult, RecoveryDiscardParams, RecoveryDiscardResult,
+    Export3mfParams, ExportMeshParams, ExportParams, ExportSdfParams, ExportStepParams, ExportStlParams, ExportUrdfParams, FileExportResult,
+    NewerFileReport, OpenElsewhere, OpenParams, OpenResult, OpenedDesign, RecoverParams, RecoverResult, RecoveryDiscardParams, RecoveryDiscardResult,
     RecoveryListParams, RecoveryListResult,
 };
 use crate::Session;
@@ -16,16 +16,50 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ExportStepParams>(), &["bodies", "path"]);
     assert_keys(input_schema_for::<ExportMeshParams>(), &["bodies", "path", "quality"]);
-    assert_keys(input_schema_for::<ExportStlParams>(), &["bodies", "lay_on_print_faces", "path", "quality"]);
+    assert_keys(input_schema_for::<ExportStlParams>(), &["ascii", "bodies", "lay_on_print_faces", "path", "quality", "solids"]);
     assert_keys(input_schema_for::<Export3mfParams>(), &["bodies", "lay_on_print_faces", "objects", "path", "quality"]);
-    assert_keys(input_schema_for::<ExportUrdfParams>(), &["effort", "mesh_prefix", "path", "velocity"]);
+    assert_keys(input_schema_for::<ExportUrdfParams>(), &["effort", "images", "mesh_prefix", "path", "velocity"]);
+    assert_keys(input_schema_for::<ExportSdfParams>(), &["bodies", "model_uris", "name", "path", "quality", "static"]);
     assert_keys(
         input_schema_for::<ExportParams>(),
-        &["bodies", "effort", "format", "lay_on_print_faces", "mesh_prefix", "objects", "path", "quality", "velocity"],
+        &[
+            "bodies",
+            "effort",
+            "format",
+            "hierarchy",
+            "images",
+            "lay_on_print_faces",
+            "mesh_prefix",
+            "model_uris",
+            "name",
+            "objects",
+            "options",
+            "path",
+            "quality",
+            "solids",
+            "static",
+            "velocity",
+        ],
     );
     assert_keys(
         input_schema_for::<OpenParams>(),
-        &["folder", "history", "max_points", "names", "origin", "path", "read_only", "reuse_import", "units", "up", "verify"],
+        &[
+            "folder",
+            "format",
+            "geometry",
+            "history",
+            "max_points",
+            "names",
+            "options",
+            "origin",
+            "path",
+            "read_only",
+            "reader",
+            "reuse_import",
+            "units",
+            "up",
+            "verify",
+        ],
     );
     assert_keys(input_schema_for::<RecoveryListParams>(), &["dir"]);
     assert_keys(input_schema_for::<RecoverParams>(), &["dir", "discard", "id"]);
@@ -224,7 +258,7 @@ fn bad_calls_say_what_is_wrong_and_write_nothing() {
     std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("{e}"));
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap_or_else(|e| panic!("{e}"));
-    for cmd in ["file.export_step", "file.export_stl", "file.export_3mf", "file.export_obj", "file.export_urdf"] {
+    for cmd in ["file.export_step", "file.export_stl", "file.export_3mf", "file.export_obj", "file.export_urdf", "file.export_sdf"] {
         let e = s.execute(cmd, &json!({})).unwrap_err().to_string();
         assert!(e.contains(cmd) && e.contains("path"), "{cmd}: {e}");
     }
@@ -237,6 +271,11 @@ fn bad_calls_say_what_is_wrong_and_write_nothing() {
     s.param_check = ParamCheck::Off;
     let e = s.execute("file.export_urdf", &json!({"path": at, "effort": -1})).unwrap_err().to_string();
     assert!(e.contains("effort"), "{e}");
+    let model = dir.join("Model").to_string_lossy().to_string();
+    for (key, value) in [("static", json!("yes")), ("model_uris", json!(1)), ("name", json!("a/b")), ("bodies", json!(["Nope"]))] {
+        let e = s.execute("file.export_sdf", &json!({"path": model, key: value})).unwrap_err().to_string();
+        assert!(e.contains(key) || e.contains("Nope") || e.contains("a/b"), "{key}: {e}");
+    }
     assert_eq!(std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0), 0, "nothing written");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -414,6 +453,14 @@ fn export_replies_match_the_output_schema() {
             assert!(reply.get("param_warnings").is_none(), "{p}: {reply}");
             assert!(conforms(schema, schema, &reply), "{p}: {reply} doesn't match {schema}");
         }
+        // #18780: ExportResult with skipped bodies conforms to schema
+        let reply_with_skipped = json!({
+            "path": at("k.3mf"),
+            "bytes": 1024,
+            "format": "ThreeMf",
+            "skipped": ["BrokenBody"]
+        });
+        assert!(conforms(schema, schema, &reply_with_skipped));
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

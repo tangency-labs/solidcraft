@@ -15,21 +15,38 @@ use std::sync::Arc;
 
 use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::config::RowKey;
-use solidcraft_doc::drawing::view::{ResolvedView, SetBy};
+use solidcraft_doc::drawing::cutting_line::SectionKind;
+use solidcraft_doc::drawing::view::{Cut, ResolvedView, SetBy, View, ViewKind};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::drawing_view::{Exploded, Pose, StudyStep, ViewConfiguration};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
+use solidcraft_geom::drawing_detail::{Boundary, Shape};
 use solidcraft_geom::drawing_view::{Scale, ViewFrame};
+use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_geom::{Aabb2, EPS};
 use solidcraft_render::VisualStyle;
 
 use crate::params::bad;
 use crate::{Result, Session};
 
+#[path = "drawing_view_exact.rs"]
+mod exact;
+#[path = "drawing_view_hatch.rs"]
+mod hatch;
 #[path = "drawing_view_lines.rs"]
 mod lines;
+#[path = "drawing_view_threads.rs"]
+mod threads;
 
-pub use lines::{CHORD_MM, CHORD_RANGE, LineRequest, Lines, MIN_MODEL_CHORD_MM, Piece, Stats, ViewLine, lines, paper_group, paper_lines};
+pub use exact::{Fallback, PreparedBodies};
+pub use hatch::{BodyHatch, CutFaces, FLATTEN_MM, Hatching, hatches};
+pub use lines::{CHORD_MM, CHORD_RANGE, LineRequest, Lines, MIN_MODEL_CHORD_MM, Made, Piece, Stats, ViewLine, lines, paper_group, paper_lines};
+pub use threads::ThreadLine;
+
+#[path = "drawing_view_flat.rs"]
+mod flat;
+
+pub use flat::{Flat, bend_dashes_mm, flat, flat_from, flat_group};
 
 /// The paper millimetres each way of a view's boundary when there's nothing to measure, round its
 /// centre, so it can still be picked, moved and deleted.
@@ -64,6 +81,10 @@ pub enum Unmeasured {
     /// The row of the configuration table it draws can't be put on the design: its values don't
     /// apply (a hostile file), or a sketch would collapse with them.
     NotConfigured,
+    /// A flat pattern view's body has no flat pattern ([`flat`] says why).
+    NoFlat,
+    /// It is a section view whose cutting line keeps none of its parts.
+    CutAway,
 }
 
 /// Why a choice of occurrences that draws nothing is refused.
@@ -81,6 +102,8 @@ impl Unmeasured {
             Unmeasured::NotPosed => "not_posed",
             Unmeasured::NoConfiguration => "no_configuration",
             Unmeasured::NotConfigured => "not_configured",
+            Unmeasured::NoFlat => "no_flat",
+            Unmeasured::CutAway => "cut_away",
         }
     }
 }
@@ -99,6 +122,8 @@ impl fmt::Display for Unmeasured {
             Unmeasured::NotPosed => f.write_str("its position can't be placed"),
             Unmeasured::NoConfiguration => f.write_str("the configuration it draws is no longer in the design"),
             Unmeasured::NotConfigured => f.write_str("its configuration can't be applied to the design"),
+            Unmeasured::NoFlat => f.write_str("the view's body has no flat pattern"),
+            Unmeasured::CutAway => f.write_str("its cutting line keeps none of the parts"),
         }
     }
 }
@@ -131,10 +156,14 @@ impl From<&ResolvedView> for Styles {
 }
 
 impl Styles {
-    /// Leaves out a shaded part's own lines: its picture draws it, and it still hides what lies
-    /// behind it.
+    /// Leaves out the lines of a part shaded with no lines: its picture draws it, and it still
+    /// hides what lies behind it. A part shaded with its edges keeps its exact lines (visible, and
+    /// hidden too for shaded with hidden edges), drawn over its picture, so where the picture's
+    /// tessellated outline and the exact lines differ, the lines win.
     pub fn leave_shaded_to_pictures(&self, lines: &mut Lines) {
-        lines.lines.retain(|l| !(if l.reference { self.reference } else { self.display }).is_shaded());
+        let shaded = |reference: bool| (if reference { self.reference } else { self.display }) == VisualStyle::Shaded;
+        lines.lines.retain(|l| !shaded(l.reference));
+        lines.threads.retain(|t| !shaded(t.reference));
     }
 }
 
@@ -144,6 +173,11 @@ impl Styles {
 pub struct ShownSet {
     pub state: Arc<ModelState>,
     pub bodies: Vec<Shown>,
+    /// In a section view, which of its parts it draws uncut, and why ([`measured`]).
+    pub uncut: Option<String>,
+    /// In a section view, the bodies its plane cut, by their index among the state's bodies (the
+    /// ones it hatches), and how each tells its cut faces ([`CutFaces`]).
+    pub cut: BTreeMap<usize, CutFaces>,
 }
 
 impl ShownSet {
@@ -477,7 +511,7 @@ pub fn shown(s: &Session) -> std::result::Result<ShownSet, Unmeasured> {
             Shown { index, path, body, reference }
         })
         .collect();
-    if bodies.is_empty() { Err(Unmeasured::NoBodies) } else { Ok(ShownSet { state, bodies }) }
+    if bodies.is_empty() { Err(Unmeasured::NoBodies) } else { Ok(ShownSet { state, bodies, uncut: None, cut: BTreeMap::new() }) }
 }
 
 /// A saved view on its sheet.
@@ -492,11 +526,19 @@ pub struct OnSheet {
     pub unmeasured: Option<Unmeasured>,
 }
 
-/// Why a view drawing in `display` and `reference` styles can't be drawn yet, if it can't: shaded
-/// views with lines need the view's exact lines. The snapshot and the sheet scene refuse alike.
-pub fn not_drawable(display: VisualStyle, reference: VisualStyle) -> Option<&'static str> {
-    let lined = |style: VisualStyle| style.is_shaded() && style != VisualStyle::Shaded;
-    (lined(display) || lined(reference)).then_some("not supported yet: shaded views with lines need the view's exact lines (W06)")
+/// Why section view `view` can't be drawn yet, if it can't (#13046): only a full section's lines
+/// are cut so far, and a shaded part's picture isn't. The sheet scene refuses it; its settings stay
+/// editable. Pictures and dimensions leave out every section view for now.
+pub fn not_cut_yet(view: &ResolvedView) -> Option<&'static str> {
+    match view.cut.as_ref()?.line.kind() {
+        SectionKind::Full if view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded() => {
+            Some("not supported yet: a shaded section view")
+        }
+        SectionKind::Full => None,
+        SectionKind::Half => Some("not supported yet: a half section"),
+        SectionKind::Offset => Some("not supported yet: an offset section"),
+        SectionKind::Aligned => Some("not supported yet: an aligned section"),
+    }
 }
 
 /// Why saved view `view` can't be drawn yet, if it can't, as it draws its parts apart (#13048): its
@@ -517,6 +559,31 @@ pub fn not_drawable_apart(view: &ResolvedView) -> Option<&'static str> {
     }
 }
 
+/// Why flat pattern view `view` can't be drawn, if it can't: it draws one body's flat, so it is never
+/// exploded or posed, and a configuration of its own needs that configuration's flat, not read yet.
+/// Nothing for a view of the model.
+pub fn not_drawable_flat(view: &ResolvedView) -> Option<&'static str> {
+    if view.flat.is_none() {
+        None
+    } else if view.exploded.value != Exploded::Assembled {
+        Some("a flat pattern view is never exploded: it draws one body's flat")
+    } else if view.pose.value != Pose::Designed {
+        Some("a flat pattern view has no position: it draws one body's flat")
+    } else if view.configuration.value != ViewConfiguration::Active {
+        Some("not supported yet: a flat pattern view of a configuration of its own")
+    } else {
+        None
+    }
+}
+
+/// Why nothing on saved view `view` can point at the model, if nothing can (#13030): a flat pattern
+/// view draws its body's flat, whose edges aren't the model's, so no dimension, balloon or note
+/// leader has a place on it. A note on it that points at nothing is drawn.
+pub fn no_model_edges(view: &View) -> Option<&'static str> {
+    let why = "a flat pattern view draws its body's flat, not the model's edges: nothing on it points at the model";
+    matches!(view.kind, ViewKind::Flat { .. }).then_some(why)
+}
+
 /// What saved view `view` shows of `shown`, with its extents on its plane, or why there's nothing to
 /// measure: the one rule its boundary, its fitted scale and its lines are worked out by.
 pub fn measured<'a>(
@@ -527,8 +594,67 @@ pub fn measured<'a>(
     if set.bodies.is_empty() {
         return Err(Unmeasured::NothingChosen);
     }
+    // Only a full section is cut so far ([`not_cut_yet`]): the others measure their bodies whole.
+    let set = match &view.cut {
+        Some(cut) if cut.line.kind() == SectionKind::Full => Cow::Owned(sectioned(&set, cut)?),
+        _ => set,
+    };
     let extents = measure(&set, &view.basis)?;
     Ok((set, extents))
+}
+
+/// What a full section view along `cut` shows of `set`: each model body cut by the line's plane, the
+/// side its arrows point to kept ([`ModelBody::section`], which remembers it), and a body with nothing
+/// on that side left out. Reference parts show whole around the cut, as context. Mesh bodies have no
+/// faces to cut, so they show whole, and so does a body whose cut fails: [`ShownSet::uncut`] says
+/// which. Each body keeps its place among the state's bodies, so picking a line still finds its part.
+fn sectioned(set: &ShownSet, cut: &Cut) -> std::result::Result<ShownSet, Unmeasured> {
+    let plane = cut.line.planes(&cut.parent).map_err(|e| e.to_string()).and_then(|p| p.into_iter().next().ok_or_else(|| "no plane".into()));
+    let mut state = ModelState::clone(&set.state);
+    let (mut bodies, mut meshes, mut failed, mut why_failed) = (Vec::new(), 0usize, 0usize, None);
+    let mut cut_bodies = BTreeMap::new();
+    for shown in &set.bodies {
+        let Some(body) = set.body(shown) else { continue };
+        if shown.reference {
+            bodies.push(shown.clone());
+            continue;
+        }
+        if body.body.is_mesh() {
+            meshes += 1;
+            bodies.push(shown.clone());
+            continue;
+        }
+        match plane.clone().and_then(|plane| body.section(&plane).map_err(|e| e.to_string())) {
+            Ok(Some(section)) => {
+                if let Some(slot) = state.bodies.get_mut(shown.index) {
+                    // A body that only touches the plane is shown whole, and nothing of it is hatched.
+                    let telling = plane.as_ref().ok().and_then(|plane| hatch::cut_faces(&body.body, &section.body, plane));
+                    if let Some(telling) = telling {
+                        cut_bodies.insert(shown.index, telling);
+                    }
+                    *slot = section;
+                }
+                bodies.push(shown.clone());
+            }
+            Ok(None) => {}
+            Err(why) => {
+                failed += 1;
+                why_failed.get_or_insert(why);
+                bodies.push(shown.clone());
+            }
+        }
+    }
+    if set.bodies.iter().any(|b| !b.reference) && !bodies.iter().any(|b| !b.reference) {
+        return Err(Unmeasured::CutAway);
+    }
+    let count = |n: usize, what: &str| if n == 1 { format!("1 {what}body is") } else { format!("{n} {what}bodies are") };
+    let meshes = (meshes > 0).then(|| format!("{} drawn uncut: a mesh has no faces to cut", count(meshes, "mesh ")));
+    let failed = why_failed.map(|why| format!("{} drawn uncut: {why}", count(failed, "")));
+    let uncut = match (meshes, failed) {
+        (Some(meshes), Some(failed)) => Some(format!("{meshes}; {failed}")),
+        (meshes, failed) => meshes.or(failed),
+    };
+    Ok(ShownSet { state: Arc::new(state), bodies, uncut, cut: cut_bodies })
 }
 
 /// The extents of the bodies `shown` holds, seen on `basis`, or that they have nothing to measure:
@@ -570,6 +696,35 @@ pub fn frame(basis: Plane, scale: Scale, model: &Aabb2, centre: Vec2, cmd: &str)
     ViewFrame::new(basis, scale, model.center(), centre).map_err(|e| bad(cmd, e.to_string()))
 }
 
+/// The frame saved view `view` draws through, its middle at `centre` on paper: [`frame`]'s, the
+/// model's middle there, except a detail view's, whose boundary's centre is there, so the region
+/// it shows sits on its place whatever else the model holds.
+pub fn view_frame(view: &ResolvedView, model: &Aabb2, centre: Vec2, cmd: &str) -> Result<ViewFrame> {
+    match view.detail {
+        Some(boundary) => ViewFrame::new(view.basis, view.scale.value, boundary.centre(), centre).map_err(|e| bad(cmd, e.to_string())),
+        None => frame(view.basis, view.scale.value, model, centre, cmd),
+    }
+}
+
+/// A detail view's boundary as `frame` draws it: the window its lines are cut to, on paper.
+pub fn detail_window(boundary: &Boundary, frame: &ViewFrame) -> Shape {
+    let map = frame.paper_map();
+    match boundary.shape() {
+        Shape::Circle { centre, radius } => Shape::Circle { centre: map.apply(centre), radius: radius * map.scale() },
+        Shape::Rectangle(b) => {
+            let (a, c) = (map.apply(b.min), map.apply(b.max));
+            Shape::Rectangle(Aabb2 { min: Vec2::new(a.x.min(c.x), a.y.min(c.y)), max: Vec2::new(a.x.max(c.x), a.y.max(c.y)) })
+        }
+    }
+}
+
+/// Why detail view `view` can't be drawn yet, if it can't: its region is cut from its lines, and a
+/// shaded part's picture isn't cut yet.
+pub fn not_detailed_yet(view: &ResolvedView) -> Option<&'static str> {
+    let shaded = view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded();
+    (view.detail.is_some() && shaded).then_some("not supported yet: a shaded detail view")
+}
+
 /// Saved view `id` of `drawing`, one of `s`'s design's drawings, on its sheet: the extents of what it
 /// shows on its plane ([`measured`]; a view's source is the design the drawing is in), grown by
 /// [`shows`], at its scale, with the model's middle on its centre ([`Drawing::view_centre`]); with nothing to
@@ -580,13 +735,72 @@ pub fn on_sheet(s: &Session, drawing: &Drawing, id: u64, cmd: &str) -> Result<On
     on_sheet_from(&mut ViewSessions::new(s), drawing, id, cmd)
 }
 
+/// Where a saved view puts what it draws on its sheet ([`on_its_sheet`]).
+pub(crate) struct ViewOnSheet {
+    /// The frame its records are laid out through, centred on the view.
+    pub frame: ViewFrame,
+    /// The view's centre, in paper mm from the sheet's lower-left corner.
+    pub centre: Vec2,
+    /// Its sheet's size, in paper mm.
+    pub size: Vec2,
+    /// The line group its lines and records are drawn in.
+    pub line_group: LineGroup,
+}
+
+/// Where saved view `id` of `d` puts what it draws on its sheet, as the sheet draws it: its frame,
+/// centre, sheet size and line group, measured from where the design places its parts ([`on_sheet`];
+/// an occurrence move not captured yet is left out). Or, in the sheet's words
+/// ([`crate::drawing_scene::NOT_DRAWN`]), that it isn't drawn: no such view, a style the sheet can't
+/// draw yet, a section view (what points at its cut faces is in no part yet, #13046), or nothing to
+/// measure. A view that draws no model edges, a flat
+/// pattern view ([`no_model_edges`]), has no place for what points at the model
+/// ([`crate::drawing_scene::NO_PLACE`]).
+pub(crate) fn on_its_sheet(s: &Session, d: &Drawing, id: u64, cmd: &str) -> std::result::Result<ViewOnSheet, &'static str> {
+    use crate::drawing_scene::{NO_PLACE, NOT_DRAWN, designed};
+    let copy = (!s.pending_moves.is_empty()).then(|| designed(s));
+    let s = copy.as_ref().unwrap_or(s);
+    let view = d.resolve_view(id).map_err(|_| NOT_DRAWN)?;
+    if d.view(id).and_then(no_model_edges).is_some() {
+        return Err(NO_PLACE);
+    }
+    // Not yet on a section view: its cut faces' edges are in no part (#13046).
+    if not_drawable_apart(&view).is_some() || view.cut.is_some() {
+        return Err(NOT_DRAWN);
+    }
+    let on = on_sheet(s, d, id, cmd).ok().filter(|on| on.unmeasured.is_none()).ok_or(NOT_DRAWN)?;
+    let sheet = d.views.iter().find(|v| v.id == id).and_then(|v| d.sheets.iter().find(|sheet| sheet.id == v.sheet));
+    let (Ok(through), Ok(centre), Some(Ok(size))) =
+        (view_frame(&view, &on.extents.model, Vec2::ZERO, cmd), d.view_centre(id), sheet.map(|sheet| sheet.sheet.size_mm()))
+    else {
+        return Err(NOT_DRAWN);
+    };
+    Ok(ViewOnSheet { frame: through, centre, size, line_group: view.line_group.value })
+}
+
 /// [`on_sheet`], drawn from `sessions`: one read of several views makes each copy once.
 pub fn on_sheet_from(sessions: &mut ViewSessions, drawing: &Drawing, id: u64, cmd: &str) -> Result<OnSheet> {
     let view = drawing.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?;
+    if let Some(of) = &view.flat {
+        return flat_on_sheet(drawing, id, &flat(sessions.placed, of, cmd), cmd);
+    }
     let centre = drawing.view_centre(id).map_err(|e| bad(cmd, e.to_string()))?;
     let shown = shown_by(sessions, &view);
     let measured = measured(&shown, &view).map(|(set, e)| (e, shows(&set, &view.basis, &e, view.reference_shown_percent)));
     placed(&view, measured, centre, cmd)
+}
+
+/// Flat pattern view `id` of `drawing` on its sheet, from its `flat` as already read: [`on_sheet`] for
+/// a flat view, so a command that has read the flat doesn't read it again.
+pub fn flat_on_sheet(drawing: &Drawing, id: u64, flat: &Result<Flat>, cmd: &str) -> Result<OnSheet> {
+    let view = drawing.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?;
+    let centre = drawing.view_centre(id).map_err(|e| bad(cmd, e.to_string()))?;
+    placed(&view, flat_measured(flat), centre, cmd)
+}
+
+/// A flat pattern view's extents and what it shows, from its [`flat`]: [`placed`]'s input.
+pub fn flat_measured(flat: &Result<Flat>) -> std::result::Result<(Extents, Aabb2), Unmeasured> {
+    let flat = flat.as_ref().map_err(|_| Unmeasured::NoFlat)?;
+    Ok((Extents { model: flat.model, error_mm: 0.0, bodies: 1 }, flat.model))
 }
 
 /// A view drawing as `view` does on its sheet, from what [`measure`] and [`shows`] said of it, with the
@@ -601,7 +815,9 @@ pub fn placed(view: &ResolvedView, measured: std::result::Result<(Extents, Aabb2
             (Extents { model, error_mm: 0.0, bodies: 0 }, model, Some(why))
         }
     };
-    let boundary = frame(view.basis, scale, &extents.model, centre, cmd)?.boundary(&shows).map_err(|e| bad(cmd, e.to_string()))?;
+    // A detail view's boundary is its region's: it shows nothing past it.
+    let shows = view.detail.map_or(shows, |region| region.shape().bounds());
+    let boundary = view_frame(view, &extents.model, centre, cmd)?.boundary(&shows).map_err(|e| bad(cmd, e.to_string()))?;
     Ok(OnSheet { boundary, extents, unmeasured })
 }
 

@@ -23,12 +23,11 @@
 //! Deviations:
 //! - **Files.** [`BrepData::write_to_file`] returns the file's bytes (no filesystem on
 //!   wasm32); only a new file (`bNewFile = TRUE`) is supported.
-//! - **ASCII doubles (opt-in).** With
-//!   [`crate::kernel::UpstreamFixes::ascii_doubles_round_trip`],
-//!   [`write_brep_to_file`] (through [`BrepData::write_to_file_with_nurbs`]) writes
-//!   an ASCII file's doubles so that they read back unchanged
-//!   ([`BrepData::write_to_file_with`]; WR-655), where upstream's `%.16f` loses digits
-//!   below 1.
+//! - **ASCII doubles.** [`write_brep_to_file`] (through
+//!   [`BrepData::write_to_file_with_nurbs`]) writes an ASCII file's finite doubles so
+//!   that they read back unchanged ([`BrepData::write_to_file_with`]; WR-655), where
+//!   upstream's `%.16f` loses digits below 1. [`BrepData::write_to_file`] keeps
+//!   upstream's `%.16f` text.
 //! - **Native formats only.** `bWriteAsBSplines = TRUE` approximates every non-B-spline
 //!   curve and surface (`ApproximateCurve`, `ApproximateSurface`); it is not ported,
 //!   and the writers always write native formats (the upstream default). The kinds
@@ -792,8 +791,8 @@ impl BrepData {
     /// [`Self::write_to_file`] after [`make_missing_nurb`] on every surface: upstream's
     /// `SmBSplineSurface::WriteToDB` reaches the NURB through
     /// `GetOrCreateGwNurbPointer`, so a lazy surface is written with the NURB it makes.
-    /// With `k.fixes.ascii_doubles_round_trip` an ASCII file's doubles read back
-    /// unchanged ([`Self::write_to_file_with`]).
+    /// An ASCII file's finite doubles are written so that they read back unchanged
+    /// ([`Self::write_to_file_with`]; WR-655).
     ///
     /// # Errors
     ///
@@ -802,7 +801,7 @@ impl BrepData {
         for s in &mut self.surfaces {
             make_missing_nurb(k, &mut s.object)?;
         }
-        self.write_to_file_with(file_type, k.fixes.ascii_doubles_round_trip)
+        self.write_to_file_with(file_type, true)
     }
 
     /// `SmBrepData::WriteToFile(name, eType, TRUE)`: the `Version` and
@@ -818,8 +817,7 @@ impl BrepData {
     }
 
     /// [`Self::write_to_file`], an ASCII file's doubles written so that they read back
-    /// unchanged when `round_trip_doubles` (not upstream: WR-655's opt-in,
-    /// [`crate::kernel::UpstreamFixes::ascii_doubles_round_trip`];
+    /// unchanged when `round_trip_doubles` (not upstream: WR-655's fix,
     /// [`DatabaseWriter::with_round_trip_doubles`]).
     ///
     /// # Errors

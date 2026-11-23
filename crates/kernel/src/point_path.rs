@@ -126,6 +126,11 @@ impl PointPath {
                 continue;
             }
             let mut pts = piece.points();
+            // A point that is not finite is refused, as the points sweep refuses it: the length
+            // test below would drop the lines beside it and leave a shorter path.
+            if !pts.iter().all(|p| p.is_finite()) {
+                return Err(KernelError::Invalid("the sweep path has a bad point".into()));
+            }
             if let (Some(end), Some(first)) = (out.last().map(PathSeg::end), pts.first_mut()) {
                 *first = end;
             }

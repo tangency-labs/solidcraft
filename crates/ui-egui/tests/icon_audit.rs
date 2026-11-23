@@ -118,6 +118,17 @@ fn universal_panel_host_menus(requested: &mut BTreeMap<String, bool>) {
         h.call("ui.resize", json!({"width":width,"height":height}));
         enable_host_specimen(&mut h.app, preset).unwrap();
         h.frames(3);
+        if preset == "content_fill" {
+            h.app
+                .dispatch_panel_layout(LayoutAction::Apply {
+                    expected_revision: None,
+                    mutations: vec![Mutation::SetSize {
+                        section: SectionId::new("specimen-section-0").unwrap(),
+                        size: Size { width: 280.0, height: 220.0 },
+                    }],
+                })
+                .unwrap();
+        }
         if preset == "overflow" {
             let section = SectionId::new("specimen-section-0").unwrap();
             let members =
@@ -277,6 +288,52 @@ fn ribbon(h: &mut Harness, requested: &mut BTreeMap<String, bool>) {
     }
 }
 
+/// Discover an inert package and traverse the host's actual plugin menus and ribbon groups.
+fn plugin_slot_menus_and_ribbon(requested: &mut BTreeMap<String, bool>) {
+    let mut h = harness();
+    let root = h.dir.join("plugins");
+    let package = root.join("icon-audit-helper");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(package.join("entry.wasm"), []).unwrap();
+    std::fs::write(
+        package.join("plugin.json"),
+        json!({
+            "id":"icon-audit-helper","name":"Icon audit helper","version":"1.0","capabilities":["commands@0.1"],
+            "runtime":{"module":"entry.wasm","commands":[],"entries":[{
+                "name":"inspect","effect":"read","slots":[
+                    {"kind":"menu","name":"File"},{"kind":"menu","name":"Help"},
+                    {"kind":"ribbon","name":"Inspect"},{"kind":"ribbon","name":"Audit tools"}
+                ]
+            }]}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    h.app.session.plugin_state.plugins_dir = Some(root);
+    h.app.home.open = false;
+    h.app.preferences.ribbon_tabs_only = false;
+    h.app.ui.tab = "INSPECT".into();
+    h.call("ui.resize", json!({"width":2400,"height":1400}));
+    // Discovery runs on a worker. Use the shared bounded scenario wait for this fixture's
+    // unique group, so an earlier scan of the user's data directory cannot satisfy the wait.
+    h.step(&json!({"until":{"shown_handles":["panel:INSPECT:plugin:icon-audit-helper","tab:INSPECT"]}})).unwrap();
+    let label = "Icon audit helper · inspect";
+    for (handle, surface) in [("appbar:file", "plugin File slot"), ("appbar:help", "plugin Help slot")] {
+        click(&mut h, handle);
+        assert!(h.widget(label).is_some(), "{surface}: the host item must show the plugin's name");
+        collect(&mut h, surface, requested);
+        escape(&mut h);
+    }
+    // Model's Plugins group already lists every command, so a slot is drawn only on the other tabs.
+    let tab = "INSPECT";
+    click(&mut h, &format!("tab:{tab}"));
+    click(&mut h, &format!("panel:{tab}:plugin:icon-audit-helper"));
+    assert!(h.widget(label).is_some(), "{tab}: the host group menu must show the plugin's name");
+    collect(&mut h, &format!("plugin {tab} ribbon slot"), requested);
+    escape(&mut h);
+    assert_eq!(requested.get("prefs_plugins"), Some(&false), "the host plugin badge must resolve to real artwork");
+}
+
 fn assistant(h: &mut Harness, requested: &mut BTreeMap<String, bool>) {
     use solidcraft_ui_egui::agent_chat::{Item, backend::ToolStatus};
     h.call("ui.agent_chat", json!({"features":true,"open":true,"picker":false,"width":440}));
@@ -361,10 +418,16 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     }
     h.call("ui.status_fixture", json!({"preset":"off"}));
     collect(&mut h, "initial browser and timeline", &mut requested);
+    // The Browser's search field in its header, with its kind filter (#1634).
+    click(&mut h, "browser:magnifier");
+    h.frames(3);
+    collect(&mut h, "browser search field", &mut requested);
+    click(&mut h, "browser:magnifier");
+    h.frames(2);
     assistant(&mut h, &mut requested);
 
     let navigation = h.app.preferences.navigation_bar.clone();
-    h.call("ui.prefs", json!({"navigation_bar":{"slots":["orbit","pan","zoom","spin","fit","look_at","home","visual_style","projection","display","grid","ground_shadow","ambient_occlusion"]}}));
+    h.call("ui.prefs", json!({"navigation_bar":{"slots":["orbit","pan","zoom","spin","fit","look_at","home","selection_mode","visual_style","projection","display","grid","ground_shadow","ambient_occlusion"]}}));
     collect(&mut h, "navigation catalogue", &mut requested);
     let size = h.ctx.content_rect().size();
     h.call("ui.resize", json!({"width":500,"height":800}));
@@ -377,7 +440,11 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     h.call("ui.prefs", json!({"navigation_bar":navigation}));
     h.frames(3);
 
-    for (handle, surface) in [("nav:slot:visual_style", "navigation visual styles"), ("nav:view", "navigation display")] {
+    for (handle, surface) in [
+        ("nav:slot:selection_mode", "navigation selection modes"),
+        ("nav:slot:visual_style", "navigation visual styles"),
+        ("nav:view", "navigation display"),
+    ] {
         click(&mut h, handle);
         h.frames(3);
         collect(&mut h, surface, &mut requested);
@@ -424,6 +491,8 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         // following Design menu scenes, where the provisional glyph is forbidden.
         let mut drawing = Harness::new();
         drawing.app.home.open = false;
+        // This scene audits the retained legacy management and docking controls.
+        drawing.app.preferences.drawing_sheets_visibility = "legacy".into();
         workspace::enter(&mut drawing.app, "drawing").unwrap();
         drawing.frames(3);
         collect(&mut drawing, "Drawing sheet strip and browser", &mut requested);
@@ -459,15 +528,20 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         menu(&mut h, target.clone(), &target.to_string(), &mut requested);
     }
     // The Section Analysis and a canvas have a menu only while they are there (#10745).
+    // Escape after each menu ends the section, so each menu gets one of its own.
+    let plane = h.app.run("inspect.section", json!({"plane": "YZ"})).unwrap()["section"]["id"].clone();
+    menu(&mut h, json!({"type":"section","plane":plane}), "section", &mut requested);
     h.app.run("inspect.section", json!({"plane": "YZ"})).unwrap();
-    menu(&mut h, json!({"type":"section"}), "section", &mut requested);
+    menu(&mut h, json!({"type":"analysis"}), "analysis", &mut requested);
     h.app.run("inspect.section", json!({"clear": true})).unwrap();
     let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
     png.extend(400u32.to_be_bytes());
     png.extend(200u32.to_be_bytes());
     png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-    let canvas = h.app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].clone();
+    let data = std::env::temp_dir().join(format!("solidcraft-icon-audit-{}.png", std::process::id()));
+    std::fs::write(&data, &png).unwrap();
+    let data = data.to_string_lossy().into_owned();
+    let canvas = h.app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 80})).unwrap()["canvas"].clone();
     menu(&mut h, json!({"type":"canvas","id":canvas}), "canvas", &mut requested);
     h.app.run("selection.delete", json!({"canvases": [canvas]})).unwrap();
     for selection in [
@@ -701,6 +775,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         collect(&mut scenario, name, &mut requested);
     }
     universal_panel_host_menus(&mut requested);
+    plugin_slot_menus_and_ribbon(&mut requested);
     icon_svg::audit::stop();
     let manifest = requested.iter().map(|(name, placeholder)| format!("{name}\t{placeholder}\n")).collect::<String>();
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../look/icons/design/requested_icons.txt");
@@ -725,7 +800,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
 
 #[test]
 fn intentional_drawing_requests_do_not_allow_unknown_or_unplanned_icons() {
-    assert!(planned_drawing_placeholder("drawing.view.base.planned"));
+    assert!(!planned_drawing_placeholder("drawing.view.base.planned"));
     assert!(!planned_drawing_placeholder("drawing.unknown"));
     assert!(!planned_drawing_placeholder("solid.extrude"));
     assert!(permitted_request(icon_svg::PLACEHOLDER, true, true));

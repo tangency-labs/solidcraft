@@ -178,11 +178,21 @@ impl Raw {
 /// no picked edge is such, every taken-up edge that is. A chamfer running up past the end of the
 /// face beside it takes up that face's side edge and lies between its faces too: it is made from
 /// the picked edge alone. A corner patch between several blends matches none of them and stays
-/// without origin.
+/// without origin. A face a blend took away whole lies under the blend face holding one of its edges.
 pub fn blends(h: &mut History, operand: &[EdgeProv], picked: &[usize], taken_up: &[usize]) {
+    let kept: BTreeSet<FaceOrigin> = h.faces.iter().flat_map(|f| f.origins.iter().copied()).collect();
     let mut next_to: Vec<BTreeSet<FaceOrigin>> = vec![BTreeSet::new(); h.faces.len()];
     for e in &h.edges {
+        let gone = e.origins.iter().filter_map(|o| match o {
+            EdgeOrigin::Edge { operand: 0, edge } => operand.get(*edge),
+            _ => None,
+        });
+        let gone: Vec<FaceOrigin> =
+            gone.flat_map(|p| p.faces.iter().map(|&face| FaceOrigin::Face { operand: 0, face })).filter(|o| !kept.contains(o)).collect();
         for f in &e.faces {
+            if let Some(set) = next_to.get_mut(*f) {
+                set.extend(gone.iter().copied());
+            }
             for g in &e.faces {
                 if let (Some(set), Some(p)) = (next_to.get_mut(*f), h.faces.get(*g))
                     && f != g

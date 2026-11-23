@@ -8,6 +8,8 @@
 //! certified: the leans are for a preference between the two faces, not a decision at a
 //! tolerance.
 //!
+//! [`wedge_at_middle`] is the angle between those two normals, evaluated the same way.
+//!
 //! [`widest_wedge_bound`] is enclosed, not evaluated: an upper bound on the wedge between an
 //! edge's faces anywhere along it, by interval enclosures of the faces' normals along their
 //! trim curves, branch and bound over the edge's parameter. No recursion: the pieces are a
@@ -81,6 +83,25 @@ pub fn faces_along(k: &Kernel, b: &mut Brep, e: EdgeId, dir: Vec3) -> Result<[(F
     Ok([(f0, n0.dot(dir)), (f1, n1.dot(dir))])
 }
 
+/// The wedge between the two faces of `e` at the middle of its interval: the angle, in radians
+/// from 0 to pi, between their outward unit normals there (the normals [`faces_along`] leans,
+/// at the binormal points of the edge's blend edge use and its radial mate). Evaluated, not
+/// certified, as [`faces_along`]: for telling whether edges share a wedge, not for a decision
+/// at a tolerance.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for an edge without a blend edge use or its mate (not between
+/// two faces), or a face whose normal vanishes there; the evaluators' errors.
+pub fn wedge_at_middle(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> {
+    let u0 =
+        edge::blend_edgeuse(k, b, e)?.ok_or_else(|| invalid("the edge has no blend edge use"))?;
+    let u1 = eu1::radial(b, u0)?.ok_or_else(|| invalid("the edge lies on one face only"))?;
+    let t = b.edge(e)?.interval.evaluate(0.5);
+    let (_, n0) = outward(k, b, u0, t)?;
+    let (_, n1) = outward(k, b, u1, t)?;
+    Ok(n0.dot(n1).clamp(-1.0, 1.0).acos())
+}
+
 /// An upper bound on the widest wedge along an edge ([`widest_wedge_bound`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WedgeBound {
@@ -148,12 +169,14 @@ impl Ord for Piece {
 }
 
 /// One face of an edge as [`widest_wedge_bound`] encloses it: its trim curve, its surface's
-/// net, the range its uv is clamped to, and the sign that turns `S_u x S_v` outward.
+/// net, the range its uv is clamped to, the centre of the sphere its surface is (if it is
+/// one) and the sign that turns its normal outward.
 struct Side {
     trim: NurbsCurve,
     net: Nurbs,
     u: Ivl,
     v: Ivl,
+    centre: Option<Vec3>,
     sign: f64,
 }
 
@@ -176,7 +199,11 @@ fn clamped(x: Ivl, r: Ivl) -> Ivl {
 }
 
 impl Side {
-    /// `S_u x S_v` over the trim curve's points for every parameter in `t`, enclosed.
+    /// A normal of the face over the trim curve's points for every parameter in `t`,
+    /// enclosed: `S - c` on a sphere of centre `c`, else `S_u x S_v`. A sphere's net is its
+    /// definition exactly (a quadric's rational form), so `S - c` is its normal at every
+    /// point, of length its radius; `S_u x S_v` vanishes at its poles, where a piece's
+    /// cosine would be the whole line however far it is halved.
     fn normal_over(&self, t: Ivl) -> Result<V3<Ivl>> {
         let at = curve_derivs_over(&self.trim, t, 0, None)?;
         let p = at
@@ -184,8 +211,18 @@ impl Side {
             .copied()
             .ok_or_else(|| invalid("a trim curve has no point"))?;
         let (u, v) = (clamped(p.x, self.u), clamped(p.y, self.v));
-        let partials = nurbs_partials_over_box(&self.net, u.lo, u.hi, v.lo, v.hi, 1, 0)?;
-        let n = cross(partials.at(1, 0), partials.at(0, 1));
+        let n = if let Some(c) = self.centre {
+            let partials = nurbs_partials_over_box(&self.net, u.lo, u.hi, v.lo, v.hi, 0, 0)?;
+            let s = partials.at(0, 0);
+            V3 {
+                x: s.x - Ivl::from(c.x),
+                y: s.y - Ivl::from(c.y),
+                z: s.z - Ivl::from(c.z),
+            }
+        } else {
+            let partials = nurbs_partials_over_box(&self.net, u.lo, u.hi, v.lo, v.hi, 1, 0)?;
+            cross(partials.at(1, 0), partials.at(0, 1))
+        };
         let s = Ivl::from(self.sign);
         Ok(V3 {
             x: n.x * s,
@@ -219,6 +256,10 @@ fn side(k: &Kernel, b: &mut Brep, u: EdgeuseId, t: f64) -> Result<Side> {
             _ => break,
         }
     }
+    let centre = match surface.kind() {
+        crate::surface::surface::SurfaceKind::Sphere(s) => Some(s.base().position().origin()),
+        _ => None,
+    };
     let net = as_b_spline(k, surface)?.ok_or_else(|| invalid("a face of the edge has no net"))?;
     let net = Nurbs::of(&net)?;
     let domain = rec.uv_domain;
@@ -244,6 +285,7 @@ fn side(k: &Kernel, b: &mut Brep, u: EdgeuseId, t: f64) -> Result<Side> {
         net,
         u,
         v,
+        centre,
         sign: 1.0,
     };
     let n = probe.normal_over(Ivl::from(t))?;
@@ -258,12 +300,27 @@ fn side(k: &Kernel, b: &mut Brep, u: EdgeuseId, t: f64) -> Result<Side> {
     Ok(probe)
 }
 
+/// The squares of the numbers in `x`, enclosed: never below 0. `x * x` takes its two factors
+/// as independent numbers, so where `x` holds 0 its lower end is the negative `x.lo x.hi`.
+fn squared(x: Ivl) -> Ivl {
+    let (least, most) = (x.mig(), x.mag());
+    Ivl::checked(least * least, most * most)
+}
+
+/// The squared length of `a`, enclosed: the sum of its components' [`squared`].
+fn length_squared(a: V3<Ivl>) -> Ivl {
+    squared(a.x) + squared(a.y) + squared(a.z)
+}
+
 /// The cosine of the angle between the faces' outward normals, enclosed for every parameter
-/// in `t`; the whole line where a normal's enclosure holds 0.
+/// in `t`; the whole line where a normal's enclosure holds 0. The lengths are enclosed by
+/// [`length_squared`]: `dot(n, n)` would let a component's enclosure that holds 0 (one wide
+/// across a knot of the face's net) pull the length's lower end to 0 or below, and the cosine
+/// to the whole line, though the normal is nowhere near 0 (#19691).
 fn normals_cos_over(sides: &[Side; 2], t: Ivl) -> Result<Ivl> {
     let [a, b] = sides;
     let (na, nb) = (a.normal_over(t)?, b.normal_over(t)?);
-    Ok(dot(na, nb) / (dot(na, na).sqrt() * dot(nb, nb).sqrt()))
+    Ok(dot(na, nb) / (length_squared(na).sqrt() * length_squared(nb).sqrt()))
 }
 
 /// An upper bound on the wedge between the faces of edge `e` anywhere along it (radians, the
@@ -329,7 +386,7 @@ pub fn widest_wedge_bound(k: &Kernel, b: &mut Brep, e: EdgeId, gap: f64) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::primitive::api_primitives::create_box;
+    use crate::primitive::api_primitives::{create_box, create_cylinder};
     use crate::query::api_queries::edge_closest_point;
 
     /// A unit box's top front edge: its top face leans 1 along +z, its front face 0.
@@ -353,6 +410,17 @@ mod tests {
         );
         assert_ne!(leans[0].0, leans[1].0);
         assert!(faces_along(&k, &mut b, e, Vec3::new(f64::NAN, 0.0, 0.0)).is_err());
+    }
+
+    /// The faces of every edge of a box meet square: the wedge at its middle is a right angle.
+    #[test]
+    fn the_wedge_at_a_box_edge_s_middle_is_a_right_angle() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Vec3::new(0.0, 0.0, 0.0), 1.0, 2.0, 3.0).unwrap();
+        for e in b.edge_list().to_vec() {
+            let w = wedge_at_middle(&k, &mut b, e).unwrap();
+            assert!((w - std::f64::consts::FRAC_PI_2).abs() < 1e-12, "{w}");
+        }
     }
 
     /// A box edge's faces meet square all along it: the bound is a right angle, from above,
@@ -415,5 +483,45 @@ mod tests {
         let w = widest_wedge_bound(&k, &mut b, e, 1e-9).unwrap().wedge;
         let right = 0.5 * crate::math::PI;
         assert!(w >= right && w - right < 2e-9, "{w}");
+    }
+
+    /// #19691: a normal enclosed over a piece of an edge can hold 0 in a component (one wide
+    /// across a knot of a face's net) and still be far from 0; its squared length stays at
+    /// least the other components' squares, where `dot(n, n)` reaches below 0.
+    #[test]
+    fn a_normal_s_squared_length_never_reaches_below_its_components_squares() {
+        let n = V3 {
+            x: Ivl::new(0.48, 0.56),
+            y: Ivl::new(-58.0, 60.0),
+            z: Ivl::new(-1e-11, 1e-11),
+        };
+        assert!(dot(n, n).lo < 0.0);
+        let l = length_squared(n);
+        assert!(l.lo >= 0.48 * 0.48 * (1.0 - 1e-15), "{l:?}");
+        assert!(l.hi >= 0.56 * 0.56 + 60.0 * 60.0, "{l:?}");
+        assert_eq!(squared(Ivl::new(-2.0, 3.0)), Ivl::checked(0.0, 9.0));
+        assert_eq!(squared(Ivl::new(-3.0, -2.0)), Ivl::checked(4.0, 9.0));
+    }
+
+    /// #19691: a small cylinder's rims meet their faces square all round (a plane and the
+    /// cylinder). The bound is a right angle from above within the gap, never the whole half
+    /// turn a length enclosed at 0 or below gave.
+    #[test]
+    fn a_small_cylinder_s_rims_widest_wedge_is_a_right_angle() {
+        let mut k = Kernel::default();
+        let mut b = create_cylinder(&mut k, Vec3::new(500.0, 0.0, 0.0), 0.24, 0.5).unwrap();
+        let right = 0.5 * crate::math::PI;
+        let mut rims = 0;
+        for e in b.edge_list().to_vec() {
+            let Ok(w) = widest_wedge_bound(&k, &mut b, e, 1e-9) else {
+                continue;
+            };
+            if (wedge_at_middle(&k, &mut b, e).unwrap() - right).abs() > 1e-9 {
+                continue;
+            }
+            rims += 1;
+            assert!(w.wedge >= right && w.wedge - right < 1e-6, "{e:?}: {w:?}");
+        }
+        assert_eq!(rims, 2);
     }
 }

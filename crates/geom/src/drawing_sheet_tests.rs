@@ -318,6 +318,17 @@ fn rows_skip_i_and_o_and_letters_go_on_past_z() {
     assert_eq!(rows, "ABCDEFGHIJ");
 }
 
+/// A view's letters (#13044) skip I, O and Q, then go on past Z as a grid's rows do.
+#[test]
+fn view_letters_skip_i_o_and_q() {
+    assert_eq!((0..23).filter_map(view_letter).collect::<String>(), "ABCDEFGHJKLMNPRSTUVWXYZ");
+    assert_eq!(view_letter(23).as_deref(), Some("AA"));
+    assert_eq!(view_letter(23 + 23 * 23).as_deref(), Some("AAA"));
+    for i in 0..2000 {
+        assert!(view_letter(i).is_some_and(|l| !l.contains(['I', 'O', 'Q'])), "{i}");
+    }
+}
+
 #[test]
 fn hostile_sizes_and_profiles_are_refused() {
     let custom = |a: f64, b: f64| Sheet { size: SheetSize::Custom { sides_mm: [a, b] }, orientation: Orientation::Landscape };
@@ -354,6 +365,10 @@ fn hostile_sizes_and_profiles_are_refused() {
         DrawingBorderProfile { grid_border_mm: -0.1, ..iso },
         DrawingBorderProfile { grid_border_mm: f64::NAN, ..iso },
         DrawingBorderProfile { grid_border_mm: 10.000_001, ..iso },
+        // ...on the drawing border or at least a field's shortest length (1 mm) outside it.
+        DrawingBorderProfile { grid_border_mm: 1e-9, ..iso },
+        DrawingBorderProfile { grid_border_mm: 1e-6, ..iso },
+        DrawingBorderProfile { grid_border_mm: 0.999_999, ..iso },
         // On every side: 5 mm is wider than a 4 mm bottom margin, or a 4 mm left one without the
         // filing margin.
         with_margins(20.0, 10.0, 10.0, 4.0),
@@ -424,6 +439,8 @@ fn hostile_sizes_and_profiles_are_refused() {
         DrawingBorderProfile { grid: GridRule::Equal { columns: 200, rows: 200 }, ..iso },
         DrawingBorderProfile { grid_border_mm: 0.0, centring_mark_mm: None, ..with_margins(0.0, 0.0, 0.0, 0.0) },
         DrawingBorderProfile { grid_border_mm: 10.0, ..iso },
+        DrawingBorderProfile { grid_border_mm: 1.0, ..iso },
+        DrawingBorderProfile { grid_border_mm: 1.000_001, ..iso },
         DrawingBorderProfile { centring_mark_mm: Some(138.5), ..iso },
         // With no grid reference border, a centring mark that reaches inside has a length, and so
         // does one from the sheet's edge.
@@ -441,6 +458,29 @@ fn hostile_sizes_and_profiles_are_refused() {
     ] {
         profile.layout(&a3).unwrap();
     }
+}
+
+/// Every grid reference border laid out lies on the drawing border or at least 1 mm outside it on
+/// every side, so no field mark is a sliver on the drawing border's line: borders from 0 through
+/// sub-micrometre values to the margin's width, on every size both ways.
+#[test]
+fn no_grid_reference_border_is_a_sliver_outside_the_drawing_border() {
+    let mut laid_out = 0;
+    for size in PaperSize::ALL {
+        for orientation in [Orientation::Landscape, Orientation::Portrait] {
+            for g in [0.0, 1e-12, 1e-9, 1e-6, 0.5, 0.999_999, 1.0, 1.000_001, 5.0, 10.0] {
+                let profile = DrawingBorderProfile { grid_border_mm: g, ..DrawingBorderProfile::iso() };
+                let Ok(layout) = profile.layout(&Sheet::standard(size, orientation)) else { continue };
+                laid_out += 1;
+                let (d, b) = (layout.drawing_border, layout.grid_border);
+                for gap in [d.min.x - b.min.x, d.min.y - b.min.y, b.max.x - d.max.x, b.max.y - d.max.y] {
+                    assert!(gap == 0.0 || gap >= MIN_FIELD_MM - EPS, "{size:?} {orientation:?}, {g} mm: a {gap} mm gap");
+                }
+            }
+        }
+    }
+    // 0, 1, 1.000001, 5 and 10 mm on all 40 sheets.
+    assert_eq!(laid_out, 200);
 }
 
 #[test]
@@ -712,4 +752,15 @@ fn a_border_on_paper_draws_only_what_its_profile_has() {
     assert_eq!(paper(DrawingBorderProfile { centring_mark_mm: None, ..iso() }, &a3), [1, 1 + 2 * 7 + 2 * 5]);
     assert_eq!(paper(DrawingBorderProfile { grid: GridRule::Equal { columns: 1, rows: 1 }, ..iso() }, &a3), [1, 1, 4]);
     assert_eq!(paper(iso(), &Sheet::standard(PaperSize::A4, Orientation::Portrait)), [1, 1 + 2 * 3 + 2 * 5, 4]);
+}
+
+#[test]
+fn alternate_letter_alphabets_share_the_bijective_sequence_and_reject_unbounded_work() {
+    assert_eq!(letters_from_alphabet(0, b"AB").as_deref(), Some("A"));
+    assert_eq!(letters_from_alphabet(2, b"AB").as_deref(), Some("AA"));
+    assert_eq!(letters_from_alphabet(5, b"AB").as_deref(), Some("BB"));
+    assert_eq!(letters_from_alphabet(6, b"AB").as_deref(), Some("AAA"));
+    assert_eq!(letters_from_alphabet(23, b"ABCDEFGHJKLMNPRSTUVWXYZ").as_deref(), Some("AA"));
+    assert_eq!(letters_from_alphabet(usize::MAX, b""), None);
+    assert_eq!(letters_from_alphabet(usize::MAX, b"A"), None);
 }

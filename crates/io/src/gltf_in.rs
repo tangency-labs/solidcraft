@@ -27,10 +27,8 @@ use solidcore_record::Vec3;
 use solidcraft_doc::appearance::Look;
 use solidcraft_doc::{Mat, MeshData, mat_mul};
 
-use crate::{IoError, MAX_3MF_BYTES, MeshFeature, Result};
+use crate::{IoError, MeshFeature, Result};
 
-/// Largest `.glb` / `.gltf` file read.
-pub const MAX_GLTF_BYTES: usize = MAX_3MF_BYTES;
 /// Most bytes of external and embedded buffers read for one file.
 const MAX_BUFFER_BYTES: usize = 1 << 30;
 /// Most vertices and triangles, over all bodies.
@@ -59,6 +57,9 @@ pub struct PlanPlace {
     pub slot: usize,
     pub parent: Option<usize>,
     pub transform: Mat,
+    /// The occurrence's own name (a KiCad footprint's reference, such as `R33`); `None`: the
+    /// component's name and a number, as any occurrence.
+    pub name: Option<String>,
 }
 
 /// How a glTF file's nodes become components below the import's own: `slots` are the
@@ -102,6 +103,19 @@ impl GltfImport {
         if let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = &mut self.feature.kind {
             for (m, slot) in meshes.iter_mut().zip(&self.plan.bodies) {
                 let Some(frame) = slot.and_then(|s| world.get(s).copied().flatten()) else { continue };
+                // Placements are rigid, so shading normals turn with the rotation alone.
+                if !m.corner_normals.is_empty() {
+                    m.corner_normals = m
+                        .corner_normals
+                        .as_chunks::<3>()
+                        .0
+                        .iter()
+                        .flat_map(|n| {
+                            let v = solidcraft_doc::apply_vector(&frame, Vec3::new(n[0], n[1], n[2]));
+                            [v.x, v.y, v.z]
+                        })
+                        .collect();
+                }
                 m.positions = m
                     .positions
                     .as_chunks::<3>()
@@ -123,11 +137,10 @@ impl GltfImport {
 pub type Loader<'a> = &'a mut dyn FnMut(&str) -> std::result::Result<Vec<u8>, String>;
 
 /// Read a `.glb` or `.gltf` file (`file` names it; its stem names the meshes when nothing in the
-/// file does). External buffers are read through `load`.
+/// file does). External buffers are read through `load`. The file may be as large as the limit for
+/// STEP and import files ([`crate::limits`], #17446).
 pub fn read_gltf(bytes: &[u8], file: &str, load: Loader<'_>) -> Result<GltfImport> {
-    if bytes.len() > MAX_GLTF_BYTES {
-        return Err(IoError::Invalid(format!("glTF file too large ({} MB)", bytes.len() >> 20)));
-    }
+    crate::limits::check(crate::limits::Kind::Step, bytes.len() as u64).map_err(|e| IoError::Invalid(format!("glTF {e}")))?;
     let (json, blob) = if bytes.starts_with(b"glTF") { split_glb(bytes)? } else { (bytes, None) };
     let doc = parse_document(json)?;
     let stem = std::path::Path::new(file)
@@ -570,7 +583,7 @@ impl<'d> Reader<'d, '_, '_> {
             {
                 own.clone_from(mesh);
             }
-            self.plan.places.push(PlanPlace { slot, parent, transform: place });
+            self.plan.places.push(PlanPlace { slot, parent, transform: place, name: None });
             return Ok(());
         }
         let slot = self.plan.slots.len();
@@ -578,7 +591,7 @@ impl<'d> Reader<'d, '_, '_> {
         let name = name.or_else(|| node.mesh().and_then(|m| m.name().map(clean_name)).filter(|n| !n.is_empty()));
         self.plan.slots.push(name.unwrap_or_else(|| format!("Node {index}")));
         self.slot_meshes.push(node.mesh().and_then(|m| m.name().map(clean_name)).filter(|n| !n.is_empty()));
-        self.plan.places.push(PlanPlace { slot, parent, transform: place });
+        self.plan.places.push(PlanPlace { slot, parent, transform: place, name: None });
         self.keys.insert(key, slot);
         self.node_meshes(index, Some(slot), &rest)?;
         let children: Vec<usize> = node.children().map(|c| c.index()).collect();
