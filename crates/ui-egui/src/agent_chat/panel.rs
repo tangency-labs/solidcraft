@@ -3081,7 +3081,11 @@ mod tests {
             solidcraft_ui_registry::clear_handles();
             let input = egui::RawInput { screen_rect: Some(screen), focused: true, events, ..Default::default() };
             let view = PanelView::of(app, &ctx);
-            let mut output = ctx.run_ui(input, |ui| ui_kit::scope(ui, |ui| conversation(&mut app.agent_chat, &view, ui)));
+            // The conversation is drawn in the room it has before it scrolls (#17355).
+            let mut output = ctx.run_ui(input, |ui| {
+                let room = ui.available_height();
+                ui_kit::scope(ui, |ui| conversation(&mut app.agent_chat, &view, ui, room))
+            });
             output.textures_delta.clear();
         };
         frame(&mut app, Vec::new());
