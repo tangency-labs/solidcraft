@@ -155,8 +155,9 @@ sketch, a brief, a part to fit around.
   thumbnails (hold the pointer over one for a bigger preview, click it to open the viewer, where
   the file's name is shown and ‹ › step through the message's pictures, together with the picture
   of the view); the other files are listed by name. Pictures in any of the formats above are
-  decoded in the background, with a spinner until they are in. A file that can't be attached says
-  why.
+  decoded in the background, with a spinner until they are in. A photo stored turned by its EXIF
+  orientation is attached upright: its chip and size are the turned picture's, and it is sent as
+  upright pixels. A file that can't be attached says why.
 
 Files stay with their message: one queued while the agent works keeps its files, and one sent
 again after a sign-in sends them again. When several queued messages go as one prompt, their
@@ -280,6 +281,35 @@ These permissions apply to SolidCraft for your user account:
 
 Restart SolidCraft after applying the override. Other agents or installation folders
 may need different filesystem permissions.
+
+Starting from a computer with no Node, these steps set up Claude Code for the Flatpak. They were
+tested on Linux Mint:
+
+1. Install Node through nvm, not the distribution's package. A package such as `nodejs` from
+   `apt` can be too old, and it installs to `/usr/bin`, which the sandbox can't see. Install
+   nvm with the command from the [nvm README](https://github.com/nvm-sh/nvm#installing-and-updating),
+   open a new terminal, then run `nvm install --lts` and check it with `node -v`.
+2. Install Claude Code and its adapter:
+
+   ```sh
+   npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code
+   npm install -g @agentclientprotocol/claude-agent-acp
+   ```
+
+   Newer npm versions skip a package's setup script unless it's allowed. Without
+   `--allow-scripts`, Claude Code installs but its setup doesn't run. Check it with
+   `claude --version`.
+3. Run `claude` once and sign in. Claude Code needs a Pro, Max, Team or Enterprise plan, or an
+   Anthropic Console account; the free Claude plan doesn't include it. Then quit it; it doesn't
+   need to trust your home folder for SolidCraft to use it.
+4. Run the `flatpak override` command above. **Preferences → Assistant** shows the same command
+   with a **Copy** button.
+5. Quit SolidCraft completely and start it again. **Preferences → Assistant → Agents** then lists
+   Claude Code with **login found**.
+
+The adapter includes the Claude Code engine itself, so steps 2 and 3 can likely be shortened to
+installing only `@agentclientprotocol/claude-agent-acp` and signing in from the panel (see
+[Signing in](#signing-in)). That shorter path hasn't been tested with the Flatpak yet.
 
 ### XAI Grok
 
@@ -494,6 +524,12 @@ each agent can have its own setting in its row.
 
 **Always allow** remembers that command for that agent. The page lists what you allowed this way,
 per agent, with **Reset**.
+
+Installed plugins are tools too (`<plugin>.<entry>`, see [Plugins as tools for
+agents](plugins.md#plugins-as-tools-for-agents)). A call to one always waits for **Allow** or
+**Deny**, in every mode and after **Always allow**: running a plugin's code needs your go each
+time. So does opening a file with an importer plugin (`file.import`, or `doc.open` of a file an
+installed importer opens), alone or in a batch. The plugin opens none of its own dialogs.
 
 These settings cover SolidCraft's tools. A coding agent's own tools (its shell, its file edits)
 follow the agent's own mode, which you pick in the panel's header. When an agent asks before

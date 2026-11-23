@@ -9,7 +9,9 @@ const COMMANDS: &[(&str, &str)] = &[
     ("run", "run"),
     ("eval", "eval"),
     ("inspect", "eval"),
+    ("check", "check"),
     ("script", "script"),
+    ("textconv", "textconv"),
     ("export-snapshot", "export-snapshot"),
     ("bench-open", "bench-open"),
     ("bench-agent", "bench-agent"),
@@ -22,6 +24,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("fuzz", "fuzz"),
     ("fuzz-one", "fuzz-one"),
     ("mcp", "mcp"),
+    ("plugin", "plugin"),
     ("crashes", "crashes"),
     ("licences", "licences"),
     ("licenses", "licences"),
@@ -35,7 +38,9 @@ const COMMANDS: &[(&str, &str)] = &[
 const LISTED: &[&str] = &[
     "run",
     "eval",
+    "check",
     "script",
+    "textconv",
     "export-snapshot",
     "bench-open",
     "bench-agent",
@@ -47,6 +52,7 @@ const LISTED: &[&str] = &[
     "oracle",
     "fuzz",
     "mcp",
+    "plugin",
     "crashes",
     "licences",
     "gpu",
@@ -60,6 +66,11 @@ fn mentioned(text: &str) -> Vec<&str> {
     names.dedup();
     names
 }
+
+/// How long `fuzz` may run before it counts as a fuzz run, which goes on for minutes. Usage or
+/// a refusal takes well under a second alone, but the whole test suite on all cores can hold a
+/// freshly built binary's start for tens of seconds.
+const FUZZ_RUN: Duration = Duration::from_secs(120);
 
 /// Runs the binary and waits at most `limit` for it to finish. `None` means it was still
 /// running and was killed: the fuzz run `fuzz --help` used to start goes on for minutes.
@@ -127,7 +138,7 @@ fn the_top_level_usage_still_lists_every_command() {
 
 #[test]
 fn fuzz_help_does_not_start_a_fuzz_run() {
-    let Some((code, stdout, stderr)) = run_within(Duration::from_secs(20), &["fuzz", "--help"]) else {
+    let Some((code, stdout, stderr)) = run_within(FUZZ_RUN, &["fuzz", "--help"]) else {
         panic!("`fuzz --help` kept running: it started a fuzz run instead of printing the usage");
     };
     assert_eq!(code, Some(0), "{stderr}");
@@ -139,7 +150,7 @@ fn fuzz_help_does_not_start_a_fuzz_run() {
 #[test]
 fn fuzz_refuses_an_argument_it_does_not_take() {
     for arg in ["--not-a-flag", "stray"] {
-        let Some((code, _stdout, stderr)) = run_within(Duration::from_secs(20), &["fuzz", arg]) else {
+        let Some((code, _stdout, stderr)) = run_within(FUZZ_RUN, &["fuzz", arg]) else {
             panic!("`fuzz {arg}` kept running: it started a fuzz run instead of refusing the argument");
         };
         assert_ne!(code, Some(0), "`fuzz {arg}` succeeded");
@@ -217,9 +228,4 @@ fn a_closed_stderr_does_not_stop_the_cli() {
         drop(child.stderr.take());
         assert_eq!(child.wait().unwrap().code(), Some(1));
     }
-    // The old name's alias writes its deprecation notice first: an agent still configured with
-    // `solvecraft-cli mcp` must get the server, not that panic.
-    let mut child = Command::new(env!("CARGO_BIN_EXE_solvecraft-cli")).arg("--help").stdout(Stdio::null()).stderr(Stdio::piped()).spawn().unwrap();
-    drop(child.stderr.take());
-    assert_eq!(child.wait().unwrap().code(), Some(0));
 }

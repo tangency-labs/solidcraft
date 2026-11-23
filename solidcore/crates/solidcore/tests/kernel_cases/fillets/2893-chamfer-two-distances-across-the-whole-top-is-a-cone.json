@@ -1,0 +1,145 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "chamfer_sides",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "distance": 10.0,
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  8.178681931579773,
+                  5.754056122601737,
+                  20.0
+                ],
+                [
+                  8.178681931579773,
+                  5.754056122601737,
+                  20.0
+                ]
+              ],
+              "index": 2
+            }
+          ],
+          "points": [
+            [
+              -8.17868193157977,
+              -5.754056122601739,
+              20.0
+            ]
+          ],
+          "tolerance": 1.529992074132168
+        },
+        "first": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "second": {
+          "distance": 3.0
+        }
+      }
+    }
+  ],
+  "case": "2893-chamfer-two-distances-across-the-whole-top-is-a-cone",
+  "expected": {
+    "bbox": {
+      "max": [
+        10,
+        10,
+        20
+      ],
+      "min": [
+        -10,
+        -10,
+        0
+      ]
+    },
+    "body_count": 1,
+    "faces": 3,
+    "method": "The chamfer's line in (rho, z) runs from (0, 20) on the axis to (10, 17) on the wall, so the top is taken whole and the cone ends in a point on the axis (the owner's ruling of 2026-10-30 (d7): a chamfer that reaches a rim builds). The result is the cone from the tip at z = 20 down to r 10 at z = 17 on top of the cylinder r 10 from z = 17 to z = 0: pi r^2 h / 3 + pi r^2 h = pi 100 3 / 3 + pi 100 17 = 100 pi + 1700 pi = 1800 pi = 5654.866776. Faces: the cone, the wall and the bottom: 3.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2893"
+    ],
+    "volume_mm3": 5654.8667764616275,
+    "what": "the top rim of a cylinder r10 x 20 chamfered 10 across the top (the whole radius) and 3 down the wall: builds a cone to the centre"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 4,
+      "faces": 3,
+      "vertices": 3
+    }
+  },
+  "records": "2893-chamfer-two-distances-across-the-whole-top-is-a-cone.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b6"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#2893"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "chamfer_sides"
+  ],
+  "ungraded": [],
+  "what": "the top rim of a cylinder r10 x 20 chamfered 10 across the top (the whole radius) and 3 down the wall: builds a cone to the centre",
+  "why_not": []
+}

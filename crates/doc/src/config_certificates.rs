@@ -807,11 +807,14 @@ fn same_oriented_plane(a: &solidcore_record::Plane, b: &solidcore_record::Plane,
 
 impl Document {
     /// The exact plane an anchor on face `index` of `body` is measured in: the construction
-    /// certificate's plane, or for a [`FaceCertificate::Lineage`] face its current exact plane in
-    /// the [`lineage_frame`].
+    /// certificate's plane, or for a [`FaceCertificate::Lineage`] face the frame what built the
+    /// body gives it (a sheet's panel's: the flat pattern's, see [`ModelBody::sketch_frame`]),
+    /// else its current exact plane in the [`lineage_frame`].
     pub fn anchor_face_plane(&self, body: &ModelBody, index: usize, certificate: Option<&FaceCertificate>) -> Option<solidcore_record::Plane> {
         match certificate {
-            Some(FaceCertificate::Lineage) => body.body.planar_face(index).and_then(|plane| lineage_frame(body, &plane)),
+            Some(FaceCertificate::Lineage) => {
+                body.sketch_frame(index).or_else(|| body.body.planar_face(index).and_then(|plane| lineage_frame(body, &plane)))
+            }
             _ => body.body.face_plane(index),
         }
     }
@@ -855,12 +858,15 @@ impl Document {
     /// (a later join merged it into another face) the face that answers to it. Every one must
     /// follow exact history and lie on one oriented plane.
     pub(crate) fn lineage_face_indices(&self, body: &ModelBody, name: &str) -> Result<Vec<usize>> {
+        // Bodies are named in today's form; a design saved before format 52 holds the older one.
+        let name = &*crate::persistent_name::written_now(name);
         let names = crate::naming::names(body);
-        // `face` is `name` itself or a piece of it (a piece of a piece, …).
+        // `face` is `name` itself or a piece of it (a piece of a piece, …). Compare the
+        // identities in either saved spelling: 0.40 rc.3 wrote `blend:…`, now `blend(…)`.
         let piece_of = |face: &str| {
             let mut n = face;
             loop {
-                if n == name {
+                if crate::persistent_name::same_face(n, name) {
                     return true;
                 }
                 match crate::piece_names::parent_piece(n) {
@@ -875,7 +881,7 @@ impl Document {
                 .info
                 .iter()
                 .enumerate()
-                .filter(|(_, info)| info.synonyms.iter().chain(&info.aliases).any(|other| other == name))
+                .filter(|(_, info)| info.synonyms.iter().chain(&info.aliases).any(|other| crate::persistent_name::same_face(other, name)))
                 .map(|(index, _)| index)
                 .collect();
         }

@@ -23,7 +23,6 @@ use solidcore::kernel::Kernel;
 use solidcore::math::Point3;
 use solidcore::topology::proto_topology::p1::CopyBrepMap;
 use solidcore::{Result as SolidResult, SolidError};
-use std::collections::BTreeMap;
 
 #[path = "blend_fillet_executive_p3/attributed.rs"]
 mod attributed;
@@ -31,6 +30,8 @@ mod attributed;
 mod contract;
 #[path = "blend_fillet_executive_p3/end_to_end.rs"]
 mod end_to_end;
+#[cfg(test)]
+pub(crate) use end_to_end::result_body_of;
 #[path = "blend_fillet_executive_p3/preview.rs"]
 mod preview;
 #[path = "blend_fillet_executive_p3/surface_bodies.rs"]
@@ -338,6 +339,15 @@ impl ExecutiveAccess<Handle> for Access {
             .ok_or_else(missing_error)?;
         orient_brep(k, b, outward, maybe_not_solid, just_unify, faces_to_swap_uv)
     }
+    fn keeps_open_result(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &SolidError,
+    ) -> SolidResult<bool> {
+        // never asked: this harness does not stitch (`do_stitching` is missing)
+        missing()
+    }
     fn do_stitching(
         &mut self,
         _: &mut Kernel,
@@ -562,6 +572,38 @@ impl ExecutiveAccess<Handle> for Access {
             None,
             allow_spine_edges,
         ))
+    }
+    fn stitch_faces_keeping_fillet_edges(
+        &mut self,
+        k: &mut Kernel,
+        brep: Handle,
+        tolerance: f64,
+        corners: &[Handle],
+    ) -> SolidResult<StitchAttempt> {
+        // (the fixture's handles name no corners) with no corner there is no patch face,
+        // and the patch callback keeps the default choice for every glued pair
+        if !corners.is_empty() {
+            return missing();
+        }
+        ExecutiveAccess::stitch_faces(self, k, brep, tolerance, None, false)
+    }
+    // (the fixture's handles name no solvers) with no blend, none takes a face
+    fn solvers_faces_outlast(&mut self, _: &mut Kernel, solvers: &[Handle]) -> SolidResult<bool> {
+        if !solvers.is_empty() {
+            return missing();
+        }
+        Ok(true)
+    }
+    // (the fixture's handles name no solvers) with no blend, no bands overlap
+    fn solvers_bands_clear_other_rails(
+        &mut self,
+        _: &mut Kernel,
+        solvers: &[Handle],
+    ) -> SolidResult<bool> {
+        if !solvers.is_empty() {
+            return missing();
+        }
+        Ok(true)
     }
     fn editing_enabled(&self, brep: Handle) -> SolidResult<bool> {
         self.breps
@@ -807,6 +849,15 @@ fn output(values: &[f64]) -> Result<Output, HarnessError> {
 }
 
 fn rust(input: &Inputs) -> Result<Output, HarnessError> {
+    rust_with_fixes(input, &solidcore::kernel::UpstreamFixes::default())
+}
+
+/// [`rust`] with the opt-in `fixes` on the record's kernel (runner tests only; the gate
+/// runs the default).
+fn rust_with_fixes(
+    input: &Inputs,
+    fixes: &solidcore::kernel::UpstreamFixes,
+) -> Result<Output, HarnessError> {
     if let Some(example) = input.upstream_case {
         contract::validate_upstream_fixture(example).map_err(|e| HarnessError::new(e.to_string()))?;
         if !input.record.is_empty() {
@@ -821,7 +872,8 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
     else {
         return Err(HarnessError::new("short executive record"));
     };
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
+    k.fixes = *fixes;
     k.context.set_doing_boolean(*prior_boolean != 0.0);
     let mut b = solidcore::topology::Brep::new();
     // Apply SmZoneTol3d's default-sentinel/fabs conversion, then write the member.
@@ -832,58 +884,29 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
         breps: vec![Some(b)],
     };
     let target = (*has_target != 0.0).then_some(Handle(0));
-    let mut executive = FilletExecutive {
+    let mut executive = FilletExecutive::new(
         target,
-        fillet: None,
-        corners: vec![],
-        solvers: vec![],
-        topo_edges: vec![],
-        edge_attribute: None,
-        initialized: *initialized != 0.0,
-        options: ExecutionOptions {
-            piecewise_merge: *piecewise != 0.0,
-            topology_insertion: *insertion != 0.0,
-            global_merge: *global != 0.0,
-            trimming: *trimming != 0.0,
-            classification: *classification != 0.0,
+        ExecutiveObjects {
+            executive: Handle(0),
+            pseudo_brep: Handle(0),
+            edge_attribute: Handle(0),
         },
-        error: ErrorInfo {
-            code: *seed_code as i32,
-            ..ErrorInfo::default()
-        },
-        intersector: TopologyIntersector::new(
-            None,
-            None,
-            solidcore::math::EFF_ZERO_SQ,
-            30.0 * (solidcore::math::PI / 180.0),
-        ),
-        intersection_edges: vec![],
-        intersection_vertices: vec![],
-        law_sequence_edges: vec![],
-        pseudo_brep: None,
-        surface_generators: vec![],
-        filleted_vertices: Vec::new(),
-        vertex_corner_map: BTreeMap::new(),
-        edgeuse_solver_map: BTreeMap::new(),
-        self_intersection_handler: None,
-        mark_corner_patches: false,
-        cliff_overflow: false,
-        open_ends: Vec::new(),
-        overflow_first: false,
-        classify_only: false,
-        overflow_edges: Vec::new(),
-        mitred_edges: Vec::new(),
-        fan_split_points: Vec::new(),
-        earlier_pass_faces: Vec::new(),
-        // the fork's refusal fit (WR-696): none noted, as `FilletExecutive::new` leaves it
-        fit_radius: -1.0,
-        fit_edge: None,
-        fit_kind: solidcore::blend::fillet_executive::FitKind::Radius,
-        fit_setback: -1.0,
-        rollover_adjusting: false,
+    );
+    // The fixture does not allocate these objects.
+    executive.edge_attribute = None;
+    executive.pseudo_brep = None;
+    executive.initialized = *initialized != 0.0;
+    executive.options = ExecutionOptions {
+        piecewise_merge: *piecewise != 0.0,
+        topology_insertion: *insertion != 0.0,
+        global_merge: *global != 0.0,
+        trimming: *trimming != 0.0,
+        classification: *classification != 0.0,
     };
-    // The executive constructor sets this after constructing its SmMerge base.
-    executive.intersector.ignore_tangency = true;
+    executive.error = ErrorInfo {
+        code: *seed_code as i32,
+        ..ErrorInfo::default()
+    };
     let mut error_out = ErrorInfo {
         code: 5,
         comment: "sentinel".into(),
@@ -962,7 +985,7 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
             .chain(error_out.comment.bytes())
             .map(f64::from),
     );
-    Ok(with_point_step(output(&values)?, rust_point_step(&k)))
+    output(&values)
 }
 
 impl UnitDiff for Runner {
@@ -990,8 +1013,6 @@ impl UnitDiff for Runner {
         }
         Ok(v)
     }
-    // ND-3: every C++ case runs in a fresh child, which inherits this process's
-    // `sdStaticStep`; it must still be unlatched before the unit's cases and after them.
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let input = case.parse::<Inputs>()?;
         if let Some(attributed) = &input.attributed {
@@ -1049,22 +1070,43 @@ impl UnitDiff for Runner {
     }
 }
 
-/// Compared key: the `sdStaticStep` latch (ND-3: `SmFilletSolver::ComputePointValues`'
-/// function static, fixed by the first call in a process) after the case.
-pub(super) const POINT_STEP: &str = "fillet_point_step";
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore::kernel::UpstreamFixes;
 
-/// The Rust side's [`Kernel::fillet_point_step`] after a case run on a fresh kernel,
-/// read as the C++ probe reads `sdStaticStep`: the probe's finite-difference crossing
-/// point latches `1e-5` when nothing has.
-pub(super) fn rust_point_step(k: &Kernel) -> f64 {
-    k.fillet_point_step.get().unwrap_or(1.0e-5)
-}
-
-/// `out` with the case's latched step ([`POINT_STEP`]); a deferred or rejected output is
-/// returned unchanged.
-pub(super) fn with_point_step(mut out: Output, step: f64) -> Output {
-    if out.deferred.is_none() && out.rejected.is_none() {
-        out.values.insert(POINT_STEP.into(), vec![step]);
+    /// `create_fillet_brep` on the fixture's target with no blend: every stage before and
+    /// after the hooks succeeds with nothing to do, so each hook is reached.
+    fn create_fillet_brep_record() -> Inputs {
+        let record = [
+            1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1e-5, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ];
+        serde_json::from_value(serde_json::json!({ "record": record })).unwrap()
     }
-    out
+
+    /// The record with `fixes` on runs as with every flag off: with no blend, no face is
+    /// taken whole, no bands overlap and no corner patch changes the stitch.
+    fn reaches_hook_as_with_flags_off(set: impl FnOnce(&mut UpstreamFixes)) {
+        let mut fixes = UpstreamFixes::default();
+        set(&mut fixes);
+        let input = create_fillet_brep_record();
+        let off = rust_with_fixes(&input, &UpstreamFixes::default()).unwrap();
+        assert_eq!(off.deferred, None);
+        assert_eq!(off.ints["status_error_flags"][0], 0, "{off:?}");
+        let on = rust_with_fixes(&input, &fixes).unwrap();
+        assert_eq!(on, off);
+    }
+
+    /// WR-542/649: `BandsClearOtherRails` (`geometry_bands_clear_other_rails`).
+    #[test]
+    fn bands_hook_answers_with_no_blend() {
+        reaches_hook_as_with_flags_off(|f| f.fillet_refuse_overlapping_bands = true);
+    }
+
+    /// WR-546: the stitch with `SmFilletPatchStitchCallback`
+    /// (`stitch_body_keeping_fillet_edges`).
+    #[test]
+    fn patch_stitch_hook_answers_with_no_corner() {
+        reaches_hook_as_with_flags_off(|f| f.fillet_patch_keeps_fillet_edges = true);
+    }
 }

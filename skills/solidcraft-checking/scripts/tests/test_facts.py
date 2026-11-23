@@ -59,20 +59,31 @@ def holes(count: str) -> list:
 
 # Traps
 
-def test_a_dimension_driven_to_zero_can_break_the_next_change():
-    with pytest.raises(SolidCraftError, match="would conflict"):
-        execute([
-            cmd("parameters.add", name="y", expression="5 mm"),
-            cmd("sketch.create", plane="XY", name="Pin sketch"),
-            cmd("sketch.circle.center", center=[-10, -5], radius=2),
-            cmd("sketch.dimension", entities=["origin", "c1.center"], type="horizontal", value="10 mm"),
-            cmd("sketch.dimension", entities=["origin", "c1.center"], type="vertical", value="y"),
-            cmd("sketch.dimension", entities=["c1"], type="radius", value="2 mm"),
-            cmd("sketch.finish"),
-            cmd("solid.extrude", sketch="Pin sketch", distance="1 mm"),
-            cmd("parameters.change", name="y", expression="0 mm"),
-            cmd("parameters.change", name="y", expression="5 mm"),
-        ])
+def pin_centre(kind: str, *values: str) -> tuple:
+    """The centre of a pin drawn at (0, -5) and held at `d` from the origin by a `kind` dimension,
+    after `d` takes each of `values`."""
+    body = execute([
+        cmd("parameters.add", name="d", expression="5 mm"),
+        cmd("sketch.create", plane="XY", name="Pin sketch"),
+        cmd("sketch.circle.center", center=[0, -5], radius=2),
+        cmd("sketch.constraint.horizontal_vertical", points=["origin", "c1.center"], mode="vertical"),
+        cmd("sketch.dimension", entities=["origin", "c1.center"], type=kind, value="d"),
+        cmd("sketch.dimension", entities=["c1"], type="radius", value="2 mm"),
+        cmd("sketch.finish"),
+        cmd("solid.extrude", sketch="Pin sketch", distance="1 mm"),
+        *[cmd("parameters.change", name="d", expression=v) for v in values],
+    ])["bodies"][0]
+    return tuple((body["bbox"]["min"][i] + body["bbox"]["max"][i]) / 2 for i in (0, 1))
+
+
+def test_a_vertical_dimension_driven_to_zero_comes_back_on_its_side():
+    assert pin_centre("vertical", "0 mm") == pytest.approx((0, 0), abs=1e-3)
+    assert pin_centre("vertical", "0 mm", "5 mm") == pytest.approx((0, -5), abs=1e-3)
+
+
+def test_a_distance_held_plumb_driven_to_zero_comes_back_on_its_side():
+    assert pin_centre("distance", "0 mm") == pytest.approx((0, 0), abs=1e-3)
+    assert pin_centre("distance", "0 mm", "5 mm") == pytest.approx((0, -5), abs=1e-3)
 
 
 def slot_centre(*changes: list) -> float:
@@ -121,18 +132,12 @@ def centred_row(position: list) -> list:
     ]
 
 
-def test_a_position_measured_from_an_anchor_point_survives_reaching_zero():
-    with pytest.raises(SolidCraftError, match="would conflict"):
-        execute(centred_row([
-            cmd("sketch.dimension", entities=["origin", "c1.center"], type="horizontal", value="(n - 1) / 2 * 10 mm"),
-        ]))
+def test_a_centred_row_measured_from_the_origin_survives_reaching_zero():
     body = execute(centred_row([
-        cmd("sketch.point", point=[-100, 0]),
-        cmd("sketch.dimension", entities=["origin", "p1"], type="horizontal", value="100 mm"),
-        cmd("sketch.constraint.horizontal_vertical", points=["origin", "p1"], mode="horizontal"),
-        cmd("sketch.dimension", entities=["p1", "c1.center"], type="horizontal", value="100 mm - (n - 1) / 2 * 10 mm"),
+        cmd("sketch.dimension", entities=["origin", "c1.center"], type="horizontal", value="(n - 1) / 2 * 10 mm"),
     ]))["bodies"][0]
     assert body["volume_mm3"] == pytest.approx(100 * 40 * 4 - 3 * pi * 4, rel=2e-4)
+    assert body["center_of_mass"][0] == pytest.approx(0, abs=1e-3)
 
 
 def test_pattern_counts_run_from_1_to_1000_and_a_range_rule_does_not_stop_0():

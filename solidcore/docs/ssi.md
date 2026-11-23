@@ -292,8 +292,7 @@ What came of it, from #17's thread:
   SolidCraft's earlier kernel completed the cases reported in the literature.
 - Step 3's policy has since been replaced: fixes change the default result, with no compatibility
   flag, and the existing `UpstreamFixes` flags are to be retired (AGENTS.md §4b, 2026-11-04). The
-  WR-80 fix is the default; the WR-74 to WR-79 fixes still sit behind flags (§4.4), which is
-  open work.
+  WR-80 fix and the fork's fixes in §4.4's table run by default.
 
 ## 4. The pipeline
 
@@ -351,7 +350,7 @@ In the port (`do_intersection_with_caches`, `intersect/surface_intersector/p5.rs
    seeds it.
 
 The 5 and 2 degree thresholds are where interior loops go missing: a small loop between nearly
-tangent surfaces has every seed below them. `ssi_low_angle_start_on_probation` (WR-79) traces such
+tangent surfaces has every seed below them. The port (WR-79) traces such
 seeds on probation and keeps the trace only as a closed crossing loop larger than twice the tolerance.
 
 In `ssi` (`ssi/src/intersect.rs`, `piece.rs`) completeness is proved instead of seeded:
@@ -418,16 +417,15 @@ Directions count as one only when they are the same one, to about 0.08°: upstre
 two close branches as a tangent curve (#2695).
 Equal umbilical curvatures are a coincidence. It runs on start points and on points the corrector
 lands on, not on every point the marcher passes, so the base marcher steps straight through a branch
-point. The fork's fixes, all off by default:
+point. The fork's fixes, all always on:
 
-| flag (record, issue) | what it adds | file |
+| fix (record, issue) | what it adds | file |
 |---|---|---|
-| `ssi_split_curves_at_singular_points` (WR-77, #393) | samples \|n1 × n2\| along each crossing curve, refines each sharp minimum by golden section, and splits the curve where the sine is below 1e-6 and rises above 1e-3 on both sides, more than ten approximation tolerances from its ends | `surface_intersector/singular_splits.rs` |
-| `ssi_tangent_curve_tracer` (WR-75, #395) | traces tangent curves the marcher cannot follow: Levenberg-Marquardt on S1 − S2 = 0 with n1 ∥ n2, directions probed on a small circle in the tangent plane; traces crossing branches through tangent contact nodes and reports the nodes | `surface_intersector/tangent_curves.rs`, `tangent_tracer.rs` |
-| `ssi_tangent_contact_points` (WR-74, #394) | Newton on a 4 × 4 system (the gap along S2's tangents, S1's tangents against n2) from the leaf pairs the interior search skips, plus the poles; a root is a touch point when the gap is below 1e-7 of the tolerance and the normals agree to 1e-4 rad | `adv_surface_intersector/tangent_contacts.rs` |
-| `ssi_trace_tangent_curves_once` (WR-76, #392) | one start point per cluster of tangent boundary start points, so an open tangent curve is traced once | `surface_intersector/p5.rs` |
-| `ssi_singular_start_inside_direction` (WR-512) | a curve starting at a singularity leaves along a direction into both domains | `adv_surface_intersector.rs` |
-| `ssi_pole_point_keeps_its_tangent` (WR-550) | a point at a pole keeps its exact limit tangent when stepping back | `surface_intersector/p1.rs` |
+| singular-point splits (WR-77, #393) | samples \|n1 × n2\| along each crossing curve, refines each sharp minimum by golden section, and splits the curve where the sine is below 1e-6 and rises above 1e-3 on both sides, more than ten approximation tolerances from its ends | `surface_intersector/singular_splits.rs` |
+| tangent curve tracer (WR-75, #395) | traces tangent curves the marcher cannot follow: Levenberg-Marquardt on S1 − S2 = 0 with n1 ∥ n2, directions probed on a small circle in the tangent plane; traces crossing branches through tangent contact nodes and reports the nodes. Not in a self intersection whose two domains overlap or touch, where every point solves these equations at equal parameters | `surface_intersector/tangent_curves.rs`, `tangent_tracer.rs` |
+| tangential contact points (WR-74, #394) | Newton on a 4 × 4 system (the gap along S2's tangents, S1's tangents against n2) from the leaf pairs the interior search skips, plus the poles; a root is a touch point when the gap is below 1e-7 of the tolerance and the normals agree to 1e-4 rad | `adv_surface_intersector/tangent_contacts.rs` |
+| tangent curves traced once (WR-76, #392) | one start point per cluster of tangent boundary start points, so an open tangent curve is traced once | `surface_intersector/p5.rs` |
+| pole point keeps its tangent (WR-550) | a point at a pole keeps its exact limit tangent when stepping back | `surface_intersector/p1.rs` |
 
 **`ssi`, the field path** (`ssi/src/trace2d.rs`, `field.rs`). Where one patch lies on a surface with
 an implicit equation f (an analytic surface, or a B-spline patch whose exact implicit form
@@ -610,18 +608,18 @@ and why the approximation tolerance is half of it.
 
 | mode | what goes wrong | port today | `ssi` | open |
 |---|---|---|---|---|
-| tangent curve (#17 gap 4) | n1 × n2 = 0 along it; the marcher has no direction | collapses to its end points (#395); fixed with `ssi_tangent_curve_tracer` | a proved valley of the field, or of a Taylor field | flag on by default |
-| touch point inside both faces (#17 gap 1) | no boundary start, normals within 5° at every seed | missed (#394); found with `ssi_tangent_contact_points` | a proved extremum of g at zero | flag on by default |
-| branch point (#17 gap 3) | the marcher steps straight through; one curve where two end | wrong topology (#393); split with `ssi_split_curves_at_singular_points` | a proved saddle; branches joined through it, vertex reported | #393 |
-| small loop, nearly tangent (#17 gap 2) | every seed below the 5°/2° thresholds | missed (#396); found with `ssi_low_angle_start_on_probation` | loop-free pairs cannot hide it; closed form for plane/sphere and degree-2 | flag on by default |
+| tangent curve (#17 gap 4) | n1 × n2 = 0 along it; the marcher has no direction | collapses to its end points (#395); fixed by the tangent curve tracer, except a surface touching itself within one domain | a proved valley of the field, or of a Taylor field | always on |
+| touch point inside both faces (#17 gap 1) | no boundary start, normals within 5° at every seed | missed (#394); found by the tangential contact search (WR-74) | a proved extremum of g at zero | always on |
+| branch point (#17 gap 3) | the marcher steps straight through; one curve where two end | wrong topology (#393); fixed by the singular-point split | a proved saddle; branches joined through it, vertex reported | #393 |
+| small loop, nearly tangent (#17 gap 2) | every seed below the 5°/2° thresholds | missed (#396); found by the start points on probation (WR-79) | loop-free pairs cannot hide it; closed form for plane/sphere and degree-2 | always on |
 | small circle taken as a point | gap to tangency within tolerance though the circle is not | fixed (WR-79): the sphere's closed forms collapse a circle only when its radius is within the tolerance; `FaceIntersect` takes a circle whose cap lies within the tolerance as a touch (§4.6) | the radius from √((R − \|d\|)(R + \|d\|)) | |
 | coincident faces | normals parallel everywhere | closed forms for planes, coaxial revolutions, parallel cylinders; else the boolean's coincidence check before SSI | region boundary from the field's zero coefficients | |
 | near-coincident strip | two planes within tolerance across a strip; the crossing is fixed only to tol / sin θ | the crossing is no event, decided before the faces are intersected (by default) | patches 1e-8 apart, separating only at second order: refused (`y23_fig1d_two_quads`) | |
 | grazing | boxes just touch; a boundary meets the other surface tangentially | `grazing_box_process`, `do_boundary_plane_test` | the pair is apart or refused | |
 | plane a hair off a cylinder wall | two lines microns apart instead of one tangent line | fixed (WR-510): within either face's zone tolerance it is one tangent line when that line lies in the face's sweep, else the crossings are tested | | |
 | near-miss seam | an intersection runs within tolerance of a closed surface's seam | the curve and its trims end near but not on the seam: `SmFace::Test #36` "Face Near missing Seam", or `make_faceuse` 1001 | curves split at the seam by `solidcore-ssi` | #2538, #2537, cause not traced |
-| curve across a pole | the UV coordinate along a collapsed edge names no point | `ssi_pole_point_keeps_its_tangent`; a trace point on the degenerate boundary is the pole, with the pole's foot on the other surface (`place_at_pole`), and its singular parameter is the limit along the curve's tangent (`pole_singular_parameter`), also where the pole lies only within the tolerance of the curve | split at the pole; placed by its approach; the pole divided out of the field | |
-| empty trace reversed (#17 gap 4) | `SM_ERR_NULL_POINTER` | not traced back: a trace that produced no points is not reversed (WR-80, `surface_intersector/p4.rs`, `p5.rs`) | | `adv_surface_intersector.rs`'s own trace-back is unchecked; no known case reaches it (WR-80 addendum 2026-11-05) |
+| curve across a pole | the UV coordinate along a collapsed edge names no point | the pole point keeps its tangent (WR-550); a trace point on the degenerate boundary is the pole, with the pole's foot on the other surface (`place_at_pole`), and its singular parameter is the limit along the curve's tangent (`pole_singular_parameter`), also where the pole lies only within the tolerance of the curve | split at the pole; placed by its approach; the pole divided out of the field | |
+| empty trace reversed (#17 gap 4) | `SM_ERR_NULL_POINTER` | not traced back: a trace that produced no points is not reversed (WR-80, `surface_intersector/p4.rs`, `p5.rs`, `adv_surface_intersector.rs`) | | |
 | trace that never ends | 5000 points, or a creeping boundary trace | an error at 5000; `ssi_start_loop_trace_budget` bounds all start points | `Error::Unfinished` at 100,000 steps; pair budget 2,000,000 | |
 
 **Refusals.** `ssi` refuses by name: `BOOLEAN_TANGENT` (a contact it cannot prove), `BAD_PATCH`,
@@ -701,8 +699,8 @@ boolean's side.
 |---|---|
 | [#17](https://github.com/tangency-labs/solidcore/issues/17) | the corpus and the measured gaps of the upstream intersector |
 | [#391](https://github.com/tangency-labs/solidcore/issues/391) | an empty trace reversed (`SM_ERR_NULL_POINTER`); fixed on the default path |
-| [#393](https://github.com/tangency-labs/solidcore/issues/393) | curves not split at singular crossing points; fix behind a flag |
-| [#395](https://github.com/tangency-labs/solidcore/issues/395) | tangent and high-order contact curves missed or collapsed; fix behind a flag |
+| [#393](https://github.com/tangency-labs/solidcore/issues/393) | curves not split at singular crossing points; fixed on the default path |
+| [#395](https://github.com/tangency-labs/solidcore/issues/395) | tangent and high-order contact curves missed or collapsed; fixed on the default path |
 | [#1552](https://github.com/tangency-labs/solidcore/issues/1552) | how `solidcore-ssi` is wired into the kernel |
 | [#2479](https://github.com/tangency-labs/solidcore/issues/2479) | pcurves end one ulp past their face's domain |
 | [#2537](https://github.com/tangency-labs/solidcore/issues/2537) | a tilted cylinder whose cap is bisected by a box face is refused (#36) |

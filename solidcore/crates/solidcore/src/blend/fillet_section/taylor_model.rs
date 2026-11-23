@@ -437,6 +437,7 @@ impl<const N: usize> TayScalar for TmN<N> {
 
 impl<const N: usize> GnScalar for TmN<N> {
     type Storage = Box<[[Self; super::series::STORE_E + 1]]>;
+    const JOINT_OFFSET: bool = true;
     fn of(d: f64) -> Self {
         Self::lift(d)
     }

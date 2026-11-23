@@ -548,33 +548,73 @@ mod tests {
         .unwrap();
     }
 
-    /// `Test #82` refuses a vertex tolerance equal to its limit, not only one over it: just under
-    /// the limit the check reports nothing, at it test 82 fails for that vertex.
-    #[test]
-    fn the_check_refuses_a_vertex_tolerance_at_the_limit() {
+    /// Failed test numbers of the level-2 check of `b`.
+    fn failed_tests(k: &mut Kernel, b: &mut Brep) -> Vec<u32> {
         use crate::topology::brep::validation::{check_brep, CheckLevel};
+        let c = check_brep(k, b, CheckLevel::Level2).unwrap();
+        c.pointer_reports
+            .reports()
+            .iter()
+            .chain(c.reports.reports())
+            .filter(|r| !r.ok)
+            .map(|r| r.test_index as u32)
+            .collect()
+    }
 
-        for (factor, refused) in [(0.999_999, false), (1.0, true)] {
+    /// `Test #82` holds under `LARGE_SMALL_SIZE_RATIO` times the body's tolerance as before. From
+    /// that limit up to `GROWTH_PAST_RATIO` times it the ratio no longer decides: the vertex is
+    /// accepted when its ball reaches no face or edge it does not bound, refused (test 82) when it
+    /// does. Past that a tolerance would be absorbing a misplaced vertex: refused whatever its
+    /// ball clears. In the 10 x 10 x 10 box the nearest non-incident face is 10 away, so 1 x and
+    /// 2 x the limit clear and 2.5 x and 50 x are refused. In a box 1.5 x the limit wide the
+    /// nearest is that far: a corner tolerance of 0.9 of it clears, 1.1 and 1.2 pass
+    /// through it.
+    #[test]
+    fn a_vertex_past_the_ratio_limit_is_accepted_only_where_its_ball_clears_other_topology() {
+        for (factor, refused) in [
+            (0.999_999, false),
+            (1.0, false),
+            (2.0, false),
+            (2.5, true),
+            (50.0, true),
+        ] {
             with_box(|k, b| {
                 let (v, _, limit) = corner_and_limit(b);
                 b.vertex_mut(v)?.tolerance = factor * limit;
-                let c = check_brep(k, b, CheckLevel::Level2)?;
-                let failed: Vec<u32> = c
-                    .pointer_reports
-                    .reports()
-                    .iter()
-                    .chain(c.reports.reports())
-                    .filter(|r| !r.ok)
-                    .map(|r| r.test_index as u32)
-                    .collect();
+                let failed = failed_tests(k, b);
                 assert_eq!(
-                    failed,
-                    if refused { vec![82] } else { vec![] },
-                    "at {factor} of the limit"
+                    failed.contains(&82),
+                    refused,
+                    "at {factor} x limit: {failed:?}"
                 );
                 Ok(())
             })
             .unwrap();
+        }
+        for (radius, refused) in [(0.9, false), (1.1, true), (1.2, true)] {
+            let mut k = Kernel::default();
+            let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0, 2.0, 3.0).unwrap();
+            // a body tolerance whose limit is 1000 / 1500: the nearest non-incident face (x = 1)
+            // is 1.5 x the limit away, so the radii below are 1.35 x to 1.8 x it
+            b.set_tolerance(1.0 / 1500.0);
+            // Tests 6 and 83 hold the face and vertex zones above 0.99 x the body's, so the
+            // coarser body takes its zones with it.
+            for f in b.face_list().to_vec() {
+                b.face_mut(f).unwrap().tolerance = 1.0 / 1500.0;
+            }
+            for e in b.edge_list().to_vec() {
+                b.edge_mut(e).unwrap().tolerance = 1.0 / 1500.0;
+            }
+            for w in b.vertex_list().to_vec() {
+                b.vertex_mut(w).unwrap().tolerance = 1.0 / 1500.0;
+            }
+            let v = b.vertex_list()[0];
+            b.vertex_mut(v).unwrap().tolerance = radius;
+            assert_eq!(
+                failed_tests(&mut k, &mut b).contains(&82),
+                refused,
+                "1 x 2 x 3 box, corner tolerance {radius}"
+            );
         }
     }
 

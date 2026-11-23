@@ -193,7 +193,6 @@ impl Design {
                         plane: solidcraft_doc::PlaneRef::Custom { plane: cut_plane },
                         tool: None,
                         sketch: None,
-                        loops: false,
                     };
                     let id = doc.add_feature(kind, Some(name)).map_err(|e| Error::Invalid(format!("split_face `{name}`: {e}")))?;
                     (vec![FeatureId(id)], vec![body.clone()])
