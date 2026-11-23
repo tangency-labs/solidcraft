@@ -3458,6 +3458,32 @@ mod install_zip {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// #20814: a write that finds another write in progress waits for it, so a job the app gave up on
+    /// never overlaps the next install or removal.
+    #[test]
+    fn a_package_write_waits_for_the_write_in_progress() {
+        let (_s, root) = session("write-lock");
+        let plugin = unpack(&gears("0.1.0")).unwrap();
+        let dir = root.join("plugins");
+        let held = crate::plugin::install::write_lock();
+        let (finished, done) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn({
+            let dir = dir.clone();
+            move || {
+                let result = crate::plugin::install::install(&plugin, &dir, false);
+                let _ = finished.send(());
+                result
+            }
+        });
+        assert!(done.recv_timeout(std::time::Duration::from_millis(300)).is_err(), "the second write started while the first held the lock");
+        assert!(!dir.exists(), "nothing was written yet");
+        drop(held);
+        assert!(done.recv_timeout(std::time::Duration::from_secs(60)).is_ok(), "the waiting write runs once the lock is free");
+        assert!(worker.join().unwrap().is_ok());
+        assert!(dir.join("gears").join("plugin.json").exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn replacing_an_installed_plugin_needs_replace() {
         let (mut s, root) = session("replace");
