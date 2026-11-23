@@ -2596,7 +2596,7 @@ mod tests {
         doc.add_feature(
             FeatureKind::Cylinder {
                 base: point_expr(Vec3::new(80.0, 0.0, 0.0)),
-                axis: solidcraft_doc::Dir(Vec3::Z),
+                axis: solidcraft_doc::dir_expr(Vec3::Z),
                 radius: "6".into(),
                 height: "15".into(),
                 operation: Operation::NewBody,
@@ -2741,7 +2741,7 @@ mod tests {
         });
         add(FeatureKind::Cylinder {
             base: point_expr(Vec3::new(40.0, 0.0, 0.0)),
-            axis: solidcraft_doc::Dir(Vec3::Z),
+            axis: solidcraft_doc::dir_expr(Vec3::Z),
             radius: "6".into(),
             height: "15".into(),
             operation: Operation::NewBody,
@@ -2781,7 +2781,7 @@ mod tests {
         doc.add_feature(
             FeatureKind::Cylinder {
                 base: point_expr(Vec3::ZERO),
-                axis: solidcraft_doc::Dir(Vec3::Z),
+                axis: solidcraft_doc::dir_expr(Vec3::Z),
                 radius: "6".into(),
                 height: "15".into(),
                 operation: Operation::NewBody,
