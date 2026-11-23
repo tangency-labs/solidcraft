@@ -341,6 +341,15 @@ While drawing a fit spline, click its starting point after three distinct sample
 it smoothly. Right-click finishes an ordinary natural fit. Offset accepts both ellipse
 handles and dense fitted curves; the second click sets the side and distance from the curve.
 
+**Fit Spline Within Tolerance** turns a contour of many points into one smooth spline: give
+the points (2 to 10000, plain coordinates, in order along the contour) and a tolerance
+(default 0.01 mm), and it fits the spline through as few of the points as keep every point
+within it, reporting the deviation it reached (`sketch.spline.fit_tolerance` from scripts and
+agents). Use it for a contour that comes from a computation — a traced outline, a scanned
+section or a generated shape — which is past the 500 points a fit point spline takes. When
+even 500 spline points cannot reach the tolerance it refuses, naming the deviation reached:
+the points may be too rough for a smooth spline, or the tolerance too tight.
+
 **Equation Curve** draws a curve from formulas instead of clicks: x(t) and y(t) over a range of
 t, or y = f(x) over a range of x, using the design's parameters. [Equation curves](equation-curves.md)
 walks through it step by step, with pictures and examples (a line, a parabola, a wave, a circle,

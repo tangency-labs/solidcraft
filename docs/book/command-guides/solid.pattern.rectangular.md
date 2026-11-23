@@ -3,7 +3,7 @@ Repeat a hole, a pocket or a whole body in a row or a grid: a row of tapped hole
 #### Before you start
 
 - Make one of the thing you want to repeat first, such as one hole in the corner of the grid.
-- Choose what to copy with Object Type. Bodies copies whole solid bodies. Features repeats a step from the History, such as a Hole or a cut Extrude, on the same body.
+- Choose what to copy with Object Type. Bodies copies whole solid bodies. Features repeats a step from the History, such as a Hole or a cut Extrude, on the same body. Components places a whole component again, such as a part in an assembly.
 - A sketch is neither. To repeat sketch curves, use the sketch's own Rectangular Pattern, or extrude the sketch first.
 - You need a direction for each row: an origin axis, a sketch line or a straight edge of the part.
 
@@ -12,7 +12,7 @@ Repeat a hole, a pocket or a whole body in a row or a grid: a row of tapped hole
 | Choice in the dialog | Meaning | Example or reason to choose it |
 | --- | --- | --- |
 | Type | Rectangular, Circular or Path. The same dialog makes all three patterns. | Rectangular for rows and grids. |
-| Object Type | Bodies copies whole bodies. Features repeats History steps. | Features for holes in one plate. |
+| Object Type | Bodies copies whole bodies. Features repeats History steps. Components places whole components again. If the bodies you pick make up a whole component, the dialog says so and offers a Pattern Components button that switches to Components for you. | Features for holes in one plate. Components for parts in an assembly, such as a row of clamps on a fixture plate. |
 | Objects or Features | What to repeat. With Features, pick the step in the History. | The Hole feature for the first hole. |
 | Direction | The way the first row runs. | The X axis, or the long edge of the plate. |
 | Quantity | How many along the first direction, counting the original. | 5 holes in the row. |
@@ -33,6 +33,7 @@ Repeat a hole, a pocket or a whole body in a row or a grid: a row of tapped hole
 
 #### Tips and common mistakes
 
+- **Do** click Pattern Components when the dialog offers it and you want the component placed again. That is much faster and uses far less memory than copying every body in it. Leave Object Type on Bodies when you want separate body copies instead.
 - **Do** count the original in Quantity. Five holes in a row is Quantity 5, not 4.
 - **Do** read Spacing as hole-to-hole pitch, the way the print dimensions it, not the total length of the row.
 - **Do** pattern the Hole feature rather than the body when the holes are all in one part. Change the hole size once and every copy follows.

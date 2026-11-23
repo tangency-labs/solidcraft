@@ -112,14 +112,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("sketch: id or name; view?: open Model view id; restore_marker?: nonnegative timeline position, null (end) or false. A position or null: temporarily roll to this sketch and restore that position on Finish or Cancel; Finish groups the edit into one Undo step. Omitted: the same with the current position when features come after the sketch, so they rebuild once at Finish rather than after every sketch command. false: leave the timeline in place (later features rebuild after every sketch command)"),
     CommandSpec::new("sketch.finish", "Finish Sketch", crate::checked!("sketch.finish", finish_sketch))
         .in_sketch_part()
-        .at("SKETCH", "FINISH SKETCH").icon("finish").enabled(in_sketch).noundo()
+        .at("SKETCH", "FINISH SKETCH").icon("finish").enabled(super::has_sketch_edit).noundo()
         .contract(&EXIT_CONTRACT).output(output_schema_for::<crate::schema::drawing_sketch::FinishResult>)
         .params("restore_marker?: bool (default true); false transfers the temporary marker directly to another editor without rebuilding the intervening timeline"),
     CommandSpec::new("sketch.cancel", "Cancel Sketch", crate::checked!("sketch.cancel", cancel_sketch))
         .in_sketch_part()
         .at("SKETCH", "FINISH SKETCH")
         .icon("sketch_cancel")
-        .enabled(in_sketch)
+        .enabled(super::has_sketch_edit)
         .contract(&EXIT_CONTRACT).output(output_schema_for::<crate::schema::drawing_sketch::CancelResult>)
         .params("Leaves the sketch without keeping what changed since it was created or opened for editing: the design goes back to how it was then (a new sketch is removed), as one step that Undo brings back. Refused when the undo history no longer leads back to that point (use Undo instead). restore_marker?: bool (default true); false transfers the temporary marker to another editor"),
     CommandSpec::new("sketch.line", "Line", crate::checked!("sketch.line", draw_line))
@@ -229,7 +229,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&POLYGON_CIRCUMSCRIBED_CONTRACT)
         .output(output_schema_for::<PolygonResult>)
-        .params(concat!("center, radius (to edge midpoints), sides, angle?: deg", connect_doc!(), created_doc!())),
+        .params(concat!("center, radius | diameter (to edge midpoints): number or expression (an expression naming a parameter is a dimension driven by it, so the polygon follows the parameter; on a sheet sketch the dimension keeps the expression and reads source parameters without defining any), sides: number or expression (read when drawn, it does not follow a later change), angle?: deg", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.polygon.edge", "Edge Polygon", crate::checked!("sketch.polygon.edge", polygon_edge))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -1741,8 +1741,8 @@ fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
     // The shared preprocessor refuses model snaps before a sheet tool reads them.
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let list = p.get("points").and_then(Value::as_array).cloned().ok_or_else(|| bad(cmd, "`points` must be a list"))?;
-    if list.len() < 2 || list.len() > 10_000 {
-        return Err(bad(cmd, "a line needs 2 or more points"));
+    if let Some(why) = crate::schema::sketch_shapes::line_points_refusal(list.len()) {
+        return Err(bad(cmd, why));
     }
     let closed = bool_(p, "closed").unwrap_or(false);
     let infer = bool_(p, "infer").unwrap_or(false);
@@ -2469,6 +2469,38 @@ pub(super) fn slot_width_dimension(
     Ok(Some(sk.add_constraint(ConstraintKind::Diameter { c: cap, value: w }, Some(pname))?))
 }
 
+/// The radius or diameter dimension on round curve `c` (radius `r` now) for a size typed as the
+/// expression `e` over parameters. A model sketch defines a model parameter holding `e`. A sheet
+/// sketch never changes the source design, so it keeps `e` on the dimension as its authored paper
+/// expression, as a sheet dimension does, and `e` may only read source parameters.
+#[allow(clippy::too_many_arguments)]
+fn size_dimension(
+    sk: &mut Sketch,
+    doc: &mut solidcraft_doc::Document,
+    paper: bool,
+    cmd: &str,
+    e: &str,
+    diameter: bool,
+    c: usize,
+    r: f64,
+) -> Result<String> {
+    let value = if diameter { 2.0 * r } else { r };
+    let mk = |v: f64| if diameter { ConstraintKind::Diameter { c, value: v } } else { ConstraintKind::Radius { c, value: v } };
+    if !paper {
+        let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
+        let pname = doc.new_model_param(e, &unit);
+        return Ok(sk.add_constraint(mk(value), Some(pname))?);
+    }
+    if e.len() > 4096 || e.trim().is_empty() || e.chars().any(char::is_control) {
+        return Err(bad(cmd, "sheet dimension expression must be nonempty, at most 4096 bytes and contain no controls"));
+    }
+    if solidcraft_doc::expr::definition(e).is_some() {
+        return Err(bad(cmd, "a sheet dimension cannot define source parameters; use a paper expression or a read-only source parameter"));
+    }
+    let wanted = doc.eval(e, Kind::Length).map_err(|err| bad(cmd, format!("value: {err}")))?;
+    Ok(sk.add_constraint(mk(wanted), Some(e.to_string()))?)
+}
+
 fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.circle.center";
     let paper = s.sheet_sketching();
@@ -2494,10 +2526,7 @@ fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
         }
         // A size typed as an expression is a dimension driven by the parameters it names.
         if let Some((e, diameter)) = &size {
-            let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
-            let pname = doc.new_model_param(e, &unit);
-            let kind = if *diameter { ConstraintKind::Diameter { c: ci, value: 2.0 * r } } else { ConstraintKind::Radius { c: ci, value: r } };
-            cons.push(sk.add_constraint(kind, Some(pname))?);
+            cons.push(size_dimension(sk, doc, paper, cmd, e, *diameter, ci, r)?);
         }
         Ok((ids_of(sk, &[ci]), cons))
     })?;
@@ -2650,9 +2679,24 @@ fn arc_center(s: &mut Session, p: &Value) -> Result<Value> {
     draw_reply(out, info)
 }
 
-fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, start: f64, n: usize, inscribed: bool) -> Result<Value> {
+/// A polygon's corners on a circle of `r_vertex` round `center`, `n` of them, the first at angle
+/// `start`. `size` is the expression the size was typed as when it names parameters (with whether
+/// it is a diameter): the construction circle that holds the polygon to its centre then gets a
+/// dimension driven by it, so the polygon follows the parameters (#20920).
+fn polygon(
+    s: &mut Session,
+    p: &Value,
+    cmd: &str,
+    center: Vec2,
+    r_vertex: f64,
+    start: f64,
+    n: usize,
+    inscribed: bool,
+    size: Option<(String, bool)>,
+) -> Result<Value> {
     let mut support_circle = String::new();
-    let (out, info) = draw(s, p, cmd, |sk, _| {
+    let paper = s.sheet_sketching();
+    let (out, info) = draw(s, p, cmd, |sk, doc| {
         let corners: Vec<Vec2> = (0..n).map(|i| center + Vec2::from_angle(start + std::f64::consts::TAU * i as f64 / n as f64) * r_vertex).collect();
         let (l, pts) = polygon_lines(sk, &corners)?;
         let mut cons = Vec::new();
@@ -2689,6 +2733,9 @@ fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, s
                 cons.push(add_c(sk, ConstraintKind::Tangent { a: *first, b: circ })?);
             }
         }
+        if let Some((e, diameter)) = &size {
+            cons.push(size_dimension(sk, doc, paper, cmd, e, *diameter, circ, rc)?);
+        }
         Ok((ids_of(sk, &l), cons))
     })?;
     let reply = PolygonResult { curves: out.0, constraints: out.1, sketch: info, support_circle, created: None, param_warnings: Vec::new() };
@@ -2696,7 +2743,22 @@ fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, s
 }
 
 fn sides(p: &Value, cmd: &str) -> Result<usize> {
-    let n = num(p, "sides").unwrap_or(6.0);
+    sides_count(num(p, "sides").unwrap_or(6.0), cmd)
+}
+
+/// `sides` of a polygon typed as an expression over the design's parameters, or as a number. The
+/// count is read when the polygon is drawn: the sketch has no way to add or remove sides when a
+/// parameter changes later (a circular sketch pattern's `count` is what follows one).
+fn sides_expr(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
+    if !p.get("sides").is_some_and(Value::is_string) {
+        return sides(p, cmd);
+    }
+    let e = req_expr(cmd, p, "sides")?;
+    let n = s.doc.eval(&e, Kind::Unitless).map_err(|e| bad(cmd, format!("sides: {e}")))?;
+    sides_count(n, cmd)
+}
+
+fn sides_count(n: f64, cmd: &str) -> Result<usize> {
     if !(3.0..=200.0).contains(&n) || n.fract() != 0.0 {
         return Err(bad(cmd, "sides must be an integer from 3 to 200"));
     }
@@ -2709,16 +2771,16 @@ fn polygon_inscribed(s: &mut Session, p: &Value) -> Result<Value> {
     let r = radius_arg(p, cmd)?;
     let n = sides(p, cmd)?;
     let a = num(p, "angle").unwrap_or(90.0).to_radians();
-    polygon(s, p, cmd, c, r, a, n, true)
+    polygon(s, p, cmd, c, r, a, n, true, None)
 }
 
 fn polygon_circumscribed(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.polygon.circumscribed";
     let c = req_vec2(cmd, p, "center")?;
-    let r = radius_arg(p, cmd)?;
-    let n = sides(p, cmd)?;
+    let (r, size) = circle_size(s, p, cmd)?;
+    let n = sides_expr(s, p, cmd)?;
     let a = num(p, "angle").unwrap_or(90.0).to_radians();
-    polygon(s, p, cmd, c, r / (std::f64::consts::PI / n as f64).cos(), a + std::f64::consts::PI / n as f64, n, false)
+    polygon(s, p, cmd, c, r / (std::f64::consts::PI / n as f64).cos(), a + std::f64::consts::PI / n as f64, n, false, size)
 }
 
 fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2735,7 +2797,7 @@ fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
     let dir = (b - a).normalized().unwrap_or(Vec2::X);
     let center = mid + dir.perp() * apothem;
     let start = (a - center).angle();
-    polygon(s, p, cmd, center, rv, start, n, true)
+    polygon(s, p, cmd, center, rv, start, n, true, None)
 }
 
 /// The centre point of arc `a` (`None`: not an arc).

@@ -497,7 +497,9 @@ Preferences › Design › **Insert Design lists the designs open in other tabs 
 off. A STEP or mesh file picked there is inserted as **Insert STEP** or **Insert
 Mesh** would. The part's solid bodies come
 in as they sit in that design, and they are kept in the assembly, so it opens even without the
-part file. The link is stored relative to the assembly's folder once the assembly is saved.
+part file. Its mesh bodies, such as the parts of a KiCad board, come in too, in the same linked
+component, and **Update Links** follows them as well. A design with mesh bodies only can't be
+linked yet. The link is stored relative to the assembly's folder once the assembly is saved.
 For scripts, `translate: [x,y,z]` places the design's origin in millimetres from the destination
 parent's origin (the active component unless `parent` is supplied). It defaults to `[0,0,0]`.
 With `reuse: true`, insertion reuses the existing linked component but uses the same coordinates;
