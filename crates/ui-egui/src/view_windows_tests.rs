@@ -1,5 +1,5 @@
-//! Views opened in their own windows: each window is its own native viewport, with its own
-//! keyboard input, drawn while the main window draws its frame.
+//! Views and panels opened in their own windows: each window is its own native viewport, with its
+//! own keyboard and pointer input, drawn while the main window draws its frame.
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -17,6 +17,12 @@ thread_local! {
     static FOCUSED: RefCell<Option<egui::ViewportId>> = const { RefCell::new(None) };
     /// The view windows drawn so far.
     static SEEN: RefCell<Vec<egui::ViewportId>> = RefCell::default();
+    /// The windows whose last frame drew the context menu.
+    static MENU_IN: RefCell<Vec<egui::ViewportId>> = RefCell::default();
+}
+
+fn context_menu_area(ctx: &egui::Context) -> bool {
+    ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).is_some()
 }
 
 fn info(focused: bool) -> egui::ViewportInfo {
@@ -44,7 +50,17 @@ fn install_renderer() {
         };
         raw.viewports.insert(id, info(focused));
         let mut cb = viewport.viewport_ui_cb;
-        let mut out = ctx.run_ui(raw, |ui| cb(ui));
+        let mut out = ctx.run_ui(raw, |ui| {
+            cb(ui);
+            let drawn = context_menu_area(ui.ctx());
+            MENU_IN.with(|m| {
+                let mut m = m.borrow_mut();
+                m.retain(|w| *w != id);
+                if drawn {
+                    m.push(id);
+                }
+            });
+        });
         out.textures_delta.clear();
     });
 }
@@ -178,4 +194,62 @@ fn a_shortcut_key_in_a_view_window_does_not_type_into_the_dialog_it_opens() {
 #[test]
 fn a_shortcut_key_in_the_main_window_with_view_windows_does_not_type_into_the_dialog_it_opens() {
     extrude_key_then_pick(2, |_| None);
+}
+
+/// A right-click on a row of the Browser popped out into its own window opens the row's menu, and
+/// that window draws it, not the main window (#19364).
+#[test]
+fn a_right_click_in_the_popped_out_browser_opens_its_menu_in_that_window() {
+    SEEN.with(|s| s.borrow_mut().clear());
+    PENDING.with(|p| p.borrow_mut().clear());
+    MENU_IN.with(|m| m.borrow_mut().clear());
+    FOCUSED.with(|f| *f.borrow_mut() = None);
+    let mut h = Harness::new();
+    h.ctx.set_embed_viewports(false);
+    install_renderer();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    for _ in 0..3 {
+        frame(&mut h, Vec::new());
+    }
+    let window = json!({"type": "window", "host": "browser-window", "origin": {"x": 40, "y": 40},
+        "return_to": {"zone": "left", "index": 0, "size": {"width": 280, "height": 600}, "collapsed": false}});
+    h.app
+        .run(
+            "panel.popout",
+            json!({"target": {"type": "instance", "id": "browser"},
+                "destination": {"type": "new_section", "section": "browser-window", "index": 0, "location": window,
+                    "size": {"width": 360, "height": 520}}}),
+        )
+        .unwrap();
+    for _ in 0..6 {
+        frame(&mut h, Vec::new());
+    }
+    let windows = SEEN.with(|s| s.borrow().clone());
+    assert_eq!(windows.len(), 1, "the Browser has its own window");
+    let browser = windows[0];
+    FOCUSED.with(|f| *f.borrow_mut() = Some(browser));
+    // Down the rows until one opens its menu.
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Secondary, pressed, modifiers: egui::Modifiers::NONE };
+    let opened = (0..30).map(|row| egui::pos2(80.0, 14.0 + 14.0 * row as f32)).find(|&at| {
+        send(browser, vec![egui::Event::PointerMoved(at), button(at, true)]);
+        frame(&mut h, Vec::new());
+        send(browser, vec![button(at, false)]);
+        frame(&mut h, Vec::new());
+        frame(&mut h, Vec::new());
+        h.app.viewport.context_menu.is_some()
+    });
+    assert!(opened.is_some(), "a right-click on a row opens its menu");
+    assert_eq!(MENU_IN.with(|m| m.borrow().clone()), vec![browser], "the Browser's window draws its menu");
+    assert!(!context_menu_area(&h.ctx), "the main window does not draw it");
+    // A click in the main window closes it.
+    let at = egui::pos2(800.0, 500.0);
+    frame(
+        &mut h,
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
+        ],
+    );
+    frame(&mut h, Vec::new());
+    assert!(h.app.viewport.context_menu.is_none(), "a click elsewhere closes the menu");
 }

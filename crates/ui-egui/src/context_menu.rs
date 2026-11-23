@@ -250,6 +250,9 @@ pub struct MenuState {
     opener: Option<Rect>,
     /// The menu was on screen in an earlier frame. Until then a press is the opening click's own.
     shown: bool,
+    /// The OS window of a popped-out panel whose row opened the menu: only that window draws it
+    /// (#19364). `None`: the window the app is drawn in.
+    window: Option<egui::ViewportId>,
     /// What the browser did with the last right-click (#20011): `Taken` when the browser opened
     /// its own menu, so the app opens none of its own under it.
     pub browser_menu: BrowserMenu,
@@ -2811,7 +2814,33 @@ pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
     app.menu.flick = false;
     app.menu.opener = None;
     app.menu.shown = false;
+    app.menu.window = None;
     app.viewport.context_menu = Some(at);
+}
+
+/// Open a menu a row of a popped-out panel asked for, in that panel's own OS window (#19364).
+pub(crate) fn open_in_window(app: &mut SolveApp, window: egui::ViewportId, at: Pos2, target: Target) {
+    open_for(app, at, target);
+    if app.viewport.context_menu == Some(at) {
+        app.menu.window = Some(window);
+    }
+}
+
+/// Draw the open menu in a popped-out panel's OS window when one of its rows opened it (#19364).
+/// True when it is that window's menu.
+pub(crate) fn show_in_window(app: &mut SolveApp, ctx: &egui::Context) -> bool {
+    if app.viewport.context_menu.is_none() || app.menu.window != Some(ctx.viewport_id()) {
+        return false;
+    }
+    show_menu(app, ctx);
+    true
+}
+
+/// Close a popped-out panel's menu whose window was not drawn this frame: it closed or docked again.
+pub(crate) fn close_unshown_window(app: &mut SolveApp, drawn: &[egui::ViewportId]) {
+    if app.menu.window.is_some_and(|window| !drawn.contains(&window)) {
+        close(app);
+    }
 }
 
 /// A button's menu: a click opens it, and a click on the same button while it is open closes it.
@@ -2836,6 +2865,7 @@ pub fn close(app: &mut SolveApp) {
     app.viewport.context_menu = None;
     app.menu.flick = false;
     app.menu.opener = None;
+    app.menu.window = None;
 }
 
 /// Open the menu at a point for automation: the pointer moves there first so what is under it
@@ -3132,6 +3162,21 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     show_rename(app, ctx);
     crate::design_properties::show_object(app, ctx);
     crate::quick_menu::watch(app, ctx);
+    if app.viewport.context_menu.is_none() {
+        return;
+    }
+    if app.menu.window.is_some_and(|window| window != ctx.viewport_id()) {
+        // A popped-out panel's window draws its menu (`show_in_window`); a click here closes it.
+        if ctx.input(|i| i.pointer.any_pressed()) || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            close(app);
+        }
+        return;
+    }
+    show_menu(app, ctx);
+}
+
+/// Draw the open menu in `ctx`'s window and act on its picks and on clicks outside it.
+fn show_menu(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(at) = app.viewport.context_menu else { return };
     let screen = ctx.content_rect();
     let target = app.menu.target.clone();
