@@ -265,6 +265,7 @@ mod sketch_canvas;
 pub mod sketch_clipboard;
 mod sketch_constraints;
 mod sketch_construction;
+mod sketch_corner_freeform;
 mod sketch_create;
 pub(crate) use sketch_create::AT_MUST;
 pub(crate) use sketch_create::MAX_TEXT_EDITS;

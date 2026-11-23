@@ -1887,10 +1887,10 @@ impl Dialog {
     /// To Object or From Object input accepts parallel planes regardless of the automatic
     /// switching preference. A start plane may coincide with the profiles.
     fn extrude_target(&self, s: &Session, h: &Hit) -> Option<Sel> {
-        let Kind::Extrude { thin: false, smart, .. } = &self.kind else { return None };
         let to_active = self.active_input().is_some_and(|i| i.label == TO_OBJECT);
         let from_active = self.active_input().is_some_and(|i| i.label == FROM_OBJECT);
-        if !to_active && !from_active && (self.active != 0 || !smart.auto_to_object || smart.profiles_chosen) {
+        let Kind::Extrude { thin, smart, .. } = &self.kind else { return None };
+        if !to_active && !from_active && (*thin || self.active != 0 || !smart.auto_to_object || smart.profiles_chosen) {
             return None;
         }
         let reference = profile_plane(s, self.inputs.first()?.items.first()?)?;
@@ -2345,8 +2345,23 @@ fn fillet_edges(s: &Session, sel: &Sel, chain: bool) -> Vec<Sel> {
 /// How close two edge ends are to be one vertex (mm).
 const VERTEX_TOLERANCE: f64 = 1e-6;
 
+/// A picked face's edges but its seams and its smooth joins with a round, which leave nothing to fillet.
+fn face_round_edges(b: &solidcraft_engine::doc::ModelBody, face: usize) -> Vec<usize> {
+    let m = b.mesh();
+    let edges: Vec<usize> = m
+        .face_edges(u32::try_from(face).unwrap_or(u32::MAX))
+        .into_iter()
+        .filter(|&e| !m.seams.get(e).copied().unwrap_or(false) && m.edges.get(e).is_some())
+        .collect();
+    let mids: Vec<Vec3> = edges.iter().map(|&e| polyline_mid(&m.edges[e])).collect();
+    match solidcraft_engine::kernel::smooth_picks(&b.body, &mids) {
+        Ok(smooth) => edges.into_iter().zip(smooth).filter(|(_, s)| !s).map(|(e, _)| e).collect(),
+        Err(_) => edges,
+    }
+}
+
 /// The B-rep edges a Fillet dialog rounds, by body and index: the picked edges, and each edge of a
-/// picked face but its seams.
+/// picked face but its seams and smooth joins.
 fn fillet_edge_ids(s: &Session, items: &[Sel]) -> Vec<(String, usize)> {
     let st = crate::open_meshing::session_world(s);
     let mut ids: Vec<(String, usize)> = Vec::new();
@@ -2355,11 +2370,8 @@ fn fillet_edge_ids(s: &Session, items: &[Sel]) -> Vec<(String, usize)> {
             Sel::Edge { body, index, .. } => ids.push((body.clone(), *index)),
             Sel::Face { body, index, .. } => {
                 if let Some(b) = st.body(body) {
-                    let m = b.mesh();
-                    for e in m.face_edges(u32::try_from(*index).unwrap_or(u32::MAX)) {
-                        if !m.seams.get(e).copied().unwrap_or(false) {
-                            ids.push((body.clone(), e));
-                        }
+                    for e in face_round_edges(b, *index) {
+                        ids.push((body.clone(), e));
                     }
                 }
             }
@@ -4354,7 +4366,7 @@ fn picked_side(app: &SolveApp, d: &Dialog, first: &Sel) -> Option<usize> {
 }
 
 /// Discard an editor whose target was removed, before its preview can draw again. Show the sketch
-/// of the Extrude, Revolve, sheet metal base or contour flange, or Hole at sketch
+/// of the Extrude, Revolve, sheet metal base, contour flange or tab, or Hole at sketch
 /// points the open dialog edits, or the sketch an Extrude or Revolve ended on its way to opening
 /// (#14128), and only while it is open: whichever way the dialog closed (OK, Cancel, another
 /// tool, another design), the sketch returns to its own visibility.
@@ -4381,6 +4393,7 @@ pub(crate) fn sync_feature_edit(app: &mut SolveApp) {
         | FeatureKind::Revolve { sketch, .. }
         | FeatureKind::SheetBase { sketch, .. }
         | FeatureKind::SheetContour { sketch, .. }
+        | FeatureKind::SheetTab { sketch, .. }
         | FeatureKind::Hole { points: Some(solidcraft_engine::doc::SketchPoints { sketch, single: false, .. }), .. } => Some(**sketch),
         _ => None,
     });
@@ -5849,10 +5862,8 @@ fn edges_by_body(s: &Session, picks: &[Sel]) -> Vec<(String, Vec<Vec3>)> {
             Sel::Face { body, index, .. } => {
                 if let Some(b) = st.body(body) {
                     let m = b.mesh();
-                    for e in m.face_edges(u32::try_from(*index).unwrap_or(u32::MAX)) {
-                        if !m.seams.get(e).copied().unwrap_or(false)
-                            && let Some(p) = m.edges.get(e)
-                        {
+                    for e in face_round_edges(b, *index) {
+                        if let Some(p) = m.edges.get(e) {
                             add(body.as_str(), polyline_mid(p));
                         }
                     }
@@ -6125,7 +6136,8 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
             let original_all = match &feature.kind {
                 FeatureKind::Extrude { sketch, profiles: ProfileSel::All, thin: None, .. }
                 | FeatureKind::Revolve { sketch, profiles: ProfileSel::All, .. }
-                | FeatureKind::Emboss { sketch, profiles: ProfileSel::All, .. } => Some(*sketch),
+                | FeatureKind::Emboss { sketch, profiles: ProfileSel::All, .. }
+                | FeatureKind::SheetTab { sketch, profiles: ProfileSel::All, .. } => Some(*sketch),
                 _ => None,
             };
             // A thin extrude follows curves and takes no profiles: an extrude of every profile
