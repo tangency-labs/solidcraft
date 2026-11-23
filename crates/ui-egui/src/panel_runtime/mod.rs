@@ -24,10 +24,10 @@ pub use interaction::*;
 pub use layout::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::NativeMonitor;
-pub use preferences::*;
 pub(crate) use preferences::PanelLayoutSnapshot;
 pub(crate) use preferences::panel_layout_matches;
 pub(crate) use preferences::panel_layout_snapshot;
+pub use preferences::*;
 pub(crate) use production::PanelVisibilitySnapshot;
 pub(crate) use production::apply_placement_command;
 pub(crate) use production::place_assistant;

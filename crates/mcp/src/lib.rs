@@ -20,10 +20,10 @@ mod tools;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use backend::Auto;
-#[cfg(not(target_arch = "wasm32"))]
-pub use backend::Remote;
 pub use backend::Backend;
 pub use backend::Headless;
+#[cfg(not(target_arch = "wasm32"))]
+pub use backend::Remote;
 pub use options::COMPACT_ENV;
 pub use options::COMPACT_FLAG;
 pub use options::Options;

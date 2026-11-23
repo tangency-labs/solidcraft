@@ -181,7 +181,6 @@ pub mod ui_prefs;
 pub mod view_navigation;
 pub mod view_pick;
 
-pub(crate) use check::read;
 pub use check::Contract;
 pub use check::Issue;
 pub use check::ParamCheck;
@@ -189,6 +188,7 @@ pub use check::TypedContract;
 pub use check::input_schema_for;
 pub use check::issues;
 pub use check::output_schema_for;
+pub(crate) use check::read;
 pub use check::run_checked;
 pub use check::run_checked_as;
 pub use types::*;

@@ -97,9 +97,9 @@ mod value_focus;
 mod viewport_status;
 mod wheel;
 
-pub use actions::*;
 pub use actions::Button;
 pub use actions::button;
+pub use actions::*;
 pub use assistant::*;
 pub use assistant_entry::*;
 pub use attention::*;
@@ -116,21 +116,21 @@ pub use container::Container;
 pub use container::DockEdges;
 pub use container::Edge;
 pub use container::LayoutMode;
-pub use container::Surface;
 pub use container::SHELL_GAP;
+pub use container::Surface;
 pub use container::input_blocked;
 pub use container::set_input_blocked;
 pub use dash::dashed_line;
 pub use details::*;
 pub use disclosure::*;
 pub use drag::*;
-pub use fields::*;
 pub use fields::Expressions;
 pub use fields::cell_editor;
 pub use fields::install_expressions;
 pub use fields::wide_cell_editor;
-pub use file_view::Icon;
+pub use fields::*;
 pub use file_view::FileView;
+pub use file_view::Icon;
 pub use file_view::RecentRow;
 pub use file_view::RecoveryMessage;
 pub use file_view::SampleCard;
@@ -169,13 +169,14 @@ pub use metrics::table_row_height;
 pub use name_list::NameList;
 pub use name_list::NameRow;
 pub use name_list::name_list;
-pub use navigation::*;
 pub use navigation::NavigationEdge;
 pub use navigation::NavigationIdle;
 pub use navigation::NavigationSize;
+pub use navigation::*;
 pub use navigation_menu::*;
 pub use navigation_settings::*;
 pub use panel::ComputeStatus;
+pub use panel::DialogButtons;
 pub use panel::FeatureOptions;
 pub use panel::InspectorAction;
 pub use panel::InspectorNames;
@@ -183,17 +184,16 @@ pub use panel::Panel;
 pub use panel::Part;
 pub use panel::StackCard;
 pub use panel::StackSlot;
+pub use panel::Window;
 pub use panel::WindowPage;
 pub use panel::WorkspaceOptions;
-pub use panel::inspector_header;
-pub use panel::panel_header_hover;
-pub use panel::within;
-pub use panel::DialogButtons;
-pub use panel::Window;
 #[cfg(any(test, feature = "test-support"))]
 pub use panel::collapsible_header;
 #[cfg(any(test, feature = "test-support"))]
 pub use panel::header;
+pub use panel::inspector_header;
+pub use panel::panel_header_hover;
+pub use panel::within;
 pub use panel_host::*;
 pub use preferences::*;
 pub use preferences_assistant::*;
@@ -227,16 +227,16 @@ pub use search::CommandSearch;
 pub use search::SearchBadge;
 pub use search::SearchFieldGeometry;
 pub use shortcuts::*;
-#[cfg(any(test, feature = "test-support"))]
-pub use sphere::sphere_preview;
 pub use sphere::FinishKind;
 pub use sphere::Sphere;
-pub use sphere::sphere_thumbnail;
 pub use sphere::SphereTile;
 pub use sphere::sphere_cursor;
 pub use sphere::sphere_grid;
 pub use sphere::sphere_grid_drag;
+#[cfg(any(test, feature = "test-support"))]
+pub use sphere::sphere_preview;
 pub use sphere::sphere_preview_with_source;
+pub use sphere::sphere_thumbnail;
 pub use stages::Cards;
 pub use stages::StageAction;
 pub use stages::StageBar;
@@ -247,9 +247,9 @@ pub use test_support::checkbox_shapes as test_checkbox_shapes;
 #[cfg(any(test, feature = "test-support"))]
 pub use test_support::raster as test_raster;
 #[cfg(any(test, feature = "test-support"))]
-pub use test_support::textures_update as test_textures_update;
-#[cfg(any(test, feature = "test-support"))]
 pub use test_support::raster as raster_ui;
+#[cfg(any(test, feature = "test-support"))]
+pub use test_support::textures_update as test_textures_update;
 #[cfg(any(test, feature = "test-support"))]
 pub use test_support::textures_update as update_test_textures;
 #[cfg(any(test, feature = "test-support"))]

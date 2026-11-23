@@ -63,13 +63,12 @@ pub use cpu_sky::CpuSky;
 pub use denoise_diagnostics::DenoiseDiagnostics;
 pub use denoise_diagnostics::DenoiseGuideClass;
 pub use denoise_diagnostics::resolve_denoise_class;
-#[cfg(feature = "raytrace-cpu")]
-pub(crate) use host::FRAME_METADATA_BYTES;
-pub(crate) use host::Reservation;
 pub use host::CaptureLease;
 pub use host::CaptureProfile;
 pub use host::CpuHost;
 pub use host::DenoiseMaskInfo;
+#[cfg(feature = "raytrace-cpu")]
+pub(crate) use host::FRAME_METADATA_BYTES;
 pub use host::HostKind;
 pub use host::ImageHost;
 pub use host::JobEnvironmentInfo;
@@ -82,6 +81,7 @@ pub use host::PreparedSubmission;
 pub use host::PreviewInfo;
 pub use host::RenderFrame;
 pub use host::RenderPreview;
+pub(crate) use host::Reservation;
 pub use host::RetainedMetadata;
 pub use host_memory::HostMemoryAdmission;
 pub use host_memory::HostMemorySource;

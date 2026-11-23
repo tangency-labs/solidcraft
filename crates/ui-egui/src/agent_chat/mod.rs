@@ -58,11 +58,11 @@ pub(crate) use panel::owns_keyboard_input;
 pub(crate) use panel::prepare_shared;
 pub(crate) use panel::request_new_chat;
 pub(crate) use panel::shared_content;
-pub(crate) use panel::tool_space;
 pub use panel::show;
 pub use panel::tip as panel_tip;
 pub use panel::toggle;
 pub use panel::toggle_shortcut;
+pub(crate) use panel::tool_space;
 
 /// Most entries kept in the conversation; older ones are dropped.
 const MAX_ITEMS: usize = 2000;
