@@ -1235,3 +1235,33 @@ fn round_holes_in_one_sketch_cut_through_the_flat_across_a_bend_keep_their_arcs(
     let v = exact_volume(&s);
     assert!((v - drilled).abs() < 1e-6 * drilled, "{v} vs {drilled}");
 }
+
+/// A hole over the bend cut from the flat whose box meets a cut the sheet keeps already is left
+/// to the body's cut, as before: it loses what the same two holes drilled one by one take.
+#[test]
+fn a_hole_over_the_bend_next_to_an_earlier_cut_of_the_flat_is_the_bodys_cut() {
+    // (radius, x, y): both over the plate's tangent line (y = 12), their boxes overlapping.
+    let holes = [(3.042, 87.84, 10.926), (2.0, 91.5, 11.0)];
+    let drilled = {
+        let mut s = wide_bend();
+        run(&mut s, "sheet.unfold", json!({}));
+        for (r, x, y) in holes {
+            run(&mut s, "solid.cylinder", json!({"radius": r, "height": 30, "base": [x, y, -10], "axis": "Z", "operation": "cut"}));
+        }
+        run(&mut s, "sheet.refold", json!({}));
+        exact_volume(&s)
+    };
+    let mut s = wide_bend();
+    run(&mut s, "sheet.unfold", json!({}));
+    for (i, (r, x, y)) in holes.into_iter().enumerate() {
+        let name = format!("Hole{i}");
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": T, "name": name}));
+        run(&mut s, "sketch.circle.center", json!({"center": [x, y], "diameter": 2.0 * r}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": name, "distance": 3.0 * T, "direction": "symmetric", "operation": "cut"}));
+    }
+    run(&mut s, "sheet.refold", json!({}));
+    let v = exact_volume(&s);
+    assert!((v - drilled).abs() < 1e-6 * drilled, "{v} vs {drilled}");
+}
+
