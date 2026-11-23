@@ -16,16 +16,17 @@
 //! | [`Tolerances::tol_gap_gain`]           | `SM_TOL_GAP_GAIN`                         |
 //! | [`Tolerances::model_size_estimate`]    | `SmContext::m_dThisModelSizeEstimate`, `SM_MODEL_SIZE_ESTIMATE` |
 //! | [`Tolerances::large_small_size_ratio`] | `SM_LARGE_SMALL_SIZE_RATIO`               |
-//! | [`Rng`]                                | C `rand()` / `srand(time(NULL))` (e.g. `SmShell.cpp`) |
+//! | [`Rng`], [`Kernel::seed`], [`Kernel::seeded_rng`] | C `rand()` / `srand(time(NULL))` (e.g. `SmShell.cpp`) |
 //! | [`Caches`]                             | `SmCacheMgr`, `SmCacheMgrCrv/Srf/TSrf/Brep` |
 //! | [`Kernel::fillet_point_step`], [`Kernel::latch_fillet_point_step`] | the function-static `sdStaticStep` of `SmFilletSolver::ComputePointValues` |
 //! | [`Kernel::upstream_ub_passed`], [`Kernel::note_upstream_ub`] | (none: upstream undefined behaviour the port went past) |
 //! | [`CancelToken`], [`Kernel::cancel`], [`Kernel::set_cancel_token`], [`Kernel::check_cancelled`] | (none: cooperative cancellation for worker-thread jobs) |
 //! | [`WorkCounters`], [`Kernel::work_counters`] | the SolidCraft fork's `SmWorkCounters` (process-wide there) |
 //!
-//! Upstream seeds `rand()` from the clock in a few places; the port replaces that with
-//! [`Rng`], seeded from [`KernelOptions::seed`], so runs are reproducible. Results that
-//! depend on random draws therefore cannot match the C++ bit for bit; difftests of such
+//! Upstream seeds `rand()` from the clock in a few places; the port replaces that with an
+//! [`Rng`] each such call makes for itself from [`KernelOptions::seed`]
+//! ([`Kernel::seeded_rng`]), so a call's draws are the same whatever ran before it. Results
+//! that depend on random draws therefore cannot match the C++ bit for bit; difftests of such
 //! code must compare outcomes that are invariant to the draw (and say so in
 //! `plan/findings.md`).
 //!
@@ -649,7 +650,7 @@ pub struct UpstreamFixes
 pub struct KernelOptions {
     /// Tolerances to use.
     pub tolerances: Tolerances,
-    /// Seed for the kernel's [`Rng`].
+    /// Seed of the generators the kernel's sampling calls make ([`Kernel::seeded_rng`]).
     pub seed: u64,
 }
 
@@ -809,8 +810,10 @@ impl CancelToken {
 pub struct Kernel {
     /// Geometric tolerances.
     pub tolerances: Tolerances,
-    /// Deterministic random-number generator.
-    pub rng: Rng,
+    /// The seed of every generator a call makes for its random draws
+    /// ([`Kernel::seeded_rng`]; from [`KernelOptions::seed`]). Configuration only: no call
+    /// changes it, so the kernel holds no position in a random sequence.
+    pub seed: u64,
     /// Memoisation caches.
     pub caches: Caches,
     /// The session's modeling context (marks, Boolean flag, callbacks, its own
@@ -994,7 +997,7 @@ impl Kernel {
     pub fn new(options: &KernelOptions) -> Self {
         Self {
             tolerances: options.tolerances,
-            rng: Rng::new(options.seed),
+            seed: options.seed,
             caches: Caches::default(),
             context: Context::default(),
             fillet_point_step: Cell::new(None),
@@ -1101,6 +1104,16 @@ impl Kernel {
             return token.check(operation);
         }
         Ok(())
+    }
+
+    /// A generator at the start of the sequence of the kernel's [seed](Self::seed).
+    ///
+    /// A call that draws random numbers makes one for itself and draws from it, so what it
+    /// draws is a function of the seed and of its own inputs, never of what ran on the
+    /// kernel before: the same call on the same input draws the same numbers.
+    #[must_use]
+    pub const fn seeded_rng(&self) -> Rng {
+        Rng::new(self.seed)
     }
 
     /// Records that an operation went past upstream undefined behaviour `id` (see
@@ -1361,15 +1374,34 @@ mod tests {
     #[test]
     fn rng_is_deterministic_and_in_range() {
         let mut k1 = Kernel::default();
-        let mut k2 = Kernel::new(&KernelOptions::default());
+        let k2 = Kernel::new(&KernelOptions::default());
+        let (mut r1, mut r2) = (k1.seeded_rng(), k2.seeded_rng());
         for _ in 0..1000 {
-            let a = k1.rng.next_f64();
-            assert_eq!(a, k2.rng.next_f64());
+            let a = r1.next_f64();
+            assert_eq!(a, r2.next_f64());
             assert!((0.0..1.0).contains(&a));
-            let s = k1.rng.next_signed_unit();
-            assert_eq!(s, k2.rng.next_signed_unit());
+            let s = r1.next_signed_unit();
+            assert_eq!(s, r2.next_signed_unit());
             assert!((-1.0..1.0).contains(&s));
         }
         k1.caches.clear();
+    }
+
+    /// Every generator a kernel hands out starts at its seed, however many were handed out
+    /// and drawn from before; another seed gives another sequence.
+    #[test]
+    fn every_seeded_rng_starts_at_the_kernels_seed() {
+        let k = Kernel::new(&KernelOptions {
+            seed: 12_345,
+            ..KernelOptions::default()
+        });
+        assert_eq!(k.seed, 12_345);
+        let mut first = k.seeded_rng();
+        let drawn: Vec<u64> = (0..5).map(|_| first.next_u64()).collect();
+        let mut second = k.seeded_rng();
+        assert_eq!(second, Rng::new(12_345));
+        assert_eq!((0..5).map(|_| second.next_u64()).collect::<Vec<_>>(), drawn);
+        assert_eq!(Kernel::default().seed, Rng::DEFAULT_SEED);
+        assert_ne!(Kernel::default().seeded_rng().next_u64(), drawn[0]);
     }
 }

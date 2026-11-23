@@ -112,20 +112,6 @@ fn prove(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<Option<Outward>> {
     }))
 }
 
-/// `test`'s answer, with the kernel's random draws put back where they stood: a solid test
-/// taken on an operand before an operation never changes what the operation then draws. So an
-/// operation gives the same result on an operand that brought its proof ([`Outward`], taken
-/// without a test) as on one tested now, and the same as where no test is taken at all.
-fn undrawn<T>(
-    k: &mut Kernel,
-    test: impl FnOnce(&mut Kernel) -> solidcore::Result<T>,
-) -> solidcore::Result<T> {
-    let rng = k.rng.clone();
-    let answer = test(k);
-    k.rng = rng;
-    answer
-}
-
 /// A [`Body`] locked: the B-rep to read through `Deref`; through `DerefMut` it is handed out
 /// only once the proof beside it is dropped, so no change of the B-rep keeps a proof made
 /// before it.
@@ -559,7 +545,7 @@ impl Expect {
     /// The kernel's, from the solid test.
     pub(crate) fn of(k: &mut Kernel, input: &mut Brep) -> solidcore::Result<Expect> {
         Ok(Expect {
-            solid: undrawn(k, |k| is_outward_solid(k, input))?,
+            solid: is_outward_solid(k, input)?,
             touching: false,
         })
     }
@@ -582,12 +568,11 @@ impl Expect {
     ) -> solidcore::Result<Expect> {
         let solid = is_manifold_solid(input)?
             && (proof.outward.is_some_and(|o| o.holds(k))
-                || undrawn(k, |k| {
-                    Ok(match proof.primitive {
-                        Some(t) => is_outward_primitive(k, input, &t)?,
-                        None => false,
-                    } || prove(k, input)?.is_some())
-                })?);
+                || match proof.primitive {
+                    Some(t) => is_outward_primitive(k, input, &t)?,
+                    None => false,
+                }
+                || prove(k, input)?.is_some());
         Ok(Expect {
             solid,
             touching: false,
