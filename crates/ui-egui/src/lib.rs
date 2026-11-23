@@ -1681,7 +1681,7 @@ impl SolveApp {
         }
         crate::plugins::sync_policy(self);
         if plugins::busy(self) && matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
-            return Err(self.tr("prefs.plugin_busy").into());
+            return Err(plugins::busy_message(self));
         }
         if id.eq_ignore_ascii_case("plugin.run")
             || solidcraft_engine::plugin::resolve_call(&self.session, id, &params).map_err(|e| e.to_string())?.is_some()
