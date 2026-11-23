@@ -1481,7 +1481,7 @@ pub(crate) fn cmd_bench_open(args: &[String]) -> Result<(), String> {
     if let Ok(size) = std::fs::metadata(path).map(|m| m.len())
         && let Some(warning) = solidcraft_engine::io::limits::memory_warning(path, size)
     {
-        eprintln!("warning: {path}: {warning}");
+        solidcraft_engine::note!("warning: {path}: {warning}");
     }
     let bytes = solidcraft_engine::io::limits::read(path, kind).map_err(|e| format!("{path}: {e}"))?;
     let read_ms = t.elapsed().as_secs_f64() * 1000.0;
