@@ -796,8 +796,17 @@ fn toast_stays_in_free_content_above_history_and_navigation() {
                     let content = crate::shell::content_rect(&h.app, layout.viewport);
                     let mut obstacles = crate::shell::covered_rects(&h.app);
                     obstacles.extend([layout.navigation, layout.axis_view]);
-                    // The default place: the bottom of the corner column (#7893).
-                    let free = corner_free(content, &obstacles);
+                    // The default place: the bottom of the corner column (#7893), in the view the
+                    // bottom navigation leaves: #19655 lifts window messages above it by the
+                    // navigation's height + NAV_BOTTOM + space_8 (owner-approved).
+                    let mut view = crate::shell::bottom_readout_rect(&h.app, content);
+                    if h.app.preferences.navigation_bar.edge == crate::ui_kit::NavigationEdge::Bottom {
+                        let clearance = crate::ui_kit::NavigationMetrics::for_size(h.app.preferences.navigation_bar.size).height()
+                            + crate::ui_kit::NAV_BOTTOM
+                            + solidcraft_theme::Tokens::get().space_8;
+                        view.max.y = (view.bottom() - clearance).max(view.top());
+                    }
+                    let free = corner_free(view, &obstacles);
                     if let Some(toast) = crate::scenario::rect_of("toast") {
                         assert!(toast.is_finite() && toast.is_positive());
                         assert!(content.contains_rect(toast), "{mode:?}, {scale}, {width}x{height}: {toast:?}");
@@ -2379,6 +2388,70 @@ fn swept(points: &[Pos2], centre: Pos2) -> f32 {
     points.windows(2).map(|w| ((w[1] - centre).angle() - (w[0] - centre).angle()).rem_euclid(turn)).sum::<f32>() / turn
 }
 
+#[test]
+fn window_tool_hint_clears_both_tiles_navigation_rows_regardless_of_the_last_tile() {
+    let mut app = SolveApp::new(Default::default(), Default::default());
+    app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    // A line first: starting a tool finishes the open sketch (#19654), which deletes an empty one.
+    app.run("sketch.line", json!({"points": [[0, 0], [10, 0]]})).unwrap();
+    app.start("sketch.line");
+    assert_eq!(app.tool.as_ref().unwrap().cmd, "sketch.line");
+    app.preferences.navigation_bar.edge = crate::ui_kit::NavigationEdge::Bottom;
+    let t = Tokens::get();
+    let height = crate::ui_kit::NavigationMetrics::for_size(app.preferences.navigation_bar.size).height();
+    let ctx = crate::fonts::test_context();
+    let screen = Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 720.0));
+    for place in [ToastPlace::Corner, ToastPlace::Centre] {
+        place.publish(&ctx);
+        let mut previous = None;
+        for last_right in [false, true] {
+            let mut host = Rect::NOTHING;
+            let mut rows = [Rect::NOTHING; 2];
+            let mut shown = Vec::new();
+            // Handled output: egui panics when a frame's texture deltas are dropped unapplied.
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+                host = ui.max_rect();
+                let navigation_top = host.bottom() - t.space_8 - crate::ui_kit::NAV_BOTTOM - height;
+                rows = [
+                    Rect::from_min_size(pos2(host.left() + t.space_8, navigation_top), vec2(300.0, height)),
+                    Rect::from_min_size(pos2(host.right() - 300.0 - t.space_8, navigation_top), vec2(300.0, height)),
+                ];
+                let tile = Rect::from_min_max(
+                    pos2(if last_right { host.center().x } else { host.left() }, host.top()),
+                    pos2(if last_right { host.right() } else { host.center().x }, host.bottom()),
+                );
+                app.viewport.window = Some(host);
+                app.viewport.rect = Some(tile);
+                app.shell.content = Some(host);
+                app.viewport.layout = Some(crate::viewport_layout::Layout {
+                    viewport: tile,
+                    drawable: tile,
+                    middle: tile,
+                    content: tile,
+                    axis_view: Rect::NOTHING,
+                    navigation: rows[usize::from(last_right)],
+                    confirm: Rect::NOTHING,
+                    usable: None,
+                    panel_obstacles: None,
+                });
+                shown = transient_messages(&mut app, ui, host, None);
+            });
+            output.textures_delta.clear();
+            assert_eq!(shown.len(), 1, "one actual Line instruction toast belongs to the window");
+            let hint = shown[0];
+            assert!(host.contains_rect(hint));
+            for row in rows {
+                assert!(!hint.intersects(row), "the Line hint cannot cover either tile's navigation: {hint:?}, {row:?}");
+                assert!(hint.bottom() + t.space_8 <= row.top() + 0.5, "the hint leaves the shared navigation gap");
+            }
+            if let Some(previous) = previous {
+                assert_eq!(hint, previous, "the last painted tile cannot move a window hint");
+            }
+            previous = Some(hint);
+        }
+    }
+}
+
 /// The status toast has a close (×) at its top right and no Close button (#7971): the × closes it
 /// without opening the run's messages (a click elsewhere on it still does), its ring shows the
 /// share of its six seconds left, and behind an issue report the × does nothing.
@@ -2969,4 +3042,29 @@ fn note_callouts_are_screen_facing_and_follow_the_anchor() {
     h.app.run("note.update", json!({"note": id, "hidden": true})).unwrap();
     h.settle();
     assert!(shot(&h).is_empty());
+}
+
+/// Notes: a long note wraps inside its box. The box was sized from a layout wrapped at
+/// `NOTE_WRAP_WIDTH` while the text was drawn on one line, so a sentence ran out of its box.
+#[test]
+fn a_long_note_wraps_inside_its_box() {
+    let mut h = Harness::new();
+    let text = "This is a test comment to check that a long note is drawn correctly in the viewport";
+    h.app.run("note.add", json!({"anchor": [10.0, 5.0, 20.0], "text": text})).unwrap();
+    h.settle();
+    let proj = display_proj(&h.app);
+    let mut out = Vec::new();
+    draw(&h.ctx, |ui| out = note_callouts(&h.app, ui.painter(), &proj));
+    assert_eq!(out.len(), 1);
+    let note = &out[0];
+    assert!(note.galley.rows.len() > 1, "a sentence wider than the callout wraps");
+    assert!(note.galley.size().x <= NOTE_WRAP_WIDTH + 0.5);
+    // What draw_notes actually paints: the wrapped text, inside the callout box.
+    let output = draw(&h.ctx, |ui| draw_notes(&h.app, ui.painter(), &proj));
+    let texts: Vec<_> = output.shapes.iter().filter_map(|s| if let Shape::Text(t) = &s.shape { Some(t) } else { None }).collect();
+    assert_eq!(texts.len(), 1, "one note, one text shape");
+    let painted = texts[0];
+    assert!(painted.galley.rows.len() > 1, "the painted text wraps");
+    let drawn = Rect::from_min_size(painted.pos, painted.galley.size());
+    assert!(note.text_rect.expand(0.5).contains_rect(drawn), "painted text {drawn:?} inside box {:?}", note.text_rect);
 }

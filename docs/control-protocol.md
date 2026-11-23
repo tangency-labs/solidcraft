@@ -738,8 +738,9 @@ preview. A Finish already running can still commit. Reconnect with a fresh Begin
 
 ### Reading the solved joint pose
 
-A client that follows a joint while someone adjusts Drive Joints asks `control.joint_pose`,
-which says what the preview shows: the joints it posed and the values the solver reached.
+A client that follows a joint while someone adjusts Drive Joints or drags a part along its
+joints asks `control.joint_pose`. The reply says what the preview shows: the joints it posed and
+the values the solver reached.
 
 ```text
 {"id":1,"method":"control.joint_pose","token":"…"}
@@ -752,9 +753,10 @@ which says what the preview shows: the joints it posed and the values the solver
 - `error` says why the current inputs make no preview (null when there is none).
 - `pose` is null when no solved joint preview is up. Otherwise:
   - `source` is what posed it: the command that opened the preview (`joint.drive` for Drive
-    Joints, `control.joint_drive` for a movement over this channel).
-  - `generation` counts the completed poses: it moves when the pose moves, and is not the
-    design's revision.
+    Joints, `control.joint_drive` for a movement over this channel, `joint.reach` for a part
+    dragged along its joints).
+  - `generation` counts the completed poses across all these sources. It moves when a new
+    completed pose is shown, and is not the design's revision.
   - `joints` are the joints the preview posed: the ones it drove and the ones it moved with
     them (a motion link's follower, a joint a closed loop moved). Each gives its id, its name
     and its values, as `joint.inspect` and `joint.drive` give them (`deg` for an angle, `mm` for
@@ -764,6 +766,12 @@ The pose is read, not computed: it is the state the viewport shows, so reading i
 nothing in the design, its history, its dirty state or its revision. A preview that poses no
 joint leaves no pose. Cancelling the movement, closing the dialog, switching design and
 changing the design all drop it.
+
+A native drag reports its completed CPU pose after the drag's existing solve. Reading does not
+advance the drag. Release clears the preview and keeps the drag's one Undo step; Escape clears
+it without applying it. A drag that already writes each frame to the design (for example, with
+contact sets enabled or uncaptured moves present) has no scratch pose: use the committed joint
+queries for those frames.
 
 ### Following the design
 
@@ -1110,7 +1118,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `browser_hover_shows_origin` (default true: an Origin plane, axis or point row under the pointer in the browser, the design's or a part's, shows that item in the view, and a hidden one only while the pointer is on its row, its eye and saved visibility unchanged and not pickable, #15658; false: only an origin plane already drawn lights up, as before; Preferences › Design › Origin)
 - `browser_scroll_wheel` (`automatic` default, `always_zoom` or `always_pan`; browser only; small vertical steps pan in automatic and always pan, and automatic shows a one-time notice offering always zoom when the first scrolls look like a steady smooth-scroll mouse wheel; always zoom treats unmodified vertical scroll as a wheel, so two-finger pan needs Shift or the navigation modifiers)
 - `browser_wheel_hint_dismissed` (default false; browser only: true once the one-time scroll-wheel notice was answered "Don't ask again"; no control in Preferences)
-- `check_updates` (default true; [updates](book/src/guide/updates.md)). When the organization's policy sets it ([managed deployment](book/src/guide/managed-deployment.md)), the reply has `policy: {locked: ["check_updates"], check_updates: bool}` with the value in force (any policy adds that object, with `organization` when it names one; `locked` lists what it locks), `check_updates` itself stays the person's stored choice, and a request that changes it is refused
+- `check_updates` (default true; [updates](book/src/guide/updates.md)). When the organization's policy sets it ([managed deployment](book/src/guide/managed-deployment.md)), the reply has `policy: {locked: ["check_updates"], check_updates: bool, settings: {check_updates: bool}}` with the value in force (any policy adds that object, with `organization` when it names one; `locked` lists every setting it sets and `settings` their values in force), `check_updates` itself stays the person's stored choice, and a request that changes it is refused
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
 - `constraint_glyph_scale` (1…3, default 1: how large the open sketch's constraint glyphs are drawn, a multiple of their 15-pixel badge, letter and icon included; Preferences › Sketch › Constraint glyph size, #10794)
 - `default_units`

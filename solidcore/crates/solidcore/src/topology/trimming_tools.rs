@@ -503,8 +503,8 @@ impl TrimSurfaceBackend<'_> {
             Self::Retained(transfer) => transfer
                 .transfer
                 .as_ref()
-                .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim"))?
-                .owned_surface(),
+                .and_then(crate::topology::brep::p6::FaceSurfaceTransfer::owned_surface)
+                .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim")),
         }
     }
 
