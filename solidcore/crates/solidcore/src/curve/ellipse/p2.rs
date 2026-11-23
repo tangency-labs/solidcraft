@@ -92,6 +92,12 @@
 //!   circle within the intersection tolerance ([`line_coplanar_circle_intersect_distinct`]). Where upstream would have merged
 //!   them, a solution of the second crossing that repeats one of the first (both
 //!   dropped onto the end of a short arc) is not added again.
+//! - **A line's touch between two flank points (#18828).**
+//!   `Ellipse::touch_between_line_flanks` is not upstream: for an ellipse that is no
+//!   circle `IntersectWithLine` leaves the line to the general intersector, which returns
+//!   a tangent line's touch as two points on its flanks. It certifies the one touch they
+//!   stand for by the circle's contact rule read on the ellipse's support function
+//!   ([`line_coplanar_ellipse_touch`]), for `curve.curve_p8` to replace them with.
 //! - **Co-port.** The geometric constructor belongs to unit `curve.ellipse_p1`; it is
 //!   ported here because every method of this unit needs an ellipse with its NURB
 //!   (made by `MakeNurb`, `p1`).
@@ -130,8 +136,8 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p1::{
     circle_coplanar_circle_intersect_in_contact, line_coplanar_circle_intersect_distinct,
-    line_plane_intersect, point_project_to_plane, transform_point_to_start_plane,
-    vector_project_to_plane, CircleCircle,
+    line_coplanar_ellipse_touch, line_plane_intersect, point_project_to_plane,
+    transform_point_to_start_plane, vector_project_to_plane, CircleCircle,
 };
 use crate::geom::geom_utility::p2::{intersect_two_planes, PlanesIntersection};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -2135,6 +2141,106 @@ impl Ellipse {
 
         out.needs_more_intersections = false;
         Ok(out)
+    }
+
+    /// Not upstream (#18828): the touch of `line` with this ellipse (no circle) that two
+    /// point solutions of the general curve/curve intersector, `flanks` (`[ellipse
+    /// parameter, line parameter]` each), stand for, as `[ellipse parameter, line
+    /// parameter, distance]`.
+    ///
+    /// The general intersector meets a line tangent to an ellipse at a double root, where
+    /// its local solves stop on either side of the touch, as far out as the curves stay
+    /// within its zero of each other (2.4e-5 to 2.7e-5 from the touch on an ellipse of
+    /// in-plane radius of curvature 11), so the touch comes back as two points on its
+    /// flanks. Two such points are one touch when the line lies in the ellipse's plane (to
+    /// `SM_EFF_ZERO_SQRT`) and touches the ellipse by the circle's contact rule
+    /// ([`line_coplanar_ellipse_touch`] with `contact_tol`): then the line stays outside
+    /// the ellipse, or enters it by no more than the contact tolerance, which the contact
+    /// rule reads as one touch, as it does for a circle; either way the two points are not
+    /// two crossings to keep. The touch is the support point's drop onto the line, dropped onto
+    /// both curves as [`Ellipse::intersect_with_line`] drops its candidates; it must lie
+    /// between the two flank points on both curves (or at one of them) and within `tol` of
+    /// both (the scaled zero added). `None` when any of that fails, for a circle (which
+    /// the analytic intersector already decides), or for a line out of the plane. `None`
+    /// too when the touch rule or a point solve fails: the two points were a valid answer
+    /// before this was asked, so they stand, as [`Ellipse::intersect_with_line`] keeps
+    /// what it has when a point solve fails.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations; an unported path or a cancellation of a point solve.
+    pub(crate) fn touch_between_line_flanks(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        line: &Line,
+        line_interval: &Extent1d,
+        tol: f64,
+        contact_tol: f64,
+        flanks: [[f64; 2]; 2],
+    ) -> Result<Option<[f64; 3]>> {
+        if self.is_circle() {
+            return Ok(None);
+        }
+        let normal = self.position.z_axis();
+        let start = line.line_point();
+        let line_vec = line.line_vector() * line.line_scale();
+        let length = line_vec.length();
+        if length <= EFF_ZERO * (1.0 + start.max_dimension()) {
+            return Ok(None);
+        }
+        if normal.dot(line_vec).abs() > EFF_ZERO_SQRT * length {
+            return Ok(None);
+        }
+        // (a line too short against the radii to have a direction certifies nothing)
+        let Ok(Some(t)) = line_coplanar_ellipse_touch(
+            start,
+            line_vec,
+            self.position.origin(),
+            self.position.x_axis(),
+            self.position.y_axis(),
+            [self.x_radius(), self.y_radius()],
+            contact_tol,
+        ) else {
+            return Ok(None);
+        };
+        let candidate =
+            point_project_to_plane(start, self.position.origin(), normal) + t * line_vec;
+        let between = |v: f64, a: f64, b: f64| min2(a, b) <= v && v <= max2(a, b);
+        let on_line: Vec<Solution<()>> =
+            match line_global_point_solve(line, line_interval, candidate, tol * 10.0) {
+                Ok(s) => s,
+                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                    return Err(e)
+                }
+                Err(_) => return Ok(None),
+            };
+        let on_ellipse: Vec<Solution<()>> =
+            match ellipse_global_point_solve(k, self, interval, candidate, tol * 10.0) {
+                Ok(s) => s,
+                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                    return Err(e)
+                }
+                Err(_) => return Ok(None),
+            };
+        let mut best: Option<[f64; 3]> = None;
+        for s1 in &on_ellipse {
+            for s2 in &on_line {
+                let (u, w) = (s1.start.parameters[0], s2.start.parameters[0]);
+                if !(between(u, flanks[0][0], flanks[1][0])
+                    && between(w, flanks[0][1], flanks[1][1]))
+                {
+                    continue;
+                }
+                let p1 = self.base.evaluate_point(u)?;
+                let dist = p1.distance(line.evaluate_point(w));
+                let scaled_zero = EFF_ZERO * (1.0 + p1.max_dimension());
+                if dist <= tol + scaled_zero && best.is_none_or(|b| dist < b[2]) {
+                    best = Some([u, w, dist]);
+                }
+            }
+        }
+        Ok(best)
     }
 
     /// Where a line in this circle's plane that overlaps it by less than the contact
