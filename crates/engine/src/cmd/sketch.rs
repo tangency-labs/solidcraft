@@ -229,7 +229,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&POLYGON_CIRCUMSCRIBED_CONTRACT)
         .output(output_schema_for::<PolygonResult>)
-        .params(concat!("center, radius | diameter (to edge midpoints): number or expression (an expression naming a parameter is a dimension driven by it, so the polygon follows the parameter), sides: number or expression (read when drawn, it does not follow a later change), angle?: deg", connect_doc!(), created_doc!())),
+        .params(concat!("center, radius | diameter (to edge midpoints): number or expression (an expression naming a parameter is a dimension driven by it, so the polygon follows the parameter; on a sheet sketch the dimension keeps the expression and reads source parameters without defining any), sides: number or expression (read when drawn, it does not follow a later change), angle?: deg", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.polygon.edge", "Edge Polygon", crate::checked!("sketch.polygon.edge", polygon_edge))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -2469,6 +2469,38 @@ pub(super) fn slot_width_dimension(
     Ok(Some(sk.add_constraint(ConstraintKind::Diameter { c: cap, value: w }, Some(pname))?))
 }
 
+/// The radius or diameter dimension on round curve `c` (radius `r` now) for a size typed as the
+/// expression `e` over parameters. A model sketch defines a model parameter holding `e`. A sheet
+/// sketch never changes the source design, so it keeps `e` on the dimension as its authored paper
+/// expression, as a sheet dimension does, and `e` may only read source parameters.
+#[allow(clippy::too_many_arguments)]
+fn size_dimension(
+    sk: &mut Sketch,
+    doc: &mut solidcraft_doc::Document,
+    paper: bool,
+    cmd: &str,
+    e: &str,
+    diameter: bool,
+    c: usize,
+    r: f64,
+) -> Result<String> {
+    let value = if diameter { 2.0 * r } else { r };
+    let mk = |v: f64| if diameter { ConstraintKind::Diameter { c, value: v } } else { ConstraintKind::Radius { c, value: v } };
+    if !paper {
+        let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
+        let pname = doc.new_model_param(e, &unit);
+        return Ok(sk.add_constraint(mk(value), Some(pname))?);
+    }
+    if e.len() > 4096 || e.trim().is_empty() || e.chars().any(char::is_control) {
+        return Err(bad(cmd, "sheet dimension expression must be nonempty, at most 4096 bytes and contain no controls"));
+    }
+    if solidcraft_doc::expr::definition(e).is_some() {
+        return Err(bad(cmd, "a sheet dimension cannot define source parameters; use a paper expression or a read-only source parameter"));
+    }
+    let wanted = doc.eval(e, Kind::Length).map_err(|err| bad(cmd, format!("value: {err}")))?;
+    Ok(sk.add_constraint(mk(wanted), Some(e.to_string()))?)
+}
+
 fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.circle.center";
     let paper = s.sheet_sketching();
@@ -2494,10 +2526,7 @@ fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
         }
         // A size typed as an expression is a dimension driven by the parameters it names.
         if let Some((e, diameter)) = &size {
-            let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
-            let pname = doc.new_model_param(e, &unit);
-            let kind = if *diameter { ConstraintKind::Diameter { c: ci, value: 2.0 * r } } else { ConstraintKind::Radius { c: ci, value: r } };
-            cons.push(sk.add_constraint(kind, Some(pname))?);
+            cons.push(size_dimension(sk, doc, paper, cmd, e, *diameter, ci, r)?);
         }
         Ok((ids_of(sk, &[ci]), cons))
     })?;
@@ -2666,6 +2695,7 @@ fn polygon(
     size: Option<(String, bool)>,
 ) -> Result<Value> {
     let mut support_circle = String::new();
+    let paper = s.sheet_sketching();
     let (out, info) = draw(s, p, cmd, |sk, doc| {
         let corners: Vec<Vec2> = (0..n).map(|i| center + Vec2::from_angle(start + std::f64::consts::TAU * i as f64 / n as f64) * r_vertex).collect();
         let (l, pts) = polygon_lines(sk, &corners)?;
@@ -2704,10 +2734,7 @@ fn polygon(
             }
         }
         if let Some((e, diameter)) = &size {
-            let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
-            let pname = doc.new_model_param(e, &unit);
-            let kind = if *diameter { ConstraintKind::Diameter { c: circ, value: 2.0 * rc } } else { ConstraintKind::Radius { c: circ, value: rc } };
-            cons.push(sk.add_constraint(kind, Some(pname))?);
+            cons.push(size_dimension(sk, doc, paper, cmd, e, *diameter, circ, rc)?);
         }
         Ok((ids_of(sk, &l), cons))
     })?;
