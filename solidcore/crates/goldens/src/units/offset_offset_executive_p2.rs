@@ -1779,6 +1779,9 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         ),
     };
     let (status, mut result) = operation(result)?;
+    if let Some(brep) = result.as_ref() {
+        crate::dump::body(&kernel, "result", brep);
+    }
     let result_projection = result.as_ref().map(rust_result_projection).transpose()?;
     let offset_projection = exec
         .as_ref()
