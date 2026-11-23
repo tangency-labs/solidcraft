@@ -42,6 +42,11 @@
 //! `stubs4-delete-edge-bottle-e8-r0.1` and `topology.brep_p10` `gen0020` (their edge
 //! tolerances, each certified in `certify::trim_tolerance`), so their entries are deleted too.
 //!
+//! #20939's `edge::set_interval` clears the gaps cached over the old interval, so the UV trim
+//! recovery of `create_uv_trim_curves` leaves the gap-cache flags of the
+//! `own_reader_open_shell_uv_trim_f<k>_rebuild` rows of `topology.face_p3` at 0 where main's
+//! row has 1; their 12 entries are deleted.
+//!
 //! The kept-trim cover (tangency-labs/solidcraft#19295) raises, after the healer, the
 //! tolerance of an edge whose kept UV trim runs farther from it than its tolerance, to a
 //! proved bound on that distance, and records each raise it makes with the value before
@@ -568,7 +573,7 @@ replay_tests! {
     stitch_p2_rows_move_only_through_the_read_tolerances: "heal.stitch_p2", 4;
     brep_p10_rows_move_only_through_the_read_tolerances: "topology.brep_p10", 38;
     edgeuse_p3_rows_move_only_through_the_read_tolerances: "topology.edgeuse_p3", 14;
-    face_p3_rows_move_only_through_the_read_tolerances: "topology.face_p3", 48;
+    face_p3_rows_move_only_through_the_read_tolerances: "topology.face_p3", 36;
 }
 
 macro_rules! replay_trim_cover_tests {

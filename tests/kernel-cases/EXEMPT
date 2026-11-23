@@ -562,6 +562,7 @@ view.status_details               the view: camera, layout, display
 view.status_items                 the view: camera, layout, display
 view.tool                         the view: camera, layout, display
 view.tool.zoom                    the view: camera, layout, display
+view.toolbar_reset_all            toolbar preferences: crates/ui-egui/src/toolbar_custom.rs::reset_tests::engine_execute_resets_every_tab_without_a_dialog
 view.top                          the view: camera, layout, display
 view.visual_style                 the view: camera, layout, display
 window.options.use_as_default     copies pop-out presentation settings to preferences; no geometry
