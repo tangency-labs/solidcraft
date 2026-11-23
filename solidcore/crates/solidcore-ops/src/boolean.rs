@@ -75,7 +75,7 @@ fn finished(k: &mut Kernel, r: Brep, expect: Expect, contract: Contract) -> Kern
 /// gaps are covered by growing tolerances. Only a vertex wider than the check allows moves;
 /// elsewhere tolerances only grow. Without it, the validity check of [`finished`] refuses a
 /// sound result for a sub-micron gap. The update can itself fail with the kernel's error, which
-/// then comes back in place of the [`Error::NotSolid`] the check would have given.
+/// then comes back in place of the [`Error::NotSolidBecause`] the check would have given.
 fn after_boolean(k: &mut Kernel, r: &mut Brep) -> KernelResult<()> {
     update_tolerances_after_boolean(k, r).map(|_| ())
 }
@@ -151,8 +151,8 @@ pub fn boolean(a: Body, b: Body, op: BooleanOp) -> Result<Option<Body>> {
 /// [`boolean`] under `contract`.
 ///
 /// # Errors
-/// As [`boolean`]; under [`Contract::Proved`], [`Error::NotSolid`] too for a result of proved
-/// solids that is not proved valid and facing out.
+/// As [`boolean`]; under [`Contract::Proved`], [`Error::NotSolidBecause`] too for a result of
+/// proved solids that is not proved valid and facing out.
 pub fn boolean_with(a: Body, b: Body, op: BooleanOp, contract: Contract) -> Result<Option<Body>> {
     let both = [a, b];
     usable("SmApiBoolean", &both)?;
@@ -229,8 +229,8 @@ pub fn union_all(bodies: Vec<Body>) -> Result<Body> {
 /// [`after_boolean`]'s update as it is made, so a later level unions repaired operands.
 ///
 /// # Errors
-/// As [`union_all`]; under [`Contract::Proved`], [`Error::NotSolid`] too for a result of proved
-/// solids that is not proved valid and facing out.
+/// As [`union_all`]; under [`Contract::Proved`], [`Error::NotSolidBecause`] too for a result of
+/// proved solids that is not proved valid and facing out.
 // The operands are consumed: their bodies are taken out under the kernel's lock.
 #[allow(clippy::needless_pass_by_value)]
 pub fn union_all_with(bodies: Vec<Body>, contract: Contract) -> Result<Body> {
@@ -322,8 +322,8 @@ pub fn imprint(body: Body, tool: Body) -> Result<(Body, bool)> {
 /// `body` when its face, edge or vertex count moved (a face cut, an edge split).
 ///
 /// # Errors
-/// As [`imprint`]; under [`Contract::Proved`], [`Error::NotSolid`] when a solid body comes out
-/// not proved a solid.
+/// As [`imprint`]; under [`Contract::Proved`], [`Error::NotSolidBecause`] when a solid body
+/// comes out not proved a solid.
 pub fn imprint_with(body: Body, tool: Body, contract: Contract) -> Result<(Body, bool)> {
     let both = [body, tool];
     usable("SmApiBooleanWithOptions", &both)?;

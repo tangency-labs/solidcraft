@@ -112,7 +112,7 @@ use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
 use crate::error::blend::{AnalyticShape, BlendFailure, SolverFailure};
-use crate::error::{ignore_status, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{ignore_status, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;
@@ -144,6 +144,7 @@ use crate::topology::edgeuse::p3::get_or_create_uv_trim_curve;
 use crate::topology::face::p2 as face_p2;
 use crate::topology::{edge, vertexuse, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 use crate::topology::{vertex, Vertexuse};
+use crate::EntityRef;
 
 const OP: &str = "blend::fillet_solver::p2";
 
@@ -390,7 +391,13 @@ fn checked_edge_curve(k: &Kernel, s: &FilletSolver, b: &Brep, e: EdgeId) -> Resu
     // NER(pCurve)
     edge::curve(b, e)?
         .cloned()
-        .ok_or_else(|| SolidError::blend_at(OP, BlendFailure::EdgeWithoutCurve, EntityRef::Edge(e)))
+        .ok_or_else(|| edge_without_curve(OP, e))
+}
+
+/// An edge of the caller's body without a curve (`NER(pCurve)`):
+/// [`BlendFailure::EdgeWithoutCurve`] at the edge, status `SM_ERR_NULL_POINTER`.
+fn edge_without_curve(op: &'static str, edge: EdgeId) -> SolidError {
+    SolidError::blend_at(op, BlendFailure::EdgeWithoutCurve, EntityRef::Edge(edge))
 }
 
 fn is_circular_fsg(s: &FilletSolver) -> Result<bool> {
@@ -1989,9 +1996,7 @@ impl FilletSolver {
 
         // the edge's ends, and where the ball touches each cylinder in their cross-sections
         let e = filleted_edge(ops.solver(), b)?;
-        let curve = edge::curve(b, e)?.ok_or_else(|| {
-            SolidError::blend_at(OP, BlendFailure::EdgeWithoutCurve, EntityRef::Edge(e))
-        })?;
+        let curve = edge::curve(b, e)?.ok_or_else(|| edge_without_curve(OP, e))?;
         let ivl = edge::interval(b, e)?;
         let ends = [
             curve_pv(k, curve, ivl.min())?.0,
@@ -2971,13 +2976,8 @@ impl FilletSolver {
                     .set_fillet_edge_type(FilletEdgeType::SplitFace);
 
                 // drop the corner point to the side curve
-                let side_curve = edge::curve(b, side_edge)?.ok_or_else(|| {
-                    SolidError::blend_at(
-                        OP_C,
-                        BlendFailure::EdgeWithoutCurve,
-                        EntityRef::Edge(side_edge),
-                    )
-                })?;
+                let side_curve = edge::curve(b, side_edge)?
+                    .ok_or_else(|| edge_without_curve(OP_C, side_edge))?;
                 let sols = side_curve.global_point_solve(
                     k,
                     &edge::interval(b, side_edge)?,
@@ -3256,7 +3256,7 @@ fn edge_zone_kernel(k: &Kernel, tol: f64) -> Kernel {
         },
         ..crate::kernel::KernelOptions::default()
     });
-    tk.rng = k.rng.clone();
+    tk.seed = k.seed;
     tk.cancel.clone_from(&k.cancel);
     tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
     tk

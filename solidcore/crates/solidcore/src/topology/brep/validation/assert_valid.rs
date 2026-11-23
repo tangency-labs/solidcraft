@@ -233,6 +233,22 @@ impl BrepCheck {
             .collect()
     }
 
+    /// Name the first check that gained a failure, including a failed check without a report.
+    pub(crate) fn first_new_failure_name(&self, before: &Self) -> Option<&'static str> {
+        let (class, _) = self.failures_beyond(before).into_iter().next()?;
+        Some(match class {
+            FailureClass::Report { .. } => self
+                .failures()
+                .find(|r| FailureClass::of(r) == class)
+                .map_or("the edited B-rep failed validation", |r| r.name),
+            FailureClass::PointersStatus(_) => "ValidatePointers failed",
+            FailureClass::AssertValidSkipped => {
+                "AssertValid was skipped after ValidatePointers failed"
+            }
+            FailureClass::AssertValidWithoutReport => "AssertValid failed without a report",
+        })
+    }
+
     /// The failure lines in [`BrepCheck::lines`] order, each with its class and its report
     /// (`None` for a synthetic line).
     fn classified(&self) -> Vec<(FailureClass, Option<&AssertReport>)> {
