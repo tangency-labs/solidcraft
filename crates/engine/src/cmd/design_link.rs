@@ -488,9 +488,12 @@ mod tests {
         let missing = dir.join("gone.sc");
         assert!(matches!(state(&missing), Some((LinkState::Missing, r)) if r.contains("gone.sc")));
         assert_eq!(link_presence(&missing, None).map(|p| p.state), Some(LinkState::Missing));
-        // Unreadable: not a design file name, or a folder.
+        // Unreadable: neither a design nor a STEP file name, or a folder.
+        std::fs::write(dir.join("part.txt"), b"ISO-10303-21;").unwrap();
+        assert!(matches!(state(&dir.join("part.txt")), Some((LinkState::Unreadable, r)) if r.contains("not a .sc design")));
+        // A STEP file is a link source too (Insert STEP keeps its link), read under the STEP limit.
         std::fs::write(dir.join("part.step"), b"ISO-10303-21;").unwrap();
-        assert!(matches!(state(&dir.join("part.step")), Some((LinkState::Unreadable, r)) if r.contains("not a .sc design")));
+        assert_eq!(read_linked_file(&dir.join("part.step"), None), Ok(b"ISO-10303-21;".to_vec()));
         std::fs::create_dir_all(dir.join("folder.sc")).unwrap();
         assert!(matches!(state(&dir.join("folder.sc")), Some((LinkState::Unreadable, _))));
         // A design a newer SolidCraft saved is read like any other, and opens saying so (#12166).
