@@ -267,6 +267,10 @@ impl CacheFace<EntityRef> for BrepCacheFace<'_> {
         )
     }
 
+    fn has_loopuses(&self) -> Result<bool> {
+        crate::topology::face::p4::has_loopuses(self.b, self.f)
+    }
+
     fn loopuse_edgeuses(&self, loopuse: EntityRef) -> Result<Vec<EntityRef>> {
         let EntityRef::Loopuse(lu) = loopuse else {
             return Err(cache_face_entity("not a loop use"));

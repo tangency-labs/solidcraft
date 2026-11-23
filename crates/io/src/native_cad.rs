@@ -116,7 +116,20 @@ fn traced_records(
     let mut unplaced = Vec::with_capacity(read.read.len());
     let looks = colours.then(|| Looks::of(ir));
     let layers = HiddenLayers::of(ir);
+    // With `shown`, a B-rep that cannot be read comes in as the mesh the file shows it with (an
+    // OpenUSD `BrepArray`'s fallback mesh, a tessellation of its body), rather than not at all,
+    // and rather than as an open surface of the faces that read: the mesh is all of the body.
+    let has_triangles =
+        |id: &str| ir.model.tessellations.iter().any(|t| t.body.as_ref().is_some_and(|b| b.as_str() == id) && !t.triangles().is_empty());
+    let mut opened: Vec<(String, String)> = Vec::new();
     for r in read.read {
+        if shown
+            && has_triangles(&r.body)
+            && let Some(why) = r.opened
+        {
+            opened.push((r.body, why));
+            continue;
+        }
         let body = by_id.get(r.body.as_str());
         let (color, paint) = looks.as_ref().map_or((None, None), |l| l.paint_of(ir, &r.body, &r.solid.face_origin));
         warnings.extend(r.solid.notes.iter().map(|n| format!("{}: {n}", label(&r.body))));
@@ -138,12 +151,12 @@ fn traced_records(
         };
         unplaced.push(assembly::Unplaced { body: r.body, record });
     }
-    // With `shown`, a B-rep that cannot be read comes in as the mesh the file shows it with (an
-    // OpenUSD `BrepArray`'s fallback mesh, a tessellation of its body), rather than not at all.
-    let has_triangles =
-        |id: &str| ir.model.tessellations.iter().any(|t| t.body.as_ref().is_some_and(|b| b.as_str() == id) && !t.triangles().is_empty());
-    let fallen: std::collections::HashSet<&str> =
+    let mut fallen: std::collections::HashSet<&str> =
         if shown { read.failures.iter().map(|f| f.body.as_str()).filter(|id| has_triangles(id)).collect() } else { Default::default() };
+    fallen.extend(opened.iter().map(|(id, _)| id.as_str()));
+    warnings.extend(
+        opened.iter().map(|(id, why)| format!("{}: its B-rep was not imported ({why}): it came in as the mesh the file shows it with", label(id))),
+    );
     warnings.extend(read.failures.iter().map(|f| {
         if fallen.contains(f.body.as_str()) {
             format!("{}: its B-rep was not imported ({}): it came in as the mesh the file shows it with", label(&f.body), f.message)
