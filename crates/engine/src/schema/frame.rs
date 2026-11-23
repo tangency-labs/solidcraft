@@ -540,8 +540,12 @@ pub struct MultiTrimParams {
     /// none.
     #[serde(default)]
     pub gap: Option<MemberGap>,
-    /// Take the override of these members away (the corner goes back to the frame's own rules); no `kind`, `flip`
-    /// or `gap` with it.
+    /// Whether a butt at this corner copes the butting tube to the through tube's real shape. Default: the frame's
+    /// `coped`.
+    #[serde(default)]
+    pub coped: Option<bool>,
+    /// Take the override of these members away (the corner goes back to the frame's own rules); no `kind`, `flip`,
+    /// `gap` or `coped` with it.
     #[serde(default)]
     pub remove: Option<bool>,
 }
@@ -707,7 +711,7 @@ impl JsonSchema for CornerParam {
 pub struct CornersParam(pub Vec<CornerOverride>);
 
 /// What a `corners` entry must be.
-pub const CORNER_ENTRY: &str = "`corners` entries must be {members: [2 to 1000 line or pair ids, or {line}], kind, gap?}";
+pub const CORNER_ENTRY: &str = "`corners` entries must be {members: [2 to 1000 line or pair ids, or {line}], kind, gap?, coped?}";
 
 /// A `corners` entry, either shape (`corner` for `kind`, members as bare ids), and its `flip` when it gives one (an
 /// older script's, or the dialog's: the handler saves it as an order). `None` for anything else.
@@ -747,7 +751,7 @@ impl JsonSchema for CornersParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "Corners, crossings and overlaps finished their own way: the 2 to 1000 members that meet there (lines' or pairs' ids), in order (the first runs through, or stays whole), and the corner type. An older script's `corner` reads as `kind`, and its `flip` is saved as today's order with the first two swapped.",
+            "description": "Corners, crossings and overlaps finished their own way: the 2 to 1000 members that meet there (lines' or pairs' ids), in order (the first runs through, or stays whole), and the corner type, with its own `gap` and `coped` (a butt there copes the butting tube; default: the frame's). An older script's `corner` reads as `kind`, and its `flip` is saved as today's order with the first two swapped.",
             "type": "array", "maxItems": MAX_MEMBERS,
             "items": {
                 "type": "object",
@@ -759,7 +763,8 @@ impl JsonSchema for CornersParam {
                     "kind": {"type": "string", "enum": ["auto", "none", "mitre", "butt"]},
                     "corner": {"type": "string", "enum": ["auto", "none", "mitre", "butt"]},
                     "flip": {"type": "boolean"},
-                    "gap": {"type": ["string", "number"]}
+                    "gap": {"type": ["string", "number"]},
+                    "coped": {"type": "boolean"}
                 },
                 // Its type as `kind` or an older `corner`, one of them, as the handler reads it.
                 "required": ["members"],

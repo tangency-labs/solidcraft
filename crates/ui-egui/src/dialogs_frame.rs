@@ -160,6 +160,8 @@ pub struct Override {
     pub flip: bool,
     /// Its own weld gap; empty: the frame's.
     pub gap: String,
+    /// Whether its butt is coped, once chosen on its row; none: the frame's Coped.
+    pub coped: Option<bool>,
     /// An edit's: the members in their saved order, and the Flip the row showed for it. While the row's Flip is
     /// unchanged they go back in that order, so OK leaves an order today's rules wouldn't give as it was.
     pub saved: Option<(Vec<String>, bool)>,
@@ -168,7 +170,7 @@ pub struct Override {
 impl Override {
     /// A new pick: the frame's type `corner`, unflipped, the frame's gap.
     fn new(pick: Sel, corner: usize) -> Override {
-        Override { pick, corner, flip: false, gap: String::new(), saved: None }
+        Override { pick, corner, flip: false, gap: String::new(), coped: None, saved: None }
     }
 }
 
@@ -1032,6 +1034,7 @@ fn corner_rows(ui: &mut egui::Ui, d: &mut Dialog, lit: Option<usize>, crossings:
         return false;
     }
     let frame = m.corner;
+    let frame_coped = m.coped;
     let frame_gap = if m.gap.trim().is_empty() { "0 mm".to_string() } else { m.gap.clone() };
     let mut enter = false;
     let choices = override_choices(frame);
@@ -1039,7 +1042,7 @@ fn corner_rows(ui: &mut egui::Ui, d: &mut Dialog, lit: Option<usize>, crossings:
     let labels: Vec<&str> = choices.iter().map(|c| c.1).collect();
     let mut drop = None;
     for (n, pick) in picks.iter().enumerate() {
-        let Some(Override { corner, flip, gap, .. }) = m.overrides.iter_mut().find(|o| o.pick == *pick) else { continue };
+        let Some(Override { corner, flip, gap, coped, .. }) = m.overrides.iter_mut().find(|o| o.pick == *pick) else { continue };
         let label = corner_label(n + 1);
         let crossed = crossings.get(n).copied().unwrap_or(false);
         // A scope of its own keeps each row's ids apart.
@@ -1086,6 +1089,20 @@ fn corner_rows(ui: &mut egui::Ui, d: &mut Dialog, lit: Option<usize>, crossings:
                     }
                 });
                 enter |= hint_row(ui, "Gap", gap, &frame_gap);
+                // A butt (or Auto's) here coped on its own; unchosen, it follows the frame's Coped.
+                if !crossed {
+                    let can = override_flips(override_type(*corner, frame)) && frame != NONE;
+                    form_row(ui, "Coped", |ui| {
+                        ui.add_enabled_ui(can, |ui| {
+                            let before = coped.unwrap_or(frame_coped);
+                            let mut on = before;
+                            check(ui, &mut on);
+                            if on != before {
+                                *coped = Some(on);
+                            }
+                        });
+                    });
+                }
             });
         });
     }
@@ -1493,6 +1510,10 @@ fn flat_commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<St
             if let Some(gap) = o.map(|o| o.gap.trim()).filter(|g| !g.is_empty()) {
                 entry["gap"] = json!(gap);
             }
+            // Its own Coped, saved only where it differs from the frame's.
+            if let Some(c) = o.and_then(|o| o.coped).filter(|c| *c != m.coped) {
+                entry["coped"] = json!(c);
+            }
             corners.push(entry);
         }
     }
@@ -1663,7 +1684,7 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
                 }
                 let flip = flipped(&lines);
                 let gap = o.gap.as_deref().map(|g| shown_expr(g, ValueKind::Length)).unwrap_or_default();
-                m.overrides.push(Override { flip, gap, saved: Some((lines, flip)), ..Override::new(pick, corner_index(&o.kind)) });
+                m.overrides.push(Override { flip, gap, coped: o.coped, saved: Some((lines, flip)), ..Override::new(pick, corner_index(&o.kind)) });
             }
             None => missing.push(o),
         }
@@ -1678,9 +1699,6 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
         if !pairs.is_empty() {
             extra.insert("pairs".into(), json!(pairs));
             extra.insert("next_pair".into(), json!(next_pair));
-        }
-        if *fit_ends {
-            extra.insert("fit_ends".into(), json!(true));
         }
         m.groups = groups
             .iter()

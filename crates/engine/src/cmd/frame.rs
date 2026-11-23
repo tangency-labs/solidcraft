@@ -99,7 +99,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(not_in_sketch)
         .contract(&MULTI_TRIM_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("feature: the Frame Member (id or name); members: [2 to 1000 line or pair ids, or {feature?: the frame's own name, line}] (a corner, crossing or overlap of the frame, the members in order: the first runs through a butt, or stays whole at a crossing or overlap, and of three or more the first two make the corner); kind?: auto|none|mitre|butt (default auto: the frame's own type, with this order); flip?: bool (the first two in the order today's rules give them, swapped; without it the members are saved as given); gap?: length expr (this corner's weld gap, 0…1000 mm; default the frame's; an overlap takes none); remove?: bool (take the override of these members away, back to the frame's own rules; no kind, flip or gap with it). Replaces the override of the same members (any order) or adds one, as one undo step; the frame stays one timeline entry. Returns the edited feature as frame.member does"),
+        .params("feature: the Frame Member (id or name); members: [2 to 1000 line or pair ids, or {feature?: the frame's own name, line}] (a corner, crossing or overlap of the frame, the members in order: the first runs through a butt, or stays whole at a crossing or overlap, and of three or more the first two make the corner); kind?: auto|none|mitre|butt (default auto: the frame's own type, with this order); flip?: bool (the first two in the order today's rules give them, swapped; without it the members are saved as given); coped?: bool (a butt here copes the butting tube to the through tube's real shape; default the frame's coped); gap?: length expr (this corner's weld gap, 0…1000 mm; default the frame's; an overlap takes none); remove?: bool (take the override of these members away, back to the frame's own rules; no kind, flip or gap with it). Replaces the override of the same members (any order) or adds one, as one undo step; the frame stays one timeline entry. Returns the edited feature as frame.member does"),
 ];
 
 /// The `profile` parameter: its kind and each dimension as given, a number or an expression; or a
@@ -831,8 +831,8 @@ fn multi_trim(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let given = |k: &str| !matches!(p.get(k), None | Some(Value::Null));
     let remove = given("remove") && bool_(p, "remove").ok_or_else(|| bad(cmd, "`remove` must be true or false"))?;
-    if remove && ["kind", "flip", "gap"].into_iter().any(given) {
-        return Err(bad(cmd, "`remove` takes the override away: give no `kind`, `flip` or `gap` with it"));
+    if remove && ["kind", "flip", "gap", "coped"].into_iter().any(given) {
+        return Err(bad(cmd, "`remove` takes the override away: give no `kind`, `flip`, `gap` or `coped` with it"));
     }
     let mut members = trim_members(p.get("members")).map_err(|e| bad(cmd, e))?;
     for m in &mut members {
@@ -890,7 +890,11 @@ fn multi_trim(s: &mut Session, p: &Value) -> Result<Value> {
             }
             members = order.into_iter().map(|line| MemberRef { feature: None, line }).collect();
         }
-        let record = CornerOverride { members, kind, gap };
+        let coped = match given("coped") {
+            false => None,
+            true => Some(bool_(p, "coped").ok_or_else(|| bad(cmd, "`coped` must be true or false"))?),
+        };
+        let record = CornerOverride { members, kind, gap, coped };
         let full = new_corners.len() >= frame::MAX_MEMBERS;
         match at.and_then(|k| new_corners.get_mut(k)) {
             Some(slot) => *slot = record,

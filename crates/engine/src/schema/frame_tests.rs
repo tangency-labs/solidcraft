@@ -504,7 +504,7 @@ fn a_corner_entry_reads_both_shapes() {
 
 #[test]
 fn the_multi_trim_schema_takes_what_the_handler_reads() {
-    assert_keys(input_schema_for::<MultiTrimParams>(), &["feature", "flip", "gap", "kind", "members", "remove"]);
+    assert_keys(input_schema_for::<MultiTrimParams>(), &["coped", "feature", "flip", "gap", "kind", "members", "remove"]);
     let schema = input_schema_for::<MultiTrimParams>();
     let schema = schema.as_value();
     for (p, takes) in [
@@ -512,6 +512,8 @@ fn the_multi_trim_schema_takes_what_the_handler_reads() {
         (json!({"feature": 3, "members": ["l2", {"line": "l1"}], "kind": "butt", "flip": true}), true),
         (json!({"feature": "F", "members": [{"feature": "F", "line": "l1"}, "l2"], "remove": true}), true),
         (json!({"feature": "F", "members": ["l1", "l2"], "gap": 2}), true),
+        (json!({"feature": "F", "members": ["l1", "l2"], "kind": "butt", "coped": true}), true),
+        (json!({"feature": "F", "members": ["l1", "l2"], "coped": "yes"}), false),
         (json!({"feature": "F", "members": ["l1"]}), false),
         (json!({"feature": "F", "members": ["l1", 2]}), false),
         (json!({"feature": "F", "members": ["l1", "l2"], "kind": "coped_butt"}), false),

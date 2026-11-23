@@ -113,7 +113,8 @@ A corner sharper than 5 degrees inside is refused: "Corner at (x, y, z) is too s
   largest piece on its own side of the through member, and a member that lies wholly inside the
   through member is refused.
 
-**Corner Overrides** (`corners`) give single corners their own type, member order and weld gap.
+**Corner Overrides** (`corners`) give single corners their own type, member order, weld gap and
+Coped (`coped` on the entry; empty: the frame's), so one butt can be coped and the next left plain.
 Each is saved by the ids of the members that meet there, in order (a line's id, or a pair's
 `pair1`, `pair2`…; a point where three or more end takes an override only under Auto), not by the
 point, so it survives a dimension change while the members still meet. The first member runs
@@ -134,7 +135,9 @@ where three or more end.
 In the dialog, a box drag in the view picks the frame sketch's straight lines (not construction,
 projected lines or arcs), and the corner points when Corner Overrides is active (Shift adds). Each
 override is one row, **Corner 1**, **Corner 2**… in pick order: its type, its **Flip** (greyed for
-None and Mitre) and a bin that removes it, with a **Gap** row under it. The arrow on the Corner
+None and Mitre) and a bin that removes it, with a **Gap** row and a **Coped** row under it (Coped
+greyed but for a Butt or Auto corner; left alone it follows the frame's Coped, and it is saved only
+where it differs). The arrow on the Corner
 Overrides line folds the rows away; picking another corner opens them again. Pointing at an overridden corner in the view lights
 its row (or the Corner Overrides line while the rows are folded).
 
@@ -333,7 +336,7 @@ tubes that overlap takes no `gap`: an overlap is notched, not welded".
 
 **Member order.** An override is saved as `{"members": [{"line": "l1"}, {"line": "l2"}], "kind":
 "butt", "gap": "2 mm"}`: its members in order (a line's id or a pair's `pair1`…), its `kind` (`auto`,
-`none`, `mitre` or `butt`) and its `gap` only when it has one. The order is fixed and decides the
+`none`, `mitre` or `butt`), and its `gap` and `coped` only when it has them. The order is fixed and decides the
 build, whatever later sketch edits do to the members' lengths:
 
 - Two members: the first runs through a Butt (coped or not) and is Auto's long tube at a butt or
@@ -370,9 +373,10 @@ are its UI) sets, changes or removes one override of a Frame Member in place, as
 - `members`: 2 to 1000 line or pair ids (or `{feature?, line}`), in order, which must meet at a
   corner, crossing or overlap of the frame ("a corner override is not at a corner of the frame"). A
   piece of a crossing (`L>X`) is refused, as in `frame.member`: name its line.
-- `kind`: `auto` (the default), `none`, `mitre` or `butt`. `flip` and `gap` as above.
+- `kind`: `auto` (the default), `none`, `mitre` or `butt`. `flip` and `gap` as above. `coped`: a butt
+  here copes the butting tube (default: the frame's `coped`).
 - `remove: true` takes away the override of these members (in any order), and the corner goes back
-  to the frame's own rules; `kind`, `flip` or `gap` with it is refused. It also removes an override
+  to the frame's own rules; `kind`, `flip`, `gap` or `coped` with it is refused. It also removes an override
   whose members no longer meet after a sketch edit.
 
 It replaces the override of the same members (in any order) or adds one, and returns the edited

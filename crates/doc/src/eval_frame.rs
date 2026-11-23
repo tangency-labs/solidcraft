@@ -591,6 +591,8 @@ fn corner_ends(
     crossing: Option<&Plan>,
     coped: bool,
 ) -> Result<(CornerEnds, Vec<Fit>)> {
+    // The frame's type as chosen, and as it cuts.
+    let plain = finish.0;
     let finish = (finish.0.coped(coped), finish.1, finish.2);
     // A design file is hostile input: the command checks the list, a file may not.
     if overrides.len() > MAX_MEMBERS {
@@ -630,7 +632,9 @@ fn corner_ends(
         let k = at.get(&pair(a, b)).ok_or_else(|| DocError::Invalid("A corner override is not at a corner of the frame".into()))?;
         if let Some(f) = finishes.get_mut(*k) {
             // An Auto override on a frame that isn't Auto is the frame's own type, with its own Flip.
-            *f = (if o.corner == CornerType::Auto { finish.0 } else { o.corner.coped(coped) }, o.flip, o.gap);
+            // Its own Coped, else the frame's.
+            let kind = if o.corner == CornerType::Auto { plain } else { o.corner };
+            *f = (kind.coped(o.coped.unwrap_or(coped)), o.flip, o.gap);
         }
     }
     // Each member's cut ends, and each Coped Butt's (T, U): U loses T's filled shape once every plane cut is made.
@@ -1010,7 +1014,7 @@ fn orders(corner: CornerType, (segments, planes, drawn, sketch_x): Lines, record
         .iter()
         .map(|r| {
             let lines: Vec<String> = r.lines().map(str::to_string).collect();
-            Override { members: if laid_pair { laid(&lines) } else { lines }, corner: r.kind, flip: false, gap: 0.0 }
+            Override { members: if laid_pair { laid(&lines) } else { lines }, corner: r.kind, flip: false, gap: 0.0, coped: r.coped }
         })
         .collect();
     let (plan, matched) = if corner.is_none() {
@@ -1093,7 +1097,7 @@ fn overrides(corner: CornerType, lines: Lines, records: &[CornerOverride], gaps:
                 Some((_, frame)) => frame,
                 None => 0.0,
             };
-            Ok(Override { members, corner: r.kind, flip, gap })
+            Ok(Override { members, corner: r.kind, flip, gap, coped: r.coped })
         })
         .collect()
 }
@@ -1123,6 +1127,7 @@ pub fn default_orders(doc: &Document, st: &ModelState, f: &Feature, sets: &[Vec<
             members: set.iter().map(|l| MemberRef { feature: None, line: l.clone() }).collect(),
             kind: CornerType::Auto,
             gap: None,
+            coped: None,
         })
         .collect();
     Ok(orders(*corner, (&segments, &planes, &drawn, sketch_x), &records, true))
@@ -1459,7 +1464,9 @@ fn auto_ends(
                 add_corner(&mut out, &c, false, (angled, None), segments, regions, placed, g)?;
             }
             (CornerType::Auto, Joint::Mitre) => add_corner(&mut out, &c, false, cuts(CornerType::Mitre)?, segments, regions, placed, g)?,
-            (CornerType::Auto, _) if coped => add_corner(&mut out, &c, true, cuts(CornerType::CopedButt)?, segments, regions, placed, g)?,
+            (CornerType::Auto, _) if ac.coped.unwrap_or(coped) => {
+                add_corner(&mut out, &c, true, cuts(CornerType::CopedButt)?, segments, regions, placed, g)?
+            }
             (CornerType::Auto, _) => {
                 // A butt: the long tube runs through, cut as stage 1's T; the short one is cut to fit against it.
                 let (mut through, _) = cuts(CornerType::Butt)?;
@@ -1467,7 +1474,7 @@ fn auto_ends(
                 add_corner(&mut out, &c, true, (through, None), segments, regions, placed, g)?;
                 fits.push(Fit { member: ac.short.0, at_start: ac.short.1, against: vec![ac.long.0], gap: ac.gap });
             }
-            (kind, _) => add_corner(&mut out, &c, kind.flips(), cuts(kind.coped(coped))?, segments, regions, placed, g)?,
+            (kind, _) => add_corner(&mut out, &c, kind.flips(), cuts(kind.coped(ac.coped.unwrap_or(coped)))?, segments, regions, placed, g)?,
         }
     }
     // Members in no group plane, chained: mitred, or as their override says, by stage 1's rules.
@@ -1476,7 +1483,18 @@ fn auto_ends(
         let (Some(pa), Some(pb)) = (end(ch.a), end(ch.b)) else { continue };
         let c = Corner { point: (pa + pb) * 0.5, ends: [ch.a, ch.b] };
         let g = ch.gap.unwrap_or(gap);
-        let cuts = frame_corners::corner_cuts(ch.kind.coped(coped), ch.flip, g, &c, segments, &length, placed, regions, sketch_x, drawn)?;
+        let cuts = frame_corners::corner_cuts(
+            ch.kind.coped(ch.coped.unwrap_or(coped)),
+            ch.flip,
+            g,
+            &c,
+            segments,
+            &length,
+            placed,
+            regions,
+            sketch_x,
+            drawn,
+        )?;
         add_corner(&mut out, &c, ch.kind.flips(), cuts, segments, regions, placed, g)?;
     }
     let mut place = vec![usize::MAX; segments.len()];

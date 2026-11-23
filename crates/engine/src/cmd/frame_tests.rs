@@ -547,7 +547,7 @@ fn corner_settings_are_taken_and_saved() {
     assert_eq!((*corner, *flip), (CornerType::Butt, true));
     // Saved in the order today's rules lay them (the longer l1 runs through), with no `flip`.
     let members = vec![MemberRef { feature: None, line: l1 }, MemberRef { feature: None, line: l2 }];
-    assert_eq!(*corners, [CornerOverride { members, kind: CornerType::Mitre, gap: None }]);
+    assert_eq!(*corners, [CornerOverride { members, kind: CornerType::Mitre, gap: None, coped: None }]);
 }
 
 #[test]
@@ -925,6 +925,30 @@ fn a_coped_box_tube_keeps_slivers_in_the_through_member_radii() {
     assert!((left.2[1] - 14.0).abs() < 1e-3, "{left:?}");
     assert!((left.3[1] - 386.0).abs() < 1e-3, "{left:?}");
     assert_eq!(bodies(&mut s).len(), 4);
+}
+
+/// One corner coped on its own: an override's `coped` copes that butt only, and on a coped frame
+/// an override's `coped: false` leaves that butt plain. The left post meets the bottom rail at its
+/// start: coped there, its slivers fill the rail's outer radius down to y = 14, while its top end
+/// butts square at the top rail's near face (380); and the other way round.
+#[test]
+fn one_corner_is_coped_by_its_override() {
+    for (frame_coped, corner_coped, want) in [(false, true, (14.0, 380.0)), (true, false, (20.0, 386.0))] {
+        let mut s = Session::default();
+        rectangle_frame(&mut s);
+        let (rails, posts) = rails_and_posts(&s);
+        let corners = json!([{"members": [&rails[0], &posts[0]], "kind": "butt", "coped": corner_coped}]);
+        let r =
+            run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube(), "corner": "butt", "coped": frame_coped, "corners": corners}));
+        let (_, left) = bottom_and_left(&mut s);
+        assert!((left.2[1] - want.0).abs() < 1e-3 && (left.3[1] - want.1).abs() < 1e-3, "frame coped {frame_coped}: {r} {left:?}");
+        // frame.multi_trim sets the same corner's Coped in place.
+        let fid = r["feature"].clone();
+        run(&mut s, "frame.multi_trim", json!({"feature": fid, "members": [&rails[0], &posts[0]], "kind": "butt", "coped": frame_coped}));
+        let (_, left) = bottom_and_left(&mut s);
+        let back = if frame_coped { 14.0 } else { 20.0 };
+        assert!((left.2[1] - back).abs() < 1e-3, "multi_trim coped {frame_coped}: {left:?}");
+    }
 }
 
 #[test]
