@@ -131,6 +131,8 @@ impl Renderer {
             selection_tint: [0.0; 3],
             hatch: Default::default(),
             moving: None,
+            edge_layer: None,
+            edge_layer_fade: 1.0,
             motions: Default::default(),
             ground: None,
         };

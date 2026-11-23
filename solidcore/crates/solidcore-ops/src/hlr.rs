@@ -17,6 +17,8 @@ pub use k::{
     Visibility, Workers, MAX_COORDINATE, MAX_ITEMS, MAX_THREADS, MAX_TRIM_SAMPLES,
 };
 
+pub mod occlusion;
+
 /// How exactly a drawn curve stands for its source.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -131,6 +133,14 @@ fn kernel_placement(p: &Placement) -> k::Placement {
         body: p.body,
         rotation: p.rotation.map(vec3),
         translation: vec3(p.translation),
+    }
+}
+
+impl Placement {
+    /// Whether the placement is a rotation and a translation (the only ones hidden lines take).
+    #[must_use]
+    pub fn rigid(&self) -> bool {
+        kernel_placement(self).rigid()
     }
 }
 

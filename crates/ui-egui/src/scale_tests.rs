@@ -368,6 +368,8 @@ pub(crate) fn view_frame(
         selection_tint: [0.4, 0.6, 0.9],
         hatch: Default::default(),
         moving: None,
+        edge_layer: None,
+        edge_layer_fade: 1.0,
         motions: Default::default(),
         ground: None,
     }

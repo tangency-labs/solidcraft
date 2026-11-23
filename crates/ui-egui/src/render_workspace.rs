@@ -3946,6 +3946,8 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
             },
             hatch: Default::default(),
             moving: None,
+            edge_layer: None,
+            edge_layer_fade: 1.0,
             motions: Default::default(),
             ground: None,
         };

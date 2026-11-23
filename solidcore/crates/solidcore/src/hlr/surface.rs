@@ -58,7 +58,89 @@ pub(crate) struct Nurbs {
     g: usize,
     /// `(g+1)²` samples, u fastest.
     grid: Vec<Vec3>,
+    /// Each grid cell's corners' box grown by a quarter of its largest side (cells row by row,
+    /// u fastest): where a ray is looked for in the cell.
+    cells: Vec<(Vec3, Vec3)>,
+    /// Blocks of [`CELL_BLOCK`] by [`CELL_BLOCK`] cells: their cells' boxes' box, and the first
+    /// cell's grid position.
+    blocks: Vec<(Vec3, Vec3, [usize; 2])>,
 }
+
+/// Where the ray (the origin of the plane across it) meets a cell's corners `q` (seen along the
+/// ray, in order round the cell) as cell coordinates `[s, t]` in `[0, 1]²`: inside one of its two
+/// triangles, or at the nearest point of them when the ray passes within a quarter of their
+/// extent; `None` farther out.
+fn seed_in_quad(q: &[[f64; 2]; 4]) -> Option<[f64; 2]> {
+    let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+    for p in q {
+        lo = [lo[0].min(p[0]), lo[1].min(p[1])];
+        hi = [hi[0].max(p[0]), hi[1].max(p[1])];
+    }
+    let pad = 0.25 * (hi[0] - lo[0]).max(hi[1] - lo[1]);
+    if !(lo[0] - pad <= 0. && hi[0] + pad >= 0. && lo[1] - pad <= 0. && hi[1] + pad >= 0.) {
+        return None;
+    }
+    // Two triangles, (00, 10, 11) and (00, 11, 01), with their corners' cell coordinates.
+    let tris = [
+        ([q[0], q[1], q[2]], [[0., 0.], [1., 0.], [1., 1.]]),
+        ([q[0], q[2], q[3]], [[0., 0.], [1., 1.], [0., 1.]]),
+    ];
+    let mut best: Option<(f64, [f64; 2])> = None;
+    for (t, st) in tris {
+        let (w, gap) = nearest_in_triangle(t);
+        let at = [
+            st[0][0] * w[0] + st[1][0] * w[1] + st[2][0] * w[2],
+            st[0][1] * w[0] + st[1][1] * w[1] + st[2][1] * w[2],
+        ];
+        if best.is_none_or(|(g, _)| gap < g) {
+            best = Some((gap, at));
+        }
+    }
+    best.filter(|(gap, _)| *gap <= pad * pad).map(|(_, at)| at)
+}
+
+/// The weights of the point of triangle `t` nearest the origin, and its squared distance from it.
+fn nearest_in_triangle(t: [[f64; 2]; 3]) -> ([f64; 3], f64) {
+    let [a, b, c] = t;
+    let cross = |u: [f64; 2], v: [f64; 2]| u[0] * v[1] - u[1] * v[0];
+    let sub = |u: [f64; 2], v: [f64; 2]| [u[0] - v[0], u[1] - v[1]];
+    let area = cross(sub(b, a), sub(c, a));
+    if area.abs() > 1e-300 {
+        let (wa, wb) = (
+            cross(sub(b, [0., 0.]), sub(c, [0., 0.])) / area,
+            cross(sub(c, [0., 0.]), sub(a, [0., 0.])) / area,
+        );
+        let wc = 1. - wa - wb;
+        if wa >= 0. && wb >= 0. && wc >= 0. {
+            return ([wa, wb, wc], 0.);
+        }
+    }
+    // Outside (or flat): the nearest point of the three sides.
+    let side = |p: [f64; 2], q: [f64; 2]| {
+        let d = sub(q, p);
+        let l2 = d[0] * d[0] + d[1] * d[1];
+        let s = if l2 > 0. {
+            (-(p[0] * d[0] + p[1] * d[1]) / l2).clamp(0., 1.)
+        } else {
+            0.
+        };
+        let x = [p[0] + d[0] * s, p[1] + d[1] * s];
+        (s, x[0] * x[0] + x[1] * x[1])
+    };
+    let (sab, gab) = side(a, b);
+    let (sbc, gbc) = side(b, c);
+    let (sca, gca) = side(c, a);
+    if gab <= gbc && gab <= gca {
+        ([1. - sab, sab, 0.], gab)
+    } else if gbc <= gca {
+        ([0., 1. - sbc, sbc], gbc)
+    } else {
+        ([sca, 0., 1. - sca], gca)
+    }
+}
+
+/// Cells to a side of a [`Nurbs::blocks`] block.
+const CELL_BLOCK: usize = 8;
 
 #[derive(Clone, Debug)]
 pub(crate) enum S3 {
@@ -1537,8 +1619,10 @@ impl Nurbs {
             dom,
             g,
             grid: Vec::new(),
+            cells: Vec::new(),
+            blocks: Vec::new(),
         };
-        let mut grid = Vec::new();
+        let mut grid = Vec::with_capacity((g + 1) * (g + 1));
         for j in 0..=g {
             for i in 0..=g {
                 grid.push(n.point(n.grid_uv(i, j)));
@@ -1547,7 +1631,42 @@ impl Nurbs {
         if grid.iter().any(|p| !p.is_finite()) {
             return Err(HlrError::Unsupported("spline surface evaluation"));
         }
+        let mut cells = Vec::with_capacity(g * g);
+        for j in 0..g {
+            for i in 0..g {
+                let corners = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)]
+                    .map(|(a, b)| grid.get(b * (g + 1) + a).copied().unwrap_or(Vec3::ZERO));
+                let (lo, hi) = corners
+                    .iter()
+                    .fold((corners[0], corners[0]), |(lo, hi), p| {
+                        (lo.min(*p), hi.max(*p))
+                    });
+                let d = hi - lo;
+                let pad = 0.25 * d.x.max(d.y).max(d.z);
+                cells.push((lo - Vec3::new(pad, pad, pad), hi + Vec3::new(pad, pad, pad)));
+            }
+        }
+        let mut blocks = Vec::new();
+        for bj in (0..g).step_by(CELL_BLOCK) {
+            for bi in (0..g).step_by(CELL_BLOCK) {
+                let (mut lo, mut hi) = (
+                    Vec3::new(f64::MAX, f64::MAX, f64::MAX),
+                    Vec3::new(f64::MIN, f64::MIN, f64::MIN),
+                );
+                for j in bj..(bj + CELL_BLOCK).min(g) {
+                    for i in bi..(bi + CELL_BLOCK).min(g) {
+                        if let Some((a, b)) = cells.get(j * g + i) {
+                            lo = lo.min(*a);
+                            hi = hi.max(*b);
+                        }
+                    }
+                }
+                blocks.push((lo, hi, [bi, bj]));
+            }
+        }
         n.grid = grid;
+        n.cells = cells;
+        n.blocks = blocks;
         Ok(n)
     }
 
@@ -1561,14 +1680,34 @@ impl Nurbs {
     }
 
     fn point(&self, uv: [f64; 2]) -> Vec3 {
-        let u = super::vec::clamp_to(uv[0], self.dom[0][0], self.dom[0][1]);
-        let v = super::vec::clamp_to(uv[1], self.dom[1][0], self.dom[1][1]);
-        self.s
-            .eval(u, v)
-            .unwrap_or(Vec3::new(f64::NAN, f64::NAN, f64::NAN))
+        let [u, v] = self.clamp(uv);
+        match self.s.eval_d1(u, v) {
+            Some([p, _, _]) => p,
+            None => self
+                .s
+                .eval(u, v)
+                .unwrap_or(Vec3::new(f64::NAN, f64::NAN, f64::NAN)),
+        }
+    }
+
+    /// The point and its partials along u and v, in one evaluation where the degree allows.
+    fn point_partials(&self, uv: [f64; 2]) -> (Vec3, Vec3, Vec3) {
+        let [u, v] = self.clamp(uv);
+        match self.s.eval_d1(u, v) {
+            Some([p, su, sv]) => (p, su, sv),
+            None => {
+                let (su, sv) = self.partials_by_differences(uv);
+                (self.point(uv), su, sv)
+            }
+        }
     }
 
     fn partials(&self, uv: [f64; 2]) -> (Vec3, Vec3) {
+        let (_, su, sv) = self.point_partials(uv);
+        (su, sv)
+    }
+
+    fn partials_by_differences(&self, uv: [f64; 2]) -> (Vec3, Vec3) {
         let fd = |k: usize| {
             let h = (super::vec::at(self.dom, k)[1] - super::vec::at(self.dom, k)[0]) * 1e-6;
             let (mut a, mut b) = (uv, uv);
@@ -1616,8 +1755,8 @@ impl Nurbs {
             }
         };
         for _ in 0..40 {
-            let (su, sv) = self.partials(uv);
-            let r = self.point(uv) - p;
+            let (q, su, sv) = self.point_partials(uv);
+            let r = q - p;
             let (a, b, c) = (su.dot(su), su.dot(sv), sv.dot(sv));
             let det = a * c - b * b;
             if det.abs() <= 1e-300 {
@@ -1642,70 +1781,98 @@ impl Nurbs {
         let q2 = |p: Vec3| [(p - p0).dot(ep), (p - p0).dot(eq)];
         let g = self.g;
         let start = out.len();
-        let proj: Vec<[f64; 2]> = self.grid.iter().map(|p| q2(*p)).collect();
-        for j in 0..g {
-            for i in 0..g {
-                let corners = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)];
-                let pts: Vec<[f64; 2]> = corners
+        // Only cells whose grown box the ray passes through within `range`, found block by block.
+        let meets = |lo: &Vec3, hi: &Vec3| {
+            super::slab(p0, d, *lo, *hi).is_some_and(|[a, b]| a <= range[1] && b >= range[0])
+        };
+        let mut candidates = Vec::new();
+        for (blo, bhi, [bi, bj]) in &self.blocks {
+            if !meets(blo, bhi) {
+                continue;
+            }
+            for j in *bj..(bj + CELL_BLOCK).min(g) {
+                for i in *bi..(bi + CELL_BLOCK).min(g) {
+                    if self
+                        .cells
+                        .get(j * g + i)
+                        .is_some_and(|(lo, hi)| meets(lo, hi))
+                    {
+                        candidates.push((i, j));
+                    }
+                }
+            }
+        }
+        for (i, j) in candidates {
+            let (a, b) = (self.grid_uv(i, j), self.grid_uv(i + 1, j + 1));
+            // The cell's corners seen along the ray: a ray farther from their two triangles than
+            // a quarter of their extent misses the cell; else Newton starts where it meets them.
+            let corner = |x: usize, y: usize| {
+                self.grid
+                    .get(y * (g + 1) + x)
+                    .map_or([f64::NAN; 2], |p| q2(*p))
+            };
+            let quad = [
+                corner(i, j),
+                corner(i + 1, j),
+                corner(i + 1, j + 1),
+                corner(i, j + 1),
+            ];
+            let Some(st) = seed_in_quad(&quad) else {
+                continue;
+            };
+            let mut uv = [a[0] + (b[0] - a[0]) * st[0], a[1] + (b[1] - a[1]) * st[1]];
+            let mut ok = false;
+            let far = [(b[0] - a[0]).abs(), (b[1] - a[1]).abs()];
+            for _ in 0..40 {
+                // A root more than a cell away is not this cell's (it is not kept below).
+                if uv[0] < a[0] - far[0]
+                    || uv[0] > b[0] + far[0]
+                    || uv[1] < a[1] - far[1]
+                    || uv[1] > b[1] + far[1]
+                {
+                    break;
+                }
+                let (p, su, sv) = self.point_partials(uv);
+                let f = q2(p);
+                let (j11, j12, j21, j22) = (su.dot(ep), sv.dot(ep), su.dot(eq), sv.dot(eq));
+                let det = j11 * j22 - j12 * j21;
+                if det.abs() <= 1e-300 {
+                    break;
+                }
+                let du = (f[0] * j22 - f[1] * j12) / det;
+                let dv = (f[1] * j11 - f[0] * j21) / det;
+                uv = self.clamp([uv[0] - du, uv[1] - dv]);
+                if du.abs() + dv.abs() <= 1e-14 * (1. + uv[0].abs() + uv[1].abs()) {
+                    let r = q2(self.point(uv));
+                    ok = r[0].abs() + r[1].abs() <= 1e-9 * (1. + self.size_hint());
+                    break;
+                }
+            }
+            // Keep roots inside this cell (with slack) so neighbouring cells don't repeat them.
+            let slack = [(b[0] - a[0]) * 1e-6, (b[1] - a[1]) * 1e-6];
+            if !ok
+                || uv[0] < a[0] - slack[0]
+                || uv[0] > b[0] + slack[0]
+                || uv[1] < a[1] - slack[1]
+                || uv[1] > b[1] + slack[1]
+            {
+                continue;
+            }
+            let p = self.point(uv);
+            let lam = (p - p0).dot(d);
+            if lam >= range[0]
+                && lam <= range[1]
+                && !out
                     .iter()
-                    .filter_map(|(a, b)| proj.get(b * (g + 1) + a).copied())
-                    .collect();
-                let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
-                for p in &pts {
-                    lo = [lo[0].min(p[0]), lo[1].min(p[1])];
-                    hi = [hi[0].max(p[0]), hi[1].max(p[1])];
-                }
-                let pad = 0.25 * ((hi[0] - lo[0]).max(hi[1] - lo[1]));
-                if lo[0] - pad > 0. || hi[0] + pad < 0. || lo[1] - pad > 0. || hi[1] + pad < 0. {
-                    continue;
-                }
-                let (a, b) = (self.grid_uv(i, j), self.grid_uv(i + 1, j + 1));
-                let mut uv = [0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])];
-                let mut ok = false;
-                for _ in 0..40 {
-                    let p = self.point(uv);
-                    let f = q2(p);
-                    let (su, sv) = self.partials(uv);
-                    let (j11, j12, j21, j22) = (su.dot(ep), sv.dot(ep), su.dot(eq), sv.dot(eq));
-                    let det = j11 * j22 - j12 * j21;
-                    if det.abs() <= 1e-300 {
-                        break;
-                    }
-                    let du = (f[0] * j22 - f[1] * j12) / det;
-                    let dv = (f[1] * j11 - f[0] * j21) / det;
-                    uv = self.clamp([uv[0] - du, uv[1] - dv]);
-                    if du.abs() + dv.abs() <= 1e-14 * (1. + uv[0].abs() + uv[1].abs()) {
-                        let r = q2(self.point(uv));
-                        ok = r[0].abs() + r[1].abs() <= 1e-9 * (1. + self.size_hint());
-                        break;
-                    }
-                }
-                // Keep roots inside this cell (with slack) so neighbouring cells don't repeat them.
-                let slack = [(b[0] - a[0]) * 1e-6, (b[1] - a[1]) * 1e-6];
-                if !ok
-                    || uv[0] < a[0] - slack[0]
-                    || uv[0] > b[0] + slack[0]
-                    || uv[1] < a[1] - slack[1]
-                    || uv[1] > b[1] + slack[1]
-                {
-                    continue;
-                }
-                let p = self.point(uv);
-                let lam = (p - p0).dot(d);
-                if lam >= range[0]
-                    && lam <= range[1]
-                    && !out
-                        .iter()
-                        .skip(start)
-                        .any(|h| (h.lam - lam).abs() <= 1e-9 * (1. + lam))
-                {
-                    let (su, sv) = self.partials(uv);
-                    let grazing = su
-                        .cross(sv)
-                        .normalized()
-                        .is_none_or(|n| n.dot(d).abs() < 1e-6);
-                    out.push(Hit { lam, uv, grazing });
-                }
+                    .skip(start)
+                    .any(|h| (h.lam - lam).abs() <= 1e-9 * (1. + lam))
+            {
+                let (su, sv) = self.partials(uv);
+                let grazing = su
+                    .cross(sv)
+                    .normalized()
+                    .is_none_or(|n| n.dot(d).abs() < 1e-6);
+                out.push(Hit { lam, uv, grazing });
             }
         }
     }

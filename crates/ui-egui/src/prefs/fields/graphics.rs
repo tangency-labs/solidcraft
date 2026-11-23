@@ -25,6 +25,10 @@ macro_rules! graphics_preferences {
             /// An idle Escape (nothing else owns it) turns off the newest analysis or the section view,
             /// as before. Off by default: they close only from their status item, toggle or command.
             escape_closes_analyses: bool = false, PAGE_GRAPHICS;
+            /// In the shaded views with edges, once the view stands still the edges hidden behind faces
+            /// are worked out from the exact faces and left out (`crate::exact_edges`). Off: the edges
+            /// are drawn by the GPU's depth test alone, as before.
+            exact_hidden_edges: bool = true, PAGE_GRAPHICS => check_id("prefs.exact_hidden_edges");
             /// With the frame rate: a frame-time graph, a histogram and what the GPU drew (#2548).
             frame_rate_details: bool = false, PAGE_GRAPHICS;
             /// Exact graphics adapter name; empty selects automatically on the next start.

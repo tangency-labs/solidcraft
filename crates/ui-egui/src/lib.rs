@@ -241,6 +241,7 @@ pub mod drawing_jobs;
 pub mod drawing_sheet_page;
 pub mod drawing_workspace;
 pub(crate) mod edge_detail;
+pub(crate) mod exact_edges;
 #[cfg(test)]
 mod file_load_ui_tests;
 #[cfg(test)]

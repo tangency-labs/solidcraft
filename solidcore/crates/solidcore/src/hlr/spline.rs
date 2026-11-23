@@ -155,4 +155,9 @@ impl NurbsSurface {
     pub(crate) fn eval(&self, u: f64, v: f64) -> Option<Vec3> {
         self.eval.point([u, v])
     }
+    /// The point at `(u, v)` and its partials along u and v, in one evaluation.
+    pub(crate) fn eval_d1(&self, u: f64, v: f64) -> Option<[Vec3; 3]> {
+        let (p, su, sv) = self.eval.derivs(u, v)?;
+        Some([p, su, sv])
+    }
 }
