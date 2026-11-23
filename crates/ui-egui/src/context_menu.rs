@@ -716,7 +716,7 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
         None => act("timeline.suppress", if suppressed { "Unsuppress" } else { "Suppress" }, "suppress")
             .with(json!({"feature":id, "suppressed": !suppressed})),
     };
-    // Every selected feature is found, the row's own first.
+    // Every selected feature is found; `feature` names the row the menu was opened on.
     let find = if rule.many { json!({"feature": id, "features": targets}) } else { json!({"feature": id}) };
     let one = |item: Item| rule.one(item);
     let profile = act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some());
