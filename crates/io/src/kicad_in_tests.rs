@@ -65,6 +65,7 @@ fn models_stand_on_the_board_face_they_are_on() {
         value: String::new(),
         name: String::new(),
         fields: Vec::new(),
+        uuid: String::new(),
         layer: layer.into(),
         at: [10.0, 20.0, 90.0],
         models: Vec::new(),
@@ -935,6 +936,58 @@ fn a_text_variable_can_read_another_footprints_field() {
         footprint_with_text("x")
     ));
     assert_eq!(board, vec!["10k B2 <Unknown reference: R9>"]);
+}
+
+/// KiCad's text dialog saves `${R7:VALUE}` with the footprint's id in place of its reference
+/// (`(uuid …)` since KiCad 8, `(tstamp …)` before), and reads either form back.
+#[test]
+fn a_saved_cross_reference_names_the_footprint_by_its_id() {
+    for id in ["uuid", "tstamp"] {
+        let footprint =
+            footprint_with_text("x").replacen(r#"(layer "F.Cu")"#, &format!(r#"(layer "F.Cu") ({id} "0e467c16-584b-4a66-9b99-5dd5e1ebf143")"#), 1);
+        let (board, _) =
+            texts_of(&format!(r#"{footprint} (gr_text "${{0e467c16-584b-4a66-9b99-5dd5e1ebf143:VALUE}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+        assert_eq!(board, vec!["10k"], "{id}");
+    }
+}
+
+/// A field's own variables are put in where the field is read, in its footprint (KiCad reads a
+/// field by its shown text): from the footprint's text, through a cross reference, and through a
+/// chain of them.
+#[test]
+fn a_field_holding_variables_is_expanded_where_it_is_read() {
+    let footprint = footprint_with_text("${Label}").replacen(
+        r#"(property "MPN""#,
+        &format!(r#"(property "Label" "${{REFERENCE}}=${{VALUE}}" (at 0 0) (layer "F.Fab") (hide yes) {VAR_FONT}) (property "MPN""#),
+        1,
+    );
+    let (board, footprints) = texts_of(&format!(r#"{footprint} (gr_text "${{R7:Label}} ${{R7:R7:VALUE}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+    assert_eq!(footprints, vec![vec!["R7=10k"]]);
+    assert_eq!(board, vec!["R7=10k 10k"]);
+}
+
+/// A field that names itself, and a cross reference repeated a hundred thousand times, end at the
+/// depth limit and stay as written instead of running the stack out.
+#[test]
+fn variables_that_never_end_stay_as_written() {
+    let footprint = footprint_with_text("${Loop}").replacen(
+        r#"(property "MPN""#,
+        &format!(r#"(property "Loop" "${{Loop}}" (at 0 0) (layer "F.Fab") (hide yes) {VAR_FONT}) (property "MPN""#),
+        1,
+    );
+    let chain = format!("${{{}VALUE}}", "R7:".repeat(100_000));
+    let (board, footprints) = texts_of(&format!(r#"{footprint} (gr_text "{chain}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+    assert_eq!(board, vec![chain]);
+    assert_eq!(footprints, vec![vec!["${Loop}"]]);
+}
+
+/// A value that would take a text past the length limit is not put in: the name stays as written,
+/// so a long title read by many texts cannot make each of them long.
+#[test]
+fn a_value_past_the_length_limit_leaves_its_name() {
+    let title = "T".repeat(5000);
+    let (board, _) = texts_of(&format!(r#"(title_block (title "{title}")) (gr_text "Board ${{TITLE}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+    assert_eq!(board, vec!["Board ${TITLE}"]);
 }
 
 /// A layer the board's layer table names is shown by that name.

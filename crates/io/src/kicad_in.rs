@@ -190,6 +190,9 @@ pub struct KicadFootprint {
     pub name: String,
     /// Every field (property) by its name, hidden ones too: what `${NAME}` in its text reads.
     pub fields: Vec<(String, String)>,
+    /// The footprint's id (`uuid`, `tstamp` before KiCad 8): KiCad saves a cross reference such
+    /// as `${R7:VALUE}` with it in place of the reference.
+    pub uuid: String,
     pub layer: String,
     /// Board X/Y in millimetres and footprint rotation in degrees.
     pub at: [f64; 3],
@@ -560,7 +563,7 @@ fn expand_text_variables(board: &mut KicadBoard, root: &Expr<'_>) {
         texts
             .iter()
             .filter_map(|text| {
-                let resolve = |name: &str| vars.resolve(name, &text.layer, footprint);
+                let resolve = |name: &str, depth: usize| vars.resolve(name, &text.layer, footprint, depth);
                 let expanded = expand_variables(&text.text, 0, &resolve);
                 (!expanded.trim().is_empty()).then(|| KicadText { text: expanded, ..text.clone() })
             })
@@ -583,13 +586,21 @@ struct TextVariables<'a> {
 
 impl TextVariables<'_> {
     /// The value of the variable `name` in a text on `layer` (in `footprint`'s text, or the
-    /// board's for `None`); `None` when there is no such variable.
-    fn resolve(&self, name: &str, layer: &str, footprint: Option<&KicadFootprint>) -> Option<String> {
-        if let Some((reference, rest)) = name.split_once(':') {
-            let Some(other) = self.footprints.iter().find(|f| f.reference == reference) else {
+    /// board's for `None`), `depth` names deep; `None` when there is no such variable. A cross
+    /// reference (`R7:VALUE`, or the footprint's id in place of `R7`) reads that footprint's;
+    /// qualifiers are followed one after another, at most [`MAX_VARIABLE_DEPTH`] of them.
+    fn resolve(&self, name: &str, layer: &str, footprint: Option<&KicadFootprint>, depth: usize) -> Option<String> {
+        let (mut name, mut layer, mut footprint) = (name, layer, footprint);
+        let mut hops = 0usize;
+        while let Some((reference, rest)) = name.split_once(':') {
+            hops += 1;
+            if hops > MAX_VARIABLE_DEPTH {
+                return None;
+            }
+            let Some(other) = self.footprints.iter().find(|f| f.reference == reference || (!f.uuid.is_empty() && f.uuid == reference)) else {
                 return Some(format!("<Unknown reference: {reference}>"));
             };
-            return self.resolve(rest, &other.layer, Some(other));
+            (name, layer, footprint) = (rest, other.layer.as_str(), Some(other));
         }
         if let Some(footprint) = footprint {
             let (library, part) = footprint.name.split_once(':').unwrap_or(("", footprint.name.as_str()));
@@ -601,7 +612,11 @@ impl TextVariables<'_> {
                 _ => {}
             }
             if let Some((_, value)) = footprint.fields.iter().find(|(key, _)| key == name) {
-                return Some(value.clone());
+                // A field is read as KiCad shows it: its own variables put in, in its footprint.
+                if depth >= MAX_VARIABLE_DEPTH {
+                    return None;
+                }
+                return Some(expand_variables(value, depth + 1, &|inner: &str, d: usize| self.resolve(inner, layer, Some(footprint), d)));
             }
         }
         if name == "LAYER" {
@@ -614,7 +629,7 @@ impl TextVariables<'_> {
 /// `text` with each `${NAME}` that `resolve` knows replaced by its value; a name is expanded
 /// first (`${${REFERENCE}}` reads the variable named by the reference), and a `${` that is never
 /// closed runs to the end of the text, as KiCad reads it.
-fn expand_variables(text: &str, depth: usize, resolve: &dyn Fn(&str) -> Option<String>) -> String {
+fn expand_variables(text: &str, depth: usize, resolve: &dyn Fn(&str, usize) -> Option<String>) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(at) = rest.find("${") {
@@ -641,7 +656,8 @@ fn expand_variables(text: &str, depth: usize, resolve: &dyn Fn(&str) -> Option<S
             None => (after, ""),
         };
         let name = if depth < MAX_VARIABLE_DEPTH { expand_variables(inner, depth + 1, resolve) } else { inner.to_string() };
-        match resolve(&name) {
+        // A value that would take the text past the limit is left out, its name kept.
+        match resolve(&name, depth).filter(|value| out.len() + value.len() <= MAX_EXPANDED_TEXT) {
             Some(value) => out.push_str(&value),
             None => {
                 out.push_str("${");
@@ -3323,6 +3339,7 @@ fn parse_footprint(
     let reference = property(expr, "Reference").or_else(|| fp_text(expr, "reference")).unwrap_or_default();
     let value = property(expr, "Value").or_else(|| fp_text(expr, "value")).unwrap_or_default();
     let name = children(expr).get(1).and_then(atom).unwrap_or_default().to_string();
+    let uuid = field(expr, "uuid").or_else(|| field(expr, "tstamp")).and_then(|e| children(e).get(1)).and_then(atom).unwrap_or_default().to_string();
     let mut fields: Vec<(String, String)> = Vec::new();
     for child in children(expr).iter().filter(|e| head(e) == Some("property")) {
         if let (Some(key), Some(text)) = (children(child).get(1).and_then(atom), children(child).get(2).and_then(atom))
@@ -3415,7 +3432,7 @@ fn parse_footprint(
         pad.at[2] -= position[2];
     }
     position[2] = position[2].rem_euclid(360.0);
-    Ok(KicadFootprint { reference, value, name, fields, layer, at: position, models, pads, graphics, texts })
+    Ok(KicadFootprint { reference, value, name, fields, uuid, layer, at: position, models, pads, graphics, texts })
 }
 
 fn parse_pad(expr: &Expr<'_>) -> std::result::Result<KicadPad, String> {
