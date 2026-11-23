@@ -263,7 +263,13 @@ fn properties_part(path: &Path, material: &str, density: Option<f64>, color: [u8
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
     if let Some(density) = density {
-        s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial { name: material.into(), density, appearance: None, physical_card: None });
+        s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+            name: material.into(),
+            density,
+            appearance: None,
+            physical_card: None,
+            rf_loss_db: None,
+        });
     }
     run(&mut s, "material.assign", json!({"bodies": ["Cube"], "material": material}));
     s.doc_mut().appearances.bodies.insert("Cube".into(), solidcraft_doc::appearance::Look::custom(color, 0.4));
@@ -340,6 +346,7 @@ fn linked_design_properties_do_not_replace_conflicting_custom_materials() {
         density: 9.0,
         appearance: None,
         physical_card: None,
+        rf_loss_db: None,
     });
     let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
     let p = run(&mut s, "component.properties", json!({"component": c}));
@@ -362,6 +369,7 @@ fn linked_design_properties_keep_distinct_names_for_equal_material_properties() 
         density: 4.2,
         appearance: None,
         physical_card: None,
+        rf_loss_db: None,
     });
     let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
     assert_link_properties(&mut s, c, "Source alloy", 4.2, [12, 34, 56]);

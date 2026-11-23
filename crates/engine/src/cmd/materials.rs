@@ -7,6 +7,7 @@
 use serde_json::Value;
 use solidcraft_doc::appearance::{Look, library};
 use solidcraft_doc::config::Column;
+use solidcraft_doc::rf::{Band, RfLoss, builtin_rf_loss, rf_preset, rf_preset_of};
 use solidcraft_doc::{DEFAULT_MATERIAL, MATERIALS, MAX_USER_MATERIALS, UserMaterial, valid_density};
 
 use super::CommandSpec;
@@ -16,7 +17,7 @@ use crate::schema::TypedContract;
 use crate::schema::appearance::LookReply;
 use crate::schema::materials::{
     DensityComparison, MaterialCreateParams, MaterialDeleteParams, MaterialDeleted, MaterialEditParams, MaterialInspectParams, MaterialInspected,
-    MaterialReply,
+    MaterialReply, RfLossReply,
 };
 use crate::schema::output_schema_for;
 use crate::{Result, Session};
@@ -32,7 +33,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CREATE_CONTRACT)
         .output(output_schema_for::<MaterialReply>)
         .params(
-        "name (not a built-in material's); density_g_cm3: (0, 1000]; appearance?: library name (appearance.library) | color?: \"#rrggbb\" or [r, g, b] (0–255), opacity? (0–1), pbr?: {metallic:0..1, roughness:0.045..1, dielectric_ior:1..3} (opaque only, needs color/appearance): the default look. A named appearance keeps its preset response when pbr is omitted; pbr: null selects scalar shading. Optical edits do not change density. physical_card?: validated SI candidate record (null/omitted means unknown); card density never changes assigned density. Assign it with material.assign",
+        "name (not a built-in material's); density_g_cm3: (0, 1000]; appearance?: library name (appearance.library) | color?: \"#rrggbb\" or [r, g, b] (0–255), opacity? (0–1), pbr?: {metallic:0..1, roughness:0.045..1, dielectric_ior:1..3} (opaque only, needs color/appearance): the default look. A named appearance keeps its preset response when pbr is omitted; pbr: null selects scalar shading. Optical edits do not change density. physical_card?: validated SI candidate record (null/omitted means unknown); card density never changes assigned density. rf?: Wi-Fi loss per crossing for inspect.rf_coverage, a preset (concrete, drywall, interior-glass, low-e-glass, metal, none, wood-door) or {\"2.4\": dB, \"5\": dB, \"6\": dB} (0–100). Assign it with material.assign",
     ),
     CommandSpec::new("material.edit", "Edit Physical Material", crate::checked!("material.edit", edit))
         .icon("material")
@@ -40,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<MaterialReply>)
         .params(
-        "material: a material defined in this design; name? (bodies and configuration cells follow); density_g_cm3?; appearance? | color?, opacity?, pbr? (as material.create; color: null clears the look). physical_card?: validated SI candidate record (omitted retains, null clears). Omitted appearance/color retains the entire current look",
+        "material: a material defined in this design; name? (bodies and configuration cells follow); density_g_cm3?; appearance? | color?, opacity?, pbr? (as material.create; color: null clears the look). physical_card?: validated SI candidate record (omitted retains, null clears). rf?: preset or {\"2.4\", \"5\", \"6\"} dB (omitted retains, null clears). Omitted appearance/color retains the entire current look",
     ),
     CommandSpec::new("material.inspect", "Inspect Physical Material", crate::checked!("material.inspect", inspect))
         .icon("material")
@@ -49,7 +50,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<MaterialInspected>)
         .params(
-        "material: built-in or design-owned name. Returns assigned density, default appearance, optional physical_card, validation and density comparison. Read-only; missing engineering data remains unknown and card density does not change mass",
+        "material: built-in or design-owned name. Returns assigned density, default appearance, optional physical_card, validation and density comparison, and rf: its Wi-Fi loss per crossing (null: inspect.rf_coverage guesses from thickness). Read-only; missing engineering data remains unknown and card density does not change mass",
     ),
     CommandSpec::new("material.delete", "Delete Physical Material", crate::checked!("material.delete", delete))
         .icon("delete")
@@ -134,6 +135,7 @@ fn material_reply(cmd: &str, m: &UserMaterial) -> Result<MaterialReply> {
         physical_validation: None,
         density_comparison: None,
         bodies: None,
+        rf: m.rf_loss_db.as_ref().map(rf_reply),
         param_warnings: Vec::new(),
     };
     if let Some(record) = &m.physical_card {
@@ -178,6 +180,42 @@ fn physical_card(cmd: &str, p: &Value) -> Result<Option<Option<solidcraft_doc::p
     }
 }
 
+/// The Wi-Fi losses `rf` gives: `None` when it isn't given, `Some(None)` to clear them (`rf: null`).
+fn rf_loss(cmd: &str, p: &Value) -> Result<Option<Option<RfLoss>>> {
+    let message = "`rf` must be a preset (concrete, drywall, interior-glass, low-e-glass, metal, none, wood-door), null, or {\"2.4\": dB, \"5\": dB, \"6\": dB} with losses from 0 to 100";
+    match p.get("rf") {
+        None => Ok(None),
+        Some(Value::Null) => Ok(Some(None)),
+        Some(Value::String(preset)) => rf_preset(preset).map(|p| Some(Some(p.loss))).ok_or_else(|| bad(cmd, message)),
+        Some(Value::Object(bands)) => {
+            if bands.len() != 3 || bands.keys().any(|k| !Band::ALL.iter().any(|b| b.name() == k)) {
+                return Err(bad(cmd, message));
+            }
+            let mut loss = [0.0; 3];
+            for band in Band::ALL {
+                let value = bands.get(band.name());
+                let db = value.and_then(Value::as_f64).ok_or_else(|| bad(cmd, message))?;
+                if let Some(slot) = loss.get_mut(band.index()) {
+                    *slot = db;
+                }
+            }
+            let loss = RfLoss(loss);
+            if loss.is_valid() { Ok(Some(Some(loss))) } else { Err(bad(cmd, message)) }
+        }
+        Some(_) => Err(bad(cmd, message)),
+    }
+}
+
+/// How `inspect.rf_coverage` reads a loss in a reply: dB by band, and the preset it matches.
+pub(crate) fn rf_reply(loss: &RfLoss) -> RfLossReply {
+    RfLossReply {
+        ghz_2_4: loss.at(Band::G2_4),
+        ghz_5: loss.at(Band::G5),
+        ghz_6: loss.at(Band::G6),
+        preset: rf_preset_of(loss).map(|p| p.id.to_string()),
+    }
+}
+
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "material.inspect";
     let name = str_(p, "material").ok_or_else(|| bad(cmd, "`material` must be a material name"))?;
@@ -194,6 +232,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             physical_card: own.physical_card,
             physical_validation: own.physical_validation,
             density_comparison: own.density_comparison,
+            rf: own.rf,
             param_warnings: Vec::new(),
         }
     } else {
@@ -202,6 +241,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             .find(|(n, _)| *n == canonical.as_str())
             .map(|(_, density)| *density)
             .ok_or_else(|| bad(cmd, "material is unavailable"))?;
+        let canonical_name = canonical.clone();
         MaterialInspected {
             name: canonical,
             density_g_cm3: density,
@@ -210,6 +250,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             physical_card: None,
             physical_validation: None,
             density_comparison: None,
+            rf: builtin_rf_loss(&canonical_name).as_ref().map(rf_reply),
             param_warnings: Vec::new(),
         }
     };
@@ -232,8 +273,13 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     if s.doc.user_materials.len() >= MAX_USER_MATERIALS {
         return Err(bad(cmd, format!("a design defines at most {MAX_USER_MATERIALS} materials")));
     }
-    let material =
-        UserMaterial { density: density(cmd, p)?, appearance: look(cmd, p, &name)?.flatten(), name, physical_card: physical_card(cmd, p)?.flatten() };
+    let material = UserMaterial {
+        density: density(cmd, p)?,
+        appearance: look(cmd, p, &name)?.flatten(),
+        name,
+        physical_card: physical_card(cmd, p)?.flatten(),
+        rf_loss_db: rf_loss(cmd, p)?.flatten(),
+    };
     let out = reply(cmd, material_reply(cmd, &material)?)?;
     s.doc_mut().user_materials.push(material);
     Ok(out)
@@ -301,7 +347,8 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         }),
     };
     let physical_card = physical_card(cmd, p)?.unwrap_or(old.physical_card);
-    let material = UserMaterial { name: name.clone(), density, appearance, physical_card };
+    let rf_loss_db = rf_loss(cmd, p)?.unwrap_or(old.rf_loss_db);
+    let material = UserMaterial { name: name.clone(), density, appearance, physical_card, rf_loss_db };
     let mut out = material_reply(cmd, &material)?;
     if let Some(m) = s.doc_mut().user_materials.get_mut(i) {
         *m = material;

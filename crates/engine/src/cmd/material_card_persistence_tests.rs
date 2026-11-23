@@ -238,3 +238,35 @@ fn card_number_admission_preserves_metadata_without_exempting_other_material_fie
     saved["user_materials"][0]["density"] = json!(12.25e9);
     assert!(Document::from_json(&saved.to_string()).unwrap_err().to_string().contains("number"));
 }
+
+#[test]
+fn rf_losses_are_set_by_preset_or_by_band_kept_by_edits_and_saved() {
+    let mut s = fixture();
+    let mass = s.execute("component.properties", &json!({})).unwrap();
+    let out = s.execute("material.edit", &json!({"material":"Synthetic","rf":"concrete"})).unwrap();
+    assert_eq!(out["rf"], json!({"2.4":12.0,"5":20.0,"6":24.0,"preset":"concrete"}));
+    // RF losses never change the mass.
+    assert_eq!(s.execute("component.properties", &json!({})).unwrap(), mass);
+    // An edit without `rf` keeps it; typed losses that match no preset have none.
+    s.execute("material.edit", &json!({"material":"Synthetic","density_g_cm3":0.9})).unwrap();
+    assert_eq!(s.execute("material.inspect", &json!({"material":"Synthetic"})).unwrap()["rf"]["preset"], "concrete");
+    let out = s.execute("material.edit", &json!({"material":"Synthetic","rf":{"2.4":1,"5":2.5,"6":3}})).unwrap();
+    assert_eq!(out["rf"], json!({"2.4":1.0,"5":2.5,"6":3.0}));
+    let reopened = Document::from_json(&serde_json::to_string(&*s.doc).unwrap()).unwrap();
+    assert_eq!(reopened.user_materials, s.doc.user_materials);
+    assert_eq!(reopened.user_materials[0].rf_loss_db, Some(solidcraft_doc::rf::RfLoss([1.0, 2.5, 3.0])));
+    // null clears; built-in materials report their defaults; a material without any reports null.
+    s.execute("material.edit", &json!({"material":"Synthetic","rf":null})).unwrap();
+    assert!(s.execute("material.inspect", &json!({"material":"Synthetic"})).unwrap()["rf"].is_null());
+    assert_eq!(s.execute("material.inspect", &json!({"material":"Glass"})).unwrap()["rf"]["preset"], "interior-glass");
+    assert_eq!(s.execute("material.inspect", &json!({"material":"Steel"})).unwrap()["rf"]["preset"], "metal");
+    assert!(s.execute("material.inspect", &json!({"material":"PLA"})).unwrap()["rf"].is_null());
+    // Losses out of range, unknown presets and missing bands are refused and change nothing.
+    let doc = s.doc.clone();
+    for rf in [json!("brick"), json!({"2.4":1,"5":2}), json!({"2.4":1,"5":2,"6":-1}), json!({"2.4":1,"5":2,"6":3,"60":1}), json!(5)] {
+        assert!(s.execute("material.edit", &json!({"material":"Synthetic","rf":rf})).is_err(), "{rf}");
+    }
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+    let created = s.execute("material.create", &json!({"name":"Pane","density_g_cm3":2.5,"rf":"Low-E glass"})).unwrap();
+    assert_eq!(created["rf"]["6"], 18.0);
+}

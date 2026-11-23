@@ -298,6 +298,7 @@ mod revolve_edit_tests;
 #[cfg(test)]
 mod revolve_manipulator_tests;
 pub use solidcraft_ui_kit::ribbon;
+pub mod rf_overlay;
 #[cfg(test)]
 mod round_pick_tests;
 mod rule_editor;

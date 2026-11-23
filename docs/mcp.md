@@ -476,6 +476,24 @@ volume, mass and body count; check `ok` and `diagnostics` before applying any ca
 Apply the selected values separately with `parameters.change {changes}` if you intend to
 edit the design. Use `describe_command` for the input and output schemas.
 
+To predict Wi-Fi coverage over a floor plan, call `execute` with `inspect.rf_coverage`. Call it
+with no `emitters` first to list the devices: the built-in ones, and those of a `devices_file`
+(a JSON list of `{id, name?, eirp_dbm}`) when you give one. The reply is kept small: the coverage
+figures for each band (`pct_at_least_60`, `pct_at_least_67`, `p5_dbm`), the signal at each named
+point with the wall loss on the way, and the grid's size. Ask for `grid: true` only when you need
+every cell, and give `png` for a picture: the `screenshot` tool doesn't draw the heatmap yet. Give
+walls their losses with `rf` on `material.create` (a preset such as `"concrete"` or
+`"low-e-glass"`). Scope the walls with `components` and `rf_materials: true`, and leave furniture
+out with `exclude`. Moving an emitter and calling again reuses the cut walls (`walls_reused`), so
+comparing spots is cheap. See [rf-coverage.md](rf-coverage.md).
+
+```json
+{"command": "inspect.rf_coverage", "params": {
+  "emitters": [{"at": [4064, 4064], "height": 2550, "device": "u7-pro"}],
+  "components": ["Walls"], "rf_materials": true, "band": "5",
+  "points": [{"name": "Bedroom", "at": [1650, 2290]}]}}
+```
+
 Resources: `solidcraft://design` (inspect JSON with measurements) and `solidcraft://commands`
 (the catalog).
 

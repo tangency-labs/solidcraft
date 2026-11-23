@@ -522,6 +522,18 @@ feature follows its edges when the part changes.
 - **For translators:** an edge of a body, not a construction axis or a reference plane; the
   distance is a length, not a reference value for light or material.
 
+### RF loss
+
+How much a Wi-Fi signal loses each time a straight path crosses a piece of a material, in dB, at
+2.4, 5 and 6 GHz.
+
+Losses are per crossing, not per millimetre: Wi-Fi Coverage counts walls, as multi-wall indoor
+models do.
+
+- **In SolidCraft:** `rf` on `material.create`, `material.edit` and `material.inspect`; the presets
+  concrete, drywall, interior-glass, low-e-glass, metal, none and wood-door; `inspect.rf_coverage`.
+- **Don't use:** attenuation (for the material's value), wall factor.
+
 ### rollback marker
 
 The marker in the timeline after which no feature is computed.
