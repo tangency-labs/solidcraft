@@ -192,6 +192,15 @@ pub enum SolverFailure {
     /// The guess point does not drop onto the side edge: an empty search
     /// ([`ErrorKind::NotFound`]).
     GuessDoesNotDropOnSideEdge,
+    /// A point the law intersection traced through has curve parameter `parameter`, below
+    /// zero: it lies before the start of the curve the trace builds
+    /// ([`ErrorKind::OutsideDomain`]). A refusal, not a defect: the trace follows the
+    /// offset surfaces' intersection, which the caller's geometry can carry back past the
+    /// curve's start.
+    IntersectionPointBeforeCurve {
+        /// The point's curve parameter.
+        parameter: f64,
+    },
     /// A solver's equations could not be loaded for the solve: the solver's error is the
     /// failure's cause, and decides whether it is a defect or a refusal
     /// ([`ErrorKind::Failed`]).
@@ -225,8 +234,9 @@ pub enum SolverFailure {
         /// The surface parameter v.
         v: f64,
     },
-    /// The two offset surfaces' normals at a tangent intersection point are parallel, so
-    /// their cross product gives the curve no direction ([`ErrorKind::Degenerate`]).
+    /// The two offset surfaces' normals are parallel at a point the curve is to start from
+    /// (a tangent intersection point, or the solver's two uv guesses), so their cross
+    /// product gives the curve no direction ([`ErrorKind::Degenerate`]).
     OffsetNormalsParallel,
     /// The solver has not got both offset surfaces set: the caller's solver state
     /// ([`ErrorKind::InvalidInput`]).
@@ -508,6 +518,7 @@ impl SolverFailure {
             Self::GeneratorBuildsNoSurface => ErrorKind::Unsupported,
             Self::GnSideInputMissing { .. } => ErrorKind::InvalidInput,
             Self::GuessDoesNotDropOnSideEdge => ErrorKind::NotFound,
+            Self::IntersectionPointBeforeCurve { .. } => ErrorKind::OutsideDomain,
             Self::JacobianNotLoaded => ErrorKind::Failed,
             Self::LeavePointDoesNotDropOnEdge => ErrorKind::NotFound,
             Self::NeighbourPointsNotFound => ErrorKind::NotFound,
@@ -596,6 +607,7 @@ impl SolverFailure {
             Self::GeneratorBuildsNoSurface => SM_ERR,
             Self::GnSideInputMissing { .. } => SM_ERR_NULL_POINTER,
             Self::GuessDoesNotDropOnSideEdge => SM_ERR,
+            Self::IntersectionPointBeforeCurve { .. } => SM_ERR,
             Self::JacobianNotLoaded => SM_ERR,
             Self::LeavePointDoesNotDropOnEdge => SM_ERR,
             Self::NeighbourPointsNotFound => SM_ERR,
@@ -765,6 +777,11 @@ impl core::fmt::Display for SolverFailure {
             Self::GuessDoesNotDropOnSideEdge => {
                 f.write_str("the guess point does not drop onto the side edge")
             }
+            Self::IntersectionPointBeforeCurve { parameter } => write!(
+                f,
+                "a point the intersection traced has curve parameter {parameter}, before the \
+                 curve's start"
+            ),
             Self::JacobianNotLoaded => f.write_str("the solver's equations could not be loaded"),
             Self::LeavePointDoesNotDropOnEdge => f.write_str(
                 "the point where the rail leaves its face does not drop onto the filleted edge",
@@ -784,9 +801,9 @@ impl core::fmt::Display for SolverFailure {
                 f,
                 "offset surface {side} has no normal at (u, v) = ({u}, {v})"
             ),
-            Self::OffsetNormalsParallel => f.write_str(
-                "the offset surfaces' normals are parallel at the tangent intersection point",
-            ),
+            Self::OffsetNormalsParallel => {
+                f.write_str("the offset surfaces' normals are parallel where the curve is to start")
+            }
             Self::OffsetSurfaceMissing => {
                 f.write_str("the solver has not got both offset surfaces set")
             }
