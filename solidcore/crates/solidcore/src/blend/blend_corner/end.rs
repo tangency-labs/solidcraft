@@ -2727,14 +2727,7 @@ pub fn calc_end_edge_geom(
     let Some(miss_fv) = miss_fv else {
         return Ok(EndEdges::Built);
     };
-    // The other rail's end, `None` where it missed its side edge too (a second miss, which
-    // only a cliff overflow's `both_miss` handles): the roll-over below is proven for
-    // `miss_fv`'s rail only.
-    let other_end = if miss_fv == start_fv {
-        (!misses[1]).then_some(end_fv)
-    } else {
-        (!misses[0]).then_some(start_fv)
-    };
+    let other_end = other_rail_end(miss_fv, start_fv, end_fv, misses);
     let record = pseudo.fillet_vertex(miss_fv)?;
     if record.point_class() != PointClassType::Edgeuse {
         return Ok(EndEdges::Built);
@@ -2853,6 +2846,24 @@ pub fn calc_end_edge_geom(
             .map(EndEdges::Refused);
     }
     Ok(EndEdges::Built)
+}
+
+/// The other rail's end for `calc_end_edge_geom`'s roll-over test: of the End's rail ends
+/// `start_fv` and `end_fv` (`misses[0]` and `misses[1]` say whether each missed its side
+/// edge), the one that is not `miss_fv`, or `None` where it missed its side edge too (a
+/// second miss, which only a cliff overflow's `both_miss` handles): the roll-over is proven
+/// for `miss_fv`'s rail only.
+fn other_rail_end(
+    miss_fv: VertexId,
+    start_fv: VertexId,
+    end_fv: VertexId,
+    misses: [bool; 2],
+) -> Option<VertexId> {
+    if miss_fv == start_fv {
+        (!misses[1]).then_some(end_fv)
+    } else {
+        (!misses[0]).then_some(start_fv)
+    }
 }
 
 /// The fork's `SmBlendCorner::CreateEndPatchOfEnd`'s branch for an End at a smooth vertex
@@ -3141,5 +3152,17 @@ mod tests {
             rolls_over(&pseudo, Some(g_end), &FailingSolvers(cancelled)),
             Err(SolidError::Cancelled { .. })
         ));
+    }
+
+    /// The other rail's end `calc_end_edge_geom` hands `end_section_rolls_over`: the rail end
+    /// that is not the miss, or `None` where it missed its side edge too, from either end.
+    #[test]
+    fn the_other_rail_end_is_none_where_it_missed_its_side_edge_too() {
+        let start = VertexId::from_index(3);
+        let end = VertexId::from_index(5);
+        assert_eq!(other_rail_end(start, start, end, [true, true]), None);
+        assert_eq!(other_rail_end(start, start, end, [true, false]), Some(end));
+        assert_eq!(other_rail_end(end, start, end, [true, true]), None);
+        assert_eq!(other_rail_end(end, start, end, [false, true]), Some(start));
     }
 }
