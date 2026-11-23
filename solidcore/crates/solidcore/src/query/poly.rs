@@ -1820,7 +1820,8 @@ impl PolyBrep {
     ///
     /// # Errors
     ///
-    /// [`SolidError::InvalidInput`] for unknown ids; a defect for a broken ring.
+    /// [`SolidError::InvalidInput`] for unknown ids, and with
+    /// [`QueryFailure::PolyRadialRingNotClosed`] for a ring that does not lead back to `e`.
     pub fn edge_all_radials(&self, e: PolyEdgeId) -> Result<Vec<PolyEdgeId>> {
         const OP: &str = "query::poly::PolyBrep::edge_all_radials";
         let mut out = Vec::new();
@@ -1828,7 +1829,7 @@ impl PolyBrep {
         loop {
             out.push(cur);
             if out.len() > self.edge_slots.len() {
-                return Err(SolidError::query(OP, QueryFailure::Defect { why: "an edge's radials are linked only by the poly B-rep's own methods, which keep the ring closed within the edges it has" }));
+                return Err(SolidError::query(OP, QueryFailure::PolyRadialRingNotClosed));
             }
             match self.edge_radial(cur)? {
                 None => break,
@@ -3503,6 +3504,14 @@ mod tests {
         b.vertex_remove_poly_edge(start, es[0]).unwrap();
         let e = b.edge_bounding_box(es[0]).unwrap_err();
         named(e, F::PolyEdgeWithoutVertex, SM_ERR_NULL_POINTER);
+        // an edge linked into a second ring leaves its first ring's other edge outside it
+        b.link_radials(&[es[0], es[1]]).unwrap();
+        b.link_radials(&[es[0], es[2]]).unwrap();
+        named(
+            b.edge_all_radials(es[1]).unwrap_err(),
+            F::PolyRadialRingNotClosed,
+            SM_ERR,
+        );
     }
 
     #[test]

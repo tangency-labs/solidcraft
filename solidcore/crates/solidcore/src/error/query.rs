@@ -112,6 +112,9 @@ pub enum QueryFailure {
     /// direction. Upstream returns `SM_ERR_INVALID_INPUT` as a status here, so its kind is
     /// [`ErrorKind::InvalidInput`].
     ZeroLengthVector,
+    /// The scale given is undefined. Upstream returns `SM_ERR_INVALID_INPUT` as a status
+    /// here. [`ErrorKind::InvalidInput`].
+    UndefinedScale,
     /// A drop of a point onto a curve or a surface found no foot point. Class `failed`.
     NoFoot,
     /// The sector classification stepped off a face on its first step, where it has no
@@ -159,9 +162,10 @@ pub enum QueryFailure {
     PolyEdgeNotAtVertex,
     /// The poly edge is in no loop, so it has no next edge. [`ErrorKind::InvalidInput`].
     PolyEdgeOutsideLoop,
-    /// The scale given is undefined. Upstream returns `SM_ERR_INVALID_INPUT` as a status
-    /// here. [`ErrorKind::InvalidInput`].
-    UndefinedScale,
+    /// The poly edge's radial ring does not lead back to it: an edge of the ring was linked
+    /// into another ring ([`crate::query::poly::PolyBrep::link_radials`] given an edge
+    /// that already had radials). [`ErrorKind::InvalidInput`].
+    PolyRadialRingNotClosed,
 }
 
 impl QueryFailure {
@@ -197,7 +201,8 @@ impl QueryFailure {
             | Self::PolyEdgeNotContinuing
             | Self::PolyLoopEmpty
             | Self::PolyLoopNotClosed
-            | Self::PolyEdgeNotAtVertex => SM_ERR,
+            | Self::PolyEdgeNotAtVertex
+            | Self::PolyRadialRingNotClosed => SM_ERR,
             Self::Missing(_)
             | Self::FaceWithoutSurface
             | Self::EdgeWithoutCurve
@@ -231,6 +236,7 @@ impl QueryFailure {
             | Self::EdgeuseWithoutEdge
             | Self::EdgeuseOrientationUnset
             | Self::InvalidReach
+            | Self::UndefinedScale
             | Self::NoEdgeGiven
             | Self::UvLineNotMade
             | Self::NoPolyBrep
@@ -242,7 +248,7 @@ impl QueryFailure {
             | Self::PolyEdgeWithoutVertex
             | Self::PolyEdgeNotAtVertex
             | Self::PolyEdgeOutsideLoop
-            | Self::UndefinedScale => ErrorKind::InvalidInput,
+            | Self::PolyRadialRingNotClosed => ErrorKind::InvalidInput,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -281,6 +287,7 @@ impl core::fmt::Display for QueryFailure {
             Self::RegionNotFound => f.write_str("no ray fired from the point found its region"),
             Self::BoundingBoxNotFound => f.write_str("the curve's bounding box could not be found"),
             Self::ZeroLengthVector => f.write_str("a vector of zero length has no direction"),
+            Self::UndefinedScale => f.write_str("the scale is undefined"),
             Self::NoFoot => f.write_str("the drop found no foot point"),
             Self::SteppedOffOnFirstStep => f.write_str("the first step stepped off the surface"),
             Self::TangentAlongEdge => {
@@ -306,7 +313,9 @@ impl core::fmt::Display for QueryFailure {
             Self::PolyEdgeWithoutVertex => f.write_str("the poly edge has no start or end vertex"),
             Self::PolyEdgeNotAtVertex => f.write_str("the poly edge does not start at the vertex"),
             Self::PolyEdgeOutsideLoop => f.write_str("the poly edge is in no loop"),
-            Self::UndefinedScale => f.write_str("the scale is undefined"),
+            Self::PolyRadialRingNotClosed => {
+                f.write_str("the poly edge's radial ring does not lead back to it")
+            }
         }
     }
 }
@@ -422,6 +431,7 @@ pub(super) mod tests {
             (F::RegionNotFound, SM_ERR, K::Failed),
             (F::BoundingBoxNotFound, SM_ERR, K::Failed),
             (F::ZeroLengthVector, SM_ERR_INVALID_INPUT, K::InvalidInput),
+            (F::UndefinedScale, SM_ERR_INVALID_INPUT, K::InvalidInput),
             (F::NoFoot, SM_ERR, K::Failed),
             (F::SteppedOffOnFirstStep, SM_ERR, K::Failed),
             (F::TangentAlongEdge, SM_ERR, K::Failed),
@@ -443,7 +453,7 @@ pub(super) mod tests {
             ),
             (F::PolyEdgeNotAtVertex, SM_ERR, K::InvalidInput),
             (F::PolyEdgeOutsideLoop, SM_ERR_NULL_POINTER, K::InvalidInput),
-            (F::UndefinedScale, SM_ERR_INVALID_INPUT, K::InvalidInput),
+            (F::PolyRadialRingNotClosed, SM_ERR, K::InvalidInput),
         ];
         for (failure, code, kind) in cases {
             let e = SolidError::query("query::op", failure);
