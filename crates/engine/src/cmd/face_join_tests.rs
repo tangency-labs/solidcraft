@@ -355,6 +355,29 @@ fn join_extrude_to_another_body_joins_that_body_on_request() {
     assert!((volume("Base") - 60_000.0).abs() < 1e-6, "the target took the tool: {}", volume("Base"));
 }
 
+/// #19671: an edit that makes a Join To Object out of an extrude that had none takes the new
+/// rule: what the old extent had to say about the body it runs to was about nothing, so the
+/// bodies the edit names are the ones it joins.
+#[test]
+fn a_redefine_that_adds_the_to_object_keeps_the_body_it_runs_to_apart() {
+    let (mut s, sketch) = base_and_target();
+    // The plain extrude: a distance, no object to run to.
+    let extrude = run(&mut s, "solid.extrude", json!({"sketch":sketch,"distance":10,"operation":"join","targets":["Base"]}))["feature"].clone();
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    // The edit gives it the object to run to: the body it runs to stays its own body.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":extrude,"command":"solid.extrude","params":{"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"]}}),
+    );
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let state = s.model.state();
+    let volume = |name: &str| solidcraft_kernel::measure(&state.body(name).unwrap().body).unwrap().volume;
+    assert_eq!(state.bodies.len(), 2, "the body the extrude runs to stays its own body");
+    assert!((volume("Base") - 28_000.0).abs() < 1e-6, "the base took the tool: {}", volume("Base"));
+    assert!((volume("Target") - 32_000.0).abs() < 1e-6, "the target is untouched: {}", volume("Target"));
+}
+
 /// #19671: `to_body_apart` is about a Join that runs to another body: a Join without one, or an
 /// operation that never joins that body, is refused with the reason.
 #[test]

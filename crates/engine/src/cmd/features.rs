@@ -80,7 +80,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "start_offset?: expr (along the sketch normal, also with direction: negative); ",
             "symmetric_offset?: bool (with direction: symmetric and start_offset: offset both sides symmetrically away from the sketch plane, leaving a clearance gap); ",
             "to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); ",
-            "to_body_apart?: bool (Join To Object: keep the body the To Object pick is on apart, so the join changes only the bodies in `targets`); ",
+            "to_body_apart?: bool (Join To Object: keep the body the To Object pick is on apart, so the join changes only the bodies in `targets`; a call that names its targets keeps that body apart, and `false` takes it too); ",
             "from?: [x,y,z] (From Object: start at that face or point; on a flat face at a slant the start follows the face, and a distance moves it along the extrusion); ",
             "operation?: new|join|cut|intersect|auto (cut into a body, otherwise join existing solids; new in an empty component); ",
             "touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); ",

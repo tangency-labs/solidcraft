@@ -2812,9 +2812,12 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         *profiles = picked.clone();
     }
     // An old design's Join To Object keeps the body it runs to apart through an edit (#8151).
-    // An edit that says otherwise (the dialog's choice) changes it.
+    // An edit that says otherwise (the dialog's choice) changes it. An edit that makes a Join
+    // To Object out of an extrude that had none takes the new rule (#19671): what the old
+    // extent had to say about the body it runs to was about nothing.
     if let (FeatureKind::Extrude { extent: before, .. }, FeatureKind::Extrude { extent: after, .. }) = (&old.kind, &mut new.kind)
         && after.to.is_some()
+        && before.to.is_some()
         && params.get("to_body_apart").is_none()
     {
         after.to_body_apart = before.to_body_apart;

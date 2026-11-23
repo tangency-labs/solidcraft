@@ -151,8 +151,8 @@ pub struct ExtrudeParams {
     #[serde(default)]
     pub to_offset: Option<LengthExpr>,
     /// On a Join To Object, leave the body the `to` pick is on as its own body, so the join
-    /// changes only the bodies in `targets`. Needs a Join with `to`. Default false: the body the
-    /// join runs to is taken too.
+    /// changes only the bodies in `targets`. Needs a Join with `to`. Default: a call that names
+    /// its targets leaves that body apart; a call that names none takes it too.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "bool")]
     pub to_body_apart: Option<bool>,
