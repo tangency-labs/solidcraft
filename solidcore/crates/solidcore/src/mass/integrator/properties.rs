@@ -2474,7 +2474,7 @@ fn require_uv_trims(b: &Brep, f: Option<FaceId>) -> Result<()> {
 fn require_classification_trees(b: &Brep) -> Result<()> {
     let builds = |f| crate::query::face::p2::classification_builds_tree(b, f).unwrap_or(true);
     match faces(b) {
-        Ok(faces) if !faces.into_iter().any(builds) => Ok(()),
+        Ok(faces) if !faces.iter().copied().any(builds) => Ok(()),
         _ => Err(SolidError::PreparationRequired { operation: OP }),
     }
 }
