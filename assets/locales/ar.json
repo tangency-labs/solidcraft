@@ -3282,7 +3282,7 @@
   "plugin_error.failed": "{plugin}: {reason}",
   "plugin_error.failed_export": "تعذّر على {plugin} تصدير {file}: {reason}",
   "plugin_error.failed_file": "تعذّر على {plugin} فتح {file}: {reason}",
-  "plugin_error.fuel_ceiling": "تطلب {requested} من fuel، والإضافات يمكنها استخدام {allowed}. ارفع الحد الأقصى لـ fuel الإضافات في التفضيلات › الإضافات (في solidcraft-cli: max_fuel في ملف --plugin-limits).",
+  "plugin_error.fuel_ceiling": "تطلب {requested} من fuel، والإضافات يمكنها استخدام {allowed}. أعد تثبيت الإضافة واسمح بطلب fuel الخاص بها، أو ارفع الحد الأقصى لـ fuel الإضافات في التفضيلات › الإضافات (في solidcraft-cli: max_fuel في ملف --plugin-limits).",
   "plugin_error.memory_ceiling": "تطلب {requested} MiB من الذاكرة، والإضافات يمكنها استخدام {allowed} MiB. ثبّت الإضافة مرة أخرى واسمح بطلب الذاكرة الخاص بها، أو ارفع الحد الأقصى لذاكرة الإضافات (MiB) في التفضيلات › الإضافات (في solidcraft-cli: max_memory_mib في ملف --plugin-limits).",
   "plugin_error.out_of_fuel": "استهلكت كل الـ fuel الذي تطلبه ({allowed}) فأُوقفت. اطلب من مؤلفها رفع حد fuel.",
   "plugin_error.out_of_memory": "احتاجت إلى أكثر من {allowed} MiB من الذاكرة التي تطلبها فأُوقفت. اطلب من مؤلفها رفع حد الذاكرة.",
