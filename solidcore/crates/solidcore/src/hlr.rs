@@ -284,6 +284,29 @@ pub fn prepare_cancellable(
     opts: &Options,
     cancel: &dyn Fn() -> bool,
 ) -> Result<Prepared, HlrError> {
+    prepare_until(b, opts, cancel, false)?.ok_or(HlrError::Invalid("freeform face"))
+}
+
+/// [`prepare_cancellable`], or `None` when `opts` leaves freeform faces out and the body has
+/// one, found before trimming any face: seconds for a thread's helical faces (#21190).
+///
+/// # Errors
+/// See [`prepare_cancellable`].
+pub fn prepare_unless_freeform(
+    b: &Brep,
+    opts: &Options,
+    cancel: &dyn Fn() -> bool,
+) -> Result<Option<Prepared>, HlrError> {
+    prepare_until(b, opts, cancel, !opts.freeform)
+}
+
+/// [`prepare_cancellable`], or `None` before the trims when `stop_at_freeform` and a face is.
+fn prepare_until(
+    b: &Brep,
+    opts: &Options,
+    cancel: &dyn Fn() -> bool,
+    stop_at_freeform: bool,
+) -> Result<Option<Prepared>, HlrError> {
     if !(1..=MAX_TRIM_SAMPLES).contains(&opts.trim_samples) {
         return Err(HlrError::Invalid("trim samples"));
     }
@@ -326,6 +349,7 @@ pub fn prepare_cancellable(
     }
     let local_curves: Vec<C3> = curves.iter().map(|(c, _)| c.clone()).collect();
     let mut users: Vec<Vec<usize>> = vec![Vec::new(); b.edges.len()];
+    let mut surfaces = Vec::new();
     // Faces and edges by their numbers in the record. Validation puts every face in a shell; its
     // loops are stored the same whichever side a shell uses, and hidden lines look at both, so the
     // shells' orientation does not come into it (a face two shells share is one face). An edge no
@@ -381,45 +405,15 @@ pub fn prepare_cancellable(
             .surfaces
             .entry(analytic_name(&analytic).to_string())
             .or_insert(0) += 1;
-        let trim = trim::build(f, &local_curves, &surface, opts.trim_samples);
-        if let Some(why) = trim.unsupported {
-            report.unsupported_trims.push((fi, why.to_string()));
-        }
-        report.max_trim_chord = report.max_trim_chord.max(trim.chord_error);
-        let (mut lo, mut hi) = (trim.lo, trim.hi);
-        // Curved faces can bulge past their boundary: bound them by the whole surface's
-        // guaranteed box (spline hull, turned profile), clipped to nothing tighter.
-        if !matches!(surface, S3::Plane { .. }) {
-            if let Some((blo, bhi)) = surface.bound() {
-                lo = lo.min(blo);
-                hi = hi.max(bhi);
-            }
-        }
-        // Every face is padded, planes too: a plane record and its edges may disagree by
-        // rounding, and a box flat along the normal would cull the plane's own hit. Rounding
-        // grows with where the body was modelled (its offset), not with the face's size.
-        let pad =
-            (hi - lo).len() * 1e-6 + 1e-12 * offset.x.abs().max(offset.y.abs()).max(offset.z.abs());
-        lo -= Vec3::new(pad, pad, pad);
-        hi += Vec3::new(pad, pad, pad);
         for u in trim::uses(f) {
             if let Some(list) = users.get_mut(u.edge as usize) {
                 list.push(fi);
             }
         }
-        let freeform = matches!(analytic, Analytic::Other);
-        if freeform {
+        if matches!(analytic, Analytic::Other) {
             report.freeform_faces.push(fi);
         }
-        faces.push(FaceData {
-            surface,
-            analytic,
-            group: Vec::new(),
-            trim,
-            lo,
-            hi,
-            freeform,
-        });
+        surfaces.push((surface, analytic));
     }
     for (ei, (c, acc)) in curves.into_iter().enumerate() {
         let list = users.get(ei).cloned().unwrap_or_default();
@@ -433,10 +427,8 @@ pub fn prepare_cancellable(
             let normals_parallel = [0.25, 0.5, 0.75].iter().all(|k| {
                 let m = c.at(t0 + (t1 - t0) * k);
                 let n = |f: usize| {
-                    faces.get(f).and_then(|fd: &FaceData| {
-                        fd.surface
-                            .inverse(m, None)
-                            .and_then(|uv| fd.surface.normal(uv))
+                    surfaces.get(f).and_then(|(s, _): &(S3, Analytic)| {
+                        s.inverse(m, None).and_then(|uv| s.normal(uv))
                     })
                 };
                 n(*f1)
@@ -444,8 +436,8 @@ pub fn prepare_cancellable(
                     .is_some_and(|(a, b)| a.cross(b).len() < 1e-6)
             });
             let same_surface = match (
-                faces.get(*f1).map(|f: &FaceData| f.analytic),
-                faces.get(*f2).map(|f: &FaceData| f.analytic),
+                surfaces.get(*f1).map(|(_, a)| *a),
+                surfaces.get(*f2).map(|(_, a)| *a),
             ) {
                 (Some(a), Some(b)) => same_analytic(&a, &b, 1e-9),
                 _ => false,
@@ -482,7 +474,7 @@ pub fn prepare_cancellable(
         Analytic::Torus { major, .. } => Some((3, *major)),
         Analytic::Plane | Analytic::Other => None,
     };
-    let analytics: Vec<Analytic> = faces.iter().map(|f| f.analytic).collect();
+    let analytics: Vec<Analytic> = surfaces.iter().map(|(_, a)| *a).collect();
     let mut sorted: Vec<(u8, f64, usize)> = analytics
         .iter()
         .enumerate()
@@ -490,12 +482,13 @@ pub fn prepare_cancellable(
         .collect();
     sorted.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
     let mut compared = 0usize;
-    for (i, f) in faces.iter_mut().enumerate() {
+    let mut groups = Vec::with_capacity(analytics.len());
+    for (i, analytic) in analytics.iter().enumerate() {
         if i % 256 == 0 && cancel() {
             return Err(HlrError::Cancelled);
         }
         let mut group = vec![i];
-        if let Some((kind, v)) = size(&f.analytic) {
+        if let Some((kind, v)) = size(analytic) {
             // Wider than any match allows: same_analytic takes sizes within 1e-9 of the size
             // (relative for lengths, absolute for the half angle).
             let reach = 2e-9 * v.abs().max(1.);
@@ -516,14 +509,54 @@ pub fn prepare_cancellable(
                 if *j != i
                     && analytics
                         .get(*j)
-                        .is_some_and(|b| same_analytic(&f.analytic, b, 1e-9))
+                        .is_some_and(|b| same_analytic(analytic, b, 1e-9))
                 {
                     group.push(*j);
                 }
             }
         }
         group.sort_unstable();
-        f.group = group;
+        groups.push(group);
+    }
+    if stop_at_freeform && !report.freeform_faces.is_empty() {
+        return Ok(None);
+    }
+    let shapes = surfaces.into_iter().zip(groups);
+    for (fi, (f, ((surface, analytic), group))) in b.faces.iter().zip(shapes).enumerate() {
+        if cancel() {
+            return Err(HlrError::Cancelled);
+        }
+        let trim = trim::build(f, &local_curves, &surface, opts.trim_samples);
+        if let Some(why) = trim.unsupported {
+            report.unsupported_trims.push((fi, why.to_string()));
+        }
+        report.max_trim_chord = report.max_trim_chord.max(trim.chord_error);
+        let (mut lo, mut hi) = (trim.lo, trim.hi);
+        // Curved faces can bulge past their boundary: bound them by the whole surface's
+        // guaranteed box (spline hull, turned profile), clipped to nothing tighter.
+        if !matches!(surface, S3::Plane { .. }) {
+            if let Some((blo, bhi)) = surface.bound() {
+                lo = lo.min(blo);
+                hi = hi.max(bhi);
+            }
+        }
+        // Every face is padded, planes too: a plane record and its edges may disagree by
+        // rounding, and a box flat along the normal would cull the plane's own hit. Rounding
+        // grows with where the body was modelled (its offset), not with the face's size.
+        let pad =
+            (hi - lo).len() * 1e-6 + 1e-12 * offset.x.abs().max(offset.y.abs()).max(offset.z.abs());
+        lo -= Vec3::new(pad, pad, pad);
+        hi += Vec3::new(pad, pad, pad);
+        let freeform = matches!(analytic, Analytic::Other);
+        faces.push(FaceData {
+            surface,
+            analytic,
+            group,
+            trim,
+            lo,
+            hi,
+            freeform,
+        });
     }
     report.faces = faces.len();
     report.edges = edges.len();
@@ -537,14 +570,14 @@ pub fn prepare_cancellable(
     if faces.is_empty() || !lo.is_finite() || !hi.is_finite() {
         return Err(HlrError::Invalid("empty or unbounded body"));
     }
-    Ok(Prepared {
+    Ok(Some(Prepared {
         edges,
         faces,
         offset,
         lo,
         hi,
         report,
-    })
+    }))
 }
 
 /// How exactly a drawn curve stands for its source.

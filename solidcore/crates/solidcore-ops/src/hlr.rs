@@ -274,6 +274,20 @@ pub fn prepare_cancellable(
     k::prepare_cancellable(&kernel_body(b)?, opts, cancel)
 }
 
+/// [`prepare_cancellable`], or `None` for a freeform face `opts` leaves out
+/// ([`k::prepare_unless_freeform`]).
+///
+/// # Errors
+/// As [`prepare_cancellable`].
+pub fn prepare_unless_freeform(
+    b: &Brep,
+    opts: &Options,
+    cancel: &dyn Fn() -> bool,
+) -> Result<Option<Prepared>, HlrError> {
+    crate::record_check::validate(b).map_err(|_| HlrError::Invalid("portable B-rep"))?;
+    k::prepare_unless_freeform(&kernel_body(b)?, opts, cancel)
+}
+
 /// The hidden-line drawing of the scene `scene` of the bodies `defs` in `view`, on the calling
 /// thread ([`k::hidden_lines`]).
 ///

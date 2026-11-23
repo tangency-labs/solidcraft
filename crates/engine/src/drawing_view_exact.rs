@@ -478,11 +478,13 @@ enum Made {
 /// `record` (`None` for a mesh body) prepared for `hlr` with `opts`. `None` when cancelled.
 fn prepare_body(record: Option<&Brep>, opts: &hlr::Options, cancel: &(dyn Fn() -> bool + Sync)) -> Option<Made> {
     let Some(record) = record else { return Some(Made::Fallback(Fallback::MeshBody)) };
-    Some(match hlr::prepare_cancellable(record, opts, cancel) {
+    // A freeform face is found before the faces are trimmed, which takes seconds for a thread (#21190).
+    Some(match hlr::prepare_unless_freeform(record, opts, cancel) {
         Err(HlrError::Cancelled) => return None,
         Err(_) => Made::Fallback(Fallback::Unread),
-        Ok(def) if !(def.report.freeform_faces.is_empty() && def.report.unsupported_trims.is_empty()) => Made::Fallback(Fallback::Unsupported),
-        Ok(def) => Made::Def(Box::new(def)),
+        Ok(None) => Made::Fallback(Fallback::Unsupported),
+        Ok(Some(def)) if !(def.report.freeform_faces.is_empty() && def.report.unsupported_trims.is_empty()) => Made::Fallback(Fallback::Unsupported),
+        Ok(Some(def)) => Made::Def(Box::new(def)),
     })
 }
 
