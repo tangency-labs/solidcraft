@@ -1554,15 +1554,21 @@ mod tests {
         let (r, _) = with_brep(|k, b, fenv| {
             create_face_in_region_from_surface(k, b, None, None, &unit_box(), fenv)
         });
-        assert_eq!(code(&r.unwrap_err()), Some(SM_ERR_NULL_POINTER));
+        let e = r.unwrap_err();
+        assert_eq!(code(&e), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.topology_failure(), Some(&TopologyFailure::NoSurfaceGiven));
         let (r, _) = with_brep(|k, b, fenv| {
             create_faces_from_surface(k, b, None, &unit_box(), ContinuityType::C0, fenv)
         });
-        assert_eq!(code(&r.unwrap_err()), Some(SM_ERR_NULL_POINTER));
+        let e = r.unwrap_err();
+        assert_eq!(code(&e), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.topology_failure(), Some(&TopologyFailure::NoSurfaceGiven));
         let (r, _) = with_brep(|k, b, fenv| {
             create_faces_with_curves(k, b, None, &[4], None, &[], Some(plane()), fenv)
         });
-        assert_eq!(code(&r.unwrap_err()), Some(SM_ERR_NULL_POINTER));
+        let e = r.unwrap_err();
+        assert_eq!(code(&e), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.topology_failure(), Some(&TopologyFailure::NoCurveGiven));
     }
 
     #[test]
@@ -1579,7 +1585,12 @@ mod tests {
         let (r, b) = with_brep(|k, b, fenv| {
             create_face_in_region_from_surface(k, b, None, Some(Surface::from(bs)), &dom, fenv)
         });
-        assert_eq!(code(&r.unwrap_err()), Some(SM_ERR));
+        let e = r.unwrap_err();
+        assert_eq!(code(&e), Some(SM_ERR));
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::UvDomainOutsideSurface)
+        );
         assert!(!b.editing_enabled());
     }
 
@@ -1593,11 +1604,24 @@ mod tests {
             let (r, _) = with_brep(|k, b, fenv| {
                 create_planar_face_with_3d_curves(k, b, None, &curves, 1e-6, fenv)
             });
-            assert_eq!(code(&r.unwrap_err()), Some(SM_ERR));
+            let e = r.unwrap_err();
+            assert_eq!(code(&e), Some(SM_ERR));
+            // the plane's failure is kept as the cause
+            assert_eq!(
+                e.topology_failure(),
+                Some(&TopologyFailure::NoPlaneThroughCurves)
+            );
+            assert!(e.cause().is_some(), "{e:?}");
             let (r, _) = with_brep(|k, b, fenv| {
                 create_planar_faces_with_3d_curves(k, b, None, &curves, 1e-6, fenv)
             });
-            assert_eq!(code(&r.unwrap_err()), Some(SM_ERR));
+            let e = r.unwrap_err();
+            assert_eq!(code(&e), Some(SM_ERR));
+            assert_eq!(
+                e.topology_failure(),
+                Some(&TopologyFailure::NoPlaneThroughCurves)
+            );
+            assert!(e.cause().is_some(), "{e:?}");
         }
     }
 

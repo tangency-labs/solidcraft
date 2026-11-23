@@ -95,7 +95,9 @@
 use crate::curve::curve::p2::{BSPLINE_CURVE_TYPE, LINE_TYPE};
 use crate::curve::curve::Curve;
 use crate::error::topology::TopologyFailure;
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::{
+    ignore_status, ignored, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER,
+};
 use crate::geom::a_object;
 use crate::geom::attribute::{AttributeHandle, AttributeStore, ObjectKey};
 use crate::geom::extent1d::Extent1d;
@@ -988,11 +990,17 @@ fn face_surface(
                 OP_MAKE,
                 "data surface owned outside this B-rep",
             ))?;
-    let owner = b
-        .face(owner_face)?
-        .surface
-        .as_ref()
-        .ok_or_else(|| SolidError::topology(OP_MAKE, TopologyFailure::FaceWithoutSurface))?;
+    let owner = b.face(owner_face)?.surface.as_ref().ok_or_else(|| {
+        Failure::new(
+            OP_MAKE,
+            TopologyFailure::Defect {
+                why: "the owner face has no surface, though a face is listed as an owner \
+                          only once its surface is made",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
     let mut copy = owner.copy(k)?;
     let key = env.new_key()?;
     let copy_ref = ObjectRef {
@@ -1243,11 +1251,17 @@ fn edge_curve(
                 OP_MAKE,
                 "data curve owned outside this B-rep",
             ))?;
-    let owner = b
-        .edge(owner_edge)?
-        .curve
-        .as_ref()
-        .ok_or_else(|| SolidError::topology(OP_MAKE, TopologyFailure::EdgeWithoutCurve))?;
+    let owner = b.edge(owner_edge)?.curve.as_ref().ok_or_else(|| {
+        Failure::new(
+            OP_MAKE,
+            TopologyFailure::Defect {
+                why: "the owner edge has no curve, though an edge is listed as an owner \
+                          only once its curve is made",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
     let mut curve = owner.copy(k)?;
     let key = env.new_key()?;
     let curve_ref = ObjectRef {
@@ -3390,11 +3404,11 @@ mod tests {
         ));
         let mut d = square(0);
         d.shells[0].shell_type = 7;
+        let e = build(&mut d, MakeTopologyOptions::default()).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(1001));
         assert_eq!(
-            build(&mut d, MakeTopologyOptions::default())
-                .err()
-                .and_then(|e| e.upstream_status()),
-            Some(1001)
+            e.topology_failure(),
+            Some(&TopologyFailure::UnknownShellType { shell_type: 7 })
         );
         let mut d = square(0);
         d.edgeuses[0].next_eu = 99;

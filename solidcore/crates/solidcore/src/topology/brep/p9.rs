@@ -452,7 +452,7 @@ fn brep_ray_fire<O>(
 fn ray_direction(direction: Vec3) -> Result<Vec3> {
     direction
         .unitize()
-        .map_err(|_| failure(TopologyFailure::BrepWithoutExtent))
+        .map_err(|_| failure(TopologyFailure::ZeroLengthVector))
 }
 
 /// Whether a `SmShell::RayFire` call succeeded. Upstream retries on any failed status;
@@ -494,9 +494,7 @@ impl OrientSheetNote {
     #[must_use]
     pub fn into_error(self) -> SolidError {
         match self {
-            Self::Reoriented => Failure::new(OP, TopologyFailure::SheetReoriented)
-                .with_status(1)
-                .into_error(),
+            Self::Reoriented => failure(TopologyFailure::SheetReoriented),
         }
     }
 
@@ -1561,7 +1559,9 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
             b.vertexuse(vu)?.owner,
             VertexuseOwner::Edgeuse(_) | VertexuseOwner::Loopuse(_)
         ) {
-            return Err(failure(TopologyFailure::VertexuseNotInFace));
+            return Err(Failure::new(OP, TopologyFailure::VertexUseNotOnFace)
+                .with_status(SM_ERR)
+                .into_error());
         }
     }
     let start_faceuse = vertexuse::faceuse(b, start)?;
@@ -3184,7 +3184,10 @@ mod tests {
         assert_eq!(e.operation(), OP);
         assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
         assert_eq!(e.entity(), None);
-        assert!(e.topology_failure().is_some());
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::SheetReoriented)
+        );
         assert_eq!(OrientSheetNote::stop_on_note(Ok(None)), Ok(()));
     }
 
@@ -3813,9 +3816,11 @@ mod tests {
 
     #[test]
     fn zero_ray_direction_retains_the_defined_native_status() {
+        let e = ray_direction(Vec3::ZERO).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(1007));
         assert_eq!(
-            ray_direction(Vec3::ZERO).unwrap_err().upstream_status(),
-            Some(1007)
+            e.topology_failure(),
+            Some(&TopologyFailure::ZeroLengthVector)
         );
         assert_eq!(ray_direction(Vec3::Z).unwrap(), Vec3::Z);
     }

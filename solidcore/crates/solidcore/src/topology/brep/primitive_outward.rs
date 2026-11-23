@@ -1700,6 +1700,8 @@ mod tests {
                         assert_eq!(e.operation(), "topology::brep::p8", "box {s:e}");
                         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "box {s:e}");
                         assert_eq!(e.kind(), crate::error::ErrorKind::Failed, "box {s:e}");
+                        // the face construction's failure is kept as the cause
+                        assert!(e.cause().is_some(), "box {s:e}: {e:?}");
                     }
                 }
             }

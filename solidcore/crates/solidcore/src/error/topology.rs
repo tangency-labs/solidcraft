@@ -153,9 +153,7 @@
 //! | [`TopologyFailure::UvDomainOutsideSurface`] | `SM_ERR` |
 //! | [`TopologyFailure::CurveLoopsInvalid`] | `SM_ERR_INVALID_INPUT` |
 //! | [`TopologyFailure::NotASheet`] | `SM_ERR` |
-//! | [`TopologyFailure::BrepWithoutExtent`] | `SM_ERR_INVALID_INPUT` |
 //! | [`TopologyFailure::VertexusesNotGiven`] | `SM_ERR` |
-//! | [`TopologyFailure::VertexuseNotInFace`] | `SM_ERR` |
 //! | [`TopologyFailure::VertexusesOnDifferentFaces`] | `SM_ERR` |
 //! | [`TopologyFailure::UnknownShellType`] | `SM_ERR` |
 //! | [`TopologyFailure::VertexWithoutUses`] | `SM_ERR_NULL_POINTER` |
@@ -167,7 +165,7 @@
 //! | [`TopologyFailure::LoopSplitNoFace`] | `SM_ERR` |
 //! | [`TopologyFailure::LoopSplitFaceEarly`] | `SM_ERR` |
 //! | [`TopologyFailure::EdgeNotSplit`] | `SM_ERR` |
-//! | [`TopologyFailure::SheetReoriented`] | `SM_ERR` |
+//! | [`TopologyFailure::SheetReoriented`] | `1` (upstream `TRUE`) |
 //!
 //! A named cause keeps the status of the phrase it replaced, unless its site overrides it
 //! through `with_status`.
@@ -182,8 +180,8 @@
 //! elsewhere). A check of a caller's argument that reports no status (upstream
 //! dereferences null) stays [`crate::SolidError::InvalidInput`]; one that reports a status
 //! is a named cause of class `invalid_input`, keeping that status.
-//! `brep/p9`'s face-orientation repair keeps its bare final status 1 (upstream `TRUE`),
-//! which no failure here stands for.
+//! `brep/p9`'s face-orientation repair keeps its final status 1 (upstream `TRUE`) in
+//! [`TopologyFailure::SheetReoriented`], for a caller that stops on it.
 
 use super::{
     EntityRef, ErrorKind, Failure, Reason, SM_ERR, SM_ERR_ASSERT_FAILURE, SM_ERR_INVALID_INPUT,
@@ -460,8 +458,9 @@ pub enum TopologyFailure {
     /// The surface could not be split at the new seam parameter; the split's error is kept as the
     /// cause.
     SeamSplitFailed,
-    /// The caller asked for the face parameters of a vertex use that lies on no face (a shell or
-    /// wire vertex use). Its argument, so of kind [`ErrorKind::InvalidInput`].
+    /// The caller gave a vertex use that lies on no face (a shell or wire vertex use) where the
+    /// routine needs one on a face. Its argument, so of kind [`ErrorKind::InvalidInput`].
+    /// `SM_ERR_NULL_POINTER`, or the site's status.
     VertexUseNotOnFace,
     /// The routine works in a face, and the caller's edge use lies on none (an edge use of a
     /// wire). Its argument, so of kind [`ErrorKind::InvalidInput`].
@@ -696,6 +695,54 @@ pub enum TopologyFailure {
     /// definition; the proof's failure is the cause. Class `failed`; whether it is a
     /// defect or a refusal is its cause's.
     BlendRecordNotProved,
+    /// A curve of a loop the caller gave is missing. [`ErrorKind::InvalidInput`].
+    CurveSlotEmpty,
+    /// The UV domain the caller gave is not inside the surface's natural domain.
+    /// [`ErrorKind::InvalidInput`].
+    UvDomainOutsideSurface,
+    /// The loops the caller's counts make of the curves are not valid.
+    /// [`ErrorKind::InvalidInput`].
+    CurveLoopsInvalid,
+    /// The B-rep the caller gave is not a sheet. [`ErrorKind::InvalidInput`].
+    NotASheet,
+    /// The caller did not give both vertex uses of the new edge. [`ErrorKind::InvalidInput`].
+    VertexusesNotGiven,
+    /// The vertex uses the caller gave are on different face uses. [`ErrorKind::InvalidInput`].
+    VertexusesOnDifferentFaces,
+    /// A shell record of the caller's data has a type no shell has.
+    /// [`ErrorKind::InvalidInput`].
+    UnknownShellType {
+        /// The record's type.
+        shell_type: u64,
+    },
+    /// A vertex of the caller's data that a single-vertex loop record names has no vertex use.
+    /// [`ErrorKind::InvalidInput`].
+    VertexWithoutUses,
+    /// A loop record of the caller's data names no edge use that was built.
+    /// [`ErrorKind::InvalidInput`].
+    LoopRecordWithoutEdgeuse,
+    /// The search for the infinite region has no edge to aim its ray at: the B-rep or the
+    /// shell's faces have none, or every face of the shell has both sides in it.
+    /// [`ErrorKind::Unsupported`].
+    NoEdgeToAimAt,
+    /// No ray toward the B-rep's edges found the region it starts in. Class `failed`.
+    RayFoundNoRegion,
+    /// The plane through the curves could not be made; the error that stopped it is the cause.
+    /// Class `failed`; whether it is a defect or a refusal is its cause's.
+    NoPlaneThroughCurves,
+    /// The face could not be made; the error that stopped it is the cause. Class `failed`;
+    /// whether it is a defect or a refusal is its cause's.
+    FaceNotMade,
+    /// A closed loop of the caller's curves split no new face off. Class `failed`.
+    LoopSplitNoFace,
+    /// A loop of the caller's curves split a face off before the loop closed. Class `failed`.
+    LoopSplitFaceEarly,
+    /// An edge could not be split at the parameter. Class `failed`.
+    EdgeNotSplit,
+    /// Not a failure: the sheet's faces were turned to agree
+    /// ([`crate::topology::brep::p9::OrientSheetNote`]), as an error for a caller that stops on
+    /// it, with the note's status `1` (upstream `TRUE`). Class `failed`.
+    SheetReoriented,
 }
 
 /// What a B-rep constructor call works in ([`TopologyFailure::ConstructorNotOpen`],
@@ -731,60 +778,6 @@ impl core::fmt::Display for ConstructorPart {
             Self::EdgeCurve => "edge curve",
         })
     }
-    /// A curve of a loop the caller gave is missing. [`ErrorKind::InvalidInput`].
-    CurveSlotEmpty,
-    /// The UV domain the caller gave is not inside the surface's natural domain.
-    /// [`ErrorKind::InvalidInput`].
-    UvDomainOutsideSurface,
-    /// The loops the caller's counts make of the curves are not valid.
-    /// [`ErrorKind::InvalidInput`].
-    CurveLoopsInvalid,
-    /// The B-rep the caller gave is not a sheet. [`ErrorKind::InvalidInput`].
-    NotASheet,
-    /// The ray toward the B-rep's edges has no direction: its bounding box is a point.
-    /// [`ErrorKind::InvalidInput`].
-    BrepWithoutExtent,
-    /// The caller did not give both vertex uses of the new edge. [`ErrorKind::InvalidInput`].
-    VertexusesNotGiven,
-    /// A vertex use the caller gave is on neither an edge use nor a loop use of a face.
-    /// [`ErrorKind::InvalidInput`].
-    VertexuseNotInFace,
-    /// The vertex uses the caller gave are on different face uses. [`ErrorKind::InvalidInput`].
-    VertexusesOnDifferentFaces,
-    /// A shell record of the caller's data has a type no shell has.
-    /// [`ErrorKind::InvalidInput`].
-    UnknownShellType {
-        /// The record's type.
-        shell_type: u64,
-    },
-    /// A vertex of the caller's data that a single-vertex loop record names has no vertex use.
-    /// [`ErrorKind::InvalidInput`].
-    VertexWithoutUses,
-    /// A loop record of the caller's data names no edge use that was built.
-    /// [`ErrorKind::InvalidInput`].
-    LoopRecordWithoutEdgeuse,
-    /// The search for the infinite region has no edge to aim its ray at: the B-rep or the
-    /// shell's faces have none, or every face of the shell has both sides in it.
-    /// [`ErrorKind::Unsupported`].
-    NoEdgeToAimAt,
-    /// No ray toward the B-rep's edges found the region it starts in. Class `failed`.
-    RayFoundNoRegion,
-    /// The plane through the curves could not be made; the error that stopped it is the cause.
-    /// Class `failed`; whether it is a defect or a refusal is its cause's.
-    NoPlaneThroughCurves,
-    /// The face could not be made; the error that stopped it is the cause. Class `failed`;
-    /// whether it is a defect or a refusal is its cause's.
-    FaceNotMade,
-    /// A closed loop of the caller's curves split no new face off. Class `failed`.
-    LoopSplitNoFace,
-    /// A loop of the caller's curves split a face off before the loop closed. Class `failed`.
-    LoopSplitFaceEarly,
-    /// An edge could not be split at the parameter. Class `failed`.
-    EdgeNotSplit,
-    /// Not a failure: the sheet's faces were turned to agree
-    /// ([`crate::topology::brep::p9::OrientSheetNote`]), as an error for a caller that stops on
-    /// it, with the note's status `1`. Class `failed`.
-    SheetReoriented,
 }
 
 impl TopologyFailure {
@@ -889,7 +882,6 @@ impl TopologyFailure {
             | Self::UvDomainOutsideSurface
             | Self::NotASheet
             | Self::VertexusesNotGiven
-            | Self::VertexuseNotInFace
             | Self::VertexusesOnDifferentFaces
             | Self::UnknownShellType { .. }
             | Self::LoopRecordWithoutEdgeuse
@@ -899,8 +891,9 @@ impl TopologyFailure {
             | Self::FaceNotMade
             | Self::LoopSplitNoFace
             | Self::LoopSplitFaceEarly
-            | Self::EdgeNotSplit
-            | Self::SheetReoriented => SM_ERR,
+            | Self::EdgeNotSplit => SM_ERR,
+            // upstream's `TRUE`: the repair's note, not an error status
+            Self::SheetReoriented => 1,
             Self::Missing(_)
             | Self::RadialFaceWithoutSurface
             | Self::RadialRimWithoutEdge
@@ -942,8 +935,7 @@ impl TopologyFailure {
             | Self::PartNotEmpty
             | Self::NoRegionGiven
             | Self::LoopIndexOutOfRange { .. }
-            | Self::CurveLoopsInvalid
-            | Self::BrepWithoutExtent => SM_ERR_INVALID_INPUT,
+            | Self::CurveLoopsInvalid => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) | Self::GatheredBothSides => SM_ERR_ASSERT_FAILURE,
             Self::OutOfMemory(_) | Self::TooManyOutputSlots { .. } | Self::AllocationFailed => {
                 SM_ERR_OUT_OF_MEMORY
@@ -1042,9 +1034,7 @@ impl TopologyFailure {
             | Self::UvDomainOutsideSurface
             | Self::CurveLoopsInvalid
             | Self::NotASheet
-            | Self::BrepWithoutExtent
             | Self::VertexusesNotGiven
-            | Self::VertexuseNotInFace
             | Self::VertexusesOnDifferentFaces
             | Self::UnknownShellType { .. }
             | Self::VertexWithoutUses
@@ -1389,19 +1379,25 @@ impl core::fmt::Display for TopologyFailure {
             Self::CurvesNotInOneLoop => f.write_str("the curves are not in one loop"),
             Self::CurvesNotAdjacent => f.write_str("the two curves are not adjacent in their loop"),
             Self::CurveSlotEmpty => f.write_str("a curve of a loop is missing"),
-            Self::UvDomainOutsideSurface => f.write_str("the UV domain is not inside the surface's natural domain"),
+            Self::UvDomainOutsideSurface => {
+                f.write_str("the UV domain is not inside the surface's natural domain")
+            }
             Self::CurveLoopsInvalid => f.write_str("the curve loops are not valid"),
             Self::NotASheet => f.write_str("the B-rep is not a sheet"),
-            Self::BrepWithoutExtent => f.write_str("the B-rep has no extent to aim a ray across"),
             Self::VertexusesNotGiven => f.write_str("both vertex uses are needed"),
-            Self::VertexuseNotInFace => f.write_str("a vertex use is not in a face"),
-            Self::VertexusesOnDifferentFaces => f.write_str("the vertex uses are on different face uses"),
-            Self::UnknownShellType { shell_type } => write!(f, "a shell record has the unknown type {shell_type}"),
+            Self::VertexusesOnDifferentFaces => {
+                f.write_str("the vertex uses are on different face uses")
+            }
+            Self::UnknownShellType { shell_type } => {
+                write!(f, "a shell record has the unknown type {shell_type}")
+            }
             Self::VertexWithoutUses => f.write_str("a vertex of a vertex loop has no vertex use"),
             Self::LoopRecordWithoutEdgeuse => f.write_str("a loop record names no built edge use"),
             Self::NoEdgeToAimAt => f.write_str("there is no edge to aim the ray at"),
             Self::RayFoundNoRegion => f.write_str("no ray toward the edges found the region"),
-            Self::NoPlaneThroughCurves => f.write_str("the plane through the curves could not be made"),
+            Self::NoPlaneThroughCurves => {
+                f.write_str("the plane through the curves could not be made")
+            }
             Self::FaceNotMade => f.write_str("the face could not be made"),
             Self::LoopSplitNoFace => f.write_str("the closed loop split off no new face"),
             Self::LoopSplitFaceEarly => f.write_str("a face was split off before its loop closed"),
@@ -2301,13 +2297,7 @@ mod tests {
                 K::InvalidInput,
             ),
             (TopologyFailure::NotASheet, SM_ERR, K::InvalidInput),
-            (
-                TopologyFailure::BrepWithoutExtent,
-                SM_ERR_INVALID_INPUT,
-                K::InvalidInput,
-            ),
             (TopologyFailure::VertexusesNotGiven, SM_ERR, K::InvalidInput),
-            (TopologyFailure::VertexuseNotInFace, SM_ERR, K::InvalidInput),
             (
                 TopologyFailure::VertexusesOnDifferentFaces,
                 SM_ERR,
@@ -2335,7 +2325,7 @@ mod tests {
             (TopologyFailure::LoopSplitNoFace, SM_ERR, K::Failed),
             (TopologyFailure::LoopSplitFaceEarly, SM_ERR, K::Failed),
             (TopologyFailure::EdgeNotSplit, SM_ERR, K::Failed),
-            (TopologyFailure::SheetReoriented, SM_ERR, K::Failed),
+            (TopologyFailure::SheetReoriented, 1, K::Failed),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::topology(op, failure);
