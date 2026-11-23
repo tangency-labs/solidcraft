@@ -1240,7 +1240,7 @@ impl Joint {
         // An inside corner (the strips overlap) is cut back where the far edges meet; that needs
         // straight far edges.
         let inside = eb.ruling.dot(ea.tangent) - ea.ruling.dot(eb.tangent) < -1e-9;
-        let refuse = |what: &str| KernelError::Invalid(format!("{what} at the corner at {vertex:?}"));
+        let refuse = |what: &str| KernelError::Invalid(format!("{what} at the corner at {vertex}"));
         if corners == RuledCorners::Mitre || inside {
             let (m, lam, mu) = meet().ok_or_else(|| refuse("the strips' far edges don't meet: try round corners,"))?;
             let convex = lam > 0.0 && mu < 0.0;

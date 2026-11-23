@@ -9,6 +9,10 @@
 #![forbid(unsafe_code)]
 
 mod airfoil;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[allow(dead_code)]
+#[path = "../build.rs"]
+mod build_script;
 pub mod catalog;
 mod design;
 pub mod design_lock;
@@ -22,35 +26,90 @@ mod gerber;
 mod gerber_area;
 mod gerber_set;
 mod glb;
-pub use design::{
-    DesignCompression, DesignContainerReader, DesignFile, DesignPreview, FileKind, ImportCache, OpenPgpSignature, OpenPgpSigner, ProvenanceChain,
-    ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus, ProvenanceSummary, SignatureSource, Signer,
-    THUMBNAIL_SIZE, design_text, file_kind, has_design_provenance, is_design_container, large_file_text, read_design_file, read_design_file_once,
-    read_design_geometry, read_design_preview, read_design_provenance, read_design_provenance_chain, read_design_provenance_chain_file,
-    read_design_provenance_file, read_design_provenance_file_checked, read_design_provenance_summary_file, read_design_thumbnail,
-    read_design_thumbnail_file, read_design_with_model, read_drawing, read_drawing_file, write_design_container, write_design_container_with_cache,
-    write_design_container_with_compression, write_design_container_with_preview, write_design_container_with_provenance,
-    write_design_container_with_thumbnail, write_drawing_container,
-};
-pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, GlbOptions, MAX_GLB_BYTES, export_glb};
+pub use design::DesignCompression;
+pub use design::DesignContainerReader;
+pub use design::DesignFile;
+pub use design::DesignPreview;
+pub use design::FileKind;
+pub use design::ImportCache;
+pub use design::OpenPgpSignature;
+pub use design::OpenPgpSigner;
+pub use design::ProvenanceChain;
+pub use design::ProvenanceRecord;
+pub use design::ProvenanceReport;
+pub use design::ProvenanceSave;
+pub use design::ProvenanceSigner;
+pub use design::ProvenanceStatus;
+pub use design::ProvenanceSummary;
+pub use design::SignatureSource;
+pub use design::Signer;
+pub use design::THUMBNAIL_SIZE;
+pub use design::design_text;
+pub use design::file_kind;
+pub use design::has_design_provenance;
+pub use design::is_design_container;
+pub use design::large_file_text;
+pub use design::read_design_file;
+pub use design::read_design_file_once;
+pub use design::read_design_geometry;
+pub use design::read_design_preview;
+pub use design::read_design_provenance;
+pub use design::read_design_provenance_chain;
+pub use design::read_design_provenance_chain_file;
+pub use design::read_design_provenance_file;
+pub use design::read_design_provenance_file_checked;
+pub use design::read_design_provenance_summary_file;
+pub use design::read_design_thumbnail;
+pub use design::read_design_thumbnail_file;
+pub use design::read_design_with_model;
+pub use design::read_drawing;
+pub use design::read_drawing_file;
+pub use design::write_design_container;
+pub use design::write_design_container_with_cache;
+pub use design::write_design_container_with_compression;
+pub use design::write_design_container_with_preview;
+pub use design::write_design_container_with_provenance;
+pub use design::write_design_container_with_thumbnail;
+pub use design::write_drawing_container;
+pub use glb::DEFAULT_COLOR as GLB_DEFAULT_COLOR;
+pub use glb::GlbOptions;
+pub use glb::MAX_GLB_BYTES;
+pub use glb::export_glb;
 mod legacy_dir;
+pub mod library;
 pub mod library_files;
 pub mod limits;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
-pub use native_cad::{
-    NATIVE_CAD_EXTS, NativeDesign, USD_EXTS, cadmpeg_step_records, detects_freecad, is_freecad_path, is_native_cad_path, is_usd_path,
-    native_cad_design, native_cad_records, native_cad_to_step, read_usd, usd_from_step, usd_records,
-};
+pub use native_cad::NATIVE_CAD_EXTS;
+pub use native_cad::NativeDesign;
+pub use native_cad::USD_EXTS;
+pub use native_cad::cadmpeg_step_records;
+pub use native_cad::detects_freecad;
+pub use native_cad::is_freecad_path;
+pub use native_cad::is_native_cad_path;
+pub use native_cad::is_usd_path;
+pub use native_cad::native_cad_design;
+pub use native_cad::native_cad_records;
+pub use native_cad::native_cad_to_step;
+pub use native_cad::read_usd;
+pub use native_cad::usd_from_step;
+pub use native_cad::usd_records;
 pub mod paper;
 mod pat;
 mod pcd;
 mod ply;
 mod ply_complex;
-pub use ply::{ply_counts, read_ply_mesh};
+pub use ply::ply_counts;
+pub use ply::read_ply_mesh;
 mod point_cloud;
-pub use point_cloud::{CloudFile, DEFAULT_MAX_POINTS, MAX_POINT_CLOUD_BYTES, is_ply_path, is_point_cloud_path, read_point_cloud};
+pub use point_cloud::CloudFile;
+pub use point_cloud::DEFAULT_MAX_POINTS;
+pub use point_cloud::MAX_POINT_CLOUD_BYTES;
+pub use point_cloud::is_ply_path;
+pub use point_cloud::is_point_cloud_path;
+pub use point_cloud::read_point_cloud;
 pub mod safe_write;
 pub mod safe_zip;
 pub mod sdf;
@@ -59,48 +118,154 @@ mod svg;
 /// Explicit development-test seams; absent from ordinary production builds.
 #[cfg(any(test, feature = "dxf-legacy-baseline-tests"))]
 pub mod test_support {
-    pub use crate::dxf_out::{DxfEntity, DxfLayer, legacy_dxf_baseline};
+    pub use crate::dxf_out::DxfEntity;
+    pub use crate::dxf_out::DxfLayer;
+    pub use crate::dxf_out::legacy_dxf_baseline;
 }
 mod threemf;
 pub mod urdf;
 pub mod vfs;
 
-pub use airfoil::{Airfoil, AirfoilFormat, MAX_AIRFOIL_BYTES, MAX_AIRFOIL_POINTS, read_airfoil};
-pub use dxf::{DxfReadProfile, DxfWriteOptions, read_dxf, read_dxf_file, read_dxf_file_with_profile, write_dxf, write_dxf_entities, write_dxf_opts};
-pub use dxf_out::{
-    DXF_PROFILE_FORMAT, DXF_PROFILE_VERSION, DxfEntity, DxfEntityWeight, DxfExportProfile, DxfFile, DxfFileEntity, DxfFileLayer, DxfGeometryBounds,
-    DxfLayer, DxfLayerId, DxfLinetype, DxfPath, DxfPathStyle, DxfRole, DxfRoleStyle, DxfShape, DxfSourceBlock, DxfStandardWeight,
-    DxfTextHorizontalAlignment, DxfTextRecordKind, DxfTextSource, DxfTextVerticalAlignment, DxfVertex, MAX_DXF_PROFILE_BYTES, admit_path,
-    loop_lwpolyline, loop_lwpolyline_scaled, path_shapes, write_dxf_drawing_units, write_dxf_file, write_dxf_file_as,
-    write_dxf_file_with_text_bounds,
-};
-pub use excellon::{DrillArc, DrillHit, DrillSlot, Drills, read_excellon};
-pub use gerber::{GerberLayer, GerberOutline, read_gerber_layer, read_gerber_outline};
-pub use gerber_set::{
-    BOARD_EXTENSIONS, BoardJob, GerberSet, MAX_SET_FILES, SetFile, SetRole, classify_set, is_zip_path, read_gerber_set, zip_entries,
-};
-pub use legacy_dir::{APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
-pub use pat::{PatImportOptions, PatUnits, read_pat};
-pub use safe_write::{backup_path, write_atomic};
-pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
-pub use svg::{CurveWarning, SvgDrawing, decode_svg, read_svg, read_svg_drawing, svg_nothing_to_import, svg_sheet};
+pub use airfoil::Airfoil;
+pub use airfoil::AirfoilFormat;
+pub use airfoil::MAX_AIRFOIL_BYTES;
+pub use airfoil::MAX_AIRFOIL_POINTS;
+pub use airfoil::read_airfoil;
+pub use dxf::DxfReadProfile;
+pub use dxf::DxfWriteOptions;
+pub use dxf::read_dxf;
+pub use dxf::read_dxf_file;
+pub use dxf::read_dxf_file_with_profile;
+pub use dxf::write_dxf;
+pub use dxf::write_dxf_entities;
+pub use dxf::write_dxf_opts;
+pub use dxf_out::DXF_PROFILE_FORMAT;
+pub use dxf_out::DXF_PROFILE_VERSION;
+pub use dxf_out::DxfEntity;
+pub use dxf_out::DxfEntityWeight;
+pub use dxf_out::DxfExportProfile;
+pub use dxf_out::DxfFile;
+pub use dxf_out::DxfFileEntity;
+pub use dxf_out::DxfFileLayer;
+pub use dxf_out::DxfGeometryBounds;
+pub use dxf_out::DxfLayer;
+pub use dxf_out::DxfLayerId;
+pub use dxf_out::DxfLinetype;
+pub use dxf_out::DxfPath;
+pub use dxf_out::DxfPathStyle;
+pub use dxf_out::DxfRole;
+pub use dxf_out::DxfRoleStyle;
+pub use dxf_out::DxfShape;
+pub use dxf_out::DxfSourceBlock;
+pub use dxf_out::DxfStandardWeight;
+pub use dxf_out::DxfTextHorizontalAlignment;
+pub use dxf_out::DxfTextRecordKind;
+pub use dxf_out::DxfTextSource;
+pub use dxf_out::DxfTextVerticalAlignment;
+pub use dxf_out::DxfVertex;
+pub use dxf_out::MAX_DXF_PROFILE_BYTES;
+pub use dxf_out::admit_path;
+pub use dxf_out::loop_lwpolyline;
+pub use dxf_out::loop_lwpolyline_scaled;
+pub use dxf_out::path_shapes;
+pub use dxf_out::write_dxf_drawing_units;
+pub use dxf_out::write_dxf_file;
+pub use dxf_out::write_dxf_file_as;
+pub use dxf_out::write_dxf_file_with_text_bounds;
+pub use excellon::DrillArc;
+pub use excellon::DrillHit;
+pub use excellon::DrillSlot;
+pub use excellon::Drills;
+pub use excellon::read_excellon;
+pub use gerber::GerberLayer;
+pub use gerber::GerberOutline;
+pub use gerber::read_gerber_layer;
+pub use gerber::read_gerber_outline;
+pub use gerber_set::BOARD_EXTENSIONS;
+pub use gerber_set::BoardJob;
+pub use gerber_set::GerberSet;
+pub use gerber_set::MAX_SET_FILES;
+pub use gerber_set::SetFile;
+pub use gerber_set::SetRole;
+pub use gerber_set::classify_set;
+pub use gerber_set::is_zip_path;
+pub use gerber_set::read_gerber_set;
+pub use gerber_set::zip_entries;
+pub use legacy_dir::APP_ID;
+pub use legacy_dir::PREVIOUS_APP_IDS;
+pub use legacy_dir::adopt_legacy_dir;
+pub use legacy_dir::legacy_flatpak_paths;
+pub use pat::PatImportOptions;
+pub use pat::PatUnits;
+pub use pat::read_pat;
+pub use safe_write::backup_path;
+pub use safe_write::write_atomic;
+pub use sketch2d::Geom2;
+pub use sketch2d::MAX_DRAWING_BYTES;
+pub use svg::CurveWarning;
+pub use svg::SvgDrawing;
+pub use svg::decode_svg;
+pub use svg::read_svg;
+pub use svg::read_svg_drawing;
+pub use svg::svg_nothing_to_import;
+pub use svg::svg_sheet;
 mod gltf_in;
-pub use gltf_in::{GltfImport, Loader, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
+pub use gltf_in::GltfImport;
+pub use gltf_in::Loader;
+pub use gltf_in::MeshPlan;
+pub use gltf_in::PlanPlace;
+pub use gltf_in::glb_container;
+pub use gltf_in::is_gltf_path;
+pub use gltf_in::read_gltf;
 mod kicad_in;
-pub use kicad_in::{
-    DEFAULT_BOARD_COLOR, KicadBoard, KicadCopper, KicadDrill, KicadFootprint, KicadImport, KicadLoader, KicadModel, KicadModelFile, KicadOptions,
-    KicadPad, KicadRepresentation, KicadStroke, KicadText, KicadVia, KicadZone, MAX_KICAD_BYTES, is_kicad_path, kicad_board_mesh, kicad_board_path,
-    kicad_board_thickness, parse_kicad_board, parse_kicad_board_with, read_kicad,
-};
+pub use kicad_in::DEFAULT_BOARD_COLOR;
+pub use kicad_in::KicadBoard;
+pub use kicad_in::KicadCopper;
+pub use kicad_in::KicadDrill;
+pub use kicad_in::KicadFootprint;
+pub use kicad_in::KicadImport;
+pub use kicad_in::KicadLoader;
+pub use kicad_in::KicadModel;
+pub use kicad_in::KicadModelFile;
+pub use kicad_in::KicadOptions;
+pub use kicad_in::KicadPad;
+pub use kicad_in::KicadRepresentation;
+pub use kicad_in::KicadStroke;
+pub use kicad_in::KicadText;
+pub use kicad_in::KicadVia;
+pub use kicad_in::KicadZone;
+pub use kicad_in::MAX_KICAD_BYTES;
+pub use kicad_in::is_kicad_path;
+pub use kicad_in::kicad_board_mesh;
+pub use kicad_in::kicad_board_path;
+pub use kicad_in::kicad_board_thickness;
+pub use kicad_in::parse_kicad_board;
+pub use kicad_in::parse_kicad_board_with;
+pub use kicad_in::read_kicad;
 mod obj;
 pub use obj::read_obj;
-pub use sdf::{SdfDecal, SdfOptions, SdfPackage, sdf_model};
-pub use threemf::{
-    MAX_3MF_BYTES, MeshObject, model_xml, model_xml_parts, model_xml_with, read_3mf, weld, write_3mf, write_3mf_parts, write_3mf_with,
-};
-pub use urdf::{UrdfOptions, UrdfPackage, urdf};
+pub use sdf::SdfDecal;
+pub use sdf::SdfOptions;
+pub use sdf::SdfPackage;
+pub use sdf::sdf_model;
+pub use threemf::MAX_3MF_BYTES;
+pub use threemf::MeshObject;
+pub use threemf::model_xml;
+pub use threemf::model_xml_parts;
+pub use threemf::model_xml_with;
+pub use threemf::read_3mf;
+pub use threemf::weld;
+pub use threemf::write_3mf;
+pub use threemf::write_3mf_parts;
+pub use threemf::write_3mf_with;
+pub use urdf::UrdfOptions;
+pub use urdf::UrdfPackage;
+pub use urdf::urdf;
 mod vrml_in;
-pub use vrml_in::{MAX_VRML_BYTES, VrmlMesh, is_vrml_path, read_vrml};
+pub use vrml_in::MAX_VRML_BYTES;
+pub use vrml_in::VrmlMesh;
+pub use vrml_in::is_vrml_path;
+pub use vrml_in::read_vrml;
 
 use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Metadata, ModelState};

@@ -15,7 +15,7 @@
 //! ball of radius the distance (#2793's rig cases). No recursion.
 
 use super::{FilletBody, FilletObject, FilletSession, FilletSurfaceGenerator};
-use crate::blend::blend_refusal::{chains_among, BlendRefusal};
+use crate::blend::blend_refusal::{chains_among, setback_below_resolution, BlendRefusal};
 use crate::blend::chamfer_side::widest_wedge_bound;
 use crate::blend::fillet_executive::p2::FilletParametersAccess;
 use crate::blend::fillet_solver::p5::is_knife_edge;
@@ -332,7 +332,10 @@ impl FilletSession<'_> {
     /// than a knife edge chamfered at equal distances, which is the chord between the contacts
     /// of the ball of radius the distance), sizes or setbacks that are not finite and
     /// positive, or two distances that fold on it (one at most the other's `cos(wedge)`);
-    /// [`BlendRefusal::ChamferAngleTooLarge`] for an angle past the wedge's room.
+    /// [`BlendRefusal::ChamferAngleTooLarge`] for an angle past the wedge's room;
+    /// [`BlendFailure::SizeBelowResolution`](crate::error::blend::BlendFailure::SizeBelowResolution)
+    /// at the edge for a setback (a distance, or one computed from an angle or a chord at
+    /// the wedge) below eight times the body's tolerance, along either face.
     pub fn prepare_chamfers(
         &mut self,
         k: &Kernel,
@@ -549,6 +552,7 @@ impl FilletSession<'_> {
                 if !(d == d2 && d.is_finite() && d > 0.0) {
                     return Err(size_invalid(id));
                 }
+                setback_below_resolution(OP_ALONG, id, [d, d2], self.objects.target.tolerance())?;
                 first.push(d);
                 second.push(d);
                 chamfers.push(None);
@@ -569,6 +573,18 @@ impl FilletSession<'_> {
             if !(a.is_finite() && a > 0.0 && b.is_finite() && b > 0.0) {
                 return Err(size_invalid(id));
             }
+            // a setback is how far a rail lies from the edge along its face, whether it was
+            // given as a distance or computed from an angle or a chord: one below the
+            // smallest size a fillet builds (an angle so small its second setback is far
+            // below the body's tolerance) puts the rail on the edge within tolerance, a
+            // sliver, refused as such a distance is; before the swap, so either face the
+            // first size is along names it alike
+            setback_below_resolution(
+                OP_ALONG,
+                id,
+                asked.setbacks(),
+                self.objects.target.tolerance(),
+            )?;
             let chamfer = if on_second {
                 let size = match asked.size {
                     ChamferSize::Distances(_) | ChamferSize::DistanceAngle { .. } => {
@@ -826,5 +842,96 @@ mod tests {
         assert!(setback(1.37, [1.0, 2.0], widest) < 0.0);
         // already past the bound: the narrowest stands
         assert_eq!(unfolded_wedge(1.6, [1.0, 2.0], widest, m), 1.6);
+    }
+
+    /// The unit box with its corner at (1, 1) cut off from (1, 0.5) to (0.5, 1), from z = 0
+    /// to 1, and its edge that is either the box's square edge on x = 1, y = 0 (a wedge of 90
+    /// degrees) or the cut's obtuse edge on x = 1, y = 0.5 (135 degrees).
+    fn cut_box(k: &mut Kernel, obtuse: bool) -> (crate::Brep, EdgeId) {
+        use crate::curve::curve::Curve;
+        let pts = [(0.0, 0.0), (1.0, 0.0), (1.0, 0.5), (0.5, 1.0), (0.0, 1.0)];
+        let curves: Vec<Curve> = (0..pts.len())
+            .map(|i| {
+                let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+                Curve::from(
+                    crate::primitive::api_curves::create_line_segment(
+                        crate::math::Vec3::new(a.0, a.1, 0.0),
+                        crate::math::Vec3::new(b.0, b.1, 0.0),
+                    )
+                    .unwrap(),
+                )
+            })
+            .collect();
+        let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+        let body =
+            crate::sweep::api_brep::create_taper_extrude(k, &refs, 1.0, 0.0, 3, false).unwrap();
+        let at = crate::math::Point3::new(1.0, if obtuse { 0.5 } else { 0.0 }, 0.5);
+        let e = body
+            .edge_list()
+            .iter()
+            .copied()
+            .find(|&e| {
+                crate::query::api_queries::edge_closest_point(k, &body, e, at)
+                    .unwrap()
+                    .closest
+                    .distance
+                    < 1e-9
+            })
+            .unwrap();
+        (body, e)
+    }
+
+    /// #21004: a distance and an angle so small that the second setback, `distance sin(angle)
+    /// / sin(wedge + angle)`, is far below the body's tolerance (0.001 and 1e-300: about
+    /// 1.4e-303 on the obtuse 135-degree edge, 1e-303 on the square one) is refused as a
+    /// distance that small is, `SizeBelowResolution` at the edge, alike along either face;
+    /// the same distance at an angle of 22.5 degrees (setback 0.001 on the obtuse edge,
+    /// 0.0004 on the square one) still prepares.
+    #[test]
+    fn a_setback_an_angle_gives_below_resolution_is_refused_alike_along_either_face() {
+        use crate::error::blend::BlendFailure;
+        let sliver = ChamferSize::DistanceAngle {
+            distance: 0.001,
+            angle: 1e-300,
+        };
+        let good = ChamferSize::DistanceAngle {
+            distance: 0.001,
+            angle: crate::math::PI / 8.0,
+        };
+        for obtuse in [true, false] {
+            let mut k = Kernel::default();
+            let (mut body, e) = cut_box(&mut k, obtuse);
+            let tolerance = body.tolerance();
+            let of_edge = edge::faces(&body, e, None).unwrap();
+            assert_eq!(of_edge.len(), 2);
+            for face in of_edge {
+                let err = FilletSession::new(&mut k, &mut body)
+                    .unwrap()
+                    .prepare_chamfers_along(&k, &[e], &[sliver], &[face])
+                    .unwrap_err();
+                let Some(&BlendFailure::SizeBelowResolution { size, tolerance: t }) =
+                    err.blend_failure()
+                else {
+                    panic!("obtuse {obtuse}, along {face:?}: {err:?}");
+                };
+                // the second setback, not the distance asked: positive, finite, a sliver
+                assert!(size > 0.0 && size < 1e-302, "{size}");
+                assert_eq!(t, tolerance);
+                assert_eq!(err.kind(), crate::error::ErrorKind::InvalidInput, "{err:?}");
+                assert_eq!(err.entity(), Some(EntityRef::Edge(e)), "{err:?}");
+                assert_eq!(
+                    err.operation(),
+                    "blend::fillet_executive::session::prepare_chamfers_along"
+                );
+                assert_eq!(
+                    err.upstream_status(),
+                    Some(crate::error::SM_ERR_INVALID_INPUT)
+                );
+                FilletSession::new(&mut k, &mut body)
+                    .unwrap()
+                    .prepare_chamfers_along(&k, &[e], &[good], &[face])
+                    .unwrap();
+            }
+        }
     }
 }

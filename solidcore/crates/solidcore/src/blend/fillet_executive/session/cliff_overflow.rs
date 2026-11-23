@@ -37,7 +37,8 @@ fn null_defect(why: &'static str) -> SolidError {
 }
 
 /// Why a solver's rolling edge use and its edge are there.
-const SOLVER_EDGE: &str = "a solver has no edge use, or its edge use no edge: a solver rolls \
+pub(super) const SOLVER_EDGE: &str =
+    "a solver has no edge use, or its edge use no edge: a solver rolls \
      on an edge use of the filleted edge it is made for";
 
 /// `smos_Max` of two doubles.
