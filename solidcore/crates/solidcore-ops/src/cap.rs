@@ -14,7 +14,7 @@ use solidcore::topology::face::curve_on::curve_lies_on_face;
 
 use crate::body::Body;
 use crate::order::{self, Order};
-use crate::session::with_body;
+use crate::session::{read_body, with_body};
 use crate::{Error, Result};
 
 fn vec(p: [f64; 3]) -> Vec3 {
@@ -131,7 +131,7 @@ pub fn edges_lie_on_face(
         .iter()
         .map(|e| order::edge(part_order, *e))
         .collect::<Result<Vec<_>>>()?;
-    let curves = with_body("section_curves", part, |_, b| {
+    let curves = read_body("section_curves", part, |_, b| {
         let mut out = Vec::new();
         for e in &ids {
             let data = b.edge(*e)?;

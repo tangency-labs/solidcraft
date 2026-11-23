@@ -21,6 +21,7 @@ pub mod broken_view_preview;
 pub mod browser;
 pub mod browser_canvas;
 mod browser_defects;
+pub mod browser_links;
 pub mod browser_prompts;
 pub mod browser_search;
 #[cfg(test)]
@@ -35,6 +36,9 @@ mod colour_vision_tests;
 pub mod command_help;
 pub mod context_menu;
 pub mod control;
+mod control_click;
+#[cfg(test)]
+mod control_click_view_tests;
 pub mod control_job;
 mod control_joint_drive;
 mod control_joint_pose;
@@ -54,6 +58,7 @@ pub mod dialogs_constrain;
 pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
+pub mod dialogs_frame_plate;
 mod dialogs_hole;
 pub mod dialogs_insert_airfoil;
 pub mod dialogs_insert_drawing;
@@ -204,6 +209,7 @@ mod status_tests {
     }
 }
 mod app_bar_custom;
+mod app_plugins;
 #[cfg(test)]
 mod apply_off_thread_tests;
 mod export_name;
@@ -314,6 +320,7 @@ pub mod settings_profiles;
 #[cfg(test)]
 mod settings_profiles_tests;
 pub mod sheet_rule_library;
+pub(crate) mod sheet_views;
 pub mod shell;
 #[cfg(test)]
 mod shell_face_sketch_ui_tests;
@@ -321,7 +328,7 @@ pub mod shortcut_box;
 pub mod sketch3d;
 #[cfg(test)]
 mod sketch3d_frame_ui_tests;
-pub(crate) mod sketch_attachment_ui;
+mod sketch_attachment_ui;
 #[cfg(test)]
 mod sketch_attachment_ui_tests;
 mod sketch_construction;
@@ -535,68 +542,69 @@ impl Default for UiState {
 /// Host services injected by the app so this crate stays portable.
 #[derive(Default)]
 pub struct Services {
-    /// Ask for a file to open. The extensions are the file type the command reads, offered as
-    /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
-    pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
-    pub pick_save: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
-    /// Open a dialog for one file of a kind (its name, its extensions): on macOS a dialog allows
-    /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
-    /// Open dialog.
-    pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
-    /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
-    pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
-    /// Open a dialog asking for a folder. `None` on the web build and when the host has no
-    /// folder picker: a plugin field shows no Browse button and the text field still accepts
-    /// a pasted path, and the document library cannot choose a folder.
-    pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
-    pub show_in_folder: Option<Box<dyn Fn(&str)>>,
-    /// Open a file in the program the system opens its kind with (a PDF in its viewer, to print).
-    pub open_path: Option<Box<dyn Fn(&str) -> Result<(), String>>>,
-    /// A browser: open a document made in memory (its name, its media type, its bytes) in a new tab.
-    pub open_bytes: Option<Box<dyn Fn(&str, &str, &[u8]) -> Result<(), String>>>,
-    /// Where the host reads the anti-aliasing preference at start (a small JSON file).
-    pub graphics_path: Option<String>,
-    /// Linux: the window system this run uses, `wayland` or `x11` (Preferences shows it, #3083).
-    pub window_system: Option<&'static str>,
+    /// HTTP for the agent chat's API agents (OpenAI-compatible and Anthropic-compatible endpoints); None: no API agents.
+    pub agent_http: Option<agent_chat::backend::HttpFn>,
+    /// Show the designs the browser keeps for itself; None: the host has no such store.
+    pub browser_files: Option<Box<dyn Fn()>>,
+    /// Whether a recent design that is not in memory can be brought back by the host (the browser
+    /// build remembers files it saved to the disk); None: it can't.
+    pub can_restore: Option<Box<dyn Fn(&str) -> bool>>,
     /// The desktop's dark (`Some(true)`) or light preference as the host reads it, for Theme:
     /// System where the window toolkit does not report it (Linux desktops, #7944). Called every
     /// frame, so it only reads a value kept up to date elsewhere. None, or `None` from it: the
     /// window toolkit's theme.
     pub desktop_dark: Option<Box<dyn Fn() -> Option<bool>>>,
-    /// Lazy background observation; `needed` arms polling, the return is cached only.
-    pub reduce_transparency: Option<Box<dyn Fn(bool) -> Option<bool>>>,
+    /// Hand a design's bytes to the user as a downloaded file (name, bytes); the browser build's
+    /// File > Download design. None: the host saves real files, so there is nothing to offer.
+    pub download_design: Option<Box<dyn Fn(&str, &[u8]) -> Result<(), String>>>,
+    /// Upload a model to EasyPrint (Printables' slicer in the browser) and answer with the address
+    /// to open (`easyprint_ui`); None: this host can't, and the menu doesn't offer it.
+    pub easyprint_upload: Option<easyprint_ui::Upload>,
+    /// Adapter names and descriptive labels from the desktop renderer's chosen backends.
+    pub graphics_adapters: Vec<(String, String)>,
     /// Graphics API that opened the current window; the saved preference applies next start.
     pub graphics_backend: Option<&'static str>,
     /// An explicit process override is controlling the API instead of the saved preference.
     pub graphics_backend_override: bool,
+    /// Where the host reads the anti-aliasing preference at start (a small JSON file).
+    pub graphics_path: Option<String>,
     /// The host's ordinary restart command, run only after unsaved designs are handled.
     pub graphics_restart: Option<(std::path::PathBuf, Vec<String>)>,
-    /// Adapter names and descriptive labels from the desktop renderer's chosen backends.
-    pub graphics_adapters: Vec<(String, String)>,
-    /// HTTPS GET for the update check (`update`); None: never check (browser, tests).
-    pub http_get: Option<update::HttpGet>,
     /// HTTPS download to a file, with progress, for one-click updates (`update::install`).
     pub http_download: Option<update::install::HttpDownload>,
+    /// HTTPS GET for the update check (`update`); None: never check (browser, tests).
+    pub http_get: Option<update::HttpGet>,
     /// The browser's offer to install the web app (`install`); None: no Install button (desktop).
     pub install_app: Option<install::InstallApp>,
-    /// Hand a design's bytes to the user as a downloaded file (name, bytes); the browser build's
-    /// File > Download design. None: the host saves real files, so there is nothing to offer.
-    pub download_design: Option<Box<dyn Fn(&str, &[u8]) -> Result<(), String>>>,
-    /// Whether a recent design that is not in memory can be brought back by the host (the browser
-    /// build remembers files it saved to the disk); None: it can't.
-    pub can_restore: Option<Box<dyn Fn(&str) -> bool>>,
+    /// A browser: open a document made in memory (its name, its media type, its bytes) in a new tab.
+    pub open_bytes: Option<Box<dyn Fn(&str, &str, &[u8]) -> Result<(), String>>>,
+    /// Open a file in the program the system opens its kind with (a PDF in its viewer, to print).
+    pub open_path: Option<Box<dyn Fn(&str) -> Result<(), String>>>,
+    /// Open a dialog for one file of a kind (its name, its extensions): on macOS a dialog allows
+    /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
+    /// Open dialog.
+    pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
+    /// Open a dialog asking for a folder. `None` on the web build and when the host has no
+    /// folder picker: a plugin field shows no Browse button and the text field still accepts
+    /// a pasted path, and the document library cannot choose a folder.
+    pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    /// Ask for a file to open. The extensions are the file type the command reads, offered as
+    /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
+    pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
+    /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
+    pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    pub pick_save: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
+    /// Lazy background observation; `needed` arms polling, the return is cached only.
+    pub reduce_transparency: Option<Box<dyn Fn(bool) -> Option<bool>>>,
     /// Bring such a design back and open it when it arrives (asks the user for access, so call it
     /// in the click that chose it).
     pub restore_file: Option<Box<dyn Fn(&str)>>,
-    /// Show the designs the browser keeps for itself; None: the host has no such store.
-    pub browser_files: Option<Box<dyn Fn()>>,
-    /// HTTP for the agent chat's API agents (OpenAI-compatible and Anthropic-compatible endpoints); None: no API agents.
-    pub agent_http: Option<agent_chat::backend::HttpFn>,
     /// The system keychain, for API agents' keys; None: keys can't be stored.
     pub secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
-    /// Upload a model to EasyPrint (Printables' slicer in the browser) and answer with the address
-    /// to open (`easyprint_ui`); None: this host can't, and the menu doesn't offer it.
-    pub easyprint_upload: Option<easyprint_ui::Upload>,
+    pub show_in_folder: Option<Box<dyn Fn(&str)>>,
+    /// Where the ticket server's sign-in is kept: the system keyring (the browser's storage on
+    /// the web). Never a plain file.
+    pub ticket_secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
     /// HTTP to the ticket server, for problem reports and My tickets (`tickets`); None: reports
     /// open a GitHub draft instead.
     pub tickets_http: Option<tickets::Http>,
@@ -604,9 +612,8 @@ pub struct Services {
     /// None: nothing is sent.
     #[cfg(feature = "usage-stats")]
     pub usage_http: Option<tickets::Http>,
-    /// Where the ticket server's sign-in is kept: the system keyring (the browser's storage on
-    /// the web). Never a plain file.
-    pub ticket_secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
+    /// Linux: the window system this run uses, `wayland` or `x11` (Preferences shows it, #3083).
+    pub window_system: Option<&'static str>,
 }
 
 /// The view before a sketch opened and the view that faced the sketch then (#7038).
@@ -687,6 +694,7 @@ pub struct SolveApp {
     pub(crate) sketch_refreshes: std::collections::BTreeMap<u64, sketch_view::ModelRefresh>,
     pub(crate) stopped_sketch_refreshes: std::collections::BTreeSet<u64>,
     pub(crate) sketch_edit_sequences: std::collections::BTreeMap<u64, u64>,
+    pub(crate) view_ribbons: std::collections::BTreeMap<(u64, u64), workspace::ViewRibbon>,
     /// The custom view navigator's body (kept with the preferences).
     pub view_gizmo: view_gizmo::State,
     /// Seconds since start, as of this frame.
@@ -851,6 +859,8 @@ pub struct SolveApp {
     /// When Esc was last pressed (input time): a second press soon after finishes the sketch.
     pub last_escape: Option<f64>,
     pub status: Option<(String, f64, bool)>,
+    /// Interactive tool guidance is presented only where the tool receives input.
+    pub(crate) status_is_tool_hint: bool,
     /// The status message offers Undo (a click on it undoes the last step), as after an automatic stand-up.
     pub status_undo: bool,
     /// The status message is a refused JSON save of a design with binary data in it, and offers
@@ -959,6 +969,7 @@ pub struct SolveApp {
     pub synthetic_mods: egui::Modifiers,
     /// A click that came in the same frame as typing before it, held for the next frame.
     held_click: Vec<egui::Event>,
+    control_click: control_click::ControlClick,
     /// Pen-tip release positions from the platform, for this frame and for a held click.
     pen_release: Option<egui::Pos2>,
     held_pen_release: Option<egui::Pos2>,
@@ -978,13 +989,9 @@ pub struct SolveApp {
     agent_replies: Vec<(std::sync::mpsc::Receiver<serde_json::Value>, std::sync::mpsc::Sender<serde_json::Value>)>,
     /// Agent exports computing on copies of the design.
     control_answering: Vec<control_job::ControlJob>,
-    /// Most recent completed inspection per session and package, ordered by request.
-    plugin_inspection_versions: std::collections::BTreeMap<(u64, String), usize>,
-    /// Set by the desktop app ([`Self::share_plugin_grants`]): the approved plugin grants are kept
-    /// in the plugins folder's grant store too, shared with the command line and headless MCP.
-    plugin_grant_store: Option<solidcraft_engine::plugin::grant_store::Synced>,
+    /// Plugin state kept between frames. New plugin state goes in [`app_plugins::State`].
+    pub(crate) plugins: app_plugins::State,
     plugin_slots: plugin_slots::State,
-    plugin_events: plugin_events::State,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
@@ -1063,6 +1070,7 @@ impl SolveApp {
     }
 
     pub fn new(mut session: Session, services: Services) -> Self {
+        session.model_focus = true;
         // The app's catalogs, once per process; later calls find them installed.
         i18n::install();
         // The app's look (icons, glyphs and built-in theme files), likewise, before the first frame.
@@ -1102,6 +1110,7 @@ impl SolveApp {
             sketch_notices: Default::default(),
             prepared_edit_starts: Default::default(),
             sketch_edit_sequences: Default::default(),
+            view_ribbons: Default::default(),
             sketch_finish_processing: false,
             sketch_refreshes: Default::default(),
             stopped_sketch_refreshes: Default::default(),
@@ -1186,6 +1195,7 @@ impl SolveApp {
             escape_owner: None,
             last_escape: None,
             status: None,
+            status_is_tool_hint: false,
             status_undo: false,
             status_save_sc: false,
             quit_requested: false,
@@ -1235,6 +1245,7 @@ impl SolveApp {
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
             held_click: Vec::new(),
+            control_click: control_click::ControlClick::default(),
             pen_release: None,
             held_pen_release: None,
             synthetic_press: false,
@@ -1247,10 +1258,8 @@ impl SolveApp {
             control_joint_drive: Default::default(),
             agent_replies: Vec::new(),
             control_answering: Vec::new(),
-            plugin_inspection_versions: Default::default(),
-            plugin_grant_store: None,
+            plugins: Default::default(),
             plugin_slots: Default::default(),
-            plugin_events: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
@@ -1676,6 +1685,9 @@ impl SolveApp {
                 params.insert("view".into(), json!(target));
             }
         }
+        if matches!(id, "drawing.sketch.create" | "drawing.sketch.edit") {
+            crate::sketch_view::prepare_sheet_start(self, id, &mut params)?;
+        }
         crate::plugins::sync_policy(self);
         if plugins::busy(self) && matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
             return Err(self.tr("prefs.plugin_busy").into());
@@ -1706,7 +1718,7 @@ impl SolveApp {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
         self.session.set_validation(self.preferences.validation);
-        drawing_workspace::sync_history(self);
+        workspace::command_receiver(self, id, &params)?;
         print_face_ui::sync(&mut self.session, &self.preferences);
         if id == "timeline.play" {
             let reply = self.session.execute(id, &params).map_err(|e| e.to_string())?;
@@ -1845,10 +1857,11 @@ impl SolveApp {
             r => r,
         };
         if let Ok(v) = &r {
+            sheet_views::command_opened(self, id, v);
             if id.eq_ignore_ascii_case("plugin.inspect")
                 && let Some(id) = v.pointer("/manifest/id").and_then(Value::as_str)
             {
-                self.plugin_inspection_versions.insert((self.session.uid, id.to_owned()), control_job::next_plugin_inspection());
+                self.plugins.inspection_versions.insert((self.session.uid, id.to_owned()), control_job::next_plugin_inspection());
             }
             match id {
                 "ui.appBarReset" => self.toolbar_custom.reset_app_bar(),
@@ -1907,7 +1920,20 @@ impl SolveApp {
                 "view.navigation_bar" => {
                     self.ui.show_navigation_bar = v.get("visible").and_then(Value::as_bool).unwrap_or(!self.ui.show_navigation_bar)
                 }
+                // The Browser tree panel is a panel of the layout: closing it from its host menu
+                // leaves no way back, so this command opens it again (#16058). Closing it here
+                // closes it in the layout too, so a second toggle reads the closed state.
+                "view.browser" => {
+                    let visible = v.get("visible").and_then(Value::as_bool).unwrap_or(!browser::panel_open(self));
+                    self.ui.show_browser = visible;
+                    if visible {
+                        browser::reveal_shared_panel(self, "browser");
+                    } else {
+                        browser::close_shared_panel(self, "browser");
+                    }
+                }
                 "view.next_tab" | "view.previous_tab" => documents::cycle(self, id == "view.next_tab"),
+                "view.toolbar_reset_all" => toolbar_custom::reset_all(self),
                 "view.ribbon_tabs_only" => {
                     let on = v.get("on").and_then(Value::as_bool).unwrap_or(!self.preferences.ribbon_tabs_only);
                     self.preferences.ribbon_tabs_only = on;
@@ -2064,6 +2090,11 @@ impl SolveApp {
             Ok(value)
         });
         crate::sketch_view::project(self);
+        if workspace::sheet_scope(self) {
+            workspace::sync_context(self);
+        }
+        sheet_views::drop_deleted(self);
+        crate::drawing_sheet_page::retire_closed(self);
         if r.is_ok() && self.session.active_sketch.is_some() && !self.sketch_finish_processing {
             // A sketch some command left open: remember the view to go back to, as a command run from
             // a script does. Only the UI turns the view, and only when it starts the sketch.
@@ -2402,10 +2433,19 @@ impl SolveApp {
         if self.file_load_holds() || self.file_picker.is_some() {
             return;
         }
+        if matches!(id, "drawing.sheet_sketch" | "drawing.sketch.create")
+            || (id == "sketch.create" && self.docs.views.active().kind == solidcraft_views::ViewKind::Sheet)
+        {
+            if let Err(error) = crate::sketch_view::start_sheet(self) {
+                self.set_status(error, true);
+            }
+            return;
+        }
         if drawing_workspace::start(self, id) {
             return;
         }
         if drawing_workspace::active(self)
+            && !(self.session.active_sheet_sketch.is_some() && id.starts_with("sketch."))
             && !id.starts_with("drawing.")
             && !matches!(id, "assembly.bom" | "sheet.flat_pattern" | "document.metadata" | "document.metadata.set" | "view.layout")
             && !matches!(id, "view.fit" | "view.home" | "view.tool" | "view.tool.zoom")
@@ -2573,6 +2613,7 @@ impl SolveApp {
                 | "view.grid"
                 | "view.ground_shadow"
                 | "view.navigation_bar"
+                | "view.browser"
                 | "view.next_tab"
                 | "view.previous_tab"
                 | "tab.view.open"
@@ -3008,7 +3049,7 @@ impl SolveApp {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             self.tool = Some(t);
-            self.set_status(tools::hint(id), false);
+            self.set_tool_hint(tools::hint(id));
             return;
         }
         if let Some(mut d) = dialogs::Dialog::for_command(self, id) {
@@ -3417,6 +3458,21 @@ impl SolveApp {
     fn sketch_closed_in(&mut self, open: Option<u64>, owner: Option<u64>) {
         self.take_sketch_exit();
         self.tool = None;
+        // A dialog whose command works only in a sketch (Offset, Mirror, Project...) has nothing
+        // left to work on: it closes instead of staying open with a refused OK (#7424). Its picks
+        // are in the sketch that closed, so it closes too when a plugin run opened another one.
+        let sketch_only = |spec: &solidcraft_engine::cmd::CommandSpec| {
+            std::ptr::fn_addr_eq(spec.enabled, solidcraft_engine::cmd::in_sketch as solidcraft_engine::cmd::Enabled)
+        };
+        if self
+            .dialog
+            .as_ref()
+            .and_then(|d| d.command())
+            .and_then(solidcraft_engine::find_command)
+            .is_some_and(|spec| spec.disabled_refusal(&self.session).is_some() || (sketch_only(spec) && self.session.active_sketch != open))
+        {
+            dialogs::cancel(self);
+        }
         dim_view::cancel();
         // Unless another component was activated meanwhile: that one stays.
         if let Some(pre) = self.pre_sketch_component.take().filter(|pre| Some(pre.sketch) == open && pre.opened_in == self.session.active_component) {
@@ -3519,8 +3575,15 @@ impl SolveApp {
         let (text, at) = (i18n::tr_diagnostic(&s.into()), now_ms());
         self.messages.push(&text, error, at);
         self.status = Some((text, at, error));
+        self.status_is_tool_hint = false;
         self.status_undo = false;
         self.status_save_sc = false;
+    }
+
+    /// Retain tool guidance while its owner is suspended, without hiding ordinary statuses.
+    pub(crate) fn set_tool_hint(&mut self, text: impl Into<String>) {
+        self.set_status(text, false);
+        self.status_is_tool_hint = true;
     }
 
     /// Tell the user when the open design came from a newer SolidCraft: the notice on the status
@@ -4183,6 +4246,7 @@ impl SolveApp {
 
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        self.control_click.enabled = ctx.os() == egui::os::OperatingSystem::Mac;
         params_dialog::install_expressions(ctx);
         ui_kit::set_viewport_half_height(ctx, self.cam.half_height());
         // Tab or Shift+Tab into any text or number box selects its text, app-wide.
@@ -4213,6 +4277,7 @@ impl SolveApp {
         verify_job::tick(self);
         timeline::tick_import_checks(self, ctx);
         edit_in_place::tick(self);
+        browser_links::refresh(self, ctx);
         let typing = ctx.egui_wants_keyboard_input();
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {
             edit_in_place::back(self);
@@ -4267,7 +4332,9 @@ impl SolveApp {
             }
             agent_chat::toggle_shortcut(self, ctx);
             // A digit for a construction line's Length box is not a shortcut (#10258).
-            sketch_construction::claim_typed_length(self, ctx);
+            if !self.preferences.workspace_follows_view || workspace::focused_sketch(self).is_some() {
+                sketch_construction::claim_typed_length(self, ctx);
+            }
             if !self.embedded {
                 toolbar::shortcuts(self, ctx);
             }
@@ -4305,7 +4372,9 @@ impl SolveApp {
             if !keymap::capturing(self) {
                 expression_complete::begin_frame(ctx);
             }
-            sketch_construction::claim_typed_length(self, ctx);
+            if !self.preferences.workspace_follows_view || workspace::focused_sketch(self).is_some() {
+                sketch_construction::claim_typed_length(self, ctx);
+            }
             toolbar::shortcuts(self, ctx);
         }
     }
@@ -4326,9 +4395,11 @@ impl SolveApp {
     /// Process a frame with a platform-identified pen-tip release in egui coordinates.
     pub fn raw_input_hook_with_pen(&mut self, raw: &mut egui::RawInput, pen_release: Option<egui::Pos2>) {
         self.pen_release = pen_release;
+        let later = self.control_click.remap(&mut raw.events);
         self.synthetic_input(raw);
         finite_input(raw);
         self.hold_click_after_typing(raw);
+        self.held_click.extend(later);
         issue_report::hold_input(self, raw);
         // Over a quiet view, pointer motion asks egui for no frame after this one: the window
         // asked for this one only if the motion lit up something new
@@ -4465,6 +4536,8 @@ impl SolveApp {
 
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        let host = self.view_windows.current_window();
+        let opening_host = self.view_windows.opening_host(Some(host));
         plugins::tick(self, ui.ctx(), false);
         documents::give_up_renames_of_other_designs(self);
         params_dialog::install_expressions(ui.ctx());
@@ -4512,6 +4585,7 @@ impl SolveApp {
         documents::sync_views(self);
         documents::sync_window_title(self, ui.ctx());
         plugin_events::tick(self, ui.ctx());
+        self.view_windows.opening_host(opening_host);
     }
 
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {
@@ -4665,15 +4739,21 @@ impl SolveApp {
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
-        if drawing_workspace::active(self) {
+        if view_tiles::shown(self) && (self.preferences.workspace_follows_view || !drawing_workspace::active(self)) {
+            view_tiles::show(self, ui);
+        } else if self.docs.views.active().kind == solidcraft_views::ViewKind::Sheet && !dialogs_sheet::flat_active(self) {
+            dim_view::set_model_drawn(Vec::new());
+            let id = self.docs.views.active().id;
+            drawing_sheet_page::show_view(self, ui, id);
+            view_tiles::single_sketch_chrome(self, ui);
+        } else if drawing_workspace::active(self) {
             if dialogs_sheet::flat_active(self) {
                 viewport::show(self, ui);
             } else {
                 dim_view::set_model_drawn(Vec::new());
                 drawing_workspace::show(self, ui);
+                view_tiles::single_sketch_chrome(self, ui);
             }
-        } else if view_tiles::shown(self) {
-            view_tiles::show(self, ui);
         } else if view_window_drag::unanchored(self, ui.ctx(), self.docs.views.active().id) {
             self.viewport.rect = Some(ui.max_rect());
             let t = solidcraft_theme::Tokens::get();
@@ -4815,8 +4895,9 @@ impl SolveApp {
     }
 
     fn issue_screenshots(&mut self, ctx: &egui::Context) {
-        // A view that just moved is drawn with fewer AO samples: shoot the full-quality frame
-        // that follows (#7165), or after half a second a view that keeps moving as it is.
+        // A view that just moved is drawn with fewer AO samples and coarser instanced edges:
+        // shoot the full-quality frame that follows (#7165), or after half a second a view that
+        // keeps moving (an animation, a motion study) as it is, rather than never.
         let settled = viewport::ao_settled(self, ctx);
         self.shots.issue(ctx, settled, now_ms());
     }

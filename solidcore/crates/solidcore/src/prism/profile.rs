@@ -282,6 +282,84 @@ fn bezier_points(n: u8, p: &[Point2; MAX_BEZIER_CTRL]) -> Option<&[Point2]> {
 }
 
 impl Seg2 {
+    /// Whether `piece` is the restriction of this cubic Bézier to a nonempty interval of
+    /// `[0, 1]`, in either direction, within control-point roundoff (at most 1e-9 mm).
+    /// A coordinate root only proposes an endpoint: the four controls of the
+    /// restriction must all agree, which bounds the whole curve by the convex hull property.
+    #[must_use]
+    pub fn cubic_contains(&self, piece: &Self) -> bool {
+        let (
+            Self::Cubic { p0, p1, p2, p3 },
+            Self::Cubic {
+                p0: a,
+                p1: b,
+                p2: c,
+                p3: d,
+            },
+        ) = (*self, *piece)
+        else {
+            return false;
+        };
+        let controls = [p0, p1, p2, p3];
+        let mut hull = crate::geom::extent2d::Extent2d::new();
+        for p in controls {
+            hull.add_point(p);
+        }
+        let tol =
+            (128.0 * f64::EPSILON * hull.min.length().max(hull.max.length()).max(1.0)).min(1e-9);
+        if !hull.contains_point(a, tol) || !hull.contains_point(d, tol) {
+            return false;
+        }
+        let params = |p: Point2, tangent: Vec2| {
+            // Invert the coordinate that changes fastest at this end of the restriction.
+            // The wider coordinate of the whole span can turn here and lose the parameter
+            // to rounding while the other coordinate still distinguishes nearby points.
+            let direction = if tangent.x == 0.0 && tangent.y == 0.0 {
+                hull.max - hull.min
+            } else {
+                tangent
+            };
+            let coord = |q: Point2| {
+                if direction.x.abs() >= direction.y.abs() {
+                    q.x
+                } else {
+                    q.y
+                }
+            };
+            // Include the span ends: a crossing there can differ by roundoff in the chosen coordinate.
+            let mut roots = vec![0.0, 1.0];
+            let mut work = 128;
+            crate::query::tangent_edge::bernstein_roots(
+                &controls.map(|v| coord(v) - coord(p)),
+                0.0,
+                1.0,
+                48,
+                &mut work,
+                &mut roots,
+            );
+            roots
+        };
+        let ends = params(d, d - c);
+        // The blossom of the cubic: restricting to [u,v] gives B(u,u,u), B(u,u,v),
+        // B(u,v,v), B(v,v,v), equally for a reversed interval.
+        let blossom = |s, t, u| {
+            let lerp = |p: Point2, q: Point2, f: f64| p + (q - p) * f;
+            let ab = lerp(p0, p1, s);
+            let bc = lerp(p1, p2, s);
+            let cd = lerp(p2, p3, s);
+            lerp(lerp(ab, bc, t), lerp(bc, cd, t), u)
+        };
+        params(a, b - a).into_iter().any(|u| {
+            blossom(u, u, u).distance(a) <= tol
+                && ends.iter().copied().any(|v| {
+                    u != v
+                        && blossom(v, v, v).distance(d) <= tol
+                        && blossom(u, u, v).distance(b) <= tol
+                        && blossom(u, v, v).distance(c) <= tol
+                })
+        })
+    }
+
     /// Where it starts.
     #[must_use]
     pub fn start(&self) -> Point2 {
