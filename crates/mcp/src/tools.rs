@@ -330,7 +330,10 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "Export bodies to STEP (.step/.stp), IGES (.iges/.igs), 3MF (.3mf), binary STL (.stl), ASCII STL (format stla), OBJ or GLB (.glb: binary glTF \
              in metres with Y up, with each body's colours, metallic, roughness and opacity, render-setup Glass as glTF transmission, and each \
              occurrence a named node holding its part's bodies) or OpenUSD (.usda text, .usdc or .usd binary, .usdz package: in metres with Z up, \
-             each part's exact B-rep and a mesh of it, with colours, and the assembly as prims, a part placed twice written once). \
+             each body, named, as its exact B-rep and its mesh, with its looks' colour, opacity, metallic and roughness, \
+             and the assembly as prims named after the occurrences, a part placed twice written once) or Rhino (.3dm, Rhino 8: \
+             each body where the design shows it, as its exact shape, named and in its colour, when every face is planar and every \
+             edge straight, else as its mesh, without its name or colour; warnings say what the file left out; FreeCAD .FCStd cannot be written yet). \
              The format comes from the extension unless given; for OpenUSD the path's extension picks text, binary or package, and a \
              format naming another encoding is refused. URDF (.urdf) exports the whole assembly for robot simulators: a link per \
              component placement with mass and inertia, joints from the assembly's joints, and STL meshes in metres written \
@@ -340,13 +343,18 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             object(
                 json!({
                     "path": string("Output file"),
-                    "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "glb", "usd", "usda", "usdc", "usdz", "urdf", "sdf"]},
+                    "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm", "urdf", "sdf"]},
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf)"},
+                    "writer": {"type": "string", "enum": ["solidcraft", "cadmpeg"], "description": "STEP and IGES only: SolidCraft's own writer (default), or cadmpeg's, which writes STEP AP242 with the components and colours but no solid names, and IGES 5.3 with each body where the design shows it; refused for other formats"},
                     "mesh_prefix": string("urdf: put before each mesh file name (default: none, so relative to the .urdf)"),
                     "effort": {"type": "number", "description": "urdf: joint effort limit, N or N m (default 1000)"},
                     "velocity": {"type": "number", "description": "urdf: joint velocity limit, m/s or rad/s (default 10)"},
                     "hierarchy": {"type": "boolean", "description": "glb: false writes every body flat under the root in world coordinates, as SolidCraft 0.40 did (default true: a named node per occurrence)"},
-                    "images": {"type": "boolean", "description": "urdf: also write each picture shown on the model as a textured visual (default false)"},
+                    "images": {"type": "boolean", "description": "urdf and usd: also write each picture shown on the model as a textured visual; usd writes it only in a .usdz package (default false)"},
+                    "physics": {"type": "boolean", "description": "usd: also write the joints, grounded parts and each component's mass as OpenUSD physics, for a simulator (default false)"},
+                    "render_setup": string("usd: the saved render setup whose image textures a .usdz package holds (default: none)"),
+                    "purpose": {"type": "string", "enum": ["interchange", "distribution"], "description": "usd: what the file is for: interchange (exact shapes beside meshes, for CAD) or distribution (meshes only with the pictures shown on the model, for viewers and game engines); exact_brep and images override it (default interchange)"},
+                    "exact_brep": {"type": "boolean", "description": "usd: write each body's exact shape beside its mesh (default: true for interchange, false for distribution)"},
                     "name": string("sdf: the model's name (default: the folder's name)"),
                     "static": {"type": "boolean", "description": "sdf: scenery Gazebo never moves (default true); false gives it the bodies' mass"},
                     "model_uris": {"type": "boolean", "description": "sdf: name files as model://<folder>/<file> (default false: relative to model.sdf)"},
@@ -371,6 +379,64 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                 &[],
             ),
             Effect::ReadOnly,
+        ),
+        tool(
+            "documents",
+            "Design tabs",
+            "The desktop app's open design tabs: their names, which is active, which have unsaved changes, and any prompt waiting on a person. \
+             With no action, lists them. `action` `switch` and `index` turn to that tab; `close` closes the tab at `index` (the active one when \
+             omitted); `new` opens a new empty design. Closing a tab that has unsaved changes is refused, naming the design, unless `force: true` \
+             says to discard them. Programmatic calls never open a \"save changes?\" dialog. External MCP clients only; not available in the in-app Assistant. Needs the desktop app: headless returns an error.",
+            object(
+                json!({
+                    "action": {"type": "string", "enum": ["new", "switch", "close"], "description": "new, switch or close (default: just list the tabs)"},
+                    "index": {"type": "integer", "description": "Which tab (switch and close; close: the active one when omitted)"},
+                    "force": {"type": "boolean", "description": "close: discard unsaved changes in the closed tab (refused otherwise, naming the design)"},
+                }),
+                &[],
+            ),
+            Effect::Replaces,
+        ),
+        tool(
+            "quit_app",
+            "Quit the app",
+            "Quit the desktop app cleanly (so the next start does not offer crash recovery). `force: true` quits even with unsaved designs; \
+             otherwise a design with unsaved changes is refused and named. Programmatic calls never open a \"save changes?\" dialog. Needs the \
+             desktop app: headless returns an error. External MCP clients only; not available in the in-app Assistant.",
+            object(json!({"force": {"type": "boolean", "description": "Quit even with unsaved designs (refused otherwise, naming them)"}}), &[]),
+            Effect::Replaces,
+        ),
+        tool(
+            "preferences",
+            "Read or set preferences",
+            "The desktop app's display and unit preferences: default_units, theme, language, up_axis, ui_scale, zoom_to_cursor, \
+             smooth_wheel_zoom and show_frame_rate. With no arguments, reads them back. With arguments, sets the named ones and returns \
+             them. Kept between runs. Any other key is refused, so this tool cannot change plugin access, graphics, file limits, signing or \
+             file paths, open dialogs or change the current design. Needs the desktop app: headless returns an error. External MCP clients \
+             only; not available in the in-app Assistant.",
+            json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true,
+            }),
+            Effect::Edits,
+        ),
+        tool(
+            "agent_cursor",
+            "Show the agent's cursor",
+            "The desktop app's agent cursor, where commands the agent runs visibly glide and land. `show` turns it on or off; `speed` is a \
+             multiplier from 1 to 5 (5 is fastest) or \"instant\" (no animation: each command runs at once and the pointer jumps to where it \
+             acted); `follow_camera` keeps the cursor with the camera as it moves. All are optional; with none, reads the current settings. \
+             External MCP clients only; not available in the in-app Assistant. Needs the desktop app: headless returns an error.",
+            object(
+                json!({
+                    "show": {"type": "boolean", "description": "Show (true) or hide (false) the cursor"},
+                    "speed": {"anyOf": [{"type": "number"}, {"type": "string"}], "description": "1-5 (times the normal speed) or \"instant\" (no animation)"},
+                    "follow_camera": {"type": "boolean", "description": "Keep the cursor with the camera as it moves"},
+                }),
+                &[],
+            ),
+            Effect::Edits,
         ),
         tool(
             "running",
@@ -460,7 +526,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "skill_reference",
             "Skill reference",
             "Read a document of SolidCraft's bundled agent skills (solidcraft-modeling, solidcraft-mechanisms, \
-             solidcraft-editing, solidcraft-checking) from the copy built into SolidCraft. `file` defaults to reference.md; \
+             solidcraft-editing, solidcraft-checking, solidcraft-sheetmetal) from the copy built into SolidCraft. `file` defaults to reference.md; \
              each skill also has SKILL.md. Unknown skills or files are refused with the available ones.",
             object(
                 json!({
@@ -589,6 +655,12 @@ fn text_result(v: &Value, is_error: bool, opts: Options) -> Value {
 
 /// Run a tool, as the server does by default. Failures are tool results with `isError: true`
 /// (the model sees the message); nothing here panics on hostile arguments.
+/// The preferences an external AI client may read and set through the `preferences` tool (#3704): display and unit
+/// settings only. Everything else `ui.prefs` knows (plugin grants, graphics, file limits, the signing key, file paths)
+/// stays with the person.
+const AGENT_PREFERENCES: &[&str] =
+    &["default_units", "theme", "language", "up_axis", "ui_scale", "zoom_to_cursor", "smooth_wheel_zoom", "show_frame_rate"];
+
 pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> Value {
     call_tool_with(b, name, args, Options::default())
 }
@@ -1015,7 +1087,27 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "export" => exec(
             b,
             "file.export",
-            pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "hierarchy", "images", "name", "static", "model_uris"]),
+            pick(
+                a,
+                &[
+                    "path",
+                    "format",
+                    "bodies",
+                    "writer",
+                    "mesh_prefix",
+                    "effort",
+                    "velocity",
+                    "hierarchy",
+                    "images",
+                    "physics",
+                    "render_setup",
+                    "purpose",
+                    "exact_brep",
+                    "name",
+                    "static",
+                    "model_uris",
+                ],
+            ),
         ),
         "crash_reports" => match a.get("id") {
             Some(_) => exec(b, "diagnostics.crash_report", pick(a, &["id"])),
@@ -1024,6 +1116,65 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "skill_reference" => crate::skill_reference::read(a),
         "running" => b.call("control.running", json!({})),
         "cancel" => b.call("control.cancel", json!({})),
+        "documents" => {
+            if !b.has_ui() {
+                return Err("documents: needs the desktop app (headless has no design tabs)".into());
+            }
+            let mut params = json!({});
+            if let Some(action) = str_arg(a, "action") {
+                params["action"] = json!(action);
+            }
+            if let Some(index) = a.get("index") {
+                params["index"] = index.clone();
+            }
+            if let Some(force) = a.get("force") {
+                params["force"] = force.clone();
+            }
+            if str_arg(a, "action") == Some("close") {
+                params["ask"] = json!(false);
+            }
+            b.call("ui.documents", params)
+        }
+        "quit_app" => {
+            if !b.has_ui() {
+                return Err("quit_app: needs the desktop app (headless has no app window to quit)".into());
+            }
+            let mut params = json!({});
+            if let Some(force) = a.get("force") {
+                params["force"] = force.clone();
+            }
+            params["ask"] = json!(false);
+            b.call("app.quit", params)
+        }
+        "preferences" => {
+            if !b.has_ui() {
+                return Err("preferences: needs the desktop app (headless has no preferences window)".into());
+            }
+            if let Some(key) = a.keys().find(|key| !AGENT_PREFERENCES.contains(&key.as_str())) {
+                return Err(format!(
+                    "preferences: `{key}` cannot be read or set from an AI client; the preferences this tool can set are {}",
+                    AGENT_PREFERENCES.join(", ")
+                ));
+            }
+            let mut reply = b.call("ui.prefs", Value::Object(a.clone()))?;
+            // Read back only the same settings: the full reply also names plugin grants, file paths and the signing key.
+            if let Some(all) = reply.as_object_mut() {
+                all.retain(|key, _| AGENT_PREFERENCES.contains(&key.as_str()));
+            }
+            Ok(reply)
+        }
+        "agent_cursor" => {
+            if !b.has_ui() {
+                return Err("agent_cursor: needs the desktop app (headless has no window to show a cursor in)".into());
+            }
+            let mut params = json!({});
+            for key in ["show", "speed", "follow_camera"] {
+                if let Some(value) = a.get(key) {
+                    params[key] = value.clone();
+                }
+            }
+            b.call("ui.agent_cursor", params)
+        }
         "undo" => exec(b, "edit.undo", json!({})),
         "redo" => exec(b, "edit.redo", json!({})),
         "new_design" => exec(b, "file.new", pick(a, &["name"])),
@@ -1226,7 +1377,27 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         "redo" => mapped("edit.redo", json!({})),
         "export" => mapped(
             "file.export",
-            pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "hierarchy", "images", "name", "static", "model_uris"]),
+            pick(
+                a,
+                &[
+                    "path",
+                    "format",
+                    "bodies",
+                    "writer",
+                    "mesh_prefix",
+                    "effort",
+                    "velocity",
+                    "hierarchy",
+                    "images",
+                    "physics",
+                    "render_setup",
+                    "purpose",
+                    "exact_brep",
+                    "name",
+                    "static",
+                    "model_uris",
+                ],
+            ),
         ),
         "save" => mapped("file.save", pick(a, &["path", "format", "overwrite"])),
         "open" => mapped("doc.open", pick(a, &["path", "up", "names", "geometry"])),
@@ -1243,6 +1414,10 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         "running" => Err("`running` is a tool, not a command: call it on its own".into()),
         "skill_reference" => Err("`skill_reference` is a tool, not a command: call it on its own".into()),
         "cancel" => Err("`cancel` is a tool, not a command: call it on its own".into()),
+        "documents" => Err("`documents` is a tool, not a command: call it on its own".into()),
+        "quit_app" => Err("`quit_app` is a tool, not a command: call it on its own".into()),
+        "preferences" => Err("`preferences` is a tool, not a command: call it on its own".into()),
+        "agent_cursor" => Err("`agent_cursor` is a tool, not a command: call it on its own".into()),
         "version" => Err("`version` is a tool, not a command: call it on its own".into()),
         // An engine command: the step goes as it is.
         _ => Ok((String::new(), Value::Null, None)),
@@ -1251,6 +1426,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
 
 /// The tool names a `batch` step may not be (or is mapped from): `execute` must not wrap them.
 const TOOL_STEPS: &[&str] = &[
+    "agent_cursor",
     "batch",
     "body_topology",
     "cancel",
@@ -1258,6 +1434,7 @@ const TOOL_STEPS: &[&str] = &[
     "compare_picture",
     "crash_reports",
     "describe_command",
+    "documents",
     "execute",
     "export",
     "inspect_design",
@@ -1266,6 +1443,8 @@ const TOOL_STEPS: &[&str] = &[
     "new_design",
     "open",
     "pending",
+    "preferences",
+    "quit_app",
     "redo",
     "running",
     "save",

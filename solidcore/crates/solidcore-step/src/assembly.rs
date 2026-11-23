@@ -743,6 +743,10 @@ impl<'t> Assembly<'t> {
         if twins > 0 {
             notes.push(format!("{twins} edges the file writes twice (two edges on the same vertices and one curve, each used by one face) made one"));
         }
+        let paired = self.pair_slit_edges()?;
+        if paired > 0 {
+            notes.push(format!("{paired} loops of no area written on two coincident edges rewritten to run out and back on one"));
+        }
         // A face bounded by a slit alone is the whole of its closed surface, closed by its seams
         // (a sphere's frame put on the slit), before anything is measured on the frame or split
         // at its poles.
@@ -1414,6 +1418,83 @@ impl<'t> Assembly<'t> {
             }
         }
         Ok(redirect.len())
+    }
+
+    /// A two-edge loop that runs out along one line on one edge and back on another edge of the
+    /// same vertices, curve record and interval (a bore that touches a flat face along a line
+    /// writes the loop so), where each of the two edges is also used by exactly one other face.
+    /// The loop is a slit of no area, so it is rewritten to use one edge twice, and the other
+    /// faces then share the other edge: the pairing a file that writes the slit as one edge has.
+    /// Without this the loop is not seen as a slit and the shell reads as contradictory.
+    /// Returns how many loops were rewritten.
+    fn pair_slit_edges(&mut self) -> R<usize> {
+        let mut uses: HashMap<u32, Vec<(usize, usize, usize)>> = HashMap::new();
+        for (fi, face) in self.faces.iter().enumerate() {
+            for (li, l) in face.loops.iter().enumerate() {
+                if let Bound::Edges(es) = l {
+                    for (pos, (e, _)) in es.iter().enumerate() {
+                        uses.entry(*e).or_default().push((fi, li, pos));
+                    }
+                }
+            }
+        }
+        // (face, loop, the loop's use of x, the loop's use of y, x, y, y runs against x)
+        let mut work: Vec<(usize, usize, usize, usize, u32, u32, bool)> = Vec::new();
+        let mut touched: HashSet<u32> = HashSet::new();
+        for (fi, face) in self.faces.iter().enumerate() {
+            for (li, l) in face.loops.iter().enumerate() {
+                let Bound::Edges(es) = l else { continue };
+                let [(x, dx), (y, dy)] = es.as_slice() else { continue };
+                let (x, y) = (*x, *y);
+                if x == y {
+                    continue;
+                }
+                let (ex, ey) = (self.edges.get(x as usize).ok_or("edge reference")?, self.edges.get(y as usize).ok_or("edge reference")?);
+                let [a, b] = ex.vertices;
+                let against = ex.vertices[0] != ey.vertices[0];
+                let same_ends = a != b && ((ey.vertices == [a, b]) || (ey.vertices == [b, a]));
+                if !same_ends || ex.curve != ey.curve || ex.interval != ey.interval {
+                    continue;
+                }
+                // Out along one, back along the other: the two uses run against each other on
+                // the line.
+                if (dx == dy) != against {
+                    continue;
+                }
+                let (Some(ux), Some(uy)) = (uses.get(&x), uses.get(&y)) else { continue };
+                if ux.len() != 2 || uy.len() != 2 || touched.contains(&x) || touched.contains(&y) {
+                    continue;
+                }
+                // Each edge's other use is a different face's, and not this loop's twin.
+                let other = |u: &Vec<(usize, usize, usize)>| u.iter().find(|&&(f, l, _)| !(f == fi && l == li)).copied();
+                let (Some(ox), Some(oy)) = (other(ux), other(uy)) else { continue };
+                if ox.0 == fi || oy.0 == fi || ox.0 == oy.0 {
+                    continue;
+                }
+                touched.insert(x);
+                touched.insert(y);
+                work.push((fi, li, 0, 1, x, y, against));
+            }
+        }
+        let count = work.len();
+        for (fi, li, px, _py, x, y, against) in work {
+            let Some(oy) = uses.get(&y).and_then(|u| u.iter().find(|&&(f, l, _)| !(f == fi && l == li)).copied()) else { continue };
+            // The other face that used y now uses x, run the way its vertices run against x's.
+            let face = self.faces.get_mut(oy.0).ok_or("face reference")?;
+            if let Some(Bound::Edges(es)) = face.loops.get_mut(oy.1)
+                && let Some(u) = es.get_mut(oy.2)
+            {
+                *u = (x, u.1 != against);
+            }
+            // This loop's use of x becomes a use of y, so the loop is y out and y back.
+            let face = self.faces.get_mut(fi).ok_or("face reference")?;
+            if let Some(Bound::Edges(es)) = face.loops.get_mut(li)
+                && let Some(u) = es.get_mut(px)
+            {
+                *u = (y, u.1 != against);
+            }
+        }
+        Ok(count)
     }
 
     /// Orient a closed manifold shell by exact shared-edge parity. Across an edge,
