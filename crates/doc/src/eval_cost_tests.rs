@@ -802,7 +802,7 @@ fn a_cams_profile_is_meshed_once() {
     // The cam's body: a cylinder in the cam's own component.
     let kind = FeatureKind::Cylinder {
         base: point_expr(Vec3::ZERO),
-        axis: Dir(Vec3::Z),
+        axis: crate::dir_expr(Vec3::Z),
         radius: "5".into(),
         height: "10".into(),
         operation: Operation::NewBody,
