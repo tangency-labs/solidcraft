@@ -1,4 +1,7 @@
 //! Each ribbon feature form keeps its parameter builder while sharing the dense layout.
+#[path = "../../../solidcore/crates/solidcore/tests/support/annular_samples.rs"]
+mod annular_samples;
+
 use super::*;
 use crate::scenario::{self, Harness};
 
@@ -630,7 +633,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Operation" if command == "solid.mirror" => return None,
         "Operation" | "Type" | "Orientation" | "Move Type" | "Object Type" | "Rule" | "Rim Edge" | "Catch Direction" | "Shape" | "Holes" | "Size"
         | "Bend Line Position" | "From Snap" | "To Snap" | "Joint" | "Joint 1" | "Joint 2" | "Gear 1" | "Gear 2" | "Pinion" | "Rack" | "Screw"
-        | "Nut" | "Cam" | "Follower" | "Anchor" => Role::ComboBox,
+        | "Nut" | "Cam" | "Follower" | "Anchor" | "Bolt Pattern" => Role::ComboBox,
         "Inset By" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
@@ -918,6 +921,7 @@ form_case!(remove, "solid.remove", []);
 form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing", "pattern.start_point", "Orientation"]);
 form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
+form_case!(frame_plate, "frame.plate", ["Shape", "Width", "Height", "Thickness", "Offset", "Bolt Pattern"]);
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);
 form_case!(thread, "solid.thread", ["Form", "Size", "Pitch", "Designation", "Hand", "Starts", "Extent", "Start", "End"]);
 form_case!(primitive_box, "solid.box", ["ui.length", "ui.width", "ui.height", "Operation"]);
@@ -1426,6 +1430,39 @@ fn offset_face_dialog_moves_the_body_clicked_where_two_bodies_touch_flush() {
     // Small grows to 10 × 12 × 5; Big keeps 40 × 30 × 20.
     assert!((volume("Small") - 600.0).abs() < 1e-6, "{}", volume("Small"));
     assert!((volume("Big") - 24000.0).abs() < 1e-6, "{}", volume("Big"));
+}
+
+/// Mouse hits on curved faces are triangle points. The dialog keeps their face identity so
+/// neither name capture nor evaluation asks the approximate point to pick another face.
+#[test]
+fn offset_face_dialog_accepts_a_curved_display_triangle_hit() {
+    use solidcraft_engine::doc::naming;
+    let mut h = Harness::new();
+    h.app.run("solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Cylinder"})).unwrap();
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let body = state.body("Cylinder").unwrap();
+    let index = body.body.face_at_point(Vec3::new(10.0, 0.0, 10.0)).unwrap().unwrap();
+    let name = naming::face_names(body)[index].clone();
+    let mesh = body.mesh();
+    let triangle = mesh.triangles.iter().zip(&mesh.tri_face).find_map(|(t, f)| if *f as usize == index { mesh.tri(t) } else { None }).unwrap();
+    let point = Vec3::from(annular_samples::triangle_centroid(triangle.map(|p| [p.x, p.y, p.z])));
+    assert_eq!(body.body.face_at_point(point).unwrap(), None, "the display hit is beyond modelling tolerance");
+    h.app.session.selection = vec![Sel::Face { body: "Cylinder".into(), index, point }];
+    let mut d = Dialog::for_command(&h.app, "solid.offset_face").unwrap();
+    d.kind = Kind::OffsetFaces { distance: "2".into() };
+    let commands = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(preview_commands(&h.app, &d).unwrap(), commands);
+    let (command, params) = &commands[0];
+    assert_eq!(params["faces"], json!([name]));
+    assert_eq!(params["body"], "Cylinder");
+    h.app.run(command, params.clone()).unwrap();
+    let state = h.app.session.model.state();
+    let body = &state.body("Cylinder").unwrap().body;
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    assert!((0..body.face_count()).any(|f| matches!(
+        solidcraft_engine::kernel::face_surface(body, f),
+        Some(solidcraft_engine::kernel::FaceSurface::Cylinder { radius, .. }) if (radius - 12.0).abs() < 1e-6
+    )));
 }
 
 #[test]
