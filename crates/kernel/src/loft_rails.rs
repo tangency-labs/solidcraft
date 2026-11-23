@@ -496,8 +496,23 @@ pub(crate) fn section_normals(sections: &[Section], direction: impl Fn(f64) -> O
 /// Orient the rail toward the first outline, then check that it meets every section in order.
 /// It meets every section but the last at the first crossing after the section before, and the
 /// last at the first crossing walking back from the end. Thus a rail may run on past either end.
+///
+/// A closed rail (curves that close into a ring, #17580) has no ends to run past: walking back
+/// from its end would go round the other way, and the loft would follow the ring the long way
+/// from one section to the next. It is opened where it first leaves the first section's plane at
+/// a point of its curves ([`opened`]), and it meets every section, the last too, at the first
+/// crossing after the section before: the ring is followed the way it runs from there (the other
+/// way when that misses a section, as for any rail).
 fn rail(pts: &[Vec3], sections: &[Section], tol: f64) -> Result<Rail> {
+    let not_reached = |i: usize| {
+        KernelError::Invalid(format!(
+            "a guide rail does not reach section {}: a rail has to run from the first section to the last, through every one",
+            i + 1
+        ))
+    };
     let pts = crate::sweep_path::clean(pts).map_err(|_| KernelError::Invalid("a guide rail needs 2…100000 finite points along its length".into()))?;
+    let closed = pts.len() > 2 && pts.first().zip(pts.last()).is_some_and(|(a, b)| a.dist(*b) <= tol);
+    let pts = if closed { opened(&pts, sections.first(), tol).ok_or_else(|| not_reached(0))? } else { pts };
     let mut reversed = pts.clone();
     reversed.reverse();
     let endpoint_distance = |points: &[Vec3]| {
@@ -509,15 +524,9 @@ fn rail(pts: &[Vec3], sections: &[Section], tol: f64) -> Result<Rail> {
     let (first, second) = if endpoint_distance(&reversed) < endpoint_distance(&pts) { (&reversed, &pts) } else { (&pts, &reversed) };
     let validate = |points: &[Vec3]| -> Result<Vec<Anchor>> {
         let mut cursor = (0usize, 0.0f64);
-        let not_reached = |i: usize| {
-            KernelError::Invalid(format!(
-                "a guide rail does not reach section {}: a rail has to run from the first section to the last, through every one",
-                i + 1
-            ))
-        };
         let mut anchors = Vec::with_capacity(sections.len());
         for (i, section) in sections.iter().enumerate() {
-            let (hit, at) = if i + 1 == sections.len() {
+            let (hit, at) = if i + 1 == sections.len() && !closed {
                 let back: Vec<Vec3> = points.iter().rev().copied().collect();
                 let (hit, (k, u)) = crate::sweep_path::rail_crossing(&back, section.plane.origin, section.plane.normal(), (0, 0.0), tol)
                     .ok_or_else(|| not_reached(i))?;
@@ -548,6 +557,25 @@ fn rail(pts: &[Vec3], sections: &[Section], tol: f64) -> Result<Rail> {
             Err(_) => Err(first_error),
         },
     }
+}
+
+/// The closed rail `ring` (its last point its first) opened where it first leaves `section`'s
+/// plane at a point of its curves (within `tol`): where it crosses the plane, or where a run of
+/// it along the plane (an edge of the section drawn into the rail) ends (the kernel's
+/// departures). It then runs from that point round the ring and back to it. `None` when it
+/// leaves the section nowhere on its curves.
+fn opened(ring: &[Vec3], section: Option<&Section>, tol: f64) -> Option<Vec<Vec3>> {
+    let section = section?;
+    let points: Vec<[f64; 3]> = ring.iter().map(|p| <[f64; 3]>::from(*p)).collect();
+    let departures = solidcore_ops::sweep::polyline_plane_departures(&points, section.plane.origin.into(), section.plane.normal().into(), tol);
+    let (k, hit) =
+        departures.into_iter().map(|(k, p)| (k, Vec3::from(p))).find(|(_, p)| nearest_on(&section.curves, *p).is_some_and(|(_, _, d)| d <= tol))?;
+    // From that point on to the end of the ring, which is its start, and on to the point again.
+    let mut out = vec![hit];
+    out.extend(ring.iter().skip(k + 1));
+    out.extend(ring.iter().skip(1).take(k));
+    out.push(hit);
+    crate::sweep_path::clean(&out).ok()
 }
 
 /// The point of a section (its curves) nearest `p`: as a wire parameter, the point, and how far

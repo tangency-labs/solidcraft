@@ -61,9 +61,9 @@ impl Renderer {
         let scopes = [wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal, wgpu::ErrorFilter::Validation].map(|f| device.push_error_scope(f));
         let result = self.probe_pixels(device, queue, blank_samples);
         // Discard the probe's uploads and picture even on errors, before the real scene arrives.
-        self.model = Batches::default();
-        self.sketch = Batches::default();
-        self.highlight = Batches::default();
+        self.pic.model = Batches::default();
+        self.pic.sketch = Batches::default();
+        self.pic.highlight = Batches::default();
         self.preview = Batches::default();
         self.pic.ss = None;
         self.pic.ss_key = None;
@@ -124,12 +124,15 @@ impl Renderer {
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
+            edge_px: crate::view::EDGE_PX,
             sky: [0.0; 4],
             ssaa: 1.0,
             hover_tint: [0.0; 3],
             selection_tint: [0.0; 3],
             hatch: Default::default(),
             moving: None,
+            motions: Default::default(),
+            ground: None,
         };
         let size = wgpu::Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 };
         let color = device.create_texture(&wgpu::TextureDescriptor {

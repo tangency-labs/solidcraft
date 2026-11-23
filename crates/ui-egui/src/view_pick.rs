@@ -77,6 +77,23 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     };
     let edges_on = p.get("edges").and_then(Value::as_bool).unwrap_or(true);
     let edge_px = f("edge_px").filter(|x| *x > 0.0).unwrap_or(6.0) as f32;
+    let point_px = match p.get("point_px") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(
+            v.as_f64()
+                .filter(|x| x.is_finite() && *x >= 0.0 && *x <= 1024.0)
+                .ok_or("view.pick: `point_px` must be a number from 0 to 1024".to_string())? as f32,
+        ),
+    };
+    let clouds_on = solidcraft_engine::point_cloud_pick::clouds_requested(p)?;
+    let cloud_radius = match p.get("cloud_radius") {
+        None | Some(Value::Null) => solidcraft_engine::point_cloud_pick::DEFAULT_CLOUD_RADIUS_MM,
+        Some(v) => {
+            v.as_f64().filter(|x| x.is_finite() && (0.0..=solidcraft_engine::point_cloud_pick::MAX_CLOUD_RADIUS_MM).contains(x)).ok_or_else(|| {
+                format!("view.pick: `cloud_radius` must be a number from 0 to {}", solidcraft_engine::point_cloud_pick::MAX_CLOUD_RADIUS_MM)
+            })?
+        }
+    };
     let all = p.get("all").and_then(Value::as_bool).unwrap_or(false);
     let include_ghosted = p.get("include_ghosted").and_then(Value::as_bool).unwrap_or(false);
 
@@ -167,30 +184,44 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
             ),
             _ => (None, None),
         };
+        // Whatever is nearest in front hides the cloud: the first kept face or the section's cap.
+        let cover_t = match (kept.first().map(|c| c.t), cap.as_ref().map(|c| c.t)) {
+            (Some(f), Some(c)) => Some(f.min(c)),
+            (f, c) => f.or(c),
+        };
+        let cloud_max = if all || wireframe { None } else { cover_t.map(|t| t + slack) };
+        let cloud_hits = if clouds_on { cloud_candidates(app, &proj, input, cloud_max, point_px, cloud_radius, &section, all) } else { Vec::new() };
         hits.push(match (all, cap, kept) {
             (true, cap, kept) => {
-                let mut row: Vec<Value> = Vec::new();
+                let mut rows: Vec<(f64, Value)> = Vec::new();
                 if let Some(cap) = &cap {
-                    row.push(cap_json(input, cap));
+                    rows.push((cap.t, cap_json(input, cap)));
                 }
-                row.extend(kept.iter().map(|c| hit_json(input, c, &occ, &comps, None, None)));
-                Value::Array(row)
+                rows.extend(kept.iter().map(|c| (c.t, hit_json(input, c, &occ, &comps, None, None))));
+                rows.extend(cloud_hits.into_iter().map(|(h, px)| (h.depth, cloud_json(input, &h, px))));
+                rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+                Value::Array(rows.into_iter().map(|(_, v)| v).collect())
             }
-            (false, Some(cap), kept) => match kept.first() {
-                // The cap is nearer than any kept face: the pick lands on the cut.
-                Some(c) if c.t < cap.t => hit_json(input, c, &occ, &comps, edge.as_ref(), vertex.as_ref()),
-                _ => cap_json(input, &cap),
-            },
-            (false, None, kept) => match kept.first() {
-                Some(c) => hit_json(input, c, &occ, &comps, edge.as_ref(), vertex.as_ref()),
-                None => match (&edge, &vertex) {
-                    (None, None) => Value::Null,
-                    _ => json!({
-                        "pixel": input.raw, "body": null, "face": null,
-                        "edge": edge.as_ref().map(edge_json), "vertex": vertex.as_ref().map(vertex_json),
-                    }),
-                },
-            },
+            (false, cap, kept) => {
+                let surface = match (cap, kept.first()) {
+                    (Some(cap), Some(c)) if c.t < cap.t => Some((c.t, hit_json(input, c, &occ, &comps, edge.as_ref(), vertex.as_ref()))),
+                    (Some(cap), _) => Some((cap.t, cap_json(input, &cap))),
+                    (None, Some(c)) => Some((c.t, hit_json(input, c, &occ, &comps, edge.as_ref(), vertex.as_ref()))),
+                    (None, None) => None,
+                };
+                match (cloud_hits.into_iter().next(), surface) {
+                    (Some((ch, px)), Some((st_t, _))) if wireframe || ch.depth <= st_t + slack => cloud_json(input, &ch, px),
+                    (Some((ch, px)), None) => cloud_json(input, &ch, px),
+                    (_, Some((_, v))) => v,
+                    (None, None) => match (&edge, &vertex) {
+                        (None, None) => Value::Null,
+                        _ => json!({
+                            "pixel": input.raw, "body": null, "face": null,
+                            "edge": edge.as_ref().map(edge_json), "vertex": vertex.as_ref().map(vertex_json),
+                        }),
+                    },
+                }
+            }
         });
     }
     Ok(json!({
@@ -222,7 +253,8 @@ fn face_candidates(
             continue;
         }
         let ghosted = crate::viewport::body_faded(app, b, active_bodies);
-        if ghosted && !include_ghosted {
+        // Ghost Frame Members lets clicks through a member's faces, as the mouse picker does.
+        if (ghosted && !include_ghosted) || crate::viewport::frame_ghosted(app, b) {
             continue;
         }
         if let Some((_, bb)) = bounds.get(i) {
@@ -397,6 +429,10 @@ pub(crate) fn body_cut_at(
         if !include_ghosted && crate::viewport::body_faded(app, b, active_bodies) {
             continue;
         }
+        // Ghost Frame Members lets picks through a member, its cut too, as `face_candidates` does.
+        if crate::viewport::frame_ghosted(app, b) {
+            continue;
+        }
         // A sheet or an open shell has no inside to cut: a ray crossing it once is not within
         // material, so it must not raise a cap that hides what lies behind (#17177).
         if !b.is_closed() {
@@ -468,6 +504,8 @@ fn near_edges(
         if !include_ghosted && crate::viewport::body_faded(app, b, active_bodies) {
             continue;
         }
+        // A frame member Ghost Frame Members draws see-through: its vertices, not its edges.
+        let frame_ghosted = crate::viewport::frame_ghosted(app, b);
         let mut body_slack = slack;
         if let Some((_, bb)) = bounds.get(i) {
             if crate::viewport::screen_box(proj, bb, edge_px).is_some_and(|r| !r.contains(pos)) {
@@ -496,6 +534,9 @@ fn near_edges(
                         }
                     }
                 }
+            }
+            if frame_ghosted {
+                continue;
             }
             let (Some(p0), Some(p1)) = (e.get(si).map(|p| at(*p)), e.get(si + 1).map(|p| at(*p))) else { continue };
             let (Some(a), Some(c)) = (proj.to_screen(p0), proj.to_screen(p1)) else { continue };
@@ -612,6 +653,79 @@ fn edge_json(e: &EdgeHit) -> Value {
 
 fn vertex_json(v: &VertexHit) -> Value {
     json!({ "point": v3(v.point), "distance_px": v.dist_px })
+}
+
+fn cloud_json(input: &Input, h: &solidcraft_engine::point_cloud_pick::CloudPickHit, dist_px: Option<f32>) -> Value {
+    let mut j = json!({
+        "pixel": input.raw,
+        "body": null,
+        "face": null,
+        "cloud": h.cloud,
+        "cloud_name": h.cloud_name,
+        "point_index": h.index,
+        "point": v3(h.point),
+        "depth": h.depth,
+    });
+    if let Some(px) = dist_px {
+        j["distance_px"] = json!(px);
+    } else {
+        j["distance_mm"] = json!(h.ray_dist);
+    }
+    j
+}
+
+/// Pick visible point-cloud points along `input`, nearest first. For a pixel, uses screen-space
+/// distance within `point_px` (or each cloud's dot radius + 2 px, minimum 6 px); for a world ray,
+/// uses perpendicular distance within `cloud_radius` mm.
+#[allow(clippy::too_many_arguments)]
+fn cloud_candidates(
+    app: &SolveApp,
+    proj: &crate::viewport::Proj,
+    input: &Input,
+    max_depth: Option<f64>,
+    point_px: Option<f32>,
+    cloud_radius: f64,
+    section: &[SectionPlane],
+    all: bool,
+) -> Vec<(solidcraft_engine::point_cloud_pick::CloudPickHit, Option<f32>)> {
+    if input.pixel.is_some() && point_px.is_some_and(|p| p <= 0.0) {
+        return Vec::new();
+    }
+    if input.pixel.is_none() && cloud_radius <= 0.0 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    // Every cloud is searched to the same depth: the nearest across clouds is chosen after.
+    for raw_cloud in solidcraft_engine::view::shown_point_clouds(&app.session) {
+        if raw_cloud.is_empty() {
+            continue;
+        }
+        let playing = |k: usize| app.tree.cloud_panel.as_ref().and_then(|p| p.playing(raw_cloud.id, k));
+        let cloud = crate::point_clouds::as_drawn(raw_cloud, playing);
+        let index = app.viewport.cloud_pick_index.of(raw_cloud.points.values());
+        let hit = match input.pixel {
+            Some(pos) => {
+                let px = point_px.unwrap_or_else(|| ((cloud.point_size as f32) * 0.5 + 2.0).max(6.0));
+                let (a, b) = crate::pick_index::reach(proj, pos, px);
+                solidcraft_engine::point_cloud_pick::pick_cloud_screen(&cloud, index.as_deref(), input.o, input.d, a, b, max_depth, section, |w| {
+                    proj.to_screen(w).map(|sp| sp.distance(pos)).filter(|d| *d <= px)
+                })
+                .map(|(h, dpx)| (h, Some(dpx)))
+            }
+            None => {
+                solidcraft_engine::point_cloud_pick::pick_cloud_ray(&cloud, index.as_deref(), input.o, input.d, cloud_radius, 0.0, max_depth, section)
+                    .map(|h| (h, None))
+            }
+        };
+        if let Some(h) = hit {
+            out.push(h);
+        }
+    }
+    out.sort_by(|a, b| a.0.depth.total_cmp(&b.0.depth));
+    if !all {
+        out.truncate(1);
+    }
+    out
 }
 
 #[cfg(test)]

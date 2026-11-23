@@ -396,7 +396,10 @@ fn take_refresh(app: &mut SolveApp) {
     let occurrences = &computed.doc.occurrences;
     computed.pending_moves =
         session.pending_moves.iter().filter(|(id, _)| occurrences.iter().any(|o| o.id == **id)).map(|(id, m)| (*id, *m)).collect();
-    session.accept_computed(computed);
+    if let Err(error) = session.accept_computed(computed) {
+        app.set_status(error.to_string(), true);
+        return;
+    }
     // Every link was read as its file was when the run started: one saved since is read again
     // when the assembly's tab comes back.
     crate::documents::record_stamps_at(app, &r.assembly, &r.stamps);
@@ -414,7 +417,11 @@ fn take_refresh(app: &mut SolveApp) {
         }
     }
     let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
-    app.set_status(language.format("ui.command_done", &[("command", language.label(crate::command_label("component.update_links")))]), false);
+    app.set_status(
+        language
+            .format("ui.command_done", &[("command", language.command("component.update_links", crate::command_label("component.update_links")))]),
+        false,
+    );
 }
 
 /// Finish Edit from the window (its button, the back button): a part with changes is saved

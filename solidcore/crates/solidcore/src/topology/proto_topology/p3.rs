@@ -112,6 +112,12 @@
 //!   allocated `rpNewPE` through the out-parameter; the port returns `None` there (the
 //!   failing paths are not reachable from the callers ported so far).
 //! - The `SM_DEBUG_CODE` blocks are not ported.
+//! - **Circles in contact** (not upstream): `FindOrCreateProtoVertex(PC, PC)` with no curve
+//!   takes a point classified onto an edge of each B-rep, where the two edges are circles in
+//!   one plane that touch by the contact rule (`circle_coplanar_circle_intersect_in_contact`
+//!   at `contact_tol_3d`), for their touching point (`touch_of_edges`): the surface
+//!   intersection met their lens at its two crossings, which became vertices beside the
+//!   touch (docs/booleans.md §6).
 //! - **Vertex identity** (not upstream): `FindOrCreateProtoVertex(PC, PC)` makes no proto
 //!   vertex for two classifications onto vertices farther apart than the intersection
 //!   tolerance of the two (a distance upstream's `sm_FindPositionFromPCs` only reports and
@@ -137,16 +143,19 @@ use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::CurveKind;
 use crate::error::{passed_on, EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::geom_utility::p1::{circle_coplanar_circle_intersect_in_contact, CircleCircle};
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
-use crate::geom::tol::{xsect_tol3d, xsect_tol_3d_from_zones, zone_tol3d, USE_DEFAULT};
+use crate::geom::tol::{
+    contact_tol_3d, xsect_tol3d, xsect_tol_3d_from_zones, zone_tol3d, USE_DEFAULT,
+};
 use crate::intersect::curve_class::p5::ExtractOptions;
 use crate::intersect::curve_class::{ClassificationInit, CurveClassification, CurveInterval};
 use crate::intersect::point_class::{
     ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
 };
 use crate::kernel::Kernel;
-use crate::math::{max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
+use crate::math::{max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::knots::Side;
 use crate::query::face::p2 as face_p2;
@@ -399,6 +408,15 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             }
         }
 
+        // Not upstream: with no curve, two classifications onto edges are the crossing of
+        // those two edges, and two coplanar circles a hair less than tangent cross nowhere
+        // but touch at one point (docs/booleans.md §6, "Circles a hair less than tangent"):
+        // a point the surface intersection found where their lens meets the other face, one
+        // of the two crossings `2√(2δ r1 r2 / (r1 ± r2))` apart, is that touching point.
+        if crossing.is_none() {
+            touch_of_edges(k, geometry, pc1, pc2)?;
+        }
+
         // sm_FindPositionFromPCs, status ignored; the position stays SM_UNDEF on failure
         // (passed on with `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
         let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
@@ -458,10 +476,28 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         )?;
         let within = self.find_proto_vertex_within(k, position, point_tol, Some(&region))?;
         let found = self.find_proto_vertex_holding(k, geometry, position, pc1, pc2, within)?;
+        // Not upstream: a point classified on a vertex is that vertex's point, whatever the
+        // position found for the pair (the average of the two objects' points), so the proto
+        // vertex also holds the ball of each vertex's own point: a later point on the vertex
+        // (within the coincidence rule of it) is at the proto vertex, as the vertex says, though
+        // it may lie farther from the average (docs/booleans.md, "One point or two").
+        let mut held = Vec::new();
+        for pc in [&*pc1, &*pc2] {
+            if pc.point_class() == PointClassType::Vertex {
+                let mut v = *pc;
+                v.set_class_object(PointClassType::Vertex, pc.object());
+                if let Some(at) = ignore_soft(v.find_obj_point_3d(k, geometry))? {
+                    held.push(DeclaredContact::of_point(at, point_tol));
+                }
+            }
+        }
 
         // when nearby PV exists
         if let Some(pv) = found {
             self.note_region(pv, region);
+            for r in held {
+                self.note_region(pv, r);
+            }
             // AddVertexDefinition(rPC1, rPC2, pNewVD): status ignored (passed on with the
             // flag)
             ignore_soft(passed_on(
@@ -475,6 +511,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let created = self.create_proto_vertex(k, geometry, pc1, pc2)?;
         if let Some(pv) = created {
             self.note_region(pv, region);
+            for r in held {
+                self.note_region(pv, r);
+            }
         }
         Ok((created, created.is_some()))
     }
@@ -1542,7 +1581,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     if dist > xs {
                         continue;
                     }
-                    // `seam_vertex_stays_on_seam` (not upstream): the vertex that stays is
+                    // Not upstream (#18274): the vertex that stays is
                     // the first definition's, unless only the other is the operand's own
                     // vertex at the end of a seam edge (its definition found it on that
                     // vertex): a seam's vertex keeps its place on the seam
@@ -1557,9 +1596,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                                 && ends_seam(&*brep, v)?,
                         )
                     };
-                    let keep_second = k.fixes.seam_vertex_stays_on_seam
-                        && on_seam(self, vd2, v2)?
-                        && !on_seam(self, vd1, v1)?;
+                    let keep_second = on_seam(self, vd2, v2)? && !on_seam(self, vd1, v1)?;
                     let (keep, gone) = if keep_second { (v2, v1) } else { (v1, v2) };
                     let merge_away = |s: &mut Self, deleted_v: &mut [Option<O>]| -> Result<()> {
                         set_slot(deleted_v, jj, gone);
@@ -2779,6 +2816,75 @@ fn crossing_sine<O: ClassObject>(
         return Ok(sine1);
     }
     Ok(sine1.min(sine2))
+}
+
+/// Not upstream: moves `pc1` and `pc2`, a point classified onto an edge of each B-rep, to
+/// where those two edges touch when they are circles in one plane that the contact rule
+/// takes for touching (`circle_coplanar_circle_intersect_in_contact` at `contact_tol_3d`,
+/// as the edge/curve intersections of the boolean read them), and the touching point lies
+/// on both edges within their intersection tolerance. Any other pair is left as it is.
+///
+/// # Errors
+///
+/// Those of the circles' intersection; an unported or cancelled drop of the touching point.
+fn touch_of_edges<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    pc1: &mut PointClassification<O>,
+    pc2: &mut PointClassification<O>,
+) -> Result<()> {
+    if pc1.point_class() != PointClassType::Edge || pc2.point_class() != PointClassType::Edge {
+        return Ok(());
+    }
+    // an edge's circle: centre, unit normal, radius
+    let circle = |pc: &PointClassification<O>| -> Result<Option<(Point3, Vec3, f64)>> {
+        let Some((b, EntityRef::Edge(e))) = pc.object().and_then(|o| geometry.topology_entity(o))
+        else {
+            return Ok(None);
+        };
+        let Some(curve) = b.edge(e)?.curve.as_ref() else {
+            return Ok(None);
+        };
+        let CurveKind::Ellipse(c) = curve.kind() else {
+            return Ok(None);
+        };
+        if !c.is_circle() {
+            return Ok(None);
+        }
+        let place = c.position();
+        Ok(Some((place.origin(), place.z_axis(), c.x_radius())))
+    };
+    let (Some((c1, n1, r1)), Some((c2, n2, r2))) = (circle(pc1)?, circle(pc2)?) else {
+        return Ok(());
+    };
+    let tol = xsect_tol_3d_from_zones(
+        k,
+        pc1.obj_zone_tol_3d(k, geometry)?,
+        pc2.obj_zone_tol_3d(k, geometry)?,
+    );
+    // one plane: parallel normals (the angle test of the circles' own intersection) and
+    // the second centre on the first plane within the tolerance
+    if n1.cross(n2).length() > EFF_ZERO_SQRT || (c2 - c1).dot(n1).abs() > tol {
+        return Ok(());
+    }
+    let CircleCircle::Tangent(touch) =
+        circle_coplanar_circle_intersect_in_contact(n1, c1, r1, c2, r2, tol, contact_tol_3d(k))?
+    else {
+        return Ok(());
+    };
+    // the touching point on both edges' arcs: dropped onto each edge's interval within
+    // their tolerance (a drop that fails leaves the point where it was)
+    let (mut q1, mut q2) = (*pc1, *pc2);
+    for q in [&mut q1, &mut q2] {
+        match q.compute_point_parameters(k, geometry, touch) {
+            Ok(()) if q.deviation() <= tol => {}
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Ok(()) | Err(_) => return Ok(()),
+        }
+    }
+    *pc1 = q1;
+    *pc2 = q2;
+    Ok(())
 }
 
 #[cfg(test)]

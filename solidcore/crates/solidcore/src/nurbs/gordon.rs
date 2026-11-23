@@ -159,7 +159,7 @@ fn crossing(k: &Kernel, a: &Curve, b: &Curve) -> Result<std::result::Result<(f64
         Err(e)
             if matches!(
                 e.intersect_failure(),
-                Some(IntersectFailure::Failed("the curves do not intersect"))
+                Some(IntersectFailure::NoIntersection)
             ) =>
         {
             Ok(Err(0))

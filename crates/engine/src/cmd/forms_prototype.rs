@@ -49,10 +49,10 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("form.blend.export","Export Blender Forms",crate::checked!("form.blend.export",blend::export)).icon("edit").at("SURFACE","FORMS")
         .noundo().doc_only().contract(&BLEND_EXPORT).output(output_schema_for::<params::BlendReply>)
         .params("path: .blend destination; surface?: false (editable quad cages with subdivision and creases) or true (evaluated CAD triangle meshes, no subdivision modifier); features?: saved feature ids (cages require Forms); name?: current editor object name; tolerance?, operation?, targets?: active Form fitting/Finish options. Default: current editor and staged Forms, otherwise saved Forms for cages or current bodies for surfaces. Export never finishes the live editor."),
-    CommandSpec::new("form.pipe","Form Pipe",crate::checked!("form.pipe",pipe::create)).icon("edit").at("SURFACE","FORMS")
+    CommandSpec::new("form.pipe","Form Pipe",crate::checked!("form.pipe",pipe::create)).begins_edit().icon("edit").at("SURFACE","FORMS")
         .noundo().doc_only().contract(&PIPE).output(output_schema_for::<params::Reply>)
         .params("sketch and optional curves, or body and optional edges: source path; diameter?, section_density?:1..12, path_samples?:1..20. Overrides replace the segment list; zero diameter/samples inherit globals. regenerate?: false, required to replace a sculpted pipe cage."),
-    CommandSpec::new("form.surface","Form Surface",crate::checked!("form.surface",surface)).icon("edit").at("SURFACE","FORMS")
+    CommandSpec::new("form.surface","Form Surface",crate::checked!("form.surface",surface)).begins_edit().icon("edit").at("SURFACE","FORMS")
         .noundo().doc_only().contract(&SURFACE).output(output_schema_for::<params::Reply>)
         .params("body, face: existing CAD source; segments?: [U,V] (2,2); continuity?:0|1. Edit interior guide points while retaining the source rim; Finish replaces that face in its solid. A retained-repair tool preview requires reattach:{swap,reverse_u,reverse_v} and unchanged guide counts."),
     CommandSpec::new("form.prototype.match","Match Form Boundary",crate::checked!("form.prototype.match",matching)).icon("edit")
@@ -130,7 +130,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "vertices: logical indices; positions: evaluated surface positions in mm; checkpoint?: true. Solves the inverse subdivision response.",
         ),
-    CommandSpec::new("form.prototype.create", "Create Form", crate::checked!("form.prototype.create", create))
+    CommandSpec::new("form.prototype.create", "Create Form", crate::checked!("form.prototype.create", create)).begins_edit()
         .noundo()
         .at("SURFACE","FORMS").icon("surface_patch")
         .doc_only()

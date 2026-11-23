@@ -24,7 +24,8 @@ use std::collections::BTreeMap;
 
 use super::nx1_end::find_surface_extension_dist_at_corner;
 use super::{
-    check_tangential_edgeuse_at_vertex, edge_of, find_side_edgeuse, need, new_corner_vertex,
+    check_tangential_edgeuse_at_vertex, defect, edge_of, find_side_edgeuse, missing_defect, need,
+    new_corner_vertex,
 };
 use crate::blend::fillet_corner::p1::{
     check_face_complimentary_corner_concavity, face_by_two_edgeuses,
@@ -120,8 +121,8 @@ impl FilletCorner {
     /// if a later operation fails.
     ///
     /// # Errors
-    /// `SM_ERR` unless three edge uses meet at the corner; `SM_ERR_NULL_POINTER` without
-    /// a side edge use or a side face surface; [`SolidError::InvalidInput`] for a
+    /// Reviewed `Defect`s: `SM_ERR` unless three edge uses meet at the corner;
+    /// `SM_ERR_NULL_POINTER` without the unblended edge use or a side face surface; [`SolidError::InvalidInput`] for a
     /// different corner kind or topology upstream dereferences; those of the convexity,
     /// solver, surface-extension and pseudo-topology operations.
     #[allow(clippy::too_many_lines)] // one upstream routine
@@ -149,9 +150,10 @@ impl FilletCorner {
             .clone()
             .ok_or_else(|| invalid("corner without outward edge uses"))?;
         if all.len() != 3 {
-            return Err(SolidError::blend_failed(
+            return Err(defect(
                 OP,
-                "the corner does not have exactly three edge uses",
+                "the 3x2 mixed corner does not have exactly three edge uses, though the \
+                 corner's create makes one only of a ring of three",
             ));
         }
         let (mut convex_eu, mut concave_eu) = match self.solver_eus.as_deref() {
@@ -178,8 +180,13 @@ impl FilletCorner {
         // box. Here the roles follow the unfilleted edge's convexity (WR-524), as
         // tangency-labs/smlib@1255993: that fork resolves the in-between edge use and its
         // convexity before the solvers.
-        let curr_eu = curr_eu_found
-            .ok_or_else(|| SolidError::blend_missing(OP, "the corner's unfilleted edge use"))?;
+        let curr_eu = curr_eu_found.ok_or_else(|| {
+            missing_defect(
+                OP,
+                "the 3x2 mixed corner has no edge use but its two blended ones, though its \
+                     ring holds three distinct edge uses and both blended ones",
+            )
+        })?;
         let (cross_eu, ext_eu, cross_id, ext_id) = if cross_uses_convex_fillet(
             k,
             target,
@@ -340,20 +347,18 @@ impl FilletCorner {
             .and_then(Option::as_mut)
             .ok_or_else(|| invalid("corner solver is not live"))?;
         let ext_dist = find_surface_extension_dist_at_corner(target, ext_eu, ext_solver, vertex)?;
-        let curr_eu = all
-            .iter()
-            .copied()
-            .find(|&eu| eu != convex_eu && eu != concave_eu)
-            .ok_or_else(|| SolidError::blend_missing(OP, "the corner's unfilleted edge use"))?;
+        // the unfilleted edge use found above (`curr_eu`)
         let orig_face1 = need(
             face_by_two_edgeuses(target, Some(curr_eu), Some(cross_eu), None)?,
             "no concave side face",
         )?;
-        let surface = target
-            .face(orig_face1)?
-            .surface
-            .as_ref()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the concave side face's surface"))?;
+        let surface = target.face(orig_face1)?.surface.as_ref().ok_or_else(|| {
+            missing_defect(
+                OP,
+                "the concave side face has no surface, though the face is beside the blended \
+                     edge whose solver's offset surfaces were made from its faces' surfaces",
+            )
+        })?;
         let new_surface = surface
             .extended_sides(
                 k,

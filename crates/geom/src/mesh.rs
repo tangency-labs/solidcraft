@@ -582,9 +582,22 @@ impl MeshGeom for Mesh {
         if rim.len() < 2 || !radius.is_finite() {
             return single;
         }
-        // All samples must lie on this circle, and every end must join exactly one other
-        // piece. Open arcs, ellipses, and branching tangent chains stay separate.
+        // The two surfaces an edge separates, seam-split pieces counted as one surface.
+        let sides = |i: usize| {
+            self.edge_faces.get(i).map(|fs| {
+                let mut s: Vec<Vec<usize>> = fs.iter().map(|&f| self.surface_patch(f as usize)).collect();
+                s.sort_unstable();
+                s
+            })
+        };
+        let first = sides(edge);
+        // All samples must lie on this circle, every end must join exactly one other piece,
+        // and every piece must separate the same two surfaces. Open arcs, ellipses, branching
+        // tangent chains, and a circle shared by two different face pairs stay separate.
         for &i in &rim {
+            if sides(i) != first {
+                return single;
+            }
             let Some(points) = self.edges.get(i) else { return single };
             if points.iter().any(|q| !q.is_finite() || (q.dist(center) - radius).abs() > tol || (*q - center).dot(normal).abs() > tol) {
                 return single;

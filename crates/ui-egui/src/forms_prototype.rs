@@ -1432,6 +1432,7 @@ fn viewport_frame(app: &SolveApp, proj: &Proj, ppp: f32, key: u64) -> Frame {
         analysis_colors: [0.0; 36],
         access: None,
         outline: false,
+        edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
         eye: [eye.x as f32, eye.y as f32, eye.z as f32, if app.cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
         ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
@@ -1441,6 +1442,8 @@ fn viewport_frame(app: &SolveApp, proj: &Proj, ppp: f32, key: u64) -> Frame {
         hatch: Default::default(),
         sky: crate::viewport::sky_uniform(app.preferences.dark_parts_shading, app.preferences.viewport_material_finish, proj.cam.up),
         moving: None,
+        motions: Default::default(),
+        ground: None,
     }
 }
 fn fallback(ui: &egui::Ui, proj: &Proj, mesh: &Mesh, color: egui::Color32) {

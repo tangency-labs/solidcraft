@@ -40,6 +40,17 @@ pub enum Edge {
     Bottom,
 }
 
+/// A place to put a view in the current window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Placement {
+    /// Fill an empty cell in reading order.
+    Empty(usize),
+    /// Take an occupied cell, swapping if the moved view is already shown.
+    Replace(u64),
+    /// Take half of an occupied cell.
+    Split { target: u64, edge: Edge },
+}
+
 /// A layout the Layout menu offers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Preset {
@@ -112,6 +123,56 @@ fn split(axis: Axis, ratio: f32, first: Tiles, second: Tiles) -> Tiles {
 pub const EMPTY: u64 = 0;
 
 impl Tiles {
+    /// A layout with the requested placement applied. The original is kept if a target is
+    /// stale, the view was dropped on itself, or the move would exceed the window's tile limit.
+    pub fn placed(&self, view: u64, placement: Placement) -> Option<Self> {
+        if view == EMPTY {
+            return None;
+        }
+        let mut next = self.clone();
+        let shown = self.contains(view);
+        let changed = match placement {
+            Placement::Empty(ordinal) => {
+                // Exchange with a temporary unique id so other empty cells keep their positions.
+                const MARKER: u64 = u64::MAX;
+                if view == MARKER || !next.fill_empty(ordinal, MARKER) {
+                    return None;
+                }
+                next.replace_leaf(view, &mut |_| Tiles::Leaf(EMPTY));
+                next.replace_leaf(MARKER, &mut |_| Tiles::Leaf(view))
+            }
+            Placement::Replace(target) if target != view && self.contains(target) => {
+                if shown {
+                    next.swap(view, target)
+                } else {
+                    next.replace_leaf(target, &mut |_| Tiles::Leaf(view))
+                }
+            }
+            Placement::Split { target, edge } if target != view && self.contains(target) => {
+                if shown {
+                    next.remove(view);
+                }
+                next.split_at(target, view, edge)
+            }
+            _ => false,
+        };
+        changed.then_some(next)
+    }
+
+    /// Which menu preset has this split tree's shape. Splitter sizes and view ids may differ.
+    pub fn preset_kind(&self) -> Option<Preset> {
+        match self {
+            Tiles::Leaf(_) => Some(Preset::Single),
+            Tiles::Split { axis, first, second, .. } => match (axis, first.preset_kind(), second.preset_kind()) {
+                (Axis::Row, Some(Preset::Single), Some(Preset::Single)) => Some(Preset::SideBySide),
+                (Axis::Column, Some(Preset::Single), Some(Preset::Single)) => Some(Preset::Stacked),
+                (Axis::Row, Some(Preset::Single), Some(Preset::Stacked)) => Some(Preset::LargeAndTwo),
+                (Axis::Column, Some(Preset::SideBySide), Some(Preset::SideBySide)) => Some(Preset::Grid),
+                _ => None,
+            },
+        }
+    }
+
     /// A layout of exactly `preset` showing `views` in order, each place beyond them an empty
     /// cell ([`EMPTY`]). None without a view.
     pub fn preset_padded(preset: Preset, views: &[u64]) -> Option<Tiles> {
@@ -271,6 +332,18 @@ impl Tiles {
         first.set_ratio_at(id, next, to) || second.set_ratio_at(id, next, to)
     }
 
+    /// Give each branch a share of its parent's area proportional to its cell count.
+    pub(crate) fn equal_sizes(&mut self) -> bool {
+        let Tiles::Split { ratio, first, second, .. } = self else { return false };
+        let first_count = first.len();
+        let equal_ratio = clamp_ratio(first_count as f32 / (first_count + second.len()) as f32);
+        let changed = *ratio != equal_ratio;
+        *ratio = equal_ratio;
+        let first_changed = first.equal_sizes();
+        let second_changed = second.equal_sizes();
+        changed || first_changed || second_changed
+    }
+
     /// Show `view` beside `target`, on its `edge`. False when `view` is shown already, `target`
     /// is not, or the window already shows [`MAX_TILES`] views.
     pub fn split_at(&mut self, target: u64, view: u64, edge: Edge) -> bool {
@@ -364,7 +437,7 @@ impl Tiles {
         let mut sorted = views.clone();
         sorted.sort_unstable();
         sorted.dedup();
-        (views.len() <= MAX_TILES && sorted.len() == views.len()).then_some(tiles)
+        (tiles.len() <= MAX_TILES && !views.is_empty() && sorted.len() == views.len()).then_some(tiles)
     }
 
     fn read(value: &Value, depth: usize) -> Option<Tiles> {
@@ -411,6 +484,38 @@ mod tests {
 
     fn grid() -> Tiles {
         Tiles::preset(Preset::Grid, &[1, 2, 3, 4]).unwrap()
+    }
+
+    #[test]
+    fn placement_splits_swaps_replaces_and_preserves_empty_cells() {
+        let initial = Tiles::Leaf(1);
+        let split = initial.placed(2, Placement::Split { target: 1, edge: Edge::Left }).unwrap();
+        assert_eq!(split.views(), [2, 1]);
+        assert_eq!(split.preset_kind(), Some(Preset::SideBySide));
+        assert_eq!(split.placed(2, Placement::Replace(1)).unwrap().views(), [1, 2]);
+        assert_eq!(split.placed(3, Placement::Replace(2)).unwrap().views(), [3, 1]);
+
+        let padded = Tiles::preset_padded(Preset::Grid, &[1, 2]).unwrap();
+        let swap = padded.placed(1, Placement::Empty(1)).unwrap();
+        assert_eq!(swap.rects(AREA, 6.0).into_iter().map(|(id, _)| id).collect::<Vec<_>>(), [EMPTY, 2, EMPTY, 1]);
+        assert_eq!(Tiles::from_json(&swap.to_json()), Some(swap));
+        assert!(padded.placed(3, Placement::Split { target: 1, edge: Edge::Bottom }).is_none());
+        assert!(grid().placed(1, Placement::Split { target: 4, edge: Edge::Bottom }).is_some());
+        assert!(padded.placed(1, Placement::Replace(1)).is_none());
+        assert!(padded.placed(1, Placement::Empty(2)).is_none());
+    }
+
+    #[test]
+    fn equal_sizes_preserves_the_layout_and_gives_empty_cells_the_same_area() {
+        let mut tiles = Tiles::preset_padded(Preset::LargeAndTwo, &[1, 2]).unwrap();
+        let area = Rect { x: 0.0, y: 0.0, w: 900.0, h: 600.0 };
+        assert!(tiles.set_ratio(1, 0.65));
+        assert!(tiles.equal_sizes());
+        assert_eq!(tiles.preset_kind(), Some(Preset::LargeAndTwo));
+        let regions = tiles.rects(area, 0.0);
+        assert_eq!(regions.iter().map(|(id, _)| *id).collect::<Vec<_>>(), [1, 2, EMPTY]);
+        assert!(regions.iter().all(|(_, rect)| (rect.w * rect.h - 180_000.0).abs() < 1.0));
+        assert!(!tiles.equal_sizes());
     }
 
     /// Every preset shows its views in reading order, fills the area without overlap, and a preset

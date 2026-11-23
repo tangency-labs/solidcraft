@@ -88,7 +88,8 @@ pub fn trimmed_guides(body: &Body, points: &[Vec3], tolerance: f64) -> Result<Ve
     if points.is_empty() {
         return Ok(Vec::new());
     }
-    let (body, order) = body.ops_body().ok_or_else(|| invalid("could not read the native trimmed face geometry"))?;
+    let form = body.ops_body().ok_or_else(|| invalid("could not read the native trimmed face geometry"))?;
+    let (body, order) = &*form;
     let xyz: Vec<_> = points.iter().map(|p| [p.x, p.y, p.z]).collect();
     let distances = body.face_distances_within(order, &xyz, tolerance).map_err(invalid)?;
     let mut covered = vec![false; points.len()];

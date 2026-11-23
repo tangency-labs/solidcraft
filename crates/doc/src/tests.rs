@@ -107,6 +107,7 @@ fn plate_doc() -> (Document, u64) {
                 direction: Direction::Positive,
                 distance2: None,
                 start_offset: None,
+                symmetric_offset: false,
                 through_all: false,
                 second_follows_first: false,
                 taper: None,
@@ -216,6 +217,7 @@ fn an_outline_closed_by_point_on_curve_tangent_joints_extrudes() {
                 direction: Direction::Positive,
                 distance2: None,
                 start_offset: None,
+                symmetric_offset: false,
                 through_all: false,
                 second_follows_first: false,
                 taper: None,
@@ -923,6 +925,7 @@ fn a_coil_follows_its_sketch() {
             position: 0,
             start_angle: None,
             clockwise: false,
+            end_cut: Default::default(),
             operation: Operation::NewBody,
             targets: Vec::new(),
         },
@@ -976,6 +979,7 @@ fn box_fillet_cut_timeline() {
                 direction: Direction::Positive,
                 distance2: None,
                 start_offset: None,
+                symmetric_offset: false,
                 through_all: false,
                 second_follows_first: false,
                 taper: None,
@@ -1440,10 +1444,11 @@ fn a_design_saved_before_the_midplane_frame_change_keeps_its_old_frame() {
     assert!(built.origin.dist(Vec3::new(0., 0., 20.)) < 1e-9, "the midplane takes the world XY frame: {built:?}");
     assert!(built.x.dist(Vec3::X) < 1e-9 && built.y.dist(Vec3::Y) < 1e-9, "the midplane takes the world XY frame: {built:?}");
 
-    // The design as an older build saved it: the format before this one, and no list of the
-    // changes it has, so the pending change is applied to it as it opens.
+    // The design as an older build saved it: format 63, the one before the midplane change
+    // (`format/v64/midplane-old-frame.rs`), and no list of the changes it has, so the change is
+    // applied to it as it opens. Not `FORMAT - 1`: another pending change moves `FORMAT` on.
     let mut saved: serde_json::Value = serde_json::from_str(&doc.to_json()).unwrap();
-    saved["format"] = serde_json::json!(crate::format::format_string(crate::format::FORMAT - 1));
+    saved["format"] = serde_json::json!(crate::format::format_string(63));
     saved.as_object_mut().unwrap().remove("format_pending");
     let older = crate::format::read(&serde_json::to_string(&saved).unwrap()).unwrap();
     let built = plane_of(&older);
@@ -1795,6 +1800,7 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 direction: Direction::Positive,
                 distance2: None,
                 start_offset: None,
+                symmetric_offset: false,
                 through_all: false,
                 second_follows_first: false,
                 taper: None,
@@ -1826,6 +1832,8 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "5".into() },
                 tool: None,
                 tool_plane: false,
+                tool_sheet: Default::default(),
+                tool_faces: Vec::new(),
                 sketch: None,
                 line: None,
             },
@@ -1901,6 +1909,32 @@ fn fillet_setbacks_default_to_none_and_round_trip() {
     };
     let back: FeatureKind = serde_json::from_value(serde_json::to_value(&set).unwrap()).unwrap();
     assert_eq!(back, set);
+}
+
+/// A frame member saved before pairs reads with its sketch, no pairs and `next_pair` 0, and
+/// saves exactly as it was read (no `pairs`, no `next_pair`); one of pairs only, without a
+/// sketch, keeps them through a save.
+#[test]
+fn frame_member_pairs_default_to_none_and_round_trip() {
+    let profile = serde_json::json!({"source": "library", "profile": {"kind": "rect_tube", "width": "40", "height": "40", "wall": "3"}});
+    let old = serde_json::json!({"type": "frame_member", "path_sketch": 3, "lines": ["l1"], "profile": profile});
+    let kind: FeatureKind = serde_json::from_value(old.clone()).unwrap();
+    let FeatureKind::FrameMember { path_sketch, pairs, next_pair, .. } = &kind else { panic!("{kind:?}") };
+    assert_eq!(*path_sketch, Some(SketchId(3)));
+    assert!(pairs.is_empty());
+    assert_eq!(*next_pair, 0);
+    assert_eq!(serde_json::to_value(&kind).unwrap(), old);
+    let with_pairs = serde_json::json!({"type": "frame_member", "profile": profile, "pairs": [
+        {"id": "pair1", "a": {"type": "vertex", "at": [0.0, 0.0, 0.0]}, "b": {"type": "construct_point", "name": "Top"}},
+        {"id": "pair3", "a": {"type": "sketch_point", "sketch": 3, "point": "p1"}, "b": {"type": "origin"}}
+    ], "next_pair": 4});
+    let kind: FeatureKind = serde_json::from_value(with_pairs.clone()).unwrap();
+    let FeatureKind::FrameMember { path_sketch, pairs, next_pair, .. } = &kind else { panic!("{kind:?}") };
+    assert_eq!(*path_sketch, None);
+    assert_eq!(pairs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pair1", "pair3"]);
+    assert_eq!(pairs[1].b, construct::GeoRef::Origin);
+    assert_eq!(*next_pair, 4);
+    assert_eq!(serde_json::to_value(&kind).unwrap(), with_pairs);
 }
 
 /// A fillet saved before turns reads as mitred and writes no `turn`; a swept one saves
@@ -2222,6 +2256,7 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             direction: Direction::Positive,
             distance2: None,
             start_offset: None,
+            symmetric_offset: false,
             through_all: false,
             second_follows_first: false,
             taper: None,
