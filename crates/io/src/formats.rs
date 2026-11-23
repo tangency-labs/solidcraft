@@ -254,7 +254,9 @@ pub static FORMATS: &[FormatSpec] = &[
         extensions: &["3dm"],
         role: Role::Artifact,
         import: Some(ImportSpec { target: ImportTarget::Brep, options: BREP_IMPORT, native_only: true }),
-        export: None,
+        // Written by cadmpeg from the design (`file.export`); FreeCAD is not, as cadmpeg cannot
+        // write a new FreeCAD file yet.
+        export: Some(ExportSpec { command: "file.export", format: None, options: &[], scope: ExportScope::Bodies, lossless: false }),
     },
     FormatSpec {
         id: "kicad",
@@ -627,6 +629,9 @@ mod tests {
             assert_eq!(writes(e), vec!["usd"]);
         }
         assert!(writes("gltf").is_empty(), "a .gltf file is never written");
+        assert_eq!(writes("3dm"), vec!["3dm"]);
+        assert_eq!(for_path("a.3DM").map(|f| f.id), Some("3dm"));
+        assert!(writes("fcstd").is_empty(), "cadmpeg cannot write a new FreeCAD file yet");
         assert!(for_path("a.png").is_none());
         assert!(for_path("nodot").is_none());
     }

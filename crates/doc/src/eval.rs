@@ -3575,6 +3575,15 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             // fold in here, each relative to the reading component, as `reads.paths` does.
             return mirror_placements_digest(doc, f, plane, placements, bodies) ^ datum_paths_digest(doc, f, &datums);
         }
+        FeatureKind::MeshReduce { body, .. } => {
+            reads.placed_body(st, body);
+            if let Some(st) = st {
+                let name = copy_body_name(st, f, 0, &format!("{body} Reduced"));
+                serde_json::to_string(&doc.body_offsets.get(&name)).unwrap_or_default().hash(&mut h);
+            } else {
+                reads.all = true;
+            }
+        }
         // A component's envelope bounds what is placed inside it, where it stands in its frame:
         // moving a part inside it builds it again, moving the component does not.
         FeatureKind::BoundingSolid { contents: true, .. } => return contents_digest(doc, f, st),
@@ -14463,6 +14472,41 @@ fn eval_feature_kind(
             let result = ModelBody::new(source.name.clone(), converted, f.id);
             let target = st.bodies.get_mut(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             *target = result;
+            Ok(())
+        }
+        FeatureKind::MeshReduce { body, triangle_count, percentage } => {
+            let source = st.body(body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            if doc.model_body_component(source) != f.component {
+                return Err(DocError::Invalid("activate the mesh body's component before reducing it".into()));
+            }
+            let (_, triangles) = source.body.triangle_mesh().ok_or_else(|| DocError::Invalid("select a mesh body".into()))?;
+            let original = triangles.len();
+            let target = match (triangle_count, percentage) {
+                (Some(n), None) if *n > 0 => *n,
+                (None, Some(p)) if p.is_finite() && *p > 0.0 && *p < 100.0 => ((original as f64 * p / 100.0).floor() as usize).max(1),
+                _ => return Err(DocError::Invalid("specify exactly one positive triangle_count or percentage between 0 and 100".into())),
+            };
+            if target >= original {
+                return Err(DocError::Invalid(format!("target {target} must be less than the original {original} triangles")));
+            }
+            let (result, achieved) = kernel::reduce_mesh(&source.body, target)?;
+            if achieved >= original {
+                return Err(DocError::Invalid("mesh reduction could not remove any triangles under its geometric and topology constraints".into()));
+            }
+            if achieved > target {
+                *warning = Some(format!(
+                    "reduction stopped at {achieved} triangles; requested {target}; geometric or topology constraints prevented further reduction"
+                ));
+            }
+            let source_offset = doc.model_body_offset(source).copied();
+            let name = copy_body_name(st, f, 0, &format!("{body} Reduced"));
+            // A stored placement for the new body takes precedence. Otherwise materialize the
+            // source offset in its geometry: no new document placement is needed.
+            let result = match source_offset.filter(|_| !doc.body_offsets.contains_key(&name)) {
+                Some(offset) => kernel::transform_matrix(&result, offset)?,
+                None => result,
+            };
+            st.bodies.push(ModelBody::new(name, result, f.id));
             Ok(())
         }
         FeatureKind::Repair { body, gap, patch_holes } => {
