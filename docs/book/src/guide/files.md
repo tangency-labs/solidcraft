@@ -49,7 +49,9 @@ Opening a STEP, IGES, FreeCAD or Rhino file creates a design with the file's bod
 inserting one adds them to the current design. Later features build on them. A FreeCAD file's
 sketches and features are rebuilt as SolidCraft features instead, so its dimensions can be edited;
 when one cannot be, its bodies come in as a base feature and a warning says why (Preferences ›
-General › FreeCAD files turns the rebuild off). Mesh bodies render,
+General › FreeCAD files turns the rebuild off). Preferences › General › Import with cadmpeg (off
+by default) reads STEP, IGES, FreeCAD and Rhino files with cadmpeg straight into B-rep instead of
+through SolidCraft's own STEP and IGES readers, to compare the two. Mesh bodies render,
 measure, move and export, but solid features need B-rep bodies.
 
 The stand-up offer for STEP and IGES files remembers your answer for unchanged files; Preferences › Design lets you turn this memory off or forget all remembered answers.
@@ -183,6 +185,22 @@ treated as PrusaSlicer 3, and any other entry is left as it is.
 Closed meshes can be rebuilt as solids with the `mesh.convert` command (command palette,
 scripts and the control channel): a mesh with a constant cross-section as analytic planar and
 cylindrical faces, any other closed mesh as the faceted solid its triangles describe.
+
+Use **Surface → Mesh → Reduce Mesh** to create a separate, simpler mesh without changing the
+original. Select the mesh body and choose either a retained percentage (greater than 0 and less
+than 100) or a positive target triangle count. The status reports the original, target and achieved
+triangle counts, including when a run stops above the target. Open boundary edges and original
+creases sharper than 30° stay in place. The reduced body inherits the source body's colour
+and placement and preserves per-corner normal seams. Reduction does not repair the source.
+Smaller targets can remove more detail: the triangle count is not a geometric tolerance.
+The reduced body can be selected for Convert Mesh, which still requires a closed mesh within its
+triangle limit. The reported count describes the body in the design: mesh exporters that weld
+nearby vertices can write a different count. Scripts can call `mesh.reduce` with `body` and
+exactly one of `percentage` or `triangle_count`; an optional `name` names the history feature.
+
+The **Mesh** section also contains **Convert Mesh**, **Insert Mesh**, and **Save As Mesh**.
+To restore the previous Surface toolbar, enable **Use legacy Surface toolbar** in Layout preferences.
+Mesh panel customizations are kept but hidden while the legacy toolbar is enabled.
 
 **File → Export 3MF…** with the format changed to **3MF with face tags** (`file.export` or `file.save_mesh` with `format: "3mf-tagged"`) writes an
 ordinary 3MF in which every triangle also names the B-rep face it lies on and every coordinate

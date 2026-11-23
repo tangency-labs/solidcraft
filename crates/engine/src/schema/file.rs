@@ -228,6 +228,12 @@ pub struct ExportParams {
     /// `file.export_stl` has it; refused for the other formats. Default: false. Not read for URDF.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
+    /// GLB only: true writes each component occurrence as a node named after it, holding its
+    /// part's bodies in the part's frame, so a viewer can move each part on its own; false writes
+    /// every body directly under the root in world coordinates, named as the model names it (as
+    /// SolidCraft 0.40 did). Default: true. Not read for the other formats.
+    #[serde(default)]
+    pub hierarchy: Option<bool>,
     /// ASCII STL (`stla`) only: `face` writes one named solid for each B-rep face, as
     /// `file.export_stl` has it; refused for the other formats. Default: body.
     #[serde(default)]
@@ -314,6 +320,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             velocity: None,
             images: None,
             lay_on_print_faces: None,
+            hierarchy: None,
             solids: None,
             name: None,
             is_static: None,
@@ -394,6 +401,12 @@ impl<'de> Deserialize<'de> for ExportParams {
             Some(Value::Bool(true)) if matches!(format, Format::StlBinary | Format::StlAscii | Format::ThreeMf | Format::ThreeMfTagged) => Some(true),
             Some(Value::Bool(true)) => return Err(refuse("`lay_on_print_faces` is for STL and 3MF: other formats are not printed")),
             Some(_) => return Err(refuse("`lay_on_print_faces` must be true or false")),
+        };
+        out.hierarchy = match m.get("hierarchy") {
+            _ if format != Format::Glb => None,
+            None | Some(Value::Null) => None,
+            Some(Value::Bool(b)) => Some(*b),
+            Some(_) => return Err(refuse("`hierarchy` must be true or false")),
         };
         Ok(out)
     }
@@ -612,11 +625,11 @@ pub enum HistoryParam {
     Solids,
 }
 
-/// `reader` of `doc.open` and `file.insert_step`: which reader reads a STEP, FreeCAD or Rhino
-/// file, `solidcraft` (SolidCraft's own STEP reader, which keeps the STEP text; a FreeCAD or
-/// Rhino file restated as STEP by cadmpeg's writer first) or `cadmpeg` (cadmpeg's model read
-/// straight into B-rep records: a STEP file decoded by cadmpeg's STEP decoder), read as the
-/// handler reads it.
+/// `reader` of `doc.open` and `file.insert_step`: which reader reads a STEP, IGES, FreeCAD or
+/// Rhino file, `solidcraft` (SolidCraft's own STEP or IGES reader, which keeps the STEP text; a
+/// FreeCAD or Rhino file restated as STEP by cadmpeg's writer first) or `cadmpeg` (cadmpeg's
+/// model read straight into B-rep records: a STEP or IGES file decoded by cadmpeg's STEP or IGES
+/// decoder), read as the handler reads it.
 #[derive(Clone, Copy, Debug)]
 pub struct ReaderParam(pub solidcraft_io::StepReader);
 
@@ -636,7 +649,7 @@ impl JsonSchema for ReaderParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "solidcraft (the default) is SolidCraft's own STEP reader, which keeps the STEP text (a FreeCAD or Rhino file is restated as STEP by cadmpeg's STEP writer first); cadmpeg reads cadmpeg's model straight into B-rep records, with no STEP text in between (a STEP file decoded by cadmpeg's STEP decoder), to compare the two. Matching ignores case and surrounding spaces.",
+            "description": "solidcraft (the default) is SolidCraft's own STEP or IGES reader, which keeps the STEP text (an IGES file is restated as STEP; a FreeCAD or Rhino file is restated as STEP by cadmpeg's STEP writer first); cadmpeg reads cadmpeg's model straight into B-rep records, with no STEP text in between (a STEP or IGES file decoded by cadmpeg's STEP or IGES decoder), to compare the two. Matching ignores case and surrounding spaces.",
             "type": "string",
             "enum": ["solidcraft", "cadmpeg"]
         })
@@ -672,8 +685,8 @@ pub struct OpenParams {
     /// SolidCraft features, or only its solids as one Import feature. Default: features.
     #[serde(default)]
     pub history: Option<HistoryParam>,
-    /// For a STEP (`.step`, `.stp`), FreeCAD or Rhino file (ignored for other files): which
-    /// reader reads it.
+    /// For a STEP (`.step`, `.stp`), IGES (`.igs`, `.iges`), FreeCAD or Rhino file (ignored for
+    /// other files): which reader reads it.
     /// Default: solidcraft.
     #[serde(default)]
     pub reader: Option<ReaderParam>,

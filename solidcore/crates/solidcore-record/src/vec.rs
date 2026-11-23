@@ -37,6 +37,15 @@ impl From<Vec2> for [f64; 2] {
         [v.x, v.y]
     }
 }
+/// A point or vector as a message shows it: `[x, y, z]`, the way a command's parameters write it,
+/// each coordinate to a thousandth of a millimetre (`-0` shown as `0`).
+impl std::fmt::Display for Vec3 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let c = |x: f64| (x * 1000.0).round() / 1000.0 + 0.0;
+        write!(f, "[{}, {}, {}]", c(self.x), c(self.y), c(self.z))
+    }
+}
+
 impl From<[f64; 3]> for Vec3 {
     fn from(a: [f64; 3]) -> Self {
         Vec3::new(a[0], a[1], a[2])
@@ -148,5 +157,14 @@ mod tests {
         );
         assert_eq!(Vec2::new(1., 2.).extend(3.), a);
         assert!(!Vec3::new(f64::NAN, 0., 0.).is_finite());
+    }
+
+    #[test]
+    fn a_point_shows_as_parameters_write_it() {
+        assert_eq!(
+            Vec3::new(-1060.6601717798214, 1060.66, 0.0).to_string(),
+            "[-1060.66, 1060.66, 0]"
+        );
+        assert_eq!(Vec3::new(-0.0001, 2.5, -0.0).to_string(), "[0, 2.5, 0]");
     }
 }

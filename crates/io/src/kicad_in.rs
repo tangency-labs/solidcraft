@@ -196,8 +196,12 @@ pub struct KicadFootprint {
 #[derive(Clone, Debug, PartialEq)]
 pub struct KicadText {
     pub text: String,
-    /// X/Y in millimetres and rotation in degrees, in the containing frame.
+    /// X/Y in millimetres in the containing frame, and the rotation in degrees. A footprint's
+    /// text stores its rotation on the board, not relative to the footprint (KiCad 5 files as well).
     pub at: [f64; 3],
+    /// A footprint text KiCad may draw upside down: `(unlocked yes)`, or `unlocked` in its `at`.
+    /// Other footprint text is turned to read upright (see [`footprint_text_angle`]).
+    pub unlocked: bool,
     pub layer: String,
     /// Cap height and glyph width in millimetres.
     pub height: f64,
@@ -236,6 +240,9 @@ pub struct KicadPad {
     pub layers: Vec<String>,
     /// `(width, height)` of the drill, if any.
     pub drill: Option<[f64; 2]>,
+    /// How far the pad's copper sits from its position (and its hole), in the pad's own frame:
+    /// `(drill … (offset dx dy))`. The hole stays at `at`.
+    pub offset: [f64; 2],
     pub roundrect_ratio: f64,
 }
 
@@ -2769,7 +2776,7 @@ fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings
             let frame = footprint_world(footprint);
             for text in &footprint.texts {
                 let origin = apply2(&frame, text.at[0], text.at[1]);
-                one(text, Vec2::new(origin[0], origin[1]), (footprint.at[2] + text.at[2]).to_radians());
+                one(text, Vec2::new(origin[0], origin[1]), footprint_text_angle(text).to_radians());
             }
         }
     }
@@ -2886,7 +2893,7 @@ fn silkscreen_meshes(board: &KicadBoard, thickness: f64, warnings: &mut Vec<Stri
             let frame = footprint_world(footprint);
             for text in &footprint.texts {
                 let origin = apply2(&frame, text.at[0], text.at[1]);
-                text_one(text, Vec2::new(origin[0], origin[1]), (footprint.at[2] + text.at[2]).to_radians());
+                text_one(text, Vec2::new(origin[0], origin[1]), footprint_text_angle(text).to_radians());
             }
         }
     }
@@ -2930,7 +2937,8 @@ fn pad_loops(pad: &KicadPad) -> Vec<Vec<[f64; 2]>> {
         _ => vec![[-sx * 0.5, -sy * 0.5], [sx * 0.5, -sy * 0.5], [sx * 0.5, sy * 0.5], [-sx * 0.5, sy * 0.5]],
     };
     for p in &mut points {
-        let [x, y] = turn_in_pad(pad, p[0], p[1]);
+        // The copper's offset from the hole is in the pad's frame, so it turns with the pad.
+        let [x, y] = turn_in_pad(pad, p[0] + pad.offset[0], p[1] + pad.offset[1]);
         p[0] = x + pad.at[0];
         p[1] = y + pad.at[1];
     }
@@ -3182,12 +3190,18 @@ fn parse_pad(expr: &Expr<'_>) -> std::result::Result<KicadPad, String> {
         let second = n.get(1).copied().unwrap_or(first);
         Some([first, if second.is_finite() && second > 0.0 { second } else { first }])
     });
+    // An SMD pad writes `(drill (offset dx dy))` with no drill size: the offset still applies.
+    let offset = field(expr, "drill")
+        .and_then(|drill| field(drill, "offset"))
+        .and_then(numeric_atoms)
+        .and_then(|n| Some([*n.first()?, *n.get(1)?]))
+        .unwrap_or([0.0, 0.0]);
     let roundrect_ratio = field(expr, "roundrect_rratio")
         .and_then(|e| numbers(e, 1).ok())
         .and_then(|n| n.first().copied())
         .filter(|v| v.is_finite() && *v >= 0.0 && *v <= 0.5)
         .unwrap_or(0.0);
-    Ok(KicadPad { at: [x, y, angle], size: [sx, sy], shape, layers, drill, roundrect_ratio })
+    Ok(KicadPad { at: [x, y, angle], size: [sx, sy], shape, layers, drill, offset, roundrect_ratio })
 }
 
 fn numeric_atoms(expr: &Expr<'_>) -> Option<Vec<f64>> {
@@ -3224,7 +3238,11 @@ fn parse_text(expr: &Expr<'_>, text_index: usize) -> Option<KicadText> {
     if is_hidden(expr) || effects.is_some_and(is_hidden) {
         return None;
     }
-    let at = field(expr, "at").and_then(|e| numbers(e, 2).ok()).unwrap_or_default();
+    // Older files write `(at x y angle unlocked)`; the word is not a number.
+    let at_field = field(expr, "at");
+    let at = at_field.and_then(|e| numbers_but(e, 2, "unlocked").ok()).unwrap_or_default();
+    let unlocked = at_field.is_some_and(|e| children(e).iter().any(|c| atom(c) == Some("unlocked")))
+        || field(expr, "unlocked").is_some_and(|e| children(e).get(1).and_then(atom) != Some("no"));
     let x = at.first().copied().unwrap_or(0.0);
     let y = at.get(1).copied().unwrap_or(0.0);
     let angle = at.get(2).copied().unwrap_or(0.0);
@@ -3260,7 +3278,27 @@ fn parse_text(expr: &Expr<'_>, text_index: usize) -> Option<KicadText> {
             }
         }
     }
-    Some(KicadText { text, at: [x, y, angle], layer, height, width, thickness, bold, italic, mirror, left, right, top, bottom })
+    Some(KicadText { text, at: [x, y, angle], unlocked, layer, height, width, thickness, bold, italic, mirror, left, right, top, bottom })
+}
+
+/// The rotation a footprint's text is drawn at, in degrees on the board. The file stores it on the
+/// board already (the footprint's own rotation is not added). Unless the text is unlocked, KiCad
+/// keeps it readable: a rotation past a quarter turn either way is drawn half a turn round, in
+/// (-90, 90], about the same anchor and with the same justification. Board text is never turned.
+fn footprint_text_angle(text: &KicadText) -> f64 {
+    if text.unlocked {
+        return text.at[2];
+    }
+    let mut angle = text.at[2].rem_euclid(360.0);
+    if angle > 180.0 {
+        angle -= 360.0;
+    }
+    if angle > 90.0 {
+        angle -= 180.0;
+    } else if angle <= -90.0 {
+        angle += 180.0;
+    }
+    angle
 }
 
 /// A 3D model offset: KiCad writes `(offset (xyz ...))` in millimetres; the legacy
@@ -3352,9 +3390,14 @@ fn atom<'e, 'a>(expr: &'e Expr<'a>) -> Option<&'e str> {
 }
 
 fn numbers(expr: &Expr<'_>, minimum: usize) -> std::result::Result<Vec<f64>, String> {
+    numbers_but(expr, minimum, "")
+}
+
+/// [`numbers`], passing over the one word `skip` among them (a text's `(at x y angle unlocked)`).
+fn numbers_but(expr: &Expr<'_>, minimum: usize, skip: &str) -> std::result::Result<Vec<f64>, String> {
     let mut values = Vec::new();
     for item in children(expr).iter().skip(1) {
-        if let Some(value) = atom(item) {
+        if let Some(value) = atom(item).filter(|value| skip.is_empty() || *value != skip) {
             let number = value.parse::<f64>().map_err(|_| format!("invalid number `{value}`"))?;
             if !number.is_finite() || number.abs() > MAX_NUMBER {
                 return Err(format!("number `{value}` is outside the supported range"));

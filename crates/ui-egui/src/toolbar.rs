@@ -1016,6 +1016,8 @@ fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
         if let Some(format) = format {
             params["format"] = json!(format);
         }
+        // GLB only, and not read for the other formats.
+        params["hierarchy"] = json!(app.preferences.glb_export_hierarchy);
         if let Ok(result) = app.run("file.export", params) {
             let skipped =
                 result.get("skipped").and_then(Value::as_array).map_or(Vec::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>());
@@ -1899,7 +1901,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         // Every panel with all its buttons (the user's pins have no cap); a toolbar too narrow
         // for them narrows the buttons, then trims panels into their drop-down and the » menu.
         let editing_in_place = app.edit_in_place.active.is_some();
-        let lists: Vec<_> = crate::toolbar_custom::panel_lists(&tab)
+        let lists: Vec<_> = crate::toolbar_custom::panel_lists_for(app, &tab)
             .into_iter()
             .filter(|(panel, _, _)| editing_in_place || !(tab == "MODEL" && *panel == "FINISH EDITING"))
             .map(|(panel, mut cmds, promote)| {
@@ -3032,7 +3034,11 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
         if k != Key::Escape {
             app.last_escape = None;
         }
-        if shown && (crate::keymap::drag_zoom_key(app, k, mods) || crate::navigation::view_key(app, ctx, k, mods, repeat)) {
+        if shown
+            && (crate::keymap::drag_zoom_key(app, k, mods)
+                || crate::navigation::toggle_mode_key(app, ctx, k, mods, repeat)
+                || crate::navigation::view_key(app, ctx, k, mods, repeat))
+        {
             continue;
         }
         // Alt+1 to Alt+9 show the shown design's first to ninth view (Ctrl+1 to Ctrl+7 keep
@@ -3130,7 +3136,8 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 // End navigation before the underlying tool or dialog; sketch double-Escape
                 // handling starts with the next press.
-                if app.viewport.nav.take().is_some() {
+                if app.viewport.nav_toggle.take().is_some() | app.viewport.nav.take().is_some() {
+                    app.viewport.nav_toggle_at = None;
                     app.last_escape = None;
                     continue;
                 }
@@ -6911,6 +6918,48 @@ mod command_start_tab_tests {
 mod persistent_ribbon_tests {
     use super::*;
     use crate::scenario::{self, Harness};
+
+    #[test]
+    fn surface_toolbar_switches_layout_without_losing_custom_pins() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":2400,"height":1000}));
+        h.app.ui.tab = "SURFACE".into();
+        h.frames(3);
+        let lists = crate::toolbar_custom::panel_lists_for(&h.app, "SURFACE");
+        assert_eq!(lists.iter().map(|(p, _, _)| *p).collect::<Vec<_>>(), ["SKETCH", "CREATE", "EDIT", "MESH"]);
+        let (_, mesh, count) = lists.iter().find(|(p, _, _)| *p == "MESH").unwrap();
+        assert_eq!(mesh.iter().map(|c| c.id).collect::<Vec<_>>(), ["mesh.reduce", "mesh.convert", "file.insert_mesh", "file.save_mesh"]);
+        assert_eq!(
+            crate::toolbar_custom::buttons(&h.app, "SURFACE", "MESH", mesh, *count).iter().map(|c| c.id).collect::<Vec<_>>(),
+            ["mesh.reduce", "mesh.convert"]
+        );
+        h.step(&json!({"click":{"handle":"panel:SURFACE:CREATE"}})).unwrap();
+        assert!(scenario::handle_at("dropdown:surface.thicken").is_some());
+        h.step(&json!({"click":{"handle":"panel:SURFACE:CREATE"}})).unwrap();
+        assert!(scenario::handle_at("button:mesh.reduce").is_some());
+        assert!(scenario::handle_at("button:mesh.convert").is_some());
+        crate::toolbar_custom::pin(&mut h.app, "SURFACE", "file.insert_mesh").unwrap();
+        h.app.preferences.legacy_surface_toolbar = true;
+        h.frames(3);
+        let lists = crate::toolbar_custom::panel_lists_for(&h.app, "SURFACE");
+        assert_eq!(lists.iter().map(|(p, _, _)| *p).collect::<Vec<_>>(), ["SKETCH", "CREATE", "EDIT", "CONVERT"]);
+        let (_, create, count) = lists.iter().find(|(p, _, _)| *p == "CREATE").unwrap();
+        assert!(!create.iter().any(|c| c.id == "surface.thicken"));
+        assert_eq!(*count, 4);
+        let (_, convert, count) = lists.iter().find(|(p, _, _)| *p == "CONVERT").unwrap();
+        assert_eq!(convert.iter().map(|c| c.id).collect::<Vec<_>>(), ["surface.thicken", "mesh.convert", "mesh.reduce"]);
+        assert_eq!(*count, 2);
+        assert!(scenario::handle_at("button:surface.thicken").is_some());
+        assert!(scenario::handle_at("button:mesh.convert").is_some());
+        assert!(scenario::handle_at("button:mesh.reduce").is_none());
+        assert!(scenario::handle_at("button:file.insert_mesh").is_none(), "Mesh customizations stay hidden in the legacy layout");
+        h.app.preferences.legacy_surface_toolbar = false;
+        h.frames(3);
+        assert!(scenario::handle_at("button:file.insert_mesh").is_some());
+        h.call("ui.prefs", json!({"language":"ja"}));
+        assert_eq!(ribbon_label(&h.app, "MESH"), "メッシュ");
+    }
 
     fn harness() -> Harness {
         let mut h = Harness::new();

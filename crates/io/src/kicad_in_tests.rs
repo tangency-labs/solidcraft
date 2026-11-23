@@ -812,6 +812,80 @@ fn a_slot_on_a_turned_footprint_lies_along_its_pad() {
     assert!((pads[2] - pads[0] - 1.5).abs() < 1e-6 && (pads[3] - pads[1] - 3.0).abs() < 1e-6, "{pads:?}");
 }
 
+/// The front silkscreen's bounds when `items` (footprints, board text) are drawn on a 40 mm board.
+fn front_silk_bounds(items: &str) -> [f64; 4] {
+    let source = format!(r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start -20 -20) (end 20 20) (layer "Edge.Cuts")) {items})"#);
+    let options = KicadOptions { copper: KicadCopper::None, silkscreen: true, components: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(source.as_bytes(), "text.kicad_pcb", &options, &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    bounds(meshes.iter().find(|m| m.name == "Silkscreen F.SilkS").unwrap_or_else(|| panic!("no front silk: {meshes:?}")))
+}
+
+fn same_bounds(a: [f64; 4], b: [f64; 4]) -> bool {
+    a.iter().zip(&b).all(|(x, y)| (x - y).abs() < 1e-6)
+}
+
+const FONT: &str = "(effects (font (size 1 1) (thickness 0.15)))";
+const FONT_LEFT: &str = "(effects (font (size 1 1) (thickness 0.15)) (justify left))";
+
+/// KiCad stores a footprint text's rotation on the board: on a footprint turned a quarter turn, a
+/// reference at 0° reads level, as board text at 0° does. Its position still turns with the
+/// footprint: (3, 0) in a footprint turned 90° is (0, -3) on the board.
+#[test]
+fn footprint_text_keeps_its_own_angle_on_a_turned_footprint() {
+    let turned = front_silk_bounds(&format!(
+        r#"(footprint "R" (layer "F.Cu") (at 0 0 90) (property "Reference" "ABCDEFGH" (at 3 0 0) (layer "F.SilkS") {FONT}))"#
+    ));
+    let level = front_silk_bounds(&format!(r#"(gr_text "ABCDEFGH" (at 0 -3 0) (layer "F.SilkS") {FONT})"#));
+    assert!(same_bounds(turned, level), "{turned:?} {level:?}");
+    assert!(turned[2] - turned[0] > turned[3] - turned[1], "reads level, not up the board: {turned:?}");
+}
+
+/// A footprint text turned past a quarter turn is drawn half a turn round so that it reads
+/// upright (KiCad's rule for text that is not unlocked), keeping its anchor and justification:
+/// 180° is drawn as 0°, 270° as 90°. Board text keeps its rotation.
+#[test]
+fn locked_footprint_text_past_a_quarter_turn_reads_upright() {
+    let footprint = |angle: u32, font: &str| {
+        front_silk_bounds(&format!(
+            r#"(footprint "R" (layer "F.Cu") (at 0 0) (property "Reference" "ABCDEFGH" (at 0 0 {angle}) (layer "F.SilkS") {font}))"#
+        ))
+    };
+    let board = |angle: u32, font: &str| front_silk_bounds(&format!(r#"(gr_text "ABCDEFGH" (at 0 0 {angle}) (layer "F.SilkS") {font})"#));
+    assert!(same_bounds(footprint(180, FONT_LEFT), board(0, FONT_LEFT)), "{:?} {:?}", footprint(180, FONT_LEFT), board(0, FONT_LEFT));
+    assert!(same_bounds(footprint(270, FONT), board(90, FONT)), "{:?} {:?}", footprint(270, FONT), board(90, FONT));
+    assert!(same_bounds(footprint(90, FONT), board(90, FONT)), "a quarter turn is already upright");
+    // Board text at 180° is drawn upside down: left-justified, it runs to the left of its anchor.
+    let upside_down = board(180, FONT_LEFT);
+    assert!(upside_down[2] < 0.5 && upside_down[0] < -5.0, "{upside_down:?}");
+}
+
+/// An unlocked footprint text is drawn at its own rotation, upside down if that is what it says.
+#[test]
+fn unlocked_footprint_text_keeps_its_upside_down_angle() {
+    let unlocked = front_silk_bounds(&format!(
+        r#"(footprint "R" (layer "F.Cu") (at 0 0) (property "Reference" "ABCDEFGH" (at 0 0 180) (unlocked yes) (layer "F.SilkS") {FONT_LEFT}))"#
+    ));
+    let board = front_silk_bounds(&format!(r#"(gr_text "ABCDEFGH" (at 0 0 180) (layer "F.SilkS") {FONT_LEFT})"#));
+    assert!(same_bounds(unlocked, board), "{unlocked:?} {board:?}");
+}
+
+/// Older files write `unlocked` inside the text's `at`: the position and rotation are still read.
+#[test]
+fn unlocked_written_in_the_position_keeps_the_position() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start -10 -10) (end 10 10) (layer "Edge.Cuts"))
+      (footprint "R" (layer "F.Cu") (at 0 0)
+        (fp_text reference "R1" (at 3 1 180 unlocked) (layer "F.SilkS")
+          (effects (font (size 1 1) (thickness 0.15))))))"#;
+    let board = parse_kicad_board(source.as_bytes(), "legacy.kicad_pcb").unwrap();
+    let [footprint] = board.footprints.as_slice() else { panic!("expected one footprint") };
+    assert_eq!(footprint.texts.len(), 1, "{:?}", footprint.texts);
+    assert_eq!(footprint.texts[0].at, [3.0, 1.0, 180.0]);
+    assert!(footprint.texts[0].unlocked);
+}
+
 #[test]
 fn copper_overlay_is_a_flat_face_on_the_board() {
     let source = r#"(kicad_pcb (general (thickness 1.6))
@@ -1090,6 +1164,61 @@ fn through_hole_pad_copper_has_the_drill_through_it() {
         let area = copper_area(&imported, layer, 0.035);
         assert!((area - expected).abs() < 0.05, "{layer}: {area} vs {expected}");
     }
+}
+
+/// `(drill … (offset dx dy))` moves a pad's copper off its hole, in the pad's own frame: the hole
+/// stays at the pad's position (checked with kicad-cli 10: its drill file and copper plot). Library
+/// footprints use it for hand-soldering pads and module castellations (Adafruit Feather, Raspberry
+/// Pi Pico, TO-92 HandSolder); an SMD pad writes it without a drill size.
+#[test]
+fn a_pad_offset_moves_the_copper_off_its_hole() {
+    let front_copper = |at: &str, pad: &str| {
+        let source = format!(
+            r#"(kicad_pcb (general (thickness 1.6))
+              (gr_rect (start 0 0) (end 40 20) (layer "Edge.Cuts"))
+              (footprint "test:Offset" (layer "F.Cu") (at {at})
+                (property "Reference" "J1")
+                {pad}))"#
+        );
+        let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+        let mut load = |_: &str| Err("not used".to_string());
+        let imported = read_kicad(source.as_bytes(), "offset.kicad_pcb", &options, &mut load).unwrap();
+        let board = parse_kicad_board(source.as_bytes(), "offset.kicad_pcb").unwrap();
+        let drills: Vec<[f64; 2]> = board.drills.iter().map(|d| d.center).collect();
+        let area = copper_area(&imported, "Copper F.Cu", 0.035);
+        let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+        let mesh = meshes.iter().find(|m| m.name == "Copper F.Cu").expect("front copper");
+        let points = mesh.positions.as_chunks::<3>().0;
+        let low = |i: usize| points.iter().map(|p| p[i]).fold(f64::MAX, f64::min);
+        let high = |i: usize| points.iter().map(|p| p[i]).fold(f64::MIN, f64::max);
+        ([low(0), high(0), low(1), high(1)], area, drills)
+    };
+    let near = |a: [f64; 4], b: [f64; 4]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-6);
+
+    // A 3 × 2 pad drilled 1 mm, its copper 0.5 mm to the right of the hole: copper from X 9 to 12
+    // (KiCad's Y 9 to 11, -11 to -9 here), the hole still at the footprint's origin and inside it.
+    let (extent, area, drills) = front_copper("10 10", r#"(pad "1" thru_hole rect (at 0 0) (size 3 2) (drill 1 (offset 0.5 0)) (layers "*.Cu"))"#);
+    assert!(near(extent, [9.0, 12.0, -11.0, -9.0]), "{extent:?}");
+    assert_eq!(drills, [[10.0, -10.0]], "the hole stays at the pad's position");
+    let expected = 6.0 - std::f64::consts::PI * 0.25;
+    assert!((area - expected).abs() < 0.05, "the hole opens the shifted copper: {area} vs {expected}");
+
+    // A pad turned a quarter turn turns its offset too: (3, 0) puts the copper 3 mm up the board
+    // (KiCad's Y 6 to 8 for a pad at Y 10).
+    let (extent, _, drills) = front_copper("10 10", r#"(pad "1" thru_hole rect (at 10 0 90) (size 2 2) (drill 1 (offset 3 0)) (layers "*.Cu"))"#);
+    assert!(near(extent, [19.0, 21.0, -8.0, -6.0]), "{extent:?}");
+    assert_eq!(drills, [[20.0, -10.0]]);
+
+    // An SMD pad has an offset and no drill: the copper moves and no hole comes in.
+    let (extent, _, drills) = front_copper("10 10", r#"(pad "1" smd rect (at 0 5) (size 1 1) (drill (offset 3 0)) (layers "F.Cu"))"#);
+    assert!(near(extent, [12.5, 13.5, -15.5, -14.5]), "{extent:?}");
+    assert!(drills.is_empty(), "{drills:?}");
+
+    // On a turned footprint the file writes the pad's angle on the board (90° here), and the offset
+    // turns with the pad: KiCad draws this copper from X 19 to 21 and Y 6 to 8, hole at (20, 10).
+    let (extent, _, drills) = front_copper("20 10 90", r#"(pad "1" thru_hole rect (at 0 0 90) (size 2 2) (drill 1 (offset 3 0)) (layers "*.Cu"))"#);
+    assert!(near(extent, [19.0, 21.0, -8.0, -6.0]), "{extent:?}");
+    assert_eq!(drills, [[20.0, -10.0]]);
 }
 
 #[test]

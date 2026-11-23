@@ -12,7 +12,7 @@
 //! solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N]
 //!                                 [--timeout-s 300] [--json out.json] [--markdown out.md]
 //!                                                             the standard Assistant model test (#4851) on a running app
-//! solidcraft-cli snapshot <script|design> [--in design|part.step] --out shot.png [--width W] [--height H] [--view iso|front|top|…|NAME | --camera JSON] [--no-grid] [--no-axes] [--quality LEVEL]
+//! solidcraft-cli snapshot <script|design> [--in design|part.step] --out shot.png [--width W] [--height H] [--view iso|front|top|…|NAME | --camera JSON] [--no-grid] [--no-axes] [--transparent] [--quality LEVEL]
 //!                                                             [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27]
 //! solidcraft-cli exec <command> [json-params]                 run one command on an empty design
 //! solidcraft-cli commands                                     the command registry as JSON
@@ -88,13 +88,13 @@ const USAGE_BENCH_AGENT: &str = "  solidcraft-cli bench-agent [--scale F] [--sav
 /// `bench-assistant`'s lines in the usage.
 const USAGE_BENCH_ASSISTANT: &str = "  solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N] [--timeout-s 300] [--json out.json] [--markdown out.md]\n";
 /// `snapshot`'s lines in the usage.
-const USAGE_SNAPSHOT: &str = "  solidcraft-cli snapshot <script|design> [--in design.sc|part.step] --out shot.png [--width W] [--height H] [--view NAME | --camera JSON] [--no-grid] [--no-axes]\n      [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27] [--quality coarse|normal|fine|ultra]\n  solidcraft-cli snapshot --in <design.sc|part.step> --out shot.png ...\n      (as with run, --in starts from a design and the script runs on top of it; an option snapshot doesn't take is an error;\n       --view: iso, front, back, top, bottom, left, right, or the name of a view saved in the design with view.save;\n       --camera: {target: [x,y,z], yaw, pitch, distance, fov?} in mm and radians, as the MCP screenshot takes it (docs/mcp.md);\n       --no-grid and --no-axes leave the ground grid (on Z 0) and the origin's axes out of the picture;\n       --body: how one body is drawn, as appearance.assign takes it: opacity 0-1 (below 1 is see-through, so what is inside\n         it shows) and color #rrggbb, either or both, once per body;\n       --tool: draw this body solid in the tool colour and every other body see-through, so a cut's or a join's tool body\n         is visible inside the material it meets; a later --body overrides it;\n       --section: cut the model as inspect.section does, so the inside shows: z=27 (the plane through that world\n         coordinate, keeping the smaller side), add ,flip to keep the other side, or XY, XZ, YZ, or its own JSON;\n       --quality: the display quality the bodies are meshed at, as the app's setting (default normal))\n";
+const USAGE_SNAPSHOT: &str = "  solidcraft-cli snapshot <script|design> [--in design.sc|part.step] --out shot.png [--width W] [--height H] [--view NAME | --camera JSON] [--no-grid] [--no-axes] [--transparent]\n      [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27] [--quality coarse|normal|fine|ultra]\n  solidcraft-cli snapshot --in <design.sc|part.step> --out shot.png ...\n      (as with run, --in starts from a design and the script runs on top of it; an option snapshot doesn't take is an error;\n       --view: iso, front, back, top, bottom, left, right, or the name of a view saved in the design with view.save;\n       --camera: {target: [x,y,z], yaw, pitch, distance, fov?} in mm and radians, as the MCP screenshot takes it (docs/mcp.md);\n       --no-grid and --no-axes leave the ground grid (on Z 0) and the origin's axes out of the picture;\n       --transparent: a transparent background instead of the gradient: alpha 0 where nothing is drawn,\n         the model opaque, its anti-aliased edges and see-through bodies partly so; drawn twice (over black\n         and over white), so it takes about twice as long; the grid and the axes stay unless left out;\n       --body: how one body is drawn, as appearance.assign takes it: opacity 0-1 (below 1 is see-through, so what is inside\n         it shows) and color #rrggbb, either or both, once per body;\n       --tool: draw this body solid in the tool colour and every other body see-through, so a cut's or a join's tool body\n         is visible inside the material it meets; a later --body overrides it;\n       --section: cut the model as inspect.section does, so the inside shows: z=27 (the plane through that world\n         coordinate, keeping the smaller side), add ,flip to keep the other side, or XY, XZ, YZ, or its own JSON;\n       --quality: the display quality the bodies are meshed at, as the app's setting (default normal))\n";
 /// `render`'s lines in the usage.
 const USAGE_RENDER: &str = "  solidcraft-cli render <script|design> --out image.png [--setup NAME] [--width W] [--height H] [--transparent] [--overwrite] [--timeout SECONDS]\n      [--progressive] [--samples N] [--max-depth N] [--seed N] [--exposure EV] [--lighting FILE.json] [--environment FILE.json] [--tone-map reinhard|aces_fitted] [--legacy-memory-admission]\n      --legacy-memory-admission skips available-RAM checks; fixed shared/host budgets and allocation limits still apply.\n";
 /// `exec`'s lines in the usage.
 const USAGE_EXEC: &str = "  solidcraft-cli exec <command> [json-params]\n";
 /// `commands`'s lines in the usage.
-const USAGE_COMMANDS: &str = "  solidcraft-cli commands\n";
+const USAGE_COMMANDS: &str = "  solidcraft-cli commands [FILTER | --id COMMAND]\n      (the command registry as JSON; FILTER keeps the commands whose id contains it, in any case, e.g. `commands config`;\n       --id COMMAND prints that one command's documentation and its input and output schemas, as MCP's describe_command does)\n";
 /// `recipe`'s lines in the usage.
 const USAGE_RECIPE: &str = "  solidcraft-cli recipe <recipe.json>\n";
 /// `oracle`'s lines in the usage.
@@ -206,6 +206,8 @@ fn main() -> ExitCode {
         eprintln!("error: {e}");
         return ExitCode::FAILURE;
     }
+    // Compiled plugins are kept in the per-user cache folder, as the desktop app keeps them.
+    solidcraft_engine::plugin::configure_compile_cache();
     let r = match args.first().map(String::as_str) {
         // Asked-for help is not an error: the command's usage on stdout, exit 0. It is read
         // before the command runs, so `--help` never starts a run (a fuzz run, a server).
@@ -223,19 +225,7 @@ fn main() -> ExitCode {
         Some("render") => render::run(&args[1..]),
         Some("exec") => cmd_exec(&args[1..]),
         Some("gpu") => cmd_gpu(&args[1..]),
-        Some("commands") => {
-            use std::io::Write as _;
-            let mut s = Session::default();
-            s.execute("engine.commands", &json!({})).map_err(|e| e.to_string()).and_then(|v| {
-                // A pipeline consumer may stop early (e.g. `commands | head`).
-                // Unlike println!, writing explicitly lets us handle that without a panic.
-                match writeln!(std::io::stdout().lock(), "{}", pretty(&v)) {
-                    Ok(()) => Ok(()),
-                    Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
-                    Err(e) => Err(format!("stdout: {e}")),
-                }
-            })
-        }
+        Some("commands") => cmd_commands(&args[1..]),
         Some("recipe") => args.get(1).ok_or_else(usage).and_then(|p| {
             let v = read_json(p)?;
             recipe::to_script(&v).map(|s| println!("{}", pretty(&s)))
@@ -585,7 +575,15 @@ fn positional_index(args: &[String]) -> Option<usize> {
         if a.starts_with("--") {
             i += if matches!(
                 a.as_str(),
-                "--quiet" | "--results" | "--timings" | "--profile" | "--allow-errors" | "--no-grid" | "--no-axes" | "--script-relative"
+                "--quiet"
+                    | "--results"
+                    | "--timings"
+                    | "--profile"
+                    | "--allow-errors"
+                    | "--no-grid"
+                    | "--no-axes"
+                    | "--script-relative"
+                    | "--transparent"
             ) {
                 1
             } else {
@@ -960,6 +958,54 @@ fn timeline_ok(s: &Session, skip_newer_features: bool, what_now: &str) -> Result
     Err(format!("{} timeline feature(s) failed, {what_now}:\n{}", failed.len(), failed.join("\n")))
 }
 
+/// `commands`: the command registry, whole by default. A word narrows it to the commands whose id
+/// contains it (any case); `--id COMMAND` prints that one command's documentation and schemas
+/// instead, as the MCP server's `describe_command` does (#20923).
+fn cmd_commands(args: &[String]) -> Result<(), String> {
+    use std::io::Write as _;
+    known_args("commands", args, &["--id"], &[], true)?;
+    let ids = args.iter().filter(|a| *a == "--id").count();
+    if ids > 1 {
+        return Err("commands takes one --id".into());
+    }
+    if args.len().saturating_sub(2 * ids) > 1 {
+        return Err("commands takes one filter word".into());
+    }
+    let filter = positional(args);
+    let id = flag(args, "--id");
+    if filter.is_some() && id.is_some() {
+        return Err("commands: give a filter or --id, not both".into());
+    }
+    let mut s = Session::default();
+    let v = match id {
+        Some(id) => s.execute("engine.describe", &json!({"command": id})).map_err(|e| e.to_string())?,
+        None => {
+            let all = s.execute("engine.commands", &json!({})).map_err(|e| e.to_string())?;
+            match filter {
+                Some(word) => {
+                    let word = word.to_lowercase();
+                    let kept: Vec<Value> = all
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter(|c| c["id"].as_str().is_some_and(|id| id.to_lowercase().contains(&word)))
+                        .cloned()
+                        .collect();
+                    Value::Array(kept)
+                }
+                None => all,
+            }
+        }
+    };
+    // A pipeline consumer may stop early (e.g. `commands | head`).
+    // Unlike println!, writing explicitly lets us handle that without a panic.
+    match writeln!(std::io::stdout().lock(), "{}", pretty(&v)) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        Err(e) => Err(format!("stdout: {e}")),
+    }
+}
+
 /// Runs `solidcraft-cli eval` (and its `inspect` alias), opening the input design or script with the requested `--validation` mode and reporting both `inspect.measure` and `document.inspect`.
 fn cmd_eval(args: &[String]) -> Result<(), String> {
     let json_out = json_out(args)?;
@@ -1069,7 +1115,7 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
         "snapshot",
         args,
         &["--in", "--out", "--width", "--height", "--view", "--camera", "--body", "--tool", "--section", "--quality"],
-        &["--no-grid", "--no-axes"],
+        &["--no-grid", "--no-axes", "--transparent"],
         true,
     )?;
     // A snapshot writes one picture. Only the body and tool options take several values.
@@ -1121,8 +1167,13 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
         None => solidcraft_engine::view::home_camera(&s).map_err(|e| e.to_string())?,
     };
     let guides = Guides { grid: !args.iter().any(|a| a == "--no-grid"), axes: !args.iter().any(|a| a == "--no-axes") };
-    let scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides).map_err(|e| e.to_string())?;
-    let png = solidcraft_engine::capture::png(&scene, &cam, w, h)?;
+    let mut scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides).map_err(|e| e.to_string())?;
+    // `--transparent`: drawn over black and over white and the alpha recovered; else once, as before.
+    let png = if args.iter().any(|a| a == "--transparent") {
+        solidcraft_engine::capture::png_transparent(&mut scene, &cam, w, h)?
+    } else {
+        solidcraft_engine::capture::png(&scene, &cam, w, h)?
+    };
     std::fs::write(out, &png.bytes).map_err(|e| format!("{out}: {e}"))?;
     let mut reply = json!({"path": out, "width": w, "height": h, "bytes": png.bytes.len(), "renderer": png.renderer});
     if let Some(w) = solidcraft_engine::capture::warning(png.renderer) {
@@ -1400,6 +1451,12 @@ pub(crate) fn cmd_bench_open(args: &[String]) -> Result<(), String> {
     let t = std::time::Instant::now();
     let step = solidcraft_engine::io::is_step_path(path);
     let kind = if step { solidcraft_engine::io::limits::Kind::Step } else { solidcraft_engine::io::limits::Kind::Design };
+    // As `doc.open` does: warned about, and read all the same, when it may need more memory than there is.
+    if let Ok(size) = std::fs::metadata(path).map(|m| m.len())
+        && let Some(warning) = solidcraft_engine::io::limits::memory_warning(path, size)
+    {
+        eprintln!("warning: {path}: {warning}");
+    }
     let bytes = solidcraft_engine::io::limits::read(path, kind).map_err(|e| format!("{path}: {e}"))?;
     let read_ms = t.elapsed().as_secs_f64() * 1000.0;
     println!("{}", json!({"step": "read", "ms": read_ms, "bytes": bytes.len()}));

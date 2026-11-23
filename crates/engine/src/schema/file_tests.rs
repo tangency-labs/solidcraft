@@ -26,6 +26,7 @@ fn schemas_and_the_key_check_agree() {
             "bodies",
             "effort",
             "format",
+            "hierarchy",
             "images",
             "lay_on_print_faces",
             "mesh_prefix",

@@ -941,7 +941,9 @@ pub(crate) fn delete_topological_vertex_joining(
         } else {
             deleted_interval.min()
         };
-        b.edge_mut(survivor)?.interval.add_value(far);
+        let mut grown = b.edge(survivor)?.interval;
+        grown.add_value(far);
+        crate::topology::edge::set_interval(b, survivor, &grown)?;
     } else {
         // Upstream casts each copy to `SmBSplineCurve` and calls `Trim` through the
         // result unchecked, so an edge curve of another kind (an `SmCrvOnSurf`) is a null
@@ -996,7 +998,7 @@ pub(crate) fn delete_topological_vertex_joining(
             true,
             notifications.as_deref_mut(),
         )?;
-        b.edge_mut(survivor)?.interval = interval;
+        crate::topology::edge::set_interval(b, survivor, &interval)?;
         set_edge_curve_owner(b, survivor, notifications.as_deref_mut())?;
     }
     for eu in crate::topology::edge::edgeuses(b, survivor, None, None)? {
@@ -3719,6 +3721,21 @@ fn transform_in(
             swap_reflection_shells(b, face)?;
         }
     }
+    // #20939: a scale changes every distance, and a scale that is not uniform and positive
+    // turns the geometry to NURBS with new parameters, so each edge use's cached largest
+    // edge/face gap and gap to its counter-clockwise neighbour (value and parameters) is
+    // wrong; they are cleared and measured again when next asked for. The vertex use gaps
+    // were cleared as each vertex moved. A placement alone (rotation and translation) keeps
+    // distances and parameters, so the caches stay. Upstream keeps them in every case.
+    if scale.is_some_and(|s| !s.approx_eq(Vec3::new(1.0, 1.0, 1.0))) {
+        for edge in brep_edges(b)? {
+            for eu in b.edge(edge)?.edgeuses.clone() {
+                let use_ = b.edgeuse_mut(eu)?;
+                use_.max_edge_face_gap = crate::heal::gap::EdgeFaceGap::new();
+                use_.edge_ccw_edge_gap = crate::heal::gap::EdgeEdgeGap::new();
+            }
+        }
+    }
     // WR-507 (#1520): a scale of 1 (a rotation or reflection) is no scale, and a scale s
     // keeps each tolerance at least its own times s; upstream sets every one to the body
     // tolerance whenever a scale is given.
@@ -3737,8 +3754,9 @@ fn transform_in(
             },
         )?;
         let size = model_box.size().length();
-        let zone = b.set_this_model_size_estimate(k, size);
-        crate::geom::tol::set_context_model_size_estimate(&mut k.context, size);
+        // (the scaled body's size is its own: upstream also stores it on the body's
+        // context, which here is every body's default)
+        let zone = b.set_this_model_size_estimate(size);
         for vertex in vertices {
             let tol = max2(zone, vertex::tolerance(b, vertex)? * tol_scale);
             crate::error::ignore_status(vertex::set_tolerance(b, vertex, tol, false, false))?;
