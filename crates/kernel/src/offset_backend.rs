@@ -49,7 +49,9 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
         // A face the drafted face runs into without meeting it, a hole's wall near the side
         // (#19686): the draft trims only the faces around the drafted one.
         SmError::DraftCutsThrough { at: [x, y, z], depth } => KernelError::Invalid(format!(
-            "{op}: the drafted face would cut through the face at ({}, {}, {}), which reaches at least {} mm past it              without meeting it (a hole's or pocket's wall near the side); a draft only extends or trims the faces around              the drafted face: use a smaller draft angle, or move that face farther from the drafted one",
+            "{op}: the drafted face would cut through the face at ({}, {}, {}), which reaches at least {} mm past it \
+             without meeting it (a hole's or pocket's wall near the side); a draft only extends or trims the faces around \
+             the drafted face: use a smaller draft angle, or move that face farther from the drafted one",
             crate::blend::trimmed_mm(x),
             crate::blend::trimmed_mm(y),
             crate::blend::trimmed_mm(z),

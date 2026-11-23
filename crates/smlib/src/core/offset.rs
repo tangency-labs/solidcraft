@@ -670,8 +670,10 @@ pub(crate) fn draft(
         // `moved_faces(b, status(b->LocalOperation(faces, surfaces)))`, its marks on the picked
         // faces (`mark_moved`).
         // A face the drafted faces would cut through (a hole's wall within the draft of the side,
-        // #19686): read before the kernel edits the copy, named if the kernel then refuses.
-        let through = solidcore_ops::offset::drafted_through(k, &mut w, &picked, &surfaces)?;
+        // #19686): read before the kernel edits the copy, named if the kernel then refuses. Best
+        // effort: a check that fails itself only leaves the kernel's own refusal, and never
+        // refuses a draft the kernel builds.
+        let through = solidcore_ops::offset::drafted_through(k, &mut w, &picked, &surfaces).ok().flatten();
         mark_moved(&mut w, &picked)?;
         if let Err(e) = called(local_operation_simple(k, &mut w, &picked, surfaces))? {
             return Ok(Err(match through {

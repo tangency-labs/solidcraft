@@ -7049,7 +7049,18 @@ fn a_draft_that_would_cut_through_a_hole_near_the_side_is_refused_naming_it() {
         let mut s = block(Some(1200.0 - 95.0 - wall));
         let features = s.doc.features.len();
         let error = s.execute("solid.draft", &draft).unwrap_err().to_string();
-        assert!(error.contains("would cut through the face at") && error.contains("smaller draft angle"), "wall {wall}: {error}");
+        // The whole sentence, the point and depth between its words, with no run of spaces.
+        let words = [
+            "draft: the drafted face would cut through the face at (",
+            concat!(
+                " mm past it without meeting it (a hole's or pocket's wall near the side); ",
+                "a draft only extends or trims the faces around the drafted face: use a smaller draft angle, ",
+                "or move that face farther from the drafted one"
+            ),
+        ];
+        let (Some(start), Some(end)) = (error.find(words[0]), error.find(words[1])) else { panic!("wall {wall}: {error}") };
+        let between = &error[start + words[0].len()..end];
+        assert!(between.contains("), which reaches at least ") && !error.contains("  "), "wall {wall}: {error}");
         assert_eq!(s.doc.features.len(), features, "wall {wall}: the draft is not added");
     }
     let mut plain = block(None);
