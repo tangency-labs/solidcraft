@@ -292,7 +292,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .from_selection(super::sketch_selection::tangent)
         .contract(&TANGENT_CONTRACT)
         .output(output_schema_for::<TangentResult>)
-        .params(concat!("a, b: curves or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or the end point of a line or an arc: that end then lies on the other curve (or on the other end point), and its curve is tangent there, in one step (`constraints` lists both); in a 3D sketch, a drawn 3D line and a drawn 3D arc that meet at an end (the line leaves the arc the way it runs on)", model_operand_doc!())),
+        .params(concat!("a, b: curves or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or the end point of a line or an arc: that end then lies on the other curve (or on the other end point), and its curve is tangent there, in one step (`constraints` lists both); a line and a circle or an arc are joined the same way, at the line's end nearest the curve, whichever of the two is picked first; in a 3D sketch, a drawn 3D line and a drawn 3D arc that meet at an end (the line leaves the arc the way it runs on)", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.equal", "Equal", crate::checked!("sketch.constraint.equal", c_equal))
         .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
@@ -3517,10 +3517,71 @@ fn c_tangent(s: &mut Session, p: &Value) -> Result<Value> {
     if tangent_end(&sk, p, "a").is_some() || tangent_end(&sk, p, "b").is_some() {
         return tangent_at_end(s, p, cmd);
     }
+    // A line and a round curve: the tangency is read at the line's end, so the end lies on the
+    // curve and the line touches it there (#14343).
+    if let Some(joint) = tangent_joint_operands(&sk, p) {
+        return tangent_at_end(s, &joint, cmd);
+    }
     let made = constrain(s, p, cmd, |sk| {
         two_curves_or_axes(sk, p, cmd).and_then(|ab| two_different(cmd, ab)).map(|(a, b)| ConstraintKind::Tangent { a, b })
     })?;
     reply(cmd, TangentResult { made: TangentMade::Curves(made), param_warnings: Vec::new() })
+}
+
+/// The operands of a Tangent between a line and a round curve, with the line's end nearest the
+/// curve in place of the line (#14343): that end then lies on the curve (point on curve) and the
+/// line touches it there, so the two curves close an area that can be extruded. The tangency held
+/// for the infinite line only, and the gap it left at the line's end kept the area open. `None`
+/// when the operands are not a line and a round curve, when the line is an axis, or when the two
+/// are already joined at that end.
+fn tangent_joint_operands(sk: &Sketch, p: &Value) -> Option<Value> {
+    let id = |key: &str| p.get(key).and_then(Value::as_str);
+    let a = sk.curve_index(id("a")?)?;
+    let b = sk.curve_index(id("b")?)?;
+    let line_of = |c: usize| sk.curves.get(c).is_some_and(|cu| matches!(cu.kind, CurveKind::Line { .. }) && !cu.infinite);
+    let round_of = |c: usize| sk.curves.get(c).is_some_and(|cu| matches!(cu.kind, CurveKind::Circle { .. } | CurveKind::Arc { .. }));
+    let (line, curve, key) = if line_of(a) && round_of(b) {
+        (a, b, "a")
+    } else if round_of(a) && line_of(b) {
+        (b, a, "b")
+    } else {
+        return None;
+    };
+    let (start, end) = sk.curves[line].kind.ends()?;
+    let near = if curve_distance(sk, curve, sk.points[start].pos) <= curve_distance(sk, curve, sk.points[end].pos) { start } else { end };
+    // The end must end this line alone: another curve ending there is not this tangent's end.
+    let owners = sk.curves.iter().enumerate().filter(|(i, cu)| *i != curve && cu.kind.ends().is_some_and(|(s, e)| s == near || e == near)).count();
+    if owners != 1 {
+        return None;
+    }
+    // The two are already joined at that end: the tangent is all that is missing.
+    if already_held(sk, &ConstraintKind::PointOnCurve { p: near, c: curve }) {
+        return None;
+    }
+    let mut joint = p.clone();
+    joint[key] = Value::String(sk.points[near].id.clone());
+    Some(joint)
+}
+
+/// The distance from a point to a curve, over the curve's own polyline.
+fn curve_distance(sk: &Sketch, c: usize, p: Vec2) -> f64 {
+    let poly = sk.polyline(c);
+    match poly.as_slice() {
+        [] => f64::INFINITY,
+        [q] => q.dist(p),
+        _ => poly.windows(2).map(|w| point_segment_distance(p, w[0], w[1])).fold(f64::INFINITY, f64::min),
+    }
+}
+
+/// The distance from a point to a segment.
+fn point_segment_distance(p: Vec2, a: Vec2, b: Vec2) -> f64 {
+    let d = b - a;
+    let l = d.len();
+    if !(l > 1e-12) {
+        return p.dist(a);
+    }
+    let t = ((p - a).dot(d) / (l * l)).clamp(0.0, 1.0);
+    p.dist(a + d * t)
 }
 
 /// The point a Tangent operand names when it names no curve and no sketch axis (#12092). `x` and
