@@ -1078,8 +1078,9 @@ pub enum FeatureKind {
         #[serde(default)]
         keep_tools: bool,
     },
-    /// Copies of other features' results, or of bodies (rectangular, circular or along a path).
-    /// The copied features are named by id (#1134).
+    /// Copies of other features' results, of bodies, or of components (rectangular, circular or
+    /// along a path). The copied features are named by id (#1134). Component copies are named by
+    /// component id; the occurrence ids they make are kept so a count change keeps survivors (#12116).
     Pattern {
         features: Vec<FeatureId>,
         pattern: PatternKind,
@@ -1092,6 +1093,14 @@ pub enum FeatureKind {
         /// placement shows. Empty in older designs, and for bodies picked by their own name.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         placements: Vec<Vec<u64>>,
+        /// Place these components again as occurrences (one per pattern matrix, beyond each
+        /// component's first placement). Empty for a pattern of features or bodies.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        components: Vec<u64>,
+        /// Occurrence ids this pattern of components made, in order: for each of `components`,
+        /// one id per matrix. Kept across count changes so survivors keep their identity (#12116).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        occurrences: Vec<u64>,
     },
     /// Mirror copies of other features' results in a plane. The copied features are named by
     /// id (#1134).
@@ -1330,6 +1339,15 @@ pub enum FeatureKind {
         /// and section names. Otherwise use the face's extended surface and its sheet.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         tool_plane: bool,
+        /// With `tool`: what of the tool body cuts, its face extended (older designs), the
+        /// picked faces as they are, or the whole body as it is (#9305).
+        #[serde(default, skip_serializing_if = "SplitSheet::is_extended")]
+        tool_sheet: SplitSheet,
+        /// With `tool_sheet` `faces`: points on the tool body's other picked faces, named like
+        /// `tool` so they follow the faces.
+        #[walk(picks_faces)]
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tool_faces: Vec<Position>,
         /// A straight line of this sketch as the tool (#1552): the plane through it along the
         /// sketch's normal, which follows the sketch.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1518,6 +1536,11 @@ pub enum FeatureKind {
         /// never given again.
         #[serde(default, skip_serializing_if = "is_zero_u32")]
         next_pair: u32,
+        /// Two or more groups of lines, each placed its own way (`frame::MemberGroup`); then they
+        /// stand in for `lines`, `anchor`, `locate`, `angle`, `mirror` and `body_name`, which stay
+        /// unset. None: those fields are the feature's one group (`frame::member_groups`).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        groups: Vec<crate::frame::MemberGroup>,
     },
     /// Raise or sink profiles on a planar face, or wrap them on a selected cylindrical wall.
     Emboss {
@@ -1711,6 +1734,9 @@ pub enum FeatureKind {
         /// Turn the other way (left-handed).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         clockwise: bool,
+        /// Where the wire ends; axial when absent.
+        #[serde(default, skip_serializing_if = "CoilEndCut::is_axial")]
+        end_cut: CoilEndCut,
         #[serde(default)]
         operation: Operation,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1867,6 +1893,10 @@ pub enum FeatureKind {
         body: Option<BodyName>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         refold: bool,
+        /// Unfold: a point on the flat panel that stays where it is, so the flat lies in its
+        /// plane (default: where the sheet's flat lies, its largest flat panel's plane).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fixed: Option<Position>,
     },
     /// Convert to sheet metal, of picked faces (#6748): the sheet is the faces picked at `face` and
     /// `faces`, and every face a bend joins to them, each a panel of the rule's thickness, however
@@ -2694,6 +2724,25 @@ pub struct TrimCurves {
     pub direction: Option<Dir>,
 }
 
+/// What of the tool body cuts in a Split Body by a face (#9305).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SplitSheet {
+    /// The picked face's surface extended (with its sheet where that does not cut through).
+    #[default]
+    Extended,
+    /// The picked faces exactly as they are, bounded where they end.
+    Faces,
+    /// Every face of the tool body exactly as it is.
+    Body,
+}
+
+impl SplitSheet {
+    pub fn is_extended(&self) -> bool {
+        *self == SplitSheet::Extended
+    }
+}
+
 /// A face picked by a point on it, on a named body.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 pub struct FaceAt {
@@ -2958,6 +3007,21 @@ pub enum CoilSection {
     #[default]
     Circular,
     Square,
+}
+
+/// Where a coil's wire ends: in a plane through the axis, or square to the wire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CoilEndCut {
+    #[default]
+    Axial,
+    Square,
+}
+
+impl CoilEndCut {
+    fn is_axial(&self) -> bool {
+        *self == Self::Axial
+    }
 }
 
 fn is_zero_i8(v: &i8) -> bool {
@@ -4222,6 +4286,7 @@ impl Document {
             .chain(a.contact_sets.iter().map(|c| c.id))
             .chain(a.studies.iter().map(|s| s.id))
             .chain(a.exploded.iter().map(|v| v.id))
+            .chain(a.rigid_groups.iter().map(|g| g.id))
             .chain(self.configs.rows.iter().map(|r| r.id))
             .max()
             .unwrap_or(0);
@@ -5086,6 +5151,20 @@ impl Document {
         // How many of them come before the rollback marker: it keeps its place among the rest.
         let before_marker = self.marker.map(|m| self.features.iter().take(m).filter(|f| gone.contains(&f.id)).count());
         let gone_params: Vec<String> = self.features.iter().filter(|f| gone.contains(&f.id)).flat_map(|f| f.param_names.clone()).collect();
+        // A Pattern of components takes the occurrences it made with it (#12116).
+        let patterned: std::collections::BTreeSet<u64> = self
+            .features
+            .iter()
+            .filter(|f| gone.contains(&f.id))
+            .filter_map(|f| match &f.kind {
+                FeatureKind::Pattern { occurrences, .. } if !occurrences.is_empty() => Some(occurrences.iter().copied()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        if !patterned.is_empty() {
+            self.remove_occurrences(&patterned);
+        }
         self.configs
             .rules
             .retain(|rule| !rule.references_features(&gone) && !rule.parameter_references().iter().any(|name| gone_params.contains(name)));
@@ -5685,15 +5764,18 @@ impl Document {
             .is_some_and(|from| sk.points.iter().zip(&from.points).any(|(p, q)| (p.fixed || p.link.is_some()) && p.id == q.id && p.pos != q.pos));
         let mut report = solidcraft_sketch::solve_after_edit_with_analysis(sk, stored, was(sk).as_deref(), first_analysis);
         // Links that moved far (a large change of a size upstream): when the jump fails, or
-        // lands on the mirror image of a side or turn the stored sketch has, walked there in
-        // steps; a turn the walk cannot avoid either is reported as one.
+        // lands on the mirror image of a side or turn the stored sketch has, or turns a line
+        // parallel or square to another end for end, walked there in steps; a side or turn the
+        // walk cannot avoid either is reported as one. A sense is not: the links may run its
+        // line through zero length, which turns it end for end as the only solution.
         if let Some(from) = moved_from.filter(|_| given_moved) {
             let flips = if report.ok() { solidcraft_sketch::flips_from_stored(sk, from) } else { Vec::new() };
             if !report.keeps_orientation() || !flips.is_empty() {
                 match solidcraft_sketch::solve_after_link_move(sk, from, stored, first_analysis) {
                     Some(walked) => report = walked,
                     None => {
-                        for id in flips {
+                        let sides = if flips.is_empty() { Vec::new() } else { solidcraft_sketch::side_flips_from_stored(sk, from) };
+                        for id in sides {
                             if !report.failing.contains(&id) {
                                 report.failing.push(id.clone());
                             }

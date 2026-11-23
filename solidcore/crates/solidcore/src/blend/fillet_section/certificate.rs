@@ -174,6 +174,7 @@ use super::tay::{
     gn_half_angle, gn_invert, gn_target, tay_sqrt, GnAreaCells, Ring, Tay, TayScalar, TAY,
 };
 use super::taylor_model::Tm;
+use crate::error::blend::{BlendFailure, SectionDegeneracy, SectionLimit, SectionProof};
 use crate::error::{Result, SolidError};
 use crate::geom::krawczyk::{contraction, k_operator};
 use crate::kernel::Kernel;
@@ -234,11 +235,20 @@ impl NurbsCurve {
                 u.push(k);
             }
         }
-        if p < 1 || u.len() != n + p + 1 {
-            // "SmGnSectionFSG: the centre line's NURBS data do not agree"
-            return Err(SolidError::blend_failed(
+        // "SmGnSectionFSG: the centre line's NURBS data do not agree"
+        if p < 1 {
+            return Err(SolidError::blend(
                 OP,
-                "the centre line's NURBS data do not agree",
+                BlendFailure::SectionUnsupported(SectionLimit::DegreeBelowOne),
+            ));
+        }
+        if u.len() != n + p + 1 {
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "the curve's knots do not number its control points plus its order: \
+                          a B-spline curve the kernel holds keeps the two consistent",
+                },
             ));
         }
         let rational = ws.len() == cps.len();
@@ -251,9 +261,9 @@ impl NurbsCurve {
             };
             let positive = w > 0.0;
             if !positive {
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "the centre line's weights are not positive",
+                    BlendFailure::SectionUnsupported(SectionLimit::CurveWeightNotPositive),
                 ));
             }
             pw.extend_from_slice(&[cp.x * w, cp.y * w, cp.z * w, w]);
@@ -437,9 +447,9 @@ fn derivs_over(
         first = false;
     }
     if first {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "no piece covers the parameter",
+            BlendFailure::SectionDegenerate(SectionDegeneracy::NoSpanCoversInterval),
         ));
     }
     Ok(rd)
@@ -715,10 +725,11 @@ fn partials_over_piece(
     };
     let positive = w00.lo > 0.0;
     if !positive {
-        // "SmGnSectionFSG: a face's weights are not positive over a box"
-        return Err(SolidError::blend_failed(
+        // "SmGnSectionFSG: a face's weights are not positive over a box" (status SM_ERR
+        // and this operation: `is_certificate_sm_err` subdivides a wide box on it)
+        return Err(SolidError::blend(
             OP,
-            "a face's weights are not positive over a box",
+            BlendFailure::SectionNotProved(SectionProof::FaceWeightPositive),
         ));
     }
     let mut out = Partials::default();
@@ -849,7 +860,7 @@ pub fn leader_series_piecewise(
             }
         });
     }
-    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
+    out.ok_or_else(|| no_part_of_the_box(OP))
 }
 
 /// `sm_GnLaw` (0d43b4c): a ball whose radius varies, its law r(s) over the leader's
@@ -899,9 +910,12 @@ pub fn law_series(
         derivs = derivs.min(law.curve.degree()?);
     }
     if derivs > MAX_S {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the radius law's order is past the most the series hold",
+            BlendFailure::SectionUnsupported(SectionLimit::OrderPastSeries {
+                order: derivs,
+                most: MAX_S,
+            }),
         ));
     }
     let d = law.curve.evaluate(s, derivs, !before, false)?;
@@ -911,16 +925,25 @@ pub fn law_series(
             fact *= i as f64;
         }
         let di = d.get(i).ok_or_else(|| {
-            SolidError::blend_failed(OP, "the radius law has no derivative of this order")
+            SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "the radius law's evaluation returned fewer derivatives than asked: \
+                          a B-spline curve's evaluation returns every order up to the one asked",
+                },
+            )
         })?;
         r.set(i, 0, di.x / fact);
     }
     let positive = r.at(0, 0) > 0.0;
     if !positive {
         // "SmGnSectionFSG: the radius law is not positive"
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the radius law is not positive",
+            BlendFailure::RadiusLawNotPositive {
+                s,
+                radius: r.at(0, 0),
+            },
         ));
     }
     Ok(Some(r))
@@ -944,9 +967,9 @@ pub fn law_series_over(law: &GnLaw<'_>, s: Ivl, order: usize) -> Result<Ser<Ivl>
         r.set(i, 0, at1(&d, i, VZ).x * (Ivl::from(1.0) / Ivl::from(fact)));
     }
     if !r.at(0, 0).is_positive() {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the radius is not proved positive",
+            BlendFailure::SectionNotProved(SectionProof::RadiusPositive),
         ));
     }
     Ok(r)
@@ -1042,6 +1065,19 @@ pub fn face_partials_over(
         return definition_partials_over_box(k, d, cn, ku, kv, ua, ub, va, vb, lk);
     }
     nurbs_partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk)
+}
+
+/// The failure of a hull over a box's parts that found none: [`knot_cuts`] returns at least
+/// one part for every interval it does not refuse, and a box past a continued end adds its
+/// part past the end, so an empty hull is the kernel's fault.
+pub(crate) fn no_part_of_the_box(op: &'static str) -> SolidError {
+    SolidError::blend(
+        op,
+        BlendFailure::Defect {
+            why: "a box's hull over its pieces found no piece: the knot cuts return at least \
+                  one part for every interval they do not refuse",
+        },
+    )
 }
 
 /// The parts of `[lo, hi]` between the knots strictly inside it, each with the span whose
@@ -1153,7 +1189,7 @@ pub fn nurbs_partials_over_box(
             });
         }
     }
-    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
+    out.ok_or_else(|| no_part_of_the_box(OP))
 }
 
 /// The refusal of a feet's box past a face's net in a direction its kind does not continue
@@ -1304,7 +1340,7 @@ pub fn nurbs_partials_over_box_ending(
             });
         }
     }
-    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
+    out.ok_or_else(|| no_part_of_the_box(OP))
 }
 
 /// Whether the piece `(ku, kv)` of a cone's net over the part `[a0, a1] x [b0, b1]` past its
@@ -1686,9 +1722,80 @@ fn guess_box(at: &SpanAt) -> ([f64; 4], [Ivl; 4]) {
 /// Whether the knot `x` of `knots` (degree `p`) is below `continuity` by count: degree minus
 /// its multiplicity. [`knot_cuts`] refuses a crossed line by it, and the cell path's
 /// trigger reads it, so the two cannot drift apart.
-fn below_continuity(knots: &[f64], p: usize, x: f64, continuity: usize) -> bool {
+pub(crate) fn below_continuity(knots: &[f64], p: usize, x: f64, continuity: usize) -> bool {
     let m = knots.iter().filter(|&&y| y == x).count();
     p.checked_sub(m).is_none_or(|c| c < continuity)
+}
+
+/// Pieces of a parameter range: `(from, to, span)`, as [`knot_cuts`] returns them.
+pub(crate) type KnotPieces = Vec<(f64, f64, usize)>;
+
+/// The pieces of `[lo, hi]` when it crosses exactly one knot line `x` below `continuity`
+/// ([`below_continuity`]) and its part on one side of the line (the shorter; the upper on
+/// a tie) is at most `limit` wide: the other side's pieces ([`knot_cuts`]), then that
+/// side's polynomial continued over the short part, the line treated as an end of the
+/// net. Returns the pieces, the short part's width and whether it is the lower part (the
+/// first piece; else the last). The continued polynomial `S~` at a parameter `W` of the
+/// short part lies within the first partials' size times the width of its value at `x`,
+/// the limit of the surface from the kept side (a point of the surface's closure), so
+/// `|C - S~(W)|` plus that slack bounds `C`'s distance to the surface; a caller that takes
+/// point values from the surface's own piece `S` over the short part and bounds the gap
+/// to the image point `S(W)` adds `sup |S - S~|` there twice (`NetSurface::partials`). (#18219: a trim along a face's boundary that is a
+/// C^0 join of an extended net crosses the join by rounding at every depth.) `None` when
+/// the box crosses no such line or more than one, the short part is wider than `limit`,
+/// or another knot lies strictly inside the short part (its surface is then more than one
+/// span).
+pub(crate) fn past_one_low_line(
+    knots: &[f64],
+    p: usize,
+    n: usize,
+    lo: f64,
+    hi: f64,
+    continuity: usize,
+    limit: f64,
+) -> Option<(KnotPieces, f64, bool)> {
+    let mut prev = f64::NAN;
+    let mut line: Option<f64> = None;
+    for &x in knots {
+        if x > lo && x < hi && x != prev && below_continuity(knots, p, x, continuity) {
+            if line.is_some() {
+                return None;
+            }
+            line = Some(x);
+        }
+        prev = x;
+    }
+    let x = line?;
+    let (below, above) = (x - lo, hi - x);
+    // (the short part's true surface is one span: no other knot strictly inside it, so
+    // `sup |S - S~|` over it is that span's polynomial against the kept side's)
+    let (s0, s1) = if below < above { (lo, x) } else { (x, hi) };
+    if knots.iter().any(|&k| k > s0 && k < s1) {
+        return None;
+    }
+    if below < above {
+        if !matches!(
+            below.partial_cmp(&limit),
+            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+        ) {
+            return None;
+        }
+        let mut cuts = knot_cuts(knots, p, n, x, hi, continuity).ok()?;
+        let kept = cuts.first()?.2;
+        cuts.insert(0, (lo, x, kept));
+        Some((cuts, below, true))
+    } else {
+        if !matches!(
+            above.partial_cmp(&limit),
+            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+        ) {
+            return None;
+        }
+        let mut cuts = knot_cuts(knots, p, n, lo, x, continuity).ok()?;
+        let kept = cuts.last()?.2;
+        cuts.push((x, hi, kept));
+        Some((cuts, above, false))
+    }
 }
 
 /// Whether `[lo, hi]` crosses a knot line of `knots` (strictly inside it) below
@@ -4528,9 +4635,9 @@ pub fn gn_certify_span_reusing(
     let l_jets = if arc { 0 } else { n }; // the jets graded on their own: the arc's rails only
     if let Some(v) = vary.as_deref() {
         if !(a.w.is_finite() && b.w.is_finite()) {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "the varying jets' thumbweights are not finite",
+                BlendFailure::SectionNotProved(SectionProof::BoundFinite),
             ));
         }
         bar = gn_form_normalized(v.n, Ivl::from(a.w));
@@ -4701,14 +4808,11 @@ pub fn gn_certify_span_reusing(
         solved_ends = Some((level, ends.clone()));
         let mut acc = LevelAcc::new(bar.w.len());
         let mut level_pieces = Vec::new();
-        for pair in ends.windows(2) {
+        for (ea, eb) in ends.iter().zip(ends.iter().skip(1)) {
             if !acc.proved {
                 break;
             }
             k.check_cancelled(OP_CERTIFY_SPAN)?;
-            let [ea, eb] = pair else {
-                return Err(SolidError::blend_failed(OP, "the span has no pair of ends"));
-            };
             // the piece's enclosures ([`gn_fourth_over_series`]'s); the middle's also where
             // the piece's is not proved, for its feet's Taylor models (#14405)
             let pe = gn_try!(
@@ -7538,7 +7642,10 @@ mod tests {
         let error = curve_derivs_over(&cn, Ivl::new(0.0, 0.0), 1, None).unwrap_err();
         assert_eq!(
             error,
-            SolidError::blend_failed(OP, "no piece covers the parameter")
+            SolidError::blend(
+                OP,
+                BlendFailure::SectionDegenerate(SectionDegeneracy::NoSpanCoversInterval)
+            )
         );
         assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
     }

@@ -5,7 +5,7 @@
   Intune's import takes no combo boxes and wants every namespace it references uploaded first, so
   this file uses none of either. The target namespace never changes; a new policy raises revision.
 -->
-<policyDefinitions xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.2" schemaVersion="1.0">
+<policyDefinitions xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.3" schemaVersion="1.0">
   <policyNamespaces>
     <target prefix="solidcraft" namespace="TangencyLabs.Policies.SolidCraft" />
   </policyNamespaces>
@@ -46,6 +46,76 @@
       <elements>
         <text id="OrganizationName" valueName="OrganizationName" maxLength="64" required="true" />
       </elements>
+    </policy>
+    <policy name="DefaultUnits" class="Both" displayName="$(string.DefaultUnits)" explainText="$(string.DefaultUnits_Explain)" presentation="$(presentation.DefaultUnits)" key="Software\Policies\SolidCraft">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <elements>
+        <enum id="DefaultUnits" valueName="DefaultUnits" required="true">
+          <item displayName="$(string.DefaultUnits_mm)">
+            <value>
+              <string>mm</string>
+            </value>
+          </item>
+          <item displayName="$(string.DefaultUnits_cm)">
+            <value>
+              <string>cm</string>
+            </value>
+          </item>
+          <item displayName="$(string.DefaultUnits_m)">
+            <value>
+              <string>m</string>
+            </value>
+          </item>
+          <item displayName="$(string.DefaultUnits_in)">
+            <value>
+              <string>in</string>
+            </value>
+          </item>
+          <item displayName="$(string.DefaultUnits_ft)">
+            <value>
+              <string>ft</string>
+            </value>
+          </item>
+        </enum>
+      </elements>
+    </policy>
+    <policy name="Language" class="Both" displayName="$(string.Language)" explainText="$(string.Language_Explain)" presentation="$(presentation.Language)" key="Software\Policies\SolidCraft">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <elements>
+        <text id="Language" valueName="Language" maxLength="16" required="true" />
+      </elements>
+    </policy>
+    <policy name="ReopenDesigns" class="Both" displayName="$(string.ReopenDesigns)" explainText="$(string.ReopenDesigns_Explain)" presentation="$(presentation.ReopenDesigns)" key="Software\Policies\SolidCraft" valueName="ReopenDesigns">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
+    </policy>
+    <policy name="ShowDiscordButton" class="Both" displayName="$(string.ShowDiscordButton)" explainText="$(string.ShowDiscordButton_Explain)" presentation="$(presentation.ShowDiscordButton)" key="Software\Policies\SolidCraft" valueName="ShowDiscordButton">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
+    </policy>
+    <policy name="ShowDonateButton" class="Both" displayName="$(string.ShowDonateButton)" explainText="$(string.ShowDonateButton_Explain)" presentation="$(presentation.ShowDonateButton)" key="Software\Policies\SolidCraft" valueName="ShowDonateButton">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
     </policy>
   </policies>
 </policyDefinitions>
