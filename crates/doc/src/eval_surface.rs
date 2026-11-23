@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::{RuledCorners, RuledMode, SheetSection};
-use solidcore_record::{Loop2, Region2, Seg2};
+use solidcore_record::Seg2;
 
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
     match &f.kind {
@@ -602,17 +602,6 @@ fn loop_patch(ss: &SolvedSketch, curves: &[String]) -> Result<kernel::Body> {
         }
         chains.push(segs);
     }
-    // Curves of one sketch lie in its plane, so the patch they bound is flat: built as that flat
-    // face, bounded by the curves themselves, its edges are the exact arcs and lines. A Coons patch
-    // of them is a B-spline fitted to the arcs, each of whose edges then needs a proved bound on
-    // its distance from its curve: about 180 ms a side, most of the time of a design that rebuilds
-    // it (#17714: a delete in an earlier sketch waited seconds for it). Curves that don't close
-    // into one loop keep the Coons patch.
-    if let Some(outer) = closed_loop(&chains)
-        && let Ok(body) = kernel::patch_region(&ss.plane, &Region2 { outer, holes: Vec::new() })
-    {
-        return Ok(body);
-    }
     let side = |k: usize| -> Result<kernel::BoundaryCurve<'static>> {
         let (Some(id), Some(segs)) = (curves.get(k), chains.get(k)) else { return Err(DocError::Invalid("a boundary curve is missing".into())) };
         Ok(kernel::BoundaryCurve {
@@ -647,39 +636,6 @@ fn loop_patch(ss: &SolvedSketch, curves: &[String]) -> Result<kernel::Body> {
         }
         _ => Err(DocError::Invalid("a loop patch takes three or four curves".into())),
     }
-}
-
-/// How far apart two chains' ends may be and still be one corner of [`closed_loop`]: the ends of
-/// a sketch's curves held together by a coincident constraint, as solved.
-const LOOP_JOIN: f64 = 1e-6;
-
-/// The loop that `chains` (each a run of segments end to end, in their order round the loop)
-/// close, each chain turned to run on from the one before; `None` when they don't meet end to
-/// end, the last back at the first.
-fn closed_loop(chains: &[Vec<Seg2>]) -> Option<Loop2> {
-    let ends = |c: &[Seg2]| -> Option<(Vec2, Vec2)> { Some((c.first()?.start(), c.last()?.end())) };
-    let reversed = |c: &[Seg2]| -> Vec<Seg2> { c.iter().rev().map(|s| s.reversed()).collect() };
-    let (first, second) = (chains.first()?, chains.get(1)?);
-    let (s0, e0) = ends(first)?;
-    let (s1, e1) = ends(second)?;
-    // The first chain runs toward the corner it shares with the second.
-    let start_forward = [s1, e1].iter().any(|p| p.dist(e0) <= LOOP_JOIN);
-    if !start_forward && ![s1, e1].iter().any(|p| p.dist(s0) <= LOOP_JOIN) {
-        return None;
-    }
-    let mut segs: Vec<Seg2> = if start_forward { first.clone() } else { reversed(first) };
-    for chain in chains.iter().skip(1) {
-        let at = segs.last()?.end();
-        let (s, e) = ends(chain)?;
-        if s.dist(at) <= LOOP_JOIN {
-            segs.extend(chain.iter().cloned());
-        } else if e.dist(at) <= LOOP_JOIN {
-            segs.extend(reversed(chain));
-        } else {
-            return None;
-        }
-    }
-    (segs.last()?.end().dist(segs.first()?.start()) <= LOOP_JOIN).then_some(Loop2 { segs })
 }
 
 /// A network curve resolved in the feature's frame, owning what it is built from.

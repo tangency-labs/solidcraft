@@ -74,38 +74,6 @@ fn three_and_four_curve_loops_are_flat_patches() {
     assert!((face - want).abs() < 2e-3 * want && (total - want).abs() < 2e-3 * want, "{face} / {total} vs {want}");
 }
 
-/// #17714: four arcs of one sketch's circle bound a flat face built from the arcs themselves: a
-/// plane, whose measured area is the circle's to rounding at any size. The Coons patch it was before fitted
-/// a B-spline to the arcs and proved each edge's distance from its arc, most of a second a patch
-/// (the design in the issue waited for it on every delete in an earlier sketch).
-#[test]
-fn four_arcs_of_one_sketch_bound_a_flat_face() {
-    use std::f64::consts::{FRAC_1_SQRT_2, PI};
-    for r in [40.0, 4000.0] {
-        let mut s = Session::default();
-        run(&mut s, "sketch.create", json!({"plane": "XY"}));
-        let d = r * FRAC_1_SQRT_2;
-        let quarters =
-            [([r, 0.0], [0.0, r], [d, d]), ([0.0, r], [-r, 0.0], [-d, d]), ([-r, 0.0], [0.0, -r], [-d, -d]), ([0.0, -r], [r, 0.0], [d, -d])];
-        let arcs: Vec<String> = quarters
-            .iter()
-            .map(|(start, end, through)| {
-                first(&run(&mut s, "sketch.arc.three_point", json!({"start": start, "end": end, "through": through}))["created"]["curves"])
-            })
-            .collect();
-        let made = run(&mut s, "surface.boundary", json!({"curves": arcs}));
-        let body = first(&made["created_bodies"]);
-        let faces = run(&mut s, "model.faces", json!({"body": body}));
-        assert!(faces["faces"][0]["plane_normal"].is_array(), "r {r}: a plane: {faces}");
-        let (face, total) = areas(&mut s, &body);
-        let want = PI * r * r;
-        // The measured area is exact; the face list's is its mesh's, a little inside the arcs.
-        assert!((total - want).abs() < 1e-9 * want && (face - want).abs() < 1e-2 * want, "r {r}: {face} / {total} vs {want}");
-        let edges = run(&mut s, "model.edges", json!({"body": body}));
-        assert_eq!(edges["edges"].as_array().map(Vec::len), Some(4), "r {r}: the four arcs: {edges}");
-    }
-}
-
 /// Simpson's rule over [0, a] × [0, a] with n (even) intervals each way.
 fn simpson2(f: impl Fn(f64, f64) -> f64, a: f64, n: usize) -> f64 {
     let h = a / n as f64;
