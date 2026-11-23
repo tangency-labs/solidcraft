@@ -1916,6 +1916,7 @@ pub(crate) mod tests {
     pub(crate) fn kernel_order(b: &Body) -> Order {
         let k = b.lock();
         Order {
+            split_edges: 0,
             faces: k.face_list().to_vec(),
             edges: k.edge_list().to_vec(),
             vertices: k.vertex_list().to_vec(),

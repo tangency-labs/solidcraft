@@ -916,3 +916,51 @@ fn a_hole_drilled_from_a_sketch_on_a_turned_plane_cuts_through() {
     let faces = run(&mut s, "model.faces", json!({"body": "Ring"}))["faces"].as_array().cloned().unwrap();
     assert_eq!(faces.len(), 5, "expected 5 faces, got {}", faces.len());
 }
+
+/// #20424: a hole drilled from a tube's axis out through its wall starts on the bore itself, not
+/// on the bore's display mesh, whose facets lie inside it by their chord: drilled there, the tool
+/// left the material between the facets and the bore. Two Ø4 through holes opposite each other,
+/// one drilled, the other its mirror or drilled again from the other side: each removes the
+/// cylinder's piece of the wall, the integral over its disc of the wall's length along its axis
+/// (the drill point is in the air past the tube), and the tube keeps 4 + 2 faces.
+#[test]
+fn holes_drilled_out_from_a_tubes_axis_start_on_its_bore() {
+    let (ro, ri, r, len) = (30.0_f64, 28.5_f64, 2.0_f64, 900.0_f64);
+    // Over the disc w² + z² <= r², the wall's length along the axis at w; w = r sin t.
+    let n = 20_000;
+    let step = std::f64::consts::PI / n as f64;
+    let one: f64 = (0..n)
+        .map(|i| {
+            let t = -std::f64::consts::FRAC_PI_2 + (i as f64 + 0.5) * step;
+            let w = r * t.sin();
+            2.0 * r * t.cos() * ((ro * ro - w * w).sqrt() - (ri * ri - w * w).sqrt()) * r * t.cos() * step
+        })
+        .sum();
+    let expected = std::f64::consts::PI * (ro * ro - ri * ri) * len - 2.0 * one;
+    let s2 = std::f64::consts::FRAC_1_SQRT_2;
+    let sketch = |s: &mut Session, x: f64, name: &str| {
+        run(s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [x, x, 0], "y_dir": [0, 0, 1]}, "name": name}));
+        run(s, "sketch.point", json!({"point": [0, 0]}));
+        run(s, "sketch.finish", json!({}));
+    };
+    for mirrored in [true, false] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rings"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": ri}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": ro}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Rings", "distance": 450, "distance2": 450, "body_name": "Tube"}));
+        sketch(&mut s, s2, "Out");
+        run(&mut s, "solid.hole", json!({"sketch": "Out", "diameter": "4 mm", "type": "drilled", "tip_angle": "118 deg", "name": "H1"}));
+        if mirrored {
+            run(&mut s, "solid.mirror", json!({"features": ["H1"], "plane": {"origin": [0, 0, 0], "normal": [-s2, s2, 0]}}));
+        } else {
+            sketch(&mut s, -s2, "Back");
+            run(&mut s, "solid.hole", json!({"sketch": "Back", "diameter": "4 mm", "type": "drilled", "tip_angle": "118 deg", "name": "H2"}));
+        }
+        let vol = volume(&mut s);
+        assert!((vol - expected).abs() < 1e-3, "mirrored {mirrored}: volume {vol}, expected {expected}");
+        let faces = run(&mut s, "model.faces", json!({"body": "Tube"}))["faces"].as_array().map_or(0, Vec::len);
+        assert_eq!(faces, 6, "mirrored {mirrored}: the tube's 4 faces and one bore per hole");
+    }
+}
