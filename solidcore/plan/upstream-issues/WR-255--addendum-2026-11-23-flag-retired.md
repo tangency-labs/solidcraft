@@ -1,0 +1,11 @@
+Updates: WR-255
+
+#### WR-255 (update, 2026-11-23). `uv_trim_corner_end_points_only` is removed; only the trims' end control points move
+
+`topology::face::p2::fix_uv_trim_curves` (upstream `sm_FixUVTrimCurves`) now always closes a face's corner UV gap by moving the two trims' ends onto the vertex's UV point (`edit_end_point`, spread over the control points next to the end as since the 2026-11-17 addendum). Upstream's path, a drop of the vertex onto each trim, a `Trim` at the drop parameter and an `EditParameterization` back over the old interval, is deleted with the flag: it slid every interior parameter of the trim off its edge's. Removed: the `Kernel::fixes` field, its doc file and name, SolidCraft's preset line, the old branch and its helpers, the flag lines in six integration tests, and the p2 unit test of the old default path. The spread test now runs the one path and asserts its bound unconditionally.
+
+- **Goldens:** 21 rows move in 5 units:
+  - `topology.face_p3` 11, `topology.brep_p3` 4 and `topology.face_p2` 1 record the trims themselves. `uvtc_trim_rows` (goldens lib) replays each row and certifies every UV trim of the B-rep it records on its edge within the edge's tolerance (`trims_on_edges::certify_brep`, a rounded-interval bound both ways).
+  - `blend.fillet_executive_p3` 4: every moved mass entry is classified EQUAL against a certified enclosure (`tests/uvtc_moved_rows_are_classified.rs`).
+  - `corpus.parity` 1, `Fillet/sphere_diff_3cylinders.smb` (`tests/uvtc_corpus_row.rs`): `area` and `rt_area` are EQUAL against certified enclosures; `volume` and `rt_volume` move by one unit in the last place and are EQUAL inside an enclosure that reaches its cell budget wider than the corpus accuracy. `check` and `rt_check` go from 3 to 6 lines.
+- **The new check lines are the file's.** The three lines (tests 11, 13 and 15: slow first derivative, cusp, internal coincident control points) are on edge 24's trim. A run of its control points spans a knot interval the surface maps to one point. That run is, bit for bit, a run of one of the file's own UV curves, so the read keeps an input defect and does not make one. Upstream's `Trim` at the far end's drop point cut it off only as a side effect: a trim interval within tolerance of a knot snaps to that knot. Removing degenerate pole spans on read is separate work.
