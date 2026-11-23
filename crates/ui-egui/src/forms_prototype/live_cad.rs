@@ -1052,7 +1052,7 @@ mod tests {
         });
         for offset in 1..=3 {
             app.session.execute("form.prototype.close", &json!({})).unwrap();
-            app.forms_prototype = Default::default();
+            *app.forms_prototype = Default::default();
             // Production's gate lives outside every editor. Reuse this explicit
             // instance gate across test resets without coupling parallel tests.
             app.forms_prototype.live.worker_gate = gate.clone();
@@ -1178,7 +1178,7 @@ mod tests {
         for _ in 0..3 {
             app.session.execute("form.prototype.close", &json!({})).unwrap();
             // Cancel/close replaces the UI editor and drops its old receiver.
-            app.forms_prototype = Default::default();
+            *app.forms_prototype = Default::default();
             app.session.execute("form.prototype.create", &json!({"primitive":"face","segments":[1,1,1],"levels":0})).unwrap();
             install_for_test(&mut app);
             let started = starts.clone();
@@ -1473,7 +1473,7 @@ mod tests {
         assert!(Arc::ptr_eq(&index, &again_index));
         let face_count = exact.body.face_count();
         let point = mesh.positions[0];
-        app.forms_prototype = Default::default();
+        *app.forms_prototype = Default::default();
         assert!(selection_geometry(&app).is_none());
         assert_eq!(exact.body.face_count(), face_count);
         assert_eq!(mesh.positions[0], point);

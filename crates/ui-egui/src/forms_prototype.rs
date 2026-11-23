@@ -1970,7 +1970,7 @@ mod tests {
             h.frame_with(crate::test_support::key(egui::Key::Escape));
             assert!(transform_feedback::current(&h.app).is_none());
             assert!(inspect(&h.app)["transform_feedback"].is_null());
-            h.app.forms_prototype = Default::default();
+            *h.app.forms_prototype = Default::default();
             assert!(transform_feedback::current(&h.app).is_none());
         }
     }
@@ -2274,7 +2274,7 @@ mod tests {
         let permit = extrusion::WorkerPermit::acquire(gate.clone()).unwrap();
         pull(&mut abandoned, proj.to_screen(point + Vec3::Z * 1.4).unwrap());
         let (_, abandoned_result) = transform_job::hold_for_test(&mut abandoned).unwrap();
-        abandoned.forms_prototype = Default::default();
+        *abandoned.forms_prototype = Default::default();
         assert!(abandoned_result.send(Err("abandoned fixture".into())).is_err());
 
         let (mut app, proj, point, vertex) = hierarchical_pointer();

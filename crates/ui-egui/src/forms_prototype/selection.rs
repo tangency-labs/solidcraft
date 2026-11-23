@@ -1136,7 +1136,7 @@ mod tests {
         poll_region_jobs(&mut app, &ctx, &proj, &flag, true);
         entered.recv().unwrap();
         let old = app.forms_prototype.region_jobs.pending.as_mut().unwrap().thread.take().unwrap();
-        app.forms_prototype = Default::default();
+        *app.forms_prototype = Default::default();
         live_cad::install_for_test(&mut app);
         let drag = queued_drag(&mut app, &proj, start);
         enqueue_region(&mut app, drag, Box::new(|_| Ok([Element::Vertex(0)].into_iter().collect())));

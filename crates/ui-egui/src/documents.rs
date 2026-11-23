@@ -1966,7 +1966,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
         crate::drawing_workspace::reset_document(app);
         app.session.invalidate_view(rev);
         app.cam = Camera::default();
-        app.forms_prototype = Default::default();
+        *app.forms_prototype = Default::default();
         crate::forms_prototype::opened(app);
         app.fit_view();
         // The linked designs that changed while it was closed are read again (#9739): last, as a
@@ -2163,7 +2163,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         app.tool = None;
         app.bom = None;
         app.session.replace_design(Session::default());
-        app.forms_prototype = Default::default();
+        *app.forms_prototype = Default::default();
         give_up_renames_of_other_designs(app);
         app.session.revision = rev + 1;
         crate::prefs::apply_new_design(app);

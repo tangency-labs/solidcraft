@@ -1886,7 +1886,7 @@ impl SolveApp {
             if v.get("form_restored").and_then(Value::as_bool) == Some(true)
                 && solidcraft_engine::find_command(id).is_some_and(|spec| spec.id == "edit.restore_checkpoint")
             {
-                self.forms_prototype = Default::default();
+                *self.forms_prototype = Default::default();
                 if self.session.forms_prototype.is_some() {
                     forms_prototype::opened(self);
                 }
@@ -2193,7 +2193,7 @@ impl SolveApp {
                     self.tool = None;
                     self.preview.reset();
                     self.cam = Camera::default();
-                    self.forms_prototype = Default::default();
+                    *self.forms_prototype = Default::default();
                     forms_prototype::opened(self);
                     self.fit_view();
                     history_folds::load(self);

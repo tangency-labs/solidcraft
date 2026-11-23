@@ -179,7 +179,7 @@ mod tests {
     fn native_interchange_capacity_survives_a_form_reset() {
         let mut app = SolveApp::new(Default::default(), Default::default());
         let permit = worker_permit().unwrap();
-        app.forms_prototype = Default::default();
+        *app.forms_prototype = Default::default();
         for import in [false, true] {
             start_command(&mut app, import, json!({"path":"unused.blend"}));
             assert!(app.forms_prototype.interchange.is_none());

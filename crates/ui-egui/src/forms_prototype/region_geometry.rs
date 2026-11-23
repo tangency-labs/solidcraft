@@ -519,7 +519,7 @@ mod tests {
         assert!(Arc::ptr_eq(&first.allowed, &second.allowed));
         assert!(Arc::ptr_eq(&first.exact.definition, &second.exact.definition));
         let before = app.session.forms_prototype.as_ref().unwrap().source_revision();
-        app.forms_prototype = Default::default();
+        *app.forms_prototype = Default::default();
         assert!(Query::capture(&app, &projection, &region).is_err());
         assert_eq!(first.run().unwrap(), second.run().unwrap());
         assert_eq!(app.session.forms_prototype.as_ref().unwrap().source_revision(), before);
