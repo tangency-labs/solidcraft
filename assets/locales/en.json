@@ -5476,7 +5476,7 @@
   "select the sheet edge first": "select the sheet edge first",
   "select two components": "select two components",
   "set by the sketch's lines": "set by the sketch's lines",
-  "settings.cadmpeg_import": "Read STEP, FreeCAD and Rhino files with cadmpeg straight into B-rep, instead of through SolidCraft's STEP reader",
+  "settings.cadmpeg_import": "Read STEP, IGES, FreeCAD and Rhino files with cadmpeg straight into B-rep, instead of through SolidCraft's STEP and IGES readers",
   "settings.display_quality_note": "Only the display. Designs and exports are not affected.",
   "settings.double_click_components": "Double-click a component to activate it",
   "settings.frame_rate_details_note": "Adds a graph of the last frames' times with the triangles drawn over it, a histogram of frame times and what the GPU drew. Click the frame rate in the view to show or hide them.",

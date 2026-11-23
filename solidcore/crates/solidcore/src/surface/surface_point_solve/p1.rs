@@ -75,6 +75,7 @@
 //!   omitted. `Dump` has no counterpart.
 
 use crate::curve::curve::Curve;
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::{Extent2d, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
@@ -91,6 +92,7 @@ use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::math::CPoint;
 use crate::surface::surface::p2::SurfaceEval;
+use crate::surface::surface::p7::chained;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 const OP_CPTS: &str = "surface::surface_point_solve::p1::control_point";
@@ -631,18 +633,18 @@ impl<'s> SurfPtGlobalSolver<'s> {
         let b = &self.base;
         // We need a SmBSplineSurface to work with control points.
         let Some(bspl) = b.b_spline else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_TRI,
-                "the surface is not a B-spline surface",
+                SurfaceFailure::SolverSurfaceNotBSpline,
             ));
         };
 
         let (best_idx_u, best_idx_v) = best_idx;
         let mut best_idx_u = best_idx_u;
         let mut best_idx_v = best_idx_v;
-        let (num_u, num_v, cpts) = bspl.control_points().map_err(|_| {
-            SolidError::surface_failed(OP_TRI, "the B-spline surface has no control points")
-        })?;
+        let (num_u, num_v, cpts) = bspl
+            .control_points()
+            .map_err(|e| chained(OP_TRI, SurfaceFailure::NoControlPoints, e))?;
         let rational = bspl.is_rational();
         let mut best_dist = BIG_DOUBLE;
         let mut this_local_u = -1.0;
@@ -773,23 +775,23 @@ impl<'s> SurfPtGlobalSolver<'s> {
         let b = &self.base;
         // This requires an SmBSplineSurface.
         let Some(bspl) = b.b_spline else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_LEG,
-                "the surface is not a B-spline surface",
+                SurfaceFailure::SolverSurfaceNotBSpline,
             ));
         };
 
         // Also, this won't help in this case:
         if b.solver_op == SolverOperation::Signed3dDirectedMaximize {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_LEG,
-                "a signed directed maximize gets no leg refinement",
+                SurfaceFailure::UnsupportedSolverOperation,
             ));
         }
 
-        let (num_u, num_v, cpts) = bspl.control_points().map_err(|_| {
-            SolidError::surface_failed(OP_LEG, "the B-spline surface has no control points")
-        })?;
+        let (num_u, num_v, cpts) = bspl
+            .control_points()
+            .map_err(|e| chained(OP_LEG, SurfaceFailure::NoControlPoints, e))?;
         let rational = bspl.is_rational();
 
         let best_pt = control_point(&cpts, num_v, best_idx_u, best_idx_v, rational)?;

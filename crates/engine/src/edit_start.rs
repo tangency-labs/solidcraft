@@ -293,7 +293,7 @@ impl Session {
                 domain: SketchDomain::Model,
             };
             let before = self.doc.clone();
-            crate::cmd::finish_model_edit(self, true)?;
+            crate::cmd::finish_model_edit(self, true, false)?;
             self.sketch_finish_pending |= !Arc::ptr_eq(&before, &self.doc) || self.model.is_stale();
             self.publish_sketch_finish(event.clone());
             event.sequence = self.sketch_finish_sequence;
