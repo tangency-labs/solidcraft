@@ -1089,7 +1089,11 @@ fn wr493_moved_bodies_pass_level_2() {
 /// the cone face [`CLASSIFIED_TRIM_FACE`] (it has loop uses; main's cache, built in editing
 /// mode, stored point testing off), the face classification makes the face's missing trims
 /// (`CreateUVTrimCurves`) on the read (`tolsub::state::CLASSIFIED_READ_TRIMS`, the same
-/// edge uses), and the fillet keeps them.
+/// edge uses), and the fillet keeps them. Since WR-732's retirement (#18934) the read's
+/// B-rep ray builds the face's tree against its current trims while the body is edited,
+/// so the implant makes the same five trims first (edge 20's control points differ from the
+/// classification's by up to 2.7e-9 in UV, measured; the mass integrated over them moves,
+/// and the sums test pins it).
 pub(crate) const CLASSIFIED_TRIM_ROWS: [&str; 6] = [
     "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
     "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
@@ -1140,9 +1144,10 @@ pub(crate) fn without_classified_trims(unit: &str, case: &str, output: &mut crat
 ///   changed, bit for bit; that row hashes to main's row (`refit::replay`'s and
 ///   `tolsub::replay`'s put-back runs) and digests to main's committed blocks within
 ///   rounding ([`sphere_diff_3cylinders_rows_are_their_sums`]);
-/// * one face classification (`point_classify` at the face's middle) makes the five again,
-///   bit for bit the same, and the record is the run's again: they are what the
-///   classification makes, not another change;
+/// * the five are bit for bit the trims the file's read holds on the same edge uses (since
+///   WR-732's retirement, #18934, the read makes them by implanting the cone face's current
+///   trims while it is edited): the fillet keeps them as the read makes them, so they are
+///   no change of the fillet's;
 /// * each trim's same-parameter gap to its edge is certified (`curve_uv_gap_bound`,
 ///   interval Taylor models, every rounding included) within the edge's tolerance.
 ///
@@ -1150,7 +1155,6 @@ pub(crate) fn without_classified_trims(unit: &str, case: &str, output: &mut crat
 #[test]
 fn sphere_diff_3cylinders_rows_move_only_by_the_classified_trims() {
     use solidcore::curve::curve::CurveKind;
-    use solidcore::geom::vector2d::Point2;
     use solidcore::query::curve_surface_gap::curve_uv_gap_bound;
     use solidcore::surface::surface::SurfaceKind;
     use solidcore::topology::brep::p1;
@@ -1165,6 +1169,16 @@ fn sphere_diff_3cylinders_rows_move_only_by_the_classified_trims() {
         let mut enc = Vec::new();
         crate::util::trim_curve::put_trim_curve(k, &mut enc, Some(c)).unwrap();
         enc.iter().map(|x| x.to_bits()).collect::<Vec<u64>>()
+    };
+    // the file's read, as the runner reads it: its five classified trims are the implant's
+    let read = {
+        let path = crate::case::repo_root()
+            .join(crate::fixtures::UPSTREAM_TEST_FILES)
+            .join("Fillet/sphere_diff_3cylinders.smb");
+        let mut k = crate::runner_kernel();
+        crate::own_reader::read_file(&mut k, path.to_str().unwrap())
+            .unwrap()
+            .unwrap()
     };
     for case in CLASSIFIED_TRIM_ROWS {
         let mut output = run(&blend_fillet_executive_p3::Runner, case);
@@ -1261,29 +1275,13 @@ fn sphere_diff_3cylinders_rows_move_only_by_the_classified_trims() {
             crate::tolsub::state::CLASSIFIED_READ_TRIMS,
             "{case}: not the read's classified trims"
         );
-        // one classification on the face makes them again, bit for bit
-        let d = body.face(f).unwrap().uv_domain;
-        let uv = Point2::new(0.5 * (d.min().x + d.max().x), 0.5 * (d.min().y + d.max().y));
-        let mut pc = solidcore::intersect::point_class::PointClassification::new(0.0);
-        solidcore::query::face::p2::point_classify(
-            &k,
-            &mut body,
-            f,
-            uv,
-            &mut pc,
-            solidcore::query::face::p2::PointClassifyOptions::default(),
-        )
-        .unwrap();
+        // the five are the read's own trims, bit for bit: the fillet keeps them as the read
+        // of the file makes them (`read`, the implant's)
         for (i, eu, bits) in &taken {
-            let again = body.edgeuse(*eu).unwrap().uv_trim_curve.as_ref();
-            let again = again.unwrap_or_else(|| panic!("{case}: edge {i}: not made again"));
-            assert_eq!(&encoding(&k, again), bits, "{case}: edge {i}: another trim");
+            let made = read.edgeuse(*eu).unwrap().uv_trim_curve.as_ref();
+            let made = made.unwrap_or_else(|| panic!("{case}: edge {i}: not on the read"));
+            assert_eq!(&encoding(&k, made), bits, "{case}: edge {i}: another trim");
         }
-        assert_eq!(
-            record(&k, &body),
-            now,
-            "{case}: the record after the classification"
-        );
     }
 }
 
@@ -1293,10 +1291,12 @@ fn sphere_diff_3cylinders_rows_move_only_by_the_classified_trims() {
 /// integrated over those trims (with main's read put back the row is main's to the bit,
 /// `tolsub::replay::classified_read_rows_are_mains_without_the_trims`): it moves by 1.3e-9 of
 /// itself (`area` 38235.9926466384 to 38235.99269705083, `rt_area` 38235.99654566674 to
-/// 38235.996596079174). The record asks the area to `ACCURACY` (`1e-6`) relative. A
-/// certified enclosure of the read's total face area (`enclose_face_area_relative`, every
-/// rounding included, asked `1e-8` wide) holds main's and this branch's values, both sides,
-/// each within that accuracy of it: the move is a re-integration within the requested
+/// 38235.996596079174). The record asks the area to `ACCURACY` (`1e-6`) relative. Since
+/// WR-732's retirement (#18934) the read makes the five trims by implanting the face's
+/// current trims while it is edited, and the area is main's value before #20179 to the
+/// bit again (asserted). A certified enclosure of the read's total face area
+/// (`enclose_face_area_relative`, every rounding included, asked `1e-8` wide) holds both
+/// values, each within that accuracy of it: either is a re-integration within the requested
 /// accuracy, not a change of the body.
 #[test]
 fn sphere_diff_3cylinders_corpus_area_is_within_its_accuracy() {
@@ -1304,14 +1304,15 @@ fn sphere_diff_3cylinders_corpus_area_is_within_its_accuracy() {
     use solidcore::mass::enclosure::enclose_face_area_relative;
     use solidcore::topology::brep::p1;
     const CASE: &str = "Fillet__sphere_diff_3cylinders.smb";
-    // (key, main's committed value, this branch's)
+    // (key, main's committed value before #20179, its value with #20179's trims; since
+    // #18934 the read's trims are the implant's, and the area is the first value again)
     const VALUES: [(&str, f64, f64); 2] = [
         ("area", 38_235.992_646_638_4, 38_235.992_697_050_83),
         ("rt_area", 38_235.996_545_666_74, 38_235.996_596_079_174),
     ];
     let out = run_in_process(&regression_case(&Runner, CASE)).unwrap();
-    for (key, _, now) in VALUES {
-        assert_eq!(out.values[key], [now], "{CASE}: {key}");
+    for (key, main, _) in VALUES {
+        assert_eq!(out.values[key], [main], "{CASE}: {key}");
     }
     let path = crate::case::repo_root()
         .join(crate::fixtures::UPSTREAM_TEST_FILES)

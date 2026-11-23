@@ -90,9 +90,12 @@
 //! unchanged) and this branch's committed line. (The hashes their [`TRIM_COVER`] entries held
 //! were of an older main's run, not of the line main now commits.)
 //!
-//! #20179 (the point test asks the face whether to test) adds five UV trims to the result
-//! body of six `blend.fillet_executive_p3` `sphere_diff_3cylinders` rows: their put-back
-//! runs are hashed without them ([`run_without_classified_trims`], proved in `wr493_rows`'
+//! #20179 (the point test asks the face whether to test) adds five UV trims to the read of
+//! `Fillet/sphere_diff_3cylinders.smb`, and six `blend.fillet_executive_p3` rows keep them
+//! in their result body. Since WR-732's retirement (#18934) the read makes them by
+//! implanting the cone face's current trims while it is edited. The put-back runs of every
+//! row that reads the file run on main's read of it ([`run_without_classified_trims`]:
+//! `state::strip_classified_trims`; the trims are proved in `wr493_rows`'
 //! `sphere_diff_3cylinders_rows_move_only_by_the_classified_trims`).
 //!
 //! #17739's vertex step raises a vertex whose gap is over half its new tolerance to
@@ -167,16 +170,11 @@ fn run_raw(u: &dyn UnitDiff, case: &Case) -> crate::Output {
     out.unwrap_or_else(|e| panic!("{}: {e:?}", case.name))
 }
 
-/// [`run`] without the UV trims #20179's face classification adds: a fillet row's result
-/// body without them (`wr493_rows::without_classified_trims`, which proves them), other
-/// rows with main's read of the file put back (`state::strip_classified_trims`; rows of
-/// other files as [`run`]). The row main's run gives, for the put-back runs.
+/// [`run`] without the UV trims the read of `Fillet/sphere_diff_3cylinders.smb` makes on
+/// its cone face (#20179, made by the implant since #18934): every row with main's read of
+/// that file put back (`state::strip_classified_trims`; rows of other files as [`run`]).
+/// The row main's run gives, for the put-back runs.
 fn run_without_classified_trims(u: &dyn UnitDiff, case: &Case) -> Value {
-    if u.id() == "blend.fillet_executive_p3" {
-        let mut out = run_raw(u, case);
-        crate::wr493_rows::without_classified_trims(u.id(), &case.name, &mut out);
-        return encode(&case.name, &out);
-    }
     state::strip_classified_trims(|| run(u, case)).0
 }
 
@@ -253,7 +251,10 @@ fn replay(unit_id: &str) -> usize {
             ));
         }
         if hash(&line) != main_hash {
-            failures.push(format!("{name}: substituted row is not main's row"));
+            failures.push(format!(
+                "{name}: substituted row {:#018x} is not main's row",
+                hash(&line)
+            ));
         }
         let line = run(u.as_ref(), case);
         let committed = golden.get(name);
@@ -379,7 +380,10 @@ fn replay_trim_cover(unit_id: &str) -> usize {
         }
         let committed = golden.get(name);
         if hash(&line) != main_hash {
-            failures.push(format!("{name}: the row put back is not main's row"));
+            failures.push(format!(
+                "{name}: the row put back {:#018x} is not main's row",
+                hash(&line)
+            ));
         }
         let line = run(u.as_ref(), case);
         if TRIM_COVER_WITHIN_COMPARATOR.contains(&(unit_id, name)) {
@@ -457,8 +461,12 @@ const TRIM_COVER_REFIT: &[(&str, &str)] = &[
 /// goldens' comparator (the cover measures the kept trims on the file's NURB here, on the
 /// fitted NURB on main): their committed line stays main's. (#20179 re-blessed
 /// `corpus.parity`'s `Fillet__sphere_diff_3cylinders.smb` and `topology.face_p3`'s
-/// `uv_trim_f0`/`f1`/`f4`/`f5`/`f8`/`f9`, which its classified trims move: their put-back
-/// above is main's hash, and their committed line is now this branch's run.)
+/// `uv_trim_f0`/`f1`/`f4`/`f5`/`f8`/`f9`, which its classified trims move, and #18934
+/// re-blessed `uv_trim_f6`, whose read now holds four of the classified read's vertex/face
+/// gaps again, computed after the implant set the trims: their put-back above is main's
+/// hash, and their committed line is now this branch's run. #18934 also re-blessed
+/// `topology.brep_cutting`'s `gen0050`, whose put-back is held in [`TRIM_COVER`] as the run
+/// with that change.)
 const TRIM_COVER_WITHIN_COMPARATOR: &[(&str, &str)] = &[
     ("blend.fillet_removal", "nurb_fillet_face18"),
     ("heal.stitch_p1", "file_boolean_trees_result.smb_advanced"),
@@ -473,7 +481,6 @@ const TRIM_COVER_WITHIN_COMPARATOR: &[(&str, &str)] = &[
     ),
     ("heal.stitch_p2", "file_nurb_fillet.smb_stitchfaces_0.001"),
     ("heal.stitch_p2", "file_nurb_fillet.smb_stitchfaces_0.005"),
-    ("topology.brep_cutting", "gen0050"),
     ("topology.brep_mirror", "mat0058"),
     ("topology.brep_p2", "refine_cci_f0_plane_a_nouv"),
     ("topology.brep_p2", "refine_cci_f0_plane_a_uv"),
@@ -491,10 +498,6 @@ const TRIM_COVER_WITHIN_COMPARATOR: &[(&str, &str)] = &[
     (
         "topology.edgeuse_p3",
         "own_reader_sphere_diff_3cylinders_get_or_create_eu19",
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f6",
     ),
 ];
 
@@ -655,27 +658,30 @@ fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usiz
 /// #18490 moves these four rows (the round sits on the sphere drop's finer trims), so each
 /// hash is of the row with that change, from Linux CI.
 /// Each hash is of the line without the `fillet_point_step` key, which recorded the retired
-/// step latch (#18916).
+/// step latch (#18916). WR-732's retirement (#18934) moves the four rows' mass through the
+/// fillet's own classifications while it edits (by up to 1.7e-10 of the area), so each
+/// hash is of this branch's committed line with that change; its moved mass entries are
+/// classified against a certified enclosure (`tests/wr493_moved_rows_are_classified`).
 const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0x9e43_eafe_0171_4c09,
+        0xe1e3_635c_8163_baf4,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0xe2ec_b89d_309a_54a8,
+        0x8bac_794b_d40c_eff1,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0x9fc9_deff_361b_7066,
+        0xbeeb_d6e3_3007_7bc7,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x5669_c3ab_dde7_2e76,
+        0x40d1_d34a_5faf_fa8a,
     ),
 ];
 
@@ -743,7 +749,12 @@ fn record() {
 /// `_rebuild` rows hold main's row after #18490 moved them (main at 0cfdad69ff: the hash of
 /// main's blessed line, MEASURED equal to this branch's run with the trims put back); the eight
 /// `uv_trim_f2`, `f3`, `f10` and `f11` rows (each with its `_rebuild`) hold main's blessed line
-/// after #20939 cleared their gap-cache flags (main at 1562e5f516). The two
+/// after #20939 cleared their gap-cache flags (main at 1562e5f516). `topology.brep_p10`'s
+/// `gen0026` (drop_uv 2, healer on) holds its put-back run after WR-732's retirement
+/// (#18934): the healer makes the dropped trims again while the body is edited, now
+/// against the faces' current trims, which moves 62 of the row's doubles by up to 1.7e-8
+/// against main's put-back run (MEASURED at e97d2814d7); the classified trims' put-back is
+/// the same as before. The two
 /// `uv_trim_f6` rows read the file too but do not move with #20179; they are listed so that
 /// the put-back is shown to keep them.
 const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
@@ -752,7 +763,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
         "Fillet__sphere_diff_3cylinders.smb",
         0x0fe4ffda86f0023a,
     ),
-    ("topology.brep_p10", "gen0026", 0xc2f31f04dbd827bb),
+    ("topology.brep_p10", "gen0026", 0xa46e34a6b84a2841),
     (
         "topology.brep_p10",
         "read_Fillet_sphere_diff_3cylinders",
@@ -903,7 +914,10 @@ fn classified_read_rows_are_mains_without_the_trims() {
             failures.push(format!("{unit_id} {name}: no read put back"));
         }
         if hash(&line) != main_hash {
-            failures.push(format!("{unit_id} {name}: not main's row"));
+            failures.push(format!(
+                "{unit_id} {name}: {:#018x} is not main's row",
+                hash(&line)
+            ));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));

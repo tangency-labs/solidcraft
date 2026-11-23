@@ -6,8 +6,11 @@
 // `goldens::wr493_rows::sphere_diff_3cylinders_rows_are_their_sums`.
 // e1-r0.1 entry 0 and e4-r0.1 entries 0 and 4 are moved by #18490 (the sphere drop's
 // spans proved off it are subdivided, so the round sits on finer sphere trims), not by
-// the retirement; they are EQUAL in `EXPECTED` too.
-static BEYOND_ROUNDING: [(&str, usize); 46] = [
+// the retirement; they are EQUAL in `EXPECTED` too. Entry 0 of the six rows that keep the
+// read's classified trims (e2-r0.1, e5-r0.1, e5-r0.5, e30-r0.1, all-r0.1, e29-r1.0) is
+// moved by WR-732's retirement (#18934: the read makes those trims by the implant, and
+// the area is integrated over them); EQUAL in `EXPECTED` as well.
+static BEYOND_ROUNDING: [(&str, usize); 52] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 0),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 5),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 9),
@@ -18,6 +21,7 @@ static BEYOND_ROUNDING: [(&str, usize); 46] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 9),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 10),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 11),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 0),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 5),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 9),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 10),
@@ -34,22 +38,27 @@ static BEYOND_ROUNDING: [(&str, usize); 46] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 9),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 10),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 11),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 0),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 5),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 9),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 10),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 11),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 0),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 5),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 9),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 10),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 11),
+    ("sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1", 0),
     ("sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1", 5),
     ("sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1", 9),
     ("sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1", 10),
     ("sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1", 11),
+    ("sweep4-sphere_diff_3cylinders-all-r0.1", 0),
     ("sweep4-sphere_diff_3cylinders-all-r0.1", 5),
     ("sweep4-sphere_diff_3cylinders-all-r0.1", 9),
     ("sweep4-sphere_diff_3cylinders-all-r0.1", 10),
     ("sweep4-sphere_diff_3cylinders-all-r0.1", 11),
+    ("sweep5-sphere_diff_3cylinders-e29-r1.0", 0),
     ("sweep5-sphere_diff_3cylinders-e29-r1.0", 5),
     ("sweep5-sphere_diff_3cylinders-e29-r1.0", 9),
     ("sweep5-sphere_diff_3cylinders-e29-r1.0", 10),

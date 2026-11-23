@@ -36,7 +36,10 @@
 //! bound past twice upstream's distance) must cover the same way, and the old one must not have: for an edge
 //! one of its trims' `B` exceeds `o` (the raise was needed for the enclosure; `B` is an upper
 //! bound, so this argues rather than proves that `o` was short), for a vertex `o` does not
-//! cover an edge end that `n` does.
+//! cover an edge end that `n` does. One raise is upstream's margin instead: a vertex at twice
+//! its gap to its edges' ends (`topology::face::p3`'s UV trim gaps, which the stitch reaches
+//! while it edits since WR-732's retirement, #18934), still covering every end
+//! ([`vertex_is_twice_its_end_gap`]).
 
 use solidcore::curve::curve::p2::CurveKind;
 use solidcore::curve::curve::Curve;
@@ -975,6 +978,34 @@ fn vertex_covers_its_ends(k: &Kernel, b: &Brep, v: VertexId, n: f64) -> bool {
     true
 }
 
+/// Whether `n` is upstream's margin on the gap from the point of `v` to its edges' ends:
+/// twice the largest distance from the point to an end of an edge of `v` that ends there,
+/// to a few roundings. `topology::face::p3`'s UV trim gaps with `adjust_tolerances` raise a
+/// vertex whose tolerance is below twice its 3D gap to an edge use's end to that (#18934: the
+/// stitch now makes its faces' trims while it edits, by the B-rep ray's implant); that gap is
+/// evaluated on the edge use and this one on the edge curve's end, so the two agree to
+/// rounding, not to the bit (measured within 1e-16 relative on `heal.stitch_p1`).
+fn vertex_is_twice_its_end_gap(k: &Kernel, b: &Brep, v: VertexId, n: f64) -> bool {
+    let at = b.vertex(v).expect("vertex").point;
+    let mut gap: f64 = 0.0;
+    for e in solidcore::topology::vertex::edges(b, v, None).expect("edges") {
+        let rec = b.edge(e).expect("edge");
+        let Some(curve) = rec.curve.as_ref() else {
+            continue;
+        };
+        let (v0, v1) = edge::start_end_vertices(b, e).expect("ends");
+        for (end, t) in [
+            (v0, rec.interval.evaluate(0.0)),
+            (v1, rec.interval.evaluate(1.0)),
+        ] {
+            if end == Some(v) {
+                gap = gap.max(at.distance(curve.evaluate_point(k, t).expect("end point")));
+            }
+        }
+    }
+    gap > 0.0 && (n - 2.0 * gap).abs() <= 8.0 * f64::EPSILON * n
+}
+
 /// What one unit's moved values were certified by.
 #[derive(Debug, Default)]
 struct Tally {
@@ -985,6 +1016,9 @@ struct Tally {
     edges: usize,
     /// Moved vertices within their tolerance of their edges' ends.
     vertices: usize,
+    /// Raised vertices at upstream's margin, twice their gap to their edges' ends
+    /// ([`vertex_is_twice_its_end_gap`]), still covering every end.
+    vertex_margin: usize,
     /// Trims bounded (or faces, for an edge without trims).
     trims: usize,
     /// Faces of moved edges on which the edge holds no UV trim, bounded against the face's
@@ -1379,7 +1413,16 @@ fn certify(unit: &str) -> Tally {
                         "{at}: certified, remove it from OPEN"
                     );
                 } else if raised && !follows && vertex_covers_its_ends(&k, b, v, old) {
-                    failures.push(format!("{at}: raised {old:e} -> {new:e}: old covered"));
+                    // (upstream's margin: a vertex the UV trim gaps raise to twice its gap to
+                    // an end of its edges, which the old tolerance covered already; the new
+                    // one must still cover every end)
+                    if vertex_is_twice_its_end_gap(&k, b, v, new)
+                        && vertex_covers_its_ends(&k, b, v, new)
+                    {
+                        tally.vertex_margin += 1;
+                    } else {
+                        failures.push(format!("{at}: raised {old:e} -> {new:e}: old covered"));
+                    }
                 } else if vertex_covers_its_ends(&k, b, v, new) {
                     tally.vertices += 1;
                     assert!(

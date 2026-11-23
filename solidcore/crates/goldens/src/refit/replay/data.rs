@@ -10,6 +10,14 @@
 //! and the four `stubs4-delete-edge-sphere_diff_3cylinders-e1/e4` rows (the last five
 //! recorded on Linux CI).
 //!
+//! WR-732's retirement (#18934: while the body is edited, a B-rep ray builds each face's
+//! tree against its current trims) moves the mass of the four
+//! `stubs4-delete-edge-sphere_diff_3cylinders-e1/e4` rows through the fillet's own
+//! classifications (by up to 1.7e-10 of the area; with main's read of the file put back
+//! they move all the same), so they hold the hash of the refit run with that change
+//! instead; `tests/wr493_moved_rows_are_classified` classifies their moved mass entries
+//! against a certified enclosure.
+//!
 //! The `blend.fillet_executive_p3` hashes are of those lines without the
 //! `fillet_point_step` key, which recorded the retired step latch (#18916); every other
 //! value is the line's.
@@ -1003,12 +1011,12 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0x45841a9164d2602c,
+        0x53b35219de7093b1,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0xe86c8a18238633fd,
+        0x3be6a9d75b7fd613,
     ),
     (
         "blend.fillet_executive_p3",
@@ -1018,12 +1026,12 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0x5ce7e9eb2f229d1e,
+        0xba863f1e84328990,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x03aaed98113a5d6f,
+        0x30159fc81b20cbbe,
     ),
     (
         "blend.fillet_executive_p3",
