@@ -3797,6 +3797,34 @@ fn plane_at_angle_previews_the_tilted_plane_when_edited() {
     assert_ne!(h.app.preview.key, first, "a new angle redraws the preview");
 }
 
+/// Plane at Angle's preview carries a handle that turns the plane about its axis, and the
+/// angle box beside it follows the drag and stays for typing an exact value (#17290).
+#[test]
+fn plane_at_angle_drags_the_preview_handle() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let id = h.app.run("construct.plane.at_angle", json!({"base":"XY","axis":"X","angle":"0 deg"})).unwrap()["feature"].as_u64().unwrap();
+    h.app.edit_feature(id);
+    h.frames(4);
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::AnglePlane { .. })), "{:?}", h.app.dialog);
+    // The handle stands on the preview square's edge, ten millimetres from the plane's origin
+    // along the edge the X axis does not run through. Dragging it to (0, 0, 10) turns the
+    // plane through ninety degrees about the X axis.
+    h.step(&json!({"drag":[{"handle":"angle_plane"},{"world":[0,0,10]}]})).unwrap();
+    let Some(d) = h.app.dialog.as_ref() else { panic!("the dialog stays open") };
+    let Kind::AnglePlane { angle, .. } = &d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!(angle, "90 deg", "the drag wrote the angle");
+    // The command the dialog sends takes that angle, and the plane turns with it.
+    let commands = crate::dialogs::apply_commands(&h.app, d).unwrap();
+    assert_eq!(commands[0].1["params"]["angle"], "90 deg", "the command takes the dragged angle");
+    for (command, params) in commands {
+        h.app.run(&command, params).unwrap();
+    }
+    let planes = solidcraft_engine::view::construction_planes(&h.app.session);
+    let plane = &planes.last().unwrap().2;
+    assert!(plane.normal().cross(-Vec3::Y).len() < 1e-6, "the plane stands turned: {plane:?}");
+}
+
 /// #2474, #2494: every construct tool asks for what it needs. Started from the toolbar with
 /// nothing selected, none of them runs its command and reports that `a` (or `face`, `edge`…)
 /// is required; a construct command added later without a dialog fails here too.
