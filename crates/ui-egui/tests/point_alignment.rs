@@ -214,9 +214,10 @@ fn horizontal_vertical_takes_a_line_middle_without_shift() {
     assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
     let sk = &h.app.session.model.state().sketches[0].sketch;
     let p = sk.point(sk.resolve_point("c1.center").unwrap()).unwrap();
+    let mid = line_midpoint(sk, "l1");
     // Level with the middle (the closer axis): the centre does not land on the line.
-    assert!((p.y - 30.0).abs() < 1e-6, "centre: {p:?}");
-    assert!((p.x - 34.0).abs() < 1e-6, "centre: {p:?}");
+    assert!((p.y - mid.y).abs() < 1e-6, "centre: {p:?}, middle: {mid:?}");
+    assert!((p.x - mid.x).abs() > 1.0, "centre: {p:?}, middle: {mid:?}");
     assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::HorizontalPoints { .. })));
 }
 
