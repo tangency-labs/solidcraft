@@ -1276,15 +1276,18 @@ pub(crate) fn vertex_index_at(b: &ModelBody, at: Vec3) -> Option<usize> {
 pub fn face_names_at(st: &ModelState, pts: &[Vec3]) -> Vec<String> {
     pts.iter()
         .map(|p| {
+            // Exact distances of a point on two faces at once (walls touching along a line) differ
+            // only by rounding: within `ON` the first body's face is the one, as it is at 0.
+            const ON: f64 = 1e-9;
             let mut best: Option<(f64, String)> = None;
             for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
                 let tol = (b.body.size() * 1e-3).max(1e-3);
                 if let Some((d, f)) = b.body.face_and_dist_at(*p, tol)
-                    && best.as_ref().is_none_or(|(bd, _)| d < *bd)
+                    && best.as_ref().is_none_or(|(bd, _)| d < *bd - ON)
                 {
                     let name = face_names(b).get(f).cloned().unwrap_or_default();
                     best = Some((d, name));
-                    if d == 0.0 {
+                    if d <= ON {
                         break;
                     }
                 }
