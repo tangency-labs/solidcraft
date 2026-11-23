@@ -55,8 +55,10 @@ use crate::blend::fillet_executive::NoRoomReason;
 mod band;
 mod cliff;
 mod corner;
+mod crease_trim;
 mod crossing;
 mod ease;
+mod keep;
 mod law_corner;
 mod no_room;
 mod overflow;
@@ -69,10 +71,12 @@ mod weld;
 pub use band::BandInput;
 pub use cliff::CliffInput;
 pub use corner::CornerShape;
+pub use crease_trim::CreaseTrimStop;
 pub use crossing::CrossingInput;
 pub use ease::EaseGeometry;
 pub use ease::EaseInput;
 pub use ease::EaseStop;
+pub use keep::KeepStop;
 pub use law_corner::LawCornerSearch;
 pub use no_room::no_room_class;
 pub use overflow::OverflowDrop;
@@ -222,6 +226,11 @@ pub enum BlendFailure {
         /// The end's parameter on the crease.
         t: f64,
     },
+    /// A blend trimmed at its creases (the fork's `TrimAtCreases`, the bound of its open ends
+    /// included) is not built for a reason with no blend-too-large reason
+    /// ([`CreaseTrimStop`] says why, and gives the kind). The executive notes the refusal in
+    /// its error info as well; status `SM_ERR`.
+    CreaseTrimNotBuilt(CreaseTrimStop),
     /// A cross-section type is given as unknown. A check of the caller's arguments
     /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_INVALID_INPUT`.
     CrossSectionTypeUnknown,
@@ -361,6 +370,10 @@ pub enum BlendFailure {
     /// status here, so its kind is [`ErrorKind::InvalidInput`]. A phrase cause
     /// ([`BlendFailure::is_phrase`]); an argument check is [`crate::SolidError::InvalidInput`].
     InvalidValue(&'static str),
+    /// A round kept round a feature standing in its band (the fork's `KeepFeaturesInBands`)
+    /// is not built ([`KeepStop`] says why, and gives the kind). The executive notes the
+    /// refusal in its error info as well; status `SM_ERR`.
+    KeptFeatureNotBuilt(KeepStop),
     /// A search the exact round at a radius law's corner makes finds nothing: the
     /// [`LawCornerSearch`] `what`, at the corner at index `corner` of the round's law corners.
     /// An empty search ([`ErrorKind::NotFound`]): neither a defect nor a refusal; status
@@ -578,7 +591,8 @@ pub enum BlendFailure {
         /// The curve's kind.
         kind: &'static str,
     },
-    /// A fillet size (a radius, or a chamfer's distance) is below eight times the body's
+    /// A fillet size (a radius, a chamfer's distance, or a setback a chamfer's angle or
+    /// chord gives at its edge's wedge) is below eight times the body's
     /// tolerance, the smallest the fillet builds. A check of the caller's arguments
     /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_INVALID_INPUT`.
     SizeBelowResolution {
@@ -706,6 +720,7 @@ impl BlendFailure {
             Self::CornerRefused => SM_ERR,
             Self::CornerShapeNotBuilt(shape) => shape.upstream_status(),
             Self::CreasePieceEndUnbuildable { .. } => SM_ERR,
+            Self::CreaseTrimNotBuilt(_) => SM_ERR,
             Self::CrossSectionTypeUnknown => SM_ERR_INVALID_INPUT,
             Self::CrossingInputMissing(_) => SM_ERR_NULL_POINTER,
             Self::CrossingNotFinite => SM_ERR,
@@ -727,6 +742,7 @@ impl BlendFailure {
             Self::GnSectionInvalid { .. } => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
+            Self::KeptFeatureNotBuilt(_) => SM_ERR,
             Self::LawCornerNotFound { .. } => SM_ERR_NULL_POINTER,
             Self::LawHasNoValue => SM_ERR,
             Self::LawIntervalEmpty => SM_ERR,
@@ -800,6 +816,7 @@ impl BlendFailure {
             Self::CornerRefused => ErrorKind::Failed,
             Self::CornerShapeNotBuilt(_) => ErrorKind::Unsupported,
             Self::CreasePieceEndUnbuildable { .. } => ErrorKind::Unsupported,
+            Self::CreaseTrimNotBuilt(stop) => stop.class(),
             Self::CrossSectionTypeUnknown => ErrorKind::InvalidInput,
             Self::CrossingInputMissing(_) => ErrorKind::Missing,
             Self::CrossingNotFinite => ErrorKind::StageFailed,
@@ -821,6 +838,7 @@ impl BlendFailure {
             Self::GnSectionInvalid { .. } => ErrorKind::InvalidInput,
             Self::Inconsistent(_) => ErrorKind::of_status(self.comparison_status()),
             Self::InvalidValue(_) => ErrorKind::of_status(self.comparison_status()),
+            Self::KeptFeatureNotBuilt(stop) => stop.class(),
             Self::LawCornerNotFound { .. } => ErrorKind::NotFound,
             Self::LawHasNoValue => ErrorKind::Unsupported,
             Self::LawIntervalEmpty => ErrorKind::InvalidInput,
@@ -907,6 +925,7 @@ impl BlendFailure {
             Self::CornerRefused => true,
             Self::CornerShapeNotBuilt(_) => true,
             Self::CreasePieceEndUnbuildable { .. } => true,
+            Self::CreaseTrimNotBuilt(_) => true,
             Self::CrossSectionTypeUnknown => true,
             Self::CrossingInputMissing(_) => true,
             Self::CrossingNotFinite => true,
@@ -928,6 +947,7 @@ impl BlendFailure {
             Self::GnSectionInvalid { .. } => true,
             Self::Inconsistent(_) => true,
             Self::InvalidValue(_) => true,
+            Self::KeptFeatureNotBuilt(_) => true,
             Self::LawCornerNotFound { .. } => true,
             Self::LawHasNoValue => true,
             Self::LawIntervalEmpty => true,
@@ -1049,6 +1069,7 @@ impl core::fmt::Display for BlendFailure {
                 self.class(),
                 if *at_end { "end" } else { "start" },
             ),
+            Self::CreaseTrimNotBuilt(stop) => write!(f, "{}: {}", self.class(), stop.what()),
             Self::CrossSectionTypeUnknown => {
                 write!(f, "{}: a cross-section type is unknown", self.class())
             }
@@ -1130,6 +1151,7 @@ impl core::fmt::Display for BlendFailure {
             ),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::InvalidValue(what) => f.write_str(what),
+            Self::KeptFeatureNotBuilt(stop) => write!(f, "{}: {}", self.class(), stop.what()),
             Self::LawCornerNotFound { corner, what } => write!(
                 f,
                 "{}: law corner {corner} has no {}",
@@ -2646,6 +2668,64 @@ mod tests {
         );
     }
 
+    /// #19825: each cause of a kept feature or a trim at the creases that is not built is no
+    /// phrase, replaces the status `SM_ERR` it keeps, has its stop's class (none a defect or
+    /// a refusal), and is worded with its class.
+    #[test]
+    fn the_kept_feature_and_crease_trim_causes_keep_their_status_and_class() {
+        let mut rows = Vec::new();
+        for (stop, class) in [
+            (KeepStop::WallsNotUpright, ErrorKind::Unsupported),
+            (KeepStop::WallsNotAllCopied, ErrorKind::Failed),
+            (KeepStop::WallMeetsNoRound, ErrorKind::NotFound),
+            (KeepStop::RoundNotClosed, ErrorKind::NotFound),
+            (KeepStop::RoundNotSewn, ErrorKind::Failed),
+        ] {
+            rows.push((BlendFailure::KeptFeatureNotBuilt(stop), class));
+        }
+        for (stop, class) in [
+            (
+                CreaseTrimStop::NoSectionThroughEndVertex,
+                ErrorKind::Degenerate,
+            ),
+            (
+                CreaseTrimStop::PieceOnBoundaryAwayFromCreases,
+                ErrorKind::Unsupported,
+            ),
+            (
+                CreaseTrimStop::CornerBetweenAddingAndTaking,
+                ErrorKind::Unsupported,
+            ),
+            (
+                CreaseTrimStop::SectionEndAlongUncutEdge,
+                ErrorKind::Unsupported,
+            ),
+            (CreaseTrimStop::TakesOffNothing, ErrorKind::NotFound),
+            (CreaseTrimStop::ReachesEveryFace, ErrorKind::NotFound),
+            (CreaseTrimStop::MovedEdgeLeavesGeometry, ErrorKind::Failed),
+            (CreaseTrimStop::NotSewn, ErrorKind::Failed),
+        ] {
+            rows.push((BlendFailure::CreaseTrimNotBuilt(stop), class));
+        }
+        for (cause, class) in rows {
+            assert!(!cause.is_phrase(), "{cause:?}");
+            assert!(cause.replaces_upstream_status(), "{cause:?}");
+            assert_eq!(cause.class(), class, "{cause:?}");
+            assert_eq!(cause.comparison_status(), SM_ERR, "{cause:?}");
+            let text = cause.to_string();
+            assert!(text.starts_with(&format!("{class}: ")), "{text}");
+            let error = SolidError::blend("blend::op", cause);
+            assert_eq!(error.kind(), class, "{error:?}");
+            assert_eq!(error.upstream_status(), Some(SM_ERR), "{error:?}");
+            assert!(!error.is_defect() && !error.is_refusal(), "{error:?}");
+        }
+        assert_eq!(
+            BlendFailure::CreaseTrimNotBuilt(CreaseTrimStop::NotSewn).to_string(),
+            "failed: a blend past its faces does not sew into the body along its creases and \
+             rails"
+        );
+    }
+
     /// The `BlendFailure` variants the per-file scan (`phrase_sites::BLEND`) counts are
     /// exactly the phrase causes (`phrase_causes!`, which [`BlendFailure::is_phrase`] is
     /// built from), so the per-file pins in `error/phrase_sites.rs` see every phrase cause.
@@ -2716,8 +2796,10 @@ mod tests {
             ("blend/band.rs", include_str!("blend/band.rs")),
             ("blend/cliff.rs", include_str!("blend/cliff.rs")),
             ("blend/corner.rs", include_str!("blend/corner.rs")),
+            ("blend/crease_trim.rs", include_str!("blend/crease_trim.rs")),
             ("blend/crossing.rs", include_str!("blend/crossing.rs")),
             ("blend/ease.rs", include_str!("blend/ease.rs")),
+            ("blend/keep.rs", include_str!("blend/keep.rs")),
             ("blend/law_corner.rs", include_str!("blend/law_corner.rs")),
             ("blend/no_room.rs", include_str!("blend/no_room.rs")),
             ("blend/overflow.rs", include_str!("blend/overflow.rs")),
