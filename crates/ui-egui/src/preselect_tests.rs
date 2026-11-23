@@ -3797,8 +3797,8 @@ fn plane_at_angle_previews_the_tilted_plane_when_edited() {
     assert_ne!(h.app.preview.key, first, "a new angle redraws the preview");
 }
 
-/// Plane at Angle's preview carries a handle that turns the plane about its axis, and the
-/// angle box beside it follows the drag and stays for typing an exact value (#17290).
+/// Plane at Angle's preview carries a handle that turns the plane about its axis, and the angle
+/// box reads the angle the drag writes and stays for typing an exact value (#17290).
 #[test]
 fn plane_at_angle_drags_the_preview_handle() {
     let mut h = crate::scenario::Harness::new();
