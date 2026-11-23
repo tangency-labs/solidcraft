@@ -177,6 +177,7 @@ pub use profiles::MAX_PROFILE_EDGES;
 pub use profiles::Profile;
 pub use profiles::ProfileSearch;
 pub use profiles::distinct_curves;
+pub use profiles::enclosed_gaps;
 pub use profiles::find_drawn_profiles;
 pub use profiles::find_profiles;
 pub use profiles::find_profiles_checked;

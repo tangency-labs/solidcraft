@@ -312,6 +312,21 @@ pub(crate) static TEST_DETECTED: std::sync::Mutex<Option<Vec<Slicer>>> = std::sy
 #[cfg(test)]
 pub(crate) static TEST_BUSCTL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
+/// Tests of the commands set how long a started slicer is waited for. [`READY_LIMIT`] is there for a
+/// slicer that hangs; a made-up one on a loaded machine can take longer than that to come up while
+/// nothing is wrong, and what such a test checks is that the file waits for the slicer's own sign.
+#[cfg(test)]
+pub(crate) static TEST_READY_LIMIT: std::sync::Mutex<Option<std::time::Duration>> = std::sync::Mutex::new(None);
+
+/// How long a started slicer is waited for: [`READY_LIMIT`].
+pub(crate) fn ready_limit() -> std::time::Duration {
+    #[cfg(test)]
+    if let Some(made_up) = *TEST_READY_LIMIT.lock().unwrap_or_else(std::sync::PoisonError::into_inner) {
+        return made_up;
+    }
+    READY_LIMIT
+}
+
 /// The program that is asked what is on the session bus: `busctl`.
 pub(crate) fn busctl_program() -> String {
     #[cfg(test)]
@@ -1133,6 +1148,12 @@ pub(crate) fn wait_for_ready_via(slicer: &Slicer, busctl: &str, limit: std::time
 #[cfg(unix)]
 pub(crate) mod test_support {
     use std::path::Path;
+
+    /// `path` as one shell word, whatever it holds (a space, a quote): for paths written into the
+    /// scripts of [`fake_program`].
+    pub(crate) fn sh_quote(path: &Path) -> String {
+        format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+    }
 
     /// A small shell script that can be run. One that was only just written can fail to start (text
     /// file busy) while another test forks, which would read as a `busctl` that is missing; so it is
