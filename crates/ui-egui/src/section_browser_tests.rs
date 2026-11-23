@@ -885,3 +885,31 @@ fn showing_a_saved_section_from_the_dialog_keeps_it() {
     assert!((kept.0 - second.0).len() < 1e-6 && (kept.1 - second.1).len() < 1e-6, "OK keeps it: {kept:?} vs {second:?}");
     assert_eq!(shown(&mut h).as_deref(), Some("Second cut"));
 }
+
+/// The Section Analysis dialog with saved sections opens whole inside a 1280 x 720 window in
+/// German too: the "Speichern als…" button and the name field share one row, so a long
+/// translation or a long section name cannot push the card off the right edge (#20649).
+#[test]
+fn the_section_dialog_with_saved_sections_fits_the_window_in_german() {
+    for language in ["en", "de"] {
+        let mut h = harness();
+        h.call("ui.resize", json!({"width": 1280, "height": 720}));
+        h.app.preferences.language = language.into();
+        h.app.preferences.viewport_section_status = false;
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        for (name, offset) in [("Mid-height", -15), ("A section with a rather long name indeed", -8)] {
+            h.app.run("inspect.section", json!({"plane": "XZ", "offset": offset})).unwrap();
+            h.app.run("inspect.section.save", json!({"name": name})).unwrap();
+        }
+        h.app.session.selection.clear();
+        h.app.start("inspect.section");
+        h.frames(8);
+        // Every part the dialog published this frame is inside the window, its OK button included.
+        let parts = crate::scenario::rects("dialog:");
+        assert!(!parts.is_empty(), "{language}: the dialog is open (dialog: {:?})", h.app.dialog.as_ref().map(|d| d.error.clone()));
+        for (name, rect) in &parts {
+            assert!(rect.right() <= 1280.0 + 0.5 && rect.left() >= -0.5, "{language}: {name} {rect:?} is past the window's edge ({parts:?})");
+        }
+        assert!(parts.iter().any(|(name, _)| name == "dialog:ok"), "{language}: the OK button is drawn ({parts:?})");
+    }
+}

@@ -1297,7 +1297,8 @@ fn saved_section_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
     ui_kit::text(ui, tr("section.saved_title"), ui_kit::Text::Hint("section_saved"));
     let mut act: Option<(&'static str, Value)> = None;
     for name in &names {
-        ui.horizontal(|ui| {
+        // A long name or a long translation wraps to the next line instead of widening the card.
+        ui.horizontal_wrapped(|ui| {
             let on = shown.as_deref() == Some(name.as_str());
             let look = if on { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small };
             if ui_kit::button(ui, name.as_str(), look).clicked() {
@@ -1312,18 +1313,22 @@ fn saved_section_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
             }
         });
     }
+    // The button takes its own width first and the name field the rest of the row, so a long
+    // translation ("Speichern als…") cannot push the row, and with it the card, past the window.
     ui.horizontal(|ui| {
-        let (enter, _) = ui_kit::text_field(ui, &mut draft.name, tr("section.saved_name"));
-        let renaming = draft.renaming.clone();
-        let label = tr(if renaming.is_some() { "section.saved_rename" } else { "section.saved_save" });
-        let ok = !draft.name.trim().is_empty() && (renaming.is_some() || live);
-        let clicked = ui_kit::button(ui, label, ui_kit::Button::Enabled(ok)).clicked();
-        if (clicked || enter) && ok {
-            act = Some(match renaming {
-                Some(old) => ("inspect.section.rename", json!({"section": old, "name": draft.name})),
-                None => ("inspect.section.save", json!({"name": draft.name})),
-            });
-        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let renaming = draft.renaming.clone();
+            let label = tr(if renaming.is_some() { "section.saved_rename" } else { "section.saved_save" });
+            let ok = !draft.name.trim().is_empty() && (renaming.is_some() || live);
+            let clicked = ui_kit::button(ui, label, ui_kit::Button::Enabled(ok)).clicked();
+            let (enter, _) = ui_kit::text_field(ui, &mut draft.name, tr("section.saved_name"));
+            if (clicked || enter) && ok {
+                act = Some(match renaming {
+                    Some(old) => ("inspect.section.rename", json!({"section": old, "name": draft.name})),
+                    None => ("inspect.section.save", json!({"name": draft.name})),
+                });
+            }
+        });
     });
     if let Some((cmd, params)) = act {
         match app.run(cmd, params) {
