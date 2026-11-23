@@ -1430,15 +1430,14 @@ mod tests {
         assert_ne!(model.k.context.current_mark(MarkType::Mark), old_mark);
         assert!(!model.k.context.is_mark_locked(MarkType::Mark));
         model.transform(b, Axis2Placement::default())?;
-        // HCR's scene transform is wired (topology::brep::p5::transform_with_notifications):
-        // the scene is built, then this fixture has no service to retain it in.
+        // HCR must propagate the scene copy's error for the bare face.
         let hcr = model.hcr(b, Axis2Placement::default(), 0.001, 0.1, false, false, true);
         assert!(
             matches!(
                 hcr,
                 Err(SolidError::InvalidInput {
-                    reason: "fixture has no retained HCR service",
-                    ..
+                    operation: "topology::brep::p3",
+                    reason: "face without face use",
                 })
             ),
             "{hcr:?}"
@@ -1461,6 +1460,28 @@ mod tests {
         );
         assert!(!model.b[0].editing_enabled());
         assert!(!model.k.context.doing_boolean());
+        Ok(())
+    }
+
+    #[test]
+    fn hcr_reaches_scene_retention_for_a_complete_body() -> Result<()> {
+        use solidcore::geom::axis2_placement::Axis2Placement;
+        use solidcore::primitive::api_primitives::create_box;
+
+        let mut model = Model::new([1., 0., 0.])?;
+        let b = BrepId::from_index(0);
+        *model.brep_mut(b)? = create_box(&mut model.k, Point3::ZERO, 4., 3., 2.)?;
+        let hcr = model.hcr(b, Axis2Placement::default(), 0.001, 0.1, false, false, true);
+        assert!(
+            matches!(
+                hcr,
+                Err(SolidError::InvalidInput {
+                    operation: "sweep test model",
+                    reason: "fixture has no retained HCR service",
+                })
+            ),
+            "{hcr:?}"
+        );
         Ok(())
     }
 
