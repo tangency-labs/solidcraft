@@ -28,14 +28,14 @@
 //! upstream); member null is native 1006, API null/invalid selection is native 1007.
 //!
 //! Failures (the conversion guide, `docs/failure-codes-and-reproduction.md` §6): each keeps
-//! the status upstream's site returned. A link or entity of a B-rep, or of the executive's
-//! own data, that is not there is an [`OffsetFailure::Defect`] whose `why` says which (p1's
-//! reasons where the two files share the link); a missing B-rep, a face of the input with
-//! no surface, a shell selection naming no face of the body and a shell wall below twice
-//! the tolerance are the caller's input; an inset that leaves no cavity, an extended
-//! offset's face that collapses or meets itself, and a trim past the extension are named.
-//! `collapse_offset_status` keeps its generic cause: it hides the executive's reason from
-//! solidcore-ops, which passes the kernel's status there (`docs/offset-and-shell.md` §4.2).
+//! the status upstream's site returned. A link or entity of a B-rep the kernel built, or of
+//! the executive's own data, that is not there is an [`OffsetFailure::Defect`] whose `why`
+//! says which (p1's reasons where the two files share the link); a missing B-rep, a link
+//! of the input body that is not there (a caller can build such a body with `Brep`'s public
+//! mutators), a face of the input with no surface, a shell selection naming no face of the
+//! body and a shell wall below twice the tolerance are the caller's input; an inset that
+//! leaves no cavity, an extended offset's face that collapses, and a trim past the
+//! extension are named.
 //! Offset/member inputs are mutable so existing queries can populate lazy UV trim
 //! geometry in the same arena; this adds no constructive capability or topology copy.
 //! Not upstream or the fork (WR-705): the two API entry points run the tolerance update on their result.
@@ -71,8 +71,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::attributes;
 use super::p1::{
-    OffsetExecutive, OffsetOperation, EDGE_NO_VERTEX, EU_NO_EDGE, EU_NO_MATE, EU_NO_RADIAL,
-    FU_NO_MATE, NO_NEW_FACE, NO_OFFSET, OFFSET_FACE_NO_SURFACE,
+    OffsetExecutive, OffsetOperation, EDGE_NO_VERTEX, NO_NEW_FACE, NO_OFFSET,
+    OFFSET_FACE_NO_SURFACE,
 };
 use crate::boolean::merge::p4::{
     BooleanKernels, KernelManifoldIntersector, ManifoldKernelAdapter, ManifoldNotificationKeys,
@@ -111,7 +111,9 @@ use crate::topology::edge::{NotificationStores, NotifyState};
 use crate::topology::edgeuse::{p1 as eu, p2 as eu2};
 use crate::topology::face::p2 as face;
 use crate::topology::topology::Topology;
-use crate::topology::{Brep, BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, RegionId, VertexId};
+use crate::topology::{
+    Brep, BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, RegionId, ShellId, VertexId,
+};
 
 const OP_OFFSET: &str = "offset::offset_executive::p2::offset_brep";
 const OP_SHELL: &str = "offset::offset_executive::p2::shell_brep";
@@ -860,8 +862,7 @@ impl OffsetExecutive {
                 for &edgeuse in &offset_edgeuses {
                     kernel.check_cancelled(OP_SOLID)?;
                     marked.insert(edgeuse);
-                    let mut radial =
-                        present(eu::radial(original, edgeuse)?, OP_SOLID, EU_NO_RADIAL)?;
+                    let mut radial = input_edgeuse_radial(original, edgeuse, OP_SOLID)?;
                     if marked.contains(&radial) {
                         continue;
                     }
@@ -893,7 +894,7 @@ impl OffsetExecutive {
             if self.create_offset_solid() {
                 for &edgeuse in &offset_edgeuses {
                     kernel.check_cancelled(OP_SOLID)?;
-                    let edge = present(eu::edge(original, edgeuse)?, OP_SOLID, EU_NO_EDGE)?;
+                    let edge = input_edgeuse_edge(original, edgeuse, OP_SOLID)?;
                     if eu::edge_is_lamina(original, edge)? {
                         let mut stores = NotificationStores {
                             records: &mut *notifications.records,
@@ -1019,17 +1020,20 @@ impl OffsetExecutive {
                     let Some(radial) = eu::radial(original, edgeuse)? else {
                         continue;
                     };
-                    if radial == edgeuse
-                        || !self.radial_face_collapsed(original, radial)?
-                        || !eu2::is_tangent_sector(
-                            kernel,
-                            original,
-                            radial,
-                            self.tangency_tol_degrees(),
-                            false,
-                            true,
-                        )?
-                        || marked.contains(&edgeuse)
+                    if radial == edgeuse {
+                        continue;
+                    }
+                    let Some(collapsed) = self.radial_collapsed_face(original, radial)? else {
+                        continue;
+                    };
+                    if !eu2::is_tangent_sector(
+                        kernel,
+                        original,
+                        radial,
+                        self.tangency_tol_degrees(),
+                        false,
+                        true,
+                    )? || marked.contains(&edgeuse)
                     {
                         continue;
                     }
@@ -1040,11 +1044,7 @@ impl OffsetExecutive {
                     let (Some(across), Some(offset_edgeuse), Some(offset_across)) =
                         (across, offset_edgeuse, offset_across)
                     else {
-                        unbridged = unbridged.or(Some(present(
-                            eu::face(original, radial)?,
-                            OP_EXTENDED,
-                            EU_NO_FACE,
-                        )?));
+                        unbridged = unbridged.or(Some(collapsed));
                         continue;
                     };
                     let mut stores = NotificationStores {
@@ -1066,25 +1066,13 @@ impl OffsetExecutive {
                             notifications.result_key_of,
                         ))?;
                     if mated.is_none() {
-                        unbridged = unbridged.or(Some(present(
-                            eu::face(original, radial)?,
-                            OP_EXTENDED,
-                            EU_NO_FACE,
-                        )?));
+                        unbridged = unbridged.or(Some(collapsed));
                         continue;
                     }
                     marked.insert(edgeuse);
-                    marked.insert(present(
-                        eu::mate(original, edgeuse)?,
-                        OP_EXTENDED,
-                        EU_NO_MATE,
-                    )?);
+                    marked.insert(input_edgeuse_mate(original, edgeuse, OP_EXTENDED)?);
                     marked.insert(across);
-                    marked.insert(present(
-                        eu::mate(original, across)?,
-                        OP_EXTENDED,
-                        EU_NO_MATE,
-                    )?);
+                    marked.insert(input_edgeuse_mate(original, across, OP_EXTENDED)?);
                 }
             }
             // On an inset shell with selected open faces (`shell_faces`), a tangent
@@ -1116,10 +1104,9 @@ impl OffsetExecutive {
             if self.extend_convex_edges() {
                 for &edgeuse in &mapped {
                     kernel.check_cancelled(OP_EXTENDED)?;
-                    let radial =
-                        present(eu::radial(original, edgeuse)?, OP_EXTENDED, EU_NO_RADIAL)?;
+                    let radial = input_edgeuse_radial(original, edgeuse, OP_EXTENDED)?;
                     // (WR-346: mated across it above)
-                    if self.radial_face_collapsed(original, radial)? {
+                    if self.radial_collapsed_face(original, radial)?.is_some() {
                         continue;
                     }
                     if marked.contains(&radial) {
@@ -1149,17 +1136,9 @@ impl OffsetExecutive {
                             notifications,
                         )?;
                         marked.insert(radial);
-                        marked.insert(present(
-                            eu::mate(original, radial)?,
-                            OP_EXTENDED,
-                            EU_NO_MATE,
-                        )?);
+                        marked.insert(input_edgeuse_mate(original, radial, OP_EXTENDED)?);
                         marked.insert(edgeuse);
-                        marked.insert(present(
-                            eu::mate(original, edgeuse)?,
-                            OP_EXTENDED,
-                            EU_NO_MATE,
-                        )?);
+                        marked.insert(input_edgeuse_mate(original, edgeuse, OP_EXTENDED)?);
                     }
                 }
             }
@@ -1167,17 +1146,16 @@ impl OffsetExecutive {
             let mut deferred_shell_tangents = Vec::new();
             for &edgeuse in &mapped {
                 kernel.check_cancelled(OP_EXTENDED)?;
-                let mut radial =
-                    present(eu::radial(original, edgeuse)?, OP_EXTENDED, EU_NO_RADIAL)?;
+                let mut radial = input_edgeuse_radial(original, edgeuse, OP_EXTENDED)?;
                 // (WR-346: mated across it above)
-                if self.radial_face_collapsed(original, radial)? {
+                if self.radial_collapsed_face(original, radial)?.is_some() {
                     continue;
                 }
                 marked.insert(edgeuse);
                 if marked.contains(&radial) {
                     continue;
                 }
-                let edge = present(eu::edge(original, edgeuse)?, OP_EXTENDED, EU_NO_EDGE)?;
+                let edge = input_edgeuse_edge(original, edgeuse, OP_EXTENDED)?;
                 if !eu::edge_is_lamina(original, edge)? {
                     let Some(selected) = select_radial(original, radial, &mapped, &marked)? else {
                         continue;
@@ -1222,25 +1200,24 @@ impl OffsetExecutive {
                     let Some(radial) = eu::radial(original, edgeuse)? else {
                         continue;
                     };
-                    if radial == edgeuse
-                        || !self.radial_face_collapsed(original, radial)?
-                        || eu2::is_tangent_sector(
-                            kernel,
-                            original,
-                            radial,
-                            self.tangency_tol_degrees(),
-                            false,
-                            true,
-                        )?
-                    {
+                    if radial == edgeuse {
+                        continue;
+                    }
+                    let Some(collapsed) = self.radial_collapsed_face(original, radial)? else {
+                        continue;
+                    };
+                    if eu2::is_tangent_sector(
+                        kernel,
+                        original,
+                        radial,
+                        self.tangency_tol_degrees(),
+                        false,
+                        true,
+                    )? {
                         continue;
                     }
                     if !self.squeeze_collapsed_end_edge(kernel, edgeuse, notifications)? {
-                        unbridged = unbridged.or(Some(present(
-                            eu::face(original, radial)?,
-                            OP_EXTENDED,
-                            EU_NO_FACE,
-                        )?));
+                        unbridged = unbridged.or(Some(collapsed));
                     }
                 }
                 if let Some(face) = unbridged {
@@ -1325,7 +1302,7 @@ impl OffsetExecutive {
             if self.create_offset_solid() {
                 for &edgeuse in &mapped {
                     kernel.check_cancelled(OP_EXTENDED)?;
-                    let edge = present(eu::edge(original, edgeuse)?, OP_EXTENDED, EU_NO_EDGE)?;
+                    let edge = input_edgeuse_edge(original, edgeuse, OP_EXTENDED)?;
                     if eu::edge_is_lamina(original, edge)? {
                         // SE, not SER, upstream: propagate Unported, ignore other errors but
                         // a defect.
@@ -1487,8 +1464,8 @@ impl OffsetExecutive {
     }
 
     /// Not upstream (WR-346): whether the face of original edge use `radial` collapsed.
-    fn radial_face_collapsed(&self, original: &Brep, radial: EdgeuseId) -> Result<bool> {
-        Ok(eu::face(original, radial)?.is_some_and(|f| self.is_collapsed_face(f)))
+    fn radial_collapsed_face(&self, original: &Brep, radial: EdgeuseId) -> Result<Option<FaceId>> {
+        Ok(eu::face(original, radial)?.filter(|&f| self.is_collapsed_face(f)))
     }
 
     /// Not upstream (WR-346): squeezes out the offset edge of original edge use
@@ -1653,11 +1630,9 @@ impl OffsetExecutive {
             loops: curves
                 .curve_loops
                 .into_iter()
-                .map(|count| {
-                    usize::try_from(count)
-                        .map_err(|_| defect(operation, LOOP_COUNT_TOO_LARGE, SM_ERR_INVALID_INPUT))
-                })
-                .collect::<Result<Vec<_>>>()?,
+                // each count is the length of a list in memory (`len() as u64`)
+                .map(|count| count as usize)
+                .collect(),
             curves_3d: curves
                 .curves_3d
                 .map(|curves| curves.into_iter().map(Some).collect()),
@@ -1712,28 +1687,20 @@ impl OffsetExecutive {
                 },
             ))?;
         }
-        let mut faceuse = present(
-            face::upward_faceuse(original, id)?,
-            operation,
-            FACE_NO_FACEUSE,
-        )?;
-        let shell = present(
-            eu::faceuse_shell(original, faceuse)?,
-            operation,
-            FU_NO_SHELL,
-        )?;
+        let mut faceuse = input_upward_faceuse(original, id, operation)?;
+        let shell = input_faceuse_shell(original, faceuse, operation)?;
         let region = eu::shell_region(original, shell)?;
         let use_mate = if extended {
             region != original.infinite_region()
         } else {
-            !region_is_void(original, present(region, operation, SHELL_NO_REGION)?)?
+            !region_is_void(original, input_shell_region(region, shell, operation)?)?
         };
         if use_mate {
-            faceuse = present(eu::faceuse_mate(original, faceuse)?, operation, FU_NO_MATE)?;
+            faceuse = input_faceuse_mate(original, faceuse, operation)?;
         }
         // cpp:1196–1207 applies inset only to extended copied faces.
         if extended && self.inset() {
-            faceuse = present(eu::faceuse_mate(original, faceuse)?, operation, FU_NO_MATE)?;
+            faceuse = input_faceuse_mate(original, faceuse, operation)?;
         }
         // cpp:498–506: copied rounded faces do not apply inset.
         self.relate_faceuse(faceuse, new_face);
@@ -1826,8 +1793,8 @@ impl OffsetExecutive {
     /// # Errors
     ///
     /// For an extended offset of `face`, [`OffsetFailure::ExtendedFaceCollapses`] where it has
-    /// no offset surface, and [`OffsetFailure::ExtendedFaceMeetsItself`] where its offset
-    /// surface meets itself along more curves than the offset takes.
+    /// no offset surface, and a [`OffsetFailure::Defect`] where its offset surface meets
+    /// itself along more curves than the offset takes (the offset skips that search).
     fn skip_offset_face_geometry(
         &self,
         face: FaceId,
@@ -1848,19 +1815,13 @@ impl OffsetExecutive {
                 Ok(true)
             };
         }
+        // `offset_face_prefix` builds every offset surface with its self-intersection
+        // skipped, so `ssi_count` is 0 there; the branch is upstream's.
         if extended
             && ((self.merge_results() && ssi_count > 0)
                 || (self.extend_convex_edges() && ssi_count > 5))
         {
-            let limit = if self.merge_results() { 0 } else { 5 };
-            return Err(failed(
-                OP_EXTENDED,
-                OffsetFailure::ExtendedFaceMeetsItself {
-                    face,
-                    curves: ssi_count,
-                    limit,
-                },
-            ));
+            return Err(defect(OP_EXTENDED, SELF_INTERSECTION_NOT_SKIPPED, SM_ERR));
         }
         Ok(false)
     }
@@ -2006,30 +1967,95 @@ pub(super) fn select_offset_faceuse(
     inset: bool,
     operation: &'static str,
 ) -> Result<FaceuseId> {
-    let mut faceuse = present(
-        face::upward_faceuse(original, face)?,
-        operation,
-        FACE_NO_FACEUSE,
-    )?;
-    let shell = present(
-        eu::faceuse_shell(original, faceuse)?,
-        operation,
-        FU_NO_SHELL,
-    )?;
+    let mut faceuse = input_upward_faceuse(original, face, operation)?;
+    let shell = input_faceuse_shell(original, faceuse, operation)?;
     let region = eu::shell_region(original, shell)?;
     // Native predicates differ: rounded compares identity, extended tests void.
     let use_mate = if extended {
-        !region_is_void(original, present(region, operation, SHELL_NO_REGION)?)?
+        !region_is_void(original, input_shell_region(region, shell, operation)?)?
     } else {
         region != original.infinite_region()
     };
     if use_mate {
-        faceuse = present(eu::faceuse_mate(original, faceuse)?, operation, FU_NO_MATE)?;
+        faceuse = input_faceuse_mate(original, faceuse, operation)?;
     }
     if inset {
-        faceuse = present(eu::faceuse_mate(original, faceuse)?, operation, FU_NO_MATE)?;
+        faceuse = input_faceuse_mate(original, faceuse, operation)?;
     }
     Ok(faceuse)
+}
+
+// The links of the operation's input below are the caller's (rule 9): a caller can build a
+// body without them with `Brep`'s public mutators, so each is a named invalid input that
+// keeps upstream's null-pointer status.
+
+/// The upward face use of the input's `face` ([`OffsetFailure::FaceHasNoFaceuse`]).
+fn input_upward_faceuse(
+    original: &Brep,
+    face: FaceId,
+    operation: &'static str,
+) -> Result<FaceuseId> {
+    face::upward_faceuse(original, face)?
+        .ok_or_else(|| failed(operation, OffsetFailure::FaceHasNoFaceuse { face }))
+}
+
+/// The shell of the input's `faceuse` ([`OffsetFailure::FaceuseHasNoShell`]).
+fn input_faceuse_shell(
+    original: &Brep,
+    faceuse: FaceuseId,
+    operation: &'static str,
+) -> Result<ShellId> {
+    eu::faceuse_shell(original, faceuse)?
+        .ok_or_else(|| failed(operation, OffsetFailure::FaceuseHasNoShell { faceuse }))
+}
+
+/// The region of the input's `shell` ([`OffsetFailure::ShellHasNoRegion`]).
+fn input_shell_region(
+    region: Option<RegionId>,
+    shell: ShellId,
+    operation: &'static str,
+) -> Result<RegionId> {
+    region.ok_or_else(|| failed(operation, OffsetFailure::ShellHasNoRegion { shell }))
+}
+
+/// The mate of the input's `faceuse` ([`OffsetFailure::FaceuseHasNoMate`]).
+fn input_faceuse_mate(
+    original: &Brep,
+    faceuse: FaceuseId,
+    operation: &'static str,
+) -> Result<FaceuseId> {
+    eu::faceuse_mate(original, faceuse)?
+        .ok_or_else(|| failed(operation, OffsetFailure::FaceuseHasNoMate { faceuse }))
+}
+
+/// The radial of the input's `edgeuse` ([`OffsetFailure::EdgeuseHasNoRadial`]).
+fn input_edgeuse_radial(
+    original: &Brep,
+    edgeuse: EdgeuseId,
+    operation: &'static str,
+) -> Result<EdgeuseId> {
+    eu::radial(original, edgeuse)?
+        .ok_or_else(|| failed(operation, OffsetFailure::EdgeuseHasNoRadial { edgeuse }))
+}
+
+/// The edge of the input's `edgeuse` ([`OffsetFailure::EdgeuseHasNoEdge`]).
+fn input_edgeuse_edge(
+    original: &Brep,
+    edgeuse: EdgeuseId,
+    operation: &'static str,
+) -> Result<EdgeId> {
+    eu::edge(original, edgeuse)?
+        .ok_or_else(|| failed(operation, OffsetFailure::EdgeuseHasNoEdge { edgeuse }))
+}
+
+/// The mate of the input's `edgeuse` ([`OffsetFailure::EdgeuseHasNoMate`]).
+fn input_edgeuse_mate(
+    original: &Brep,
+    edgeuse: EdgeuseId,
+    operation: &'static str,
+) -> Result<EdgeuseId> {
+    eu::mate(original, edgeuse)?
+        .ok_or_else(|| failed(operation, OffsetFailure::EdgeuseHasNoMate { edgeuse }))
 }
 
 /// The identities of the private working copy [`api_shell_brep_full`] makes of its
@@ -3108,27 +3134,15 @@ fn given<T>(brep: Option<T>, operation: &'static str, status: i32) -> Result<T> 
 }
 
 // Why each missing thing below is the kernel's fault ([`OffsetFailure::Defect`]); p1's
-// reasons cover the links the two files share. The B-reps are the operation's input and
-// the offset B-rep the executive builds; the kernel makes both with every link.
+// reasons cover the links the two files share.
 
-/// Why a face has no face use.
-const FACE_NO_FACEUSE: &str =
-    "a face has no face use, though the kernel makes every face with its face uses";
-/// Why a face use has no shell.
-const FU_NO_SHELL: &str =
-    "a face use has no shell, though the kernel makes every face use in a shell";
-/// Why a shell has no region.
-const SHELL_NO_REGION: &str =
-    "a shell has no region, though the kernel makes every shell in a region";
-/// Why a loop's curve count is not an index.
-const LOOP_COUNT_TOO_LARGE: &str = "a face's loop counts more curves than an index can address, \
-                                    though each of those curves was made in memory";
+/// Why an extended offset face's offset surface meets itself.
+const SELF_INTERSECTION_NOT_SKIPPED: &str = "an extended offset face's offset surface meets \
+     itself, though the offset skips the self-intersection of every face it offsets and finds \
+     no curve";
 /// Why the surface replacement kept no old surface.
 const OLD_SURFACE_NOT_KEPT: &str = "the surface replacement handed back no old surface, though \
                                     it was asked to keep it";
-/// Why an edge use beside a collapsed face has no face.
-const EU_NO_FACE: &str = "an edge use beside a collapsed face has no face, though the collapse \
-                          test found that face through it";
 /// Why the empty offset B-rep has no infinite region.
 const NEW_BREP_NO_REGION: &str =
     "the empty offset B-rep has no infinite region, though it is made with one";
@@ -6435,9 +6449,9 @@ mod tests {
                 SM_ERR_INVALID_INPUT,
             );
         }
-        // an extended offset's face whose offset surface collapses, and one whose offset
-        // surface meets itself
-        for (merge, extend, curves, limit) in [(true, false, 1, 0), (false, true, 6, 5)] {
+        // an extended offset's face whose offset surface collapses; one whose offset surface
+        // meets itself is a defect, as the offset skips that search
+        for (merge, extend, curves) in [(true, false, 1), (false, true, 6)] {
             let mut exec = executive();
             exec.set_merge_results(merge);
             exec.set_extend_convex_edges(extend);
@@ -6454,17 +6468,9 @@ mod tests {
             let e = exec
                 .skip_offset_face_geometry(face, true, true, curves)
                 .unwrap_err();
-            assert_eq!(e.entity(), Some(EntityRef::Face(face)));
-            named(
-                e,
-                OffsetFailure::ExtendedFaceMeetsItself {
-                    face,
-                    curves,
-                    limit,
-                },
-                ErrorKind::Unsupported,
-                SM_ERR,
-            );
+            assert!(e.is_defect(), "{e}");
+            assert_eq!(e.sm_status(), Some(SM_ERR), "{e}");
+            assert!(e.to_string().contains("skips the self-intersection"), "{e}");
         }
         // an offset face's trim past both its surface's domain and the extension's
         let inside = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
@@ -6485,7 +6491,7 @@ mod tests {
     /// B-rep, that is not there is a defect that says which, with the status of upstream's
     /// `NER` (the conversion guide, rule 2).
     #[test]
-    fn a_missing_link_or_offset_brep_is_a_defect_that_says_which() {
+    fn a_missing_offset_brep_is_a_defect_and_a_missing_input_link_is_named() {
         let defect = |e: SolidError, says: &str| {
             assert!(e.is_defect(), "{e}");
             assert!(
@@ -6513,32 +6519,71 @@ mod tests {
                 .unwrap_err(),
             "an offset face has no surface",
         );
-        // the face's links, each cut once
+        // the input face's links, each cut once with the public mutators: the caller's input
+        let input = |e: SolidError, cause: OffsetFailure| {
+            assert!(!e.is_defect(), "{e}");
+            assert_eq!(e.offset_failure(), Some(&cause), "{e}");
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e}");
+            assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER), "{e}");
+        };
         let faceuse = brep.face(face).unwrap().faceuse.unwrap();
         let shell = brep.faceuse(faceuse).unwrap().shell.unwrap();
         let mut no_faceuse = one_face(true).0;
         no_faceuse.face_mut(face).unwrap().faceuse = None;
-        defect(
+        input(
             select_offset_faceuse(&no_faceuse, face, false, false, OP_SOLID).unwrap_err(),
-            "has no face use",
+            OffsetFailure::FaceHasNoFaceuse { face },
         );
         let mut no_shell = one_face(true).0;
         no_shell.faceuse_mut(faceuse).unwrap().shell = None;
-        defect(
+        input(
             select_offset_faceuse(&no_shell, face, false, false, OP_SOLID).unwrap_err(),
-            "has no shell",
+            OffsetFailure::FaceuseHasNoShell { faceuse },
         );
         let mut no_region = one_face(true).0;
         no_region.shell_mut(shell).unwrap().region = None;
-        defect(
+        input(
             select_offset_faceuse(&no_region, face, true, false, OP_EXTENDED).unwrap_err(),
-            "has no region",
+            OffsetFailure::ShellHasNoRegion { shell },
         );
         let mut no_mate = one_face(true).0;
         no_mate.faceuse_mut(faceuse).unwrap().mate = None;
-        defect(
+        input(
             select_offset_faceuse(&no_mate, face, false, true, OP_SOLID).unwrap_err(),
-            "has no mate",
+            OffsetFailure::FaceuseHasNoMate { faceuse },
+        );
+    }
+
+    #[test]
+    fn a_missing_input_edgeuse_link_is_named() {
+        // an edge use of the input with no edge, made with the public record mutator: it has
+        // no edge, no mate and no radial, each the caller's input
+        let (mut brep, face) = one_face(true);
+        let shell = brep.face(face).unwrap().shell;
+        let edgeuse = brep
+            .add_edgeuse_record(crate::topology::Edgeuse {
+                owner: crate::topology::EdgeuseOwner::Shell(Some(shell)),
+                ..crate::topology::Edgeuse::default()
+            })
+            .unwrap();
+        let input = |e: SolidError, cause: OffsetFailure| {
+            assert!(!e.is_defect(), "{e}");
+            assert_eq!(e.offset_failure(), Some(&cause), "{e}");
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e}");
+            assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER), "{e}");
+            assert_eq!(e.entity(), Some(EntityRef::Edgeuse(edgeuse)), "{e}");
+        };
+        input(
+            input_edgeuse_edge(&brep, edgeuse, OP_SOLID).unwrap_err(),
+            OffsetFailure::EdgeuseHasNoEdge { edgeuse },
+        );
+        input(
+            input_edgeuse_mate(&brep, edgeuse, OP_EXTENDED).unwrap_err(),
+            OffsetFailure::EdgeuseHasNoMate { edgeuse },
+        );
+        input(
+            input_edgeuse_radial(&brep, edgeuse, OP_EXTENDED).unwrap_err(),
+            OffsetFailure::EdgeuseHasNoRadial { edgeuse },
         );
     }
 

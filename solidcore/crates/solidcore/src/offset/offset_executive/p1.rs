@@ -3247,7 +3247,7 @@ pub(super) const NO_OFFSET: &str =
                          before any step that builds into it, and every step that takes it \
                          gives it back";
 /// Why an edge use has no edge.
-pub(super) const EU_NO_EDGE: &str =
+const EU_NO_EDGE: &str =
     "an edge use has no edge, though the kernel links every edge use to its edge";
 /// Why an edge use has no vertex use.
 const EU_NO_VERTEXUSE: &str =
@@ -3262,11 +3262,10 @@ const EU_NO_LOOPUSE: &str = "an edge use of a face has no loop use, though the k
 const EU_NO_NEIGHBOUR: &str = "an edge use has no neighbour in its loop, though the kernel keeps \
                                the edge uses of a loop in a ring";
 /// Why an edge use has no mate.
-pub(super) const EU_NO_MATE: &str =
+const EU_NO_MATE: &str =
     "an edge use has no mate, though the kernel makes edge uses in mated pairs";
 /// Why an edge use has no radial.
-pub(super) const EU_NO_RADIAL: &str =
-    "an edge use has no radial, though the kernel links the uses around \
+const EU_NO_RADIAL: &str = "an edge use has no radial, though the kernel links the uses around \
                             every edge in a ring";
 /// Why an edge use has no face use.
 const EU_NO_FACEUSE: &str = "an edge use of a face has no face use, though the kernel makes \
@@ -3284,8 +3283,7 @@ pub(super) const EDGE_NO_VERTEX: &str =
 const LOOP_NO_VERTEX: &str = "a loop use has an edge use with no vertex, though the kernel \
                               starts every edge use of a loop at a vertex";
 /// Why a face use has no mate.
-pub(super) const FU_NO_MATE: &str =
-    "a face use has no mate, though the kernel makes face uses in mated pairs";
+const FU_NO_MATE: &str = "a face use has no mate, though the kernel makes face uses in mated pairs";
 /// Why an offset face has no surface.
 pub(super) const OFFSET_FACE_NO_SURFACE: &str =
     "an offset face has no surface, though the offset gives every face it builds one";
