@@ -86,6 +86,42 @@ fn wall_angles(b: &Brep, face: usize, o: Vec3, axis: Vec3, radial: Vec3, tangent
     None
 }
 
+/// Whether every profile's outline lies on flat faces of `body` in the sketch's plane, decided
+/// exactly on those faces' trims ([`Body::point_lies_on_face`]) at the outline's points. Then
+/// the profiles are drawn on the body's face, not on a plane touching a cylinder wall.
+fn profiles_on_flat_faces(body: &Body, rec: &Brep, plane: &Plane, regions: &[Region2]) -> Result<bool> {
+    let normal = plane.normal();
+    let tol = (body.size() * 1e-7).max(1e-7);
+    let flat: Vec<usize> = (0..rec.faces.len())
+        .filter(|f| matches!(surf_of(rec, *f), Some(Surf::Plane { n, d }) if n.dot(normal).abs() > 1.0 - 1e-9 && (n.dot(plane.origin) - d).abs() <= tol))
+        .collect();
+    if flat.is_empty() {
+        return Ok(false);
+    }
+    let mut checked = 0usize;
+    for reg in regions {
+        for p in reg.outer.polyline(1e-4) {
+            checked += 1;
+            if checked > 20_000 {
+                // Past the work limit the profiles are left to the wall search as before.
+                return Ok(false);
+            }
+            let at = plane.origin + plane.x * p.x + plane.y * p.y;
+            let mut on = false;
+            for f in &flat {
+                if body.point_lies_on_face(*f, at, tol)?.is_some() {
+                    on = true;
+                    break;
+                }
+            }
+            if !on {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
 /// The body's record, for the queries below (a mesh body has none).
 fn record(body: &Body) -> Result<Brep> {
     crate::native::brep_record(body)
@@ -359,6 +395,11 @@ pub fn infer_cylinder_emboss(body: &Body, plane: &Plane, regions: &[Region2], de
     guard("cylinder emboss inference", || {
         let rec = record(body)?;
         let tol = (body.size() * 1e-8).max(1e-8);
+        // Profiles drawn on a flat face of the body are raised from that face, even where a
+        // round beside it touches the sketch's plane (#21195).
+        if profiles_on_flat_faces(body, &rec, plane, regions)? {
+            return Ok(None);
+        }
         let mut tangent = false;
         for face in 0..rec.faces.len() {
             if face >= 50_000 {
@@ -377,17 +418,13 @@ pub fn infer_cylinder_emboss(body: &Body, plane: &Plane, regions: &[Region2], de
                     if !profile_interval_overlaps(plane, regions, o, wrap_x, -std::f64::consts::PI * r, std::f64::consts::PI * r)? {
                         continue;
                     }
-                    // A wall whose angles cannot be read off two arcs and two lines (a round
-                    // that meets another at a corner) is never a wrap candidate, so it does not
-                    // claim a profile that lies on a flat face beside it (#21195).
-                    let Some((lo, hi)) = wall_angles(&rec, face, o, a, radial, wrap_x) else {
-                        continue;
-                    };
-                    if lo >= -tol / r || hi <= tol / r {
-                        continue;
-                    }
-                    if !profile_interval_overlaps(plane, regions, o, wrap_x, lo * r, hi * r)? {
-                        continue;
+                    if let Some((lo, hi)) = wall_angles(&rec, face, o, a, radial, wrap_x) {
+                        if lo >= -tol / r || hi <= tol / r {
+                            continue;
+                        }
+                        if !profile_interval_overlaps(plane, regions, o, wrap_x, lo * r, hi * r)? {
+                            continue;
+                        }
                     }
                     let relevant = match face_axial_bounds(&rec, face, o, a)? {
                         Some((lo, hi)) => profile_interval_overlaps(plane, regions, o, a, lo, hi)?,

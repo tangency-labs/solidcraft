@@ -741,6 +741,23 @@ fn emboss_with_no_face_raises_a_profile_on_a_flat_top_with_rounded_edges() {
 }
 
 #[test]
+fn emboss_with_no_face_on_a_tangent_plane_beside_a_drilled_wall_is_refused_not_raised_flat() {
+    // #21195: a wall the wrap cannot take (a hole through it, so not two arcs and two lines) is
+    // still the wall the sketch touches. With no flat face under the profile, the emboss is
+    // refused; it must not become a flat block standing off the cylinder on the sketch's plane.
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 40, "operation": "new", "body_name": "Can"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 60, "base": [-30, 0, 20], "axis": "X", "operation": "cut", "targets": ["Can"]}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 20, 0], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Label"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-5, 15], "p1": [5, 25]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let saved = s.doc.to_json();
+    let e = s.execute("solid.emboss", &json!({"sketch": "Label", "depth": 1})).unwrap_err().to_string();
+    assert!(e.contains("cylinder"), "{e}");
+    assert_eq!(s.doc.to_json(), saved);
+}
+
+#[test]
 fn emboss_face_off_the_part_says_how_far() {
     // #392: a point beside the face was refused with "`face` must identify exactly one target
     // body surface", which didn't say the point was off the face.
