@@ -98,6 +98,7 @@ use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::p5::make_curve_cache;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
+use crate::error::intersect::IntersectFailure;
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -479,12 +480,13 @@ impl<'s> SurfaceTracer<'s> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` for an empty curve.
+    /// [`IntersectFailure::NoCurveToReverse`] (`SM_ERR_NULL_POINTER`) for an empty curve:
+    /// the kernel's own callers reverse only a curve with points.
     pub fn reverse_curve_direction(&mut self) -> Result<()> {
         if self.curve_points.is_empty() {
-            return Err(SolidError::intersect_missing(
+            return Err(SolidError::intersect(
                 OP_REVERSE,
-                "the traced curve's points",
+                IntersectFailure::NoCurveToReverse,
             ));
         }
 
@@ -596,9 +598,9 @@ pub trait SurfaceTrace<'s> {
         step_size: Option<f64>,
     ) -> Result<()> {
         let _ = (k, uv, pnt, prev, step_size);
-        Err(SolidError::intersect_failed(
+        Err(SolidError::intersect(
             OP_HOOK,
-            "this tracer does not compute point values",
+            IntersectFailure::TracerHasNoPointValues,
         ))
     }
 
@@ -616,9 +618,9 @@ pub trait SurfaceTrace<'s> {
         next: &mut TracePoint,
     ) -> Result<Option<Point2>> {
         let _ = (k, curr, guess, next);
-        Err(SolidError::intersect_failed(
+        Err(SolidError::intersect(
             OP_HOOK,
-            "this tracer does not step to a next point",
+            IntersectFailure::TracerHasNoPointSolve,
         ))
     }
 
@@ -639,9 +641,9 @@ pub trait SurfaceTrace<'s> {
         param: SurfParamType,
     ) -> Result<SolutionArray<BoundaryCurve>> {
         let _ = (k, boundary, interval, side, param);
-        Err(SolidError::intersect_failed(
+        Err(SolidError::intersect(
             OP_HOOK,
-            "this tracer does not drop a boundary curve",
+            IntersectFailure::TracerHasNoBoundaryDrop,
         ))
     }
 
@@ -1751,9 +1753,11 @@ where
                 } else if uv_curves.len() == 1 {
                     out.uv_curves.extend(uv_curves);
                 } else {
-                    return Err(SolidError::intersect_failed(
+                    return Err(SolidError::intersect(
                         OP_BOUNDARY,
-                        "the boundary curve dropped onto neither one nor two uv curves",
+                        IntersectFailure::BoundaryDropNotOneOrTwo {
+                            found: uv_curves.len(),
+                        },
                     ));
                 }
 
@@ -2040,6 +2044,13 @@ where
         // Trace the other direction if appropriate.
         let start_type = t.tracer().point(start_id)?.point_type;
         if !t.tracer().curve_is_closed && start_type != TracePointType::Singularity {
+            // A trace that starts on a found curve at a tangent point, or whose start
+            // values fail, leaves the curve empty: upstream's reversal then fails and the
+            // curve is flushed. Test for it here instead of reversing into the error.
+            if t.tracer().curve_points.is_empty() {
+                ignore_status(flush_curve(k, t.tracer_mut(), out, None))?;
+                continue;
+            }
             match t.reverse_curve_direction() {
                 Ok(()) => {}
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
@@ -2051,8 +2062,10 @@ where
             }
 
             t.tracer_mut().curve_trace_direction = -1.0;
+            // the default reversal keeps every point; only an outside `SurfaceTrace`
+            // override can succeed and leave none
             let back_start = *t.tracer().curve_points.last().ok_or_else(|| {
-                SolidError::intersect_missing(OP_REVERSE, "the traced curve's last point")
+                SolidError::intersect(OP_REVERSE, IntersectFailure::ReversalLeftNoPoints)
             })?;
             ignore_status(t.trace_curve(k, back_start, &out.curves_3d))?;
             ignore_status(t.reverse_curve_direction())?;
@@ -2235,7 +2248,15 @@ mod tests {
         let s = plane();
         let d = Extent2d::from_bounds(0.0, 0.0, 10.0, 10.0);
         let mut t = SurfaceTracer::new(k, &s, &d).unwrap();
-        assert!(t.reverse_curve_direction().is_err());
+        // a caller reversing an empty tracer: its own input, not a kernel defect
+        let e = t.reverse_curve_direction().unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::NoCurveToReverse)
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert!(!e.is_defect());
+        assert_eq!(e.upstream_status(), Some(1006));
         for (i, param) in [0.0, 1.0, 3.0].into_iter().enumerate() {
             let mut p = TracePoint::new();
             p.curve_parameter = param;
