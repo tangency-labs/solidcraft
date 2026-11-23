@@ -746,10 +746,10 @@ impl OffsetExecutive {
                     // vanish is taken as the cut's.
                     if let Some(owned) = self.owned_vanishing_edge(original, b, u)? {
                         // (issue #18503's hook, the parity rule) whether the moved
-                        // faces' cut removes this vanish is settled at the executive's
-                        // tail ([`Self::settle_deferred_vanishes`]), after every
-                        // extension pass: only there does the classification match the
-                        // one the reconstruction's discharge will make. The gap's
+                        // faces' cut removes this vanish — and whether the old path's
+                        // squeeze would be explained — settles at the executive's tail
+                        // ([`Self::settle_deferred_vanishes`]), after every extension
+                        // pass and with the whole group's gaps in view. The gap's
                         // context is recorded for the WR-566 squeeze there; until then
                         // the edge and the gap stay untouched, no progress claimed.
                         self.deferred_gaps.insert(
@@ -905,6 +905,130 @@ impl OffsetExecutive {
     /// the body the gap pass left untouched (the recorded ids are this body's, still
     /// current); where the squeeze declines, the gap pass's own failure stands, named
     /// as it always was.
+    /// (issue #18503's hook, the parity rule) Whether the WR-566 squeeze would be
+    /// EXPLAINED for this vanish's pair by `closed_faces` once EVERY recorded group's
+    /// squeezes run — the gap's own face closing to nothing with the edge
+    /// (`gone.contains(&face)`) or the ORIGINAL face across it closing
+    /// (`across ∈ gone_orig`, `closed_faces`'s other route). Predicted read-only on a
+    /// private copy in which every descendant the settle's squeeze loop would squeeze
+    /// has its near vertex merged into its far one: the pass's squeezes close faces
+    /// TOGETHER (a wall only closes when its own copies go too), so the prediction
+    /// sees the whole group. Where it holds, the squeeze is the old path the base
+    /// runs; where it does not, a squeeze would leave the closed edge's face
+    /// unexplained below — the reconstruction's obligation.
+    fn the_group_would_be_explained(
+        &self,
+        kernel: &mut Kernel,
+        original: &Brep,
+        b: &Brep,
+        notifications: &OffsetNotifications<'_>,
+        groups: &[(EdgeId, DeferredGap, Vec<EdgeId>)],
+        gap: &DeferredGap,
+    ) -> Result<bool> {
+        // the settle's squeeze set, performed for real on a private copy: the
+        // topology edits (the collapsed edge leaving the loops) are what
+        // `closed_faces`'s degeneracy reads, and the simulation's notifications are
+        // discarded with the copy
+        let mut c = b.clone_standing_for_self()?;
+        let mut records = crate::topology::topology::NotifyRecords::default();
+        let mut attributes = crate::geom::attribute::AttributeStore::default();
+        let mut stores = NotificationStores {
+            records: &mut records,
+            attributes: &mut attributes,
+            key_of: notifications.result_key_of,
+        };
+        for (_, g, g_descendants) in groups {
+            for &x in g_descendants {
+                let Ok(uses) = edge::edgeuses(b, x, None, None) else {
+                    continue;
+                };
+                let Some(&ux) = uses.first() else {
+                    continue;
+                };
+                let Ok(at_v) = edgeuse_vertex(b, ux) else {
+                    continue;
+                };
+                let at_start = b
+                    .vertex(at_v)
+                    .is_ok_and(|v| v.point.distance(g.vertex_point) <= g.tolerance);
+                let at = if at_start {
+                    at_v
+                } else {
+                    match eu::mate(b, ux).ok().flatten().map(|m| edgeuse_vertex(b, m)) {
+                        Some(Ok(v)) => v,
+                        _ => continue,
+                    }
+                };
+                let Ok(Some(far)) = edge::other_vertex(b, x, Some(at)) else {
+                    continue;
+                };
+                if far == at
+                    || b.vertex(far)
+                        .is_ok_and(|r| r.point.distance(g.vertex_point) > g.tolerance)
+                {
+                    continue;
+                }
+                let done = NotifyState::from_kernel_stores(&mut stores)
+                    .with_kernel_env(kernel, |kernel, env| {
+                        squeeze_edge(kernel, &mut c, env, x, at)
+                    });
+                // a simulation failure is not the answer: the prediction declines
+                if let Err(err) = done {
+                    if err.is_cancelled() {
+                        return Err(err);
+                    }
+                }
+            }
+        }
+        // this gap's pair, as `squeeze_closed_edge` records it
+        let f = gap.face;
+        if face3::is_degenerate(kernel, &mut c, f, false, None)? {
+            return Ok(true);
+        }
+        let u = gap.use_id;
+        let mut orig_eus = self.edgeuse_to_edgeuses.firsts(u);
+        if orig_eus.is_empty() {
+            let Ok(Some(m)) = eu::mate(b, u) else {
+                return Ok(false);
+            };
+            orig_eus = self.edgeuse_to_edgeuses.firsts(m);
+        }
+        let mut across = None;
+        if let [orig_eu] = orig_eus.as_slice() {
+            let Ok(Some(orig_edge)) = eu::edge(original, *orig_eu) else {
+                return Ok(false);
+            };
+            let orig_face = eu::face(original, *orig_eu)?;
+            for of in edge::faces(original, orig_edge, None)? {
+                if Some(of) != orig_face {
+                    across = Some(of);
+                }
+            }
+        }
+        let Some(across) = across else {
+            return Ok(false);
+        };
+        for (cf, _) in b.faces().iter() {
+            let is_copy = self.faceuse_to_faces.firsts(cf).into_iter().any(|fu| {
+                eu::faceuse_face(original, fu)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|orig| orig == across)
+            });
+            if is_copy && face3::is_degenerate(kernel, &mut c, cf, false, None)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// (issue #18503's hook) The deferred vanish obligations, settled at the
+    /// executive's tail: the moved faces' cut removes none of a vanish's group is the
+    /// gap pass's own close (the WR-566 squeeze, as the base runs it), and where the
+    /// cut removes it but the old path's squeeze would be explained once every
+    /// group's squeezes run, the old path builds it too (the maintainer's parity
+    /// rule: build where the base builds). Only a vanish no squeeze can explain is
+    /// the reconstruction's obligation.
     fn settle_deferred_vanishes(
         &mut self,
         kernel: &mut Kernel,
@@ -930,7 +1054,10 @@ impl OffsetExecutive {
                 moved_copies.push(f);
             }
         }
-        for (owned, gap) in recorded {
+        // each obligation's group: the original's descendants in this body (an
+        // original's offset can carry a descendant per face it bounds)
+        let mut groups: Vec<(EdgeId, DeferredGap, Vec<EdgeId>)> = Vec::new();
+        for &(owned, gap) in &recorded {
             let mut descendants: Vec<EdgeId> = Vec::new();
             for (x, _) in b.edges().iter() {
                 let uses = edge::edgeuses(b, x, None, None)?;
@@ -944,11 +1071,23 @@ impl OffsetExecutive {
                     descendants.push(x);
                 }
             }
+            groups.push((owned, gap, descendants));
+        }
+        for (owned, gap, descendants) in &groups {
+            let (owned, gap, descendants) = (*owned, *gap, descendants.clone());
             let cut_owned = match &self.reconstruction_classifier {
                 Some(classify) => classify.classify(kernel, b, &moved_copies, &descendants)?,
                 None => true,
             };
-            if cut_owned {
+            let explainable = self.the_group_would_be_explained(
+                kernel,
+                original,
+                b,
+                notifications,
+                &groups,
+                &gap,
+            )?;
+            if cut_owned && !explainable {
                 continue;
             }
             // Every collapsed descendant of the group is squeezed, not only the
