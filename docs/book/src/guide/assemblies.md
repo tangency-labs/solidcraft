@@ -179,10 +179,10 @@ solve and `joint.solve` gives the reason, instead of placing the part from old n
 plain number, or driving the value, drops that expression.
 
 **Edit Joint → Position** shows **Offset X**, **Offset Y** and **Offset Z**. X and Y move along
-the saved first attachment's axes. Their expressions are evaluated once, as during creation;
-scripts use `offset_x` and `offset_y`. Older designs keep their saved attachment positions,
-with X and Y initially zero for additional shifts from those positions. Assembly constraints
-keep their existing controls and reference geometry until changed to a plain joint.
+the saved first attachment's axes, and expressions typed for them follow their parameters just as
+Offset Z does; scripts use `offset_x` and `offset_y`. Older designs keep their saved attachment
+positions, with X and Y initially zero for additional shifts from those positions. Assembly
+constraints keep their existing controls and reference geometry until changed to a plain joint.
 
 **Relations** are joints that tie only part of a placement, so a part is placed the way a
 designer describes it, one relation at a time: `parallel` (z along z, free to move and turn
