@@ -10,6 +10,7 @@
 # surface.surface_point_solve_p2: main's file without the lines of gen0072 and gen0546, Solve maxima a witness grid refutes, now known failing (#13684)
 # surface.surface_point_solve_p3: main's file without the lines of 51 global point solves a witness grid refutes, now known failing (#13684)
 # blend.fillet_executive_p3, offset.offset_geometry_creation, topology.api_files, topology.brep_local_operation, topology.edgeuse_p3, topology.face_p3: main's file with the rows #18490 moves (the sphere drop subdivides the spans proved off its curve)
+# blend.fillet_executive_p3, blend.fillet_intersector, blend.fillet_solver_p4: main's files without the `fillet_point_step` key, which recorded the retired step latch (#18916); every other value unchanged
 # boolean.api_brep: main's file with torus_guard_major_2x_eff_zero recording the constructor's refusal of its torus, whose tube crosses its axis (#20227): ints.record [] -> [2]
 # primitive.api_primitives: main's file with the 40 spheres of negative radius refused, each `{"rec":[1007.0]}` (#20227); the 14 of them that had rows (gen0244, gen0416, gen0419, gen0585, gen0598, gen0621, gen0769, gen0790, gen0893, gen0897, gen0957, gen1094, gen1206, gen1252) lose their rows, and gen0244's and gen0893's `rounding-bound` entries leave the open list, since a refused case has no body
 # blend.fillet_executive_p3, blend.fillet_geom_p2: main's files with the plane crossing's refit (tangency-labs/solidcraft#20237): p2's eight generated cases fitted with other stations, p3's four law-cube cases one result-geometry value 1e-9 to 3e-9 off, and the two law-box edge-map cases' lines with the lowered tolerances their rows hold
@@ -21,19 +22,19 @@ blend.fillet_corner_p3	41ff3e1d687449c4
 blend.fillet_custom_solver	d5a7b6227772dc0a
 blend.fillet_executive_p1	86854330a700f392
 blend.fillet_executive_p2	68a6e765f600c883
-blend.fillet_executive_p3	b9acb377b192208e
+blend.fillet_executive_p3	2b5734a9005efba1
 blend.fillet_geom_p1	82c1f975f967a59d
 blend.fillet_geom_p2	4a54b5291270572a
 blend.fillet_geom_p3	15646cd3bfb41d7e
 blend.fillet_geom_p4	9137b943cfc62a3a
 blend.fillet_geom_p5	a0729d892f49cfa9
 blend.fillet_geom_p6	9aa079e2ec8daa4b
-blend.fillet_intersector	08f9ddcb22ced73a
+blend.fillet_intersector	86fe8489b8c12932
 blend.fillet_removal	157659e7ac959b87
 blend.fillet_solver_p1	12290b86d065d83e
 blend.fillet_solver_p2	f443bb49d42e8636
 blend.fillet_solver_p3	1538c605eb4dcb47
-blend.fillet_solver_p4	e85d4b261c82d1e2
+blend.fillet_solver_p4	0905c6ebc3407321
 blend.fillet_solver_p5	872c5100402aeb0a
 blend.fillet_standard_solver_p1	fcd2f44f6127b6b5
 blend.fillet_standard_solver_p2	9b97d9fbe57a37e9

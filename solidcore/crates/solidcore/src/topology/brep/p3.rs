@@ -1458,11 +1458,7 @@ pub(crate) fn with_lent_context<R>(
     k: &mut Kernel,
     run: impl FnOnce(&mut Kernel, &mut Context) -> R,
 ) -> Result<R> {
-    let mut ctx = Context::default();
-    ctx.install_lease(k.context.lend_notify()?);
-    let r = run(k, &mut ctx);
-    k.context.install_lease(ctx.take_lease());
-    Ok(r)
+    Context::with_lent_notifications(k, Context::default(), run)
 }
 
 /// Runs `edit` of `b` for a caller without identities of its own, notified through
