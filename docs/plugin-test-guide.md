@@ -136,7 +136,7 @@ discards the transaction, including errors caught by the guest. A successful edi
 is committed as one undo step.
 
 The optional `model.mesh` grant returns an evaluated body's component-local vertices
-and triangle indices, up to 8192 vertices and 16384 triangles, subject also to a
+and triangle indices, corners at the same point shared, up to 8192 vertices and 16384 triangles, subject also to a
 1 MiB result cap. It contains no reconstruction or conversion algorithm. The bundled
 box sample does not request that grant.
 

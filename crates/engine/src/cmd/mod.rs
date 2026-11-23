@@ -164,6 +164,7 @@ mod component_link;
 pub use component_link::resolve_design_links;
 mod config;
 mod design_link;
+mod documents;
 mod file;
 mod file_library;
 pub(crate) use file_library::uses_file as file_library_uses_file;
@@ -188,6 +189,8 @@ mod motion_simulate;
 mod notes;
 mod parts;
 mod plugin;
+#[cfg(test)]
+pub(crate) use plugin::shared_corners as plugin_shared_corners;
 mod plugin_storage;
 mod point_cloud;
 mod point_cloud_deviation;
@@ -666,6 +669,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(view_navigation::COMMANDS.iter());
     v.extend(tab_layouts::COMMANDS.iter());
     v.extend(tab_views::COMMANDS.iter());
+    v.extend(documents::COMMANDS.iter());
     v.extend(view_pick::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());
     v.extend(drawing::COMMANDS.iter());
