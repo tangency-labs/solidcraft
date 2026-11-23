@@ -28,7 +28,9 @@
 //! at the chain's widest wedge, bounded from above by enclosures of the faces' normals along
 //! each edge (`blend::chamfer_side::widest_wedge_bound`), not by samples. The sizes drift. A rim whose wedge runs from 63.4 to
 //! 116.6 degrees, asked 1 and 2, is measured at 86.4 and has setbacks from 0.01 to 1.95 and
-//! from 1.73 to 2.61. Setbacks that hold at every station are another definition. Edges
+//! from 1.73 to 2.61. Setbacks that hold at every station are another definition, a record
+//! kind not built yet (`record::ChamferKindRecord::Setbacks`, its station in
+//! `blend::fillet_section::setback_station`). Edges
 //! between planes of different wedges have no one pair: each keeps its own.
 //!
 //! Not upstream (solidcore's, #2486). Deviations: none. No recursion.
