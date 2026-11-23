@@ -123,6 +123,10 @@ pub enum IntersectFailure {
     /// The point classification has no object, or none of the kind its class names. The
     /// caller's classification: [`ErrorKind::InvalidInput`].
     NoClassObject,
+    /// The topology solver has no object where it solves against one: a null object of
+    /// the caller's trees or a null handle the caller passed (a B-rep, or the vertex, curve or
+    /// surface of a local solve). [`ErrorKind::InvalidInput`].
+    NoObjectToSolve,
     /// The routine reads what an earlier step of the same object sets up (a drop's start
     /// points, a cache's tree), and the caller has not run that step.
     /// [`ErrorKind::InvalidInput`].
@@ -326,6 +330,9 @@ pub enum IntersectFailure {
     /// The tracer does not drop a boundary curve for start points: the base tracer and the
     /// drop-curve tracer leave it to the tracers that override it. [`ErrorKind::Unsupported`].
     TracerHasNoBoundaryDrop,
+    /// The local solver is of an abstract kind (base, point or curve), which solves nothing:
+    /// only the kinds derived from them solve a pair of objects. [`ErrorKind::Unsupported`].
+    AbstractLocalSolver,
     /// A boundary iso curve dropped onto `found` UV curves, neither one nor two (two along a
     /// seam). Class `failed`.
     BoundaryDropNotOneOrTwo {
@@ -460,6 +467,7 @@ impl IntersectFailure {
             | Self::TracerHasNoPointValues
             | Self::TracerHasNoPointSolve
             | Self::TracerHasNoBoundaryDrop
+            | Self::AbstractLocalSolver
             | Self::BoundaryDropNotOneOrTwo { .. }
             | Self::NoClassFace
             | Self::IntervalIndexPastEnd { .. }
@@ -480,6 +488,7 @@ impl IntersectFailure {
             | Self::FaceWithoutSurface
             | Self::EdgeWithoutCurve
             | Self::NoClassObject
+            | Self::NoObjectToSolve
             | Self::NotSetUp
             | Self::PolyFaceWithoutEdges
             | Self::CurveNotBSpline
@@ -521,6 +530,7 @@ impl IntersectFailure {
             | Self::FaceWithoutSurface
             | Self::EdgeWithoutCurve
             | Self::NoClassObject
+            | Self::NoObjectToSolve
             | Self::NotSetUp
             | Self::EmptyStack
             | Self::DomainOutsideSurface
@@ -553,7 +563,8 @@ impl IntersectFailure {
             | Self::TracerHasNoBoundaryDrop
             | Self::UvCurveAgainstVolume
             | Self::UnalignedDiscontinuities
-            | Self::EdgeuseWithoutTrimCurve => ErrorKind::Unsupported,
+            | Self::EdgeuseWithoutTrimCurve
+            | Self::AbstractLocalSolver => ErrorKind::Unsupported,
             Self::PointOutsideDomain { .. } => ErrorKind::OutsideDomain,
             Self::NoSurfaceNormal
             | Self::DegenerateTangent
@@ -607,6 +618,7 @@ impl core::fmt::Display for IntersectFailure {
             Self::NoClassObject => {
                 f.write_str("the classification has no object of the kind its class names")
             }
+            Self::NoObjectToSolve => f.write_str("there is no object to solve against"),
             Self::NotSetUp => f.write_str("a step this one reads from has not run"),
             Self::EmptyStack => f.write_str("the stack holds no point and tangent"),
             Self::DomainOutsideSurface => {
@@ -738,6 +750,9 @@ impl core::fmt::Display for IntersectFailure {
             Self::TracerHasNoPointSolve => f.write_str("this tracer does not step to a next point"),
             Self::TracerHasNoBoundaryDrop => {
                 f.write_str("this tracer does not drop a boundary curve")
+            }
+            Self::AbstractLocalSolver => {
+                f.write_str("the base, point and curve local solvers solve nothing")
             }
             Self::BoundaryDropNotOneOrTwo { found } => write!(
                 f,
@@ -1036,6 +1051,7 @@ pub(super) mod tests {
             (F::FaceWithoutSurface, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::EdgeWithoutCurve, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::NoClassObject, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::NoObjectToSolve, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::NotSetUp, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::EmptyStack, SM_ERR, K::InvalidInput),
             (F::DomainOutsideSurface, SM_ERR, K::InvalidInput),
@@ -1160,6 +1176,7 @@ pub(super) mod tests {
             (F::TracerHasNoPointValues, SM_ERR, K::Unsupported),
             (F::TracerHasNoPointSolve, SM_ERR, K::Unsupported),
             (F::TracerHasNoBoundaryDrop, SM_ERR, K::Unsupported),
+            (F::AbstractLocalSolver, SM_ERR, K::Unsupported),
             (F::BoundaryDropNotOneOrTwo { found: 3 }, SM_ERR, K::Failed),
             (
                 F::ReversalLeftNoPoints,
@@ -1325,8 +1342,6 @@ pub(super) mod tests {
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
             ("solidcore/src/intersect/curve_class/p3.rs", 19),
-            ("solidcore/src/intersect/topology_solver/p1.rs", 12),
-            ("solidcore/src/intersect/topology_solver/p2.rs", 24),
         ];
         assert_pinned(
             "intersection phrase-cause sites",

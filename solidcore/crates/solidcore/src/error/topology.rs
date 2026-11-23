@@ -101,6 +101,23 @@
 //! | [`TopologyFailure::OwnerListOverCount`] | `SM_ERR` |
 //! | [`TopologyFailure::NothingToLink`] | `SM_ERR` |
 //! | [`TopologyFailure::NotOnOwnerList`] | `SM_ERR` |
+//! | [`TopologyFailure::NoFootOnSeam`] | `SM_ERR` |
+//! | [`TopologyFailure::ClassificationParametersUnset`] | `SM_ERR` |
+//! | [`TopologyFailure::EdgesOnDifferentBreps`] | `SM_ERR_ASSERT_FAILURE` |
+//! | [`TopologyFailure::AbsorbedCurveAtNoFiniteDistance`] | `SM_ERR` |
+//! | [`TopologyFailure::BrepSideNotOneOrTwo`] | `SM_ERR` |
+//! | [`TopologyFailure::ProtoVertexNotAnEnd`] | `SM_ERR` |
+//! | [`TopologyFailure::ProtoEdgeWithoutDefinitions`] | `SM_ERR_INVALID_INPUT` |
+//! | [`TopologyFailure::DefinitionWithoutSourceTopology`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::MergeGaveNoVertex`] | `SM_ERR` |
+//! | [`TopologyFailure::NoFinalVertexAtEnd`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::ClassificationOffTopology`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::OldEdgeNotAmongSplit`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::SplitDefinitionNotAdded`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::CurveStoreFull`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::OverlapBelowSplitResolution`] | `SM_ERR` |
+//! | [`TopologyFailure::IntersectingProtoEdgeEmpty`] | `SM_ERR` |
+//! | [`TopologyFailure::NotAMatedPair`] | `SM_ERR` |
 //! | [`TopologyFailure::NoVertexGiven`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::NoFaceGiven`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::NoInfiniteRegion`] | `SM_ERR` |
@@ -608,8 +625,71 @@ pub enum TopologyFailure {
     /// The object to link, or the member to link it after, was not given.
     /// [`ErrorKind::InvalidInput`].
     NothingToLink,
-    /// The object to remove is not on this owner's list. [`ErrorKind::InvalidInput`].
+    /// The object to remove is not on this owner's list: an owning topology's members, or
+    /// a proto vertex's, a proto edge's or the proto topology manager's lists.
+    /// [`ErrorKind::InvalidInput`].
     NotOnOwnerList,
+    /// A vertex definition's position drops onto no point of its vertex's seam curve.
+    /// Class `failed`.
+    NoFootOnSeam,
+    /// Neither point classification the caller gave has its parameters set, so there is
+    /// no point to place the position at. [`ErrorKind::InvalidInput`].
+    ClassificationParametersUnset,
+    /// The two edges the caller gave are on different B-reps. [`ErrorKind::InvalidInput`].
+    EdgesOnDifferentBreps,
+    /// A vertex definition that absorbed a curve cannot move to the position: a point of
+    /// that curve is at no finite distance from it (a non-finite position, or a distance
+    /// that overflows). Class `failed`.
+    AbsorbedCurveAtNoFiniteDistance,
+    /// The caller named B-rep `which` of a vertex definition; there are only 1 and 2.
+    /// [`ErrorKind::InvalidInput`].
+    BrepSideNotOneOrTwo {
+        /// The B-rep the caller named.
+        which: i32,
+    },
+    /// The proto vertex the caller named is neither end of the proto edge.
+    /// [`ErrorKind::InvalidInput`].
+    ProtoVertexNotAnEnd,
+    /// The proto edge the caller gave has no edge definitions to evaluate or split.
+    /// [`ErrorKind::InvalidInput`].
+    ProtoEdgeWithoutDefinitions,
+    /// A vertex definition the caller gave has no source topology on one of its B-reps.
+    /// [`ErrorKind::InvalidInput`].
+    DefinitionWithoutSourceTopology,
+    /// Merging a vertex definition's point into its B-rep made `new_vertices` vertices, not
+    /// one, and the point is not on a vertex there. Class `failed`.
+    MergeGaveNoVertex {
+        /// The number of vertices the merge made.
+        new_vertices: usize,
+    },
+    /// No vertex imprinted at the proto vertex at an end of the edge definition is
+    /// connected to the definition's source topology (an imprint of that end failed
+    /// earlier, and its status was ignored). Class `failed`.
+    NoFinalVertexAtEnd,
+    /// A point classification or intersection the caller gave is not on a topology object
+    /// (a vertex, edge, face, loop or region). [`ErrorKind::InvalidInput`].
+    ClassificationOffTopology,
+    /// Neither of the two new edges the caller gave after a split is the old edge.
+    /// [`ErrorKind::InvalidInput`].
+    OldEdgeNotAmongSplit,
+    /// The vertex definition at the split point of an edge definition could not be found
+    /// or added; that failure is the cause. Class `failed`; whether it is a defect or a
+    /// refusal is its cause's.
+    SplitDefinitionNotAdded,
+    /// The B-rep's store holds no more curves (its handles are full), so a copied curve
+    /// cannot be stored. [`ErrorKind::Unsupported`].
+    CurveStoreFull,
+    /// Two proto edges overlap along a piece whose both ends fall where an end of either
+    /// edge's definitions refuses to split (within ten times their tolerance of it), so
+    /// there is no piece of that edge to combine. Class `failed`.
+    OverlapBelowSplitResolution,
+    /// One of two intersecting proto edges to split against each other has no edge
+    /// definitions: an earlier split, whose failure the Boolean only warns on, left it
+    /// empty. Class `failed`.
+    IntersectingProtoEdgeEmpty,
+    /// The two objects whose relationship is to be removed are not a mated pair (an
+    /// intersector without relationships has none). Class `failed`.
+    NotAMatedPair,
     /// The two vertices to combine share a face in which the surviving vertex is a vertex
     /// loop, so no edge between them can be made in that face. [`ErrorKind::Unsupported`].
     VertexLoopInSharedFace,
@@ -795,6 +875,15 @@ impl TopologyFailure {
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
             Self::Failed(_)
+            | Self::NoFootOnSeam
+            | Self::ClassificationParametersUnset
+            | Self::AbsorbedCurveAtNoFiniteDistance
+            | Self::BrepSideNotOneOrTwo { .. }
+            | Self::ProtoVertexNotAnEnd
+            | Self::MergeGaveNoVertex { .. }
+            | Self::OverlapBelowSplitResolution
+            | Self::IntersectingProtoEdgeEmpty
+            | Self::NotAMatedPair
             | Self::JoinedVertexReaches { .. }
             | Self::Defect { .. }
             | Self::EditingDisabled
@@ -905,6 +994,12 @@ impl TopologyFailure {
             // upstream's `TRUE`: the repair's note, not an error status
             Self::SheetReoriented => 1,
             Self::Missing(_)
+            | Self::DefinitionWithoutSourceTopology
+            | Self::NoFinalVertexAtEnd
+            | Self::ClassificationOffTopology
+            | Self::OldEdgeNotAmongSplit
+            | Self::SplitDefinitionNotAdded
+            | Self::CurveStoreFull
             | Self::RadialFaceWithoutSurface
             | Self::RadialRimWithoutEdge
             | Self::CurveNotBSpline { .. }
@@ -935,6 +1030,7 @@ impl TopologyFailure {
             | Self::VertexWithoutUses
             | Self::FaceWithoutUses => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_)
+            | Self::ProtoEdgeWithoutDefinitions
             | Self::NoBrepGiven
             | Self::NoTrimmedBSpline
             | Self::EdgeUseNotInLoop
@@ -947,7 +1043,9 @@ impl TopologyFailure {
             | Self::NoRegionGiven
             | Self::LoopIndexOutOfRange { .. }
             | Self::CurveLoopsInvalid => SM_ERR_INVALID_INPUT,
-            Self::Inconsistent(_) | Self::GatheredBothSides => SM_ERR_ASSERT_FAILURE,
+            Self::Inconsistent(_) | Self::GatheredBothSides | Self::EdgesOnDifferentBreps => {
+                SM_ERR_ASSERT_FAILURE
+            }
             Self::OutOfMemory(_) | Self::TooManyOutputSlots { .. } | Self::AllocationFailed => {
                 SM_ERR_OUT_OF_MEMORY
             }
@@ -968,6 +1066,14 @@ impl TopologyFailure {
         match self {
             Self::Defect { .. } => ErrorKind::StageFailed,
             Self::EditingDisabled
+            | Self::ClassificationParametersUnset
+            | Self::EdgesOnDifferentBreps
+            | Self::BrepSideNotOneOrTwo { .. }
+            | Self::ProtoVertexNotAnEnd
+            | Self::ProtoEdgeWithoutDefinitions
+            | Self::DefinitionWithoutSourceTopology
+            | Self::ClassificationOffTopology
+            | Self::OldEdgeNotAmongSplit
             | Self::NoBrepGiven
             | Self::NotInBrep
             | Self::VertexNotOnEdge
@@ -1052,6 +1158,7 @@ impl TopologyFailure {
             | Self::FaceWithoutUses
             | Self::LoopRecordWithoutEdgeuse => ErrorKind::InvalidInput,
             Self::CurveNotBSpline { .. }
+            | Self::CurveStoreFull
             | Self::SurfaceWithoutNurbs { .. }
             | Self::FaceWithoutEdges
             | Self::WireEndSqueezed
@@ -1069,6 +1176,14 @@ impl TopologyFailure {
             | Self::SurfaceDiscontinuous
             | Self::NoEdgeToAimAt => ErrorKind::Unsupported,
             Self::CurveNotApproximated
+            | Self::NoFootOnSeam
+            | Self::AbsorbedCurveAtNoFiniteDistance
+            | Self::MergeGaveNoVertex { .. }
+            | Self::NoFinalVertexAtEnd
+            | Self::SplitDefinitionNotAdded
+            | Self::OverlapBelowSplitResolution
+            | Self::IntersectingProtoEdgeEmpty
+            | Self::NotAMatedPair
             | Self::LoopOrientationUndecided
             | Self::NoTrimmedBSpline
             | Self::AllocationFailed
@@ -1281,6 +1396,54 @@ impl core::fmt::Display for TopologyFailure {
             }
             Self::NothingToLink => f.write_str("an object to link is missing"),
             Self::NotOnOwnerList => f.write_str("the object is not on this list"),
+            Self::NoFootOnSeam => {
+                f.write_str("the vertex definition's position drops onto no point of its seam")
+            }
+            Self::ClassificationParametersUnset => {
+                f.write_str("neither point classification has its parameters set")
+            }
+            Self::EdgesOnDifferentBreps => f.write_str("the edges are on different B-reps"),
+            Self::AbsorbedCurveAtNoFiniteDistance => f.write_str(
+                "a vertex definition that absorbed a curve cannot move to a position at no \
+                 finite distance from it",
+            ),
+            Self::BrepSideNotOneOrTwo { which } => {
+                write!(f, "there is no B-rep {which}, only 1 and 2")
+            }
+            Self::ProtoVertexNotAnEnd => {
+                f.write_str("the proto vertex is neither end of the proto edge")
+            }
+            Self::ProtoEdgeWithoutDefinitions => {
+                f.write_str("the proto edge has no edge definitions")
+            }
+            Self::DefinitionWithoutSourceTopology => {
+                f.write_str("the definition has no source topology")
+            }
+            Self::MergeGaveNoVertex { new_vertices } => write!(
+                f,
+                "merging the point made {new_vertices} vertices, not one, and it is not on a \
+                 vertex"
+            ),
+            Self::NoFinalVertexAtEnd => f.write_str(
+                "no vertex imprinted at the proto vertex is connected to the edge definition",
+            ),
+            Self::ClassificationOffTopology => {
+                f.write_str("the classification is not on a topology object")
+            }
+            Self::OldEdgeNotAmongSplit => {
+                f.write_str("neither new edge of the split is the old edge")
+            }
+            Self::SplitDefinitionNotAdded => {
+                f.write_str("the vertex definition at the split could not be added")
+            }
+            Self::CurveStoreFull => f.write_str("the B-rep's curve store is full"),
+            Self::OverlapBelowSplitResolution => {
+                f.write_str("two proto edges overlap along less than their definitions can split")
+            }
+            Self::IntersectingProtoEdgeEmpty => {
+                f.write_str("a proto edge of the intersecting pair has no edge definitions")
+            }
+            Self::NotAMatedPair => f.write_str("the two are not a mated pair"),
             Self::VertexLoopInSharedFace => f.write_str(
                 "the vertices share a face in which the surviving vertex is a vertex loop",
             ),
@@ -1725,6 +1888,78 @@ mod tests {
             assert_eq!(e.topology_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
         }
+    }
+
+    /// The named causes of the Boolean's proto topology keep the status of the phrase each
+    /// replaced, and have their class.
+    #[test]
+    fn the_proto_topology_causes_keep_their_status_and_have_their_class() {
+        use ErrorKind as K;
+        use TopologyFailure as T;
+        let op = "topology::op";
+        let cases = [
+            (T::NoFootOnSeam, SM_ERR, K::Failed),
+            (T::ClassificationParametersUnset, SM_ERR, K::InvalidInput),
+            (
+                T::EdgesOnDifferentBreps,
+                SM_ERR_ASSERT_FAILURE,
+                K::InvalidInput,
+            ),
+            (T::AbsorbedCurveAtNoFiniteDistance, SM_ERR, K::Failed),
+            (T::BrepSideNotOneOrTwo { which: 3 }, SM_ERR, K::InvalidInput),
+            (T::ProtoVertexNotAnEnd, SM_ERR, K::InvalidInput),
+            (
+                T::ProtoEdgeWithoutDefinitions,
+                SM_ERR_INVALID_INPUT,
+                K::InvalidInput,
+            ),
+            (
+                T::DefinitionWithoutSourceTopology,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (T::MergeGaveNoVertex { new_vertices: 0 }, SM_ERR, K::Failed),
+            (T::NoFinalVertexAtEnd, SM_ERR_NULL_POINTER, K::Failed),
+            (
+                T::ClassificationOffTopology,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                T::OldEdgeNotAmongSplit,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (T::SplitDefinitionNotAdded, SM_ERR_NULL_POINTER, K::Failed),
+            (T::CurveStoreFull, SM_ERR_NULL_POINTER, K::Unsupported),
+            (T::OverlapBelowSplitResolution, SM_ERR, K::Failed),
+            (T::IntersectingProtoEdgeEmpty, SM_ERR, K::Failed),
+            (T::NotAMatedPair, SM_ERR, K::Failed),
+        ];
+        for (failure, status, kind) in cases {
+            let e = SolidError::topology(op, failure);
+            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.topology_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+        }
+        // the split's vertex definition keeps the failure that kept it out as its cause,
+        // which decides defect or not
+        let why = "a step the kernel got wrong";
+        let cause = SolidError::topology(op, T::Defect { why });
+        let e = Failure::new(op, T::SplitDefinitionNotAdded)
+            .caused_by(cause.clone())
+            .into_error();
+        assert_eq!(e.cause(), Some(&cause));
+        assert!(e.is_defect());
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        let cause = SolidError::topology(op, T::ClassificationOffTopology);
+        let e = Failure::new(op, T::SplitDefinitionNotAdded)
+            .caused_by(cause.clone())
+            .into_error();
+        assert!(!e.is_defect(), "{e:?}");
+        assert_eq!(e.kind(), K::Failed);
     }
 
     /// The named causes of the B-rep constructor, the file and projection wrappers and the
@@ -2411,9 +2646,6 @@ mod tests {
             ("solidcore/src/topology/brep/validation/assert_valid/seams.rs", 1),
             ("solidcore/src/topology/brep/validation/pointers.rs", 2),
             ("solidcore/src/topology/brep/vertex_fans.rs", 6),
-            ("solidcore/src/topology/proto_topology/p1/proto.rs", 16),
-            ("solidcore/src/topology/proto_topology/p2.rs", 8),
-            ("solidcore/src/topology/proto_topology/p3.rs", 6),
         ];
         assert_pinned(
             "topology phrase-cause sites",

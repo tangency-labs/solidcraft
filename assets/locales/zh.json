@@ -5476,7 +5476,7 @@
   "select the sheet edge first": "请先选择钣金边",
   "select two components": "请选择两个组件",
   "set by the sketch's lines": "由草图的线条决定",
-  "settings.cadmpeg_import": "使用 cadmpeg 将 STEP、FreeCAD 和 Rhino 文件直接读取为 B-rep，而不经过 SolidCraft 的 STEP 读取器",
+  "settings.cadmpeg_import": "使用 cadmpeg 将 STEP、IGES、FreeCAD 和 Rhino 文件直接读取为 B-rep，而不经过 SolidCraft 的 STEP 和 IGES 读取器",
   "settings.display_quality_note": "仅影响显示，不影响设计和导出。",
   "settings.double_click_components": "双击组件以激活",
   "settings.frame_rate_details_note": "添加最近各帧耗时的图表(叠加绘制的三角形数)、帧耗时直方图以及 GPU 绘制的内容。点击视图中的帧率可显示或隐藏。",

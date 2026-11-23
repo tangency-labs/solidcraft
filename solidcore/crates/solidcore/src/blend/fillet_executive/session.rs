@@ -430,9 +430,9 @@ struct SessionObjects<'target> {
     /// (not upstream, #2489) The marks of the faces the session made, while
     /// `Kernel::blend_face_log` is on (`blend_face_log`).
     blend_face_marks: Vec<AttributeHandle>,
-    /// The corner type of chamfers meeting at a vertex (`set_chamfer_corner`; WR-716).
-    /// Read only with `Kernel::fixes.fillet_chamfer_corner`.
-    chamfer_corner: crate::blend::blend_corner::BlendChamferCorner,
+    /// The corner type of chamfers meeting at a vertex (`set_chamfer_corner`; WR-716),
+    /// `None` where the caller asked none.
+    chamfer_corner: Option<crate::blend::blend_corner::BlendChamferCorner>,
     band_cut_cache: Option<band_cuts::BandCutCache>,
     /// (not upstream) The edges `prepare_chamfers_along` chamfered as knife edges: equal
     /// distances, the chord between the contacts of the ball of that radius, kept as the
@@ -1847,7 +1847,7 @@ impl<'target> FilletSession<'target> {
                 radius_corner_surfaces: Vec::new(),
                 setback_refusal: None,
                 blend_face_marks: Vec::new(),
-                chamfer_corner: crate::blend::blend_corner::BlendChamferCorner::Mitre,
+                chamfer_corner: None,
                 band_cut_cache: None,
                 knife_chamfers: Vec::new(),
             },
@@ -2477,11 +2477,10 @@ impl<'target> FilletSession<'target> {
                 // Not the fork's (WR-716, #2345): chamfers meeting at a vertex where every
                 // edge is chamfered are the blend corner's chamfer event, closed by their
                 // planes, of the session's corner type; refused where that type does not
-                // exist there; a corner the event declines stays the pinned 3x3 one
-                if k.fixes.fillet_chamfer_corner
-                    && corner.chamfer
-                    && corner.kind == FilletCornerKind::ConvexNByN
-                {
+                // exist there (with no type asked, the type that exists: see
+                // `classify_chamfer`); a corner the event declines (an edge not straight, a face
+                // not a plane, a chamfer not of constant width) stays the pinned 3x3 one
+                if corner.chamfer && corner.kind == FilletCornerKind::ConvexNByN {
                     use crate::blend::blend_corner::chamfer::{classify_chamfer, ChamferClass};
                     let lookup = SweptSessionSolvers {
                         solvers: solvers.as_slice(),
@@ -3082,14 +3081,16 @@ impl<'target> FilletSession<'target> {
         self.objects.roll_over_ends = ends;
     }
 
-    /// How chamfers meeting at a vertex where every edge is chamfered close the corner,
-    /// with `Kernel::fixes.fillet_chamfer_corner` (WR-716): the Mitre (the default; the
-    /// chamfer planes run on to meet each other) or the Facet (one plane through the
-    /// rails' crossings). It overrides the corner's bevel flag
-    /// ([`Self::set_corner_bevel`]) at such a corner. Set it before [`Self::do_fillet`]
-    /// (the corners are made there). Without the flag it changes nothing.
+    /// How chamfers meeting at a vertex where every edge is chamfered close the corner
+    /// (the blend corner's chamfer event, WR-716): the Mitre (the chamfer planes run on to
+    /// meet each other) or the Facet (one plane through the rails' crossings), refused
+    /// where the asked type does not exist. Unset, the corner is the Mitre where it exists,
+    /// at four or more chamfers the patch or (crossings in one plane) the Facet, and
+    /// otherwise the pinned corner, never a refusal of the type (`classify_chamfer`). It
+    /// overrides the corner's bevel flag ([`Self::set_corner_bevel`]) at
+    /// such a corner. Set it before [`Self::do_fillet`] (the corners are made there).
     pub fn set_chamfer_corner(&mut self, corner: crate::blend::blend_corner::BlendChamferCorner) {
-        self.objects.chamfer_corner = corner;
+        self.objects.chamfer_corner = Some(corner);
     }
 
     /// The fork's `AddSetBackVertex` (smlib#79 step 4c; WR-697): the caller sets
