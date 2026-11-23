@@ -75,8 +75,34 @@ pub fn relation_values(doc: &Document, st: &ModelState, j: &Joint) -> Option<Vec
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-    use crate::joints::{JointKind, JointOrigin, Snap};
+    use crate::joints::{Constraint, JointKind, JointOrigin, Snap};
+    use crate::{FeatureKind, Model};
     use solidcore_record::Vec3;
+
+    /// A plate in one component, and a block 130 mm along x and 40 mm along y from it, 40 mm
+    /// above its top face: two parts whose top and bottom faces do not touch.
+    fn plate_and_block() -> (Document, std::sync::Arc<ModelState>, u64, u64) {
+        let mut doc = Document::new("mate");
+        let plate = doc.add_component(Some("Plate"), 0).unwrap();
+        let block = doc.add_component(Some("Block"), 0).unwrap();
+        for (component, name, corner) in [
+            (plate, "Plate", ["0", "0", "0"]),
+            (block, "Block", ["130", "40", "40"]),
+        ] {
+            let kind: FeatureKind = serde_json::from_value(serde_json::json!({
+                "type": "box", "corner": corner, "length": "100", "width": "100", "height": "10", "operation": "new_body"
+            }))
+            .unwrap();
+            let id = doc.add_feature(kind, Some(name)).unwrap();
+            doc.feature_mut(id).unwrap().component = component;
+        }
+        let a = doc.add_occurrence(plate, 0, IDENTITY).unwrap();
+        let b = doc.add_occurrence(block, 0, IDENTITY).unwrap();
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        let st = model.state();
+        (doc, st, a, b)
+    }
 
     fn joint(kind: JointKind) -> Joint {
         let at = |occurrence| JointOrigin::new(occurrence, Snap::Point { point: Vec3::ZERO, z: None, x: None });
@@ -101,6 +127,24 @@ mod tests {
 
     fn z_of(m: &Mat) -> Vec3 {
         Vec3::new(m[2][0], m[2][1], m[2][2])
+    }
+
+    /// A mate's two faces are coincident: the lateral offsets start at zero, so the faces'
+    /// centres meet and the faces touch. The part is not left beside the other one, level with
+    /// it and a gap away from it (#14939).
+    #[test]
+    fn a_mate_starts_with_its_faces_together() {
+        let (doc, st, a, b) = plate_and_block();
+        let face = |pick| Snap::FaceCenter { pick, face: None, x: None };
+        let mut j = joint(JointKind::Planar);
+        j.angle = 0.0;
+        j.constraint = Some(Constraint::Mate);
+        j.a = JointOrigin::new(a, face(Vec3::new(50.0, 50.0, 10.0)));
+        j.b = JointOrigin::new(b, face(Vec3::new(180.0, 90.0, 40.0)));
+        let q = relation_values(&doc, &st, &j).expect("the joint's origins resolve");
+        // The faces' centres meet: the lateral offsets are zero, not the 130 mm and 40 mm the
+        // parts stand apart.
+        assert!(q[0].abs() < 1e-9 && q[1].abs() < 1e-9, "the mate's lateral offsets: {q:?}");
     }
 
     /// Whatever its values, each relation keeps what it ties.
