@@ -1335,8 +1335,9 @@ fn a_pick_named_by_position_past_the_depth_limit_survives_deleting_unrelated_fea
     // Its top face, saved by position too.
     let top = Vec3::new(25., 110., 20.);
     let face = crate::naming::face_names(cleat)
-        .into_iter()
+        .iter()
         .find(|n| crate::name_lookup::locate_face(&state, n, top).is_some_and(|hit| hit.on_point))
+        .cloned()
         .unwrap();
     assert!(face.starts_with("Cleat:face:"), "{face}");
 

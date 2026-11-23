@@ -217,7 +217,8 @@ fn recover_positional_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<Edge
     if b.body.is_mesh() || !near.is_finite() {
         return None;
     }
-    let [fa, fb] = split_top_level_bars(strip_edge_number(name)).as_slice() else { return None };
+    let parts = split_top_level_bars(strip_edge_number(name));
+    let [fa, fb] = parts.as_slice() else { return None };
     let (fa, fb) = (positional_face(b, fa)?, positional_face(b, fb)?);
     let reach = pick_reach(b);
     let mut on = b.body.record().edges.iter().enumerate().filter(|(i, e)| {
