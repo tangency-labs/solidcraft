@@ -38,6 +38,7 @@ crates/doc/src/document.rs:AlignFrame::resolve normalized
 crates/doc/src/document.rs:Document::resolve_plane_in cross,dot,normalized
 crates/doc/src/document.rs:MeshData::eq triangles
 crates/doc/src/document.rs:MeshData::generate_crease_normals triangles
+crates/doc/src/document.rs:unit_direction normalized
 crates/doc/src/drawing/cutting_line.rs:CuttingLine::basis cross,dot
 crates/doc/src/drawing/cutting_line.rs:CuttingLine::first_way normalized
 crates/doc/src/drawing/cutting_line.rs:CuttingLine::planes cross,normalized
@@ -207,7 +208,7 @@ crates/doc/src/hole_reference.rs:face_side raycast
 crates/doc/src/hole_reference.rs:flat_face dot
 crates/doc/src/hole_reference.rs:on_reference_face closest_on_triangle,triangles
 crates/doc/src/hole_reference.rs:reference_frame cross,dot,normalized
-crates/doc/src/joints.rs:frame cross,dot,normalized
+crates/doc/src/joints.rs:frame_with_x_policy cross,dot,normalized
 crates/doc/src/joints.rs:mismatch atan2
 crates/doc/src/joints.rs:nearest_plane dot
 crates/doc/src/joints.rs:resolve_snap dot,normalized
@@ -1233,6 +1234,7 @@ crates/ui-egui/src/dialogs.rs:Dialog::extrude_target dot
 crates/ui-egui/src/dialogs.rs:FaceSnap::new dot,triangles
 crates/ui-egui/src/dialogs.rs:axis_of cross,dot,normalized
 crates/ui-egui/src/dialogs.rs:box_corner dot
+crates/ui-egui/src/dialogs.rs:dialog_commands dot
 crates/ui-egui/src/dialogs.rs:edge_circle_in dot
 crates/ui-egui/src/dialogs.rs:face_sel_on triangles
 crates/ui-egui/src/dialogs.rs:facing dot
@@ -1249,6 +1251,7 @@ crates/ui-egui/src/dialogs.rs:sketch_curve_edge dot
 crates/ui-egui/src/dialogs.rs:square_sketch_axes atan2,cross,dot,normalized
 crates/ui-egui/src/dialogs.rs:triangle_dist cross,dot
 crates/ui-egui/src/dialogs.rs:world_axis cross,dot
+crates/ui-egui/src/dialogs_assembly.rs:alignment_marker normalized
 crates/ui-egui/src/dialogs_assembly.rs:circle_of cross,dot,normalized
 crates/ui-egui/src/dialogs_assembly.rs:face_dist triangles
 crates/ui-egui/src/dialogs_assembly.rs:face_normal_near cross,normalized,triangles
@@ -1390,8 +1393,8 @@ crates/ui-egui/src/point_clouds.rs:Key::of triangles
 crates/ui-egui/src/point_clouds.rs:records triangles
 crates/ui-egui/src/prefs.rs:same_orientation dot
 crates/ui-egui/src/preview.rs:SurfaceIndex::new triangles
-crates/ui-egui/src/preview.rs:build_as triangles
 crates/ui-egui/src/preview.rs:build_copies triangles
+crates/ui-egui/src/preview.rs:build_scene triangles
 crates/ui-egui/src/preview.rs:build_tool triangles
 crates/ui-egui/src/preview.rs:new_faces triangles
 crates/ui-egui/src/preview.rs:point_triangle_dist cross,dot,normalized
