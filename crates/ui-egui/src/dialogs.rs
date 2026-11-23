@@ -1823,6 +1823,12 @@ impl Dialog {
                 _ => None,
             };
         }
+        if crate::dialogs_assembly::alignment_side(&self.kind, self.active).is_some()
+            && let Hit::SketchCurve { sketch, id, straight: true, .. } = h
+        {
+            let sel = Sel::ExternalSketchCurve { sketch: *sketch, id: id.clone() };
+            return crate::dialogs_assembly::alignment_accepts(s, self, &sel).then_some(sel);
+        }
         // Only construction tools resolve wire-node references. In particular, Hole must
         // not silently freeze a wire node into a face position or accept an unresolved ID.
         if matches!(h, Hit::SketchPoint3d { .. }) && !matches!(self.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. } | Kind::Frame(_)) {
@@ -1865,7 +1871,7 @@ impl Dialog {
         if inp.rejects(&sel) {
             return None;
         }
-        (inp.accept != AXIS_PICKS || takes_as_axis(s, &sel)).then_some(sel)
+        (inp.accept != AXIS_PICKS || takes_as_axis(s, &sel)).then_some(sel).filter(|sel| crate::dialogs_assembly::alignment_accepts(s, self, sel))
     }
 
     /// A round edge where a 3D point is wanted stands for its centre: a construction point's
@@ -2034,7 +2040,7 @@ impl Dialog {
             self.focus = true;
             return;
         }
-        if self.take_extrude_target(s, &sel) {
+        if !crate::dialogs_assembly::alignment_accepts(s, self, &sel) || self.take_extrude_target(s, &sel) {
             return;
         }
         if let Some(key) = stored_input_reference_key(self, self.active) {
@@ -2111,6 +2117,7 @@ impl Dialog {
             let picked = self.inputs.get(self.active).and_then(|i| i.items.first());
             crate::primitive_placement::picked(s, cmd, at, &mut self.extra, picked);
         }
+        crate::dialogs_assembly::resolve_alignment_order(s, self, None);
     }
 
     /// Box selection result: replace (or add to) the active input.
@@ -3673,7 +3680,9 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let mut hovered: Option<(usize, Sel)> = None;
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
-        let stored_reference = stored_input_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
+        let alignment = crate::dialogs_assembly::stored_alignment(&d.kind, i);
+        let stored_reference =
+            stored_input_reference_key(d, i).and_then(|key| d.extra.get(key)).or(alignment.as_ref()).filter(|_| inp.items.is_empty());
         form_row(ui, inp.label, |ui| {
             ui.horizontal(|ui| {
                 let active = i == d.active && !text_focus;
@@ -3683,25 +3692,48 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 let frame_rows = crate::dialogs_frame::listed_rows(d, i).map(|rows| rows.len());
                 let filled = frame_rows.map_or(!inp.items.is_empty(), |n| n > 0) || custom_axis || stored_reference.is_some();
                 let text = if filled {
-                    RichText::new(if stored_reference.is_some() && matches!(d.kind, Kind::Section { .. }) {
-                        solidcraft_ui_text::tr("ui.viewport_status_section_plane").into()
-                    } else if stored_reference.is_some() && matches!(d.kind, Kind::OffsetPlane { .. }) {
-                        solidcraft_ui_text::tr("sketch_panel.plane_fixed").into()
-                    } else if custom_axis || stored_reference.is_some() {
-                        solidcraft_ui_text::tr("dialog.custom_axis").into()
-                    } else if !inp.multi {
-                        inp.items.first().map(|item| selection_label(s, names, d, inp, item)).unwrap_or_default()
-                    } else {
-                        let count = if i == 0 { shell_count.or(frame_rows).unwrap_or(inp.items.len()) } else { inp.items.len() };
-                        solidcraft_ui_text::format("dialog.selected_count", &[("count", &count.to_string())])
-                    })
+                    RichText::new(
+                        if let Some(face) = alignment.as_ref().and_then(|v| v.get("face")).and_then(Value::as_str).filter(|_| inp.items.is_empty()) {
+                            face.to_string()
+                        } else if let Some(reference) = alignment.as_ref().and_then(|v| v.get("reference")).filter(|_| inp.items.is_empty()) {
+                            reference
+                                .get("name")
+                                .or_else(|| reference.get("axis"))
+                                .or_else(|| reference.get("plane"))
+                                .and_then(Value::as_str)
+                                .map(str::to_string)
+                                .unwrap_or_else(|| {
+                                    let name = reference
+                                        .get("feature")
+                                        .or_else(|| reference.get("sketch"))
+                                        .and_then(Value::as_u64)
+                                        .and_then(|id| s.doc.feature(id))
+                                        .map(|feature| feature.name.clone())
+                                        .unwrap_or_else(|| solidcraft_ui_text::tr("dialog.missing_alignment_reference").into());
+                                    reference.get("curve").and_then(Value::as_str).map_or_else(|| name.clone(), |curve| format!("{name} / {curve}"))
+                                })
+                        } else if stored_reference.is_some() && matches!(d.kind, Kind::Section { .. }) {
+                            solidcraft_ui_text::tr("ui.viewport_status_section_plane").into()
+                        } else if stored_reference.is_some() && matches!(d.kind, Kind::OffsetPlane { .. }) {
+                            solidcraft_ui_text::tr("sketch_panel.plane_fixed").into()
+                        } else if custom_axis || stored_reference.is_some() {
+                            solidcraft_ui_text::tr("dialog.custom_axis").into()
+                        } else if !inp.multi {
+                            inp.items.first().map(|item| selection_label(s, names, d, inp, item)).unwrap_or_default()
+                        } else {
+                            let count = if i == 0 { shell_count.or(frame_rows).unwrap_or(inp.items.len()) } else { inp.items.len() };
+                            solidcraft_ui_text::format("dialog.selected_count", &[("count", &count.to_string())])
+                        },
+                    )
                     .color(t.on_accent)
                 } else {
                     RichText::new(solidcraft_ui_text::tr("dialog.select")).color(t.text)
                 };
                 let selected_text = text.text().strip_prefix("↖ ").unwrap_or_else(|| text.text());
                 let prompt = if !filled && inp.label == "Edges" { tr("Select edges") } else { selected_text };
-                let chip = crate::ui_kit::selection_field(ui, prompt, crate::ui_kit::Selection { active, filled });
+                let enabled = crate::dialogs_assembly::alignment_input_available(d, i);
+                let chip =
+                    ui.add_enabled_ui(enabled, |ui| crate::ui_kit::selection_field(ui, prompt, crate::ui_kit::Selection { active, filled })).inner;
                 if matches!(d.kind, Kind::Shell { .. }) && i == 0 {
                     chip.widget_info(|| {
                         let mut info = egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tr(inp.label));
@@ -3806,6 +3838,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
         d.pick_refused = None;
     }
     if let Some(i) = clear {
+        crate::dialogs_assembly::clear_alignment(&mut d.kind, i);
         if let Some(key) = stored_input_reference_key(d, i) {
             d.extra.remove(key);
         }
