@@ -310,12 +310,13 @@ pub fn on_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     // horizontal or vertical.
     let alignment = app.tool.as_ref().is_some_and(|t| t.kind == Kind::HorizontalVertical);
     let picked = app.tool.as_ref().is_some_and(|t| t.kind == Kind::HorizontalVertical && !t.point_picks.is_empty());
-    let hits = alignment.then(|| pick(app, proj, pos)).unwrap_or_default();
-    let midpoint = if !alignment {
+    let want_middle = alignment && (shift || picked);
+    let hits = want_middle.then(|| pick(app, proj, pos)).unwrap_or_default();
+    let midpoint = if !want_middle {
         None
     } else if shift {
         midpoint_of(app, proj, &hits, pos, f32::INFINITY)
-    } else if picked && matches!(active_hit(&hits, app), Some(Hit::SketchCurve { straight: true, .. })) {
+    } else if matches!(active_hit(&hits, app), Some(Hit::SketchCurve { straight: true, .. })) {
         midpoint_of(app, proj, &hits, pos, LINE_MIDDLE_PX)
     } else {
         None
