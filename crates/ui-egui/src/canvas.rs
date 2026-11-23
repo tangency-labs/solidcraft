@@ -2398,6 +2398,7 @@ fn draw_angle_plane(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, 
     // The angle box stays where it has always been, beside the base anchor: the handle is
     // added beside it, not in place of it (#17290).
     let box_at = bs + vec2(16.0, -30.0);
+    let mut handle = None;
     if let Some(turn) = turn {
         // The circle the handle rides, so the sweep the plane makes is seen.
         let points: Vec<Pos2> = (0..=48)
@@ -2409,7 +2410,7 @@ fn draw_angle_plane(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, 
         if points.len() > 1 {
             painter.add(egui::Shape::line(points, Stroke::new(1.0, Tokens::get().origin_plane_edge.linear_multiply(0.35))));
         }
-        rotation_handle(
+        handle = rotation_handle(
             ui,
             painter,
             proj,
@@ -2426,8 +2427,13 @@ fn draw_angle_plane(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, 
             angle,
         );
     }
+    // A box over a handle takes the press meant for the handle (#6608): the box moves aside.
+    let mut place = box_place(app, proj);
+    if let Some(end) = handle {
+        place.handles = Some(egui::Rect::from_center_size(end, vec2(28.0, 28.0)));
+    }
     let dragging = *angle != before;
-    value_box(ui, "Angle", angle, box_at, focus || dragging, box_place(app, proj));
+    value_box(ui, "Angle", angle, box_at, focus || dragging, place);
 }
 
 fn revolve_convention(d: &Dialog) -> solidcraft_engine::doc::RevolveConvention {
