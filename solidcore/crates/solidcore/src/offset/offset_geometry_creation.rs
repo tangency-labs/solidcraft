@@ -254,7 +254,7 @@ use crate::surface::surface::p2::{
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
 use crate::surface::surface_cache::face_context::FaceQueries;
-use crate::surface::surface_cache::SurfaceCache;
+use crate::surface::surface_cache::{SurfaceCache, SurfaceCacheState};
 use crate::topology::brep::p1 as bp1;
 use crate::topology::brep::p2 as brep_p2;
 use crate::topology::brep_cache::CacheObject;
@@ -825,20 +825,21 @@ pub trait OffsetBrep<O>: ProtoGeometry<O> {
         Ok(cache)
     }
 
-    /// The surface cache as `smsurf_GetSurfaceCache` hands it to a reader of its state
-    /// bits only, without the solve's `GetTree` (`GlobalPointSolve`'s fast-drop face
-    /// test). Backends that keep face caches override this; the default is the
-    /// solve's cache.
+    /// The state bits of the surface cache as `smsurf_GetSurfaceCache` hands it to a
+    /// reader of them only, without the solve's `GetTree` (`GlobalPointSolve`'s
+    /// fast-drop face test). Backends that keep face caches override this; the default
+    /// is the solve's cache's.
     fn prepare_surface_state_cache(
         &mut self,
         k: &Kernel,
         surface: &Surface,
         handle: Option<O>,
-    ) -> Result<SurfaceCache<O>>
+    ) -> Result<SurfaceCacheState<O>>
     where
         O: Copy + PartialEq,
     {
-        self.prepare_surface_solve_cache(k, surface, handle)
+        self.prepare_surface_solve_cache(k, surface, handle)?
+            .state()
     }
 
     /// Read-only face queries after cache preparation. One service resolves all
@@ -1246,7 +1247,7 @@ impl<O: ClassObject, B: OffsetBrep<O>> SurfaceSolveContext<O> for OffsetSurfaceS
         k: &Kernel,
         surface: &Surface,
         handle: Option<O>,
-    ) -> Result<SurfaceCache<O>> {
+    ) -> Result<SurfaceCacheState<O>> {
         self.0.prepare_surface_state_cache(k, surface, handle)
     }
 

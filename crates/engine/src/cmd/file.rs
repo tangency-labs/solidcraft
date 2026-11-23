@@ -118,7 +118,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|sdf|json, or plugin_id.entry for an installed exporter plugin (plugin.list exporters), which writes the whole design with options?: the slot's declared options (default from extension; an extension SolidCraft doesn't write goes to the exporter plugin that claims it; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (default false; true: each shown canvas and decal is written as a textured quad, its image next to the URDF); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies); solids?: body|face (ASCII STL, format stla only, default body: face writes one `solid <name>` block per B-rep face, named by the face's persistent name, for CFD meshers; docs/formats/stl-face-solids.md)"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|sdf|json, or plugin_id.entry for an installed exporter plugin (plugin.list exporters), which writes the whole design with options?: the slot's declared options (default from extension; an extension SolidCraft doesn't write goes to the exporter plugin that claims it; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic, roughness and opacity as materials (a look that is not opaque is alpha blended), and the Glass a render setup gives a body as glTF transmission; Glass with subsurface scattering, Glass two setups give a body differently, or a body a render setup gives an image texture, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (default false; true: each shown canvas and decal is written as a textured quad, its image next to the URDF); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies); solids?: body|face (ASCII STL, format stla only, default body: face writes one `solid <name>` block per B-rep face, named by the face's persistent name, for CFD meshers; docs/formats/stl-face-solids.md)"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
     // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
@@ -2556,13 +2556,14 @@ fn export_to(
     bodies: &[String],
     parts: &[(String, Vec<String>)],
     quality: solidcraft_io::MeshQuality,
+    hierarchy: bool,
 ) -> Result<Value> {
     if format == Format::Obj {
         // The colours of the bodies go in a material library beside the mesh file.
         return export_obj(s, path, bodies, quality);
     }
     if format == Format::Glb {
-        return export_glb(s, cmd, path, bodies, quality);
+        return export_glb(s, cmd, path, bodies, quality, hierarchy);
     }
     if format == Format::Usd {
         return export_usd(s, path, bodies);
@@ -2741,7 +2742,19 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if lay {
         return export_laid(s, path, format, &bodies, &parts, quality);
     }
-    export_to(s, cmd, path, format, &bodies, &parts, quality)
+    export_to(s, cmd, path, format, &bodies, &parts, quality, hierarchy(p, cmd, format)?)
+}
+
+/// `hierarchy` (GLB only, not read for the other formats): true, the default, writes each
+/// occurrence as a named node holding its part's bodies; false writes every body under the root
+/// in world coordinates, as SolidCraft 0.40 did.
+fn hierarchy(p: &Value, cmd: &str, format: Format) -> Result<bool> {
+    match p.get("hierarchy") {
+        _ if format != Format::Glb => Ok(true),
+        None | Some(Value::Null) => Ok(true),
+        Some(Value::Bool(b)) => Ok(*b),
+        Some(_) => Err(bad(cmd, "`hierarchy` must be true or false")),
+    }
 }
 
 /// `file.export` through an exporter plugin: the whole design, with the slot's options.
@@ -2759,7 +2772,7 @@ fn export_with_plugin(s: &mut Session, cmd: &str, path: &str, exporter: &crate::
 fn export_step(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export_step";
     let path = path_arg(p, cmd)?;
-    export_to(s, cmd, path, Format::Step, &string_list(cmd, p, "bodies")?, &[], solidcraft_io::MeshQuality::default())
+    export_to(s, cmd, path, Format::Step, &string_list(cmd, p, "bodies")?, &[], solidcraft_io::MeshQuality::default(), true)
 }
 
 fn export_stl(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2778,7 +2791,7 @@ fn export_stl(s: &mut Session, p: &Value) -> Result<Value> {
     if lay {
         return export_laid(s, path, format, &bodies, &[], quality);
     }
-    export_to(s, cmd, path, format, &bodies, &[], quality)
+    export_to(s, cmd, path, format, &bodies, &[], quality, true)
 }
 
 /// `solids` as the STL exports read it: `body` (the default) writes one solid for the file, `face`
@@ -2828,13 +2841,13 @@ fn export_3mf(s: &mut Session, p: &Value) -> Result<Value> {
     if lay_on_print_faces(p, cmd, Format::ThreeMf)? {
         return export_laid(s, path, Format::ThreeMf, &bodies, &parts, quality);
     }
-    export_to(s, cmd, path, Format::ThreeMf, &bodies, &parts, quality)
+    export_to(s, cmd, path, Format::ThreeMf, &bodies, &parts, quality, true)
 }
 
 fn export_obj_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export_obj";
     let path = path_arg(p, cmd)?;
-    export_to(s, cmd, path, Format::Obj, &string_list(cmd, p, "bodies")?, &[], mesh_quality(p, cmd)?)
+    export_to(s, cmd, path, Format::Obj, &string_list(cmd, p, "bodies")?, &[], mesh_quality(p, cmd)?, true)
 }
 
 fn export_urdf_cmd(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2880,26 +2893,43 @@ fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io
 }
 
 /// The GLB export (#1553): the bodies as placed, with the looks the design shows them in.
-/// Written atomically, so a refusal or a failed write leaves a file already there as it was. A
-/// body a render setup gives an image texture or optics is refused: the file has no place for
-/// them, and writing the body without them would show it wrongly.
-fn export_glb(s: &Session, cmd: &str, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality) -> Result<Value> {
+/// Written atomically, so a refusal or a failed write leaves a file already there as it was. Glass
+/// a render setup gives a body is written as glTF transmission (#5296). A body a render setup
+/// gives an image texture is refused: the file has no place for it, and writing the body without
+/// it would show it wrongly.
+fn export_glb(s: &Session, cmd: &str, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality, hierarchy: bool) -> Result<Value> {
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     let world = s.world_state()?;
-    let bound = super::render::bound_bodies(s, cmd)?;
+    let textured = super::render::textured_bodies(s, cmd)?;
     for b in world.bodies.iter().filter(|b| bodies.is_empty() || bodies.contains(&b.name)) {
-        if let Some((setup, what)) = bound.get(&b.name) {
+        if let Some(setup) = textured.get(&b.name) {
             return Err(bad(
                 cmd,
                 format!(
-                    "{}: render setup `{setup}` gives it {what}, which GLB export does not write yet; remove it from the setup, or leave the body out with `bodies`",
+                    "{}: render setup `{setup}` gives it an image texture, which GLB export does not write yet; remove it from the setup, or leave the body out with `bodies`",
                     b.name
                 ),
             ));
         }
     }
-    let bytes = solidcraft_io::export_glb(&s.doc, &s.model.state(), &world, bodies, &name, quality)?;
+    let glass = super::render::glass_bodies(s, cmd, bodies)?;
+    // The occurrences as the world state placed them: a part moved but not yet committed is where
+    // the move left it, so its node and its mesh's frame agree with the world.
+    let moved;
+    let doc = if s.pending_moves.is_empty() {
+        &*s.doc
+    } else {
+        let mut d = (*s.doc).clone();
+        for o in &mut d.occurrences {
+            if let Some(m) = s.pending_moves.get(&o.id) {
+                o.transform = *m;
+            }
+        }
+        moved = d;
+        &moved
+    };
+    let bytes = solidcraft_io::export_glb(doc, &s.model.state(), &world, bodies, &name, &solidcraft_io::GlbOptions { quality, hierarchy, glass })?;
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{:?}", Format::Glb)}))
 }
@@ -3192,7 +3222,7 @@ fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
     if lay {
         return export_laid_to(s, path, format, &bodies, &parts, quality);
     }
-    export_to(s, cmd, path, format, &bodies, &parts, quality)
+    export_to(s, cmd, path, format, &bodies, &parts, quality, true)
 }
 
 /// The browser build can't start a program.
@@ -3570,8 +3600,11 @@ mod tests {
         let half = std::f64::consts::FRAC_1_SQRT_2;
         assert_eq!(root["rotation"], json!([-half, 0.0, 0.0, half]));
         let v3 = |v: &Value| -> [f64; 3] { [0, 1, 2].map(|i| v[i].as_f64().unwrap()) };
-        // A node's placement as a matrix (`m[col][row]`) from its translation and rotation.
+        // A node's placement (`m[col][row]`): its `matrix`, else its translation and rotation.
         let local = |n: &Value| -> solidcraft_doc::Mat {
+            if let Some(m) = n.get("matrix").and_then(Value::as_array) {
+                return std::array::from_fn(|c| std::array::from_fn(|r| m[c * 4 + r].as_f64().unwrap()));
+            }
             let t = n.get("translation").map_or([0.0; 3], v3);
             let [x, y, z, w] = n.get("rotation").map_or([0.0, 0.0, 0.0, 1.0], |q| [0, 1, 2, 3].map(|i| q[i].as_f64().unwrap()));
             [
@@ -3652,11 +3685,73 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// #1553: a GLB material has the look's colour (linear, as glTF's factors are), metallic and
-    /// roughness, and a face's own look wins over its body's. A transparent body, or a body a
-    /// render setup gives optics, is refused, and the file already at the path stays as it was.
+    /// #5296: a part moved but not yet committed is written where the move left it, through its
+    /// occurrence's node, with its mesh still in its part's frame, so both copies of the part have
+    /// the same mesh. `hierarchy: false` writes the bodies flat under the root, as 0.40 did.
     #[test]
-    fn a_glb_export_writes_opaque_looks_and_refuses_what_it_cannot_hold() {
+    fn a_glb_export_places_a_moved_part_through_its_node() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-glb-moved-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = |n: &str| dir.join(n).to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("component.create", &json!({"name": "Bracket"})).unwrap();
+        s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 10, "body_name": "Base"})).unwrap();
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("occurrence.copy", &json!({"component": "Bracket", "translate": [0, 40, 0]})).unwrap();
+        let second = s.doc.occurrences.iter().find(|o| o.name == "Bracket:2").unwrap();
+        let mut moved = second.transform;
+        moved[3][0] += 100.0;
+        let id = second.id;
+        s.pending_moves.insert(id, moved);
+
+        s.execute("file.export", &json!({"path": path("moved.glb")})).unwrap();
+        let g = glb_json(&std::fs::read(path("moved.glb")).unwrap());
+        let node = |name: &str| g["nodes"].as_array().unwrap().iter().find(|n| n["name"] == name).unwrap_or_else(|| panic!("no node {name}")).clone();
+        let m = node("Bracket:2")["matrix"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect::<Vec<_>>();
+        assert!((m[12] - 100.0).abs() < 1e-9 && (m[13] - 40.0).abs() < 1e-9, "{m:?}");
+        // Both copies' meshes are the part as the part has it.
+        let local = |occurrence: &str| {
+            let kids = node(occurrence)["children"].as_array().unwrap().clone();
+            let body = &g["nodes"][kids[0].as_u64().unwrap() as usize];
+            let mesh = &g["meshes"][body["mesh"].as_u64().unwrap() as usize];
+            let a = &g["accessors"][mesh["primitives"][0]["attributes"]["POSITION"].as_u64().unwrap() as usize];
+            [&a["min"], &a["max"]].map(|v| [0, 1, 2].map(|i| v[i].as_f64().unwrap()))
+        };
+        for occurrence in ["Bracket:1", "Bracket:2"] {
+            let [lo, hi] = local(occurrence);
+            assert!(
+                lo.iter().zip([0.0, 0.0, 0.0]).chain(hi.iter().zip([20.0, 20.0, 10.0])).all(|(a, b)| (a - b).abs() < 1e-3),
+                "{occurrence}: {lo:?} {hi:?}"
+            );
+        }
+        let mut found: Vec<([f64; 3], [f64; 3])> = glb_bodies(&g).iter().map(|(_, lo, hi)| (*lo, *hi)).collect();
+        found.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert!((found[1].0[0] - 100.0).abs() < 1e-3 && (found[1].0[1] - 40.0).abs() < 1e-3, "{found:?}");
+
+        s.execute("file.export", &json!({"path": path("flat.glb"), "hierarchy": false})).unwrap();
+        let flat = glb_json(&std::fs::read(path("flat.glb")).unwrap());
+        assert!(flat["nodes"].as_array().unwrap().iter().all(|n| n.get("matrix").is_none()));
+        let mut flat_found: Vec<([f64; 3], [f64; 3])> = glb_bodies(&flat).iter().map(|(_, lo, hi)| (*lo, *hi)).collect();
+        flat_found.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(flat_found.len(), 2);
+        for (a, b) in found.iter().zip(&flat_found) {
+            assert!(a.0.iter().chain(&a.1).zip(b.0.iter().chain(&b.1)).all(|(x, y)| (x - y).abs() < 1e-3), "{a:?} != {b:?}");
+        }
+        let e = s.execute("file.export", &json!({"path": path("bad.glb"), "hierarchy": "yes"})).unwrap_err().to_string();
+        assert!(e.contains("hierarchy"), "{e}");
+        // GLB only: other formats don't read it, so any value is ignored there.
+        s.execute("file.export", &json!({"path": path("part.obj"), "hierarchy": "yes"})).unwrap();
+        assert!(std::fs::metadata(path("part.obj")).is_ok_and(|m| m.len() > 0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #1553, #5296: a GLB material has the look's colour (linear, as glTF's factors are),
+    /// metallic, roughness and opacity, and a face's own look wins over its body's. A body a
+    /// render setup gives Glass is written with glTF's transmission; Glass glTF cannot hold, or
+    /// two setups giving a body different Glass, is refused, and the file already at the path
+    /// stays as it was.
+    #[test]
+    fn a_glb_export_writes_looks_and_glass_and_refuses_what_it_cannot_hold() {
         let dir = std::env::temp_dir().join(format!("solidcraft-glb-looks-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("block.glb").to_string_lossy().to_string();
@@ -3674,29 +3769,71 @@ mod tests {
         assert_eq!(red, json!({"baseColorFactor": [1.0, 0.0, 0.0, 1.0], "metallicFactor": 1.0, "roughnessFactor": 0.25}));
         let green = materials.iter().find(|m| m["pbrMetallicRoughness"]["baseColorFactor"] == json!([0.0, 1.0, 0.0, 1.0]));
         assert!(green.is_some_and(|m| m["pbrMetallicRoughness"]["metallicFactor"] == 0.0), "{materials:?}");
+        assert!(materials.iter().all(|m| m.get("alphaMode").is_none()), "opaque looks stay opaque: {materials:?}");
         assert_eq!(g["meshes"][0]["primitives"].as_array().map(Vec::len), Some(2), "the top face is a primitive of its own");
         assert!(g.get("extensionsUsed").is_none(), "IOR 1.5 is glTF's own: {g}");
 
-        // Refused: the file written above stays as it was.
-        s.execute("appearance.assign", &json!({"bodies": ["Block"], "color": "#2040c0", "opacity": 0.5})).unwrap();
-        let e = s.execute("file.export", &json!({"path": path})).unwrap_err().to_string();
-        assert!(e.contains("Block") && e.contains("transparent"), "{e}");
-        assert_eq!(std::fs::read(&path).unwrap(), written);
+        // A body half see-through is alpha blended at half.
+        s.execute("appearance.assign", &json!({"bodies": ["Block"], "name": "Tinted", "color": "#2040c0", "opacity": 0.5})).unwrap();
+        let g = glb_json(&s.execute("file.export", &json!({"path": path})).map(|_| std::fs::read(&path).unwrap()).unwrap());
+        let tinted = g["materials"].as_array().unwrap().iter().find(|m| m["name"] == "Tinted").cloned().unwrap_or_else(|| panic!("{g}"));
+        assert_eq!(tinted["alphaMode"], "BLEND");
+        assert_eq!(tinted["pbrMetallicRoughness"]["baseColorFactor"][3], 0.5);
         s.execute("appearance.assign", &json!({"bodies": ["Block"], "color": "#2040c0", "opacity": 1.0})).unwrap();
 
-        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 4, "corner": [40, 0, 0], "body_name": "Diffuser"})).unwrap();
-        s.execute("render.settings.set", &json!({"name": "Studio", "set": {"job": {"method": "gpu_path"}}})).unwrap();
-        let index = crate::product_scene::extract(&s).unwrap().meshes.iter().position(|m| m.name == "Diffuser").unwrap();
-        s.execute(
-            "render.optics.bind",
-            &json!({"name": "Studio", "body_index": index, "body_name": "Diffuser", "expected_revision": s.revision, "optics": {"ior": 1.4}}),
-        )
-        .unwrap();
+        // Glass: transmitted, with its IOR, and a volume as thick as the pane's thinnest side
+        // that keeps exp(-1) of red over 1 / 0.2 mm (5 mm, 0.005 m).
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 4, "corner": [40, 0, 0], "body_name": "Pane"})).unwrap();
+        let index = crate::product_scene::extract(&s).unwrap().meshes.iter().position(|m| m.name == "Pane").unwrap();
+        let glass = json!({"ior": 1.52, "absorption_per_mm": [0.2, 0.1, 0.0], "boundary": "closed_mesh"});
+        for setup in ["Studio", "Hero"] {
+            s.execute("render.settings.set", &json!({"name": setup, "set": {"job": {"method": "gpu_path"}}})).unwrap();
+            s.execute(
+                "render.optics.bind",
+                &json!({"name": setup, "body_index": index, "body_name": "Pane", "expected_revision": s.revision, "optics": glass}),
+            )
+            .unwrap();
+        }
+        s.execute("file.export", &json!({"path": path})).unwrap();
+        let g = glb_json(&std::fs::read(&path).unwrap());
+        let pane = g["materials"].as_array().unwrap().iter().find(|m| m["name"] == "Pane").cloned().unwrap_or_else(|| panic!("{g}"));
+        assert_eq!(pane["extensions"]["KHR_materials_transmission"]["transmissionFactor"], 1.0);
+        assert_eq!(pane["extensions"]["KHR_materials_ior"]["ior"], 1.52);
+        assert!(pane.get("alphaMode").is_none(), "glass transmits rather than blends: {pane}");
+        let volume = &pane["extensions"]["KHR_materials_volume"];
+        assert!((volume["thicknessFactor"].as_f64().unwrap() - 4.0).abs() < 1e-9, "{volume}");
+        assert!((volume["attenuationDistance"].as_f64().unwrap() - 0.005).abs() < 1e-12, "{volume}");
+        let color: Vec<f64> = volume["attenuationColor"].as_array().unwrap().iter().filter_map(Value::as_f64).collect();
+        for (c, want) in color.iter().zip([(-1.0f64).exp(), (-0.5f64).exp(), 1.0]) {
+            assert!((c - want).abs() < 1e-12, "{color:?}");
+        }
+        let used: Vec<&str> = g["extensionsUsed"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        assert_eq!(used, ["KHR_materials_ior", "KHR_materials_transmission", "KHR_materials_volume"]);
+        let written = std::fs::read(&path).unwrap();
+
+        // Two setups giving the pane different Glass: refused, naming both.
+        let rebind = |s: &mut Session, setup: &str, optics: &Value| {
+            let replace =
+                json!({"name": setup, "body_index": index, "body_name": "Pane", "expected_revision": s.revision, "optics": optics, "replace": true});
+            s.execute("render.optics.bind", &replace).unwrap();
+        };
+        rebind(&mut s, "Hero", &json!({"ior": 1.33, "boundary": "closed_mesh"}));
         let e = s.execute("file.export", &json!({"path": path})).unwrap_err().to_string();
-        assert!(e.contains("Diffuser") && e.contains("render setup `Studio`") && e.contains("optics"), "{e}");
+        assert!(e.contains("Pane") && e.contains("`Hero`") && e.contains("`Studio`"), "{e}");
+        assert_eq!(std::fs::read(&path).unwrap(), written);
+        // Left out with `bodies`, its Glass is not read: the rest exports.
+        s.execute("file.export", &json!({"path": path, "bodies": ["Block"]})).unwrap();
+        assert!(glb_json(&std::fs::read(&path).unwrap())["materials"].as_array().unwrap().iter().all(|m| m["name"] != "Pane"));
+        std::fs::write(&path, &written).unwrap();
+        // Glass that scatters light inside it: refused, as glTF has no place for it.
+        let scattering = json!({"ior": 1.52, "absorption_per_mm": [0.2, 0.1, 0.0], "boundary": "closed_mesh", "subsurface": {"scattering_per_mm": 0.4, "anisotropy": 0.0}});
+        rebind(&mut s, "Hero", &scattering);
+        rebind(&mut s, "Studio", &scattering);
+        let e = s.execute("file.export", &json!({"path": path})).unwrap_err().to_string();
+        assert!(e.contains("Pane") && e.contains("subsurface"), "{e}");
         assert_eq!(std::fs::read(&path).unwrap(), written);
         s.execute("file.export", &json!({"path": path, "bodies": ["Block"]})).unwrap();
-        assert_ne!(std::fs::read(&path).unwrap(), written, "the body without optics exports");
+        assert_ne!(std::fs::read(&path).unwrap(), written, "the body without Glass exports");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

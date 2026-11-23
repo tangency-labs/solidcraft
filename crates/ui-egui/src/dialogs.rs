@@ -7273,9 +7273,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     if let Value::Object(m) = &mut params {
         // A fillet option that doesn't apply with the others is never sent.
         let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
+        // The dialog has no end cut control to clear one an edited coil kept.
+        let profile_coil = matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && m.contains_key("sketch");
         for (k, v) in &d.extra {
             // Saved selection mode is editor state, not a command parameter.
             if matches!(d.kind, Kind::Split { .. }) && k == "split_tool_mode" {
+                continue;
+            }
+            if profile_coil && k == "end_cut" {
                 continue;
             }
             if fillet && !dense::fillet_option_applies(&d.extra, k) {
@@ -7366,6 +7371,17 @@ fn pattern_objects(s: &Session, objects: &[Sel], p: &mut Value) {
         p["occurrences"] = json!(paths);
     } else if objects.iter().any(|x| matches!(x, Sel::Feature { .. })) {
         p["features"] = json!(pattern_features(s, objects));
+    } else if objects.iter().any(|x| matches!(x, Sel::Occurrence { .. })) {
+        let mut names = Vec::new();
+        for x in objects {
+            let Sel::Occurrence { path } = x else { continue };
+            let Ok(place) = s.occurrence_placement(path) else { continue };
+            let Some(name) = s.doc.components.iter().find(|c| c.id == place.component).map(|c| c.name.clone()) else { continue };
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        p["components"] = json!(names);
     } else {
         p["bodies"] = json!(objects.body_names());
     }
@@ -8610,6 +8626,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             position,
             start_angle,
             clockwise,
+            end_cut,
             operation,
             targets,
         } => {
@@ -8647,6 +8664,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             if *clockwise {
                 d.extra.insert("clockwise".into(), json!(true));
+            }
+            if *end_cut == solidcraft_engine::doc::CoilEndCut::Square {
+                d.extra.insert("end_cut".into(), json!("square"));
             }
             if !targets.is_empty() {
                 d.extra.insert("targets".into(), json!(targets));
@@ -8738,7 +8758,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Pattern { features, pattern, bodies: copied, placements } => {
+        FeatureKind::Pattern { features, pattern, bodies: copied, placements, components, .. } => {
             let ids: Vec<u64> = features.iter().map(|f| f.0).collect();
             let bodies: Vec<Sel> = if copied.is_empty() {
                 st.bodies.iter().filter(|b| ids.contains(&b.feature)).map(|b| Sel::Body { name: b.name.clone() }).collect()
@@ -8752,6 +8772,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 };
                 copied.iter().enumerate().map(|(k, name)| Sel::Body { name: world(k, name) }).collect()
             };
+            let component_sels: Vec<Sel> =
+                components.iter().filter_map(|id| s.doc.occurrence_of(*id).map(|o| Sel::Occurrence { path: vec![o.id] })).collect();
             let mut d = match pattern {
                 PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
                     let mut d = start("solid.pattern.rectangular")?;
@@ -8835,6 +8857,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     inp.accept = selection::FEATURES;
                     inp.label = objects_label(inp.accept);
                     inp.items = ids.iter().map(|id| Sel::Feature { id: *id }).collect();
+                } else if !component_sels.is_empty() {
+                    // Same accept as Align of components: bodies/occurrences resolve to placements.
+                    inp.accept = BODIES;
+                    inp.label = "Components";
+                    inp.items = component_sels;
                 } else {
                     inp.accept = BODIES;
                     inp.label = objects_label(inp.accept);
@@ -8853,8 +8880,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 inp.items = sections
                     .iter()
                     .flat_map(|sec| {
+                        if let Some(point) = &sec.point {
+                            return vec![Sel::SketchPoint { id: format!("{}:{point}", sec.sketch.0) }];
+                        }
                         let idx = st.sketch(sec.sketch.0).map(|ss| profile_indices(ss, &sec.profiles)).unwrap_or_default();
-                        idx.into_iter().map(move |index| Sel::Profile { sketch: sec.sketch.0, index })
+                        idx.into_iter().map(move |index| Sel::Profile { sketch: sec.sketch.0, index }).collect()
                     })
                     .collect();
             }
