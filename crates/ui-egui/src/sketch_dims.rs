@@ -593,6 +593,10 @@ fn construction_offset_live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Optio
 /// side, and a box on that click would take it.
 fn boxes_now(t: &Tool) -> Vec<DimBox> {
     let mut boxes = boxes_for(t.cmd, t.pts.len());
+    // The 3-Point Arc's Radius and Sweep boxes belong to its tangent mode (#20719).
+    if t.cmd == "sketch.arc.three_point" && !t.arc_modes {
+        boxes.clear();
+    }
     if t.cmd == "sketch.construction_line.parallel" && input_stage(t) == 0 || !t.pts.is_empty() {
         boxes.retain(|b| b.label != "Offset");
     }
@@ -814,6 +818,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     }
     let Some(mut t) = app.tool.take() else { return };
     t.classic = app.preferences.construction_line_classic;
+    t.arc_modes = app.preferences.sketch_arc_tangent_snap;
     sync(&mut t);
     let place = if t.dims.is_empty() { None } else { boxes(app, ui, proj, &mut t) };
     if t.classic {
@@ -836,9 +841,10 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let e = shown(app, t, hover.as_ref()?);
     let px = 2.0 * app.cam.half_height() / f64::from(proj.rect.height().max(1.0));
     let lv = live(app, t, e, px);
-    // The 3-Point Arc's centre, a small cross while its third point is placed. Only a marker: no
-    // geometry is added (#20719).
+    // The 3-Point Arc's centre, a small cross while its third point is placed, in the arc's
+    // tangent mode only. Only a marker: no geometry is added (#20719).
     if t.cmd == "sketch.arc.three_point"
+        && t.arc_modes
         && let (Some(start), Some(end)) = (t.pts.first(), t.pts.get(1))
         && let Some((centre, _, _)) = three_point_circle(start.0, end.0, e)
         && let Some(at) = proj.to_screen(plane.to_world(centre))
@@ -849,8 +855,8 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
         ui.painter().line_segment([at - vec2(arm, 0.0), at + vec2(arm, 0.0)], stroke);
         ui.painter().line_segment([at - vec2(0.0, arm), at + vec2(0.0, arm)], stroke);
         crate::scenario::publish_count("arc_centre_marker", 1.0);
-        // With the arc's snaps on: dotted lines from the centre to the ends it lines up with.
-        let guides = if app.preferences.sketch_arc_tangent_snap { centre_guides(centre, [start.0, end.0], 3.0 * px) } else { Vec::new() };
+        // Dotted lines from the centre to the ends it lines up with.
+        let guides = centre_guides(centre, [start.0, end.0], 3.0 * px);
         for (from, to) in &guides {
             if let (Some(a), Some(b)) = (proj.to_screen(plane.to_world(*from)), proj.to_screen(plane.to_world(*to))) {
                 ui.painter().extend(crate::ui_kit::dashed_line(&[a, b], ui.painter().clip_rect(), egui::Stroke::new(1.0, tk.rubber_band), 2.0, 3.0));

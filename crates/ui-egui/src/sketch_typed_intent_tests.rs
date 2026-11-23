@@ -430,7 +430,7 @@ fn arc_numbers(h: &Harness) -> (f64, f64, Vec2) {
 
 #[test]
 fn three_point_arc_third_point_offers_radius_and_sweep_boxes() {
-    let mut h = l_with_arc_ends(false);
+    let mut h = l_with_arc_ends(true);
     h.step(&json!({"move":{"sketch":[10.0, 10.0]}})).unwrap();
     h.frames(2);
     let labels: Vec<_> = h.app.tool.as_ref().unwrap().dims.iter().map(|d| d.label).collect();
@@ -447,7 +447,7 @@ fn three_point_arc_third_point_offers_radius_and_sweep_boxes() {
 
 #[test]
 fn three_point_arc_typed_sweep_gives_that_sweep_and_too_small_a_radius_is_refused() {
-    let mut h = l_with_arc_ends(false);
+    let mut h = l_with_arc_ends(true);
     h.step(&json!({"move":{"sketch":[10.0, 10.0]}})).unwrap();
     h.frames(2);
     h.step(&json!({"key":"Tab"})).unwrap();
@@ -459,7 +459,7 @@ fn three_point_arc_typed_sweep_gives_that_sweep_and_too_small_a_radius_is_refuse
     let (radius, ..) = arc_numbers(&h);
     assert!((radius - 50.0).abs() < 1e-6, "{radius}");
 
-    let mut small = l_with_arc_ends(false);
+    let mut small = l_with_arc_ends(true);
     small.step(&json!({"move":{"sketch":[10.0, 10.0]}})).unwrap();
     small.frames(2);
     type_value(&mut small, "20");
@@ -530,6 +530,28 @@ fn three_point_arc_tangent_snap_is_off_unless_turned_on() {
     h.step(&json!({"click":{"sketch":off}})).unwrap();
     h.frames(2);
     assert!(!constraints(&h).iter().any(|k| matches!(k, ConstraintKind::Tangent { .. })));
+}
+
+/// #20719: the Radius and Sweep boxes and the centre cross are part of the tangent mode. With it
+/// off the 3-Point Arc offers no box, so a typed value locks nothing and the click draws the arc
+/// through the pointer as it always did; with it on both are there.
+#[test]
+fn three_point_arc_boxes_and_centre_cross_are_off_unless_the_mode_is_on() {
+    let mut h = l_with_arc_ends(false);
+    h.step(&json!({"move":{"sketch":[10.0, 10.0]}})).unwrap();
+    h.frames(2);
+    assert!(h.app.tool.as_ref().unwrap().dims.is_empty(), "no Radius or Sweep box");
+    assert_eq!(crate::scenario::count_of("arc_centre_marker"), None, "no centre cross");
+    let t = h.app.tool.as_ref().unwrap();
+    assert!(!crate::sketch_dims::has_locked(t, "Radius") && !crate::sketch_dims::has_locked(t, "Sweep"), "no value is locked");
+    assert!(crate::sketch_dims::dimensions(t).as_object().is_some_and(|d| d.is_empty()), "nothing becomes a dimension");
+    assert!(!constraints(&h).iter().any(|k| matches!(k, ConstraintKind::Radius { .. } | ConstraintKind::ArcSweep { .. })));
+
+    let mut on = l_with_arc_ends(true);
+    on.step(&json!({"move":{"sketch":[10.0, 10.0]}})).unwrap();
+    on.frames(2);
+    assert_eq!(on.app.tool.as_ref().unwrap().dims.len(), 2);
+    assert_eq!(crate::scenario::count_of("arc_centre_marker"), Some(1.0));
 }
 
 /// #20719: a click commits the point the hover showed. An arc ends at (10, 0) with its centre

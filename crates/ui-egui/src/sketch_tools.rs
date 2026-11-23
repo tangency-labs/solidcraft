@@ -1044,6 +1044,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         chain: Default::default(),
         line_type: crate::sketch_construction::last_line_type(),
         classic: false,
+        arc_modes: false,
     })
 }
 

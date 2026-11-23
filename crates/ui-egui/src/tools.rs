@@ -126,6 +126,10 @@ pub struct Tool {
     /// Construction/Normal switch under the Length box sets `line_type`, and only a typed length
     /// makes a segment. Kept in step with the preference while the tool runs.
     pub classic: bool,
+    /// The 3-Point Arc's tangent mode is on (`sketch_arc_tangent_snap`, #20719): its third point
+    /// has Radius and Sweep boxes and a centre cross. Kept in step with the preference while the
+    /// tool runs; off, the tool shows only the pointer's coordinates, as before.
+    pub arc_modes: bool,
 }
 
 impl Tool {
@@ -182,6 +186,7 @@ impl Tool {
             chain: Default::default(),
             line_type: 3,
             classic: false,
+            arc_modes: false,
         })
     }
 }
