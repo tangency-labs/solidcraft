@@ -7597,7 +7597,7 @@ pub(crate) fn curves_sketch(app: &SolveApp, ids: &[String], not: Option<u64>) ->
 
 /// Whether the sketch `sketch` still holds the curve `id` (a 3D wire counts): a curve deleted
 /// or renamed in that sketch leaves a pick of it naming nothing the app can use (#17550).
-pub(crate) fn sketch_holds_curve(st: &solidcraft_engine::doc::ModelState, sketch: u64, id: &str) -> bool {
+fn sketch_holds_curve(st: &solidcraft_engine::doc::ModelState, sketch: u64, id: &str) -> bool {
     st.sketch(sketch).is_some_and(|ss| ss.sketch.curve_index(id).is_some() || ss.sketch.wire_index(id).is_some())
 }
 
