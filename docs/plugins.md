@@ -985,9 +985,7 @@ Only an importer may say `open`.
   `unsupported`), and the next one gets a fresh instance. The compiled component stays in memory, so the next file opens
   without compiling again. Return `unsupported(reason)` for a
   deliberate refusal meant for the user: File › Open and drag-and-drop open show the plugin's name
-  and its reason as plain text in a dialog with OK. **Show importer refusals in a dialog** in
-  Preferences › Design › Imported files is on by default; turn it off to report interactive
-  refusals only in the status line, as before. Traps and other failures use the status line.
+  and its reason as plain text in a dialog with OK. Traps and other failures use the status line.
   Rust engine callers receive a typed `Unsupported` error with the plugin's reason. Answered
   background opens also include `plugin_error: {"kind":"unsupported","plugin":"Sample","reason":"..."}`
   alongside `ok: false` and the readable `error` text. Scripts and MCP do not open a dialog;
