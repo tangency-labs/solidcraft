@@ -214,7 +214,8 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     let healed = crate::boolean_record::healed(b)?.with_split_lines(b.splits.clone());
     let size = healed.size();
     let reach = size * 1e-3 + 1e-6;
-    let (ops, order) = healed.ops_body().ok_or_else(|| KernelError::Failed("offset faces: exact body".into()))?;
+    let form = healed.ops_body().ok_or_else(|| KernelError::Failed("offset faces: exact body".into()))?;
+    let (ops, order) = &*form;
     let pts: Vec<[f64; 3]> = at.iter().map(|p| [p.x, p.y, p.z]).collect();
     let dists = ops.face_distances_within(order, &pts, reach).map_err(|e| KernelError::Failed(e.to_string()))?;
     let mut chosen: Vec<usize> = Vec::new();
