@@ -2782,7 +2782,7 @@ const TRIM_BOUND_FLOOR: f64 = 1.0e-3;
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id.
-fn existing_uv_trim_curve(
+pub(crate) fn existing_uv_trim_curve(
     b: &Brep,
     eu: EdgeuseId,
     want_dist: bool,
@@ -3425,13 +3425,46 @@ pub fn normalized_evaluate(
     // fetch or create UVTrimCurve (status ignored; the outputs are for the
     // suspicious-result debug check)
     let _ = get_or_create_uv_trim_curve(k, b, eu, true, true, true)?;
-    let b = &*b;
+    evaluate_with_trim(k, b, eu, normalized_parameter, want_first_deriv)
+}
+
+/// [`normalized_evaluate`] in UV space with `ok_to_make_uv_trim_curve` of an edge use
+/// whose UV trim curve exists (its own or its mate's): the same evaluation, reading the
+/// B-rep only.
+///
+/// # Errors
+///
+/// As [`normalized_evaluate`]; [`SolidError::PreparationRequired`] where the edge use
+/// has no UV trim curve (nothing is made).
+pub(crate) fn normalized_evaluate_existing_uv(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    normalized_parameter: f64,
+    want_first_deriv: bool,
+) -> Result<NormalizedEval> {
+    orientation(b, eu)?;
+    if existing_uv_trim_curve(b, eu, true)?.is_none() {
+        return Err(SolidError::PreparationRequired { operation: OP });
+    }
+    evaluate_with_trim(k, b, eu, normalized_parameter, want_first_deriv)
+}
+
+/// The UV evaluation of [`normalized_evaluate`] once the edge use's UV trim curve is
+/// fetched (shared by [`normalized_evaluate_existing_uv`]).
+fn evaluate_with_trim(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    normalized_parameter: f64,
+    want_first_deriv: bool,
+) -> Result<NormalizedEval> {
     on_own_surfaces(evaluate_fetched(
         k,
         b,
         eu,
         normalized_parameter,
-        parameter_space,
+        true,
         want_first_deriv,
         &own_surface(b),
     ))

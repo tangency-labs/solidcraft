@@ -34,8 +34,8 @@ Each case runs as the rig runs it, with the kernel's operations traced at the bo
 - `<area>/<case>.json`: one entry. A ladder case's area is `ladder/<tier>`.
 - `<area>/<case>.bodies.json.gz`: the entry's operand records, `{"b<n>": record}`, gzip.
 - `<area>/<case>.jpg`: the case's render, where it has one: the site's case gallery shows it.
-- `manifest.json`: the counts per area and every case that isn't expressible, with its reasons.
-- `known_failing.json`: the kernel cases that fail today, the one list: `case` (`<area>/<case>`), `issue` and `reason`. Seeded from the entries' `rig.known_failing`; an entry whose `issue` is `to file` has none yet.
+- `manifest.json`: the SolidCraft and solidcore commits the cases were exported at, and every case that isn't expressible, with its reasons.
+- `../kernel_cases_known_failing/<area>/<case>.json`: the kernel cases that fail today, the one list, one file per case (named by the case, so pull requests that list or unlist different cases never touch the same file): `issue`, `reason` and, optionally, `fails`. Seeded from the entries' `rig.known_failing`; an entry whose `issue` is `to file` has none yet. To list a case, add its file; to unlist it, delete the file. A file whose case the corpus does not have fails the rig.
 
 ## An entry
 

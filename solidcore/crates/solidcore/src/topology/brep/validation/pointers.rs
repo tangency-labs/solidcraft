@@ -391,9 +391,10 @@ pub(crate) fn validate_pointers_excluding(
     validate_pointers_traced(k, b, reports, level, walk, keys, &mut true)
 }
 
-/// [`validate_pointers_excluding`], also clearing `faces_whole` (not upstream) when a face was
-/// checked on a copy standing for the body or its `CheckFace` stopped early: then a second pass
-/// with `walk` may check a face where this one did not. Otherwise `walk` only drops tests.
+/// [`validate_pointers_excluding`], also clearing `faces_whole` (not upstream) when a face's
+/// `CheckFace` stopped early: then a second pass with `walk` may check a face where this one
+/// did not. Otherwise `walk` only drops tests, also for a face checked on the copy standing
+/// for the body (see the face loop below).
 pub(crate) fn validate_pointers_traced(
     k: &Kernel,
     b: &mut Brep,
@@ -465,6 +466,15 @@ pub(crate) fn validate_pointers_traced(
     // `check_face` makes its trims, here on a copy standing for this B-rep (made once, for
     // the first such face), so the check's answer does not depend on whether an earlier
     // operation made them, and checking does not change the body it checks.
+    //
+    // A face checked on that copy leaves `faces_whole` set (#21131). A second pass makes its
+    // own copy from this B-rep, and its caller runs it only when this pass wrote nothing
+    // to the B-rep (its write stamps, `check_with_keys_counted`). So that copy starts as this
+    // one did, and the same deterministic `CheckFace` makes the same trims on it, face after
+    // face in the same order. With `walk` it then only skips `check_loop`, whose reads
+    // (`edge_uv_extremes`, the junction and gap tests) write nothing that a later loop or face
+    // reads. So the second pass would find nothing this one missed, as on a face checked on
+    // the body itself.
     let mut standing: Option<Brep> = None;
     for &f in &faces {
         // (not upstream) cooperative cancellation once per face: checking a face's trim
@@ -474,7 +484,6 @@ pub(crate) fn validate_pointers_traced(
         let on = if crate::topology::trimming_tools::face_uv_curves_present(b, f)? {
             &mut *b
         } else {
-            *faces_whole = false;
             match &mut standing {
                 Some(copy) => copy,
                 none => none.insert(b.clone_standing_for_self()?),
