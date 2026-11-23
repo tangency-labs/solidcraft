@@ -6,7 +6,7 @@
 //! noncharacter and private-use code points, every other space, and characters that draw
 //! nothing (default-ignorable code points, braille blank, object replacement) are refused.
 
-use unicode_general_category::{get_general_category, GeneralCategory as Gc};
+use unicode_general_category::{GeneralCategory as Gc, get_general_category};
 
 /// Whether every character is suitable for one plain annotation line.
 pub fn is_plain_line(text: &str) -> bool {

@@ -592,8 +592,24 @@ fn parameter_names_are_explicit_and_stable() {
 fn plain_annotation_policy_rejects_text_that_draws_nothing() {
     // Shared plain-text cases: also the cases for any other annotation using the helper.
     for text in [
-        "\u{3164}", "\u{115f}", "\u{ffa0}", "\u{2800}", "\u{fffc}", "\u{034f}", "\u{fe0f}", "\u{0301}", "\u{ffff}", "\u{e000}", "\u{0378}", "\u{2003}",
-        "\u{3000}", "\u{3164}drill\u{3164}", "a\u{3164}b", " \u{0301}", "\u{0301}a", "a\u{fe0f}",
+        "\u{3164}",
+        "\u{115f}",
+        "\u{ffa0}",
+        "\u{2800}",
+        "\u{fffc}",
+        "\u{034f}",
+        "\u{fe0f}",
+        "\u{0301}",
+        "\u{ffff}",
+        "\u{e000}",
+        "\u{0378}",
+        "\u{2003}",
+        "\u{3000}",
+        "\u{3164}drill\u{3164}",
+        "a\u{3164}b",
+        " \u{0301}",
+        "\u{0301}a",
+        "a\u{fe0f}",
     ] {
         assert!(!crate::plain_text::is_plain_line(text), "{text:?}");
     }
@@ -647,5 +663,28 @@ fn formatted_limit_range_must_not_collapse_to_one_value() {
         let indication = pair(order);
         indication.validate().unwrap();
         assert!(indication.formatted_parameter_texts(one_decimal).is_err());
+    }
+}
+
+#[test]
+fn a_range_formats_each_limit_once() {
+    let mut iso_pair = iso();
+    iso_lines(&mut iso_pair).push(IsoParameterLine {
+        parameter: IsoParameter::Ra,
+        tolerance: ToleranceType::Lower,
+        limit_um: 0.8,
+        acceptance: AcceptanceRule::Maximum,
+    });
+    let asme_pair = asme(AmplitudeUnit::Microinch);
+    for (indication, limits, expected) in [(iso_pair, [1.6, 0.8], vec!["U Ra 1.6", "L Ra 0.8"]), (asme_pair, [63.0, 32.0], vec!["Ra 32-63"])] {
+        let calls = std::cell::RefCell::new(Vec::new());
+        let text = indication
+            .formatted_parameter_texts(|limit| {
+                calls.borrow_mut().push(limit);
+                diagnostic_number(limit)
+            })
+            .unwrap();
+        assert_eq!(text, expected);
+        assert_eq!(*calls.borrow(), limits);
     }
 }

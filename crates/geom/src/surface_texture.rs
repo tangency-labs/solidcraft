@@ -270,52 +270,52 @@ impl Indication {
             }
             Ok::<(String, f64), Invalid>((text, rounded))
         };
-        let number = |n| shown(n).map(|(text, _)| text);
-        // A range valid in the record must not be drawn as one value: when the stored limits
-        // differ, the rounded lower limit has to stay below the rounded upper limit.
-        let distinct = |lower: f64, upper: f64| -> Result<()> {
-            if for_preview && lower != upper {
-                require(shown(lower)?.1 < shown(upper)?.1, "formatted lower limit must stay below the formatted upper limit")?;
-            }
-            Ok(())
+        // Check the same formatter results that will be displayed. Unequal stored limits
+        // must remain distinct and ordered after rounding.
+        let check_range = |lower, upper, rounded_lower, rounded_upper| {
+            require(
+                !for_preview || lower == upper || rounded_lower < rounded_upper,
+                "formatted lower limit must stay below the formatted upper limit",
+            )
         };
         match &self.specification {
-            Specification::Iso21920_1_2021 { lines } => lines
-                .iter()
-                .map(|line| {
-                    // Reviewer-requested provisional convention: prefix 'U ' for an upper limit only
-                    // when a lower limit for the same parameter is present; lower keeps 'L ', lone upper
-                    // remains unprefixed. No verified compliance claim is made.
-                    let tolerance = match line.tolerance {
-                        ToleranceType::Lower => "L ",
-                        ToleranceType::Upper => {
-                            if lines.iter().any(|other| other.parameter == line.parameter && other.tolerance == ToleranceType::Lower) {
-                                "U "
-                            } else {
-                                ""
+            Specification::Iso21920_1_2021 { lines } => {
+                let formatted = lines.iter().map(|line| shown(line.limit_um)).collect::<Result<Vec<_>>>()?;
+                lines
+                    .iter()
+                    .zip(&formatted)
+                    .map(|(line, (text, rounded))| {
+                        let paired =
+                            lines.iter().zip(&formatted).find(|(other, _)| other.parameter == line.parameter && other.tolerance != line.tolerance);
+                        // Provisional convention: a lone upper limit has no prefix.
+                        let tolerance = match line.tolerance {
+                            ToleranceType::Lower => {
+                                if let Some((upper, (_, rounded_upper))) = paired {
+                                    check_range(line.limit_um, upper.limit_um, *rounded, *rounded_upper)?;
+                                }
+                                "L "
                             }
-                        }
-                    };
-                    let rule = match line.acceptance {
-                        AcceptanceRule::Maximum => "",
-                        AcceptanceRule::SixteenPercent => " T16%",
-                        AcceptanceRule::Median => " Tmed",
-                    };
-                    if let Some(other) = lines.iter().find(|o| o.parameter == line.parameter && o.tolerance != line.tolerance) {
-                        let (lower, upper) = if line.tolerance == ToleranceType::Lower { (line.limit_um, other.limit_um) } else { (other.limit_um, line.limit_um) };
-                        distinct(lower, upper)?;
-                    }
-                    Ok(format!("{tolerance}{} {}{rule}", line.parameter.name(), number(line.limit_um)?))
-                })
-                .collect(),
+                            ToleranceType::Upper if paired.is_some() => "U ",
+                            ToleranceType::Upper => "",
+                        };
+                        let rule = match line.acceptance {
+                            AcceptanceRule::Maximum => "",
+                            AcceptanceRule::SixteenPercent => " T16%",
+                            AcceptanceRule::Median => " Tmed",
+                        };
+                        Ok(format!("{tolerance}{} {text}{rule}", line.parameter.name()))
+                    })
+                    .collect()
+            }
             Specification::AsmeY14_36_2018 { lines, .. } => lines
                 .iter()
                 .map(|line| {
-                    let maximum = number(line.maximum)?;
+                    let (maximum, rounded_maximum) = shown(line.maximum)?;
                     match line.minimum {
                         Some(minimum) => {
-                            distinct(minimum, line.maximum)?;
-                            Ok(format!("{} {}-{maximum}", line.parameter.name(), number(minimum)?))
+                            let (text, rounded_minimum) = shown(minimum)?;
+                            check_range(minimum, line.maximum, rounded_minimum, rounded_maximum)?;
+                            Ok(format!("{} {text}-{maximum}", line.parameter.name()))
                         }
                         None => Ok(format!("{} {maximum}", line.parameter.name())),
                     }
