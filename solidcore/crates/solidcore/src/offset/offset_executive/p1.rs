@@ -3247,7 +3247,7 @@ pub(super) const NO_OFFSET: &str =
                          before any step that builds into it, and every step that takes it \
                          gives it back";
 /// Why an edge use has no edge.
-const EU_NO_EDGE: &str =
+pub(super) const EU_NO_EDGE: &str =
     "an edge use has no edge, though the kernel links every edge use to its edge";
 /// Why an edge use has no vertex use.
 const EU_NO_VERTEXUSE: &str =
@@ -3262,10 +3262,11 @@ const EU_NO_LOOPUSE: &str = "an edge use of a face has no loop use, though the k
 const EU_NO_NEIGHBOUR: &str = "an edge use has no neighbour in its loop, though the kernel keeps \
                                the edge uses of a loop in a ring";
 /// Why an edge use has no mate.
-const EU_NO_MATE: &str =
+pub(super) const EU_NO_MATE: &str =
     "an edge use has no mate, though the kernel makes edge uses in mated pairs";
 /// Why an edge use has no radial.
-const EU_NO_RADIAL: &str = "an edge use has no radial, though the kernel links the uses around \
+pub(super) const EU_NO_RADIAL: &str =
+    "an edge use has no radial, though the kernel links the uses around \
                             every edge in a ring";
 /// Why an edge use has no face use.
 const EU_NO_FACEUSE: &str = "an edge use of a face has no face use, though the kernel makes \
@@ -3277,7 +3278,7 @@ const EDGE_NO_EDGEUSE: &str =
 const EDGE_NO_SAME_EDGEUSE: &str = "an edge has no edge use running with its curve, though the \
                                     kernel makes an edge's uses in mated pairs, one each way";
 /// Why an edge has no vertex at an end.
-const EDGE_NO_VERTEX: &str =
+pub(super) const EDGE_NO_VERTEX: &str =
     "an edge has no vertex at an end, though the kernel bounds every edge by its vertices";
 /// Why a vertex of a loop use is missing.
 const LOOP_NO_VERTEX: &str = "a loop use has an edge use with no vertex, though the kernel \

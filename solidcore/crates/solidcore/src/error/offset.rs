@@ -2758,15 +2758,10 @@ mod tests {
     }
 
     /// The offset routines describe their failures: their library code builds no bare
-    /// `Upstream` status, except the files listed (with the bare sites each may still
-    /// hold) whose conversion waits on other open work.
+    /// `Upstream` status.
     #[test]
     fn the_offset_routines_build_no_bare_statuses() {
-        super::super::bare_scan::assert_waiting(
-            "offset",
-            20,
-            &[("offset/offset_executive/p2.rs", 28)],
-        );
+        super::super::bare_scan::assert_waiting("offset", 20, &[]);
     }
 
     /// The sites that build a offset phrase cause only fall:
