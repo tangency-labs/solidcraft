@@ -291,9 +291,12 @@ fn a_body_without_uv_trims_still_measures() {
         assert!(near(m.centroid[i], n.centroid[i]), "{m:?} {n:?}");
     }
     assert!(near(with.area(1e-9).unwrap(), without.area(1e-9).unwrap()));
-    // the trims are made: the edit door ran
+    // the trims are made (each edge use's, or its mate's): the edit door ran
     let b = without.kernel();
-    assert!(b.edgeuses().iter().all(|(_, u)| u.uv_trim_curve.is_some()));
+    assert_eq!(
+        solidcore::mass::integrator::properties::missing_uv_trim(&b, None).unwrap(),
+        None
+    );
 }
 
 /// A read through the shared door leaves the proof beside the body standing: the next proved

@@ -3670,25 +3670,25 @@ mod tests {
     /// face surface's trim cache slot.
     fn trims_and_caches(b: &Brep) -> String {
         use crate::topology::edgeuse::p1 as eu1;
-        let mut out = String::new();
+        let mut out = Vec::new();
         for (u, r) in b.edgeuses().iter() {
             let gap = eu1::is_max_edge_face_gap_init(b, u).unwrap();
-            out += &format!("{u:?} {} {gap}\n", r.uv_trim_curve.is_some());
+            out.push(format!("{u:?} {} {gap}", r.uv_trim_curve.is_some()));
         }
         for e in edges(b).unwrap() {
-            out += &format!("{e:?} {:?}\n", edge::tolerance(b, e).unwrap());
+            out.push(format!("{e:?} {:?}", edge::tolerance(b, e).unwrap()));
         }
         for f in faces(b).unwrap() {
             let s = crate::topology::face::p2::surface(b, f).unwrap().unwrap();
             let face = b.face(f).unwrap();
-            out += &format!(
-                "{f:?} {:?} {} {}\n",
+            out.push(format!(
+                "{f:?} {:?} {} {}",
                 face.tolerance,
                 s.has_trim_cache(),
                 s.trim_cache_in_use()
-            );
+            ));
         }
-        out
+        out.join("\n")
     }
 
     /// Primitives with plane, cylinder, cone, sphere and torus faces.
