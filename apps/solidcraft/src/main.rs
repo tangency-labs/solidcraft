@@ -1665,6 +1665,9 @@ fn main() -> eframe::Result {
                 if !native_frame::set_class_icon(cc) {
                     solidcraft_engine::note!("SolidCraft window: no class icon; the taskbar may show a generic one");
                 }
+                // Every window that draws SolidCraft's title bar hands it to Windows: the main
+                // window here, a pop-out when it first draws its bar (#13996).
+                native_frame::register(&cc.egui_ctx);
                 // The OS hit test offers the resize border, at the window's DPI, from the first
                 // message (#1381).
                 app.native_resize_border = custom_titlebar && native_frame::install(cc);

@@ -94,6 +94,12 @@ SolidCraft changes to egui and eframe:
   system refuses is tried again for up to 150 ms (Windows refuses while another process has the
   file open). `lib.rs` re-exports `save_to_disk`, hidden, for SolidCraft's tests
   (`settings_saved_at_once_from_two_windows_stay_whole` in `apps/solidcraft/src/startup.rs`).
+- `crates/egui/src/data/input/viewport_info.rs`, `crates/egui-winit/src/lib.rs`
+  (`update_viewport_info`): `ViewportInfo::native_window`, the handle of the native window a
+  viewport is shown in (the `HWND` on Windows, `None` elsewhere). Windows asks a window what is
+  under the pointer by that handle, and a window's title bar is laid out by its viewport: with
+  the handle each window, the main one and every pop-out, publishes its own bar for one window
+  procedure to answer from (`crates/ui-kit/src/window_chrome/caption.rs`, #13996).
 
 The SolidCraft 3D view uses both to skip frames for pointer motion that changes nothing it
 draws (`viewport::follow_pointer_without_frame` in `crates/ui-egui`).
@@ -241,3 +247,14 @@ SolidCraft changes:
 - `src/platform_impl/windows/window.rs` (`set_fullscreen`): going full screen on such a monitor
   would have sized the window 0x0, so it fills the monitor the window is on instead, and never
   applies a zero-area size (#20645).
+- `src/platform_impl/windows/event_loop.rs` (`WM_NCCALCSIZE`), `window_state.rs`
+  (`WindowFlags::adjust_rect`): a resizable undecorated window with the undecorated shadow keeps
+  the system frame on the left, right and bottom (its invisible resize borders and drop shadow)
+  and has none at the top. This replaces winit's 1 px non-client row at the top, with which
+  Windows 11 offered no snap layouts on a restored window's maximize button, although the hit
+  test answered `HTMAXBUTTON` (#13996). `adjust_rect` grows an inner size by the same frame, so
+  requested and saved sizes and DPI changes keep the client area's size. The two places must
+  agree, which is why the calculation is here and not in the app. A window that cannot be
+  resized (the preview of a view dragged out of the window) has no resize borders to keep and is
+  winit's own, as is a maximized one. The hit test itself is the app's
+  (`apps/solidcraft/src/native_frame.rs`): nothing of it is in this copy.
