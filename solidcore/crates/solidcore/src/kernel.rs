@@ -201,6 +201,7 @@ pub struct WorkCounters {
     blends_recertified: Cell<u64>,
     vertex_drops: Cell<u64>,
     seam_tests: Cell<u64>,
+    contact_stretch_certifications: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -400,6 +401,17 @@ impl WorkCounters {
         self.seam_tests.get()
     }
 
+    /// Stretches a curve intersection certified to keep its two curves within the
+    /// tolerance, from a point solution to an end of either curve, to learn whether the
+    /// solution moves to that end (`move_contacts_to_curve_ends`): each certificate
+    /// subdivides the stretch. The count grows with the point solutions near an end, so
+    /// two curves that coincide within the tolerance along many turns, crossing at
+    /// thousands of points, show here. Not the fork's.
+    #[must_use]
+    pub fn contact_stretch_certifications(&self) -> u64 {
+        self.contact_stretch_certifications.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -424,11 +436,18 @@ impl WorkCounters {
         self.blends_recertified.set(0);
         self.vertex_drops.set(0);
         self.seam_tests.set(0);
+        self.contact_stretch_certifications.set(0);
     }
 
     /// Counts one edge or vertex asked whether it is a seam or a pole of a face.
     pub(crate) fn add_seam_test(&self) {
         self.seam_tests.set(self.seam_tests.get().saturating_add(1));
+    }
+
+    /// Counts one stretch certified for a contact's move to a curve end.
+    pub(crate) fn add_contact_stretch_certification(&self) {
+        self.contact_stretch_certifications
+            .set(self.contact_stretch_certifications.get().saturating_add(1));
     }
 
     /// Counts one vertex a classified curve is solved against.
