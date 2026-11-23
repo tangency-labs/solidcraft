@@ -213,8 +213,12 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     }
     let healed = crate::boolean_record::healed(b)?.with_split_lines(b.splits.clone());
     let mut chosen: Vec<usize> = Vec::new();
+    // The reach of the earlier mesh pick (a point near a display triangle of a face), widened by
+    // that mesh's chord deviation, since the distance is now to the exact face. The nearest
+    // exact face wins, so a point near a rim still picks the face it lies on.
+    let reach = 2.0 * healed.size() * 1e-3 + 2e-6;
     for p in at {
-        match healed.face_at_point(*p)? {
+        match healed.face_within(*p, reach)? {
             Some(f) => {
                 if !chosen.contains(&f) {
                     chosen.push(f);

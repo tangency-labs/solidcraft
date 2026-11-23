@@ -1423,13 +1423,12 @@ pub fn named_face_point(st: &ModelState, body: Option<&str>, name: &str) -> Resu
     let b = st.bodies.get(hit.body).ok_or_else(|| format!("no face is named `{name}`"))?;
     // The spot starts on a display triangle. Project it onto the known face before exact
     // face-name capture; a non-analytic curved face has no analytic projection in `spot`.
-    let point = match face_spot(b, hit.face) {
-        Some(spot) => solidcraft_kernel::point_closest(spot.point, &b.body, solidcraft_kernel::Members::Faces(&[hit.face]))
-            .map_err(|e| e.to_string())?
-            .map(|nearest| nearest.to),
-        None => None,
-    };
-    point.ok_or_else(|| format!("face `{name}` has no surface to pick"))
+    // When the exact projection finds nothing, the spot itself is returned, as it always was.
+    let spot = face_spot(b, hit.face).ok_or_else(|| format!("face `{name}` has no surface to pick"))?;
+    match solidcraft_kernel::point_closest(spot.point, &b.body, solidcraft_kernel::Members::Faces(&[hit.face])) {
+        Ok(Some(nearest)) => Ok(nearest.to),
+        _ => Ok(spot.point),
+    }
 }
 
 /// The point on the face this name finds nearest `p`; `None` when the name finds no face (see

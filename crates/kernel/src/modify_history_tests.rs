@@ -353,13 +353,12 @@ fn offset_an_annular_end_near_either_circular_rim() {
     let within = centre + Vec3::Z * (tolerance * 0.5);
     assert_eq!(b.face_at_point(within).unwrap(), Some(end));
     assert_eq!(crate::offset_faces(&b, &[within], 4.0).unwrap().record(), expected.record());
-    for p in [
-        centre + Vec3::Z * (tolerance * 4.0),
-        Vec3::new(0.0, 0.0, 200.0),
-        Vec3::new(3.5 + tolerance * 4.0, 0.0, 200.0),
-        Vec3::new(1.75 - tolerance * 4.0, 0.0, 200.0),
-    ] {
-        assert_eq!(b.face_at_point(p).unwrap(), None, "{p:?}");
+    // Just off the end (beyond modelling tolerance, within the pick's reach) still picks it.
+    let off = centre + Vec3::Z * (tolerance * 4.0);
+    assert_eq!(b.face_at_point(off).unwrap(), None);
+    assert_eq!(crate::offset_faces(&b, &[off], 4.0).unwrap().record(), expected.record());
+    // Far from every face: refused.
+    for p in [Vec3::new(0.0, 0.0, 200.0), Vec3::new(0.5, 0.0, 200.0), centre + Vec3::Z * 5.0, Vec3::new(9.0, 0.0, 200.0)] {
         let e = crate::offset_faces(&b, &[p], 4.0).unwrap_err();
         assert!(e.to_string().contains("no face at"), "{p:?}: {e}");
     }

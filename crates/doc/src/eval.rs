@@ -10762,7 +10762,7 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
                             from.x, from.y, from.z
                         )),
                     },
-                    _ => *p = hit.pick_point(input, *p)?,
+                    _ => *p = hit.pick_point(input, *p),
                 }
             }
             // A deleted face is picked by its point as well: when its name is gone (a design saved by

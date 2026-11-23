@@ -1109,6 +1109,14 @@ impl Body {
         Ok(self.nearest_face_query(p, tolerance)?.filter(|(d, _)| *d <= tolerance).map(|(_, face)| face))
     }
 
+    /// The face nearest `p` by exact trimmed-face distance, provided it lies within `reach`.
+    /// This is for a pick that must keep an older, wider reach: the exact distance only
+    /// chooses between the faces near a rim, so a point near a curved face's display triangle
+    /// still finds that face. A mesh body holds no B-rep face.
+    pub fn face_within(&self, p: Vec3, reach: f64) -> Result<Option<usize>> {
+        Ok(self.nearest_face_query(p, reach)?.filter(|(d, _)| *d <= reach).map(|(_, face)| face))
+    }
+
     fn nearest_face_query(&self, p: Vec3, reach: f64) -> Result<Option<(f64, usize)>> {
         let Some(form) = self.ops_body() else { return Ok(None) };
         let (ops, order) = &*form;

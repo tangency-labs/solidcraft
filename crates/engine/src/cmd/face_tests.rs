@@ -584,7 +584,7 @@ fn offset_face_near_annular_rims_keeps_the_end_face_name_and_body() {
         let mut s = Session::new(before.clone());
         let out = run(&mut s, "solid.offset_face", json!({"faces": [pick], "body": "Boss", "distance": 4}));
         let feature = s.doc.feature(out["feature"].as_u64().unwrap()).unwrap();
-        assert_eq!(feature.face_names, [name.clone()], "{pick}");
+        assert_eq!(feature.face_names, std::slice::from_ref(&name), "{pick}");
         assert!(s.model.results.iter().all(|r| r.error.is_none()), "{pick}: {:?}", s.model.results);
         assert_eq!(s.model.state().body("Boss").unwrap().body.record(), &expected, "{pick}");
         // Reopening exercises the persistent name captured from a point near the rim.
@@ -596,7 +596,7 @@ fn offset_face_near_annular_rims_keeps_the_end_face_name_and_body() {
 }
 
 #[test]
-fn offset_face_refuses_a_point_just_off_the_annular_end() {
+fn offset_face_refuses_a_point_far_from_the_annular_end_but_takes_one_just_off_it() {
     let mut s = Session::default();
     annular_boss(&mut s);
     let before = s.doc.as_ref().clone();
@@ -604,7 +604,14 @@ fn offset_face_refuses_a_point_just_off_the_annular_end() {
     let boss = state.body("Boss").unwrap();
     let original = boss.body.record().clone();
     let off = 4.0 * original.tolerance;
-    for point in [json!([2.625, 0, 10.0 + off]), json!([0, 0, 10]), json!([3.5 + off, 0, 10]), json!([1.75 - off, 0, 10])] {
+    // Just off the end face (as a point on a display triangle is) still picks it.
+    let name = solidcraft_doc::naming::face_names(boss)[boss.body.face_at_point(Vec3::new(2.625, 0.0, 10.0)).unwrap().unwrap()].clone();
+    let mut near = Session::new(before.clone());
+    let out = run(&mut near, "solid.offset_face", json!({"faces": [[2.625, 0, 10.0 + off]], "body": "Boss", "distance": 4}));
+    let feature = near.doc.feature(out["feature"].as_u64().unwrap()).unwrap();
+    assert_eq!(feature.face_names, std::slice::from_ref(&name));
+    // A point in the bore, or well off the boss, is far from every face and is refused.
+    for point in [json!([0, 0, 10]), json!([0.5, 0, 10]), json!([2.625, 0, 15]), json!([8, 0, 10.5])] {
         let mut s = Session::new(before.clone());
         let e = s.execute("solid.offset_face", &json!({"faces": [point], "body": "Boss", "distance": 4})).unwrap_err();
         assert!(e.to_string().contains("no face at"), "{point}: {e}");
@@ -614,7 +621,7 @@ fn offset_face_refuses_a_point_just_off_the_annular_end() {
 }
 
 #[test]
-fn offset_a_curved_face_by_name_or_exact_point_but_refuse_floating_points() {
+fn offset_a_curved_face_by_name_or_point_and_refuse_only_points_far_from_it() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Cylinder"}));
     let before = s.doc.as_ref().clone();
@@ -623,12 +630,26 @@ fn offset_a_curved_face_by_name_or_exact_point_but_refuse_floating_points() {
     assert!(body.display_tol() > 0.01, "the floating points are inside the display picking reach");
     let wall = body.body.face_at_point(Vec3::new(10.0, 0.0, 10.0)).unwrap().unwrap();
     let name = solidcraft_doc::naming::face_names(body)[wall].clone();
-    for point in [[9.99, 0.0, 10.0], [10.01, 0.0, 10.0]] {
+    for point in [[10.0, 0.0, 10.0], [9.99, 0.0, 10.0], [10.01, 0.0, 10.0]] {
+        let mut s = Session::new(before.clone());
+        run(&mut s, "solid.offset_face", json!({"faces": [point], "body": "Cylinder", "distance": 2}));
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{point:?}: {:?}", s.model.results);
+        let state = s.model.state();
+        let body = &state.body("Cylinder").unwrap().body;
+        assert!(
+            (0..body.face_count()).any(|f| matches!(
+                solidcraft_kernel::face_surface(body, f),
+                Some(solidcraft_kernel::FaceSurface::Cylinder { radius, .. }) if (radius - 12.0).abs() < 1e-6
+            )),
+            "{point:?}"
+        );
+    }
+    for point in [[5.0, 0.0, 10.0], [14.0, 0.0, 10.0]] {
         let e = s.execute("solid.offset_face", &json!({"faces": [point], "body": "Cylinder", "distance": 2})).unwrap_err();
         assert!(e.to_string().contains("no face at"), "{point:?}: {e}");
         assert_eq!(s.doc.features.len(), before.features.len());
     }
-    for pick in [json!([10, 0, 10]), json!(name)] {
+    for pick in [json!(name)] {
         let mut s = Session::new(before.clone());
         run(&mut s, "solid.offset_face", json!({"faces": [pick], "body": "Cylinder", "distance": 2}));
         let state = s.model.state();

@@ -998,10 +998,11 @@ impl FaceHit {
     /// nearest `p` that keeps clear of every edge of it. The nearest point of a face the
     /// reference's point no longer lies on is on the face's boundary (a parameter moved the face
     /// away from the pick), where a pick by point finds the face beside it as well (#2531).
-    /// The chosen interior point is projected onto the exact trimmed face: a curved face's
-    /// triangle lies off its surface by the display deviation, beyond modelling tolerance.
-    pub fn pick_point(&self, st: &ModelState, p: Vec3) -> crate::Result<Vec3> {
-        let b = st.bodies.get(self.body).ok_or_else(|| crate::DocError::Unknown(format!("face {}", self.face)))?;
+    /// The chosen interior point is projected onto the exact trimmed face when that finds it (a
+    /// curved face's triangle lies off its surface by the display deviation); when the exact
+    /// query finds nothing the unprojected point is returned, as it always was.
+    pub fn pick_point(&self, st: &ModelState, p: Vec3) -> Vec3 {
+        let Some(b) = st.bodies.get(self.body) else { return self.point };
         let m = b.mesh();
         // Clear of the edges by a few pick tolerances, or by half the face's roomiest triangle
         // on a face narrower than that.
@@ -1011,9 +1012,10 @@ impl FaceHit {
             Some(margin) => inside_nearest(&m, self.face, p, margin).unwrap_or(self.point),
             None => self.point,
         };
-        solidcraft_kernel::point_closest(point, &b.body, solidcraft_kernel::Members::Faces(&[self.face]))?
-            .map(|nearest| nearest.to)
-            .ok_or_else(|| crate::DocError::Unknown(format!("face {}", self.face)))
+        match solidcraft_kernel::point_closest(point, &b.body, solidcraft_kernel::Members::Faces(&[self.face])) {
+            Ok(Some(nearest)) => nearest.to,
+            _ => point,
+        }
     }
 }
 
