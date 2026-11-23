@@ -881,14 +881,6 @@ impl crate::SolidError {
         Failure::new(operation, failure).into_error()
     }
 
-    /// [`crate::SolidError::Failed`] for an intersection or classification routine that
-    /// could not continue, as the phrase says, with status [`SM_ERR`] (upstream
-    /// `return SE(SM_ERR)`).
-    #[must_use]
-    pub(crate) fn intersect_failed(operation: &'static str, what: &'static str) -> Self {
-        Self::intersect(operation, IntersectFailure::Failed(what))
-    }
-
     /// [`crate::SolidError::Failed`] for something an intersection or classification
     /// routine needs that is not there, as the phrase says, with status
     /// [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)` on a `NULL` pointer).
@@ -955,10 +947,6 @@ pub(super) mod tests {
         assert_eq!(
             SolidError::intersect_missing("intersect::op", "the edge's curve").to_string(),
             "intersect::op: the edge's curve is missing"
-        );
-        assert_eq!(
-            SolidError::intersect_failed("intersect::op", "the ray hits no face").kind(),
-            ErrorKind::Failed
         );
     }
 
@@ -1388,7 +1376,6 @@ pub(super) mod tests {
                 Builder::Variant("IntersectFailure", "Missing"),
                 Builder::Variant("IntersectFailure", "OutsideDomain"),
                 Builder::Variant("IntersectFailure", "Inconsistent"),
-                Builder::Method("intersect_failed", Some(1)),
                 Builder::Method("intersect_missing", Some(1)),
             ],
             wrappers: Wrappers::Phrase,
