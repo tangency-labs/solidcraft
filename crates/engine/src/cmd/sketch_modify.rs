@@ -3017,7 +3017,8 @@ const CLOSING_TRIES: usize = 64;
 /// `picks` are in the order they were picked. Once the picks so far close a chain, that closed
 /// chain is the shape: a curve picked after it that meets it at a corner is a stray, which would
 /// otherwise leave two picked ways at that corner and break the chain open. Strays come back so
-/// the offset leaves them out instead of offsetting them on their own.
+/// the offset leaves them out instead of offsetting them on their own. A pick outside `pool`
+/// (a construction line on a corner of drawn curves) never breaks the chain and is no stray.
 fn chain(sk: &Sketch, start: usize, pool: &[usize], picks: &[usize]) -> (Vec<(usize, bool)>, bool, Vec<usize>) {
     // Ends joined by a coincident constraint are one joint, as well as a shared point: lines drawn
     // one by one meet at their own points, held together by constraints, and must chain the same
@@ -3098,23 +3099,20 @@ fn chain(sk: &Sketch, start: usize, pool: &[usize], picks: &[usize]) -> (Vec<(us
         back.extend(fwd);
         (back, joined)
     };
-    let all = walk(picks);
-    let (order, closed) = if all.1 {
-        // Every corner that took a pick had exactly one, so fewer picks close nothing else.
-        all
-    } else {
-        // Picks decide only where more than two curves meet; one with no such end changes
-        // nothing, so the picks before it walk the same chain.
-        let branch = |c: usize| ends(c).is_some_and(|(a, b)| [a, b].into_iter().any(|at| pool.iter().filter(|o| meets(**o, at)).count() > 2));
-        (1..picks.len())
-            .filter(|k| *k == 1 || picks.get(k - 1).is_some_and(|c| branch(*c)))
-            .take(CLOSING_TRIES)
-            .find_map(|k| picks.get(..k).map(walk).filter(|w| w.1))
-            .unwrap_or(all)
-    };
+    // Fewer picks go first: all of them together can close another shape than the first ones did
+    // (the arc and a side of an arch close its outline, but with the top line picked too, the walk
+    // from the arc closes at the top line). Picks decide only where more than two curves meet; one
+    // with no such end changes nothing, so the picks before it walk the same chain.
+    let branch = |c: usize| ends(c).is_some_and(|(a, b)| [a, b].into_iter().any(|at| pool.iter().filter(|o| meets(**o, at)).count() > 2));
+    let (order, closed) = (1..=picks.len())
+        .filter(|k| *k == 1 || picks.get(k - 1).is_some_and(|c| branch(*c)))
+        .take(CLOSING_TRIES)
+        .find_map(|k| picks.get(..k).map(walk).filter(|w| w.1))
+        .unwrap_or_else(|| walk(picks));
     let strays = if closed {
         let corners: Vec<usize> = order.iter().filter_map(|(c, _)| ends(*c)).flat_map(|(a, b)| [a, b]).collect();
-        picks.iter().copied().filter(|p| !order.iter().any(|(c, _)| c == p) && corners.iter().any(|at| meets(*p, *at))).collect()
+        let stray = |p: &usize| pool.contains(p) && !order.iter().any(|(c, _)| c == p) && corners.iter().any(|at| meets(*p, *at));
+        picks.iter().copied().filter(stray).collect()
     } else {
         Vec::new()
     };
@@ -3572,23 +3570,30 @@ fn offset_pool(sk: &Sketch, first: usize, sel: &[usize], eligible: &std::collect
     (0..sk.curves.len()).filter(|i| sk.curves.get(*i).is_some_and(|c| eligible.contains(&c.id) && c.construction == construction)).collect()
 }
 
-/// The curves (ids) of every closed shape that Offset makes of `picks` (curve ids, in the order
-/// they were picked), or none when the picks close nothing. While there is one, the Offset window
-/// takes no other curve: a picked one clicked again opens the shape, and then more can be picked.
-pub fn offset_closed_shape(sk: &Sketch, picks: &[String], use_chain: bool) -> Vec<String> {
-    let eligible: std::collections::HashSet<String> = sk.curves.iter().map(|c| c.id.clone()).collect();
+/// Whether Offset would leave the curve `id` out if it were picked next, after `picks` (curve
+/// ids, in the order they were picked): the picks close a shape, and the curve only meets that
+/// shape at a corner (a stray, see [`chain`]). The Offset window does not take such a curve: a
+/// picked one clicked again opens the shape, and then this one can be picked. A curve of a shape
+/// apart from the closed one is never left out.
+pub fn offset_leaves_out(sk: &Sketch, picks: &[String], id: &str, use_chain: bool) -> bool {
+    let Some(next) = sk.curve_index(id) else { return false };
     let mut pending: Vec<usize> = picks.iter().filter_map(|id| sk.curve_index(id)).collect();
-    let mut shape = Vec::new();
-    // The groups the command offsets one after another; each takes at least its first pick.
-    while let Some(&first) = pending.first() {
+    if pending.contains(&next) {
+        return false;
+    }
+    pending.push(next);
+    let eligible: std::collections::HashSet<String> = sk.curves.iter().map(|c| c.id.clone()).collect();
+    // The groups the command offsets one after another; each takes at least its first pick. Once
+    // a group takes `next`, or only `next` is left, no group leaves it out.
+    while let Some(&first) = pending.first().filter(|c| **c != next && pending.contains(&next)) {
         let pool = offset_pool(sk, first, &pending, &eligible, use_chain);
-        let (order, closed, strays) = chain(sk, first, &pool, &pending);
-        if closed {
-            shape.extend(order.iter().filter_map(|(c, _)| sk.curves.get(*c).map(|c| c.id.clone())));
+        let (order, _, strays) = chain(sk, first, &pool, &pending);
+        if strays.contains(&next) {
+            return true;
         }
         pending.retain(|c| *c != first && !strays.contains(c) && !order.iter().any(|(o, _)| o == c));
     }
-    shape
+    false
 }
 
 /// Build every side of one connected source group. The pool is frozen before any output

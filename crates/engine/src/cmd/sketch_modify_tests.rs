@@ -156,34 +156,64 @@ fn offset_chain_through_a_corner_of_three_curves_follows_the_picked_one_and_clos
     // A curve picked after the shape closed, touching it, is left alone: not offset on its own
     // and not a second way on at the corner that would break the chain open.
     assert_eq!(arch_offset(&[&left, &top, &arc]), (rectangle, true));
-    assert_eq!(arch_offset(&[&arc, &right, &bottom, &left, &top]), (outline, true));
+    assert_eq!(arch_offset(&[&arc, &right, &bottom, &left, &top]), (outline.clone(), true));
+    // Also where the later pick would close another shape with the first one alone.
+    assert_eq!(arch_offset(&[&arc, &right, &top]), (outline.clone(), true));
+    assert_eq!(arch_offset(&[&arc, &left, &top]), (outline, true));
+}
+
+/// A construction line never chains with drawn curves, so one that ends on a closed shape's corner
+/// cannot break that chain open: it keeps an offset of its own.
+#[test]
+fn offset_keeps_a_picked_construction_line_that_ends_on_a_corner_of_a_closed_shape() {
+    let mut s = new_sketch();
+    let sides = ids(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, -10], "p1": [10, 10]}))["curves"]);
+    run(&mut s, "sketch.line", json!({"points": [[-10, -10], [10, 10]], "construction": true, "ids": ["diagonal"]}));
+    let r = run(&mut s, "sketch.offset", json!({"curves": [sides[0], "diagonal"], "distance": 1}));
+    let sk = sketch(&s);
+    let chains: Vec<(usize, bool)> = sk.offsets.iter().map(|o| (o.sources.len(), o.closed)).collect();
+    assert_eq!(chains, [(4, true), (1, false)], "{r}");
 }
 
 #[test]
-fn offset_closed_shape_names_the_shape_the_picks_close() {
-    let (s, [arc, top, right, bottom, left]) = arch();
+fn offset_leaves_out_only_a_curve_on_a_corner_of_a_shape_the_picks_close() {
+    let (mut s, [arc, top, right, bottom, left]) = arch();
+    // A rectangle and a circle apart from the arch, and a construction line on its corners.
+    let apart = ids(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [30, -20], "p1": [50, 0]}))["curves"]);
+    let circle = ids(&run(&mut s, "sketch.circle.center", json!({"center": [40, 20], "radius": 5}))["curves"])[0].clone();
+    run(&mut s, "sketch.line", json!({"points": [[-10, 0], [10, -20]], "construction": true, "ids": ["diagonal"]}));
+    let diagonal = "diagonal".to_string();
     let sk = sketch(&s);
-    let shape = |picks: &[&String]| {
+    let out = |picks: &[&String], id: &str, chain: bool| {
         let picks: Vec<String> = picks.iter().map(|s| s.to_string()).collect();
-        let mut shape = super::offset_closed_shape(&sk, &picks, true);
-        shape.sort();
-        shape
+        super::offset_leaves_out(&sk, &picks, id, chain)
     };
-    let sorted = |v: [&String; 4]| {
-        let mut v: Vec<String> = v.iter().map(|s| s.to_string()).collect();
-        v.sort();
-        v
-    };
-    assert!(shape(&[]).is_empty());
-    assert!(shape(&[&arc]).is_empty(), "the arc alone closes nothing");
-    assert!(shape(&[&left]).is_empty(), "one side stops at the arc's feet");
-    assert_eq!(shape(&[&left, &top]), sorted([&top, &right, &bottom, &left]));
-    // The shape's unpicked curves belong to it: the Offset window still takes them.
-    assert_eq!(shape(&[&arc, &right]), sorted([&arc, &right, &bottom, &left]));
+    // Picks that close nothing leave nothing out.
+    for id in [&arc, &top, &right, &bottom, &left] {
+        assert!(!out(&[], id, true), "{id}");
+        assert!(!out(&[&left], id, true), "{id}: one side stops at the arc's feet");
+    }
+    // The left and top lines close the rectangle: the arc meets it, its own lines belong to it.
+    assert!(out(&[&left, &top], &arc, true));
+    assert!(out(&[&arc, &right], &top, true));
+    for id in [&left, &top, &right, &bottom] {
+        assert!(!out(&[&left, &top], id, true), "{id}");
+    }
+    // Nothing apart from the closed shape is left out, and several closed shapes each keep their
+    // own strays out, whichever was picked first.
+    for id in apart.iter().chain([&circle, &diagonal]) {
+        assert!(!out(&[&left, &top], id, true), "{id}");
+    }
+    assert!(!out(&[&circle], &arc, true), "a circle has no corner to meet");
+    assert!(out(&[&apart[0], &circle, &left, &top], &arc, true));
+    assert!(out(&[&left, &top, &apart[0], &circle], &arc, true));
     // Without Chain only the picks make the shape.
-    assert!(super::offset_closed_shape(&sk, &[arc.clone(), right.clone()], false).is_empty());
+    assert!(!out(&[&arc, &right], &top, false));
+    assert!(out(&[&left, &top, &right, &bottom], &arc, false));
+    assert!(!out(&[&left, &top, &right, &bottom], &apart[0], false));
     // Hostile picks: unknown ids are ignored.
-    assert!(super::offset_closed_shape(&sk, &["nope".into()], true).is_empty());
+    assert!(!out(&[&"nope".to_string()], &arc, true));
+    assert!(!out(&[&left, &top], "nope", true));
 }
 
 #[test]

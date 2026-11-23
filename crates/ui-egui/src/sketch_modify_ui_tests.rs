@@ -805,7 +805,7 @@ fn two_sided_offset_shows_a_dimension_for_each_distance() {
 }
 
 #[test]
-fn offset_takes_no_curve_outside_a_closed_shape_until_a_pick_opens_it() {
+fn offset_takes_no_curve_on_a_corner_of_a_closed_shape_until_a_pick_opens_it() {
     use crate::sketch_modify_ui::candidate;
     use crate::viewport::Hit;
     // An arch: a rectangle with an arc across its top line, three curves at each top corner.
@@ -842,11 +842,79 @@ fn offset_takes_no_curve_outside_a_closed_shape_until_a_pick_opens_it() {
     assert!(offered(&h, &arc), "one side closes nothing, so the arc is still offered");
     click(&mut h, &top);
     // The left and top lines close the rectangle (#14788).
-    assert!(!offered(&h, &arc), "a curve outside the closed rectangle neither highlights nor picks");
+    assert!(!offered(&h, &arc), "a curve on two corners of the closed rectangle neither highlights nor picks");
     assert!(offered(&h, &right), "an unpicked line of the rectangle is part of the shape");
     assert!(offered(&h, &top), "a picked line can be clicked to take it out");
     click(&mut h, &top);
     assert!(offered(&h, &arc), "taking the top line out opens the shape again");
+}
+
+/// Picks that close a shape refuse only a curve that meets that shape at a corner: the curves of
+/// shapes apart from it still join the same Offset.
+#[test]
+fn offset_takes_two_separate_rectangles_and_a_circle_into_one_offset() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [-30, -10], "p1": [-10, 10]})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [10, -10], "p1": [30, 10]})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center": [0, 25], "radius": 5})).unwrap();
+    // A line off the first rectangle's top right corner.
+    h.app.run("sketch.line", json!({"points": [[-10, 10], [-10, 25]], "ids": ["spur"]})).unwrap();
+    h.settle();
+    let own = curve_ids(&h).len();
+    h.step(&json!({"start": "sketch.offset"})).unwrap();
+    let picked = |h: &Harness| h.app.dialog.as_ref().unwrap().inputs[0].items.len();
+
+    // Chain is on, so one line closes each rectangle.
+    h.step(&json!({"click": {"sketch": [30, 3]}})).unwrap();
+    assert_eq!(picked(&h), 1);
+    h.step(&json!({"click": {"sketch": [-30, 3]}})).unwrap();
+    assert_eq!(picked(&h), 2, "a second, separate rectangle joins the Offset");
+    h.step(&json!({"click": {"sketch": [5, 25]}})).unwrap();
+    assert_eq!(picked(&h), 3, "a circle joins the Offset");
+    h.step(&json!({"click": {"sketch": [-10, 18]}})).unwrap();
+    assert_eq!(picked(&h), 3, "a line on a corner of a closed rectangle does not");
+
+    h.frames(2);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
+    assert_eq!(curve_ids(&h).len(), own + 9, "both rectangles and the circle have a copy");
+    let state = h.app.session.model.state();
+    let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let chains: Vec<(usize, bool)> = sketch.offsets.iter().map(|o| (o.sources.len(), o.closed)).collect();
+    assert_eq!(chains, [(4, true), (4, true), (1, true)], "each shape is one closed chain");
+}
+
+/// A circle closes a shape of its own with no corner, so it keeps nothing out of the Offset.
+#[test]
+fn offset_takes_other_curves_after_a_circle_or_with_chain_off() {
+    use crate::sketch_modify_ui::candidate;
+    use crate::viewport::Hit;
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center": [0, 25], "radius": 5})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [-10, -10], "p1": [10, 10]})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[20, 0], [30, 0]], "ids": ["apart"]})).unwrap();
+    h.settle();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let all = curve_ids(&h);
+    h.step(&json!({"start": "sketch.offset"})).unwrap();
+    let refused = |h: &Harness| -> Vec<String> {
+        let d = h.app.dialog.as_ref().unwrap();
+        let hit = |id: &String| Hit::SketchCurve { sketch, id: id.clone(), straight: true, point: solidcore_record::Vec3::ZERO };
+        all.iter().filter(|id| candidate(d, &h.app.session, &hit(id)).is_none()).cloned().collect()
+    };
+    let pick = |h: &mut Harness, ids: &[String]| {
+        h.app.dialog.as_mut().unwrap().inputs[0].items = ids.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
+    };
+    pick(&mut h, &all[..1]);
+    assert!(refused(&h).is_empty(), "a picked circle refuses nothing");
+    if let Kind::SketchModify(Mod::Offset { chain, .. }) = &mut h.app.dialog.as_mut().unwrap().kind {
+        *chain = false;
+    }
+    pick(&mut h, &all[1..5]);
+    assert!(refused(&h).is_empty(), "with Chain off, four picked lines that close refuse no curve apart from them");
 }
 
 #[test]
