@@ -509,7 +509,8 @@ fn view_dxf_curves_arcs_with_dashed_hidden_lines_keep_their_layers_and_order() {
 // byte-baseline seam. This is not another production writer or parser.
 fn legacy_view_projection_bytes(s: &Session, cam: &Camera, dashed: bool) -> String {
     use solidcraft_io::test_support::{DxfEntity, DxfLayer, legacy_dxf_baseline};
-    let meshes = mesh_lines::prepare(s, CMD, 0.01, mesh_lines::Ask::default(), |b| s.body_visible(&b.name), refused).unwrap();
+    let meshes =
+        mesh_lines::prepare(s, &s.world_state().unwrap(), CMD, 0.01, mesh_lines::Ask::default(), |b| s.body_visible(&b.name), refused).unwrap();
     let parts = sketch::parts(s, 0.01).unwrap();
     let mut drawing = mesh_lines::drawing(&meshes, &parts, &View::from_camera(cam)).unwrap();
     drawing.sketch = mesh_lines::sketch_off_lines(std::mem::take(&mut drawing.sketch), &drawing.lines, 0.02 + drawing.eps);

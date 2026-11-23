@@ -34,7 +34,7 @@ impl ViewKind {
 
     /// This workspace can draw its contents in the frame of a tile.
     pub fn can_tile(self) -> bool {
-        matches!(self, Self::Model | Self::Render)
+        matches!(self, Self::Model | Self::Sheet | Self::Render)
     }
 
     /// The kind's stable key: its name in commands and in the saved form.
@@ -63,7 +63,7 @@ impl ViewKind {
     }
 }
 
-/// A model sketch being edited in one view. Runtime state, never saved with a layout.
+/// A Model or Sheet sketch being edited in one view. Runtime state, never saved with a layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SketchSession {
     pub sketch: u64,
@@ -723,7 +723,7 @@ impl ViewSet {
                 .window_of(id)
                 .and_then(|window| self.views_of(window))
                 .and_then(|views| views.get(id))
-                .is_some_and(|view| view.kind == ViewKind::Model)
+                .is_some_and(|view| matches!(view.kind, ViewKind::Model | ViewKind::Sheet))
         {
             return false;
         }
@@ -1043,33 +1043,11 @@ impl ViewSet {
         if !self.active().kind.can_tile() {
             return Vec::new();
         }
-        // The Render workspace owns one preview and one selected result for this design.
-        let render = if self.active().kind == ViewKind::Render {
-            Some(self.active)
-        } else {
-            self.tiles
-                .as_ref()
-                .filter(|tiles| tiles.contains(self.active))
-                .and_then(|tiles| self.views.iter().find(|view| view.kind == ViewKind::Render && tiles.contains(view.id)).map(|view| view.id))
-        };
-        let mut order: Vec<_> = self
-            .views
-            .iter()
-            .filter(|view| view.kind.can_tile() && (view.kind != ViewKind::Render || render == Some(view.id)))
-            .map(|view| view.id)
-            .take(limit)
-            .collect();
+        let mut order: Vec<_> = self.views.iter().filter(|view| view.kind.can_tile()).map(|view| view.id).take(limit).collect();
         if !order.contains(&self.active)
             && let Some(last) = order.last_mut()
         {
             *last = self.active;
-        }
-        if limit > 1
-            && let Some(render) = render
-            && !order.contains(&render)
-            && let Some(other) = order.iter_mut().rev().find(|id| **id != self.active)
-        {
-            *other = render;
         }
         order
     }
@@ -1077,11 +1055,7 @@ impl ViewSet {
     /// Both views have tile canvases and can share one layout.
     pub fn can_tile_with(&self, id: u64, other: u64) -> bool {
         let kind = |id| self.get(id).map(|view| view.kind).filter(|kind| kind.can_tile());
-        match (kind(id), kind(other)) {
-            (Some(ViewKind::Render), Some(ViewKind::Render)) => id == other,
-            (Some(_), Some(_)) => true,
-            _ => false,
-        }
+        matches!((kind(id), kind(other)), (Some(_), Some(_)))
     }
 
     /// Whether the view could join the layout without replacing an occupied cell.
@@ -1138,12 +1112,7 @@ impl ViewSet {
         } else {
             Tiles::Leaf(self.active).placed(id, placement)
         }?;
-        next.views()
-            .into_iter()
-            .all(|other| {
-                other == id || self.get(other).is_some_and(|view| view.kind.can_tile() && (kind != ViewKind::Render || view.kind != ViewKind::Render))
-            })
-            .then_some(next)
+        next.views().into_iter().all(|other| other == id || self.get(other).is_some_and(|view| view.kind.can_tile())).then_some(next)
     }
 
     /// Place an open view in the current window. Keep focus if it still has a cell.
@@ -1194,18 +1163,13 @@ impl ViewSet {
         self.tiles = None;
     }
 
-    /// Drop views that are gone, lack a tile canvas or duplicate the Render workspace.
+    /// Drop only views that are gone or lack a tile canvas.
     fn prune_tiles(&mut self) {
         let Some(tiles) = &mut self.tiles else { return };
         let kind = |id| self.views.iter().find(|view| view.id == id).map(|view| view.kind);
         let members = tiles.views();
-        let render = if tiles.contains(self.active) && kind(self.active) == Some(ViewKind::Render) {
-            Some(self.active)
-        } else {
-            members.iter().copied().find(|id| kind(*id) == Some(ViewKind::Render))
-        };
         for id in members {
-            if kind(id).is_none_or(|kind| !kind.can_tile() || (kind == ViewKind::Render && render != Some(id))) {
+            if kind(id).is_none_or(|kind| !kind.can_tile()) {
                 tiles.remove(id);
             }
         }
@@ -1386,7 +1350,8 @@ impl ViewSet {
 
     /// Take the view at `i` out of the set onto the closed stack.
     fn remove_closed(&mut self, i: usize) {
-        let view = self.views.remove(i);
+        let mut view = self.views.remove(i);
+        view.editing = None;
         self.closed.push((i, view));
         let skip = self.closed.len().saturating_sub(CLOSED_CAP);
         self.closed.drain(..skip);
@@ -1744,26 +1709,48 @@ mod tests {
 
     #[test]
     fn sketch_editing_is_runtime_only_and_follows_the_original_view() {
-        let mut set = ViewSet::new();
-        let original = set.active().id;
-        let editing = SketchSession { sketch: 42 };
-        assert!(set.set_editing(Some((original, editing))));
-        let copy = set.duplicate(original).unwrap();
-        assert_eq!(set.get(original).unwrap().editing, Some(editing));
-        assert_eq!(set.get(copy).unwrap().editing, None);
-        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap().get(original).unwrap().editing, None);
-        assert!(set.to_json()["views"].as_array().unwrap().iter().all(|view| view.get("editing").is_none()));
-        let moved = set.move_to_window(original, WindowTarget::New { placement: None }).unwrap();
-        assert_eq!(set.views_of(moved.window).unwrap().get(original).unwrap().editing, Some(editing));
-        assert!(set.set_editing(Some((copy, SketchSession { sketch: 43 }))));
-        assert_eq!(set.views_of(moved.window).unwrap().get(original).unwrap().editing, None);
-        assert_eq!(set.get(copy).unwrap().editing, Some(SketchSession { sketch: 43 }));
-        let render = set.open(ViewKind::Render, None, false);
-        assert!(!set.set_editing(Some((render, editing))));
-        assert!(!set.set_editing(Some((999, editing))));
-        assert_eq!(set.get(copy).unwrap().editing, Some(SketchSession { sketch: 43 }));
-        assert!(set.set_editing(None));
-        assert_eq!(set.get(copy).unwrap().editing, None);
+        for kind in [ViewKind::Model, ViewKind::Sheet] {
+            let mut set = ViewSet::new();
+            let original = if kind == ViewKind::Model { set.active().id } else { set.open(kind, Some("sheet-a".into()), false) };
+            let editing = SketchSession { sketch: 42 };
+            assert!(set.set_editing(Some((original, editing))), "{kind:?}");
+            let copy = set.duplicate(original).unwrap();
+            assert_eq!(set.get(original).unwrap().editing, Some(editing));
+            assert_eq!(set.get(copy).unwrap().editing, None);
+            assert_eq!(ViewSet::from_json(&set.to_json()).unwrap().get(original).unwrap().editing, None);
+            assert!(set.to_json()["views"].as_array().unwrap().iter().all(|view| view.get("editing").is_none()));
+            let moved = set.move_to_window(original, WindowTarget::New { placement: None }).unwrap();
+            assert_eq!(set.views_of(moved.window).unwrap().get(original).unwrap().editing, Some(editing));
+            let saved = set.to_json();
+            assert!(saved["views"].as_array().unwrap().iter().all(|view| view.get("editing").is_none()));
+            assert_eq!(ViewSet::from_json(&saved).unwrap().views_of(moved.window).unwrap().get(original).unwrap().editing, None);
+            assert!(set.set_editing(Some((copy, SketchSession { sketch: 43 }))));
+            assert_eq!(set.views_of(moved.window).unwrap().get(original).unwrap().editing, None);
+            assert_eq!(set.get(copy).unwrap().editing, Some(SketchSession { sketch: 43 }));
+            for unsupported in [ViewKind::Render, ViewKind::Animation] {
+                let target = set.open(unsupported, None, false);
+                assert!(!set.set_editing(Some((target, editing))));
+                assert_eq!(set.get(target).unwrap().editing, None);
+            }
+            assert!(!set.set_editing(Some((999, editing))));
+            assert_eq!(set.get(copy).unwrap().editing, Some(SketchSession { sketch: 43 }));
+            let other_kind = if kind == ViewKind::Model { ViewKind::Sheet } else { ViewKind::Model };
+            let other = set.open(other_kind, (other_kind == ViewKind::Sheet).then(|| "sheet-b".into()), false);
+            assert!(set.set_editing(Some((other, editing))));
+            assert_eq!(set.get(copy).unwrap().editing, None, "switching Model/Sheet preserves one global owner");
+            assert_eq!(set.views_of(moved.window).unwrap().get(original).unwrap().editing, None);
+            assert!(set.set_editing(Some((original, editing))));
+            set.move_to_window(original, WindowTarget::Existing { window: 0, index: None }).unwrap();
+            assert_eq!(set.get(original).unwrap().editing, Some(editing), "moving back keeps the original owner");
+            assert_eq!(set.get(other).unwrap().editing, None);
+            assert!(set.close(original));
+            assert!(set.closed.iter().all(|(_, view)| view.editing.is_none()));
+            assert_eq!(set.reopen(), Some(original));
+            assert_eq!(set.get(original).unwrap().editing, None, "reopening a closed view never reopens an editor");
+            assert!(set.set_editing(Some((copy, editing))));
+            assert!(set.set_editing(None));
+            assert_eq!(set.get(copy).unwrap().editing, None);
+        }
     }
 
     fn sheets(n: usize) -> ViewSet {
@@ -2609,13 +2596,13 @@ mod tests {
     }
 
     #[test]
-    fn a_layout_shows_the_model_views_in_tab_order() {
+    fn a_layout_shows_model_and_sheet_views_in_tab_order() {
         let mut set = models(3);
         set.open(ViewKind::Sheet, None, false);
         set.activate_index(1);
-        assert_eq!(set.set_layout(Preset::Grid), 3, "three Model views fill three of the four places");
+        assert_eq!(set.set_layout(Preset::Grid), 4, "three Model views and a Sheet fill the grid");
         assert!(set.is_tiled());
-        assert_eq!(set.tiles().unwrap().views().len(), 3);
+        assert_eq!(set.tiles().unwrap().views().len(), 4);
         assert_eq!(set.set_layout(Preset::SideBySide), 2);
         assert!(set.tiles().unwrap().contains(set.active().id), "the active view is always among the shown");
         assert_eq!(set.set_layout(Preset::Single), 1);
@@ -2627,23 +2614,20 @@ mod tests {
         let mut set = models(2);
         let first = set.open(ViewKind::Render, None, false);
         let second = set.duplicate(first).unwrap();
-        assert_eq!(set.set_layout(Preset::Grid), 3);
+        assert_eq!(set.set_layout(Preset::Grid), 4);
         assert!(set.tiles().unwrap().contains(second));
-        assert!(!set.tiles().unwrap().contains(first));
+        assert!(set.tiles().unwrap().contains(first));
         set.activate_index(0);
-        assert!(!set.show_beside(first, Edge::Bottom));
+        assert!(!set.show_beside(first, Edge::Bottom), "a view already shown is not duplicated as a tile");
         set.untile();
         assert!(set.show_beside(first, Edge::Right));
         set.activate(first);
         assert_eq!(set.set_layout_padded(Preset::Grid), 4);
-        assert!(!set.fill_empty(0, second));
-        let model = set.open(ViewKind::Model, None, false);
-        set.activate(first);
-        assert!(set.fill_empty(0, model));
+        assert!(set.tiles().unwrap().contains(second), "both Render views can occupy the grid");
         assert_eq!(ViewSet::from_json(&set.to_json()), Some(set.clone()));
         assert!(set.activate_index(0));
         assert_eq!(set.set_layout(Preset::SideBySide), 2);
-        assert!(set.tiles().unwrap().contains(first), "a preset keeps the Render tile already shown");
+        assert!(!set.tiles().unwrap().contains(first), "the preset uses tab order, with no kind exception");
         set.untile();
         assert_eq!(set.set_layout(Preset::SideBySide), 2);
         assert!(!set.tiles().unwrap().contains(first), "a hidden Render tab does not replace a Model preset angle");
@@ -2664,17 +2648,22 @@ mod tests {
     }
 
     #[test]
-    fn a_sheet_is_never_tiled_and_leaves_the_layout_dormant() {
+    fn sheet_views_share_layouts_and_one_sheet_can_have_two_views() {
         let mut set = models(2);
-        let sheet = set.open(ViewKind::Sheet, None, false);
-        assert_eq!(set.set_layout(Preset::SideBySide), 1, "the active view is not a Model view");
+        let sheet = set.open(ViewKind::Sheet, Some("drawing/sheet".into()), false);
+        let other = set.open(ViewKind::Sheet, Some("drawing/sheet".into()), false);
+        assert_ne!(sheet, other);
+        assert_eq!(set.set_layout(Preset::Grid), 4);
+        assert!(set.tiles().unwrap().contains(sheet) && set.tiles().unwrap().contains(other));
         set.activate_index(0);
+        set.untile();
         set.set_layout(Preset::SideBySide);
         set.activate(sheet);
-        assert!(set.tiles().is_some() && !set.is_tiled(), "the layout waits while a Sheet shows alone");
+        assert!(!set.is_tiled(), "a hidden view stays open without destroying the layout");
         set.activate_index(0);
         assert!(set.is_tiled());
-        assert!(!set.show_beside(sheet, Edge::Right), "only implemented canvases are shown beside");
+        assert!(set.show_beside(sheet, Edge::Right));
+        assert_eq!(ViewSet::from_json(&set.to_json()), Some(set.clone()));
     }
 
     #[test]
