@@ -84,7 +84,7 @@ pub enum QueryFailure {
     BrepWithoutFaces,
     /// The face has no loops: no upward face use, or none with a loop use. Class `failed`.
     FaceWithoutLoops,
-    /// A face of the caller's body has no upward face use. [`ErrorKind::InvalidInput`].
+    /// A face of the caller's body has no (upward) face use. [`ErrorKind::InvalidInput`].
     FaceWithoutFaceuse,
     /// An edge use of the caller's body has no edge. [`ErrorKind::InvalidInput`].
     EdgeuseWithoutEdge,
@@ -260,13 +260,13 @@ impl core::fmt::Display for QueryFailure {
             Self::BrepWithoutEdges => f.write_str("the B-rep has no edges"),
             Self::BrepWithoutFaces => f.write_str("the B-rep has no faces"),
             Self::FaceWithoutLoops => f.write_str("the face has no loops"),
-            Self::FaceWithoutFaceuse => f.write_str("the face has no upward face use"),
+            Self::FaceWithoutFaceuse => f.write_str("the face has no face use"),
             Self::EdgeuseWithoutEdge => f.write_str("the edge use has no edge"),
             Self::EdgeuseOrientationUnset => {
                 f.write_str("the edge use's orientation is neither same nor opposite")
             }
             Self::LoopuseWithoutVertexuse => f.write_str("a loop use's vertex use is missing"),
-            Self::VertexuseWithoutVertex => f.write_str("a vertex use has no vertex"),
+            Self::VertexuseWithoutVertex => f.write_str("the vertex use has no vertex"),
             Self::NoEdgeAtPoint => f.write_str("no edge is at the point"),
             Self::NoFaceAtPoint => f.write_str("no face is at the point"),
             Self::ClosestPointNotEvaluated => f.write_str("a closest point does not evaluate"),

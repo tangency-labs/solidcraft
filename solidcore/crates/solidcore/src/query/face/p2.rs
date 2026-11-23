@@ -2351,14 +2351,7 @@ fn curve_on_classify_body<O: ClassObject>(
             match intersect_ts_bound(k, objects, &mut made_trims, cc, f, do_check_3d) {
                 Ok(()) => {}
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(e) => {
-                    return Err(crate::error::Failure::new(
-                        OP_CURVE,
-                        QueryFailure::BoundaryNotIntersected,
-                    )
-                    .caused_by(e)
-                    .into_error())
-                }
+                Err(e) => return Err(boundary_not_intersected(e)),
             }
         } else {
             // 3D Curve Branch
@@ -2511,6 +2504,14 @@ fn reset_classification<O: ClassObject>(k: &Kernel, cc: &mut CurveClassification
     cc.reset(k, &ResetOptions::default())
 }
 
+/// The face boundary's intersection with the 2D classification curve failed with `e`:
+/// upstream's `SM_ERR`, with `e` kept as the cause (its class carries through).
+fn boundary_not_intersected(e: SolidError) -> SolidError {
+    crate::error::Failure::new(OP_CURVE, QueryFailure::BoundaryNotIntersected)
+        .caused_by(e)
+        .into_error()
+}
+
 /// `SmCurveClassification::IntersectTSBound(this, bDoCheck3d)`, on the face's B-rep
 /// (see [`WithMadeTrimCurves`]).
 fn intersect_ts_bound<O: ClassObject>(
@@ -2624,7 +2625,13 @@ fn cached_ts_bound<O: ClassObject>(
         let &(_, eu, edge) = ids
             .iter()
             .find(|(h, _, _)| *h == edgeuse.edgeuse)
-            .ok_or_else(|| crate::error::Failure::new(OP_CURVE, QueryFailure::Defect { why: "the lookup of a visited edge use among the face's edge uses found none, though the visits are taken from the face's loops, whose edge uses the list holds" }).with_status(crate::error::SM_ERR_NULL_POINTER).into_error())?;
+            // the caller's adapter named a visited edge use the face's loops do not hold
+            .ok_or_else(|| {
+                SolidError::intersect(
+                    OP_CURVE,
+                    crate::error::intersect::IntersectFailure::CacheItemNotOnBoundary,
+                )
+            })?;
         // get/create the UVCurve for this Edgeuse
         if edgeuse.trim_curve.is_none() {
             let fetch = crate::topology::edgeuse::p3::get_or_create_uv_trim_curve(
@@ -3470,6 +3477,71 @@ pub(crate) mod tests {
         .unwrap();
         assert_eq!(cc.size(), 1);
     }
+    /// A failed boundary intersection stays upstream's `SM_ERR` and keeps its cause.
+    #[test]
+    fn a_failed_boundary_intersection_keeps_its_cause() {
+        let cause = SolidError::query(OP_CURVE, QueryFailure::FaceWithoutSurface);
+        let e = boundary_not_intersected(cause);
+        assert_eq!(
+            e.query_failure(),
+            Some(&QueryFailure::BoundaryNotIntersected)
+        );
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.cause().and_then(SolidError::query_failure),
+            Some(&QueryFailure::FaceWithoutSurface)
+        );
+    }
+
+    /// Each broken link of the caller's body the boundary walk reads is named, keeping
+    /// upstream's `SM_ERR_NULL_POINTER` (the edge use's missing edge through the
+    /// status override, as its cause defaults to `SM_ERR`).
+    #[test]
+    fn broken_boundary_links_are_named_null_pointers() {
+        let k = Kernel::default();
+        let walk = |b: &Brep, f: FaceId| {
+            let objects = Handles {
+                b,
+                source: Curve::from(Line::from_points(Vec3::ZERO, Vec3::X, 2)),
+            };
+            let mut copy = b.clone_standing_for_self().unwrap();
+            boundary_loops(
+                &k,
+                &mut SnapshotObjects::new(&objects, b, &mut copy),
+                &mut Vec::new(),
+                f,
+                true,
+            )
+            .map(|_| ())
+        };
+        let check = |r: Result<()>, want: QueryFailure| {
+            let e = r.unwrap_err();
+            assert_eq!(e.query_failure(), Some(&want), "{e:?}");
+            assert_eq!(e.sm_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        };
+
+        let mut b = Brep::new();
+        let f = square(&mut b);
+        b.face_mut(f).unwrap().faceuse = None;
+        check(walk(&b, f), QueryFailure::FaceWithoutFaceuse);
+
+        let mut b = Brep::new();
+        let f = square(&mut b);
+        b.edgeuse_mut(EdgeuseId::from_index(1)).unwrap().vertexuse = None;
+        check(walk(&b, f), QueryFailure::LoopuseWithoutVertexuse);
+
+        let mut b = Brep::new();
+        let f = square(&mut b);
+        b.vertexuse_mut(VertexuseId::from_index(2)).unwrap().vertex = None;
+        check(walk(&b, f), QueryFailure::VertexuseWithoutVertex);
+
+        let mut b = Brep::new();
+        let f = square(&mut b);
+        b.edgeuse_mut(EdgeuseId::from_index(3)).unwrap().edge = None;
+        check(walk(&b, f), QueryFailure::EdgeuseWithoutEdge);
+    }
+
     #[test]
     fn cached_boundary_views_resolve_real_edge_and_trim_handles() {
         let k = Kernel::default();
