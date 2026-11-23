@@ -73,7 +73,7 @@ use crate::kernel::Kernel;
 use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::knots::Side;
-use crate::surface::surface_cache::p1::SurfaceCache;
+use crate::surface::surface_cache::p1::{SolveModes, SurfaceCache};
 use crate::topology::ObjectHandle;
 
 const OP_LSI: &str = "surface::surface::p10::LsiGlobalSolver::local_solve_branch";
@@ -349,7 +349,15 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                 super::p1::ignore_native_classification(face_cache.point_test(k, uv))?
                     .unwrap_or(true),
             ),
-            _ => super::p1::is_point_valid_with(k, owner, cache, uv, None, self.face_queries),
+            _ => super::p1::is_point_valid_with(
+                k,
+                owner,
+                cache,
+                SolveModes::of(cache, self.modes),
+                uv,
+                None,
+                self.face_queries,
+            ),
         }
     }
 
@@ -430,7 +438,12 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         let srf_eval = cache.surface();
 
         // no work - This SurfaceNode is classified outside its face.
-        if !is_node_valid(tree.owner(), cache, &surface_node)? {
+        if !is_node_valid(
+            tree.owner(),
+            cache,
+            SolveModes::of(cache, self.modes),
+            &surface_node,
+        )? {
             return Ok(false);
         }
 
@@ -782,7 +795,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             }
 
             // Handle surface boundary discontinuities
-            if !cache.process_boundary_curves {
+            if !SolveModes::of(cache, self.modes).process_boundary_curves {
                 continue;
             }
             for dir in [SurfParamType::U, SurfParamType::V] {
