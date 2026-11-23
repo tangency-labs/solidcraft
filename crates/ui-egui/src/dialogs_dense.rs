@@ -622,8 +622,8 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
             // Join and Cut take their bodies in Target Bodies. A body picked there is a
             // choice by hand, so Extrude's automatic operation stops changing it.
-            set_extrude_targets(&mut d.inputs, &mut d.active, &mut d.extra, *operation);
-            if d.inputs.iter().any(|i| i.label == EXTRUDE_TARGETS && !i.items.is_empty()) {
+            set_target_bodies(&mut d.inputs, &mut d.active, &mut d.extra, *operation, "ui.extrude_join_targets_tip", "ui.extrude_cut_targets_tip");
+            if d.inputs.iter().any(|i| i.label == TARGET_BODIES && !i.items.is_empty()) {
                 *auto_op = false;
             }
             ui_kit::section(ui, "extrude_options", "Options", true, |ui| {
@@ -1034,6 +1034,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 }
             }
             crate::op_auto::op_row(ui, "rv_op", operation);
+            // Join and Cut take their bodies in Target Bodies.
+            set_target_bodies(&mut d.inputs, &mut d.active, &mut d.extra, *operation, "ui.revolve_join_targets_tip", "ui.revolve_cut_targets_tip");
         }
         Kind::Shell { thickness } => {
             // The direction below says which side the wall grows to; the label stays short enough
@@ -1262,11 +1264,15 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Loft { operation, rail_fit } => {
             crate::op_auto::op_row(ui, "lf_op", operation);
             crate::dialogs_sweep::rail_fit_row(ui, "lf", rail_fit);
+            // Join and Cut take their bodies in Target Bodies.
+            set_target_bodies(&mut d.inputs, &mut d.active, &mut d.extra, *operation, "ui.loft_join_targets_tip", "ui.loft_cut_targets_tip");
         }
         Kind::Sweep { operation, opts } => {
             enter |= crate::dialogs_sweep::rows_with(ui, opts, "sw", |ui| {
                 crate::op_auto::op_row(ui, "sw_op", operation);
             });
+            // Join and Cut take their bodies in Target Bodies.
+            set_target_bodies(&mut d.inputs, &mut d.active, &mut d.extra, *operation, "ui.sweep_join_targets_tip", "ui.sweep_cut_targets_tip");
         }
         k @ Kind::Move { .. } => {
             enter |= crate::dialogs_move::rows(ui, k);

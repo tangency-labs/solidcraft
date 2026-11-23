@@ -1,0 +1,10 @@
+{
+  "en": {
+    "ui.loft_cut_targets_tip": "The bodies the loft cuts. With none picked, SolidCraft chooses the bodies automatically.",
+    "ui.loft_join_targets_tip": "The bodies the loft joins. With none picked, it joins the shown bodies of the active component it meets.",
+    "ui.revolve_cut_targets_tip": "The bodies the revolution cuts. With none picked, SolidCraft chooses the bodies automatically.",
+    "ui.revolve_join_targets_tip": "The bodies the revolution joins. With none picked, it joins the body its sketch or face is on, or else the shown bodies of the active component.",
+    "ui.sweep_cut_targets_tip": "The bodies the sweep cuts. With none picked, SolidCraft chooses the bodies automatically.",
+    "ui.sweep_join_targets_tip": "The bodies the sweep joins. With none picked, it joins the body its sketch or face is on, or else the shown bodies of the active component."
+  }
+}
