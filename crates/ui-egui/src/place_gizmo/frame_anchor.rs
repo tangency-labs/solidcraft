@@ -15,9 +15,9 @@
 //! The section comes from the engine (`member_section_view`), laid out by the code that makes
 //! the member, so what is drawn is where the member goes; one cache ([`section_view`]) serves the
 //! view and the dialog's offsets. Unfinished or refused dialog values show nothing; a half-typed
-//! offset leaves the last section. The hot points are behind the `frame_hot_points` preference
-//! (Preferences > Tools), on by default: off, the dialog places the section by its Anchor alone,
-//! as before. The handles are published as `frame_anchor:<anchor>`, `frame_anchor:position`,
+//! offset leaves the last section. The hot points, arrows and arc are always drawn while the Frame
+//! Member dialog is open: placing the section by dragging it is what the dialog is for, so there is
+//! no option. The handles are published as `frame_anchor:<anchor>`, `frame_anchor:position`,
 //! `frame_anchor:arrow_a`, `frame_anchor:arrow_b` and `frame_anchor:rotate` for `ui.handles`.
 
 use std::cell::RefCell;
@@ -93,14 +93,9 @@ const ROTATE_TIP: &str = "ui.frame_rotate_tip";
 const ARROW_LETTERS: [&str; 2] = ["A", "B"];
 const ARROW_HANDLES: [&str; 2] = ["frame_anchor:arrow_a", "frame_anchor:arrow_b"];
 
-/// Are the hot points on (Preferences > Tools > Frame Member)?
-pub(crate) fn on(app: &SolveApp) -> bool {
-    app.preferences.frame_hot_points
-}
-
-/// Is this a Frame Member dialog with its hot points on?
-fn serves(app: &SolveApp, d: &Dialog) -> bool {
-    on(app) && matches!(d.kind, Kind::Frame(_))
+/// Is this a Frame Member dialog (whose hot points are drawn)?
+fn serves(_app: &SolveApp, d: &Dialog) -> bool {
+    matches!(d.kind, Kind::Frame(_))
 }
 
 /// A hot point: its index in the dialog's `ANCHORS` (= `Anchor::ALL`), its name, label and point.
