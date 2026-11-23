@@ -75,7 +75,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sweep")
         .contract(&SWEEP_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order; an entry {sketch, curve} is a curve of that sketch, so the path may join curves of several sketches (#16168)]; path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); operation?, touching?, targets?, name?, body_name?"),
+        .params("sketch: profile sketch; profiles?; face?: [x,y,z] (a planar body face as the profile, its edges projected into a sketch on it) and face_body?: name (whose face, where faces of several bodies meet) and fixed?: true (the face's plane as a fixed plane, as solid.extrude's); path_sketch: sketch; path: [curve ids in order; an entry {sketch, curve} is a curve of that sketch, so the path may join curves of several sketches (#16168)]; path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); operation?, touching?, targets?, name?, body_name?"),
     CommandSpec::new("solid.loft", "Loft", loft).begins_edit().at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2…50, in order; matching hole counts, no holes at an apex); rails?: [{sketch, curves: [ids in order]}] (one or two guide rails from the first section to the last, through every section's outline: the loft follows them between the sections; not with sections that have holes); rail_fit?: scale|stretch (default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); operation?, touching?, targets? (Join excludes hidden bodies from automatic targets; explicit targets or participants may include them), name?, body_name?"),
     CommandSpec::new("solid.box", "Box", crate::checked!("solid.box", prim_box)).begins_edit()
         .at("SOLID", "CREATE")
@@ -830,6 +830,11 @@ pub(super) fn in_design_units(s: &Session, kind: &mut FeatureKind) {
             *e = s.doc.with_design_unit(e, k).into();
         }
     }
+}
+
+/// A constructor whose persistent attachment is already authored in the active frame.
+pub(super) fn add_feature_local(s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
+    add_feature_in(s, p, kind, false)
 }
 
 /// `add_feature`; `world` is false when `kind` is already in the active component's frame.
@@ -4471,31 +4476,53 @@ pub(crate) fn sketch_key(v: Option<&Value>) -> Option<String> {
 
 fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.sweep";
-    let sketch = feature_sketch(s, p, cmd)?;
+    let face = p.get("face").filter(|v| !v.is_null());
+    if face.is_some() && (p.get("sketch").is_some_and(|v| !v.is_null()) || p.get("profiles").is_some()) {
+        return Err(bad(cmd, "a sweep's profile is either a face or a sketch, not both"));
+    }
+    // A planar body face sweeps like a profile (its edges projected into a sketch on it).
+    let (sketch, face_profile, face_body) = match face {
+        Some(fp) => {
+            let fp = vec3(fp).ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z] on the face"))?;
+            let (id, inside, body) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"), fixed_param(p, cmd)?)?;
+            s.active_sketch = None;
+            s.sketching_view = None;
+            (id, Some(ProfileSel::Points { points: vec![inside] }), Some(body))
+        }
+        None => (feature_sketch(s, p, cmd)?, None, None),
+    };
     let (path_sketch, path, path_body, path_edges) = sweep_path(s, p, cmd)?;
     let (orientation, twist, scale) = sweep_options(s, p, cmd)?;
     let (rails, rail_fit) = sweep_rails(s, p, cmd, path_body.is_none().then_some(path_sketch))?;
     let operation = operation(p, cmd)?;
-    let targets = face_join_targets(s, p, operation, &[sketch], cmd)?;
-    add_feature(
-        s,
-        p,
-        FeatureKind::Sweep {
-            sketch: SketchId(sketch),
-            profiles: profiles_or_default(s, p, sketch, cmd)?,
-            path_sketch: SketchId(path_sketch),
-            path,
-            path_body,
-            path_edges,
-            orientation,
-            twist,
-            scale,
-            rails,
-            rail_fit,
-            operation,
-            targets,
-        },
-    )
+    let mut targets = face_join_targets(s, p, operation, &[sketch], cmd)?;
+    // A sweep from a face joins the body the face is on, as a revolve's does (#2747).
+    if targets.is_empty() && operation == Operation::Join && string_list(cmd, p, "participants")?.is_empty() {
+        targets.extend(face_body.clone().map(BodyName));
+    }
+    let profiles = match face_profile {
+        Some(f) => f,
+        None => profiles_or_default(s, p, sketch, cmd)?,
+    };
+    let mut kind = FeatureKind::Sweep {
+        sketch: SketchId(sketch),
+        profiles,
+        path_sketch: SketchId(path_sketch),
+        path,
+        path_body,
+        path_edges,
+        orientation,
+        twist,
+        scale,
+        rails,
+        rail_fit,
+        operation,
+        targets,
+    };
+    // The path's points on a body's edges and the direction the profile follows are given in the
+    // world: they go into the active component's frame, as `frames` maps the face pick.
+    super::component::to_active_frame_geometry(s, &mut kind);
+    add_feature_in(s, p, kind, false)
 }
 
 /// A sweep's path (#2216, #16168): a chain of a body's edges (`path_body` and `path_edges`) or

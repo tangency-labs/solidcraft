@@ -212,23 +212,19 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         return Err(KernelError::Invalid("offset distance".into()));
     }
     let healed = crate::boolean_record::healed(b)?.with_split_lines(b.splits.clone());
-    let size = healed.size();
-    let mesh = healed.mesh(&crate::MeshTolerance::chord((size * 1e-3).max(1e-3)))?;
     let mut chosen: Vec<usize> = Vec::new();
+    // The reach of the earlier mesh pick (a point near a display triangle of a face), widened by
+    // that mesh's chord deviation, since the distance is now to the exact face. The nearest
+    // exact face wins, so a point near a rim still picks the face it lies on.
+    let reach = 2.0 * healed.size() * 1e-3 + 2e-6;
     for p in at {
-        let near = mesh
-            .triangles
-            .iter()
-            .zip(&mesh.tri_face)
-            .filter_map(|(t, f)| mesh.tri(t).map(|[x, y, z]| (solidcraft_geom::compare::closest_on_triangle(*p, x, y, z).dist(*p), *f as usize)))
-            .min_by(|a, c| a.0.total_cmp(&c.0));
-        match near {
-            Some((d, f)) if d < size * 1e-3 + 1e-6 => {
+        match healed.face_within(*p, reach)? {
+            Some(f) => {
                 if !chosen.contains(&f) {
                     chosen.push(f);
                 }
             }
-            _ => return Err(KernelError::Invalid(format!("no face at {:?}", [p.x, p.y, p.z]))),
+            _ => return Err(KernelError::Invalid(format!("no face at {p}"))),
         }
     }
     let chosen = crate::offset::with_same_surface(&healed, &chosen);

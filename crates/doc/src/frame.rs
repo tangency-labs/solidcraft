@@ -360,6 +360,7 @@ pub use crate::eval::frame_member::{
     members_of_bodies, overlap_parent, section_view,
 };
 pub use crate::frame_corners::{CornerOverride, CornerType, MAX_GAP, MemberRef, checked_gap, read_coped};
+pub use crate::frame_plate::{PlateHoles, PlateMember, PlateShape, plate_member, plate_region};
 
 /// A frame member between two points (#15705): its id, which names the member as a line's id
 /// does (`names`, End Caps), and its two ends, found again on every evaluation so the member
