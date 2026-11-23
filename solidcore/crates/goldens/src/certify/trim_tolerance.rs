@@ -1483,22 +1483,30 @@ struct GoldenChange {
 /// and none belongs to [`ROWS`]. The vertex crossing correction itself moves no golden.
 /// Derivation: `plan/findings/blend.fillet_solver_p5--issue-17016-non-tangent-rollover.md`,
 /// "Three goldens rows that move, and why". No topology or status changes in these rows.
+/// #18294 moves the two setbacks rows again (each reason names the change and the row before
+/// it); its other seven `issue-880-*` rows are in [`MAIN`]'s digest.
 const FILLET_UV_CHANGES: &[GoldenChange] = &[
     GoldenChange {
         case: "issue-880-half-arc-rim-0-setbacks-1-1",
         old_hash: 0x0c84b1bb5aabdeb6,
-        new_hash: 0x064c8b893b765eaf,
+        new_hash: 0xff20292224de653a,
         reason: "Keep the domain-proved oblique UV jets on the procedural surface: the old \
                  boundary fix-up flattened slopes of 5.3e-5 to 8.5e-4 and moved control \
-                 polygons by up to 2.2e-5 in UV without a bound on the procedural surface.",
+                 polygons by up to 2.2e-5 in UV without a bound on the procedural surface. \
+                 Then #18294: the glue keeps a trim curve only when it spans the surviving \
+                 edge, so two vertex and one edge tolerance fall from 6.82e-5 to 4e-5 and \
+                 three of the ten vertices are listed in another order (row was 064c8b893b765eaf).",
     },
     GoldenChange {
         case: "issue-880-half-arc-rim-0-setbacks-1-2",
         old_hash: 0x0c29e482175fe1e2,
-        new_hash: 0x94a9c0596e8f0db7,
+        new_hash: 0x338bc7a48039bef7,
         reason: "Keep the domain-proved oblique UV jets on the procedural surface for the \
                  unequal setbacks too; the old boundary flattening and polygon moves have \
-                 no bound on that surface, and preserving the jets moves the mass integral.",
+                 no bound on that surface, and preserving the jets moves the mass integral. \
+                 Then #18294: the glue keeps a trim curve only when it spans the surviving \
+                 edge, so two vertex and one edge tolerance fall from 7.47e-5 to 4.15e-5 \
+                 (row was 94a9c0596e8f0db7).",
     },
     GoldenChange {
         case: "source-file-nurb_box-edge0",
