@@ -801,6 +801,40 @@ fn a_token_under_another_stops_when_either_does() {
     assert!(dialog.within(|| design.within(|| Brep::make_box([0.0; 3], [1.0; 3]))).is_err(), "either way round");
 }
 
+/// A limit on a call's work (#20575) stops it at the check that makes the count, the same on every
+/// machine, and says it was the limit: a call that stays under it, and one stopped from outside,
+/// do not.
+#[test]
+fn a_work_limit_stops_a_call_at_its_count_and_says_so() {
+    let checks = std::cell::Cell::new(0_u32);
+    let (result, spent) = stop::within_polls(500, || {
+        let result: Result<()> = core::run("limited_call", |k| {
+            loop {
+                checks.set(checks.get() + 1);
+                k.check_cancelled("limited_call")?;
+            }
+        });
+        result
+    });
+    assert!(result.is_err_and(|e| e.to_string().contains("cancel")));
+    assert!(spent);
+    // The call's own check before it starts counts too, and nothing else does.
+    assert!((490..=499).contains(&checks.get()), "{}", checks.get());
+
+    let (result, spent) = stop::within_polls(500, || -> Result<()> { core::run("short_call", |k| k.check_cancelled("short_call")) });
+    assert!(result.is_ok() && !spent);
+
+    let outer = stop::Stop::new();
+    let (result, spent) = outer.within(|| {
+        stop::within_polls(u64::MAX, || {
+            outer.stop();
+            let result: Result<()> = core::run("stopped_call", |k| k.check_cancelled("stopped_call"));
+            result
+        })
+    });
+    assert!(result.is_err() && !spent, "stopped from outside, not by the limit");
+}
+
 /// Every call samples the same random points, whatever its kernel did before: what depends on
 /// them answers the same on any kernel of the pool. (Seven points of a box's first face, each
 /// dithered by a random draw, after the call has sampled the box's other faces.)

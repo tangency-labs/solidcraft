@@ -3313,16 +3313,11 @@ pub fn create_edge_edge_blend(
 
     // locals
     let (Some(edge1), Some(edge2)) = (eu1::edge(b_1, eu_1)?, eu1::edge(b2!(), eu_2)?) else {
-        // Could not fetch Edge from Edgeuse
-        return Err(Failure::new(
+        // Could not fetch Edge from Edgeuse: the edge uses are the caller's
+        return Err(SolidError::topology(
             OP,
-            TopologyFailure::Defect {
-                why: "an edge use has no edge, though the kernel links every edge use to its \
-                      edge when it makes it",
-            },
-        )
-        .with_status(SM_ERR_INVALID_INPUT)
-        .into_error());
+            TopologyFailure::EdgeuseWithoutEdge,
+        ));
     };
 
     // edge locals
@@ -4061,6 +4056,26 @@ mod tests {
             // a neighbour whose trim curve cannot be created swaps nothing (fork 60a8a51)
             assert!(!redistribute_fixture(&mut b, edge).unwrap());
             assert_eq!(seam_sides(&b, uses), [0.0, 1.0]);
+        }
+    }
+
+    #[test]
+    fn an_edge_edge_blend_refuses_an_edge_use_without_edge_as_invalid_input() {
+        let k = Kernel::default();
+        for missing in 0..2 {
+            let (mut b, _, uses, _) = seam_fixture();
+            b.edgeuse_mut(uses[missing]).unwrap().edge = None;
+            let e =
+                create_edge_edge_blend(&k, 0, &mut b, Some(uses[0]), None, Some(uses[1]), 0, None)
+                    .unwrap_err();
+            assert_eq!(
+                e.topology_failure(),
+                Some(&TopologyFailure::EdgeuseWithoutEdge),
+                "{e}"
+            );
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e}");
+            assert!(!e.is_defect(), "{e}");
+            assert_eq!(e.sm_status(), Some(SM_ERR_INVALID_INPUT), "{e}");
         }
     }
 

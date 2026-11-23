@@ -59,7 +59,8 @@ impl std::error::Error for PeriodicSeamError {
 /// record is published. Returns the completed record and each output face's input index;
 /// `None` leaves a record with in-domain trims and complete sectors unchanged. The kernel
 /// removes crossed internal cuts, splits genuine boundaries at the base cut, inserts seams
-/// and translates the pieces.
+/// and translates the pieces. A completed record that is no longer valid or no longer agrees
+/// with its own geometry is not returned: `None` keeps the record as it was.
 ///
 /// # Errors
 /// Typed evaluation, conversion and topology failures, including a lost face origin.
@@ -132,6 +133,16 @@ pub fn complete_periodic_seams(
     }
     let (completed, order) =
         to_record(&mut kernel, &mut body).map_err(PeriodicSeamError::Conversion)?;
+    // The kernel moves every trim piece into the base period on its own. Where a loop's
+    // consecutive uses lie either side of the cut with no seam edge between them (a vertex
+    // sits on the cut), the pieces end a whole period apart and the record's geometry no
+    // longer agrees with itself. Such a completion is not published: the record as imported,
+    // whose lifted trims continue one another, stays.
+    if crate::record_check::validate(&completed).is_err()
+        || crate::record_check::agreement(&completed).is_err()
+    {
+        return Ok(None);
+    }
     let faces = order
         .faces
         .iter()
