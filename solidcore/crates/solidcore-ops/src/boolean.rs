@@ -17,15 +17,21 @@
 use solidcore::boolean::api_brep::{self as sm, Boolean2dOutcome};
 use solidcore::boolean::merge::MergeOptions;
 use solidcore::boolean::operand_tolerances::matched_tolerances;
+use solidcore::error::boolean::BooleanFailure;
+use solidcore::error::topology::TopologyFailure;
+use solidcore::error::Reason;
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::kernel::Kernel;
 use solidcore::primitive::primitive_creation::p1::Boolean2d;
+use solidcore::topology::api_files::rebuild_native;
+use solidcore::topology::brep::p3::brep_copy;
 use solidcore::topology::brep::validation::update_tolerances_after_boolean;
-use solidcore::Brep;
 use solidcore::Result as KernelResult;
+use solidcore::{Brep, SolidError};
 
 use crate::body::{finish_under, Body, Contract, Expect, Outward, Proof};
-use crate::session::run_taking;
+use crate::measure::{locate_points, Located};
+use crate::session::{read_locked, run_on, run_taking};
 use crate::{Error, Result};
 
 /// Which boolean.
@@ -73,7 +79,7 @@ fn finished(k: &mut Kernel, r: Brep, expect: Expect, contract: Contract) -> Kern
 /// gaps are covered by growing tolerances. Only a vertex wider than the check allows moves;
 /// elsewhere tolerances only grow. Without it, the validity check of [`finished`] refuses a
 /// sound result for a sub-micron gap. The update can itself fail with the kernel's error, which
-/// then comes back in place of the [`Error::NotSolid`] the check would have given.
+/// then comes back in place of the [`Error::NotSolidBecause`] the check would have given.
 fn after_boolean(k: &mut Kernel, r: &mut Brep) -> KernelResult<()> {
     update_tolerances_after_boolean(k, r).map(|_| ())
 }
@@ -137,10 +143,11 @@ fn result(d: Done, empty: Result<Option<Body>>) -> Result<Option<Body>> {
 
 /// `a` op `b` (`SmApiBoolean`) under [`Contract::Closed`]: `None` when the result is empty,
 /// [`Error::NotSolid`] when solid operands give a body that is not closed (solids touching
-/// along an edge or at a vertex are closed).
+/// along an edge or at a vertex are closed). An empty difference or intersection of solids is
+/// [`Error::EmptyRefuted`] where a vertex of an operand shows the result holds material.
 ///
 /// # Errors
-/// [`Error::NotSolid`]; the kernel's error.
+/// [`Error::NotSolid`]; [`Error::EmptyRefuted`]; the kernel's error.
 pub fn boolean(a: Body, b: Body, op: BooleanOp) -> Result<Option<Body>> {
     boolean_with(a, b, op, Contract::Closed)
 }
@@ -148,8 +155,8 @@ pub fn boolean(a: Body, b: Body, op: BooleanOp) -> Result<Option<Body>> {
 /// [`boolean`] under `contract`.
 ///
 /// # Errors
-/// As [`boolean`]; under [`Contract::Proved`], [`Error::NotSolid`] too for a result of proved
-/// solids that is not proved valid and facing out.
+/// As [`boolean`]; under [`Contract::Proved`], [`Error::NotSolidBecause`] too for a result of
+/// proved solids that is not proved valid and facing out.
 pub fn boolean_with(a: Body, b: Body, op: BooleanOp, contract: Contract) -> Result<Option<Body>> {
     let both = [a, b];
     usable("SmApiBoolean", &both)?;
@@ -159,11 +166,134 @@ pub fn boolean_with(a: Body, b: Body, op: BooleanOp, contract: Contract) -> Resu
         let expect = expect_of(k, &mut operands, contract)?;
         let [(mut ca, _), (mut cb, _)] = operands;
         matched_tolerances(k, &mut ca, &mut cb)?;
+        let witnesses = Witnesses::of(k, &ca, &cb, op, expect)?;
         let mut r = sm::boolean(k, ca, cb, operation(op))?.result;
         after_boolean(k, &mut r)?;
-        finished(k, r, expect, contract)
+        Ok(match finished(k, r, expect, contract)? {
+            Done::Empty => witnesses.refute(k),
+            d => d,
+        })
     })?;
     result(d, Ok(None))
+}
+
+/// Union copies of two bodies under [`Contract::Closed`]. For a failed radial search at a
+/// shared edge between solid operands, retry in reverse order and, if needed, with rebuilt native
+/// operands. The inputs and the attributes that carry their provenance are kept.
+pub fn union_copies(a: &Body, b: &Body) -> Result<Option<Body>> {
+    let inputs = [("a", a), ("b", b)];
+    if inputs.iter().any(|(_, body)| body.is_poisoned()) {
+        return Err(Error::Internal(
+            "SmApiBoolean: the body was left unfinished by an earlier panic".into(),
+        ));
+    }
+    let d = run_on("SmApiBoolean", &inputs, |k| {
+        let ca = read_locked(a, |a| brep_copy(k, a))?;
+        let cb = read_locked(b, |b| brep_copy(k, b))?;
+        let mut operands = [(ca, Proof::default()), (cb, Proof::default())];
+        let expect = expect_of(k, &mut operands, Contract::Closed)?;
+        let [(ca, _), (cb, _)] = operands;
+        let first = union_pair(k, ca, cb, expect, Contract::Closed);
+        let Err(original) = first else { return first };
+        if !expect.solid() || !radial_sector_failure(&original) {
+            return Err(original);
+        }
+
+        // The merge copies faces into its first operand. Its radial search can succeed in
+        // the other direction at the same shared edge.
+        let cb = read_locked(b, |b| brep_copy(k, b))?;
+        let ca = read_locked(a, |a| brep_copy(k, a))?;
+        let reverse = union_pair(k, cb, ca, expect, Contract::Proved);
+        if matches!(
+            reverse,
+            Ok(Done::Body(..)) | Err(SolidError::Cancelled { .. })
+        ) || reverse
+            .as_ref()
+            .is_err_and(|e| e.root_cause().is_not_certified())
+        {
+            return reverse;
+        }
+        let rebuilt = (|| {
+            let cb = read_locked(b, |b| rebuild_native(k, b))?;
+            let ca = read_locked(a, |a| rebuild_native(k, a))?;
+            union_pair(k, cb, ca, expect, Contract::Proved)
+        })();
+        match rebuilt {
+            done @ (Ok(Done::Body(..)) | Err(SolidError::Cancelled { .. })) => done,
+            Err(e) if e.root_cause().is_not_certified() => Err(e),
+            _ => Err(original),
+        }
+    })?;
+    result(d, Ok(None))
+}
+
+fn radial_sector_failure(error: &SolidError) -> bool {
+    error.failure().is_some_and(|failure| {
+        failure.operation == "boolean::merge::p2::make_faceuse"
+            && matches!(
+                failure.reason,
+                Reason::Boolean(BooleanFailure::NoRadialEdgeUse)
+            )
+            && error.root_cause().failure().is_some_and(|cause| {
+                matches!(
+                    cause.reason,
+                    Reason::Topology(TopologyFailure::NoRadialCandidate)
+                )
+            })
+    })
+}
+
+fn union_pair(
+    k: &mut Kernel,
+    mut a: Brep,
+    mut b: Brep,
+    expect: Expect,
+    contract: Contract,
+) -> KernelResult<Done> {
+    matched_tolerances(k, &mut a, &mut b)?;
+    let mut r = sm::boolean_union(k, a, b)?;
+    after_boolean(k, &mut r)?;
+    finished(k, r, expect, contract)
+}
+
+/// Each operand's vertices with a copy of the other operand, which the boolean consumes, and
+/// the side of it (material or void) on which a vertex proves the result is not empty.
+struct Witnesses(Vec<(Vec<[f64; 3]>, Brep, bool)>);
+
+impl Witnesses {
+    fn of(k: &mut Kernel, a: &Brep, b: &Brep, op: BooleanOp, expect: Expect) -> KernelResult<Self> {
+        if !expect.solid() {
+            return Ok(Self(Vec::new()));
+        }
+        let pairs: &[(&Brep, &Brep, bool)] = match op {
+            BooleanOp::Union => &[],
+            BooleanOp::Subtract => &[(a, b, false)],
+            BooleanOp::Intersect => &[(a, b, true), (b, a, true)],
+        };
+        let mut held = Vec::new();
+        for &(from, against, material) in pairs {
+            held.push((vertices(from)?, brep_copy(k, against)?, material));
+        }
+        Ok(Self(held))
+    }
+
+    fn refute(self, k: &Kernel) -> Done {
+        for (points, against, material) in &self.0 {
+            let located = locate_points(k, against, points);
+            let on_its_side = |l: &std::result::Result<Located, _>| matches!(l, Ok(Located::InRegion { material: Some(m), .. }) if m == material);
+            if let Some((&at, _)) = points.iter().zip(located).find(|(_, l)| on_its_side(l)) {
+                return Done::Refused(Error::EmptyRefuted { at });
+            }
+        }
+        Done::Empty
+    }
+}
+
+fn vertices(b: &Brep) -> KernelResult<Vec<[f64; 3]>> {
+    b.vertex_list()
+        .iter()
+        .map(|&v| b.vertex(v).map(|v| [v.point.x, v.point.y, v.point.z]))
+        .collect()
 }
 
 /// The union of `bodies` under [`Contract::Closed`], pairwise level by level (an odd one
@@ -182,8 +312,8 @@ pub fn union_all(bodies: Vec<Body>) -> Result<Body> {
 /// [`after_boolean`]'s update as it is made, so a later level unions repaired operands.
 ///
 /// # Errors
-/// As [`union_all`]; under [`Contract::Proved`], [`Error::NotSolid`] too for a result of proved
-/// solids that is not proved valid and facing out.
+/// As [`union_all`]; under [`Contract::Proved`], [`Error::NotSolidBecause`] too for a result of
+/// proved solids that is not proved valid and facing out.
 // The operands are consumed: their bodies are taken out under the kernel's lock.
 #[allow(clippy::needless_pass_by_value)]
 pub fn union_all_with(bodies: Vec<Body>, contract: Contract) -> Result<Body> {
@@ -275,8 +405,8 @@ pub fn imprint(body: Body, tool: Body) -> Result<(Body, bool)> {
 /// `body` when its face, edge or vertex count moved (a face cut, an edge split).
 ///
 /// # Errors
-/// As [`imprint`]; under [`Contract::Proved`], [`Error::NotSolid`] when a solid body comes out
-/// not proved a solid.
+/// As [`imprint`]; under [`Contract::Proved`], [`Error::NotSolidBecause`] when a solid body
+/// comes out not proved a solid.
 pub fn imprint_with(body: Body, tool: Body, contract: Contract) -> Result<(Body, bool)> {
     let both = [body, tool];
     usable("SmApiBooleanWithOptions", &both)?;
