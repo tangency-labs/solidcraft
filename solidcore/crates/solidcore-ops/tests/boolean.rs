@@ -3828,5 +3828,3 @@ fn curved_pockets_touching_along_a_vertical_spline_edge_cut_after_round_trip() {
     let got = volume(&r);
     assert!(near(got, want), "volume {got} vs closed form {want}");
 }
-
-
