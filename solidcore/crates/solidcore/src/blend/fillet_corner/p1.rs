@@ -3322,7 +3322,7 @@ impl FilletCorner {
         set_edge_curve(env.pseudo.brep_mut(), rail0, None)?;
         let crv_ivl = rail0_curve.natural_interval();
         set_edge_curve(env.pseudo.brep_mut(), edge0, Some(rail0_curve))?;
-        env.pseudo.brep_mut().edge_mut(edge0)?.interval = crv_ivl;
+        edge::set_interval(env.pseudo.brep_mut(), edge0, &crv_ivl)?;
 
         // move pRail1->Curve to pEdge1 (delete current pEdge1->Curve - reverse Rail1Curve
         // direction)
@@ -3330,7 +3330,7 @@ impl FilletCorner {
         let crv_ivl = rail1_curve.natural_interval();
         let crv_ivl = rail1_curve.reverse_parameterization(env.k, &crv_ivl)?;
         set_edge_curve(env.pseudo.brep_mut(), edge1, Some(rail1_curve))?;
-        env.pseudo.brep_mut().edge_mut(edge1)?.interval = crv_ivl;
+        edge::set_interval(env.pseudo.brep_mut(), edge1, &crv_ivl)?;
 
         // move pEU0->UVTrimCurve to pPrimEU0 (delete current pPrimEU0->UVTrimCurve)
         env.pseudo

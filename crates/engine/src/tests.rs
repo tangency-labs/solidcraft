@@ -6168,7 +6168,7 @@ fn computed_import_preserves_file_and_earlier_undo_history() {
     let saved = s.doc.clone();
     let mut computed = s.scratch();
     run(&mut computed, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]}));
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert_eq!(s.path.as_deref(), Some("existing.solidcraft"));
     assert!(s.is_dirty());
     assert_eq!(s.model.state().bodies.len(), 2);
@@ -6301,7 +6301,7 @@ fn design_tokens_computed_save_preserves_the_saved_token() {
     run(&mut saved, "file.save_as", json!({"path": folder.path("renamed.sc")}));
     s.adopt_save(&saved);
     let unchanged = s.scratch();
-    s.accept_computed(unchanged);
+    s.accept_computed(unchanged).unwrap();
     assert_eq!(s.design_token(), token, "adopting a save preserves the association too");
 }
 
@@ -6317,7 +6317,7 @@ fn design_tokens_open_pinning_preserves_token_on_noop_acceptance() {
     let mut opened = Session::opened_at(doc, None, None);
     let token = opened.design_token();
     let unchanged = opened.scratch();
-    opened.accept_computed(unchanged);
+    opened.accept_computed(unchanged).unwrap();
     assert_eq!(opened.design_token(), token);
 }
 
@@ -6328,7 +6328,7 @@ fn design_tokens_direct_computed_mutations_after_commands_get_a_fresh_token() {
     run(&mut computed, "parameters.add", json!({"name": "width", "expression": "10 mm"}));
     let executed = computed.design_token();
     computed.doc_mut().name = "Direct candidate edit".into();
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert_ne!(s.design_token(), executed);
 }
 
@@ -6344,10 +6344,10 @@ fn design_tokens_accepting_historical_candidates_never_reuses_their_tokens() {
     let older_edited = s.scratch();
     run(&mut s, "edit.undo", json!({}));
     let current = s.design_token();
-    s.accept_computed(older);
+    s.accept_computed(older).unwrap();
     assert_eq!(s.design_token(), current, "an identical historical candidate keeps the live token");
     assert_eq!(s.doc.to_json(), bytes);
-    s.accept_computed(older_edited);
+    s.accept_computed(older_edited).unwrap();
     assert_eq!(s.doc.to_json(), edited_bytes);
     assert_ne!(s.design_token(), historical);
     assert_ne!(s.design_token(), edited);
@@ -6502,7 +6502,7 @@ fn a_model_put_back_from_an_earlier_copy_lets_go_of_the_bodies_it_replaces() {
     warm(&changed);
     run(&mut s, "inspect.measure", json!({}));
     assert_eq!(warm_bodies(&changed), ["Other", "Block"]);
-    s.accept_computed(original);
+    s.accept_computed(original).unwrap();
     assert_eq!(warm_bodies(&changed), ["Other"]);
 }
 
@@ -6660,7 +6660,7 @@ fn adopting_a_computed_component_keeps_its_warm_world_geometry() {
     for b in &prepared.bodies {
         let _ = b.mesh();
     }
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert!(std::sync::Arc::ptr_eq(&prepared, &s.world_state().unwrap()));
     s.invalidate_view(100);
     assert!(std::sync::Arc::ptr_eq(&prepared, &s.world_state().unwrap()));
