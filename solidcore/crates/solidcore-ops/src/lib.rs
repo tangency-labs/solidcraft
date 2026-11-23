@@ -66,6 +66,7 @@ pub mod hatch;
 pub mod heal;
 pub mod history;
 pub mod hlr;
+pub mod hole_stacks;
 pub mod import_geometry;
 pub mod joint_turn;
 pub mod label;
