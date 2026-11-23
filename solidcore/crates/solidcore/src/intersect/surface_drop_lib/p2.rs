@@ -512,11 +512,6 @@ fn keep_seam_side(
     let natural = surface.natural_uv_domain_with_nurb(k)?;
     let ivl = free(&natural);
     let (lo, hi) = (ivl.min(), ivl.max());
-    // (cheap rejection before the closure test's evaluations: far off the seam)
-    let band = 1e-3 * (hi - lo);
-    if (s_found - lo).abs() > band && (s_found - hi).abs() > band {
-        return Ok(found);
-    }
     let closed =
         ignored(surface.is_closed(k, &natural, singular_dir, None, true))?.is_some_and(|(c, _)| c);
     if !closed {
@@ -1918,7 +1913,10 @@ mod tests {
                 }
             };
             let dom = |a: f64, b: f64| {
-                let (p, q) = (at(a, d.v_min().min(d.u_min())), at(b, other));
+                let (p, q) = (
+                    at(a, if swap { d.u_min() } else { d.v_min() }),
+                    at(b, other),
+                );
                 Extent2d::from_bounds(p.x, p.y, q.x, q.y)
             };
             for (domain, from, to, want) in [
