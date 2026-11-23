@@ -38,7 +38,7 @@ pub struct SelectionDeleteParams {
     pub items: Option<SelectionItems>,
     /// `delete`: a view in `items` also takes the views projected or cut from it, which are
     /// otherwise refused, naming them. Read only for a drawing's objects.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "contents_schema")]
     pub contents: Option<Value>,
     /// Components to delete, by id or name (not the design itself). Only the first 10000 are
