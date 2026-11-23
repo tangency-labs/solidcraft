@@ -69,7 +69,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::attributes;
 use super::p1::{
-    OffsetExecutive, OffsetOperation, FU_NO_MATE, NO_NEW_FACE, NO_OFFSET, OFFSET_FACE_NO_SURFACE,
+    OffsetExecutive, OffsetOperation, EDGE_NO_VERTEX, EU_NO_EDGE, EU_NO_MATE, EU_NO_RADIAL,
+    FU_NO_MATE, NO_NEW_FACE, NO_OFFSET, OFFSET_FACE_NO_SURFACE,
 };
 use crate::boolean::merge::p4::{
     BooleanKernels, KernelManifoldIntersector, ManifoldKernelAdapter, ManifoldNotificationKeys,
@@ -599,13 +600,14 @@ impl OffsetExecutive {
         notifications: &mut OffsetNotifications<'_>,
     ) -> ShellOutcome {
         let original_key = original.key();
-        let mut input = Some(original);
+        // the input while the shell holds it: put in place first, so no step finds it gone
+        let mut input: Option<Brep> = None;
         // (not upstream) the Boolean difference leaves `doing_boolean` set on its error
         // exits (SmMerge.cpp:2551, 3114, 4148); a refused shell hands the kernel back as
         // it came, as `with_doing_boolean` does, so a reused kernel carries no stale flag.
         let doing_boolean = kernel.context.doing_boolean();
         let result = (|| {
-            let original = required(input.as_mut(), OP_SHELL)?;
+            let original = input.insert(original);
             // (not upstream) the source's own attributes go to the caller's stores, as
             // upstream's live on the objects the shell copies and edits
             attributes::seed_attributes(
@@ -665,7 +667,7 @@ impl OffsetExecutive {
                 // onto its plane, WR-564)
                 let mut sheet_faces: Vec<FaceId> = Vec::new();
                 {
-                    let source = required(input.as_ref(), OP_SHELL)?;
+                    let source: &Brep = original;
                     let original_key_of = notifications.original_key_of;
                     let mut stores = NotificationStores {
                         records: &mut *notifications.records,
@@ -696,7 +698,11 @@ impl OffsetExecutive {
                         match sheet_to_copy.get_at(Some(EntityRef::Face(f)))? {
                             Some(EntityRef::Face(copy)) => sheet_faces.push(copy),
                             _ => {
-                                return Err(SolidError::null_pointer(OP_SHELL));
+                                return Err(defect(
+                                    OP_SHELL,
+                                    SHEET_FACE_NOT_COPIED,
+                                    SM_ERR_NULL_POINTER,
+                                ));
                             }
                         }
                     }
@@ -845,7 +851,7 @@ impl OffsetExecutive {
             }
 
             // cpp:608 is unconditional, even with zero faces and skip=true.
-            let mut temporary = required(self.take_offset_brep(), OP_SOLID)?;
+            let mut temporary = present(self.take_offset_brep(), OP_SOLID, NO_OFFSET)?;
             let status = shrink_geometry(kernel, &mut temporary);
             self.set_offset_brep(temporary);
             status?;
@@ -869,7 +875,7 @@ impl OffsetExecutive {
                 for &edgeuse in &offset_edgeuses {
                     kernel.check_cancelled(OP_SOLID)?;
                     marked.insert(edgeuse);
-                    let mut radial = required(eu::radial(original, edgeuse)?, OP_SOLID)?;
+                    let mut radial = present(eu::radial(original, edgeuse)?, OP_SOLID, EU_NO_RADIAL)?;
                     if marked.contains(&radial) {
                         continue;
                     }
@@ -901,7 +907,7 @@ impl OffsetExecutive {
             if self.create_offset_solid() {
                 for &edgeuse in &offset_edgeuses {
                     kernel.check_cancelled(OP_SOLID)?;
-                    let edge = required(eu::edge(original, edgeuse)?, OP_SOLID)?;
+                    let edge = present(eu::edge(original, edgeuse)?, OP_SOLID, EU_NO_EDGE)?;
                     if eu::edge_is_lamina(original, edge)? {
                         let mut stores = NotificationStores {
                             records: &mut *notifications.records,
@@ -943,7 +949,7 @@ impl OffsetExecutive {
 
             // cpp:874–882: hand over the temporary unstitched.
             if options.skip_stitch_merge {
-                return required(self.take_offset_brep(), OP_SOLID);
+                return present(self.take_offset_brep(), OP_SOLID, NO_OFFSET);
             }
 
             // cpp:887–902: a failed merge drops its partial result.
@@ -1049,7 +1055,7 @@ impl OffsetExecutive {
                         (across, offset_edgeuse, offset_across)
                     else {
                         unbridged =
-                            unbridged.or(Some(required(eu::face(original, radial)?, OP_EXTENDED)?));
+                            unbridged.or(Some(present(eu::face(original, radial)?, OP_EXTENDED, EU_NO_FACE)?));
                         continue;
                     };
                     let mut stores = NotificationStores {
@@ -1072,13 +1078,13 @@ impl OffsetExecutive {
                         ))?;
                     if mated.is_none() {
                         unbridged =
-                            unbridged.or(Some(required(eu::face(original, radial)?, OP_EXTENDED)?));
+                            unbridged.or(Some(present(eu::face(original, radial)?, OP_EXTENDED, EU_NO_FACE)?));
                         continue;
                     }
                     marked.insert(edgeuse);
-                    marked.insert(required(eu::mate(original, edgeuse)?, OP_EXTENDED)?);
+                    marked.insert(present(eu::mate(original, edgeuse)?, OP_EXTENDED, EU_NO_MATE)?);
                     marked.insert(across);
-                    marked.insert(required(eu::mate(original, across)?, OP_EXTENDED)?);
+                    marked.insert(present(eu::mate(original, across)?, OP_EXTENDED, EU_NO_MATE)?);
                 }
             }
             // On an inset shell with selected open faces (`shell_faces`), a tangent
@@ -1110,7 +1116,7 @@ impl OffsetExecutive {
             if self.extend_convex_edges() {
                 for &edgeuse in &mapped {
                     kernel.check_cancelled(OP_EXTENDED)?;
-                    let radial = required(eu::radial(original, edgeuse)?, OP_EXTENDED)?;
+                    let radial = present(eu::radial(original, edgeuse)?, OP_EXTENDED, EU_NO_RADIAL)?;
                     // (WR-346: mated across it above)
                     if self.radial_face_collapsed(original, radial)? {
                         continue;
@@ -1142,9 +1148,9 @@ impl OffsetExecutive {
                             notifications,
                         )?;
                         marked.insert(radial);
-                        marked.insert(required(eu::mate(original, radial)?, OP_EXTENDED)?);
+                        marked.insert(present(eu::mate(original, radial)?, OP_EXTENDED, EU_NO_MATE)?);
                         marked.insert(edgeuse);
-                        marked.insert(required(eu::mate(original, edgeuse)?, OP_EXTENDED)?);
+                        marked.insert(present(eu::mate(original, edgeuse)?, OP_EXTENDED, EU_NO_MATE)?);
                     }
                 }
             }
@@ -1152,7 +1158,7 @@ impl OffsetExecutive {
             let mut deferred_shell_tangents = Vec::new();
             for &edgeuse in &mapped {
                 kernel.check_cancelled(OP_EXTENDED)?;
-                let mut radial = required(eu::radial(original, edgeuse)?, OP_EXTENDED)?;
+                let mut radial = present(eu::radial(original, edgeuse)?, OP_EXTENDED, EU_NO_RADIAL)?;
                 // (WR-346: mated across it above)
                 if self.radial_face_collapsed(original, radial)? {
                     continue;
@@ -1161,7 +1167,7 @@ impl OffsetExecutive {
                 if marked.contains(&radial) {
                     continue;
                 }
-                let edge = required(eu::edge(original, edgeuse)?, OP_EXTENDED)?;
+                let edge = present(eu::edge(original, edgeuse)?, OP_EXTENDED, EU_NO_EDGE)?;
                 if !eu::edge_is_lamina(original, edge)? {
                     let Some(selected) = select_radial(original, radial, &mapped, &marked)? else {
                         continue;
@@ -1221,7 +1227,7 @@ impl OffsetExecutive {
                     }
                     if !self.squeeze_collapsed_end_edge(kernel, edgeuse, notifications)? {
                         unbridged =
-                            unbridged.or(Some(required(eu::face(original, radial)?, OP_EXTENDED)?));
+                            unbridged.or(Some(present(eu::face(original, radial)?, OP_EXTENDED, EU_NO_FACE)?));
                     }
                 }
                 if let Some(face) = unbridged {
@@ -1306,7 +1312,7 @@ impl OffsetExecutive {
             if self.create_offset_solid() {
                 for &edgeuse in &mapped {
                     kernel.check_cancelled(OP_EXTENDED)?;
-                    let edge = required(eu::edge(original, edgeuse)?, OP_EXTENDED)?;
+                    let edge = present(eu::edge(original, edgeuse)?, OP_EXTENDED, EU_NO_EDGE)?;
                     if eu::edge_is_lamina(original, edge)? {
                         // SE, not SER, upstream: propagate Unported, ignore other errors but
                         // a defect.
@@ -1381,16 +1387,12 @@ impl OffsetExecutive {
                     Vec::new()
                 };
             if finite.len() > 1 {
-                let mut body_cache = None;
+                let cache = super::p1::make_original_brep_cache(kernel, original)?;
                 for region in finite {
-                    if body_cache.is_none() {
-                        body_cache = Some(super::p1::make_original_brep_cache(kernel, original)?);
-                    }
-                    let cache = required(body_cache.as_ref(), OP_EXTENDED)?;
                     let cavity = super::cavity::is_cavity_region(
                         kernel,
                         original,
-                        cache,
+                        &cache,
                         &mut result,
                         region,
                         self.offset_distance(),
@@ -1489,7 +1491,7 @@ impl OffsetExecutive {
         let Some(offset_edgeuse) = self.offset_edgeuse(edgeuse) else {
             return Ok(false);
         };
-        let mut offset = required(self.take_offset_brep(), OP_EXTENDED)?;
+        let mut offset = present(self.take_offset_brep(), OP_EXTENDED, NO_OFFSET)?;
         let status = self.squeeze_collapsed_end_edge_in(
             kernel,
             &mut offset,
@@ -1512,13 +1514,15 @@ impl OffsetExecutive {
         let Some(offset_edge) = eu::edge(offset, offset_edgeuse)? else {
             return Ok(false);
         };
-        let v1 = required(
+        let v1 = present(
             crate::topology::edge::start_vertex(offset, offset_edge)?,
             OP_EXTENDED,
+            EDGE_NO_VERTEX,
         )?;
-        let v2 = required(
+        let v2 = present(
             crate::topology::edge::end_vertex(offset, offset_edge)?,
             OP_EXTENDED,
+            EDGE_NO_VERTEX,
         )?;
         if v1 == v2
             || offset.vertex(v1)?.point.distance(offset.vertex(v2)?.point)
@@ -1589,7 +1593,7 @@ impl OffsetExecutive {
     ) -> Result<()> {
         let mut temporary = Brep::new_with_infinite_region()?;
         temporary.set_key(notifications.result_brep.key);
-        let region = required(temporary.infinite_region(), OP_SOLID)?;
+        let region = present(temporary.infinite_region(), OP_SOLID, NEW_BREP_NO_REGION)?;
         // The empty constructor created this real topology record. Unlike source
         // records and the reserved B-rep key, it did not exist before this call.
         notifications
@@ -2109,7 +2113,7 @@ pub fn api_shell_brep_full(
     for (_, face) in faces.iter().flatten() {
         match original_to_copy.get_at(Some(EntityRef::Face(*face)))? {
             Some(EntityRef::Face(mapped)) => working_faces.push(mapped),
-            _ => return Err(SolidError::sm_err(OP_API_SHELL)),
+            _ => return Err(defect(OP_API_SHELL, SELECTION_NOT_COPIED, SM_ERR)),
         }
     }
 
@@ -2503,8 +2507,8 @@ fn shell_difference_with(
         KernelManifoldIntersector::with_notifications(keys, notifications.records, |adapter| {
             adapter.configure_operands(
                 kernel,
-                required(primary.as_ref(), OP_SHELL)?,
-                required(other.as_ref(), OP_SHELL)?,
+                present(primary.as_ref(), OP_SHELL, DIFFERENCE_OPERAND_MISSING)?,
+                present(other.as_ref(), OP_SHELL, DIFFERENCE_OPERAND_MISSING)?,
                 tolerance,
                 20.0 * crate::math::PI / 180.0,
             )?;
@@ -2523,7 +2527,7 @@ fn shell_difference_with(
         // Difference assigns rpResult to primary, not a clone. A still-present
         // original on error remains in its caller slot; other may already have
         // been consumed before a late cache/inverse-transform error (p4).
-        Ok(true) => required(primary.take(), OP_SHELL),
+        Ok(true) => present(primary.take(), OP_SHELL, DIFFERENCE_RESULT_MISSING),
         Ok(false) => Err(SolidError::invalid_input(
             OP_SHELL,
             "Difference did not assign its result",
@@ -2859,8 +2863,8 @@ fn merge_sheet_side_walls(
 ///
 /// # Errors
 ///
-/// `SM_ERR_NULL_POINTER` for a face without surface; those of the planarity test, the
-/// normal, the unitizations, the box, `MakeNurb` and `ReplaceSurface`.
+/// A defect (`SM_ERR_NULL_POINTER`) for a wall without surface; those of the planarity test,
+/// the normal, the unitizations, the box, `MakeNurb` and `ReplaceSurface`.
 fn put_planar_face_on_its_plane(
     kernel: &mut Kernel,
     b: &mut Brep,
@@ -2871,11 +2875,11 @@ fn put_planar_face_on_its_plane(
     use crate::surface::plane::p1::Plane;
     use crate::surface::surface::Surface;
 
-    let surface = b
-        .face(f)?
-        .surface
-        .as_ref()
-        .ok_or_else(|| SolidError::null_pointer(OP_SHELL))?;
+    let surface = present(
+        b.face(f)?.surface.as_ref(),
+        OP_SHELL,
+        OFFSET_FACE_NO_SURFACE,
+    )?;
     if surface.is_kind_of(Plane::TYPE)? {
         return Ok(());
     }
@@ -3053,10 +3057,6 @@ fn region_is_void(brep: &Brep, region: RegionId) -> Result<bool> {
     Ok(brep.region(region)?.is_void() != 0)
 }
 
-fn required<T>(value: Option<T>, operation: &'static str) -> Result<T> {
-    value.ok_or_else(|| SolidError::null_pointer(operation))
-}
-
 /// A defect of p2 ([`OffsetFailure::Defect`]) at `operation`: `why` says which step failed
 /// and why that is the kernel's fault, with `status`, the status of the site it replaced
 /// (`SM_ERR_NULL_POINTER` for an upstream `NER`).
@@ -3114,6 +3114,26 @@ const LOOP_COUNT_TOO_LARGE: &str = "a face's loop counts more curves than an ind
 /// Why the surface replacement kept no old surface.
 const OLD_SURFACE_NOT_KEPT: &str = "the surface replacement handed back no old surface, though \
                                     it was asked to keep it";
+/// Why an edge use beside a collapsed face has no face.
+const EU_NO_FACE: &str = "an edge use beside a collapsed face has no face, though the collapse \
+                          test found that face through it";
+/// Why the empty offset B-rep has no infinite region.
+const NEW_BREP_NO_REGION: &str =
+    "the empty offset B-rep has no infinite region, though it is made with one";
+/// Why a face of the sheet has no copy.
+const SHEET_FACE_NOT_COPIED: &str = "a face of the sheet has no copy in the map of its merge \
+                                     into the shell, though the merge maps every face it copies";
+/// Why a selected face has no copy.
+const SELECTION_NOT_COPIED: &str = "a selected face has no copy in the working copy's map, \
+                                    though the selection names faces of the source and the copy \
+                                    maps every face of its source";
+/// Why an operand of the shell's difference is not there.
+const DIFFERENCE_OPERAND_MISSING: &str = "an operand of the shell's difference is not there, \
+                                          though the shell puts both in place just before";
+/// Why the difference's result is not there.
+const DIFFERENCE_RESULT_MISSING: &str = "the difference reported its result in its first \
+                                         operand, which holds none, though it puts its result \
+                                         there when it reports one";
 
 /// `sm_OrderEdgeusesByBrep`: `edgeuses` ordered by `brep` (its faces, each face's
 /// two face uses, their edge uses), not by identity: the B-rep order is walked from
