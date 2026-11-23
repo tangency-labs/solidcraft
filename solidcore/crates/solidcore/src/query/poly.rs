@@ -1885,14 +1885,24 @@ impl PolyBrep {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` for an edge outside any loop (upstream dereferences its
-    /// null `m_pNext`); [`SolidError::InvalidInput`] for unknown ids.
+    /// `SM_ERR_NULL_POINTER` (a defect) for an edge outside any loop, which the poly
+    /// B-rep's methods never leave (upstream dereferences its null `m_pNext`);
+    /// [`SolidError::InvalidInput`] for unknown ids.
     pub fn edge_end_poly_vertex(&self, e: PolyEdgeId) -> Result<Option<PolyVertexId>> {
         const OP: &str = "query::poly::PolyBrep::edge_end_poly_vertex";
         let x = self.edge(e)?;
-        let next = x
-            .next
-            .ok_or_else(|| SolidError::query(OP, QueryFailure::PolyEdgeOutsideLoop))?;
+        let next = x.next.ok_or_else(|| {
+            crate::error::Failure::new(
+                OP,
+                QueryFailure::Defect {
+                    why: "a live poly edge is always in a loop: add_poly_edge and the copy \
+                              insert every edge they make into its loop at once, and only \
+                              delete_edge takes it out, just before freeing it",
+                },
+            )
+            .with_status(crate::error::SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         let last_edge = match x.owner {
             Some(l) => self.lp(l)?.head == Some(next),
             None => false,
@@ -3496,6 +3506,14 @@ mod tests {
         b.add_poly_edge(&k, open, 1.0e-5, p, q, v).unwrap();
         let e = b.add_poly_edge(&k, open, 1.0e-5, far, p, w).unwrap_err();
         named(e, F::PolyEdgeNotContinuing, SM_ERR);
+        // a loop finished while its last edge ends away from its first vertex
+        let short = b.start_poly_edge_loop(f).unwrap();
+        b.add_poly_edge(&k, short, 1.0e-5, p, q, v).unwrap();
+        named(
+            b.finish_poly_edge_loop(short).unwrap_err(),
+            F::PolyLoopNotClosed,
+            SM_ERR,
+        );
         // an edge taken off a vertex it does not start at, then off its own
         let start = b.edge_start_poly_vertex(es[0]).unwrap().unwrap();
         let other = b.edge_start_poly_vertex(es[1]).unwrap().unwrap();
@@ -3929,6 +3947,9 @@ mod tests {
             matches!(&r, Err(e) if e.upstream_status() == Some(1007)),
             "{r:?}"
         );
+        let e = r.unwrap_err();
+        assert_eq!(e.query_failure(), Some(&QueryFailure::UndefinedScale));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
     }
 
     #[test]

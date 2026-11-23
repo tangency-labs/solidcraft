@@ -160,8 +160,6 @@ pub enum QueryFailure {
     /// The poly edge to remove from the vertex does not start at it.
     /// [`ErrorKind::InvalidInput`].
     PolyEdgeNotAtVertex,
-    /// The poly edge is in no loop, so it has no next edge. [`ErrorKind::InvalidInput`].
-    PolyEdgeOutsideLoop,
     /// The poly edge's radial ring does not lead back to it: an edge of the ring was linked
     /// into another ring ([`crate::query::poly::PolyBrep::link_radials`] given an edge
     /// that already had radials). [`ErrorKind::InvalidInput`].
@@ -211,8 +209,7 @@ impl QueryFailure {
             | Self::NoPolyBrep
             | Self::NoTessDriver
             | Self::PolyBrepWithoutFace
-            | Self::PolyEdgeWithoutVertex
-            | Self::PolyEdgeOutsideLoop => SM_ERR_NULL_POINTER,
+            | Self::PolyEdgeWithoutVertex => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) | Self::ZeroLengthVector | Self::UndefinedScale => {
                 SM_ERR_INVALID_INPUT
             }
@@ -247,7 +244,6 @@ impl QueryFailure {
             | Self::PolyLoopNotClosed
             | Self::PolyEdgeWithoutVertex
             | Self::PolyEdgeNotAtVertex
-            | Self::PolyEdgeOutsideLoop
             | Self::PolyRadialRingNotClosed => ErrorKind::InvalidInput,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
@@ -312,7 +308,6 @@ impl core::fmt::Display for QueryFailure {
             }
             Self::PolyEdgeWithoutVertex => f.write_str("the poly edge has no start or end vertex"),
             Self::PolyEdgeNotAtVertex => f.write_str("the poly edge does not start at the vertex"),
-            Self::PolyEdgeOutsideLoop => f.write_str("the poly edge is in no loop"),
             Self::PolyRadialRingNotClosed => {
                 f.write_str("the poly edge's radial ring does not lead back to it")
             }
@@ -452,7 +447,6 @@ pub(super) mod tests {
                 K::InvalidInput,
             ),
             (F::PolyEdgeNotAtVertex, SM_ERR, K::InvalidInput),
-            (F::PolyEdgeOutsideLoop, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::PolyRadialRingNotClosed, SM_ERR, K::InvalidInput),
         ];
         for (failure, code, kind) in cases {
