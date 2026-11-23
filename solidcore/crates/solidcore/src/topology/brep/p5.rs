@@ -3737,8 +3737,9 @@ fn transform_in(
             },
         )?;
         let size = model_box.size().length();
-        let zone = b.set_this_model_size_estimate(k, size);
-        crate::geom::tol::set_context_model_size_estimate(&mut k.context, size);
+        // (the scaled body's size is its own: upstream also stores it on the body's
+        // context, which here is every body's default)
+        let zone = b.set_this_model_size_estimate(size);
         for vertex in vertices {
             let tol = max2(zone, vertex::tolerance(b, vertex)? * tol_scale);
             crate::error::ignore_status(vertex::set_tolerance(b, vertex, tol, false, false))?;
