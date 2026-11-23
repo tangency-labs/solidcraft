@@ -1770,8 +1770,18 @@ impl Ellipse {
                     // Unreachable: here the sine of the planes' angle is at least that of
                     // 10 degrees (`nearly_parallel` returned above), and the planes'
                     // intersection calls them parallel only below `SM_EFF_ZERO`. Planes that do
-                    // not cross take the nearly parallel exit.
-                    PlanesIntersection::Parallel { .. } => return Ok(out),
+                    // not cross take the nearly parallel exit. Kept an error, so no path
+                    // returns an empty answer as if it were checked.
+                    PlanesIntersection::Parallel { .. } => {
+                        return Err(SolidError::curve(
+                            "curve::ellipse::p2::Ellipse::intersect_with_ellipse",
+                            CurveFailure::Defect {
+                                why: "the planes' intersection called the ellipses' planes \
+                                      parallel after the nearly parallel exit, which takes \
+                                      every pair whose angle is below 10 degrees",
+                            },
+                        ));
+                    }
                 };
 
             // intersect circle with line of intersections
