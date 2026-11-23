@@ -1549,16 +1549,35 @@ fn a_join_in_the_flat_is_kept_like_a_cut() {
 fn a_cut_out_with_a_corner_on_a_bend_line_refolds() {
     // The base (10, -20) (-5, 0) (-100, 0) (-100, -20): 2050; the bend 25 x 3π/2; the flange 25 x 16.
     let area = 2450.0 + 37.5 * PI;
+    // The bend's free end at (-5, 0) is the plate's edge y = 0 carried through the bend from the
+    // part's surfaces, square through the sheet. Across the bend w = 0.8 x + 0.6 y, the zone from
+    // w = -4, and along it v = -0.6 x + 0.8 y, the edge runs v = -0.75 w on the plate's surface,
+    // whose sharp lies at w = -2; the plate's surface lies R = 2 from the bend's axis and its
+    // neutral surface R + K T = 3, so on the plate's half of the zone the end runs
+    // v = f(w) = 3 - 1.5 tan((w + 4) / 3). The triangle, (w, v) = (-4, 3) (-3, 1) (-1.8, 2.6), lies
+    // in that half, and cuts what of it lies under f: from its edge (-4, 3)-(-3, 1) up to f, then
+    // from (-3, 1)-(-1.8, 2.6) up to f, as far as f meets that edge. (1 mm² where the end ran
+    // straight on along y = 0, 2 where it ran square across.) The flat follows f by a spline
+    // within 1e-3 mm of it, here over less than 2 mm of it.
+    let end_cut = {
+        let f_int = |w: f64| 3.0 * w + 4.5 * ((w + 4.0) / 3.0).cos().ln();
+        let f = |w: f64| 3.0 - 1.5 * ((w + 4.0) / 3.0).tan();
+        let bc = |w: f64| 1.0 + 4.0 / 3.0 * (w + 3.0);
+        let mut w: f64 = -2.5;
+        for _ in 0..50 {
+            let slope = -0.5 / ((w + 4.0) / 3.0).cos().powi(2) - 4.0 / 3.0;
+            w -= (f(w) - bc(w)) / slope;
+        }
+        (f_int(-3.0) - f_int(-4.0) - 2.0) + (f_int(w) - f_int(-3.0) - ((w + 3.0) + 2.0 / 3.0 * (w + 3.0).powi(2)))
+    };
+    assert!((end_cut - 1.311581).abs() < 1e-6, "{end_cut}");
     let cases = [
-        // The bend's free end follows the plate's edge y = 0 through the zone (option B), so the
-        // half of the triangle past it is off the sheet: it cuts (-5, 0) (-3, -1) (-3, 0), all in
-        // the zone (0.8 x + 0.6 y ≥ -4 there), ½ · 1 · 2 = 1 mm². (2 where the end ran square across.)
-        ([[-5.0, 0.0], [-3.0, -1.0], [-3.0, 1.0]], 1.0),
-        ([[-5.0, 0.0], [-7.0, -1.0], [-6.0, -3.0]], 2.5),
-        ([[2.5, -10.0], [2.1, -12.8], [-0.3, -9.6]], 4.0),
-        ([[2.5, -10.0], [4.7, -9.6], [3.5, -8.0]], 2.0),
+        ([[-5.0, 0.0], [-3.0, -1.0], [-3.0, 1.0]], end_cut, 2e-3),
+        ([[-5.0, 0.0], [-7.0, -1.0], [-6.0, -3.0]], 2.5, 3e-6),
+        ([[2.5, -10.0], [2.1, -12.8], [-0.3, -9.6]], 4.0, 3e-6),
+        ([[2.5, -10.0], [4.7, -9.6], [3.5, -8.0]], 2.0, 3e-6),
     ];
-    for (triangle, cut) in cases {
+    for (triangle, cut, tol) in cases {
         let mut s = Session::default();
         run(&mut s, "sheet.manage_rules", json!({"name": "Rule", "active": true, "thickness": "2 mm", "k_factor": "0.5", "bend_radius": "2 mm"}));
         run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
@@ -1574,7 +1593,7 @@ fn a_cut_out_with_a_corner_on_a_bend_line_refolds() {
         run(&mut s, "sketch.line", json!({"points": triangle, "closed": true}));
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.extrude", json!({"sketch": "Cutout", "through_all": true, "direction": "symmetric", "operation": "cut"}));
-        assert!(rel(volume(&mut s), (area - cut) * 2.0) < 1e-9, "{triangle:?} flat: {}", volume(&mut s));
+        assert!((volume(&mut s) / 2.0 - (area - cut)).abs() < tol, "{triangle:?} flat: {}", volume(&mut s));
         run(&mut s, "sheet.refold", json!({}));
         let refolded = volume(&mut s);
         assert!((folded - refolded - cut * 2.0).abs() < 0.01, "{triangle:?} refolded: {refolded}, {} less", folded - refolded);
@@ -10693,4 +10712,86 @@ fn wall_bends(s: &Session) -> Vec<f64> {
             _ => None,
         })
         .collect()
+}
+
+/// A 2 mm sheet, R 2, K 0.44, whose outline (20, 0), (100, 0), (100, 60), (−25, 60) has a left
+/// side running 0.75 along its bottom edge for every mm toward that edge, and a 90° flange 26 high
+/// picked on the bottom face, set inside: it turns down, toward the material, so the sheet's
+/// surface (the top, z 2) is the bend's outside and the flange's outer face is the edge's plane,
+/// y 0. The sharp lies where the two meet, y 0, z 2, with each tangent line R + T = 4 from it.
+fn slanted_flange(s: &mut Session) {
+    run(s, "sheet.manage_rules", json!({"name": "T", "thickness": "2 mm", "active": true, "bend_radius": "2 mm", "k_factor": 0.44}));
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(s, "sketch.line", json!({"points": [[20, 0], [100, 0], [100, 60], [-25, 60]], "closed": true}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "sheet.flange", json!({"type": "base", "sketch": "Base"}));
+    run(s, "sheet.flange", json!({"type": "edge", "height": 26, "angle": 90, "position": "inside", "edges": [[60, 0, 0]]}));
+}
+
+/// The flange carries the plate's side straight on across the sharp: on the part's surfaces,
+/// unfolded about it, the plate's side and the flange's are one line. The plate's side meets the
+/// sharp at x 20, so the flange's runs down its outer face from there, 0.75 along for every mm
+/// down: 18 mm below the sharp (z −16) at x 33.5. Set off by 0.75 × the bend deduction,
+/// 2 (R + T) − (π/2)(R + K T) = 3.476, so that the flat's edge ran straight, it lay at x 30.893.
+#[test]
+fn a_flange_on_a_slanted_edge_carries_the_plates_side_straight_on_across_the_sharp() {
+    use solidcraft_kernel::PointClass::{Inside, Outside};
+    let mut s = Session::default();
+    slanted_flange(&mut s);
+    let body = &s.model.state().bodies[0].body;
+    let at = |x: f64, y: f64, z: f64| body.classify_point(solidcore_record::Vec3::new(x, y, z)).unwrap();
+    // The plate's side as drawn, 30 from the edge.
+    assert_eq!((at(-2.2, 30.0, 1.0), at(-2.8, 30.0, 1.0)), (Inside, Outside));
+    // The flange's, 18 below the sharp, halfway through the sheet.
+    assert_eq!((at(33.8, 1.0, -16.0), at(33.2, 1.0, -16.0)), (Inside, Outside));
+}
+
+/// The bend's end follows the two sides through the bend, square through the sheet. The bend's
+/// axis lies R + T = 4 inside both surfaces, at y 4, z −2. The ray 22.5° round from the plate meets
+/// the plate's surface 4 tan 22.5° = 1.657 past its tangent line (y 4), at y 2.343, where the
+/// plate's side runs at x 20 − 0.75 × 2.343 = 18.243: so the end crosses that ray there, at every
+/// depth (halfway through the sheet, 3 from the axis: y 2.852, z 0.772). A straight line across
+/// the flat from where the side crosses one tangent line (x 17) to where it crosses the other
+/// (x 23) would put it a quarter of the way, at x 18.5.
+#[test]
+fn a_bends_free_end_follows_the_slanted_sides_square_through_the_sheet() {
+    use solidcraft_kernel::PointClass::{Inside, Outside};
+    let mut s = Session::default();
+    slanted_flange(&mut s);
+    let body = &s.model.state().bodies[0].body;
+    let at = |x: f64, y: f64, z: f64| body.classify_point(solidcore_record::Vec3::new(x, y, z)).unwrap();
+    let (sin, cos) = (PI / 8.0).sin_cos();
+    let (y, z) = (4.0 - 3.0 * sin, -2.0 + 3.0 * cos);
+    let x = 20.0 - 0.75 * (4.0 - 4.0 * (PI / 8.0).tan());
+    assert!((x - 18.242641).abs() < 1e-6, "{x}");
+    assert_eq!((at(x + 0.12, y, z), at(x - 0.12, y, z)), (Inside, Outside));
+}
+
+/// A 120° flange set inside and picked on the top face turns away from the material, so its sharp
+/// lies T tan 60° = 3.464 inside the edge, more than the thickness: the edge is cut back to it
+/// before the flange is laid on. The flange's side still carries the plate's on, 0.75 along the
+/// edge for every mm out, so in the flat it runs parallel to the plate's side: x falls 0.75 for
+/// every mm y rises, the plate's x = 20 − 0.75 y.
+#[test]
+fn a_flange_whose_sharp_is_cut_back_into_the_plate_still_carries_its_slanted_side() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "T", "thickness": "2 mm", "active": true, "bend_radius": "2 mm", "k_factor": 0.44}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 0], [100, 0], [100, 60], [-25, 60]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"type": "base", "sketch": "Base"}));
+    run(&mut s, "sheet.flange", json!({"type": "edge", "height": 26, "angle": 120, "position": "inside", "edges": [[60, 0, 2]]}));
+    // The flange's side in the flat: from the flange's corner left of the middle at the bottom up
+    // to its neighbour on the outline.
+    let f = flat(&mut s);
+    let pts = outline_points(&f);
+    let n = pts.len();
+    let Some((k, low)) = pts.iter().copied().enumerate().filter(|(_, p)| p.0 < 60.0).min_by(|a, b| a.1.1.total_cmp(&b.1.1)) else {
+        panic!("no flange corner: {pts:?}")
+    };
+    let up =
+        [pts.get((k + n - 1) % n), pts.get((k + 1) % n)].into_iter().flatten().copied().filter(|p| p.0 < 60.0).max_by(|a, b| a.1.total_cmp(&b.1));
+    let Some(up) = up else { panic!("the flange's side has no top: {pts:?}") };
+    let slope = (up.0 - low.0) / (up.1 - low.1);
+    assert!((slope + 0.75).abs() < 1e-9, "the flange's side runs {slope} along for each mm across, not -0.75: {low:?} {up:?}");
 }

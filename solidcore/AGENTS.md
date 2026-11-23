@@ -99,7 +99,8 @@ anywhere (including dependencies; `deny.toml` bans copyleft crates).
 - No `unwrap`/`expect`/`panic!`/`todo!`/unchecked `[i]` indexing (denied by lints; tests
   are exempt). Use `.get()`, iterators, `?` and `SolidError`.
 - Deterministic: no clock, no hashing of addresses, no `HashMap` iteration order in
-  results (use `Vec`, `BTreeMap`, or sort), randomness only from `kernel.rng`.
+  results (use `Vec`, `BTreeMap`, or sort), randomness only from a
+  generator the call makes itself from the kernel's seed (`Kernel::seeded_rng`).
 - No global or `static mut`/`thread_local` state. Everything lives in `Kernel`.
 - Must build for `wasm32-unknown-unknown`: no filesystem or `std::time`, and no threads in
   library code for now (§4c).
