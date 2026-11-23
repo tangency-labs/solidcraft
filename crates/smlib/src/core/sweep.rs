@@ -1188,6 +1188,28 @@ pub(crate) fn loft_to_point(section: &[Profile], apex: [f64; 3]) -> Result<Body>
     })
 }
 
+/// The planar first section of `sections` lofted through the rest (stations) to `apex`: a loft
+/// to a point that follows guide rails (#20985). solidcore-ops builds it
+/// ([`solidcore_ops::sweep::loft_to_point_through`]).
+pub(crate) fn loft_to_point_through(sections: &[Vec<Profile>], apex: [f64; 3], params: &[f64]) -> Result<Body> {
+    use solidcore_ops::sweep::Curve as Ops;
+    let ops: Vec<Vec<Ops>> = sections
+        .iter()
+        .map(|s| {
+            s.iter()
+                .map(|c| match c {
+                    Profile::Line { start, end } => Ops::Line { start: *start, end: *end },
+                    Profile::Arc { center, axis, reference, radius, start, end } => {
+                        Ops::Arc { center: *center, axis: *axis, reference: *reference, radius: *radius, start: *start, end: *end }
+                    }
+                    Profile::Nurbs { degree, points, knots } => Ops::Nurbs { degree: *degree, points: points.clone(), knots: knots.clone() },
+                })
+                .collect()
+        })
+        .collect();
+    super::call::ops("smlib_loft_to_point_through", || solidcore_ops::sweep::loft_to_point_through(&ops, apex, params))
+}
+
 /// `maps_ok`: each station map finite, of bounded size and far from singular, its translation
 /// within `MAX_COORD`.
 fn maps_ok(stations: &[Affine]) -> bool {

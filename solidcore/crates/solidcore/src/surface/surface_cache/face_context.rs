@@ -16,6 +16,7 @@
 
 use core::fmt::{self, Debug};
 
+use crate::error::surface::SurfaceFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::intersect::point_class::PointClassification;
@@ -395,7 +396,7 @@ fn face_surface_cache<O: Copy + PartialEq>(
         .face(face)?
         .surface
         .as_ref()
-        .ok_or_else(|| SolidError::surface_missing(OP, "the face's surface"))?
+        .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::FaceHasNoSurface))?
         .clone_for_evaluation()?;
     let mut mapped = MappedCacheFace::new(BrepCacheFace { b, f: face }, handle_of, entity_of)?;
     let mut cache = get_surface_cache_with_face(k, &surface, Some(surface_handle), &mut mapped)?;

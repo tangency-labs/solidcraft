@@ -201,6 +201,8 @@ pub struct WorkCounters {
     blends_recertified: Cell<u64>,
     vertex_drops: Cell<u64>,
     seam_tests: Cell<u64>,
+    uv_trim_builds: Cell<u64>,
+    trim_deviation_bounds: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -400,6 +402,22 @@ impl WorkCounters {
         self.seam_tests.get()
     }
 
+    /// UV trim curves built for an edge use
+    /// (`topology::edgeuse::p3::create_uv_trim_curve`): each build, whether it
+    /// attaches its curve or fails. Not the fork's (#21105).
+    #[must_use]
+    pub fn uv_trim_builds(&self) -> u64 {
+        self.uv_trim_builds.get()
+    }
+
+    /// Certified bounds on a new UV trim's distance from its edge
+    /// (`topology::edgeuse::p3::trim_deviation_bound`): each bisection the bound starts, the
+    /// costly part of building a trim. Not the fork's (#21105).
+    #[must_use]
+    pub fn trim_deviation_bounds(&self) -> u64 {
+        self.trim_deviation_bounds.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -424,6 +442,20 @@ impl WorkCounters {
         self.blends_recertified.set(0);
         self.vertex_drops.set(0);
         self.seam_tests.set(0);
+        self.uv_trim_builds.set(0);
+        self.trim_deviation_bounds.set(0);
+    }
+
+    /// Counts one UV trim curve built.
+    pub(crate) fn add_uv_trim_build(&self) {
+        self.uv_trim_builds
+            .set(self.uv_trim_builds.get().saturating_add(1));
+    }
+
+    /// Counts one certified bound on a trim's distance from its edge.
+    pub(crate) fn add_trim_deviation_bound(&self) {
+        self.trim_deviation_bounds
+            .set(self.trim_deviation_bounds.get().saturating_add(1));
     }
 
     /// Counts one edge or vertex asked whether it is a seam or a pole of a face.
