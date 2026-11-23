@@ -428,7 +428,17 @@ impl<T> Answer for Result<T> {
 macro_rules! plain {
     ($($t:ty),* $(,)?) => { $(impl Answer for $t {})* };
 }
-plain!((), bool, f64, usize, [usize; 3], Vec<u8>, Vec<usize>, Brep);
+plain!(
+    (),
+    bool,
+    f64,
+    usize,
+    [usize; 3],
+    Vec<u8>,
+    Vec<usize>,
+    Vec<solidcore::query::brep::FaceHit>,
+    Brep,
+);
 
 impl<T> Answer for Option<T> {}
 
