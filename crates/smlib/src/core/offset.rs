@@ -67,6 +67,10 @@ fn status(e: SolidError) -> Error {
 /// their fields; other typed refusals keep the kernel diagnostic alongside them.
 pub(super) fn refused(error: solidcore_ops::Error, diagnostic: String) -> Error {
     use solidcore_ops::Error as Ops;
+    // this crate words a named solid test as the bare NotSolid it always was
+    if error.not_solid_test().is_some() {
+        return Error::RefusedWithDiagnostic { refusal: Ops::NotSolid, diagnostic };
+    }
     match error {
         Ops::WallsTouch => Error::WallsTouch,
         Ops::WallFolds { largest } => Error::WallFolds { largest },

@@ -118,10 +118,12 @@
 //! - **`SmVertex::GetEdges`** is [`crate::topology::vertex::edges`], which walks the
 //!   vertex's use list as upstream does (the co-port here scanned the B-rep's vertex uses
 //!   naming the vertex, which also met stale ones whose edge use was gone).
-//! - **`GetPointsInFace`** draws its V dither from `kernel.rng` instead of
-//!   `srand(time(NULL))` / `rand()` (a uniform integer in `[0, RAND_MAX]`, glibc's
-//!   `RAND_MAX`), so results asked for more than one point are not reproducible
-//!   against upstream (`plan/findings.md`). Point counts above
+//! - **`GetPointsInFace`** draws its V dither from a generator each call makes from the
+//!   kernel's seed ([`Kernel::seeded_rng`]) instead of `srand(time(NULL))` / `rand()` (a
+//!   uniform integer in `[0, RAND_MAX]`, glibc's `RAND_MAX`), so results asked for more
+//!   than one point are not reproducible against upstream (`plan/findings.md`), and the
+//!   same call on the same face gives the same points whatever the kernel ran before:
+//!   point `i` of a call takes draw `i` of the seed's sequence. Point counts above
 //!   [`MAX_POINTS_IN_FACE`] are [`SolidError::InvalidInput`] (upstream allocates
 //!   them). The rectangular branch starts each column and row at the domain's minimum
 //!   and sizes the columns by the domain's u length over the column count plus one,
@@ -133,7 +135,7 @@
 //!   plan only `min(count, 30)` columns and stop once the requested count is reached, so
 //!   when those rows do not divide the requested count the last sampled column is
 //!   truncated and later columns are not sampled (31 points fill 16 of 30 columns), and
-//!   the V dither is still drawn once per point from `kernel.rng`. It takes the B-rep
+//!   the V dither is still drawn once per point. It takes the B-rep
 //!   mutably: its UV-domain and iso-line classifications run on it (the classification's
 //!   snapshot hands back the UV trim curves, the tolerance growth that fits them and the
 //!   gap caches), so what upstream's `const` queries leave on the B-rep stays there.
@@ -169,7 +171,7 @@ use crate::intersect::curve_class::p1::{CurveClassification, CurveInterval};
 use crate::intersect::curve_class::p4::ClassificationInit;
 use crate::intersect::curve_class::p5::ClassGeometryMut;
 use crate::intersect::point_class::{ClassGeometry, ClassObject, ClassObjectKind, PointClassType};
-use crate::kernel::Kernel;
+use crate::kernel::{Kernel, Rng};
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -1678,11 +1680,11 @@ pub struct PointsInFace {
     pub pv: Vec<Vec3>,
 }
 
-/// A dither of upstream's `((rand() - RAND_MAX/2) / (1.2*RAND_MAX))`, drawn from
-/// `kernel.rng`.
-fn rand_dither(k: &mut Kernel) -> f64 {
+/// A dither of upstream's `((rand() - RAND_MAX/2) / (1.2*RAND_MAX))`, drawn from the
+/// calling routine's own generator.
+fn rand_dither(rng: &mut Rng) -> f64 {
     // an integer in [0, RAND_MAX] as rand() returns
-    let r = (k.rng.next_f64() * (RAND_MAX + 1.0)).floor();
+    let r = (rng.next_f64() * (RAND_MAX + 1.0)).floor();
     let half = (RAND_MAX / 2.0).floor(); // RAND_MAX/2 in integer arithmetic
     (r - half) / (1.2 * RAND_MAX)
 }
@@ -1691,7 +1693,12 @@ fn rand_dither(k: &mut Kernel) -> f64 {
 /// positions and normals. A rectangularly trimmed face is sampled on a grid of
 /// constant-U columns; another face samples interior intervals of classified
 /// constant-U UV lines. With more than one point the V values are dithered by a
-/// random draw (`kernel.rng`).
+/// random draw each, which keeps the samples off a face's symmetric lines. The draws come
+/// from a generator the call makes from the kernel's seed ([`Kernel::seeded_rng`]): point
+/// `i` takes draw `i` of that seed's sequence, so the points are a function of the face,
+/// the count and the seed, and the same call gives the same points whatever the kernel
+/// sampled before. (The inner-shell tests sample their faces through
+/// [`points_in_face_drawing`], one generator per call for all of them.)
 ///
 /// The rectangular branch starts at the domain's minimum and sizes its columns by the
 /// domain's u length over the column count plus one (upstream samples fractions of the
@@ -1711,6 +1718,26 @@ pub fn points_in_face(
     b: &mut Brep,
     f: FaceId,
     point_count: u64,
+) -> Result<PointsInFace> {
+    // this call's own draws, from the start of the seed's sequence
+    let mut rng = k.seeded_rng();
+    points_in_face_drawing(k, b, f, point_count, &mut rng)
+}
+
+/// [`points_in_face`] with its dithers drawn from `rng`, which the caller made for its own
+/// call: a routine that samples several faces in one call (the inner-shell tests) draws
+/// them all from one generator in its own order, so each face takes the next draws of
+/// that call's sequence rather than the same first ones.
+///
+/// # Errors
+///
+/// Those of [`points_in_face`].
+pub(crate) fn points_in_face_drawing(
+    k: &mut Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    point_count: u64,
+    rng: &mut Rng,
 ) -> Result<PointsInFace> {
     // init output
     let mut out = PointsInFace::default();
@@ -1768,7 +1795,7 @@ pub fn points_in_face(
                 }
                 let v = v_min + (j + 1) as f64 * v_inc;
                 let v_dither = if point_count > 1 {
-                    rand_dither(k) * v_inc
+                    rand_dither(rng) * v_inc
                 } else {
                     0.0
                 };
@@ -1862,7 +1889,11 @@ pub fn points_in_face(
                 .find(|ivl| ivl.mid.point_class() == PointClassType::Face)
             {
                 for kk in 0..smp_cnt {
-                    let v_dither = if point_count > 1 { rand_dither(k) } else { 0.0 };
+                    let v_dither = if point_count > 1 {
+                        rand_dither(rng)
+                    } else {
+                        0.0
+                    };
                     let v_norm = ((kk + 1) as f64 + v_dither) / ((smp_cnt + 1) as f64);
                     // status ignored upstream (the point keeps its default value);
                     // passed on as the fork
@@ -4208,19 +4239,128 @@ mod tests {
             assert_eq!(r.pv[2 * i + 1], Vec3::Z);
         }
 
-        // one RNG draw per point, as upstream's rand() per point
+        // one draw per point, as upstream's rand() per point, from the start of the seed's
+        // sequence: point i is its grid point moved by dither i of that sequence, one row
+        // of height v length / 2
         let opts = KernelOptions {
             seed: 12_345,
             ..KernelOptions::default()
         };
         let mut sampled = Kernel::new(&opts);
-        let mut drawn = Kernel::new(&opts);
         let r = points_in_face(&mut sampled, &mut b, f, 7).unwrap();
+        let dithers = dithers_of(12_345, 7);
         assert_eq!(r.uv.len(), 7);
-        for _ in 0..7 {
-            drawn.rng.next_f64();
+        for (uv, d) in r.uv.iter().zip(&dithers) {
+            assert_eq!(uv.y, (-7.0 + 0.25) + d * 0.25);
         }
-        assert_eq!(sampled.rng.next_f64(), drawn.rng.next_f64());
+        // each dither lies within 1/2.4 of a row either way, and they are not all one value
+        // (the samples leave the row's centre line by different amounts)
+        assert!(dithers.iter().all(|d| d.abs() <= 1.0 / 2.4));
+        assert!(dithers.windows(2).all(|w| w[0] != w[1]));
+        assert_eq!(
+            sampled.seed, 12_345,
+            "sampling leaves the seed as configured"
+        );
+    }
+
+    /// The first `n` dithers of `seed`'s sequence, by `GetPointsInFace`'s formula:
+    /// `(rand() - RAND_MAX/2) / (1.2*RAND_MAX)` with `rand()` a uniform integer in
+    /// `[0, RAND_MAX]` made from one draw.
+    fn dithers_of(seed: u64, n: usize) -> Vec<f64> {
+        let mut rng = Rng::new(seed);
+        (0..n)
+            .map(|_| {
+                let r = (rng.next_f64() * 2_147_483_648.0).floor();
+                (r - 1_073_741_823.0) / (1.2 * 2_147_483_647.0)
+            })
+            .collect()
+    }
+
+    /// The points are a function of the face, the count and the seed: a second identical
+    /// call gives the same points bit for bit, on the same kernel and on a kernel that
+    /// sampled another face first; another seed gives other dithers. (Seven points on a
+    /// rectangular face of a plane, one per column, each dithered in v.)
+    #[test]
+    fn points_in_face_repeats_its_points_whatever_was_sampled_before() {
+        let bounds = (3.0, -7.0, 4.0, -6.5);
+        let (mut b, f) = rectangular_face(bounds);
+        let mut k = Kernel::default();
+        let first = points_in_face(&mut k, &mut b, f, 7).unwrap();
+        let second = points_in_face(&mut k, &mut b, f, 7).unwrap();
+        assert_eq!(first.uv, second.uv);
+        assert_eq!(first.pv, second.pv);
+
+        // a kernel with a history: other counts on another face first
+        let mut used = Kernel::default();
+        let (mut other, of) = rectangular_face((0.0, 0.0, 1.0, 2.0));
+        for count in [3, 7, 31] {
+            points_in_face(&mut used, &mut other, of, count).unwrap();
+        }
+        let later = points_in_face(&mut used, &mut b, f, 7).unwrap();
+        assert_eq!(first.uv, later.uv);
+        assert_eq!(first.pv, later.pv);
+
+        // the default seed's dithers, by the definition
+        let dithers = dithers_of(Rng::DEFAULT_SEED, 7);
+        for (uv, d) in first.uv.iter().zip(&dithers) {
+            assert_eq!(uv.y, (-7.0 + 0.25) + d * 0.25);
+        }
+
+        // the seed still decides the dithers
+        let mut seeded = Kernel::new(&KernelOptions {
+            seed: 7,
+            ..KernelOptions::default()
+        });
+        let other_seed = points_in_face(&mut seeded, &mut b, f, 7).unwrap();
+        assert!(first
+            .uv
+            .iter()
+            .zip(&other_seed.uv)
+            .all(|(a, b)| a.x == b.x && a.y != b.y));
+    }
+
+    /// Face uses that share one call's generator, as the inner-shell tests' do, take
+    /// successive draws: a second face of the same shape and domain is not sampled at the
+    /// first one's relative places, but at the next draws of the seed's sequence, and the
+    /// whole sequence of samples repeats bit for bit from a fresh generator.
+    #[test]
+    fn face_uses_sharing_a_generator_take_successive_draws() {
+        let bounds = (3.0, -7.0, 4.0, -6.5);
+        let (mut b, f) = rectangular_face(bounds);
+        let (mut b2, f2) = rectangular_face(bounds);
+        let mut k = Kernel::default();
+
+        let mut rng = k.seeded_rng();
+        let first = points_in_face_drawing(&mut k, &mut b, f, 3, &mut rng).unwrap();
+        let second = points_in_face_drawing(&mut k, &mut b2, f2, 3, &mut rng).unwrap();
+
+        // three columns at min u + (i + 1) / 4, one row at min v + v length / 2, the first
+        // face dithered by draws 0..3 and the second by draws 3..6
+        let dithers = dithers_of(Rng::DEFAULT_SEED, 6);
+        for (i, (uv, d)) in first.uv.iter().zip(&dithers[..3]).enumerate() {
+            assert_eq!(uv.x, 3.0 + (i + 1) as f64 / 4.0);
+            assert_eq!(uv.y, (-7.0 + 0.25) + d * 0.25);
+        }
+        for (i, (uv, d)) in second.uv.iter().zip(&dithers[3..]).enumerate() {
+            assert_eq!(uv.x, 3.0 + (i + 1) as f64 / 4.0);
+            assert_eq!(uv.y, (-7.0 + 0.25) + d * 0.25);
+        }
+        // the same face sampled at other relative places in each column
+        assert!(first
+            .uv
+            .iter()
+            .zip(&second.uv)
+            .all(|(a, c)| a.x == c.x && a.y != c.y));
+        // the first face's points are those of a call of its own
+        assert_eq!(first.uv, points_in_face(&mut k, &mut b, f, 3).unwrap().uv);
+
+        // the whole sequence again, from a fresh generator, after other sampling
+        points_in_face(&mut k, &mut b2, f2, 31).unwrap();
+        let mut again = k.seeded_rng();
+        let first_again = points_in_face_drawing(&mut k, &mut b, f, 3, &mut again).unwrap();
+        let second_again = points_in_face_drawing(&mut k, &mut b2, f2, 3, &mut again).unwrap();
+        assert_eq!(first.pv, first_again.pv);
+        assert_eq!(second.pv, second_again.pv);
     }
 
     #[test]
@@ -4231,18 +4371,23 @@ mod tests {
             seed: 7,
             ..KernelOptions::default()
         };
-        for count in [30, 31] {
+        // (count, rows per column): 30 points are one row of 30 columns, 31 points two
+        // rows of which the last column is cut short
+        for (count, rows) in [(30u64, 1usize), (31, 2)] {
             let mut sampled = Kernel::new(&opts);
-            let mut drawn = Kernel::new(&opts);
             let r = points_in_face(&mut sampled, &mut b, f, count).unwrap();
             assert_eq!(r.uv.len(), count as usize);
             for uv in &r.uv {
                 assert_inside(bounds, *uv);
             }
-            for _ in 0..count {
-                drawn.rng.next_f64();
+            // one draw per point, in order, from the start of the seed's sequence: point n
+            // (row n % rows of its column) is its grid point moved by dither n
+            let v_inc = 0.5 / (rows + 1) as f64;
+            let dithers = dithers_of(7, count as usize);
+            for (n, (uv, d)) in r.uv.iter().zip(&dithers).enumerate() {
+                let v = -7.0 + (n % rows + 1) as f64 * v_inc;
+                assert_eq!(uv.y, v + d * v_inc, "point {n} of {count}");
             }
-            assert_eq!(sampled.rng.next_f64(), drawn.rng.next_f64());
         }
 
         // a domain far from the origin: each column is one product and one sum from the

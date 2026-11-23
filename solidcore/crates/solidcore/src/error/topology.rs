@@ -116,6 +116,13 @@
 //! | [`TopologyFailure::NoFiniteRegion`] | `SM_ERR` |
 //! | [`TopologyFailure::FaceStitchFailed`] | `SM_ERR` |
 //! | [`TopologyFailure::SurfaceNotTransformable`] | `SM_ERR` |
+//! | [`TopologyFailure::NoTrimmedBSpline`] | `SM_ERR_INVALID_INPUT` |
+//! | [`TopologyFailure::FaceListedTwice`] | `SM_ERR` |
+//! | [`TopologyFailure::EdgesNotSharingVertices`] | `SM_ERR` |
+//! | [`TopologyFailure::NoSectorForNewEdgeuse`] | `SM_ERR` |
+//! | [`TopologyFailure::NoClassifiablePoint`] | `SM_ERR` |
+//! | [`TopologyFailure::UvTrimCurvesNotMade`] | `SM_ERR` |
+//! | [`TopologyFailure::FacesNotCopiedOnce`] | `SM_ERR` |
 //!
 //! A named cause keeps the status of the phrase it replaced, unless its site overrides it
 //! through `with_status`.
@@ -207,6 +214,15 @@ pub enum TopologyFailure {
         /// The face the surface belongs to, where it has one.
         entity: Option<EntityRef>,
     },
+    /// An edge gave no B-spline copy of its curve trimmed to its interval: it has no curve,
+    /// its curve has no B-spline form, or the trim failed. Class `failed`.
+    NoTrimmedBSpline,
+    /// A face the caller listed to copy is listed more than once.
+    /// [`ErrorKind::InvalidInput`].
+    FaceListedTwice,
+    /// The two edges the caller gave to glue do not share both their vertices.
+    /// [`ErrorKind::InvalidInput`].
+    EdgesNotSharingVertices,
     /// The face's upward face use has no edge use (its loops are vertex loops, or it has
     /// none), so no edge gives a direction to vote with. [`ErrorKind::Unsupported`].
     FaceWithoutEdges,
@@ -414,6 +430,20 @@ pub enum TopologyFailure {
     /// The edge use has no UV trim curve and making one failed; the error of the fetch that tried
     /// is kept as the cause.
     UvTrimCurveNotMade,
+    /// No radial sector of an edge takes a new face's edge use there; the face is still
+    /// made. Class `failed`.
+    NoSectorForNewEdgeuse,
+    /// No point stepped off the face use's first edge could be classified against the
+    /// shells: the step leaves the face (a face narrower than the step) or the
+    /// classification fails, at every step tried. Class `failed`.
+    NoClassifiablePoint,
+    /// The UV trim curves of a face could not be made; the error that stopped them, where
+    /// there is one, is the cause. Class `failed`; whether it is a defect or a refusal is
+    /// its cause's.
+    UvTrimCurvesNotMade,
+    /// A requested face has no copy, or more than one, after the copy: the merge passed
+    /// over a face it failed to make, or split one. Class `failed`.
+    FacesNotCopiedOnce,
     /// The caller gave no file contents to read. [`ErrorKind::InvalidInput`].
     NoDataGiven,
     /// The caller gave no curve. [`ErrorKind::InvalidInput`].
@@ -643,7 +673,13 @@ impl TopologyFailure {
             | Self::NoRegionsToKeepGiven
             | Self::NoFiniteRegion
             | Self::FaceStitchFailed
-            | Self::SurfaceNotTransformable { .. } => SM_ERR,
+            | Self::SurfaceNotTransformable { .. }
+            | Self::FaceListedTwice
+            | Self::EdgesNotSharingVertices
+            | Self::NoSectorForNewEdgeuse
+            | Self::NoClassifiablePoint
+            | Self::UvTrimCurvesNotMade
+            | Self::FacesNotCopiedOnce => SM_ERR,
             Self::Missing(_)
             | Self::RadialFaceWithoutSurface
             | Self::RadialRimWithoutEdge
@@ -666,6 +702,7 @@ impl TopologyFailure {
             | Self::NoVertexSector { .. } => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_)
             | Self::NoBrepGiven
+            | Self::NoTrimmedBSpline
             | Self::EdgeUseNotInLoop
             | Self::NewPrimaryNotOnEdge
             | Self::NotFourEdgeUses { .. }
@@ -743,7 +780,9 @@ impl TopologyFailure {
             | Self::EdgeNotOnVertex
             | Self::VerticesShareNoRegion
             | Self::NoRegionsToKeepGiven
-            | Self::NoFiniteRegion => ErrorKind::InvalidInput,
+            | Self::NoFiniteRegion
+            | Self::FaceListedTwice
+            | Self::EdgesNotSharingVertices => ErrorKind::InvalidInput,
             Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
             | Self::FaceWithoutEdges
@@ -758,6 +797,7 @@ impl TopologyFailure {
             | Self::EdgeCurveNotJoinable { .. }
             | Self::SurfaceNotTransformable { .. } => ErrorKind::Unsupported,
             Self::CurveNotApproximated
+            | Self::NoTrimmedBSpline
             | Self::AllocationFailed
             | Self::NoProjectedCurves
             | Self::NoFootOnCurve
@@ -999,6 +1039,23 @@ impl core::fmt::Display for TopologyFailure {
             }
             Self::SurfaceNotTransformable { entity: Some(e) } => {
                 write!(f, "a face's surface could not be transformed ({e})")
+            }
+            Self::NoTrimmedBSpline => {
+                f.write_str("an edge gave no B-spline of its curve trimmed to its interval")
+            }
+            Self::FaceListedTwice => f.write_str("a face to copy is listed twice"),
+            Self::EdgesNotSharingVertices => {
+                f.write_str("the edges to glue do not share both vertices")
+            }
+            Self::NoSectorForNewEdgeuse => {
+                f.write_str("no radial sector of the edge takes the new edge use")
+            }
+            Self::NoClassifiablePoint => {
+                f.write_str("no point stepped off the face use could be classified")
+            }
+            Self::UvTrimCurvesNotMade => f.write_str("the face's UV trim curves could not be made"),
+            Self::FacesNotCopiedOnce => {
+                f.write_str("a requested face has no copy, or more than one")
             }
         }
     }
@@ -1742,6 +1799,47 @@ mod tests {
         assert!(asserted.is_defect());
     }
 
+    /// The named causes of the later B-rep edits (face copy and surface transfer) keep the
+    /// status of the phrase each replaced, and have their class.
+    #[test]
+    fn the_face_copy_causes_keep_their_status_and_have_their_class() {
+        use ErrorKind as K;
+        let op = "topology::op";
+        let cases = [
+            (
+                TopologyFailure::NoTrimmedBSpline,
+                SM_ERR_INVALID_INPUT,
+                K::Failed,
+            ),
+            (TopologyFailure::FaceListedTwice, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::EdgesNotSharingVertices,
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (TopologyFailure::NoSectorForNewEdgeuse, SM_ERR, K::Failed),
+            (TopologyFailure::NoClassifiablePoint, SM_ERR, K::Failed),
+            (TopologyFailure::UvTrimCurvesNotMade, SM_ERR, K::Failed),
+            (TopologyFailure::FacesNotCopiedOnce, SM_ERR, K::Failed),
+        ];
+        for (failure, status, kind) in cases {
+            let e = SolidError::topology(op, failure);
+            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.topology_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+        }
+        // the trim curves' failure stays their cause, and decides defect or refusal
+        let why = "a step the kernel got wrong";
+        let cause = SolidError::topology(op, TopologyFailure::Defect { why });
+        let e = Failure::new(op, TopologyFailure::UvTrimCurvesNotMade)
+            .caused_by(cause.clone())
+            .into_error();
+        assert_eq!(e.cause(), Some(&cause));
+        assert!(e.is_defect());
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+    }
+
     /// The sites that build a topology phrase cause only fall:
     /// per file, in the library code of `solidcore` and `solidcore-ops`, as
     /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
@@ -1776,8 +1874,6 @@ mod tests {
             ("solidcore/src/topology/brep/p1.rs", 42),
             ("solidcore/src/topology/brep/p10.rs", 10),
             ("solidcore/src/topology/brep/p2.rs", 16),
-            ("solidcore/src/topology/brep/p6.rs", 29),
-            ("solidcore/src/topology/brep/p7.rs", 13),
             ("solidcore/src/topology/brep/p8.rs", 15),
             ("solidcore/src/topology/brep/p9.rs", 18),
             ("solidcore/src/topology/brep/planar_section.rs", 3),
