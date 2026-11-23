@@ -437,9 +437,13 @@ fn combine_replies_with_combine_result() {
 fn sweep_schemas_and_the_key_check_agree() {
     let shape = ["orientation", "rail_fit", "rails", "scale", "twist"];
     let mut solid = vec![
+        "body",
         "body_name",
         "body_names",
         "exact_regions",
+        "face",
+        "face_body",
+        "fixed",
         "name",
         "operation",
         "participants",

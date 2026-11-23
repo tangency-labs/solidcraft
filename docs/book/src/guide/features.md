@@ -91,6 +91,16 @@ radius, by default the offset itself, so the gap is the same all round.
 {"command": "solid.combine", "params": {"target": "Block", "tools": ["Pin"], "operation": "cut", "keep_tools": true, "offset": "gap", "offset_edges": "round"}}
 ```
 
+**A new sketch from inside Extrude.** The Extrude dialog's **New Sketch** button (or a click on
+an origin or construction plane while **Profiles** is still empty) opens a sketch while the
+dialog waits: pick its plane or planar face and draw. **Finish Sketch** (or Extrude's own button
+or shortcut) comes back to the dialog with the dialog's other settings as they were. A sketch
+with one profile has it picked; with more, none is picked and you pick the ones to extrude.
+**Cancel Sketch** comes back without it. **OK** makes the
+sketch and the extrude one undo step; **Cancel** leaves the design and the undo history as they
+were. The sketch is an ordinary timeline entry of its own, and `solid.extrude` is unchanged for
+scripts.
+
 **Extrude to a picked target** (Preferences › Tools, on by default) lets a pick choose the
 extent. With it on and a profile selected in the solid Extrude dialog, picking a face away from
 its plane, a curved face, an off-plane vertex or a parallel plane automatically switches
@@ -245,6 +255,12 @@ screw: a socket head (ISO 4762) or a button head (ISO 7380-1) of the bolt's size
 **Counterbore Ø** and **Counterbore depth** with the head's diameter and height plus 0.5 mm each
 side and below; change either to use your own. Scripts use `head: "ISO 4762"` with `clearance`
 on `solid.hole`.
+
+With **Hole Type** Countersink and Clearance, **Screw head** offers a countersunk socket head
+(ISO 10642). It fills **Countersink Ø** with the head's diameter plus 0.5 mm each side and
+**Countersink angle** with 90°, so the head sits 0.5 mm below the face; change either to use your
+own. Scripts use `head: "ISO 10642"` with `clearance` on `solid.hole`: the hole type then
+defaults to countersink.
 
 The **Thread** feature's **Hand** is **Right** (the default), **Left**, or **Both** (a right- and
 a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "left"` (or `"right"`,

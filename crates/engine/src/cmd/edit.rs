@@ -2536,6 +2536,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "sheet.perforate"
                 | "sheet.fold"
                 | "sheet.path_flange"
+                | "sheet.tab"
                 | "sheet.unfold"
                 | "sheet.refold"
                 | "sheet.convert"
@@ -2547,6 +2548,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "frame.end_cap"
                 | "frame.rotate_member"
                 | "frame.member"
+                | "frame.plate"
         );
     if !constructor {
         return Err(bad(cmd, format!("`{cid}` does not make a feature")));
@@ -2688,6 +2690,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if let FeatureKind::Emboss { face: Some(face), .. } = &old.kind {
         trial.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
+    }
+    if let FeatureKind::FramePlate { plane, .. } = &old.kind
+        && let Some(anchor) = solidcraft_doc::face_anchor::plane_face_anchor(plane)
+    {
+        trial.active_occurrence_path = (!anchor.author_path.is_empty()).then(|| anchor.author_path.clone());
     }
     trial.active_sketch = None;
     trial.sketching_view = None;

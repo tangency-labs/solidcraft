@@ -9,6 +9,10 @@
 #![forbid(unsafe_code)]
 
 mod airfoil;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[allow(dead_code)]
+#[path = "../build.rs"]
+mod build_script;
 pub mod catalog;
 mod design;
 pub mod design_lock;
@@ -72,6 +76,7 @@ pub use glb::GlbOptions;
 pub use glb::MAX_GLB_BYTES;
 pub use glb::export_glb;
 mod legacy_dir;
+pub mod library;
 pub mod library_files;
 pub mod limits;
 #[cfg(test)]
@@ -2591,7 +2596,7 @@ mod tests {
         doc.add_feature(
             FeatureKind::Cylinder {
                 base: point_expr(Vec3::new(80.0, 0.0, 0.0)),
-                axis: solidcraft_doc::Dir(Vec3::Z),
+                axis: solidcraft_doc::dir_expr(Vec3::Z),
                 radius: "6".into(),
                 height: "15".into(),
                 operation: Operation::NewBody,
@@ -2736,7 +2741,7 @@ mod tests {
         });
         add(FeatureKind::Cylinder {
             base: point_expr(Vec3::new(40.0, 0.0, 0.0)),
-            axis: solidcraft_doc::Dir(Vec3::Z),
+            axis: solidcraft_doc::dir_expr(Vec3::Z),
             radius: "6".into(),
             height: "15".into(),
             operation: Operation::NewBody,
@@ -2776,7 +2781,7 @@ mod tests {
         doc.add_feature(
             FeatureKind::Cylinder {
                 base: point_expr(Vec3::ZERO),
-                axis: solidcraft_doc::Dir(Vec3::Z),
+                axis: solidcraft_doc::dir_expr(Vec3::Z),
                 radius: "6".into(),
                 height: "15".into(),
                 operation: Operation::NewBody,

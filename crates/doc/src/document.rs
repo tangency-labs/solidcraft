@@ -1049,8 +1049,11 @@ pub enum FeatureKind {
         #[serde(with = "point_expr")]
         #[walk(placement)]
         base: PointExpr,
-        #[serde(default = "z_axis")]
-        axis: Dir,
+        /// From the bottom to the top: unitless expressions (#18822), so the cylinder turns as
+        /// the parameters change; plain numbers for a fixed direction. Normalized when evaluated.
+        #[serde(with = "point_expr", default = "z_axis_expr")]
+        #[walk(direction)]
+        axis: DirExpr,
         #[walk(length = "Radius")]
         radius: Expr,
         #[walk(length = "Height")]
@@ -1590,6 +1593,24 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         groups: Vec<crate::frame::MemberGroup>,
     },
+    /// A separate mounting or end plate, centred on a persistently identified planar face.
+    FramePlate {
+        plane: PlaneRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        member: Option<crate::frame::PlateMember>,
+        shape: crate::frame::PlateShape,
+        holes: crate::frame::PlateHoles,
+        #[walk(length = "Thickness")]
+        thickness: Expr,
+        #[walk(length = "Offset")]
+        offset: Expr,
+        #[walk(length = "X Offset")]
+        x_offset: Expr,
+        #[walk(length = "Y Offset")]
+        y_offset: Expr,
+        #[walk(angle = "Rotation")]
+        angle: Expr,
+    },
     /// Raise or sink profiles on a planar face, or wrap them on a selected cylindrical wall.
     Emboss {
         sketch: SketchId,
@@ -1932,6 +1953,16 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Bend radius")]
         radius: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
+    },
+    /// Tab: the closed profiles of a sketch on a flat face of a sheet (either side, or in a plane
+    /// level with one) join that panel through the sheet's thickness, part of its outline
+    /// (`SurfaceSheet::add_tab`).
+    SheetTab {
+        sketch: SketchId,
+        #[walk(profiles_of = sketch)]
+        profiles: ProfileSel,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
     },
@@ -2762,7 +2793,7 @@ impl FilletStyle {
 
 /// Sketch curves a trim cuts with: chains of the curves `curves` (every curve of the sketch
 /// that is not construction geometry when empty) swept along `direction` (the sketch's normal
-/// when none) onto the surface.
+/// when none) onto the surface, or with `face_normal` dropped square onto it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 pub struct TrimCurves {
     pub sketch: SketchId,
@@ -2770,6 +2801,11 @@ pub struct TrimCurves {
     pub curves: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub direction: Option<Dir>,
+    /// The curves are projected along the surface's own normal, not along one direction: each
+    /// point of a curve goes to its foot on the surface (its nearest point there), wherever
+    /// the sketch lies. `direction` then has no say.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub face_normal: bool,
 }
 
 /// What of the tool body cuts in a Split Body by a face (#9305).
@@ -3241,6 +3277,37 @@ pub fn point_expr(p: Vec3) -> PointExpr {
     [Expr::new(format!("{}", p.x)), Expr::new(format!("{}", p.y)), Expr::new(format!("{}", p.z))]
 }
 
+/// A direction whose components are unitless expressions (`["0", "-sin(t)", "-cos(t)"]`), so it
+/// turns as the parameters change. Saved as a [`PointExpr`] is; normalized when evaluated.
+pub type DirExpr = [Expr; 3];
+
+/// A direction as expressions (plain numbers).
+pub fn dir_expr(d: Vec3) -> DirExpr {
+    point_expr(d)
+}
+
+/// The direction `d` holds when each component is a plain number, normalized; `None` when one
+/// is an expression or it is zero.
+pub fn literal_dir(d: &DirExpr) -> Option<Vec3> {
+    let num = |e: &Expr| e.trim().parse::<f64>().ok().filter(|v| v.is_finite());
+    let [x, y, z] = d;
+    unit_direction(Vec3::new(num(x)?, num(y)?, num(z)?))
+}
+
+/// `v` as a unit direction, however short it is: scaled by its largest component first, so
+/// only a vector that is exactly zero (or not finite) has none (#18822).
+pub fn unit_direction(v: Vec3) -> Option<Vec3> {
+    let m = v.x.abs().max(v.y.abs()).max(v.z.abs());
+    if !(m.is_finite() && m > 0.0) {
+        return None;
+    }
+    Vec3::new(v.x / m, v.y / m, v.z / m).normalized()
+}
+
+fn z_axis_expr() -> DirExpr {
+    dir_expr(Vec3::Z)
+}
+
 /// Stored as `[x, y, z]`: plain numbers as numbers (as points were before they took
 /// expressions, so such designs read and write the same), anything else as a string.
 mod point_expr {
@@ -3311,6 +3378,7 @@ impl FeatureKind {
                 | FeatureKind::SheetPerforate { .. }
                 | FeatureKind::SheetFold { .. }
                 | FeatureKind::SheetPath { .. }
+                | FeatureKind::SheetTab { .. }
                 | FeatureKind::SheetUnfold { .. }
                 | FeatureKind::SheetConvert { .. }
                 | FeatureKind::SheetSurfaceConvert { .. }
@@ -3370,6 +3438,7 @@ impl FeatureKind {
             FeatureKind::FrameEndCap { .. } => "EndCapFeature",
             FeatureKind::FrameMemberTurn { .. } => "MemberTurnFeature",
             FeatureKind::FrameMember { .. } => "FrameMemberFeature",
+            FeatureKind::FramePlate { .. } => "FramePlateFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
             FeatureKind::Boss { .. } => "BossFeature",
             FeatureKind::Lip { groove: false, .. } => "LipFeature",
@@ -3384,6 +3453,7 @@ impl FeatureKind {
             FeatureKind::SheetPerforate { .. } => "PerforateFeature",
             FeatureKind::SheetFold { .. } => "FoldFeature",
             FeatureKind::SheetPath { .. } => "PathFlangeFeature",
+            FeatureKind::SheetTab { .. } => "TabFeature",
             FeatureKind::SheetUnfold { refold: false, .. } => "UnfoldFeature",
             FeatureKind::SheetUnfold { .. } => "RefoldFeature",
             FeatureKind::SheetConvert { .. } => "ConvertToSheetMetalFeature",
@@ -3457,6 +3527,7 @@ impl FeatureKind {
             FeatureKind::FrameEndCap { .. } => "frame_end_cap",
             FeatureKind::FrameMemberTurn { .. } => "frame_member_turn",
             FeatureKind::FrameMember { .. } => "frame_member",
+            FeatureKind::FramePlate { .. } => "frame_plate",
             FeatureKind::Emboss { .. } => "emboss",
             FeatureKind::Rib { .. } => "rib",
             FeatureKind::ReplaceFace { .. } => "replace_face",
@@ -3470,6 +3541,7 @@ impl FeatureKind {
             FeatureKind::SheetPerforate { .. } => "sheet_perforate",
             FeatureKind::SheetFold { .. } => "sheet_fold",
             FeatureKind::SheetPath { .. } => "sheet_path",
+            FeatureKind::SheetTab { .. } => "sheet_tab",
             FeatureKind::SheetUnfold { .. } => "sheet_unfold",
             FeatureKind::SheetConvert { .. } => "sheet_convert",
             FeatureKind::SheetSurfaceConvert { .. } => "sheet_surface_convert",
@@ -3546,6 +3618,7 @@ impl FeatureKind {
             "EndCapFeature" => "frame_end_cap",
             "MemberTurnFeature" => "frame_member_turn",
             "FrameMemberFeature" => "frame_member",
+            "FramePlateFeature" => "frame_plate",
             "EmbossFeature" => "emboss",
             "BossFeature" => "boss",
             "LipFeature" | "GrooveFeature" => "lip",
@@ -3559,6 +3632,7 @@ impl FeatureKind {
             "PerforateFeature" => "sheet_perforate",
             "FoldFeature" => "sheet_fold",
             "PathFlangeFeature" => "sheet_path",
+            "TabFeature" => "sheet_tab",
             "UnfoldFeature" | "RefoldFeature" => "sheet_unfold",
             "ConvertToSheetMetalFeature" => "sheet_convert",
             "ConvertBodyToSheetMetalFeature" => "sheet_surface_convert",
@@ -3634,6 +3708,7 @@ impl FeatureKind {
             FeatureKind::FrameEndCap { .. } => "EndCap",
             FeatureKind::FrameMemberTurn { .. } => "Rotate",
             FeatureKind::FrameMember { .. } => "Member",
+            FeatureKind::FramePlate { .. } => "MountingPlate",
             FeatureKind::Emboss { .. } => "Emboss",
             FeatureKind::Boss { .. } => "Boss",
             FeatureKind::Lip { groove: false, .. } => "Lip",
@@ -3648,6 +3723,7 @@ impl FeatureKind {
             FeatureKind::SheetPerforate { .. } => "Perforate",
             FeatureKind::SheetFold { .. } => "Fold",
             FeatureKind::SheetPath { .. } => "PathFlange",
+            FeatureKind::SheetTab { .. } => "Tab",
             FeatureKind::SheetUnfold { refold: false, .. } => "Unfold",
             FeatureKind::SheetUnfold { .. } => "Refold",
             FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } => "ConvertToSheetMetal",
