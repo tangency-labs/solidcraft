@@ -1620,15 +1620,7 @@ fn curve_as_bspline(
         CurveKind::Ellipse(e) => return Ok(e.base().clone()),
         CurveKind::Parabola(p) => return Ok(p.base().clone()),
         CurveKind::Hyperbola(h) => return Ok(h.base.clone()),
-        CurveKind::Hermite(_) => "Hermite",
-        CurveKind::Projected(_) => "projected",
-        CurveKind::Iso(_) => "iso-parametric",
-        CurveKind::Offset(_) => "offset",
-        CurveKind::Conic(_) => "conic",
-        CurveKind::CrvInVolume(_) => "curve-in-volume",
-        CurveKind::CrvOnSurf(_) => "curve-on-surface",
-        CurveKind::TangentField(_) => "tangent-field",
-        CurveKind::Composite(_) => "composite",
+        other => other.name(),
     };
     Err(SolidError::blend_at(
         op,
