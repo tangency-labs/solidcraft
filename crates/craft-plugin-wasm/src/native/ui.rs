@@ -326,6 +326,7 @@ pub(crate) fn describe<H: PluginHost + 'static>(
         effect: Effect::Read,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
+        created_dirs: Vec::new(),
         clock: false,
         forms: false,
         limits: store_limits(limits, 10_000),
@@ -359,5 +360,5 @@ pub(crate) fn describe<H: PluginHost + 'static>(
         validate(declarations(result), runtime)
     })();
     host = store.into_data().host;
-    (host, outcome.map_err(|error| with_limits(error, limits)))
+    (host, outcome.map_err(|error| with_limits(error, limits.deadline_ms)))
 }

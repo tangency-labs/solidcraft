@@ -4,7 +4,7 @@ use cap_std::fs::OpenOptionsExt;
 use cap_std::fs::{Dir, OpenOptions};
 use craft_plugin::{
     CommandSchema, Effect, HostError, Limits, LossReport, MAX_EXPORT_FILE_BYTES, MAX_IMPORT_CHUNK_BYTES, MAX_IMPORT_DESIGN_BYTES,
-    MAX_IMPORT_INPUT_BYTES, MAX_JSON_BYTES, Manifest, PluginHost, Result,
+    MAX_IMPORT_INPUT_BYTES, MAX_JOB_CALLS, MAX_JSON_BYTES, Manifest, PluginHost, Result,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -56,14 +56,14 @@ static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 fn limit(name: &str) -> HostError {
     HostError::LimitExceeded { limit: name.into() }
 }
-/// The deadline passed. [`with_limits`] fills in the manifest's number.
+/// The deadline passed. [`with_limits`] fills in the enforced deadline.
 fn deadline() -> HostError {
     HostError::Exhausted { limit: "deadline_ms".into(), allowed: 0 }
 }
 /// Fills in the budget a [`deadline`] or other placeholder left out, once the call is over.
-fn with_limits(error: HostError, limits: &Limits) -> HostError {
+fn with_limits(error: HostError, deadline_ms: u64) -> HostError {
     match error {
-        HostError::Exhausted { limit, allowed: 0 } if limit == "deadline_ms" => HostError::Exhausted { limit, allowed: limits.deadline_ms },
+        HostError::Exhausted { limit, allowed: 0 } if limit == "deadline_ms" => HostError::Exhausted { limit, allowed: deadline_ms },
         error => error,
     }
 }
@@ -143,6 +143,9 @@ struct State<H> {
     design_tokens: bool,
     folders: BTreeMap<String, Folder>,
     staged: BTreeMap<(String, PathBuf), PendingWrite>,
+    /// Folders `write-file` made inside a grant for a staged file, in the order they were made.
+    /// A run that does not publish removes the ones still empty.
+    created_dirs: Vec<(String, PathBuf)>,
     clock: bool,
     forms: bool,
     limits: StoreLimits,
@@ -216,6 +219,12 @@ impl<H: PluginHost> State<H> {
                 let _ = folder.dir.remove_file(pending.temporary);
             }
         }
+        // Newest first, so a folder's sub-folders go before it; a folder that now holds anything stays.
+        for (grant, dir) in std::mem::take(&mut self.created_dirs).into_iter().rev() {
+            if let Some(folder) = self.folders.get(&grant) {
+                let _ = folder.dir.remove_dir(dir);
+            }
+        }
     }
     fn publish_writes(&mut self) -> Result<()> {
         let mut writes: Vec<_> = self.staged.iter().collect();
@@ -226,6 +235,8 @@ impl<H: PluginHost> State<H> {
                 permission: format!("files.write:{grant}: publication failed after app commit; files may have changed: {error}"),
             })?;
         }
+        // The published files now live in the folders made for them.
+        self.created_dirs.clear();
         Ok(())
     }
 }
@@ -407,9 +418,25 @@ impl<H: PluginHost> files::Host for State<H> {
         if data.len() > MAX_JSON_BYTES {
             return Err(self.fail(limit("file write size")));
         }
+        let mut created = Vec::new();
         let write = (|| -> std::io::Result<PathBuf> {
             let folder = self.folders.get(&grant).ok_or_else(|| std::io::Error::other("grant disappeared"))?;
             let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+            // A file in a sub-folder that does not exist yet gets that folder, inside the grant
+            // (#20493). Each step was checked above: plain names, no links, the whole path allowed.
+            let mut prefix = PathBuf::new();
+            for component in parent.components().filter(|c| matches!(c, PathComponent::Normal(_))) {
+                prefix.push(component);
+                match folder.dir.symlink_metadata(&prefix) {
+                    Ok(metadata) if metadata.is_dir() => {}
+                    Ok(_) => return Err(std::io::Error::other(format!("{} is a file, not a folder", prefix.display()))),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        folder.dir.create_dir(&prefix)?;
+                        created.push(prefix.clone());
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
             let temp = parent.join(format!(".craft-plugin-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
             let mut options = OpenOptions::new();
             options.write(true).create_new(true);
@@ -424,7 +451,15 @@ impl<H: PluginHost> files::Host for State<H> {
             }
             result.map(|()| temp)
         })();
-        let temporary = write.map_err(|e| self.fail(HostError::PermissionDenied { permission: format!("files.write:{grant}: {e}") }))?;
+        self.created_dirs.extend(created.into_iter().map(|dir| (grant.clone(), dir)));
+        // Only a refusal by the system is a denied permission; anything else is about this path.
+        let temporary = write.map_err(|e| {
+            self.fail(if e.kind() == std::io::ErrorKind::PermissionDenied {
+                HostError::PermissionDenied { permission: format!("files.write:{grant}: {e}") }
+            } else {
+                HostError::InvalidInput { field: "path".into(), reason: format!("files.write:{grant}: {e}") }
+            })
+        })?;
         if let Some(previous) = self.staged.insert((grant.clone(), path), PendingWrite { temporary, order: self.calls })
             && let Some(folder) = self.folders.get(&grant)
         {
@@ -649,8 +684,11 @@ fn refuse_links(dir: &Dir, path: &Path) -> std::io::Result<()> {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(std::io::Error::other(format!("{} is a link; links are not followed", prefix.display())));
             }
+            // Nothing lies past a plain file, so no link can either: the caller reports a file
+            // where a folder should be as a wrong path, not as a refused permission (#20493).
+            Ok(metadata) if !metadata.is_dir() => return Ok(()),
             Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => return Ok(()),
             Err(error) => return Err(error),
         }
     }
@@ -904,6 +942,7 @@ fn run_mode<H: PluginHost + 'static>(
         compiled,
         commands,
         folders,
+        options,
         manifest
             .capabilities
             .iter()
@@ -937,10 +976,17 @@ fn execute<H: PluginHost + 'static>(
     (engine, component, stack): (Engine, Component, usize),
     (commands, groups, design_tokens): (BTreeMap<String, CommandSchema>, BTreeSet<String>, bool),
     folders: BTreeMap<String, Folder>,
+    options: RuntimeOptions,
     forms: bool,
     dialog: bool,
 ) -> (State<H>, Result<Value>) {
     let limits = &runtime.limits;
+    // A long job runs for its fixed deadline, and reports its progress as often as it likes. The
+    // deadline counts guest (Wasm) running time like every other entry's, so one mechanism covers
+    // both. The manifest's host-call budget, already held under the user's ceiling, still applies
+    // and a job never has fewer calls than its progress reports need.
+    let (deadline_ms, max_calls) =
+        if entry.job { (options.job_deadline_ms, limits.host_calls.max(MAX_JOB_CALLS as u64)) } else { (limits.deadline_ms, limits.host_calls) };
     let state = State {
         host,
         commands,
@@ -949,13 +995,14 @@ fn execute<H: PluginHost + 'static>(
         design_tokens,
         folders,
         staged: BTreeMap::new(),
+        created_dirs: Vec::new(),
         clock: runtime.permissions.clock,
         forms: forms && !dialog,
         failed: None,
         calls: 0,
-        max_calls: limits.host_calls,
+        max_calls,
         log_bytes: 0,
-        deadline: GuestDeadline::new(limits.deadline_ms),
+        deadline: GuestDeadline::new(deadline_ms),
         limits: store_limits(limits, 10_000),
         import: None,
         panels: None,
@@ -1028,7 +1075,7 @@ fn execute<H: PluginHost + 'static>(
     // Fuel can run out between epoch ticks. If a hook has also crossed its deadline, report
     // the typed timeout even when the fuel trap was the first opportunity to stop it.
     let expired = dialog && store.data().deadline.expired(Instant::now());
-    (store.into_data(), outcome.map_err(|error| with_limits(if expired { deadline() } else { error }, limits)))
+    (store.into_data(), outcome.map_err(|error| with_limits(if expired { deadline() } else { error }, deadline_ms)))
 }
 
 fn store_limits(limits: &Limits, table_elements: usize) -> StoreLimits {
@@ -1403,6 +1450,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         design_tokens: false,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
+        created_dirs: Vec::new(),
         clock: runtime.permissions.clock,
         forms: false,
         failed: None,
@@ -1455,7 +1503,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
     })();
     let mut state = store.into_data();
     state.close_evaluation();
-    (state.host, outcome.map_err(|error| with_limits(error, limits)))
+    (state.host, outcome.map_err(|error| with_limits(error, limits.deadline_ms)))
 }
 
 /// Runs an export slot in a fresh instance. The plugin reads the design only through the
@@ -1519,6 +1567,7 @@ pub(super) fn run_export<H: PluginHost + 'static>(
         design_tokens: false,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
+        created_dirs: Vec::new(),
         clock: runtime.permissions.clock,
         forms: false,
         failed: None,
@@ -1562,7 +1611,7 @@ pub(super) fn run_export<H: PluginHost + 'static>(
     // An export never changes the app: what its commands did is always thrown away.
     let rolled_back = state.host.rollback_transaction();
     let outcome = rolled_back.and(outcome);
-    (state.host, outcome.map_err(|error| with_limits(error, limits)))
+    (state.host, outcome.map_err(|error| with_limits(error, limits.deadline_ms)))
 }
 
 #[cfg(test)]

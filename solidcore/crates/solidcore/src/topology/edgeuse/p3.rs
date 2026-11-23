@@ -497,6 +497,7 @@ pub fn create_uv_trim_curve(
     want_deviation: bool,
     opt_drop_curve_fail: Option<&mut DropCurveFail<ObjectHandle>>,
 ) -> Result<CreatedUvTrimCurve> {
+    k.work_counters.add_uv_trim_build();
     // always collect DropCurveData
     let mut local_fail = DropCurveFail::<ObjectHandle>::default();
     let fail: &mut DropCurveFail<ObjectHandle> = match opt_drop_curve_fail {
@@ -2716,6 +2717,7 @@ pub(crate) fn trim_deviation_bound(
     let ivl = edge_rec.interval;
     // (below a thousandth of the fit tolerance a tighter bound changes nothing)
     let floor = TRIM_BOUND_FLOOR * fit;
+    k.work_counters.add_trim_deviation_bound();
     crate::query::curve_surface_gap::trim_image_gap_bound_within(
         k,
         &surface,

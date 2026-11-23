@@ -61,6 +61,8 @@ pub(crate) struct Counts {
     pub fit_searches: usize,
     pub classifications: usize,
     pub hole_points: usize,
+    /// Contact tests a join made to find which bodies its tool meets.
+    pub contact_tests: usize,
 }
 
 thread_local! {
@@ -96,6 +98,7 @@ thread_local! {
             fit_searches: 0,
             classifications: 0,
             hole_points: 0,
+            contact_tests: 0,
         })
     };
 }
@@ -417,6 +420,53 @@ fn moving_a_construction_plane_moves_the_sketch_on_it() {
     doc.feature_mut(plane).unwrap().kind = offset("12 mm");
     model.evaluate(&doc);
     assert!((model.state().sketch(sketch).unwrap().plane.origin.z - 12.0).abs() < 1e-9, "the sketch follows its plane");
+}
+
+/// A boundary surface reads its own sketch and nothing else: an edit of a sketch it does not use
+/// leaves it as it was. A delete in a later sketch rebuilt a patch through four arcs of an earlier
+/// one, whose edge tolerances take most of a second to prove, twice per check (#17714).
+#[test]
+fn a_boundary_surface_keeps_its_result_when_another_sketch_changes() {
+    let mut doc = Document::new("Boundary");
+    let mut square = Sketch::new();
+    let corners = [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)].map(|(x, y)| square.add_point(Vec2::new(x, y), None).unwrap());
+    let mut curves = Vec::new();
+    for k in 0..4 {
+        let line = square.add_line_pts(corners[k], corners[(k + 1) % 4], None).unwrap();
+        curves.push(square.curves[line].id.clone());
+    }
+    let loop_sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: square }, None).unwrap();
+    let other = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XZ".into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let patch = doc
+        .add_feature(FeatureKind::SurfaceBoundary { sketch: loop_sketch.into(), curves, orders: Vec::new(), crown: 0.0, samples: 25 }, None)
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(model.state().bodies.len(), 1);
+
+    // The line sketch before the patch changes: it alone is evaluated again.
+    if let Ok(sk) = doc.sketch_mut(other)
+        && let Some(p) = sk.points.get_mut(1)
+    {
+        p.pos = Vec2::new(12.0, 2.0);
+    }
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 1, "only the edited sketch");
+    assert!(model.result(patch).unwrap().error.is_none());
+    assert_eq!(model.state().bodies.len(), 1);
+
+    // Its own sketch changes: the patch follows it.
+    if let Ok(sk) = doc.sketch_mut(loop_sketch)
+        && let Some(p) = sk.points.get_mut(corners[2])
+    {
+        p.pos = Vec2::new(30.0, 20.0);
+    }
+    let size = model.state().bodies[0].body.size();
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 2, "the square and the patch");
+    assert!(model.result(patch).unwrap().error.is_none());
+    assert!(model.state().bodies[0].body.size() > size, "the patch reaches the moved corner");
 }
 
 #[test]
@@ -1690,6 +1740,40 @@ fn a_mirror_of_a_round_with_nothing_placed_measures_no_box() {
     assert_eq!(work.tight_boxes, 0, "{work:?}");
 }
 
+/// A join into the only body there is takes it without asking whether the tool meets it: the
+/// contact test meshes the body finely, and on a part of a few hundred faces it took longer than
+/// the join. With two bodies the tool picks the one it meets, as before.
+#[test]
+fn a_join_into_the_only_body_makes_no_contact_test() {
+    let boss = |corner: Vec3| FeatureKind::Box {
+        corner: point_expr(corner),
+        length: "4".into(),
+        width: "4".into(),
+        height: "4".into(),
+        operation: Operation::Join,
+        centred: false,
+    };
+    let mut doc = Document::new("one block");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    doc.add_feature(boss(Vec3::new(-2.0, -2.0, 10.0)), None).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(work.contact_tests, 0, "{work:?}");
+    assert!((volume(&model, "A") - (2000.0 + 64.0)).abs() < 1e-6, "{}", volume(&model, "A"));
+    // A second block: the boss joins the one it stands on.
+    let mut doc = Document::new("two blocks");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(-10.0, 20.0, 0.0), [20.0, 10.0, 10.0]);
+    doc.add_feature(boss(Vec3::new(-2.0, 23.0, 10.0)), None).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert!(work.contact_tests > 0, "{work:?}");
+    assert!((volume(&model, "A") - 2000.0).abs() < 1e-6, "{}", volume(&model, "A"));
+    assert!((volume(&model, "B") - (2000.0 + 64.0)).abs() < 1e-6, "{}", volume(&model, "B"));
+}
+
 /// `comps` parts, each with `bodies` boxes, `sketches` sketches and `taps` taps, placed `copies`
 /// times: a design and its state, made without evaluating it.
 fn placed_parts(comps: usize, bodies: usize, sketches: usize, taps: usize, copies: usize) -> (Document, ModelState) {
@@ -2031,6 +2115,12 @@ fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
                     alignment2: Default::default(),
                     reversed: false,
                     reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -2081,6 +2171,12 @@ fn a_patterned_modelled_thread_reuses_its_final_check() {
                     alignment2: Default::default(),
                     reversed: false,
                     reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -3800,6 +3896,34 @@ fn a_save_while_an_import_is_checked_keeps_no_model_and_does_not_wait() {
     assert_eq!(feature["warning"], serde_json::json!(crate::eval::import_warning(&["fails SMLib's check"])));
     assert_eq!(feature["import_report"]["issues"][0]["detail"], "fails SMLib's check", "kept with what the check found");
     assert_eq!(saved.records, model.saved(&doc).unwrap().records, "as a save that waited keeps it");
+}
+
+/// #20633: a window is woken once when an import's check of its parts ends, and not at all while
+/// it runs, so an untouched window draws nothing for the minutes a large import's check takes.
+#[test]
+fn a_window_is_woken_once_when_an_imports_check_ends() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let doc = placed_imports(1);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let import = doc.features[0].id;
+    let end = model.running_import_check_for_tests(import);
+    assert!(model.checking_imports());
+    let woke = Arc::new(AtomicUsize::new(0));
+    let w = woke.clone();
+    model.on_import_checks_end(Arc::new(move || {
+        w.fetch_add(1, Ordering::SeqCst);
+    }));
+    assert_eq!(woke.load(Ordering::SeqCst), 0, "nothing while the check runs");
+    end(Vec::new());
+    assert_eq!(woke.load(Ordering::SeqCst), 1, "the end of the check wakes the window once");
+    assert!(!model.checking_imports());
+    // A model whose checks have all ended wakes nothing: the result is already in.
+    let w = woke.clone();
+    model.on_import_checks_end(Arc::new(move || {
+        w.fetch_add(1, Ordering::SeqCst);
+    }));
+    assert_eq!(woke.load(Ordering::SeqCst), 1, "no check is running, so nothing is woken");
 }
 
 /// The tolerance heal preference is part of an import's and a Repair's fingerprint, and of no
