@@ -2,18 +2,18 @@
 //! (`SmPlane::IsNurbSurfacePlane`) placed a recognised plane's origin, its point at
 //! (u, v) = (0, 0), along the B-spline's own Y axis, and only then turned that axis to
 //! be perpendicular to X. With a domain far from v = 0 the turn is multiplied by the
-//! distance to the origin.
+//! distance to the origin. The origin is now placed along the final axes.
 //!
 //! The case is SolidCraft rig sweeps/4305's swept groove wall: a planar bilinear patch
 //! over u 0..1, v 4..5, 40 mm along v, whose v direction leans `TURN = 3.2116e-8` rad
 //! off perpendicular to u. Closed form (to first order in `TURN`, the second-order terms
 //! are below 1e-14 mm):
-//! - flag off (upstream): the corner at v = 4 is `4 * 40 * TURN = 5.1386e-6` mm off the
-//!   wall and the corner at v = 5 is `200 * TURN = 6.4232e-6` mm off. Those are the
-//!   vertex/face gaps the SolidCraft check refused against its 5e-6 limit.
-//! - flag on (fixed): the corner at v = 4 is on the wall and the corner at v = 5 is off
-//!   by the wall's own span times the turn, `40 * TURN = 1.2846e-6` mm. This is the
-//!   analytic limit, since an orthogonal plane cannot follow the lean exactly.
+//! - upstream: the corner at v = 4 is `4 * 40 * TURN = 5.1386e-6` mm off the wall and
+//!   the corner at v = 5 is `200 * TURN = 6.4232e-6` mm off. Those are the vertex/face
+//!   gaps the SolidCraft check refused against its 5e-6 limit.
+//! - fixed: the corner at v = 4 is on the wall and the corner at v = 5 is off by the
+//!   wall's own span times the turn, `40 * TURN = 1.2846e-6` mm. This is the analytic
+//!   limit, since an orthogonal plane cannot follow the lean exactly.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -63,29 +63,8 @@ fn corner_gaps(k: &Kernel) -> (f64, f64) {
 }
 
 #[test]
-fn flag_off_places_the_origin_along_the_unturned_axis() {
-    let k = Kernel::default();
-    assert!(!k.fixes.plane_recognition_origin_after_axes);
-    let (low, high) = corner_gaps(&k);
-    assert!(
-        (low - 4.0 * SPAN * TURN).abs() < SLACK,
-        "v = 4 corner gap {low:e}, expected {:e}",
-        4.0 * SPAN * TURN
-    );
-    assert!(
-        (high - 5.0 * SPAN * TURN).abs() < SLACK,
-        "v = 5 corner gap {high:e}, expected {:e}",
-        5.0 * SPAN * TURN
-    );
-    // Over SolidCraft's 5e-6 vertex gap limit, as the refused cut reported.
-    assert!(low > 5.0e-6 && high > 5.0e-6);
-}
-
-#[test]
-fn flag_on_places_the_origin_along_the_plane_axes() {
-    let mut k = Kernel::default();
-    k.fixes.plane_recognition_origin_after_axes = true;
-    let (low, high) = corner_gaps(&k);
+fn recognition_places_the_origin_along_the_plane_axes() {
+    let (low, high) = corner_gaps(&Kernel::default());
     assert!(low < SLACK, "v = 4 corner gap {low:e}, expected 0");
     assert!(
         (high - SPAN * TURN).abs() < SLACK,

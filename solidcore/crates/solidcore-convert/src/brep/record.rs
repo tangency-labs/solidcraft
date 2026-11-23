@@ -7,9 +7,9 @@
 //!   its NURBS form, proved on each other; an analytic face by its label and its NURBS form,
 //!   proved (`lies_on`); a plane by its placement, its parameters its kernel ones times its
 //!   scales. Nothing is sampled. A curve or surface with no NURBS form (an offset) is refused.
-//!   Two things still cross as approximations: a procedural blend goes as its net and loses its
-//!   definition and bound until the definition records move into the record (PR 1's last
-//!   commit, still to come), and a use with no UV trim gets one the kernel makes by fitting.
+//!   A blend face goes as its definition and its net ([`face_definition`]: a procedural blend, a
+//!   round of an exact class whose net has no analytic label); a use with no UV trim gets one the
+//!   kernel makes by fitting.
 //! - **Pcurves:** every use's pcurve is the kernel's own UV trim (made first where a use has
 //!   none, by the kernel's fit), its knots on the edge record's interval ([`record_trim`]). A face's parameters in
 //!   the record are its NURBS's (or a plane's, scaled), none periodic, so no loop is moved by
@@ -35,10 +35,12 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::Kernel;
 use solidcore::surface::face_surface::record_face;
+use solidcore::surface::procedural_blend::convert::face_definition;
+use solidcore::topology::brep::create_missing_uv_trim_curves;
+use solidcore::topology::brep::outer_shells::outer_shells;
 use solidcore::topology::brep::p1 as bl;
 use solidcore::topology::brep_data::{BrepData, NO_OBJECT, UNDEF_ULONG};
-use solidcore::topology::brep_data_write::FromBrepEnv;
-use solidcore::topology::edgeuse::{p1 as eu1, p3 as eu3};
+use solidcore::topology::brep_data_write::{data_regions, FromBrepEnv};
 use solidcore::topology::loopuse::notify_ref;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::EdgeuseId;
@@ -47,6 +49,31 @@ use solidcore::{Brep, EdgeId, FaceId};
 use solidcore_record::brep as r;
 
 use super::{Order, Unsupported, R};
+
+/// A blend face's record: its definition as its label and its net as its NURBS form (the form the
+/// face was written with, or its surface when that is the net itself), when the kernel reads a
+/// definition off it ([`face_definition`]) and the net is a NURBS surface; otherwise the face as
+/// written.
+fn with_definition(
+    k: &Kernel,
+    surface: &solidcore::surface::surface::Surface,
+    label: r::Surface,
+    form: Option<r::Surface>,
+) -> R<(r::Surface, Option<r::Surface>)> {
+    let net = form.as_ref().unwrap_or(&label);
+    if !matches!(
+        net,
+        r::Surface::Spline { .. } | r::Surface::RationalSpline { .. }
+    ) {
+        return Ok((label, form));
+    }
+    let Some(definition) = face_definition(k, surface)? else {
+        return Ok((label, form));
+    };
+    let net = form.unwrap_or(label);
+    let definition = Box::new(crate::blend::record_blend(definition));
+    Ok((r::Surface::Blend { definition }, Some(net)))
+}
 
 fn index(i: usize) -> R<u32> {
     u32::try_from(i).map_err(|_| Unsupported::Invalid("index"))
@@ -101,12 +128,7 @@ struct Edge {
 /// step the kernel refuses; [`Unsupported::Invalid`] for kernel data that does not hold
 /// together or a record that does not validate.
 pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
-    for eu in solidcore::topology::brep::p2::edgeuses(b, None)? {
-        if eu1::faceuse(b, eu)?.is_none() || eu1::uv_trim_curve_pointer(b, eu)?.is_some() {
-            continue;
-        }
-        eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
-    }
+    create_missing_uv_trim_curves(k, b)?;
     let b: &Brep = b;
     let store = AttributeStore::default();
     let records = NotifyRecords::new();
@@ -166,9 +188,15 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
             .as_ref()
             .ok_or(Unsupported::Invalid("a face without a surface"))?;
         let made = record_face(k, surface, &fd.uv_domain)?;
+        let (label, form) = with_definition(
+            k,
+            surface,
+            crate::record_surface(made.surface)?,
+            made.nurbs.map(crate::record_surface).transpose()?,
+        )?;
         let mut face = Face {
-            surface: crate::record_surface(made.surface)?,
-            nurbs: made.nurbs.map(crate::record_surface).transpose()?,
+            surface: label,
+            nurbs: form,
             domain: made.domain,
             agrees: made.agrees,
             loops: Vec::new(),
@@ -228,24 +256,47 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
         faces.push(face);
     }
 
-    // Regions, shells and faceuses as blocks of the data's lists.
+    // Regions, shells and faceuses as blocks of the data's lists. Each region's shells are
+    // listed with its outer shell first, the one mated to the region enclosing it
+    // ([`outer_shells`]): the kernel's list order does not say which it is (a union that
+    // seals a void can leave the void's shell first), and the record takes a region's first
+    // shell as its outer one.
     let n_shells = bd.shells.len();
-    let mut region_shells = Vec::new();
+    let kernel_regions = data_regions(b)?;
+    let outer = outer_shells(b)?;
+    let mut region_shells: Vec<Vec<usize>> = Vec::new();
     let mut region_of = vec![0usize; n_shells];
+    let mut first_start = None;
     for (ri, rd) in bd.regions.iter().enumerate() {
         let start = data_index(rd.start_shell)?;
         let end = start
             .checked_add(data_index(rd.num_shells)?)
             .filter(|e| *e <= n_shells)
             .ok_or(Unsupported::Invalid("region shells"))?;
+        first_start.get_or_insert(start);
         for s in start..end {
             if let Some(slot) = region_of.get_mut(s) {
                 *slot = ri;
             }
         }
-        region_shells.push(start..end);
+        let region = *at(&kernel_regions, ri)?;
+        let kernel_shells = &b.region(region)?.shells;
+        if kernel_shells.len() != end - start {
+            return Err(Unsupported::Invalid(
+                "the kernel's data lists differ from its body's",
+            ));
+        }
+        let mut shells: Vec<usize> = (start..end).collect();
+        let outer_at = outer
+            .get(&region)
+            .and_then(|o| kernel_shells.iter().position(|s| s == o));
+        if let Some(p) = outer_at.filter(|p| *p > 0) {
+            let s = shells.remove(p);
+            shells.insert(0, s);
+        }
+        region_shells.push(shells);
     }
-    if region_shells.first().map(|s| s.start) != Some(0) {
+    if first_start != Some(0) {
         return Err(Unsupported::Invalid(
             "the kernel's data has no infinite region first",
         ));
@@ -404,6 +455,7 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
             .iter()
             .map(|&v| at(&vertex_ids, v).copied())
             .collect::<R<_>>()?,
+        split_edges: order.split_edges,
     };
     Ok((brep, kernel))
 }
@@ -516,7 +568,7 @@ fn find(root: &[usize], mut r: usize) -> usize {
 /// boundary faces together are one record region: the infinite region where it is among them,
 /// otherwise the void whose outer shell bounds it alone.
 fn record_regions(
-    region_shells: &[std::ops::Range<usize>],
+    region_shells: &[Vec<usize>],
     region_of: &[usize],
     groups: &[Group],
     material: impl Fn(usize) -> bool,
@@ -548,10 +600,7 @@ fn record_regions(
     // A region's outer runtime shell bounds it alone when every solid it faces faces no
     // region but this one.
     let alone = |r: usize| -> R<bool> {
-        let Some(outer) = region_shells
-            .get(r)
-            .and_then(|s| (s.start < s.end).then_some(s.start))
-        else {
+        let Some(outer) = region_shells.get(r).and_then(|s| s.first().copied()) else {
             return Ok(false);
         };
         for g in groups.iter().filter(|g| g.empty.contains(&outer)) {
@@ -610,7 +659,7 @@ fn record_regions(
             Ok(())
         };
         if material(r) {
-            for s in block.clone() {
+            for &s in block {
                 list(s, &mut listed)?;
             }
         } else {
@@ -713,6 +762,8 @@ struct Sources {
     faces: Vec<usize>,
     edges: Vec<usize>,
     vertices: Vec<usize>,
+    /// Data edges split because only sheet faces use them more than twice (each once).
+    split_edges: usize,
 }
 
 /// The record in canonical order: faces in first appearance through the shells, edges
@@ -735,7 +786,7 @@ fn canonical(
     } = parts;
     let (mut edge_source, vertex_source) =
         split_shared(&mut faces, &mut edges, &shells, &sheets, n_vertices)?;
-    split_touching(&mut faces, &mut edges, &mut edge_source, &radial)?;
+    let split_edges = split_touching(&mut faces, &mut edges, &mut edge_source, &radial)?;
     let n_vertices = vertex_source.len();
     let mut face_new: Vec<Option<u32>> = vec![None; faces.len()];
     let (mut face_order, mut direction) = (Vec::new(), Vec::new());
@@ -929,6 +980,7 @@ fn canonical(
     brep.validate_built()
         .map_err(|e| Unsupported::Invalid(e.0))?;
     let sources = Sources {
+        split_edges,
         faces: face_order.iter().map(|&f| f as usize).collect(),
         edges: edge_order
             .iter()
@@ -1066,7 +1118,7 @@ fn split_touching(
     edges: &mut Vec<Edge>,
     edge_source: &mut Vec<usize>,
     radial: &Radial,
-) -> R<()> {
+) -> R<usize> {
     // The data edgeuses using each edge, and where each is: (face, loop, position).
     let mut records_of: Vec<Vec<usize>> = vec![Vec::new(); edges.len()];
     let mut place: HashMap<usize, (usize, usize, usize)> = HashMap::new();
@@ -1116,8 +1168,45 @@ fn split_touching(
     let after = |rec: usize| -> R<bool> { Ok(material_same(rec)? != top_entry(rec)?) };
     let before = |rec: usize| -> R<bool> { Ok(material_same(rec)? == top_entry(rec)?) };
 
+    // The original edges split because only sheet faces use them (each once).
+    let mut split_sheets = 0;
     for e in crowded {
         let mine = records_of.get(e).cloned().unwrap_or_default();
+        // An edge only sheet faces use (no material on either side of any of them) has no
+        // sectors to pair across: the first two uses keep it, every further use gets a copy
+        // of its own, so the sheet stays one open body with the extra uses as boundary edges.
+        let only_sheets = mine.iter().all(|rec| {
+            face_of(*rec)
+                .ok()
+                .and_then(|f| radial.material_same.get(f).copied())
+                .is_some_and(|m| m.is_none())
+        });
+        if only_sheets {
+            split_sheets += 1;
+            for &rec in mine.iter().skip(2) {
+                let made = edges.len();
+                let original = edges.get(e).ok_or(Unsupported::Invalid("edge"))?.clone();
+                edges.push(original);
+                edge_source.push(*at(edge_source, e)?);
+                let (f, li, p) = place
+                    .get(&rec)
+                    .copied()
+                    .ok_or(Unsupported::Invalid("edgeuse"))?;
+                let slot = faces
+                    .get_mut(f)
+                    .and_then(|face| face.loops.get_mut(li))
+                    .and_then(|l| {
+                        if let Loop::Edges(u) = l {
+                            u.get_mut(p)
+                        } else {
+                            None
+                        }
+                    })
+                    .ok_or(Unsupported::Invalid("edgeuse"))?;
+                slot.0 = index(made)?;
+            }
+            continue;
+        }
         let start = *mine.first().ok_or(Unsupported::Invalid("edge"))?;
         // The edge's radial list from one of its uses, keeping this edge's.
         let mut cycle = Vec::new();
@@ -1203,5 +1292,5 @@ fn split_touching(
             }
         }
     }
-    Ok(())
+    Ok(split_sheets)
 }

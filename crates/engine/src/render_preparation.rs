@@ -4,7 +4,7 @@ pub mod batch;
 pub(crate) mod batch_payload;
 
 use crate::{Result, Session, cmd::PreparedCapture};
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_render::job::CancelToken;
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -103,6 +103,7 @@ fn current(source: &Session, session: &Session) -> bool {
         && Arc::ptr_eq(&source.model.state(), &session.model.state())
         && !session.model.is_stale()
         && source.active_sketch == session.active_sketch
+        && source.sketching_view == session.sketching_view
         && source.feature_edit_sketch == session.feature_edit_sketch
         && source.active_component == session.active_component
         && source.active_occurrence_path == session.active_occurrence_path
@@ -144,16 +145,12 @@ fn finish_inner(session: &mut Session, prepared: &mut Prepared, ticket: Option<b
     captured.check_cancel().map_err(crate::render_jobs::job_error)?;
     if prepared.kind == Kind::Check {
         prepared.completed = true;
-        return Ok(std::mem::take(&mut prepared.capture.reply));
+        return serde_json::to_value(&prepared.capture.reply).map_err(|e| crate::params::bad(prepared.kind.command(), e.to_string()));
     }
     let status = session
         .render_jobs
         .try_start_prepared_inner(session.revision, &mut prepared.capture.submission, prepared.capture.replace, prepared.shot.clone(), ticket)
         .map_err(crate::render_jobs::job_error)?;
     prepared.completed = true;
-    let mut status = json!(status);
-    if let (Some(out), Some(ignored)) = (status.as_object_mut(), prepared.capture.reply.get("ignored_controls")) {
-        out.insert("ignored_controls".into(), ignored.clone());
-    }
-    Ok(status)
+    Ok(crate::cmd::render_started(prepared.kind.command(), &status, &prepared.capture.reply))
 }

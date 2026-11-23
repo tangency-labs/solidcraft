@@ -12,9 +12,12 @@ use crate::geom::{
 };
 use crate::p21::Param;
 
+pub mod product;
 pub mod topology;
 
-/// A real as Part 21 writes it: always with a decimal point, exponent as `E`.
+/// A real as Part 21 writes it: always with a decimal point, exponent as `E`. Part 21 has no
+/// form for a value that is not finite: it is written as `0.`, and a [`Writer`] counts every one it
+/// writes ([`Writer::non_finite`]) so its caller can refuse the file.
 pub fn real(x: f64) -> String {
     if !x.is_finite() {
         return "0.".into();
@@ -30,7 +33,8 @@ pub fn real(x: f64) -> String {
     }
 }
 
-/// A string literal: quotes doubled, non-ASCII as `\X2\` UTF-16 runs.
+/// A string literal: quotes doubled, non-ASCII as `\X2\` runs (UCS-2, four hex digits) for the
+/// Basic Multilingual Plane and `\X4\` runs (eight hex digits) above it.
 pub fn string(s: &str) -> String {
     let mut o = String::from("'");
     for c in s.chars() {
@@ -39,13 +43,11 @@ pub fn string(s: &str) -> String {
             '\\' => o.push_str("\\\\"),
             c if c.is_ascii() && !c.is_ascii_control() => o.push(c),
             c if c.is_ascii_control() => {}
+            c if u32::from(c) <= 0xFFFF => {
+                let _ = write!(o, "\\X2\\{:04X}\\X0\\", u32::from(c));
+            }
             c => {
-                o.push_str("\\X2\\");
-                let mut buf = [0u16; 2];
-                for u in c.encode_utf16(&mut buf) {
-                    let _ = write!(o, "{u:04X}");
-                }
-                o.push_str("\\X0\\");
+                let _ = write!(o, "\\X4\\{:08X}\\X0\\", u32::from(c));
             }
         }
     }
@@ -85,6 +87,17 @@ fn param(p: &Param, o: &mut String) {
     }
 }
 
+/// How many reals in `v` (lists and typed values included) are not finite.
+fn non_finite(v: &[Param]) -> usize {
+    v.iter()
+        .map(|p| match p {
+            Param::Real(x) => usize::from(!x.is_finite()),
+            Param::List(v) | Param::Typed(_, v) => non_finite(v),
+            _ => 0,
+        })
+        .sum()
+}
+
 fn params(v: &[Param], o: &mut String) {
     for (i, p) in v.iter().enumerate() {
         if i > 0 {
@@ -100,6 +113,7 @@ fn params(v: &[Param], o: &mut String) {
 pub struct Writer {
     lines: Vec<String>,
     shared: HashMap<String, u64>,
+    non_finite: usize,
 }
 
 impl Writer {
@@ -131,12 +145,14 @@ impl Writer {
 
     /// A simple entity instance, shared with an identical earlier one.
     pub fn add(&mut self, name: &str, p: &[Param]) -> u64 {
+        self.non_finite += non_finite(p);
         self.push(Self::simple(name, p))
     }
 
     /// A simple entity instance of its own, even when an identical one exists: an entity whose
     /// identity matters (two vertices at one point are two vertices; a product is one product).
     pub fn add_distinct(&mut self, name: &str, p: &[Param]) -> u64 {
+        self.non_finite += non_finite(p);
         self.push_distinct(&Self::simple(name, p))
     }
 
@@ -146,6 +162,7 @@ impl Writer {
         sorted.sort_by(|a, b| a.0.cmp(b.0));
         let mut body = String::from("(");
         for (name, p) in sorted {
+            self.non_finite += non_finite(p);
             body.push_str(name);
             body.push('(');
             params(p, &mut body);
@@ -153,6 +170,12 @@ impl Writer {
         }
         body.push(')');
         self.push(body)
+    }
+
+    /// How many reals that are not finite were written so far (each as `0.`). A file with any is
+    /// not the geometry it was given.
+    pub fn non_finite(&self) -> usize {
+        self.non_finite
     }
 
     /// Entities added so far.
@@ -177,7 +200,7 @@ impl Writer {
     /// A whole exchange file around the entities written so far.
     pub fn file(&self, name: &str, schema: &str) -> String {
         format!(
-            "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME({},'',(''),(''),'SolidCraft','SolidCraft','');\nFILE_SCHEMA(({}));\nENDSEC;\nDATA;\n{}ENDSEC;\nEND-ISO-10303-21;\n",
+            "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME({},'',(''),(''),'','','');\nFILE_SCHEMA(({}));\nENDSEC;\nDATA;\n{}ENDSEC;\nEND-ISO-10303-21;\n",
             string(name),
             string(schema),
             self.data()

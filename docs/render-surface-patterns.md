@@ -13,7 +13,7 @@ preview field; it does not load a texture or displace a surface.
 
 ## Consumer contract
 
-At most 32 effects and reserved slots are admitted. Names are 1–256 UTF-8 bytes,
+At most 32 effects and reserved slots are admitted. Names are 1–512 UTF-8 bytes (`MAX_BODY_NAME_BYTES`),
 without control characters, and must resolve to exactly one captured mesh. The
 frame must be finite and orthonormal with positive handedness. Repeats are within
 0.001–1,000,000 mm; roughness amplitude is within 0–1; bump amplitude is within

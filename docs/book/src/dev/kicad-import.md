@@ -1,0 +1,1 @@
+{{#include ../../../kicad-import.md}}

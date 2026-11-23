@@ -29,7 +29,7 @@ const SNAP_FIT_CONTRACT: TypedContract<SnapFitParams> = TypedContract::new();
 const REST_CONTRACT: TypedContract<RestParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("plastic.boss", "Boss", crate::checked!("plastic.boss", boss))
+    CommandSpec::new("plastic.boss", "Boss", crate::checked!("plastic.boss", boss)).begins_edit()
         .at("PLASTIC", "CREATE")
         .icon("boss")
         .contract(&BOSS_CONTRACT)
@@ -38,7 +38,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "position: [x,y,z] on a face; direction? (default: out of the face); diameter, height; hole_diameter?, hole_depth? (default: to the face); \
              draft? (angle), fillet? (root radius); ribs? (count), rib_thickness?, rib_length? (out from the wall), rib_offset? (below the top); body?",
         ),
-    CommandSpec::new("plastic.lip", "Lip", crate::checked!("plastic.lip", lip))
+    CommandSpec::new("plastic.lip", "Lip", crate::checked!("plastic.lip", lip)).begins_edit()
         .at("PLASTIC", "CREATE")
         .icon("lip")
         .contract(&LIP_CONTRACT)
@@ -46,7 +46,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "face: [x,y,z] on the rim face of a shelled body; width, height; type?: lip|groove; gap? (groove clearance); side?: inside|outside (which rim edge); body?",
         ),
-    CommandSpec::new("plastic.snap_fit", "Snap Fit", crate::checked!("plastic.snap_fit", snap_fit))
+    CommandSpec::new("plastic.snap_fit", "Snap Fit", crate::checked!("plastic.snap_fit", snap_fit)).begins_edit()
         .at("PLASTIC", "CREATE")
         .icon("snap_fit")
         .contract(&SNAP_FIT_CONTRACT)
@@ -55,7 +55,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "position: [x,y,z] on a face; direction? (default: out of the face); hook: [x,y,z] (the catch's direction); length, thickness, width, catch_depth, catch_length; \
              base_height? (extends the base below the face); new_body?: bool (make a separate body instead of joining); body?",
         ),
-    CommandSpec::new("plastic.rest", "Rest", crate::checked!("plastic.rest", rest))
+    CommandSpec::new("plastic.rest", "Rest", crate::checked!("plastic.rest", rest)).begins_edit()
         .at("PLASTIC", "CREATE")
         .icon("rest")
         .contract(&REST_CONTRACT)
@@ -421,6 +421,38 @@ mod tests {
         // Outside band along the outer edge (80 x 50): 80·50 − 78·48 = 256, 2 deep.
         assert!(rel(v0 - volume(&mut g), 256.0 * 2.0) < 1e-6, "{}", v0 - volume(&mut g));
         assert!(g.execute("plastic.lip", &json!({"face": [40, 25, 0], "width": 1, "height": 2})).is_err(), "a face without an inner edge");
+    }
+
+    #[test]
+    fn groove_on_bottom_rim_of_rounded_shell() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": solidcore_record::Plane::XY, "name": "Outline"}));
+        run(
+            &mut s,
+            "sketch.rectangle.rounded",
+            json!({"p0": [-25.263865881072945, -28.541660374585607], "p1": [25.263865881072945, 28.541660374585607], "radius": 3}),
+        );
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Outline", "distance": 10}));
+        run(&mut s, "solid.shell", json!({"faces": [[0, 0, 0]], "thickness": 2}));
+        let state = s.model.state();
+        let shell = &state.body("Body1").unwrap().body;
+        assert!(shell.validity().is_empty(), "shell: {:?}", shell.validity());
+        let (plane, band) = solidcraft_kernel::rim_band(shell, Vec3::new(0.0, -27.541660374585607, 0.0), 1.5, 0.0, false).unwrap();
+        let cutter = solidcraft_kernel::extrude(&plane, &[band], -2.0, 0.0).unwrap();
+        for body in &cutter {
+            assert!(body.validity().is_empty(), "cutter: {:?}", body.validity());
+        }
+        let before = volume(&mut s);
+        let result = s.execute("plastic.lip", &json!({"face": [0, -27.541660374585607, 0], "width": 1.5, "height": 2, "type": "groove"}));
+        assert!(result.is_ok(), "{result:?}");
+        let area = |w: f64, h: f64, r: f64| w * h - (4.0 - PI) * r * r;
+        let w = 50.52773176214589;
+        let h = 57.083320749171214;
+        let groove_area = area(w - 1.0, h - 1.0, 2.5) - area(w - 4.0, h - 4.0, 1.0);
+        let removed = before - volume(&mut s);
+        assert!((removed - groove_area * 2.0).abs() < 0.05, "removed {removed}, expected {}", groove_area * 2.0);
+        assert!(s.model.state().body("Body1").unwrap().body.validity().is_empty());
     }
 
     /// A lip follows its rim face when a parameter moves it (#11209): it was kept by a point

@@ -34,6 +34,9 @@
 //!   negative value, as upstream. The `[Curve #%ld]`, `[Surface #%ld]` and
 //!   `[Brep #%ld]` indices are never used and are not scanned. The uninitialised
 //!   locals `lNodeValue` and `lTotalAttributes` are `0` when nothing is stored.
+//! - **Kept UV trims (not upstream).** Each B-rep's kept UV trim curves are held to
+//!   their edges by a proved bound after it is built (`p2::cover_kept_uv_trim_curves`, as
+//!   a B-rep file's read; tangency-labs/solidcraft#18195).
 //! - **Counts (not upstream; upstream trusts them).** A header-declared count is
 //!   [`SolidError::InvalidInput`] when it is above its sanity cap
 //!   ([`MAX_PART_ITEMS`] curves, surfaces, tree nodes or attributes,
@@ -62,8 +65,6 @@
 
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
-#[cfg(test)]
-use crate::geom::attribute::ObjectKey;
 use crate::geom::attribute::{ids, Attribute, AttributeHandle, AttributeStore, Behavior, TagData};
 use crate::geom::object::ObjectRef;
 use crate::kernel::Kernel;
@@ -135,7 +136,7 @@ pub struct PartEnv<'a> {
 /// `*rDB.GetInStreamPtr()` (upstream dereferences `NULL` without a stream).
 fn stream(db: &mut DatabaseReader) -> Result<&mut InputStream> {
     db.in_stream_mut()
-        .ok_or_else(|| SolidError::null_pointer(OP_PART))
+        .ok_or_else(|| SolidError::topology_missing(OP_PART, "the database's input stream"))
 }
 
 /// `fin.getline(sBuff, MAXSIZE)`.
@@ -272,7 +273,9 @@ pub fn read_part_from_file(
 /// B-rep counts; the curve count carries the database version and the surface count
 /// the healer version, each as millions), then the stand-alone curves (dimension 3)
 /// and surfaces, the Boolean tree nodes and the B-reps, each read with attributes and
-/// built by `MakeTopologyFromData(pBrepData, sAttributes, FALSE)`. For a version
+/// built by `MakeTopologyFromData(pBrepData, sAttributes, FALSE)` (not upstream: each
+/// B-rep's kept UV trim curves are then held to their edges by a proved bound, as a B-rep
+/// file's read holds them, `p2::cover_kept_uv_trim_curves`). For a version
 /// above 30 the attributes follow; each replaces its placeholder on every object
 /// using it, and the placeholders are deleted.
 ///
@@ -282,7 +285,8 @@ pub fn read_part_from_file(
 /// [`BrepData::read_from_db`], [`make_topology_from_data`] and
 /// [`read_attribute_from_db`]; a short binary stream, a missing stream, a count
 /// exceeding the remaining input; [`SolidError::InvalidInput`] for an attribute
-/// index past the placeholder table or on a `NULL` slot.
+/// index past the placeholder table or on a `NULL` slot; those of the cover of each
+/// B-rep's kept UV trim curves.
 pub fn read_part_from_db(
     k: &mut Kernel,
     db: &mut DatabaseReader,
@@ -454,6 +458,10 @@ pub fn read_part_from_db(
         };
         make_topology_from_data(k, &mut b, &mut data, &mut topology_env, options)?;
         env.next_key = topology_env.next_key;
+        // not upstream: every UV trim curve the part keeps is held to its edge by a proved
+        // bound, as a B-rep file's read holds it after its end check
+        // (`p2::cover_kept_uv_trim_curves`)
+        crate::topology::brep::p2::cover_kept_uv_trim_curves(k, &mut b)?;
         breps.push(b);
         after_item(db, start, OP_PART)?;
     }
@@ -842,11 +850,9 @@ mod tests {
         assert!(s.good());
     }
 
-    fn key_of(_: usize, _: EntityRef) -> ObjectRef {
-        ObjectRef {
-            type_code: 0,
-            key: ObjectKey(0),
-        }
+    /// Typed identities, one per object, as production readers give them.
+    fn key_of(_: usize, e: EntityRef) -> ObjectRef {
+        crate::topology::loopuse::notify_ref(e)
     }
 
     fn read(text: &str) -> Result<Part> {

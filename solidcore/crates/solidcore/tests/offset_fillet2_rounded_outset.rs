@@ -28,8 +28,7 @@ mod offset_fixture;
 use offset_fixture::Notifications;
 use solidcore::error::offset::OffsetFailure;
 use solidcore::error::{ErrorKind, Reason};
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::offset::offset_executive::p1::{OffsetExecutive, OffsetOperation};
 use solidcore::offset::offset_executive::p2::SolidOffsetOptions;
 use solidcore::topology::brep::p10::TopologyEnv;
@@ -37,7 +36,7 @@ use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::FaceId;
-use solidcore::{Brep, EntityRef, Kernel, SolidError};
+use solidcore::{Brep, Kernel, SolidError};
 
 fn fillet2(k: &mut Kernel) -> Option<Brep> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -54,10 +53,7 @@ fn fillet2(k: &mut Kernel) -> Option<Brep> {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,

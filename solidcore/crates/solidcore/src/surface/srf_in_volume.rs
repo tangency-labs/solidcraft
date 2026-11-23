@@ -97,6 +97,7 @@
 //!   skipped (the stream had already failed) leaves upstream's member uninitialised;
 //!   the port returns [`SolidError::InvalidInput`].
 
+use crate::error::surface::SurfaceFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -118,7 +119,7 @@ use crate::surface::surface::p2::{
     B_SPLINE_SURFACE_TYPE, MAX_GEOMETRY_NESTING, SRF_IN_VOLUME_TYPE,
 };
 use crate::surface::volume::p1::{
-    lift_first_derivative_srf, lift_second_derivative_srf, lift_third_derivative_srf_opt_in,
+    lift_first_derivative_srf, lift_second_derivative_srf, lift_third_derivative_srf,
 };
 use crate::surface::volume::{EvalOptions, Volume, VolumeKind};
 use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType};
@@ -783,7 +784,10 @@ impl SrfInVolume {
             hu == 0 || hv == 0
         };
         if !supported {
-            return Err(SolidError::sm_err(OP_EVAL));
+            return Err(SolidError::surface(
+                OP_EVAL,
+                SurfaceFailure::DerivativeCombinationUnsupported { u: hu, v: hv },
+            ));
         }
 
         // limit the number of derivatives to 3
@@ -839,7 +843,6 @@ impl SrfInVolume {
         let tangent = at(&srf_derivs, n_eval + 1);
         let side = |c: f64| if c > 0.0 { u_from_left } else { !u_from_left };
         let opts = EvalOptions {
-            fixes: k.fixes,
             from_left: [side(tangent.x), side(tangent.y), side(tangent.z)],
             non_zero_tangents,
             ..EvalOptions::default()
@@ -934,14 +937,13 @@ impl SrfInVolume {
                 sv(0, 1, 2),
                 sv(0, 0, 3),
             ];
-            let [duuu, duuv, duvv, dvvv] = lift_third_derivative_srf_opt_in(
+            let [duuu, duuv, duvv, dvvv] = lift_third_derivative_srf(
                 [su(1, 0), su(0, 1)],
                 [su(2, 0), su(1, 1), su(0, 2)],
                 [su(3, 0), su(2, 1), su(1, 2), su(0, 3)],
                 vol1,
                 vol2,
                 vol3,
-                k.fixes.volume_lift_third_derivative_terms,
             );
             // when managing the special case of lHighestUDeriv != lHighestVDeriv is
             // when one or the other is 0.
@@ -1085,14 +1087,13 @@ impl SrfInVolume {
             self.volume
                 .inv_map_point(k, point_on_surf, None, None, true)?
         };
-        if !inv.success {
-            return Err(SolidError::sm_err(OP_STEP));
-        }
+        // upstream quits when the inversion fails; both inversions return `success`
+        // true on every `Ok` (as upstream), so only an empty answer can stop here
         let first = inv
             .points
             .first()
             .copied()
-            .ok_or_else(|| SolidError::sm_err(OP_STEP))?;
+            .ok_or_else(|| SolidError::surface(OP_STEP, SurfaceFailure::NoVolumeInverse))?;
 
         // Project the inverted volume point back through the base surface
         self.surface
@@ -1154,7 +1155,7 @@ impl SrfInVolume {
         if self.owns_surface() {
             Ok(())
         } else {
-            Err(SolidError::sm_err(OP))
+            Err(SolidError::surface(OP, SurfaceFailure::BaseSurfaceNotOwned))
         }
     }
 

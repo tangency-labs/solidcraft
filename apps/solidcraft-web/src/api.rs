@@ -48,6 +48,7 @@ impl Api {
         let execute = api.clone();
         let commands = api.clone();
         let inspect = api.clone();
+        let buttons = api.ctx.clone();
         for (name, function) in [
             (
                 "request",
@@ -68,6 +69,16 @@ impl Api {
                 "inspect",
                 Closure::<dyn Fn(JsValue) -> js_sys::Promise>::new(move |value: JsValue| inspect.request("document.inspect", params(&value)))
                     .into_js_value(),
+            ),
+            // The mouse buttons egui holds now, by bit as in a pointer event's `buttons`
+            // (1 primary, 2 secondary, 4 middle, 8 back, 16 forward): for checking that they
+            // follow the browser's (`mouse_buttons`).
+            (
+                "buttons",
+                Closure::<dyn Fn() -> u32>::new(move || {
+                    crate::mouse_buttons::egui_down(&buttons).iter().enumerate().filter(|(_, down)| **down).map(|(bit, _)| 1 << bit).sum()
+                })
+                .into_js_value(),
             ),
         ] {
             js_sys::Reflect::set(&object, &name.into(), &function)?;

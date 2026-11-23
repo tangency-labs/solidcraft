@@ -639,3 +639,76 @@ fn replace_face_moves_the_named_body_of_a_flush_face_and_warns_for_an_unnamed_on
     assert!((body_volume(&mut s, "Small") - 350.0).abs() < 1e-6, "{}", body_volume(&mut s, "Small"));
     assert!((body_volume(&mut s, "Big") - 24000.0).abs() < 1e-6);
 }
+
+/// Replace Face on a named body takes the named body's face, though another body has a face a
+/// hair from the pick (#16871): B's top moves to z = 10.02 (30 × 20 × 10.02) whatever A is.
+#[test]
+fn replace_face_ignores_a_face_of_another_body_near_the_target_plane() {
+    // A's height and corner: on the target plane, just past it, and half overlapping B.
+    for (height, corner) in [(10.02, [0.0, 0.0, 0.0]), (10.03, [0.0, 0.0, 0.0]), (10.02, [15.0, 0.0, 0.0])] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": height, "corner": corner, "operation": "new", "body_name": "A"}));
+        run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "B"}));
+        let out = run(
+            &mut s,
+            "solid.replace_face",
+            json!({"faces": [[15, 10, 10]], "target": {"origin": [0, 0, 10.02], "normal": [0, 0, 1]}, "body": "B"}),
+        );
+        assert!(out.get("warning").is_none_or(Value::is_null), "A {height} at {corner:?}: {out}");
+        let b = body_volume(&mut s, "B");
+        assert!((b - 6012.0).abs() < 1e-6, "A {height} at {corner:?}: B is {b}");
+        let a = body_volume(&mut s, "A");
+        assert!((a - 600.0 * height).abs() < 1e-6, "A {height} at {corner:?}: A is {a}");
+    }
+}
+
+/// #18061: a face with more edges than a profile can take is refused with its edge count and the
+/// limit, not "the face has no usable boundary"; a face with none keeps that message.
+#[test]
+fn a_face_with_too_many_edges_is_refused_with_its_count_and_the_limit() {
+    let many = super::profile_edge_count("solid.extrude", 6000).unwrap_err().to_string();
+    assert!(many.contains("the face has 6000 edges; a face used as a profile can have at most 5000"), "{many}");
+    assert!(super::profile_edge_count("solid.extrude", 5000).is_ok());
+    let none = super::profile_edge_count("solid.revolve", 0).unwrap_err().to_string();
+    assert!(none.contains("the face has no usable boundary"), "{none}");
+}
+
+/// The exact volume and the extent along Z of the only body, after a rebuild.
+fn volume_and_top(s: &mut Session) -> (f64, f64) {
+    s.refresh();
+    let state = s.model.state();
+    let m = state.bodies.first().and_then(|b| solidcraft_kernel::measure(&b.body).ok());
+    m.map_or((f64::NAN, f64::NAN), |m| (m.volume, m.bbox.max.z))
+}
+
+/// #20496: Offset Face with a distance of 0 leaves the face where it is, as Offset Plane does: no
+/// kernel error, the body is unchanged and the feature stays in the timeline.
+#[test]
+fn offset_face_with_a_zero_distance_leaves_the_face_where_it_is() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10}));
+    for d in [json!(0), json!("0 mm"), json!("5 mm - 5 mm")] {
+        let features = s.doc.features.len();
+        run(&mut s, "solid.offset_face", json!({"faces":[[10,10,10]],"distance":d}));
+        assert_eq!(s.doc.features.len(), features + 1, "{d}");
+        let (v, top) = volume_and_top(&mut s);
+        assert!((v - 4000.0).abs() < 1e-6 && (top - 10.0).abs() < 1e-6, "{d}: {v} {top}");
+    }
+    run(&mut s, "solid.offset_face", json!({"faces":[[10,10,10]],"distance":1}));
+    let (v, top) = volume_and_top(&mut s);
+    assert!((v - 4400.0).abs() < 1e-6 && (top - 11.0).abs() < 1e-6, "{v} {top}");
+}
+
+/// #20496: a design whose Offset Face distance is a parameter rebuilds at every value, 0 included.
+#[test]
+fn offset_face_distance_parameter_can_pass_through_zero() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10}));
+    run(&mut s, "parameters.add", json!({"name": "lift", "expression": "0 mm"}));
+    run(&mut s, "solid.offset_face", json!({"faces":[[10,10,10]],"distance":"lift"}));
+    for (lift, volume, top) in [("0 mm", 4000.0, 10.0), ("2 mm", 4800.0, 12.0), ("0 mm", 4000.0, 10.0)] {
+        run(&mut s, "parameters.change", json!({"name": "lift", "expression": lift}));
+        let (v, t) = volume_and_top(&mut s);
+        assert!((v - volume).abs() < 1e-6 && (t - top).abs() < 1e-6, "lift {lift}: {v} {t}");
+    }
+}

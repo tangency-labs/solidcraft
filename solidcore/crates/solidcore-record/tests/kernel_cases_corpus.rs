@@ -4,6 +4,8 @@
 //! validation, and every operation an entry lists takes records it gives or bodies an earlier
 //! operation made. Nonempty replay inputs are unique across the corpus: descriptions and
 //! expected answers cannot disguise duplicate calls on the same operand records.
+//! Recorded volumes of passing cases without known-failure markers must also agree with
+//! independent analytic expectations.
 
 #![allow(
     clippy::unwrap_used,
@@ -135,19 +137,66 @@ fn replay_identity_uses_arguments_and_records_not_case_metadata() {
     );
 }
 
-fn validate_counts(root: &Path, files: &[PathBuf], manifest: &Value) {
-    let listed: std::collections::BTreeMap<_, _> = manifest["areas"]
-        .as_object()
-        .unwrap()
-        .iter()
-        .map(|(area, a)| (PathBuf::from(area), a["cases"].as_u64().unwrap()))
-        .collect();
-    let mut actual = std::collections::BTreeMap::new();
-    for file in files {
-        let area = file.strip_prefix(root).unwrap().parent().unwrap();
-        *actual.entry(area.to_path_buf()).or_insert(0_u64) += 1;
+/// The manifest is the export's record: the SolidCraft and solidcore commits it was made at
+/// (`solidcraft`, `solidcore`) and every case that isn't expressible with its reasons
+/// (`not_expressible`). It stores no per-area totals: those are counts of the case files, and a
+/// stored copy only made every pull request that adds a case edit the same lines. Every case it
+/// names must be a case file of the corpus, and one the kernel alone does not account for.
+fn validate_manifest(root: &Path, files: &[PathBuf], manifest: &Value) {
+    let m = manifest.as_object().expect("manifest.json: an object");
+    for k in m.keys() {
+        assert!(
+            ["solidcraft", "solidcore", "not_expressible"].contains(&k.as_str()),
+            "manifest.json: `{k}` is not a manifest field (per-area totals are counted from the \
+             case files, never stored)"
+        );
     }
-    assert_eq!(actual, listed, "the manifest counts entries per area");
+    for k in ["solidcraft", "solidcore"] {
+        assert!(
+            m.get(k).is_some_and(|v| v.is_string() || v.is_null()),
+            "manifest.json: `{k}` must be the commit the cases were exported at"
+        );
+    }
+    let cases: std::collections::BTreeMap<String, &PathBuf> = files
+        .iter()
+        .map(|f| {
+            let name = f
+                .strip_prefix(root)
+                .unwrap()
+                .with_extension("")
+                .to_string_lossy()
+                .replace('\\', "/");
+            (name, f)
+        })
+        .collect();
+    let mut seen = std::collections::BTreeSet::new();
+    for n in m["not_expressible"]
+        .as_array()
+        .expect("manifest.json: `not_expressible` is a list")
+    {
+        let case = n["case"]
+            .as_str()
+            .unwrap_or_else(|| panic!("manifest.json: not_expressible entry {n} has no `case`"));
+        assert!(
+            seen.insert(case),
+            "manifest.json: not_expressible lists {case} twice"
+        );
+        let file = cases.get(case).unwrap_or_else(|| {
+            panic!(
+                "manifest.json: not_expressible lists {case}, which has no file \
+                 ({case}.json under kernel_cases/): remove it from the manifest"
+            )
+        });
+        if let Ok(text) = std::fs::read_to_string(file) {
+            let e: Value = serde_json::from_str(&text).unwrap();
+            assert_ne!(
+                e["operation_expressible"].as_bool(),
+                Some(true),
+                "manifest.json: not_expressible lists {case}, which {} marks operation_expressible",
+                file.display()
+            );
+        }
+    }
 }
 
 fn validate_results(e: &Value, bodies: &serde_json::Map<String, Value>, made: &[&str], f: &Path) {
@@ -207,6 +256,50 @@ fn validate_continuations(e: &Value, f: &Path) {
     }
 }
 
+fn validate_analytic_volume(e: &Value, f: &Path) {
+    if e["expected"]["source"].as_str() != Some("analytic") {
+        return;
+    }
+    // Failing cases intentionally preserve the rig's incorrect output.
+    if !e["rig"]["known_failing"].is_null() || e["rig"]["status"].as_str() != Some("pass") {
+        return;
+    }
+    let Some(got) = e["rig"]["measured"]["volume_mm3"].as_f64() else {
+        return;
+    };
+    let expected = &e["expected"]["volume_mm3"];
+    if let Some(want) = expected.as_f64() {
+        // Match the replay runner: abs_mm takes precedence over relative tolerance.
+        let tolerance = &e["expected"]["tolerance"];
+        let limit = tolerance["abs_mm"]
+            .as_f64()
+            .unwrap_or_else(|| tolerance["rel"].as_f64().unwrap_or(1e-3) * want.abs());
+        assert!(
+            (got - want).abs() <= limit,
+            "{}: recorded volume {got} mm³ differs from analytic {want} mm³ (allowed difference {limit} mm³)",
+            f.display()
+        );
+    } else if let Some(bounds) = expected.as_array() {
+        assert_eq!(
+            bounds.len(),
+            2,
+            "{}: volume interval needs two bounds",
+            f.display()
+        );
+        let lo = bounds[0]
+            .as_f64()
+            .unwrap_or_else(|| panic!("{}: volume interval needs numeric bounds", f.display()));
+        let hi = bounds[1]
+            .as_f64()
+            .unwrap_or_else(|| panic!("{}: volume interval needs numeric bounds", f.display()));
+        assert!(
+            lo <= got && got <= hi,
+            "{}: recorded volume {got} mm³ is outside analytic interval [{lo}, {hi}] mm³",
+            f.display()
+        );
+    }
+}
+
 #[test]
 fn every_operand_is_a_valid_record_and_every_input_is_given() {
     let mut files = Vec::new();
@@ -214,10 +307,11 @@ fn every_operand_is_a_valid_record_and_every_input_is_given() {
     let manifest: Value =
         serde_json::from_str(&std::fs::read_to_string(corpus().join("manifest.json")).unwrap())
             .unwrap();
-    validate_counts(&corpus(), &files, &manifest);
+    validate_manifest(&corpus(), &files, &manifest);
     let mut records = 0;
     for f in &files {
         let e: Value = serde_json::from_str(&std::fs::read_to_string(f).unwrap()).unwrap();
+        validate_analytic_volume(&e, f);
         assert_eq!(
             Path::new(e["area"].as_str().unwrap()),
             f.strip_prefix(corpus()).unwrap().parent().unwrap(),
@@ -300,21 +394,152 @@ fn every_operand_is_a_valid_record_and_every_input_is_given() {
 }
 
 #[test]
-fn regression_area_counts() {
+fn regression_analytic_scalar_volumes() {
+    for (want, got, tolerance, accepted) in [
+        (1000.0, 1001.0, serde_json::json!(null), true),
+        (1000.0, 999.0, serde_json::json!(null), true),
+        (1000.0, 2000.0, serde_json::json!(null), false),
+        (1000.0, 998.0, serde_json::json!(null), false),
+        (0.001, 0.0015, serde_json::json!(null), false),
+        (0.0, 0.0, serde_json::json!(null), true),
+        (0.0, 1e-12, serde_json::json!(null), false),
+        (1000.0, 1010.0, serde_json::json!({"rel": 0.01}), true),
+        (1000.0, 1011.0, serde_json::json!({"rel": 0.01}), false),
+        (10.0, 10.5, serde_json::json!({"abs_mm": 0.5}), true),
+        (
+            10.0,
+            10.6,
+            serde_json::json!({"abs_mm": 0.5, "rel": 1.0}),
+            false,
+        ),
+        (
+            10.0,
+            10.5,
+            serde_json::json!({"abs_mm": 0.5, "rel": 0.0}),
+            true,
+        ),
+    ] {
+        let e = serde_json::json!({
+            "expected": {"source": "analytic", "volume_mm3": want, "tolerance": tolerance},
+            "rig": {"status": "pass", "measured": {"volume_mm3": got}},
+        });
+        assert_eq!(
+            std::panic::catch_unwind(|| validate_analytic_volume(&e, Path::new("case.json")))
+                .is_ok(),
+            accepted,
+            "wrong verdict for {e}"
+        );
+    }
+}
+
+#[test]
+fn regression_analytic_volume_intervals() {
+    for (got, accepted) in [
+        (9.0, false),
+        (10.0, true),
+        (15.0, true),
+        (20.0, true),
+        (21.0, false),
+    ] {
+        let e = serde_json::json!({
+            "expected": {"source": "analytic", "volume_mm3": [10.0, 20.0],
+                "tolerance": {"abs_mm": 100.0, "rel": 100.0}},
+            "rig": {"status": "pass", "measured": {"volume_mm3": got}},
+        });
+        assert_eq!(
+            std::panic::catch_unwind(|| validate_analytic_volume(&e, Path::new("case.json")))
+                .is_ok(),
+            accepted,
+            "wrong verdict for {e}"
+        );
+    }
+}
+
+#[test]
+fn regression_analytic_volume_check_respects_rig_status() {
+    for (rig, accepted) in [
+        (serde_json::json!({"status": "pass"}), false),
+        (
+            serde_json::json!({"status": "pass", "known_failing": null}),
+            false,
+        ),
+        (serde_json::json!({"status": "fail"}), true),
+        (serde_json::json!({"status": "error"}), true),
+        (serde_json::json!({}), true),
+        (
+            serde_json::json!({"status": "fail", "known_failing": "wrong volume"}),
+            true,
+        ),
+        (
+            serde_json::json!({"status": "pass", "known_failing": "wrong volume"}),
+            true,
+        ),
+    ] {
+        for expected in [serde_json::json!(1.0), serde_json::json!([1.0, 2.0])] {
+            let mut e = serde_json::json!({
+                "expected": {"source": "analytic", "volume_mm3": expected},
+                "rig": rig,
+            });
+            e["rig"]["measured"] = serde_json::json!({"volume_mm3": 3.0});
+            assert_eq!(
+                std::panic::catch_unwind(|| validate_analytic_volume(&e, Path::new("case.json")))
+                    .is_ok(),
+                accepted,
+                "wrong verdict for {e}"
+            );
+        }
+    }
+}
+
+#[test]
+fn analytic_volume_check_skips_unavailable_comparisons() {
+    for e in [
+        serde_json::json!({"expected": {"source": "analytic", "volume_mm3": 1.0}}),
+        serde_json::json!({"expected": {"source": "analytic", "volume_mm3": 1.0},
+            "rig": {"status": "pass"}}),
+        serde_json::json!({"expected": {"source": "analytic", "volume_mm3": 1.0},
+            "rig": {"status": "pass", "measured": {"volume_mm3": null}}}),
+        serde_json::json!({"expected": {"source": "analytic"},
+            "rig": {"status": "pass", "measured": {"volume_mm3": 2.0}}}),
+        serde_json::json!({"expected": {"source": "measured", "volume_mm3": 1.0},
+            "rig": {"status": "pass", "measured": {"volume_mm3": 2.0}}}),
+        serde_json::json!({"expected": {"volume_mm3": 1.0},
+            "rig": {"status": "pass", "measured": {"volume_mm3": 2.0}}}),
+    ] {
+        validate_analytic_volume(&e, Path::new("case.json"));
+    }
+}
+
+#[test]
+fn regression_manifest_names_only_case_files() {
     let root = Path::new("corpus");
     let files: Vec<PathBuf> = ["a/one.json", "a/two.json", "ladder/tier/one.json"]
         .iter()
         .map(|p| root.join(p))
         .collect();
-    let valid = serde_json::json!({"areas": {"a": {"cases": 2}, "ladder/tier": {"cases": 1}}});
-    validate_counts(root, &files, &valid);
+    let pins = |not: Value| serde_json::json!({"solidcraft": "c1", "solidcore": "c2", "not_expressible": not});
+    let valid = pins(
+        serde_json::json!([{"case": "a/two", "why": ["x"]}, {"case": "ladder/tier/one", "why": []}]),
+    );
+    validate_manifest(root, &files, &valid);
+    validate_manifest(root, &files, &pins(serde_json::json!([])));
+    let mut totals = pins(serde_json::json!([]));
+    totals["areas"] = serde_json::json!({"a": {"cases": 2}});
     for invalid in [
-        serde_json::json!({"areas": {"a": {"cases": 1}, "ladder/tier": {"cases": 2}}}),
-        serde_json::json!({"areas": {"a": {"cases": 3}}}),
-        serde_json::json!({"areas": {"a": {"cases": 2}, "ladder/other": {"cases": 1}}}),
+        // a case with no file
+        pins(serde_json::json!([{"case": "a/three", "why": []}])),
+        pins(serde_json::json!([{"case": "ladder/other/one", "why": []}])),
+        // listed twice
+        pins(serde_json::json!([{"case": "a/one", "why": []}, {"case": "a/one", "why": []}])),
+        // no case name
+        pins(serde_json::json!([{"why": []}])),
+        // stored totals
+        totals,
+        // no pins
+        serde_json::json!({"not_expressible": []}),
     ] {
         assert!(
-            std::panic::catch_unwind(|| validate_counts(root, &files, &invalid)).is_err(),
+            std::panic::catch_unwind(|| validate_manifest(root, &files, &invalid)).is_err(),
             "accepted {invalid}"
         );
     }

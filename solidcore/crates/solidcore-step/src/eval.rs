@@ -4,12 +4,18 @@
 
 use crate::geom::{BSplineCurve, BSplineSurface, Curve, P3, Surface, add, cross, dot, norm, scale, sub};
 
-/// Every knot repeated by its multiplicity.
-fn expanded(knots: &[f64], mults: &[usize]) -> Option<Vec<f64>> {
-    if knots.len() != mults.len() {
+/// Every knot repeated by its multiplicity, for `points` control points of degree `degree`:
+/// `None` unless there are more points than the degree and the multiplicities add up to
+/// `points + degree + 1`. Both are read from the file, so this is checked before anything is
+/// built: the knots are then at most twice the points, which are already in memory.
+fn expanded(knots: &[f64], mults: &[usize], points: usize, degree: usize) -> Option<Vec<f64>> {
+    if knots.len() != mults.len() || degree >= points {
         return None;
     }
     let total = mults.iter().try_fold(0usize, |a, m| a.checked_add(*m))?;
+    if total != points.checked_add(degree)?.checked_add(1)? {
+        return None;
+    }
     let mut v = Vec::with_capacity(total);
     for (k, m) in knots.iter().zip(mults) {
         v.extend(std::iter::repeat_n(*k, *m));
@@ -65,14 +71,11 @@ fn homogeneous(p: P3, w: f64) -> [f64; 4] {
 impl BSplineCurve {
     /// Parameter range: from knot `degree` to knot `n` of the expanded knot vector.
     pub fn domain(&self) -> Option<(f64, f64)> {
-        let u = expanded(&self.knots, &self.multiplicities)?;
+        let u = expanded(&self.knots, &self.multiplicities, self.points.len(), self.degree)?;
         Some((*u.get(self.degree)?, *u.get(self.points.len())?))
     }
     pub fn point(&self, t: f64) -> Option<P3> {
-        let u = expanded(&self.knots, &self.multiplicities)?;
-        if u.len() != self.points.len() + self.degree + 1 {
-            return None;
-        }
+        let u = expanded(&self.knots, &self.multiplicities, self.points.len(), self.degree)?;
         let ctrl: Vec<[f64; 4]> = match &self.weights {
             Some(w) if w.len() == self.points.len() => self.points.iter().zip(w).map(|(p, w)| homogeneous(*p, *w)).collect(),
             Some(_) => return None,
@@ -84,13 +87,10 @@ impl BSplineCurve {
 
 impl BSplineSurface {
     pub fn point(&self, s: f64, t: f64) -> Option<P3> {
-        let uk = expanded(&self.u_knots, &self.u_multiplicities)?;
-        let vk = expanded(&self.v_knots, &self.v_multiplicities)?;
         let nu = self.points.len();
         let nv = self.points.first()?.len();
-        if uk.len() != nu + self.u_degree + 1 || vk.len() != nv + self.v_degree + 1 {
-            return None;
-        }
+        let uk = expanded(&self.u_knots, &self.u_multiplicities, nu, self.u_degree)?;
+        let vk = expanded(&self.v_knots, &self.v_multiplicities, nv, self.v_degree)?;
         // Each u row evaluated along v, then the column of results along u.
         let mut column = Vec::with_capacity(nu);
         for (i, row) in self.points.iter().enumerate() {

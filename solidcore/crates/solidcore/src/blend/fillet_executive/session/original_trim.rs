@@ -8,6 +8,7 @@ use crate::blend::fillet_geom::p1::FilletErrorType;
 use crate::blend::fillet_geom::p6::{
     TrimOriginalBody, TrimOriginalSurfacesEnv, TrimOriginalSurfacesMarks,
 };
+use crate::error::blend::BlendFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::context::{MarkLock, MarkType, ALL_MARKS};
 use crate::kernel::Kernel;
@@ -228,7 +229,10 @@ impl OriginalSurfaceTrimAccess<FilletObject, FaceId> for TrimAccess<'_, '_> {
                     "Fillet Error: the faces a fillet's rails enclose on the body reach past its rails (the trim leaks)",
                 ),
             );
-            return Err(SolidError::sm_err(OP_TRIM_LEAK));
+            return Err(SolidError::blend(
+                OP_TRIM_LEAK,
+                BlendFailure::TrimLoopDoesNotSeparate,
+            ));
         }
         Ok(())
     }

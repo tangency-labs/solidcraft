@@ -31,6 +31,109 @@ fn acceptance_preserves_file_history_and_prepared_world_without_evaluation() {
 }
 
 #[test]
+fn prepared_preview_includes_visibility_and_command_replies() {
+    let mut session = Session::default();
+    session.execute("solid.box", &json!({"length":1,"width":1,"height":1,"body_name":"Hidden"})).unwrap();
+    session.execute("browser.visibility", &json!({"items":["Hidden"],"visible":false})).unwrap();
+    let history = session.undo.len();
+    let document = session.doc.clone();
+    let prepared = session.scratch().compute_commands(&commands(), None).unwrap();
+
+    let preview = prepared.preview_visible_world().unwrap();
+    assert!(preview.before.bodies.is_empty());
+    assert_eq!(preview.after.bodies.len(), 1);
+    assert_eq!(preview.replies.as_slice(), std::slice::from_ref(&prepared.steps[0].reply));
+    assert!(prepared.changes_document());
+    assert!(Arc::ptr_eq(&document, &session.doc));
+    assert_eq!(session.undo.len(), history);
+}
+
+#[test]
+fn an_equal_document_in_a_new_allocation_is_unchanged() {
+    let session = Session::default();
+    let mut prepared = session.scratch().compute_commands(&[], None).unwrap();
+    prepared.computed.doc = Arc::new((*prepared.computed.doc).clone());
+    assert!(!Arc::ptr_eq(&prepared.source.doc, &prepared.computed.doc));
+    assert!(!prepared.changes_document());
+}
+
+#[test]
+fn prepared_model_commands_preserve_live_sheet_focus_and_selection() {
+    let mut session = Session::default();
+    session.execute("solid.box", &json!({"length":1,"width":1,"height":1})).unwrap();
+    session.execute("drawing.create", &json!({})).unwrap();
+    let drawing = session.open_drawing.unwrap();
+    let sheet = solidcraft_doc::ids::encode(session.doc.drawing(drawing).unwrap().sheets[0].id);
+    let note = session.execute("drawing.note.add", &json!({"anchor":{"sheet":sheet},"at":[20,20],"content":"Selected note"})).unwrap();
+    let note = solidcraft_doc::ids::decode(note["note"].as_str().unwrap()).unwrap();
+    session.model_focus = true;
+    let prepared = session.scratch().compute_commands(&commands(), None).unwrap();
+    session.model_focus = false;
+    session.selection = vec![crate::Sel::Drawing { drawing, object: note }];
+    let selection = session.selection.clone();
+    assert!(prepared.is_current(&session), "picking in the focused Sheet does not change the Model worker's inputs");
+    session.accept_commands(prepared).unwrap();
+    assert!(!session.model_focus, "worker acceptance never restores its old focused domain");
+    assert_eq!(session.selection, selection, "the focused Sheet keeps its current selection");
+    assert_eq!(session.open_drawing, Some(drawing));
+    assert_eq!(session.doc.features.len(), 2);
+}
+
+#[test]
+fn prepared_model_commands_keep_authoring_and_selection_stale_guards_after_sheet_focus() {
+    for change in 0..7 {
+        let mut session = Session::default();
+        session.execute("solid.box", &json!({"length":1,"width":1,"height":1})).unwrap();
+        session.execute("drawing.create", &json!({})).unwrap();
+        let drawing = session.open_drawing.unwrap();
+        let sheet = solidcraft_doc::ids::encode(session.doc.drawing(drawing).unwrap().sheets[0].id);
+        let note_params = json!({"anchor":{"sheet":sheet},"at":[20,20],"content":"Selected note"});
+        let note = session.execute("drawing.note.add", &note_params).unwrap();
+        let note = solidcraft_doc::ids::decode(note["note"].as_str().unwrap()).unwrap();
+        let other = if change == 5 {
+            let made = session.execute("drawing.create", &json!({"name":"Other drawing"})).unwrap();
+            let other_drawing = session.open_drawing.unwrap();
+            let other_note = session
+                .execute("drawing.note.add", &json!({"anchor":{"sheet":made["sheets"][0]["id"]},"at":[20,20],"content":"Other selection"}))
+                .unwrap();
+            session.open_drawing = Some(drawing);
+            Some((other_drawing, solidcraft_doc::ids::decode(other_note["note"].as_str().unwrap()).unwrap()))
+        } else {
+            None
+        };
+        session.model_focus = true;
+        let mut batch = commands();
+        if change == 4 {
+            batch.push(("drawing.note.add".into(), note_params));
+        }
+        let prepared = session.scratch().compute_commands(&batch, None).unwrap();
+        session.model_focus = false;
+        session.selection = vec![crate::Sel::Drawing { drawing, object: note }];
+        match change {
+            0 => session.revision += 1,
+            1 => session.model_focus = true,
+            2 => session.selection.push(crate::Sel::Axis { name: "X".into() }),
+            3 => session.selection = vec![crate::Sel::Drawing { drawing, object: u64::MAX }],
+            5 => {
+                let (drawing, object) = other.unwrap();
+                session.open_drawing = Some(drawing);
+                session.selection = vec![crate::Sel::Drawing { drawing, object }];
+            }
+            6 => session.selection = vec![crate::Sel::Drawing { drawing: u64::MAX, object: note }],
+            _ => {}
+        }
+        let document = session.doc.clone();
+        let selection = session.selection.clone();
+        let history = (session.undo.len(), session.redo.len());
+        assert!(!prepared.is_current(&session), "case {change}");
+        assert!(session.accept_commands(prepared).is_err(), "case {change}");
+        assert!(Arc::ptr_eq(&document, &session.doc), "case {change}");
+        assert_eq!(session.selection, selection, "case {change}");
+        assert_eq!((session.undo.len(), session.redo.len()), history, "case {change}");
+    }
+}
+
+#[test]
 fn failure_discards_the_entire_batch() {
     let session = Session::default();
     let document = session.doc.clone();
@@ -179,6 +282,19 @@ fn editor_display_changes_allow_apply_and_cancel() {
 }
 
 #[test]
+fn cancelling_a_previewed_editor_restores_authored_bytes_with_a_fresh_plugin_token() {
+    let (mut session, source, original, commands) = extrusion_editor();
+    let bytes = original.doc.to_json();
+    let historical = original.design_token();
+    let rolled_back = session.design_token();
+    session.preview(&commands).unwrap();
+    session.restore_editor(&source, original).unwrap();
+    assert_eq!(session.doc.to_json(), bytes);
+    assert_ne!(session.design_token(), historical);
+    assert_ne!(session.design_token(), rolled_back);
+}
+
+#[test]
 fn editor_visibility_changes_allow_cancel_and_keep_undo_and_redo_at_the_original_marker() {
     for undo_hide in [false, true] {
         let (mut session, source, original, _) = extrusion_editor();
@@ -317,4 +433,255 @@ fn an_editor_accepts_the_placements_rolling_the_marker_solves() {
     session.accept_commands(prepared).unwrap();
     assert_eq!(session.doc.marker, None);
     assert_eq!(occurrence(&session, "B").transform, moved);
+}
+
+/// #18695: editing a feature in a design with joints whose values or expressions are re-solved
+/// when the marker rolls back accepts the re-solved values: the editor's pinned model differs
+/// from its source there, and OK still applies without "original editor model does not match".
+#[test]
+fn an_editor_accepts_the_joint_values_rolling_the_marker_solves() {
+    let mut session = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        session.execute("component.activate", &json!({"component": "root"})).unwrap();
+        session.execute("component.create", &json!({"name": name})).unwrap();
+        session.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    let component = |s: &Session, name: &str| s.doc.components.iter().find(|c| c.name == name).map(|c| c.id).unwrap();
+    let occurrence = |s: &Session, name: &str| {
+        let component = component(s, name);
+        s.doc.occurrences.iter().find(|o| o.component == component).cloned().unwrap()
+    };
+    session.execute("occurrence.ground", &json!({"occurrence": occurrence(&session, "A").id, "grounded": true})).unwrap();
+    session
+        .execute("joint.create", &json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "offset": "5 mm", "name": "Slide"}))
+        .unwrap();
+    session.execute("joint.drive", &json!({"joint": "Slide", "value": 15})).unwrap();
+    assert_eq!(session.doc.assembly.joints[0].values, vec![15.0]);
+
+    session.execute("component.activate", &json!({"component": "A"})).unwrap();
+    let a = component(&session, "A");
+    let body = session.model.state().bodies.iter().find(|b| b.component == a).map(|b| b.name.clone()).unwrap();
+    session.execute("solid.move", &json!({"bodies": [body], "translate": [30, 0, 0]})).unwrap();
+
+    let original = session.scratch();
+    session.execute("timeline.roll_to", &json!({"position": 2})).unwrap();
+    let source = session.scratch();
+
+    let prepared = session.scratch().compute_editor_commands(&[], &source, original).unwrap();
+    session.accept_commands(prepared).unwrap();
+    assert_eq!(session.doc.marker, None);
+}
+
+/// Cancel on a computing OK (solidcore#3247): a dialog's computation of a long Combine Cut (a
+/// coil cut from a cylinder, as in #3962) stops within 500 ms of Cancel and says it was
+/// cancelled. Nothing it computed is kept in the evaluation cache the session shares: OK again
+/// computes the cut anew, and finishes.
+#[test]
+fn a_cancelled_computation_stops_promptly_and_is_never_cached() {
+    use solidcraft_doc::progress::{Progress, watch};
+    use std::time::{Duration, Instant};
+    let mut session = Session::default();
+    session.execute("solid.cylinder", &json!({"radius": 20, "height": 120, "body_name": "Stock"})).unwrap();
+    let coil = json!({"diameter": 51, "pitch": 15.24, "turns": 6, "section": "square", "section_size": 13, "body_name": "Tool", "operation": "new", "base": [0, 0, 12]});
+    session.execute("solid.coil", &coil).unwrap();
+    let cut = vec![("solid.combine".to_string(), json!({"operation": "cut", "target": "Stock", "tools": ["Tool"]}))];
+    let progress = Arc::new(Progress::default());
+    let (watching, scratch, commands) = (progress.clone(), session.scratch(), cut.clone());
+    let worker = std::thread::spawn(move || {
+        let r = scratch.stop_token().within(|| watch(watching, || scratch.compute_commands(&commands, None)));
+        (r.map(|_| ()).map_err(|e| e.to_string()), Instant::now())
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let cancelled = Instant::now();
+    progress.cancel();
+    let (r, returned) = worker.join().unwrap();
+    let took = returned.saturating_duration_since(cancelled);
+    assert!(r.as_ref().is_err_and(|e| e.contains("cancelled")), "{r:?}");
+    assert!(took < Duration::from_millis(500), "returned {took:?} after Cancel");
+    let again = session.scratch().compute_commands(&cut, None).unwrap();
+    // The cut is the one feature computed anew (the session's counter carries over to its copies).
+    assert_eq!(again.computed.model.recomputed, session.model.recomputed + 1, "nothing of the cancelled run was cached");
+    assert!(again.computed.model.results.iter().all(|r| r.error.is_none()), "OK again finishes the cut");
+}
+
+#[test]
+fn computed_sketch_ownership_rejects_closed_targets_and_keeps_live_view_metadata() {
+    use crate::{ViewContext, ViewDescriptor};
+    use solidcraft_views::ViewKind;
+    let context = |window| {
+        ViewContext::new(
+            vec![
+                ViewDescriptor { id: 1, kind: ViewKind::Model, window: 0, subject: None },
+                ViewDescriptor { id: 2, kind: ViewKind::Model, window, subject: None },
+            ],
+            1,
+            vec![1, 2],
+        )
+        .unwrap()
+    };
+    let mut session = Session::default();
+    session.set_view_context(context(1)).unwrap();
+    let commands = vec![("sketch.create".into(), json!({"plane":"XY","view":2}))];
+    let prepared = session.scratch().compute_commands(&commands, None).unwrap();
+    session.set_view_context(ViewContext::default()).unwrap();
+    let before = (session.doc.to_json(), session.undo.len(), session.revision);
+    assert!(!prepared.is_current(&session));
+    assert!(session.accept_commands(prepared).is_err());
+    assert_eq!((session.doc.to_json(), session.undo.len(), session.revision), before);
+    session.set_view_context(context(1)).unwrap();
+    let mut computed = session.scratch();
+    computed.execute("sketch.create", &json!({"view":2})).unwrap();
+    session.set_view_context(ViewContext::default()).unwrap();
+    assert!(session.accept_computed(computed).is_err());
+    assert_eq!((session.doc.to_json(), session.undo.len(), session.revision), before);
+    session.set_view_context(context(1)).unwrap();
+    let prepared = session.scratch().compute_commands(&commands, None).unwrap();
+    session.set_view_context(context(2)).unwrap();
+    assert!(prepared.is_current(&session), "moving the same open Model is valid");
+    session.accept_commands(prepared).unwrap();
+    assert_eq!(session.sketching_view, Some(2));
+    assert_eq!(session.view_context, context(2), "adoption cannot reinstall the worker's stale window placement");
+}
+
+#[test]
+fn edit_start_transactions_are_atomic_and_adoption_never_replays_consumed_events() {
+    let mut s = Session::default();
+    s.execute("sketch.create", &json!({"name":"Initial"})).unwrap();
+    s.execute("sketch.line", &json!({"points":[[0,0],[10,0]]})).unwrap();
+    let doc = s.doc.to_json();
+    let active = s.active_sketch;
+    let batch = vec![("solid.box".into(), json!({"length":2,"width":3,"height":4})), ("solid.fillet".into(), json!({"radius":-1}))];
+    assert!(s.scratch().compute_commands(&batch, None).is_err());
+    assert_eq!(s.doc.to_json(), doc);
+    assert_eq!(s.active_sketch, active);
+    assert!(s.take_sketch_finish_event().is_none(), "failed isolated transaction publishes nothing");
+    let first = s.prepare_edit_start("solid.box", &serde_json::Value::Null).unwrap().unwrap();
+    let prepared = s.scratch().compute_commands(&batch[..1], None).unwrap();
+    assert_eq!(s.take_sketch_finish_event().unwrap().sequence, first.sequence);
+    s.accept_commands(prepared).unwrap();
+    assert!(s.take_sketch_finish_event().is_none(), "source event was consumed while worker ran");
+    s.execute("sketch.create", &json!({"name":"Next"})).unwrap();
+    s.execute("sketch.line", &json!({"points":[[0,0],[5,0]]})).unwrap();
+    let entry = s.edit_start_sequence();
+    let prepared = s.scratch().compute_commands(&batch[..1], None).unwrap();
+    assert!(s.take_sketch_finish_event().is_none());
+    s.accept_commands(prepared).unwrap();
+    let event = s.take_sketch_finish_event().unwrap();
+    assert!(event.sequence > first.sequence);
+    assert_eq!(event.name, "Next");
+    assert!(s.edit_start_sequence() > entry);
+    assert!(s.take_sketch_finish_event().is_none());
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert!(s.take_sketch_finish_event().is_none(), "history never replays events");
+}
+
+#[test]
+fn edit_start_cache_catchup_is_receiver_explicit_and_never_adopts_authoring_state() {
+    use solidcraft_doc::display_quality::DisplayQuality;
+    let mut s = Session::default();
+    let id = s.execute("sketch.create", &json!({"name":"Catch up"})).unwrap()["sketch"].as_u64().unwrap();
+    s.execute("sketch.line", &json!({"points":[[0,0],[10,0]]})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+    s.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+    s.execute("sketch.edit", &json!({"sketch":id})).unwrap();
+    assert!(s.doc.marker.is_some());
+    s.execute("drawing.create", &json!({})).unwrap();
+    let drawing = s.open_drawing;
+    let feature = s.doc.features.iter().find(|feature| feature.id != id).unwrap().id;
+    s.prepare_feature_edit_start(feature).unwrap();
+    assert!(s.needs_sketch_finish_evaluation());
+    assert_eq!(s.doc.marker, None);
+    let pending = s.ahead();
+    let revision = s.revision;
+    s.selection.push(crate::Sel::Feature { id: feature });
+    let selection = s.selection.clone();
+    let undo = s.undo.len();
+    let context = s.view_context.clone();
+    s.set_command_check(Some(std::sync::Arc::new(|_, _, _| Err("no commands allowed".into()))));
+    let ready = pending.refresh_sketch_model(DisplayQuality::Normal).unwrap();
+    assert!(s.accept_refreshed_sketch_model(ready), "cache preparation needs no Model command or permission and works from Drawing");
+    assert!(!s.needs_sketch_finish_evaluation());
+    assert!(s.revision > revision);
+    assert_eq!(s.selection, selection);
+    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.view_context, context);
+    assert_eq!(s.open_drawing, drawing);
+    assert_eq!(s.take_sketch_finish_event().unwrap().sketch, id, "cache acceptance preserves the live queue");
+    assert!(s.take_sketch_finish_event().is_none());
+}
+
+#[test]
+fn edit_start_cache_catchup_rejects_changed_editor_or_document_source() {
+    use solidcraft_doc::display_quality::DisplayQuality;
+    for changed in 0..3 {
+        let mut s = Session::default();
+        let id = s.execute("sketch.create", &json!({})).unwrap()["sketch"].as_u64().unwrap();
+        s.mark_sketch_entered_by_person();
+        s.prepare_view_close(1).unwrap();
+        assert!(s.doc.feature(id).is_none());
+        let ready = s.ahead().refresh_sketch_model(DisplayQuality::Normal).unwrap();
+        match changed {
+            0 => s.revision += 1,
+            1 => {
+                s.active_sketch = Some(99);
+                s.sketching_view = Some(1);
+            }
+            _ => {
+                s.doc_mut().name = "Changed".into();
+            }
+        }
+        let doc = s.doc.clone();
+        let active = s.active_sketch;
+        let undo = s.undo.len();
+        assert!(!s.accept_refreshed_sketch_model(ready));
+        assert!(s.needs_sketch_finish_evaluation());
+        assert!(Arc::ptr_eq(&s.doc, &doc));
+        assert_eq!(s.active_sketch, active);
+        assert_eq!(s.undo.len(), undo);
+    }
+}
+
+#[test]
+fn edit_start_cache_catchup_keeps_worker_prepared_occurrences() {
+    use solidcraft_doc::display_quality::DisplayQuality;
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name":"Part"})).unwrap();
+    s.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+    s.execute("sketch.create", &json!({})).unwrap();
+    s.mark_sketch_entered_by_person();
+    s.prepare_view_close(1).unwrap();
+    assert!(s.needs_sketch_finish_evaluation());
+    let ready = s.ahead().refresh_sketch_model(DisplayQuality::Normal).unwrap();
+    let evaluations = s.evaluations;
+    assert!(s.accept_refreshed_sketch_model(ready));
+    let warmed = s.world_cache.lock().unwrap().as_ref().unwrap().world.as_ref().unwrap().clone();
+    assert!(Arc::ptr_eq(&warmed, &s.world_state().unwrap()), "the window reuses placements already warmed by the worker");
+    assert_eq!(s.evaluations, evaluations + 1);
+}
+
+#[test]
+fn edit_start_component_restore_does_not_evaluate_the_pending_suffix() {
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name":"Part"})).unwrap();
+    let component = s.active_component;
+    let occurrence = s.doc.occurrences.iter().find(|occurrence| occurrence.component == component).unwrap().id;
+    let sketch = s.execute("sketch.create", &json!({})).unwrap()["sketch"].as_u64().unwrap();
+    s.execute("sketch.line", &json!({"points":[[0,0],[10,0]]})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+    s.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+    s.execute("sketch.edit", &json!({"sketch":sketch})).unwrap();
+    assert!(s.doc.marker.is_some());
+    s.prepare_view_close(1).unwrap();
+    assert!(s.needs_sketch_finish_evaluation());
+    assert_eq!(s.doc.marker, None);
+    let model = s.model.state();
+    let evaluations = s.evaluations;
+    s.execute("component.activate", &json!({"component":0})).unwrap();
+    s.execute("component.activate", &json!({"component":component,"occurrence":occurrence,"path":[occurrence]})).unwrap();
+    assert_eq!(s.active_component, component);
+    assert_eq!(s.active_occurrence_path, Some(vec![occurrence]));
+    assert_eq!(s.evaluations, evaluations, "restoring the sketch's original placement leaves suffix rebuilding to the worker");
+    assert!(Arc::ptr_eq(&model, &s.model.state()));
+    assert!(s.needs_sketch_finish_evaluation());
 }

@@ -1,6 +1,7 @@
 [
  {"note": "Like Fusion, typing a number after picking the geometry goes into the dialog's heads-up value: Fillet after picking an edge, as Hole after picking a face and Extrude after opening do today."},
  {"start": "sketch.create"}, {"click": {"plane": "XY"}},
+ {"call": "ui.camera", "params": {"target": [30, 20, 0], "distance": 180}},
  {"start": "sketch.rectangle.two_point"}, {"click": {"sketch": [0, 0]}}, {"click": {"sketch": [60, 40]}}, {"key": "Escape"},
  {"start": "sketch.finish"},
  {"call": "ui.view", "params": {"view": "home"}},

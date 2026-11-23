@@ -1,13 +1,31 @@
+# IDE configuration
+.idea/
+.code/
+.vscode/
+
+# Python venv and cache
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# AI Agents
+.claude/worktrees/
+.claude/settings.local.json
+.claude/*.sh
+
+# Compiled target
 /target*/
+/target-snapshot
 /plan/
 /dist/
+
+# OS files
 *~
 .DS_Store
+
+# Temporary files
 *.swp
-/.claude/worktrees/
-/target-snapshot
-__pycache__/
-.vscode/
 
 # cargo-mutants output (docs/mutation-testing.md)
 mutants.out*/
@@ -15,3 +33,5 @@ mutants.out*/
 # external corpus downloads (cargo xtask external-corpus, #1397): fetched at test time,
 # hash-pinned in tests/external-corpus.toml; never commit case data
 /corpus/
+
+# Separately compiled original plugin example.

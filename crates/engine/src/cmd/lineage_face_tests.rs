@@ -116,6 +116,29 @@ fn a_chamfer_face_takes_a_sketch_that_follows_the_chamfer() {
     healthy(&reopened(&s), "OnBevel");
 }
 
+/// #14639: a chamfer face named in the pre-format-52 form (`F2:blend:A|B`) still places a sketch.
+#[test]
+fn a_sketch_on_a_chamfer_face_saved_in_the_older_name_form_opens() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "name": "Base"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[40, 15, 10]], "distance": 3, "name": "Bevel"}));
+    sketch_on(&mut s, [38.5, 15., 8.5], "OnBevel");
+    let (saved_plane, _) = healthy(&s, "OnBevel");
+    let mut doc: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let sketch = doc["features"].as_array_mut().unwrap().iter_mut().find(|f| f["name"] == "OnBevel").unwrap();
+    let name = sketch["plane"]["anchor"]["target"]["name"].as_str().unwrap().to_string();
+    let (head, edge) = name.split_once(":blend(").unwrap();
+    let older = format!("{head}:blend:{}", edge.strip_suffix(')').unwrap());
+    sketch["plane"]["anchor"]["target"]["name"] = json!(older);
+
+    let mut t = Session::new(solidcraft_doc::Document::from_json(&doc.to_string()).unwrap());
+    t.refresh();
+    no_errors(&t);
+    let (plane, certificate) = healthy(&t, "OnBevel");
+    assert_eq!(certificate, Some(FaceCertificate::Lineage));
+    assert!((plane.origin - saved_plane.origin).len() < 1e-9 && plane.normal().dot(saved_plane.normal()) > 1. - 1e-12, "{plane:?}");
+}
+
 /// #7476: a cone's base and the flat top of a cut-off cone take a sketch, as a cylinder's caps
 /// do, on the origin and placed along a slanted axis. The sketch on the top follows the height.
 #[test]
@@ -149,6 +172,50 @@ fn the_flat_faces_of_a_cone_take_a_sketch_that_follows_the_cone() {
         assert!(height(&healthy(&s, "OnBase").0).abs() < 1e-9);
         let t = reopened(&s);
         assert!((height(&healthy(&t, "OnTop").0) - 30.).abs() < 1e-9);
+    }
+}
+
+/// #14897: a pipe's end faces take a sketch, as a sweep's caps do: a solid pipe and a hollow one
+/// (its ends are rings), each along a slanted line. The sketches follow the pipe when its path
+/// gets longer and keep their faces after a save.
+#[test]
+fn the_end_faces_of_a_pipe_take_a_sketch_that_follows_the_pipe() {
+    use solidcore_record::Vec3;
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [25, 25]]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 40], [25, 65]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.pipe", json!({"path_sketch": "Path", "path": ["l1"], "diameter": 5, "operation": "new", "name": "Solid"}));
+    run(&mut s, "solid.pipe", json!({"path_sketch": "Path", "path": ["l2"], "diameter": 5, "wall": 1, "operation": "new", "name": "Hollow"}));
+    no_errors(&s);
+    // The solid pipe's ends hold the path's ends; the hollow pipe's rings hold points 2 mm above
+    // its path's ends (between the 1.5 mm hole and the 2.5 mm outside).
+    sketch_on(&mut s, [0., 0., 0.], "SolidStart");
+    sketch_on(&mut s, [25., 25., 0.], "SolidEnd");
+    sketch_on(&mut s, [0., 40., 2.], "HollowStart");
+    sketch_on(&mut s, [25., 65., 2.], "HollowEnd");
+    let along = Vec3::new(1., 1., 0.).normalized().unwrap();
+    let ends = [("SolidStart", ":start", Vec3::ZERO), ("SolidEnd", ":end", Vec3::new(25., 25., 0.))];
+    let rings = [("HollowStart", ":start", Vec3::new(0., 40., 0.)), ("HollowEnd", ":end", Vec3::new(25., 65., 0.))];
+    for (name, role, at) in ends.into_iter().chain(rings) {
+        let FaceAttachmentStatus::Healthy { plane, target, .. } = status(&s, name) else { panic!("{name}: {:?}", status(&s, name)) };
+        assert_eq!(target.certificate, Some(FaceCertificate::Lineage), "{name}");
+        assert!(target.name.ends_with(role), "{name}: {}", target.name);
+        assert!(plane.normal().cross(along).len() < 1e-9, "{name}: {plane:?}");
+        assert!((plane.origin - at).dot(along).abs() < 1e-9, "{name}: {plane:?}");
+    }
+    // The solid pipe's path gets longer: the sketch on its end goes with it.
+    run(&mut s, "sketch.edit", json!({"sketch": "Path"}));
+    run(&mut s, "sketch.move_point", json!({"point": "l1.end", "to": [30, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    no_errors(&s);
+    let end = |s: &Session| (healthy(s, "SolidEnd").0.origin - Vec3::new(30., 30., 0.)).dot(along);
+    assert!(end(&s).abs() < 1e-9, "{:?}", healthy(&s, "SolidEnd"));
+    let t = reopened(&s);
+    assert!(end(&t).abs() < 1e-9);
+    for name in ["SolidStart", "HollowStart", "HollowEnd"] {
+        healthy(&t, name);
     }
 }
 

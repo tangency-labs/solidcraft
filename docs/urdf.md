@@ -20,6 +20,9 @@ Next to `robot.urdf` the export writes one binary STL per component, in metres:
   in `robot-base.stl`.
 - `robot-<component>-collision.stl` appears only when a component mixes closed solids with
   open surfaces: it holds the closed ones, which are the collision geometry.
+- With `images: true`, `robot-<component>-<decal>.dae` and `robot-<component>-<decal>.png` (or
+  `.jpg`) appear for each shown picture of the component: a COLLADA mesh with texture
+  coordinates, and the decal's image beside it. See [Decals](#decals).
 
 Every path is checked before anything is written, including against the folders an agent may
 use (`allow_paths`). The meshes are written first and the `.urdf` last. If a write fails part
@@ -32,6 +35,7 @@ way, the error names the files already written and the one that failed.
 | `mesh_prefix` | none | Put before each mesh file name. Leave it empty for loaders that resolve against the URDF's folder (Isaac Sim, PyBullet, MuJoCo, yourdfpy). RViz and other ROS tools need `package://<pkg>/meshes/` or an absolute folder. |
 | `effort` | 1000 | Joint effort limit, in N (sliding) or N m (turning). |
 | `velocity` | 10 | Joint velocity limit, in m/s or rad/s. |
+| `images` | false | Also write each picture shown on the model as a textured visual; see [Decals](#decals). |
 
 URDF requires `effort` and `velocity` on every moving joint. When they are not given, the
 defaults are written and a warning says so. A value that is not a positive number is refused.
@@ -56,6 +60,30 @@ defaults are written and a warning says so. A value that is not a positive numbe
   mass of 1e-6 kg and inertia of 1e-12 kg m², because Gazebo drops massless links and breaks
   the chain there.
 - **Colour:** the first body's colour, as the visual's material.
+
+## Decals
+
+A decal is an image on a face of a part, such as a label, a logo or an ArUco marker. With
+`images: true` (off by default, so an export made the usual way writes what it always has), each
+shown image, placed with **Insert → Decal** or **Insert → Canvas**, becomes one more `<visual>` of
+every link its component gives, at the same origin as the link's own mesh. Its mesh is a COLLADA file (`.dae`) that names the image as its material's
+texture, so Gazebo (Classic and Sim), RViz and other COLLADA readers draw the image where
+SolidCraft shows it.
+
+- The image covers the decal's rectangle as SolidCraft shows it, mirrored when the decal is.
+  A decal anchored to sketch points (`canvas.frame_sketch`) is written where its sketch puts it.
+- The quad is written on both sides, 0.2 mm off the face each way, so the face never hides it
+  (also for a 24-bit depth buffer seen from 10 m) and one side faces out whichever way the face
+  points.
+- The material is opaque: COLLADA readers disagree on what a `<transparency>` of 1 means, and one
+  that takes it for a clear surface hid the whole image. A clear pixel of a PNG shows the colour
+  it holds. A decal made partly transparent in SolidCraft (`opacity` below 1) is written opaque,
+  with a warning.
+- The image file is written as it is: a PNG stays a PNG, a JPEG becomes `.jpg`. An SVG decal is
+  already a PNG in the design.
+- Every shown image is written, canvas or decal: hide an image you traced from (`canvas.edit
+  {visible: false}`, or Show/Hide on it) to keep it out. An image whose data is damaged, or
+  whose component is placed nowhere, is left out with a warning.
 
 ## Joints
 
@@ -112,6 +140,7 @@ the copies move together, which a URDF could only express with `<mimic>`.) The e
 
 - `<mimic>` for motion links.
 - Simplified collision shapes: the collision mesh is the visual mesh.
+- Images wrapped around curved faces: a decal is a flat image on a plane.
 - SDF and MJCF export, and URDF import.
 - Joint motion inside the copies of a component placed several times.
 - Drive dynamics: `effort` and `velocity` are limits you choose.

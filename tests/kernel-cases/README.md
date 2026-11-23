@@ -115,7 +115,7 @@ the frozen truck-geometry PRs, a `kernel-paused` PR), for the report's coverage 
 | `volume_mm3`, `area_mm2` as `[min, max]` | An inclusive range, where analysis only bounds the measure: a cut removes at most its tool's volume, a join adds at most the tool's. `method` derives both ends. |
 | `continuity` | `{order, edges}`: every seam `edges` names reaches `order` (`g0` … `g4`), as Continuity Analysis (`inspect.continuity`) measures it: from the faces' exact surfaces, at its default 33 stations a seam and its default tolerances (1 µm, 1°, 0.01 / mm, 0.001 / mm², 0.0001 / mm³), never loosened per case. A failure names the worst seam (lowest order; of those, the one furthest past the next order's tolerance), its faces, the order it reaches and that next order's worst value. `edges`: `blend` (default), every seam of a face a fillet or chamfer made (a round, a chamfer face or a corner patch) with the faces either side of the edge it replaced, and every seam of a corner patch with the rounds it joins: what the blend is built to meet (not where a round runs into an end face, nor where two rounds meet without a patch: that seam is the input's, tangent only where the rounded edges were); `corner`, those of them on a corner patch (a blend made from several replaced edges); or a list of points `[[x,y,z], …]`, the edges nearest them, as Continuity Analysis picks them. `exact: true`: every seam reaches `order` and not the next (a case built to an order proves the measurement reads that order, no more and no less). A constant round meets its faces G1 (curvature jumps by 1 / r), a `curvature` round G2, a chamfer G0; a `corner: g2` patch is built G2 to the rounds and faces round it. |
 | `continuity` (older form) | `{near, within_mm, clear_mm, curvature_jump_per_mm}`: over every tangent seam lying wholly within `within_mm` of `near` (a corner's patch and its neighbours), the curvature jump across it (the faces' normal curvatures square to the seam, from their exact surfaces, at 65 stations a seam) is at most `curvature_jump_per_mm` at every station at least `clear_mm` along the seam from a vertex where two of those seams turn (where a neighbour's own G1 seam ends, which no surface is G2 to both sides of). A rolling ball's corner jumps 1 / r everywhere. |
-| `surface_types` | The set of kinds the faces' surfaces are, over every body, as the records hold them: `plane`, `cylinder`, `cone`, `sphere`, `torus`, `ball_patch` (a corner's patch on a sphere, its NURBS net), `bspline` (a B-spline or NURBS surface) or `revolution` (a revolved curve). Exact: none missing, none extra. |
+| `surface_types` | The set of kinds the faces' surfaces are, over every body, as the records hold them: `plane`, `cylinder`, `cone`, `sphere`, `torus`, `ball_patch` (a corner's patch on a sphere, its NURBS net), `bspline` (a B-spline or NURBS surface), `revolution` (a revolved curve) or `blend` (a round by its definition, its NURBS net its geometry). Exact: none missing, none extra. |
 | `splines` | `[{degree: [p, q], spans?: [m, n]}, …]`: one entry per B-spline face, each matching one face (directions in either order); `spans`, the distinct knot intervals each way, only where the construction fixes them. |
 | `boundary_edges` | The edges only one face uses (a sheet's free boundary), over every body, as the records hold them; exact or `[min, max]`. |
 | `flat_pattern` | A sheet metal case's flat pattern, from the script's last `sheet.flat_pattern` result: `size_mm` ([w, h] of the outline), `area_mm2` (the outline's area less the cut-outs', relative tolerance as volume) and `bend_lines` (each `[[x, y], [x, y]]`, a bend's centre line in flat coordinates, matched one for one, either way round, and as many as the result has), positions within the box-diagonal tolerance. |
@@ -131,11 +131,13 @@ the frozen truck-geometry PRs, a `kernel-paused` PR), for the report's coverage 
 
 Every area is a regression suite: each case is one small case of one issue, with its exact
 answer. `.github/workflows/kernel-rig.yml` runs them, and the ladder, on pull requests (not
-drafts). A plan job (`scripts/ci/kernel_rig_plan.py`) picks the areas from the changed files, one
-job builds `solidcraft-cli` (release) and the rig's runner, and a matrix of shards, one per
-selected area plus the ladder, runs them in parallel; the `kernel-rig` check passes when every
-selected shard does (and when none was selected). Pushes to main and develop, merge groups, the
-release gate (`release-gate.yml`) and a run by hand run every area. Each area's shard runs:
+drafts; once approved for CI) and merge groups: CI (`ci.yml`) calls it, and the required `ci`
+check fails when it does. A plan job (`scripts/ci/kernel_rig_plan.py`) picks the areas from the
+changed files, one job builds `solidcraft-cli` (release) and the rig's runner, and a matrix of
+shards, one per selected area plus the ladder, runs them in parallel; the rig's summary job
+(`Kernel rig / kernel-rig`) passes when every selected shard does (and when none was selected).
+Pushes to main and develop, the release gate (`release-gate.yml`) and a run by hand run every
+area. Each area's shard runs:
 
 ```sh
 cargo xtask kernel-cases --area <area> --cli target/release/solidcraft-cli \
@@ -176,9 +178,9 @@ target/release/solidcraft-cli --known-failing tests/kernel-cases/<area>/KNOWN_FA
 - The ladder spans every operation: it runs whenever any area does, and on a change under
   `ladder/`.
 
-The workflow's trigger paths are whole folders that hold every `PATHS` glob (a self-test,
-`scripts/ci/test_kernel_rig_plan.py`, checks it), so a pull request that touches none of them
-starts no job at all. To see what a change would run:
+The workflow's push trigger paths are whole folders that hold every `PATHS` glob (a self-test,
+`scripts/ci/test_kernel_rig_plan.py`, checks it), so a push to main that touches none of them
+starts no rig run; a pull request that reaches no area runs only the plan job and the summary. To see what a change would run:
 `git diff --name-only -z origin/develop... | python3 scripts/ci/kernel_rig_plan.py --paths -`.
 
 The plan finds the areas from the folders, so the workflow needs no edit when an area's `PATHS`

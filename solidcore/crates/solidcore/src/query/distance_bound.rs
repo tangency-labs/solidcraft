@@ -24,6 +24,7 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 use crate::blend::fillet_section::station::as_b_spline;
+use crate::error::query::QueryFailure;
 use crate::geom::certified::above;
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
@@ -146,32 +147,19 @@ impl Piece {
             let (rl, rr) = r.split_v(0.5);
             [ll, lr, rl, rr]
         };
-        let [x, y, z, w] = [
-            split(&self.h[0]),
-            split(&self.h[1]),
-            split(&self.h[2]),
-            split(&self.h[3]),
-        ];
+        let [x0, x1, x2, x3] = split(&self.h[0]);
+        let [y0, y1, y2, y3] = split(&self.h[1]);
+        let [z0, z1, z2, z3] = split(&self.h[2]);
+        let [w0, w1, w2, w3] = split(&self.h[3]);
         let [u0, u1, v0, v1] = self.uv;
         let (um, vm) = (0.5 * (u0 + u1), 0.5 * (v0 + v1));
-        let rects = [
-            [u0, um, v0, vm],
-            [u0, um, vm, v1],
-            [um, u1, v0, vm],
-            [um, u1, vm, v1],
-        ];
-        let mut out = Vec::new();
-        for (i, uv) in rects.into_iter().enumerate() {
-            let pick =
-                |a: &[Bernstein2; 4]| a.get(i).cloned().ok_or_else(|| SolidError::sm_err(OP));
-            out.push(Self::new(
-                [pick(&x)?, pick(&y)?, pick(&z)?, pick(&w)?],
-                err,
-                self.depth + 1,
-                uv,
-            )?);
-        }
-        out.try_into().map_err(|_| SolidError::sm_err(OP))
+        let depth = self.depth + 1;
+        Ok([
+            Self::new([x0, y0, z0, w0], err, depth, [u0, um, v0, vm])?,
+            Self::new([x1, y1, z1, w1], err, depth, [u0, um, vm, v1])?,
+            Self::new([x2, y2, z2, w2], err, depth, [um, u1, v0, vm])?,
+            Self::new([x3, y3, z3, w3], err, depth, [um, u1, vm, v1])?,
+        ])
     }
 }
 
@@ -382,7 +370,8 @@ pub fn measurable(k: &Kernel, surf: &Surface) -> Result<bool> {
 /// # Errors
 ///
 /// `InvalidInput` for a point or `want` not finite, `want` negative, or a UV box not inside
-/// the patches' knot range (to its rounding); `Unsupported` for a surface without a NURBS
+/// the patches' knot range (to its rounding); [`QueryFailure::NoPatchInBox`] for a box inside
+/// that rounding but past every patch; `Unsupported` for a surface without a NURBS
 /// form, a 2D form, or weights not proved positive; those of making the form and of its
 /// Bézier decomposition.
 pub fn surface_distance_lower_bound(
@@ -407,8 +396,12 @@ pub fn surface_distance_lower_bound(
     let mut heap: BinaryHeap<Piece> = pieces.into_iter().collect();
     let off = |lower: f64| (lower - slack).max(0.0);
     loop {
-        // (the box is inside the patches' range, so some patch overlaps it)
-        let nearest = heap.pop().ok_or_else(|| SolidError::sm_err(OP))?;
+        // (empty only at the start, for a box within the range's rounding but past every
+        // patch, or a decomposition with no patch: each piece popped later is bounded or
+        // replaced by its quarters)
+        let nearest = heap
+            .pop()
+            .ok_or_else(|| SolidError::query(OP, QueryFailure::NoPatchInBox))?;
         if nearest.lower >= want_net || made >= MAX_PATCHES {
             return Ok(off(nearest.lower));
         }
@@ -557,7 +550,7 @@ pub(crate) fn pieces_about(
         let (Some(&u0), Some(&u1), Some(&v0), Some(&v1)) =
             (uk.first(), uk.last(), vk.first(), vk.last())
         else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::query(OP, QueryFailure::Defect { why: "a patch of the surface's Bézier decomposition has no knots, though the decomposition gives each patch the knots of its span" }));
         };
         // the part of the patch inside the UV box, in the patch's [0, 1]^2
         let (mut a0, mut a1, mut b0, mut b1) = (0.0, 1.0, 0.0, 1.0);
@@ -1107,6 +1100,32 @@ mod tests {
         }
     }
 
+    /// A UV box inside the rounding of the patches' knot range but past every patch leaves
+    /// no piece to bound: the caller's box, named.
+    #[test]
+    fn a_box_past_every_patch_is_refused_by_name() {
+        use crate::error::query::QueryFailure;
+        let k = Kernel::default();
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let plane = Plane::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::X,
+            Vec3::Y,
+            Vec2::new(1.0, 1.0),
+            &dom,
+        );
+        let s = Surface::from(plane);
+        let full = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let u1 = full.max().x;
+        let du = 4.0 * f64::EPSILON * u1.abs().max(1.0);
+        let past = Extent2d::from_bounds(u1, full.min().y, u1 + du, full.max().y);
+        let p = Point3::new(0.5, 0.5, 1.0);
+        let e = surface_distance_lower_bound(&k, &s, Some(&past), p, 0.0).unwrap_err();
+        assert_eq!(e.query_failure(), Some(&QueryFailure::NoPatchInBox), "{e}");
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+    }
+
     /// A flat rational sheet far from the origin, the point just above it: `z = hz` exactly
     /// (hz and the weights have short mantissas, so every `Z W = hz W` is exact), and
     /// translating to the point rounds each `p.z W` on the size of `p`, far above the
@@ -1569,8 +1588,7 @@ mod tests {
         use crate::blend::fillet_section::section::GnSectionFsg;
         use crate::nurbs::b_spline_curve::BSplineCurve;
         use crate::surface::procedural_blend::{BlendDefinitionInput, ProceduralBlend};
-        let mut k = Kernel::default();
-        k.fixes.fillet_round_as_definition = true;
+        let k = Kernel::default();
         let bilinear = |p: [Point3; 4]| {
             BSplineSurface::create_bilinear_surface(p[0], p[1], p[2], p[3]).unwrap()
         };

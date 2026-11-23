@@ -173,6 +173,6 @@ pub(crate) fn merge_faces(body: &Body, keep: &[[f64; 3]], tolerance: f64) -> Res
             return Ok(Err(status(e)));
         }
         b.refresh_cached_topology();
-        finish(b, solid_in)
+        finish(k, b, solid_in)
     })
 }

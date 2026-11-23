@@ -53,14 +53,12 @@ use solidcore::topology::geometry_write::write_surface;
 use solidcore::topology::{edge, vertex, EdgeId, FaceId};
 use solidcore::{Brep, Kernel, SolidError};
 
-/// Every fix but `geometric_g2_continuity`.
+/// Every fix.
 fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -646,7 +644,7 @@ fn the_middle_edge_r1_rolls_over_onto_the_top_face_before_its_end() {
     check_top_end(&k, &b, 1.0, EXACT_TOL);
 }
 
-/// With `fillet_round_as_definition` (every fix here) the round on each side of the seam is
+/// The round on each side of the seam is
 /// a `ProceduralBlend`, a ball of radius r by its definition: the rolled one rolls it on the
 /// wall and the top face (the face beyond T), the one before on the wall and the R2 round.
 /// Each goes to the fork's record and back unchanged: the same definition, the same points
@@ -783,4 +781,18 @@ fn the_size_the_collapsed_offset_names_builds() {
     clean(&mut k, &mut b);
     check_top_end(&k, &b, fit, 1e-8);
     profile::write_profile(&k);
+}
+
+/// The round's ball touching the R2 round on T lies short of P (at the angle
+/// asin(2 / (21 + r)) about A, short of V's asin(2 / 21)) for every r: part of the round lies
+/// between the edge's ends, so it is not refused as rolling past an end (#14846's refusal of
+/// a ball every position of which lies past an end): it builds, and the body is clean.
+#[test]
+fn the_middle_edge_r1_9_is_not_refused_as_rolling_past_an_end() {
+    let r: f64 = 1.9;
+    assert!((2.0 / (21.0 + r)).asin() < (2.0_f64 / 21.0).asin());
+    let mut k = all_fixes();
+    let mut b = front_rounded(&mut k);
+    round(&mut k, &mut b, MIDDLE, r).unwrap();
+    clean(&mut k, &mut b);
 }

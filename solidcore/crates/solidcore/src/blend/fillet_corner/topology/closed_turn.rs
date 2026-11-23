@@ -26,7 +26,7 @@
 //!
 //! [`BlendCorner::is_closed_turn`]: crate::blend::blend_corner::BlendCorner::is_closed_turn
 
-use super::{need, new_corner_vertex};
+use super::{defect, missing_defect, need, new_corner_vertex};
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_executive::session::SolverObject;
 use crate::blend::fillet_geom::p1::{
@@ -72,8 +72,9 @@ impl FilletCorner {
     /// # Errors
     /// Invalid topology or a corner that is not a closed Turn; those of the edge-use binormal,
     /// curve evaluation, solver rail lookups and pseudo-topology operations;
-    /// `SM_ERR_NULL_POINTER` for a side edge use without a radial; `SM_ERR` when the
-    /// new fillet edge does not have exactly two edge uses.
+    /// a reviewed `Defect` (status `SM_ERR_NULL_POINTER`) for a side edge use without a
+    /// radial, and one (`SM_ERR`) when the new fillet edge does not have exactly two edge
+    /// uses.
     #[allow(clippy::too_many_lines)]
     pub fn make_closed_turn_topology(&mut self, env: ClosedTurnTopologyEnv<'_>) -> Result<()> {
         fn lookup(corner: FilletCornerId, this: &FilletCorner) -> CornerLookup<'_> {
@@ -154,7 +155,13 @@ impl FilletCorner {
 
             // when binormal opposes tangent - get radial edgeuse
             if tangent.dot(bin_vec) < 0.0 {
-                seam = eu1::radial(target, seam)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+                seam = eu1::radial(target, seam)?.ok_or_else(|| {
+                    missing_defect(
+                        OP,
+                        "a side edge use of the closed turn has no radial, though the corner's \
+                         create reached every edge use of its ring as the radial of another",
+                    )
+                })?;
             }
             seam_edgeuse = Some(seam);
 
@@ -248,7 +255,11 @@ impl FilletCorner {
 
         // get edgeuses marking filletEdge sector
         if edge::edgeuses(pseudo.brep(), fillet_edge, None, None)?.len() != 2 {
-            return Err(SolidError::sm_err(OP));
+            return Err(defect(
+                OP,
+                "the fillet edge just made does not have exactly two edge uses, though making \
+                 a fillet edge makes its primary edge use and that use's mate",
+            ));
         }
 
         // set FilletEdgeuse->FilletGeom pointers

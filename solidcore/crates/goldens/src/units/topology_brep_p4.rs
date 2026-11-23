@@ -305,6 +305,8 @@ fn orient(o: OrientType) -> i64 {
 /// The records of the Rust B-rep, with the layout of the shim's. `pre` are the record
 /// counts before the operation.
 fn rust_records(b: &Brep, pre: [usize; 10]) -> Model {
+    #[cfg(test)]
+    crate::certify::written(b);
     let lb = Labels { pre };
     let (mut regions, mut shells, mut faceuses, mut faces) =
         (Vec::new(), Vec::new(), Vec::new(), Vec::new());
@@ -589,7 +591,7 @@ fn rust_status(e: &SolidError) -> Output {
         return o;
     }
     match e {
-        SolidError::Upstream { code, .. } => status_output(f64::from(*code)),
+        e if solidcore::error::upstream_status(e).is_some() => status_output(f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))),
         // the kernel's refusal of the input (a damaged B-rep it will not walk)
         other => Output::err(other.to_string()),
     }
@@ -787,7 +789,7 @@ impl UnitDiff for Runner {
                 // a failed edit leaves the records it changed (the shim walks the B-rep
                 // after a failed status of the edits as well)
                 let o = rust_status(&e);
-                if edits(i.op) && matches!(e, SolidError::Upstream { .. }) {
+                if edits(i.op) && solidcore::error::upstream_status(&e).is_some() {
                     let counts = record_counts(&b)
                         .iter()
                         .map(|&n| n as i64)

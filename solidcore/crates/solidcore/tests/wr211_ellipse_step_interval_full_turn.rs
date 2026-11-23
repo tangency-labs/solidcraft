@@ -2,11 +2,9 @@
 //!
 //! `Ellipse::adjust_step_interval` is reached through the public curve factories
 //! ([`create_analytic_circle`], [`create_ellipse`]) and steps a `[0, 360]` arc to
-//! `[360, 540]`. With every fix at its default the old polar table clamps both new
-//! ends to the arc's end, so the NURBS interval collapses to one parameter and the
-//! next reparameterisation gives the interior NaN knots of WR-211. The fork's
-//! turn-preserving mapping (`Kernel::fixes.ellipse_adjust_step_interval_keeps_turns`)
-//! keeps the arc: half its NURB length, angles 0 to 180, every sampled point on the
+//! `[360, 540]`. Upstream's polar table clamps both new ends to the arc's end, so the
+//! NURBS interval collapses to one parameter and the next reparameterisation gives the
+//! interior NaN knots of WR-211. The fork's turn-preserving mapping keeps the arc: half its NURB length, angles 0 to 180, every sampled point on the
 //! curve and finite knots after the same reparameterisation.
 #![allow(
     clippy::unwrap_used,
@@ -48,95 +46,14 @@ fn knots(curve: &Ellipse) -> Vec<f64> {
         .to_vec()
 }
 
-/// Default fixes: the pinned C++ result of WR-211, from a public circle and ellipse.
-///
-/// `[0, 360] -> [360, 540]` installs the new STEP domain with a zero-length NURBS
-/// interval `[1, 1]` (`N_BasisReparam` then divides by that length and leaves
-/// `360 360 360 NaN NaN 540 540 540`). Every evaluation before the second edit is the
-/// arc's start point, so the curve has become that one point.
-#[test]
-fn a_full_turn_step_move_collapses_the_nurb_at_default_fixes() {
-    let k = Kernel::default();
-    assert!(
-        !k.fixes.ellipse_adjust_step_interval_keeps_turns,
-        "the pinned default must not keep turns"
-    );
-    let past = past_a_turn();
-
-    let mut circle = create_analytic_circle(&k, Point3::ZERO, 1.0).unwrap();
-    assert_eq!(circle.step_interval(), Extent1d::from_min_max(0.0, 360.0));
-    assert_eq!(
-        circle.base().natural_interval(),
-        Extent1d::from_min_max(0.0, 1.0)
-    );
-    circle.adjust_step_interval(&k, &past, None).unwrap();
-    assert_eq!(circle.step_interval(), past);
-    let collapsed = Extent1d::from_min_max(1.0, 1.0);
-    assert_eq!(circle.base().natural_interval(), collapsed);
-    assert_eq!(circle.base().natural_interval().length(), 0.0);
-    assert_eq!(knots(&circle), [1.0; 8]);
-    for _ in 0..3 {
-        let p = circle.base().evaluate_point(1.0).unwrap();
-        assert!(distance(p, Point3::new(1.0, 0.0, 0.0)) < ON_POINT, "{p:?}");
-        assert!(
-            ((p - Point3::ZERO).length() - 1.0).abs() < ON_CIRCLE,
-            "{p:?}"
-        );
-    }
-
-    let mut ellipse = create_ellipse(&k, Point3::ZERO, 3.0, 2.0).unwrap();
-    ellipse.adjust_step_interval(&k, &past, None).unwrap();
-    assert_eq!(ellipse.step_interval(), past);
-    assert_eq!(ellipse.base().natural_interval(), collapsed);
-    assert_eq!(knots(&ellipse), [1.0; 8]);
-    let p = ellipse.base().evaluate_point(1.0).unwrap();
-    assert!(distance(p, Point3::new(3.0, 0.0, 0.0)) < ON_POINT, "{p:?}");
-
-    // WR-211's second step, still public: reparameterise the collapsed curve to the
-    // new STEP domain. `fac = (ur - ul) / 0` keeps the end knots and makes every
-    // interior knot `ul + inf * 0 = NaN`, and the interior points evaluate to NaN.
-    circle.edit_parameterization(&k, &past, true, None).unwrap();
-    assert_eq!(circle.base().natural_interval(), past);
-    let after = knots(&circle);
-    assert_eq!(after.len(), 8);
-    assert_eq!(&after[0..3], &[360.0, 360.0, 360.0]);
-    assert!(after[3].is_nan() && after[4].is_nan(), "{after:?}");
-    assert_eq!(&after[5..8], &[540.0, 540.0, 540.0]);
-    let mid = circle.base().evaluate_point(450.0).unwrap();
-    assert!(
-        mid.x.is_nan() && mid.y.is_nan() && mid.z.is_nan(),
-        "{mid:?}"
-    );
-    let end = circle.base().evaluate_point(540.0).unwrap();
-    assert!(
-        distance(end, Point3::new(-1.0, 0.0, 0.0)) < ON_POINT,
-        "{end:?}"
-    );
-
-    ellipse
-        .edit_parameterization(&k, &past, true, None)
-        .unwrap();
-    let after = knots(&ellipse);
-    assert_eq!(&after[0..3], &[360.0, 360.0, 360.0]);
-    assert!(after[3].is_nan() && after[4].is_nan(), "{after:?}");
-    assert_eq!(&after[5..8], &[540.0, 540.0, 540.0]);
-    let mid = ellipse.base().evaluate_point(450.0).unwrap();
-    assert!(
-        mid.x.is_nan() && mid.y.is_nan() && mid.z.is_nan(),
-        "{mid:?}"
-    );
-}
-
-/// The fork's turn-preserving mapping (opt-in, everything else at its default): the
-/// same public circle and ellipse keep angles 0 to 180 instead of collapsing.
+/// The fork's turn-preserving mapping: the same public circle and ellipse keep angles 0 to 180 instead of collapsing.
 ///
 /// The NURBS interval becomes `[1, 1.5]` (half the full-turn length, one NURBS length
 /// per turn moved whole turns back), the points are the arc's start, quarter and end,
 /// and the same reparameterisation leaves finite knots and on-curve points.
 #[test]
-fn a_full_turn_step_move_keeps_its_arc_with_the_turn_preserving_fix() {
-    let mut k = Kernel::default();
-    k.fixes.ellipse_adjust_step_interval_keeps_turns = true;
+fn a_full_turn_step_move_keeps_its_arc() {
+    let k = Kernel::default();
     let past = past_a_turn();
 
     let mut circle = create_analytic_circle(&k, Point3::ZERO, 1.0).unwrap();

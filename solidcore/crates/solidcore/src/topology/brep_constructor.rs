@@ -76,7 +76,8 @@
 
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::Curve;
-use crate::error::{ignored, EntityRef, Result, SolidError};
+use crate::error::topology::{ConstructorPart, TopologyFailure};
+use crate::error::{ignored, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
@@ -207,6 +208,25 @@ fn null(what: &'static str) -> SolidError {
     SolidError::invalid_input(OP, what)
 }
 
+/// `call` needs `part` open, and it is not: the caller's call order, with upstream's
+/// `SE(SM_ERR)`.
+fn not_open(call: &'static str, part: ConstructorPart) -> SolidError {
+    SolidError::topology(OP, TopologyFailure::ConstructorNotOpen { call, part })
+}
+
+/// `call` needs `part` closed, and it is still open: the caller's call order, with
+/// upstream's `SE(SM_ERR)`.
+fn still_open(call: &'static str, part: ConstructorPart) -> SolidError {
+    SolidError::topology(OP, TopologyFailure::ConstructorStillOpen { call, part })
+}
+
+/// `cause` where upstream returns `NERN(NULL)` (`SM_ERR_NULL_POINTER`).
+fn null_status(cause: TopologyFailure) -> SolidError {
+    Failure::new(OP, cause)
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
 /// `pRegion->PostInsert(pShell)`.
 fn post_insert_shell(b: &mut Brep, region: RegionId, s: ShellId) -> Result<()> {
     b.region_mut(region)?.shells.push(s);
@@ -330,7 +350,7 @@ pub(crate) fn drop_limit(
             SolverOperation::Minimize,
         )?;
         if !dropped.success {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology(OP, TopologyFailure::NoFootOnCurve));
         }
     }
     let mut t = dropped.parameter;
@@ -404,7 +424,10 @@ impl BrepConstructor {
     pub fn start_brep(&mut self, k: &mut Kernel, model_size_estimate: f64) -> Result<&mut Brep> {
         let _ = model_size_estimate; // SM_REF1: not used
         if self.brep.is_some() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(null_status(TopologyFailure::ConstructorStillOpen {
+                call: "StartBrep",
+                part: ConstructorPart::Brep,
+            }));
         }
         let b = p3::new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
         Ok(self.brep.insert(b))
@@ -418,16 +441,23 @@ impl BrepConstructor {
     pub fn end_brep(&mut self) -> Result<Brep> {
         // Make sure the Brep is active and everything else has been shut down within
         // the brep using the 'End**' command.
-        if self.brep.is_none()
-            || self.region.is_some()
-            || self.outer_shell.is_some()
-            || self.inner_shell.is_some()
-            || self.face.is_some()
-            || self.loop_.is_some()
-        {
-            return Err(SolidError::sm_err(OP));
+        let open = if self.region.is_some() {
+            Some(ConstructorPart::Region)
+        } else if self.outer_shell.is_some() || self.inner_shell.is_some() {
+            Some(ConstructorPart::Shell)
+        } else if self.face.is_some() {
+            Some(ConstructorPart::Face)
+        } else if self.loop_.is_some() {
+            Some(ConstructorPart::Loop)
+        } else {
+            None
+        };
+        if let Some(part) = open {
+            return Err(still_open("EndBrep", part));
         }
-        self.brep.take().ok_or(SolidError::sm_err(OP))
+        self.brep
+            .take()
+            .ok_or_else(|| not_open("EndBrep", ConstructorPart::Brep))
     }
 
     /// `StartRegion`: a new region (a solid) whose shells will bound it from
@@ -444,10 +474,16 @@ impl BrepConstructor {
         let _ = is_solid_region; // not used
                                  // Make sure the brep is open and there are no open regions.
         if self.region.is_some() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(null_status(TopologyFailure::ConstructorStillOpen {
+                call: "StartRegion",
+                part: ConstructorPart::Region,
+            }));
         }
         let Some(b) = self.brep.as_mut() else {
-            return Err(SolidError::null_pointer(OP));
+            return Err(null_status(TopologyFailure::ConstructorNotOpen {
+                call: "StartRegion",
+                part: ConstructorPart::Brep,
+            }));
         };
         let r = b.add_region_record(Region::default())?;
         b.post_insert_region(r)?;
@@ -463,8 +499,11 @@ impl BrepConstructor {
     /// `SM_ERR` without open region or while a shell is open.
     pub fn end_region(&mut self) -> Result<()> {
         // Make sure the region is open and all contained shells are closed
-        if self.region.is_none() || self.outer_shell.is_some() || self.inner_shell.is_some() {
-            return Err(SolidError::sm_err(OP));
+        if self.region.is_none() {
+            return Err(not_open("EndRegion", ConstructorPart::Region));
+        }
+        if self.outer_shell.is_some() || self.inner_shell.is_some() {
+            return Err(still_open("EndRegion", ConstructorPart::Shell));
         }
         self.region = None;
         self.outer_region = None;
@@ -481,10 +520,10 @@ impl BrepConstructor {
     /// a B-rep without infinite region (upstream dereferences it).
     pub fn start_shell(&mut self) -> Result<(ShellId, Option<ShellId>)> {
         if self.outer_shell.is_some() || self.inner_shell.is_some() {
-            return Err(SolidError::sm_err(OP));
+            return Err(still_open("StartShell", ConstructorPart::Shell));
         }
         let Some(b) = self.brep.as_mut() else {
-            return Err(SolidError::sm_err(OP));
+            return Err(not_open("StartShell", ConstructorPart::Brep));
         };
 
         let outer = b.add_shell_record(Shell::default())?;
@@ -524,10 +563,10 @@ impl BrepConstructor {
     /// `SM_ERR` without open shell or while a face is open; those of the stitching.
     pub fn end_shell(&mut self, k: &mut Kernel, stitch_shell: bool) -> Result<()> {
         let Some(outer) = self.outer_shell else {
-            return Err(SolidError::sm_err(OP));
+            return Err(not_open("EndShell", ConstructorPart::Shell));
         };
         if self.face.is_some() {
-            return Err(SolidError::sm_err(OP));
+            return Err(still_open("EndShell", ConstructorPart::Face));
         }
 
         if stitch_shell {
@@ -569,8 +608,11 @@ impl BrepConstructor {
     ///
     /// `SM_ERR` without B-rep or open shell.
     pub fn start_face(&mut self, outside_faceuse: OrientType) -> Result<FaceId> {
+        if self.brep.is_none() {
+            return Err(not_open("StartFace", ConstructorPart::Brep));
+        }
         let (Some(b), Some(outer)) = (self.brep.as_mut(), self.outer_shell) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(not_open("StartFace", ConstructorPart::Shell));
         };
 
         // (the skeleton shell is set when a face use joins one)
@@ -614,8 +656,11 @@ impl BrepConstructor {
     ///
     /// `SM_ERR` without open face or while a loop is open.
     pub fn end_face(&mut self) -> Result<()> {
-        if self.face.is_none() || self.loop_.is_some() {
-            return Err(SolidError::sm_err(OP));
+        if self.face.is_none() {
+            return Err(not_open("EndFace", ConstructorPart::Face));
+        }
+        if self.loop_.is_some() {
+            return Err(still_open("EndFace", ConstructorPart::Loop));
         }
         self.face = None;
         Ok(())
@@ -628,8 +673,17 @@ impl BrepConstructor {
     ///
     /// `SM_ERR` without B-rep or open face.
     pub fn start_and_end_single_vertex_loop(&mut self, point: Point3) -> Result<LoopId> {
-        if self.brep.is_none() || self.face.is_none() {
-            return Err(SolidError::sm_err(OP));
+        if self.brep.is_none() {
+            return Err(not_open(
+                "StartAndEndSingleVertexLoop",
+                ConstructorPart::Brep,
+            ));
+        }
+        if self.face.is_none() {
+            return Err(not_open(
+                "StartAndEndSingleVertexLoop",
+                ConstructorPart::Face,
+            ));
         }
         let l = self.start_loop(OrientType::Same)?; // default behavior
         let b = open(&mut self.brep, "no B-rep")?;
@@ -690,8 +744,11 @@ impl BrepConstructor {
     /// `SM_ERR` without B-rep or open face; [`SolidError::InvalidInput`] for a face
     /// without its face uses.
     pub fn start_loop(&mut self, orientation_to_surface: OrientType) -> Result<LoopId> {
+        if self.brep.is_none() {
+            return Err(not_open("StartLoop", ConstructorPart::Brep));
+        }
         let (Some(b), Some(f)) = (self.brep.as_mut(), self.face) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(not_open("StartLoop", ConstructorPart::Face));
         };
 
         self.edge = None;
@@ -750,7 +807,7 @@ impl BrepConstructor {
     /// null link upstream dereferences; those of `IsClosed` and `EvaluatePoint`.
     pub fn end_loop(&mut self, k: &Kernel) -> Result<()> {
         let Some(l) = self.loop_ else {
-            return Err(SolidError::sm_err(OP));
+            return Err(not_open("EndLoop", ConstructorPart::Loop));
         };
         let b = open(&mut self.brep, "EndLoop: no B-rep")?;
 
@@ -856,7 +913,7 @@ impl BrepConstructor {
             let cw = eu1::cw_edgeuse(b, eu)?.ok_or_else(|| null("EndLoop: null CW link"))?;
             let cw_mate = eu1::mate(b, cw)?;
             if cw_mate != Some(mate_ccw) {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::topology(OP, TopologyFailure::LoopMatesDisagree));
             }
         }
 
@@ -889,7 +946,7 @@ impl BrepConstructor {
         end_vertex: Option<VertexId>,
     ) -> Result<EdgeId> {
         let Some(l) = self.loop_ else {
-            return Err(SolidError::sm_err(OP));
+            return Err(not_open("StartEdge", ConstructorPart::Loop));
         };
         let b = open(&mut self.brep, "StartEdge: no B-rep")?;
         let (mut start_vertex, mut end_vertex) = (start_vertex, end_vertex);
@@ -1074,15 +1131,19 @@ impl BrepConstructor {
     /// # Errors
     ///
     /// `SM_ERR` without open edge or edge curve, or when a point does not drop;
-    /// `SM_ERR_INVALID_INPUT` (as [`SolidError::Upstream`] of `SetMinMax`) for a
+    /// `SM_ERR_INVALID_INPUT` (as a [`TopologyFailure`](crate::error::topology::TopologyFailure) of `SetMinMax`) for a
     /// decreasing interval; those of `DropPoint` and `EvaluatePoint`.
     pub fn set_limits(&mut self, k: &Kernel, start: &VertexNode, end: &VertexNode) -> Result<()> {
+        if self.brep.is_none() {
+            return Err(not_open("SetLimits", ConstructorPart::Brep));
+        }
         let (Some(b), Some(e)) = (self.brep.as_mut(), self.edge) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(not_open("SetLimits", ConstructorPart::Edge));
         };
         let rec = b.edge(e)?;
+        // SetEdgeCurve gives the edge its curve, and comes first
         let Some(curve) = rec.curve.as_ref() else {
-            return Err(SolidError::sm_err(OP));
+            return Err(not_open("SetLimits", ConstructorPart::EdgeCurve));
         };
         let tol = rec.tolerance;
         // SmTol::GetZoneTol3d(m_pEdge): the edge's tolerance
@@ -1109,7 +1170,7 @@ impl BrepConstructor {
     /// `SM_ERR` without open edge.
     pub fn end_edge(&mut self) -> Result<()> {
         if self.edge.is_none() {
-            return Err(SolidError::sm_err(OP));
+            return Err(not_open("EndEdge", ConstructorPart::Edge));
         }
         Ok(())
     }
@@ -1153,24 +1214,30 @@ impl BrepConstructor {
     /// # Errors
     ///
     /// `SM_ERR` without open edge or edge use, or for a 3D curve on an edge that has
-    /// one; `SM_ERR_NULL_POINTER` for a UV curve that is not a B-spline curve kind;
-    /// [`SolidError::InvalidInput`] for a missing curve or face surface (upstream
-    /// dereferences them); those of `LiftCurve`.
+    /// one; `SM_ERR_NULL_POINTER` for a missing UV curve or one that is not a B-spline
+    /// curve kind; [`SolidError::InvalidInput`] for a missing 3D curve or face surface
+    /// (upstream dereferences them); those of `LiftCurve`.
     pub fn set_edge_curve(
         &mut self,
         k: &Kernel,
         curve: Option<Curve>,
         uv_curve: bool,
     ) -> Result<()> {
+        if self.brep.is_none() {
+            return Err(not_open("SetEdgeCurve", ConstructorPart::Brep));
+        }
         let (Some(b), Some(e), Some(eu)) = (self.brep.as_mut(), self.edge, self.edgeuse) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(not_open("SetEdgeCurve", ConstructorPart::Edge));
         };
         let f = eu1::face(b, eu)?.ok_or_else(|| null("SetEdgeCurve: edge use without face"))?;
 
         if !uv_curve {
             if b.edge(e)?.curve.is_some() {
                 // Don't need to set curve of this edge it has already been done.
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::topology(
+                    OP,
+                    TopologyFailure::EdgeCurveAlreadySet,
+                ));
             }
             let mut curve = curve.ok_or_else(|| null("SetEdgeCurve: no curve"))?;
             let edge_ref = notify_ref(EntityRef::Edge(e));
@@ -1182,6 +1249,7 @@ impl BrepConstructor {
 
         // m_pUVTrimCurve = SM_CAST_PTR(SmBSplineCurve, pCurve), owned by the edge use
         let natural = curve.as_ref().map(Curve::natural_interval);
+        let given = curve.is_some();
         let uv = curve
             .map(|mut c| {
                 let _ = c.set_owner(Some(notify_ref(EntityRef::Edgeuse(eu))), None);
@@ -1190,7 +1258,17 @@ impl BrepConstructor {
             .filter(|c| c.is_kind_of(BSPLINE_CURVE_TYPE));
         b.edgeuse_mut(eu)?.uv_trim_curve = uv;
         let (Some(uv), Some(natural)) = (b.edgeuse(eu)?.uv_trim_curve.as_ref(), natural) else {
-            return Err(SolidError::null_pointer(OP));
+            // no curve given, or one that is not a B-spline (upstream's cast gives NULL)
+            let cause = if given {
+                TopologyFailure::CurveNotBSpline {
+                    entity: Some(EntityRef::Edgeuse(eu)),
+                }
+            } else {
+                TopologyFailure::NoCurveGiven
+            };
+            return Err(Failure::new(OP, cause)
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error());
         };
         if b.edge(e)?.curve.is_some() {
             return Ok(());
@@ -1446,5 +1524,65 @@ mod tests {
         c.end_shell(&mut k, false).unwrap();
         assert!(c.end_brep().is_ok());
         let _ = Vec3::new(0.0, 0.0, 0.0);
+    }
+
+    /// A call out of order names what is not open or still open, with upstream's status.
+    #[test]
+    fn a_call_out_of_order_names_the_part() {
+        use crate::error::{SM_ERR, SM_ERR_NULL_POINTER};
+        use ConstructorPart as P;
+        let check = |r: Result<()>, cause: TopologyFailure, status: i32| {
+            let e = r.unwrap_err();
+            assert_eq!(e.topology_failure(), Some(&cause));
+            assert_eq!(e.upstream_status(), Some(status));
+        };
+        let not_open = |call, part| TopologyFailure::ConstructorNotOpen { call, part };
+        let still_open = |call, part| TopologyFailure::ConstructorStillOpen { call, part };
+        let mut k = Kernel::default();
+        let mut c = BrepConstructor::new();
+        check(c.end_brep().map(drop), not_open("EndBrep", P::Brep), SM_ERR);
+        check(
+            c.start_region(true, None).map(drop),
+            not_open("StartRegion", P::Brep),
+            SM_ERR_NULL_POINTER,
+        );
+        check(
+            c.start_shell().map(drop),
+            not_open("StartShell", P::Brep),
+            SM_ERR,
+        );
+        c.start_brep(&mut k, USE_DEFAULT).unwrap();
+        check(
+            c.start_brep(&mut k, USE_DEFAULT).map(drop),
+            still_open("StartBrep", P::Brep),
+            SM_ERR_NULL_POINTER,
+        );
+        check(
+            c.start_face(OrientType::Same).map(drop),
+            not_open("StartFace", P::Shell),
+            SM_ERR,
+        );
+        check(c.end_face(), not_open("EndFace", P::Face), SM_ERR);
+        c.start_region(true, None).unwrap();
+        check(
+            c.start_region(true, None).map(drop),
+            still_open("StartRegion", P::Region),
+            SM_ERR_NULL_POINTER,
+        );
+        c.start_shell().unwrap();
+        check(c.end_region(), still_open("EndRegion", P::Shell), SM_ERR);
+        c.start_face(OrientType::Same).unwrap();
+        check(
+            c.end_shell(&mut k, false),
+            still_open("EndShell", P::Face),
+            SM_ERR,
+        );
+        check(
+            c.end_brep().map(drop),
+            still_open("EndBrep", P::Region),
+            SM_ERR,
+        );
+        check(c.end_loop(&k), not_open("EndLoop", P::Loop), SM_ERR);
+        check(c.end_edge(), not_open("EndEdge", P::Edge), SM_ERR);
     }
 }

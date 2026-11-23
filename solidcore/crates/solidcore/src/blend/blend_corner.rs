@@ -46,6 +46,7 @@ use crate::blend::fillet_corner::p1::{
     check_face_complimentary_corner_concavity, test_g1_continuity,
 };
 use crate::blend::fillet_corner::p3::FilletCorner;
+use crate::blend::fillet_corner::topology::check_tangential_edgeuse_at_vertex;
 use crate::blend::fillet_exact::{classify_exact_blend, BlendQuadric, BlendSpine, QuadricKind};
 use crate::blend::fillet_geom::p1::{FilletBrep, FilletEdgeType, FilletSolverId, FilletVertexType};
 use crate::blend::fillet_geom::p4::set_edge_curve;
@@ -69,8 +70,11 @@ use crate::topology::{edge, Brep, EdgeId, EdgeuseId, VertexId};
 pub mod ball;
 pub mod chamfer;
 pub mod end;
+pub mod join_gap;
 pub mod mixed;
 pub mod on_face;
+pub(crate) mod piece;
+pub mod rollover;
 pub mod setback;
 pub mod swept;
 
@@ -87,6 +91,14 @@ pub enum BlendCornerEvent {
     Turn,
     /// `SM_BCE_JOIN`: two blends whose edges continue each other (G1) at the vertex.
     Join,
+    /// The section continues across a tangent rim. The two pieces of the rim
+    /// and their common cliff bound the material added by this chamfer.
+    CliffJoin {
+        /// The two pieces of the original rim that meet at this contact.
+        rim: [EdgeId; 2],
+        /// The common cliff face bounded by both pieces.
+        cliff: crate::topology::FaceId,
+    },
     /// `SM_BCE_BALL` (the fork's 79d4763): three rounds of one radius and convexity, the
     /// common ball's sphere between them ([`ball`]).
     Ball,
@@ -168,7 +180,13 @@ impl BlendCorner {
     /// section ([`FilletCorner::make_join_topology`]).
     #[must_use]
     pub fn is_join(self) -> bool {
-        self.event == BlendCornerEvent::Join
+        self.event == BlendCornerEvent::Join || self.is_cliff_join()
+    }
+
+    /// Whether the shared section lies on the continued supports at a tangent cliff.
+    #[must_use]
+    pub fn is_cliff_join(self) -> bool {
+        matches!(self.event, BlendCornerEvent::CliffJoin { .. })
     }
 
     /// `m_eEvent == SM_BCE_END` (the fork's 53c47b8): the End ([`BlendEnd`]).
@@ -187,7 +205,7 @@ impl BlendCorner {
     /// itself (`solver_eus`, the corner's `m_pSolverEUs`).
     #[must_use]
     pub fn is_closed_join(self, solver_eus: Option<&[EdgeuseId]>) -> bool {
-        self.event == BlendCornerEvent::Join && solver_eus.is_some_and(|eus| eus.len() == 1)
+        self.is_join() && solver_eus.is_some_and(|eus| eus.len() == 1)
     }
 
     /// Not the fork's (#2349): a Turn of one closed blended edge meeting itself at an
@@ -236,11 +254,11 @@ impl BlendCorner {
 /// `SmBlendCorner::Classify` without the Swept turn's checks
 /// (`SmFilletExecutive::GetSweptTurns()` FALSE): the event at a filleted vertex with two
 /// blended edge uses of one convexity among three or four (`all_eus`, the corner's ring).
-/// A Join where their edges continue each other (G1 within `tangency_tol_deg`) and every
-/// other edge of the ring is a tangent edge (`IsTangentEdge` within the same tolerance), or
-/// where their edges meet at 5 degrees or less at a face corner of the other convexity; else
-/// a Turn, Mitred. Not two solver edge uses among three or four: no event
-/// ([`BlendCornerEvent::None`]).
+/// A Join where their edges continue each other (G1 within `tangency_tol_deg`), or meet at
+/// 5 degrees or less at a face corner of the other convexity, and every other edge of the
+/// ring is a tangent edge (`IsTangentEdge`) within `tangency_tol_deg`, its faces at the vertex
+/// within `join_tol_deg`; else a Turn, Mitred. Not
+/// two solver edge uses among three or four: no event ([`BlendCornerEvent::None`]).
 ///
 /// Not the fork's: a Join is one section both blends reach. Where an edge stands
 /// between their faces on a side, that section ends where the rails cross it, and the two
@@ -249,6 +267,14 @@ impl BlendCorner {
 /// whose faces are tangent only at the vertex (a ruled loft's side edge at its circular rim)
 /// is the Turn of `docs/generic-blend.md` §3.2: the blends meet on their crossing, a crease
 /// running on from the side edge.
+///
+/// Not the fork's either: at the vertex the side edges' faces are tangent within
+/// `join_tol_deg`, the angle below which the two blends' sections at the joint vertex stand
+/// within the B-rep's intersection tolerance ([`join_within_xsect_tolerance_deg`]), not only
+/// within the solvers' tangency tolerance (10 degrees by default) the fork reads. A sketch's
+/// line running into an arc a degree off tangent leaves an upright edge whose faces meet at
+/// that degree: the two balls stand the radius times it apart, one section there leaves a gap
+/// the trim leaks through, and their mitre closes it.
 ///
 /// # Errors
 ///
@@ -261,14 +287,19 @@ pub fn classify(
     solver_eus: &[EdgeuseId],
     all_eus: &[EdgeuseId],
     tangency_tol_deg: f64,
+    join_tol_deg: f64,
 ) -> Result<BlendCorner> {
     let mut out = BlendCorner::default();
-    let vertex = vertex.ok_or_else(|| SolidError::null_pointer(OP_CLASSIFY))?;
+    let vertex =
+        vertex.ok_or_else(|| SolidError::blend_missing(OP_CLASSIFY, "the corner's vertex"))?;
     if solver_eus.len() != 2 || (all_eus.len() != 3 && all_eus.len() != 4) {
         return Ok(out);
     }
     let (Some(&eu1_), Some(&eu2_)) = (solver_eus.first(), solver_eus.get(1)) else {
-        return Err(SolidError::null_pointer(OP_CLASSIFY));
+        return Err(SolidError::blend_missing(
+            OP_CLASSIFY,
+            "the corner's two blended edge uses",
+        ));
     };
     // a Join: the blends continue each other, or, at a face corner of the other
     // convexity, meet at 5 degrees or less (they blend there: no mitre so thin)
@@ -276,36 +307,109 @@ pub fn classify(
     let e2 = eu1::edge(b, eu2_)?;
     let (g1, angle) = test_g1_continuity(k, b, Some(vertex), e1, e2, tangency_tol_deg)?;
     let angle_deg = angle.unwrap_or(90.0);
-    if g1
+    let continuing = g1
         || (angle_deg <= 5.0
-            && check_face_complimentary_corner_concavity(k, b, vertex, eu1_, eu2_, None)?)
-    {
-        // edges continuing each other with a sharp edge between their faces: the blends'
-        // balls where their rails cross it are two, so they turn there
-        if g1 && !side_edges_tangent(k, b, solver_eus, all_eus, tangency_tol_deg)? {
-            out.event = BlendCornerEvent::Turn;
-            return Ok(out);
-        }
-        out.event = BlendCornerEvent::Join;
-        return Ok(out);
-    }
-    out.event = BlendCornerEvent::Turn;
+            && check_face_complimentary_corner_concavity(k, b, vertex, eu1_, eu2_, None)?);
+    // with a sharp edge between their faces the blends' balls where their rails cross it are
+    // two, so they turn there
+    out.event = if continuing
+        && side_edges_tangent(
+            k,
+            b,
+            vertex,
+            solver_eus,
+            all_eus,
+            tangency_tol_deg,
+            join_tol_deg,
+        )? {
+        BlendCornerEvent::Join
+    } else {
+        BlendCornerEvent::Turn
+    };
     Ok(out)
 }
 
+/// The angle (degrees) below which two blends of sizes up to `size` may share one section (a
+/// Join) in a B-rep of intersection tolerance `xsect_tol` (#16627).
+///
+/// The gap (#16627). Look along the side edge at the joint vertex `v`: its two faces are two
+/// lines through `v` meeting at `pi - a`, `a` the angle between their normals (the angle
+/// `check_tangential_edgeuse_at_vertex` compares). Each blend's section centre (a round's ball
+/// centre, the corner of a chamfer's two offset planes) stands off its side face by that
+/// blend's offset `o` there, so it lies on that face's offset line, at the foot `C_i = v + o
+/// n_i` of the vertex's normal. The shared section's centre lies on both offset lines: at
+/// their crossing `P`, which stands `o tan(a / 2)` from each foot (the offset lines meet at
+/// `pi - a`, and `P`, `C_i` and `v` make a right triangle with its angle `a / 2` at `v`). So
+/// the shared section stands at most `|C_1 P| + |P C_2| = 2 o tan(a / 2)` off the blends.
+/// MEASURED to match: forced to the Join on rounds and on equal and unequal chamfers at
+/// wedges of 60, 90 and 120 degrees, the check's vertex offset was `o a` to eight digits, which
+/// `2 o tan(a / 2)` equals to `a^2 / 12` relative (1e-10 here). The offset is a round's radius
+/// on any wedge, and a chamfer's `(d' - d cos w) / sin w` off the face with setback `d` (`d'`
+/// on the other, wedge angle `w`), not its setback: on a 120 degree wedge setbacks 1 stand
+/// `sqrt 3` off, and a bound on the setbacks (or on a round's reach `r cot(w / 2)`, 1 / sqrt 3
+/// there) understates the gap. `size` is the largest offset of either surface of either blend.
+/// The check holds every vertex strictly within the B-rep's intersection tolerance of each of
+/// its faces (`SmVertex::IsWithinXSectTol3dOfFaces`, `gap < XSectTol3d`, twice the B-rep's
+/// zone tolerance). So a Join needs `2 size tan(a / 2) < xsect_tol`: `a < 2 atan(xsect_tol /
+/// (2 size))`.
+///
+/// The budget is shrunk for the rounding of the angle `check_tangential_edgeuse_at_vertex`
+/// compares: `8 eps` absolute plus `8 eps` relative in the angle between the two normals, and
+/// six more roundings in this budget, its quotient by `2 size`, the arctangent and the
+/// conversion to degrees and back (`16 eps` relative and `8 eps * size` absolute in all). That
+/// margin takes the normals as unit vectors correct to rounding; the error of a face normal
+/// evaluated on a curved surface is not bounded here.
+///
+/// Never above the solvers' tangency tolerance; that tolerance where `size` is not a positive
+/// length (no offset for the sections to stand apart by). 0 (no Join at any angle the strict
+/// test can pass) where the budget is not a positive length, and for a non-finite size or a
+/// tolerance that is not a positive finite length.
+#[must_use]
+pub fn join_within_xsect_tolerance_deg(size: f64, xsect_tol: f64, tangency_tol_deg: f64) -> f64 {
+    if !(size.is_finite() && xsect_tol.is_finite() && xsect_tol > 0.0) {
+        return 0.0;
+    }
+    if size <= EFF_ZERO {
+        return tangency_tol_deg;
+    }
+    let eps = f64::EPSILON;
+    let budget = xsect_tol * (1.0 - 16.0 * eps) - 8.0 * eps * size;
+    if budget > 0.0 {
+        crate::math::rad_to_deg(2.0 * (budget / (2.0 * size)).atan()).min(tangency_tol_deg)
+    } else {
+        0.0
+    }
+}
+
+/// The angle (degrees) at which two blends of sizes up to `size` meeting at a vertex are one
+/// section within `tol`: their balls' centres stand `size` off the faces, so faces meeting
+/// along a side edge at an angle `a` put them `size * a` apart. Capped at `tangency_tol_deg`, the solvers'
+/// tangency tolerance; that tolerance where `size` is not a positive length.
+#[must_use]
+pub fn join_tolerance_deg(size: f64, tol: f64, tangency_tol_deg: f64) -> f64 {
+    if size > EFF_ZERO && tol > 0.0 {
+        crate::math::rad_to_deg(tol / size).min(tangency_tol_deg)
+    } else {
+        tangency_tol_deg
+    }
+}
+
 /// Whether every edge of the corner's ring (`all_eus`) other than the blended ones
-/// (`solver_eus`) has faces tangent along it within `tol_deg` (`IsTangentEdge`).
+/// (`solver_eus`) has faces tangent along it within `tol_deg` (`IsTangentEdge`), and, where it
+/// is open, at `vertex` within `join_tol_deg`: there the two balls stand off its two faces.
 ///
 /// # Errors
 ///
 /// [`SolidError::null_pointer`] for a ring edge use without an edge; those of the tangency
-/// test.
+/// tests.
 fn side_edges_tangent(
     k: &Kernel,
     b: &mut Brep,
+    vertex: VertexId,
     solver_eus: &[EdgeuseId],
     all_eus: &[EdgeuseId],
     tol_deg: f64,
+    join_tol_deg: f64,
 ) -> Result<bool> {
     let mut blended = Vec::new();
     for &eu in solver_eus {
@@ -316,8 +420,15 @@ fn side_edges_tangent(
         if blended.contains(&e) {
             continue;
         }
-        let e = e.ok_or_else(|| SolidError::null_pointer(OP_CLASSIFY))?;
+        let e = e.ok_or_else(|| {
+            SolidError::blend_missing(OP_CLASSIFY, "an unblended edge use's edge")
+        })?;
         if !edge::is_tangent_edge(k, b, e, tol_deg, false)? {
+            return Ok(false);
+        }
+        if !edge::is_closed(b, e)?
+            && !check_tangential_edgeuse_at_vertex(k, b, eu, vertex, join_tol_deg)?
+        {
             return Ok(false);
         }
     }
@@ -353,10 +464,9 @@ fn foot_on_surface(
     for _ in 0..40 {
         let d = surface.evaluate(k, uv, 1, 1, flags)?;
         let at = |i: usize, j: usize| {
-            d.get(i)
-                .and_then(|row| row.get(j))
-                .copied()
-                .ok_or_else(|| SolidError::null_pointer(OP_EXACT))
+            d.get(i).and_then(|row| row.get(j)).copied().ok_or_else(|| {
+                SolidError::blend_missing(OP_EXACT, "a derivative of the surface's evaluation")
+            })
         };
         let r = point - at(0, 0)?;
         let su = at(1, 0)?;
@@ -449,7 +559,12 @@ pub fn exact_mitre_curve(
     mitre: EdgeId,
     solvers: &mut dyn MitreSolvers,
 ) -> Result<bool> {
-    let nul = || SolidError::null_pointer(OP_EXACT);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_EXACT,
+            "topology or geometry the mitre curve is built from",
+        )
+    };
     let start = edge::vertex(pseudo.brep(), mitre)?.ok_or_else(nul)?;
     let end = edge::other_vertex(pseudo.brep(), mitre, Some(start))?.ok_or_else(nul)?;
     let from_s = pseudo.fillet_vertex(start)?.vertex_type == FilletVertexType::RailXEdgeuse;
@@ -830,6 +945,67 @@ pub fn exact_mitre_curve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A classification without a vertex is a typed `Missing` failure, with the null-pointer
+    /// status the bare status had.
+    #[test]
+    fn a_corner_without_a_vertex_is_a_typed_missing_failure() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0)
+            .unwrap();
+        let err = classify(&k, &mut b, None, &[], &[], 1.0, 1.0).unwrap_err();
+        assert_eq!(
+            err.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Missing(
+                "the corner's vertex"
+            ))
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
+    }
+
+    /// Two balls of radius 2 stand 2 a apart where their faces meet at an angle a: one within
+    /// 4e-5 up to a = 2e-5 rad; never past the solvers' tangency tolerance, which is all there is
+    /// without a size.
+    #[test]
+    fn blends_join_where_their_balls_are_one_within_the_tolerance() {
+        let deg = crate::math::rad_to_deg(2e-5);
+        assert!((join_tolerance_deg(2.0, 4e-5, 10.0) - deg).abs() <= 1e-15);
+        assert_eq!(join_tolerance_deg(1e-9, 4e-5, 2.0), 2.0);
+        assert_eq!(join_tolerance_deg(0.0, 4e-5, 10.0), 10.0);
+        assert_eq!(join_tolerance_deg(2.0, 0.0, 10.0), 10.0);
+    }
+
+    /// #16627: in a B-rep of intersection tolerance 2e-5 blends of size 1 join only below
+    /// `2 atan(1e-5)` rad, where `2 tan(a / 2)` reaches 2e-5, less the rounding margin (8 eps
+    /// absolute in the angle, 1e-10 of it here), and never at that angle itself. No budget (a size so large that rounding eats it, a tolerance not a
+    /// positive finite length, or a non-finite size) admits no Join; no size keeps the tangency
+    /// tolerance.
+    #[test]
+    fn blends_join_only_below_the_intersection_tolerance() {
+        let deg = join_within_xsect_tolerance_deg(1.0, 2e-5, 10.0);
+        let bound = crate::math::rad_to_deg(2.0 * 1e-5_f64.atan());
+        assert!(deg < bound, "{deg} not below {bound}");
+        let a = deg.to_radians();
+        assert!(
+            2.0 * (a / 2.0).tan() < 2e-5,
+            "{a}: the gap reaches the tolerance"
+        );
+        assert!(deg > bound * (1.0 - 1e-9), "{deg} far below {bound}");
+        assert_eq!(join_within_xsect_tolerance_deg(1e12, 1e-5, 10.0), 0.0);
+        assert_eq!(join_within_xsect_tolerance_deg(1.0, 0.0, 10.0), 0.0);
+        assert_eq!(join_within_xsect_tolerance_deg(1.0, f64::NAN, 10.0), 0.0);
+        assert_eq!(join_within_xsect_tolerance_deg(f64::NAN, 2e-5, 10.0), 0.0);
+        assert_eq!(
+            join_within_xsect_tolerance_deg(f64::INFINITY, 2e-5, 10.0),
+            0.0
+        );
+        assert_eq!(join_within_xsect_tolerance_deg(0.0, 2e-5, 10.0), 10.0);
+        // small blends: capped at the tangency tolerance
+        assert_eq!(join_within_xsect_tolerance_deg(1e-9, 2e-5, 2.0), 2.0);
+    }
 
     #[test]
     fn bernstein_product_is_the_cubic() {

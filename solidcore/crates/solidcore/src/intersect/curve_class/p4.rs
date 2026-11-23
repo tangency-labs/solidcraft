@@ -73,6 +73,14 @@
 //!   leaves them (an edge use outside a loop touches neither; any later failure sets the
 //!   point to `(0,0,0)` and keeps the binormal), and only [`SolidError::Unported`] and
 //!   [`SolidError::InvalidInput`] (a null dereference upstream) propagate.
+//! - **3D-distinct end touches (solidcore-native, #18342).** `GetLoopTouches` types the
+//!   first and last touch as on the curve's start or end by comparing the curve parameter
+//!   with the face's zone tolerance mapped to UV. A touch strictly inside the interval
+//!   whose point is at least the face's intersection tolerance and more than the curve's
+//!   scaled zero from that end stays inside (`distinct_end_type`), as `FindInterval` keeps
+//!   such points off an interval end (part 3). When a point or the scaled zero cannot be
+//!   computed, upstream's type stands (no new error; unported, cancelled and uncertified
+//!   still propagate).
 //! - **Recursion.** None.
 
 use crate::curve::curve::p2::{Curve, CurveKind};
@@ -83,8 +91,8 @@ use crate::geom::global_solver::SolverOperation;
 use crate::geom::periodic_extent1d::PeriodicExtent1d;
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::geom::tol::{
-    are_same, eff_zero, is_degenerate_vec3, scaled_zero2, xsect_tol_3d_from_zones, zone_tol_3d,
-    SmallTopoType, ANG_TOL_DEG,
+    are_same, eff_zero, is_degenerate_vec3, scaled_zero2, scaled_zero_of_curve,
+    xsect_tol_3d_from_zones, zone_tol_3d, SmallTopoType, ANG_TOL_DEG,
 };
 use crate::heal::face_props::{FaceProps, HealerOpType, LoopObject, PropStage, Tri, UNDEF_ULONG};
 use crate::intersect::curve_class::p1::{
@@ -554,15 +562,23 @@ fn vertexuse_is_loop_vertexuse<O: ClassObject, G: ClassGeometry<O>>(
 
 /// `SmVertexuse::ComputeUVSector(sectorIO, FALSE)` (unit `topology.vertexuse`) with the
 /// status ignored: a failed computation keeps the outputs it wrote. With `bOkToMake` false
-/// nothing is created, so the port runs it on a copy of the B-rep (it takes `&mut Brep`).
+/// nothing is created; it reads the B-rep in place, and only where it would reach a step
+/// that can change the B-rep (a global point solve, which builds the face's surface cache)
+/// does the port run it on a copy of the B-rep (it takes `&mut Brep` there), so the
+/// B-rep is never changed. Copying the whole B-rep for each sector made the seam checks
+/// of a large body slow.
 fn vertexuse_compute_uv_sector<O: ClassObject, G: ClassGeometry<O>>(
     k: &Kernel,
     geometry: &G,
     vertexuse: O,
 ) -> Result<UvSectorIo<O>> {
     let (b, vu) = vertexuse_id(geometry, vertexuse, OP_CROSS)?;
-    let mut scratch = b.clone_sharing_surface_caches();
-    let io = topo_vertexuse::compute_uv_sector(k, &mut scratch, vu, false)?.io;
+    let io = if let Some(sector) = topo_vertexuse::compute_uv_sector_read_only(k, b, vu)? {
+        sector.io
+    } else {
+        let mut scratch = b.clone_sharing_surface_caches();
+        topo_vertexuse::compute_uv_sector(k, &mut scratch, vu, false)?.io
+    };
     let eu_handle = |eu: Option<EdgeuseId>| -> Result<Option<O>> {
         eu.map(|eu| handle_of(geometry, b, EntityRef::Edgeuse(eu), OP_CROSS))
             .transpose()
@@ -751,6 +767,45 @@ fn drop_vector(k: &Kernel, surface: &Surface, uv: Point2, v: Vec3) -> Result<Vec
 /// `sU.CCWAngleBetween(v, angle)` with the status ignored.
 fn ccw_angle(v: Vec2) -> Result<f64> {
     Ok(ignored(Vec2::new(1.0, 0.0).ccw_angle_between(v))?.unwrap_or(UNDEF_DOUBLE))
+}
+
+/// solidcore-native: `ty` (a touch's `ClassifyPoint` against the classification interval
+/// with a UV tolerance) with `Start` or `End` turned into `Inside` when `param` is strictly
+/// inside `ivl` and its curve point is 3D-distinct from that end: at least `tol_3d` (the
+/// face's intersection tolerance) and more than the curve's scaled zero away. Upstream
+/// compares the curve parameter with a tolerance mapped into the surface's UV space, which
+/// marks a crossing far from the curve's end as an end touch when the curve parameter is
+/// much finer than the UV one (the loop bisector over the sentinel range). When a point or
+/// the scaled zero cannot be computed, `ty` stands (this extra measurement adds no new
+/// error), except that an unported callee, a cancellation or a certification refusal
+/// (`SolidError::is_unported_or_cancelled`) propagates.
+fn distinct_end_type(
+    k: &Kernel,
+    curve: &Curve,
+    ivl: &Extent1d,
+    param: f64,
+    ty: ExtentPointType,
+    tol_3d: f64,
+) -> Result<ExtentPointType> {
+    let end = match ty {
+        ExtentPointType::Start => ivl.min(),
+        ExtentPointType::End => ivl.max(),
+        _ => return Ok(ty),
+    };
+    if !(param > ivl.min() && param < ivl.max()) {
+        return Ok(ty);
+    }
+    let distinct = || -> Result<bool> {
+        let dist = curve
+            .evaluate_point(k, param)?
+            .distance(curve.evaluate_point(k, end)?);
+        Ok(dist >= tol_3d && dist > scaled_zero_of_curve(k, curve)?)
+    };
+    match distinct() {
+        Ok(true) => Ok(ExtentPointType::Inside),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Ok(false) | Err(_) => Ok(ty),
+    }
 }
 
 /// `SM_IS_BETWEEN(c, a, b)` (`SmMath.h`).
@@ -1522,10 +1577,23 @@ impl<O: ClassObject> CurveClassification<O> {
         };
 
         // remember when first/last touch is on ClassifyCrv Start/Stop
-        let mut touch_1st_type =
-            crv_classification_interval.classify_point(first_touch.param, first_zone_tol_2d);
-        let mut touch_last_type =
-            crv_classification_interval.classify_point(last_touch.param, last_zone_tol_2d);
+        // (solidcore-native: a touch 3D-distinct from that end stays inside)
+        let mut touch_1st_type = distinct_end_type(
+            k,
+            classify_crv,
+            &crv_classification_interval,
+            first_touch.param,
+            crv_classification_interval.classify_point(first_touch.param, first_zone_tol_2d),
+            face_xsect_tol_3d,
+        )?;
+        let mut touch_last_type = distinct_end_type(
+            k,
+            classify_crv,
+            &crv_classification_interval,
+            last_touch.param,
+            crv_classification_interval.classify_point(last_touch.param, last_zone_tol_2d),
+            face_xsect_tol_3d,
+        )?;
 
         // check state - stored params must be on or inside the interval
         if touch_1st_type == ExtentPointType::Outside || touch_last_type == ExtentPointType::Outside
@@ -2379,4 +2447,45 @@ struct TouchContext<'a, O, G> {
     crv_classification_interval: Extent1d,
     /// `lCrvClassification_IvlCnt`.
     ivl_cnt: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::curve::line::Line;
+
+    /// #18342: on a line 2 469 134 long over [0, 1] (a loop bisector across an infinite
+    /// cylinder's ±1234567 axial sentinel range), `distinct_end_type` keeps the `Start` or
+    /// `End` type of a genuine end touch (1e-9 in 3D, below the face's intersection
+    /// tolerance, or at the end parameter itself) and turns only a touch 3.5e-3 away in 3D
+    /// into `Inside`; other types pass through.
+    #[test]
+    fn distinct_end_type_keeps_genuine_end_touches() {
+        use ExtentPointType::{Both, End, Inside, Start};
+        let k = Kernel::default();
+        let curve = Curve::from(Line::from_points(
+            Point3::new(0.0, 0.0, 1_234_567.0),
+            Point3::new(0.0, 0.0, -1_234_567.0),
+            3,
+        ));
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let tol = 1e-7;
+        let len = 2_469_134.0;
+        let ty = |param: f64, ty: ExtentPointType| {
+            distinct_end_type(&k, &curve, &ivl, param, ty, tol).expect("type")
+        };
+        // genuine end touches: close in 3D, or exactly on the end
+        assert_eq!(ty(1e-9 / len, Start), Start);
+        assert_eq!(ty(1.0 - 1e-9 / len, End), End);
+        assert_eq!(ty(0.0, Start), Start);
+        assert_eq!(ty(1.0, End), End);
+        // just below the tolerance in 3D still an end touch
+        assert_eq!(ty(0.9 * tol / len, Start), Start);
+        // 3D-distinct from the end: inside
+        assert_eq!(ty(3.538e-3 / len, Start), Inside);
+        assert_eq!(ty(1.0 - 3.538e-3 / len, End), Inside);
+        // other types are never changed
+        assert_eq!(ty(3.538e-3 / len, Both), Both);
+        assert_eq!(ty(0.5, Inside), Inside);
+    }
 }

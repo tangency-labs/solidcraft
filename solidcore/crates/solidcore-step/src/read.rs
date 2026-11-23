@@ -167,6 +167,10 @@ fn knots(mults: Option<&Param>, values: Option<&Param>, n_ctrl: usize, degree: u
 
 /// Knots of a B-spline given by its type alone (BEZIER_, UNIFORM_, QUASI_UNIFORM_CURVE).
 fn implied_knots(spec: KnotSpec, n_ctrl: usize, degree: usize) -> R<(Vec<f64>, Vec<usize>)> {
+    // (a degree of 0 is no B-spline, and the Bezier segments below divide by it)
+    if degree == 0 {
+        return Err("a B-spline of degree 0".into());
+    }
     if n_ctrl <= degree {
         return Err("too few control points".into());
     }

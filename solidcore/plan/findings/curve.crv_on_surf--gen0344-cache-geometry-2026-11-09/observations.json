@@ -1,0 +1,77 @@
+{
+  "unit": "curve.crv_on_surf",
+  "case": "gen0344",
+  "seed": 7770047198091881206,
+  "base_revision": "f9ed9a90b453517d83e787169887c180e17656fd",
+  "current_revision": "94ae5e1806a59af4322ec50fd81af232161a363f",
+  "operation": {
+    "a": 1.6945858245489083,
+    "b": 3.243688129013577,
+    "guess": null,
+    "op": "drop",
+    "point": [
+      -1.9701455729075308,
+      1.0722580903708865,
+      0.5330470153759967
+    ],
+    "solver_op": 0,
+    "tol": 0.0,
+    "vec": null
+  },
+  "changed_top_level_decoded_fields": [
+    "breaks",
+    "approximation",
+    "raw_value_count"
+  ],
+  "unchanged_drop": {
+    "status": 0.0,
+    "drop_success": false,
+    "drop_parameter": 3.243688129013577,
+    "drop_distance": 3.1935980469430203
+  },
+  "source_uv_and_surface_bit_identical": true,
+  "all_raw_values_finite": true,
+  "cache_difference": {
+    "bit_exact_equal_polynomial_cells": 130,
+    "changed_polynomial_cells": 17,
+    "changed_parameter_ranges": [
+      [
+        3.8756126132562025,
+        3.9073851893762397
+      ]
+    ],
+    "caches_are_exactly_the_same_polynomial_through_query_interval": true
+  },
+  "exact_definition_point_at_returned_parameter": [
+    "1.19494302710647111505111648709045794777122620148826497008452742628485103908876552305716781",
+    "1.03051760708733742870389677894180468021432867285744107447188646320796545192480179774300207",
+    "0.109324970215568546438590832464916822597436511891910682619808195932730102193965361103162815"
+  ],
+  "exact_definition_distance_at_returned_parameter": "3.19359804694302045748987648186477136374715336210326979458411965984156261577638137595113895",
+  "reported_distance_minus_exact_distance": "-1.6089462615274561804295781620390014479458411965984156261577638137595113895E-16",
+  "moved_break": [
+    {
+      "side": "before",
+      "break": 3.8951021382285997,
+      "exact_v_residual": "-1.37882664752611622017009773903365148144023923778042765006784318804585700878148116484436761E-16"
+    },
+    {
+      "side": "after",
+      "break": 3.8951021382285993,
+      "exact_v_residual": "1.63746554103116902137932832141089490664681865564748185310333059658712663417312858610708479E-16"
+    }
+  ],
+  "surface_v_knot_crossing_root_enclosure": [
+    "3.89510213822859953885997400306835208039181543270995498397276694686068205289489679208042149",
+    "3.89510213822859953885997400306835208039218277469458694881900717702856400466921512506691277"
+  ],
+  "actual_default_requested_approximation_tolerance": 5e-06,
+  "stored_achieved_gap_is_a_sampled_estimate_not_a_certificate": 0.009682821860461372,
+  "scope_limit": "The drop reports success=false on both versions; no successful projection or global minimum is claimed. The whole cached curve exceeds the requested approximation tolerance on both versions. The cache is an initial-guess aid, not a new exact curve definition. The exact bound is for real B-spline curves represented by the stored f64 coefficients; it does not claim a rounding bound for every floating-point evaluation.",
+  "archived_raw_outputs_reproduce_entire_committed_goldens": {
+    "before": true,
+    "after": true
+  },
+  "source_state_bit_identical_tail_length": 147,
+  "stored_source_definition_matches_input_coefficients_exactly": true
+}

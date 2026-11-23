@@ -55,7 +55,7 @@ impl SolveApp {
     /// by the face clicked). A face of a component other than the active one, or one no feature
     /// made (imported or lost), leaves everything as it was. Whether an editor was started.
     pub(crate) fn edit_feature_of_face(&mut self, body: &str, index: usize, point: solidcore_record::Vec3) -> bool {
-        if self.pending_feature_edit.is_some() || self.session.active_sketch.is_some() {
+        if self.pending_feature_edit.is_some() {
             return false;
         }
         let component = self.session.world_state().ok().and_then(|st| st.body(body).map(|b| b.component));
@@ -146,22 +146,28 @@ impl SolveApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
             return;
         };
+        use crate::operations::{Outcome, ended};
         match result {
             Ok((original, rolled)) => {
                 // A stale result is discarded, never restarted against a newer design.
                 // Adoption preserves the live history stacks and current selection.
                 let restore = if pending.feature.is_some() { rolled } else { original.scratch() };
                 if let Err(error) = self.session.restore_editor(&pending.source, restore) {
+                    ended(self, "feature_edit", Outcome::Failed(error.to_string()));
                     self.set_status(error.to_string(), true);
                     return;
                 }
+                ended(self, "feature_edit", if pending.opens() { Outcome::Done } else { Outcome::Cancelled });
                 if let Some(feature) = pending.feature {
                     self.open_feature_edit(feature, pending.marker, original);
                 } else if let Some(command) = pending.next_command {
                     self.start(&command);
                 }
             }
-            Err(error) => self.set_status(error, true),
+            Err(error) => {
+                ended(self, "feature_edit", Outcome::Failed(error.clone()));
+                self.set_status(error, true);
+            }
         }
     }
 }

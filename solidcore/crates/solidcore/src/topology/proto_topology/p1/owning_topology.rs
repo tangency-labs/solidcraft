@@ -7,6 +7,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::error::topology::TopologyFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::topology::topology::{self as topo, Topology, TopologyRecords};
@@ -198,7 +199,10 @@ impl OwningTopology {
                         .ok_or(broken_list(OP_UPDATE_SIZE))?;
                     // check back pointers
                     if rec(records, next, OP_UPDATE_SIZE)?.last() != Some(elem) {
-                        return Err(SolidError::sm_err(OP_UPDATE_SIZE));
+                        return Err(SolidError::topology(
+                            OP_UPDATE_SIZE,
+                            TopologyFailure::OwnerListBroken,
+                        ));
                     }
                     elem = next;
                     self.list_size += 1;
@@ -225,10 +229,16 @@ impl OwningTopology {
         on_list: Option<ObjectKey>,
     ) -> Result<()> {
         let (Some(ins), Some(cur)) = (to_insert, on_list) else {
-            return Err(SolidError::sm_err(OP_INSERT_AFTER));
+            return Err(SolidError::topology(
+                OP_INSERT_AFTER,
+                TopologyFailure::NothingToLink,
+            ));
         };
         let Some(cur_next) = rec(records, cur, OP_INSERT_AFTER)?.next() else {
-            return Err(SolidError::sm_err(OP_INSERT_AFTER));
+            return Err(SolidError::topology(
+                OP_INSERT_AFTER,
+                TopologyFailure::OwnerListBroken,
+            ));
         };
         rec(records, ins, OP_INSERT_AFTER)?;
         set_next(records, ins, Some(cur_next), OP_INSERT_AFTER)?;
@@ -315,12 +325,18 @@ impl OwningTopology {
 
         // check state - Object must be in our list.
         if r.owner() != Some(this) {
-            return Err(SolidError::sm_err(OP_REMOVE));
+            return Err(SolidError::topology(
+                OP_REMOVE,
+                TopologyFailure::NotOnOwnerList,
+            ));
         }
 
         // check state - look for problem circular list and ListOwner Ptrs
         let (Some(next), Some(last)) = (r.next(), r.last()) else {
-            return Err(SolidError::sm_err(OP_REMOVE));
+            return Err(SolidError::topology(
+                OP_REMOVE,
+                TopologyFailure::OwnerListBroken,
+            ));
         };
 
         if next == obj {
@@ -440,7 +456,15 @@ impl OwningTopology {
                     // check m_lListSize
                     count += 1;
                     if count > self.list_size {
-                        return Ok((items, Err(SolidError::sm_err(OP_GET_ALL))));
+                        return Ok((
+                            items,
+                            Err(SolidError::topology(
+                                OP_GET_ALL,
+                                TopologyFailure::OwnerListOverCount {
+                                    list_size: self.list_size,
+                                },
+                            )),
+                        ));
                     }
                     match next {
                         Some(n) if n != head => elem = n,
@@ -522,4 +546,21 @@ pub fn destroy_topology<R: OwningRecords + ?Sized>(records: &mut R, this: Object
     }
     records.set_owning(owner, list).ok_or(broken_list(OP))?;
     set_owner(records, this, None, OP)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Linking with an object missing is an `SM_ERR` that says so.
+    #[test]
+    fn inserting_without_an_object_is_a_typed_failure() {
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let e = OwningTopology::default()
+            .insert_after(&mut records, None, None)
+            .unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.operation(), OP_INSERT_AFTER);
+        assert_eq!(e.topology_failure(), Some(&TopologyFailure::NothingToLink));
+    }
 }
