@@ -37,7 +37,7 @@ use crate::blend::fillet_solver::p1::{
     test_manifold_tangent_rollover_at, FilletSolver, FilletSolverOps,
 };
 use crate::curve::curve::Curve;
-use crate::error::blend::{BlendFailure, CrossingInput, SolverFailure};
+use crate::error::blend::{BlendFailure, CrossingInput, FilletSetUp, SolverFailure};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
@@ -871,16 +871,8 @@ impl FilletSolver {
                     )
                 })?;
                 let curve = edge::curve(fillets.brep(), rail)?
-                    .ok_or_else(|| {
-                        SolidError::blend_solver(
-                            OP,
-                            SolverFailure::RailNotBSpline {
-                                fillet_geom: id,
-                                side: ii,
-                                kind: None,
-                            },
-                        )
-                    })?
+                    // a rail edge with no curve is [`FilletSetUp::RailCurve`]
+                    .ok_or_else(|| SolidError::blend(OP, BlendFailure::FilletSetUpInvalid(FilletSetUp::RailCurve)))?
                     .clone();
                 let face = fillets.fillet_edge(rail)?.original_face().ok_or_else(|| {
                     SolidError::blend_solver(OP, SolverFailure::RailWithoutFace { rail })
