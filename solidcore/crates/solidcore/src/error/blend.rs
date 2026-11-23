@@ -67,7 +67,7 @@
 //! | [`BlendFailure::PassedOn`]             | the status of the stage passed on |
 //! | [`BlendFailure::NotCertified`]         | `SM_ERR`                          |
 //! | [`BlendFailure::SectionNotProved`], [`BlendFailure::SectionDegenerate`], [`BlendFailure::SectionUnsupported`], [`BlendFailure::RadiusLawNotPositive`], [`BlendFailure::SectionInputInvalid`] | `SM_ERR` |
-//! | [`BlendFailure::Solver`]               | `SM_ERR`, `SM_ERR_NULL_POINTER` for [`SolverFailure::GnSideInputMissing`] and [`SolverFailure::ExtensionCornerMissing`] |
+//! | [`BlendFailure::Solver`]               | its cause's ([`SolverFailure`]: `SM_ERR`, or `SM_ERR_NULL_POINTER` for a missing input of the caller's, a centre line with no B-spline form, a surface cache not built, a side surface that misses its end plane and a side edge not on the rail's face) |
 //! | [`BlendFailure::WeldNotBuilt`]         | `SM_ERR`                          |
 //!
 //! **The phrase causes** ([`BlendFailure::Failed`] to [`BlendFailure::PassedOn`]) are the
@@ -867,6 +867,156 @@ pub enum SolverFailure {
         /// True for the end, false for the start.
         at_end: bool,
     },
+    /// The fillet is not of the analytic shape the routine builds (its cross-section,
+    /// its edge's curve or its faces are of another kind): a kind the routine cannot
+    /// handle ([`ErrorKind::Unsupported`]).
+    AnalyticShapeDoesNotApply {
+        /// The shape the routine builds.
+        shape: AnalyticShape,
+    },
+    /// The fillet's radius is `start` at its first section and `end` at its last: the
+    /// analytic surfaces are built for a constant radius only, a kind the routine cannot
+    /// handle ([`ErrorKind::Unsupported`]).
+    RadiusNotConstant {
+        /// The radius at the first section.
+        start: f64,
+        /// The radius at the last section.
+        end: f64,
+    },
+    /// The fillet's radius `radius` is below the zero tolerance, so its section has no
+    /// arc ([`ErrorKind::Degenerate`]).
+    RadiusVanishes {
+        /// The radius.
+        radius: f64,
+    },
+    /// The fillet's section turns through `angle` radians, too little for an arc
+    /// ([`ErrorKind::Degenerate`]).
+    SweepAngleTooSmall {
+        /// The turn, in radians.
+        angle: f64,
+    },
+    /// The fillet's section turns through `angle` radians, within the tolerance of half a
+    /// turn or past it: the analytic surfaces are built for less, a kind the routine
+    /// cannot handle ([`ErrorKind::Unsupported`]).
+    SweepAngleNearHalfTurn {
+        /// The turn, in radians.
+        angle: f64,
+    },
+    /// The ball's centre has no foot on face `side`'s quadric: an empty search
+    /// ([`ErrorKind::NotFound`]).
+    FootNotFound {
+        /// The face, 0 or 1.
+        side: usize,
+    },
+    /// The circular spine has no station in the half-plane through the point (the point is
+    /// on the axis, or the offsets' meridians do not cross there): an empty search
+    /// ([`ErrorKind::NotFound`]).
+    SpineStationNotFound,
+    /// The nearest-point search on a curve found `count` nearest points where one is
+    /// needed: an empty or ambiguous search ([`ErrorKind::NotFound`]).
+    NoSingleCurveFoot {
+        /// The number of nearest points found.
+        count: usize,
+    },
+    /// An end of the filleted edge lies on cylinder `side`'s axis, so the ball's contact
+    /// there has no direction from the axis ([`ErrorKind::Degenerate`]).
+    EdgeEndOnAxis {
+        /// The cylinder, 0 or 1.
+        side: usize,
+    },
+    /// An end of the trace lies `deviation` off the ball, farther than `tol`: not within
+    /// tolerance ([`ErrorKind::NotWithinTolerance`]).
+    TraceEndOffBall {
+        /// The distance of the trace's end from the ball.
+        deviation: f64,
+        /// The tolerance.
+        tol: f64,
+    },
+    /// The solver solves for more further values than a fillet point holds (`limit`): the
+    /// caller's solver ([`ErrorKind::InvalidInput`]).
+    TooManySolverValues {
+        /// The values a fillet point holds.
+        limit: usize,
+    },
+    /// The solver has not got both offset surfaces set: the caller's solver state
+    /// ([`ErrorKind::InvalidInput`]).
+    OffsetSurfaceMissing,
+    /// The corner's cross section does not meet the extended side surface: an empty search
+    /// ([`ErrorKind::NotFound`]).
+    CrossSectionMissesSideSurface,
+    /// The corner point does not drop onto the side edge's curve: an empty search
+    /// ([`ErrorKind::NotFound`]).
+    CornerDoesNotDropOnSideCurve,
+    /// The side surface and the plane through the side curve's end point do not meet in a
+    /// curve: an empty search ([`ErrorKind::NotFound`]); status `SM_ERR_NULL_POINTER`.
+    SideSurfaceMissesEndPlane,
+    /// Interval `index` of the roll-over rail's classification does not end (or, the last,
+    /// start) at an edge: a case the roll-over does not handle ([`ErrorKind::Unsupported`]).
+    RolloverIntervalNotAtEdge {
+        /// The interval's index.
+        index: usize,
+    },
+    /// An edge use of the caller's body has no mate: the caller's input
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    EdgeUseWithoutMate,
+    /// An edge use of the caller's body has no face: the caller's input
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    EdgeUseWithoutFace,
+    /// The fillet geometry's centre line is of a curve kind with no B-spline form: a kind
+    /// the routine cannot handle ([`ErrorKind::Unsupported`]); status `SM_ERR_NULL_POINTER`.
+    CenterLineNotBSpline {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+    },
+    /// The surface's cache could not be built: the cache's error is the failure's cause
+    /// ([`ErrorKind::Failed`]); status `SM_ERR_NULL_POINTER`.
+    SurfaceCacheNotBuilt,
+    /// The point does not drop onto offset surface `side`: an empty search
+    /// ([`ErrorKind::NotFound`]).
+    PointDoesNotDropOnSurface {
+        /// The surface, 0 or 1.
+        side: usize,
+    },
+    /// The solve for the fillet's cross section on the plane through the failure's site
+    /// found no section: an empty search ([`ErrorKind::NotFound`]).
+    CrossSectionNotFound,
+    /// `count` short intervals of the rail's classification could not be squeezed out (no
+    /// single side edge at both ends, no edge use on the rail's face, no guess on the edge,
+    /// or wider than the edge's tolerance): a case the refinement does not handle
+    /// ([`ErrorKind::Unsupported`]).
+    ShortIntervalsNotRemoved {
+        /// The number of intervals left.
+        count: usize,
+    },
+    /// The side edge has no edge use on the rail's face: an empty search
+    /// ([`ErrorKind::NotFound`]); status `SM_ERR_NULL_POINTER`.
+    SideEdgeNotOnRailFace,
+    /// The guess point does not drop onto the side edge: an empty search
+    /// ([`ErrorKind::NotFound`]).
+    GuessDoesNotDropOnSideEdge,
+    /// The rail does not cross the side edge from any guess: an empty search
+    /// ([`ErrorKind::NotFound`]).
+    RailMissesSideEdge,
+    /// The roll-over meets a side edge that rolls over tangentially, which the full
+    /// roll-over does not handle ([`ErrorKind::Unsupported`]).
+    TangentRolloverUnhandled,
+}
+
+/// The analytic shape a fillet solver routine builds
+/// ([`SolverFailure::AnalyticShapeDoesNotApply`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AnalyticShape {
+    /// A cylinder: a circular section along a line.
+    Cylinder,
+    /// A cone: a circular section along a line between faces that open.
+    Cone,
+    /// A torus: a circular (or linear) section along a circular arc.
+    Torus,
+    /// A sphere: the ball where two cylinders' axes meet.
+    Sphere,
+    /// The ball's triangle where one face's offset collapses.
+    BallTriangle,
 }
 
 /// A method of the base fillet solver ([`SolverFailure::BaseSolverMethod`]).
@@ -890,23 +1040,58 @@ impl SolverFailure {
             | Self::ClippedIsoMissesSurface { .. }
             | Self::SupportSurfacesDoNotMeet
             | Self::SupportCurveMissesSurface
-            | Self::SupportEndOffCurve { .. } => ErrorKind::NotFound,
-            Self::RailTangentZero { .. } | Self::OffsetNormalVanishes { .. } => {
-                ErrorKind::Degenerate
+            | Self::SupportEndOffCurve { .. }
+            | Self::FootNotFound { .. }
+            | Self::SpineStationNotFound
+            | Self::NoSingleCurveFoot { .. }
+            | Self::CrossSectionMissesSideSurface
+            | Self::CornerDoesNotDropOnSideCurve
+            | Self::SideSurfaceMissesEndPlane
+            | Self::PointDoesNotDropOnSurface { .. }
+            | Self::CrossSectionNotFound
+            | Self::SideEdgeNotOnRailFace
+            | Self::GuessDoesNotDropOnSideEdge
+            | Self::RailMissesSideEdge => ErrorKind::NotFound,
+            Self::RailTangentZero { .. }
+            | Self::OffsetNormalVanishes { .. }
+            | Self::RadiusVanishes { .. }
+            | Self::SweepAngleTooSmall { .. }
+            | Self::EdgeEndOnAxis { .. } => ErrorKind::Degenerate,
+            Self::PiecesTooFarApart { .. } | Self::TraceEndOffBall { .. } => {
+                ErrorKind::NotWithinTolerance
             }
-            Self::PiecesTooFarApart { .. } => ErrorKind::NotWithinTolerance,
-            Self::GeneratorBuildsNoSurface | Self::BaseSolverMethod(_) => ErrorKind::Unsupported,
-            Self::GnSideInputMissing { .. } | Self::ExtensionCornerMissing => {
-                ErrorKind::InvalidInput
-            }
-            Self::JacobianNotLoaded | Self::SupportIntersectionFailed => ErrorKind::Failed,
+            Self::GeneratorBuildsNoSurface
+            | Self::BaseSolverMethod(_)
+            | Self::AnalyticShapeDoesNotApply { .. }
+            | Self::RadiusNotConstant { .. }
+            | Self::SweepAngleNearHalfTurn { .. }
+            | Self::RolloverIntervalNotAtEdge { .. }
+            | Self::CenterLineNotBSpline { .. }
+            | Self::ShortIntervalsNotRemoved { .. }
+            | Self::TangentRolloverUnhandled => ErrorKind::Unsupported,
+            Self::GnSideInputMissing { .. }
+            | Self::ExtensionCornerMissing
+            | Self::TooManySolverValues { .. }
+            | Self::OffsetSurfaceMissing
+            | Self::EdgeUseWithoutMate
+            | Self::EdgeUseWithoutFace => ErrorKind::InvalidInput,
+            Self::JacobianNotLoaded
+            | Self::SupportIntersectionFailed
+            | Self::SurfaceCacheNotBuilt => ErrorKind::Failed,
         }
     }
 
     /// The status the C++ reports unless the site says otherwise (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::GnSideInputMissing { .. } | Self::ExtensionCornerMissing => SM_ERR_NULL_POINTER,
+            Self::GnSideInputMissing { .. }
+            | Self::ExtensionCornerMissing
+            | Self::EdgeUseWithoutMate
+            | Self::EdgeUseWithoutFace
+            | Self::CenterLineNotBSpline { .. }
+            | Self::SurfaceCacheNotBuilt
+            | Self::SideSurfaceMissesEndPlane
+            | Self::SideEdgeNotOnRailFace => SM_ERR_NULL_POINTER,
             Self::CrossSectionPointNotFound { .. }
             | Self::RailTangentZero { .. }
             | Self::PiecesTooFarApart { .. }
@@ -918,7 +1103,28 @@ impl SolverFailure {
             | Self::SupportIntersectionFailed
             | Self::SupportSurfacesDoNotMeet
             | Self::SupportCurveMissesSurface
-            | Self::SupportEndOffCurve { .. } => SM_ERR,
+            | Self::SupportEndOffCurve { .. }
+            | Self::AnalyticShapeDoesNotApply { .. }
+            | Self::RadiusNotConstant { .. }
+            | Self::RadiusVanishes { .. }
+            | Self::SweepAngleTooSmall { .. }
+            | Self::SweepAngleNearHalfTurn { .. }
+            | Self::FootNotFound { .. }
+            | Self::SpineStationNotFound
+            | Self::NoSingleCurveFoot { .. }
+            | Self::EdgeEndOnAxis { .. }
+            | Self::TraceEndOffBall { .. }
+            | Self::TooManySolverValues { .. }
+            | Self::OffsetSurfaceMissing
+            | Self::CrossSectionMissesSideSurface
+            | Self::CornerDoesNotDropOnSideCurve
+            | Self::RolloverIntervalNotAtEdge { .. }
+            | Self::PointDoesNotDropOnSurface { .. }
+            | Self::CrossSectionNotFound
+            | Self::ShortIntervalsNotRemoved { .. }
+            | Self::GuessDoesNotDropOnSideEdge
+            | Self::RailMissesSideEdge
+            | Self::TangentRolloverUnhandled => SM_ERR,
         }
     }
 }
@@ -975,6 +1181,94 @@ impl core::fmt::Display for SolverFailure {
                 "the support edge's {} does not drop onto its curve",
                 end(*at_end)
             ),
+            Self::AnalyticShapeDoesNotApply { shape } => {
+                write!(f, "the fillet is not of the analytic shape {shape:?}")
+            }
+            Self::RadiusNotConstant { start, end } => write!(
+                f,
+                "the fillet's radius is {start} at its start and {end} at its end, not constant"
+            ),
+            Self::RadiusVanishes { radius } => {
+                write!(
+                    f,
+                    "the fillet's radius {radius} is below the zero tolerance"
+                )
+            }
+            Self::SweepAngleTooSmall { angle } => {
+                write!(f, "the fillet's section turns through only {angle} radians")
+            }
+            Self::SweepAngleNearHalfTurn { angle } => write!(
+                f,
+                "the fillet's section turns through {angle} radians, about half a turn or more"
+            ),
+            Self::FootNotFound { side } => {
+                write!(f, "the ball's centre has no foot on face {side}'s quadric")
+            }
+            Self::SpineStationNotFound => {
+                f.write_str("the circular spine has no station in the point's half-plane")
+            }
+            Self::NoSingleCurveFoot { count } => write!(
+                f,
+                "the nearest-point search on the curve found {count} points where one is needed"
+            ),
+            Self::EdgeEndOnAxis { side } => {
+                write!(
+                    f,
+                    "an end of the filleted edge lies on cylinder {side}'s axis"
+                )
+            }
+            Self::TraceEndOffBall { deviation, tol } => write!(
+                f,
+                "an end of the trace lies {deviation} off the ball, farther than {tol}"
+            ),
+            Self::TooManySolverValues { limit } => write!(
+                f,
+                "the solver solves for more further values than a fillet point holds ({limit})"
+            ),
+            Self::OffsetSurfaceMissing => {
+                f.write_str("the solver has not got both offset surfaces set")
+            }
+            Self::CrossSectionMissesSideSurface => {
+                f.write_str("the corner's cross section does not meet the extended side surface")
+            }
+            Self::CornerDoesNotDropOnSideCurve => {
+                f.write_str("the corner point does not drop onto the side edge's curve")
+            }
+            Self::SideSurfaceMissesEndPlane => f.write_str(
+                "the side surface and the plane through the side curve's end do not meet",
+            ),
+            Self::RolloverIntervalNotAtEdge { index } => write!(
+                f,
+                "interval {index} of the roll-over rail's classification is not bounded by an edge"
+            ),
+            Self::EdgeUseWithoutMate => f.write_str("an edge use of the body has no mate"),
+            Self::EdgeUseWithoutFace => f.write_str("an edge use of the body has no face"),
+            Self::CenterLineNotBSpline { fillet_geom } => write!(
+                f,
+                "the centre line of fillet geometry {} has no B-spline form",
+                fillet_geom.0
+            ),
+            Self::SurfaceCacheNotBuilt => f.write_str("the surface's cache could not be built"),
+            Self::PointDoesNotDropOnSurface { side } => {
+                write!(f, "the point does not drop onto offset surface {side}")
+            }
+            Self::CrossSectionNotFound => {
+                f.write_str("no cross section of the fillet was found on the plane")
+            }
+            Self::ShortIntervalsNotRemoved { count } => write!(
+                f,
+                "{count} short intervals of the rail's classification could not be removed"
+            ),
+            Self::SideEdgeNotOnRailFace => {
+                f.write_str("the side edge has no edge use on the rail's face")
+            }
+            Self::GuessDoesNotDropOnSideEdge => {
+                f.write_str("the guess point does not drop onto the side edge")
+            }
+            Self::RailMissesSideEdge => f.write_str("the rail does not cross the side edge"),
+            Self::TangentRolloverUnhandled => {
+                f.write_str("a side edge rolls over tangentially, which is not handled")
+            }
         }
     }
 }
