@@ -326,6 +326,8 @@ pub struct ViewportBuilder {
     // windows:
     pub drag_and_drop: Option<bool>,
     pub taskbar: Option<bool>,
+    /// Whether the native WGPU backend makes this an owned window of the root window on Windows.
+    pub windows_owned_by_root: Option<bool>,
 
     pub close_button: Option<bool>,
     pub minimize_button: Option<bool>,
@@ -524,6 +526,13 @@ impl ViewportBuilder {
     #[inline]
     pub fn with_taskbar(mut self, show: bool) -> Self {
         self.taskbar = Some(show);
+        self
+    }
+
+    /// On Windows, keep this native WGPU viewport with the root window as an owned window.
+    #[inline]
+    pub fn with_windows_owned_by_root(mut self, owned: bool) -> Self {
+        self.windows_owned_by_root = Some(owned);
         self
     }
 
@@ -747,6 +756,7 @@ impl ViewportBuilder {
             window_level: new_window_level,
             mouse_passthrough: new_mouse_passthrough,
             taskbar: new_taskbar,
+            windows_owned_by_root: new_windows_owned_by_root,
             window_type: new_window_type,
             override_redirect: new_override_redirect,
             monitor: new_monitor,
@@ -921,6 +931,13 @@ impl ViewportBuilder {
         if new_taskbar.is_some() && self.taskbar != new_taskbar {
             self.taskbar = new_taskbar;
             recreate_window = true;
+        }
+
+        if new_windows_owned_by_root.is_some()
+            && self.windows_owned_by_root != new_windows_owned_by_root
+        {
+            self.windows_owned_by_root = new_windows_owned_by_root;
+            recreate_window |= cfg!(target_os = "windows");
         }
 
         if new_fullsize_content_view.is_some()

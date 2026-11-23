@@ -14243,6 +14243,7 @@ fn desktop_panel_windows_reserve_ids_only_after_commit_and_fit_the_current_monit
     let origin = builder.position.unwrap();
     assert!(monitor.contains_rect(egui::Rect::from_min_size((origin.to_vec2() * 2.0).to_pos2(), size * 2.0)));
     assert_eq!(builder.min_inner_size, Some(egui::vec2(min.width, min.height)));
+    assert_eq!(builder.windows_owned_by_root, cfg!(target_os = "windows").then_some(true));
 
     adapter.commit(&[HostEffect::ReleaseNative { host: host.clone() }]);
     assert!(adapter.viewport_id(&host).is_none());

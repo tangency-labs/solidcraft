@@ -2229,6 +2229,19 @@ pub fn create_window(
     event_loop: &ActiveEventLoop,
     viewport_builder: &ViewportBuilder,
 ) -> Result<Window, winit::error::OsError> {
+    create_window_with_owner(egui_ctx, event_loop, viewport_builder, None)
+}
+
+/// Creates a window with an optional native owner on Windows.
+///
+/// # Errors
+/// Returns an error if the native window cannot be created.
+pub fn create_window_with_owner(
+    egui_ctx: &egui::Context,
+    event_loop: &ActiveEventLoop,
+    viewport_builder: &ViewportBuilder,
+    owner: Option<&Window>,
+) -> Result<Window, winit::error::OsError> {
     profiling::function_scope!();
 
     let window_attributes = apply_monitor_to_window_attributes(
@@ -2236,6 +2249,22 @@ pub fn create_window(
         viewport_builder,
         event_loop,
     );
+
+    #[cfg(target_os = "windows")]
+    let window_attributes = {
+        use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+        use winit::platform::windows::WindowAttributesExtWindows as _;
+
+        if let Some(owner) = owner
+            && let Ok(RawWindowHandle::Win32(handle)) = owner.window_handle().map(|h| h.as_raw())
+        {
+            window_attributes.with_owner_window(handle.hwnd.get())
+        } else {
+            window_attributes
+        }
+    };
+    #[cfg(not(target_os = "windows"))]
+    let _ = owner;
 
     let window = event_loop.create_window(window_attributes)?;
     apply_viewport_builder_to_window(egui_ctx, &window, viewport_builder);
@@ -2308,6 +2337,7 @@ pub fn create_winit_window_attributes(
         // Windows:
         drag_and_drop: _drag_and_drop,
         taskbar: _taskbar,
+        windows_owned_by_root: _, // Applied during window creation, with the live owner window.
 
         // wayland:
         app_id: _app_id,

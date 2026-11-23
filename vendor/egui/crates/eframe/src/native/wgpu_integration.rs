@@ -168,6 +168,7 @@ impl<'app> WgpuWinitApp<'app> {
             ..
         } = &mut *shared;
 
+        let root_window = windows_root_window(viewports);
         for viewport in viewports.values_mut() {
             viewport.initialize_window(
                 event_loop,
@@ -175,6 +176,7 @@ impl<'app> WgpuWinitApp<'app> {
                 viewport_from_window,
                 painter,
                 *clipboard_shortcuts,
+                root_window.as_deref(),
             );
         }
     }
@@ -204,6 +206,7 @@ impl<'app> WgpuWinitApp<'app> {
             viewport_from_window,
             painter,
             *clipboard_shortcuts,
+            None,
         );
     }
 
@@ -1131,6 +1134,7 @@ impl Viewport {
         windows_id: &mut HashMap<WindowId, ViewportId>,
         painter: &mut egui_wgpu::winit::Painter,
         clipboard_shortcuts: bool,
+        root_window: Option<&Window>,
     ) {
         if self.window.is_some() {
             return; // we already have one
@@ -1140,7 +1144,20 @@ impl Viewport {
 
         let viewport_id = self.ids.this;
 
-        match egui_winit::create_window(egui_ctx, event_loop, &self.builder) {
+        let owner = if cfg!(target_os = "windows")
+            && viewport_id != ViewportId::ROOT
+            && self.builder.windows_owned_by_root == Some(true)
+        {
+            // Keep this viewport pending until we can create it with its owner.
+            let Some(root_window) = root_window else {
+                return;
+            };
+            Some(root_window)
+        } else {
+            None
+        };
+
+        match egui_winit::create_window_with_owner(egui_ctx, event_loop, &self.builder, owner) {
             Ok(window) => {
                 windows_id.insert(window.id(), viewport_id);
 
@@ -1214,6 +1231,14 @@ fn is_viewport_or_descendant_visible(viewports: &Viewports, viewport_id: Viewpor
     })
 }
 
+fn windows_root_window(viewports: &Viewports) -> Option<Arc<Window>> {
+    if cfg!(target_os = "windows") {
+        viewports.get(&ViewportId::ROOT)?.window.clone()
+    } else {
+        None
+    }
+}
+
 fn render_immediate_viewport(
     beginning: Instant,
     shared: &RefCell<SharedState>,
@@ -1237,6 +1262,7 @@ fn render_immediate_viewport(
             ..
         } = &mut *shared.borrow_mut();
 
+        let root_window = windows_root_window(viewports);
         let viewport = initialize_or_update_viewport(
             viewports,
             ids,
@@ -1253,6 +1279,7 @@ fn render_immediate_viewport(
                     viewport_from_window,
                     painter,
                     *clipboard_shortcuts,
+                    root_window.as_deref(),
                 );
             });
         }
