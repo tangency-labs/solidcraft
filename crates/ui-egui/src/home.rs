@@ -1134,7 +1134,7 @@ fn recent_time(app: &SolveApp, path: &str) -> String {
     recent_time_at(app, *time, now)
 }
 
-fn recent_time_at(app: &SolveApp, time: u64, now: u64) -> String {
+pub(crate) fn recent_time_at(app: &SolveApp, time: u64, now: u64) -> String {
     let seconds = now.saturating_sub(time);
     if seconds < 60 {
         return app.tr("home.opened_just_now").to_string();
