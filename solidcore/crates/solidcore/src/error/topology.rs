@@ -785,9 +785,12 @@ pub enum TopologyFailure {
         /// The tolerance it exceeds.
         tolerance: f64,
     },
-    /// The transform's matrix could not be decomposed; the error that stopped it is the cause.
-    /// Class `failed`; whether it is a defect or a refusal is its cause's.
-    MatrixNotDecomposed,
+    /// The transform's matrix could not be decomposed; the error that stopped it is the cause,
+    /// and its class is the cause's.
+    MatrixNotDecomposed {
+        /// The class of the error that stopped it, the cause.
+        class: ErrorKind,
+    },
     /// A group of faces the merge joined across removed edges left other than one face. Class
     /// `failed`.
     MergedGroupNotOneFace,
@@ -946,7 +949,7 @@ impl TopologyFailure {
             | Self::VertexuseWithoutVertex
             | Self::CurveNotOwnedByEdge
             | Self::EdgeEndOffVertex { .. }
-            | Self::MatrixNotDecomposed
+            | Self::MatrixNotDecomposed { .. }
             | Self::MergedGroupNotOneFace
             | Self::SectionPlaneNotMade => SM_ERR,
             // upstream's `TRUE`: the repair's note, not an error status
@@ -1132,8 +1135,10 @@ impl TopologyFailure {
             | Self::CurvesNotJoined
             | Self::FaceStitchFailed
             | Self::BlendRecordNotProved => ErrorKind::Failed,
-            Self::NoPlaneThroughCurves { class } | Self::FaceNotMade { class } => *class,
             Self::EdgeEndOffVertex { .. } => ErrorKind::NotWithinTolerance,
+            Self::NoPlaneThroughCurves { class }
+            | Self::FaceNotMade { class }
+            | Self::MatrixNotDecomposed { class } => *class,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -1486,7 +1491,7 @@ impl core::fmt::Display for TopologyFailure {
                 f,
                 "an end of the edge's curve is {distance} from its vertex, past {tolerance}"
             ),
-            Self::MatrixNotDecomposed => {
+            Self::MatrixNotDecomposed { .. } => {
                 f.write_str("the transform matrix could not be decomposed")
             }
             Self::MergedGroupNotOneFace => {
@@ -2467,7 +2472,14 @@ mod tests {
                 SM_ERR,
                 K::NotWithinTolerance,
             ),
-            (TopologyFailure::MatrixNotDecomposed, SM_ERR, K::Failed),
+            // the class is the cause's
+            (
+                TopologyFailure::MatrixNotDecomposed {
+                    class: K::InvalidInput,
+                },
+                SM_ERR,
+                K::InvalidInput,
+            ),
             (TopologyFailure::MergedGroupNotOneFace, SM_ERR, K::Failed),
             (TopologyFailure::SectionPlaneNotMade, SM_ERR, K::Failed),
         ];

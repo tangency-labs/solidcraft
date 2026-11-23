@@ -483,9 +483,11 @@ pub fn transform_matrix_with_notifications(
         Ok(r) => r,
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(e) => {
-            return Err(Failure::new(OP, TopologyFailure::MatrixNotDecomposed)
-                .caused_by(e)
-                .into_error())
+            return Err(
+                Failure::new(OP, TopologyFailure::MatrixNotDecomposed { class: e.kind() })
+                    .caused_by(e)
+                    .into_error(),
+            )
         }
     };
     ut.transpose()?;
@@ -1018,6 +1020,36 @@ mod tests {
         ];
         let r = transform_matrix(&mut k, &mut b, &m, true);
         assert!(zero_length(&r), "{r:?}");
+        assert_eq!(points(&b), before);
+        assert_eq!(counts(&b), [6, 12, 8]);
+    }
+
+    /// A matrix the decomposition cannot take (a NaN entry) fails as
+    /// `MatrixNotDecomposed`, keeps the decomposition's error as its cause and takes its
+    /// class from it, with status `SM_ERR`; the box is left as it was (review of #21132).
+    #[test]
+    fn a_matrix_the_decomposition_refuses_keeps_its_error_as_the_cause() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Vec3::ZERO, 2.0, 3.0, 4.0).unwrap();
+        let before = points(&b);
+        let m = [
+            [f64::NAN, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        let e = transform_matrix(&mut k, &mut b, &m, true).unwrap_err();
+        let cause = e.cause().expect("the decomposition's error is the cause");
+        assert_eq!(cause.operation(), "geom::matrix::Matrix::sv_decompose");
+        assert_eq!(cause.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::MatrixNotDecomposed {
+                class: crate::error::ErrorKind::InvalidInput
+            })
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(points(&b), before);
         assert_eq!(counts(&b), [6, 12, 8]);
     }
