@@ -1514,7 +1514,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     },
                     ..crate::kernel::KernelOptions::default()
                 });
-                tk.rng = k.rng.clone();
+                tk.seed = k.seed;
                 tk.cancel.clone_from(&k.cancel);
                 let mut trim_ivl = edge_ivl;
                 let crv = edge_curve_mut(OP, target, edge_id)?;

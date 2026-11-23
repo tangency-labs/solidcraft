@@ -57,7 +57,6 @@ pub(in crate::error) const STAGE: Scan = Scan {
 const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/blend_setback.rs", 3),
     ("solidcore/src/blend/fillet_corner/p1.rs", 6),
-    ("solidcore/src/blend/fillet_exact/rational.rs", 2),
     ("solidcore/src/blend/fillet_executive/session.rs", 5),
     ("solidcore/src/blend/fillet_executive/session/trim_at_creases.rs", 4),
     ("solidcore/src/blend/fillet_geom/p1.rs", 62),
