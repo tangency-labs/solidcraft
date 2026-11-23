@@ -14,6 +14,19 @@ pub(crate) const WHOLE_MAX_BOUNDARY_CURVES: usize = 512;
 pub(crate) const WHOLE_MAX_TOTAL_CURVES: usize = 20_000;
 pub(crate) const WHOLE_MAX_ID_BYTES: usize = 512;
 
+/// The most curves one loop of a whole-source profile reference names: as many as a sketch read
+/// from a design may hold, so the outline of a long line of script text or its offset can be
+/// picked (it used to stop at 512).
+pub(crate) const MAX_WHOLE_LOOP_CURVES: usize = solidcraft_sketch::limits::CEILING_POINTS;
+/// The most curves all loops of one whole-source reference name together: a curve bounds at
+/// most the regions on its two sides, so twice what one sketch holds.
+pub(crate) const MAX_WHOLE_CURVES: usize = 2 * solidcraft_sketch::limits::CEILING_POINTS;
+
+/// What a whole-source profile pick past [`MAX_WHOLE_LOOP_CURVES`] or [`MAX_WHOLE_CURVES`]
+/// says. The interface translates it by this exact text.
+pub const WHOLE_PROFILE_TOO_MANY_CURVES: &str =
+    "the picked profiles have too many curves to keep track of; pick fewer profiles at once, or draw their outlines with fewer curves";
+
 fn whole_boundary(profile: &solidcraft_sketch::Profile) -> Option<WholeProfileBoundary> {
     let (outer, holes) = profile.whole_curve_boundaries()?;
     Some(WholeProfileBoundary { outer, holes })
@@ -36,9 +49,12 @@ pub(crate) fn validate_whole(profiles: &[WholeProfileBoundary]) -> Result<()> {
         // both are holes of the profile around the island (#17613). No hole shares the outer's.
         let mut outer = BTreeSet::new();
         for (hole, boundary) in std::iter::once(&profile.outer).chain(&profile.holes).enumerate() {
-            total += boundary.len();
-            if boundary.is_empty() || boundary.len() > WHOLE_MAX_BOUNDARY_CURVES || total > WHOLE_MAX_TOTAL_CURVES {
-                return Err(DocError::Invalid("whole-source boundary exceeds its identity budget".into()));
+            total = total.saturating_add(boundary.len());
+            if boundary.is_empty() {
+                return Err(DocError::Invalid("whole-source boundary needs canonical disjoint curve identities".into()));
+            }
+            if boundary.len() > MAX_WHOLE_LOOP_CURVES || total > MAX_WHOLE_CURVES {
+                return Err(DocError::Invalid(WHOLE_PROFILE_TOO_MANY_CURVES.into()));
             }
             let mut previous = None;
             for curve in boundary {
@@ -90,6 +106,41 @@ fn same_ids(a: &[String], b: &[String]) -> bool {
     a.sort();
     b.sort();
     a == b
+}
+
+/// A migrated whole projection names its source's entire single loop, independently of the
+/// number and kinds of curves used to represent it. Complete graph coverage certifies the
+/// regenerated region; a cut loop, holes or multiple loops cannot stand for the saved outline.
+/// No mesh, nearest region or shared-identifier score participates in this resolution.
+fn projected_boundary(ss: &SolvedSketch, curves: &[String]) -> Option<Result<usize>> {
+    use solidcraft_sketch::{CurvePick, LinkKind, LinkSource};
+
+    let mut links = ss.sketch.links.iter().filter(|link| !link.profile_boundary.is_empty() && same_ids(curves, &link.profile_boundary));
+    let link = links.next()?;
+    let missing = || crate::curve_pick_error(CurvePick::Missing, curves, &ss.name);
+    if links.next().is_some() || link.lost || link.kind != LinkKind::Project || !matches!(link.source, LinkSource::Body { .. }) {
+        return Some(Err(missing()));
+    }
+    let output: Vec<String> =
+        ss.sketch.curves.iter().filter(|curve| curve.link.as_deref() == Some(link.id.as_str())).map(|curve| curve.id.clone()).collect();
+    if output.is_empty() || output.len() > solidcraft_sketch::MAX_LINK_ENTITIES {
+        return Some(Err(missing()));
+    }
+    // Cached profiles do not serialize their complete-coverage certificates. Re-find them
+    // from the exact sketch curves, and refuse an incomplete search rather than guessing.
+    let search = solidcraft_sketch::find_profiles_checked(&ss.sketch);
+    if search.incomplete {
+        return Some(Err(missing()));
+    }
+    let mut matches = search.profiles.iter().filter_map(|profile| {
+        let (outer, holes) = profile.whole_curve_boundaries()?;
+        (holes.is_empty() && same_ids(&outer, &output)).then_some(outer)
+    });
+    let Some(boundary) = matches.next() else { return Some(Err(missing())) };
+    if matches.next().is_some() {
+        return Some(Err(missing()));
+    }
+    Some(solidcraft_sketch::profile_by_curves(&ss.profiles, &boundary).map_err(|error| crate::curve_pick_error(error, curves, &ss.name)))
 }
 
 fn unique_profile(ss: &SolvedSketch, curves: &[String]) -> Result<usize> {
@@ -280,6 +331,10 @@ fn selection_indices(ss: &SolvedSketch, selection: &ProfileSel, mut notes: Optio
             let boundaries = reserved_boundaries(ss)?;
             let mut indices = Vec::with_capacity(loops.len());
             for curves in loops {
+                if let Some(index) = projected_boundary(ss, curves) {
+                    indices.push(index?);
+                    continue;
+                }
                 let mut key = curves.clone();
                 key.sort();
                 if let Some(id) = boundaries.get(&key) {
@@ -512,6 +567,7 @@ mod tests {
                         direction: crate::Direction::Positive,
                         distance2: None,
                         start_offset: None,
+                        symmetric_offset: false,
                         through_all: false,
                         second_follows_first: false,
                         taper: None,
@@ -612,8 +668,10 @@ mod tests {
         }
         let exceeded = validate_whole(&[profile(MAX_MODEL_WHOLE_HOLES + 1, 4)]).unwrap_err().to_string();
         assert!(exceeded.contains("1024 holes"), "{exceeded}");
-        let too_many_curves = validate_whole(&[profile(MAX_MODEL_WHOLE_HOLES, 20)]).unwrap_err().to_string();
-        assert!(too_many_curves.contains("identity budget"), "{too_many_curves}");
+        assert!(validate_whole(&[profile(MAX_MODEL_WHOLE_HOLES, 20)]).is_ok(), "20 curves per hole is far under the curve budget");
+        let edges = MAX_WHOLE_CURVES / MAX_MODEL_WHOLE_HOLES + 1;
+        let too_many_curves = validate_whole(&[profile(MAX_MODEL_WHOLE_HOLES, edges)]).unwrap_err().to_string();
+        assert_eq!(too_many_curves, DocError::Invalid(WHOLE_PROFILE_TOO_MANY_CURVES.into()).to_string());
     }
 
     #[test]
@@ -633,6 +691,45 @@ mod tests {
             assert_eq!(profile_selection_indices(&ss, &loaded).unwrap(), vec![0]);
             assert_eq!(crate::select_profiles(&ss, &loaded).unwrap().len(), 1);
         }
+    }
+
+    #[test]
+    fn a_whole_source_profile_with_hundreds_of_curves_can_be_picked() {
+        // The outline of a line of script text, or its offset, has hundreds of curves around one
+        // profile. Picking it used to fail with "whole-source boundary exceeds its identity
+        // budget" past 512 curves.
+        let mut sketch = Sketch::new();
+        let sides = 600;
+        let points: Vec<_> = (0..sides)
+            .map(|index| {
+                let angle = std::f64::consts::TAU * index as f64 / sides as f64;
+                sketch.add_point(Vec2::new(50. * angle.cos(), 50. * angle.sin()), None).unwrap()
+            })
+            .collect();
+        for index in 0..sides {
+            sketch.add_line_pts(points[index], points[(index + 1) % sides], Some(&format!("side{index:03}"))).unwrap();
+        }
+        let report = solve(&mut sketch);
+        let profiles = find_profiles(&sketch);
+        let ss = SolvedSketch {
+            feature: 1,
+            name: "S".into(),
+            plane: Plane::XY,
+            sketch,
+            report,
+            profiles,
+            profiles_3d: Vec::new(),
+            ends: Default::default(),
+        };
+        assert_eq!(ss.profiles.len(), 1);
+        let (outer, holes) = ss.profiles[0].whole_curve_boundaries().unwrap();
+        assert_eq!(outer.len(), sides);
+        let picked = ProfileSel::WholeBoundaries { profiles: vec![WholeProfileBoundary { outer, holes }] };
+        assert_eq!(profile_selection_indices(&ss, &picked).unwrap(), vec![0]);
+        // Past what a sketch may hold, the refusal says what to do in words the interface translates.
+        let huge = (0..=MAX_WHOLE_LOOP_CURVES).map(|index| format!("c{index:06}")).collect::<Vec<_>>();
+        let refused = ProfileSel::WholeBoundaries { profiles: vec![WholeProfileBoundary { outer: huge, holes: Vec::new() }] };
+        assert_eq!(profile_selection_indices(&ss, &refused).unwrap_err().to_string(), WHOLE_PROFILE_TOO_MANY_CURVES);
     }
 
     fn solved_square(extra: &[(&str, [f64; 4])]) -> SolvedSketch {
@@ -730,6 +827,7 @@ mod tests {
                         direction: crate::Direction::Positive,
                         distance2: None,
                         start_offset: None,
+                        symmetric_offset: false,
                         through_all: false,
                         second_follows_first: false,
                         taper: None,

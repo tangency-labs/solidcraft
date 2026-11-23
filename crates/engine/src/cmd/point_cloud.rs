@@ -1,5 +1,5 @@
-//! Point clouds (#5151): scanned points (PLY, PCD, XYZ, PTS or ASC files) kept in the design as a
-//! reference to model from. They are drawn as points and never become bodies.
+//! Point clouds (#5151): scanned points (PLY, PCD, E57, XYZ, PTS or ASC files) kept in the design
+//! as a reference to model from. They are drawn as points and never become bodies.
 
 use serde_json::Value;
 use solidcraft_doc::Mat;
@@ -24,12 +24,12 @@ const DELETE_CONTRACT: TypedContract<PointCloudDeleteParams> = TypedContract::ne
 const LIST_CONTRACT: TypedContract<PointCloudListParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("pointcloud.insert", "Insert Point Cloud", crate::checked!("pointcloud.insert", insert))
+    CommandSpec::new("pointcloud.insert", "Insert Point Cloud", crate::checked!("pointcloud.insert", insert)).begins_edit()
         .at("SOLID", "INSERT")
         .icon("import")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<PointCloudInsertResult>)
-        .params("path: .ply, .pcd, .xyz, .pts or .asc file (its points join the design as a point cloud: drawn as points, never a body; a PLY's red, green and blue or a PCD's packed rgb are its colours, the other properties of a PLY or PCD can colour and filter it; a PLY's edge and face elements become segments and triangles, a segment with width and height properties drawn as a bead) → cloud, name, points, segments, triangles, source_points, bounds, warnings; name?; units?: mm|cm|m|in|ft (the file's length unit, default mm); max_points?: most points kept (default 5000000, at most 20000000; a larger file is thinned evenly); center?: bool (move the cloud so the middle of its base sits at the origin); point_size?: pixels (0.5…16, default 2); color_by?: file|single|height or a property's name (the file's colours, the default; one colour; a ramp by height, blue low to red high; or by any property of the file, a ramp over its values or a palette for whole numbers); color?: [r, g, b] 0…1 (the single colour; given alone it sets color_by single, null sets color_by file); color_range?: [low, high] the ramp runs between (design Z in mm by height), or null for the automatic range (by height all but the lowest and highest 2 % of the points; by a property the values it takes over what the filters keep); height_range?: the same as color_range; filters?: [{property, range: [low, high]} or {property, values: [whole numbers]} for a property with named values], or null (only what every filter keeps is shown)"),
+        .params("path: .ply, .pcd, .e57, .xyz, .pts or .asc file (its points join the design as a point cloud: drawn as points, never a body; a PLY's red, green and blue, a PCD's packed rgb or an E57's colours are its colours, the other properties of a PLY or PCD and an E57's intensity can colour and filter it; every scan of an E57 file is read, each moved by its pose; a PLY's edge and face elements become segments and triangles, a segment with width and height properties drawn as a bead) → cloud, name, points, segments, triangles, source_points, bounds, warnings; name?; units?: mm|cm|m|in|ft (the file's length unit, default mm, m for an E57 file); max_points?: most points kept (default 5000000, at most 20000000; a larger file is thinned evenly); center?: bool (move the cloud so the middle of its base sits at the origin); point_size?: pixels (0.5…16, default 2); color_by?: file|single|height or a property's name (the file's colours, the default; one colour; a ramp by height, blue low to red high; or by any property of the file, a ramp over its values or a palette for whole numbers); color?: [r, g, b] 0…1 (the single colour; given alone it sets color_by single, null sets color_by file); color_range?: [low, high] the ramp runs between (design Z in mm by height), or null for the automatic range (by height all but the lowest and highest 2 % of the points; by a property the values it takes over what the filters keep); height_range?: the same as color_range; filters?: [{property, range: [low, high]} or {property, values: [whole numbers]} for a property with named values], or null (only what every filter keeps is shown)"),
     CommandSpec::new("pointcloud.edit", "Edit Point Cloud", crate::checked!("pointcloud.edit", edit))
         .icon("edit")
         .contract(&EDIT_CONTRACT)
@@ -221,9 +221,11 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "pointcloud.insert";
     let path = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
     if !solidcraft_io::is_point_cloud_path(path) {
-        return Err(bad(cmd, "only PLY, PCD, XYZ, PTS and ASC files (.ply, .pcd, .xyz, .pts, .asc) can be inserted as point clouds"));
+        return Err(bad(cmd, "only PLY, PCD, E57, XYZ, PTS and ASC files (.ply, .pcd, .e57, .xyz, .pts, .asc) can be inserted as point clouds"));
     }
-    let (units, scale) = units_of(p, cmd)?.unwrap_or(("mm", 1.0));
+    // An E57 file is always in metres; the others say nothing, so millimetres unless told.
+    let default_units = if path.to_ascii_lowercase().ends_with(".e57") { ("m", 1000.0) } else { ("mm", 1.0) };
+    let (units, scale) = units_of(p, cmd)?.unwrap_or(default_units);
     let max_points = match p.get("max_points") {
         None | Some(Value::Null) => solidcraft_io::DEFAULT_MAX_POINTS,
         Some(v) => v
@@ -543,8 +545,8 @@ mod tests {
         s.execute("pointcloud.edit", &json!({"cloud": id, "visible": false})).unwrap();
         s.execute("edit.undo", &json!({})).unwrap();
         assert!(s.doc.point_clouds[0].visible);
-        let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
-        assert_eq!(back.point_clouds, s.doc.point_clouds);
+        // A plain JSON design can't hold the points: saving one is refused, naming them.
+        assert!(solidcraft_io::write_design(&s.doc).unwrap_err().to_string().contains("point clouds"));
         let file = solidcraft_io::write_design_container(&s.doc).unwrap();
         let opened = solidcraft_io::read_design(&file).unwrap();
         assert_eq!(opened.point_clouds, s.doc.point_clouds);
@@ -801,9 +803,88 @@ mod tests {
             opened.execute("doc.open", &json!({"path": path})).unwrap();
             assert_eq!(opened.doc.point_clouds.len(), 1, "{}", path.display());
         }
-        // An E57 file is refused by its name, and the message names the files that are read.
-        let refused = s.execute("pointcloud.insert", &json!({"path": d.join("scan.e57")})).unwrap_err().to_string();
-        assert!(refused.contains(".pcd") && refused.contains(".asc"), "{refused}");
+        // A LAS file is refused by its name, and the message names the files that are read.
+        let refused = s.execute("pointcloud.insert", &json!({"path": d.join("scan.las")})).unwrap_err().to_string();
+        assert!(refused.contains(".pcd") && refused.contains(".e57") && refused.contains(".asc"), "{refused}");
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    /// An E57 file holding one scan of `points` (metres, as doubles), on one page of 1024 bytes.
+    fn e57(points: &[[f64; 3]]) -> Vec<u8> {
+        let crc = |data: &[u8]| {
+            !data.iter().fold(!0u32, |mut c, &b| {
+                c ^= u32::from(b);
+                for _ in 0..8 {
+                    c = if c & 1 == 1 { (c >> 1) ^ 0x82F6_3B78 } else { c >> 1 };
+                }
+                c
+            })
+        };
+        // One packet: three runs, the x, the y and the z of every point.
+        let mut packet = vec![1u8, 0, 0, 0, 3, 0];
+        for _ in 0..3 {
+            packet.extend(((points.len() * 8) as u16).to_le_bytes());
+        }
+        for k in 0..3 {
+            points.iter().for_each(|p| packet.extend(p[k].to_le_bytes()));
+        }
+        while packet.len() % 4 != 0 {
+            packet.push(0);
+        }
+        let n = (packet.len() - 1) as u16;
+        packet[2..4].copy_from_slice(&n.to_le_bytes());
+        // The header, then the section of points (at 48, its packet at 80), then the XML.
+        let mut l = vec![0u8; 48];
+        l.extend([1, 0, 0, 0, 0, 0, 0, 0]);
+        l.extend((32 + packet.len() as u64).to_le_bytes());
+        l.extend(80u64.to_le_bytes());
+        l.extend(0u64.to_le_bytes());
+        l.extend(packet);
+        let xml = format!(
+            "<e57Root type=\"Structure\"><data3D type=\"Vector\"><vectorChild type=\"Structure\"><points type=\"CompressedVector\" \
+             fileOffset=\"48\" recordCount=\"{}\"><prototype type=\"Structure\"><cartesianX type=\"Float\"/><cartesianY type=\"Float\"/>\
+             <cartesianZ type=\"Float\"/></prototype></points></vectorChild></data3D></e57Root>",
+            points.len()
+        );
+        let at = l.len() as u64;
+        l.extend(xml.as_bytes());
+        assert!(l.len() <= 1020, "the test file fits on one page");
+        l.resize(1020, 0);
+        let mut h = b"ASTM-E57".to_vec();
+        h.extend(1u32.to_le_bytes());
+        h.extend(0u32.to_le_bytes());
+        h.extend(1024u64.to_le_bytes());
+        h.extend(at.to_le_bytes());
+        h.extend((xml.len() as u64).to_le_bytes());
+        h.extend(1024u64.to_le_bytes());
+        l[..48].copy_from_slice(&h);
+        let sum = crc(&l);
+        l.extend(sum.to_be_bytes());
+        l
+    }
+
+    #[test]
+    fn an_e57_scan_is_read_in_metres_unless_another_unit_is_given() {
+        let d = dir("e57");
+        let path = d.join("site.e57");
+        std::fs::write(&path, e57(&[[0.0, 0.0, 0.0], [1.5, 2.0, -0.25]])).unwrap();
+        let mut s = Session::default();
+        let r = s.execute("pointcloud.insert", &json!({"path": path})).unwrap();
+        assert_eq!((r["name"].as_str(), r["points"].as_u64()), (Some("site"), Some(2)));
+        assert_eq!(r["bounds"], json!([[0.0, 0.0, -250.0], [1500.0, 2000.0, 0.0]]));
+        assert_eq!(s.doc.point_clouds[0].units, "m");
+        // Another unit given is the file's unit.
+        let r = s.execute("pointcloud.insert", &json!({"path": path, "units": "mm"})).unwrap();
+        assert_eq!(r["bounds"], json!([[0.0, 0.0, -0.25], [1.5, 2.0, 0.0]]));
+        // Read again, the cloud stays in metres.
+        std::fs::write(&path, e57(&[[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [0.0, 1.0, 0.0]])).unwrap();
+        let r = s.execute("pointcloud.reload", &json!({"cloud": "site"})).unwrap();
+        assert_eq!(r["points"].as_u64(), Some(3));
+        assert_eq!(s.doc.point_clouds[0].world_point(1).map(|p| [p.x, p.y, p.z]), Some([3000.0, 0.0, 0.0]));
+        // The file also opens as a design of its own, in metres.
+        let mut opened = Session::default();
+        opened.execute("doc.open", &json!({"path": path})).unwrap();
+        assert_eq!(opened.doc.point_clouds[0].units, "m");
         let _ = std::fs::remove_dir_all(d);
     }
 

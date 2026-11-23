@@ -235,7 +235,15 @@ fn meshed(
     let LineRequest { shows, hidden, reference_hidden, reference_hides_model, tangent_edges, .. } = *request;
     let started = web_time::Instant::now();
     let names: BTreeSet<&str> = shown.bodies.iter().filter_map(|b| shown.body(b)).map(|b| b.name.as_str()).collect();
-    let mut scene = mesh_lines::prepare(s, cmd, model_chord_mm, Ask { tangent_edges, sources: true }, |b| names.contains(b.name.as_str()), refused)?;
+    let mut scene = mesh_lines::prepare(
+        s,
+        &shown.state,
+        cmd,
+        model_chord_mm,
+        Ask { tangent_edges, sources: true },
+        |b| names.contains(b.name.as_str()),
+        refused,
+    )?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
     if scene.placements.len() != shown.bodies.len() {
         return Err(bad(cmd, ONE_NAME));

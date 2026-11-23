@@ -1,5 +1,4 @@
-//! The solidcore backend: one kernel for the process (SMLib's context is process-global too, and
-//! some of its state, such as the fillet solver's latched step, lives for the whole process),
+//! The solidcore backend: one kernel for the process (SMLib's context is process-global too),
 //! every call under its lock and a panic guard.
 //!
 //! Upstream fixes ([`fixes`]) are solidcore's opt-in corrections of SMLib defects that the C++
@@ -10,7 +9,7 @@ use std::sync::{Mutex, PoisonError};
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::vector3d::Vec3;
-use solidcore::kernel::{CancelToken, Kernel, KernelOptions, Rng, UpstreamFixes};
+use solidcore::kernel::{CancelToken, Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{PropertyAttributes, brep_volume};
 use solidcore::primitive::api_primitives as primitives;
 
@@ -54,7 +53,9 @@ pub(crate) mod trim;
 #[cfg(test)]
 mod trim_tests;
 
-pub(crate) use convert::{from_arrays, to_arrays};
+#[cfg(test)]
+pub(crate) use convert::from_arrays;
+pub(crate) use convert::{from_arrays_with_shell_order, to_arrays, to_arrays_sampled_trims};
 pub(crate) use measure::{
     area, bounds, check, check_scoped, check_with, classify_point, classify_points, curve_face_gap_bound, edge_face_distance, is_manifold_solid,
     mass_properties, solid_count,
@@ -151,15 +152,14 @@ fn put_kernel(k: Option<Kernel>) {
 }
 
 /// What a call must not find from the calls before it: the same operation on the same bodies
-/// answers the same on any kernel, however much that kernel did first. (Its draws of random rays,
-/// the stations it remembers; marks, identities and what is only kept to reuse memory change no
-/// answer. The certificates it finished, kept by the exact content of their inputs
+/// answers the same on any kernel, however much that kernel did first. (The stations it
+/// remembers; marks, identities and what is only kept to reuse memory change no answer, and a
+/// kernel holds no position in a random sequence: each sampling call draws from the start of the
+/// seed's. The certificates it finished, kept by the exact content of their inputs
 /// (`recertify_memo`, the curve analyses), are the answers running them again gives, so they
 /// stay. Tolerances and fixes are the same on every kernel.)
 fn start_clean(k: &mut Kernel) {
-    k.rng = Rng::new(KernelOptions::default().seed);
     *k.blend_station_memo.borrow_mut() = Default::default();
-    k.fillet_point_step.set(None);
     k.upstream_ub_passed.clear();
 }
 
@@ -234,10 +234,15 @@ fn call_on<T: dump::Answer>(
     let depth = Depth;
     let caught = catch_unwind(AssertUnwindSafe(|| f(&mut k)));
     drop(depth);
+    let mut code = None;
     let r = match caught {
         Ok(Ok(v)) => Ok(v),
-        Ok(Err(e)) => Err(Error::Solidcore(format!("{call}: {e}"))),
+        Ok(Err(e)) => {
+            code = Some(crate::failure::FailureCode::of_kernel(call, &e));
+            Err(Error::Solidcore(format!("{call}: {e}")))
+        }
         Err(p) => {
+            code = Some(crate::failure::FailureCode { call, kind: crate::failure::FailureCode::OPS, operation: "Internal" });
             k = fresh();
             let why = p.downcast_ref::<&str>().map(|s| (*s).to_owned()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
             log::warn!(target: "smlib", "solidcore panicked in {call}: {why}");
@@ -254,6 +259,9 @@ fn call_on<T: dump::Answer>(
             Err(Error::Internal(e)) => Err(Error::Internal(e)),
             _ => Err(Error::Cancelled(call)),
         };
+    }
+    if let (Some(code), Err(e)) = (code, &r) {
+        crate::failure::failed(code, e);
     }
     let why = match &r {
         Ok(v) => v.refusal(),

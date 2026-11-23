@@ -19,14 +19,14 @@ use super::sketch::{
 };
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
-use crate::params::{bad, num, req_vec2, str_, string_list};
+use crate::params::{bad, num, req_vec2, str_, string_list, vec2_list};
 use crate::schema::sketch_create::{
     ArcSlotCenterParams, ArcSlotResult, ArcSlotThreePointParams, ArcTangentParams, BlendCurveParams, CenterlineParams, ConicParams,
-    ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams, FitPointSplineParams, InfiniteLineParams, LineTypeResult,
-    MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineHandlesParams, SplineHandlesResult, SplineInsertPointParams,
-    SplineInsertPointResult, SplineRemovePointParams, SplineRemovePointResult, SplineResetHandlesParams, SplineResetHandlesResult,
-    SplineReverseParams, SplineReverseResult, TextChange, TextEditsResult, TextExpressions, TextResult, ThreeTangentCircleParams,
-    TwoTangentCircleParams,
+    ControlKnotsSplineParams, ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams, FitPointSplineParams,
+    InfiniteLineParams, LineTypeResult, MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineHandlesParams, SplineHandlesResult,
+    SplineInsertPointParams, SplineInsertPointResult, SplineRemovePointParams, SplineRemovePointResult, SplineResetHandlesParams,
+    SplineResetHandlesResult, SplineReverseParams, SplineReverseResult, TextChange, TextEditsResult, TextExpressions, TextResult,
+    ThreeTangentCircleParams, ToleranceSplineParams, ToleranceSplineResult, TwoTangentCircleParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -48,7 +48,9 @@ const ARC_SLOT_THREE_CONTRACT: TypedContract<ArcSlotThreePointParams> = TypedCon
 const ARC_SLOT_CENTER_CONTRACT: TypedContract<ArcSlotCenterParams> = TypedContract::new();
 const ELLIPSE_CONTRACT: TypedContract<EllipseParams> = TypedContract::new();
 const SPLINE_FIT_CONTRACT: TypedContract<FitPointSplineParams> = TypedContract::new();
+const SPLINE_FIT_TOLERANCE_CONTRACT: TypedContract<ToleranceSplineParams> = TypedContract::new();
 const SPLINE_CONTROL_CONTRACT: TypedContract<ControlPointSplineParams> = TypedContract::new();
+const SPLINE_KNOTS_CONTRACT: TypedContract<ControlKnotsSplineParams> = TypedContract::new();
 const CONIC_CONTRACT: TypedContract<ConicParams> = TypedContract::new();
 const BLEND_CONTRACT: TypedContract<BlendCurveParams> = TypedContract::new();
 const CENTERLINE_CONTRACT: TypedContract<CenterlineParams> = TypedContract::new();
@@ -140,6 +142,19 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLINE_FIT_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!("points: [[x,y] or point refs…] (2…500): the spline passes through them; each fit point has an editable tangent handle whose direction and length control curvature, periodic?: boolean (default false); periodic cubic fit closes smoothly through at least 3 distinct samples", created_doc!())),
+    CommandSpec::new("sketch.spline.fit_tolerance", "Fit Spline Within Tolerance", crate::checked!("sketch.spline.fit_tolerance", spline_fit_tolerance))
+        .in_sketch_part()
+        .at("SKETCH", "CREATE")
+        .icon("spline")
+        .enabled(in_sketch)
+        .contract(&SPLINE_FIT_TOLERANCE_CONTRACT)
+        .output(output_schema_for::<ToleranceSplineResult>)
+        .params(concat!(
+            "points: [[x,y]…] (2…10000, plain coordinates, in order along the contour): one fit point spline through as few of them as keep every given point within the tolerance, as a contour from a computation needs (traced, scanned or generated; sketch.spline.fit_point takes at most 500 and passes through each). ",
+            "tolerance?: mm (default 0.01, from 0.0001 to 10): how far any given point may stray from the spline. periodic?: boolean (default false): the contour closes smoothly (a closing repeat of the first point is dropped). ",
+            "Returns the curve, how many of the given points it passes through and the largest deviation reached (mm); when even 500 spline points do not reach the tolerance it refuses, naming the deviation, as sketch.equation_curve does",
+            created_doc!()
+        )),
     CommandSpec::new("sketch.spline.control_point", "Control Point Spline", crate::checked!("sketch.spline.control_point", spline_cv3))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -156,6 +171,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLINE_CONTROL_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!("points: control points (2…500), degree 5; periodic?: boolean (default false): closes the control polygon into a loop (at least 6 points)", created_doc!())),
+    CommandSpec::new("sketch.spline.control_knots", "Control Point Spline with Knots", crate::checked!("sketch.spline.control_knots", spline_knots))
+        .in_sketch_part()
+        .at("SKETCH", "CREATE")
+        .icon("spline_cv")
+        .enabled(in_sketch)
+        .contract(&SPLINE_KNOTS_CONTRACT)
+        .output(output_schema_for::<DrawResult>)
+        .params(concat!("points: control points (2…500); degree: 1…9; knots: the clamped knot vector, points + degree + 1 non-decreasing numbers (the first and last degree + 1 equal to its ends, no interior knot more than degree times): the curve is exactly this B-spline, drawn and extruded as given; weights?: one positive number per point (none: all 1), with degree 2 only (a rational quadratic, exact as conics)", created_doc!())),
     CommandSpec::new("sketch.spline.insert_point", "Add Spline Point", crate::checked!("sketch.spline.insert_point", spline_insert_point))
         .icon("spline")
         .enabled(in_sketch)
@@ -871,7 +894,7 @@ fn point_list(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value, cmd: &
     Ok(out)
 }
 
-fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8) -> Result<Value> {
+fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8, nurbs: Option<solidcraft_sketch::Nurbs>) -> Result<Value> {
     let on_sheet = s.sheet_sketching();
     let periodic = match p.get("periodic") {
         None => false,
@@ -891,7 +914,11 @@ fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8) -> R
         {
             pts.push(*pts.first().ok_or_else(|| bad(cmd, "missing first point"))?);
         }
-        let c = sk.add_curve(CurveKind::Spline { pts, control, degree, periodic, nurbs: None, handles: Vec::new() }, None)?;
+        // A spline given its own knots refuses them as bad parameters, naming what does not fit.
+        let knotted = nurbs.is_some();
+        let c = sk
+            .add_curve(CurveKind::Spline { pts, control, degree, periodic, nurbs: nurbs.clone(), handles: Vec::new() }, None)
+            .map_err(|e| if knotted { bad(cmd, e.to_string()) } else { EngineError::from(e) })?;
         mark_construction(sk, &[c], p);
         Ok((ids_of(sk, &[c]), Vec::new()))
     })?;
@@ -899,13 +926,101 @@ fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8) -> R
 }
 
 fn spline_fit(s: &mut Session, p: &Value) -> Result<Value> {
-    spline(s, p, "sketch.spline.fit_point", false, 3)
+    spline(s, p, "sketch.spline.fit_point", false, 3, None)
+}
+
+/// `sketch.spline.fit_tolerance`: one spline through as few of a contour's points as keep every
+/// given point within the tolerance (#20048). The fit itself is `fit_within_tolerance`; the
+/// curve is created as `sketch.spline.fit_point` creates one, through the points it chose.
+fn spline_fit_tolerance(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.fit_tolerance";
+    let periodic = match p.get("periodic") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(v)) => *v,
+        _ => return Err(bad(cmd, "`periodic` must be true or false")),
+    };
+    let tolerance = match p.get("tolerance") {
+        None | Some(Value::Null) => 0.01,
+        Some(v) => v
+            .as_f64()
+            .filter(|t| t.is_finite() && (1e-4..=10.0).contains(t))
+            .ok_or_else(|| bad(cmd, "`tolerance` must be a number of mm from 0.0001 to 10"))?,
+    };
+    let given = vec2_list(cmd, p, "points", 10_000)?;
+    if given.len() < 2 {
+        return Err(bad(cmd, "a contour needs 2 to 10000 points"));
+    }
+    let fit = solidcraft_sketch::fit_within_tolerance(&given, tolerance, periodic)?;
+    let ((curves, _), info) = edit(s, p, cmd, false, |sk, _| {
+        let mut pts = Vec::with_capacity(fit.chosen.len() + usize::from(periodic));
+        for q in &fit.chosen {
+            let i = sk.add_point(*q, None)?;
+            if pts.last().and_then(|l| sk.point(*l)).is_some_and(|r| r.dist(*q) < 1e-9) {
+                return Err(bad(cmd, "consecutive points must differ"));
+            }
+            pts.push(i);
+        }
+        if periodic
+            && sk.point(*pts.first().ok_or_else(|| bad(cmd, "missing first point"))?)
+                != sk.point(*pts.last().ok_or_else(|| bad(cmd, "missing last point"))?)
+        {
+            pts.push(*pts.first().ok_or_else(|| bad(cmd, "missing first point"))?);
+        }
+        let c = sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic, nurbs: None, handles: Vec::new() }, None)?;
+        mark_construction(sk, &[c], p);
+        Ok((ids_of(sk, &[c]), Vec::<String>::new()))
+    })?;
+    reply(ToleranceSplineResult {
+        curve: curves.first().cloned().unwrap_or_default(),
+        curves,
+        points: fit.chosen.len(),
+        closed: periodic,
+        deviation: fit.deviation,
+        sketch: info,
+        created: None,
+        param_warnings: Vec::new(),
+    })
 }
 fn spline_cv3(s: &mut Session, p: &Value) -> Result<Value> {
-    spline(s, p, "sketch.spline.control_point", true, 3)
+    spline(s, p, "sketch.spline.control_point", true, 3, None)
 }
 fn spline_cv5(s: &mut Session, p: &Value) -> Result<Value> {
-    spline(s, p, "sketch.spline.control_point_5", true, 5)
+    spline(s, p, "sketch.spline.control_point_5", true, 5, None)
+}
+
+/// A list of numbers under `key`, each finite (a JSON number is).
+fn number_list(p: &Value, key: &str, cmd: &str) -> Result<Vec<f64>> {
+    p.get(key)
+        .and_then(Value::as_array)
+        .ok_or_else(|| bad(cmd, format!("`{key}` must be a list of numbers")))?
+        .iter()
+        .map(|x| x.as_f64().ok_or_else(|| bad(cmd, format!("`{key}` must be a list of numbers"))))
+        .collect()
+}
+
+/// `sketch.spline.control_knots`: a control spline of the degree, knots and weights it is given.
+/// A weighted spline is exact only at degree 2, where each span is a conic: a higher degree with
+/// unequal weights has no exact profile, so it is refused rather than drawn as a polyline.
+fn spline_knots(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.control_knots";
+    let degree = p
+        .get("degree")
+        .and_then(Value::as_u64)
+        .and_then(|d| u8::try_from(d).ok())
+        .filter(|d| (1..=solidcore_record::MAX_BEZIER_DEGREE as u8).contains(d))
+        .ok_or_else(|| bad(cmd, "`degree` must be a whole number from 1 to 9"))?;
+    let knots = number_list(p, "knots", cmd)?;
+    let weights = match p.get("weights") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(_) => number_list(p, "weights", cmd)?,
+    };
+    if weights.windows(2).any(|w| w[0] != w[1]) && degree != 2 {
+        return Err(bad(
+            cmd,
+            "a weighted spline has an exact profile only at degree 2 (a rational quadratic); give equal weights or none at this degree",
+        ));
+    }
+    spline(s, p, cmd, true, degree, Some(solidcraft_sketch::Nurbs { knots, weights }))
 }
 
 fn spline_insert_point(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1948,3 +2063,11 @@ mod blend_tests {
         assert!(m["bodies"][0]["faces"].as_u64().unwrap_or(0) >= 3, "a solid with the blend as a side: {m}");
     }
 }
+
+#[cfg(test)]
+#[path = "sketch_knots_tests.rs"]
+mod knots_tests;
+
+#[cfg(test)]
+#[path = "sketch_fit_tolerance_tests.rs"]
+mod fit_tolerance_tests;

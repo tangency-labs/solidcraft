@@ -91,6 +91,17 @@ fn rhino_box_imports_as_a_solid() {
     imports_the_block(bytes, "block.3dm");
 }
 
+#[test]
+fn a_file_name_with_umlauts_names_the_product() {
+    imports_the_block(BLOCK_FCSTD, "Hülse.FCStd");
+    imports_the_block(BLOCK_3DM, "Würfel ä.3dm");
+    let step = "#1=PRODUCT('cadmpeg_model','cadmpeg_model','',(#2));".to_string();
+    assert_eq!(
+        convert::step_route::name_unnamed_products(step, "dir/Hülse Bob's.FCStd"),
+        "#1=PRODUCT('H\\X2\\00FC\\X0\\lse Bob''s','H\\X2\\00FC\\X0\\lse Bob''s','',(#2));"
+    );
+}
+
 /// Only FreeCAD and Rhino contents are read: STEP text, garbage, a bad ZIP and empty input are
 /// refused with a message, as are ACIS, ShapeManager and commercial formats whatever their bytes.
 #[test]
@@ -155,6 +166,35 @@ fn decoding_is_capped() {
     assert_eq!(limits.max_input_bytes, crate::MAX_STEP_BYTES as u64);
     let same = cadmpeg_core::decode::ResourceLimits { max_input_bytes: service.max_input_bytes, ..limits };
     assert_eq!(same, service);
+}
+
+/// A raised "Largest file to open" limit raises every decode cap in proportion, not only the input size.
+#[test]
+fn a_raised_limit_raises_the_decode_caps() {
+    const TEST: &str = "native_cad::tests::a_raised_limit_raises_the_decode_caps";
+    const CHILD: &str = "SOLIDCRAFT_IO_RAISED_LIMIT_CHILD";
+    // The limit is process-wide, so it is raised in a child process of its own.
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", TEST, "--nocapture", "--test-threads=1"])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{}\n{stdout}\n{stderr}", output.status);
+        assert!(stdout.contains("test result: ok. 1 passed; 0 failed;"), "the child must run the test: {stdout}");
+        return;
+    }
+    crate::limits::set_override(Some(crate::limits::GB)).unwrap();
+    let limits = convert::policy().limits;
+    let service = cadmpeg_core::decode::ResourceLimits::service();
+    assert_eq!(limits.max_input_bytes, crate::limits::GB);
+    assert_eq!(limits.max_retained_bytes, 2 * service.max_retained_bytes);
+    assert_eq!(limits.max_decompressed_bytes_total, 2 * service.max_decompressed_bytes_total);
+    assert_eq!(limits.max_decompressed_bytes_per_expand, 2 * service.max_decompressed_bytes_per_expand);
+    assert_eq!(limits.max_entities, 2 * service.max_entities);
+    assert_eq!(limits.max_recursion_depth, service.max_recursion_depth);
 }
 
 /// A FreeCAD archive whose Document.xml inflates past the per-entry cap (a ZIP bomb, 300 MB of
@@ -694,7 +734,7 @@ fn a_part_whose_body_was_not_imported_is_said_not_checked() {
     assert!(!ir.model.declared_measures.is_empty());
     // Every region refused: a coedge missing from each.
     ir.model.coedges.clear();
-    let (records, origins) = traced_records(&ir, "washer", "", true);
+    let (records, origins) = traced_records(&ir, "washer", "", true, false);
     assert!(records.bodies.is_empty(), "{:?}", records.warnings);
     let imp = solidcraft_kernel::records_import(&records).unwrap();
     let notes = validation::check(&ir, &records, &origins, &imp);
@@ -730,11 +770,30 @@ fn a_part_with_one_body_imported_and_one_not_is_said_not_checked() {
         }
     }
     model.bodies.push(refused);
-    let (records, origins) = traced_records(&ir, "washer", "", true);
+    let (records, origins) = traced_records(&ir, "washer", "", true, false);
     assert!(!records.bodies.is_empty(), "the washer itself comes in: {:?}", records.warnings);
     let imp = solidcraft_kernel::records_import(&records).unwrap();
     let notes = validation::check(&ir, &records, &origins, &imp);
     assert!(!notes.is_empty() && notes.iter().all(|n| n.contains("was not checked")), "{notes:?}");
+}
+
+/// A part whose solid could not be closed, come in as an open surface of the faces that read, is
+/// said not checked against the volume and centre its file states, not left out of them unsaid.
+#[test]
+fn a_part_whose_solid_came_in_open_is_said_not_checked() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let ours = solidcraft_kernel::step_import(&std::fs::read_to_string(dir.join("washer.step")).unwrap()).unwrap();
+    let m = solidcraft_kernel::measure(&ours.bodies[0].body).unwrap();
+    // One face's plane moved 5 mm off its edges: the reader names that face, and the solid comes
+    // in open.
+    let text = washer_stating(m.volume, [m.centroid.x, m.centroid.y, m.centroid.z])
+        .replace("#50=CARTESIAN_POINT('',(0.0,0.0,0.0));", "#50=CARTESIAN_POINT('',(0.0,0.0,-5.0));");
+    let ir = neutral(text.as_bytes(), "washer.step");
+    let (records, origins) = traced_records(&ir, "washer", "", true, false);
+    assert!(records.bodies.iter().any(|b| b.sheet), "{:?}", records.warnings);
+    let imp = solidcraft_kernel::records_import(&records).unwrap();
+    let notes = validation::check(&ir, &records, &origins, &imp);
+    assert!(!notes.is_empty() && notes.iter().all(|n| n.contains("came in as open surfaces")), "{notes:?}");
 }
 
 /// The washer with the CAx-IF validation properties a CAD system writes for it: its volume and its
@@ -877,7 +936,7 @@ fn mesh_placed_twice() -> cadmpeg_ir::document::CadIr {
 /// holds no triangles of its own, and both placements come in as mesh bodies.
 #[test]
 fn a_mesh_part_placed_twice_keeps_its_triangles_once() {
-    let (records, _) = traced_records(&mesh_placed_twice(), "twice", "", true);
+    let (records, _) = traced_records(&mesh_placed_twice(), "twice", "", true, false);
     let shape: Vec<(bool, Option<usize>)> = records.bodies.iter().map(|b| (b.mesh.is_some(), b.copy_of)).collect();
     assert_eq!(shape, [(true, None), (false, Some(0))], "{:?}", records.warnings);
     let imp = solidcraft_kernel::records_import(&records).unwrap();
@@ -919,7 +978,7 @@ fn triangles_on_a_hidden_layer_come_in_hidden() {
             let layer = serde_json::json!({"id": "test:hidden:layer#0", "name": "Hidden parts", "visible": false, "items": [{"kind": "tessellation", "tessellation": t}]});
             ir.model.presentation_layers.push(serde_json::from_value(layer).unwrap());
         }
-        let (records, _) = traced_records(&ir, "twice", "", true);
+        let (records, _) = traced_records(&ir, "twice", "", true, false);
         assert_eq!(records.bodies.len(), 2, "{:?}", records.warnings);
         assert!(records.bodies.iter().all(|b| b.hidden == on_layer), "on a hidden layer: {on_layer}");
     }
@@ -941,4 +1000,21 @@ fn a_part_on_a_hidden_layer_comes_in_hidden() {
     assert!(with("#300=PRESENTATION_LAYER_ASSIGNMENT('Hidden parts','',(#99));\n#301=INVISIBILITY((#300));\n"), "on a hidden layer");
     assert!(!with("#300=PRESENTATION_LAYER_ASSIGNMENT('Parts','',(#99));\n"), "on a shown layer");
     assert!(!with(""), "on no layer");
+}
+
+/// Names come in trimmed, as SolidCraft's STEP reader trims them: a product written with a
+/// trailing space ("Guma NR 60ShA černá ", as a real assembly writes one) is the same product to
+/// both readers.
+#[test]
+fn product_names_come_in_trimmed() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let text = std::fs::read_to_string(dir.join("cylinder_placed.step"))
+        .unwrap()
+        .replace("PRODUCT('cylinder_placed','cylinder_placed'", "PRODUCT(' cylinder_placed  ',' cylinder_placed  '");
+    let ours = solidcraft_kernel::step_import(&text).unwrap();
+    let (theirs, warnings) = by_records(&neutral(text.as_bytes(), "cylinder_placed.step"));
+    let theirs = theirs.unwrap_or_else(|e| panic!("{e} {warnings:?}"));
+    assert_eq!(tree_of(&theirs), tree_of(&ours));
+    let tree = tree_of(&theirs);
+    assert!(tree.get(1).is_some_and(|l| l.starts_with("1 cylinder_placed [") && l.contains("/cylinder_placed|")), "{tree:?}");
 }

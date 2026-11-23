@@ -28,11 +28,18 @@ pub enum Error {
     Argument,
     /// The kernel reported success but the result has no faces (for a boolean: it is empty).
     Empty,
+    /// An empty boolean of solids refuted by the vertex `at` of an operand, which lies where the
+    /// result must hold material: an intersection of the operands was missed.
+    EmptyRefuted {
+        /// The operand's vertex the result must hold.
+        at: [f64; 3],
+    },
     /// The kernel reported success, but a solid input gave a result that is not a closed solid.
     NotSolid,
     /// A body that is not a closed solid facing out, and the test it fails (the kernel's
     /// [`SolidTest`], the first that fails in the order the tests run). [`Error::NotSolid`]
-    /// stays for the calls that return it; [`crate::Body::check_solid`] returns this one.
+    /// stays for the calls that return it; [`crate::Body::check_solid`] and the result check of
+    /// an operation under [`crate::Contract::Proved`] return this one.
     #[non_exhaustive]
     NotSolidBecause(SolidTest),
     /// No room for the operation: an inward offset (a shell's wall, faces moved in) leaves none
@@ -76,8 +83,14 @@ pub enum Error {
     /// The kernel cannot build this exactly yet (a variable radius that is zero inside its
     /// edge): what it cannot.
     Unsupported(&'static str),
-    /// A blend's edges meet at a vertex of a kind no blend corner handles yet.
-    CornerUnsupported,
+    /// A blend's edges meet at a vertex of a kind no blend corner builds yet: the kernel's
+    /// reason and the vertex's point, where its session notes them.
+    CornerUnsupported {
+        /// The kernel's reason, without the "Fillet Error:" that says only whose it is.
+        why: Option<String>,
+        /// The vertex's point.
+        at: Option<[f64; 3]>,
+    },
     /// A swept turn ([`crate::Turn::Swept`]) the kernel does not build at the corner `at`:
     /// `room` where no radius of the rounds builds it (a sharp concave side edge between them),
     /// else where the blend corner does not build one yet (unequal or variable rounds, a corner
@@ -402,7 +415,7 @@ pub enum Error {
 /// splits a coarse kind and follows the kernel's module paths, so a refactor can move it: it is
 /// the second level of a grouping, never its key.
 ///
-/// The session gives it for every failed call but a cancelled one
+/// The session gives it for every failed call it runs but a cancelled one
 /// ([`crate::session::take_failure_code`], [`crate::session::Failure::code`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FailureCode {
@@ -453,6 +466,19 @@ impl std::fmt::Display for FailureCode {
 }
 
 impl Error {
+    /// The test a body failed where this is [`Error::NotSolidBecause`], and `None` for every
+    /// other error. A caller can then tell a body that is not a solid from one whose volume's
+    /// sign the kernel could not prove ([`SolidTest::VolumeUndecided`]), which is undecided
+    /// rather than refused. The variant is `#[non_exhaustive]`, so this is how a caller outside
+    /// this crate reads its test without naming its field.
+    #[must_use]
+    pub const fn not_solid_test(&self) -> Option<SolidTest> {
+        match self {
+            Error::NotSolidBecause(test) => Some(*test),
+            _ => None,
+        }
+    }
+
     /// The variant's name (`"TooLarge"`, `"Status"`, ...): a stable static string with nothing
     /// of the failure's values in it. A variant keeps its name once released.
     #[must_use]
@@ -462,6 +488,7 @@ impl Error {
             Error::Refused { .. } => "Refused",
             Error::Argument => "Argument",
             Error::Empty => "Empty",
+            Error::EmptyRefuted { .. } => "EmptyRefuted",
             Error::NotSolid => "NotSolid",
             Error::NotSolidBecause(..) => "NotSolidBecause",
             Error::NoRoom => "NoRoom",
@@ -470,7 +497,7 @@ impl Error {
             Error::BlendNotCertified { .. } => "BlendNotCertified",
             Error::WallFolds { .. } => "WallFolds",
             Error::Unsupported(..) => "Unsupported",
-            Error::CornerUnsupported => "CornerUnsupported",
+            Error::CornerUnsupported { .. } => "CornerUnsupported",
             Error::TurnRefused { .. } => "TurnRefused",
             Error::CornerRefused { .. } => "CornerRefused",
             Error::RoundsCross { .. } => "RoundsCross",
@@ -580,6 +607,14 @@ pub enum OffsetRefusal {
         /// How far the face could move and still meet the face beside it.
         largest: f64,
     },
+    /// In a local operation, the face (a band bounded by two faces, such as a narrow ring
+    /// between a countersink's cone and the well below it) closes to nothing as the faces
+    /// move: its two sides would pass over each other and turn it inside out. `largest` is
+    /// how far the faces could move before it closes.
+    FaceCloses {
+        /// How far the faces could move before the face closes.
+        largest: f64,
+    },
     /// How far the surfaces beside an edge or at a vertex of the face must be extended to
     /// meet has no certified bound (a pair or corner of kinds it does not bound yet): refused
     /// before anything changed.
@@ -653,6 +688,11 @@ impl std::fmt::Display for OffsetRefusal {
                 f,
                 "it would move past where the curved face beside it ends; it meets that face \
                  only while it moves less than {largest}"
+            ),
+            OffsetRefusal::FaceCloses { largest } => write!(
+                f,
+                "it closes to nothing between the faces beside it as they move; it stays open \
+                 only while they move less than {largest}"
             ),
             OffsetRefusal::ReachUncertified => {
                 write!(
@@ -811,6 +851,9 @@ pub enum RoomReason {
     /// A blend past its faces keeps none of its edge, no corner taking any of it: a knife
     /// edge's chamfer wider than the part takes all of it.
     OverflowKeepsNothing,
+    /// A round passes over the face it ends on: that face falls away under it, so nothing
+    /// ends the round there.
+    EndPassesOverEndFace,
 }
 
 /// What the largest size that builds a refused blend ([`Error::TooLarge`]) sizes.
@@ -850,6 +893,9 @@ impl RoomReason {
             RoomReason::RunsIntoMaterial => "the blend runs off a face into the material",
             RoomReason::OverflowKeepsNothing => {
                 "the round or chamfer runs past its faces and keeps none of its edge"
+            }
+            RoomReason::EndPassesOverEndFace => {
+                "the round passes over the face it ends on, which falls away under it, so nothing ends the round there"
             }
         }
     }
@@ -898,6 +944,10 @@ impl std::fmt::Display for Error {
             Error::Refused { operation, reason } => write!(f, "{operation}: {reason}"),
             Error::Argument => write!(f, "invalid argument"),
             Error::Empty => write!(f, "the result is empty"),
+            Error::EmptyRefuted { at: [x, y, z] } => write!(
+                f,
+                "the result is empty, but the operand's vertex ({x}, {y}, {z}) lies where it must have material: an intersection was missed"
+            ),
             Error::NotSolid => write!(f, "the result is not a closed solid"),
             Error::NotSolidBecause(test) => {
                 write!(f, "the body is not a closed solid facing out: {test}")
@@ -927,8 +977,15 @@ impl std::fmt::Display for Error {
                 "the blend could not be certified within its tolerance in the work allowed ({halvings} spans halved, {stations} stations)"
             ),
             Error::WallFolds { largest } => write!(f, "the wall folds (largest {largest:?})"),
-            Error::CornerUnsupported => {
-                write!(f, "a blend corner of this kind is not supported yet")
+            Error::CornerUnsupported { why, at } => {
+                write!(f, "a blend corner of this kind is not supported yet")?;
+                if let Some([x, y, z]) = at {
+                    write!(f, " at ({x:.3}, {y:.3}, {z:.3})")?;
+                }
+                if let Some(why) = why {
+                    write!(f, ": {why}")?;
+                }
+                Ok(())
             }
             Error::TurnRefused { why, at, .. } => {
                 write!(f, "the swept corner is not built")?;

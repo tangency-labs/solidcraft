@@ -91,6 +91,9 @@ fn err(e: impl std::fmt::Display) -> Outcome {
     if let Some(reason) = solidcraft_engine::panels::commands::structured_error(&text) {
         reply["panel_error"] = reason;
     }
+    if let Some(reason) = solidcraft_engine::plugin::structured_tool_error(&text) {
+        reply["plugin_error"] = reason;
+    }
     Outcome::Done(reply)
 }
 fn wrap(r: Result<Value, String>) -> Outcome {
@@ -148,7 +151,7 @@ fn started(app: &SolveApp) -> Value {
         "tool": app.tool.as_ref().map(|t| t.cmd),
         "dialog": dialog_state(app),
         "windows": open_windows(app),
-        "pending": app.pending_feature_edit.is_some() || app.start_after_roll.is_some(),
+        "pending": app.pending_feature_edit.is_some() || app.start_after_roll.is_some() || app.sketch_refreshes.contains_key(&app.session.uid),
         "status": app.status.as_ref().map(|(text, _, error)| json!({"text": text, "error": error})),
     })
 }
@@ -215,6 +218,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
             | "view.ground_shadow"
             | "view.navigation_bar"
             | "view.ribbon_tabs_only"
+            | "view.toolbar_reset_all"
             | "view.next_tab"
             | "view.previous_tab"
             | "view.layout"
@@ -227,6 +231,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
             | "timeline.play"
             | "browser.expand_all"
             | "browser.collapse_all"
+            | "select.mode"
     ) && !fit_id.starts_with("settings.");
     // History changes and session swaps can return to the first-body fitting window.
     let history_may_fit = app.session.undo.len() <= 2
@@ -541,6 +546,9 @@ pub fn view_png(app: &SolveApp, w: u32, h: u32) -> Result<Vec<u8>, String> {
 }
 
 pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
+    // What a request does is an agent's action in usage statistics (`usage_stats`).
+    #[cfg(feature = "usage-stats")]
+    let _source = solidcraft_engine::usage::from(solidcraft_engine::usage::Source::Agent);
     crate::agent_chat::with_tool_request(app, req.chat_turn.as_ref(), |app| handle_request(app, ctx, req))
 }
 
@@ -682,6 +690,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             DOCUMENT_WATCH.publish(&app.session.document_id, revision);
             ok(json!({"document_id": app.session.document_id, "revision": revision}))
         }
+        // The solved joint pose the preview shows: what a client follows a joint with (#19437).
+        "control.joint_pose" => ok(crate::control_joint_pose::snapshot(app)),
         // What the MCP server bridged to this app shapes its output with (Preferences › AI).
         "mcp.options" => ok(json!({"compact": app.preferences.mcp_compact})),
         "ui.messages" => ok(crate::messages::control(app, p)),
@@ -1135,12 +1145,20 @@ fn ui_set(app: &mut SolveApp, p: &Value) -> Outcome {
     let mut cur = serde_json::to_value(&app.ui).unwrap_or(json!({}));
     let mut vis = serde_json::to_value(&app.session.visibility).unwrap_or(json!({}));
     let mut sketches = None;
+    let mut wrong_flag = None;
     if let (Some(o), Some(vo), Some(src)) = (cur.as_object_mut(), vis.as_object_mut(), p.as_object()) {
         for (k, v) in src {
             let shown = |v: &Value| v.as_bool().map(|b| json!(!b)).unwrap_or_else(|| v.clone());
             match (VIS.iter().find(|(camel, _)| camel == k), k.as_str()) {
                 (Some((_, snake)), _) => vo.insert(snake.to_string(), v.clone()),
                 (None, "showOrigin") => vo.insert("origin_hidden".into(), shown(v)),
+                // The older flags, read below: true or false, as the fields they were.
+                (None, "pickBodies" | "pickComponents") => {
+                    if !v.is_boolean() {
+                        wrong_flag = Some(format!("`{k}` must be true or false"));
+                    }
+                    None
+                }
                 (None, "showSketches") => {
                     sketches = Some(v.as_bool().ok_or_else(|| "`showSketches` must be true or false".to_string()));
                     None
@@ -1148,6 +1166,25 @@ fn ui_set(app: &mut SolveApp, p: &Value) -> Outcome {
                 _ => o.insert(k.clone(), v.clone()),
             };
         }
+        // The older flags are each about one mode (#4255): true picks it, components before bodies, and
+        // false goes back to Faces & edges from its own mode. A `pickMode` beside them wins.
+        if !src.contains_key("pickMode") {
+            let flag = |name: &str| src.get(name).and_then(Value::as_bool);
+            let now = o.get("pickMode").and_then(Value::as_str).unwrap_or_default();
+            let mode = match (flag("pickComponents"), flag("pickBodies")) {
+                (Some(true), _) => Some("parts"),
+                (_, Some(true)) => Some("bodies"),
+                (Some(false), _) if now == "parts" => Some("faces"),
+                (_, Some(false)) if now == "bodies" => Some("faces"),
+                _ => None,
+            };
+            if let Some(mode) = mode {
+                o.insert("pickMode".into(), json!(mode));
+            }
+        }
+    }
+    if let Some(e) = wrong_flag {
+        return err(e);
     }
     let sketches = match sketches.transpose() {
         Ok(s) => s,
@@ -1226,9 +1263,23 @@ fn ui_view(app: &mut SolveApp, ctx: &egui::Context, q: params::View) -> Outcome 
 }
 
 /// `ui.start {command, params?}`: like clicking the toolbar button. `params`: what the dialog
-/// opens on (joint.drive, motion.study). Refused: nothing starts, or the dialog closes.
+/// opens on (joint.drive, motion.study, plugin.edit). Refused: nothing starts, or the dialog closes.
 fn ui_start(app: &mut SolveApp, q: params::Start) -> Outcome {
     let id = q.command.as_str();
+    if id == "plugin.edit" {
+        let p: solidcraft_engine::schema::plugin::EditParams = match serde_json::from_value(q.params) {
+            Ok(p) => p,
+            Err(e) => return err(e.to_string()),
+        };
+        return match crate::plugin_menu::open_form(app, &p.plugin, &p.entry, &p.params) {
+            Ok(()) => {
+                let mut reply = started(app);
+                reply["plugin_form"] = json!({"plugin":p.plugin,"entry":p.entry});
+                ok(reply)
+            }
+            Err(e) => err(e),
+        };
+    }
     let preset = match (id, q.params) {
         (_, Value::Null) => None,
         ("joint.drive" | "motion.study", params) => Some(params),
@@ -1507,7 +1558,7 @@ fn app_quit(app: &mut SolveApp, ctx: &egui::Context, q: params::Quit) -> Outcome
     } else {
         crate::documents::request_quit(app);
     }
-    if app.quit_requested {
+    if app.ready_to_quit() {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
     ok(json!({"quitting": app.quit_requested, "asking": app.docs.closing.is_some()}))
@@ -1924,6 +1975,61 @@ pub(crate) mod tests {
         let r = joint_drive(&mut h, &client, json!({"action": "begin", "document_id": document_id, "joint": arm}));
         assert_eq!(r["ok"], false, "{r}");
         assert_eq!(joint_angle(&mut h, arm), 0.0);
+    }
+
+    /// The control channel reads the solved joint pose the preview shows: the angle a limited
+    /// hinge reached, and the joint a motion link moved with it (#19437).
+    #[test]
+    fn the_control_channel_reports_the_solved_joint_pose_of_a_preview() {
+        let (mut h, arm, follower) = joint_drive_design();
+        h.app.run("joint.motion_link", json!({"a": arm, "b": follower, "ratio": 0.5})).unwrap();
+        let source = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+
+        // Nothing is previewed: the reply says so.
+        let empty = h.call("control.joint_pose", json!({}));
+        assert_eq!(empty["ok"], true, "{empty}");
+        assert_eq!(empty["result"]["pose"], Value::Null, "{empty}");
+
+        // Drive Joints asks for more than the hinge allows.
+        h.app.start("joint.drive");
+        h.frames(4);
+        let Some(d) = h.app.dialog.as_mut() else { panic!("the drive dialog") };
+        if let crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Drive { values, .. }) = &mut d.kind {
+            values[0] = "120 deg".into();
+        }
+        h.frames(2);
+        // The preview runs on a worker thread: wait for it as the other preview tests do.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while h.app.preview.busy {
+            assert!(std::time::Instant::now() < deadline, "the drive preview did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            h.frame();
+        }
+        assert!(h.app.preview.active, "the viewport shows the pose");
+
+        let r = h.call("control.joint_pose", json!({}));
+        assert_eq!(r["ok"], true, "{r}");
+        let pose = &r["result"]["pose"];
+        assert_eq!(pose["source"], "joint.drive", "{r}");
+        // The hinge reached its limit, and the follower came with it.
+        let angle = |joint: u64| {
+            pose["joints"]
+                .as_array()
+                .and_then(|joints| joints.iter().find(|j| j["joint"] == joint))
+                .and_then(|j| j["values"].as_array())
+                .and_then(|values| values.first())
+                .map(|v| (v["value"].as_f64().unwrap(), v["unit"].as_str().unwrap().to_string()))
+        };
+        assert_eq!(angle(arm), Some((90.0, "deg".to_string())), "{r}");
+        assert_eq!(angle(follower), Some((45.0, "deg".to_string())), "{r}");
+
+        // Reading again changes nothing: no undo step, no new design.
+        let again = h.call("control.joint_pose", json!({}));
+        assert_eq!(again["result"]["pose"], *pose, "{again}");
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &source));
+        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(joint_angle(&mut h, arm), 0.0, "the preview does not change the design");
     }
 
     #[test]
@@ -3587,7 +3693,7 @@ pub(crate) mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
         for d in [&root, &out] {
-            std::fs::write(d.join("part.solidcraft"), solidcraft_engine::io::write_design(&s.doc)).unwrap();
+            std::fs::write(d.join("part.solidcraft"), solidcraft_engine::io::write_design(&s.doc).unwrap()).unwrap();
         }
         s.execute("file.export", &json!({"path": out.join("part.step").to_string_lossy()})).unwrap();
         let load = |command: &str, d: &std::path::Path, file: &str| json!({"command": command, "params": {"path": d.join(file).to_string_lossy()}, "allow_paths": [root.to_string_lossy()]});

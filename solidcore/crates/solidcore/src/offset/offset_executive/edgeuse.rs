@@ -40,7 +40,7 @@ use crate::offset::offset_geometry_creation::{
 use crate::query::edge::ClosestPoint;
 use crate::surface::surface::Surface;
 use crate::surface::surface_cache::face_context::{FaceQueries, PreparedFaceQueries};
-use crate::surface::surface_cache::SurfaceCache;
+use crate::surface::surface_cache::{SurfaceCache, SurfaceCacheState};
 use crate::surface::volume::Volume;
 use crate::topology::edge::{self, NotifyEnv, SetCurveOptions};
 use crate::topology::edgeuse::{p1 as eu, p2 as eu2, p3 as eu3};
@@ -591,6 +591,11 @@ impl FaceQueries<Handle> for EdgeBrep<'_> {
         face2::tolerance(self.brep(arena), f)
     }
 
+    fn face_has_loopuses(&self, face: Handle) -> Result<bool> {
+        let (arena, f) = face.face()?;
+        crate::topology::face::p4::has_loopuses(self.brep(arena), f)
+    }
+
     fn face_point_classify(
         &self,
         k: &Kernel,
@@ -636,39 +641,31 @@ impl FaceQueries<Handle> for EdgeBrep<'_> {
 }
 
 impl EdgeBrep<'_> {
-    /// `smsurf_GetSurfaceCache` of `surface` for a solve: with its `GetTree` when
-    /// `get_tree` ([`OffsetBrep::prepare_surface_solve_cache`]), else as handed to a
-    /// reader of the state bits only ([`OffsetBrep::prepare_surface_state_cache`]).
-    fn surface_cache_for(
+    /// The B-rep face that owns `surface` (named by `handle`, else found by its owner),
+    /// with the owner key: `None` for a surface no face of these B-reps owns, whose own
+    /// cache `smsurf_GetSurfaceCache` makes.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` when the face named does not own the surface.
+    fn surface_cache_face(
         &mut self,
-        k: &Kernel,
         surface: &Surface,
         handle: Option<Handle>,
-        get_tree: bool,
-    ) -> Result<SurfaceCache<Handle>> {
-        use crate::query::face::p2::{solve_surface_cache_of_face, surface_cache_state_of_face};
-        use crate::surface::surface::p1::{get_surface_cache, make_surface_cache};
-        // the solve's GetTree: a reused cache whose tree is not built builds it now
-        let with_tree = |mut cache: SurfaceCache<Handle>| {
-            if get_tree && cache.tree().is_none() {
-                cache.get_tree(k)?;
-            }
-            Ok(cache)
-        };
+    ) -> Result<Option<(Arena, FaceId, ObjectRef)>> {
         let Some(owner) = surface.face()? else {
-            return with_tree(get_surface_cache(k, surface, handle)?);
+            return Ok(None);
         };
         let (arena, face) = if let Some(Object::FaceSurface(arena, face)) = handle.map(|h| h.object)
         {
             (arena, face)
         } else {
             let Some(found) = self.face_for_owner(owner)? else {
-                return with_tree(get_surface_cache(k, surface, handle)?);
+                return Ok(None);
             };
             found
         };
-        let b = self.brep_mut(arena);
-        let actual_owner = face2::surface(b, face)?
+        let actual_owner = face2::surface(self.brep_mut(arena), face)?
             .ok_or_else(|| SolidError::invalid_input(OP, "cache face has no surface"))?
             .face()?;
         if actual_owner != Some(owner) {
@@ -677,17 +674,58 @@ impl EdgeBrep<'_> {
                 "surface owner is not the selected B-rep face",
             ));
         }
+        Ok(Some((arena, face, owner)))
+    }
+
+    /// `smsurf_GetSurfaceCache` of `surface` for a solve, with its `GetTree`
+    /// ([`OffsetBrep::prepare_surface_solve_cache`]).
+    fn solve_surface_cache(
+        &mut self,
+        k: &Kernel,
+        surface: &Surface,
+        handle: Option<Handle>,
+    ) -> Result<SurfaceCache<Handle>> {
+        use crate::query::face::p2::solve_surface_cache_of_face;
+        use crate::surface::surface::p1::{get_surface_cache, make_surface_cache};
+        let Some((arena, face, owner)) = self.surface_cache_face(surface, handle)? else {
+            // the solve's GetTree: a reused cache whose tree is not built builds it now
+            let mut cache = get_surface_cache(k, surface, handle)?;
+            if cache.tree().is_none() {
+                cache.get_tree(k)?;
+            }
+            return Ok(cache);
+        };
         // the surface's trimmed cache, kept with it as upstream keeps it (reused by
         // later solves on the same surface)
-        let map = cache_handle(arena);
-        let cache = if get_tree {
-            solve_surface_cache_of_face(k, b, face, owner, surface, handle, map)?
-        } else {
-            surface_cache_state_of_face(k, b, face, owner, surface, handle, map)?
-        };
-        match cache {
+        let b = self.brep_mut(arena);
+        match solve_surface_cache_of_face(k, b, face, owner, surface, handle, cache_handle(arena))?
+        {
             Some(cache) => Ok(cache),
             None => make_surface_cache(k, surface, handle),
+        }
+    }
+
+    /// The state bits of `smsurf_GetSurfaceCache` of `surface` as handed to a reader of
+    /// them only, without the solve's `GetTree`
+    /// ([`OffsetBrep::prepare_surface_state_cache`]).
+    fn surface_cache_state(
+        &mut self,
+        k: &Kernel,
+        surface: &Surface,
+        handle: Option<Handle>,
+    ) -> Result<SurfaceCacheState<Handle>> {
+        use crate::query::face::p2::surface_cache_state_of_face;
+        use crate::surface::surface::p1::{get_surface_cache, make_surface_cache};
+        let Some((arena, face, owner)) = self.surface_cache_face(surface, handle)? else {
+            return get_surface_cache(k, surface, handle)?.state();
+        };
+        // the surface's trimmed cache, kept with it as upstream keeps it
+        let b = self.brep_mut(arena);
+        match surface_cache_state_of_face(k, b, face, owner, surface, |entity| {
+            Handle::topology(arena, entity)
+        })? {
+            Some(state) => Ok(state),
+            None => make_surface_cache(k, surface, handle)?.state(),
         }
     }
 }
@@ -699,7 +737,7 @@ impl OffsetBrep<Handle> for EdgeBrep<'_> {
         surface: &Surface,
         handle: Option<Handle>,
     ) -> Result<SurfaceCache<Handle>> {
-        self.surface_cache_for(k, surface, handle, true)
+        self.solve_surface_cache(k, surface, handle)
     }
 
     fn prepare_surface_state_cache(
@@ -707,8 +745,8 @@ impl OffsetBrep<Handle> for EdgeBrep<'_> {
         k: &Kernel,
         surface: &Surface,
         handle: Option<Handle>,
-    ) -> Result<SurfaceCache<Handle>> {
-        self.surface_cache_for(k, surface, handle, false)
+    ) -> Result<SurfaceCacheState<Handle>> {
+        self.surface_cache_state(k, surface, handle)
     }
 
     fn prepared_face_queries(&self) -> Option<&dyn FaceQueries<Handle>> {
@@ -1102,17 +1140,24 @@ impl OffsetBrep<Handle> for EdgeBrep<'_> {
 
     fn edgeuse_set_uv_trim_curve(
         &mut self,
-        _k: &Kernel,
+        k: &Kernel,
         u: Handle,
         curve: Option<Handle>,
         max_dist: f64,
     ) -> Result<()> {
         let (arena, u) = u.edgeuse()?;
+        let mut raise_by = max_dist;
         let arg = match curve {
-            Some(h) => eu::UvTrimCurveArg::New(Box::new(self.cloned_curve(h)?)),
+            Some(h) => {
+                let c = self.cloned_curve(h)?;
+                // (not upstream, #18009: bounded by the trim's proved distance from the edge
+                // curve where it is enclosed, see the trait method)
+                raise_by = eu3::trim_raise_distance(k, self.brep_mut(arena), u, &c, max_dist)?;
+                eu::UvTrimCurveArg::New(Box::new(c))
+            }
             None => eu::UvTrimCurveArg::Null,
         };
-        eu::set_uv_trim_curve(self.brep_mut(arena), u, arg, max_dist, true, None)?;
+        eu::set_uv_trim_curve(self.brep_mut(arena), u, arg, raise_by, true, None)?;
         Ok(())
     }
 
