@@ -541,6 +541,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 agents_section(app, ui);
             }
             instructions_section(app, ui);
+            allowed_folders_section(app, ui);
             panel_section(app, ui);
             connecting_section(app, ui);
         });
@@ -584,6 +585,63 @@ fn instructions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         solidcraft_ui_registry::publish_target("prefs:agent_instructions", response.rect);
         ui_kit::text(ui, tr("ai.prefs.instructions_note"), ui_kit::Text::Hint("instructions"));
+    });
+}
+
+/// Extra folders the built-in Assistant's MCP server may reach (`agent_allowed_paths`, #20326).
+fn allowed_folders_section(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = solidcraft_theme::Tokens::get();
+    ui_kit::settings_section(ui, "allowed_folders", tr("ai.prefs.allowed_folders"), |ui| {
+        ui.horizontal_wrapped(|ui| ui_kit::settings_inline_note(ui, tr("ai.prefs.allowed_folders_note")));
+        if app.preferences.agent_allowed_paths.is_empty() {
+            ui.horizontal_wrapped(|ui| ui_kit::settings_inline_note(ui, tr("ai.prefs.allowed_folders_none")));
+        } else {
+            let mut remove = None;
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(t.space_6, t.space_6);
+                for (i, folder) in app.preferences.agent_allowed_paths.iter().enumerate() {
+                    let chip = ui_kit::SettingsChip {
+                        key: Some(folder),
+                        monospace: true,
+                        remove: Some(tr("ai.prefs.allowed_folders_remove")),
+                        ..Default::default()
+                    };
+                    let button = ui_kit::settings_chip(ui, folder, chip);
+                    let key = format!("prefs:agent_allowed_folder:{i}:remove");
+                    solidcraft_ui_registry::publish_target(&key, button.rect);
+                    solidcraft_ui_registry::publish_handle(&key, button.rect.center());
+                    if button.clicked() {
+                        remove = Some(i);
+                    }
+                }
+            });
+            if let Some(i) = remove.filter(|i| *i < app.preferences.agent_allowed_paths.len()) {
+                app.preferences.agent_allowed_paths.remove(i);
+            }
+        }
+        ui.horizontal(|ui| {
+            let can_browse = !cfg!(target_arch = "wasm32") && app.services.pick_folder.is_some();
+            let add = ui.add_enabled_ui(can_browse, |ui| ui_kit::button(ui, tr("ai.prefs.allowed_folders_add"), ui_kit::Button::Normal)).inner;
+            solidcraft_ui_registry::publish_target("prefs:agent_allowed_folders:add", add.rect);
+            solidcraft_ui_registry::publish_handle("prefs:agent_allowed_folders:add", add.rect.center());
+            if add.clicked() {
+                app.pick_folder(|app, folder| {
+                    if let Some(folder) = folder.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+                        && !app.preferences.agent_allowed_paths.contains(&folder)
+                    {
+                        app.preferences.agent_allowed_paths.push(folder);
+                    }
+                });
+            }
+            if !app.preferences.agent_allowed_paths.is_empty() {
+                let clear = ui_kit::button(ui, tr("ai.prefs.allowed_folders_clear"), ui_kit::Button::Normal);
+                solidcraft_ui_registry::publish_target("prefs:agent_allowed_folders:clear", clear.rect);
+                solidcraft_ui_registry::publish_handle("prefs:agent_allowed_folders:clear", clear.rect.center());
+                if clear.clicked() {
+                    app.preferences.agent_allowed_paths.clear();
+                }
+            }
+        });
     });
 }
 

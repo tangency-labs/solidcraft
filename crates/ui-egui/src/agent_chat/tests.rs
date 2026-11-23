@@ -1940,7 +1940,7 @@ while IFS= read -r line; do
 done
 "#;
     let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
-    let bridge = acp::McpBridge { cli: dir.join("solidcraft-cli"), port: 7878 };
+    let bridge = acp::McpBridge { cli: dir.join("solidcraft-cli"), port: 7878, allow_paths: Vec::new() };
     let start = backend::StartContext { cwd: dir.clone(), bridge: Some(bridge.clone()), tools: None, wake: Box::new(|| {}) };
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
@@ -6428,5 +6428,78 @@ fn importer_plugins_always_ask_like_plugin_runs() {
     assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"file.export","params":{"path":"/tmp/part.step"}})));
     assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"file.export","params":{"path":file,"format":"step"}})));
     assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"solid.box","params":{}})));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #20326: folders configured under Assistant preferences (`agent_allowed_paths`) appear as chips
+/// that can be added, removed and cleared, and are appended to `allow_paths` on chat tool requests.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn allowed_folders_preference_manages_chips_and_extends_chat_scope() {
+    let dir = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-chat-allow-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let sub_a = dir.join("proj_a");
+    let sub_b = dir.join("proj_b");
+    std::fs::create_dir_all(&sub_a).unwrap();
+    std::fs::create_dir_all(&sub_b).unwrap();
+    let a_str = sub_a.to_string_lossy().into_owned();
+    let b_str = sub_b.to_string_lossy().into_owned();
+
+    // UI flow: pick folder, verify chip, add second folder, remove first chip, then clear all.
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let picked = std::sync::Arc::new(std::sync::Mutex::new(Some(a_str.clone())));
+    let p_clone = std::sync::Arc::clone(&picked);
+    h.app.services.pick_folder = Some(Box::new(move || {
+        let v = p_clone.lock().ok().and_then(|g| g.clone());
+        Box::pin(std::future::ready(v))
+    }));
+    crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_ASSISTANT);
+    h.frames(4);
+    crate::prefs::reveal_preference(&mut h, "prefs:agent_allowed_folders:add");
+    h.step(&json!({"click": {"handle": "prefs:agent_allowed_folders:add"}})).unwrap();
+    crate::file_picker::tick(&mut h.app, &h.ctx);
+    h.frames(3);
+    assert_eq!(h.app.preferences.agent_allowed_paths, vec![a_str.clone()]);
+    *picked.lock().unwrap() = Some(b_str.clone());
+    crate::prefs::reveal_preference(&mut h, "prefs:agent_allowed_folders:add");
+    h.step(&json!({"click": {"handle": "prefs:agent_allowed_folders:add"}})).unwrap();
+    crate::file_picker::tick(&mut h.app, &h.ctx);
+    h.frames(3);
+    assert_eq!(h.app.preferences.agent_allowed_paths, vec![a_str.clone(), b_str.clone()]);
+    crate::prefs::reveal_preference(&mut h, "prefs:agent_allowed_folder:0:remove");
+    h.step(&json!({"click": {"handle": "prefs:agent_allowed_folder:0:remove"}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.preferences.agent_allowed_paths, vec![b_str.clone()]);
+    crate::prefs::reveal_preference(&mut h, "prefs:agent_allowed_folders:clear");
+    h.step(&json!({"click": {"handle": "prefs:agent_allowed_folders:clear"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.preferences.agent_allowed_paths.is_empty());
+
+    // Runtime scope: `pump_tools` appends `agent_allowed_paths` to requests that carry `allow_paths`
+    // (bridged MCP) as well as requests without one (API backend), letting `doc.open` reach them.
+    let design = sub_a.join("part.sc");
+    let mut s = solidcraft_engine::Session::default();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    s.execute("file.save", &json!({"path": design.to_string_lossy()})).unwrap();
+    let design_str = design.to_string_lossy().into_owned();
+
+    let (mut app, _script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    app.preferences.ai_permissions = agents::Mode::All;
+    send(&mut app, &ctx, "open a design in an allowed folder".into());
+
+    // Without `sub_a` in `agent_allowed_paths`, a request confined to `sub_b` refuses `sub_a`.
+    let denied_reply =
+        chat_tool(&mut app, &tx, &ctx, "engine.execute", json!({"command": "doc.open", "params": {"path": design_str}, "allow_paths": [b_str]}));
+    assert_eq!(denied_reply["ok"], false, "unconfigured folder stays refused: {denied_reply}");
+
+    // With `sub_a` configured, the same bridged request succeeds.
+    app.preferences.agent_allowed_paths = vec![a_str];
+    let allowed_reply =
+        chat_tool(&mut app, &tx, &ctx, "engine.execute", json!({"command": "doc.open", "params": {"path": design_str}, "allow_paths": [b_str]}));
+    assert_eq!(allowed_reply["ok"], true, "configured allowed folder succeeds: {allowed_reply}");
+
     let _ = std::fs::remove_dir_all(&dir);
 }
