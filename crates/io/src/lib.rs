@@ -33,7 +33,7 @@ pub use design::{
     write_design_container_with_thumbnail, write_drawing_container,
 };
 pub use design::{SHARED_DESIGN_EXT, is_shared_design_path, shared_design_name};
-pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};
+pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, GlbOptions, MAX_GLB_BYTES, export_glb};
 mod legacy_dir;
 pub mod library_files;
 pub mod limits;

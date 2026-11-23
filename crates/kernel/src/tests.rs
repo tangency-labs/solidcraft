@@ -3514,3 +3514,78 @@ fn whole_edge_keeps_corners_tangent_arcs_and_authored_splits_apart() {
         assert_eq!(whole_edge(&capped, e), ring, "ring {ring:?}");
     }
 }
+
+/// A round larger than a narrow concave round on its tangent chain is refused at once, naming
+/// that round's radius. A stem whose outline has three slight inward kinks (3, 5 and 9 degrees
+/// where its arcs meet) is joined into a bulged bar and its six corners are rounded at 2: at the
+/// kinks those rounds are concave faces 0.1 to 0.3 mm wide. A ball of 8 or of 5 does not roll
+/// inside a round of 2, so the round of the stem's foot does not fit them. The kernel found no
+/// ball on those three edges and let them pass; it went on for 18 s to refuse two of the chain's
+/// bands as overlapping, with 0.158 mm as the radius that fits.
+#[test]
+fn a_foot_round_wider_than_a_narrow_concave_round_on_its_chain_is_refused_naming_it() {
+    let bar_plane = Plane { origin: Vec3::new(0.0, 0.0, 3.0), x: Vec3::new(1.0, 0.0, 0.0), y: Vec3::new(0.0, 0.0, 1.0) };
+    let bar_loop = Loop2 {
+        segs: vec![
+            Seg2::Line { a: Vec2::new(-30.0, 0.0), b: Vec2::new(30.0, 0.0) },
+            Seg2::Line { a: Vec2::new(30.0, 0.0), b: Vec2::new(30.0, 17.5) },
+            // from (30, 17.5) through (0, 22.5) to (-30, 17.5)
+            Seg2::Arc { center: Vec2::new(0.0, -70.0), radius: 92.5, start: 1.240498971965643, sweep: 0.6605947096585074 },
+            Seg2::Line { a: Vec2::new(-30.0, 17.5), b: Vec2::new(-30.0, 0.0) },
+        ],
+    };
+    let bar = revolve(&bar_plane, &[Region2 { outer: bar_loop, holes: vec![] }], Vec2::ZERO, Vec2::new(1.0, 0.0), 2.0 * PI).unwrap().remove(0);
+    // The stem's outline: five arcs and a line, corner to corner, each arc given by the three
+    // points the sketch drew it through (its start, a point on it, its end).
+    let corners = [[21.54, -6.4], [13.71, 13.47], [-12.17, 14.52], [-21.5, -5.01], [-15.57, -15.06], [13.88, -15.91]];
+    let segs = vec![
+        // through (18.8, 4)
+        Seg2::Arc {
+            center: Vec2::new(-23.764857456221563, -12.77514513750452),
+            radius: 45.75120309514059,
+            start: 0.13979868890741112,
+            sweep: 0.4711554890184193,
+        },
+        // through (0.94, 17.9)
+        Seg2::Arc {
+            center: Vec2::new(-0.020515226704094107, -5.489318159144774),
+            radius: 23.409032304869626,
+            start: 0.9440065846664395,
+            sweep: 1.1724802229343485,
+        },
+        // through (-17.68, 5.16)
+        Seg2::Arc {
+            center: Vec2::new(39.13116330153082, -21.98152348199092),
+            radius: 62.96165954449315,
+            start: 2.5231805421562297,
+            sweep: 0.3454829737892329,
+        },
+        // through (-20.99, -11.41)
+        Seg2::Arc {
+            center: Vec2::new(-14.535971623535861, -7.675374301250519),
+            radius: 7.456668920769142,
+            start: 2.7760583061845803,
+            sweep: 1.7972107229845715,
+        },
+        Seg2::Line { a: Vec2::new(-15.57, -15.06), b: Vec2::new(13.88, -15.91) },
+        // through (20.24, -13.18)
+        Seg2::Arc {
+            center: Vec2::new(14.49239208224037, -8.563320015768795),
+            radius: 7.372159171714493,
+            start: -1.6539603698181953,
+            sweep: 1.9517884128893068,
+        },
+    ];
+    let stem_plane = Plane { origin: Vec3::new(0.0, 0.0, 65.0), ..Plane::XY };
+    let stem = extrude(&stem_plane, &[Region2 { outer: Loop2 { segs }, holes: vec![] }], -55.0, 0.0).unwrap().remove(0);
+    let body = boolean(&bar, &stem, BoolOp::Union).unwrap().unwrap();
+    let picks: Vec<Vec3> = corners.iter().map(|c| Vec3::new(c[0], c[1], 45.0)).collect();
+    let body = fillet(&body, &picks, 2.0).unwrap();
+    let chain = tangent_chain(&body, &[Vec3::new(-0.85, -15.48, 19.32)]).unwrap();
+    assert_eq!(chain.len(), 14, "the foot: six sides, six corner rounds and the bar's seam twice");
+    for r in [8.0, 5.0] {
+        let Err(KernelError::TooLarge(why)) = fillet(&body, &chain, r) else { panic!("{r}: refused as too large") };
+        assert!(why.contains("the rolling ball does not fit a face it rolls on"), "{r}: {why}");
+        assert_eq!(named_fit(&why), Some(2.0), "{r}: {why}");
+    }
+}

@@ -538,6 +538,26 @@ fn eval_propagates_script_errors_before_writing_a_report() {
     }
 }
 
+/// #20926: `eval` takes `--quiet` as `run` does: nothing on stdout, a `--json-out` report still
+/// written, and the exit status unchanged.
+#[test]
+fn eval_takes_quiet_like_run() {
+    let dir = Scratch::new();
+    let script = dir.script();
+    let report = dir.0.join("report.json");
+    for command in ["eval", "inspect"] {
+        let output = cli().arg(command).arg(&script).arg("--quiet").output().unwrap();
+        assert!(output.status.success(), "{command}: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.stdout.is_empty(), "{command}: {}", String::from_utf8_lossy(&output.stdout));
+        let _ = std::fs::remove_file(&report);
+        let output = cli().arg(command).arg("--quiet").arg(&script).arg("--json-out").arg(&report).output().unwrap();
+        assert!(output.status.success(), "{command}: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.stdout.is_empty());
+        let written: Value = serde_json::from_slice(&std::fs::read(&report).unwrap()).unwrap();
+        assert!(written["body_count"].is_number(), "{written}");
+    }
+}
+
 #[test]
 fn eval_rejects_unknown_options_and_missing_input_values_before_writing_a_report() {
     let dir = Scratch::new();
@@ -671,6 +691,13 @@ fn unknown_command_suggests_the_closest_id() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    // An MCP tool's name suggests the command it stands for (#20925).
+    for (tool, command) in [("set_parameter", "parameters.change"), ("measure", "inspect.measure"), ("inspect-design", "document.inspect")] {
+        let output = cli().args(["exec", tool]).output().unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(&format!("(did you mean `{command}`")), "{tool}: {stderr}");
+    }
 }
 
 /// #1833: `--timings` reports each command's time instead of the measurement, `--profile` adds
