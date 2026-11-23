@@ -48,6 +48,7 @@
 //! | [`scaled_zero_of_curve`]               | `SmTol::GetScaledZero(const SmCurve&)` (CO-PORTED by `intersect.surface_drop_lib_p3`) |
 //! | [`brep_model_size_estimate`], [`set_brep_model_size_estimate`] | `SmTol::GetModelSizeEstimate(const SmBrep&)`, `SmTol::SetModelSizeEstimate(SmBrep&, double)` |
 //! | [`brep_large_small_size_ratio`], [`set_brep_large_small_size_ratio`] | `SmTol::GetLargeSmallSizeRatio(const SmBrep&)`, `SmTol::SetLargeSmallSizeRatio(SmBrep&, double)` |
+//! | [`brep_size_zone_tol_3d`], [`brep_size_calc_gap_zone_tol_3d`] | not upstream: `SmTol::GetZoneTol3d(const SmContext*, ..)`, `CalcEdgeZoneTol3d` and `CalcVertexZoneTol3d(.., const SmContext*)` asked of a B-rep's context, from the B-rep's own model size estimate |
 //! | [`brep_zone_tol_3d`], [`brep_approx_tol_3d`], [`brep_xsect_tol_3d`] | `SmTol::GetZoneTol3d(const SmBrep*, SmSmallTopoType)`, `GetApproxTol3d(const SmBrep*, ..)`, `GetXSectTol3d(const SmBrep*, ..)` |
 //! | [`brep_calc_face_zone_tol_3d`], [`brep_calc_edge_zone_tol_3d`], [`brep_calc_vertex_zone_tol_3d`] | `SmTol::CalcFaceZoneTol3d(SmBrep*)`, `CalcEdgeZoneTol3d(double, double, SmBrep*, SmZoneTol3d*)`, `CalcVertexZoneTol3d(double, double, SmBrep*, SmZoneTol3d*)` |
 //! | [`scaled_zero_of_brep`]                | `SmTol::GetScaledZero(const SmBrep&)`          |
@@ -105,6 +106,10 @@
 //!   not change results in the release build).
 //! - The `SmBrep` overloads take the [`Brep`] by reference (a null `SmBrep*`
 //!   dereferences upstream); the B-rep's context is the kernel context.
+//! - A B-rep's model size estimate and size ratio are its own: setting them does not
+//!   write the kernel context (upstream's `SmBrep::SetThisModelSizeEstimate` and
+//!   `SetThisLargeSmallSizeRatio` pass them on to the B-rep's context, there one
+//!   model's; the kernel context is every B-rep's default, set only by its caller).
 //!   [`scaled_zero_of_brep`] returns the error of `SmBrep::CalculateBoundingBox`
 //!   (`query::brep::calculate_bounding_box`) where upstream ignores the status and
 //!   takes the scaled zero of whatever box the call left.
@@ -646,11 +651,48 @@ pub fn brep_model_size_estimate(k: &Kernel, b: &Brep) -> f64 {
     b.this_model_size_estimate(k, true)
 }
 
-/// Sets a B-rep's model size estimate (and its context's) and returns the B-rep's new
+/// Sets a B-rep's model size estimate, on that B-rep alone, and returns the B-rep's new
 /// zone tolerance (`SmTol::SetModelSizeEstimate(SmBrep&, double)`; upstream default
 /// [`USE_DEFAULT`]).
-pub fn set_brep_model_size_estimate(k: &mut Kernel, b: &mut Brep, model_size_estimate: f64) -> f64 {
-    b.set_this_model_size_estimate(k, model_size_estimate)
+pub fn set_brep_model_size_estimate(b: &mut Brep, model_size_estimate: f64) -> f64 {
+    b.set_this_model_size_estimate(model_size_estimate)
+}
+
+/// The zone tolerance of a B-rep's model size estimate (not upstream, which reads it
+/// from the B-rep's context, there one model's): [`size_estimate_to_zone_tol_3d`] of
+/// the estimate the B-rep stores, and the context zone tolerance
+/// ([`context_zone_tol_3d`] of the kernel context, what the caller configured) for a
+/// B-rep that stores [`USE_DEFAULT`] (and while the system zone tolerance is
+/// uninitialised, as the context form answers then). Unlike [`brep_zone_tol_3d`] it
+/// does not follow the B-rep tolerance where it was set apart from the estimate.
+#[must_use]
+pub fn brep_size_zone_tol_3d(k: &Kernel, b: &Brep) -> f64 {
+    let stored = b.this_model_size_estimate(k, false);
+    if stored == USE_DEFAULT || k.tolerances.zone_tol_3d == UNINIT_TOL {
+        context_zone_tol_3d(k, Some(&k.context), SmallTopoType::NormalSize)
+    } else {
+        size_estimate_to_zone_tol_3d(stored)
+    }
+}
+
+/// An edge's or a vertex's zone tolerance from its largest gaps, in a B-rep, before
+/// the B-rep tolerance is settled: as [`calc_edge_zone_tol_3d`] and
+/// [`calc_vertex_zone_tol_3d`] with [`brep_size_zone_tol_3d`] as the default.
+#[must_use]
+pub fn brep_size_calc_gap_zone_tol_3d(
+    k: &Kernel,
+    max_gap_1d: f64,
+    max_gap_2d: f64,
+    b: &Brep,
+    max_up_zone_tol: Option<f64>,
+) -> f64 {
+    calc_gap_zone_tol(
+        k,
+        max_gap_1d,
+        max_gap_2d,
+        max_up_zone_tol,
+        brep_size_zone_tol_3d(k, b),
+    )
 }
 
 /// A B-rep's large/small size ratio, its context's (else the system's) when it has
@@ -660,11 +702,11 @@ pub fn brep_large_small_size_ratio(k: &Kernel, b: &Brep) -> f64 {
     b.this_large_small_size_ratio(k, true)
 }
 
-/// Sets a B-rep's large/small size ratio and its context's
+/// Sets a B-rep's large/small size ratio, on that B-rep alone
 /// (`SmTol::SetLargeSmallSizeRatio(SmBrep&, double)`; upstream default
 /// [`USE_DEFAULT`]).
-pub fn set_brep_large_small_size_ratio(k: &mut Kernel, b: &mut Brep, large_small_size_ratio: f64) {
-    b.set_this_large_small_size_ratio(k, large_small_size_ratio);
+pub fn set_brep_large_small_size_ratio(b: &mut Brep, large_small_size_ratio: f64) {
+    b.set_this_large_small_size_ratio(large_small_size_ratio);
 }
 
 /// A B-rep's zone tolerance (`SmTol::GetZoneTol3d(const SmBrep*, SmSmallTopoType)`):
@@ -1259,9 +1301,9 @@ impl<A: Ord + Copy, B: Ord + Copy> Relation<A, B> {
             Cardinality::ManyToMany => false,
         };
         if violates {
-            return Err(SolidError::geom_failed(
+            return Err(SolidError::geom(
                 "geom::tol::Relation::relate_pair",
-                "the pair would break the relation's cardinality",
+                GeomFailure::PairBreaksCardinality,
             ));
         }
         self.first_to_second
@@ -1303,9 +1345,9 @@ impl<A: Ord + Copy, B: Ord + Copy> Relation<A, B> {
     pub fn remove_pair(&mut self, first: A, second: B) -> Result<()> {
         if !self.first_to_second.contains_key(&first) || !self.second_to_first.contains_key(&second)
         {
-            return Err(SolidError::geom_failed(
+            return Err(SolidError::geom(
                 "geom::tol::Relation::remove_pair",
-                "the pair is not related",
+                GeomFailure::PairNotRelated,
             ));
         }
         if let Some(seconds) = self.first_to_second.get_mut(&first) {
@@ -1404,16 +1446,40 @@ mod tests {
     fn brep_model_size_estimate_and_ratio_chase_the_context() {
         let mut k = Kernel::default();
         let mut b = Brep::new();
+        let other = Brep::new();
         assert_eq!(brep_model_size_estimate(&k, &b), MODEL_SIZE_ESTIMATE);
         assert_eq!(brep_large_small_size_ratio(&k, &b), LARGE_SMALL_SIZE_RATIO);
-        // 500..50000 -> 1e-4; the context gets the estimate too
-        assert_eq!(set_brep_model_size_estimate(&mut k, &mut b, 5000.0), 1e-4);
+        assert_eq!(brep_size_zone_tol_3d(&k, &b), 1e-5);
+        // 500..50000 -> 1e-4, on this B-rep alone: the context and another B-rep
+        // keep the default
+        assert_eq!(set_brep_model_size_estimate(&mut b, 5000.0), 1e-4);
         assert_eq!(brep_model_size_estimate(&k, &b), 5000.0);
-        assert_eq!(context_model_size_estimate(&k, &k.context), 5000.0);
+        assert_eq!(
+            context_model_size_estimate(&k, &k.context),
+            MODEL_SIZE_ESTIMATE
+        );
+        assert_eq!(k.context.this_zone_tol_3d(), 1e-5);
+        assert_eq!(brep_model_size_estimate(&k, &other), MODEL_SIZE_ESTIMATE);
         assert_eq!(brep_zone_tol_3d(&k, &b, SmallTopoType::NormalSize), 1e-4);
-        set_brep_large_small_size_ratio(&mut k, &mut b, 10.0);
+        assert_eq!(brep_size_zone_tol_3d(&k, &b), 1e-4);
+        assert_eq!(brep_size_zone_tol_3d(&k, &other), 1e-5);
+        assert_eq!(brep_size_calc_gap_zone_tol_3d(&k, 0.0, 0.0, &b, None), 1e-4);
+        set_brep_large_small_size_ratio(&mut b, 10.0);
         assert_eq!(brep_large_small_size_ratio(&k, &b), 10.0);
-        assert_eq!(k.context.stored_large_small_size_ratio(), 10.0);
+        assert_eq!(k.context.stored_large_small_size_ratio(), USE_DEFAULT);
+        assert_eq!(
+            brep_large_small_size_ratio(&k, &other),
+            LARGE_SMALL_SIZE_RATIO
+        );
+        // what the caller configures on the context is every defaulting B-rep's
+        set_context_model_size_estimate(&mut k.context, 0.05);
+        k.context.set_this_large_small_size_ratio(3.0);
+        assert_eq!(brep_model_size_estimate(&k, &other), 0.05);
+        assert_eq!(brep_size_zone_tol_3d(&k, &other), 1e-6);
+        assert_eq!(brep_large_small_size_ratio(&k, &other), 3.0);
+        assert_eq!(brep_model_size_estimate(&k, &b), 5000.0);
+        assert_eq!(brep_size_zone_tol_3d(&k, &b), 1e-4);
+        assert_eq!(brep_large_small_size_ratio(&k, &b), 10.0);
     }
 
     #[test]

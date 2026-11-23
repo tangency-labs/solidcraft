@@ -213,3 +213,12 @@ SolidCraft changes:
   `dark_mode.rs` passes the structure size to `RtlGetVersion`, as its documentation requires,
   since this choice depends on the build number it returns. eframe 0.37 requires
   winit 0.30, so this cannot come from a newer winit.
+- `src/platform_impl/windows/monitor.rs` (`MonitorHandle::name`, `native_identifier`, `size`): a
+  monitor that has gone away (unplugged, a dock disconnected, a display change on resume) makes
+  `GetMonitorInfoW` fail with OS error 1461 (`ERROR_INVALID_MONITOR_HANDLE`), and these unwrapped
+  that error, so asking for the monitor list or going full screen ended the app (#20645). Now
+  `name` is `None`, `native_identifier` is empty and `size` is 0x0, the same kind of fallback
+  winit already uses in `position` ((0, 0)), `scale_factor` (96 DPI) and `video_modes` (none).
+- `src/platform_impl/windows/window.rs` (`set_fullscreen`): going full screen on such a monitor
+  would have sized the window 0x0, so it fills the monitor the window is on instead, and never
+  applies a zero-area size (#20645).

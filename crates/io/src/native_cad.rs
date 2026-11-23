@@ -435,14 +435,28 @@ mod convert {
 
     pub(super) mod step_route;
 
-    /// Caps for hostile input: cadmpeg's tight `service` profile, with our STEP size limit on
-    /// the input. The service profile already admits a detailed part's 8 million entities:
+    /// Caps for hostile input: cadmpeg's tight `service` profile, its caps scaled with our STEP
+    /// size limit (never below `service`) and that limit on the input. The service profile already admits a detailed part's 8 million entities:
     /// cadmpeg 0.6.3 dropped the collection-item budget that refused one at a million (#1783)
     /// and the work-unit budget that went with it.
     pub(super) fn policy() -> DecodePolicy {
+        let limit = crate::limits::Kind::Step.limit();
+        let service = ResourceLimits::service();
+        // Scaled with the limit, or a file it lets in is still refused by a default-sized cap.
+        let scale = |cap: u64| {
+            let scaled = u128::from(cap) * u128::from(limit) / crate::MAX_STEP_BYTES as u128;
+            u64::try_from(scaled).unwrap_or(u64::MAX).max(cap)
+        };
         DecodePolicy {
             mode: DecodeMode::Salvage,
-            limits: ResourceLimits { max_input_bytes: crate::limits::Kind::Step.limit(), ..ResourceLimits::service() },
+            limits: ResourceLimits {
+                max_input_bytes: limit,
+                max_decompressed_bytes_total: scale(service.max_decompressed_bytes_total),
+                max_decompressed_bytes_per_expand: scale(service.max_decompressed_bytes_per_expand),
+                max_retained_bytes: scale(service.max_retained_bytes),
+                max_entities: scale(service.max_entities),
+                ..service
+            },
         }
     }
 

@@ -86,9 +86,23 @@ pub static COMMANDS: &[CommandSpec] = &[
 ];
 
 fn column_of(s: &Session, p: &Value, cmd: &str) -> Result<Column> {
-    if ["param", "feature", "material", "appearance", "component_appearance", "face_appearance"].iter().filter(|k| p.get(**k).is_some()).count() != 1
-    {
-        return Err(bad(cmd, "give exactly one configuration target"));
+    const TARGETS: &[&str] = &["param", "feature", "material", "appearance", "component_appearance", "face_appearance"];
+    if TARGETS.iter().filter(|k| p.get(**k).is_some()).count() != 1 {
+        let named = TARGETS.iter().map(|k| format!("`{k}`")).collect::<Vec<_>>();
+        let mut message = format!("give exactly one configuration target: {} or {}", named[..named.len() - 1].join(", "), named[named.len() - 1]);
+        // A key that is no target and no other parameter is likely a misspelt one: name it.
+        let unknown: Vec<String> = p
+            .as_object()
+            .into_iter()
+            .flat_map(|o| o.keys())
+            .filter(|k| !TARGETS.contains(&k.as_str()) && *k != "delete")
+            .map(|k| format!("`{k}`"))
+            .collect();
+        if !unknown.is_empty() {
+            let are = if unknown.len() == 1 { "is not a parameter" } else { "are not parameters" };
+            message.push_str(&format!(" ({} {are} of {cmd})", unknown.join(", ")));
+        }
+        return Err(bad(cmd, message));
     }
     if let Some(value) = p.get("component_appearance") {
         let key = value
