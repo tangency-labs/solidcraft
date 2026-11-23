@@ -34,7 +34,7 @@
 //! | `FaceOffsetBrep` (private)                                   | the face creator's topology/owned-geometry subset |
 //! | `create_analytic_extension` (private)                       | the SolidCraft fork's `sm_CreateAnalyticExtension` (tangency-labs/smlib@fddc366, @98ab1b0; opt-in) |
 //! | `exact_piece` (private)                                     | the fork's `sm_ExactPiece` (tangency-labs/smlib@fddc366; opt-in) |
-//! | [`make_edges_on_analytics_exact`]                          | the fork's `MakeEdgesOnAnalyticsExact` (tangency-labs/smlib@cd85d34; opt-in) |
+//! | [`make_edges_on_analytics_exact`]                          | the fork's `MakeEdgesOnAnalyticsExact` (tangency-labs/smlib@cd85d34) |
 //! | [`OffsetGeometryCreation::default_tangency_tol_radians`]    | the constructor's `m_dTangencyTolRadians` (half a degree in the fork's tangency-labs/smlib@2e1bb8c; opt-in) |
 //! | `first_cut_from_far_end` (private)                          | the fork's cut-first-from-the-far-end choice in `TrimExtendedEdge` (tangency-labs/smlib@2e1bb8c; opt-in) |
 //! | `offset_vertex_image` (private)                             | not upstream: a vertex's image on its face's offset (WR-736; opt-in) |
@@ -172,8 +172,8 @@
 //!   upstream's. `exact_piece` counts the whole turns it moves a conic angle by and
 //!   returns [`SolidError::NotConverged`] past `MAX_EXACT_PIECE_TURNS` (65536), where
 //!   the fork's loop would not end for a non-finite or huge angle.
-//! - **Opt-in fork fix.** With `Kernel::fixes.shell_edges_on_analytics_exact` (WR-545),
-//!   the shell's result runs [`make_edges_on_analytics_exact`]. Upstream's
+//! - **Fork fix.** The shell's result always runs [`make_edges_on_analytics_exact`]
+//!   (WR-545; the fork's tangency-labs/smlib@cd85d34, which upstream lacks). Upstream's
 //!   `CreateTrimmedNURBSCurve` gives `NULL` where the port returns an error; any error
 //!   but [`SolidError::Unported`] skips the edge as `NULL` does, as does a failing
 //!   `GlobalSurfaceIntersect`. `SmBrep::ReplaceCurve` is
@@ -2565,8 +2565,7 @@ fn move_within(distance: f64, allowed: f64) -> bool {
 }
 
 /// The fork's `SmOffsetGeometryCreation::MakeEdgesOnAnalyticsExact`
-/// (tangency-labs/smlib@cd85d34, behind
-/// [`crate::kernel::UpstreamFixes::shell_edges_on_analytics_exact`]; WR-545): each edge
+/// (tangency-labs/smlib@cd85d34; WR-545), run at the end of every shell: each edge
 /// of `b` whose curve is not analytic (an intersection marched and approximated)
 /// between two faces on analytic surfaces takes the exact line or conic the surfaces
 /// meet on through its ends and middle (`exact_piece`), running as the edge did,
