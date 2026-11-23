@@ -106,13 +106,28 @@ pub struct Writer {
     expanded: usize,
     resolved: usize,
     limits: Limits,
+    open_expanded_limit: fn() -> usize,
     /// Which written parts to record for a signature, and the records so far.
     tracked: Option<(fn(&str) -> bool, Vec<PartDigest>)>,
 }
 
 impl Writer {
     pub fn new(limits: Limits) -> Writer {
-        Writer { zip: zip::ZipWriter::new(Cursor::new(Vec::new())), names: BTreeSet::new(), expanded: 0, resolved: 0, limits, tracked: None }
+        Writer {
+            zip: zip::ZipWriter::new(Cursor::new(Vec::new())),
+            names: BTreeSet::new(),
+            expanded: 0,
+            resolved: 0,
+            open_expanded_limit: limits.max_expanded,
+            limits,
+            tracked: None,
+        }
+    }
+
+    /// Save required data even when reopening it will need a higher size limit.
+    /// Optional parts still share the reader's expanded budget through `space` and `room`.
+    pub fn for_save(open_limits: Limits) -> Writer {
+        Writer { limits: Limits { max_expanded: || usize::MAX, part_limit: |_| usize::MAX, ..open_limits }, ..Self::new(open_limits) }
     }
 
     /// Record the parts written from now on whose name `include` accepts, with their SHA-256, for
@@ -188,7 +203,7 @@ impl Writer {
         // The bytes written so far, plus what the open compressed part may still hold back.
         let written = self.zip.get_ref().map_or(usize::MAX, |c| c.get_ref().len()).saturating_add(1 << 20);
         let directory = self.names.len().saturating_add(entries).saturating_mul(256).saturating_add(65_536);
-        budget.saturating_sub(written.saturating_add(directory)).min((self.limits.max_expanded)().saturating_sub(self.expanded))
+        budget.saturating_sub(written.saturating_add(directory)).min((self.open_expanded_limit)().saturating_sub(self.expanded))
     }
 
     /// Add a payload as a blob, `blobs/<sha256>.<extension>`, and say its name, for the JSON that
@@ -271,7 +286,7 @@ impl<R: Read + Seek> Reader<R> {
             total = total.checked_add(part.size()).ok_or_else(|| invalid("expanded size overflow"))?;
             let limit = (limits.part_limit)(&name);
             if part.size() > limit as u64 || total > (limits.max_expanded)() as u64 {
-                return Err(invalid("expanded package too large"));
+                return Err(FormatError::ExpandedPackageTooLarge);
             }
         }
         Ok(Self { zip, blobs: BTreeMap::new(), hydrated: 0, document: None, limits })

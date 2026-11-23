@@ -531,6 +531,12 @@ fn warn_if_open_elsewhere(path: &str) {
     }
 }
 
+fn print_file_warnings(path: &str, reply: &Value) {
+    for warning in reply.get("warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+        eprintln!("{path}: warning: {warning}");
+    }
+}
+
 /// Run `script`, read from `path`, on `s`. At the warn level each step's `param_warnings` go to
 /// stderr as the step completes, even when a later step fails (stdout stays the caller's).
 fn run_script_warning(s: &mut Session, path: &str, script: &Value) -> Result<Vec<Value>, String> {
@@ -727,14 +733,13 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         // shape) goes to stderr, as a newer file's warnings do, unless --quiet: the file is
         // written, but not silently.
         if !args.iter().any(|a| a == "--quiet") {
-            for w in reply.get("warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
-                eprintln!("{out}: warning: {w}");
-            }
+            print_file_warnings(out, &reply);
         }
     }
     if let Some(p) = flag(args, "--save") {
         warn_if_open_elsewhere(p);
-        s.execute("file.save_as", &json!({"path": p})).map_err(|e| e.to_string())?;
+        let reply = s.execute("file.save_as", &json!({"path": p})).map_err(|e| e.to_string())?;
+        print_file_warnings(p, &reply);
     }
     if let Some(results) = results {
         print_json(&results, json_out)?;

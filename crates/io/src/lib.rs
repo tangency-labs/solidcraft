@@ -316,6 +316,8 @@ pub const MAX_DESIGN_BYTES: usize = 256 << 20;
 pub enum IoError {
     #[error("unsupported format `{0}` (use stl, obj, step, 3mf, glb, urdf or sc)")]
     Format(String),
+    #[error("design container: expanded package too large")]
+    ExpandedPackageTooLarge,
     #[error("nothing to export: the design has no bodies")]
     Empty,
     #[error("{0}")]

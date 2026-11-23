@@ -16,9 +16,11 @@ pub(crate) mod open_steps;
 #[path = "file_send.rs"]
 mod send;
 
+use std::io::Cursor;
+
 use serde_json::{Value, json};
 use solidcraft_doc::Document;
-use solidcraft_io::Format;
+use solidcraft_io::{DesignContainerReader, Format, IoError};
 
 use super::CommandSpec;
 use super::print_face;
@@ -2057,12 +2059,8 @@ fn write_file(
 /// import's check of its parts was still running when the save began, so the save left the
 /// cache out without waiting for it ([`saved_geometry`], #20133); taken then, as the check may
 /// have ended since.
-fn missing_save_cache(s: &Session, format: &str, cache: bool, checking: bool, bytes: &[u8]) -> Option<String> {
-    if !cache || format != "container" || s.doc.features.is_empty() {
-        return None;
-    }
-    let present = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes)).ok()?.has_model_cache();
-    if present {
+fn missing_save_cache(s: &Session, cache: bool, checking: bool, reader: Option<&DesignContainerReader<Cursor<&[u8]>>>) -> Option<String> {
+    if !cache || s.doc.features.is_empty() || reader?.has_model_cache() {
         return None;
     }
     let reason = if let Some(result) = s.model.results.iter().find(|r| r.error.is_some()) {
@@ -2080,6 +2078,19 @@ fn missing_save_cache(s: &Session, format: &str, cache: bool, checking: bool, by
         "the cache could not fit or be encoded within the design file budget".into()
     };
     Some(format!("Model cache not saved: {reason}; opening this design will rebuild its model."))
+}
+
+/// A successful save can exceed the opening limit on disk or when its contents are unpacked.
+fn save_limit_warning(bytes: usize, open_error: Option<&IoError>) -> Option<String> {
+    let limit = solidcraft_io::limits::max_design_bytes();
+    let reason = if bytes > limit {
+        format!("Saved, but the design is {} MB, over the {} MB \"Largest file to open\" limit:", bytes >> 20, limit >> 20)
+    } else if matches!(open_error, Some(IoError::ExpandedPackageTooLarge)) {
+        "Design saved. Reopening it requires a higher file-size limit for its unpacked contents.".to_owned()
+    } else {
+        return None;
+    };
+    Some(format!("{reason} {}", solidcraft_io::limits::how_to_raise()))
 }
 
 fn write_bytes(
@@ -2143,7 +2154,6 @@ fn write_bytes(
             _ => return Err(bad("file.save", "format must be container or json")),
         }
     };
-    let cache_not_saved = missing_save_cache(s, format, cache, checking, &bytes);
     // Cancelled while the design was being prepared (a watched save): nothing is written.
     if solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
         return Err(EngineError::Other(format!("{path}: save cancelled")));
@@ -2154,13 +2164,18 @@ fn write_bytes(
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
-    s.provenance_chain = solidcraft_io::read_design_provenance_chain(&bytes);
+    // One directory read checks the same limits as Open and supplies both cache and provenance
+    // information, without decoding the design or reading it back from disk.
+    let reader = if format == "container" { DesignContainerReader::new(Cursor::new(bytes.as_slice())).map(Some) } else { Ok(None) };
+    let limit_warning = save_limit_warning(bytes.len(), reader.as_ref().err());
+    let reader = reader.unwrap_or_default();
+    let cache_not_saved = missing_save_cache(s, cache, checking, reader.as_ref());
+    s.provenance_chain = reader.and_then(|mut r| r.provenance_chain());
     s.provenance = None;
     s.mark_saved();
-    let bytes_len = bytes.len();
     let mut out = SaveResult {
         path: path.to_string(),
-        bytes: bytes_len,
+        bytes: bytes.len(),
         name: s.doc.name.clone(),
         kept_format: None,
         warnings: cache_not_saved.as_ref().map(|message| vec![message.clone()]),
@@ -2169,14 +2184,6 @@ fn write_bytes(
         param_warnings: Vec::new(),
         signature,
     };
-    if bytes_len > solidcraft_io::limits::max_design_bytes() {
-        notes.push(format!(
-            "Saved, but the design is {} MB, over the {} MB \"Largest file to open\" limit: {}",
-            bytes_len >> 20,
-            solidcraft_io::limits::max_design_bytes() >> 20,
-            solidcraft_io::limits::how_to_raise()
-        ));
-    }
     // A newer SolidCraft's file keeps what this version can't read, and its format number. What
     // couldn't go back, because the design was changed around it, is said.
     if s.doc.newer_file.is_some() {
@@ -2192,6 +2199,10 @@ fn write_bytes(
     }
     if !notes.is_empty() {
         out.warnings.get_or_insert_with(Vec::new).extend(notes);
+    }
+    // The desktop shows the first warning in its status line.
+    if let Some(warning) = limit_warning {
+        out.warnings.get_or_insert_with(Vec::new).insert(0, warning);
     }
     serde_json::to_value(out).map_err(|e| bad("file.save", e.to_string()))
 }
@@ -4665,15 +4676,31 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
         let omitted = s.design_container(solidcraft_io::DesignCompression::Fast, false, false).unwrap();
-        let notice = missing_save_cache(&s, "container", true, false, &omitted).unwrap();
+        let omitted = DesignContainerReader::new(Cursor::new(omitted.as_slice())).unwrap();
+        let notice = missing_save_cache(&s, true, false, Some(&omitted)).unwrap();
         assert!(notice.contains("design file budget"), "{notice}");
         // Left out while an import's parts were being checked (#20133): that is the reason given.
-        let checking = missing_save_cache(&s, "container", true, true, &omitted).unwrap();
+        let checking = missing_save_cache(&s, true, true, Some(&omitted)).unwrap();
         assert!(checking.contains("still being checked") && !checking.contains("budget"), "{checking}");
-        assert!(missing_save_cache(&s, "container", false, false, &omitted).is_none());
-        assert!(missing_save_cache(&s, "json", true, false, &omitted).is_none());
+        assert!(missing_save_cache(&s, false, false, Some(&omitted)).is_none());
+        assert!(missing_save_cache(&s, true, false, None).is_none());
         let included = s.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
-        assert!(missing_save_cache(&s, "container", true, false, &included).is_none());
+        let included = DesignContainerReader::new(Cursor::new(included.as_slice())).unwrap();
+        assert!(missing_save_cache(&s, true, false, Some(&included)).is_none());
+    }
+
+    #[test]
+    fn save_limit_warning_covers_disk_and_expanded_limits() {
+        let limit = solidcraft_io::limits::max_design_bytes();
+        assert!(save_limit_warning(limit, None).is_none());
+        assert!(save_limit_warning(1024, Some(&IoError::Invalid("invalid archive entry".into()))).is_none());
+        let expanded = save_limit_warning(1024, Some(&IoError::ExpandedPackageTooLarge)).unwrap();
+        assert!(
+            expanded.contains("Reopening") && expanded.contains("unpacked") && expanded.contains(solidcraft_io::limits::how_to_raise()),
+            "{expanded}"
+        );
+        let on_disk = save_limit_warning(limit + 1, None).unwrap();
+        assert!(on_disk.contains("Largest file to open") && on_disk.contains(solidcraft_io::limits::how_to_raise()), "{on_disk}");
     }
 
     #[test]

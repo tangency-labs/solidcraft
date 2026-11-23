@@ -105,6 +105,7 @@ fn cancelled() -> IoError {
 impl From<solidcraft_format::FormatError> for IoError {
     fn from(e: solidcraft_format::FormatError) -> Self {
         match e {
+            solidcraft_format::FormatError::ExpandedPackageTooLarge => IoError::ExpandedPackageTooLarge,
             solidcraft_format::FormatError::Cancelled => cancelled(),
             e => invalid(e),
         }
@@ -129,10 +130,6 @@ const LIMITS: Limits = Limits {
     check_size: |length| crate::limits::check(crate::limits::Kind::Design, length),
     cancelled: Some(crate::safe_write::cancelled),
 };
-
-/// The budgets of a save. The file limit guards opening untrusted files; a design that grew past it
-/// is still written in full, never refused (data loss), and the caller says it is over the limit.
-const SAVE_LIMITS: Limits = Limits { max_expanded: || usize::MAX, part_limit: |_| usize::MAX, ..LIMITS };
 
 /// The Deflate level of a part: STEP sources take [`STEP_LEVEL`], and so does a mesh past the file
 /// limit: level 1 of a large payload leaves more on disk, and that part exists only because
@@ -171,7 +168,7 @@ fn part_limit(name: &str) -> usize {
 
 impl PackageWriter {
     fn new() -> PackageWriter {
-        PackageWriter(Writer::new(SAVE_LIMITS))
+        PackageWriter(Writer::for_save(LIMITS))
     }
     fn finish(self) -> Result<Vec<u8>> {
         Ok(self.0.finish()?)
@@ -2184,6 +2181,35 @@ mod tests {
         let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES, None).unwrap();
         assert!(read_design_geometry(&bytes).is_some());
         assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
+    }
+
+    #[test]
+    fn optional_caches_keep_a_compressible_design_within_the_expanded_open_limit() {
+        let mut doc = Document::new("Compressible imports");
+        for pad in ["a", "b"] {
+            doc.add_feature(
+                FeatureKind::Import {
+                    file: format!("{pad}.step"),
+                    step: pad.repeat(2 << 20).into(),
+                    components: Vec::new(),
+                    skip: Vec::new(),
+                    records: None,
+                },
+                None,
+            )
+            .unwrap();
+        }
+        let required = write_design_container_with_cache(&doc, DesignCompression::Fast, None, None).unwrap();
+        let expanded: usize = parts(&required).values().map(Vec::len).sum();
+        // Both imports fit individually. Together the required entries leave at most one
+        // byte for optional parts, despite plenty of space in the compressed file.
+        crate::limits::test_cap::set(Some(expanded.div_ceil(2)));
+        let preview = DesignPreview { meshes: vec![mesh()] };
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, Some(&preview), Some(&native_geometry())).unwrap();
+        let reopened = crate::read_design(&bytes);
+        crate::limits::test_cap::set(None);
+        assert_eq!(reopened.unwrap().to_json(), doc.to_json());
+        assert_eq!(bytes, required);
     }
 
     /// #20724: the cap on the cache's manifest follows the design file limit (an eighth of it, the
