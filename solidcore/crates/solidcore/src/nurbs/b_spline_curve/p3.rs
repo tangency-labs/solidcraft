@@ -1425,17 +1425,8 @@ impl BSplineCurve {
         let (knots, _) = self.knots(None)?; // Unique knot vector
         let (_, continuities) = self.calculate_continuities(k, continuity_angle_tol)?;
 
-        // check state
-        if knots.len() != continuities.len() {
-            return Err(SolidError::b_spline(
-                OP_SUBDIV,
-                BSplineFailure::Defect {
-                    why: "the unique knots and the continuities, both computed from the curve \
-                          just above, differ in length, and each continuity is that of one \
-                          unique knot",
-                },
-            ));
-        }
+        // (upstream's check that the two lengths agree is not ported: `calculate_continuities`
+        // returns one continuity per unique knot of this same curve)
 
         // init iter params
         let mut start = *knots

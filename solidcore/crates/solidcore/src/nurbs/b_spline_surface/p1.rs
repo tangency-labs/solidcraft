@@ -2569,6 +2569,28 @@ mod tests {
         .unwrap()
     }
 
+    /// A point 10 off the plane has no foot within the tolerance: the inversion names
+    /// the tolerance it searched within, class not within tolerance, status `SM_ERR`.
+    #[test]
+    fn step_inversion_of_a_point_off_the_surface_names_its_tolerance() {
+        let k = Kernel::default();
+        let s = bilinear();
+        let dom = s.natural_uv_domain();
+        let e = s
+            .step_inversion(&k, &dom, Point3::new(5.0, 5.0, 10.0), 1e-6, None)
+            .unwrap_err();
+        assert_eq!(
+            e.nurbs_failure(),
+            Some(&NurbsFailure::BSpline(
+                BSplineFailure::NoFootWithinTolerance { tolerance: 1e-6 }
+            )),
+            "{e:?}"
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::NotWithinTolerance);
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert!(!e.is_defect() && !e.is_refusal(), "{e:?}");
+    }
+
     #[test]
     fn bilinear_counts_and_domain() {
         let s = bilinear();

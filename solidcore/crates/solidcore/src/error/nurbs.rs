@@ -728,7 +728,10 @@ impl core::fmt::Display for BSplineFailure {
                 f.write_str("a boundary curve without a surface is not degenerate")
             }
             Self::NoFootWithinTolerance { tolerance } => {
-                write!(f, "the point is not within {tolerance} of the surface")
+                write!(
+                    f,
+                    "no point of the surface was found within {tolerance} of the point"
+                )
             }
             Self::DerivativeCurvesMissing => f.write_str("the derivative curves are missing"),
             Self::ExpansionChangesCounts => {
@@ -1059,6 +1062,8 @@ mod tests {
             BSplineFailure::IntervalNotSplittable { lo: 1.0, hi: 1.0 },
             BSplineFailure::NoFootWithinTolerance { tolerance: 1e-6 },
         ];
+        // a result the method could not build from valid input: class `failed`
+        let failed = [BSplineFailure::ExpansionChangesCounts];
         // the caller's missing inputs keep upstream's `NER` status
         for cause in [
             BSplineFailure::BoundaryWithoutSurface,
@@ -1075,6 +1080,7 @@ mod tests {
             (&unsupported[..], ErrorKind::Unsupported),
             (&degenerate[..], ErrorKind::Degenerate),
             (&tolerance[..], ErrorKind::NotWithinTolerance),
+            (&failed[..], ErrorKind::Failed),
         ] {
             for &cause in causes {
                 let e = SolidError::b_spline("nurbs::op", cause);

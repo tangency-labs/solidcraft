@@ -1959,6 +1959,33 @@ mod tests {
         BSplineSurface::from_nurb(sur, false)
     }
 
+    /// A bicubic Coons patch given no derivative curves names them as missing: the
+    /// caller's input, status `SM_ERR`. The bilinear patch of the same sides needs none.
+    #[test]
+    fn a_bicubic_coons_patch_without_derivative_curves_names_them() {
+        let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+        let line = |a, b| BSplineCurve::create_line_segment(3, a, b).unwrap();
+        let sides = || {
+            [
+                line(p(0.0, 0.0), p(0.0, 1.0)),
+                line(p(1.0, 0.0), p(1.0, 1.0)),
+                line(p(0.0, 0.0), p(1.0, 0.0)),
+                line(p(0.0, 1.0), p(1.0, 1.0)),
+            ]
+        };
+        let e = BSplineSurface::create_coons_patch(1e-6, false, &mut sides(), &mut []).unwrap_err();
+        assert_eq!(
+            e.nurbs_failure(),
+            Some(&NurbsFailure::BSpline(
+                BSplineFailure::DerivativeCurvesMissing
+            )),
+            "{e:?}"
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert!(BSplineSurface::create_coons_patch(1e-6, true, &mut sides(), &mut []).is_ok());
+    }
+
     /// A cubic Bezier curve on [0, 1] through the four control points.
     fn bezier(p: [(f64, f64, f64); 4]) -> Curve {
         let pw = p
