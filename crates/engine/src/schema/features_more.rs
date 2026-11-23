@@ -19,9 +19,9 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, AxisDir, CoilSectionParam, CoilSectionPositionParam, EmbossFacePoint, EmbossModeParam, FaceRef, FeatureCommon, IdOrName, LengthExpr,
-    NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam, RibDirectionParam, SketchRef, StringList, TouchingParam,
-    feature_common, present,
+    AngleExpr, AxisDir, CoilEndCutParam, CoilSectionParam, CoilSectionPositionParam, EmbossFacePoint, EmbossModeParam, FaceRef, FeatureCommon,
+    IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam, RibDirectionParam, SketchRef, StringList,
+    TouchingParam, feature_common, present,
 };
 use crate::params::{self, MAX_STRING_LIST};
 
@@ -313,6 +313,10 @@ pub struct CoilParams {
     /// A left-handed coil, turning the other way while still climbing along `axis`. Default: false.
     #[serde(default)]
     pub clockwise: Option<bool>,
+    /// Where the wire ends: in a plane through the axis (axial, the default) or square to the
+    /// wire. Refused with `sketch`.
+    #[serde(default)]
+    pub end_cut: Option<CoilEndCutParam>,
     /// A sketch whose profile is the section. Its plane is the section plane, so its placement
     /// sets the radius and the start phase.
     #[serde(default)]
