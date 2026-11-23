@@ -1349,6 +1349,19 @@ pub(crate) fn remove_viewports_not_in(
 ) {
     let active_viewports_ids: ViewportIdSet = viewport_output.keys().copied().collect();
 
+    // SolidCraft: texture uploads are shared by every window, but a pass hands them to the
+    // viewport it ran for. Hand those of a window that is closing to the root window, or every
+    // texture first used in the closing window stays blank (icons) in all the others.
+    let mut orphaned = TexturesDelta::default();
+    for (id, viewport) in viewports.iter_mut() {
+        if !active_viewports_ids.contains(id) {
+            orphaned.append(std::mem::take(&mut viewport.pending_delta));
+        }
+    }
+    if let Some(root) = viewports.get_mut(&ViewportId::ROOT) {
+        root.pending_delta.append(orphaned);
+    }
+
     // Prune dead viewports:
     viewports.retain(|id, _| active_viewports_ids.contains(id));
     viewport_from_window.retain(|_, id| active_viewports_ids.contains(id));

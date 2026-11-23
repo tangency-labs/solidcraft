@@ -85,6 +85,9 @@ struct Host {
     sketch_return_tab: Option<String>,
     ready: bool,
     startup: Option<f64>,
+    /// Whether the OS window was built with the app's own title bar (no OS decorations). A change
+    /// makes the native integration (eframe) recreate the window.
+    os_custom: Option<bool>,
 }
 
 struct Display {
@@ -1291,6 +1294,18 @@ fn window_menu(app: &mut SolveApp, ui: &mut Ui, id: WindowId, anchor: egui::Resp
     }
 }
 
+/// Whether a pop-out window draws its own title bar: always, but on macOS only with the top bar
+/// "At top edge" (the other mode keeps the OS title bar and its traffic lights).
+pub(crate) fn os_title_bar_is_custom(macos: bool, top_bar: TopBar) -> bool {
+    !macos || top_bar == TopBar::Edge
+}
+
+/// A window that was shown with one title bar style and now needs the other is recreated by the
+/// native integration, so it must be shown again like a new window.
+pub(crate) fn restarts_window(ready: bool, built_custom: Option<bool>, custom: bool) -> bool {
+    ready && built_custom.is_some_and(|built| built != custom)
+}
+
 fn window_rename_id(ctx: &Context) -> egui::Id {
     egui::Id::unique(("view_window_rename", ctx.viewport_id()))
 }
@@ -1653,6 +1668,7 @@ impl Host {
             sketch_return_tab: None,
             ready: false,
             startup: None,
+            os_custom: None,
         }
     }
 
@@ -1824,7 +1840,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
         let panel_workspace = crate::panel_runtime::panel_workspace(app);
         let Some(mut window) = app.docs.views.take_window(id) else { continue };
         let os_id = viewport_id(tab, id);
-        let custom = !cfg!(target_os = "macos") || window.options.top_bar == TopBar::Edge;
+        let custom = os_title_bar_is_custom(cfg!(target_os = "macos"), window.options.top_bar);
         let level = if window.options.keep_on_top { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
         let mut builder = crate::window_chrome::viewport("SolidCraft", solidcraft_engine::io::APP_ID, custom)
             .with_min_inner_size([640.0, 420.0])
@@ -1835,6 +1851,16 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
         // The shared builder carries the main window's size. Only ask for a child size at startup,
         // so subsequent frames leave user resizing alone.
         builder.inner_size = None;
+        if restarts_window(host.ready, host.os_custom, custom) {
+            // The OS window is about to be recreated with the other title bar style (macOS: "At top
+            // edge" hides the traffic lights). A recreated window starts hidden and unplaced, like a
+            // new one, and its icon textures are uploaded again: the pass that was meant to upload
+            // them can belong to the window that was just closed.
+            host.ready = false;
+            host.startup = None;
+            crate::resume_ui::after_long_pause(ctx);
+        }
+        host.os_custom = Some(custom);
         if !host.ready {
             builder = builder.with_visible(false);
             if let Some(p) = &window.placement {

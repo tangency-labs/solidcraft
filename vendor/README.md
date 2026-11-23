@@ -101,6 +101,10 @@ SolidCraft changes to egui and eframe:
   once. The control channel (#743) serves a request with it without waiting for the compositor's
   next frame: on Wayland a window that gets no frames (off-screen, on another workspace) otherwise
   stalled each request for up to a second. Normal redraws still paint.
+- `crates/eframe/src/native/wgpu_integration.rs`: when a window closes (or is recreated and dropped)
+  before it painted, the texture uploads its last pass took are handed to the root window instead
+  of being dropped with it. Any window's pass takes the shared queue of uploads, so a lost one
+  left a texture (an icon the cache already counted as uploaded) blank in every window.
 
 - `crates/egui/src/data/input/pointer_button.rs`, `crates/egui-winit/src/lib.rs`,
   `crates/eframe/src/web/input.rs`: mice with more than five buttons. `PointerButton` has
