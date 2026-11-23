@@ -11207,10 +11207,13 @@ enum CopyCut {
 /// A copy took material when a face of its tool is left in a body after the cut on a surface no
 /// face of that body had before: a wall of the pocket the copy made, with material on its other
 /// side. A copy took none when no face of its tool is left in any body and no other copy's tool
-/// reaches its exact box: a tool that shares material with a body leaves some of its boundary
-/// inside the body (the body is not inside it: it is still there), and that boundary is a face
-/// of the result unless another copy cut it away. Anything else (a body the history does not
-/// cover, a body the cut split, a copy beside another) is not known from it.
+/// reaches its exact box (grown by the bodies' tolerance): a tool that shares material with a
+/// body leaves some of its boundary inside the body (the body is not inside it: it is still
+/// there), and that boundary is a face of the result unless another copy cut it away. That holds
+/// only for a body of one piece, still one piece after the cut (a tool can take a whole piece of
+/// a body of several and leave none of its faces), and for a copy whose tools' faces all trace
+/// to that copy. Anything else (a body the history does not cover, a body the cut split, a body
+/// of several pieces, a copy beside another or not traced) is not known from it.
 fn copies_cut_by_history(
     st: &ModelState,
     before: &[ModelBody],
@@ -11238,6 +11241,11 @@ fn copies_cut_by_history(
         if lineage.history.faces.len() != now.body.face_count() || old.body.is_mesh() || now.body.is_mesh() {
             covered = false;
             continue;
+        }
+        // A body of several pieces (or one the cut made so) can lose a whole piece to a copy
+        // that leaves no face of its own.
+        if old.body.shell_count() != 1 || now.body.shell_count() != 1 {
+            covered = false;
         }
         let copy_of: Vec<Option<usize>> = lineage
             .operands
@@ -11271,7 +11279,10 @@ fn copies_cut_by_history(
             }
         }
     }
-    // Each copy's exact box, over its tools; none where a box can't be worked out.
+    // Each copy's exact box over its tools, grown by twice the tolerance of the bodies it cuts
+    // (the tools' own is in [`more::exact_box`]): two copies closer than that may have the sliver
+    // between them taken by the kernel as one. None where a box can't be worked out.
+    let grow = 2.0 * before.iter().map(|b| b.body.record().tolerance).fold(0.0, f64::max);
     let boxes: Vec<Option<solidcraft_geom::Aabb3>> = instances
         .iter()
         .map(|range| {
@@ -11283,17 +11294,32 @@ fn copies_cut_by_history(
                 }
                 b = b.union(&more::exact_box(&t.body)?);
             }
-            Some(b)
+            Some(b.inflated(grow))
         })
         .collect();
+    // Whether every face of copy `k`'s tools traces to copy `k` alone: its tools have a lineage,
+    // and each of its operands is copy `k` of `src`'s tool.
+    let traced = |k: usize| {
+        instances.get(k).and_then(|range| copies.get(range.clone())).is_some_and(|tools| {
+            !tools.is_empty()
+                && tools.iter().all(|t| {
+                    t.lineage.as_ref().is_some_and(|l| {
+                        l.operands.iter().all(|op| {
+                            matches!(op.as_ref(), crate::lineage::Operand::CopiedTool { feature, instance, .. }
+                                if *feature == src && *instance == first + k + 1)
+                        })
+                    })
+                })
+        })
+    };
     (0..n)
         .map(|k| {
             if took[k] {
                 return CopyCut::Took;
             }
             let alone =
-                boxes[k].as_ref().is_some_and(|b| boxes.iter().enumerate().all(|(j, other)| j == k || other.as_ref().is_some_and(|o| !b.meets(o))));
-            if covered && !left[k] && alone { CopyCut::Missed } else { CopyCut::Unknown }
+                boxes[k].is_some() && boxes.iter().enumerate().all(|(j, other)| j == k || (other.is_some() && more::boxes_apart(&boxes[k], other)));
+            if covered && !left[k] && alone && traced(k) { CopyCut::Missed } else { CopyCut::Unknown }
         })
         .collect()
 }
