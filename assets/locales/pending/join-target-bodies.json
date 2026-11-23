@@ -1,4 +1,12 @@
 {
+  "ar": {
+    "ui.loft_cut_targets_tip": "الأجسام التي يقطعها التشكيل. إذا لم يُختر أي جسم، يختار SolidCraft الأجسام تلقائيًا.",
+    "ui.loft_join_targets_tip": "الأجسام التي يُدمج فيها التشكيل. إذا لم يُختر أي جسم، يُدمج في الأجسام الظاهرة من المكوّن النشط التي يلتقي بها.",
+    "ui.revolve_cut_targets_tip": "الأجسام التي يقطعها الدوران. إذا لم يُختر أي جسم، يختار SolidCraft الأجسام تلقائيًا.",
+    "ui.revolve_join_targets_tip": "الأجسام التي يُدمج فيها الدوران. إذا لم يُختر أي جسم، يُدمج في الجسم الذي يقع عليه الرسم أو الوجه، وإلا ففي الأجسام الظاهرة من المكوّن النشط.",
+    "ui.sweep_cut_targets_tip": "الأجسام التي يقطعها الكنس. إذا لم يُختر أي جسم، يختار SolidCraft الأجسام تلقائيًا.",
+    "ui.sweep_join_targets_tip": "الأجسام التي يُدمج فيها الكنس. إذا لم يُختر أي جسم، يُدمج في الجسم الذي يقع عليه الرسم أو الوجه، وإلا ففي الأجسام الظاهرة من المكوّن النشط."
+  },
   "en": {
     "ui.loft_cut_targets_tip": "The bodies the loft cuts. With none picked, SolidCraft chooses the bodies automatically.",
     "ui.loft_join_targets_tip": "The bodies the loft joins. With none picked, it joins the shown bodies of the active component it meets.",
@@ -6,5 +14,37 @@
     "ui.revolve_join_targets_tip": "The bodies the revolution joins. With none picked, it joins the body its sketch or face is on, or else the shown bodies of the active component.",
     "ui.sweep_cut_targets_tip": "The bodies the sweep cuts. With none picked, SolidCraft chooses the bodies automatically.",
     "ui.sweep_join_targets_tip": "The bodies the sweep joins. With none picked, it joins the body its sketch or face is on, or else the shown bodies of the active component."
+  },
+  "he": {
+    "ui.loft_cut_targets_tip": "הגופים שהלופט חותך. אם לא נבחר גוף, SolidCraft בוחר את הגופים אוטומטית.",
+    "ui.loft_join_targets_tip": "הגופים שהלופט מתאחד איתם. אם לא נבחר גוף, הוא מתאחד עם הגופים המוצגים של הרכיב הפעיל שהם נפגשים.",
+    "ui.revolve_cut_targets_tip": "הגופים שהסיבוב חותך. אם לא נבחר גוף, SolidCraft בוחר את הגופים אוטומטית.",
+    "ui.revolve_join_targets_tip": "הגופים שהסיבוב מתאחד איתם. אם לא נבחר גוף, הוא מתאחד עם הגוף שהסקיצה או הפאה שלו נמצאות עליו, ואחרת עם הגופים המוצגים של הרכיב הפעיל.",
+    "ui.sweep_cut_targets_tip": "הגופים שהסחיפה חותכת. אם לא נבחר גוף, SolidCraft בוחר את הגופים אוטומטית.",
+    "ui.sweep_join_targets_tip": "הגופים שהסחיפה מתאחד איתם. אם לא נבחר גוף, הוא מתאחד עם הגוף שהסקיצה או הפאה שלו נמצאות עליו, ואחרת עם הגופים המוצגים של הרכיב הפעיל."
+  },
+  "ja": {
+    "ui.loft_cut_targets_tip": "ロフトで切り取るボディです。何も選ばない場合は、SolidCraft がボディを自動的に選択します。",
+    "ui.loft_join_targets_tip": "ロフトを結合するボディです。何も選ばない場合は、アクティブなコンポーネントの表示中のボディのうち、接するものを結合します。",
+    "ui.revolve_cut_targets_tip": "回転で切り取るボディです。何も選ばない場合は、SolidCraft がボディを自動的に選択します。",
+    "ui.revolve_join_targets_tip": "回転を結合するボディです。何も選ばない場合は、スケッチまたは面があるボディに、それがなければアクティブなコンポーネントの表示中のボディに結合します。",
+    "ui.sweep_cut_targets_tip": "スイープで切り取るボディです。何も選ばない場合は、SolidCraft がボディを自動的に選択します。",
+    "ui.sweep_join_targets_tip": "スイープを結合するボディです。何も選ばない場合は、スケッチまたは面があるボディに、それがなければアクティブなコンポーネントの表示中のボディに結合します。"
+  },
+  "vi": {
+    "ui.loft_cut_targets_tip": "Các khối mà phép vuốt nối cắt. Nếu không chọn khối nào, SolidCraft sẽ tự động chọn các khối.",
+    "ui.loft_join_targets_tip": "Các khối mà phép vuốt nối nối vào. Nếu không chọn khối nào, phép vuốt nối nối vào các khối đang hiện của thành phần đang hoạt động mà nó gặp.",
+    "ui.revolve_cut_targets_tip": "Các khối mà phép xoay tròn cắt. Nếu không chọn khối nào, SolidCraft sẽ tự động chọn các khối.",
+    "ui.revolve_join_targets_tip": "Các khối mà phép xoay tròn nối vào. Nếu không chọn khối nào, phép xoay tròn nối vào khối chứa bản phác thảo hoặc mặt của nó, nếu không thì vào các khối đang hiện của thành phần đang hoạt động.",
+    "ui.sweep_cut_targets_tip": "Các khối mà phép quét cắt. Nếu không chọn khối nào, SolidCraft sẽ tự động chọn các khối.",
+    "ui.sweep_join_targets_tip": "Các khối mà phép quét nối vào. Nếu không chọn khối nào, phép quét nối vào khối chứa bản phác thảo hoặc mặt của nó, nếu không thì vào các khối đang hiện của thành phần đang hoạt động."
+  },
+  "zh": {
+    "ui.loft_cut_targets_tip": "放样要切除的实体。未选择时，SolidCraft 会自动选择实体。",
+    "ui.loft_join_targets_tip": "放样要合并的实体。未选择时，合并到活动部件中显示且与它相交的实体。",
+    "ui.revolve_cut_targets_tip": "旋转要切除的实体。未选择时，SolidCraft 会自动选择实体。",
+    "ui.revolve_join_targets_tip": "旋转要合并的实体。未选择时，合并到其草图或面所在的实体，否则合并到活动部件中显示的实体。",
+    "ui.sweep_cut_targets_tip": "扫掠要切除的实体。未选择时，SolidCraft 会自动选择实体。",
+    "ui.sweep_join_targets_tip": "扫掠要合并的实体。未选择时，合并到其草图或面所在的实体，否则合并到活动部件中显示的实体。"
   }
 }
