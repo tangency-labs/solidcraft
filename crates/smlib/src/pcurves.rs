@@ -43,11 +43,18 @@ fn trims(face: &TrimFace<'_>, sampled: bool) -> Result<Vec<Vec<Curve2>>, String>
     if cover_gaps(&body, face, &bare, &mut arrays)? {
         body = import(&arrays)?;
     }
-    let (out, order) = if sampled {
-        body.to_native_ordered_sampled_trims().map_err(|e| e.to_string())?
-    } else {
-        body.to_native_ordered().map_err(|e| e.to_string())?
-    };
+    // SMLib's trims are made by dropping each edge onto the surface, and an edge that lies farther
+    // off it than its tolerance never drops well enough: each span fails its test again at every
+    // halving, over every edge and retry, without end. The work is limited, by its own count.
+    let limit = work_limit(face);
+    let (made, spent) = crate::stop::within_polls(limit, || if sampled { body.to_native_ordered_sampled_trims() } else { body.to_native_ordered() });
+    let (out, order) = made.map_err(|e| {
+        if spent {
+            "the face's edges lie too far off its surface for SMLib to make their trims within the work allowed".to_string()
+        } else {
+            e.to_string()
+        }
+    })?;
     let [made] = out.faces.as_slice() else { return Err(format!("SMLib made {} faces of one", out.faces.len())) };
     let made_uses: Vec<&OrientedEdge> = made
         .loops
@@ -86,6 +93,27 @@ fn trims(face: &TrimFace<'_>, sampled: bool) -> Result<Vec<Vec<Curve2>>, String>
         result.push(pcs);
     }
     Ok(result)
+}
+
+/// The work SMLib may do making a face's trims, in the kernel's checks for a stop. A drop that
+/// succeeds takes a few checks a span of its edge's curve; the limit is far above that, and
+/// grows with the knots the edges' curves have.
+// Measured on GitHub's runners on the five spring-wire files of #20575 (one face of about 115 edge
+// knots, so 8000 + 100 per knot was ~19500 checks): faces that trim in a second used 8698, 15742,
+// 20116 and 44828 checks, so that limit refused two good faces. Ten times it leaves more than four
+// times the largest good count, and the face that never finishes is still refused in about 13 s.
+fn work_limit(face: &TrimFace<'_>) -> u64 {
+    const BASE: u64 = 80_000;
+    const PER_KNOT: u64 = 1_000;
+    let knots = face.edges.iter().fold(0u64, |sum, e| {
+        let count = match e.nurbs.unwrap_or(e.curve) {
+            b::Curve::Spline { knots, .. } | b::Curve::RationalSpline { knots, .. } => knots.len(),
+            b::Curve::Polyline { points } => points.len(),
+            _ => 8,
+        };
+        sum.saturating_add(u64::try_from(count).unwrap_or(u64::MAX))
+    });
+    BASE.saturating_add(PER_KNOT.saturating_mul(knots))
 }
 
 /// Each bare use's edge measured against the face's surface as SMLib measures it (over the

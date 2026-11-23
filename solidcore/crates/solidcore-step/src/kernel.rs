@@ -7,7 +7,7 @@ use solidcore_convert as c;
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve, Curve2, Frame, Surface};
 
-pub(crate) use solidcore::eval::uv::Starts;
+pub(crate) use solidcore::eval::uv::{Starts, unwrap};
 
 /// Why a record cannot be evaluated: it does not convert (too deep), or the kernel refuses it.
 pub(crate) type Error = String;
@@ -187,7 +187,7 @@ pub(crate) mod form {
         let (form, d) = k::form::wound_surface(&surface_in(s)?, domain, tolerance)?;
         Some((surface_out(form)?, d))
     }
-    pub(crate) use solidcore::eval::form::param;
+    pub(crate) use solidcore::eval::form::{angle, param};
 
     pub(crate) fn frame_of(s: &Surface) -> Option<Frame> {
         k::form::frame_of(&surface_in(s)?).map(|f| c::record_frame(&f))

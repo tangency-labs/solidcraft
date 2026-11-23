@@ -33,6 +33,7 @@ Source today: Interface page (`prefs/interface.rs`, `prefs/navbar.rs`).
 | Bodies folders | Segmented: Always / Several / Never | `Prefs.browser_bodies_folders` (`BodiesFolders`) | Several | none | none | |
 | Play History button | Checkbox | `Prefs.history_play_button` | `true` | none | none | |
 | Folder icon from its features | Checkbox | `Prefs.history_folder_kind_icon` | `false` | "A folder whose features are all of one kind shows their icon." | none | |
+| Go to end stops at the component's end | Checkbox | `Prefs.history_last_stops_at_component` | `false` | "With History steps by component on, Go to end and Go forward stop after the active component's last feature…" | none | #15974 |
 | Origin and bodies on top | Checkbox | `Prefs.timeline_origin_bodies` | `false` | "Vertical history only." | none | |
 | Eye beside the fold arrow | Checkbox | `Prefs.browser_eye_left` | `false` | none | none | |
 
