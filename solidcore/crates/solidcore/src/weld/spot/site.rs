@@ -59,7 +59,9 @@ fn refuse(why: WeldFailure) -> SolidError {
 /// ([`WeldFailure::SpotSheetsOverlap`]) or don't touch ([`WeldFailure::SpotSheetsApart`]),
 /// a face crossed that is not flat ([`WeldFailure::SpotFaceNotFlat`]) or not square to the
 /// line ([`WeldFailure::SpotFaceNotSquare`]), and a footprint past a face's edge
-/// ([`WeldFailure::SpotPastFaceEdge`], with the largest diameter that fits as its [`Fit`]).
+/// ([`WeldFailure::SpotPastFaceEdge`], with the largest diameter that fits as its [`Fit`]),
+/// or an edge whose distance from the line was not found
+/// ([`WeldFailure::SpotEdgeNotMeasured`]).
 /// Those of the copies, the ray solves and the edge distances otherwise.
 pub fn spot_site(
     k: &Kernel,
@@ -145,10 +147,13 @@ pub fn spot_site(
                 }));
             }
             for e in face::p4::edges(b, hit.face, None, false, None)? {
-                // shortcut: an edge with no nearest point found counts as touching the line,
-                // so the spot is refused, never built on a face it could not check
-                let d = crate::query::edge::closest_point(k, b, e, hit.point)?
-                    .map_or(0.0, |c| c.distance);
+                let Some(c) = crate::query::edge::closest_point(k, b, e, hit.point)? else {
+                    return Err(refuse(WeldFailure::SpotEdgeNotMeasured {
+                        sheet,
+                        face: hit.face,
+                    }));
+                };
+                let d = c.distance;
                 if d < room {
                     room = d;
                     tightest = Some((sheet, hit.face));

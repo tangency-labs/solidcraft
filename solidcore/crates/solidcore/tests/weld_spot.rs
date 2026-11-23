@@ -460,6 +460,14 @@ fn bad_sizes_normals_and_styles_are_refused_as_invalid_input() {
             },
             ..MARKS
         },
+        // deeper than its outer radius: 0.9 d deep under a radius of 0.525 d
+        SpotMarks {
+            top: MarkTop::Dish {
+                rim: 1.0,
+                middle: 0.1,
+            },
+            ..MARKS
+        },
     ];
     let mut styles = vec![
         none,
@@ -482,6 +490,28 @@ fn bad_sizes_normals_and_styles_are_refused_as_invalid_input() {
     for style in styles {
         refused(&SpotWeld { style, ..s.clone() });
     }
+    // a dish of exactly a half sphere (0.75 deep under a radius of 0.75 of d) still builds
+    let half = SpotMarks {
+        band: 1.0,
+        edge: 1.5,
+        top: MarkTop::Dish {
+            rim: 1.0,
+            middle: 0.25,
+        },
+        ..MARKS
+    };
+    let mut k = kernel();
+    let built = spot_weld(
+        &mut k,
+        &SpotWeld {
+            style: SpotStyle {
+                marks: Some(half),
+                ..none
+            },
+            ..s.clone()
+        },
+    );
+    assert!(built.is_ok(), "{built:?}");
 }
 
 /// Finite sizes the model cannot hold are refused as the spot's own invalid input before a
@@ -555,8 +585,8 @@ fn a_spot_through_a_stack_reaches_both_outer_faces() {
             for piece in &mut got {
                 let (lo, hi) = extent(&k, &piece.body);
                 let ok = match piece.side {
-                    SpotSide::Upper => lo >= above - 1e-9,
-                    SpotSide::Lower => hi <= -first + 1e-9,
+                    SpotSide::Upper => (lo - above).abs() < 1e-9,
+                    SpotSide::Lower => (hi + first).abs() < 1e-9,
                     SpotSide::Through => (lo + first).abs() < 1e-9 && (hi - above).abs() < 1e-9,
                 };
                 assert!(ok, "style {i} on {t:?} {:?}: {lo}..{hi}", piece.side);

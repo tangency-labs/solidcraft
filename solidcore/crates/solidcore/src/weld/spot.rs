@@ -70,7 +70,8 @@ pub enum MarkTop {
         thickness: f64,
     },
     /// Dished: a sphere's cap, `rim` (a fraction of `d`) off the face at the edge's outer
-    /// radius and `middle` on the axis, `0 < middle < rim`. The face itself is not dented.
+    /// radius and `middle` on the axis, `0 < middle < rim`, at most a half sphere
+    /// (`rim - middle <= edge / 2`). The face itself is not dented.
     Dish {
         /// Height off the face at the edge's outer radius, as a fraction of `d`.
         rim: f64,
@@ -296,6 +297,10 @@ fn check_style(style: &SpotStyle) -> Result<()> {
                 if !(positive(rim) && positive(middle) && middle < rim) =>
             {
                 return bad("a spot dish whose middle is not between 0 and its rim");
+            }
+            // past a half sphere the cap's profile turns back over itself
+            MarkTop::Dish { rim, middle } if rim - middle > m.edge / 2.0 => {
+                return bad("a spot dish deeper than its outer radius (past a half sphere)");
             }
             _ => {}
         }
