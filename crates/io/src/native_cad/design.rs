@@ -417,7 +417,7 @@ impl Builder {
             },
             Some("cylinder") if whole("angle", TAU) => FeatureKind::Cylinder {
                 base: corner,
-                axis: Dir(z),
+                axis: solidcraft_doc::dir_expr(z),
                 radius: mm(len("radius")?),
                 height: mm(len("height")?),
                 operation: op,
@@ -515,6 +515,8 @@ impl Builder {
                     },
                     bodies: Vec::new(),
                     placements: Vec::new(),
+                    components: Vec::new(),
+                    occurrences: Vec::new(),
                 }
             }
             Some("circular") => {
@@ -540,6 +542,8 @@ impl Builder {
                     },
                     bodies: Vec::new(),
                     placements: Vec::new(),
+                    components: Vec::new(),
+                    occurrences: Vec::new(),
                 }
             }
             other => return Err(format!("{name}: a {} pattern is not rebuilt yet", other.unwrap_or("unknown").replace('_', " "))),

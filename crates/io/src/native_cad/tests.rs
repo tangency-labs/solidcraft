@@ -168,6 +168,35 @@ fn decoding_is_capped() {
     assert_eq!(same, service);
 }
 
+/// A raised "Largest file to open" limit raises every decode cap in proportion, not only the input size.
+#[test]
+fn a_raised_limit_raises_the_decode_caps() {
+    const TEST: &str = "native_cad::tests::a_raised_limit_raises_the_decode_caps";
+    const CHILD: &str = "SOLIDCRAFT_IO_RAISED_LIMIT_CHILD";
+    // The limit is process-wide, so it is raised in a child process of its own.
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", TEST, "--nocapture", "--test-threads=1"])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{}\n{stdout}\n{stderr}", output.status);
+        assert!(stdout.contains("test result: ok. 1 passed; 0 failed;"), "the child must run the test: {stdout}");
+        return;
+    }
+    crate::limits::set_override(Some(crate::limits::GB)).unwrap();
+    let limits = convert::policy().limits;
+    let service = cadmpeg_core::decode::ResourceLimits::service();
+    assert_eq!(limits.max_input_bytes, crate::limits::GB);
+    assert_eq!(limits.max_retained_bytes, 2 * service.max_retained_bytes);
+    assert_eq!(limits.max_decompressed_bytes_total, 2 * service.max_decompressed_bytes_total);
+    assert_eq!(limits.max_decompressed_bytes_per_expand, 2 * service.max_decompressed_bytes_per_expand);
+    assert_eq!(limits.max_entities, 2 * service.max_entities);
+    assert_eq!(limits.max_recursion_depth, service.max_recursion_depth);
+}
+
 /// A FreeCAD archive whose Document.xml inflates past the per-entry cap (a ZIP bomb, 300 MB of
 /// zeros in a few hundred KB) is refused.
 #[test]
@@ -189,14 +218,14 @@ fn a_zip_bomb_is_refused() {
 /// reason, not imported as an Import feature with no bodies; the same records whole import.
 #[test]
 fn records_that_make_no_body_are_refused_with_why() {
-    let (records, _, _) = native_cad_records(BLOCK_FCSTD, "block.FCStd").unwrap();
-    let mut broken = records.clone();
-    for b in &mut broken.bodies {
+    let read = native_cad_records(BLOCK_FCSTD, "block.FCStd").unwrap();
+    let mut broken = read.clone();
+    for b in &mut broken.records.bodies {
         b.face_origin.clear();
     }
-    let e = crate::records_import_feature((broken, Vec::new(), true), "block.FCStd", crate::StepNames::default()).err().map(|e| e.to_string());
+    let e = crate::records_import_feature(broken, "block.FCStd", crate::StepNames::default()).err().map(|e| e.to_string());
     assert!(e.as_deref().is_some_and(|e| e.contains("no bodies could be made") && e.contains("face origins")), "{e:?}");
-    let f = crate::records_import_feature((records, Vec::new(), true), "block.FCStd", crate::StepNames::default()).unwrap();
+    let f = crate::records_import_feature(read, "block.FCStd", crate::StepNames::default()).unwrap();
     assert!(!f.import.bodies.is_empty());
 }
 
@@ -693,6 +722,381 @@ fn colours_read_into_records_are_the_ones_our_step_reader_reads() {
     assert_eq!(t, o);
 }
 
+/// An IGES file read by either reader: by SolidCraft's the Import feature keeps the file restated
+/// as STEP text, by cadmpeg's (its IGES decoder) the records the neutral model was read into,
+/// with no STEP text in between, as a STEP file read by cadmpeg is kept.
+fn read_iges(bytes: &[u8], file: &str, reader: crate::StepReader) -> crate::StepFeature {
+    let sf = read(bytes, file, reader);
+    let solidcraft_doc::FeatureKind::Import { file: held, step, records, .. } = &sf.kind else { panic!("{file}: not an Import feature") };
+    assert_eq!(held, std::path::Path::new(file).file_name().unwrap().to_str().unwrap());
+    match reader {
+        crate::StepReader::SolidCraft => {
+            assert!(step.starts_with("ISO-10303-21"), "{file}: the feature keeps the IGES file restated as STEP");
+            assert!(records.is_none(), "{file}: no records with SolidCraft's reader");
+        }
+        crate::StepReader::Cadmpeg => {
+            assert!(step.is_empty(), "{file}: no STEP text in between");
+            assert_eq!(records.as_ref().map(|r| r.bodies.len()), Some(sf.import.bodies.len()), "{file}: the feature keeps the records");
+        }
+    }
+    sf
+}
+
+/// A solid of known size in an IGES file: its name, colour, volume, area and box.
+struct KnownSolid {
+    name: &'static str,
+    color: Option<[f32; 3]>,
+    volume: f64,
+    area: f64,
+    bbox: [f64; 6],
+}
+
+/// Three manifold solid B-reps (186) of known size, each with its name and the first two with a
+/// colour (314), as SolidCraft's IGES export writes them: a 10 × 20 × 30 mm box (V = 6000,
+/// A = 2(200 + 300 + 600) = 2200), a cylinder of radius 5 and height 12 on the XY plane
+/// (V = 300π, A = 2π·5·12 + 2·25π = 170π) and a ball of radius 10 at (50, 0, 0) (V = 4000π/3,
+/// A = 400π). Each colour definition is made as IGES 5.3 (4.77) has it, which cadmpeg's decoder
+/// requires and SolidCraft's export does not yet write: its status a definition (use flag 02),
+/// and its empty name left out rather than written as a zero-length Hollerith string (`0H`).
+fn known_solids_iges() -> (String, [KnownSolid; 3]) {
+    use solidcore_record::Vec3;
+    use std::f64::consts::PI;
+    let block = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+    let pin = solidcraft_kernel::cylinder(Vec3::new(30.0, 0.0, 0.0), Vec3::Z, 5.0, 12.0).unwrap();
+    let ball = solidcraft_kernel::sphere(Vec3::new(50.0, 0.0, 0.0), 10.0).unwrap();
+    let known = [
+        KnownSolid { name: "Block", color: Some([1.0, 0.5, 0.0]), volume: 6000.0, area: 2200.0, bbox: [0.0, 0.0, 0.0, 10.0, 20.0, 30.0] },
+        KnownSolid { name: "Pin", color: Some([0.0, 0.0, 1.0]), volume: 300.0 * PI, area: 170.0 * PI, bbox: [25.0, -5.0, 0.0, 35.0, 5.0, 12.0] },
+        KnownSolid { name: "Ball", color: None, volume: 4000.0 * PI / 3.0, area: 400.0 * PI, bbox: [40.0, -10.0, -10.0, 60.0, 10.0, 10.0] },
+    ];
+    let bodies: Vec<solidcraft_kernel::ExportBody> = [&block, &pin, &ball]
+        .iter()
+        .zip(&known)
+        .map(|(body, k)| solidcraft_kernel::ExportBody { name: k.name.into(), body, color: k.color })
+        .collect();
+    let header = solidcraft_kernel::StepHeader { file_name: "solids.igs".into(), ..Default::default() };
+    let text = solidcraft_kernel::iges_export_bodies(&bodies, &header).unwrap();
+    let text: String = text
+        .lines()
+        .map(|l| {
+            let section = l.get(72..73);
+            let seq: u64 = l.get(73..).and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+            if section == Some("P") && l.contains(",0H;") {
+                // A parameter line ending in an empty name (`,0H;`) ends with the field left out.
+                format!("{}\n", l.replacen(",0H;", ";   ", 1))
+            } else if section == Some("D") && seq % 2 == 1 && l.get(..8).is_some_and(|t| t.trim() == "314") {
+                format!("{}00000200{}\n", &l[..64], &l[72..])
+            } else {
+                format!("{l}\n")
+            }
+        })
+        .collect();
+    (text, known)
+}
+
+/// IGES solids come in with their names, colours, volumes, areas and boxes through either reader,
+/// the reader chosen as for STEP: SolidCraft's keeps the STEP it restates the file as, cadmpeg's
+/// IGES decoder the records.
+#[test]
+fn iges_solids_keep_their_names_colours_and_sizes_with_either_reader() {
+    let (text, known) = known_solids_iges();
+    for reader in READERS {
+        let sf = read_iges(text.as_bytes(), "parts/solids.IGS", reader);
+        assert_eq!(sf.import.bodies.len(), known.len(), "{reader:?}: {:?}", sf.warnings);
+        for k in &known {
+            let what = format!("{} ({reader:?})", k.name);
+            let i = sf.body_names.iter().position(|n| n == k.name).unwrap_or_else(|| panic!("{what}: names {:?}", sf.body_names));
+            let b = &sf.import.bodies[i];
+            assert!(b.refused.is_none(), "{what}: a whole solid");
+            assert_eq!(b.body.color(), k.color, "{what}: {:?}", sf.warnings);
+            let m = solidcraft_kernel::measure(&b.body).unwrap();
+            assert!((m.volume - k.volume).abs() < 1e-3 * k.volume, "{what}: volume {} vs {}", m.volume, k.volume);
+            assert!((m.area - k.area).abs() < 1e-3 * k.area, "{what}: area {} vs {}", m.area, k.area);
+            let got = [m.bbox.min.x, m.bbox.min.y, m.bbox.min.z, m.bbox.max.x, m.bbox.max.y, m.bbox.max.z];
+            assert!(got.iter().zip(k.bbox).all(|(g, w)| (g - w).abs() < 1e-3), "{what}: box {got:?} vs {:?}", k.bbox);
+        }
+    }
+    let by = READERS.map(|r| built(&read(text.as_bytes(), "solids.igs", r).import));
+    assert!(same_bodies(&by[0], &by[1]), "the two readers built different bodies: {:?} vs {:?}", by[0], by[1]);
+}
+
+/// The IGES import kernel cases: boxes of trimmed planes (one, or two apart), a dome of a
+/// revolved arc and a patch with a square hole, each of a size `expected.json` derives by hand.
+const IGES_CASES: [&str; 7] = [
+    "3359-iges-trim-pieces-written-end-to-start",
+    "3806-iges-revolved-arc-spherical-cap-dome",
+    "3845-iges-trim-pieces-miss-by-a-gap",
+    "3886-iges-bspline-curve-over-tiny-knot-span",
+    "3912-iges-hole-trim-first-piece-reversed",
+    "3913-iges-trim-curve-first-piece-reversed",
+    "3972-iges-two-separate-closed-boxes",
+];
+
+/// Each IGES kernel case read by SolidCraft's reader builds what the case expects (its bodies,
+/// faces, area, volume and, where given, box). cadmpeg's IGES decoder (0.6.12) projects none of
+/// these hand-written trimmed surfaces (144): it takes a composite curve's pieces and a trimmed
+/// surface's carrier only when their directory entries mark them physically dependent, and does
+/// not sew trimmed surfaces into a solid, so with the cadmpeg reader the file is refused with a
+/// message naming it, never imported as something else; should cadmpeg read one, it must build
+/// the same bodies.
+#[test]
+fn iges_kernel_cases_with_either_reader() {
+    let cases = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/kernel-cases/import");
+    for c in IGES_CASES {
+        let expected: serde_json::Value = serde_json::from_slice(&std::fs::read(cases.join(c).join("expected.json")).unwrap()).unwrap();
+        let bytes = std::fs::read(cases.join(c).join("input.igs")).unwrap();
+        let file = format!("dir/{c}.igs");
+        let sf = read_iges(&bytes, &file, crate::StepReader::SolidCraft);
+        let measured: Vec<_> = sf.import.bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap()).collect();
+        let what = format!("{c}: {:?}", sf.warnings);
+        assert_eq!(measured.len() as u64, expected["body_count"].as_u64().unwrap(), "{what}");
+        assert_eq!(measured.iter().map(|m| m.faces as u64).sum::<u64>(), expected["faces"].as_u64().unwrap(), "{what}");
+        let area: f64 = measured.iter().map(|m| m.area).sum();
+        let want = expected["area_mm2"].as_f64().unwrap();
+        assert!((area - want).abs() < 1e-3 * want, "{what}: area {area} vs {want}");
+        if let Some(want) = expected["volume_mm3"].as_f64() {
+            let volume: f64 = measured.iter().map(|m| m.volume).sum();
+            assert!((volume - want).abs() < 1e-3 * want, "{what}: volume {volume} vs {want}");
+        }
+        if let Some(bbox) = expected.get("bbox") {
+            let m = &measured[0].bbox;
+            let got = [m.min.x, m.min.y, m.min.z, m.max.x, m.max.y, m.max.z];
+            let want: Vec<f64> = ["min", "max"].iter().flat_map(|k| bbox[k].as_array().unwrap().iter().map(|v| v.as_f64().unwrap())).collect();
+            assert!(got.iter().zip(&want).all(|(g, w)| (g - w).abs() < 1e-3), "{what}: box {got:?} vs {want:?}");
+        }
+        match crate::step_import_feature_read(&bytes, &file, crate::StepNames::default(), crate::StepReader::Cadmpeg) {
+            Err(e) => assert!(e.to_string().contains(&format!("{c}.igs")), "{c}: the message names the file: {e}"),
+            Ok(theirs) => assert!(same_bodies(&built(&theirs.import), &built(&sf.import)), "{c}: cadmpeg built different bodies"),
+        }
+    }
+}
+
+/// The cadmpeg IGES reader reads only IGES: STEP text named `.igs`, garbage and an empty file
+/// are refused with a message naming the file, and IGES contents are not read as STEP.
+#[test]
+fn the_cadmpeg_iges_reader_refuses_what_is_not_iges() {
+    for (bytes, name) in [(STEP_TEXT.as_bytes(), "x.igs"), (b"\0\0garbage".as_slice(), "x.iges"), (b"".as_slice(), "x.igs")] {
+        let e = cadmpeg_iges_records(bytes, name).expect_err(name);
+        assert!(e.starts_with(name), "{name}: the message names the file: {e}");
+    }
+    let (iges, _) = known_solids_iges();
+    assert!(cadmpeg_iges_records(iges.as_bytes(), "solids.step").is_err(), "only .igs and .iges");
+    assert!(cadmpeg_step_records(iges.as_bytes(), "solids.step").is_err(), "IGES contents are not STEP");
+}
+
+/// A 10 × 20 × 30 mm box as SolidCraft's STEP export writes it, its header saying it is from
+/// `description` (FILE_DESCRIPTION), `preprocessor` and `system` (FILE_NAME's preprocessor version
+/// and originating system), each written as it stands between the quotes.
+fn box_step(description: &str, preprocessor: &str, system: &str) -> String {
+    let block = solidcraft_kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(10.0, 20.0, 30.0)).unwrap();
+    let text = solidcraft_kernel::step_export(&[&block], "").unwrap();
+    let (described, named) = ("FILE_DESCRIPTION(('SolidCraft model')", "'SolidCraft','SolidCraft'");
+    assert!(text.contains(described) && text.contains(named), "{text}");
+    text.replacen(described, &format!("FILE_DESCRIPTION(('{description}')"), 1).replacen(named, &format!("'{preprocessor}','{system}'"), 1)
+}
+
+/// The same box as SolidCraft's IGES export writes it, its global section's native system ID
+/// (field 5) `native` as a Hollerith string (left out when empty). The global section is
+/// rewritten whole: its fields run on from line to line, 72 columns each.
+fn box_iges(native: &str) -> String {
+    let block = solidcraft_kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(10.0, 20.0, 30.0)).unwrap();
+    let body = solidcraft_kernel::ExportBody { name: "Block".into(), body: &block, color: None };
+    let header = solidcraft_kernel::StepHeader { file_name: "box.igs".into(), ..Default::default() };
+    let text = solidcraft_kernel::iges_export_bodies(&[body], &header).unwrap();
+    let section = |l: &str| l.get(72..73).unwrap_or("").to_string();
+    let global: String = text.lines().filter(|l| section(l) == "G").map(|l| l[..72].trim_end()).collect();
+    // Field 4 (the file name) then field 5 (the native system ID) then 6 (the preprocessor).
+    let field = "7Hbox.igs,10HSolidCraft,19H";
+    assert!(global.contains(field), "{global}");
+    let holl = if native.is_empty() { String::new() } else { format!("{}H{native}", native.len()) };
+    let global: Vec<char> = global.replacen(field, &format!("7Hbox.igs,{holl},19H"), 1).chars().collect();
+    let mut out = String::new();
+    let mut lines = 0;
+    for l in text.lines() {
+        match section(l).as_str() {
+            "G" if lines == 0 => {
+                for chunk in global.chunks(72) {
+                    lines += 1;
+                    out.push_str(&format!("{:<72}G{lines:>7}\n", chunk.iter().collect::<String>()));
+                }
+            }
+            "G" => {}
+            "T" => out.push_str(&format!("{}G{lines:>7}{}\n", &l[..8], &l[16..])),
+            _ => out.push_str(&format!("{l}\n")),
+        }
+    }
+    out
+}
+
+/// The program that wrote a STEP file is read by the cadmpeg route as SolidCraft's reader reads
+/// it, so a file from a Y-up program is offered the same stand-up: the originating system and
+/// preprocessor version of FILE_NAME and the FILE_DESCRIPTION text, from the headers written here,
+/// a doubled quote, an escaped character and an `ENDSEC;` inside a string included.
+#[test]
+fn both_readers_name_the_program_that_wrote_a_step_file() {
+    let cases = [
+        (("SolidCraft model", "SolidCraft", "SolidCraft"), ("SolidCraft model", "SolidCraft", "SolidCraft")),
+        (("Part", "SwSTEP 2.0", "SolidWorks 2021"), ("Part", "SwSTEP 2.0", "SolidWorks 2021")),
+        (("SolidWorks export", "Example CAD", "Example CAD"), ("SolidWorks export", "Example CAD", "Example CAD")),
+        (("Part", "Example CAD", "Example CAD"), ("Part", "Example CAD", "Example CAD")),
+        (("Part", "", ""), ("Part", "", "")),
+        (("It''s ENDSEC; here", "Caf\\X2\\00E9\\X0\\ CAD", "Example CAD"), ("It's ENDSEC; here", "Café CAD", "Example CAD")),
+    ];
+    for ((description, preprocessor, system), want) in cases {
+        let text = box_step(description, preprocessor, system);
+        for reader in READERS {
+            let sf = read(text.as_bytes(), "dir/box.step", reader);
+            let i = &sf.import;
+            assert_eq!((i.description.as_str(), i.preprocessor.as_str(), i.system.as_str()), want, "{reader:?}");
+        }
+        let records = cadmpeg_step_records(text.as_bytes(), "box.step").unwrap();
+        assert_eq!(records.records.system, want.2, "the records keep the program");
+    }
+}
+
+/// A header field's text may hold the `ENDSEC` keyword many times: each is inside a string and
+/// ends nothing, so the header's real end is still found and the program named, and the keyword
+/// text does not use up the tries.
+#[test]
+fn keyword_text_in_a_header_field_does_not_hide_the_header_end() {
+    let noise = "ENDSEC ".repeat(super::STEP_HEADER_ENDS + 8);
+    let text = box_step(&noise, "Example CAD", "SolidWorks 2021");
+    let got = super::step_producer(text.as_bytes());
+    assert_eq!((got.system.as_str(), got.preprocessor.as_str()), ("SolidWorks 2021", "Example CAD"));
+}
+
+/// A header comment may hold the `ENDSEC` keyword too: each ends nothing, so the header's real
+/// end is still found and the program named, and the keyword text does not use up the tries.
+#[test]
+fn keyword_text_in_a_header_comment_does_not_hide_the_header_end() {
+    let noise = format!("/* {} */", "ENDSEC ".repeat(super::STEP_HEADER_ENDS + 8));
+    let text = box_step("Part", "Example CAD", "SolidWorks 2021");
+    let text = text.replacen("FILE_DESCRIPTION(", &format!("{noise}FILE_DESCRIPTION("), 1);
+    let got = super::step_producer(text.as_bytes());
+    assert_eq!((got.system.as_str(), got.preprocessor.as_str()), ("SolidWorks 2021", "Example CAD"));
+}
+
+/// Every STEP file of the conformance set and the import kernel cases: its header read alone is
+/// the header SolidCraft's parser reads with the whole file.
+#[test]
+fn a_step_header_read_alone_is_the_whole_files() {
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    for dir in ["../../tests/step-conformance", "../../tests/kernel-cases/import"] {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(dir);
+        for e in std::fs::read_dir(&dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.extension().is_some_and(|e| e == "step") {
+                files.push(p);
+            } else if p.join("input.step").is_file() {
+                files.push(p.join("input.step"));
+            }
+        }
+    }
+    assert!(files.len() > 30, "{} files", files.len());
+    for p in files {
+        let bytes = std::fs::read(&p).unwrap();
+        let Ok(ex) = solidcore_record::step::p21::parse(&crate::step_text(&bytes)) else { continue };
+        let got = super::step_producer(&bytes);
+        assert_eq!((got.system, got.preprocessor, got.description), (ex.originating_system, ex.preprocessor, ex.description), "{}", p.display());
+    }
+}
+
+/// The program that wrote an IGES file (its global section's native system ID) is read by the
+/// cadmpeg route, from the cards cadmpeg keeps, as SolidCraft's reader reads it: a Y-up program,
+/// another one, a name with a backslash and spaces around it (ASCII without control characters, a
+/// backslash a space, trimmed), one that runs on to the next line, and none.
+#[test]
+fn both_readers_name_the_program_that_wrote_an_iges_file() {
+    let long = "A long name that runs on past the end of the global section's line, onto the next";
+    for (native, want) in
+        [("SolidWorks 2021", "SolidWorks 2021"), ("Example CAD", "Example CAD"), ("  Solid\\Works 2019 ", "Solid Works 2019"), (long, long), ("", "")]
+    {
+        let text = box_iges(native);
+        assert_eq!(solidcraft_kernel::iges_native_system(&text), want, "{native:?}: {text}");
+        for reader in READERS {
+            let sf = read_iges(text.as_bytes(), "dir/box.igs", reader);
+            assert_eq!(sf.import.system, want, "{native:?} ({reader:?}): {:?}", sf.warnings);
+        }
+    }
+}
+
+/// Hostile headers never panic either reader: a very long program name, control characters,
+/// bytes that are not UTF-8, no FILE_NAME or no header at all, `ENDSEC` again and again where the
+/// header should end; and an IGES global section that is long, has control characters, or is
+/// missing. Where both readers read the file, they name the same program.
+#[test]
+fn hostile_headers_never_panic_either_reader() {
+    let long = "W".repeat(200_000);
+    let full = box_step("Part", "Example CAD", "Example CAD");
+    let data = full.find("DATA;").unwrap();
+    let mut steps: Vec<Vec<u8>> = [
+        box_step("Part", "Example CAD", &long),
+        box_step("Part\u{1}\u{7f}", "Solid\u{0}Works", "SolidWorks\u{8}\u{1b}[2J"),
+        box_step("Part", "Example CAD", "Solid\\Works\\"),
+        full.replacen("FILE_NAME(", "FILE_NAMES(", 1),
+        full.replacen("FILE_DESCRIPTION((", "/* ENDSEC ENDSEC ENDSEC ENDSEC ENDSEC ENDSEC ENDSEC ENDSEC ENDSEC */FILE_DESCRIPTION((", 1),
+        format!("ISO-10303-21;\n{}", &full[data..]),
+    ]
+    .into_iter()
+    .map(String::into_bytes)
+    .collect();
+    let mut latin = box_step("Part", "Example CAD", "SolidWorks Caf_").into_bytes();
+    let at = latin.windows(4).position(|w| w == b"Caf_").unwrap() + 3;
+    latin[at] = 0xe9;
+    steps.push(latin);
+    let header = |i: &solidcraft_kernel::StepImport| (i.system.clone(), i.preprocessor.clone(), i.description.clone());
+    for b in &steps {
+        let _ = super::step_producer(b);
+        let ours = crate::step_import_feature_read(b, "x.step", crate::StepNames::default(), crate::StepReader::SolidCraft);
+        let theirs = crate::step_import_feature_read(b, "x.step", crate::StepNames::default(), crate::StepReader::Cadmpeg);
+        if let (Ok(o), Ok(t)) = (ours, theirs) {
+            assert_eq!(header(&o.import), header(&t.import));
+        }
+    }
+    let mut igs = vec![box_iges(&"W".repeat(100_000)), box_iges("Solid\u{1}Works\u{7f}"), box_iges("SolidWorks")];
+    let no_global: String = igs[2].lines().filter(|l| l.get(72..73) != Some("G")).map(|l| format!("{l}\n")).collect();
+    igs.push(no_global);
+    for text in &igs {
+        let _ = solidcraft_kernel::iges_native_system(text);
+        let ours = crate::step_import_feature_read(text.as_bytes(), "x.igs", crate::StepNames::default(), crate::StepReader::SolidCraft);
+        let theirs = crate::step_import_feature_read(text.as_bytes(), "x.igs", crate::StepNames::default(), crate::StepReader::Cadmpeg);
+        if let (Ok(o), Ok(t)) = (ours, theirs) {
+            assert_eq!(o.import.system, t.import.system);
+        }
+    }
+    for garbage in [b"".as_slice(), b"ENDSEC;ENDSEC;", b"ISO-10303-21;\nHEADER;FILE_NAME('", &[0xff; 300]] {
+        assert_eq!(super::step_producer(garbage), super::Producer::default());
+        let _ = solidcraft_kernel::iges_native_system(&String::from_utf8_lossy(garbage));
+    }
+}
+
+/// A header followed by one line longer than the bytes read for it (a file written without line
+/// breaks after its first) is read, and so is one where the limit splits a UTF-8 character: the
+/// program is the one SolidCraft's reader names from the whole file.
+#[test]
+fn a_step_header_before_a_long_line_is_read() {
+    let text = box_step("Part", "SwSTEP 2.0", "SolidWorks 2021");
+    let (first, rest) = text.split_once('\n').unwrap();
+    let rest = rest.replace(['\r', '\n'], "");
+    let data = rest.find("DATA;").unwrap() + "DATA;".len();
+    for pad in ["x", "é"] {
+        // A comment in the data section takes the line past the limit; with "é" the limit falls
+        // inside a two-byte character.
+        let before = first.len() + 1 + data + "/*".len();
+        let mut comment = "x".repeat(super::STEP_HEADER_BYTES - before - 1);
+        comment.push_str(&pad.repeat(300 << 10));
+        let long = format!("{first}\n{}/*{comment}*/{}", &rest[..data], &rest[data..]);
+        assert!(long.len() > super::STEP_HEADER_BYTES && long.lines().nth(1).unwrap().len() > super::STEP_HEADER_BYTES);
+        if pad == "é" {
+            assert!(!long.is_char_boundary(super::STEP_HEADER_BYTES), "the limit splits a character");
+        }
+        let got = super::step_producer(long.as_bytes());
+        assert_eq!((got.system.as_str(), got.preprocessor.as_str(), got.description.as_str()), ("SolidWorks 2021", "SwSTEP 2.0", "Part"), "{pad:?}");
+        let ours = solidcraft_kernel::step_import(&long).unwrap();
+        assert_eq!(got.system, ours.system, "{pad:?}");
+    }
+}
+
 /// A part whose body was not imported (its conversion refused) is not compared with the figures
 /// its file states, as if what did import were the whole part: the warning says it was not checked.
 #[test]
@@ -842,7 +1246,7 @@ fn a_placed_parts_centre_is_checked_in_its_own_coordinates() {
              #306=PROPERTY_DEFINITION_REPRESENTATION(#300,#301);\n"
         );
         let at = text.rfind("ENDSEC;").unwrap();
-        let (records, _, _) = cadmpeg_step_records(format!("{}{props}{}", &text[..at], &text[at..]).as_bytes(), "cylinder_placed.step").unwrap();
+        let records = cadmpeg_step_records(format!("{}{props}{}", &text[..at], &text[at..]).as_bytes(), "cylinder_placed.step").unwrap().records;
         records.warnings.into_iter().filter(|w| w.contains("the file states")).collect::<Vec<_>>()
     };
     assert_eq!(stating(own), Vec::<String>::new());
@@ -855,7 +1259,8 @@ fn a_placed_parts_centre_is_checked_in_its_own_coordinates() {
          #304=DERIVED_UNIT((#305));\n#305=DERIVED_UNIT_ELEMENT(#1,3.);\n\
          #306=PROPERTY_DEFINITION_REPRESENTATION(#300,#301);\n";
     let at = text.rfind("ENDSEC;").unwrap();
-    let (records, warnings, _) = cadmpeg_step_records(format!("{}{props}{}", &text[..at], &text[at..]).as_bytes(), "cylinder_placed.step").unwrap();
+    let super::RecordsRead { records, warnings, .. } =
+        cadmpeg_step_records(format!("{}{props}{}", &text[..at], &text[at..]).as_bytes(), "cylinder_placed.step").unwrap();
     assert!(!records.warnings.iter().chain(&warnings).any(|w| w.contains("the file states")), "{warnings:?}");
 }
 
@@ -878,7 +1283,7 @@ ENDSEC;\nEND-ISO-10303-21;\n";
 /// its volume and its box, where it was left out before.
 #[test]
 fn a_part_given_as_triangles_comes_in_as_a_mesh_body() {
-    let (records, warnings, _) = cadmpeg_step_records(TETRAHEDRON_PART.as_bytes(), "tetrahedron.step").unwrap();
+    let super::RecordsRead { records, warnings, .. } = cadmpeg_step_records(TETRAHEDRON_PART.as_bytes(), "tetrahedron.step").unwrap();
     let imp = solidcraft_kernel::records_import(&records).unwrap();
     assert_eq!(imp.bodies.len(), 1, "{warnings:?} {:?}", imp.warnings);
     let b = &imp.bodies[0];
@@ -919,7 +1324,7 @@ fn a_mesh_part_placed_twice_keeps_its_triangles_once() {
 /// a vertex the mesh lacks, or a vertex that is not finite leaves the body out with the reason.
 #[test]
 fn a_broken_mesh_record_is_left_out_with_why() {
-    let (records, _, _) = cadmpeg_step_records(TETRAHEDRON_PART.as_bytes(), "tetrahedron.step").unwrap();
+    let super::RecordsRead { records, .. } = cadmpeg_step_records(TETRAHEDRON_PART.as_bytes(), "tetrahedron.step").unwrap();
     for (breaking, why) in [
         (
             Box::new(|m: &mut solidcraft_kernel::RecordMesh| m.triangles[0][0] = 99) as Box<dyn Fn(&mut solidcraft_kernel::RecordMesh)>,
@@ -964,7 +1369,7 @@ fn a_part_on_a_hidden_layer_comes_in_hidden() {
     let with = |extra: &str| {
         let at = text.rfind("ENDSEC;").unwrap();
         let t = format!("{}{extra}{}", &text[..at], &text[at..]);
-        let (records, warnings, _) = cadmpeg_step_records(t.as_bytes(), "washer.step").unwrap();
+        let super::RecordsRead { records, warnings, .. } = cadmpeg_step_records(t.as_bytes(), "washer.step").unwrap();
         assert_eq!(records.bodies.len(), 1, "{warnings:?}");
         records.bodies[0].hidden
     };

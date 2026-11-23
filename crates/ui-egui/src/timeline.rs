@@ -41,7 +41,8 @@ pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryT
 
 /// Where a step control (not Play) takes the marker from `marker`, or `None` when it keeps it.
 /// The steps are the features the History shows: in the bottom bar, only those of the component
-/// it shows (`timeline_scope`, #11430). A step lands where dropping the marker in that slot would.
+/// it shows (`timeline_scope`, #11430). A step lands where dropping the marker in that slot would,
+/// but past the last shown feature it goes to the end of the design (#15974).
 fn step_position(app: &SolveApp, marker: usize, control: crate::ui_kit::HistoryTransport) -> Option<usize> {
     use crate::ui_kit::HistoryTransport;
     let n = app.session.doc.features.len();
@@ -58,10 +59,14 @@ fn step_position(app: &SolveApp, marker: usize, control: crate::ui_kit::HistoryT
         HistoryTransport::Forward => slot.saturating_add(1).min(len),
         HistoryTransport::Last => len,
     };
-    let position = view.index(slot);
+    let backwards = matches!(control, HistoryTransport::First | HistoryTransport::Back);
+    // Past the last feature shown, every later feature belongs to components the bar leaves out:
+    // Forward and Last go to the end of the design, so none of them stays rolled back with nothing
+    // in the bar saying so (#15974), unless the preference keeps the old stop.
+    let to_end = !backwards && slot == len && !app.preferences.history_last_stops_at_component;
+    let position = if to_end { n } else { view.index(slot) };
     // From a marker outside the shown features, the nearest shown slot can lie the other way:
     // First and Back never add features, and Forward and Last never roll any back.
-    let backwards = matches!(control, HistoryTransport::First | HistoryTransport::Back);
     if (backwards && position > marker) || (!backwards && position < marker) { None } else { Some(position) }
 }
 
@@ -241,6 +246,15 @@ impl TimelineKind {
     }
 }
 
+/// The History menus' edit item, label and icon: a sketch says Edit Sketch, as its Browser row
+/// does (#14366); both open the same editor.
+pub(crate) fn edit_label(kind: TimelineKind) -> (&'static str, &'static str) {
+    match kind {
+        TimelineKind::Sketch => ("Edit Sketch", "sketch"),
+        _ => ("Edit Feature", "edit"),
+    }
+}
+
 pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
     match k {
         FeatureKind::Sketch { .. } => "sketch",
@@ -307,6 +321,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::FrameEndCap { .. } => "end_cap",
         FeatureKind::FrameMember { .. } => "frame_member",
         FeatureKind::FrameMemberTurn { .. } => "rotate_member",
+        FeatureKind::FramePlate { .. } => "frame_plate",
         FeatureKind::Emboss { .. } => "emboss",
         FeatureKind::ReplaceFace { .. } => "replace_face",
         FeatureKind::Align { .. } => "align",
@@ -371,11 +386,13 @@ fn construction_plane_icon(plane: &PlaneRef) -> &'static str {
 /// only once the rect is presented in the viewport (an offscreen or hidden bar asks again on the
 /// next frame); then it returns true and the caller clears `timeline_reveal`.
 fn reveal_once(ui: &egui::Ui, reveal: &mut Option<usize>, holds: bool, rect: Rect, align: egui::Align) -> bool {
-    if holds && crate::semantic_content::scroll_acknowledged_at(ui, rect, align) {
-        *reveal = None;
-        return true;
+    if !holds {
+        return false;
     }
-    false
+    // Choose one target this frame: a group's last feature must not replace its request.
+    // The caller keeps the persistent reveal until this target is actually visible.
+    *reveal = None;
+    crate::semantic_content::scroll_acknowledged_at(ui, rect, align)
 }
 
 /// Check what deleting `ids` takes with it or makes fail (off the window thread when that takes a
@@ -534,7 +551,8 @@ pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, 
 pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let doc = &app.session.doc;
     let (Some(feature), Some(index)) = (doc.feature(id), doc.feature_index(id)) else { return Vec::new() };
-    let mut v = vec![Item::action("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": id }))];
+    let (edit, icon) = edit_label(TimelineKind::of(&feature.kind));
+    let mut v = vec![Item::action("ui.editFeature", edit, icon).with(json!({ "feature": id }))];
     if matches!(feature.kind, FeatureKind::Sketch { .. }) {
         v.extend(
             crate::context_menu::items(app, &crate::context_menu::Target::Sketch { id }).into_iter().filter(|item| item.id == "ui.redefineSketch"),
@@ -1261,6 +1279,9 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
     let reveal_at = app.tree.timeline_reveal.and_then(|id| app.session.doc.features.iter().position(|f| f.id == id));
     let reveal = reveal_at.and_then(|i| history.view.find(i));
     let x = crate::timeline_scope::header(app, ui, &p, x, r).min(r.right() - t.space_24);
+    // A path click asks the next view to reveal the same feature. The old view must not
+    // acknowledge that new request while finishing this frame.
+    let reveal = reveal.filter(|_| history.within == crate::timeline_scope::shown(app));
     // Below, slots and features count those the bar shows; the marker's slot among them.
     let shown = history.view.len();
     let marker_view = history.view.slot(marker);
@@ -1841,6 +1862,8 @@ mod tests {
             features: Vec::new(),
             bodies: Vec::new(),
             placements: Vec::new(),
+            components: Vec::new(),
+            occurrences: Vec::new(),
             pattern: PatternKind::Path {
                 path_sketch: solidcraft_engine::doc::SketchId(0),
                 path: Vec::new(),
@@ -1849,6 +1872,9 @@ mod tests {
                 extent: false,
                 flip: false,
                 orient: false,
+                start: None,
+                start_fraction: None,
+                follow_frame: true,
             },
         };
         assert_eq!(super::icon_of(&feature), solidcraft_engine::find_command("solid.pattern.path").unwrap().icon);
@@ -2620,6 +2646,38 @@ mod tests {
         assert_eq!(h.app.session.doc.marker, None, "forward from between the shown features");
     }
 
+    /// Last, and Forward onto the last slot, with a component active go to the end of the design:
+    /// the features after the component's last one belong to other components, and none of them
+    /// stays rolled back behind a bar that shows its marker at the end (#15974).
+    #[test]
+    fn last_with_a_component_active_brings_back_the_later_features_of_other_components() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("view.history_layout", json!({"dock": "bottom"})).unwrap();
+        h.app.run("component.create", json!({"name": "A"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "BoxA"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("component.create", json!({"name": "B"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "operation": "new_body", "name": "BoxB"}))
+            .unwrap();
+        h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 20, "name": "PlaneB"})).unwrap();
+        h.app.run("component.activate", json!({"component": "A"})).unwrap();
+        h.settle();
+        for (control, position) in [("back", Some(0)), ("last", None), ("back", Some(0)), ("forward", None)] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, position, "{control}");
+        }
+        // The preference keeps the old stop, just after A's last feature.
+        h.app.preferences.history_last_stops_at_component = true;
+        for (control, position) in [("back", Some(0)), ("last", Some(1)), ("back", Some(0)), ("forward", Some(1))] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, position, "old stop: {control}");
+        }
+    }
+
     /// A component with no features of its own lists nothing, so the controls leave the marker
     /// where it is rather than stepping through other components' features (#11430).
     #[test]
@@ -2711,6 +2769,21 @@ mod tests {
             h.settle();
             assert_eq!(h.app.session.doc.marker, position, "{control}");
         }
+    }
+
+    /// Preferences > Layout shows the preference that keeps Last's old stop (#15974), off by
+    /// default; a click turns it on and off.
+    #[test]
+    fn the_layout_page_has_a_checkbox_for_the_old_stop_of_last() {
+        let mut h = Harness::new();
+        h.call("ui.prefs", json!({"language": "en", "open": "Layout"}));
+        let value = |h: &mut Harness| h.call("ui.prefs", json!({}))["result"]["history_last_stops_at_component"].clone();
+        assert_eq!(value(&mut h), false, "off by default");
+        crate::prefs::reveal_preference(&mut h, "prefs:history_last_stops_at_component");
+        h.step(&json!({"click": {"handle": "prefs:history_last_stops_at_component"}})).unwrap();
+        assert_eq!(value(&mut h), true, "a click turns it on");
+        h.step(&json!({"click": {"handle": "prefs:history_last_stops_at_component"}})).unwrap();
+        assert_eq!(value(&mut h), false, "a second click turns it off again");
     }
 
     /// Preferences > Layout shows "History steps by component" as a
@@ -3542,7 +3615,10 @@ mod tests {
         h.frames(2);
         let chip = rect_of("timeline-folder-chip:Mid").unwrap();
         let marker = rect_of("history:marker").unwrap();
-        assert!(marker.left() > chip.right(), "the marker waits after the folded chip: {marker:?} {chip:?}");
+        assert!(
+            (marker.center().x - chip.right() - 2.0).abs() < 0.01,
+            "the marker line sits in the existing gap after the folded chip: {marker:?} {chip:?}"
+        );
         let y = chip.center().y;
         h.step(&json!({"drag": [[marker.center().x, marker.center().y], [chip.left() + 2.0, y]]})).unwrap();
         h.settle();

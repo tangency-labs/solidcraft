@@ -130,7 +130,10 @@ use crate::boolean::merge::p2::{make_faceuse_with, MergeContext, MergeOperand, T
 use crate::boolean::topology_intersector::p1::{Relations, TopologyIntersector};
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{
+    ignore_status, ignored, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER,
+};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -170,6 +173,25 @@ use crate::topology::{
 
 const OP: &str = "topology::brep::p7";
 
+/// The defect of a transfer read after its surface was installed on a face
+/// ([`p6::TRANSFER_INSTALLED`]), with the status `SM_ERR_NULL_POINTER` of the `NER` it
+/// replaces.
+fn transfer_installed() -> SolidError {
+    Failure::new(
+        OP,
+        TopologyFailure::Defect {
+            why: p6::TRANSFER_INSTALLED,
+        },
+    )
+    .with_status(SM_ERR_NULL_POINTER)
+    .into_error()
+}
+
+/// The surface the transfer still holds ([`p6::FaceSurfaceTransfer::owned_surface`]).
+fn owned_surface(transfer: &p6::FaceSurfaceTransfer) -> Result<&Surface> {
+    transfer.owned_surface().ok_or_else(transfer_installed)
+}
+
 /// How many zone tolerances a gap between a loop's curves may be for
 /// [`make_face_with_curves`] to close it (growing the search to reach the vertex); a wider
 /// gap is refused, "loop gap larger than tolerance".
@@ -192,9 +214,12 @@ const DEGENERATE_TOL_3D: f64 = crate::geom::tol::ZONE_TOL_3D / 10.0;
 fn brep_remove_region(b: &mut Brep, region: RegionId) -> Result<()> {
     let list = p1::regions(b, None)?;
     if !list.contains(&region) {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP,
-            "the region is not on the B-rep's region list",
+            TopologyFailure::Defect {
+                why: "the emptied region of a merged shell is not on the B-rep's region \
+                      list, though it is the region the shell was in",
+            },
         ));
     }
     let head = list.first().copied();
@@ -425,10 +450,7 @@ fn merge_copy_faces(
     let mut new_faces = Vec::new();
     for &f in faces {
         if !face_in_brep(src, f)? {
-            return Err(SolidError::topology_failed(
-                OP,
-                "a face to copy is not in the source B-rep",
-            ));
+            return Err(SolidError::topology(OP, TopologyFailure::NotInBrep));
         }
         let faceuse = fp2::upward_faceuse(src, f)?
             .ok_or(SolidError::invalid_input(OP, "face without face use"))?;
@@ -677,9 +699,12 @@ fn mid_edge(ivl: &CurveInterval<IntersectObject>) -> Result<EdgeId> {
 pub(crate) fn edge_remove(b: &mut Brep, e: EdgeId, eu: EdgeuseId) -> Result<()> {
     let list = &mut b.edge_mut(e)?.edgeuses;
     let Some(at) = list.iter().position(|&x| x == eu) else {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP,
-            "the edge use is not on the edge's list",
+            TopologyFailure::Defect {
+                why: "the edge use to unlink is not on its edge's list, though it is read \
+                      from that list or from the edge's mated pair",
+            },
         ));
     };
     list.remove(at);
@@ -883,7 +908,7 @@ fn make_face_attempt_with_state(
     env: &mut ed::NotifyState<'_>,
 ) -> Result<MakeFaceAttempt> {
     let Some(surface) = surface else {
-        return Err(SolidError::topology_missing(OP, "the new face's surface"));
+        return Err(SolidError::topology(OP, TopologyFailure::NoSurfaceGiven));
     };
     let mut transfer = p6::FaceSurfaceTransfer::new(surface);
     let mut attempt = MakeFaceAttempt {
@@ -934,9 +959,11 @@ fn make_face_transfer_attempt_with_state(
         shell: None,
         face: None,
     };
-    transfer.owned_surface()?;
+    let old_owner = transfer
+        .owned_surface()
+        .ok_or_else(transfer_installed)?
+        .owner();
     let region = region.or_else(|| b.infinite_region());
-    let old_owner = transfer.owned_surface()?.owner();
     let options = p6::FaceTopologyOptions {
         region,
         edge_loops: loops,
@@ -950,8 +977,7 @@ fn make_face_transfer_attempt_with_state(
     let attempt = if legacy {
         // The copy shares the original's caches: upstream builds the face on the one
         // surface `MakeFace` keeps, so a cache made while building it stays with it.
-        let mut copy =
-            p6::FaceSurfaceTransfer::new(transfer.owned_surface()?.clone_sharing_cache());
+        let mut copy = p6::FaceSurfaceTransfer::new(owned_surface(transfer)?.clone_sharing_cache());
         p6::make_face_topology_transfer_attempt_with_state(
             k,
             b,
@@ -1430,7 +1456,7 @@ fn make_face_with_curves_transfer_impl(
         loop_points,
     } = input;
     *out = NewFace::default();
-    let surface = transfer.owned_surface()?;
+    let surface = owned_surface(transfer)?;
 
     // check input
     if curves_3d.is_none() && uv_curves.is_none() {
@@ -1674,12 +1700,6 @@ fn make_face_with_curves_transfer_impl(
 
             // the end vertex
             let end_pt = curve.evaluate_point(k, end_param)?;
-            if end_pt.distance_squared(start_pt) < zone_tol * zone_tol && approx_len < zone_tol {
-                return Err(SolidError::topology_failed(
-                    OP,
-                    "the curve between the vertices has zero length",
-                ));
-            }
             // the loop's first vertex where only vertex slots follow to the loop's end and
             // one closes it
             let rest_vertices = (jj + 1..n).all(|i| is_vertex_slot(curve_total + i));
@@ -1869,17 +1889,16 @@ fn make_face_with_curves_transfer_impl(
         let r = face_create_uv_trim_curves(k, b, face, false, uv, orients);
         match r {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(e) if e.upstream_status() == Some(crate::error::SM_ERR) => {
+            Err(cause) if cause.upstream_status() == Some(crate::error::SM_ERR) => {
                 // delete the edge uses of the face's edges
                 for e in face_edges(b, face)? {
                     for eu in ed::edgeuses(b, e, None, None)? {
                         edge_remove(b, e, eu)?;
                     }
                 }
-                return Err(SolidError::topology_failed(
-                    OP,
-                    "the face's UV trim curves could not be made",
-                ));
+                return Err(Failure::new(OP, TopologyFailure::UvTrimCurvesNotMade)
+                    .caused_by(cause)
+                    .into_error());
             }
             Ok(()) | Err(_) => {}
         }
@@ -1925,6 +1944,19 @@ pub fn glue_edges_general(
         inside_faceuses,
         env,
     )
+}
+
+/// Whether `eu`'s UV trim curve, if it has one, spans `edge`'s interval (a pcurve shares
+/// its edge's interval, `docs/validity-and-tolerances.md` §9), compared as
+/// [`glue_edges_general_searching`] compares the glued edges' intervals.
+fn trim_curve_spans(b: &Brep, eu: EdgeuseId, edge: EdgeId) -> Result<bool> {
+    let Some(curve) = eu1::uv_trim_curve_pointer(b, eu)? else {
+        return Ok(true);
+    };
+    let trim = curve.natural_interval();
+    let edge = ed::interval(b, edge)?;
+    Ok(crate::geom::tol::are_same(trim.min(), edge.min())
+        && crate::geom::tol::are_same(trim.max(), edge.max()))
 }
 
 /// [`glue_edges_general`] for a caller that says how a split of the infinite region tells
@@ -2052,9 +2084,9 @@ pub(crate) fn glue_edges_general_searching(
     let st_glued = sv_st == dv_st || sv_st == dv_end;
     let end_glued = sv_end == dv_st || sv_end == dv_end;
     if !st_glued || !end_glued {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP,
-            "the edges to glue do not share both vertices",
+            TopologyFailure::EdgesNotSharingVertices,
         ));
     }
 
@@ -2147,8 +2179,12 @@ pub(crate) fn glue_edges_general_searching(
 
         // (sbCheckDEU1 is FALSE upstream: the region check of the pair is dead code)
 
-        // different geometry: the pair's UV trim curve no longer fits (status ignored)
-        if !same_geometry {
+        // different geometry: the pair's UV trim curve no longer fits (status ignored).
+        // Not upstream (#18294): nor does one whose interval is no longer the surviving
+        // edge's. The sector search may make deu1's trim curve on the edge to delete, after
+        // `same_geometry` compared the edges, and a drop that comes back short trims that
+        // edge to the curve (`create_uv_trim_curve`'s recovery), not the surviving one.
+        if !same_geometry || !trim_curve_spans(b, deu1, surv)? {
             ignore_status(eu1::set_uv_trim_curve(
                 b,
                 deu1,
@@ -2350,26 +2386,26 @@ fn verify_face_copies(
 
     let mut remaining: BTreeSet<_> = requested.iter().copied().collect();
     if remaining.len() != requested.len() {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP_UNSTITCH,
-            "a face to copy is listed twice",
+            TopologyFailure::FaceListedTwice,
         ));
     }
     let mut live: BTreeSet<_> = p1::faces(dest, None)?.into_iter().collect();
     for &(source, target) in copies {
         if !remaining.remove(&source) || !live.remove(&target) {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_UNSTITCH,
-                "a face copy is unrequested or repeated",
+                TopologyFailure::FacesNotCopiedOnce,
             ));
         }
     }
     if remaining.is_empty() {
         Ok(())
     } else {
-        Err(SolidError::topology_failed(
+        Err(SolidError::topology(
             OP_UNSTITCH,
-            "a requested face was not copied",
+            TopologyFailure::FacesNotCopiedOnce,
         ))
     }
 }
@@ -2404,9 +2440,9 @@ fn copy_faces_carrying(
     if all {
         Ok(copies)
     } else {
-        Err(SolidError::topology_failed(
+        Err(SolidError::topology(
             OP_UNSTITCH,
-            "not every face could be copied",
+            TopologyFailure::FacesNotCopiedOnce,
         ))
     }
 }
@@ -2674,10 +2710,7 @@ fn copy_faces_named(
 
     for &f in faces {
         if !face_in_brep(src, f)? {
-            return Err(SolidError::topology_failed(
-                OP,
-                "a face to copy is not in the source B-rep",
-            ));
+            return Err(SolidError::topology(OP, TopologyFailure::NotInBrep));
         }
         let Some(curves) = ignored(fp2::create_curves_from_face(
             k,
@@ -2886,9 +2919,12 @@ pub fn merge_self_intersection_curves(
             let new_faces = set_curve_and_merge(k, &mut merge_objects, &mut cc2, curve_3d)?;
             all_faces.extend(new_faces);
             let [ivl2] = cc2.intervals() else {
-                return Err(SolidError::topology_failed(
+                return Err(SolidError::topology(
                     OP,
-                    "the merged curve does not have exactly one interval",
+                    TopologyFailure::Defect {
+                        why: "the classification held one interval before its merge and \
+                              other than one after it; the merge only imprints its intervals",
+                    },
                 ));
             };
             if ivl2.mid.point_class() != PointClassType::Edge {
@@ -2950,6 +2986,24 @@ mod tests {
     }
 
     #[test]
+    fn unstitch_refuses_a_face_listed_twice_and_keeps_the_body() {
+        use crate::primitive::api_primitives::create_box;
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Vec3::ZERO, 20.0, 20.0, 20.0).unwrap();
+        let original = p1::faces(&b, None).unwrap();
+        let face = original[0];
+        let e = unstitch(&mut k, &mut b, Some(&[face, face])).unwrap_err();
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::FaceListedTwice)
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.operation(), OP_UNSTITCH);
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(p1::faces(&b, None).unwrap(), original);
+    }
+
+    #[test]
     fn unstitch_refuses_a_skipped_face_hidden_by_another_faces_two_copies() {
         use crate::primitive::api_primitives::create_box;
 
@@ -2984,7 +3038,12 @@ mod tests {
             Ok(copies)
         });
         assert!(injected, "did not reach the return trip: {result:?}");
-        assert!(result.is_err(), "{result:?}");
+        let e = result.unwrap_err();
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::FacesNotCopiedOnce)
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(p1::faces(&b, None).unwrap(), original);
         let validation = super::super::validation::check_brep(
             &mut k,
@@ -3032,6 +3091,10 @@ mod tests {
                 .err()
                 .map(|e| (e.operation(), e.upstream_status())),
             Some((OP_UNSTITCH, Some(crate::error::SM_ERR)))
+        );
+        assert_eq!(
+            result.as_ref().err().and_then(SolidError::topology_failure),
+            Some(&TopologyFailure::FacesNotCopiedOnce)
         );
         assert_eq!(p1::faces(&b, None).unwrap(), original);
         let validation = super::super::validation::check_brep(
@@ -3680,7 +3743,11 @@ mod tests {
         );
         assert_eq!(
             e.as_ref().err().and_then(SolidError::upstream_status),
-            Some(crate::error::SM_ERR_NULL_POINTER)
+            Some(SM_ERR_NULL_POINTER)
+        );
+        assert_eq!(
+            e.as_ref().err().and_then(SolidError::topology_failure),
+            Some(&TopologyFailure::NoSurfaceGiven)
         );
         let e = make_face(
             &mut k,
@@ -3699,7 +3766,11 @@ mod tests {
         // no infinite region: MakeFaceTopology's NULL region
         assert_eq!(
             e.as_ref().err().and_then(SolidError::upstream_status),
-            Some(crate::error::SM_ERR_NULL_POINTER)
+            Some(SM_ERR_NULL_POINTER)
+        );
+        assert_eq!(
+            e.as_ref().err().and_then(SolidError::topology_failure),
+            Some(&TopologyFailure::NoInfiniteRegion)
         );
         let inf = b
             .add_region_record(Region {
@@ -3872,7 +3943,7 @@ mod tests {
                             .as_ref()
                             .err()
                             .and_then(SolidError::upstream_status),
-                        Some(crate::error::SM_ERR_NULL_POINTER)
+                        Some(SM_ERR_NULL_POINTER)
                     );
                     assert_eq!(out.face, None);
                     assert_eq!(out.shell, None);

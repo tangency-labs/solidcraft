@@ -41,6 +41,8 @@ pub(crate) enum Geo<V, P, G, E, S> {
     Construct(G),
     /// A primitive's placement point (length expressions).
     Placement(E),
+    /// A primitive's axis (unitless expressions): it turns with the feature, and never moves.
+    DirExpr(E),
     /// A profile selection, with its sketch.
     Profiles(u64, S),
 }
@@ -84,7 +86,8 @@ impl FeatureKind {
             | FeatureKind::SurfaceMatch { .. }
             | FeatureKind::SurfaceFair { .. } => &["faces"],
             FeatureKind::SplitFace { .. } => &["faces", "tool"],
-            FeatureKind::Split { .. } | FeatureKind::SurfaceTrim { .. } => &["tool"],
+            FeatureKind::Split { .. } => &["tool", "tool_faces"],
+            FeatureKind::SurfaceTrim { .. } => &["tool"],
             FeatureKind::Hole { .. } => &["position", "to"],
             FeatureKind::Boss { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. } => &["position"],
             FeatureKind::Thread { .. } => &["face", "up_to"],

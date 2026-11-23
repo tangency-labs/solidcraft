@@ -106,7 +106,7 @@ fn write_in_folder(s: &mut Session, r: &Send<'_>) -> Result<Value> {
 /// `out`: `slicer` when it went, `slicer_error` when the program would not start, `starting` (with
 /// [`Wait::Return`]) or `slicer_timeout` when the target had to be started.
 pub(super) fn deliver(target: &Slicer, path: &str, single_instance: bool, wait: Wait, out: &mut Value) {
-    deliver_via(target, path, single_instance, wait, &slicers::busctl_program(), slicers::READY_LIMIT, slicers::READY_POLL, out);
+    deliver_via(target, path, single_instance, wait, &slicers::busctl_program(), slicers::ready_limit(), slicers::READY_POLL, out);
 }
 
 #[allow(clippy::too_many_arguments)]

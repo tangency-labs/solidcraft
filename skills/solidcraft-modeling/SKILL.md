@@ -54,7 +54,9 @@ Work the part out as numbers first. Then build it in a few large `batch` calls, 
 - **Positions:** `measure` does not say where a feature sits.
   - On an asymmetric part, check the COM shift you computed.
   - On a symmetric part (a mirrored or patterned layout) the COM does not move, so take a top-view screenshot and compare distances in pixels against a known size.
-  - For holes and bosses, `body_topology {"body":"Body1","faces":"cylinders"}`: one entry per cylinder (`radius`, `origin`, `axis`, `extent` along the axis, the merged faces' `names`), a few lines.
+  - For round holes and bosses, `body_topology {"body":"Body1","faces":"cylinders"}`: one entry per cylinder (`radius`, `origin`, `axis`, `extent` along the axis, the merged faces' `names`), a few lines.
+    - Holes of one radius on one axis line, such as blind holes from both sides, merge into one entry whose `extent` spans the material between them. Check their depths with the `measure` volume.
+    - Features that are not round, such as a square hole or a rectangular boss, have no cylinder entry. Check them with the top-view screenshot.
   - The full `body_topology` is a last resort: it costs 25-45 KB and splits cylinders into half faces.
 - **Final look:** one `screenshot {"source":"model","view":"iso","width":480,"height":320}`. Use `"view":"top"` for features inside walls, which the iso view hides.
   - `width` and `height` apply only to model renders.
@@ -68,7 +70,6 @@ Work the part out as numbers first. Then build it in a few large `batch` calls, 
 | Thought | Do instead |
 |---|---|
 | "List all commands first" | `reference.md`, or `list_commands {"filter":"<distinctive word>"}`. The unfiltered list is over 100 KB. |
-| "Check positions with body_topology" | `measure` COM and bbox against your numbers. |
 | "Inspect the sketch" | `sketch.solve` returns dof and the profile count in under 100 bytes. Run `sketch.inspect` on its own, never inside a big batch. |
 | "new_design for a clean start" | When the server is bridged, ask first. |
 | "It reported ok, so it worked" | Only a `measure` that matches the computed values counts. |

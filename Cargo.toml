@@ -6,7 +6,7 @@ members = ["crates/*", "apps/*", "xtask"]
 exclude = ["solidcore", "vendor"]
 
 [workspace.package]
-version = "0.46.2"
+version = "0.47.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -129,7 +129,7 @@ gethostname = "1"
 # and its ShapeManager/ACIS `sat` codec are not compiled in. `step` is the writer we restate through.
 cadmpeg-core = "=0.6.12"
 cadmpeg-ir = "=0.6.12"
-cadmpeg-registry = { version = "=0.6.12", default-features = false, features = ["fcstd", "rhino", "step", "usd"] }
+cadmpeg-registry = { version = "=0.6.12", default-features = false, features = ["fcstd", "iges", "rhino", "step", "usd"] }
 
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "variable-fonts"] }
