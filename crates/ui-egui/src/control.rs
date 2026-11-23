@@ -958,7 +958,7 @@ fn ui_icon_audit(_app: &mut SolveApp, p: &Value) -> Outcome {
     ok(json!({"requested": requested}))
 }
 
-/// `ui.triad`: screen points of the 3D move triad's handles (x, y, z arrows and the plane square).
+/// `ui.triad`: screen points of a clicked drawn point's arrows (sketch_move_classic only).
 fn ui_triad(app: &SolveApp) -> Outcome {
     let Some(rect) = app.viewport.rect else { return err("no viewport") };
     let proj = crate::viewport::projection(app, rect);
