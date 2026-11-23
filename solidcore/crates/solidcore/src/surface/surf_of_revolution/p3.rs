@@ -1135,7 +1135,7 @@ impl SurfOfRevolution {
             return Err(SolidError::surface(
                 OP_REBUILD,
                 SurfaceFailure::NurbNotAnalytic {
-                    check: AnalyticCheck::GeneratorDegenerate,
+                    check: AnalyticCheck::GeneratorIsoDegenerate,
                 },
             ));
         }
