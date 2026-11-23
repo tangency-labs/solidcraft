@@ -16,7 +16,7 @@ use solidcraft_engine::kernel::{Construction, Continuity};
 use crate::SolveApp;
 use crate::dialogs::{Kind, OP_LABELS, OPS, combo, form_row, op_index};
 use crate::selection::{
-    AXES, AXIS_PICKS, BODIES, CURVES, EDGES, FACES, PLANES, PROFILES, SelInput, SelectionExt as _, VERTICES, items, point_value as pt,
+    AXES, AXIS_PICKS, BODIES, CURVES, EDGES, FACES, PLANES, PROFILES, SNAP_POINTS, SelInput, SelectionExt as _, VERTICES, items, point_value as pt,
 };
 use crate::ui_kit;
 
@@ -102,10 +102,12 @@ crate::dialog_descriptor::dialog_descriptors! {
                 round: bool,
             },
             /// `direction`: the stored sweep direction of trimming curves (none: the sketch's normal).
+            /// `face_normal`: the stored choice to project them along the surface's normal instead.
             Trim {
                 extend: bool,
                 stitch: bool,
                 direction: Option<Vec3>,
+                face_normal: bool,
             },
             /// `holes`: an index into [`UNTRIM_HOLES`].
             Untrim {
@@ -241,7 +243,9 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
         }
         Surf::Blend { .. } => vec![SelInput::new("From edges", EDGES, true), SelInput::new("To edges", EDGES, true)],
         Surf::Boundary { .. } => vec![SelInput::new("Curves", CURVES | EDGES, true), SelInput::new("Cross curves", CURVES | EDGES, true)],
-        Surf::Patch { .. } => vec![SelInput::new("Boundary", PROFILES | CURVES | EDGES, true), SelInput::new("Pass through", VERTICES | FACES, true)],
+        Surf::Patch { .. } => {
+            vec![SelInput::new("Boundary", PROFILES | CURVES | EDGES, true), SelInput::new("Pass through", VERTICES | FACES | SNAP_POINTS, true)]
+        }
         Surf::Unstitch => vec![SelInput::new("Body, or faces to take out", BODIES | FACES, true)],
         Surf::ReverseNormal => vec![SelInput::new("Surface, or faces to turn over", BODIES | FACES, true)],
         Surf::Ruled { .. } => {
@@ -275,7 +279,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "surface.ruled" => {
             Surf::Ruled { distance: crate::dialogs::length_default(&app.session, "10"), mode: 0, angle: "5 deg".into(), flip: false, round: false }
         }
-        "surface.trim" => Surf::Trim { extend: false, stitch: false, direction: None },
+        "surface.trim" => Surf::Trim { extend: false, stitch: false, direction: None, face_normal: false },
         "surface.untrim" => Surf::Untrim { holes: 0, outer: false, in_place: false },
         "solid.split_face" => Surf::SplitFace,
         _ => Surf::simple_start(id)?.0,
@@ -829,7 +833,7 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             let edges: Vec<Value> = items(inputs, 0).edge_points().into_iter().map(pt).collect();
             ("surface.extend", json!({"body": body, "edges": edges}))
         }
-        Surf::Trim { extend, stitch, direction } => {
+        Surf::Trim { extend, stitch, direction, face_normal } => {
             need(0, "the surface to trim")?;
             need(2, "what to keep (points on it)")?;
             let body = items(inputs, 0).body_names().into_iter().next().unwrap_or_default();
@@ -869,7 +873,10 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
                     }
                     let sketch = crate::dialogs::picks_sketch(app, picks, None).ok_or("the curves must be in one sketch")?;
                     let mut c = json!({"sketch": sketch, "curves": curves});
-                    if let Some(d) = direction {
+                    // What the dialog does not show is kept as the feature was made (Edit Feature).
+                    if *face_normal {
+                        c["direction"] = json!("face_normal");
+                    } else if let Some(d) = direction {
                         c["direction"] = pt(*d);
                     }
                     p["curves"] = c;
@@ -1237,7 +1244,12 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 (None, None) => tool_sel(app, plane, tool.as_ref()).into_iter().collect(),
             };
             (
-                Surf::Trim { extend: *extend, stitch: *stitch, direction: curves.as_ref().and_then(|c| c.direction.map(|d| d.0)) },
+                Surf::Trim {
+                    extend: *extend,
+                    stitch: *stitch,
+                    direction: curves.as_ref().and_then(|c| c.direction.map(|d| d.0)),
+                    face_normal: curves.as_ref().is_some_and(|c| c.face_normal),
+                },
                 vec![
                     vec![Sel::Body { name: body.to_string() }],
                     tools,

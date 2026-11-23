@@ -255,7 +255,8 @@ impl ModelDimension {
 pub enum DimensionKind {
     /// The distance between two corners.
     Linear { a: ModelPoint, b: ModelPoint, direction: LinearDirection, reading: Reading },
-    /// A straight edge's length: the distance between its ends.
+    /// A straight edge's length: the distance between its ends. A round edge the view sees
+    /// edge-on is drawn as a line, and its length is that line's.
     Length { edge: ModelEdge, direction: LinearDirection, reading: Reading },
     /// The angle between two straight edges' lines: the smaller one, or with `other_side` π minus it.
     Angle {
@@ -1069,7 +1070,7 @@ impl<'a> Lookup<'a> {
                 if !found.whole {
                     return Err(Status::Ambiguous(edge_candidates(&edge.body, &found)));
                 }
-                let ends = found.pieces.first().and_then(|(_, line)| straight(line));
+                let ends = found.pieces.first().and_then(|(_, line)| straight(line)).or_else(|| self.edge_on(&found, basis));
                 let [a, b] = ends.ok_or_else(|| Status::Unmeasurable(format!("edge `{}` isn't straight", edge.name)))?;
                 let measured = drawing_measure::linear(basis, a, b, *direction, *reading).map_err(unmeasurable)?;
                 Ok(Found::new(measured, vec![a, b], found.exact))
@@ -1245,6 +1246,36 @@ impl<'a> Lookup<'a> {
             None if found.whole => Err(not_straight()),
             None => Err(Status::Ambiguous(edge_candidates(&edge.body, &found))),
         }
+    }
+
+    /// The line the view through `basis` draws for the round edge `found` when it sees the edge's
+    /// circle edge-on: the edge's two points furthest apart along that line, in the design's
+    /// frame. They are read from the circle the edge lies on ([`edge_circle`], exact), never from
+    /// its mesh: a whole circle's line is its diameter, and an arc's runs between its ends or out
+    /// to the side of the circle it reaches. `None` for an edge on no circle, or one the view sees
+    /// at a slant (an ellipse) or face on.
+    fn edge_on(&self, found: &Edges, basis: &Plane) -> Option<[Vec3; 2]> {
+        let (index, _) = found.pieces.first()?;
+        let body = self.state.bodies.get(found.body)?;
+        let circle = edge_circle(&body.body, *index)?;
+        // Worked in the body's own frame, which the occurrence carries rigidly to the design's.
+        let back = mat_inverse(&found.frame)?;
+        let view = apply_vector(&back, basis.normal()).normalized()?;
+        let axis = Vec3::from(circle.axis);
+        if axis.dot(view).abs() > EDGE_ON {
+            return None;
+        }
+        // The line runs square to both the view and the circle's axis.
+        let along = view.cross(axis).normalized()?;
+        let from = circle.start - circle.center;
+        let whole = circle.angle >= TAU - SAME_ANGLE;
+        let on_arc = |u: Vec3| whole || axis.dot(from.cross(u)).atan2(from.dot(u)).rem_euclid(TAU) <= circle.angle + SAME_ANGLE;
+        let mut points = vec![circle.start, circle.end];
+        points.extend([along, -along].into_iter().map(|side| side * circle.radius).filter(|u| on_arc(*u)).map(|u| circle.center + u));
+        let at = |p: &&Vec3| p.dot(along);
+        let lo = points.iter().min_by(|p, q| at(p).total_cmp(&at(q)))?;
+        let hi = points.iter().max_by(|p, q| at(p).total_cmp(&at(q)))?;
+        Some([apply_point(&found.frame, *lo), apply_point(&found.frame, *hi)])
     }
 
     /// The point `point` names, in the design's frame: a corner, the one end all its named edges
@@ -1499,6 +1530,11 @@ const MAX_RIM_EDGES: usize = 128;
 const CONTOUR_STEPS: u32 = 32;
 /// Cuts closer than this round the contour (radians) are one.
 const SAME_ANGLE: f64 = 1e-9;
+
+/// A circle whose axis is within this (the sine of the angle) of square to the view is seen
+/// edge-on: its ellipse is then under a millionth of its diameter wide, which the Dimension tool's
+/// pick already reads as a line on the sheet.
+const EDGE_ON: f64 = 1e-6;
 
 /// The longest arc of `sphere`'s contour on the view `seen` (both in `b`'s own frame) that lies on
 /// `b`'s boundary: its start angle and its sweep, or `None` when none does. The contour is cut

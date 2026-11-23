@@ -597,6 +597,30 @@ pub enum CurveKind {
     Composite(CompositeCurve),
 }
 
+impl CurveKind {
+    /// The kind's name, for a cause that names the curve kind a step cannot handle
+    /// (`"B-spline"`, `"line"`, `"iso-parametric"`, ...).
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::BSpline(_) => "B-spline",
+            Self::Line(_) => "line",
+            Self::Ellipse(_) => "ellipse",
+            Self::Parabola(_) => "parabola",
+            Self::Hyperbola(_) => "hyperbola",
+            Self::Hermite(_) => "Hermite",
+            Self::Projected(_) => "projected",
+            Self::Iso(_) => "iso-parametric",
+            Self::Offset(_) => "offset",
+            Self::Conic(_) => "conic",
+            Self::CrvInVolume(_) => "curve-in-volume",
+            Self::CrvOnSurf(_) => "curve-on-surface",
+            Self::TangentField(_) => "tangent-field",
+            Self::Composite(_) => "composite",
+        }
+    }
+}
+
 /// A curve (`SmCurve`): its concrete kind and the object owning it (`m_pOwner`:
 /// an edge, edge use, face or another curve).
 #[derive(Debug)]

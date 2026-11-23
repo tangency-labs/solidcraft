@@ -34,6 +34,7 @@ use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p3::{local_curve_intersect, PointSolveOptions};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
+use crate::error::surface::{SolverPart, SurfaceFailure};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -51,7 +52,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BSplineSurface, IsoCurveOptions, SurfParamType};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
-use crate::surface::surface_cache::BezierPatch;
+use crate::surface::surface_cache::{BezierPatch, SolveModes};
 
 const OP: &str = "surface::surface::p9::find_tessellation_splits";
 const MAX_SPLITS: usize = 1_000_000;
@@ -347,7 +348,14 @@ impl Surface {
             } else {
                 longest
                     .ok_or_else(|| {
-                        SolidError::surface_failed(OP, "no longest boundary curve to split along")
+                        SolidError::surface(
+                            OP,
+                            SurfaceFailure::Defect {
+                                why: "no longest boundary curve was kept, though two or more \
+                                      splits need a longest length of at least the side, and \
+                                      that length's curve is kept with it",
+                            },
+                        )
                     })?
                     .equally_spaced_points(interval.min(), interval.max(), count, length / 1000.0)?
                     .1
@@ -527,7 +535,13 @@ fn surface_closed(
     Ok((
         closed,
         continuity.ok_or_else(|| {
-            SolidError::surface_failed(OP, "the closedness test gave no continuity")
+            SolidError::surface(
+                OP,
+                SurfaceFailure::Defect {
+                    why: "the closedness test returned no continuity, though every kind's test \
+                          returns one when it is asked for",
+                },
+            )
         })?,
     ))
 }
@@ -542,7 +556,15 @@ fn tangent_drop(k: &Kernel, surface: &Surface, uv: Point2, point: Point3) -> Res
     )?
     .first()
     .copied()
-    .ok_or_else(|| SolidError::surface_failed(OP, "the tangent drop gave no parameter"))
+    .ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the tangent-plane drop returned no point, though it maps each point it \
+                      is given and was given one",
+            },
+        )
+    })
 }
 /// `SmSurface::LocalCurveIntersect` (virtual; no kind overrides it).
 fn intersect_surface_curve(
@@ -730,18 +752,32 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
             k,
             surface,
             domain,
-            self.curve
-                .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?,
+            self.curve.ok_or_else(|| {
+                SolidError::surface(
+                    OP,
+                    SurfaceFailure::SolverWithout {
+                        part: SolverPart::Curve,
+                    },
+                )
+            })?,
             interval,
             conts,
             solution,
         )? {
             let uv = Point2::new(solution.start.param(1)?, solution.start.param(2)?);
+            let cache = self.surface_cache.ok_or_else(|| {
+                SolidError::surface(
+                    OP,
+                    SurfaceFailure::SolverWithout {
+                        part: SolverPart::SurfaceCache,
+                    },
+                )
+            })?;
             if super::p1::is_point_valid_with(
                 k,
                 self.base.tree(1)?.owner(),
-                self.surface_cache
-                    .ok_or_else(|| SolidError::surface_missing(OP, "the solver's surface cache"))?,
+                cache,
+                SolveModes::of(cache, self.modes),
                 uv,
                 None,
                 self.face_queries,
@@ -762,62 +798,43 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
     #[allow(clippy::too_many_lines)]
     pub fn local_solve_branch(&mut self, k: &Kernel, branch: &Branch) -> Result<bool> {
         let curve_node = *self.base.branch_node(branch, 0)?;
-        let surface_node = *self.base.branch_node(branch, 1)?;
+        let (surface_id, surface_node) = self.base.branch_entry(branch, 1)?;
+        let surface_node = *surface_node;
         let curve_tree = self.base.tree(0)?;
         let span = *curve_tree.curve_span(&curve_node)?;
-        let surface_id = branch
-            .get(1)
-            .copied()
-            .flatten()
-            .ok_or_else(|| SolidError::surface_missing(OP, "the branch's surface"))?;
-        let patch: BezierPatch<O> = self
-            .surface_cache
-            .ok_or_else(|| SolidError::surface_missing(OP, "the solver's surface cache"))?
-            .patch(surface_id)?
-            .clone();
+        // (the solver's cache, read again below: checked once here)
+        let cache = self.surface_cache.ok_or_else(|| {
+            SolidError::surface(
+                OP,
+                SurfaceFailure::SolverWithout {
+                    part: SolverPart::SurfaceCache,
+                },
+            )
+        })?;
+        let patch: BezierPatch<O> = cache.patch(surface_id)?.clone();
         let original = super::p2::original_surface(self.base.tree(1)?, &surface_node)?;
-        if Some(original)
-            != self
-                .surface_cache
-                .ok_or_else(|| SolidError::surface_missing(OP, "the solver's surface cache"))?
-                .surface_handle()
-        {
+        if Some(original) != cache.surface_handle() {
             return Err(SolidError::invalid_input(
                 OP,
                 "surface cache does not own the original surface",
             ));
         }
         // Resolve the original tree-owner handle, not the Bezier patch surface.
-        let parent_surface = self
-            .surface_cache
-            .ok_or_else(|| SolidError::surface_missing(OP, "the solver's surface cache"))?
-            .surface();
+        let parent_surface = cache.surface();
         let eval_handle = super::p1::surface_to_evaluate(self.base.tree(1)?, &surface_node)?;
-        if Some(eval_handle)
-            != self
-                .surface_cache
-                .ok_or_else(|| SolidError::surface_missing(OP, "the solver's surface cache"))?
-                .surface_handle()
-        {
+        if Some(eval_handle) != cache.surface_handle() {
             return Err(SolidError::invalid_input(
                 OP,
                 "surface evaluation handle has no geometry resolver",
             ));
         }
-        let eval_surface = self
-            .surface_cache
-            .ok_or_else(|| SolidError::surface_missing(OP, "the solver's surface cache"))?
-            .surface();
+        let eval_surface = cache.surface();
         let mut domain = patch.aux.uv_domain;
         let u_interval = domain.u_interval();
         let v_interval = domain.v_interval();
         let mut interval = *span.interval();
-        if !super::p1::is_node_valid(
-            self.base.tree(1)?.owner(),
-            self.surface_cache
-                .ok_or_else(|| SolidError::surface_missing(OP, "the solver's surface cache"))?,
-            &surface_node,
-        )? {
+        let modes = SolveModes::of(cache, self.modes);
+        if !super::p1::is_node_valid(self.base.tree(1)?.owner(), cache, modes, &surface_node)? {
             return Ok(false);
         }
         if domain.are_disjoint(&self.uv_domain, 0.0) || self.interval.are_disjoint(&interval, 0.0) {
@@ -875,29 +892,30 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
                 return Ok(false);
             }
         }
-        let natural = self
-            .curve
-            .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?
-            .natural_interval();
+        // (the solver's curve, read again below: checked once here)
+        let curve = self.curve.ok_or_else(|| {
+            SolidError::surface(
+                OP,
+                SurfaceFailure::SolverWithout {
+                    part: SolverPart::Curve,
+                },
+            )
+        })?;
+        let natural = curve.natural_interval();
         if (crate::geom::tol::is_zero(interval.min() - natural.min())
             || crate::geom::tol::is_zero(interval.max() - natural.max()))
             && crate::geom::tol::is_zero(self.interval.min() - natural.min())
             && crate::geom::tol::is_zero(self.interval.max() - natural.max())
-            && self
-                .curve
-                .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?
-                .is_closed(k, &natural, 0.0)?
+            && curve.is_closed(k, &natural, 0.0)?
         {
             // (status ignored upstream; passed on as the fork does, WR-663,
             // tangency-labs/smlib 21dcf69)
             let continuity = crate::curve::curve::p2::evaluate_continuity(
                 k,
-                self.curve
-                    .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?,
+                curve,
                 natural.min(),
                 false,
-                self.curve
-                    .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?,
+                curve,
                 natural.max(),
                 true,
                 0.5,
@@ -949,77 +967,48 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
         let mut t = interval.evaluate(0.5);
         if bigger {
             let point = eval_surface.evaluate_point(k, uv)?;
-            let (found, solution) = self
-                .curve
-                .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?
-                .local_point_solve::<O>(
-                    k,
-                    &interval,
-                    SolverOperation::Minimize,
-                    point,
-                    &PointSolveOptions::default(),
-                    t,
-                )?;
+            let (found, solution) = curve.local_point_solve::<O>(
+                k,
+                &interval,
+                SolverOperation::Minimize,
+                point,
+                &PointSolveOptions::default(),
+                t,
+            )?;
             if found {
                 t = solution.start.param(0)?;
             }
         }
-        uv = tangent_drop(
-            k,
-            eval_surface,
-            uv,
-            self.curve
-                .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?
-                .evaluate_point(k, t)?,
-        )?;
+        uv = tangent_drop(k, eval_surface, uv, curve.evaluate_point(k, t)?)?;
         if !domain.contains_point(uv, 0.0) {
             if bigger {
                 uv = domain.clamp_point(uv);
-                let (found, solution) = self
-                    .curve
-                    .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?
-                    .local_point_solve::<O>(
-                        k,
-                        &interval,
-                        SolverOperation::Minimize,
-                        eval_surface.evaluate_point(k, uv)?,
-                        &PointSolveOptions::default(),
-                        interval.evaluate(0.5),
-                    )?;
+                let (found, solution) = curve.local_point_solve::<O>(
+                    k,
+                    &interval,
+                    SolverOperation::Minimize,
+                    eval_surface.evaluate_point(k, uv)?,
+                    &PointSolveOptions::default(),
+                    interval.evaluate(0.5),
+                )?;
                 if found {
                     let t2 = solution.start.param(0)?;
                     let uv2 = domain.clamp_point(tangent_drop(
                         k,
                         eval_surface,
                         uv,
-                        self.curve
-                            .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?
-                            .evaluate_point(k, t2)?,
+                        curve.evaluate_point(k, t2)?,
                     )?);
                     guesses.push((uv2, t2));
                 }
             } else {
                 uv = domain.evaluate(0.5, 0.5);
                 t = interval.min();
-                uv = tangent_drop(
-                    k,
-                    eval_surface,
-                    uv,
-                    self.curve
-                        .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?
-                        .evaluate_point(k, t)?,
-                )?;
+                uv = tangent_drop(k, eval_surface, uv, curve.evaluate_point(k, t)?)?;
                 if !domain.contains_point(uv, 0.0) {
                     uv = domain.evaluate(0.5, 0.5);
                     t = interval.max();
-                    uv = tangent_drop(
-                        k,
-                        eval_surface,
-                        uv,
-                        self.curve
-                            .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?
-                            .evaluate_point(k, t)?,
-                    )?;
+                    uv = tangent_drop(k, eval_surface, uv, curve.evaluate_point(k, t)?)?;
                     if !domain.contains_point(uv, 0.0) {
                         t = interval.evaluate(0.5);
                         uv = domain.evaluate(0.5, 0.5);
@@ -1027,11 +1016,7 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
                             k,
                             eval_surface,
                             uv,
-                            self.curve
-                                .ok_or_else(|| {
-                                    SolidError::surface_missing(OP, "the solver's curve")
-                                })?
-                                .evaluate_point(k, t)?,
+                            curve.evaluate_point(k, t)?,
                         )?);
                         for fraction in [0.5, 0.0, 1.0] {
                             guesses.push((domain.evaluate(0.5, 0.5), interval.evaluate(fraction)));
@@ -1054,8 +1039,7 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
                 k,
                 eval_surface,
                 &domain,
-                self.curve
-                    .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?,
+                curve,
                 &interval,
                 self.base.tolerance_3d,
                 guess_uv,
@@ -1065,25 +1049,15 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
             if let Some(hit) = result {
                 deviation = hit.deviation;
                 let solution = self.solution(branch, hit.parameter, hit.uv, hit.deviation)?;
-                if !filter_solution(
-                    k,
-                    eval_surface,
-                    &domain,
-                    self.curve
-                        .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?,
-                    &interval,
-                    conts,
-                    &solution,
-                )? {
+                if !filter_solution(k, eval_surface, &domain, curve, &interval, conts, &solution)? {
                     index += 1;
                     continue;
                 }
                 if super::p1::is_point_valid_with(
                     k,
                     self.base.tree(1)?.owner(),
-                    self.surface_cache.ok_or_else(|| {
-                        SolidError::surface_missing(OP, "the solver's surface cache")
-                    })?,
+                    cache,
+                    modes,
                     hit.uv,
                     None,
                     self.face_queries,
@@ -1095,17 +1069,12 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
                     curve_tree,
                     &curve_node,
                     &surface_node,
-                    self.surface_cache.ok_or_else(|| {
-                        SolidError::surface_missing(OP, "the solver's surface cache")
-                    })?,
+                    cache,
                     surface_id,
                 )? {
                     return Ok(false);
                 }
                 if index < 1 {
-                    let curve = self
-                        .curve
-                        .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?;
                     if let Some(new_guess) = ignored(nearby_intersection(
                         k,
                         eval_surface,
@@ -1130,20 +1099,15 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
             }
             index += 1;
         }
-        for j in 0..2 {
-            let t_cont = *t_conts
-                .get(j)
-                .ok_or_else(|| SolidError::surface_missing(OP, "the curve's end continuity"))?;
+        // (the span's two end continuities, in order)
+        for (j, t_cont) in t_conts.into_iter().enumerate() {
             if (t_cont as i32) <= ContinuityType::C0 as i32 && !self.found_coincidence {
                 let t = if j == 0 {
                     interval.min()
                 } else {
                     interval.max()
                 };
-                let point = self
-                    .curve
-                    .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?
-                    .evaluate_point(k, t)?;
+                let point = curve.evaluate_point(k, t)?;
                 if pseudo_box.distance_to_point(point) < EFF_ZERO {
                     let (found, mut solution) = surface_point_solve::<O>(
                         self.kernel,
@@ -1168,11 +1132,7 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
                     }
                 }
             }
-            if !self
-                .surface_cache
-                .ok_or_else(|| SolidError::surface_missing(OP, "the solver's surface cache"))?
-                .process_boundary_curves
-            {
+            if !modes.process_boundary_curves {
                 continue;
             }
             for (dir, cont, constant, iso_interval) in [
@@ -1204,19 +1164,16 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
                 if iso.is_degenerate(k, EFF_ZERO, None)? {
                     continue;
                 }
-                let coincident = self
-                    .curve
-                    .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?
-                    .simple_coincidence_checker::<O>(
-                        self.kernel,
-                        &interval,
-                        &iso,
-                        &iso_interval,
-                        self.base.tolerance_3d,
-                        Some(&span.pseudo_box),
-                        Some(&patch.pseudo_box),
-                        [None, None],
-                    )?;
+                let coincident = curve.simple_coincidence_checker::<O>(
+                    self.kernel,
+                    &interval,
+                    &iso,
+                    &iso_interval,
+                    self.base.tolerance_3d,
+                    Some(&span.pseudo_box),
+                    Some(&patch.pseudo_box),
+                    [None, None],
+                )?;
                 let count = coincident.len();
                 let mut max_error = 0.0;
                 let mut found_coincidence = false;
@@ -1278,8 +1235,7 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
                         k,
                         &iso,
                         &iso_interval,
-                        self.curve
-                            .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?,
+                        curve,
                         &interval,
                         self.base.tolerance_3d,
                         iso_interval.evaluate(0.5),

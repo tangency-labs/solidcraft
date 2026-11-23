@@ -32,9 +32,12 @@ use solidcore::heal::stitch::p1::api_stitch_into_solid;
 use solidcore::kernel::Kernel;
 use solidcore::math::Transform;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
+use solidcore::nurbs::b_spline_surface::BSplineSurface;
+use solidcore::nurbs::b_spline_surface_n_lib::p2::SkinnedSurfaceOptions;
 use solidcore::primitive::primitive_creation::SweepOptions;
 use solidcore::prism::profile as kp;
 use solidcore::surface::surface::p4::NoObject;
+use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_brep::{
     create_curve_sweep_with_placements, create_linear_sweep, create_rotational_sweep,
     CornerRefusal as KRefusal, OffsetCornerType, TaperExtrude,
@@ -55,7 +58,8 @@ use solidcore::topology::brep::p3::new_brep;
 use solidcore::topology::brep::p4::stitch_faces;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::brep::p8::{
-    create_planar_face_with_3d_curves, create_planar_faces_with_3d_curves, FaceBuildEnv,
+    create_face_from_surface, create_planar_face_with_3d_curves,
+    create_planar_faces_with_3d_curves, FaceBuildEnv,
 };
 use solidcore::topology::brep::planar_section::{PlanarSectionOptions, SectionOutputs};
 use solidcore::topology::{Brep, FaceId};
@@ -73,7 +77,7 @@ pub use solidcore::sweep::api_brep::TaperCornerRefusal as CornerRefusal;
 use crate::body::{finish, Body, Expect};
 use crate::error::status;
 use crate::order::{self, Order};
-use crate::session::{run, with_body};
+use crate::session::{read_body, run, with_body};
 use crate::{Error, Result};
 
 /// A call's own refusal, else the value: as the kernel's calls answer inside [`run`].
@@ -1045,6 +1049,43 @@ pub fn loft(sections: &[Vec<Curve>], degree: u32, cap: bool) -> Result<Body> {
     })
 }
 
+/// Whether a loft section (its plane's normal and its middle) faces back from the section
+/// before it (its normal as turned along the loft, and its middle): the kernel's
+/// [`solidcore::geom::plane_height::faces_back`]. The application winds the section the other
+/// way round when it does.
+#[must_use]
+pub fn loft_section_faces_back(
+    before_normal: [f64; 3],
+    before_middle: [f64; 3],
+    normal: [f64; 3],
+    middle: [f64; 3],
+) -> bool {
+    solidcore::geom::plane_height::faces_back(
+        v3(before_normal),
+        v3(before_middle),
+        v3(normal),
+        v3(middle),
+    )
+}
+
+/// Where the polyline `points` leaves the plane through `origin` with unit normal `normal`
+/// (within `tol`), in order: the index of the segment and the point. The kernel's
+/// [`solidcore::geom::plane_height::plane_departures`]; a loft opens a closed guide rail at
+/// the first of them on its first section.
+#[must_use]
+pub fn polyline_plane_departures(
+    points: &[[f64; 3]],
+    origin: [f64; 3],
+    normal: [f64; 3],
+    tol: f64,
+) -> Vec<(usize, [f64; 3])> {
+    let points: Vec<Vec3> = points.iter().map(|p| v3(*p)).collect();
+    solidcore::geom::plane_height::plane_departures(&points, v3(origin), v3(normal), tol)
+        .into_iter()
+        .map(|(k, p)| (k, [p.x, p.y, p.z]))
+        .collect()
+}
+
 /// The kernel's trace of a skin: each side face with the curves it is skinned from, if traced.
 type Traced = Option<Vec<(FaceId, Vec<usize>)>>;
 
@@ -1267,6 +1308,134 @@ pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Body> {
                     .copied()
                     .unwrap_or(p);
                 face(b, fenv, &[p, q, top])?;
+            }
+            Ok(())
+        });
+        if let Err(e) = built {
+            return Ok(Err(e));
+        }
+        if let Err(e) = stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default()) {
+            return Ok(Err(status(e)));
+        }
+        b.refresh_cached_topology();
+        finish(k, b, Expect::SOLID)
+    })
+}
+
+/// A loft from the planar first of `sections` (one closed loop of curves, in order) through the
+/// rest, its stations (each as many curves as the first, need not be planar), to `apex` (off the
+/// first's plane): the base on the first section's curves, and on each of its curves one wall
+/// skinned (cubic across, or as high as the rows allow) through that curve, the stations' curves
+/// in its column, and the curve shrunk onto the apex (the wall's pole), one face over the
+/// surface's whole box; stitched and oriented. `params` places each row along the loft, the
+/// sections' then the apex's (increasing, from 0 at the first section to 1 at the apex): every
+/// wall is skinned at those parameters, so neighbouring walls, whose curves share their ends,
+/// meet on the same boundary curves. They do as long as, at each corner, the weights of the two
+/// curves that meet there keep one ratio through the rows, as rows moved from one profile (its
+/// weights kept) do; walls that do not meet leave no solid, and the call is refused. A loft to a
+/// point that follows guide rails gives the stations and where they lie.
+///
+/// # Errors
+/// [`Error::Argument`] for fewer than two sections or more than [`MAX_STATIONS`], sections of
+/// different counts, parameters that are not one a row increasing from 0 to 1, a curve list
+/// refused, a first section that is not one closed loop, or an apex not proved off its plane;
+/// the kernel's status; [`Error::Empty`], [`Error::NotSolid`].
+pub fn loft_to_point_through(
+    sections: &[Vec<Curve>],
+    apex: [f64; 3],
+    params: &[f64],
+) -> Result<Body> {
+    if !coord_ok(&apex) || !(2..=MAX_STATIONS).contains(&sections.len()) {
+        return Err(Error::Argument);
+    }
+    if params.len() != sections.len() + 1
+        || params.first() != Some(&0.0)
+        || params.last() != Some(&1.0)
+        || params.windows(2).any(|w| !matches!(w, [a, b] if a < b))
+    {
+        return Err(Error::Argument);
+    }
+    let n = sections.first().map_or(0, Vec::len);
+    if n == 0
+        || sections.iter().any(|s| s.len() != n)
+        || sections.len().saturating_mul(n) > MAX_STATION_CURVES
+    {
+        return Err(Error::Argument);
+    }
+    making("loft_to_point_through", |k| {
+        let mut rows = Vec::with_capacity(sections.len() + 1);
+        for s in sections {
+            let made = parsed!(parse(k, s));
+            let mut row = Vec::with_capacity(n);
+            for c in &made.curves {
+                let Some(b) = bspline(c)? else {
+                    return Ok(Err(Error::Argument));
+                };
+                row.push(b);
+            }
+            rows.push((made.curves, row));
+        }
+        let Some((base, base_splines)) = rows.first() else {
+            return Ok(Err(Error::Argument));
+        };
+        if !path::closed_loop(k, base, 1e-6)?.is_yes() {
+            return Ok(Err(Error::Argument));
+        }
+        let top: Point3 = v3(apex);
+        match path::point_off_plane_of(k, base, top, 1e-9) {
+            Ok(v) if v.is_yes() => {}
+            _ => return Ok(Err(Error::Argument)),
+        }
+        // The apex row: each base curve with every control point on the apex (its own weights
+        // and knots).
+        let mut tip = Vec::with_capacity(n);
+        for b in base_splines {
+            let c = b.canonical()?;
+            let at_apex = vec![top; c.control_points.len()];
+            let data = CanonicalData {
+                dim: 3,
+                degree: c.degree,
+                control_points: &at_apex,
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &c.knot_multiplicities,
+                knots: &c.knots,
+                knot_type: KnotType::Unspecified,
+                weights: (!c.weights.is_empty()).then_some(c.weights.as_slice()),
+                trim: None,
+            };
+            tip.push(BSplineCurve::create_canonical(&data)?);
+        }
+        let mut columns: Vec<Vec<BSplineCurve>> = vec![Vec::with_capacity(rows.len() + 1); n];
+        for (_, row) in &rows {
+            for (column, b) in columns.iter_mut().zip(row) {
+                column.push(b.clone());
+            }
+        }
+        for (column, b) in columns.iter_mut().zip(tip) {
+            column.push(b);
+        }
+        let degree = (params.len() - 1).min(3);
+        let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
+        let region = b.infinite_region();
+        let tol = 1e-6;
+        let built = build_faces(&mut b, |b, fenv| -> Out<()> {
+            called(create_planar_face_with_3d_curves(
+                k, b, region, base, tol, fenv,
+            ))?;
+            for column in &columns {
+                let wall = called(BSplineSurface::create_skinned_surface(
+                    k,
+                    column,
+                    SkinnedSurfaceOptions {
+                        deriv_surfs: Some([None, None]),
+                        degree,
+                        section_params: Some(params),
+                        ..Default::default()
+                    },
+                ))?;
+                let surface = Surface::from(wall);
+                let domain = called(surface.natural_uv_domain_with_nurb(k))?;
+                called(create_face_from_surface(k, b, Some(surface), &domain, fenv))?;
             }
             Ok(())
         });
@@ -1633,48 +1802,15 @@ pub fn drop_curves(
     if !tolerance_ok(tolerance) {
         return Err(Error::Argument);
     }
-    with_body("drop_curves", body, |k, b| {
+    read_body("drop_curves", body, |k, b| {
         let given = parsed!(parse(k, curves));
         let face = parsed!(face_of(b, order, face));
-        let domain = b.face(face)?.uv_domain;
-        let Some(owned) = b.face(face)?.surface.as_ref() else {
-            return Ok(Err(Error::Argument));
-        };
-        // A standalone copy (its owner not copied): the drop and lift work over the face's
-        // parameter box, and a face-owned surface's solves would ask for the face's trimmed
-        // cache, which they are not given here.
-        let surface = owned.copy(k)?;
+        let dropped = parsed!(dropped_on(k, b, face, &given.curves, tolerance)?);
         let mut out = Vec::new();
-        for c in &given.curves {
-            let dropped = match surface.drop_and_trim_curve::<NoObject>(
-                k,
-                &domain,
-                c,
-                &c.natural_interval(),
-                tolerance,
-                true,
-                false,
-                None,
-            ) {
-                Ok(d) => d,
-                Err(e) => return Ok(Err(status(e))),
-            };
-            for uv in &dropped.uv_curves {
-                let lifted = match surface.lift_curve(
-                    k,
-                    &domain,
-                    uv,
-                    &uv.natural_interval(),
-                    tolerance,
-                    false,
-                ) {
-                    Ok(l) => l,
-                    Err(e) => return Ok(Err(status(e))),
-                };
-                match put_curve(&lifted.curve)? {
-                    Ok(x) => out.push(x),
-                    Err(e) => return Ok(Err(e)),
-                }
+        for c in dropped.iter().flatten() {
+            match put_curve(c)? {
+                Ok(x) => out.push(x),
+                Err(e) => return Ok(Err(e)),
             }
         }
         Ok(if out.is_empty() {
@@ -1683,6 +1819,52 @@ pub fn drop_curves(
             Ok(out)
         })
     })?
+}
+
+/// The kernel's curves of [`drop_curves`]: for each curve of `given`, in order, its pieces
+/// dropped square onto the surface of `face` of `b` over the face's parameter box and lifted
+/// back to 3D, each within `tolerance`; none for a curve that does not land on the box. For
+/// the families outside this module that cut a face along them (`crate::trim`).
+pub(crate) fn dropped_on(
+    k: &Kernel,
+    b: &Brep,
+    face: FaceId,
+    given: &[KCurve],
+    tolerance: f64,
+) -> solidcore::Result<Out<Vec<Vec<KCurve>>>> {
+    let domain = b.face(face)?.uv_domain;
+    let Some(owned) = b.face(face)?.surface.as_ref() else {
+        return Ok(Err(Error::Argument));
+    };
+    // A standalone copy (its owner not copied): the drop and lift work over the face's
+    // parameter box, and a face-owned surface's solves would ask for the face's trimmed
+    // cache, which they are not given here.
+    let surface = owned.copy(k)?;
+    let mut out = Vec::new();
+    for c in given {
+        let dropped = match surface.drop_and_trim_curve::<NoObject>(
+            k,
+            &domain,
+            c,
+            &c.natural_interval(),
+            tolerance,
+            true,
+            false,
+            None,
+        ) {
+            Ok(d) => d,
+            Err(e) => return Ok(Err(status(e))),
+        };
+        let mut pieces = Vec::new();
+        for uv in &dropped.uv_curves {
+            match surface.lift_curve(k, &domain, uv, &uv.natural_interval(), tolerance, false) {
+                Ok(l) => pieces.push(l.curve),
+                Err(e) => return Ok(Err(status(e))),
+            }
+        }
+        out.push(pieces);
+    }
+    Ok(Ok(out))
 }
 
 /// A curve's record form ([`Curve::to_record`]): what it is, the NURBS form a circle's

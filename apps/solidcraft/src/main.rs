@@ -48,6 +48,8 @@ mod single_instance;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 mod space_mouse;
 mod startup;
+#[cfg(unix)]
+mod system_quit;
 #[cfg(any(target_os = "windows", test))]
 mod window_fit;
 
@@ -247,6 +249,13 @@ impl eframe::App for App {
             if self.window_frames == 2 && !self.take_focus_unwanted {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             }
+        }
+        // The system asked the app to stop (shutdown, SIGTERM): close as a forced quit does,
+        // keeping unsaved changes for recovery, since nobody is there to answer "save changes?".
+        // Before the starting page returns, so a signal during the setup closes the app too.
+        #[cfg(unix)]
+        if system_quit::requested() {
+            self.solve.quit_requested = true;
         }
         // The window shows with its first frame: the starting page, before the slow setup.
         let mut setup = std::mem::take(&mut self.setup);
@@ -519,6 +528,9 @@ impl Drop for App {
     /// `on_exit`, it read `app.ron` while the old process was still writing it, found it
     /// unreadable and moved it aside, resetting every setting (#9044).
     fn drop(&mut self) {
+        // A successor started below with design files would otherwise hand them back to this
+        // closing window and end (#19340).
+        single_instance::stop();
         if let Some(gpu) = &self.gpu
             && let Some(lost_at) = gpu.lost_at
         {
@@ -1061,13 +1073,13 @@ fn tickets_http(r: solidcraft_ui_egui::agent_chat::backend::HttpRequest, done: s
     drop(spawned);
 }
 
-/// Posts a usage statistics report on a worker thread, to the one endpoint only
-/// (`usage_stats::ENDPOINT`); anything else is refused. The answer comes on `done`.
+/// Sends a usage statistics request on a worker thread, to its endpoints only
+/// (`usage_stats::allowed_url`); anything else is refused. The answer comes on `done`.
 #[cfg(feature = "usage-stats")]
 fn usage_http(r: solidcraft_ui_egui::agent_chat::backend::HttpRequest, done: std::sync::mpsc::Sender<solidcraft_ui_egui::tickets::Reply>) {
     let spawned = std::thread::Builder::new().name("usage-stats-http".into()).spawn(move || {
         let reply =
-            if r.url == solidcraft_ui_egui::usage_stats::ENDPOINT { tickets_call(&r) } else { Err("not the usage statistics endpoint".into()) };
+            if solidcraft_ui_egui::usage_stats::allowed_url(&r.url) { tickets_call(&r) } else { Err("not the usage statistics endpoint".into()) };
         let _ = done.send(reply);
     });
     drop(spawned);
@@ -1323,6 +1335,8 @@ fn main() -> eframe::Result {
     mark("main");
     // The kernel's fix set, named to solidcore-ops before any call runs on it.
     solidcraft_engine::kernel::start();
+    // A large importer plugin compiles once per version, not at the first file of every session.
+    solidcraft_engine::plugin::configure_compile_cache();
     solidcraft_ui_egui::i18n::install();
     solidcraft_look::install_tables();
     solidcraft_ui_egui::workspace::install_tabs();
@@ -1671,6 +1685,7 @@ fn main() -> eframe::Result {
             }
             // The administrator's policy holds in safe mode too.
             app.policy = solidcraft_ui_egui::policy::load();
+            solidcraft_ui_egui::policy::enforce(&mut app);
             #[cfg(feature = "usage-stats")]
             app.load_usage_stats(cc.storage.and_then(|s| s.get_string(solidcraft_ui_egui::usage_stats::STORAGE_KEY)).as_deref());
             if let Some(path) = &theme_file
@@ -1768,6 +1783,14 @@ fn main() -> eframe::Result {
             } else {
                 files
             };
+            // A shutdown or restart closes the app cleanly instead of killing it (#7345).
+            #[cfg(unix)]
+            {
+                let ctx = cc.egui_ctx.clone();
+                if let Err(error) = system_quit::install(move || ctx.request_repaint()) {
+                    log::warn!("shutdown signals: {error}");
+                }
+            }
             let nav_bridge = nav_bridge::NavBridge::start(&cc.egui_ctx);
             // The rest is slow on some computers: it runs after the window shows, a step a frame,
             // behind the starting page (#1210).
@@ -2391,6 +2414,82 @@ mod tickets_http_tests {
 
 #[cfg(test)]
 mod prefs_writer_tests {
+    /// In-process MCP-to-UI integration, without opening a native window or socket session.
+    #[test]
+    fn app_management_mcp_tools_reach_the_real_ui_without_dialogs() {
+        use serde_json::{Value, json};
+        struct Desktop(solidcraft_ui_egui::scenario::Harness);
+        impl solidcraft_mcp::Backend for Desktop {
+            fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+                let reply = self.0.call(method, params);
+                if reply["ok"] == true {
+                    Ok(reply["result"].clone())
+                } else {
+                    Err(reply["error"].as_str().unwrap_or("unexpected control reply").into())
+                }
+            }
+            fn has_ui(&self) -> bool {
+                true
+            }
+            fn describe(&self) -> String {
+                "in-process desktop UI harness".into()
+            }
+        }
+        fn call(b: &mut Desktop, tool: &str, args: Value, fails: bool) -> Value {
+            let reply = solidcraft_mcp::call_tool(b, tool, &args);
+            assert_eq!(reply["isError"] == true, fails, "{tool}: {reply}");
+            assert!(b.0.app.docs.closing.is_none() && b.0.app.docs.quitting.is_none());
+            assert!(!b.0.app.prefs_window.shell.open);
+            reply
+        }
+        let mut b = Desktop(solidcraft_ui_egui::scenario::Harness::new());
+        b.0.app.run("parameters.add", json!({"name": "width", "expression": "12 mm"})).unwrap();
+        let original = b.0.app.session.document_id.clone();
+        call(&mut b, "documents", json!({"action": "new"}), false);
+        assert_eq!(b.0.app.docs.count(), 2);
+        call(&mut b, "documents", json!({"action": "switch", "index": 0}), false);
+        assert_eq!(b.0.app.session.document_id, original);
+        call(&mut b, "documents", json!({"action": "close"}), true);
+        call(&mut b, "quit_app", json!({}), true);
+        assert!(!b.0.app.quit_requested && b.0.app.session.is_dirty());
+        let before = b.0.app.preferences.theme.clone();
+        call(&mut b, "preferences", json!({"open": "General", "theme": "light"}), true);
+        assert_eq!(b.0.app.preferences.theme, before);
+        call(&mut b, "preferences", json!({"theme": "light", "default_units": "cm"}), false);
+        assert_eq!(b.0.app.preferences.theme, "light");
+        let prefs = call(&mut b, "preferences", json!({}), false);
+        assert!(prefs["content"][0]["text"].as_str().unwrap().contains("cm"));
+        call(&mut b, "agent_cursor", json!({"show": true, "speed": "instant", "follow_camera": true}), false);
+        assert!(b.0.app.ui.agent_cursor.show && b.0.app.ui.agent_cursor.follow_camera);
+        assert_eq!(b.0.call("ui.agent_cursor", json!({}))["result"]["speed"], "instant");
+        if let Ok(dir) = std::env::var("SOLIDCRAFT_APP_TOOLS_EVIDENCE") {
+            // Real egui UI paint, not a native-window or geometry-rendering claim.
+            let ctx = egui::Context::default();
+            solidcraft_ui_egui::fonts::setup_bundled_fonts(&ctx);
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+            let mut textures = std::collections::HashMap::new();
+            let mut shapes = Vec::new();
+            for _ in 0..4 {
+                let raw = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+                let output = ctx.run_ui(raw, |ui| {
+                    b.0.app.logic(ui.ctx());
+                    b.0.app.ui(ui);
+                });
+                solidcraft_ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+                shapes = output.shapes;
+            }
+            std::fs::create_dir_all(&dir).unwrap();
+            solidcraft_ui_kit::test_raster(&ctx, shapes, 1.0, screen, &textures)
+                .save(std::path::Path::new(&dir).join("app-tools-no-dialog.png"))
+                .unwrap();
+        }
+        call(&mut b, "documents", json!({"action": "close", "force": true}), false);
+        assert_eq!(b.0.app.docs.count(), 1);
+        assert_ne!(b.0.app.session.document_id, original);
+        call(&mut b, "quit_app", json!({}), false);
+        assert!(b.0.app.quit_requested);
+    }
+
     use super::PrefsWriter;
     use solidcraft_ui_egui::prefs::{NavigatorStyle, STORAGE_KEY};
     use std::collections::HashMap;

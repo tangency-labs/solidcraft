@@ -10,32 +10,6 @@ pub struct StorageGetParams {
     /// The plugin id. Required outside a plugin's run; inside one, only the plugin's own id.
     #[serde(default)]
     pub plugin: Option<String>,
-    /// Read the serialized main document in parts: supplying `offset` or `len` returns a
-    /// DocumentRead instead of StorageData. Byte offset; default 0.
-    #[serde(default)]
-    pub offset: Option<u64>,
-    /// The most document bytes to return, 1 to 524288 (512 KiB). Default 524288.
-    #[serde(default)]
-    pub len: Option<u32>,
-}
-
-/// Either the complete plugin data or a bounded read of its serialized main document.
-#[derive(Debug, Serialize, JsonSchema)]
-#[serde(untagged)]
-pub enum StorageGetResult {
-    Full(StorageData),
-    Chunk(DocumentRead),
-}
-
-/// Part of a plugin's serialized main document, without the file list or metadata.
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct DocumentRead {
-    pub plugin: String,
-    /// Raw JSON bytes from `offset`, base64; empty past the end or when there is no document.
-    pub data: String,
-    pub offset: u64,
-    /// The whole serialized document's size; 0 when there is none.
-    pub bytes: u64,
 }
 
 /// One of a plugin's files in the design.
@@ -92,59 +66,6 @@ pub struct StorageWritten {
     /// The format the data is now saved in: the running plugin's.
     pub format: u32,
     /// The main document's size, written out.
-    pub bytes: u64,
-}
-
-/// Write one of the calling plugin's files: one undoable edit.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct StoragePutBlobParams {
-    /// A relative path of plain names (letters, digits, `.`, `_`, `-`; none starting with `.`).
-    pub name: String,
-    /// The bytes, base64.
-    pub data: String,
-    /// A file the plugin can make again (a cached toolpath): a save may drop it.
-    #[serde(default)]
-    pub cache: bool,
-    /// Add the bytes to the end of the file instead of replacing it, to write a large file in parts.
-    #[serde(default)]
-    pub append: bool,
-}
-
-/// What `storage.put_blob` left.
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct BlobWritten {
-    pub name: String,
-    pub cache: bool,
-    /// The file's size now.
-    pub bytes: u64,
-}
-
-/// Read part of a plugin's file.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct StorageGetBlobParams {
-    /// The plugin id. Required outside a plugin's run; inside one, only the plugin's own id.
-    #[serde(default)]
-    pub plugin: Option<String>,
-    pub name: String,
-    /// Where to start, in bytes. Default 0.
-    #[serde(default)]
-    pub offset: u64,
-    /// The most bytes to return, 1 to 524288 (512 KiB). Default 524288.
-    #[serde(default)]
-    pub len: Option<u32>,
-}
-
-/// Part of a plugin's file.
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct BlobRead {
-    pub name: String,
-    pub cache: bool,
-    /// The bytes from `offset`, base64; empty past the end.
-    pub data: String,
-    pub offset: u64,
-    /// The whole file's size.
     pub bytes: u64,
 }
 

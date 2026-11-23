@@ -108,6 +108,41 @@ fn same_ids(a: &[String], b: &[String]) -> bool {
     a == b
 }
 
+/// A migrated whole projection names its source's entire single loop, independently of the
+/// number and kinds of curves used to represent it. Complete graph coverage certifies the
+/// regenerated region; a cut loop, holes or multiple loops cannot stand for the saved outline.
+/// No mesh, nearest region or shared-identifier score participates in this resolution.
+fn projected_boundary(ss: &SolvedSketch, curves: &[String]) -> Option<Result<usize>> {
+    use solidcraft_sketch::{CurvePick, LinkKind, LinkSource};
+
+    let mut links = ss.sketch.links.iter().filter(|link| !link.profile_boundary.is_empty() && same_ids(curves, &link.profile_boundary));
+    let link = links.next()?;
+    let missing = || crate::curve_pick_error(CurvePick::Missing, curves, &ss.name);
+    if links.next().is_some() || link.lost || link.kind != LinkKind::Project || !matches!(link.source, LinkSource::Body { .. }) {
+        return Some(Err(missing()));
+    }
+    let output: Vec<String> =
+        ss.sketch.curves.iter().filter(|curve| curve.link.as_deref() == Some(link.id.as_str())).map(|curve| curve.id.clone()).collect();
+    if output.is_empty() || output.len() > solidcraft_sketch::MAX_LINK_ENTITIES {
+        return Some(Err(missing()));
+    }
+    // Cached profiles do not serialize their complete-coverage certificates. Re-find them
+    // from the exact sketch curves, and refuse an incomplete search rather than guessing.
+    let search = solidcraft_sketch::find_profiles_checked(&ss.sketch);
+    if search.incomplete {
+        return Some(Err(missing()));
+    }
+    let mut matches = search.profiles.iter().filter_map(|profile| {
+        let (outer, holes) = profile.whole_curve_boundaries()?;
+        (holes.is_empty() && same_ids(&outer, &output)).then_some(outer)
+    });
+    let Some(boundary) = matches.next() else { return Some(Err(missing())) };
+    if matches.next().is_some() {
+        return Some(Err(missing()));
+    }
+    Some(solidcraft_sketch::profile_by_curves(&ss.profiles, &boundary).map_err(|error| crate::curve_pick_error(error, curves, &ss.name)))
+}
+
 fn unique_profile(ss: &SolvedSketch, curves: &[String]) -> Result<usize> {
     let mut matches = ss.profiles.iter().enumerate().filter(|(_, profile)| same_ids(curves, &profile.outer_curves));
     let (index, _) = matches.next().ok_or_else(|| DocError::Unknown(format!("profile bounded by {curves:?} in {}", ss.name)))?;
@@ -296,6 +331,10 @@ fn selection_indices(ss: &SolvedSketch, selection: &ProfileSel, mut notes: Optio
             let boundaries = reserved_boundaries(ss)?;
             let mut indices = Vec::with_capacity(loops.len());
             for curves in loops {
+                if let Some(index) = projected_boundary(ss, curves) {
+                    indices.push(index?);
+                    continue;
+                }
                 let mut key = curves.clone();
                 key.sort();
                 if let Some(id) = boundaries.get(&key) {
@@ -528,6 +567,7 @@ mod tests {
                         direction: crate::Direction::Positive,
                         distance2: None,
                         start_offset: None,
+                        symmetric_offset: false,
                         through_all: false,
                         second_follows_first: false,
                         taper: None,
@@ -787,6 +827,7 @@ mod tests {
                         direction: crate::Direction::Positive,
                         distance2: None,
                         start_offset: None,
+                        symmetric_offset: false,
                         through_all: false,
                         second_follows_first: false,
                         taper: None,
