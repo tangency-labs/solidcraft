@@ -360,13 +360,15 @@ pub enum BlendFailure {
         parameter: f64,
     },
     /// An edge use of the caller's body a fillet reads (the first edge use of a solver the
-    /// caller set up) has no edge; the failure is at the edge use. A check of the caller's
+    /// caller set up, or a solver's or side edge use the fillet geometry reads) has no edge;
+    /// the failure is at the edge use. A check of the caller's
     /// input ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
     EdgeUseWithoutEdge,
     /// An edge of the caller's body a fillet reads (one a smooth sequence of filleted edges
-    /// joins, a filleted edge, an edge of a face it crosses) has no curve; the failure is at
-    /// the edge. A check of the caller's body ([`ErrorKind::InvalidInput`]); status
-    /// `SM_ERR_NULL_POINTER`.
+    /// joins, a filleted edge, an edge of a face it crosses, or a filleted or side edge the
+    /// fillet geometry's vertex calculators read) has no curve; the failure is at the edge.
+    /// A check of the caller's body ([`ErrorKind::InvalidInput`]); status
+    /// `SM_ERR_NULL_POINTER` unless its site says otherwise.
     EdgeWithoutCurve,
     /// The exact blend given to the rational round cannot place the edge's middle round its
     /// cylinder's or cone's axis: from where the axis crosses the conic's plane, the half-line
@@ -443,6 +445,34 @@ pub enum BlendFailure {
     /// (upstream `AERN`, `SM_ERR_ASSERT_FAILURE`). A phrase cause
     /// ([`BlendFailure::is_phrase`]).
     Inconsistent(&'static str),
+    /// The 3D curve built between two rails' ends drops onto the surface of the face `face`
+    /// as `curves` UV curves, not one: a curve that crosses a closed surface's seam or
+    /// leaves the surface's domain has no one UV curve on it. Unsupported
+    /// ([`ErrorKind::Unsupported`]); status `SM_ERR`.
+    InterpolantDropsToCurves {
+        /// The body's face.
+        face: crate::topology::FaceId,
+        /// The UV curves the drop made.
+        curves: usize,
+    },
+    /// The curve a surface/surface intersection picked has no UV curve on its first surface
+    /// (or its second, `on_second`), and the surface's drop of it made none: a curve that
+    /// crosses a closed surface's seam has no one UV curve on its domain, and a curve that
+    /// leaves the surface has none either. Unsupported ([`ErrorKind::Unsupported`]); status
+    /// `SM_ERR`.
+    IntersectionCurveHasNoUvCurve {
+        /// True for the second surface, false for the first.
+        on_second: bool,
+    },
+    /// The curve a surface/surface intersection picked is of kind `kind` (its type string),
+    /// which is not of a B-spline class: the result is a B-spline curve, trimmed or joined
+    /// from it, and this kind has none. An unsupported kind ([`ErrorKind::Unsupported`]);
+    /// status `SM_ERR` unless its site says otherwise (`SM_ERR_NULL_POINTER` where it
+    /// replaces a `NER`).
+    IntersectionCurveNotBSpline {
+        /// The curve's kind, as its type string.
+        kind: &'static str,
+    },
     /// Neither end of the intersection curve of a fillet surface with a side face's
     /// extended surface, at a 3x2 mixed corner, drops onto the face `face` the corner's
     /// vertex is on, within ten times the solver's approximation tolerance. An empty
@@ -456,6 +486,11 @@ pub enum BlendFailure {
     /// status here, so its kind is [`ErrorKind::InvalidInput`]. A phrase cause
     /// ([`BlendFailure::is_phrase`]); an argument check is [`crate::SolidError::InvalidInput`].
     InvalidValue(&'static str),
+    /// A Join some of whose blends roll a rail over a smooth far edge of their faces has no
+    /// blend whose rails roll on the two faces its shared section ends on, so the section
+    /// has no ends to take (#16491). Unsupported ([`ErrorKind::Unsupported`]): the kernel
+    /// builds no section for such a Join; status `SM_ERR`.
+    JoinBlendsRollOffSection,
     /// A curve of kind `kind` that a blend joins end to end with another
     /// (`SmBSplineCurve::JoinWith`: a fillet corner's edge curves, a removed fillet's edge
     /// curves) has no B-spline part to join. Unsupported ([`ErrorKind::Unsupported`]); status
@@ -463,6 +498,14 @@ pub enum BlendFailure {
     JoinCurveNotBSpline {
         /// The curve's kind.
         kind: &'static str,
+    },
+    /// The `blend`th blend of a Join (0 for the first) has no ball found in the plane of the
+    /// Join's shared section: the plane solve from the ball's feet at the corner's vertex
+    /// stopped without a ball. The solve reports no residual, so the stop proves nothing
+    /// about the ball. Not converged ([`ErrorKind::NotConverged`]); status `SM_ERR`.
+    JoinSectionNotConverged {
+        /// The blend's place among the Join's blends.
+        blend: usize,
     },
     /// A round kept round a feature standing in its band (the fork's `KeepFeaturesInBands`)
     /// is not built ([`KeepStop`] says why, and gives the kind). The executive notes the
@@ -484,9 +527,10 @@ pub enum BlendFailure {
     /// A radius law is evaluated over an interval of zero length. A check of the caller's
     /// arguments ([`ErrorKind::InvalidInput`]); status `SM_ERR`.
     LawIntervalEmpty,
-    /// The face `face` a mate vertex is classified to has a surface of kind `kind` (its type
-    /// string), which is not of a B-spline class: the mate's point is evaluated on the
-    /// surface's B-spline extension, and this kind has none. An unsupported kind
+    /// The face `face` a point or curve is built on (a mate vertex's face, or the face a
+    /// rail/rail interpolation curve lies on) has a surface of kind `kind` (its type string),
+    /// which is not of a B-spline class: the point or curve is evaluated on the surface's
+    /// B-spline extension, and this kind has none. An unsupported kind
     /// ([`ErrorKind::Unsupported`]); status `SM_ERR_NULL_POINTER` (the `NER` of the cast it
     /// replaces).
     MateFaceSurfaceNotBSpline {
@@ -680,6 +724,23 @@ pub enum BlendFailure {
         /// The radius type given.
         kind: crate::blend::fillet_solver::p1::FilletSolverType,
     },
+    /// The local solve of the crossing of two solvers' rails on the face `face` stopped
+    /// without finding it. The solve reports neither its residual nor its iterations, so the
+    /// stop proves nothing about the crossing. Not converged ([`ErrorKind::NotConverged`]);
+    /// status `SM_ERR`.
+    RailCrossingNotConverged {
+        /// The face both rails lie on.
+        face: crate::topology::FaceId,
+    },
+    /// At a blending corner a rail meets the side edge `edge` nowhere: every guess along
+    /// the side edge, again with a doubled extension, and every continuation of the side
+    /// edge past its far end found no point where the rail crosses it. An empty search
+    /// ([`ErrorKind::NotFound`]); status `SM_ERR`. (At other corners the same miss is a
+    /// vertex status the corner analyses, not a failure.)
+    RailEndMissesSideEdge {
+        /// The side edge of the body.
+        edge: crate::topology::EdgeId,
+    },
     /// The rail's curve does not cross the end face's surface (its extension, or an end
     /// cap's plane) within `tolerance`, the solver's approximation tolerance: the rail end
     /// at a mixed-convexity end has no crossing. An empty search ([`ErrorKind::NotFound`]);
@@ -749,6 +810,23 @@ pub enum BlendFailure {
         /// The curve's kind.
         kind: &'static str,
     },
+    /// The plane of a set-back section passes through a point of the filleted edge that has
+    /// `feet` closest points on a solver's offset surface, where the section's solve starts
+    /// from the one closest point. Unsupported ([`ErrorKind::Unsupported`]): the kernel
+    /// picks no start among several; status `SM_ERR`.
+    SetBackFootNotUnique {
+        /// The closest points found.
+        feet: usize,
+    },
+    /// A rail's end was looked for along a chain of side edges, each continuing the last
+    /// across a vertex (a seam's or a rolled-over edge's), and the chain reached `steps`
+    /// edges, the most solidcore follows, without the end. Unsupported
+    /// ([`ErrorKind::Unsupported`]): the bound keeps the search's recursion finite; status
+    /// `SM_ERR`.
+    SideEdgeChainPastBound {
+        /// The most side edges followed.
+        steps: usize,
+    },
     /// A fillet size (a radius, a chamfer's distance, or a setback a chamfer's angle or
     /// chord gives at its edge's wedge) is below eight times the body's
     /// tolerance, the smallest the fillet builds. A check of the caller's arguments
@@ -796,6 +874,25 @@ pub enum BlendFailure {
     SolverFaceIndexInvalid {
         /// The face index given.
         index: usize,
+    },
+    /// A fillet edge's split face was recorded without the face that was split or the new
+    /// face. The caller's input ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`
+    /// (upstream dereferences both faces).
+    SplitFaceNotGiven,
+    /// A surface/surface intersection asked for the curve that leaves its start along the
+    /// heading it was given (`SrfSrfOptions::closed_by_start_direction`) found curves
+    /// through both points, but none leaves the start along that heading. An empty search
+    /// ([`ErrorKind::NotFound`]): the heading is computed by the kernel's own caller (the
+    /// turned-back arc of `fillet_geom::p5`), so a miss is not the user's input; status
+    /// `SM_ERR`.
+    SrfSrfHeadingNotFollowed,
+    /// A surface/surface intersection found no curve through its end points: of the
+    /// `candidates` intersection curves, none passes within the approximation tolerance of
+    /// both (or of the reference point). An empty search ([`ErrorKind::NotFound`]); status
+    /// `SM_ERR`.
+    SrfSrfNoCurveThroughEnds {
+        /// The intersection curves found and tried.
+        candidates: usize,
     },
     /// A stage of the blend failed with no reason the kernel names: a defect. The failure
     /// holds the operation, the status (for the goldens only) and where in solidcore's source
@@ -956,9 +1053,14 @@ impl BlendFailure {
             Self::FilletVertexWithoutCorner => SM_ERR_NULL_POINTER,
             Self::GnSectionInvalid { .. } => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
+            Self::InterpolantDropsToCurves { .. } => SM_ERR,
+            Self::IntersectionCurveHasNoUvCurve { .. } => SM_ERR,
+            Self::IntersectionCurveNotBSpline { .. } => SM_ERR,
             Self::IntersectionEndsOffFace { .. } => SM_ERR,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
+            Self::JoinBlendsRollOffSection => SM_ERR,
             Self::JoinCurveNotBSpline { .. } => SM_ERR_NULL_POINTER,
+            Self::JoinSectionNotConverged { .. } => SM_ERR,
             Self::KeptFeatureNotBuilt(_) => SM_ERR,
             Self::LawCornerNotFound { .. } => SM_ERR_NULL_POINTER,
             Self::LawHasNoValue => SM_ERR,
@@ -988,6 +1090,8 @@ impl BlendFailure {
             Self::PlaneCurveTouches { .. } => SM_ERR,
             Self::RadiusLawNotPositive { .. } => SM_ERR,
             Self::RadiusTypeNotForEdges { .. } => SM_ERR_INVALID_INPUT,
+            Self::RailCrossingNotConverged { .. } => SM_ERR,
+            Self::RailEndMissesSideEdge { .. } => SM_ERR,
             Self::RailMissesEndSurface { .. } => SM_ERR,
             Self::RailNotBlending { .. } => SM_ERR,
             Self::RemovalRefused(_) => SM_ERR,
@@ -999,11 +1103,16 @@ impl BlendFailure {
             Self::SectionNotProved(_) => SM_ERR,
             Self::SectionUnsupported(_) => SM_ERR,
             Self::SequenceCurveNotBSpline { .. } => SM_ERR_NULL_POINTER,
+            Self::SetBackFootNotUnique { .. } => SM_ERR,
+            Self::SideEdgeChainPastBound { .. } => SM_ERR,
             Self::SizeBelowResolution { .. } => SM_ERR_INVALID_INPUT,
             Self::SkinMeasureNotFinite { .. } => SM_ERR,
             Self::SkinPastStationCap { .. } => SM_ERR,
             Self::Solver(s) => s.comparison_status(),
             Self::SolverFaceIndexInvalid { .. } => SM_ERR_INVALID_INPUT,
+            Self::SplitFaceNotGiven => SM_ERR_NULL_POINTER,
+            Self::SrfSrfHeadingNotFollowed => SM_ERR,
+            Self::SrfSrfNoCurveThroughEnds { .. } => SM_ERR,
             Self::StageFailed => SM_ERR,
             Self::StationDidNotConverge { .. } => SM_ERR,
             Self::TargetNotGiven => SM_ERR_INVALID_INPUT,
@@ -1076,9 +1185,14 @@ impl BlendFailure {
             Self::FilletVertexWithoutCorner => ErrorKind::InvalidInput,
             Self::GnSectionInvalid { .. } => ErrorKind::InvalidInput,
             Self::Inconsistent(_) => ErrorKind::of_status(self.comparison_status()),
+            Self::InterpolantDropsToCurves { .. } => ErrorKind::Unsupported,
+            Self::IntersectionCurveHasNoUvCurve { .. } => ErrorKind::Unsupported,
+            Self::IntersectionCurveNotBSpline { .. } => ErrorKind::Unsupported,
             Self::IntersectionEndsOffFace { .. } => ErrorKind::NotFound,
             Self::InvalidValue(_) => ErrorKind::of_status(self.comparison_status()),
+            Self::JoinBlendsRollOffSection => ErrorKind::Unsupported,
             Self::JoinCurveNotBSpline { .. } => ErrorKind::Unsupported,
+            Self::JoinSectionNotConverged { .. } => ErrorKind::NotConverged,
             Self::KeptFeatureNotBuilt(stop) => stop.class(),
             Self::LawCornerNotFound { .. } => ErrorKind::NotFound,
             Self::LawHasNoValue => ErrorKind::Unsupported,
@@ -1108,6 +1222,8 @@ impl BlendFailure {
             Self::PlaneCurveTouches { .. } => ErrorKind::Degenerate,
             Self::RadiusLawNotPositive { .. } => ErrorKind::InvalidInput,
             Self::RadiusTypeNotForEdges { .. } => ErrorKind::InvalidInput,
+            Self::RailCrossingNotConverged { .. } => ErrorKind::NotConverged,
+            Self::RailEndMissesSideEdge { .. } => ErrorKind::NotFound,
             Self::RailMissesEndSurface { .. } => ErrorKind::NotFound,
             Self::RailNotBlending { .. } => ErrorKind::InvalidInput,
             Self::RemovalRefused(reason) => removal_class(*reason),
@@ -1119,11 +1235,16 @@ impl BlendFailure {
             Self::SectionNotProved(_) => ErrorKind::NotWithinTolerance,
             Self::SectionUnsupported(_) => ErrorKind::Unsupported,
             Self::SequenceCurveNotBSpline { .. } => ErrorKind::Unsupported,
+            Self::SetBackFootNotUnique { .. } => ErrorKind::Unsupported,
+            Self::SideEdgeChainPastBound { .. } => ErrorKind::Unsupported,
             Self::SizeBelowResolution { .. } => ErrorKind::InvalidInput,
             Self::SkinMeasureNotFinite { .. } => ErrorKind::StageFailed,
             Self::SkinPastStationCap { .. } => ErrorKind::NotWithinTolerance,
             Self::Solver(s) => s.class(),
             Self::SolverFaceIndexInvalid { .. } => ErrorKind::InvalidInput,
+            Self::SplitFaceNotGiven => ErrorKind::InvalidInput,
+            Self::SrfSrfHeadingNotFollowed => ErrorKind::NotFound,
+            Self::SrfSrfNoCurveThroughEnds { .. } => ErrorKind::NotFound,
             Self::StageFailed => ErrorKind::StageFailed,
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TargetNotGiven => ErrorKind::InvalidInput,
@@ -1209,9 +1330,14 @@ impl BlendFailure {
             Self::FilletVertexWithoutCorner => true,
             Self::GnSectionInvalid { .. } => true,
             Self::Inconsistent(_) => true,
+            Self::InterpolantDropsToCurves { .. } => true,
+            Self::IntersectionCurveHasNoUvCurve { .. } => true,
+            Self::IntersectionCurveNotBSpline { .. } => true,
             Self::IntersectionEndsOffFace { .. } => true,
             Self::InvalidValue(_) => true,
+            Self::JoinBlendsRollOffSection => true,
             Self::JoinCurveNotBSpline { .. } => true,
+            Self::JoinSectionNotConverged { .. } => true,
             Self::KeptFeatureNotBuilt(_) => true,
             Self::LawCornerNotFound { .. } => true,
             Self::LawHasNoValue => true,
@@ -1241,6 +1367,8 @@ impl BlendFailure {
             Self::PlaneCurveTouches { .. } => true,
             Self::RadiusLawNotPositive { .. } => true,
             Self::RadiusTypeNotForEdges { .. } => true,
+            Self::RailCrossingNotConverged { .. } => true,
+            Self::RailEndMissesSideEdge { .. } => true,
             Self::RailMissesEndSurface { .. } => true,
             Self::RailNotBlending { .. } => true,
             Self::RemovalRefused(_) => true,
@@ -1252,11 +1380,16 @@ impl BlendFailure {
             Self::SectionNotProved(_) => true,
             Self::SectionUnsupported(_) => true,
             Self::SequenceCurveNotBSpline { .. } => true,
+            Self::SetBackFootNotUnique { .. } => true,
+            Self::SideEdgeChainPastBound { .. } => true,
             Self::SizeBelowResolution { .. } => true,
             Self::SkinMeasureNotFinite { .. } => true,
             Self::SkinPastStationCap { .. } => true,
             Self::Solver(_) => true,
             Self::SolverFaceIndexInvalid { .. } => true,
+            Self::SplitFaceNotGiven => true,
+            Self::SrfSrfHeadingNotFollowed => true,
+            Self::SrfSrfNoCurveThroughEnds { .. } => true,
             Self::StageFailed => true,
             Self::StationDidNotConverge { .. } => true,
             Self::TargetNotGiven => true,
@@ -1452,7 +1585,7 @@ impl core::fmt::Display for BlendFailure {
                 self.class()
             ),
             Self::FaceHasNoSurface => {
-                write!(f, "{}: a face given to the fillet has no surface", self.class())
+                write!(f, "{}: a face of the fillet has no surface", self.class())
             }
             Self::Failed(what) => f.write_str(what),
             Self::FilletCrossesItself { first, second } => write!(
@@ -1472,15 +1605,41 @@ impl core::fmt::Display for BlendFailure {
                 self.class()
             ),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
+            Self::InterpolantDropsToCurves { face, curves } => write!(
+                f,
+                "{}: the curve between the rails' ends drops onto face {face:?} as {curves} UV curves, not one",
+                self.class()
+            ),
+            Self::IntersectionCurveHasNoUvCurve { on_second } => write!(
+                f,
+                "{}: the intersection curve has no UV curve on the {} surface",
+                self.class(),
+                if *on_second { "second" } else { "first" },
+            ),
+            Self::IntersectionCurveNotBSpline { kind } => write!(
+                f,
+                "{}: the intersection curve is a {kind}, which has no B-spline form",
+                self.class()
+            ),
             Self::IntersectionEndsOffFace { face } => write!(
                 f,
                 "{}: neither end of the intersection curve is on face {face:?}",
                 self.class()
             ),
             Self::InvalidValue(what) => f.write_str(what),
+            Self::JoinBlendsRollOffSection => write!(
+                f,
+                "{}: no blend of the Join rolls on the two faces its shared section ends on",
+                self.class()
+            ),
             Self::JoinCurveNotBSpline { kind } => write!(
                 f,
                 "{}: a {kind} curve to join end to end has no B-spline part",
+                self.class()
+            ),
+            Self::JoinSectionNotConverged { blend } => write!(
+                f,
+                "{}: the solve for blend {blend}'s ball in the Join's section plane stopped without a ball",
                 self.class()
             ),
             Self::KeptFeatureNotBuilt(stop) => write!(f, "{}: {}", self.class(), stop.what()),
@@ -1500,8 +1659,7 @@ impl core::fmt::Display for BlendFailure {
             ),
             Self::MateFaceSurfaceNotBSpline { face, kind } => write!(
                 f,
-                "{}: the mate's face {face:?} has a {kind} surface, which is not of a B-spline \
-                 class: the mate is not evaluated on it",
+                "{}: the face {face:?} has a {kind} surface, which is not of a B-spline class: no point or curve is built on it",
                 self.class()
             ),
             Self::Missing(what) => write!(f, "{what} is missing"),
@@ -1605,6 +1763,16 @@ impl core::fmt::Display for BlendFailure {
                 "{}: edge {index}'s radius type {kind:?} is not one an edge's fillet is set up with",
                 self.class()
             ),
+            Self::RailCrossingNotConverged { face } => write!(
+                f,
+                "{}: the local solve of the two rails' crossing on the face {face:?} stopped without finding it",
+                self.class()
+            ),
+            Self::RailEndMissesSideEdge { edge } => write!(
+                f,
+                "{}: the rail meets the side edge {edge:?} nowhere",
+                self.class()
+            ),
             Self::RailMissesEndSurface { tolerance } => write!(
                 f,
                 "{}: the rail does not cross the end face's surface within {tolerance}",
@@ -1671,6 +1839,16 @@ impl core::fmt::Display for BlendFailure {
                 "{}: a {kind} curve of a smooth sequence of filleted edges has no B-spline form to join",
                 self.class()
             ),
+            Self::SetBackFootNotUnique { feet } => write!(
+                f,
+                "{}: the set-back section's point has {feet} closest points on the offset surface, not one",
+                self.class()
+            ),
+            Self::SideEdgeChainPastBound { steps } => write!(
+                f,
+                "{}: the rail's end was not found within {steps} side edges",
+                self.class()
+            ),
             Self::SizeBelowResolution { size, tolerance } => write!(
                 f,
                 "{}: the size {size} is below eight times the body's tolerance {tolerance}, the smallest a fillet builds",
@@ -1695,6 +1873,21 @@ impl core::fmt::Display for BlendFailure {
             Self::SolverFaceIndexInvalid { index } => write!(
                 f,
                 "{}: a fillet solver's faces are its first (0) and second (1), not face {index}",
+                self.class()
+            ),
+            Self::SplitFaceNotGiven => write!(
+                f,
+                "{}: the face that was split or the new face was not given",
+                self.class()
+            ),
+            Self::SrfSrfHeadingNotFollowed => write!(
+                f,
+                "{}: no intersection curve through the points leaves the start along the heading given",
+                self.class()
+            ),
+            Self::SrfSrfNoCurveThroughEnds { candidates } => write!(
+                f,
+                "{}: none of the {candidates} intersection curves passes through the end points",
                 self.class()
             ),
             Self::StageFailed => write!(f, "{}", self.class()),
@@ -2586,6 +2779,175 @@ mod tests {
         assert!(sited.sized());
     }
 
+    /// One of each cause the fillet geometry's `p2.rs` names (TE-B-02, #19810).
+    fn fillet_geom_p2_causes() -> [BlendFailure; 16] {
+        let face = crate::topology::FaceId::from_index(3);
+        [
+            BlendFailure::ArcLengthNotConverged {
+                start: 0.0,
+                length: 2.5,
+                stopped_at: 0.5,
+            },
+            BlendFailure::SrfSrfHeadingNotFollowed,
+            BlendFailure::SrfSrfNoCurveThroughEnds { candidates: 2 },
+            BlendFailure::IntersectionCurveNotBSpline { kind: "SmIsoCurve" },
+            BlendFailure::IntersectionCurveHasNoUvCurve { on_second: true },
+            BlendFailure::RailCrossingNotConverged { face },
+            BlendFailure::SideEdgeChainPastBound { steps: 64 },
+            BlendFailure::RailEndMissesSideEdge {
+                edge: crate::topology::EdgeId::from_index(7),
+            },
+            BlendFailure::JoinSectionNotConverged { blend: 1 },
+            BlendFailure::JoinBlendsRollOffSection,
+            BlendFailure::SetBackFootNotUnique { feet: 2 },
+            BlendFailure::MateFaceSurfaceNotBSpline {
+                face,
+                kind: "SmOffsetSurface",
+            },
+            BlendFailure::InterpolantDropsToCurves { face, curves: 0 },
+            BlendFailure::SplitFaceNotGiven,
+            BlendFailure::FilletVertexWithoutCorner,
+            BlendFailure::FilletSetUpInvalid(FilletSetUp::SolverOffsetSurface),
+        ]
+    }
+
+    /// The fillet solver causes the fillet geometry's `p2.rs` raises (copied from #20715 and
+    /// #20732): the caller's input, status `SM_ERR_NULL_POINTER` by default, never a phrase,
+    /// a defect or a refusal.
+    #[test]
+    fn the_fillet_geometry_p2_solver_causes_are_the_callers_input() {
+        let fillet_geom = crate::blend::fillet_geom::p1::FilletGeomId(2);
+        let cases = [
+            (
+                SolverFailure::EdgeUseWithoutFace,
+                "an edge use of the body has no face",
+            ),
+            (
+                SolverFailure::SolverEdgeUseMissing { index: 1 },
+                "the solver has no edge use 1 of the edge to fillet",
+            ),
+            (
+                SolverFailure::FilletGeomWithoutSolver { fillet_geom },
+                "fillet geometry FilletGeomId(2) names no fillet solver",
+            ),
+        ];
+        for (solver, message) in cases {
+            let cause = BlendFailure::Solver(solver);
+            assert_eq!(cause.class(), ErrorKind::InvalidInput, "{cause:?}");
+            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            assert_eq!(cause.comparison_status(), SM_ERR_NULL_POINTER);
+            let e = SolidError::blend_solver("blend::op", solver);
+            assert_eq!(e.kind(), ErrorKind::InvalidInput);
+            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+            assert!(!e.is_defect() && !e.is_refusal(), "{e:?}");
+            assert_eq!(e.to_string(), format!("blend::op: {message}"));
+        }
+    }
+
+    /// The causes of the fillet geometry's `p2.rs` (TE-B-02, #19810): each class, status and
+    /// message; none a phrase, a defect or a refusal, and each stands in for its status.
+    #[test]
+    fn the_fillet_geometry_p2_causes_keep_their_status_and_name_their_class() {
+        use ErrorKind as K;
+        let expected = [
+            (
+                K::NotConverged,
+                SM_ERR_NOT_CONVERGING,
+                "the search for the parameter 2.5 along the curve from 0 stopped at 0.5",
+            ),
+            (
+                K::NotFound,
+                SM_ERR,
+                "no intersection curve through the points leaves the start along the heading given",
+            ),
+            (
+                K::NotFound,
+                SM_ERR,
+                "none of the 2 intersection curves passes through the end points",
+            ),
+            (
+                K::Unsupported,
+                SM_ERR,
+                "the intersection curve is a SmIsoCurve, which has no B-spline form",
+            ),
+            (
+                K::Unsupported,
+                SM_ERR,
+                "the intersection curve has no UV curve on the second surface",
+            ),
+            (
+                K::NotConverged,
+                SM_ERR,
+                "the local solve of the two rails' crossing on the face FaceId(3) stopped without finding it",
+            ),
+            (
+                K::Unsupported,
+                SM_ERR,
+                "the rail's end was not found within 64 side edges",
+            ),
+            (
+                K::NotFound,
+                SM_ERR,
+                "the rail meets the side edge EdgeId(7) nowhere",
+            ),
+            (
+                K::NotConverged,
+                SM_ERR,
+                "the solve for blend 1's ball in the Join's section plane stopped without a ball",
+            ),
+            (
+                K::Unsupported,
+                SM_ERR,
+                "no blend of the Join rolls on the two faces its shared section ends on",
+            ),
+            (
+                K::Unsupported,
+                SM_ERR,
+                "the set-back section's point has 2 closest points on the offset surface, not one",
+            ),
+            (
+                K::Unsupported,
+                SM_ERR_NULL_POINTER,
+                "the face FaceId(3) has a SmOffsetSurface surface, which is not of a B-spline class: no point or curve is built on it",
+            ),
+            (
+                K::Unsupported,
+                SM_ERR,
+                "the curve between the rails' ends drops onto face FaceId(3) as 0 UV curves, not one",
+            ),
+            (
+                K::InvalidInput,
+                SM_ERR_NULL_POINTER,
+                "the face that was split or the new face was not given",
+            ),
+            (
+                K::InvalidInput,
+                SM_ERR_NULL_POINTER,
+                "the fillet vertex has no fillet corner",
+            ),
+            (
+                K::InvalidInput,
+                SM_ERR_NULL_POINTER,
+                "a fillet solver lacks one of its two offset surfaces",
+            ),
+        ];
+        for (cause, (class, status, message)) in fillet_geom_p2_causes().into_iter().zip(expected) {
+            assert_eq!(cause.class(), class, "{cause:?}");
+            assert!(
+                !cause.is_phrase() && cause.replaces_upstream_status(),
+                "{cause:?}"
+            );
+            assert_eq!(cause.comparison_status(), status, "{cause:?}");
+            let e = SolidError::blend("blend::op", cause);
+            assert_eq!(e.kind(), class, "{cause:?}");
+            assert_eq!(e.blend_failure(), Some(&cause));
+            assert_eq!(e.upstream_status(), Some(status), "{cause:?}");
+            assert_eq!(super::super::upstream_status(&e), Some(status), "{cause:?}");
+            assert!(!e.is_defect() && !e.is_refusal() && !e.sized(), "{cause:?}");
+            assert_eq!(e.to_string(), format!("blend::op: {class}: {message}"));
+        }
+    }
+
     fn assert_plane_curve_cause(cause: BlendFailure, class: ErrorKind, message: &str) {
         assert_eq!(cause.class(), class);
         assert!(!cause.is_phrase());
@@ -2666,8 +3028,8 @@ mod tests {
                 },
                 ErrorKind::Unsupported,
                 SM_ERR_NULL_POINTER,
-                "the mate's face FaceId(3) has a SmPlane surface, which is not of a B-spline \
-                 class: the mate is not evaluated on it",
+                "the face FaceId(3) has a SmPlane surface, which is not of a B-spline class: no \
+                 point or curve is built on it",
             ),
             (
                 BlendFailure::CurveWithoutNet {
