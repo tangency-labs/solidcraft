@@ -552,7 +552,6 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             taper,
             taper_present,
             to_offset,
-            to_body_apart,
             start,
             offset_start,
             symmetric_offset,

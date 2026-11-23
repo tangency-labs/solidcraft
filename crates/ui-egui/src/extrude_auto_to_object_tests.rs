@@ -239,9 +239,9 @@ fn choosing_to_object_selects_the_to_object_field() {
     h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
     assert_eq!(dialog(&h).active_input().unwrap().label, "To Object");
     // The profiles take the pick, and choosing To Object again gives it back.
-    let d = h.app.dialog.as_mut().unwrap();
-    d.active = 0;
-    h.app.dialog = Some(d);
+    if let Some(d) = h.app.dialog.as_mut() {
+        d.active = 0;
+    }
     h.frames(2);
     h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
     h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
