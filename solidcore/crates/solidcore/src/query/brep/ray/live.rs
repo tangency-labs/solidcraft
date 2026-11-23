@@ -20,6 +20,7 @@
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use super::{cache_handle, face_surface_cache, prepare_surface_cache};
 use crate::curve::curve::Curve;
@@ -37,7 +38,7 @@ use crate::math::{Point2, Point3};
 use crate::query::brep::BrepIdentity;
 use crate::query::face::p1::Point3dClassifyOptions;
 use crate::query::face::p2::{point_classify_live, PointClassifyOptions};
-use crate::surface::surface::p1::SurfaceSolveContext;
+use crate::surface::surface::p1::{LentSurfaceCache, SurfaceSolveContext};
 use crate::surface::surface::Surface;
 use crate::surface::surface_cache::face_context::FaceQueries;
 use crate::surface::surface_cache::{SurfaceCache, SurfaceCacheState};
@@ -103,6 +104,7 @@ pub(crate) fn solve_mutable_brep_point_kept(
 /// The faces of `caches` whose cache has its tree (made by a solve's `GetTree`).
 fn built_faces(caches: &FaceCaches) -> impl Iterator<Item = FaceId> + '_ {
     caches
+        .kept
         .iter()
         .filter(|(_, cache)| cache.tree().is_some())
         .map(|(&face, _)| face)
@@ -557,6 +559,19 @@ impl SurfaceSolveContext<CacheObject> for LiveSurfaceContext<'_, '_, '_> {
         };
         self.0.cache(k, face)
     }
+    fn lend_surface_cache(
+        &mut self,
+        k: &Kernel,
+        surface: &Surface,
+        handle: Option<CacheObject>,
+    ) -> Result<LentSurfaceCache<CacheObject>> {
+        match handle {
+            Some(CacheObject::Surface(face)) => self.0.faces.lend(k, face),
+            _ => self
+                .build_surface_cache(k, surface, handle)
+                .map(LentSurfaceCache::Owned),
+        }
+    }
     fn surface_cache_without_get_tree(
         &mut self,
         k: &Kernel,
@@ -620,7 +635,60 @@ pub struct BrepFaceServices<'a> {
 /// gives several services the same unchanged B-rep keeps them from one to the next
 /// ([`BrepFaceServices::with_caches`], [`BrepFaceServices::into_caches`]), as
 /// upstream keeps each cache on its surface until the face changes.
-pub type FaceCaches = BTreeMap<FaceId, SurfaceCache<CacheObject>>;
+#[derive(Debug, Default)]
+pub struct FaceCaches {
+    /// The kept cache of each face.
+    kept: BTreeMap<FaceId, SurfaceCache<CacheObject>>,
+    /// The one copy of a face's kept cache that each solve only reading it is handed
+    /// ([`BrepFaceServices::lend`]): made on first lend, kept while the kept cache is
+    /// (which is not replaced once it has its tree).
+    lent: BTreeMap<FaceId, Arc<SurfaceCache<CacheObject>>>,
+}
+
+impl FaceCaches {
+    /// None made yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The face's kept cache.
+    #[must_use]
+    pub fn get(&self, face: &FaceId) -> Option<&SurfaceCache<CacheObject>> {
+        self.kept.get(face)
+    }
+
+    /// How many faces have a kept cache.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.kept.len()
+    }
+
+    /// Whether no face has a kept cache.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.kept.is_empty()
+    }
+
+    /// Drops every kept cache (and lent copy).
+    pub fn clear(&mut self) {
+        self.kept.clear();
+        self.lent.clear();
+    }
+
+    /// The face's kept cache, to change in a test (its lent copy is dropped).
+    #[cfg(test)]
+    pub(crate) fn get_mut(&mut self, face: FaceId) -> Option<&mut SurfaceCache<CacheObject>> {
+        self.lent.remove(&face);
+        self.kept.get_mut(&face)
+    }
+
+    /// Keeps `cache` as the face's cache, in place of any it had (and of its lent copy).
+    fn insert(&mut self, face: FaceId, cache: SurfaceCache<CacheObject>) {
+        self.lent.remove(&face);
+        self.kept.insert(face, cache);
+    }
+}
 
 impl core::fmt::Debug for BrepFaceServices<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -696,6 +764,35 @@ impl<'a> BrepFaceServices<'a> {
             .map_err(borrow_conflict)?
             .insert(face, cache);
         Ok(result)
+    }
+
+    /// [`BrepFaceServices::cache`] for a solve that only reads it: the face's lent copy
+    /// when there is one, else the copy `cache` makes, kept as the lent copy when it
+    /// has its tree and reads leave it as it was
+    /// ([`SurfaceCache::reads_leave_unchanged`]). The kept cache is not replaced once
+    /// it has its tree, and the lent copy is only read, so every reader reads what a
+    /// copy of its own would hold.
+    fn lend(&self, k: &Kernel, face: FaceId) -> Result<LentSurfaceCache<CacheObject>> {
+        if let Some(lent) = self
+            .caches
+            .try_borrow()
+            .map_err(borrow_conflict)?
+            .lent
+            .get(&face)
+        {
+            return Ok(LentSurfaceCache::Shared(Arc::clone(lent)));
+        }
+        let cache = self.cache(k, face)?;
+        if cache.tree().is_none() || !cache.reads_leave_unchanged()? {
+            return Ok(LentSurfaceCache::Owned(cache));
+        }
+        let lent = Arc::new(cache);
+        self.caches
+            .try_borrow_mut()
+            .map_err(borrow_conflict)?
+            .lent
+            .insert(face, Arc::clone(&lent));
+        Ok(LentSurfaceCache::Shared(lent))
     }
 
     /// The state bits of the face's cache as `smsurf_GetSurfaceCache` hands it out
@@ -791,6 +888,19 @@ impl SurfaceSolveContext<CacheObject> for BrepFaceServices<'_> {
             // a surface outside the B-rep: its own cache, as a solve without context
             None => crate::surface::surface::p2::surface_cache(k, surface, None),
             Some(_) => Err(SolidError::invalid_input(OP, "expected surface handle")),
+        }
+    }
+    fn lend_surface_cache(
+        &mut self,
+        k: &Kernel,
+        surface: &Surface,
+        handle: Option<CacheObject>,
+    ) -> Result<LentSurfaceCache<CacheObject>> {
+        match handle {
+            Some(CacheObject::Surface(face)) => self.lend(k, face),
+            _ => self
+                .build_surface_cache(k, surface, handle)
+                .map(LentSurfaceCache::Owned),
         }
     }
     fn surface_cache_without_get_tree(

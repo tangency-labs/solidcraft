@@ -770,6 +770,21 @@ pub(crate) fn check_geometry_nesting(
     initial_depth: usize,
     op: &'static str,
 ) -> Result<()> {
+    any_nested_geometry(root, initial_depth, op, |_| false).map(|_| ())
+}
+
+/// The walk of [`check_geometry_nesting`], stopping at the first geometry (`root`
+/// included) for which `found` holds: whether there is one.
+///
+/// # Errors
+///
+/// As [`check_geometry_nesting`], for the geometry walked before the first found.
+pub(crate) fn any_nested_geometry(
+    root: NestedGeometry<'_>,
+    initial_depth: usize,
+    op: &'static str,
+    mut found: impl FnMut(NestedGeometry<'_>) -> bool,
+) -> Result<bool> {
     use crate::curve::curve::CurveKind;
     type Geometry<'a> = NestedGeometry<'a>;
     let mut pending = PendingGeometry::default();
@@ -780,6 +795,9 @@ pub(crate) fn check_geometry_nesting(
                 op,
                 "owned geometry nesting exceeds MAX_GEOMETRY_NESTING",
             ));
+        }
+        if found(geometry) {
+            return Ok(true);
         }
         let mut push = |geometry| pending.push((geometry, depth + 1));
         match geometry {
@@ -911,7 +929,7 @@ pub(crate) fn check_geometry_nesting(
             }
         }
     }
-    Ok(())
+    Ok(false)
 }
 
 impl Surface {

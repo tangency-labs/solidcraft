@@ -434,6 +434,7 @@ impl FaceQueries<CacheObject> for RaySurfaceContext<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::surface::surface::p1::LentSurfaceCache;
     use crate::surface::surface_cache::SurfaceCacheState;
 
     #[test]
@@ -581,7 +582,7 @@ mod tests {
         let state = services
             .surface_cache_without_get_tree(&k, &surface, handle)
             .unwrap();
-        assert!(services.into_caches()[&face].tree().is_none());
+        assert!(services.into_caches().get(&face).unwrap().tree().is_none());
         assert!(on(&state));
         assert_eq!(live_on, Some(on(&state)));
 
@@ -613,7 +614,7 @@ mod tests {
         let state = services
             .surface_cache_without_get_tree(&k, &surface, handle)
             .unwrap();
-        assert!(services.into_caches()[&face].tree().is_some());
+        assert!(services.into_caches().get(&face).unwrap().tree().is_some());
         assert!(!state.is_trimmed());
         assert!(!state.point_test_enabled);
         assert!(!on(&state));
@@ -659,7 +660,7 @@ mod tests {
                 .surface_cache_without_get_tree(&k, &surface, Some(CacheObject::Surface(face)))
                 .unwrap();
             let mut caches = services.into_caches();
-            let cache = caches.get_mut(&face).unwrap();
+            let cache = caches.get_mut(face).unwrap();
             assert_eq!(cache.tree().is_some(), !doing_boolean);
             let (read, copy) = read_and_copy(cache);
             assert_eq!(read, copy);
@@ -687,6 +688,95 @@ mod tests {
             assert_eq!(face_answer(&read), face_answer(&copy));
             assert_ne!(face_answer(&read), face_answer(&own));
         }
+    }
+
+    /// A cylinder face's kept cache (made by a first solve's `GetTree`), its surface and
+    /// handle, and the B-rep holding it.
+    fn kept_cylinder_cache(
+        k: &mut Kernel,
+    ) -> (Brep, Surface, Option<CacheObject>, FaceId, FaceCaches) {
+        let mut b = crate::primitive::api_primitives::create_cylinder(
+            k,
+            crate::math::Point3::ZERO,
+            5.0,
+            20.0,
+        )
+        .unwrap();
+        let face = crate::topology::brep::p1::faces(&b, None).unwrap()[0];
+        let surface = b
+            .face(face)
+            .unwrap()
+            .surface
+            .as_ref()
+            .unwrap()
+            .clone_for_evaluation()
+            .unwrap();
+        let handle = Some(CacheObject::Surface(face));
+        let mut services = BrepFaceServices::new(&mut b);
+        services.build_surface_cache(k, &surface, handle).unwrap();
+        let caches = services.into_caches();
+        assert!(caches.get(&face).unwrap().tree().is_some());
+        (b, surface, handle, face, caches)
+    }
+
+    /// The copy a face's services lend a solve that only reads the cache: one shared copy.
+    fn lent_copy(
+        k: &Kernel,
+        services: &mut BrepFaceServices<'_>,
+        surface: &Surface,
+        handle: Option<CacheObject>,
+    ) -> std::sync::Arc<SurfaceCache<CacheObject>> {
+        match services.lend_surface_cache(k, surface, handle).unwrap() {
+            LentSurfaceCache::Shared(c) => c,
+            LentSurfaceCache::Owned(_) => panic!("a kept cache with its tree is lent shared"),
+        }
+    }
+
+    /// The solves that only read a face's kept cache
+    /// ([`SurfaceSolveContext::lend_surface_cache`]) are handed one copy of it, the same
+    /// object at every fetch instead of a copy each, also by the next services the kept
+    /// caches are handed to: it holds what the copy each fetch made (`map_handles`) holds,
+    /// and the kept cache is left as it was.
+    #[test]
+    fn a_kept_cache_is_lent_as_one_copy() {
+        let mut k = Kernel::default();
+        let (mut b, surface, handle, face, caches) = kept_cylinder_cache(&mut k);
+        let kept = format!("{:?}", caches.get(&face).unwrap());
+        let copy = format!("{:?}", caches.get(&face).unwrap().map_handles(Ok).unwrap());
+        let mut services = BrepFaceServices::with_caches(&mut b, caches);
+        let first = lent_copy(&k, &mut services, &surface, handle);
+        let second = lent_copy(&k, &mut services, &surface, handle);
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+        assert_eq!(format!("{first:?}"), copy);
+        let caches = services.into_caches();
+        assert_eq!(format!("{:?}", caches.get(&face).unwrap()), kept);
+        // the lent copy is kept with the kept cache for the next services of the B-rep
+        let mut services = BrepFaceServices::with_caches(&mut b, caches);
+        let next = lent_copy(&k, &mut services, &surface, handle);
+        assert!(std::sync::Arc::ptr_eq(&first, &next));
+        assert_eq!(format!("{next:?}"), copy);
+    }
+
+    /// A solve that changes its cache (here its point-test flag and its surface's owner)
+    /// is handed a copy of its own ([`SurfaceSolveContext::build_surface_cache`]): the
+    /// kept cache and the copy lent to the readers stay as they were.
+    #[test]
+    fn a_mutable_consumer_leaves_the_kept_cache() {
+        let mut k = Kernel::default();
+        let (mut b, surface, handle, face, caches) = kept_cylinder_cache(&mut k);
+        let kept = format!("{:?}", caches.get(&face).unwrap());
+        let mut services = BrepFaceServices::with_caches(&mut b, caches);
+        let lent = lent_copy(&k, &mut services, &surface, handle);
+        let lent_before = format!("{lent:?}");
+        let mut own = services.build_surface_cache(&k, &surface, handle).unwrap();
+        own.point_test_enabled = !own.point_test_enabled;
+        own.surface_mut().set_owner(None);
+        assert_ne!(format!("{own:?}"), lent_before);
+        let again = lent_copy(&k, &mut services, &surface, handle);
+        assert!(std::sync::Arc::ptr_eq(&lent, &again));
+        assert_eq!(format!("{again:?}"), lent_before);
+        let caches = services.into_caches();
+        assert_eq!(format!("{:?}", caches.get(&face).unwrap()), kept);
     }
 
     #[test]

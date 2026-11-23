@@ -2116,6 +2116,53 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         self.surface.check_evaluation_copy_depth(0)
     }
 
+    /// Whether reading this cache leaves it as it was, so that one copy of it can be
+    /// handed to every reader in turn ([`LentSurfaceCache::Shared`]) instead of a copy
+    /// each: none of its geometry (its surface, subdivision surfaces, iso boundary
+    /// curves and alternate curve caches, with all they own) keeps state a read
+    /// changes that a later read sees. Those kinds are an offset surface (the
+    /// extension its evaluators make, which sets the domain the next evaluation uses)
+    /// and a curve on a surface or tangent field (the breaks and approximation it makes
+    /// on first use). What other geometry writes through `&self` is a memo whose hit
+    /// answers what a fresh build answers, or a flag a solve sets and restores.
+    ///
+    /// # Errors
+    ///
+    /// The geometry nesting bound ([`Surface::check_evaluation_copy_depth`]).
+    pub(crate) fn reads_leave_unchanged(&self) -> Result<bool> {
+        use crate::curve::curve::CurveKind as Kind;
+        use crate::surface::surface::p2::{any_nested_geometry, NestedGeometry};
+        const OP: &str = "surface::surface_cache::p1::reads_leave_unchanged";
+        let keeps_read_state = |g: NestedGeometry<'_>| match g {
+            NestedGeometry::Surface(s) => matches!(s.kind(), SurfaceKind::OffsetSurface(_)),
+            NestedGeometry::Curve(c) => {
+                matches!(c.kind(), Kind::CrvOnSurf(_) | Kind::TangentField(_))
+            }
+            NestedGeometry::Volume(_) => false,
+        };
+        let surfaces = core::iter::once(&self.surface)
+            .chain(self.subdivision_surfaces.iter().map(|(_, s)| s))
+            .map(NestedGeometry::Surface);
+        let alt_curves = self.alt_caches.iter().flat_map(|a| {
+            a.cached_3d_curves
+                .iter()
+                .chain(a.cached_uv_curves.iter())
+                .flatten()
+        });
+        let curves = self
+            .iso_boundary_curves
+            .iter()
+            .flatten()
+            .chain(alt_curves)
+            .map(NestedGeometry::Curve);
+        for root in surfaces.chain(curves) {
+            if any_nested_geometry(root, 0, OP, keeps_read_state)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     /// `SmSurfaceCache_TYPE` (`GetType`).
     #[must_use]
     pub const fn type_code(&self) -> i64 {
@@ -4111,5 +4158,74 @@ mod tests {
             assert_eq!(typed.is_status_answer(), before.is_status_answer());
             assert_eq!(typed.surface_failure(), Some(&failure));
         }
+    }
+
+    /// The nesting check [`SurfaceCache::mapped_state`] makes in place of the copy
+    /// fails exactly when the copy ([`SurfaceCache::map_handles`]) fails, with the same
+    /// error, on an offset surface holding a pending extension (one a `&self` evaluation
+    /// made), which the copy takes and the check does not walk: the extension is a leaf
+    /// at the depth of the offset's base, which both walk. Each nesting level is a
+    /// plane whose corner definition owns the next surface.
+    #[test]
+    fn mapped_state_depth_check_fails_as_the_copy_with_a_pending_extension() {
+        use crate::surface::cone::Cone;
+        use crate::surface::offset_surface::OffsetSurface;
+        use crate::surface::plane::Plane;
+        use crate::surface::procedural_blend::corner::{CornerDefinition, EndDefinition};
+        use crate::surface::surface::p2::MAX_GEOMETRY_NESTING;
+
+        let k = Kernel::default();
+        let mut half = Cone::new_cylinder_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            5.0,
+            0.0,
+            180.0,
+            10.0,
+            false,
+            false,
+            false,
+        );
+        half.make_nurb(&k).unwrap();
+        let half = Surface::from(half);
+        let d = half.natural_uv_domain_with_nurb(&k).unwrap();
+        let beyond = Point2::new(
+            d.max().x + 0.1 * (d.max().x - d.min().x),
+            0.5 * (d.min().y + d.max().y),
+        );
+        // the offset at nesting depth `depth`, its base (and extension) one deeper
+        let nested = |depth: usize| {
+            let mut offset =
+                OffsetSurface::new(&k, 4.0, half.clone(), true, crate::geom::extent2d::SS_NONE)
+                    .unwrap();
+            offset.set_allow_extension(true);
+            offset.evaluate_point(&k, beyond).unwrap();
+            assert!(offset.extended_base_surface().is_none());
+            assert!(offset.with_extended_base_surface(|e| e.is_some()));
+            let mut surface = Surface::from(offset);
+            for _ in 0..depth {
+                let mut outer = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z));
+                outer.set_corner_definition(CornerDefinition::End(EndDefinition {
+                    support: Box::new(surface),
+                    boundary: Vec::new(),
+                }));
+                surface = outer;
+            }
+            SurfaceCache::<u32>::new(surface, d, SurfaceCacheOptions::default())
+        };
+        // the depths on both sides of the bound (where the offset's base crosses it)
+        let mut answered = [false; 2];
+        for depth in MAX_GEOMETRY_NESTING - 4..=MAX_GEOMETRY_NESTING {
+            let cache = nested(depth);
+            let read = cache.mapped_state(|o| o);
+            let copy = cache.map_handles(Ok).and_then(|c| c.state());
+            assert_eq!(format!("{read:?}"), format!("{copy:?}"), "depth {depth}");
+            if let Err(e) = &read {
+                assert!(matches!(e, SolidError::InvalidInput { .. }), "{e:?}");
+            }
+            answered[usize::from(read.is_ok())] = true;
+        }
+        assert_eq!(answered, [true, true]);
     }
 }

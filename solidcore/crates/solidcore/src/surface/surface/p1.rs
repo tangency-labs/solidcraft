@@ -1215,8 +1215,51 @@ pub trait SurfaceSolveContext<O: Copy + PartialEq> {
         self.build_surface_cache(k, surface, handle)?.state()
     }
 
+    /// This surface's cache for a solve that only reads it, as
+    /// [`SurfaceSolveContext::build_surface_cache`] builds it: a context that keeps
+    /// face caches may hand every such reader one copy of a kept cache
+    /// ([`LentSurfaceCache::Shared`]) when reads leave that copy as it was; by default
+    /// the cache built for this solve.
+    ///
+    /// # Errors
+    /// As [`SurfaceSolveContext::build_surface_cache`].
+    fn lend_surface_cache(
+        &mut self,
+        k: &Kernel,
+        surface: &Surface,
+        handle: Option<O>,
+    ) -> Result<LentSurfaceCache<O>> {
+        self.build_surface_cache(k, surface, handle)
+            .map(LentSurfaceCache::Owned)
+    }
+
     /// Read-only classification of the topology prepared by this context.
     fn face_queries(&self) -> Option<&dyn FaceQueries<O>>;
+}
+
+/// A surface's cache handed to a solve that reads it
+/// ([`SurfaceSolveContext::lend_surface_cache`]).
+#[allow(clippy::large_enum_variant)] // the owned cache moves by value, as `build_surface_cache` returns it
+pub enum LentSurfaceCache<O: Copy + PartialEq> {
+    /// A cache this solve owns, as [`SurfaceSolveContext::build_surface_cache`]
+    /// returns it.
+    Owned(SurfaceCache<O>),
+    /// The one copy of a context's kept cache that the context hands to each reader in
+    /// turn: it has its tree, and reading it leaves it as it was
+    /// ([`SurfaceCache::reads_leave_unchanged`]), so each reader reads what a copy of
+    /// its own would hold.
+    Shared(std::sync::Arc<SurfaceCache<O>>),
+}
+
+impl<O: Copy + PartialEq> core::ops::Deref for LentSurfaceCache<O> {
+    type Target = SurfaceCache<O>;
+
+    fn deref(&self) -> &SurfaceCache<O> {
+        match self {
+            Self::Owned(cache) => cache,
+            Self::Shared(cache) => cache,
+        }
+    }
 }
 
 /// The caller's face-aware cache preparation for a surface/surface intersection.

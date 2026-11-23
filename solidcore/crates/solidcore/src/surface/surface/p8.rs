@@ -70,8 +70,8 @@
 //! status. Recursion: none.
 
 use super::p1::{
-    get_surface_cache, is_node_valid, is_point_valid_with as is_point_valid, OperandDomain,
-    SolveOperands, SurfaceSolveContext,
+    get_surface_cache, is_node_valid, is_point_valid_with as is_point_valid, LentSurfaceCache,
+    OperandDomain, SolveOperands, SurfaceSolveContext,
 };
 use super::p2::{
     original_surface, CrossSectionValues, DerivSurfDefinition, LsiGlobalSolver, Surface,
@@ -1578,6 +1578,23 @@ impl Surface {
         }
     }
 
+    /// [`Surface::solve_cache_from_context`] for a solve that only reads the cache: the
+    /// context's lent cache ([`SurfaceSolveContext::lend_surface_cache`]).
+    fn lent_cache_from_context<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        handle: Option<O>,
+        op: &'static str,
+        context: Option<&mut dyn SurfaceSolveContext<O>>,
+    ) -> Result<LentSurfaceCache<O>> {
+        match context {
+            None => self
+                .solve_cache_of(k, handle, op)
+                .map(LentSurfaceCache::Owned),
+            Some(context) => context.lend_surface_cache(k, self, handle),
+        }
+    }
+
     /// Intersections of the line `line_point + t * line_vector` with the surface over
     /// `uv_domain` (`GlobalLineIntersect`): the plane override for a plane, else
     /// [`Surface::base_global_line_intersect`]. `surface` is this surface's handle in
@@ -2089,7 +2106,7 @@ impl Surface {
                 }
             }
             LineCacheSource::Fresh => {
-                built = self.solve_cache_from_context(
+                built = self.lent_cache_from_context(
                     k,
                     surface,
                     OP_LINE,
@@ -2101,10 +2118,18 @@ impl Surface {
                 // delays its tree builds it now
                 // The context already performed the owning face's virtual GetTree.
                 // Re-entering the bare base cache cannot rebuild a face-owned tree.
-                if context.is_some() && built.tree().is_some() {
-                    &built
+                // (only a context lends a shared cache, and with its tree)
+                let ready = match &built {
+                    LentSurfaceCache::Shared(_) => true,
+                    LentSurfaceCache::Owned(c) => context.is_some() && c.tree().is_some(),
+                };
+                if ready {
+                    &*built
                 } else {
-                    Self::held_cache(k, &mut built, OP_LINE)?
+                    match &mut built {
+                        LentSurfaceCache::Owned(c) => Self::held_cache(k, c, OP_LINE)?,
+                        LentSurfaceCache::Shared(c) => &**c,
+                    }
                 }
             }
             LineCacheSource::Held(kept) => {
@@ -2925,7 +2950,7 @@ impl Surface {
                 Self::held_cache(k, c, OP_CURVE)?
             }
         } else {
-            built = self.solve_cache_from_context(
+            built = self.lent_cache_from_context(
                 k,
                 surface_handle,
                 OP_CURVE,
@@ -2933,7 +2958,7 @@ impl Surface {
                     .as_mut()
                     .map(|context| &mut **context as &mut dyn SurfaceSolveContext<O>),
             )?;
-            &built
+            &*built
         };
         let face_queries = context
             .as_deref()
