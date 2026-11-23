@@ -58,9 +58,18 @@
 //!   lists inserts at the front of the [`BezierAux2d`] `Vec`s (list order, head first).
 //!   The list memory managers (`m_sVLMgr`, `m_sEdgeuseListMgr`) have no counterpart.
 //! - **Temporary state.** `SmTemporaryChangeValue` (restored on every return) becomes
-//!   explicit save / restore around the inner bodies; as upstream, the
-//!   `m_bPointTestEnabled` set at the end of the face branch is overwritten by the
-//!   restore when the branch ends.
+//!   explicit save / restore around the inner bodies.
+//! - **Point testing.** Upstream's `BuildTree` stores whether the cache tests points
+//!   (`m_bPointTestEnabled`): off for a standalone build (no face, a face without
+//!   loop uses, or a B-rep in editing mode), on at the end of the face branch, which
+//!   the branch's restore then overwrites with the value from before the build. The
+//!   stored value thus depended on when and in which mode the tree was built, so the
+//!   same face accepted or rejected the same point depending on what ran before. Here
+//!   no build writes it: it stays on unless a caller switches it off for a scope,
+//!   and a trimmed cache tests a point only when its face has loop uses, asked of the
+//!   face at each test ([`TrimSrfCache::point_test_in`],
+//!   [`SurfaceCache::point_test_with`], [`FaceQueries::face_has_loopuses`]). A surface
+//!   with no face keeps every point.
 //! - **Virtual dispatch.** `MarkFaceContainment` runs the base traversal through
 //!   [`sc::FaceContainmentClassifier`], with the face as classifier. Point tests on
 //!   an unwrapped base retain trimmed dispatch and require an operation-scoped
@@ -115,7 +124,7 @@ use crate::surface::surface::p2::PLANE_TYPE;
 use crate::surface::surface::Surface;
 use crate::surface::surface_cache::face_context::FaceQueries;
 use crate::surface::surface_cache::p1::{self as sc, FaceContainment, SurfaceCacheOptions};
-use crate::surface::surface_cache::{BezierAux2d, SurfaceCache};
+use crate::surface::surface_cache::{BezierAux2d, SurfaceCache, SurfaceCacheState};
 
 /// `SmTrimSrfCache_TYPE` (`SURF_BASE_TYPE + 120`).
 pub const TYPE: i64 = 15120;
@@ -247,6 +256,16 @@ pub trait CacheFace<O> {
     ///
     /// The implementor's.
     fn upward_loopuses(&self) -> Result<Vec<O>>;
+
+    /// Whether [`CacheFace::upward_loopuses`] is not empty (the point test asks it per
+    /// point; an implementor answers it without listing the loop uses).
+    ///
+    /// # Errors
+    ///
+    /// The implementor's.
+    fn has_loopuses(&self) -> Result<bool> {
+        Ok(!self.upward_loopuses()?.is_empty())
+    }
 
     /// `pLU->GetEdgeuses(sEUses)`.
     ///
@@ -401,8 +420,8 @@ pub struct TrimSrfCache<O> {
 impl<O: Copy + PartialEq> TrimSrfCache<O> {
     /// A trimmed cache of `surface` over its natural domain, not built
     /// (`SmTrimSrfCache::SmTrimSrfCache`): the state anticipates a face with trim
-    /// curves (point testing on, boundary curves off) until [`TrimSrfCache::build_tree`]
-    /// finds out.
+    /// curves (boundary curves off) until [`TrimSrfCache::build_tree`] finds out. Point
+    /// testing is on; whether a point is tested is asked of the face at each test.
     #[must_use]
     pub fn new(surface: Surface, opts: SurfaceCacheOptions) -> Self {
         // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
@@ -413,7 +432,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         // BuildTree() will change these values when there are no UVTrimCurves.
         base.face_was_modified = false;
         base.process_boundary_curves = false; // solvers skip naturalBoundaryCurve/target solutions
-        base.point_test_enabled = true; // solvers only accept point solutions within trim boundaries
+        base.point_test_enabled = true; // solvers only accept point solutions within trim boundaries (of a face with loop uses)
         base.have_t_surface_cache = false; // Set to true after adding UVTrimCurves to cache
         base.face_containment_done = FaceContainment::NotDone;
         base.trimmed_dispatch = true;
@@ -489,6 +508,25 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         })
     }
 
+    /// The state bits of the base that `self.map_handles(|o| Ok(map(o)))` would answer
+    /// ([`SurfaceCache::mapped_state`]), read without making the copy, with the copy's
+    /// errors: the base's, then the nesting bound of its polygon-edge surfaces'
+    /// evaluation copies.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`TrimSrfCache::map_handles`] with an infallible map.
+    pub fn mapped_state<P: Copy + PartialEq>(
+        &self,
+        map: impl Fn(O) -> P,
+    ) -> Result<SurfaceCacheState<P>> {
+        let state = self.base.mapped_state(map)?;
+        for (_, g) in &self.poly_edge_geometry {
+            g.surface.check_evaluation_copy_depth(0)?;
+        }
+        Ok(state)
+    }
+
     /// Unwraps the `SmSurfaceCache` base.
     #[must_use]
     pub fn into_base(self) -> SurfaceCache<O> {
@@ -523,8 +561,9 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` when the surface has no face; those of the face
-    /// classification; [`SolidError::Unported`] for its unported callees.
+    /// Those of the face classification; [`SolidError::Unported`] for its unported
+    /// callees. A surface with no face keeps every point (upstream:
+    /// `SM_ERR_NULL_POINTER` before the tree is built, kept after it).
     pub fn point_test(
         &self,
         k: &Kernel,
@@ -579,9 +618,11 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         Ok(())
     }
 
+    /// The state of a cache whose tree holds no trims (upstream also turns point
+    /// testing off here; the port leaves it alone: whether to test is asked of the
+    /// face, see [`SurfaceCache::point_test_enabled`]).
     fn set_standalone_flags(&mut self) {
         self.base.process_boundary_curves = true;
-        self.base.point_test_enabled = false;
         self.base.have_t_surface_cache = false;
     }
 
@@ -653,6 +694,11 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         }
 
         self.check_face_binding(face.face())?;
+
+        // a face without loop uses has no trim boundaries: every point is kept
+        if !face.has_loopuses()? {
+            return Ok((true, None));
+        }
 
         // classify point (with optional tolerance) against face
         let src_zone_tol_3d = match opt_zone_tol_3d {
@@ -899,9 +945,9 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
             self.set_standalone_flags();
             Ok(false)
         } else {
-            // mark state to run Solvers for TrimSurfaces
+            // mark state to run Solvers for TrimSurfaces (point testing is not set
+            // here: the face's loop uses decide it when a point is tested)
             self.base.process_boundary_curves = false;
-            self.base.point_test_enabled = true;
             self.base.have_t_surface_cache = true;
 
             // Classify every TrimSurfCache Node not on a boundary as INSIDE or OUTSIDE
@@ -1759,12 +1805,18 @@ mod tests {
             (true, None)
         );
         c.base_mut().point_test_enabled = true;
-        // no face to classify against (SM_ERR_NULL_POINTER)
+        // no face: no trim boundaries, every point is kept (#20179). Upstream returns
+        // SM_ERR_NULL_POINTER here only before the tree is built; its build of a
+        // faceless cache turns testing off, after which the same point is kept. The
+        // answer no longer depends on whether the tree was built.
         assert_eq!(
-            c.point_test(&k, Point2::new(5.0, 5.0), None)
-                .unwrap_err()
-                .upstream_status(),
-            Some(1006)
+            c.point_test(&k, Point2::new(5.0, 5.0), None).unwrap(),
+            (true, None)
+        );
+        c.build_tree(&k).unwrap();
+        assert_eq!(
+            c.point_test(&k, Point2::new(5.0, 5.0), None).unwrap(),
+            (true, None)
         );
     }
 
@@ -2024,6 +2076,10 @@ mod tests {
             Ok(2.5e-4)
         }
 
+        fn face_has_loopuses(&self, _face: i64) -> Result<bool> {
+            Ok(true)
+        }
+
         fn face_point_classify(
             &self,
             _k: &Kernel,
@@ -2257,7 +2313,11 @@ mod tests {
         base.get_tree(&k).unwrap();
         assert!(base.is_trimmed());
         assert!(base.process_boundary_curves);
-        assert!(!base.point_test_enabled);
+        // no build writes the point-test bit (#20179); a cache with no face keeps
+        // every point, in and out of its domain
+        assert!(base.point_test_enabled);
+        assert!(base.point_test(Point2::new(0.5, 0.5)).unwrap());
+        assert!(base.point_test(Point2::new(2.0, 2.0)).unwrap());
         assert!(!base.have_t_surface_cache);
         assert_eq!(base.face_containment_done, FaceContainment::NotDone);
     }
