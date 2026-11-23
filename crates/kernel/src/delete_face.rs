@@ -10,8 +10,8 @@
 //! straight edge between the moved corners. A corner left on one neighbour only, with nowhere
 //! to move (the apex of a V notch or groove), drops out of that edge. Where the gap is left
 //! between neighbours on one plane, that plane extends across it: the region is filled and the
-//! faces on the plane become one. Anything else (curved neighbours, a gap the neighbours cannot
-//! close) is refused, naming the faces and the way out.
+//! faces on the plane become one. If the planes cannot close the gap, a chain of curved fillet
+//! faces can also be taken off together where the kernel can restore their sharp edges.
 
 use solidcraft_geom::prelude::*;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -289,7 +289,7 @@ fn fill_on_planes(
 }
 
 /// Delete faces (indices in the body's face order, as in its mesh's `tri_face`) and heal the
-/// gap by extending the neighbouring planes. The result's history is over `[body]`.
+/// gap by extending the neighbours. The result's history is over `[body]`.
 pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "delete_faces");
     body.require_brep("Delete Face")?;
@@ -306,7 +306,7 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
         return Err(fail("that would delete every face"));
     }
     let size = body.size().max(1e-9);
-    guard("delete face", || {
+    let planar = guard("delete face", || {
         let mut asm = Assembly::from_record(&rec)?;
         // Edge and vertex → faces.
         let mut efaces: HashMap<u32, Vec<usize>> = HashMap::new();
@@ -350,7 +350,7 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                         .and_then(|fs| fs.iter().find(|x| del.contains(x)).copied())
                         .unwrap_or(0);
                     return Err(fail(format!(
-                        "face {by} ({}), borders face {f}, {}: include face {f} in the selection if it should go too, or take off the feature that made face {f} in the timeline instead; only planar neighbours can extend to close the gap",
+                        "face {by} ({}), borders face {f}, {}: to remove a tangent chain of rounds, select all the round faces. Include face {f} if it should go too, or take off the feature that made it in the timeline",
                         surface_kind(&rec, by),
                         surface_kind(&rec, f),
                     )));
@@ -583,7 +583,43 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
             fail("the neighbouring faces do not close the gap")
         })?;
         crate::assemble::body_with_history(finished, &asm, body, history.into_iter().map(|(_, h)| h).collect())
-    })
+    });
+    match planar {
+        Err(e @ KernelError::Invalid(_)) if del.len() >= 2 && del.iter().all(|&f| !matches!(surf_of(&rec, f), Some(Surf::Plane { .. }))) => {
+            delete_fillet_chain(body, &del)?.ok_or(e)
+        }
+        outcome => outcome,
+    }
+}
+
+/// Retain the identity of every surviving face, including supports that ran on to the sharp
+/// edges. An edge that used to bound the removed chain is now the meeting of its supports.
+fn delete_fillet_chain(body: &Body, selected: &BTreeSet<usize>) -> Result<Option<Body>> {
+    let Some(form) = body.ops_body() else { return Ok(None) };
+    let faces = selected.iter().copied().collect::<Vec<_>>();
+    let edit = || solidcore_ops::blend::delete_fillet_chain(&form.0, &form.1, &faces);
+    let removed = match solidcraft_smlib::stop::token() {
+        Some(token) => solidcore_ops::cancel::within(&token, edit),
+        None => edit(),
+    }
+    .map_err(|e| match e {
+        solidcore_ops::Error::Internal(why) => KernelError::Internal(format!("Delete Face: {why}")),
+        e => KernelError::Failed(format!("Delete Face: {e}")),
+    })?;
+    let Some(removed) = removed else { return Ok(None) };
+    let borders = crate::history::edge_faces(body.record());
+    let at_gap = |fs: &[usize]| fs.iter().any(|f| selected.contains(f));
+    let modified: HashSet<_> = borders.iter().filter(|fs| at_gap(fs)).flatten().copied().collect();
+    let faces = removed
+        .face_sources
+        .into_iter()
+        .map(|f| crate::record::from_face(0, f, if modified.contains(&f) { Change::Modified } else { Change::Kept }))
+        .collect();
+    let edges: Vec<_> =
+        removed.edge_sources.into_iter().map(|e| crate::record::pieces_of(0, e.filter(|i| borders.get(*i).is_some_and(|fs| !at_gap(fs))))).collect();
+    let healed = Body::from_smlib_record(removed.record)?;
+    let history = crate::record::of_faces(healed.record(), 1, faces, &edges);
+    Ok(Some(healed.with_history(history, &[body])?))
 }
 
 #[cfg(test)]
@@ -607,6 +643,117 @@ mod tests {
                 m.triangles.iter().zip(&m.tri_face).filter(|(_, x)| **x as usize == *f).all(|(t, _)| m.tri(t).unwrap().iter().all(|p| keep(*p)))
             })
             .collect()
+    }
+
+    #[test]
+    fn delete_split_rim_keeps_both_supports_and_records_their_sharp_meeting() {
+        use crate::history::{Change, EdgeOrigin, FaceOrigin};
+        use std::collections::BTreeSet;
+
+        let ball = crate::sphere(Vec3::ZERO, 5.0).unwrap();
+        let upper = box_solid(Vec3::new(-6.0, -6.0, 0.0), Vec3::new(6.0, 6.0, 6.0)).unwrap();
+        let half = boolean(&ball, &upper, BoolOp::Intersect).unwrap().unwrap();
+        let rim = crate::tangent_chain(&half, &[Vec3::new(0.0, 5.0, 0.0)]).unwrap();
+        let rounded = fillet(&half, &rim, 1.0).unwrap();
+        let names = &rounded.history().unwrap().faces;
+        let rounds: Vec<_> =
+            names.iter().enumerate().filter(|(_, f)| f.origins.iter().any(|o| matches!(o, FaceOrigin::Edge { .. }))).map(|(i, _)| i).collect();
+        assert_eq!(rounds.len(), 2);
+        // A body imported without a feature tree still carries both original support faces.
+        let input = crate::Body::from_record(rounded.record().clone()).unwrap();
+        let supports: BTreeSet<_> = (0..input.face_count()).filter(|i| !rounds.contains(i)).collect();
+        let healed = delete_faces(&input, &[rounds[1], rounds[0], rounds[1]]).unwrap();
+        let history = healed.history().unwrap();
+        let kept: BTreeSet<_> = history
+            .faces
+            .iter()
+            .map(|f| {
+                assert_eq!(f.change, Change::Modified);
+                let [FaceOrigin::Face { operand: 0, face }] = f.origins[..] else { panic!("lost a rim support: {f:?}") };
+                face
+            })
+            .collect();
+        assert_eq!(kept, supports);
+        assert!(history.edges.iter().any(|e| matches!(e.origins.as_slice(), [EdgeOrigin::Meet { .. }])));
+    }
+
+    fn step_roundtrip(body: &crate::Body) -> crate::Body {
+        let step = crate::step_export(&[body], "SolidCraft").unwrap();
+        crate::step_import(&step).unwrap().bodies.remove(0).body
+    }
+
+    fn picked_faces(body: &crate::Body, samples: &[Vec3]) -> Vec<usize> {
+        body.classify_points_with_normals(samples, None)
+            .unwrap()
+            .into_iter()
+            .map(|hit| match hit {
+                solidcore_ops::ClassifiedPoint::On { face, .. } => face,
+                other => panic!("expected a point on the face, got {other:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn delete_step_ball_root_grows_its_spherical_support_back_to_the_plate() {
+        let plate = cylinder(Vec3::new(0.0, 0.0, -2.0), Vec3::Z, 8.0, 2.0).unwrap();
+        let ball = crate::sphere(Vec3::new(0.0, 0.0, 1.0), 3.0).unwrap();
+        let sharp = boolean(&plate, &ball, BoolOp::Union).unwrap().unwrap();
+        let rim = crate::tangent_chain(&sharp, &[Vec3::new(0.0, 8.0_f64.sqrt(), 0.0)]).unwrap();
+        let input = step_roundtrip(&fillet(&sharp, &rim, 1.0).unwrap());
+
+        // The R1 round is centred at radius 4, height 1. At half height it covers this sphere point.
+        let xy = (4.0 - 3.0_f64.sqrt() / 2.0) * std::f64::consts::FRAC_1_SQRT_2;
+        let rounds = picked_faces(&input, &[Vec3::new(xy, xy, 0.5), Vec3::new(-xy, -xy, 0.5)]);
+        assert_ne!(rounds[0], rounds[1]);
+        let sphere_point = Vec3::new(0.0, 35.0_f64.sqrt() / 2.0, 0.5);
+        assert_eq!(input.classify_point(sphere_point).unwrap(), crate::PointClass::Inside);
+        let healed = delete_faces(&input, &rounds).unwrap();
+        assert_eq!(healed.classify_point(sphere_point).unwrap(), crate::PointClass::OnBoundary);
+
+        // The plate contributes 128π volume and 152π exposed area. Its R3 spherical cap
+        // stands 4 high, adding 80π/3 volume and 24π area.
+        let measure = crate::measure(&healed).unwrap();
+        let volume = 464.0 * std::f64::consts::PI / 3.0;
+        let area = 176.0 * std::f64::consts::PI;
+        assert!((measure.volume - volume).abs() <= 1e-8 * volume, "{}", measure.volume);
+        assert!((measure.area - area).abs() <= 1e-8 * area, "{}", measure.area);
+    }
+
+    #[test]
+    fn delete_open_rim_of_step_block_keeps_the_unselected_bore() {
+        use crate::history::{Change, FaceOrigin};
+
+        let block = box_solid(Vec3::ZERO, Vec3::new(20.0, 12.0, 8.0)).unwrap();
+        let corners = fillet(&block, &[Vec3::new(20.0, 0.0, 4.0), Vec3::new(20.0, 12.0, 4.0)], 3.0).unwrap();
+        let drill = cylinder(Vec3::new(10.0, 6.0, -1.0), Vec3::Z, 1.25, 10.0).unwrap();
+        let drilled = boolean(&corners, &drill, BoolOp::Cut).unwrap().unwrap();
+        let rim = crate::tangent_chain(&drilled, &[Vec3::new(10.0, 0.0, 8.0)]).unwrap();
+        let rounded = fillet(&drilled, &rim, 1.0).unwrap();
+        let input = step_roundtrip(&rounded);
+
+        // Halfway around the R1 section, on each straight and around each R3 corner.
+        // The turning section's centre is at radius 3 - 1 = 2 from the corner axis.
+        let d = std::f64::consts::FRAC_1_SQRT_2;
+        let turn = d * (2.0 + d);
+        let top = 7.0 + d;
+        let samples = [
+            Vec3::new(10.0, 1.0 - d, top),
+            Vec3::new(17.0 + turn, 3.0 - turn, top),
+            Vec3::new(19.0 + d, 6.0, top),
+            Vec3::new(17.0 + turn, 9.0 + turn, top),
+            Vec3::new(10.0, 11.0 + d, top),
+        ];
+        let rounded_faces = picked_faces(&input, &samples);
+        assert_eq!(rounded_faces.iter().collect::<std::collections::BTreeSet<_>>().len(), 5);
+        let bore = [Vec3::new(10.0 + d * 1.25, 6.0 + d * 1.25, 4.0)];
+        let bore_input = picked_faces(&input, &bore)[0];
+        let healed = delete_faces(&input, &rounded_faces).unwrap();
+        let bore_output = picked_faces(&healed, &bore)[0];
+        let source = &healed.history().unwrap().faces[bore_output];
+        assert_eq!(source.origins, [FaceOrigin::Face { operand: 0, face: bore_input }]);
+        assert_eq!(source.change, Change::Kept);
+        assert_eq!(healed.classify_point(Vec3::new(10.0, 6.0, 4.0)).unwrap(), crate::PointClass::Outside);
+        assert_eq!(healed.classify_point(Vec3::new(10.0, 0.12, 7.88)).unwrap(), crate::PointClass::Inside);
     }
 
     #[test]

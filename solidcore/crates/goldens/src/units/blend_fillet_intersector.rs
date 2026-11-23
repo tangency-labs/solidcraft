@@ -13,9 +13,7 @@
 //! produces the record of the reference wrapper's layout (statuses `0` = `SM_SUCCESS`, else the
 //! `SmStatus`; `1007` for a Rust `InvalidInput`, `-1` for a Rust error upstream cannot produce;
 //! op values only on success), reported as the values `rec`. A case whose Rust side reaches an
-//! unported unit is deferred as a whole. Every case runs on a fresh [`Kernel`], where
-//! `ComputePointValues`' function-static `sdStaticStep` (ND-3) starts unlatched as on a
-//! first call; the step the case leaves latched is compared as `fillet_point_step`.
+//! unported unit is deferred as a whole. Every case runs on a fresh [`Kernel`].
 //!
 //! The constant-radius `SetupOffsetValues` dispatch runs the ported standard solver,
 //! so `ComputePointValuesDelta` can compare both mutated surface records.
@@ -224,12 +222,6 @@ fn point_values(p: &PointIn) -> Vec<f64> {
     v.extend(p.user);
     v
 }
-
-// ---- C++ side -----------------------------------------------------------------------------
-
-/// Compared key: the `sdStaticStep` latch (ND-3: `SmFilletSolver::ComputePointValues`'
-/// function static, fixed by the first call in a process) after the case.
-const POINT_STEP: &str = "fillet_point_step";
 
 // ---- Rust side ----------------------------------------------------------------------------
 
@@ -688,15 +680,11 @@ fn rust_record(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
     Ok(o)
 }
 
-/// Every case runs on a fresh kernel, whose `sdStaticStep` latch sets itself.
+/// Every case runs on a fresh kernel.
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let k = Kernel::default();
     match rust_record(&k, i) {
-        // read as the C++ probe reads `sdStaticStep` (its crossing point latches 1e-5)
-        Ok(rec) => Ok(Output::new().values("rec", rec).values(
-            POINT_STEP,
-            vec![k.fillet_point_step.get().unwrap_or(1.0e-5)],
-        )),
+        Ok(rec) => Ok(Output::new().values("rec", rec)),
         Err(Fail::Deferred(d)) => Ok(*d),
         Err(Fail::Harness(e)) => Err(e),
     }
@@ -1374,9 +1362,6 @@ impl UnitDiff for Runner {
         }
         Ok(v)
     }
-
-    // ND-3: every C++ case runs in a fresh child, which inherits this process's
-    // `sdStaticStep`; it must still be unlatched before the unit's cases and after them.
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         rust(&case.parse()?)

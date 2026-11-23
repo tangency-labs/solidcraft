@@ -53,7 +53,6 @@ use solidcore::topology::brep_data::{
     VertexData,
 };
 use solidcore::topology::brep_data_write::FromBrepEnv;
-use solidcore::topology::edgeuse::{p1 as eu1, p3 as eu3};
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, ShellId, VertexId, edge, shell, vertex};
 use solidcore::{EntityRef, Kernel, Point2, Point3, SolidError, Vec3};
@@ -792,15 +791,7 @@ pub(crate) fn key_of(e: EntityRef) -> ObjectRef {
 /// vertices and point-shell vertices, edgeuses and wire edgeuses are split apart, every index
 /// compacted for the split.
 fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
-    for eu in solidcore::topology::brep::p2::edgeuses(b, None).map_err(sc("GetEdgeuses"))? {
-        if eu1::faceuse(b, eu).map_err(sc("GetFaceuse"))?.is_none()
-            || eu1::uv_trim_curve_pointer(b, eu).map_err(sc("GetUVTrimCurvePointer"))?.is_some()
-        {
-            continue;
-        }
-        let made = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true).map_err(sc("GetOrCreateUVTrimCurve"))?;
-        made.status.map_err(sc("GetOrCreateUVTrimCurve"))?;
-    }
+    solidcore::topology::brep::create_missing_uv_trim_curves(k, b).map_err(sc("GetOrCreateUVTrimCurve"))?;
     let b: &Brep = b;
 
     // the BrepData; its records keep the B-rep's lists' order
