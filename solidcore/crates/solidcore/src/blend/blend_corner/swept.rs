@@ -734,7 +734,8 @@ fn keep_definition(
 ///
 /// Status `SM_ERR_NULL_POINTER` (`NER`) without the event
 /// ([`CornerInput::EventNotSet`]), the torus ([`CornerInput::FacesNotBuilt`]) or the fillet
-/// B-rep ([`CornerInput::FilletBrepNotGiven`]); those of the face construction.
+/// B-rep ([`CornerInput::FilletBrepNotGiven`]), or a `Defect` (same status) for a face
+/// construction that succeeds without a face; those of the face construction.
 pub fn create_swept_patch(
     corner: &mut FilletCorner,
     env: &mut CornerPatchEnv<'_, '_>,

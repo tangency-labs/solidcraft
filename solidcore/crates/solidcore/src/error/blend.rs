@@ -2482,6 +2482,7 @@ mod tests {
             (S::RingEdgeOffClosedBlendFaces, SM_ERR),
             (S::SideEdgeNotBesideBlend, SM_ERR_NULL_POINTER),
             (S::EndSideEdgesShareNoFace, SM_ERR),
+            (S::EndFaceIsBlendFace, SM_ERR),
             (S::EdgeNotBetweenTwoFaces, SM_ERR),
             (S::SeamCapEndFaceNotExtended, SM_ERR),
         ];
@@ -2619,6 +2620,12 @@ mod tests {
             (I::MixedCornerWithoutOnExtendedEdgeEdge, SM_ERR_NULL_POINTER),
             (I::MixedCornerEdgesDoNotMeet, SM_ERR),
             (I::MixedCornerVertexNotInCorner, SM_ERR),
+            (I::TurnRingWithoutSideEdgeUse, SM_ERR_NULL_POINTER),
+            (I::TurnRoundsShareNoFace, SM_ERR_NULL_POINTER),
+            (
+                I::TurnWithoutTwoBlendedEdgeUses { given: 1 },
+                SM_ERR_NULL_POINTER,
+            ),
         ];
         for (input, status) in inputs {
             let cause = BlendFailure::CornerInputInvalid {

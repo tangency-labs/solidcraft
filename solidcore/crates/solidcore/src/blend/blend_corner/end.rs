@@ -647,11 +647,7 @@ pub(crate) fn ball_touching_with(
         }
     }
     if f_index > 1 {
-        return Err(bad_input(
-            OP,
-            CornerInput::SideEdgeOffSolverFaces,
-            Some(EntityRef::Edgeuse(side_eu)),
-        ));
+        return Err(unbuildable(OP, CornerStep::SideEdgeOffSolverFaces));
     }
     ball_touching_on(k, target, fs, f_index, other_face, p, cap)
 }
@@ -1195,7 +1191,8 @@ pub fn side_edgeuse_across_rolled_edge(
         return Ok(None);
     }
     let others: Vec<EdgeId> = edges.iter().copied().filter(|&x| x != e).collect();
-    // a closed edge at the vertex, listed twice, leaves one
+    // the vertex's three edges hold E, so two others are left unless the body's vertex
+    // does not list E among its edges
     let &[a, b] = others.as_slice() else {
         return Err(bad_input_with(
             OP,
@@ -2175,8 +2172,8 @@ fn classify_rail_end(
     if on.point_class() != PointClassType::Unknown {
         return Ok(on);
     }
-    // the corner's data the solve reads. A missing piece is a defect of the corner, and its
-    // error propagates as `calc_end_cap_edges`' does; a corner without a constant-radius
+    // the corner's data the solve reads. A missing piece is the caller's corner input, and
+    // its error propagates as `calc_end_cap_edges`' does; a corner without a constant-radius
     // solver has nothing to solve with
     let cap = corner
         .end_cap
