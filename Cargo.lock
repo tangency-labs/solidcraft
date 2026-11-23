@@ -787,6 +787,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "cadmpeg-codec-iges"
+version = "0.6.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1046e958878d8d52df443b516bb275bb611a2853f5d91369888e8e7bfbc66a66"
+dependencies = [
+ "cadmpeg-core",
+ "cadmpeg-ir",
+ "memchr",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "toml 1.1.8+spec-1.1.0",
+]
+
+[[package]]
 name = "cadmpeg-codec-rhino"
 version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -899,6 +914,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b101aa07edb4e12a2b0afcf7d5583793ebd45a131422b956a4fd2f7bd22a275a"
 dependencies = [
  "cadmpeg-codec-freecad",
+ "cadmpeg-codec-iges",
  "cadmpeg-codec-rhino",
  "cadmpeg-codec-step",
  "cadmpeg-codec-usd",
@@ -6091,9 +6107,11 @@ dependencies = [
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-look",
+ "solidcraft-mcp",
  "solidcraft-space-mouse",
  "solidcraft-theme",
  "solidcraft-ui-egui",
+ "solidcraft-ui-kit",
  "solidcraft-ui-text",
  "solidcraft-viewport",
  "solidcraft-viewport-gpu",
@@ -6241,6 +6259,7 @@ dependencies = [
  "solidcraft-ui-text",
  "solidcraft-viewport",
  "solidcraft-views",
+ "tempfile",
  "thiserror 2.0.21",
  "tiny-skia",
  "toml_edit",
@@ -6338,6 +6357,7 @@ dependencies = [
  "solidcraft-profile",
  "solidcraft-sketch",
  "solidcraft-testkit",
+ "sysinfo",
  "tempfile",
  "thiserror 2.0.21",
  "tiny-skia",
@@ -6363,6 +6383,7 @@ dependencies = [
  "solidcraft-profile",
  "solidcraft-smlib",
  "spade",
+ "sysinfo",
  "thiserror 2.0.21",
  "web-time",
 ]
@@ -6391,6 +6412,8 @@ dependencies = [
  "solidcraft-mcp-server",
  "solidcraft-viewport",
  "solidcraft-viewport-gpu",
+ "tempfile",
+ "wat",
 ]
 
 [[package]]
@@ -6499,6 +6522,7 @@ dependencies = [
  "arboard",
  "egui",
  "egui-wgpu",
+ "flate2",
  "getrandom 0.2.17",
  "image",
  "log",
@@ -6572,6 +6596,7 @@ dependencies = [
 name = "solidcraft-ui-text"
 version = "0.47.0"
 dependencies = [
+ "flate2",
  "log",
  "serde_json",
  "sys-locale",

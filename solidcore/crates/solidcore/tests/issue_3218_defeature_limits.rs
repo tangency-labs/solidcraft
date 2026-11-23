@@ -6,17 +6,14 @@
 //! - `LoopNotPlanar`: a planar cap asked for a cylinder fillet's loop (two lines and two arcs
 //!   on the cylinder), which no plane holds;
 //! - `ExtensionRefused`: the faces along the loop asked to be extended by 0;
-//! - `TangentNeighbours`: a patch piece cut from a neighbour's extension only along an edge
-//!   the kernel proves smooth. `fillet1019`'s fillet that ends on the tangent corner round
-//!   was refused so until #15247 corrected the classification that left its patch open; it
-//!   now comes off, and the tests below prove the body it builds (no upstream file here
-//!   reaches this limit now);
+//! - `TangentNeighbours`: the two shoulders of a rib extend as far as each other,
+//!   sharing a smooth edge while their far edges remain off the loop;
 //! - `NotEnclosed`: a box face, whose neighbours, extended, run past it;
 //! - `ExtensionWithinTolerance`: the faces along a fillet's loop extended by less than the
 //!   distance within which the loop's vertices and the patch's are one point.
 //!
-//! The models are the upstream test files, read by the Rust reader when the pinned upstream
-//! checkout is present.
+//! The rib is swept from its profile here. The other models are read from the pinned
+//! upstream checkout when it is present.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -36,7 +33,8 @@ use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::brep::validation;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, EntityRef, Kernel, SolidError};
+use solidcore::topology::FaceId;
+use solidcore::{Brep, EntityRef, Kernel};
 
 /// An upstream test file, read and arena-named as the goldens reader does.
 fn read(k: &mut Kernel, file: &str) -> Option<Brep> {
@@ -79,37 +77,36 @@ fn limit(
     let mut k = Kernel::default();
     let mut b = read(&mut k, file)?;
     let faces = bp1::faces(&b, None).unwrap();
-    let before = faces.len();
-    let r = {
-        let mut ex = FeatureExecutive::new(&mut k, &mut b).unwrap();
-        ex.add_feature(
-            &mut k,
-            &[faces[face]],
-            base_rb,
-            RebuildBrepType::ExtendSurface,
-        )
-        .unwrap()
-        .unwrap();
+    Some(limit_on_faces(&mut k, &mut b, &[faces[face]], base_rb, ext))
+}
+
+fn limit_on_faces(
+    k: &mut Kernel,
+    b: &mut Brep,
+    removed: &[FaceId],
+    base_rb: RebuildBrepType,
+    ext: Option<f64>,
+) -> DefeatureFailure {
+    let before = bp1::faces(b, None).unwrap();
+    let error = {
+        let mut ex = FeatureExecutive::new(k, b).unwrap();
+        ex.add_feature(k, removed, base_rb, RebuildBrepType::ExtendSurface)
+            .unwrap()
+            .unwrap();
         if let Some(d) = ext {
             ex.set_base_ext_dist(d);
         }
-        ex.do_defeature(&mut k)
+        ex.do_defeature(k).unwrap_err()
     };
-    assert_eq!(
-        bp1::faces(&b, None).unwrap().len(),
-        before,
-        "{file} {face}: base changed"
+    assert_eq!(bp1::faces(b, None).unwrap(), before, "base changed");
+    assert!(
+        matches!(error.entity(), Some(EntityRef::Edge(_))),
+        "{error:?}"
     );
-    match &r {
-        Err(e @ SolidError::Failed(f)) => {
-            assert!(matches!(f.entity(), Some(EntityRef::Edge(_))), "{r:?}");
-            assert_eq!(e.sm_status(), Some(SM_ERR), "{r:?}");
-            match f.reason {
-                Reason::Defeature(d) => Some(d),
-                _ => panic!("{file} {face}: {r:?}"),
-            }
-        }
-        other => panic!("{file} {face}: a refusal naming its limit, got {other:?}"),
+    assert_eq!(error.sm_status(), Some(SM_ERR), "{error:?}");
+    match error.failure().map(|f| &f.reason) {
+        Some(Reason::Defeature(limit)) => *limit,
+        _ => panic!("expected a refusal naming its limit, got {error:?}"),
     }
 }
 
@@ -247,6 +244,60 @@ fn a_box_face_is_refused_as_not_enclosed() {
         return;
     };
     assert!(matches!(l, DefeatureFailure::NotEnclosed { .. }), "{l:?}");
+}
+
+/// Removing the crown and flanks of a 2-wide rib leaves its raised outline on
+/// both end faces. The shoulders at y = 3 leave a gap if extended by 0.5 each.
+/// At 1 they meet at x = 0 in the same plane, but their free edges run past the
+/// ends of the rib and cannot close that outline.
+#[test]
+fn rib_shoulders_that_just_meet_leave_the_patch_open_at_a_tangent_edge() {
+    use solidcore::curve::curve::Curve;
+    use solidcore::math::{Point3, Vec3};
+    use solidcore::primitive::api_curves::create_line_segment;
+    use solidcore::query::face::p1::calculate_bounding_box;
+    use solidcore::sweep::api_brep::create_linear_sweep;
+
+    let mut k = Kernel::default();
+    let profile = [
+        (-5.0, 0.0),
+        (5.0, 0.0),
+        (5.0, 3.0),
+        (1.0, 3.0),
+        (1.0, 4.0),
+        (-1.0, 4.0),
+        (-1.0, 3.0),
+        (-5.0, 3.0),
+        (-5.0, 0.0),
+    ]
+    .map(|(x, y)| Point3::new(x, y, 0.0));
+    let outline: Vec<_> = profile
+        .windows(2)
+        .map(|ends| Curve::from(create_line_segment(ends[0], ends[1]).unwrap()))
+        .collect();
+    let curves: Vec<_> = outline.iter().map(Some).collect();
+    let mut body = create_linear_sweep(&mut k, &curves, Vec3::Z, 10.0, true).unwrap();
+    // Only the crown and the two flanks have their midpoint above the shoulders.
+    let rib: Vec<_> = bp1::faces(&body, None)
+        .unwrap()
+        .into_iter()
+        .filter(|&f| calculate_bounding_box(&k, &body, f, false).unwrap().mid().y > 3.25)
+        .collect();
+    assert_eq!(rib.len(), 3);
+
+    let extend = RebuildBrepType::ExtendSurface;
+    assert_eq!(
+        limit_on_faces(&mut k, &mut body, &rib, extend, Some(0.5)),
+        DefeatureFailure::NotEnclosed {
+            extended_by: Some(0.5)
+        }
+    );
+    assert_eq!(
+        limit_on_faces(&mut k, &mut body, &rib, extend, Some(1.0)),
+        DefeatureFailure::TangentNeighbours {
+            within_deg: k.tolerances.ang_tol_deg
+        }
+    );
 }
 
 /// `box_with_large_fillet`'s fillet (face 6), its faces extended by 0.001: the loop's

@@ -1,0 +1,890 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b7": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 15.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                110.0,
+                -110.0,
+                0.0
+              ],
+              "start": [
+                -110.0,
+                -110.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                110.0,
+                110.0,
+                0.0
+              ],
+              "start": [
+                110.0,
+                -110.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -110.0,
+                110.0,
+                0.0
+              ],
+              "start": [
+                110.0,
+                110.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -110.0,
+                -110.0,
+                0.0
+              ],
+              "start": [
+                -110.0,
+                110.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 6.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                112.0,
+                31.5000089624562,
+                -6.0
+              ],
+              "start": [
+                110.00000000015004,
+                31.5000089624562,
+                -6.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                112.0,
+                68.49988546009638,
+                -6.0
+              ],
+              "start": [
+                112.0,
+                31.5000089624562,
+                -6.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                109.99999999875082,
+                68.49988546009638,
+                -6.0
+              ],
+              "start": [
+                112.0,
+                68.49988546009638,
+                -6.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                -0.0,
+                -1.0
+              ],
+              "center": [
+                104.0,
+                68.5,
+                -6.0
+              ],
+              "end": 1.4033482475665877,
+              "radius": 5.999999999844104,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 1.9089983937847776e-05
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                106.0,
+                56.66784043380077,
+                -6.0
+              ],
+              "end": 3.141592653589793,
+              "radius": 6.000000000155894,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 1.7382444060059665
+            }
+          },
+          {
+            "line": {
+              "end": [
+                100.0,
+                43.33215956619923,
+                -6.0
+              ],
+              "start": [
+                99.9999999998441,
+                56.66784043380077,
+                -6.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                106.0,
+                43.33215956619923,
+                -6.0
+              ],
+              "end": 4.544940901169319,
+              "radius": 6.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 3.141592653589793
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                -0.0,
+                -1.0
+              ],
+              "center": [
+                104.0,
+                31.5,
+                -6.0
+              ],
+              "end": -1.4937426997541081e-06,
+              "radius": 6.000000000156732,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -1.4033482475708887
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 6.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                -109.9999999998387,
+                31.500008962456214,
+                -6.0
+              ],
+              "start": [
+                -112.0,
+                31.500008962456214,
+                -6.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                -0.0,
+                -1.0
+              ],
+              "center": [
+                -104.0,
+                31.5,
+                -6.0
+              ],
+              "end": -1.7382444060189053,
+              "radius": 5.999999999845399,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -3.141591159847091
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                -106.0,
+                43.33215956619924,
+                -6.0
+              ],
+              "end": 0.0,
+              "radius": 6.000000000154606,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -1.4033482475795267
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -100.0,
+                56.66784043380076,
+                -6.0
+              ],
+              "start": [
+                -99.9999999998454,
+                43.33215956619924,
+                -6.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                -106.0,
+                56.66784043380076,
+                -6.0
+              ],
+              "end": 1.4033482475838286,
+              "radius": 6.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.0
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                -0.0,
+                -1.0
+              ],
+              "center": [
+                -104.0,
+                68.5,
+                -6.0
+              ],
+              "end": 3.1415735636058604,
+              "radius": 6.000000000780573,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 1.738244406023207
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -112.0,
+                68.49988546009638,
+                -6.0
+              ],
+              "start": [
+                -109.99999999968729,
+                68.4998854600964,
+                -6.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -112.0,
+                31.500008962456214,
+                -6.0
+              ],
+              "start": [
+                -112.0,
+                68.49988546009638,
+                -6.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 6.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                109.99999999983869,
+                -31.5000089624562,
+                -6.0
+              ],
+              "start": [
+                112.0,
+                -31.5000089624562,
+                -6.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                -0.0,
+                -1.0
+              ],
+              "center": [
+                104.0,
+                -31.5,
+                -6.0
+              ],
+              "end": 1.4033482475708925,
+              "radius": 5.999999999845389,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 1.4937426997541081e-06
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                106.0,
+                -43.33215956619923,
+                -6.0
+              ],
+              "end": 3.141592653589793,
+              "radius": 6.0000000001546105,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 1.738244406010271
+            }
+          },
+          {
+            "line": {
+              "end": [
+                100.0,
+                -56.66784043380077,
+                -6.0
+              ],
+              "start": [
+                99.99999999984539,
+                -43.33215956619923,
+                -6.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                106.0,
+                -56.66784043380077,
+                -6.0
+              ],
+              "end": 4.5449409011736215,
+              "radius": 6.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 3.141592653589793
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                -0.0,
+                -1.0
+              ],
+              "center": [
+                104.0,
+                -68.5,
+                -6.0
+              ],
+              "end": -1.9089983937847776e-05,
+              "radius": 6.000000000780601,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -1.403348247566586
+            }
+          },
+          {
+            "line": {
+              "end": [
+                112.0,
+                -68.49988546009638,
+                -6.0
+              ],
+              "start": [
+                109.99999999968732,
+                -68.49988546009637,
+                -6.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                112.0,
+                -31.5000089624562,
+                -6.0
+              ],
+              "start": [
+                112.0,
+                -68.49988546009638,
+                -6.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 6.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                -112.0,
+                -31.500008962456214,
+                -6.0
+              ],
+              "start": [
+                -110.00000000015004,
+                -31.500008962456214,
+                -6.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -112.0,
+                -68.49988546009638,
+                -6.0
+              ],
+              "start": [
+                -112.0,
+                -31.500008962456214,
+                -6.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -109.99999999875082,
+                -68.49988546009641,
+                -6.0
+              ],
+              "start": [
+                -112.0,
+                -68.49988546009638,
+                -6.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                -0.0,
+                -1.0
+              ],
+              "center": [
+                -104.0,
+                -68.5,
+                -6.0
+              ],
+              "end": -1.7382444060232052,
+              "radius": 5.999999999844111,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -3.1415735636058604
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                -106.0,
+                -56.66784043380076,
+                -6.0
+              ],
+              "end": 0.0,
+              "radius": 6.000000000155894,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -1.4033482475838268
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -100.0,
+                -43.33215956619924,
+                -6.0
+              ],
+              "start": [
+                -99.9999999998441,
+                -56.66784043380076,
+                -6.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                -106.0,
+                -43.33215956619924,
+                -6.0
+              ],
+              "end": 1.4033482475795258,
+              "radius": 6.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.0
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                -0.0,
+                -1.0
+              ],
+              "center": [
+                -104.0,
+                -31.5,
+                -6.0
+              ],
+              "end": 3.141591159847091,
+              "radius": 6.000000000156732,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 1.7382444060189044
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b10"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b11"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b12"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b11"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b13"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b12",
+        "b13"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b14"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "20390-edge-notches-with-arcs-tangent-to-the-plates-side",
+  "expected": {
+    "body_count": 1,
+    "faces": 30,
+    "method": "A notch is 37 wide at the side (y 31.5 to 68.5 about y = 50) and 10 deep. Its outline from the side: an entry arc R6 about (104, 31.5) from (110, 31.5) to (105, 31.5 + sqrt(35)), a reversed arc R6 about (106, 31.5 + 2 sqrt(35)) on to (100, 31.5 + 2 sqrt(35)), the floor line x = 100, and the mirror image. Its width at y is 6 - sqrt(36 - t^2) along the first arc (t = y - 31.5 from 0 to sqrt(35)) and 4 + sqrt(36 - u^2) along the second (u from -sqrt(35) to 0); the two square-root integrals are equal and cancel, so half a notch is 6 sqrt(35) + 4 sqrt(35) + 10 (18.5 - 2 sqrt(35)) = 185 - 10 sqrt(35) and a notch 370 - 20 sqrt(35) = 251.678404 mm2. V = 220 * 220 * 15 - 4 * 6 * (370 - 20 sqrt(35)) = 717120 + 480 sqrt(35) = 719959.718296. Faces: the plate's 6 and, for each notch, its floor and five walls (four arcs and the line): 30. Tolerance: the recorded outline is the sketch solver's: its sixteen arcs keep the ideal centres (within 1e-14) with radii within 7.9e-10 of 6, and its floor lines are within 1.6e-10 of x = 100. That moves the notches' walls, 188 mm long in all and 6 deep, by at most 7.9e-10, so the volume by less than 1e-6 mm3. 1e-9 of the volume, 7.2e-4 mm3, is above that and far below a wrong cut: an entry arc's wall 0.01 mm out of place moves the volume by 0.5 mm3",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#20390"
+    ],
+    "tolerance": {
+      "rel": 1e-09
+    },
+    "volume_mm3": 719959.7182958878,
+    "what": "a 220 x 220 x 15 plate less four notches 6 deep in its x sides, each notch's two R6 entry arcs tangent to the side: the round wall an entry arc sweeps meets the side plane a hair inside the wall (1.6e-10) and starts between the two crossings, so it touches the plane along its own end; one valid solid"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 84,
+      "faces": 30,
+      "vertices": 56
+    }
+  },
+  "records": "20390-edge-notches-with-arcs-tangent-to-the-plates-side.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b14"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 110240.3849313763,
+      "body_count": 1,
+      "edges": 84,
+      "faces": 30,
+      "vertices": 56,
+      "volume_mm3": 719959.7182958836
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#20390"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a 220 x 220 x 15 plate less four notches 6 deep in its x sides, each notch's two R6 entry arcs tangent to the side: the round wall an entry arc sweeps meets the side plane a hair inside the wall (1.6e-10) and starts between the two crossings, so it touches the plane along its own end; one valid solid",
+  "why_not": []
+}

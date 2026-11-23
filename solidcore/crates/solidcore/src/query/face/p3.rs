@@ -133,6 +133,7 @@ use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::{euclidian_step_off, CurveKind, StepOff};
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
+use crate::error::query::QueryFailure;
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -206,21 +207,24 @@ fn null(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::invalid_input(operation, reason)
 }
 
-/// `return(SM_ERR_INVALID_INPUT)`.
-fn invalid_status(operation: &'static str) -> SolidError {
-    SolidError::query_invalid_value(operation, "a vector of zero length has no direction")
+/// `return(SM_ERR_INVALID_INPUT)` over the vector operation's error `cause`, which stays
+/// the cause.
+fn invalid_status(operation: &'static str, cause: SolidError) -> SolidError {
+    crate::error::Failure::new(operation, QueryFailure::ZeroLengthVector)
+        .caused_by(cause)
+        .into_error()
 }
 
 /// `SER(v.Unitize())`: the unit vector, or the `SM_ERR_INVALID_INPUT` status of a zero
 /// vector.
 fn unitize_ser(v: Vec3, operation: &'static str) -> Result<Vec3> {
-    v.unitize().map_err(|_| invalid_status(operation))
+    v.unitize().map_err(|e| invalid_status(operation, e))
 }
 
 /// `SER(a.AngleBetween(b, ang))`: the angle, or the `SM_ERR_INVALID_INPUT` status of a
 /// zero vector.
 fn angle_ser(a: Vec3, b: Vec3, operation: &'static str) -> Result<f64> {
-    a.angle_between(b).map_err(|_| invalid_status(operation))
+    a.angle_between(b).map_err(|e| invalid_status(operation, e))
 }
 
 /// The point and first derivative of an evaluation (`sPV[0]`, `sPV[1]`).
@@ -1933,8 +1937,11 @@ fn uv_line<O: ClassObject>(
     // build UVLine
     let start = Point3::new(uv_start.x, uv_start.y, 0.0);
     let end = Point3::new(uv_end.x, uv_end.y, 0.0);
-    Line::create_line_segment(2, start, end, None)
-        .map_err(|_| SolidError::query_missing(OP_UV_LINE, "the UV line"))
+    Line::create_line_segment(2, start, end, None).map_err(|e| {
+        crate::error::Failure::new(OP_UV_LINE, QueryFailure::UvLineNotMade)
+            .caused_by(e)
+            .into_error()
+    })
 }
 
 /// `sm_FaceClassifyUVLine` after the tolerance: loads `line` into `cc`.
@@ -2722,7 +2729,7 @@ fn into_loop_period(
 /// [`SolidError::InvalidInput`] where upstream dereferences null (an edge use without
 /// edge or loop use, an edge without curve, a face without surface, a missing vertex use
 /// or mate); `SM_ERR_INVALID_INPUT`
-/// ([`QueryFailure::InvalidValue`](crate::error::query::QueryFailure::InvalidValue)) for a zero vector the
+/// ([`QueryFailure::ZeroLengthVector`]) for a zero vector the
 /// projection or step-off tangents unitize or measure angles with (`SER`); those of the
 /// curve and edge evaluations and of `EvaluateNormalAtSingularity`;
 /// [`SolidError::Unported`]: those of `SmEdgeuse::EvaluateBinormal` and a 2D curve on a
@@ -5039,5 +5046,18 @@ mod tests {
         )
         .unwrap();
         assert_eq!(c.containment, PointContainment::Outside);
+    }
+
+    #[test]
+    fn a_zero_vectors_status_keeps_the_operations_error() {
+        let unit = Vec3::ZERO.unitize().unwrap_err();
+        let e = unitize_ser(Vec3::ZERO, OP_SECTOR).unwrap_err();
+        assert_eq!(e.query_failure(), Some(&QueryFailure::ZeroLengthVector));
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR_INVALID_INPUT));
+        assert_eq!(e.cause(), Some(&unit));
+        let angle = Vec3::ZERO.angle_between(Vec3::X).unwrap_err();
+        let e = angle_ser(Vec3::ZERO, Vec3::X, OP_SECTOR).unwrap_err();
+        assert_eq!(e.query_failure(), Some(&QueryFailure::ZeroLengthVector));
+        assert_eq!(e.cause(), Some(&angle));
     }
 }
