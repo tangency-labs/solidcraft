@@ -203,9 +203,15 @@ pub fn union_copies(a: &Body, b: &Body) -> Result<Option<Body>> {
         // the other direction at the same shared edge.
         let cb = read_locked(b, |b| brep_copy(k, b))?;
         let ca = read_locked(a, |a| brep_copy(k, a))?;
-        match union_pair(k, cb, ca, expect, Contract::Proved) {
-            done @ (Ok(Done::Body(..)) | Err(SolidError::Cancelled { .. })) => return done,
-            _ => {}
+        let reverse = union_pair(k, cb, ca, expect, Contract::Proved);
+        if matches!(
+            reverse,
+            Ok(Done::Body(..)) | Err(SolidError::Cancelled { .. })
+        ) || reverse
+            .as_ref()
+            .is_err_and(|e| e.root_cause().is_not_certified())
+        {
+            return reverse;
         }
         let rebuilt = (|| {
             let cb = read_locked(b, |b| rebuild_native(k, b))?;
@@ -214,6 +220,7 @@ pub fn union_copies(a: &Body, b: &Body) -> Result<Option<Body>> {
         })();
         match rebuilt {
             done @ (Ok(Done::Body(..)) | Err(SolidError::Cancelled { .. })) => done,
+            Err(e) if e.root_cause().is_not_certified() => Err(e),
             _ => Err(original),
         }
     })?;

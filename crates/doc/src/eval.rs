@@ -4553,7 +4553,7 @@ impl Model {
                         }
                     }
                     track_altered_sheets(&state, &mut next, f, &mut warning);
-                    note_join_apart(&state, &next, f, &mut warning);
+                    note_join_apart(doc, &state, &next, f, &mut warning);
                     note_cut_cavity(&state, &next, f, &mut warning);
                 }
                 // What it cut from a sheet made from surfaces goes into the sheet's records (see
@@ -5319,8 +5319,12 @@ fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature
 /// separate piece (see `apply_traced`): a valid body in several pieces, but rarely what was meant
 /// when Join was left on by mistake. Says so when a feature's Join leaves the bodies it changed
 /// in more pieces than they had (#4434). Combine joins the bodies it is given, apart or not.
-fn note_join_apart(before: &ModelState, after: &ModelState, f: &Feature, warning: &mut Option<String>) {
-    if feature_operation(f) != Some(Operation::Join) {
+fn note_join_apart(doc: &Document, before: &ModelState, after: &ModelState, f: &Feature, warning: &mut Option<String>) {
+    let mirrored_join = matches!(&f.kind, FeatureKind::Mirror { features, bodies, .. }
+    if bodies.is_empty() && features.iter().filter_map(|id| doc.feature(id.0)).any(|source| {
+        !source.suppressed && matches!(source.kind, FeatureKind::Extrude { operation: Operation::Join, .. })
+    }));
+    if feature_operation(f) != Some(Operation::Join) && !mirrored_join {
         return;
     }
     for (name, n) in join_pieces_added(before, after) {
@@ -11476,12 +11480,6 @@ fn replay(
             missed += m;
             total += t;
         }
-        // Join may otherwise save a disconnected copy as a new body or a separate lump.
-        let before_join = (matches!(f.kind, FeatureKind::Mirror { .. })
-            && matches!(src.kind, FeatureKind::Extrude { .. })
-            && op == Operation::Join
-            && !copies.is_empty())
-        .then(|| st.bodies.clone());
         // New bodies from a pattern join their source when they touch it (as one feature would).
         if f.body_names.is_empty() {
             apply_traced(doc, st, f, copies, op, &targets)?;
@@ -11491,54 +11489,11 @@ fn replay(
             named.body_names = f.body_names.iter().skip(start).cloned().collect();
             apply_traced(doc, st, &named, copies, op, &targets)?;
         }
-        if let Some(before) = before_join
-            && !mirror_join_connected(&before, st)?
-        {
-            return Err(DocError::Invalid(format!("the mirrored extrusion `{}` leaves a separate solid instead of joining the target", src.name)));
-        }
     }
     if missed > 0 {
         append_warning(warning, format!("{missed} of {total} cut copies remove no material"));
     }
     Ok(())
-}
-
-/// Each material piece left by the mirror must contain material from a pre-mirror target.
-/// Counting pieces alone misses a copy that bridges two old pieces and adds a detached one.
-fn mirror_join_connected(before: &[ModelBody], after: &ModelState) -> Result<bool> {
-    for current in &after.bodies {
-        let Some(prior) = before.iter().find(|b| b.name == current.name) else { return Ok(false) };
-        if current.body.same_shape(&prior.body) {
-            continue;
-        }
-        let pieces = current.body.lumps()?;
-        if pieces.len() < 2 {
-            continue;
-        }
-        let into_current = tool_frame(&current.name).unwrap_or(crate::IDENTITY);
-        let originals = before
-            .iter()
-            .filter(|b| b.name == current.name || after.body(&b.name).is_none())
-            .map(|b| {
-                let from = tool_frame(&b.name).and_then(|m| crate::mat_inverse(&m)).unwrap_or(crate::IDENTITY);
-                let relative = crate::mat_mul(&into_current, &from);
-                if crate::is_identity(&relative) { Ok(b.body.clone()) } else { kernel::transform_matrix(&b.body, relative) }
-            })
-            .collect::<kernel::Result<Vec<_>>>()?;
-        for piece in pieces {
-            let mut joined = false;
-            for original in &originals {
-                if kernel::boolean(&piece, original, BoolOp::Intersect)?.is_some() {
-                    joined = true;
-                    break;
-                }
-            }
-            if !joined {
-                return Ok(false);
-            }
-        }
-    }
-    Ok(true)
 }
 
 #[path = "model_cache.rs"]
