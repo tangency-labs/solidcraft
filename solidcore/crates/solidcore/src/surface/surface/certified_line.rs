@@ -306,6 +306,12 @@
 //! enclosure lies in the other's unique box, two where the enclosures are apart, and the
 //! component is undecided when two are neither.
 //!
+//! An undecided component keeps why ([`Why`]), down to the condition that failed: for 2,
+//! what is known of the components meeting it ([`Overlap`]: across a seam or on opposite
+//! ends of the knots' range, line parameters apart without the tolerance's widening); for the
+//! foot rule, which step failed ([`FootWhy`]) and, for a stretch at the floor, which
+//! condition of its foot box ([`Stretch`]). A diagnosis only: nothing reads it.
+//!
 //! The solutions of the solve are then typed ([`type_solutions`]). With a cull not placed
 //! or the components not built, every one is undecided, and so is every range. A point is
 //! undecided unless its gap to the line is enclosed below the tolerance and it lies in a box
@@ -325,7 +331,7 @@
 //!
 //! | Rust | Upstream |
 //! |------|----------|
-//! | [`LineNet`], [`isolate`], [`PassLine`], [`CertifiedRoot`], [`Isolation`], [`Stop`], [`FloorBox`], [`FloorKind`], [`Exclusion`], [`LeafSides`], [`leaf_sides`], [`enclose_strip`], [`SearchedLeaf`], [`drop_fenced`], [`Drops`], [`components`], [`Components`], [`Component`], [`side_record`], [`Revolved`], [`type_components`], [`Typed`], [`Why`], [`type_solutions`], [`SolutionAt`] | (not upstream) |
+//! | [`LineNet`], [`isolate`], [`PassLine`], [`CertifiedRoot`], [`Isolation`], [`Stop`], [`FloorBox`], [`FloorKind`], [`Exclusion`], [`LeafSides`], [`leaf_sides`], [`enclose_strip`], [`SearchedLeaf`], [`drop_fenced`], [`Drops`], [`components`], [`Components`], [`Component`], [`side_record`], [`Revolved`], [`type_components`], [`Typed`], [`Why`], [`Overlap`], [`FootWhy`], [`Stretch`], [`type_solutions`], [`SolutionAt`] | (not upstream) |
 //!
 //! Deviations: none (no upstream counterpart). Bounds: no recursion (work lists); a box is
 //! halved until its middle is one of its ends; at most [`MAX_SCRATCH_BOXES`] boxes a leaf,
@@ -400,6 +406,9 @@ pub(crate) struct LineNet {
     /// The net as the surface stores it, for [`side_bounds`] (with
     /// [`LineNet::revolved`] only).
     form: Option<crate::nurbs::srf_basic::Surface>,
+    /// Whether the stored net closes exactly in u and in v ([`closes_exactly`]): a
+    /// diagnosis of [`Overlap`] only.
+    closes: [bool; 2],
 }
 
 impl LineNet {
@@ -431,12 +440,14 @@ impl LineNet {
         let creases = [creases(&net.u, net.p, u), creases(&net.v, net.q, v)];
         let revolved = Revolved::of(surface, &net);
         let form = revolved.and_then(|_| base.gw_nurb().cloned());
+        let closes = [closes_exactly(&net, true), closes_exactly(&net, false)];
         Ok(Some(Self {
             net,
             range: [u, v],
             creases,
             revolved,
             form,
+            closes,
         }))
     }
 
@@ -555,6 +566,66 @@ impl LineNet {
         let out = i3(p.at(0, 0));
         out.iter().all(|x| x.is_finite()).then_some(out)
     }
+}
+
+/// Whether the net closes exactly in u (`in_u`, else in v): its knots clamped at both ends
+/// in that direction (so its first and last rows of control points are its edges there),
+/// and those two rows one point at each place as homogeneous points ([`one_point`]).
+fn closes_exactly(net: &Nurbs, in_u: bool) -> bool {
+    let (knots, degree) = if in_u {
+        (&net.u, net.p)
+    } else {
+        (&net.v, net.q)
+    };
+    let clamped =
+        |end: Option<&[f64]>| end.is_some_and(|e| e.windows(2).all(|w| w.first() == w.last()));
+    let len = knots.len();
+    let ends = clamped(knots.get(..=degree))
+        && clamped(len.checked_sub(degree + 1).and_then(|i| knots.get(i..)));
+    let point = |i: usize, j: usize| -> Option<[f64; 4]> {
+        let k = i.checked_mul(net.nv)?.checked_add(j)?.checked_mul(4)?;
+        let x = net.pw.get(k..k.checked_add(4)?)?;
+        Some([*x.first()?, *x.get(1)?, *x.get(2)?, *x.get(3)?])
+    };
+    let (count, across) = if in_u {
+        (net.nv, net.nu)
+    } else {
+        (net.nu, net.nv)
+    };
+    let Some(last) = across.checked_sub(1) else {
+        return false;
+    };
+    ends && (0..count).all(|k| {
+        let (a, b) = if in_u {
+            (point(0, k), point(last, k))
+        } else {
+            (point(k, 0), point(k, last))
+        };
+        a.zip(b).is_some_and(|(a, b)| one_point(a, b))
+    })
+}
+
+/// Whether the homogeneous points `a` and `b` (`(x w, y w, z w, w)`) are one point exactly:
+/// positive weights, and `a_i b_w = b_i a_w` in each coordinate, compared as the rounded
+/// product and its error, each exact by a fused multiply-add (no division, whose rounded
+/// quotients may agree for points that differ). A product too small for its error to be
+/// exact is not shown.
+fn one_point(a: [f64; 4], b: [f64; 4]) -> bool {
+    let [ax, ay, az, aw] = a;
+    let [bx, by, bz, bw] = b;
+    let product = |x: f64, y: f64| {
+        let p = x * y;
+        let exact = p.is_finite() && (p == 0.0 || p.abs() >= 1.0e-280);
+        exact.then(|| (p, x.mul_add(y, -p)))
+    };
+    aw > 0.0
+        && bw > 0.0
+        && [(ax, bx), (ay, by), (az, bz)].iter().all(|&(p, q)| {
+            match (product(p, bw), product(q, aw)) {
+                (Some(l), Some(r)) => l == r,
+                _ => false,
+            }
+        })
 }
 
 /// The knots of `knots` (degree `degree`) strictly inside `range` whose multiplicity is at
@@ -2729,8 +2800,8 @@ pub(crate) enum Why {
     NotTheNet,
     /// The side function at an end is not proved apart from 0.
     EndNotShown,
-    /// Another component's line parameters meet its own.
-    Overlapped,
+    /// Another component's line parameters meet its own, and what is known of the two.
+    Overlapped(Overlap),
     /// The cone's radius at the net's heights over its hull is not shown positive (the
     /// apex, or the other nappe).
     Apex,
@@ -2742,9 +2813,79 @@ pub(crate) enum Why {
     OutsideHull,
     /// The side test ran out of its budget.
     Budget,
-    /// The foot's branch is not certified over its line parameters (the foot rule: a
-    /// stretch with no foot box, or two neighbours not chained).
-    FootNotShown,
+    /// The foot's branch is not certified over its line parameters (the foot rule), and
+    /// where it failed.
+    FootNotShown(FootWhy),
+}
+
+/// What is known of a component another's line parameters meet ([`Why::Overlapped`]):
+/// each other component whose clipped line parameters meet its own is told by the first of
+/// these that holds for the two, and the component takes the last told of them (so
+/// [`Overlap::Seam`] means every one lies across a seam from it). A diagnosis only: none of
+/// them decides anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Overlap {
+    /// A box of each lies on an opposite end of the knots' range in a direction in which
+    /// the stored net closes exactly ([`LineNet::closes`]), their stretches along those ends
+    /// meeting: one contact across the seam, which nothing joins.
+    Seam,
+    /// The same on the ends of a direction in which the net is not shown to close (a
+    /// sphere's two poles).
+    Ends,
+    /// The boxes of one are all left at the floor, and the line parameters of the two
+    /// without the tolerance's widening (each box's widened by `tol / |D|`, rounded
+    /// outward) are apart.
+    Widening,
+    /// None of these, or past the tests' bound.
+    Other,
+}
+
+/// Where the foot rule ([`by_foot`]) failed ([`Why::FootNotShown`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum FootWhy {
+    /// Two neighbouring stretches are not chained.
+    NotChained,
+    /// A stretch halved to the floor of the line parameters has no foot box: why its last
+    /// test failed.
+    Floor(Stretch),
+    /// The foot's side at `t₀` cannot be formed (no stretch there, or its tight foot box is
+    /// not shown).
+    NoSideAtStart,
+    /// The foot's side at `t₁` cannot be formed.
+    NoSideAtEnd,
+}
+
+/// Why a stretch of the line parameters has no foot box ([`foot_box`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Stretch {
+    /// The foot rule's budget ran out in its widenings.
+    Budget,
+    /// Newton's steps toward the foot at the stretch's middle do not settle (a singular
+    /// Jacobian, a step not finite, or the net refusing a point on its knots' range).
+    Newton,
+    /// Newton's steps toward the foot at the stretch's middle leave the knots' range, or
+    /// settle off it.
+    NewtonOff,
+    /// The box reaches the net's knots' range or the solve's domain.
+    LeavesDomain,
+    /// Krawczyk's operator cannot be formed: the box crosses a crease knot line (the net
+    /// below `C¹` across it).
+    Crease,
+    /// Krawczyk's operator cannot be formed: the Jacobian at the box's middle is not
+    /// inverted.
+    Singular,
+    /// Krawczyk's operator cannot be formed: the net refuses the box, or a value is not
+    /// finite.
+    NotFinite,
+    /// The operator does not lie strictly inside the box within [`FOOT_WIDENINGS`].
+    NoContraction,
+    /// It does, but a box of the component whose line parameters meet the stretch does not
+    /// lie in the box (not reached: the box is grown from them).
+    HeldOutside,
+    /// It does, but the box is not covered by the searched leaves and strips.
+    Uncovered,
+    /// It does, but `S_u × S_v` is not shown apart from 0 over the box.
+    Degenerate,
 }
 
 /// Types every component of `comps` (module docs, "Typing"): the solve's `leaves`, `sides`
@@ -2780,6 +2921,21 @@ pub(crate) fn type_components(
             .map(|t| t.unwrap_or_else(|| Ivl::new(f64::NAN, f64::NAN)))
             .collect::<Vec<Ivl>>(),
     );
+    // what is known of each overlapped component a side test or the foot rule may read
+    // (one holding a box left at the floor, not undecided by its flags)
+    let wanted: Vec<bool> = comps
+        .list
+        .iter()
+        .zip(&overlapped)
+        .zip(&clipped)
+        .map(|((c, &o), t)| o && t.is_some() && c.holds.left > 0 && undecided_by_flags(c).is_none())
+        .collect();
+    let overlaps = match &scratch {
+        Some(scratch) if wanted.contains(&true) => {
+            overlap_reasons(net, scratch, comps, &clipped, &wanted)
+        }
+        _ => vec![Overlap::Other; comps.list.len()],
+    };
     // the net's side bounds, made once for the solve when a side test first reads them (a
     // decomposition that fails gives none: every side test is then undecided)
     let mut bounds: Option<Vec<SideBound>> = None;
@@ -2798,7 +2954,11 @@ pub(crate) fn type_components(
             (None, None, _) => Typed::Undecided(Why::NotRun),
             (None, Some(_), None) => Typed::Undecided(Why::ReachesEnd),
             (None, Some(scratch), Some(t)) => {
-                let others = overlapped.get(ci).copied().unwrap_or(true);
+                let others = overlapped
+                    .get(ci)
+                    .copied()
+                    .unwrap_or(true)
+                    .then(|| overlaps.get(ci).copied().unwrap_or(Overlap::Other));
                 type_one(
                     net,
                     scratch,
@@ -2822,8 +2982,8 @@ pub(crate) fn type_components(
 }
 
 /// Types one component not undecided by its flags (module docs, "Typing"), its line
-/// parameters `t` clipped to the line's own interval and `others` whether another
-/// component's (clipped) meet them: its certified roots are split by the interval (those
+/// parameters `t` clipped to the line's own interval and `others` what is known of it where
+/// another component's (clipped) meet them: its certified roots are split by the interval (those
 /// wholly past it are the component's [`Component::beyond`], one reaching across its end
 /// undecided), a certified root not reported and not wholly past it makes it undecided, and
 /// it is typed by its count, its sides or its foot. A component reaching an end is decided
@@ -2836,7 +2996,7 @@ fn type_one(
     (leaves, sides): (&[SearchedLeaf], &[LeafSides]),
     c: &mut Component,
     boxes: &[PlacedBox],
-    (t, others): (Ivl, bool),
+    (t, others): (Ivl, Option<Overlap>),
     bounds: &mut Option<Vec<SideBound>>,
 ) -> Typed {
     let [s0, s1] = line.span;
@@ -3033,6 +3193,112 @@ fn overlapped(hulls: &[Ivl]) -> Vec<bool> {
     out
 }
 
+/// What is known of each component of `comps` flagged in `wanted` where another's line
+/// parameters meet its own ([`Overlap`]; `clipped` each one's line parameters clipped to
+/// the line's own interval, `None` where nothing finite is left); [`Overlap::Other`] for
+/// the components not wanted. The other components are tested within [`MAX_MEETING_TESTS`]
+/// pairs of components and of boxes (a component past it is [`Overlap::Other`]). (No two
+/// components share a leaf's border: boxes meeting in `(u, v)` share a point, whose feet
+/// both boxes' line parameters hold, so [`components`] joined them.)
+fn overlap_reasons(
+    net: &LineNet,
+    line: &ScratchLine,
+    comps: &Components,
+    clipped: &[Option<Ivl>],
+    wanted: &[bool],
+) -> Vec<Overlap> {
+    let n = comps.list.len();
+    let want = |c: usize| wanted.get(c).copied().unwrap_or(false);
+    // each component's boxes on each end of the knots' range: u0, u1, v0, v1
+    let [[u0, u1], [v0, v1]] = net.range;
+    let ends: Vec<[Vec<PlacedBox>; 4]> = comps
+        .list
+        .iter()
+        .map(|c| {
+            let mut e: [Vec<PlacedBox>; 4] = Default::default();
+            for b in c.boxes.iter().filter_map(|&i| comps.boxes.get(i)) {
+                let on = [b.u.lo <= u0, b.u.hi >= u1, b.v.lo <= v0, b.v.hi >= v1];
+                for (slot, _) in e.iter_mut().zip(on).filter(|(_, o)| *o) {
+                    slot.push(*b);
+                }
+            }
+            e
+        })
+        .collect();
+    // the direction (0 for u, 1 for v) in which a box of `a` and one of `b` lie on opposite
+    // ends with their stretches along them meeting, counting each pair tested in `tests`
+    let opposite = |a: usize, b: usize, tests: &mut usize| -> Option<usize> {
+        let (ea, eb) = (ends.get(a)?, ends.get(b)?);
+        for (s, o) in [(0, 1), (1, 0), (2, 3), (3, 2)] {
+            let (Some(xa), Some(xb)) = (ea.get(s), eb.get(o)) else {
+                continue;
+            };
+            for p in xa {
+                for q in xb {
+                    *tests = tests.saturating_add(1);
+                    if *tests > MAX_MEETING_TESTS {
+                        return None;
+                    }
+                    let (x, y) = if s < 2 { (p.v, q.v) } else { (p.u, q.u) };
+                    if x.lo <= y.hi && y.lo <= x.hi {
+                        return Some(s / 2);
+                    }
+                }
+            }
+        }
+        None
+    };
+    // each one's line parameters without the widening: its points' feet (not clipped)
+    let feet: Vec<Ivl> = comps
+        .list
+        .iter()
+        .map(|c| {
+            let lo = round_down(c.t.lo + line.tol_t);
+            Ivl::new(lo, round_up(c.t.hi - line.tol_t).max(lo))
+        })
+        .collect();
+    let at_floor = |c: usize| {
+        comps
+            .list
+            .get(c)
+            .is_some_and(|x| x.holds.left == x.boxes.len())
+    };
+    let mut tests = 0_usize;
+    let mut out = vec![Overlap::Other; n];
+    for a in (0..n).filter(|&a| want(a)) {
+        let Some(Some(ta)) = clipped.get(a).copied() else {
+            continue;
+        };
+        let mut told: Option<Overlap> = None;
+        for b in (0..n).filter(|&b| b != a) {
+            tests = tests.saturating_add(1);
+            if tests > MAX_MEETING_TESTS {
+                told = Some(Overlap::Other);
+                break;
+            }
+            let tb = clipped.get(b).copied().flatten();
+            if tb.is_some_and(|tb| !(ta.lo <= tb.hi && tb.lo <= ta.hi)) {
+                continue;
+            }
+            let apart = match (feet.get(a), feet.get(b)) {
+                (Some(x), Some(y)) => x.hi < y.lo || y.hi < x.lo,
+                _ => false,
+            };
+            let pair = match opposite(a, b, &mut tests) {
+                Some(dir) if net.closes.get(dir).copied().unwrap_or(false) => Overlap::Seam,
+                Some(_) => Overlap::Ends,
+                None if apart && (at_floor(a) || at_floor(b)) => Overlap::Widening,
+                None => Overlap::Other,
+            };
+            told = Some(told.map_or(pair, |t| t.max(pair)));
+        }
+        if let Some(slot) = out.get_mut(a) {
+            *slot = told.unwrap_or(Overlap::Other);
+        }
+    }
+    out
+}
+
 /// What makes a component undecided whatever its sides (answer to the typing's design: a
 /// leaf not decided, a trim cull, a strip box not excluded).
 fn undecided_by_flags(c: &Component) -> Option<Why> {
@@ -3142,7 +3408,8 @@ fn by_count(
 /// The side test of a component holding a box left at the floor (module docs, "Typing"),
 /// for a surface of revolution: the side function at the line's points at the two ends of
 /// its line parameters, each proved more than half the tolerance from 0; no other
-/// component's line parameters meet its own (`others`); its hull covered by searched leaves
+/// component's line parameters meet its own (`others`, what is known of it where one
+/// does); its hull covered by searched leaves
 /// and strips; the net over its hull within a certified `ε` below a quarter of the
 /// tolerance of the closed form (`bounds`, [`side_bounds`]), on a cone's one nappe; and
 /// every point of the line between the ends that may lie within `ε` of the complete
@@ -3154,7 +3421,7 @@ fn by_sides(
     line: &ScratchLine,
     leaves: &[SearchedLeaf],
     c: &mut Component,
-    (t, clipped, others): (Ivl, [bool; 2], bool),
+    (t, clipped, others): (Ivl, [bool; 2], Option<Overlap>),
     bounds: &[SideBound],
 ) -> Typed {
     let Some(rev) = net.revolved else {
@@ -3176,8 +3443,8 @@ fn by_sides(
     if !(shown(lo) && shown(hi)) {
         return Typed::Undecided(Why::EndNotShown);
     }
-    if others {
-        return Typed::Undecided(Why::Overlapped);
+    if let Some(why) = others {
+        return Typed::Undecided(Why::Overlapped(why));
     }
     if !covered_by_leaves(c.u, c.v, leaves) {
         return Typed::Undecided(Why::Uncovered);
@@ -3270,23 +3537,34 @@ struct FootBox {
 
 /// The foot system `G(u, v, t) = ((S − L(t)) · S_u, (S − L(t)) · S_v)` and its Jacobian in
 /// `(u, v)` over the box `u` (`[u, v]`) and the line parameters `t`, enclosed: `G` at the
-/// box's middle, the Jacobian over the box (rows), and `S_u × S_v` over it; `None` where the
-/// net refuses the box (it leaves the knots' range, or crosses a knot line the net is not
-/// `C¹` across: the second partials' mean-value form needs `S` to be `C¹`).
+/// box's middle, the Jacobian over the box (rows), and `S_u × S_v` over it; why not where
+/// the net refuses the box (it leaves the knots' range, or crosses a knot line the net is
+/// not `C¹` across: the second partials' mean-value form needs `S` to be `C¹`).
 #[allow(clippy::type_complexity)]
 fn foot_system(
     net: &LineNet,
     line: &ScratchLine,
     u: [Ivl; 2],
     t: Ivl,
-) -> Option<([Ivl; 2], [[Ivl; 2]; 2], I3)> {
+) -> core::result::Result<([Ivl; 2], [[Ivl; 2]; 2], I3), Stretch> {
     let [bu, bv] = u;
     let (mu, mv) = (bu.mid(), bv.mid());
-    let [s_m, su_m, sv_m] = net.over(Ivl::from(mu), Ivl::from(mv), line.p)?;
+    let refused = Stretch::NotFinite;
+    let [s_m, su_m, sv_m] = net
+        .over(Ivl::from(mu), Ivl::from(mv), line.p)
+        .ok_or(refused)?;
     let gap_m = less(&s_m, t, line.d);
     let g = [dot_i(&gap_m, &su_m), dot_i(&gap_m, &sv_m)];
-    let [s, s_u, s_v] = net.over(bu, bv, line.p)?;
-    let [s_uu, s_uv, s_vv] = net.second(bu, bv, line.p)?;
+    let [s, s_u, s_v] = net.over(bu, bv, line.p).ok_or(refused)?;
+    let [s_uu, s_uv, s_vv] = net.second(bu, bv, line.p).ok_or_else(|| {
+        let [cu, cv] = &net.creases;
+        let across = |knots: &[f64], x: Ivl| knots.iter().any(|&k| k > x.lo && k < x.hi);
+        if across(cu, bu) || across(cv, bv) {
+            Stretch::Crease
+        } else {
+            refused
+        }
+    })?;
     let gap = less(&s, t, line.d);
     let j_uv = dot_i(&s_u, &s_v) + dot_i(&gap, &s_uv);
     let jac = [
@@ -3295,18 +3573,28 @@ fn foot_system(
     ];
     let normal = cross_i(&s_u, &s_v);
     let finite = g.iter().chain(jac.iter().flatten()).all(|x| x.is_finite());
-    finite.then_some((g, jac, normal))
+    if finite {
+        Ok((g, jac, normal))
+    } else {
+        Err(refused)
+    }
 }
 
 /// Krawczyk's operator of the foot system over the box `u` with the line parameters `t`
-/// (`t` an interval parameter): `None` where it cannot be formed.
-fn foot_operator(net: &LineNet, line: &ScratchLine, u: [Ivl; 2], t: Ivl) -> Option<([Ivl; 2], I3)> {
+/// (`t` an interval parameter): why not where it cannot be formed.
+fn foot_operator(
+    net: &LineNet,
+    line: &ScratchLine,
+    u: [Ivl; 2],
+    t: Ivl,
+) -> core::result::Result<([Ivl; 2], I3), Stretch> {
     let (g, jac, normal) = foot_system(net, line, u, t)?;
     let mids = u.map(Ivl::mid);
     let [[a, b], [c, d]] = jac;
-    let y = inverse_of_columns2(&[[a.mid(), c.mid()], [b.mid(), d.mid()]])?;
+    let y =
+        inverse_of_columns2(&[[a.mid(), c.mid()], [b.mid(), d.mid()]]).ok_or(Stretch::Singular)?;
     let (cm, _) = contraction(&y, &jac);
-    Some((k_operator(&mids, &y, &g, &cm, &u), normal))
+    Ok((k_operator(&mids, &y, &g, &cm, &u), normal))
 }
 
 /// The foot at the single line parameter `t` in the foot box `u` (whose operator over a
@@ -3314,13 +3602,13 @@ fn foot_operator(net: &LineNet, line: &ScratchLine, u: [Ivl; 2], t: Ivl) -> Opti
 /// strictly inside `u`, then taken again on its meet with the box a few times (each box
 /// holding the one foot holds it in its operator). `None` where it cannot be formed.
 fn tight_foot(net: &LineNet, line: &ScratchLine, u: [Ivl; 2], t: f64) -> Option<[Ivl; 2]> {
-    let (k, _) = foot_operator(net, line, u, Ivl::from(t))?;
+    let (k, _) = foot_operator(net, line, u, Ivl::from(t)).ok()?;
     if !inside2(&k, &u) {
         return None;
     }
     let mut x = k;
     for _ in 0..FOOT_WIDENINGS {
-        let Some((k, _)) = foot_operator(net, line, x, Ivl::from(t)) else {
+        let Ok((k, _)) = foot_operator(net, line, x, Ivl::from(t)) else {
             break;
         };
         let [ku, kv] = k;
@@ -3351,8 +3639,8 @@ fn within2(a: &[Ivl; 2], b: &[Ivl; 2]) -> bool {
 /// domain, holding every box of the component whose line parameters meet `t` and Newton's
 /// foot at `t`'s middle, covered by the searched leaves and strips, with `S_u × S_v` apart
 /// from 0 over it and Krawczyk's operator of the foot system over `U × t` strictly inside
-/// it (each `t` then has exactly one foot in `U`). `None` where none is found within the
-/// widenings and the budget.
+/// it (each `t` then has exactly one foot in `U`). Why not where none is found within the
+/// widenings and the budget (the last test's failure).
 #[allow(clippy::too_many_arguments)]
 fn foot_box(
     net: &LineNet,
@@ -3362,7 +3650,7 @@ fn foot_box(
     t: Ivl,
     start: [f64; 2],
     budget: &mut usize,
-) -> Option<FootBox> {
+) -> core::result::Result<FootBox, Stretch> {
     let [[u0, u1], [v0, v1]] = net.range;
     let (lo, hi) = (line.solve_domain.min(), line.solve_domain.max());
     let (du, dv) = ([u0.max(lo.x), u1.min(hi.x)], [v0.max(lo.y), v1.min(hi.y)]);
@@ -3385,35 +3673,51 @@ fn foot_box(
     u = u.map(grow);
     for _ in 0..FOOT_WIDENINGS {
         if *budget == 0 {
-            return None;
+            return Err(Stretch::Budget);
         }
         *budget = budget.saturating_sub(1);
         let [bu, bv] = u;
         let inside_domain = bu.lo > du[0] && bu.hi < du[1] && bv.lo > dv[0] && bv.hi < dv[1];
         if !inside_domain {
-            return None;
+            return Err(Stretch::LeavesDomain);
         }
         let (k, normal) = foot_operator(net, line, u, t)?;
         if inside2(&k, &u) {
-            let regular = length_squared(&normal).lo > 0.0;
-            let holds_boxes = held.is_none_or(|h| within2(&h, &u));
-            let covered = covered_by_leaves(bu, bv, leaves);
-            return (regular && holds_boxes && covered).then_some(FootBox { t, u, k });
+            return if !held.is_none_or(|h| within2(&h, &u)) {
+                Err(Stretch::HeldOutside)
+            } else if !covered_by_leaves(bu, bv, leaves) {
+                Err(Stretch::Uncovered)
+            } else if !(length_squared(&normal).lo > 0.0) {
+                Err(Stretch::Degenerate)
+            } else {
+                Ok(FootBox { t, u, k })
+            };
         }
         let [ku, kv] = k;
         if !(ku.is_finite() && kv.is_finite()) {
-            return None;
+            return Err(Stretch::NotFinite);
         }
         u = [bu.hull(ku), bv.hull(kv)].map(grow);
     }
-    None
+    Err(Stretch::NoContraction)
 }
 
-/// Newton's foot of `L(t)` on the net from `start`: `None` where the steps do not settle.
-fn newton_foot(net: &LineNet, line: &ScratchLine, t: f64, start: [f64; 2]) -> Option<[f64; 2]> {
+/// Newton's foot of `L(t)` on the net from `start`: why not where the steps do not settle,
+/// or leave the knots' range or settle off it.
+fn newton_foot(
+    net: &LineNet,
+    line: &ScratchLine,
+    t: f64,
+    start: [f64; 2],
+) -> core::result::Result<[f64; 2], Stretch> {
+    // (whether a step asked for a point off the knots' range)
+    let left = core::cell::Cell::new(false);
     let at = |p: [f64; 2]| -> Result<Linearised<2>> {
         let [u, v] = p;
         let (bu, bv) = (Ivl::from(u), Ivl::from(v));
+        if !net.holds(bu, bv) {
+            left.set(true);
+        }
         let (Some([s, s_u, s_v]), Some([s_uu, s_uv, s_vv])) =
             (net.over(bu, bv, line.p), net.second(bu, bv, line.p))
         else {
@@ -3429,9 +3733,22 @@ fn newton_foot(net: &LineNet, line: &ScratchLine, t: f64, start: [f64; 2]) -> Op
         ];
         Ok(Some((g, cols)))
     };
-    let p = newton(start, &at, &inverse_of_columns2).ok().flatten()?;
+    let p = newton(start, &at, &inverse_of_columns2)
+        .ok()
+        .flatten()
+        .ok_or_else(|| {
+            if left.get() {
+                Stretch::NewtonOff
+            } else {
+                Stretch::Newton
+            }
+        })?;
     let [pu, pv] = p;
-    net.holds(Ivl::from(pu), Ivl::from(pv)).then_some(p)
+    if net.holds(Ivl::from(pu), Ivl::from(pv)) {
+        Ok(p)
+    } else {
+        Err(Stretch::NewtonOff)
+    }
 }
 
 /// The side of the foot at the line parameter `t` in the foot box `f` (`t` in `f.t`):
@@ -3450,19 +3767,21 @@ fn foot_side(net: &LineNet, line: &ScratchLine, f: &FootBox, t: f64) -> Option<I
 /// "Typing"): `[t₀, t₁]` covered by stretches, each with a foot box ([`foot_box`]), each two
 /// neighbours chained (at their common `t`, the tight foot box of one lies in the other's
 /// box), and the side of the foot ([`foot_side`]) proved apart from 0 at `t₀` and `t₁`.
-/// With no other component's line parameters meeting its own (`others`) and its hull
-/// covered by searched leaves and strips. Sets the component's contact (crossing for
-/// opposite sides, touching for one) and returns [`Typed::Foot`], or why it is undecided.
+/// With no other component's line parameters meeting its own (`others`, what is known of
+/// it where one does) and its hull covered by searched leaves and strips. Sets the
+/// component's contact (crossing for opposite sides, touching for one) and returns
+/// [`Typed::Foot`], or why it is undecided (for a stretch at the floor, why its last foot
+/// box failed: [`Stretch`]).
 fn by_foot(
     net: &LineNet,
     line: &ScratchLine,
     leaves: &[SearchedLeaf],
     boxes: &[PlacedBox],
     c: &mut Component,
-    (t, others): (Ivl, bool),
+    (t, others): (Ivl, Option<Overlap>),
 ) -> Typed {
-    if others {
-        return Typed::Undecided(Why::Overlapped);
+    if let Some(why) = others {
+        return Typed::Undecided(Why::Overlapped(why));
     }
     if !covered_by_leaves(c.u, c.v, leaves) {
         return Typed::Undecided(Why::Uncovered);
@@ -3478,36 +3797,42 @@ fn by_foot(
         }
         // (a stretch costs one test, whatever its Newton step does)
         budget = budget.saturating_sub(1);
-        if let Some(f) = foot_box(net, line, leaves, boxes, t, start, &mut budget) {
-            if let Some(prev) = chain.last() {
-                // (the stretches tile the line parameters left to right)
-                let at = prev.t.hi;
-                // (the two feet at the common `t` are one: each box holds one foot)
-                let joined = tight_foot(net, line, prev.u, at).is_some_and(|k| within2(&k, &f.u))
-                    || tight_foot(net, line, f.u, at).is_some_and(|k| within2(&k, &prev.u));
-                if !(joined && at == t.lo) {
-                    return Typed::Undecided(Why::FootNotShown);
+        let failed = match foot_box(net, line, leaves, boxes, t, start, &mut budget) {
+            Ok(f) => {
+                if let Some(prev) = chain.last() {
+                    // (the stretches tile the line parameters left to right)
+                    let at = prev.t.hi;
+                    // (the two feet at the common `t` are one: each box holds one foot)
+                    let joined = tight_foot(net, line, prev.u, at)
+                        .is_some_and(|k| within2(&k, &f.u))
+                        || tight_foot(net, line, f.u, at).is_some_and(|k| within2(&k, &prev.u));
+                    if !(joined && at == t.lo) {
+                        return Typed::Undecided(Why::FootNotShown(FootWhy::NotChained));
+                    }
                 }
+                start = f.k.map(Ivl::mid);
+                chain.push(f);
+                continue;
             }
-            start = f.k.map(Ivl::mid);
-            chain.push(f);
-            continue;
-        }
+            Err(why) => why,
+        };
         let mid = t.mid();
         if !(mid > t.lo && mid < t.hi) {
-            return Typed::Undecided(Why::FootNotShown);
+            return Typed::Undecided(Why::FootNotShown(FootWhy::Floor(failed)));
         }
         work.push(Ivl::new(mid, t.hi));
         work.push(Ivl::new(t.lo, mid));
     }
-    let (Some(first), Some(last)) = (chain.first(), chain.last()) else {
-        return Typed::Undecided(Why::FootNotShown);
-    };
-    let (Some(lo), Some(hi)) = (
-        foot_side(net, line, first, whole.lo),
-        foot_side(net, line, last, whole.hi),
-    ) else {
-        return Typed::Undecided(Why::FootNotShown);
+    let lo = chain
+        .first()
+        .and_then(|first| foot_side(net, line, first, whole.lo));
+    let hi = chain
+        .last()
+        .and_then(|last| foot_side(net, line, last, whole.hi));
+    let (lo, hi) = match (lo, hi) {
+        (Some(lo), Some(hi)) => (lo, hi),
+        (None, _) => return Typed::Undecided(Why::FootNotShown(FootWhy::NoSideAtStart)),
+        (Some(_), None) => return Typed::Undecided(Why::FootNotShown(FootWhy::NoSideAtEnd)),
     };
     let apart = |s: Ivl| s.lo > 0.0 || s.hi < 0.0;
     if !(apart(lo) && apart(hi)) {
@@ -6012,7 +6337,8 @@ mod tests {
     /// end above the dome, `S_u × S_v` upward: both feet's sides positive), touching by the
     /// foot. The line along the dome's edge `y = −1, z = 0` lies in its boundary curve: its
     /// feet sit on the patch's border, where no foot box lies strictly inside the patch, so it
-    /// is undecided (the edge counterexample of answer8: a branch leaving the domain). On a
+    /// is undecided (the edge counterexample of answer8: a branch leaving the domain), at a
+    /// stretch at the floor whose Newton steps toward the foot leave the knots' range. On a
     /// fold, `S(u, v) = (4u(1 − u), v, u)` (the profile `x = 4z(1 − z)` turns back at
     /// `x = 1, z = ½`), the line along z through the tip touches it from outside (`S_u × S_v
     /// = (−1, 0, 4 − 8u)`, `L − S` along +x at both ends: both sides negative), touching by
@@ -6061,9 +6387,8 @@ mod tests {
         );
         assert!(!c.list.is_empty());
         assert!(
-            c.list
-                .iter()
-                .all(|x| x.typed == Typed::Undecided(Why::FootNotShown)),
+            c.list.iter().all(|x| x.typed
+                == Typed::Undecided(Why::FootNotShown(FootWhy::Floor(Stretch::NewtonOff)))),
             "{:?}",
             types(&c)
         );
