@@ -22,6 +22,8 @@ mod offset_fixture;
 
 use offset_fixture::{offset_full, planar_faces_at, report, shell, Notifications};
 use solidcore::blend::fillet_executive::api::fillet_edges;
+use solidcore::error::offset::{OffsetFailure, Unsoundness};
+use solidcore::error::Reason;
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::mass::integrator::properties::face_area;
 use solidcore::nurbs::knots::Side;
@@ -39,10 +41,39 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::edgeuse::p3 as eu3;
 use solidcore::topology::integrity;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, FaceId, Kernel, Point3, Vec3};
+use solidcore::{Brep, FaceId, Kernel, Point3, SolidError, Vec3};
 
 /// Relative tolerance of the volumes (the port lands within 1e-12 of each).
 const REL: f64 = 1e-9;
+
+// The closed forms of the bodies whose corners are mitres (three chamfers meeting), each
+// the volume of the convex polytope of the faces' half-spaces moved by the offset, an open
+// face kept (`wr_657_closed_forms_replay` recomputes each apart from the kernel).
+
+/// Edges 0, 9 and 8 chamfered, offset 1.
+const THREE_OFFSET_OUT: f64 = 8240.319371877506;
+/// Edges 0, 9 and 8 chamfered, offset -1.
+const THREE_OFFSET_IN: f64 = 3980.1213203435586;
+/// Edges 0, 9 and 8 chamfered, shelled 1 inward open at the wall at x = 30.
+const THREE_SHELL_IN_X30: f64 = 1807.9006853824353;
+/// Edges 0, 9 and 8 chamfered, shelled 1 outward open at the wall at x = 30.
+const THREE_SHELL_OUT_X30: f64 = 2156.802272360098;
+/// Edges 0, 9 and 8 chamfered, shelled 1 outward open at edge 8's chamfer.
+const THREE_SHELL_OUT_C8: f64 = 2306.5861949340533;
+/// Every edge chamfered, offset 1.
+const ALL_OFFSET_OUT: f64 = 7669.145453154059;
+/// Every edge chamfered, offset -1.
+const ALL_OFFSET_IN: f64 = 3832.9705627484773;
+/// Every edge chamfered, shelled 1 outward open at the wall at x = 30.
+const ALL_SHELL_OUT_X30: f64 = 1961.2435773258048;
+/// Every edge chamfered, shelled 1 inward open at the wall at x = 30.
+const ALL_SHELL_IN_X30: f64 = 1675.5783549120974;
+/// Every edge chamfered, shelled 1 inward open at the top (z = 10).
+const ALL_SHELL_IN_Z10: f64 = 1392.1468974070212;
+/// Every edge chamfered, shelled 1 outward open at the chamfer along the top at x = 30.
+const ALL_SHELL_OUT_C0: f64 = 2014.992807766137;
+/// Every edge chamfered, shelled 1 outward open at the upright chamfer at x = 30, y = 0.
+const ALL_SHELL_OUT_C8: f64 = 2061.561350261062;
 
 /// The box with `edges` (indices into its edge list; `None`: every edge) chamfered 2.
 fn chamfered(k: &mut Kernel, edges: Option<&[usize]>) -> Brep {
@@ -87,11 +118,42 @@ fn x30(k: &Kernel, b: &Brep) -> FaceId {
 /// Picks the face a shell leaves open.
 type OpenFace = fn(&Kernel, &Brep) -> FaceId;
 
+/// The box's top, z = 10.
+fn z10(k: &Kernel, b: &Brep) -> FaceId {
+    face_in_plane(k, b, [0.0, 0.0, 1.0], 10.0)
+}
+
 /// The box's wall at y = 0.
 fn y0(k: &Kernel, b: &Brep) -> FaceId {
     let faces = planar_faces_at(k, b, 1, 0.0);
     assert_eq!(faces.len(), 1, "the wall at y = 0");
     faces[0]
+}
+
+/// The plane face of `b` lying in the plane `n . x = h`.
+fn face_in_plane(k: &Kernel, b: &Brep, n: [f64; 3], h: f64) -> FaceId {
+    let found: Vec<FaceId> = b
+        .face_list()
+        .iter()
+        .copied()
+        .filter(|&f| {
+            let face = b.face(f).unwrap();
+            let s = face.surface.as_ref().unwrap();
+            if !s.is_kind_of(Plane::TYPE).unwrap() {
+                return false;
+            }
+            let p = s.evaluate_point(k, face.uv_domain.mid()).unwrap();
+            let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            ((n[0] * p.x + n[1] * p.y + n[2] * p.z - h) / l).abs() < 1e-6
+        })
+        .collect();
+    assert_eq!(found.len(), 1, "one face in the plane {n:?} . x = {h}");
+    found[0]
+}
+
+/// The chamfer of edge 8 (upright at x = 30, y = 0): x - y = 28.
+fn chamfer_8(k: &Kernel, b: &Brep) -> FaceId {
+    face_in_plane(k, b, [1.0, -1.0, 0.0], 28.0)
 }
 
 /// The chamfer of edge 0 (along the top at x = 30).
@@ -177,7 +239,7 @@ fn wr_657_two_chamfers_shell_outward_has_no_loop_gaps() {
 
 #[test]
 fn wr_657_three_chamfers_offsets() {
-    for (d, want) in [(1.0, 8238.532227977406), (-1.0, 3979.9694554143525)] {
+    for (d, want) in [(1.0, THREE_OFFSET_OUT), (-1.0, THREE_OFFSET_IN)] {
         let mut k = Kernel::default();
         let mut b = chamfered(&mut k, Some(&[0, 9, 8]));
         let result = offset_full(&mut k, &mut b, d);
@@ -193,7 +255,8 @@ fn wr_657_three_chamfers_offsets() {
 
 #[test]
 fn wr_657_three_chamfers_shells() {
-    // open at the wall at x = 30 (1 each way) and at the corner's triangle (1 outward)
+    // open at the wall at x = 30 (1 each way) and at edge 8's chamfer, which runs into the
+    // mitre corner (1 outward)
     let mut k = Kernel::default();
     let b = chamfered(&mut k, Some(&[0, 9, 8]));
     let open = x30(&k, &b);
@@ -202,7 +265,7 @@ fn wr_657_three_chamfers_shells() {
         &k,
         "wr_657 three chamfers shell -1 x30",
         result,
-        Some(1807.385883644974),
+        Some(THREE_SHELL_IN_X30),
         REL
     ));
     let mut k = Kernel::default();
@@ -213,25 +276,25 @@ fn wr_657_three_chamfers_shells() {
         &k,
         "wr_657 three chamfers shell +1 x30",
         result,
-        Some(2155.9012941491765),
+        Some(THREE_SHELL_OUT_X30),
         REL
     ));
     let mut k = Kernel::default();
     let b = chamfered(&mut k, Some(&[0, 9, 8]));
-    let open = face_at(&k, &b, [28.0 + 2.0 / 3.0, 4.0 / 3.0, 8.0 + 2.0 / 3.0]);
+    let open = chamfer_8(&k, &b);
     let result = shell(&mut k, b, 1.0, &[open]);
     assert!(report(
         &k,
-        "wr_657 three chamfers shell +1 corner",
+        "wr_657 three chamfers shell +1 chamfer 8",
         result,
-        Some(2337.769119345813),
+        Some(THREE_SHELL_OUT_C8),
         REL
     ));
 }
 
 #[test]
 fn wr_657_fully_chamfered_box() {
-    for (d, want) in [(1.0, 7654.848301953257), (-1.0, 3831.755643314821)] {
+    for (d, want) in [(1.0, ALL_OFFSET_OUT), (-1.0, ALL_OFFSET_IN)] {
         let mut k = Kernel::default();
         let mut b = chamfered(&mut k, None);
         let result = offset_full(&mut k, &mut b, d);
@@ -243,31 +306,24 @@ fn wr_657_fully_chamfered_box() {
             REL
         ));
     }
-    // open at the wall at x = 30, a corner's triangle and the chamfer along the top at
-    // x = 30, each way (the inset open at a chamfer is refused below)
-    let cases: [([f64; 3], f64, f64); 5] = [
-        ([30.0, 10.0, 5.0], 1.0, 1953.157755548379),
-        ([30.0, 10.0, 5.0], -1.0, 1671.4599410124183),
-        (
-            [28.0 + 2.0 / 3.0, 4.0 / 3.0, 8.0 + 2.0 / 3.0],
-            1.0,
-            2076.7518599883315,
-        ),
-        (
-            [28.0 + 2.0 / 3.0, 4.0 / 3.0, 8.0 + 2.0 / 3.0],
-            -1.0,
-            1730.7591584226357,
-        ),
-        ([29.0, 10.0, 9.0], 1.0, 2009.1803204583593),
+    // open at the wall at x = 30 each way, the top inward, and outward at the chamfer along
+    // the top at x = 30 and the upright chamfer at x = 30, y = 0, both into a mitre corner
+    // (the inset open at a chamfer is refused below)
+    let cases: [(OpenFace, f64, f64); 5] = [
+        (x30, 1.0, ALL_SHELL_OUT_X30),
+        (x30, -1.0, ALL_SHELL_IN_X30),
+        (z10, -1.0, ALL_SHELL_IN_Z10),
+        (chamfer_0, 1.0, ALL_SHELL_OUT_C0),
+        (chamfer_8, 1.0, ALL_SHELL_OUT_C8),
     ];
-    for (at, d, want) in cases {
+    for (i, (open, d, want)) in cases.into_iter().enumerate() {
         let mut k = Kernel::default();
         let b = chamfered(&mut k, None);
-        let open = face_at(&k, &b, at);
+        let open = open(&k, &b);
         let result = shell(&mut k, b, d, &[open]);
         assert!(report(
             &k,
-            &format!("wr_657 chamfered box shell {d} at {at:?}"),
+            &format!("wr_657 chamfered box shell {d} case {i}"),
             result,
             Some(want),
             REL
@@ -276,16 +332,23 @@ fn wr_657_fully_chamfered_box() {
 }
 
 /// An inset of a chamfer's width leaves the cavity meeting the open chamfer along a line
-/// only (the body is no manifold solid): the default four-face split detects a
-/// vanishing edge before the final manifold-result guard, and refuses it by name.
+/// only (the body is no manifold solid; `wr_657_closed_forms_replay` shows the line): the
+/// manifold-result guard refuses it by name. (With the old triangular corner facets the
+/// four-face split met a vanishing edge first, `SM_ERR_OFFSET_EDGE_VANISHES`; at the mitre
+/// corners there is no vertex of four faces.)
 #[test]
 fn wr_657_fully_chamfered_box_inset_open_at_a_chamfer_is_refused() {
     let mut k = Kernel::default();
     let b = chamfered(&mut k, None);
     let open = face_at(&k, &b, [29.0, 10.0, 9.0]);
     match shell(&mut k, b, -1.0, &[open]) {
-        Err(e) => assert_eq!(e.sm_status(), Some(1043)),
-        other => panic!("SM_ERR_OFFSET_EDGE_VANISHES expected: {other:?}"),
+        Err(SolidError::Failed(failure)) => assert_eq!(
+            failure.reason,
+            Reason::Offset(OffsetFailure::Unsound {
+                what: Unsoundness::NotManifoldSolid
+            })
+        ),
+        other => panic!("a refusal as no manifold solid expected: {other:?}"),
     }
 }
 
@@ -606,4 +669,290 @@ fn circle_sheet_parallel_plane_move_keeps_its_seam() {
         (area - want).abs() <= 1e-9 * want,
         "area {area}, expected {want}"
     );
+}
+
+/// A half-space `n . x <= h` (`n` need not be unit).
+type HalfSpace = ([f64; 3], f64);
+
+/// The volume of the bounded convex polytope `hs` cuts out, apart from the kernel: its
+/// vertices are the feasible meeting points of three planes; each face's polygon, ordered
+/// by angle about its centroid, has area `A_i`, and the volume is sum `h_i A_i / 3` over the
+/// unit-normal planes (the cone from the origin over each face).
+fn polytope_volume(hs: &[HalfSpace]) -> f64 {
+    let (unit, points) = polytope_vertices(hs);
+    let mut volume = 0.0;
+    for &(n, h) in &unit {
+        let mut face = on_plane(&points, n, h);
+        if face.len() < 3 {
+            continue;
+        }
+        let c = face.iter().fold(Vec3::new(0.0, 0.0, 0.0), |s, p| s + *p) / face.len() as f64;
+        let u = face[0] - c;
+        let u = u / u.length();
+        let w = n.cross(u);
+        let angle = |p: &Vec3| (*p - c).dot(w).atan2((*p - c).dot(u));
+        face.sort_by(|p, q| angle(p).total_cmp(&angle(q)));
+        let area: f64 = (0..face.len())
+            .map(|i| 0.5 * (face[i] - c).cross(face[(i + 1) % face.len()] - c).dot(n))
+            .sum();
+        volume += h * area / 3.0;
+    }
+    volume
+}
+
+/// The vertices of `hs` on the unit-normal plane `n . x = h`.
+fn on_plane(points: &[Vec3], n: Vec3, h: f64) -> Vec<Vec3> {
+    points
+        .iter()
+        .copied()
+        .filter(|p| (n.dot(*p) - h).abs() < 1e-9)
+        .collect()
+}
+
+/// The half-spaces with unit normals, and the polytope's vertices: the feasible meeting
+/// points of three planes.
+fn polytope_vertices(hs: &[HalfSpace]) -> (Vec<(Vec3, f64)>, Vec<Vec3>) {
+    let unit: Vec<(Vec3, f64)> = hs
+        .iter()
+        .map(|&(n, h)| {
+            let n = Vec3::new(n[0], n[1], n[2]);
+            let l = n.length();
+            (n / l, h / l)
+        })
+        .collect();
+    let mut points: Vec<Vec3> = Vec::new();
+    for i in 0..unit.len() {
+        for j in i + 1..unit.len() {
+            for m in j + 1..unit.len() {
+                let (a, ha) = unit[i];
+                let (b, hb) = unit[j];
+                let (c, hc) = unit[m];
+                let det = a.dot(b.cross(c));
+                if det.abs() < 1e-12 {
+                    continue;
+                }
+                let p = (b.cross(c) * ha + c.cross(a) * hb + a.cross(b) * hc) / det;
+                let feasible = unit.iter().all(|&(n, h)| n.dot(p) <= h + 1e-9);
+                if feasible && !points.iter().any(|q| (*q - p).length() < 1e-9) {
+                    points.push(p);
+                }
+            }
+        }
+    }
+    (unit, points)
+}
+
+/// The faces of the 30 x 20 x 10 box by outward axis: x-, x+, y-, y+, z-, z+.
+const BOX_FACES: [HalfSpace; 6] = [
+    ([-1.0, 0.0, 0.0], 0.0),
+    ([1.0, 0.0, 0.0], 30.0),
+    ([0.0, -1.0, 0.0], 0.0),
+    ([0.0, 1.0, 0.0], 20.0),
+    ([0.0, 0.0, -1.0], 0.0),
+    ([0.0, 0.0, 1.0], 10.0),
+];
+
+/// The box with the edges between the face pairs `edges` (indices into [`BOX_FACES`])
+/// chamfered 2: each chamfer the plane through the lines 2 from the edge on both faces,
+/// `(n_a + n_b) . x <= h_a + h_b - 2`. Every corner where three chamfers meet is their mitre.
+fn chamfered_half_spaces(edges: &[(usize, usize)]) -> Vec<HalfSpace> {
+    let mut hs = BOX_FACES.to_vec();
+    for &(a, b) in edges {
+        let ((na, ha), (nb, hb)) = (BOX_FACES[a], BOX_FACES[b]);
+        hs.push(([na[0] + nb[0], na[1] + nb[1], na[2] + nb[2]], ha + hb - 2.0));
+    }
+    hs
+}
+
+/// Every face moved `d` along its outward normal but `keep` (an open face stays).
+fn moved(hs: &[HalfSpace], d: f64, keep: Option<usize>) -> Vec<HalfSpace> {
+    hs.iter()
+        .enumerate()
+        .map(|(i, &(n, h))| {
+            let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            (n, if Some(i) == keep { h } else { h + d * l })
+        })
+        .collect()
+}
+
+/// A shell `d` open at face `open`: the material between the body and its offset with the
+/// open face kept.
+fn shell_volume(hs: &[HalfSpace], d: f64, open: usize) -> f64 {
+    let body = polytope_volume(hs);
+    let offset = polytope_volume(&moved(hs, d, Some(open)));
+    if d > 0.0 {
+        offset - body
+    } else {
+        body - offset
+    }
+}
+
+/// The closed forms behind every volume pinned above, replayed row by row against the
+/// literal each test pins (to 1e-12 relative). The two-chamfer rows (whose corner is a
+/// vertex of four planes) check the construction itself; the three-chamfer and fully
+/// chamfered rows are the mitre corners (#18920: the chamfer-corner event is the only
+/// chamfer corner, so a corner of three chamfers is the box cut by their planes).
+#[test]
+fn wr_657_closed_forms_replay() {
+    // indices into `BOX_FACES`: x+, y-, z+
+    let (xp, ym, zp) = (1, 2, 5);
+    let two = chamfered_half_spaces(&[(xp, zp), (ym, zp)]);
+    let three = chamfered_half_spaces(&[(xp, zp), (ym, zp), (xp, ym)]);
+    let mut all_edges = Vec::new();
+    for a in 0..6 {
+        for b in a + 1..6 {
+            if a / 2 != b / 2 {
+                all_edges.push((a, b));
+            }
+        }
+    }
+    let all = chamfered_half_spaces(&all_edges);
+    // the chamfers' indices in each list: the box's six faces come first
+    let (two_c0, two_c9) = (6, 7);
+    let three_c8 = 8;
+    let all_c = |a: usize, b: usize| 6 + all_edges.iter().position(|&e| e == (a, b)).unwrap();
+    let rows: Vec<(&str, f64, f64)> = vec![
+        (
+            "two, shell -1 x30",
+            shell_volume(&two, -1.0, xp),
+            1806.1797017478002,
+        ),
+        (
+            "two, shell -1 y0",
+            shell_volume(&two, -1.0, ym),
+            1745.3218373715308,
+        ),
+        (
+            "two, shell +1 y0",
+            shell_volume(&two, 1.0, ym),
+            2053.4784027704327,
+        ),
+        (
+            "two, shell +1 chamfer 0",
+            shell_volume(&two, 1.0, two_c0),
+            2272.843698672228,
+        ),
+        (
+            "two, shell +1 chamfer 9",
+            shell_volume(&two, 1.0, two_c9),
+            2226.2751561773057,
+        ),
+        (
+            "two, shell +1 x30",
+            shell_volume(&two, 1.0, xp),
+            2152.6205383941633,
+        ),
+        (
+            "three, offset +1",
+            polytope_volume(&moved(&three, 1.0, None)),
+            THREE_OFFSET_OUT,
+        ),
+        (
+            "three, offset -1",
+            polytope_volume(&moved(&three, -1.0, None)),
+            THREE_OFFSET_IN,
+        ),
+        (
+            "three, shell -1 x30",
+            shell_volume(&three, -1.0, xp),
+            THREE_SHELL_IN_X30,
+        ),
+        (
+            "three, shell +1 x30",
+            shell_volume(&three, 1.0, xp),
+            THREE_SHELL_OUT_X30,
+        ),
+        (
+            "three, shell +1 chamfer 8",
+            shell_volume(&three, 1.0, three_c8),
+            THREE_SHELL_OUT_C8,
+        ),
+        (
+            "all, offset +1",
+            polytope_volume(&moved(&all, 1.0, None)),
+            ALL_OFFSET_OUT,
+        ),
+        (
+            "all, offset -1",
+            polytope_volume(&moved(&all, -1.0, None)),
+            ALL_OFFSET_IN,
+        ),
+        (
+            "all, shell +1 x30",
+            shell_volume(&all, 1.0, xp),
+            ALL_SHELL_OUT_X30,
+        ),
+        (
+            "all, shell -1 x30",
+            shell_volume(&all, -1.0, xp),
+            ALL_SHELL_IN_X30,
+        ),
+        (
+            "all, shell -1 z10",
+            shell_volume(&all, -1.0, zp),
+            ALL_SHELL_IN_Z10,
+        ),
+        (
+            "all, shell +1 chamfer x30 z10",
+            shell_volume(&all, 1.0, all_c(xp, zp)),
+            ALL_SHELL_OUT_C0,
+        ),
+        (
+            "all, shell +1 chamfer x30 y0",
+            shell_volume(&all, 1.0, all_c(xp, ym)),
+            ALL_SHELL_OUT_C8,
+        ),
+    ];
+    for (label, closed, pinned) in rows {
+        eprintln!("{label}: closed form {closed:.13} pinned {pinned:.13}");
+        assert!(
+            (closed - pinned).abs() <= 1e-12 * pinned,
+            "{label}: {closed} vs {pinned}"
+        );
+    }
+
+    // the refused inset open at the chamfer along the top at x = 30: the cavity (every face
+    // moved in 1 but that chamfer) meets the chamfer's plane in a segment, not a face,
+    // the line x = 29, z = 9 (`..._inset_open_at_a_chamfer_is_refused`)
+    let c0 = all_c(xp, zp);
+    let (unit, points) = polytope_vertices(&moved(&all, -1.0, Some(c0)));
+    let (n, h) = unit[c0];
+    let touch = on_plane(&points, n, h);
+    assert_eq!(touch.len(), 2, "{touch:?}");
+    for p in &touch {
+        assert!(
+            (p.x - 29.0).abs() < 1e-12 && (p.z - 9.0).abs() < 1e-12,
+            "{p:?}"
+        );
+    }
+    assert!((touch[0] - touch[1]).length() > 1.0, "{touch:?}");
+}
+
+/// #3655's rig (`fixtures/solidcraft/3655-chamfer-all-box-edges-pick-order.json`): the
+/// 40 x 30 x 12.5 box with every edge chamfered 2.5 is the box cut by its twelve chamfer
+/// planes, 15000 - 0.5 * 2.5^2 * 330 + 6 * 2.5^3 = 14062.5, the rig's expectation.
+#[test]
+fn issue_3655_mitred_box_closed_form() {
+    let (a, b, c, d) = (40.0, 30.0, 12.5, 2.5);
+    let faces: [HalfSpace; 6] = [
+        ([-1.0, 0.0, 0.0], 0.0),
+        ([1.0, 0.0, 0.0], a),
+        ([0.0, -1.0, 0.0], 0.0),
+        ([0.0, 1.0, 0.0], b),
+        ([0.0, 0.0, -1.0], 0.0),
+        ([0.0, 0.0, 1.0], c),
+    ];
+    let mut hs = faces.to_vec();
+    for i in 0..6 {
+        for j in i + 1..6 {
+            if i / 2 != j / 2 {
+                let ((ni, hi), (nj, hj)) = (faces[i], faces[j]);
+                hs.push(([ni[0] + nj[0], ni[1] + nj[1], ni[2] + nj[2]], hi + hj - d));
+            }
+        }
+    }
+    let closed = a * b * c - 0.5 * d * d * (4.0 * (a + b + c)) + 6.0 * d * d * d;
+    assert_eq!(closed, 14062.5);
+    let v = polytope_volume(&hs);
+    assert!((v - closed).abs() <= 1e-12 * closed, "{v} vs {closed}");
 }

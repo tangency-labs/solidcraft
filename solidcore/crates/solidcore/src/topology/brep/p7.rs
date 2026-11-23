@@ -1946,6 +1946,19 @@ pub fn glue_edges_general(
     )
 }
 
+/// Whether `eu`'s UV trim curve, if it has one, spans `edge`'s interval (a pcurve shares
+/// its edge's interval, `docs/validity-and-tolerances.md` §9), compared as
+/// [`glue_edges_general_searching`] compares the glued edges' intervals.
+fn trim_curve_spans(b: &Brep, eu: EdgeuseId, edge: EdgeId) -> Result<bool> {
+    let Some(curve) = eu1::uv_trim_curve_pointer(b, eu)? else {
+        return Ok(true);
+    };
+    let trim = curve.natural_interval();
+    let edge = ed::interval(b, edge)?;
+    Ok(crate::geom::tol::are_same(trim.min(), edge.min())
+        && crate::geom::tol::are_same(trim.max(), edge.max()))
+}
+
 /// [`glue_edges_general`] for a caller that says how a split of the infinite region tells
 /// its infinite half: by the search (`InfiniteHalf::Searched`, upstream's behaviour), or
 /// from a face use the caller knows to lie outside the solid whose shell the glue closes
@@ -2166,8 +2179,12 @@ pub(crate) fn glue_edges_general_searching(
 
         // (sbCheckDEU1 is FALSE upstream: the region check of the pair is dead code)
 
-        // different geometry: the pair's UV trim curve no longer fits (status ignored)
-        if !same_geometry {
+        // different geometry: the pair's UV trim curve no longer fits (status ignored).
+        // Not upstream (#18294): nor does one whose interval is no longer the surviving
+        // edge's. The sector search may make deu1's trim curve on the edge to delete, after
+        // `same_geometry` compared the edges, and a drop that comes back short trims that
+        // edge to the curve (`create_uv_trim_curve`'s recovery), not the surviving one.
+        if !same_geometry || !trim_curve_spans(b, deu1, surv)? {
             ignore_status(eu1::set_uv_trim_curve(
                 b,
                 deu1,

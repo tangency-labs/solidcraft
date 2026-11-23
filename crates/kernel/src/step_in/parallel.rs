@@ -90,8 +90,20 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
     };
     let body = solidcraft_profile::scope("import", "step.place", || placed(&part.body, &job.placement))
         .map_err(|e| Failure { read: false, msg: e.to_string() })?;
-    // Counted on the part (a placement meshes the same faces).
-    let missing = if job.check_mesh { solidcraft_profile::scope("import", "step.mesh_check", || part.body.unmeshed_faces()) } else { 0 };
+    // Counted on the part (a placement meshes the same faces). A part not moved is the body
+    // itself: it keeps the display plan its check made, which its display then takes.
+    let (body, missing) = match job.check_mesh {
+        false => (body, 0),
+        true if job.placement == IDENTITY => {
+            let body = body.keeping_plans();
+            let missing = solidcraft_profile::scope("import", "step.mesh_check", || body.unmeshed_display_faces());
+            (body, missing)
+        }
+        true => {
+            let missing = solidcraft_profile::scope("import", "step.mesh_check", || part.body.unmeshed_faces());
+            (body, missing)
+        }
+    };
     Ok(Made { body, missing, part, read })
 }
 
