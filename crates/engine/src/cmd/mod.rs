@@ -114,6 +114,7 @@ mod design_drawings;
 mod design_internal;
 pub use design_internal::{in_work_folder, internal_owner, tidy_work_folder};
 mod design_link;
+mod design_stamps;
 mod file;
 mod file_library;
 pub(crate) use file_library::uses_file as file_library_uses_file;

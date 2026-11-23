@@ -1919,3 +1919,54 @@ fn an_internal_components_file_is_tagged_with_the_design_it_belongs_to() {
     let _ = std::fs::remove_dir_all(root);
     let _ = std::fs::remove_dir_all(elsewhere);
 }
+
+/// Opening and saving a design do not read work files that are as they were last read (#6892):
+/// the work folder's record answers for them. A work file changed since is still found, as a
+/// recovery component, and a record too fresh to trust only costs the reads.
+#[test]
+fn unchanged_work_files_are_not_read_on_open_or_save_and_a_changed_one_is_still_found() {
+    use super::super::design_stamps::{READS, settle_all};
+    crate::set_experimental_file_kinds(true);
+    let root = folder("stamps-open-save");
+    for (name, height) in [("bracket.scprt", 10), ("plate.scprt", 15)] {
+        part(&root.join(name), height);
+    }
+    let design = root.join("counter.sc");
+    let mut s = Session::default();
+    run(&mut s, "file.save", json!({"path": design}));
+    for name in ["bracket", "plate"] {
+        run(&mut s, "component.insert_design", json!({"path": root.join(format!("{name}.scprt"))}));
+        run(&mut s, "component.make_internal", json!({"component": name}));
+    }
+    run(&mut s, "file.save", json!({}));
+    let work = root.join(".~counter.sc.parts");
+    let reads = || READS.with(|reads| reads.replace(0));
+
+    // A record made in the same moment as the files is not trusted: both are read, and nothing differs.
+    reads();
+    let mut fresh = Session::default();
+    let reply = run(&mut fresh, "doc.open", json!({"path": design}));
+    assert!(reply.get("recovery_components").is_none(), "{reply}");
+    assert_eq!(reads(), 2, "an untrusted record costs the reads");
+
+    // Later, with the record settled: neither an open nor a save reads a work file.
+    settle_all(&work);
+    let mut later = Session::default();
+    let reply = run(&mut later, "doc.open", json!({"path": design}));
+    assert!(reply.get("recovery_components").is_none(), "{reply}");
+    assert_eq!(reads(), 0, "open: answered from the record");
+    let before = std::fs::read(&design).unwrap();
+    run(&mut later, "file.save", json!({}));
+    assert_eq!(reads(), 0, "save: answered from the record");
+    let saved = solidcraft_io::read_design(&std::fs::read(&design).unwrap()).unwrap();
+    assert_eq!(saved.internal, solidcraft_io::read_design(&before).unwrap().internal, "the save kept both parts");
+
+    // One work file is saved again by itself: the next open finds it, and reads no more than that one.
+    part(&work.join("plate.scprt"), 30);
+    settle_all(&work);
+    let mut crashed = Session::default();
+    let reply = run(&mut crashed, "doc.open", json!({"path": design}));
+    assert_eq!(reply["recovery_components"], json!(["plate.scprt"]), "{reply}");
+    assert!(reads() <= 1, "only the changed file can need a read");
+    let _ = std::fs::remove_dir_all(root);
+}

@@ -15,6 +15,9 @@
 //!   design reads and saves what its file holds for it.
 //! - **Saving packs** each linked one from its work file ([`pack`]), or keeps the bytes the file
 //!   held when there is no work file (a read-only folder, the browser build).
+//! - **Neither reads a file it need not.** The work folder records what each file held when last
+//!   read ([`Stamps`]), so an open or a save of a design with thousands of parts reads only the
+//!   ones that changed.
 //!
 //! The work file's name is made here from a name this module has checked
 //! ([`internal::valid_name`]), never taken from a container entry as it stands. Names are told
@@ -28,6 +31,7 @@ use solidcraft_doc::blob::Blob;
 use solidcraft_doc::{Document, internal};
 
 use super::design_link::{absolute, read_linked_file};
+use super::design_stamps::Stamps;
 
 /// The folder the stored parts of the design saved at `design` are unpacked to.
 pub(crate) fn work_folder(design: &str) -> Option<PathBuf> {
@@ -72,6 +76,10 @@ pub(crate) fn unpack(doc: &Document, design: &str) -> Unpacked {
     if cfg!(target_arch = "wasm32") {
         return done;
     }
+    let Some(folder) = work_folder(design) else { return done };
+    // What each work file held when last read ([`Stamps`]): a file as recorded is compared
+    // without being read, which is what keeps an open from reading every part.
+    let mut stamps = Stamps::of(&folder);
     let mut seen = BTreeSet::new();
     for (name, bytes) in &doc.internal {
         let Some(file) = work_file(Some(design), name) else { continue };
@@ -80,16 +88,20 @@ pub(crate) fn unpack(doc: &Document, design: &str) -> Unpacked {
             done.failed.push(format!("{name}: another internal component has this name in other letter case"));
             continue;
         }
-        match std::fs::read(&file) {
-            Ok(existing) if existing == bytes.as_bytes() => {}
-            Ok(_) => done.differ.push(name.clone()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => match write(&file, bytes.as_bytes()) {
-                Ok(()) => done.written.push(name.clone()),
+        match stamps.holds(name, bytes.as_bytes(), || super::design_stamps::digest(bytes.as_bytes())) {
+            Some(true) => {}
+            Some(false) => done.differ.push(name.clone()),
+            None if !file.exists() => match write(&file, bytes.as_bytes()) {
+                Ok(()) => {
+                    stamps.record(name, &super::design_stamps::digest(bytes.as_bytes()));
+                    done.written.push(name.clone());
+                }
                 Err(why) => done.failed.push(format!("{name}: {why}")),
             },
-            Err(e) => done.failed.push(format!("{name}: {e}")),
+            None => done.failed.push(format!("{name}: its unpacked file can't be read")),
         }
     }
+    stamps.save();
     done
 }
 
@@ -117,13 +129,23 @@ pub(crate) fn pack(design: &mut Cow<'_, Document>, own: Option<&str>, recovery: 
     if names.is_empty() && design.internal.is_empty() {
         return;
     }
+    let mut stamps = own.and_then(work_folder).map(|folder| Stamps::of(&folder));
     let packed: BTreeMap<String, Blob> = names
         .into_iter()
         .filter_map(|name| {
             let held = recovery.contains(&name).then(|| design.internal.get(&name).cloned()).flatten();
-            held.or_else(|| bytes(design, own, &name)).map(|blob| (name, blob))
+            // A work file that still holds what the design holds is not read again ([`Stamps`]).
+            let unchanged = || {
+                let stored = design.internal.get(&name)?;
+                let same = stamps.as_mut()?.holds(&name, stored.as_bytes(), || super::design_stamps::digest(stored.as_bytes()));
+                (same == Some(true)).then(|| stored.clone())
+            };
+            held.or_else(unchanged).or_else(|| bytes(design, own, &name)).map(|blob| (name, blob))
         })
         .collect();
+    if let Some(stamps) = stamps.as_mut() {
+        stamps.save();
+    }
     if packed != design.internal {
         design.to_mut().internal = packed;
     }
@@ -167,6 +189,10 @@ pub fn tidy_work_folder(design: &str) -> usize {
         if std::fs::read(&file).is_ok_and(|bytes| bytes == *stored) && std::fs::remove_file(&file).is_ok() {
             removed += 1;
         }
+    }
+    // With nothing left but the record of what the files held, that goes too.
+    if std::fs::read_dir(&folder).is_ok_and(|mut left| left.all(|entry| entry.is_ok_and(|entry| entry.file_name() == super::design_stamps::FILE))) {
+        Stamps::remove(&folder);
     }
     // Only an empty folder goes.
     let _ = std::fs::remove_dir(&folder);
