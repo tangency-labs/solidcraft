@@ -1930,9 +1930,9 @@ mod tests {
         );
         let mut tool = placement::Placement::new(&h.app).unwrap();
         let drawing = h.app.session.drawing("drawing.inspect").unwrap();
-        assert!(tool.request(&drawing).unwrap().get("source").is_none(), "the whole design by default");
+        assert!(tool.request(drawing).unwrap().get("source").is_none(), "the whole design by default");
         tool.choose_source(Some(vec![sub, leaf]));
-        let mut request = tool.request(&drawing).unwrap();
+        let mut request = tool.request(drawing).unwrap();
         assert_eq!(request["source"], serde_json::json!({"occurrences": [[sub, leaf]]}));
         request["sheet"] = serde_json::json!("Sheet 1");
         let placed = h.app.run("drawing.view.base", request).unwrap();
