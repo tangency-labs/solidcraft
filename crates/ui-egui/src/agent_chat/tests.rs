@@ -423,14 +423,17 @@ fn streamed_text_joins_and_tool_updates_change_their_call() {
 #[test]
 fn a_sign_in_request_keeps_the_question_for_after_the_login() {
     let mut c = chat();
-    c.last = Some(("make a cube".into(), false, None, vec![attach::Attachment::imported("motor.step".into())]));
+    let mut submission = plain_submission("make a cube");
+    submission.messages[0].files.push(attach::Attachment::imported("motor.step".into()));
+    c.last = Some(submission);
     c.state = Some(State::Busy);
     assert!(c.on_event(Event::TurnEnded { reason: "auth".into() }).is_some());
     c.on_event(Event::AuthRequired { methods: vec![] });
     assert_eq!(c.state(), State::NeedsAuth);
-    let (text, image, _, files) = c.queued.clone().expect("queued for after the login");
-    assert_eq!((text.as_str(), image), ("make a cube", false));
-    assert_eq!(files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["motor.step"], "its files go again too");
+    let [message] = c.queued.as_ref().expect("queued for after the login").messages.as_slice() else { panic!("one message") };
+    assert_eq!(message.text, "make a cube");
+    assert!(message.view.is_none());
+    assert_eq!(message.files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["motor.step"], "its files go again too");
 }
 
 #[test]
@@ -465,7 +468,7 @@ fn app_in_a_turn() -> (SolveApp, Sender<ControlRequest>) {
     let (tx, rx) = channel();
     app.agent_chat.tools_rx = Some(rx);
     app.agent_chat.state = Some(State::Busy);
-    start_turn(&mut app, "two boxes".into(), false, None, Vec::new());
+    begin_turn(&mut app, "two boxes");
     (app, tx)
 }
 
@@ -645,7 +648,7 @@ fn section_steps_stay_the_users() {
     let (_tx, rx) = channel::<ControlRequest>();
     app.agent_chat.tools_rx = Some(rx);
     app.agent_chat.state = Some(State::Busy);
-    start_turn(&mut app, "look".into(), false, None, Vec::new());
+    begin_turn(&mut app, "look");
     end_turn(&mut app);
     assert_eq!(app.session.undo.len(), 2);
     assert_eq!(app.session.undo.last().map(|s| s.label.as_str()), Some("Section Analysis"));
@@ -1029,6 +1032,18 @@ fn app_with_script() -> (SolveApp, Script, egui::Context) {
 
 fn ended(script: &Script, reason: &str) {
     script.report(Event::TurnEnded { reason: reason.into() });
+}
+
+fn plain_submission(text: &str) -> Submission {
+    Submission {
+        messages: vec![Pending { text: text.into(), view: None, context: Context::default(), files: Vec::new() }],
+        at: None,
+        interrupted: false,
+    }
+}
+
+fn begin_turn(app: &mut SolveApp, text: &str) {
+    start_turn(app, plain_submission(text));
 }
 
 #[test]
@@ -1523,7 +1538,16 @@ fn the_queue_is_sent_when_the_turn_ends() {
     assert_eq!(script.calls(), ["prompt: first", "prompt: second\n\nthird"]);
     assert!(app.agent_chat.pending.is_empty());
     assert_eq!(app.agent_chat.state(), State::Busy, "the next turn is under way");
-    assert!(matches!(app.agent_chat.items.last(), Some(Item::User { text, .. }) if text == "second\n\nthird"));
+    let messages: Vec<_> = app
+        .agent_chat
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::User { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(messages, ["first", "second\n\nthird"], "the conversation shows one bubble for the batch");
     // Nothing queued: the end of the turn just ends it.
     ended(&script, "");
     poll(&mut app, &ctx);
@@ -2965,7 +2989,7 @@ fn modern_model_restore_then_mode_restore_are_acknowledged_before_queued_prompt(
     app.agent_chat.running_id = "modern".into();
     app.preferences.agent_models.insert("modern".into(), "smart".into());
     app.agent_chat.restore_mode = Some("plan".into());
-    app.agent_chat.queued = Some(("describe the model".into(), false, None, Vec::new()));
+    app.agent_chat.queued = Some(plain_submission("describe the model"));
     script.report(Event::ConfigOptions(modern_options("fast")));
     script.report(Event::Ready { agent: "modern".into(), images: false });
     poll(&mut app, &ctx);
@@ -3309,12 +3333,16 @@ fn a_queued_message_keeps_its_files_through_stop_and_sends_them() {
     send_now(&mut app, &ctx);
     let sent = script.prompts();
     let last = sent.last().expect("the queue went");
-    let text = text_of(last);
-    assert!(text.starts_with("like this") && !text.contains("\n\n\n\n"), "a message of files alone adds no empty paragraph: {text:?}");
-    assert!(text.contains("Attached pictures: target.png.") && text.contains("wall 2 mm"), "{text}");
-    assert_eq!(pictures_in(last), 1);
-    let sent = status(&app)["items"].as_array().and_then(|i| i.last()).cloned().unwrap_or_default();
-    assert_eq!((sent["files"].clone(), sent["pictures"].clone()), (json!(["brief.md"]), json!(1)));
+    let [PromptPart::Text(first), PromptPart::Image { .. }, PromptPart::Text(second)] = last.as_slice() else {
+        panic!("the picture follows its own message");
+    };
+    assert!(first.contains("[Queued message 1]") && first.contains("like this") && first.contains("Attached pictures: target.png."), "{first}");
+    assert!(second.contains("[Queued message 2]") && second.contains("wall 2 mm") && !second.contains("\n\n\n\n"), "{second}");
+    let state = status(&app);
+    let items = state["items"].as_array().expect("conversation items");
+    let users: Vec<_> = items.iter().filter(|item| item.get("user").is_some()).collect();
+    assert_eq!(users.len(), 2, "the original message and the batch");
+    assert_eq!((&users[1]["files"], &users[1]["pictures"]), (&json!(["brief.md"]), &json!(1)));
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -3948,14 +3976,26 @@ fn queued_messages_keep_the_selection_they_were_typed_with() {
     send(&mut app, &ctx, "second".into());
     app.session.selection = vec![Sel::Body { name: "Beta".into() }];
     send(&mut app, &ctx, "third".into());
+    app.session.selection.clear();
     assert_eq!(app.agent_chat.pending.iter().map(|p| p.context.total()).collect::<Vec<_>>(), [1, 1]);
     ended(&script, "");
     poll(&mut app, &ctx);
-    let prompt = script.calls().pop().expect("the queue went");
-    assert!(prompt.starts_with("prompt: second\n\nthird\n\n[Selected"), "{prompt}");
-    assert!(prompt.contains("- Alpha") && prompt.contains("- Beta"), "{prompt}");
-    let Some(Item::User { context, .. }) = app.agent_chat.items.last() else { panic!("a sent message") };
-    assert_eq!(context.items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Alpha", "Beta"]);
+    let prompts = script.prompts();
+    let prompt = text_of(prompts.last().expect("the queue went"));
+    let (first, second) = prompt.split_once("[Queued message 2]").expect("two message sections");
+    assert!(first.contains("[Queued message 1]") && first.contains("second\n\n[Selected") && first.contains("- Alpha"), "{first}");
+    assert!(second.contains("third\n\n[Selected") && second.contains("- Beta"), "{second}");
+    assert!(!first.contains("- Beta") && !second.contains("- Alpha"), "{prompt}");
+    let labels: Vec<_> = app
+        .agent_chat
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::User { text, context, .. } => Some((text.as_str(), context.items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(labels, [("first", vec![]), ("second\n\nthird", vec!["Alpha", "Beta"])]);
 }
 
 /// A large selection is capped and says how much is left out; nothing in it can break the prompt.
@@ -4322,73 +4362,97 @@ fn a_messages_pictures_open_in_a_viewer() {
     assert!(h.app.agent_chat.gallery.is_none());
 }
 
-/// A message's picture is kept on exactly the message it was taken for: not an earlier one that
-/// also wanted a picture, not one that has it already, and nothing that isn't such a message.
+/// Two queued messages go as one turn. The prompt identifies each view and selection, and the
+/// shared bubble labels both views. A sign-in retry sends the same images without a new bubble.
 #[test]
-fn the_picture_goes_to_the_message_it_was_taken_for() {
-    let mut chat = AgentChat::default();
-    chat.push(Item::User { text: "no picture".into(), image: false, pictures: Vec::new(), files: Vec::new(), context: Context::default() });
-    chat.push(Item::User {
-        text: "first".into(),
-        image: true,
-        pictures: vec![Picture::new(vec![1], "")],
-        files: Vec::new(),
-        context: Context::default(),
-    });
-    chat.push(Item::User { text: "second".into(), image: true, pictures: Vec::new(), files: Vec::new(), context: Context::default() });
-    chat.push(Item::User { text: "third".into(), image: true, pictures: Vec::new(), files: Vec::new(), context: Context::default() });
-    let sizes = |chat: &AgentChat| -> Vec<usize> {
-        chat.items
-            .iter()
-            .filter_map(|i| match i {
-                Item::User { pictures, .. } => Some(pictures.iter().map(|p| p.bytes.len()).sum()),
-                _ => None,
-            })
-            .collect()
-    };
-    // The picture of the third message goes to the third, though the second still waits for one.
-    chat.keep_picture(Some(3), vec![2, 3]);
-    assert_eq!(sizes(&chat), [0, 1, 0, 2]);
-    // The same message again (it was sent again): nothing is added, nor moved to an older message.
-    chat.keep_picture(Some(3), vec![9; 5]);
-    assert_eq!(sizes(&chat), [0, 1, 0, 2]);
-    // A message that did not want one, no message, or a place that is gone.
-    chat.keep_picture(Some(0), vec![1]);
-    chat.keep_picture(None, vec![1]);
-    chat.keep_picture(Some(99), vec![1]);
-    assert_eq!(sizes(&chat), [0, 1, 0, 2]);
-    chat.keep_picture(Some(2), vec![0; super::MAX_PICTURE_BYTES + 1]);
-    assert_eq!(sizes(&chat), [0, 1, 0, 2], "an oversized picture is not kept");
-}
-
-/// A message sent again after a sign-in is still the message it was: its turn points at its own
-/// place in the conversation, so its picture is kept there, once, and never on an older message that
-/// wanted one (#2224 review). The picture itself can't be drawn without a renderer in a test, so the
-/// place a turn is started for is what is checked.
-#[test]
-fn a_message_sent_again_after_sign_in_stays_the_message_it_was() {
+fn queued_views_and_selections_stay_with_their_messages_on_send_and_retry() {
+    use solidcraft_engine::Sel;
+    crate::i18n::install();
     let (mut app, script, ctx) = app_with_script();
     app.agent_chat.images = true;
-    // An older message that wanted a picture and has none.
-    app.agent_chat.push(Item::User { text: "older".into(), image: true, pictures: Vec::new(), files: Vec::new(), context: Context::default() });
-    app.agent_chat.attach_view = true;
-    send(&mut app, &ctx, "the new one".into());
-    let place = app.agent_chat.items.len() - 1;
-    assert_eq!(app.agent_chat.last, Some(("the new one".into(), true, Some(place), Vec::new())), "the turn knows its message");
-    // The agent asked for a sign-in; after it the message goes again, as it is done on a sign-in.
+    app.agent_chat.attach_selection = true;
+    send(&mut app, &ctx, "older".into());
+    let top = Arc::new(test_png([220, 20, 20, 255], 4));
+    let front = Arc::new(test_png([20, 20, 220, 255], 4));
+    for (label, name, png) in [("look from the top", "TopBody", &top), ("look from the front", "FrontBody", &front)] {
+        app.session.selection = vec![Sel::Body { name: name.into() }];
+        send(&mut app, &ctx, label.into());
+        // The harness has no renderer. Give this entry the PNG its capture would have returned.
+        app.agent_chat.pending.last_mut().expect("a queued message").view = Some(Picture::shared(Arc::clone(png), "", true));
+    }
+    app.session.selection = vec![Sel::Body { name: "LaterBody".into() }];
     ended(&script, "");
     poll(&mut app, &ctx);
-    app.agent_chat.queued = app.agent_chat.last.take();
+    let prompts = script.prompts();
+    assert_eq!(prompts.len(), 2, "one turn for the entire queue");
+    let [
+        PromptPart::Text(first),
+        PromptPart::Image { base64: first_png, .. },
+        PromptPart::Text(second),
+        PromptPart::Image { base64: second_png, .. },
+    ] = prompts[1].as_slice()
+    else {
+        panic!("each message is immediately followed by its view");
+    };
+    assert!(first.contains("[Queued message 1]") && first.contains("look from the top") && first.contains("- TopBody"), "{first}");
+    assert!(second.contains("[Queued message 2]") && second.contains("look from the front") && second.contains("- FrontBody"), "{second}");
+    assert!(first.ends_with("[View for queued message 1]") && second.ends_with("[View for queued message 2]"));
+    assert!(!first.contains("FrontBody") && !second.contains("TopBody"));
+    assert!(!first.contains("LaterBody") && !second.contains("LaterBody"));
+    assert_eq!(first_png, &backend::base64(&top));
+    assert_eq!(second_png, &backend::base64(&front));
+
+    script.report(Event::AuthRequired { methods: Vec::new() });
+    ended(&script, "auth");
+    poll(&mut app, &ctx);
     script.report(Event::Ready { agent: "fake".into(), images: true });
     poll(&mut app, &ctx);
-    assert_eq!(app.agent_chat.last, Some(("the new one".into(), true, Some(place), Vec::new())), "sent again, still for the same message");
-    assert_eq!(app.agent_chat.items.iter().filter(|i| matches!(i, Item::User { .. })).count(), 2, "not a new message");
-    // Its picture goes there, once; the older message gets none.
-    app.agent_chat.keep_picture(Some(place), test_png([1, 2, 3, 255], 4));
-    app.agent_chat.keep_picture(Some(place), test_png([1, 2, 3, 255], 4));
-    let counts: Vec<usize> =
-        app.agent_chat.items.iter().filter_map(|i| if let Item::User { pictures, .. } = i { Some(pictures.len()) } else { None }).collect();
-    assert_eq!(counts, [0, 1]);
+    let retried = script.prompts();
+    assert_eq!(retried.len(), 3, "the sign-in retry sends one turn again");
+    assert_eq!(retried[2], prompts[1]);
+    let bubbles: Vec<_> = app
+        .agent_chat
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::User { text, pictures, context, .. } => Some((text.as_str(), pictures.as_slice(), context)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(bubbles.len(), 2, "the batch uses one bubble and the retry adds none");
+    assert_eq!((bubbles[0].0, bubbles[0].1.len()), ("older", 0));
+    let (text, pictures, context) = bubbles[1];
+    assert_eq!(text, "look from the top\n\nlook from the front");
+    assert_eq!(context.items.iter().map(|item| item.label.as_str()).collect::<Vec<_>>(), ["TopBody", "FrontBody"]);
+    assert_eq!(pictures.len(), 2);
+    for (index, (picture, png)) in pictures.iter().zip([&top, &front]).enumerate() {
+        assert!(picture.view && Arc::ptr_eq(&picture.bytes, png));
+        assert_eq!(picture.note, trf("ui.agent_chat_queued_view_caption", &[("number", &(index + 1).to_string())]));
+    }
+}
+
+#[test]
+fn a_full_prompt_keeps_the_queued_view_labels_and_selections() {
+    use solidcraft_engine::Sel;
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.images = true;
+    app.agent_chat.attach_selection = true;
+    let words = "é".repeat(MAX_PROMPT);
+    send(&mut app, &ctx, "older".into());
+    for (text, body, color) in [(words.as_str(), "First", [220, 20, 20, 255]), ("second", "Second", [20, 20, 220, 255])] {
+        app.session.selection = vec![Sel::Body { name: body.into() }];
+        send(&mut app, &ctx, text.into());
+        app.agent_chat.pending.last_mut().unwrap().view = Some(Picture::shared(Arc::new(test_png(color, 4)), "", true));
+    }
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    let prompts = script.prompts();
+    let [PromptPart::Text(first), PromptPart::Image { .. }, PromptPart::Text(second), PromptPart::Image { .. }] = prompts[1].as_slice() else {
+        panic!("both views have a text part");
+    };
+    assert!(first.contains("[Queued message 1]") && first.contains("- First"));
+    assert!(second.contains("[Queued message 2]") && second.contains("- Second"));
+    assert!(first.chars().count() + second.chars().count() <= MAX_PROMPT);
 }
 
 /// The picture viewer opens over the chat's own window too, not only over the docked panel (#1745).
@@ -4582,9 +4646,12 @@ fn queued_messages_number_their_picks_on() {
     assert_eq!(app.agent_chat.pending.len(), 2);
     app.agent_chat.state = Some(State::Ready);
     send_queue(&mut app, &ctx, false);
-    let prompt = script.calls().pop().expect("a prompt");
-    assert!(prompt.starts_with("prompt: see «1: Body1» \n\nsee «2: "), "the second message's mark follows the first one's number: {prompt}");
-    assert!(prompt.contains("\n«1: Body1»\nBodies:\n- Body1") && prompt.contains("\n«2: "), "{prompt}");
+    let prompts = script.prompts();
+    let prompt = text_of(prompts.last().expect("a prompt"));
+    let (first, second) = prompt.split_once("[Queued message 2]").expect("two message sections");
+    assert!(first.contains("see «1: Body1»") && first.contains("\n«1: Body1»\nBodies:\n- Body1"), "{first}");
+    assert!(second.contains("see «2: ") && second.contains("\n«2: "), "the second message's mark follows the first one's number: {second}");
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::User { text, .. }) if text.starts_with("see «1: ")));
 }
 
 /// Backspace right after a pill takes it whole; Delete right before one does too.
@@ -4731,7 +4798,7 @@ fn a_full_queue_keeps_the_words_and_their_picks() {
     let sels = box_selection(&mut app);
     app.agent_chat.state = Some(State::Busy);
     app.agent_chat.pending =
-        (0..MAX_PENDING).map(|_| Pending { text: "x".into(), image: false, context: Context::default(), files: Vec::new() }).collect();
+        (0..MAX_PENDING).map(|_| Pending { text: "x".into(), view: None, context: Context::default(), files: Vec::new() }).collect();
     app.agent_chat.input = "see ".into();
     pick_pill(&mut app, 4, &sels[3..]);
     let text = std::mem::take(&mut app.agent_chat.input);
@@ -5173,16 +5240,20 @@ fn attached_pictures_of_any_format_are_decoded_in_the_background() {
 /// the view's picture is added beside it rather than replacing it, once.
 #[test]
 fn an_attached_picture_and_the_views_picture_share_the_viewer() {
-    let mut chat = AgentChat::default();
-    let attached = Picture::shared(Arc::new(encoded(image::ImageFormat::Jpeg, 16)), "photo.jpg", false);
-    chat.push(Item::User { text: "see".into(), image: true, pictures: vec![attached], files: Vec::new(), context: Context::default() });
-    chat.keep_picture(Some(0), encoded(image::ImageFormat::Png, 8));
-    let Some(Item::User { pictures, .. }) = chat.items.last() else { panic!("a sent message") };
-    assert_eq!(pictures.iter().map(|p| (p.note.as_str(), p.view)).collect::<Vec<_>>(), [("photo.jpg", false), ("", true)]);
-    // A second view picture is not added to the same message.
-    chat.keep_picture(Some(0), encoded(image::ImageFormat::Png, 8));
-    let Some(Item::User { pictures, .. }) = chat.items.last() else { panic!("a sent message") };
-    assert_eq!(pictures.len(), 2);
+    let (mut app, _, ctx) = app_with_script();
+    app.agent_chat.images = true;
+    let attached = attach::Attachment {
+        id: 0,
+        name: "photo.jpg".into(),
+        content: attach::Content::Picture { mime: "image/jpeg", bytes: Arc::new(encoded(image::ImageFormat::Jpeg, 16)), size: [16, 16] },
+        thumb: None,
+    };
+    let view = Picture::shared(Arc::new(encoded(image::ImageFormat::Png, 8)), "", true);
+    submit(&mut app, &ctx, vec![Pending { text: "see".into(), view: Some(view), files: vec![attached], context: Context::default() }], false);
+    let Some(Item::User { pictures, .. }) = app.agent_chat.items.last() else { panic!("a sent message") };
+    let mut described: Vec<_> = pictures.iter().map(|p| (p.view, p.note.as_str())).collect();
+    described.sort_unstable();
+    assert_eq!(described, [(false, "photo.jpg"), (true, "")]);
 }
 
 /// Settings › AI › Add agent opens its dialog from the Home tab too (#3483, #3513).
@@ -5249,7 +5320,7 @@ fn no_tool_turn_reports_empty_reply_and_unperformed_edit() {
     ] {
         let (mut app, _, _) = app_with_script();
         app.agent_chat.tools_port = Some(12345);
-        start_turn(&mut app, prompt.into(), false, None, vec![]);
+        begin_turn(&mut app, prompt);
         if !reply.is_empty() {
             app.agent_chat.on_event(Event::Text { thought: false, text: reply.into() });
         }
@@ -5259,7 +5330,7 @@ fn no_tool_turn_reports_empty_reply_and_unperformed_edit() {
         assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, error: false } if text == expected)), "{prompt}");
         assert_eq!(status(&app)["turnWarning"], expected);
         assert!(app.session.undo.is_empty());
-        start_turn(&mut app, "What is a fillet?".into(), false, None, vec![]);
+        begin_turn(&mut app, "What is a fillet?");
         assert!(status(&app)["turnWarning"].is_null());
         assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, .. } if text == expected)));
         new_chat(&mut app);
@@ -5272,7 +5343,7 @@ fn no_tool_turn_reports_empty_reply_and_unperformed_edit() {
 fn no_tool_turn_warning_does_not_follow_a_tool_call() {
     let (mut app, _, _) = app_with_script();
     app.agent_chat.tools_port = Some(12345);
-    start_turn(&mut app, "Make a box".into(), false, None, vec![]);
+    begin_turn(&mut app, "Make a box");
     app.agent_chat.on_event(Event::Tool {
         id: "t".into(),
         title: Some("batch".into()),
@@ -5299,7 +5370,7 @@ fn no_tool_turn_warning_leaves_answers_and_incomplete_turns_quiet() {
     ] {
         let (mut app, _, _) = app_with_script();
         app.agent_chat.tools_port = tools.then_some(12345);
-        start_turn(&mut app, prompt.into(), false, None, vec![]);
+        begin_turn(&mut app, prompt);
         app.agent_chat.on_event(Event::Text { thought: false, text: reply.into() });
         app.agent_chat.on_event(Event::TurnEnded { reason: reason.into() });
         end_turn(&mut app);
@@ -5316,7 +5387,7 @@ fn a_cut_off_or_declined_reply_says_so_instead_of_blaming_tools() {
     for (reason, said) in [("max_tokens", "ui.agent_chat_reply_cut_off"), ("refusal", "ui.agent_chat_reply_declined")] {
         let (mut app, _, _) = app_with_script();
         app.agent_chat.tools_port = Some(12345);
-        start_turn(&mut app, "Make a box".into(), false, None, vec![]);
+        begin_turn(&mut app, "Make a box");
         app.agent_chat.on_event(Event::TurnEnded { reason: reason.into() });
         end_turn(&mut app);
         assert!(status(&app)["turnWarning"].is_null(), "{reason}");
@@ -5989,7 +6060,7 @@ fn shared_assistant_header_uses_live_status_and_one_click_starts_one_new_chat() 
     h.app.agent_chat.items.pop();
     h.app.agent_chat.pending.push(Pending {
         text: "Keep this queued request until confirmation".into(),
-        image: false,
+        view: None,
         context: Context::default(),
         files: Vec::new(),
     });
@@ -6057,8 +6128,8 @@ fn enter_and_the_control_channel_send_the_box_with_its_pills() {
     let Some(Item::User { text, context, .. }) = last_user(&h) else { panic!("Enter sent it: {:?}", h.app.agent_chat.input) };
     assert!(text.contains("«1: Body1»") && context.groups.len() == 1, "{text}");
     assert!(h.app.agent_chat.input.is_empty() && h.app.agent_chat.pills.is_empty());
-    // The same through the control channel.
-    h.app.agent_chat.items.clear();
+    // Start a separate conversation to send through the control channel as well.
+    new_chat(&mut h.app);
     h.app.agent_chat.input = "again ".into();
     pick_pill(&mut h.app, 6, &sels[3..]);
     let reply = h.call("ui.agent_chat", json!({}));
@@ -6137,7 +6208,7 @@ fn editing_a_queued_message_keeps_its_marks_and_groups_together() {
     let mut context = context::describe(&mut app.session, &sels[3..]).in_group(1, "Body1");
     context.merge(context::describe(&mut app.session, &sels[2..3]).in_group(2, "the feature"));
     context.merge(context::describe(&mut app.session, &sels[..1]));
-    let mut queued = Pending { text: "fit «1: Body1» to «2: the feature» now".into(), image: false, context, files: Vec::new() };
+    let mut queued = Pending { text: "fit «1: Body1» to «2: the feature» now".into(), view: None, context, files: Vec::new() };
     queued.text = "fit «2: the feature» to «9: typed» now".into();
     queued.regroup();
     assert_eq!(queued.text, "fit «1: the feature» to ‹9: typed› now");

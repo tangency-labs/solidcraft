@@ -2333,7 +2333,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
                     {
                         hovered = Some(Hovered::Group { sent: false, at: n, group });
                     }
-                    if p.image {
+                    if p.view.is_some() {
                         ui.label(RichText::new(tr("ui.agent_chat_view_attached")).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_small));
                     }
                     let (rest, rest_flags, places) = unplaced(&p.context, &[]);
