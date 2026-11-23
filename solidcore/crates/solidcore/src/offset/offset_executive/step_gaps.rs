@@ -60,8 +60,8 @@ fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
-/// The gap search's failure `failure` (a refusal or a reviewed defect, status `SM_ERR`),
-/// where the search stood (`site`).
+/// The gap search's failure `failure` (a refusal, or a defect: a reviewed one or one of the
+/// search's named defects; status `SM_ERR`), where the search stood (`site`).
 #[track_caller]
 fn gap_failure(failure: OffsetFailure, site: Site) -> SolidError {
     Failure::new(OP, failure).or_at(site).into_error()
@@ -300,7 +300,7 @@ impl OffsetExecutive {
     /// [`crate::error::offset::OffsetFailure::LoopGapPassLimit`] for a face still searched
     /// after [`MAX_GAP_PASSES`] passes, and
     /// [`crate::error::offset::OffsetFailure::SplitAtEdgeEnd`] where the bridged edge is not
-    /// split at the joint (each `SM_ERR`);
+    /// split at the joint (each a defect of the search, `SM_ERR`);
     /// [`crate::error::offset::OffsetFailure::LoopGapUncertified`] where the straight
     /// segment to the gap could not be established within tolerance;
     /// [`crate::error::offset::OffsetFailure::EdgeVanishes`] where the vertex moved to or past the edge's other
@@ -409,7 +409,8 @@ impl OffsetExecutive {
                 closed = false;
                 passes += 1;
                 if passes > MAX_GAP_PASSES {
-                    // one gap closed per pass: a face with this many gaps or more
+                    // one gap closed per pass: a face with this many gaps or more, or a gap
+                    // not really closed found again; either is the search's limit, a defect
                     return Err(gap_failure(
                         OffsetFailure::LoopGapPassLimit {
                             face: self.original_face(original, f),
@@ -494,7 +495,8 @@ impl OffsetExecutive {
                             )?
                         } else {
                             // both ends at the vertex, or neither: valid geometry near the
-                            // tolerance (a gap between tol and 2 tol about the vertex)
+                            // tolerance (a gap between tol and 2 tol about the vertex) that the
+                            // search does not handle, a defect
                             return Err(gap_failure(
                                 OffsetFailure::LoopGapEndsAmbiguous {
                                     face: self.original_face(original, f),
@@ -775,7 +777,8 @@ impl OffsetExecutive {
         )?;
         if !output.split {
             // the joint lies within an end vertex's tolerance along the edge, which only
-            // the gap's length (more than `tol`) was checked against
+            // the gap's length (more than `tol`) was checked against: two checks of the
+            // kernel's own edge disagree, a defect
             return Err(gap_failure(
                 OffsetFailure::SplitAtEdgeEnd {
                     face: self.original_face(original, f),
@@ -929,7 +932,8 @@ impl OffsetExecutive {
                 )?;
                 if !output.split {
                     // kept `tol` from the ends by distance, the point is within an end
-                    // vertex's tolerance along the edge
+                    // vertex's tolerance along the edge: two checks of the kernel's own edge
+                    // disagree, a defect
                     return Err(gap_failure(
                         OffsetFailure::SplitAtEdgeEnd {
                             face: None,
@@ -1764,11 +1768,12 @@ mod tests {
         )
     }
 
-    /// A gap the search cannot close is refused naming the input's face and its numbers,
-    /// with the status (`SM_ERR`) of the stage failure it replaced and where the search
-    /// stood; a defect of the search keeps the same status and site.
+    /// A gap the search cannot close is a defect of the search (the gaps are in the offset
+    /// loops the kernel built), naming the input's face and its numbers, with the status
+    /// (`SM_ERR`) of the stage failure it replaced and where the search stood; a reviewed
+    /// defect of the search keeps the same status and site.
     #[test]
-    fn a_gap_the_search_cannot_close_is_refused_with_its_numbers_and_status() {
+    fn a_gap_the_search_cannot_close_is_a_defect_with_its_numbers_and_status() {
         let (executive, original, offset, face, edgeuse, input_face, input_edge) = mapped_gap();
         let point = Point3::new(1.0, 2.0, 3.0);
         let site = executive.gap_site(&original, &offset, face, Some(edgeuse), Some(point));
@@ -1780,20 +1785,38 @@ mod tests {
         };
         let e = gap_failure(ambiguous, site);
         assert_eq!(e.offset_failure(), Some(&ambiguous));
-        assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported);
-        assert!(!e.is_defect());
+        assert_eq!(e.kind(), crate::error::ErrorKind::StageFailed);
+        assert!(e.is_defect());
+        assert!(!e.is_refusal());
         assert_eq!(e.entity(), Some(EntityRef::Face(input_face)));
         assert_eq!(
             e.to_string(),
             format!(
-                "{OP}: a gap in an offset face's loop has no one end at the vertex its edges \
-                 share: its ends are 2e-5 and 3e-5 from it, against 1e-4 (face {}) at {}",
+                "{OP}: stage_failed: a gap in an offset face's loop has no one end at the vertex \
+                 its edges share: its ends are 2e-5 and 3e-5 from it, against 1e-4 \
+                 (face {}) at {}",
                 input_face.index(),
                 e.site().unwrap()
             )
         );
         let defect = gap_failure(OffsetFailure::Defect { why: "x" }, site);
         assert!(defect.is_defect());
+        // the search's other named failures are defects too (#21059)
+        for other in [
+            OffsetFailure::LoopGapPassLimit {
+                face: executive.original_face(&original, face),
+                limit: MAX_GAP_PASSES,
+            },
+            OffsetFailure::SplitAtEdgeEnd {
+                face: executive.original_face(&original, face),
+                vertex_tolerance: 1e-5,
+            },
+        ] {
+            let other = gap_failure(other, site);
+            assert_eq!(other.kind(), crate::error::ErrorKind::StageFailed);
+            assert!(other.is_defect() && !other.is_refusal(), "{other}");
+            assert_eq!(other.upstream_status(), Some(crate::error::SM_ERR));
+        }
         for failure in [&e, &defect] {
             assert_eq!(failure.operation(), OP);
             assert_eq!(failure.upstream_status(), Some(crate::error::SM_ERR));

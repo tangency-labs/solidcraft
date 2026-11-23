@@ -469,6 +469,20 @@ pub struct SweepParams {
     /// whole drawn profile. The dialogs send `true`: they highlight the regions they pick.
     #[serde(default)]
     pub exact_regions: Option<bool>,
+    /// A point on a planar body face to sweep instead of a sketch profile.
+    #[serde(default)]
+    pub face: Option<Point3>,
+    /// The body whose face to use, where faces of several bodies meet at `face`.
+    #[serde(default)]
+    pub face_body: Option<String>,
+    /// With `face`: the face's plane as a fixed plane, as `solid.extrude`'s.
+    #[serde(default)]
+    pub fixed: Option<bool>,
+    /// With `face`, among placed instances: the body whose placement `face` is read in (read by
+    /// the engine's frame mapping, before the command runs). Default: `face_body`, else the
+    /// body nearest the point.
+    #[serde(default)]
+    pub body: Option<String>,
     /// The sketch holding the path, by id or name. Not needed when the path is a body's edges.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]
@@ -1368,6 +1382,13 @@ pub struct PatternPathParams {
     /// The length along the path from the first copy to the last, instead of `spacing`.
     #[serde(default)]
     pub distance: Option<LengthExpr>,
+    /// The start point: how far along the path the original sits, the copies measured on from
+    /// there. Default 0, the path's start. Give this or `start_fraction`, not both.
+    #[serde(default)]
+    pub start: Option<LengthExpr>,
+    /// The start point as a fraction, 0 to 1, of the path's length, kept as the path changes.
+    #[serde(default)]
+    pub start_fraction: Option<NumberExpr>,
     /// How each copy is turned. Default: identical.
     #[serde(default)]
     pub orientation: Option<PathOrientationParam>,
