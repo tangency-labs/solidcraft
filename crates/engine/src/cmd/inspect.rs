@@ -159,9 +159,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("appearance.favorite", "Favorite Look", crate::checked!("appearance.favorite", appearance_gestures::favorite)).icon("star").noundo().doc_only()
         .contract(&FAVORITE_CONTRACT).output(crate::schema::output_schema_for::<AppearanceFavoriteResult>)
         .params("look: appearance.assign look keys (appearance, or color/name/opacity/pbr); favorite: true to mark, false to unmark → the validated look and the preference; UI library preference only, no document change or dialogs."),
-    CommandSpec::new("appearance.chain", "Appearance Chain", appearance_chain::chain).icon("inspect").noundo().params(
-        "target: {body: name} | {body: name, face: zero-based model.faces index} | {component: name or id}; a placed copy's name (`KB (K:2)`, `K:2`) means the body or component it shows. Returns steps [{step: face|body|component|material, look: {name,color,opacity,pbr?} or null}] in precedence order and active (step or null). Component material is the common default look of its directly owned bodies, null if mixed/empty. Imported paint is a display fallback outside the four steps. Read-only; no dialogs",
-    ),
+    CommandSpec::new("appearance.chain", "Appearance Chain", crate::checked!("appearance.chain", appearance_chain::chain)).icon("inspect").noundo()
+        .contract(&CHAIN_CONTRACT).output(crate::schema::output_schema_for::<AppearanceChainResult>)
+        .params(
+            "target: {body: name} | {body: name, face: zero-based model.faces index} | {component: name or id}; a placed copy's name (`KB (K:2)`, `K:2`) means the body or component it shows. Returns steps [{step: face|body|component|material, look: {name,color,opacity,pbr?} or null}] in precedence order and active (step or null). Component material is the common default look of its directly owned bodies, null if mixed/empty. Imported paint is a display fallback outside the four steps. Read-only; no dialogs",
+        ),
     CommandSpec::new("appearance.replace", "Replace Appearance", crate::checked!("appearance.replace", appearance_chain::replace))
         .icon("appearance")
         .contract(&REPLACE_CONTRACT)
@@ -954,16 +956,17 @@ pub(crate) fn color_param(v: &Value) -> Option<[u8; 3]> {
 }
 
 use crate::schema::appearance::{
-    AppearanceAssignParams, AppearanceAssignResult, AppearanceCopyParams, AppearanceCopyResult, AppearanceFavoriteParams, AppearanceFavoriteResult,
-    AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult, AppearancePasteParams, AppearanceReplaceParams,
-    AppearanceReplaceResult, BodyLooks, ComponentLookReply, FaceIndexLook, FaceLookReply, FaceSpot, LibraryAppearance, LookInDesign, LookReply,
-    PbrReply, PlainAppearance, StarterAppearance,
+    AppearanceAssignParams, AppearanceAssignResult, AppearanceChainParams, AppearanceChainResult, AppearanceCopyParams, AppearanceCopyResult,
+    AppearanceFavoriteParams, AppearanceFavoriteResult, AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult,
+    AppearancePasteParams, AppearanceReplaceParams, AppearanceReplaceResult, BodyLooks, ComponentLookReply, FaceIndexLook, FaceLookReply, FaceSpot,
+    LibraryAppearance, LookInDesign, LookReply, PbrReply, PlainAppearance, StarterAppearance,
 };
 
 const ASSIGN_CONTRACT: TypedContract<AppearanceAssignParams> = TypedContract::new();
 const LIBRARY_CONTRACT: TypedContract<AppearanceLibraryParams> = TypedContract::new();
 const LIST_CONTRACT: TypedContract<AppearanceListParams> = TypedContract::new();
 const COPY_CONTRACT: TypedContract<AppearanceCopyParams> = TypedContract::new();
+const CHAIN_CONTRACT: TypedContract<AppearanceChainParams> = TypedContract::new();
 const PASTE_CONTRACT: TypedContract<AppearancePasteParams> = TypedContract::new();
 const FAVORITE_CONTRACT: TypedContract<AppearanceFavoriteParams> = TypedContract::new();
 const REPLACE_CONTRACT: TypedContract<AppearanceReplaceParams> = TypedContract::new();
@@ -995,7 +998,7 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
                 Some(n) => st.body(n).filter(|b| on(b)).map(|b| b.name.clone()),
                 None => st.bodies.iter().filter(|b| on(b)).min_by(|a, b| dist_to(a, pt).total_cmp(&dist_to(b, pt))).map(|b| b.name.clone()),
             };
-            faces.push((body.ok_or_else(|| bad(cmd, format!("no face at {pt:?}")))?, pt));
+            faces.push((body.ok_or_else(|| bad(cmd, format!("no face at {pt}")))?, pt));
         }
     }
     let mut comps: Vec<u64> = Vec::new();

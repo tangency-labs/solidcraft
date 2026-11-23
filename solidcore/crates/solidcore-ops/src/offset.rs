@@ -37,6 +37,11 @@ use crate::order::{self, Order};
 use crate::session::with_body;
 use crate::{Error, OffsetRefusal, RecordEntity, Result, Unsoundness};
 
+/// A face a draft of plane faces would cut through without meeting it (a hole's wall within the
+/// draft of the side), for a client that drafts through the kernel's local operation itself and
+/// names that face when the operation refuses ([`drafted_through`]).
+pub use solidcore::offset::draft::{drafted_through, DraftedThrough};
+
 /// The largest offset distance or wall the operations take.
 const MAX_DISTANCE: f64 = 1e6;
 
@@ -230,6 +235,7 @@ fn offset_refused(
         OffsetFailure::ExactCurveUncut => OffsetRefusal::ExactCurveUncut,
         OffsetFailure::FacesApart { .. } => OffsetRefusal::FacesApart,
         OffsetFailure::PastSide { largest, .. } => OffsetRefusal::PastSide { largest },
+        OffsetFailure::FaceCloses { largest, .. } => OffsetRefusal::FaceCloses { largest },
         OffsetFailure::ReachUncertified { .. } => OffsetRefusal::ReachUncertified,
         OffsetFailure::LoopGapUncertified { .. } => OffsetRefusal::LoopGapUncertified,
         OffsetFailure::Unsound { what } => match unsound(what, index) {
@@ -481,7 +487,7 @@ pub fn offset_faces(body: &Body, order: &Order, faces: &[usize], distance: f64) 
 }
 
 /// The sheet `body` thickened by `thickness` along its normals, or (`symmetric`) moved back by
-/// half first: a closed solid ([`Expect::SOLID`], [`Error::NotSolid`] if not).
+/// half first: a closed solid ([`Expect::SOLID`], [`Error::NotSolidBecause`] if not).
 ///
 /// # Errors
 /// [`Error::Argument`] for a thickness not finite, zero or past 1e6, or a body that is a

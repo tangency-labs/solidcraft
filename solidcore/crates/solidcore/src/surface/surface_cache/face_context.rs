@@ -33,6 +33,11 @@ pub trait FaceQueries<O>: Debug {
     /// Returns the face's 3D zone tolerance.
     fn face_zone_tol_3d(&self, face: O) -> Result<f64>;
 
+    /// Whether the face has loop uses ([`crate::topology::face::p4::has_loopuses`]):
+    /// a trimmed cache's point test classifies only on such a face, and keeps every
+    /// point on a face without loop uses.
+    fn face_has_loopuses(&self, face: O) -> Result<bool>;
+
     /// Classifies a UV point against a face, returning its class and optional object.
     fn face_point_classify(
         &self,
@@ -170,6 +175,10 @@ impl<O: Copy + PartialEq> CacheFace<O> for MappedCacheFace<'_, O> {
         self.handles(self.inner.upward_loopuses()?)
     }
 
+    fn has_loopuses(&self) -> Result<bool> {
+        self.inner.has_loopuses()
+    }
+
     fn loopuse_edgeuses(&self, loopuse: O) -> Result<Vec<O>> {
         self.handles(self.inner.loopuse_edgeuses(self.entity(loopuse)?)?)
     }
@@ -297,6 +306,11 @@ impl<O: Copy + PartialEq> FaceQueries<O> for PreparedFaceQueries<'_, O> {
     fn face_zone_tol_3d(&self, face: O) -> Result<f64> {
         self.check_face(face)?;
         crate::topology::face::p2::tolerance(self.brep, self.face)
+    }
+
+    fn face_has_loopuses(&self, face: O) -> Result<bool> {
+        self.check_face(face)?;
+        crate::topology::face::p4::has_loopuses(self.brep, self.face)
     }
 
     fn face_point_classify(
