@@ -686,6 +686,7 @@ fn actual_box_shared_constructor_builds_and_stitches_native_intermediate_body() 
 /// `do_fillet` or step by step (`create_corners`, then `do_filleting`, as solidcore-ops
 /// runs a pass). The rounded body's face, edge and vertex counts, and the kernel's blend
 /// counts of the rounding.
+#[allow(clippy::unwrap_used)] // a test helper
 fn spline_outline_top_rounded(step_by_step: bool) -> ((usize, usize, usize), BlendCounts) {
     let points = [
         (100.0, 0.0),
