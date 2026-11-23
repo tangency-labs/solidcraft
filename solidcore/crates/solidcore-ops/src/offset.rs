@@ -37,6 +37,11 @@ use crate::order::{self, Order};
 use crate::session::with_body;
 use crate::{Error, OffsetRefusal, RecordEntity, Result, Unsoundness};
 
+/// A face a draft of plane faces would cut through without meeting it (a hole's wall within the
+/// draft of the side), for a client that drafts through the kernel's local operation itself and
+/// names that face when the operation refuses ([`drafted_through`]).
+pub use solidcore::offset::draft::{drafted_through, DraftedThrough};
+
 /// The largest offset distance or wall the operations take.
 const MAX_DISTANCE: f64 = 1e6;
 
