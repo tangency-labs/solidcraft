@@ -39,7 +39,7 @@ the selected body (or the last body of the active component).
   dimensions follow; optional ones left empty take their defaults.
 - **Corner Type**, **Flip** and **Corner Overrides** cut the members where two of them meet, as
   under Corners below, and **Gap** leaves a weld gap at each welded end (see Multi-trim and the weld
-  gap). A new Frame Member starts on Auto (see Auto below); the command's own default stays None.
+  gap). A new Frame Member and the command both start on None.
 - **Anchor**, **Angle** and **Mirror** place the section on each line, as below. **Name** names
   the members (default: after the profile).
 - **Offset A** and **Offset B** move the section from its anchor by a length, along the
@@ -56,9 +56,20 @@ the selected body (or the last body of the active component).
   the section, or past it to put the member off its line, to put that point on the line
   (`locate`, rounded to 0.1 mm; hold Alt or Ctrl for no rounding; Offset A and B follow); let go
   near a dot and it takes that anchor instead. A click on a dot empties Offset A and B. Only the first line
-  gets the section; the anchor is the same on every line. Nothing is drawn until the lines and
+  of the group shown gets the section; the anchor is the same on every line of the group. Nothing is drawn until the lines and
   the profile make a member. Turn the hot points off in Preferences › Tools › Frame Member (the
   `frame_hot_points` preference, on by default); off, the section is placed by **Anchor** alone.
+- **Groups**: one feature can lay several groups of lines in the same profile, each with its own
+  lines, **Anchor**, **Angle**, **Mirror** and **Name** (uprights turned one way, rails another).
+  **New Group** starts an empty group and shows it; click a group to show and edit it, **Remove
+  Group** removes the one shown. A line belongs to one group only.
+  Several groups currently require **None**, with no corner overrides, point pairs, **Flip**,
+  **Fit Ends**, **Coped** or weld gap. Unsupported combinations report an error and keep the
+  selected settings; they are not silently dropped. Use separate Frame Members for joined
+  corners or point pairs. A single group uses the normal flat form and retains all corner,
+  pair and finishing options. Later flat frames can fit their ends to earlier grouped members,
+  using each group's actual anchor, mirror and rotation. **Offset A**, **Offset B** and the hot
+  points act on the group shown and are kept with it.
 - The preview shows the members as you change the values. **Edit Feature** reopens the dialog with
   the feature's values; the members keep their names through the edit, and a new **Name**
   renames them all. A member made with a whole profile sketch keeps it (the **Section** row shows
@@ -423,6 +434,11 @@ row whose Flip is left alone goes back in its saved order on OK.
   feature, leaves the other members' names alone; `body.rename` renames a member on its line.
   `names` (`{line id: name}`) gives names to keep, as Edit Feature (`timeline.redefine`) passes
   them unless the edit changes `body_name`.
+- `groups` (`[{lines, anchor?, locate?, angle?, mirror?, body_name?}]`): several groups of lines
+  in the feature's one profile, each placed and named its own way. Each group lists its lines, and
+  no line is in two groups. With `groups`, give `lines`, `anchor`, `locate`, `angle`, `mirror` and
+  `body_name` in each group, not beside them. A feature with one group saves as before, so designs without
+  groups don't change.
 
 Every built-in profile is SolidCraft's own parametric definition, built in code
 (`solidcraft_doc::frame`). Standard steel sizes (below) fill in a profile's dimensions from a

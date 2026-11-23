@@ -38,7 +38,10 @@ fn member(h: &mut Harness) -> &mut Member {
 }
 
 fn locate(h: &Harness) -> Option<Value> {
-    h.app.dialog.as_ref().expect("a dialog is open").extra.get("locate").cloned()
+    match &h.app.dialog.as_ref().expect("a dialog is open").kind {
+        Kind::Frame(m) => m.locate.map(|at| json!(at)),
+        k => panic!("a Frame Member dialog, not {k:?}"),
+    }
 }
 
 fn index(name: &str) -> usize {
@@ -49,7 +52,7 @@ fn index(name: &str) -> usize {
 fn view(h: &Harness) -> SectionView {
     let d = h.app.dialog.as_ref().expect("a dialog is open");
     let Kind::Frame(m) = &d.kind else { panic!("a Frame Member dialog") };
-    let (_, p) = crate::dialogs_frame::commands(&h.app, m, &d.inputs, &d.extra).unwrap().remove(0);
+    let p = crate::dialogs_frame::shown_params(&h.app, m, &d.inputs, &d.extra).unwrap();
     solidcraft_engine::cmd::frame::member_section_view(&h.app.session, &p).unwrap()
 }
 
@@ -102,7 +105,9 @@ fn the_hot_points_and_the_marker_are_published_on_the_first_line() {
 #[test]
 fn clicking_a_hot_point_sets_the_anchor_and_drops_locate() {
     let mut h = post();
-    h.app.dialog.as_mut().unwrap().extra.insert("locate".into(), json!([5.0, 5.0]));
+    if let Some(Kind::Frame(m)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        m.locate = Some([5.0, 5.0]);
+    }
     h.settle();
     h.step(&json!({"click": {"handle": "frame_anchor:top_left"}})).unwrap();
     h.settle();
@@ -314,4 +319,75 @@ fn unfinished_or_hostile_values_show_nothing() {
     };
     assert!(laid_out(v.clone()).is_none(), "a start that is not a number");
     assert!(laid_out(SectionView { start: Vec3::new(0.0, 0.0, 0.0), ..v }).is_none(), "a section with no size");
+}
+
+/// Two groups of Frame Member (`groups`): Offset A and B and the hot points act on the group shown
+/// and are kept with it; the other group's placement is left alone, and showing a group again
+/// shows its own offset.
+#[test]
+fn offsets_and_hot_points_act_on_the_group_shown() {
+    // Two posts in one 3D sketch: the one in view (group 2, shown) and one away from it (group 1).
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Post path"})).unwrap();
+    h.app.run("sketch.options", json!({"sketch_3d": true})).unwrap();
+    h.app.run("sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 300]]})).unwrap();
+    h.app.run("sketch.line3d", json!({"points": [[-150, 0, 0], [-150, 0, 300]]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.settle();
+    h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
+    h.step(&json!({"call": "ui.camera", "params": {"target": [0, 0, 0], "distance": 250}})).unwrap();
+    h.step(&json!({"start": "frame.member"})).unwrap();
+    let sketch = h.app.session.doc.find_feature("Post path").unwrap().id;
+    let wires = &h.app.session.doc.sketch(sketch).unwrap().wires;
+    assert_eq!(wires.len(), 2, "two posts");
+    let line = |k: usize| vec![Sel::ExternalSketchCurve { sketch, id: wires[k].id.clone() }];
+    let (near, far) = (line(0), line(1));
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = far;
+    let Kind::Frame(m) = &mut d.kind else { panic!("a Frame Member dialog") };
+    m.add_group(&mut d.inputs);
+    d.inputs[0].items = near;
+    h.settle();
+
+    // Group 2, shown: Bottom Middle and Offset B 50 mm.
+    member(&mut h).anchor = index("bottom");
+    member(&mut h).offset = [String::new(), "50 mm".into()];
+    h.settle();
+    let v = view(&h);
+    assert!((point(&v, Anchor::Bottom).y - v.at.y - 50.0).abs() < 1e-9, "the shown group's section is laid out");
+    let c = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let groups = c[0].1["groups"].as_array().expect("two groups").clone();
+    assert_eq!(groups[1]["locate"], json!([0.0, -70.0]), "{}", c[0].1);
+    assert!(groups[0].get("locate").is_none(), "the other group is not moved: {}", c[0].1);
+
+    // Showing group 1 shows its own (empty) offset; back on group 2 the offset is read from its locate.
+    let show = |h: &mut Harness, k: usize| {
+        let d = h.app.dialog.as_mut().unwrap();
+        let Kind::Frame(m) = &mut d.kind else { panic!("a Frame Member dialog") };
+        m.show(k, &mut d.inputs);
+        h.settle();
+    };
+    show(&mut h, 0);
+    assert_eq!(member(&mut h).offset, [String::new(), String::new()]);
+    assert_eq!(locate(&h), None);
+    show(&mut h, 1);
+    let off = member(&mut h).offset.clone();
+    let mm = |t: &str| crate::length_input::eval(&h.app.session.doc, t, solidcraft_engine::doc::expr::Kind::Length).unwrap_or(0.0);
+    assert!(off[0].trim().is_empty() || mm(&off[0]).abs() < 1e-9, "{off:?}");
+    assert!((mm(&off[1]) - 50.0).abs() < 1e-9, "{off:?}");
+
+    // A hot point on the shown group drops its located point only. Located 50 mm up, the section's
+    // top row sits under the toolbar at this camera: the view is centred on it so the click lands.
+    let v = view(&h);
+    let c = v.world(point(&v, Anchor::Center));
+    h.step(&json!({"call": "ui.camera", "params": {"target": [c.x, c.y, c.z], "distance": 250}})).unwrap();
+    h.settle();
+    h.step(&json!({"click": {"handle": "frame_anchor:top_left"}})).unwrap();
+    h.settle();
+    let c = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let groups = c[0].1["groups"].as_array().expect("two groups").clone();
+    assert!(groups[1].get("locate").is_none(), "{}", c[0].1);
+    assert_eq!(groups[1]["anchor"], json!("top_left"), "{}", c[0].1);
+    assert!(groups[0].get("locate").is_none(), "{}", c[0].1);
 }

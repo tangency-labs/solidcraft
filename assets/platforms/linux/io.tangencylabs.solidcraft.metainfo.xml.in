@@ -7,6 +7,7 @@
   <project_license>MIT OR Apache-2.0</project_license>
   <name>SolidCraft</name>
   <summary>Independent parametric 3D CAD</summary>
+  <summary xml:lang="ru">Независимая параметрическая 3D САПР</summary>
   <developer id="io.github.bherbruck">
     <name>SolidCraft contributors</name>
   </developer>
@@ -16,12 +17,22 @@
       plane, constrain and dimension the sketch, turn profiles into solids on a feature
       timeline, and change a parameter to watch the timeline rebuild.
     </p>
+    <p xml:lang="ru">
+      SolidCraft — открытая параметрическая 3D САПР, написанная на Rust. Рисуйте эскиз на
+      плоскости, задавайте в нём ограничения и размеры, превращайте профили в тела на
+      шкале операций и меняйте параметр, чтобы увидеть, как шкала перестраивается.
+    </p>
     <ul>
       <li>Sketches with a constraint solver and parameter-driven dimensions</li>
+      <li xml:lang="ru">Эскизы с решателем ограничений и размерами, управляемыми параметрами</li>
       <li>Extrude, revolve, sweep, loft, fillet, chamfer, shell, holes and patterns</li>
+      <li xml:lang="ru">Выдавливание, вращение, сдвиг, лофт, скругление, фаска, оболочка, отверстия и массивы</li>
       <li>Components and joints, sheet metal, and a plastic-enclosure subset</li>
+      <li xml:lang="ru">Компоненты и сопряжения, листовой металл и набор функций для пластиковых корпусов</li>
       <li>STEP and IGES import and export; 3MF, STL and OBJ</li>
+      <li xml:lang="ru">Импорт и экспорт STEP и IGES; 3MF, STL и OBJ</li>
       <li>Every action is a command, scriptable from a CLI, a JSON control channel and an MCP server</li>
+      <li xml:lang="ru">Каждое действие — это команда, которую можно вызывать из CLI, через управляющий канал JSON и сервер MCP</li>
     </ul>
   </description>
   <launchable type="desktop-id">io.tangencylabs.solidcraft.desktop</launchable>
@@ -36,12 +47,16 @@
   </categories>
   <keywords>
     <keyword>cad</keyword>
+    <keyword xml:lang="ru">сапр</keyword>
     <keyword>parametric</keyword>
+    <keyword xml:lang="ru">параметрический</keyword>
     <keyword>step</keyword>
+    <keyword xml:lang="ru">step</keyword>
   </keywords>
   <screenshots>
     <screenshot type="default">
       <caption>A sample part with its sketches and feature timeline</caption>
+      <caption xml:lang="ru">Пример детали с эскизами и шкалой операций</caption>
       <image>https://raw.githubusercontent.com/bherbruck/solidcraft/main/docs/screenshots/sample-plate.png</image>
     </screenshot>
   </screenshots>

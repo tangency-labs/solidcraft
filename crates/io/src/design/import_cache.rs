@@ -111,7 +111,7 @@ impl ImportCache {
         let path = self.path(key).ok_or_else(|| invalid("import cache key"))?;
         let bytes = write_design_container_with_cache(doc, DesignCompression::Fast, None, Some(model))?;
         let mut reader = DesignContainerReader::new(Cursor::new(&bytes))?;
-        if reader.reader.limited_part(native_cache::ENTRIES[0], 32 << 20).is_err() {
+        if reader.reader.limited_part(native_cache::ENTRIES[0], native_cache::max_manifest()).is_err() {
             return Err(invalid("import model was not stored"));
         }
         let binding = serde_json::to_vec(&json!({"key": key, "reply": reply})).map_err(invalid)?;

@@ -18,7 +18,7 @@ use std::cell::RefCell;
 use std::sync::{Arc, Weak};
 
 use egui::{Pos2, vec2};
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::doc::frame::{Anchor, SectionView};
 use solidcraft_engine::doc::{Document, ModelState};
@@ -120,11 +120,11 @@ fn press_area(c: Pos2) -> egui::Rect {
     egui::Rect::from_center_size(c, vec2(2.0 * REACH, 2.0 * REACH))
 }
 
-/// The `frame.member` parameters the dialog's OK would run; none while it is unfinished.
+/// The `frame.member` parameters of the group the dialog shows, as one member; none while it is
+/// unfinished.
 fn params(app: &SolveApp, d: &Dialog) -> Option<Value> {
     let Kind::Frame(m) = &d.kind else { return None };
-    let (id, p) = crate::dialogs_frame::commands(app, m, &d.inputs, &d.extra).ok()?.into_iter().next()?;
-    (id == "frame.member").then_some(p)
+    crate::dialogs_frame::shown_params(app, m, &d.inputs, &d.extra).ok()
 }
 
 /// The section the dialog's values put on the first line, from the cache when neither the values
@@ -214,8 +214,8 @@ fn tenth(v: f64) -> f64 {
 fn set_anchor(d: &mut Dialog, index: usize) {
     if let Kind::Frame(m) = &mut d.kind {
         m.anchor = index;
+        m.locate = None;
     }
-    d.extra.remove("locate");
     d.error = None;
 }
 
@@ -224,8 +224,13 @@ fn set_locate(d: &mut Dialog, view: &SectionView, p: Vec2, free: bool) {
     let [x, y] = view.locate_of(p);
     let (x, y) = if free { (x, y) } else { (tenth(x), tenth(y)) };
     let limit = solidcraft_engine::doc::frame::MAX_PROFILE_SIZE;
-    if x.is_finite() && y.is_finite() && x.abs() <= limit && y.abs() <= limit {
-        d.extra.insert("locate".into(), json!([x, y]));
+    if x.is_finite()
+        && y.is_finite()
+        && x.abs() <= limit
+        && y.abs() <= limit
+        && let Kind::Frame(m) = &mut d.kind
+    {
+        m.locate = Some([x, y]);
         d.error = None;
     }
 }
@@ -334,8 +339,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     }
 
     // What the dialog holds now: the anchor in use is ringed, none while a point is located.
-    let (anchor, located) = match app.dialog.as_ref().map(|d| (&d.kind, d.extra.contains_key("locate"))) {
-        Some((Kind::Frame(m), located)) => (m.anchor, located),
+    let (anchor, located) = match app.dialog.as_ref().map(|d| &d.kind) {
+        Some(Kind::Frame(m)) => (m.anchor, m.locate.is_some()),
         _ => (0, false),
     };
     let active_at = if located { None } else { sh.points.get(anchor).copied().flatten() };

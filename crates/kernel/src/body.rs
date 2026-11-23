@@ -1103,6 +1103,28 @@ impl Body {
         dists.into_iter().enumerate().filter_map(|(f, row)| Some((row.first().copied().flatten()?, f))).min_by(|a, b| a.0.total_cmp(&b.0))
     }
 
+    /// Exact polyline samples for each non-seam edge bordering `face` of `self`.
+    pub fn face_edge_polylines(&self, face: usize) -> Vec<Vec<Vec3>> {
+        if self.is_mesh() {
+            return Vec::new();
+        }
+        let Some(f) = self.record.faces.get(face) else {
+            return Vec::new();
+        };
+        let chord = (self.size() * 1e-3).max(1e-4);
+        let mut out = Vec::new();
+        for l in &f.loops {
+            let brep::Loop::Edges { edges } = l else { continue };
+            for ue in edges {
+                let Some(e) = self.record.edges.get(ue.edge as usize) else { continue };
+                if let Ok(pts) = edge_points(e, chord) {
+                    out.push(pts);
+                }
+            }
+        }
+        out
+    }
+
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
     pub fn with_cylinder_certificate(mut self, producer: u64) -> Result<Self> {
         if producer == 0 {
@@ -1523,19 +1545,41 @@ impl Body {
     /// The body's volume: measured with exact mass properties via SMLib for B-rep bodies,
     /// or from mesh triangles for mesh bodies.
     pub fn volume_at(&self, _tol: f64) -> Option<f64> {
+        self.measured_volume().ok()
+    }
+
+    /// The body's volume as [`crate::measure_mass`] measures it, measured once and kept with the
+    /// record ([`Body::volume`]): its clones, and every later caller, read it back. The validity
+    /// check and Convert Mesh's volume check each integrated the same body's mass properties
+    /// again, most of a conversion's time (#18458).
+    pub(crate) fn measured_volume(&self) -> Result<f64> {
         if let Some(cell) = &self.volume
             && let Ok(cached) = cell.lock()
             && let Some((_, volume)) = *cached
         {
-            return Some(volume);
+            return Ok(volume);
         }
-        let volume = crate::measure(self).ok()?.volume;
+        let volume = crate::measure_mass(self)?.volume;
         if let Some(cell) = &self.volume
             && let Ok(mut slot) = cell.lock()
         {
             *slot = Some((0, volume));
         }
-        Some(volume)
+        Ok(volume)
+    }
+
+    /// The volume a check of this body compares: a faceted solid's exactly
+    /// ([`solidcore_ops::faceted_volume`]: every face flat, every edge straight, closed shells),
+    /// else [`Body::measured_volume`]. The validity check and Convert Mesh's volume check, which
+    /// a faceted solid passes or fails by its volume's sign and size, integrated its mass
+    /// properties for it: about 2 s for a mesh of 4,000 triangles (#18458).
+    pub(crate) fn validated_volume(&self) -> Result<f64> {
+        if self.mesh.is_none()
+            && let Ok(Some(volume)) = solidcore_ops::faceted_volume(self.record())
+        {
+            return Ok(volume);
+        }
+        self.measured_volume()
     }
 
     /// Rough heap footprint, for the evaluation cache's byte budget: the B-rep topology is what
@@ -2011,6 +2055,26 @@ impl Body {
         }
     }
 
+    /// Exact material classes, boundary face indices and outward normals for all points.
+    /// The entire request, including optional face selection, uses one ops rollback scope
+    /// and cached kernel face boxes; no per-point or per-face body snapshots, no mesh.
+    pub fn classify_points_with_normals(
+        &self,
+        points: &[Vec3],
+        face: Option<solidcore_ops::PointNormalFace>,
+    ) -> Result<Vec<solidcore_ops::ClassifiedPoint>> {
+        let form = self.ops_body().ok_or_else(|| KernelError::Invalid("point classification needs an exact body".into()))?;
+        let (body, order) = &*form;
+        let points: Vec<[f64; 3]> = points.iter().copied().map(Into::into).collect();
+        body.classify_points_with_normals(order, &points, face).map_err(|e| match e {
+            solidcore_ops::Error::Argument => {
+                KernelError::Invalid("the point must lie on the selected face, or on an exact boundary face when face is omitted".into())
+            }
+            solidcore_ops::Error::Internal(message) => KernelError::Internal(format!("classify points with normals: {message}")),
+            e => KernelError::Failed(format!("classify points with normals: {e}")),
+        })
+    }
+
     /// Where face `face_index` lies along `direction` when it is a plane square to it: its level
     /// from `origin` and the face's own tolerance ([`solidcore_ops::Body::face_square_level`]),
     /// exact, no mesh. `None` for a face that is not, a mesh body, an index out of range or a
@@ -2125,9 +2189,9 @@ impl Body {
         if missing > 0 {
             out.push(format!("{missing} face(s) don't mesh"));
         }
-        match crate::measure(self) {
-            Ok(m) if m.volume.is_finite() && m.volume > 0.0 => {}
-            Ok(m) => out.push(format!("volume {}", m.volume)),
+        match self.validated_volume() {
+            Ok(volume) if volume.is_finite() && volume > 0.0 => {}
+            Ok(volume) => out.push(format!("volume {volume}")),
             Err(e) => out.push(format!("no measure: {e}")),
         }
         out
