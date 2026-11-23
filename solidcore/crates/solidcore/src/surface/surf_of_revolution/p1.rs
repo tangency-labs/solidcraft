@@ -104,7 +104,7 @@ use crate::curve::curve::{Curve, CurveKind, CurvePropertyType};
 use crate::curve::ellipse::p2::set_up_polar_conversion;
 use crate::curve::ellipse::{Ellipse, EllipseOptions, PolarConversion};
 use crate::error::surface::{AnalyticCheck, SurfaceFailure};
-use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -693,27 +693,22 @@ impl SurfOfRevolution {
         // locals
         let surf_sweep_step_ivl = self.anal_uv_domain.u_interval();
         let surf_gen_step_ivl = self.anal_uv_domain.v_interval();
-        let gen_curve_step_ivl = gen_step_interval(self.gen()?)?;
+        // (the generator is borrowed once, beside the position, for the whole routine)
+        let own = self
+            .gen_curve
+            .as_mut()
+            .ok_or_else(|| SolidError::surface(OP_GEN, SurfaceFailure::SurfaceWithoutGenerator))?;
+        let gen_curve_step_ivl = gen_step_interval(own)?;
 
         // get a GenCurve
-        let mut gen_curve = self.create_generator_from_angle(k, surf_sweep_step_ivl.min())?;
+        let mut gen_curve =
+            generator_rotated_by(k, own, &self.position, surf_sweep_step_ivl.min())?;
 
         // When SurfaceCurve and generator intervals are not the same
         if !surf_gen_step_ivl.is_contained_by(&gen_curve_step_ivl, 0.0)
             || !gen_curve_step_ivl.is_contained_by(&surf_gen_step_ivl, 0.0)
         {
             // Trimming is needed.
-            let own = self.gen_curve.as_mut().ok_or_else(|| {
-                Failure::new(
-                    OP_GEN,
-                    SurfaceFailure::Defect {
-                        why: "the generator is missing, though self.gen() read it at the top \
-                              of this routine and nothing since takes it",
-                    },
-                )
-                .with_status(SM_ERR_NULL_POINTER)
-                .into_error()
-            })?;
             gen_adjust_step_interval(k, own, &surf_gen_step_ivl)?;
             gen_adjust_step_interval(k, &mut gen_curve, &surf_gen_step_ivl)?;
         }
@@ -1261,23 +1256,7 @@ impl SurfOfRevolution {
     ///
     /// `SM_ERR_NULL_POINTER` without generator; those of the copy and the transform.
     pub fn create_generator_from_angle(&self, k: &Kernel, angle_deg: f64) -> Result<Curve> {
-        // copy the current GenCurve
-        let mut new_curve = self.gen()?.copy(k)?;
-
-        // when rotating the genCurve
-        if angle_deg.abs() > EFF_ZERO {
-            // define the rotation matrix
-            let mut rf = Axis2Placement::IDENTITY;
-            rf.rotate_about_axis_at_point(
-                angle_deg * PI / 180.0,
-                self.position.origin(),
-                self.position.z_axis(),
-            );
-
-            // rotate the GenCurve Copy
-            new_curve.transform(k, &rf, None)?;
-        }
-        Ok(new_curve)
+        generator_rotated_by(k, self.gen()?, &self.position, angle_deg)
     }
 
     // ---- parameter conversion and STEP evaluation -----------------------------------
@@ -1918,6 +1897,29 @@ pub(crate) fn first(v: &[Vec3]) -> Result<Vec3> {
     v.first()
         .copied()
         .ok_or(SolidError::invalid_input(OP_EVAL_STEP, "empty evaluation"))
+}
+
+/// A copy of `generator` rotated by `angle_deg` about the axis of `position` (the body of
+/// [`SurfOfRevolution::create_generator_from_angle`], on borrowed fields).
+fn generator_rotated_by(
+    k: &Kernel,
+    generator: &Curve,
+    position: &Axis2Placement,
+    angle_deg: f64,
+) -> Result<Curve> {
+    // copy the current GenCurve
+    let mut new_curve = generator.copy(k)?;
+
+    // when rotating the genCurve
+    if angle_deg.abs() > EFF_ZERO {
+        // define the rotation matrix
+        let mut rf = Axis2Placement::IDENTITY;
+        rf.rotate_about_axis_at_point(angle_deg * PI / 180.0, position.origin(), position.z_axis());
+
+        // rotate the GenCurve Copy
+        new_curve.transform(k, &rf, None)?;
+    }
+    Ok(new_curve)
 }
 
 // ---- sm_TestForIsoCircles --------------------------------------------------------------

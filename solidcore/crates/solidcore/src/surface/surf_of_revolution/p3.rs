@@ -1055,72 +1055,59 @@ impl SurfOfRevolution {
             * (1.0 + nurb_min_point.max_dimension() + nurb_max_point.max_dimension());
         let ang_tol_rad = EFF_ZERO_SQRT * tolerance_scale;
 
+        // The frame and angles of a direction whose iso curves are circles of a revolution:
+        // a test that finds circles returns them, set at its first circle (it refuses a
+        // family that is all degenerate), so they are carried with the answer.
+        let revolution = |c: super::IsoCircles| {
+            if c.found_circles && c.parallel_planes && c.coaxial_centers && c.planar_gen_curve {
+                c.reference_frame.zip(c.angles)
+            } else {
+                None
+            }
+        };
+
         // test sequence of U direction (V Constant) isoCurves for circularity and
         // parallelism
-        let mut circles_v = None;
-        let mut is_revolution_no_swap_uv = false;
+        let mut revolution_no_swap_uv = None;
         if deg_u == 2 {
-            let c = super::test_for_iso_circles(
+            revolution_no_swap_uv = revolution(super::test_for_iso_circles(
                 k,
                 &self.base,
                 SurfParamType::V,
                 scaled_zero,
                 ang_tol_rad,
-            )?;
-            is_revolution_no_swap_uv =
-                c.found_circles && c.parallel_planes && c.coaxial_centers && c.planar_gen_curve;
-            circles_v = Some(c);
+            )?);
         }
 
         // test sequence of V direction (U Constant) isoCurves
-        let mut circles_u = None;
-        let mut is_revolution_with_swap_uv = false;
-        if !is_revolution_no_swap_uv && deg_v == 2 {
-            let c = super::test_for_iso_circles(
+        let mut revolution_with_swap_uv = None;
+        if revolution_no_swap_uv.is_none() && deg_v == 2 {
+            revolution_with_swap_uv = revolution(super::test_for_iso_circles(
                 k,
                 &self.base,
                 SurfParamType::U,
                 scaled_zero,
                 ang_tol_rad,
-            )?;
-            is_revolution_with_swap_uv =
-                c.found_circles && c.parallel_planes && c.coaxial_centers && c.planar_gen_curve;
-            circles_u = Some(c);
-        }
-
-        // no work - no sweep direction
-        if !is_revolution_with_swap_uv && !is_revolution_no_swap_uv {
-            return Err(SolidError::surface(
-                OP_REBUILD,
-                SurfaceFailure::NurbNotAnalytic {
-                    check: AnalyticCheck::NoCircularDirection,
-                },
-            ));
+            )?);
         }
 
         // Let GenCurve = iso-curve from the 'other' parameter
-        let (gen_dir, swap_uv, param, circles) = if is_revolution_no_swap_uv {
-            // constant V isoParamCurves are circles
-            (SurfParamType::U, false, nurb_uv_domain.min().x, circles_v)
-        } else {
-            // constant U isoParamCurves are circles
-            (SurfParamType::V, true, nurb_uv_domain.min().y, circles_u)
-        };
-        // (the direction chosen is one whose test ran and found circles, and a test that
-        // finds circles sets their frame and angles at its first circle)
-        let unfilled = || {
-            SolidError::surface(
-                OP_REBUILD,
-                SurfaceFailure::Defect {
-                    why: "the iso circle test of the direction chosen left no result, frame \
-                          or angles, though it ran and found circles, and sets both at the \
-                          first one",
-                },
-            )
-        };
-        let circles = circles.ok_or_else(unfilled)?;
-        let ref_frame = circles.reference_frame.ok_or_else(unfilled)?;
-        let angles = circles.angles.ok_or_else(unfilled)?;
+        let (gen_dir, swap_uv, param, (ref_frame, angles)) =
+            match (revolution_no_swap_uv, revolution_with_swap_uv) {
+                // constant V isoParamCurves are circles
+                (Some(found), _) => (SurfParamType::U, false, nurb_uv_domain.min().x, found),
+                // constant U isoParamCurves are circles
+                (None, Some(found)) => (SurfParamType::V, true, nurb_uv_domain.min().y, found),
+                // no work - no sweep direction
+                (None, None) => {
+                    return Err(SolidError::surface(
+                        OP_REBUILD,
+                        SurfaceFailure::NurbNotAnalytic {
+                            check: AnalyticCheck::NoCircularDirection,
+                        },
+                    ));
+                }
+            };
         let (min_ang_deg, max_ang_deg) = (angles.min(), angles.max());
 
         // create GenCurve isoParamCurve

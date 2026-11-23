@@ -638,7 +638,8 @@ pub enum SurfaceFailure {
     /// tree names no original surface. [`ErrorKind::InvalidInput`].
     CacheWithoutSurfaceHandle,
     /// The evaluation at this point failed before, and the evaluator keeps that answer
-    /// until the point moves. Class `failed`.
+    /// until the point moves (that evaluation's error is the cause). Class `failed`;
+    /// whether it is a defect or a refusal is its cause's.
     EvaluationFailedBefore,
     /// The evaluator has no surface set. [`ErrorKind::InvalidInput`].
     NoSurfaceGiven,

@@ -5493,8 +5493,9 @@ pub struct SurfaceEval<'s> {
     normal_set: bool,
     /// `m_bSectDirSet`.
     sect_dir_set: bool,
-    /// `m_bFailsEval`.
-    fails_eval: bool,
+    /// `m_bFailsEval`, holding the failed evaluation's error (chained as the cause of
+    /// every later read at the point).
+    fails_eval: Option<SolidError>,
 }
 
 /// The members of a [`SurfaceEval`] its lazy normal evaluations write.
@@ -5529,7 +5530,7 @@ impl<'s> SurfaceEval<'s> {
             uv_set: false,
             normal_set: false,
             sect_dir_set: false,
-            fails_eval: false,
+            fails_eval: None,
         }
     }
 
@@ -5563,7 +5564,7 @@ impl<'s> SurfaceEval<'s> {
             self.uv_set = false;
             self.normal_set = false;
             self.sect_dir_set = false;
-            self.fails_eval = false;
+            self.fails_eval = None;
         }
     }
 
@@ -5575,7 +5576,7 @@ impl<'s> SurfaceEval<'s> {
             self.uv_set = false;
             self.normal_set = false;
             self.sect_dir_set = false;
-            self.fails_eval = false;
+            self.fails_eval = None;
         }
     }
 
@@ -5643,7 +5644,7 @@ impl<'s> SurfaceEval<'s> {
             self.uv_set,
             self.normal_set,
             self.sect_dir_set,
-            self.fails_eval,
+            self.fails_eval.is_some(),
         ]
     }
 
@@ -5660,11 +5661,12 @@ impl<'s> SurfaceEval<'s> {
         if self.uv_set {
             return Ok(());
         }
-        if self.fails_eval {
-            return Err(SolidError::surface(
-                OP_EVAL,
-                SurfaceFailure::EvaluationFailedBefore,
-            ));
+        if let Some(first) = &self.fails_eval {
+            return Err(
+                Failure::new(OP_EVAL, SurfaceFailure::EvaluationFailedBefore)
+                    .caused_by(first.clone())
+                    .into_error(),
+            );
         }
 
         let surface = self
@@ -5702,7 +5704,7 @@ impl<'s> SurfaceEval<'s> {
                     }
                 }
             }
-            self.fails_eval = true;
+            self.fails_eval = Some(e.clone());
             return Err(Failure::new(OP_EVAL, SurfaceFailure::EvaluationFailed)
                 .caused_by(e)
                 .into_error());
@@ -8604,12 +8606,23 @@ mod tests {
         assert_eq!(eval.values()[0][0], Vec3::new(0.0, 0.5, 0.0));
         assert_eq!(eval.values()[1][0], Vec3::ZERO);
         assert_eq!(eval.values()[0][1], Vec3::Y);
-        assert!(eval.fails_eval);
-        // at the same point the evaluator keeps the failed answer
+        assert!(eval.fails_eval.is_some());
+        // at the same point the evaluator keeps the failed answer, and its cause
+        let again = eval.eval().unwrap_err();
         assert_eq!(
-            eval.eval().unwrap_err().surface_failure(),
+            again.surface_failure(),
             Some(&SurfaceFailure::EvaluationFailedBefore)
         );
+        assert_eq!(again.sm_status(), e.sm_status());
+        let (first, repeated) = (e.cause().unwrap(), again.cause().unwrap());
+        assert_eq!(repeated.to_string(), first.to_string());
+        assert_eq!(again.is_defect(), e.is_defect());
+        assert_eq!(again.is_refusal(), e.is_refusal());
+        assert_eq!(again.is_port_failure(), e.is_port_failure());
+        // a new point drops the failure and its cause
+        eval.set_uv(Point2::new(0.25, 0.5));
+        assert!(eval.fails_eval.is_none());
+        assert!(!eval.flags()[3]);
     }
 
     #[test]

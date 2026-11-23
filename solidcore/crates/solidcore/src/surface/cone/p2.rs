@@ -474,24 +474,37 @@ fn mid_point(curve: &BSplineCurve) -> Result<Point3> {
     Ok(ignored(curve.evaluate_point(curve.natural_interval().mid()))?.unwrap_or(Vec3::UNDEF))
 }
 
-/// The sweep iso curve of `s` at `knot`, or `None` when its construction fails
-/// (upstream `return FALSE`; an unported dependency still propagates).
+/// The sweep iso curve of `s` at `knot`; the inner `Err` is the error of a construction
+/// that failed (upstream `return FALSE`; an unported dependency or a cancellation still
+/// propagates as the outer error).
 fn iso_curve(
     k: &Kernel,
     s: &BSplineSurface,
     sweep: SurfParamType,
     knot: f64,
-) -> Result<Option<BSplineCurve>> {
+) -> Result<std::result::Result<BSplineCurve, SolidError>> {
     match s.create_iso_parametric_curve(k, sweep, knot, IsoCurveOptions::default()) {
-        Ok(iso) => Ok(Some(iso.curve)),
+        Ok(iso) => Ok(Ok(iso.curve)),
         Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
-        Err(_) => Ok(None),
+        Err(e) => Ok(Err(e)),
     }
 }
 
+/// What [`end_circles`] finds at the two ends of the sweep.
+enum EndCircles {
+    /// The top and bottom circles (one of zero radius at a vertex).
+    Found(IsoArc, IsoArc),
+    /// The end iso curves are not two arcs or an arc and a degenerate curve.
+    NotCircular,
+    /// The construction of an end iso curve failed with this error (upstream's
+    /// `return FALSE`, which the cone tests take for "not a cone").
+    IsoFailed(SolidError),
+}
+
 /// The top and bottom circles of the sweep iso curves at `top_knot` and `bot_knot`
-/// (with a zero-radius circle at a vertex), or `None` when they are not two arcs or an
-/// arc and a degenerate curve.
+/// (with a zero-radius circle at a vertex), [`EndCircles::NotCircular`] when they are not
+/// two arcs or an arc and a degenerate curve, or the error of an iso curve that could not
+/// be made.
 fn end_circles(
     k: &Kernel,
     s: &BSplineSurface,
@@ -499,14 +512,16 @@ fn end_circles(
     top_knot: f64,
     bot_knot: f64,
     scaled_zero: f64,
-) -> Result<Option<(IsoArc, IsoArc)>> {
+) -> Result<EndCircles> {
     // make temporary Top and Bot BSPline isoParameter curves - hopefully arc shapes
     // (a failed curve is not a cone)
-    let Some(top_iso) = iso_curve(k, s, sweep, top_knot)? else {
-        return Ok(None);
+    let top_iso = match iso_curve(k, s, sweep, top_knot)? {
+        Ok(c) => c,
+        Err(e) => return Ok(EndCircles::IsoFailed(e)),
     };
-    let Some(bot_iso) = iso_curve(k, s, sweep, bot_knot)? else {
-        return Ok(None);
+    let bot_iso = match iso_curve(k, s, sweep, bot_knot)? {
+        Ok(c) => c,
+        Err(e) => return Ok(EndCircles::IsoFailed(e)),
     };
 
     // classify IsoparamCurves
@@ -536,7 +551,7 @@ fn end_circles(
                 start_ang: top.start_ang,
                 end_ang: top.end_ang,
             };
-            Ok(Some((top, bot)))
+            Ok(EndCircles::Found(top, bot))
         }
         (_, Some(bot)) if top_degenerate => {
             // cone with a vertex
@@ -547,11 +562,11 @@ fn end_circles(
                 start_ang: bot.start_ang,
                 end_ang: bot.end_ang,
             };
-            Ok(Some((top, bot)))
+            Ok(EndCircles::Found(top, bot))
         }
-        (Some(top), Some(bot)) => Ok(Some((top, bot))),
+        (Some(top), Some(bot)) => Ok(EndCircles::Found(top, bot)),
         // not a cone - Top or Bot circular isoParameter curve is degenerate or not an arc
-        _ => Ok(None),
+        _ => Ok(EndCircles::NotCircular),
     }
 }
 
@@ -1104,7 +1119,8 @@ impl Cone {
         };
 
         // classify the top and bottom isoParameter curves
-        let Some((mut top, bot)) = end_circles(
+        // (an end iso curve that cannot be made is not a cone either)
+        let EndCircles::Found(mut top, bot) = end_circles(
             k,
             test_surface,
             sweep_iso_param,
@@ -1142,7 +1158,7 @@ impl Cone {
         // check for not a cone - a middle arc must also be concentric with axis, and in
         // a parallel plane
         let mid_param = (bot_knot + top_knot) / 2.0;
-        let Some(mid_iso) = iso_curve(k, test_surface, sweep_iso_param, mid_param)? else {
+        let Ok(mid_iso) = iso_curve(k, test_surface, sweep_iso_param, mid_param)? else {
             return Ok(None);
         };
 
@@ -1678,22 +1694,30 @@ impl Cone {
         };
 
         // classify the top and bottom isoParameter curves (SmBSplineSurface's)
-        let Some((mut top, mut bot)) = end_circles(
+        let (mut top, mut bot) = match end_circles(
             k,
             &self.rev.base,
             sweep_iso_param,
             top_knot,
             bot_knot,
             scaled_zero,
-        )?
-        else {
+        )? {
+            EndCircles::Found(top, bot) => (top, bot),
             // Modified Nurb SmCone: no longer has circular top and bottom IsoParamCurves
-            return Err(SolidError::surface(
-                OP_REBUILD,
-                SurfaceFailure::NurbNotAnalytic {
-                    check: AnalyticCheck::EndsNotCircular,
-                },
-            ));
+            EndCircles::NotCircular => {
+                return Err(SolidError::surface(
+                    OP_REBUILD,
+                    SurfaceFailure::NurbNotAnalytic {
+                        check: AnalyticCheck::EndsNotCircular,
+                    },
+                ));
+            }
+            // (an end iso curve that could not be made: its error is the cause)
+            EndCircles::IsoFailed(e) => {
+                return Err(Failure::new(OP_REBUILD, SurfaceFailure::CallFailed)
+                    .caused_by(e)
+                    .into_error());
+            }
         };
 
         // not a cone - top/bot start angles or top/bot end angles vary by more than
@@ -2542,6 +2566,42 @@ mod tests {
             // a domain outside the current one is rejected
             assert!(cone.trim_with_domain(&k, &d).is_err());
         }
+    }
+
+    /// An end iso curve that cannot be made is told apart from ends that are not circular:
+    /// its construction's error comes back for the rebuild to chain as its cause.
+    #[test]
+    fn end_circles_keep_an_iso_construction_error() {
+        let k = kernel();
+        let cone = canonical(&k, 2.0, 1.0, 3.0, false, false);
+        let base = cone.rev().base();
+        let d = base.natural_uv_domain();
+        let (lo, hi) = (d.min().y, d.max().y);
+        let tol = 1e-9;
+        assert!(matches!(
+            end_circles(&k, base, SurfParamType::V, hi, lo, tol).unwrap(),
+            EndCircles::Found(..)
+        ));
+        // a knot far outside the domain: the iso curve's construction fails
+        let far = hi + 1.0e6 * (hi - lo);
+        let EndCircles::IsoFailed(e) =
+            end_circles(&k, base, SurfParamType::V, far, lo, tol).unwrap()
+        else {
+            panic!("an iso curve outside the domain is not made");
+        };
+        assert!(!e.is_unported_or_cancelled(), "{e}");
+        // a flat net's ends are lines: not circular, and no error
+        let flat = BSplineSurface::create_bilinear_surface(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+        )
+        .unwrap();
+        assert!(matches!(
+            end_circles(&k, &flat, SurfParamType::V, 1.0, 0.0, tol).unwrap(),
+            EndCircles::NotCircular
+        ));
     }
 
     #[test]
