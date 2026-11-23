@@ -122,7 +122,8 @@ fn with_hook<R>(hook: impl FnMut(Call<'_>) -> Answer + Send + 'static, f: impl F
 pub(super) enum Ans {
     /// The value's words.
     Ok(u64, u64, u64),
-    /// The error.
+    /// The error. No row left on the tape has one; a tape recorded again may.
+    #[allow(dead_code, reason = "no taped row answers an error now")]
     Err(fn() -> SolidError),
 }
 
