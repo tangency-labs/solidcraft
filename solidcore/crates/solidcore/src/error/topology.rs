@@ -116,6 +116,7 @@
 //! | [`TopologyFailure::SplitDefinitionNotAdded`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::CurveStoreFull`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::OverlapBelowSplitResolution`] | `SM_ERR` |
+//! | [`TopologyFailure::IntersectingProtoEdgeEmpty`] | `SM_ERR` |
 //! | [`TopologyFailure::NotAMatedPair`] | `SM_ERR` |
 //! | [`TopologyFailure::NoVertexGiven`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::NoFaceGiven`] | `SM_ERR_NULL_POINTER` |
@@ -552,8 +553,8 @@ pub enum TopologyFailure {
     /// The proto edge the caller gave has no edge definitions to evaluate or split.
     /// [`ErrorKind::InvalidInput`].
     ProtoEdgeWithoutDefinitions,
-    /// A vertex or edge definition the caller gave has no source topology on one of its
-    /// B-reps. [`ErrorKind::InvalidInput`].
+    /// A vertex definition the caller gave has no source topology on one of its B-reps.
+    /// [`ErrorKind::InvalidInput`].
     DefinitionWithoutSourceTopology,
     /// Merging a vertex definition's point into its B-rep made `new_vertices` vertices, not
     /// one, and the point is not on a vertex there. Class `failed`.
@@ -582,6 +583,10 @@ pub enum TopologyFailure {
     /// edge's definitions refuses to split (within ten times their tolerance of it), so
     /// there is no piece of that edge to combine. Class `failed`.
     OverlapBelowSplitResolution,
+    /// One of two intersecting proto edges to split against each other has no edge
+    /// definitions: an earlier split, whose failure the Boolean only warns on, left it
+    /// empty. Class `failed`.
+    IntersectingProtoEdgeEmpty,
     /// The two objects whose relationship is to be removed are not a mated pair (an
     /// intersector without relationships has none). Class `failed`.
     NotAMatedPair,
@@ -685,6 +690,7 @@ impl TopologyFailure {
             | Self::ProtoVertexNotAnEnd
             | Self::MergeGaveNoVertex { .. }
             | Self::OverlapBelowSplitResolution
+            | Self::IntersectingProtoEdgeEmpty
             | Self::NotAMatedPair
             | Self::JoinedVertexReaches { .. }
             | Self::Defect { .. }
@@ -904,6 +910,7 @@ impl TopologyFailure {
             | Self::NoFinalVertexAtEnd
             | Self::SplitDefinitionNotAdded
             | Self::OverlapBelowSplitResolution
+            | Self::IntersectingProtoEdgeEmpty
             | Self::NotAMatedPair
             | Self::NoTrimmedBSpline
             | Self::AllocationFailed
@@ -1157,6 +1164,9 @@ impl core::fmt::Display for TopologyFailure {
             Self::CurveStoreFull => f.write_str("the B-rep's curve store is full"),
             Self::OverlapBelowSplitResolution => {
                 f.write_str("two proto edges overlap along less than their definitions can split")
+            }
+            Self::IntersectingProtoEdgeEmpty => {
+                f.write_str("a proto edge of the intersecting pair has no edge definitions")
             }
             Self::NotAMatedPair => f.write_str("the two are not a mated pair"),
             Self::VertexLoopInSharedFace => f.write_str(
@@ -1563,6 +1573,7 @@ mod tests {
             (T::SplitDefinitionNotAdded, SM_ERR_NULL_POINTER, K::Failed),
             (T::CurveStoreFull, SM_ERR_NULL_POINTER, K::Unsupported),
             (T::OverlapBelowSplitResolution, SM_ERR, K::Failed),
+            (T::IntersectingProtoEdgeEmpty, SM_ERR, K::Failed),
             (T::NotAMatedPair, SM_ERR, K::Failed),
         ];
         for (failure, status, kind) in cases {

@@ -141,7 +141,8 @@
 use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::CurveKind;
-use crate::error::{passed_on, EntityRef, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{passed_on, EntityRef, Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p1::{circle_coplanar_circle_intersect_in_contact, CircleCircle};
 use crate::geom::global_solver::SolverOperation;
@@ -199,9 +200,6 @@ impl SolutionObject for CurveHandle {
         Some(self.0)
     }
 }
-
-use crate::error::topology::TopologyFailure;
-use crate::error::{Failure, SM_ERR};
 
 /// A dereference of a null pointer or a deleted object upstream (undefined behaviour).
 const fn dangling(reason: &'static str) -> SolidError {
@@ -1199,7 +1197,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` when a proto edge has no definition; [`SolidError::InvalidInput`] for a
+    /// [`TopologyFailure::IntersectingProtoEdgeEmpty`] (`SM_ERR`) when a proto edge has no
+    /// definition; [`TopologyFailure::OverlapBelowSplitResolution`] for an overlap shorter
+    /// than a split; [`SolidError::InvalidInput`] for a
     /// deleted object or missing curve; [`SolidError::Unported`] for the callees
     /// listed in the module header.
     pub fn split_intersecting_proto_edges(
@@ -1233,11 +1233,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let (Some(&first1), Some(&first2)) =
             (e1.edge_definitions().first(), e2.edge_definitions().first())
         else {
-            return Err(
-                Failure::new(OP_SPLIT_INT, TopologyFailure::ProtoEdgeWithoutDefinitions)
-                    .with_status(SM_ERR)
-                    .into_error(),
-            ); // [Reg_091215_simon_closed]
+            return Err(SolidError::topology(
+                OP_SPLIT_INT,
+                TopologyFailure::IntersectingProtoEdgeEmpty,
+            )); // [Reg_091215_simon_closed]
         };
 
         // no work - Skip the pair if they're known to overlap. Handled during Resolve
@@ -2901,6 +2900,7 @@ mod tests {
     use super::super::p1::proto::{EdgeDefinition, ProtoGeometry, ProtoTopology, VertexDefinition};
     use super::*;
     use crate::curve::line::Line;
+    use crate::error::SM_ERR;
     use crate::geom::extent2d::Extent2d;
     use crate::intersect::point_class::PointClassType;
     use crate::math::{Point2, Point3};
@@ -3431,9 +3431,14 @@ mod tests {
         let (pe1, ed1, ivl1) = edge(&mut m, 0, 0.0, 10.0);
         let (pe2, ed2, ivl2) = edge(&mut m, 1, b0, 20.0);
 
-        assert!(m
+        let e = m
             .split_intersecting_proto_edges(&k, &mut pool, pe1, pe2)
-            .is_err());
+            .unwrap_err();
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::OverlapBelowSplitResolution)
+        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(m.proto_edges(), [pe1, pe2]);
         for (pe, ed, ivl, from, to) in [(pe1, ed1, ivl1, 0.0, 10.0), (pe2, ed2, ivl2, b0, 20.0)] {
             let p = m.proto_edge(pe).unwrap();
@@ -3443,6 +3448,17 @@ mod tests {
             assert_eq!(at(p.start_proto_vertex()), Point3::new(from, 0.0, 0.0));
             assert_eq!(at(p.end_proto_vertex()), Point3::new(to, 0.0, 0.0));
         }
+        // a proto edge that an earlier split left without definitions stops the pair's split
+        m.proto_edge_mut(pe2).unwrap().clear_edge_definitions();
+        let e = m
+            .split_intersecting_proto_edges(&k, &mut pool, pe1, pe2)
+            .unwrap_err();
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::IntersectingProtoEdgeEmpty)
+        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed, "{e}");
     }
 
     /// An `n`-sided prism of circumradius 30 from `z0` up `h`.

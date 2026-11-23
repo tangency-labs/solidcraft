@@ -48,8 +48,6 @@ const OP_EVALUATE: &str = "topology::proto_topology::p1::ProtoTopologyManager::p
 const OP_SRC_TOPO: &str = "topology::proto_topology::p1::VertexDefinition::set_src_topo";
 const OP_DEGEN: &str = "topology::proto_topology::p1::find_ed_on_degen_face";
 const OP_END: &str = "topology::proto_topology::p1::ProtoTopologyManager::end_position";
-const OP_COMBINE: &str =
-    "topology::proto_topology::p1::ProtoTopologyManager::can_combine_edge_definitions";
 
 use crate::error::topology::TopologyFailure;
 
@@ -1734,10 +1732,10 @@ pub struct EdgeDefinition<O> {
     xsect_uv_curve2: Option<O>,
     /// `m_pXSectInterval`.
     xsect_interval: Extent1d,
-    /// `m_pSrcTopo1`.
-    src_topo1: Option<O>,
-    /// `m_pSrcTopo2`.
-    src_topo2: Option<O>,
+    /// `m_pSrcTopo1` (never null: set by the constructor and by `set_src_topo`).
+    src_topo1: O,
+    /// `m_pSrcTopo2` (never null, as `src_topo1`).
+    src_topo2: O,
     /// `m_pSrcTopo1_TYPE`.
     src_topo1_type: ClassObjectKind,
     /// `m_pSrcTopo2_TYPE`.
@@ -1772,8 +1770,8 @@ impl<O: ClassObject> EdgeDefinition<O> {
             xsect_uv_curve1,
             xsect_uv_curve2,
             xsect_interval,
-            src_topo1: Some(src_topo1),
-            src_topo2: Some(src_topo2),
+            src_topo1,
+            src_topo2,
             src_topo1_type: src_type(src_topo1),
             src_topo2_type: src_type(src_topo2),
             proto_edge,
@@ -1857,9 +1855,9 @@ impl<O: ClassObject> EdgeDefinition<O> {
     #[must_use]
     pub const fn src_topo(&self, which: i32) -> Option<O> {
         if which == 1 {
-            self.src_topo1
+            Some(self.src_topo1)
         } else {
-            self.src_topo2
+            Some(self.src_topo2)
         }
     }
 
@@ -1935,10 +1933,10 @@ impl<O: ClassObject> EdgeDefinition<O> {
     /// (`SetSrcTopo`; the classification type is unused).
     pub fn set_src_topo(&mut self, which: i32, _t: PointClassType, topo: O) {
         if which == 1 {
-            self.src_topo1 = Some(topo);
+            self.src_topo1 = topo;
             self.src_topo1_type = src_type(topo);
         } else {
-            self.src_topo2 = Some(topo);
+            self.src_topo2 = topo;
             self.src_topo2_type = src_type(topo);
         }
     }
@@ -3590,7 +3588,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         v.proto_vertex,
                         &[vd],
                     )? {
-                        return Err(self.refuse_growth_overlap());
+                        return Err(self.refuse_growth_overlap(cover));
                     }
                 }
             }
@@ -3708,7 +3706,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
 
         // when ED->SrcTopos are the same as the TgtInterval->MidPt->Objects
-        let identical = mid_pc1.object() == d.src_topo1 && mid_pc2.object() == d.src_topo2;
+        let identical =
+            mid_pc1.object() == Some(d.src_topo1) && mid_pc2.object() == Some(d.src_topo2);
         Ok((true, identical))
     }
 
@@ -4520,8 +4519,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` for a definition without a source object; those of the
-    /// `geometry` topology walks and of [`find_ed_on_degen_face`] but its statuses
+    /// Those of the `geometry` topology walks and of [`find_ed_on_degen_face`] but its statuses
     /// (those too with `ssi_proto_topology_statuses_pass_on`, fork bcc6f01).
     pub fn can_combine_edge_definitions(
         &self,
@@ -4551,12 +4549,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ) -> Result<u64> {
         let d1 = self.ed(ed1)?;
         let d2 = self.ed(ed2)?;
-        let null =
-            || SolidError::topology(OP_COMBINE, TopologyFailure::DefinitionWithoutSourceTopology);
-        let t11 = d1.src_topo1.ok_or_else(null)?;
-        let t12 = d1.src_topo2.ok_or_else(null)?;
-        let t21 = d2.src_topo1.ok_or_else(null)?;
-        let t22 = d2.src_topo2.ok_or_else(null)?;
+        let (t11, t12, t21, t22) = (d1.src_topo1, d1.src_topo2, d2.src_topo1, d2.src_topo2);
 
         // If they're sitting on the same topology in both Breps, combine.
         if t11 == t21 && t12 == t22 {

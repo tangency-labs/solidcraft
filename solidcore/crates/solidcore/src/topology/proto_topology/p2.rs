@@ -2120,7 +2120,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             None,
             v.vertex_definitions(),
         )? {
-            return Err(self.refuse_growth_overlap());
+            return Err(self.refuse_growth_overlap(grown.tolerance(k)));
         }
         *self
             .proto_vertex_mut(pv)
@@ -2222,7 +2222,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             current.proto_vertex(),
             &[to, from],
         )? {
-            return Err(self.refuse_growth_overlap());
+            return Err(self.refuse_growth_overlap(grown.tolerance(k)));
         }
         *self.vd_mut(to)? = grown;
         Ok(())
@@ -2719,22 +2719,27 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// Not upstream (WR-306): the refusal of a split that would move a definition holding
     /// an absorbed curve where its tolerance cannot cover that curve without reaching
     /// another vertex definition, of its own proto vertex or of any other listed one (or
-    /// to no finite distance from it), kept
+    /// to no finite distance from it: `needed` is `None`), kept
     /// for the Boolean to return as the other self-loop refusals are.
-    fn refuse_moving_absorbed(&mut self) -> SolidError {
-        let refusal =
-            SolidError::boolean(OP_RESOLVE_PE, BooleanFailure::SelfLoopSplitReachesVertex);
+    fn refuse_moving_absorbed(&mut self, needed: Option<f64>) -> SolidError {
+        let refusal = SolidError::boolean(
+            OP_RESOLVE_PE,
+            BooleanFailure::SelfLoopSplitReachesVertex { needed },
+        );
         self.note_self_loop_refusal(refusal.clone());
         refusal
     }
 
     /// Not upstream (#18312): the refusal of a resolution that would grow a vertex
-    /// definition or a proto vertex, to cover what it absorbed, into another vertex
-    /// definition its tolerance kept clear of ([`Self::growth_reaches_another`]), kept for the
-    /// Boolean to return as the self-loop refusals are.
-    pub(crate) fn refuse_growth_overlap(&mut self) -> SolidError {
-        let refusal =
-            SolidError::boolean(OP_RESOLVE_PV, BooleanFailure::AbsorbedCoverReachesVertex);
+    /// definition or a proto vertex, to cover what it absorbed, to tolerance `needed` and
+    /// into another vertex definition its tolerance kept clear of
+    /// ([`Self::growth_reaches_another`]), kept for the Boolean to return as the self-loop
+    /// refusals are.
+    pub(crate) fn refuse_growth_overlap(&mut self, needed: f64) -> SolidError {
+        let refusal = SolidError::boolean(
+            OP_RESOLVE_PV,
+            BooleanFailure::AbsorbedCoverReachesVertex { needed },
+        );
         self.note_self_loop_refusal(refusal.clone());
         refusal
     }
@@ -2919,7 +2924,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         let vd_tol = v0.tolerance(k);
                         // Every definition's curve, over its own interval, from its own
                         // ends: the proto edge may hold different curves.
-                        let mut within = true;
+                        let mut left = None;
                         for &ed in &eds {
                             let d = self.ed_ref(ed)?;
                             let ivl = d.xsect_interval();
@@ -2932,14 +2937,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                                 + vd_tol
                                 + pe_tol;
                             if !curve_piece_within(curve, &ivl, centre, reach) {
-                                within = false;
+                                left = Some(reach);
                                 break;
                             }
                         }
-                        if !within {
+                        if let Some(reach) = left {
                             let refusal = SolidError::boolean(
                                 OP_RESOLVE_PE,
-                                BooleanFailure::SelfLoopLeavesReach,
+                                BooleanFailure::SelfLoopLeavesReach { reach },
                             );
                             // The Boolean's resolution only warns on a proto edge's error:
                             // the manager keeps the refusal for the Boolean to return.
@@ -2960,7 +2965,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         // grows it). A move at no finite distance from that curve is
                         // refused before anything changes.
                         let Some(cover) = self.vd_ref(vd0)?.covering_tolerance(k, pt0) else {
-                            return Err(self.refuse_moving_absorbed());
+                            return Err(self.refuse_moving_absorbed(None));
                         };
                         let v0 = self.vd_ref(vd0)?;
                         let mut pc1 = *v0.brep_point_classif(1);
@@ -2993,7 +2998,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                             )?
                         {
                             self.delete_vertex_definition(new_vd);
-                            return Err(self.refuse_moving_absorbed());
+                            return Err(self.refuse_moving_absorbed(Some(cover)));
                         }
 
                         let v0 = self.vd_mut(vd0)?;
@@ -4304,6 +4309,8 @@ mod tests {
         points: Vec<Point3>,
         /// the zone tolerance of every vertex handle, when set (`None`: unresolved)
         vertex_tol: Option<f64>,
+        /// whether the point classification fails (a status the split ignores)
+        classify_fails: bool,
     }
 
     impl ClassGeometry<H> for Geo {
@@ -4469,6 +4476,9 @@ mod tests {
             tolerance: f64,
             _boundary_intersections: bool,
         ) -> Result<PointClassification<H>> {
+            if self.classify_fails {
+                return Err(SolidError::sm_err("classify"));
+            }
             let idx = self.points.len();
             self.points.push(point);
             let v = H(idx, ClassObjectKind::Vertex);
@@ -5628,6 +5638,14 @@ mod tests {
             assert_eq!(err.sm_status(), Some(1001), "{err}");
             assert_eq!(err.kind(), crate::error::ErrorKind::Failed, "{err}");
             assert!(!err.is_defect(), "{err}");
+            let reach = match err.failure().map(|f| &f.reason) {
+                Some(crate::error::Reason::Boolean(BooleanFailure::SelfLoopLeavesReach {
+                    reach,
+                })) => *reach,
+                other => panic!("{other:?}"),
+            };
+            // the reach covers the far end (5e-5 away), and the bulge, 1e-3 out, leaves it
+            assert!(reach > 5e-5 && reach < 1e-3, "{reach:e}");
             // kept for the Boolean, whose resolution only warns on a proto edge's error
             assert_eq!(m.take_self_loop_refusal(), Some(err));
             assert_eq!(m.take_self_loop_refusal(), None);
@@ -5853,6 +5871,14 @@ mod tests {
         assert!(err.to_string().contains("absorbed a curve"), "{err}");
         assert_eq!(err.kind(), crate::error::ErrorKind::Failed, "{err}");
         assert!(!err.is_defect(), "{err}");
+        let needed = match err.failure().map(|f| &f.reason) {
+            Some(crate::error::Reason::Boolean(BooleanFailure::SelfLoopSplitReachesVertex {
+                needed: Some(needed),
+            })) => *needed,
+            other => panic!("{other:?}"),
+        };
+        // the tolerance that covers the line at the origin from the loop's start
+        assert!((5e-3..5.1e-3).contains(&needed), "{needed:e}");
         assert!(m.take_self_loop_refusal().is_some(), "kept for the Boolean");
         assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions(), &[vd]);
         let def = m.vertex_def(vd).unwrap();
@@ -6174,6 +6200,13 @@ mod tests {
                 assert!(err.to_string().contains("another vertex"), "{err}");
                 assert_eq!(err.kind(), crate::error::ErrorKind::Failed, "{err}");
                 assert!(!err.is_defect(), "{err}");
+                assert_eq!(
+                    err.failure().map(|f| &f.reason),
+                    Some(&crate::error::Reason::Boolean(
+                        BooleanFailure::AbsorbedCoverReachesVertex { needed: cover }
+                    )),
+                    "{err}"
+                );
                 if pass {
                     assert_eq!(result.unwrap_err(), err);
                 } else {
@@ -6580,6 +6613,59 @@ mod tests {
         // receives the new split edge definition without error.
         assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 1);
         assert_eq!(m.proto_edge(new_pe).unwrap().num_edge_definitions(), 1);
+    }
+
+    /// A split point that classifies on neither B-rep (the classification's status is
+    /// ignored, as upstream ignores it) gets no vertex definition: the split fails with
+    /// that failure as its cause, and the definition keeps its curve.
+    #[test]
+    fn edge_definition_split_without_a_definition_names_its_cause() {
+        let mut k = Kernel::default();
+        k.fixes.ssi_proto_topology_statuses_pass_on = false;
+        let mut geo = Geo::default();
+        geo.curves.push(line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]));
+        let mut m = manager();
+        let mut pv = |x: f64| {
+            let v = m.new_proto_vertex(Point3::new(x, 0.0, 0.0), 1e-5).unwrap();
+            m.add_proto_vertex(v);
+            v
+        };
+        let (v0, v_mid, v1) = (pv(0.0), pv(1.0), pv(2.0));
+        let mut cc = CurveClassification::new(&k);
+        cc.set_curve(Some(H(0, ClassObjectKind::Curve)), false);
+        let ivl = geo.curves[0].natural_interval();
+        let mut ci1 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+        ci1.mid = region_pc(R0);
+        let mut ci2 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+        ci2.mid = region_pc(R1);
+        let pe = m
+            .create_proto_edge(&k, &mut geo, Some(v0), Some(v1), &cc, &ci1, &cc, &ci2)
+            .unwrap();
+        let ed = m.proto_edge(pe).unwrap().edge_definitions()[0];
+        let before = m.edge_def(ed).unwrap().clone();
+
+        geo.classify_fails = true;
+        let e = m
+            .edge_definition_split(&k, &mut geo, ed, ivl.mid(), Some(v_mid), None)
+            .unwrap_err();
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::SplitDefinitionNotAdded),
+            "{e}"
+        );
+        assert_eq!(
+            e.cause().and_then(SolidError::topology_failure),
+            Some(&TopologyFailure::ClassificationOffTopology),
+            "{e}"
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert!(!e.is_defect(), "{e}");
+        assert_eq!(m.edge_def(ed).unwrap(), &before);
+        assert!(m
+            .proto_vertex(v_mid)
+            .unwrap()
+            .vertex_definitions()
+            .is_empty());
     }
 
     /// `SmEdgeDefinition::Split` hangs the new upper definition on the upper proto edge
