@@ -71,6 +71,7 @@ pub use design::write_design_container_with_preview;
 pub use design::write_design_container_with_provenance;
 pub use design::write_design_container_with_thumbnail;
 pub use design::write_drawing_container;
+pub use design::written_design_provenance_chain;
 pub use glb::DEFAULT_COLOR as GLB_DEFAULT_COLOR;
 pub use glb::GlbOptions;
 pub use glb::MAX_GLB_BYTES;
