@@ -178,10 +178,11 @@ impl JsonSchema for ScaleParam {
         "DrawingScale".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let ws = super::types::whitespace_class();
         json_schema!({
-            "description": "The scale as paper:model text, such as \"1:2\" or \"5:1\", from 1:100000 to 1000:1. When not given, the largest ISO 5455 scale at which the view fits the sheet's drawing area.",
+            "description": "The scale as paper:model text, such as \"1:2\" or \"5:1\", from 1:100000 to 1000:1; spaces round each number are ignored. When not given, the largest ISO 5455 scale at which the view fits the sheet's drawing area.",
             "type": "string",
-            "pattern": "^[0-9]+(\\.[0-9]+)?:[0-9]+(\\.[0-9]+)?$"
+            "pattern": format!("^[{ws}]*[0-9]+(\\.[0-9]+)?[{ws}]*:[{ws}]*[0-9]+(\\.[0-9]+)?[{ws}]*$")
         })
     }
 }

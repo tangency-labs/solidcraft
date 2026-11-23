@@ -557,7 +557,7 @@ impl SurfaceSolveContext<CacheObject> for LiveSurfaceContext<'_, '_, '_> {
         };
         self.0.cache(k, face)
     }
-    fn surface_cache_state(
+    fn surface_cache_without_get_tree(
         &mut self,
         k: &Kernel,
         surface: &Surface,
@@ -792,7 +792,7 @@ impl SurfaceSolveContext<CacheObject> for BrepFaceServices<'_> {
             Some(_) => Err(SolidError::invalid_input(OP, "expected surface handle")),
         }
     }
-    fn surface_cache_state(
+    fn surface_cache_without_get_tree(
         &mut self,
         k: &Kernel,
         surface: &Surface,
@@ -896,7 +896,7 @@ impl SurfaceSolveContext<SideObject> for SidedFaceServices<'_> {
             _ => Err(SolidError::invalid_input(OP, "expected surface handle")),
         }
     }
-    fn surface_cache_state(
+    fn surface_cache_without_get_tree(
         &mut self,
         k: &Kernel,
         surface: &Surface,
@@ -1014,7 +1014,7 @@ impl SurfaceSolveContext<CurveFaceObject> for CurveFaceServices<'_, '_> {
             Some(_) => Err(SolidError::invalid_input(OP, "expected surface handle")),
         }
     }
-    fn surface_cache_state(
+    fn surface_cache_without_get_tree(
         &mut self,
         k: &Kernel,
         surface: &Surface,

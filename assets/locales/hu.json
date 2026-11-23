@@ -1012,6 +1012,7 @@
   "cmd.motion_list": "Mozgásvizsgálatok listázása",
   "cmd.motion_play": "Mozgásvizsgálat lejátszása",
   "cmd.motion_plot": "Mozgásvizsgálat diagramja",
+  "cmd.motion_simulate": "Mozgás szimulálása",
   "cmd.motion_study": "Mozgásvizsgálat",
   "cmd.motion_trace": "Mozgásnyom",
   "cmd.motion_trace_edit": "Mozgásnyom szerkesztése",

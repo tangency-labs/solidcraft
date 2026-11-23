@@ -1798,9 +1798,14 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                 outcome = Outcome::Cancelled;
                 request.answer(Err("file operation cancelled".into()));
             }
-            Ok(made) if request.reads_again() && running.matches(&app.session) => {
+            Ok(made) if request.reads_again() && running.matches(&app.session) => 'reload: {
                 let (id, _) = request.command();
-                app.session.accept_computed(made.session);
+                if let Err(error) = app.session.accept_computed(made.session) {
+                    let error = error.to_string();
+                    app.set_status(error.clone(), true);
+                    request.answer(Err(error));
+                    break 'reload;
+                }
                 app.big_operation = true;
                 if request.kind == Kind::UpdateLinks {
                     crate::linked_source::read_again(app, &request.options, &made.result);
@@ -1814,7 +1819,7 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     panel.depth = app.session.undo.len();
                 }
                 let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
-                app.set_status(language.format("ui.command_done", &[("command", language.label(crate::command_label(id)))]), false);
+                app.set_status(language.format("ui.command_done", &[("command", language.command(id, crate::command_label(id)))]), false);
                 // A design it could not read is said as when that was all it was asked.
                 if let Some(f) = r.as_ref().ok().and_then(|v| v["failed"].as_array()).and_then(|f| f.first()) {
                     let (name, why) = (f["name"].as_str().unwrap_or_default(), f["error"].as_str().unwrap_or_default());
@@ -1835,11 +1840,22 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                 crate::frame_watch::step(app, "before the open");
                 let tabs = app.docs.count();
                 if request.insert() {
-                    app.session.accept_computed(made.session);
+                    if let Err(error) = app.session.accept_computed(made.session) {
+                        app.open_meshing_next = false;
+                        let error = error.to_string();
+                        app.set_status(error.clone(), true);
+                        request.answer(Err(error));
+                        break 'open;
+                    }
                     app.big_operation = true;
                 } else {
                     // No tab left for it: `adopt` said why, and nothing else of the open happens.
-                    if !crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| crate::documents::adopt(app, made.session)) {
+                    // Opened by a program, not the user: nothing is asked about its links.
+                    app.docs.quiet_open = request.reply.is_some() || request.chat_turn.is_some();
+                    let adopted =
+                        crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| crate::documents::adopt(app, made.session));
+                    app.docs.quiet_open = false;
+                    if !adopted {
                         app.open_meshing_next = false;
                         // A design to recover stays offered, as when its read fails.
                         if let Kind::Recover { id, dir } = &request.kind {
