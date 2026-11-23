@@ -998,7 +998,7 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
                 Some(n) => st.body(n).filter(|b| on(b)).map(|b| b.name.clone()),
                 None => st.bodies.iter().filter(|b| on(b)).min_by(|a, b| dist_to(a, pt).total_cmp(&dist_to(b, pt))).map(|b| b.name.clone()),
             };
-            faces.push((body.ok_or_else(|| bad(cmd, format!("no face at {pt:?}")))?, pt));
+            faces.push((body.ok_or_else(|| bad(cmd, format!("no face at {pt}")))?, pt));
         }
     }
     let mut comps: Vec<u64> = Vec::new();
