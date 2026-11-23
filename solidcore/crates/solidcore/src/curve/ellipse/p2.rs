@@ -70,6 +70,10 @@
 //!   STEP interval restored, so the temporary full-circle domain does not leak.
 //!   An open arc's (WR-719, the fork's cbeb14b) end angles are its ends' own polar angles rather than
 //!   `STEPInversion`'s, whose seam rule turns an end just short of 360 into 0.
+//!   [`PolarConversion::angle_param_to_nurb_param`] takes the span's end weights and
+//!   maps the standard-form root to the span's own parameter, exact for a span whose
+//!   end weights differ (an arc split off a longer arc away from its middle); upstream
+//!   uses the standard-form root for every span.
 //! - **Notifications.** `SmBSplineCurve::SetFromGwNurb` and `Transform` send
 //!   `SM_NO_POST_EDIT`, whose `SmEllipse::Notify` override rebuilds the polar
 //!   converter (status ignored); the port calls [`Ellipse::set_up_polar_conversion`]
@@ -143,6 +147,7 @@ use crate::math::{
 };
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
+use crate::nurbs::math::NOW;
 
 const OP_SET_UP: &str = "curve::ellipse::p2::Ellipse::set_up_polar_conversion";
 
@@ -167,6 +172,22 @@ fn table(v: &[f64], i: usize, operation: &'static str) -> Result<f64> {
             "polar conversion table is shorter than its knot list",
         )
     })
+}
+
+/// The weight of control point `i` of `curve`'s NURB, `1` for a non-rational NURB.
+///
+/// # Errors
+///
+/// `InvalidInput` when the NURB has no control point `i` (a polar table that does not
+/// match its curve); those of the NURB.
+fn span_weight(curve: &Ellipse, i: usize) -> Result<f64> {
+    let p = curve.base.control_points()?.get(i).ok_or_else(|| {
+        SolidError::invalid_input(
+            OP_TO_NURBS,
+            "polar conversion table has more spans than its curve",
+        )
+    })?;
+    Ok(if p.w == NOW { 1.0 } else { p.w })
 }
 
 // ---- back-edges -----------------------------------------------------------------------
@@ -504,20 +525,40 @@ impl PolarConversion {
     }
 
     /// The NURB parameter of the angle `angle_deg` in the span from
-    /// `start_nurb`/`start_angle_deg` to `end_nurb`/`end_angle_deg`
-    /// (`AngleParamToNurbParam`): the root in `[0, 1]` of the span's quadratic, scaled
-    /// to the span. Angles within `SM_EFF_ZERO_DEG` of an end give that end.
+    /// `start_nurb`/`start_angle_deg` to `end_nurb`/`end_angle_deg` whose first and last
+    /// weights are `end_weights` (`AngleParamToNurbParam`): the root `s` in `[0, 1]` of
+    /// the span's quadratic, taken to the span's own weights and scaled to the span.
+    /// Angles within `SM_EFF_ZERO_DEG` of an end give that end.
+    ///
+    /// The quadratic is that of a span in standard form, its end weights equal
+    /// (Hoschek/Lasser; see [`PolarConversion`]). Not upstream, which uses `s` for every
+    /// span: an arc split off a longer arc away from its middle has end weights
+    /// `w0 != w2`. The rational quadratic `(B0 w0 P0 + B1 w1 P1 + B2 w2 P2) / (B0 w0 + B1
+    /// w1 + B2 w2)`, `B = ((1 - u)^2, 2 u (1 - u), u^2)`, is unchanged as a point set
+    /// under `u = l s / ((1 - s) + l s)`, `l > 0`: then `1 - u = (1 - s) / ((1 - s) + l
+    /// s)`, so `B(u)` is `((1 - s)^2, 2 l s (1 - s), l^2 s^2)` over the common factor
+    /// `((1 - s) + l s)^2`, which cancels, and in `s` the weights are `(w0, l w1, l^2
+    /// w2)`. With `l = sqrt(w0 / w2)` the end weights are equal: the span in `s` is in
+    /// standard form, the quadratic's root is its parameter, and `u = l s / ((1 - s) + l
+    /// s)` is the span's own. Equal end weights give `l = 1` and `u = s` exactly
+    /// (`(1 - s) + s` rounds to 1 for `s` in `[0, 1]`). On arcs 3e-5 to 1.2e-4 long
+    /// split off a sphere's crossing circles (a box's corner cut off by a ball), `s` put
+    /// the point up to 1.4e-6 off, and the point inversion that refines it stopped
+    /// 3.6e-10 off, beyond the check's conversion test (Ellipse test 1, 1e-10); `u` puts
+    /// it within 3e-18.
     ///
     /// # Errors
     ///
     /// `SM_ERR` when the angle is outside the span, the quadratic has no real root or
-    /// no root in `[0, 1]`.
+    /// no root in `[0, 1]`; `InvalidInput` when an end weight is not positive and finite
+    /// (not an arc).
     pub fn angle_param_to_nurb_param(
         start_nurb: f64,
         end_nurb: f64,
         start_angle_deg: f64,
         end_angle_deg: f64,
         angle_deg: f64,
+        end_weights: (f64, f64),
     ) -> Result<f64> {
         // locals
         let theta = (end_angle_deg - start_angle_deg) / 2.0 * PI / 180.0;
@@ -535,6 +576,16 @@ impl PolarConversion {
             return Err(SolidError::curve_failed(
                 OP_ANGLE,
                 "the angle is outside the arc",
+            ));
+        }
+
+        // take the standard form's T to the span's own weights (see above)
+        let (w0, w2) = end_weights;
+        let lambda = (w0 / w2).sqrt();
+        if !(w0 > 0.0 && w2 > 0.0 && lambda.is_normal()) {
+            return Err(SolidError::invalid_input(
+                OP_ANGLE,
+                "the span's end weights are not positive and finite",
             ));
         }
 
@@ -580,6 +631,8 @@ impl PolarConversion {
                 ));
             }
         }
+
+        let t = lambda * t / ((1.0 - t) + lambda * t);
 
         // scale normalized T to Nurb interval
         Ok((end_nurb - start_nurb) * t + start_nurb)
@@ -716,13 +769,15 @@ impl PolarConversion {
 
                     // check interval interior
                     if (!inside_out && polar_deg <= angle) || (inside_out && polar_deg >= angle) {
-                        // Try cheap exact conversion when possible
+                        // Try cheap exact conversion when possible (the span's control
+                        // points are 2 ii - 2 to 2 ii, the knots inside being double)
                         nurbs_guess = Self::angle_param_to_nurb_param(
                             table(&self.natural_knots, ii - 1, OP_TO_NURBS)?,
                             table(&self.natural_knots, ii, OP_TO_NURBS)?,
                             table(&self.angles, ii - 1, OP_TO_NURBS)?,
                             angle,
                             polar_deg,
+                            (span_weight(curve, ii * 2 - 2)?, span_weight(curve, ii * 2)?),
                         )?;
                         *written = Some(nurbs_guess);
                         break;
@@ -2772,13 +2827,87 @@ mod tests {
 
     #[test]
     fn angle_param_conversion() {
-        let t = PolarConversion::angle_param_to_nurb_param(0.0, 1.0, 0.0, 90.0, 45.0).expect("t");
+        let t = PolarConversion::angle_param_to_nurb_param(0.0, 1.0, 0.0, 90.0, 45.0, (1.0, 1.0))
+            .expect("t");
         assert!((t - 0.5).abs() < 1e-12);
         assert_eq!(
-            PolarConversion::angle_param_to_nurb_param(0.0, 1.0, 0.0, 90.0, 0.0).expect("t"),
+            PolarConversion::angle_param_to_nurb_param(0.0, 1.0, 0.0, 90.0, 0.0, (1.0, 1.0))
+                .expect("t"),
             0.0
         );
-        assert!(PolarConversion::angle_param_to_nurb_param(0.0, 1.0, 0.0, 90.0, 120.0).is_err());
+        assert!(
+            PolarConversion::angle_param_to_nurb_param(0.0, 1.0, 0.0, 90.0, 120.0, (1.0, 1.0))
+                .is_err()
+        );
+    }
+
+    /// The left part of a quarter of the unit circle split at `f` by de Casteljau, in
+    /// homogeneous coordinates `(w x, w y, w)`: a span whose end weights differ
+    /// (`1` and `(1 - f)^2 + 2 f (1 - f) cos 45 + f^2`), as an arc split off a longer arc
+    /// away from its middle has them. The NURB parameter converted from a polar angle
+    /// must give the circle's point at that angle, `(cos a, sin a)`, to rounding: the
+    /// evaluation below is the span's Bernstein form, a handful of roundings of 1.
+    #[test]
+    fn angle_param_conversion_is_exact_on_a_span_with_unequal_end_weights() {
+        let c = core::f64::consts::FRAC_1_SQRT_2;
+        let quarter = [[1.0, 0.0, 1.0], [c, c, c], [0.0, 1.0, 1.0]];
+        let lerp =
+            |a: [f64; 3], b: [f64; 3], t: f64| [0, 1, 2].map(|i| (1.0 - t) * a[i] + t * b[i]);
+        let f = 0.8;
+        let q1 = lerp(quarter[0], quarter[1], f);
+        let q2 = lerp(q1, lerp(quarter[1], quarter[2], f), f);
+        let span = [quarter[0], q1, q2];
+        let (w0, w2) = (span[0][2], span[2][2]);
+        assert!((w0 - w2).abs() > 0.09, "end weights {w0}, {w2}");
+        let end_deg = q2[1].atan2(q2[0]).to_degrees();
+        let point = |u: f64| {
+            let b = [(1.0 - u) * (1.0 - u), 2.0 * u * (1.0 - u), u * u];
+            let h = [0, 1, 2].map(|i| b[0] * span[0][i] + b[1] * span[1][i] + b[2] * span[2][i]);
+            (h[0] / h[2], h[1] / h[2])
+        };
+        let mut worst = 0.0_f64;
+        for i in 1..20 {
+            let angle_deg = end_deg * f64::from(i) / 20.0;
+            let u = PolarConversion::angle_param_to_nurb_param(
+                0.0,
+                1.0,
+                0.0,
+                end_deg,
+                angle_deg,
+                (w0, w2),
+            )
+            .expect("u");
+            let (x, y) = point(u);
+            let a = angle_deg.to_radians();
+            worst = worst.max((x - a.cos()).hypot(y - a.sin()));
+        }
+        assert!(worst < 1e-14, "worst distance {worst}");
+    }
+
+    /// An end weight must be positive and finite even when the angle is at an end, which
+    /// otherwise answers that end before the weights are looked at. A non-arc span is refused
+    /// for every angle in it.
+    #[test]
+    fn angle_param_conversion_refuses_end_weights_that_are_not_an_arc() {
+        let bad = [
+            (0.0, 1.0),
+            (-1.0, 1.0),
+            (f64::NAN, 1.0),
+            (f64::INFINITY, 1.0),
+            (1.0, f64::NAN),
+            (1.0, 0.0),
+        ];
+        for weights in bad {
+            for angle_deg in [0.0, 45.0, 90.0] {
+                let got = PolarConversion::angle_param_to_nurb_param(
+                    0.0, 1.0, 0.0, 90.0, angle_deg, weights,
+                );
+                assert!(
+                    got.is_err(),
+                    "weights {weights:?} at {angle_deg} gave {got:?}"
+                );
+            }
+        }
     }
 
     #[test]

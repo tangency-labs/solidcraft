@@ -87,8 +87,14 @@
 //!   [`MAX_SPAN_DEPTH`] drop points deep (upstream fixtures reach about 15: a span
 //!   passes once shorter than `1/8000` of the interval; upstream is unbounded,
 //!   plan/upstream-issues.md HANG-38); deeper is
-//!   [`SolidError::NotConverged`]. No compared case reaches the second `GetNextPoint` of
-//!   a span yet (the offset surface defers first), so the bound, the span stack and
+//!   [`SolidError::NotConverged`]. The depth alone does not end the loop: a failing
+//!   span whose midpoint rounds onto its start is split there, its empty half passes
+//!   without moving the start, and the span comes back at the same depth. Once, that
+//!   can settle a seam branch (the start dropped again lands on the other side of the
+//!   seam); a span that comes back unchanged loops for ever (#21092: a span one ulp long
+//!   across a closed seam). Not upstream: more spans of no length passed in a row than
+//!   [`MAX_SPAN_DEPTH`] are [`SolidError::NotConverged`] too. No compared case reaches
+//!   the second `GetNextPoint` of a span yet (the offset surface defers first), so the bound, the span stack and
 //!   `sm_AddToCurve` are untested until `surface.offset_surface` lands.
 //! - **C0 knot lines.** Not upstream: the UV curve turns its corner on a `C0` knot line
 //!   of a B-spline surface across which the surface is smooth ([`KnotLines`]). A span with such a line between its ends is
@@ -1621,6 +1627,8 @@ impl Surface {
                 let mut stack = vec![(start.t, end)];
                 let mut stop_spans = false;
                 let mut span_failure_path = CreateUvTrimCurvePathType::DropStartPointFail;
+                // not upstream: spans passed in a row without moving the start on (#21092)
+                let mut stalled = 0usize;
                 while let Some(&(queued_start_t, saved_end)) = stack.last() {
                     // A pending endpoint was dropped relative to an earlier start. Its
                     // parameter and UV point and tangent are taken from the stack, as
@@ -1818,6 +1826,21 @@ impl Surface {
                                 .into_error());
                             }
                             max_approx_dev += b.spent();
+                        }
+
+                        // not upstream: a span of no length moves the trace nowhere. More of
+                        // them in a row than the stack is deep can only be a span coming back
+                        // unchanged, so the trace does not converge (#21092)
+                        stalled = if (end.t - start.t).abs() > 0.0 {
+                            0
+                        } else {
+                            stalled + 1
+                        };
+                        if stalled > MAX_SPAN_DEPTH {
+                            return Err(SolidError::NotConverged {
+                                operation: OP,
+                                iterations: u32::try_from(stalled).unwrap_or(u32::MAX),
+                            });
                         }
 
                         // next span starts at this end

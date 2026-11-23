@@ -315,6 +315,15 @@ pub fn folded_pcurve(
         .map(solidcore_convert::record_curve2)
 }
 
+/// The parameters that bracket monotone pieces in both coordinates of a trim curve.
+pub fn monotone_breaks(c: &Curve2) -> crate::Result<Vec<f64>> {
+    check_curve2(c, &mut Budget::input()).map_err(|_| crate::Error::Argument)?;
+    let curve = solidcore_convert::curve2(c);
+    crate::session::run("pcurve::monotone_breaks", |k| {
+        Ok(Ok(curve.monotone_breaks(k)?))
+    })?
+}
+
 /// The point of pcurve `c` at `t` (`None` outside its interval or for a malformed record)
 /// ([`solidcore::eval::pcurve::eval`]).
 #[must_use]
