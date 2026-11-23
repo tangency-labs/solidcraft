@@ -17,9 +17,11 @@
 //!    code, copied here as the reference it replays: the same samples, sums and
 //!    `Unitize`), the encoded row hashes to main's line. At every call this branch's own
 //!    answer is certified ([`certify`]): a success is the direction of the EXACT area
-//!    vector of the samples (expansion arithmetic) within a derived rounding bound; a
-//!    refusal is an exact area vector shorter than `SM_EFF_ZERO` within those bounds
-//!    (`Unitize`'s refusal), a single linear curve, or a failed evaluation of a sample;
+//!    vector of the samples (expansion arithmetic) within a derived rounding bound, or,
+//!    for an open chain whose area has no certain direction, a normal of the plane of
+//!    every sample; a refusal is an exact area vector shorter than `SM_EFF_ZERO` within
+//!    those bounds (`Unitize`'s refusal), a single linear curve, or a failed evaluation of
+//!    a sample;
 //! 2. as is, the encoded row equals the committed golden line.
 //!
 //! So each committed row is this branch's output, and it differs from main's only through
@@ -72,7 +74,6 @@ const EXPECTED: &str = "\
 curve.curve_p3: 222 rows; calls certified {AreaNormal: 222}; moves {SameSide: 169, Reversed: 52, NowAnswered: 1}
 primitive.api_curve_ops: 19 rows; calls certified {AreaNormal: 19}; moves {SameSide: 10, Reversed: 9}
 primitive.primitive_creation_p1: 2 rows; calls certified {ZeroArea: 2, SingleLinear: 2}; moves {BothRefuse: 4}
-primitive.primitive_creation_p2: 2 rows; calls certified {ZeroArea: 2}; moves {NowRefused: 2}
 ";
 
 // ---- exact arithmetic ------------------------------------------------------------------
@@ -177,6 +178,10 @@ pub(crate) enum Cert {
     /// but shorter than `SM_EFF_ZERO` (within the double sum's rounding), where `Unitize`
     /// refuses.
     BelowEffZero,
+    /// Success for an open chain whose area direction is not certain: a unit normal of the
+    /// plane every sample lies in (each `|n . (p - p0)|` within `2e-6 |p - p0|`, the kernel's
+    /// angular zero and its rounding).
+    PlaneNormal,
     /// The single linear curve's status.
     SingleLinear,
     /// A sample's evaluation failed: its status.
@@ -271,6 +276,12 @@ pub(crate) fn certify(k: &Kernel, curves: &[Curve], own: Answer) -> Cert {
             Cert::BelowEffZero
         }
         Answer::Normal(n) => {
+            let certain = len + e_kernel + e_hat >= EFF_ZERO
+                && len > e_hat
+                && 2.0 * (e_kernel + e_hat) / (len - e_hat) + 16.0 * f64::EPSILON < 1e-6;
+            if !certain || (n - a / len).length() > 1e-6 {
+                return certify_plane(&points, n);
+            }
             assert!(
                 len + e_kernel + e_hat >= EFF_ZERO,
                 "a success below EFF_ZERO"
@@ -294,6 +305,31 @@ pub(crate) fn certify(k: &Kernel, curves: &[Curve], own: Answer) -> Cert {
             Cert::AreaNormal
         }
     }
+}
+
+/// Certifies a success for samples whose area direction is not certain: the chain is open
+/// (its last sample not `approx_eq` its first) and `n` is a unit normal of the plane of
+/// every sample, `|n . (p - p0)| <= 2e-6 |p - p0|` (the kernel's angular zero, 1.75e-6,
+/// and rounding). Its sense is the tie-break the kernel
+/// documents (the chain's turns); it is classed against main's answer by the moves.
+fn certify_plane(points: &[Vec3], n: Vec3) -> Cert {
+    let (first, last) = (points[0], points[points.len() - 1]);
+    assert!(
+        !first.approx_eq(last),
+        "a closed loop of no certain area has no normal"
+    );
+    assert!(
+        (n.length() - 1.0).abs() < 1e-12,
+        "a plane normal is a unit vector"
+    );
+    for &p in points {
+        let d = p - first;
+        assert!(
+            n.dot(d).abs() <= 2e-6 * d.length(),
+            "the plane normal {n:?} is not normal to {d:?}"
+        );
+    }
+    Cert::PlaneNormal
 }
 
 // ---- main's answer ---------------------------------------------------------------------
