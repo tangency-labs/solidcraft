@@ -1375,15 +1375,55 @@ const FILLET_UV_CHANGES: &[GoldenChange] = &[
 /// Putting these back keeps [`MAIN`]'s original digest and every tolerance proof intact.
 const FILLET_UV_MAIN: &str = include_str!("trim_tolerance_fillet_uv_main.jsonl");
 
+/// The complete diff of `topology.assert_valid` from main at this PR's merge (#19593): the
+/// body check keeps a trusted record's tolerances, so the box mutation reports the four gap
+/// tests instead of the two failures left after the check grew the corner's vertex tolerance
+/// over the gap. The two original rows are [`ASSERT_VALID_MAIN`].
+const ASSERT_VALID_CHANGES: &[GoldenChange] = &[
+    GoldenChange {
+        case: "box_mutation6_capi",
+        old_hash: 0x32a5_0262_f819_9b8e,
+        new_hash: 0x61da_2a1d_711d_e560,
+        reason: "Body::check keeps the trusted box mutation's corner tolerance, so it reports \
+                 the four vertex/edge and vertex/face gap tests instead of hiding the gap \
+                 (failure_count 2 -> 4); the pointer reports now carry the gap.",
+    },
+    GoldenChange {
+        case: "file_Solids_box_mutation6_capi",
+        old_hash: 0x6501_cdb8_75e3_d43e,
+        new_hash: 0x4d90_c3aa_43f4_d763,
+        reason: "The file-loaded copy of the same box mutation reports the same four gap tests \
+                 now that the check keeps the corner tolerance (failure_count 2 -> 4).",
+    },
+];
+
+/// The two original whole rows from main, put back so [`MAIN`]'s digest stays main's.
+const ASSERT_VALID_MAIN: &str = include_str!("trim_tolerance_assert_valid_main.jsonl");
+
 /// Reverse exactly [`FILLET_UV_CHANGES`], rejecting a missing, duplicate, overlapping or
 /// differently changed row. Every other line is retained for the whole-file digest.
 fn put_back_fillet_uv_changes(text: &str, rows: &[Row]) -> Result<String, String> {
+    put_back_changes(text, rows, FILLET_UV_CHANGES, FILLET_UV_MAIN)
+}
+
+/// Reverse exactly [`ASSERT_VALID_CHANGES`], rejecting a missing, duplicate, overlapping or
+/// differently changed row.
+fn put_back_assert_valid_changes(text: &str, rows: &[Row]) -> Result<String, String> {
+    put_back_changes(text, rows, ASSERT_VALID_CHANGES, ASSERT_VALID_MAIN)
+}
+
+fn put_back_changes(
+    text: &str,
+    rows: &[Row],
+    changes: &[GoldenChange],
+    original_text: &str,
+) -> Result<String, String> {
     use crate::json::to_canonical_string;
     let mut original = std::collections::BTreeMap::new();
-    for line in FILLET_UV_MAIN.lines() {
+    for line in original_text.lines() {
         let v: serde_json::Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
         let case = v["case"].as_str().ok_or("an original row has no case")?;
-        let change = FILLET_UV_CHANGES
+        let change = changes
             .iter()
             .find(|r| r.case == case)
             .ok_or_else(|| format!("{case}: unlisted original row"))?;
@@ -1403,7 +1443,7 @@ fn put_back_fillet_uv_changes(text: &str, rows: &[Row]) -> Result<String, String
             return Err(format!("{case}: duplicate original row"));
         }
     }
-    if original.len() != FILLET_UV_CHANGES.len() {
+    if original.len() != changes.len() {
         return Err("the independent changes and their original rows differ".into());
     }
     let mut out = String::new();
@@ -1412,7 +1452,7 @@ fn put_back_fillet_uv_changes(text: &str, rows: &[Row]) -> Result<String, String
         let v: serde_json::Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
         let change = v["case"]
             .as_str()
-            .and_then(|case| FILLET_UV_CHANGES.iter().find(|r| r.case == case));
+            .and_then(|case| changes.iter().find(|r| r.case == case));
         let line = if let Some(change) = change {
             if !seen.insert(change.case) {
                 return Err(format!("{}: duplicate changed row", change.case));
@@ -1433,7 +1473,7 @@ fn put_back_fillet_uv_changes(text: &str, rows: &[Row]) -> Result<String, String
         out.push_str(line);
         out.push('\n');
     }
-    if let Some(change) = FILLET_UV_CHANGES.iter().find(|r| !seen.contains(r.case)) {
+    if let Some(change) = changes.iter().find(|r| !seen.contains(r.case)) {
         return Err(format!("{}: missing changed row", change.case));
     }
     Ok(out)
@@ -1441,6 +1481,24 @@ fn put_back_fillet_uv_changes(text: &str, rows: &[Row]) -> Result<String, String
 
 /// Whole-row pins reject an unrecorded field change, a missing or duplicate case, and a
 /// later change that would bypass one of the tolerance proofs.
+#[test]
+fn assert_valid_golden_changes_cannot_hide_other_changes() {
+    let text = include_str!("../../expected/topology.assert_valid.jsonl");
+    let changed = put_back_assert_valid_changes(text, &[]).expect("the documented changes");
+    let mut replay = |case: &str| Err(format!("no replay for {case}"));
+    let got = expected_digest(&changed, &[], &mut replay).expect("main's digest");
+    assert_eq!(
+        got, 0x8c45_8efc_020a_7500,
+        "main's topology.assert_valid digest"
+    );
+    let first = text
+        .lines()
+        .find(|l| l.contains("\"case\":\"box_mutation6_capi\""))
+        .expect("the changed row");
+    let duplicate = format!("{text}{first}\n");
+    assert!(put_back_assert_valid_changes(&duplicate, &[]).is_err());
+}
+
 #[test]
 fn independent_golden_changes_cannot_hide_other_changes_or_tolerance_rows() {
     let text = include_str!("../../expected/blend.fillet_executive_p3.jsonl");
@@ -1558,8 +1616,9 @@ fn row_units() -> std::collections::BTreeSet<String> {
 /// of [`ROWS`] put back to its old value, is main's file ([`MAIN`] holds the digest of every
 /// unit's expected file on main, each row case's line as main's kernel writes it). So no unit,
 /// case, moved value or other change is left out of the rows, and each row's new value is the
-/// expected one. Later independent changes are pinned separately ([`FILLET_UV_CHANGES`]);
-/// their exact original lines are restored before the tolerance changes are reversed.
+/// expected one. Later independent changes are pinned separately ([`FILLET_UV_CHANGES`] and
+/// [`ASSERT_VALID_CHANGES`]); their exact original lines are restored before the tolerance
+/// changes are reversed.
 #[test]
 fn the_rows_are_the_whole_golden_diff_from_main() {
     let main: std::collections::BTreeMap<String, u64> = MAIN
@@ -1604,6 +1663,8 @@ fn the_rows_are_the_whole_golden_diff_from_main() {
         left_out.extend(out.into_iter().map(|r| (unit.clone(), r.case)));
         let text = if unit == "blend.fillet_executive_p3" {
             put_back_fillet_uv_changes(&text, &rows).unwrap_or_else(|e| panic!("{unit}: {e}"))
+        } else if unit == "topology.assert_valid" {
+            put_back_assert_valid_changes(&text, &rows).unwrap_or_else(|e| panic!("{unit}: {e}"))
         } else {
             text
         };
