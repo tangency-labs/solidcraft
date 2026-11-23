@@ -338,6 +338,8 @@ pub(crate) struct Later {
 /// Each frame: start the estimate of an offer that waits for one, and make the offer when it is
 /// done. A design changed before then (an edit, another file) gets no offer.
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
+    #[cfg(test)]
+    let meshing = crate::open_meshing::active(app);
     let Some(later) = app.stand_up_later.as_mut() else { return };
     if later.revision != app.session.revision {
         app.stand_up_later = None;
@@ -359,6 +361,8 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                     Err(_) => estimate_in(&world, &later.asked.bodies),
                 }
             }
+            #[cfg(test)]
+            Some(_) if HELD_FRAMES.with(|h| if meshing { h.get() > 0 } else { h.replace(h.get().saturating_sub(1)) > 0 }) => return,
             Some(worker) => match worker.poll() {
                 Poll::Running => return,
                 Poll::Done(upright) => upright,
@@ -380,6 +384,19 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
             later.asked.offer(app, Some(upright));
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Frames the estimate still reads as running once the bodies are meshed ([`hold_estimate`]).
+    static HELD_FRAMES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Make an estimate on this thread read as still running while the open's meshing is, and for
+/// `frames` frames after it is done, as on a busy machine whose estimate thread waits for a turn.
+#[cfg(test)]
+pub(crate) fn hold_estimate(frames: usize) {
+    HELD_FRAMES.with(|h| h.set(frames));
 }
 
 /// Turn the offered bodies a quarter turn about X (Y up becomes Z up).

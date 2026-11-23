@@ -841,6 +841,9 @@ impl DropPt {
         end_t: f64,
         end: &mut Self,
     ) -> Result<i32> {
+        // Not upstream: a drop that subdivides without end is stopped by the caller's token
+        // (a work limit, or a cancelled job); upstream has no such check.
+        k.check_cancelled(OP_NEXT)?;
         let start = self;
 
         // init return values

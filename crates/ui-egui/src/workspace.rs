@@ -585,9 +585,14 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "MODEL", panel: "FINISH EDITING", promoted: 1, ids: &["component.finish_edit"] },
     // Sketches drive surfaces too: New Sketch leads the tab, as on MODEL and SHEET METAL.
     Section { tab: "SURFACE", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
-    Section { tab: "SURFACE", panel: "CREATE", promoted: 4, ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft"] },
+    Section {
+        tab: "SURFACE",
+        panel: "CREATE",
+        promoted: 4,
+        ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft", "surface.thicken"],
+    },
     Section { tab: "SURFACE", panel: "EDIT", promoted: 4, ids: &["surface.trim", "surface.untrim", "surface.extend", "surface.stitch"] },
-    Section { tab: "SURFACE", panel: "CONVERT", promoted: 2, ids: &["surface.thicken", "mesh.convert"] },
+    Section { tab: "SURFACE", panel: "MESH", promoted: 2, ids: &["mesh.reduce", "mesh.convert", "file.insert_mesh", "file.save_mesh"] },
     Section {
         tab: "ASSEMBLE",
         panel: "COMPONENTS",
@@ -702,6 +707,7 @@ pub const SECTIONS: &[Section] = &[
             "view.grid",
             "view.ground_shadow",
             "view.navigation_bar",
+            "view.browser",
             "view.ribbon_tabs_only",
         ],
     },
@@ -771,7 +777,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "SHEET METAL",
         panel: "CREATE",
         promoted: 4,
-        ids: &["sheet.flange", "sheet.path_flange", "sheet.hem", "sheet.fold", "sheet.perforate", "sheet.convert", "sheet.recognize"],
+        ids: &["sheet.flange", "sheet.path_flange", "sheet.hem", "sheet.fold", "sheet.tab", "sheet.perforate", "sheet.convert", "sheet.recognize"],
     },
     Section { tab: "SHEET METAL", panel: "FLAT", promoted: 3, ids: &["sheet.unfold", "sheet.refold", "sheet.flat_pattern"] },
     Section { tab: "SHEET METAL", panel: "OUTPUT", promoted: 2, ids: &["sheet.export_dxf", "sheet.export_bend_table"] },
@@ -779,10 +785,15 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "SHEET METAL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
     // A frame starts from a sketch of its lines; its profile sizes are often parameters.
     Section { tab: "WELDMENTS", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
-    Section { tab: "WELDMENTS", panel: "CREATE", promoted: 2, ids: &["frame.member", "frame.end_cap"] },
+    Section { tab: "WELDMENTS", panel: "CREATE", promoted: 3, ids: &["frame.member", "frame.end_cap", "frame.plate"] },
     Section { tab: "WELDMENTS", panel: "MODIFY", promoted: 1, ids: &["frame.rotate_member"] },
     Section { tab: "WELDMENTS", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
 ];
+
+const LEGACY_SURFACE_CREATE: Section =
+    Section { tab: "SURFACE", panel: "CREATE", promoted: 4, ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft"] };
+const LEGACY_SURFACE_CONVERT: Section =
+    Section { tab: "SURFACE", panel: "CONVERT", promoted: 2, ids: &["surface.thicken", "mesh.convert", "mesh.reduce"] };
 
 // Migration data only: Render commands remain registered, but have no live ribbon sections.
 const LEGACY_RENDER_SECTIONS: &[Section] = &[
@@ -921,6 +932,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("sheet.flat_pattern", "Flat Pattern"),
     ("sheet.manage_rules", "Sheet Rules"),
     ("sheet.path_flange", "Path"),
+    ("frame.plate", "Plate"),
     ("sketch.cancel", "Cancel"),
     ("sketch.circle.center", "Circle"),
     ("sketch.constraint.coincident", "Coincident"),
@@ -1001,6 +1013,7 @@ pub(crate) fn legacy_render_destination(c: &CommandSpec) -> Option<(&'static str
         "sheet.manage_rules" => Some(("MANAGE", "RULES")),
         "sheet.convert" => Some(("MODEL", "MODIFY")),
         "parameters.change" => Some(("MANAGE", "PARAMETERS")),
+        "file.insert_mesh" | "file.save_mesh" => Some(("INSERT", "FILES")),
         "config.table" | "config.configure" => Some(("MANAGE", "CONFIGURATIONS")),
         _ => None,
     };
@@ -1012,9 +1025,25 @@ pub(crate) fn legacy_render_destination(c: &CommandSpec) -> Option<(&'static str
 /// Ordered menu commands, with the promoted commands first. Empty sections are omitted by
 /// panel_lists, except the selection filter, which has its own existing controls.
 pub fn layout<'a>(tab: &str, panel: &str, specs: &[&'a CommandSpec]) -> Option<(Vec<&'a CommandSpec>, usize)> {
-    let section = SECTIONS.iter().find(|s| s.tab == tab && s.panel == panel)?;
+    layout_for(tab, panel, specs, false)
+}
+
+pub(crate) fn layout_for<'a>(tab: &str, panel: &str, specs: &[&'a CommandSpec], legacy_surface: bool) -> Option<(Vec<&'a CommandSpec>, usize)> {
+    let section = if legacy_surface && tab == "SURFACE" {
+        match panel {
+            "CREATE" => &LEGACY_SURFACE_CREATE,
+            "CONVERT" => &LEGACY_SURFACE_CONVERT,
+            "MESH" => return None,
+            _ => SECTIONS.iter().find(|s| s.tab == tab && s.panel == panel)?,
+        }
+    } else {
+        SECTIONS.iter().find(|s| s.tab == tab && s.panel == panel)?
+    };
     let mut out: Vec<_> = section.ids.iter().filter_map(|id| specs.iter().find(|c| c.id == *id).copied()).collect();
-    for c in specs.iter().filter(|c| destination(c) == Some((section.tab, section.panel))) {
+    for c in specs.iter().filter(|c| {
+        destination(c) == Some((section.tab, section.panel))
+            && !(legacy_surface && tab == "SURFACE" && panel == "CREATE" && c.id == "surface.thicken")
+    }) {
         if !out.iter().any(|o| o.id == c.id) {
             out.push(*c);
         }
@@ -1039,7 +1068,7 @@ pub fn legacy_panel(tab: &str, panel: &str) -> Option<(&'static str, &'static st
         ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "CONSTRUCT") => Some(("MODEL", "CONSTRUCT")),
         ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "INSPECT") => Some(("INSPECT", "CHECK")),
         ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "INSERT") => Some(("INSERT", "FILES")),
-        ("MESH", "CREATE" | "PREPARE") => Some(("SURFACE", "CONVERT")),
+        ("MESH", "CREATE" | "PREPARE") => Some(("SURFACE", "MESH")),
         ("UTILITIES", "MAKE" | "ADD-INS" | "UTILITY") => Some(("MANAGE", "DESIGN")),
         ("UTILITIES", "INSPECT") => Some(("INSPECT", "CHECK")),
         _ => None,
@@ -1053,6 +1082,7 @@ pub fn feature_icon(k: &FeatureKind) -> Option<&'static str> {
         FeatureKind::SheetHem { .. } => "hem",
         FeatureKind::SheetFold { .. } => "fold",
         FeatureKind::SheetPath { .. } => "path_flange",
+        FeatureKind::SheetTab { .. } => "sheet_tab",
         FeatureKind::SheetUnfold { refold: false, .. } => "unfold",
         FeatureKind::SheetUnfold { .. } => "refold",
         FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } | FeatureKind::SheetRecognize { .. } => "convert_sheet",
@@ -1096,7 +1126,8 @@ pub fn frame_body(app: &crate::SolveApp) -> Option<String> {
     let name = active_body(app, &state)?;
     let body = state.bodies.iter().find(|b| b.name == name)?;
     let made_by = app.session.doc.feature(body.feature)?;
-    matches!(made_by.kind, FeatureKind::FrameMember { .. } | FeatureKind::FrameEndCap { .. }).then(|| body.name.clone())
+    matches!(made_by.kind, FeatureKind::FrameMember { .. } | FeatureKind::FrameEndCap { .. } | FeatureKind::FramePlate { .. })
+        .then(|| body.name.clone())
 }
 
 /// The design tabs following the general-purpose tabs in the ribbon.
@@ -1263,7 +1294,7 @@ pub fn select_command_tab(app: &mut crate::SolveApp, id: &str) {
 pub fn command_tab(app: &crate::SolveApp, id: &str) -> Option<&'static str> {
     let c = solidcraft_engine::find_command(id)?;
     // Keep the tab a toolbar click came from when it already lists this shared command.
-    if crate::toolbar_custom::panel_lists(&app.ui.tab).iter().any(|(_, cmds, _)| cmds.iter().any(|c| c.id == id)) {
+    if crate::toolbar_custom::panel_lists_for(app, &app.ui.tab).iter().any(|(_, cmds, _)| cmds.iter().any(|c| c.id == id)) {
         return None;
     }
     let (tab, _) = destination(c)?;
@@ -1762,14 +1793,14 @@ mod tests {
         let specs = solidcraft_engine::command_specs();
         assert_eq!(panels("WELDMENTS"), ["SKETCH", "CREATE", "MODIFY", "CONFIGURE"]);
         let (create, n) = layout("WELDMENTS", "CREATE", &specs).unwrap();
-        assert_eq!(create.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), ["frame.member", "frame.end_cap"]);
+        assert_eq!(create.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), ["frame.member", "frame.end_cap", "frame.plate"]);
         assert!(!panel_ids("MODEL", &specs).contains(&"frame.member"), "Frame Member's home is Weldments");
 
         let mut h = crate::scenario::Harness::new();
         h.step(&json!({"click":{"handle":"tab:WELDMENTS"}})).unwrap();
         h.frames(2);
         assert_eq!(h.app.ui.tab, "WELDMENTS");
-        for id in ["sketch.create", "frame.member", "frame.end_cap", "parameters.change"] {
+        for id in ["sketch.create", "frame.member", "frame.end_cap", "frame.plate", "parameters.change"] {
             assert!(crate::scenario::handle_at(&format!("button:{id}")).is_some(), "{id} is a button on the Weldments tab");
         }
         h.step(&json!({"click":{"handle":"button:frame.member"}})).unwrap();
