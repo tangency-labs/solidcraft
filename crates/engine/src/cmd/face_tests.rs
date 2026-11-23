@@ -649,7 +649,8 @@ fn offset_a_curved_face_by_name_or_point_and_refuse_only_points_far_from_it() {
         assert!(e.to_string().contains("no face at"), "{point:?}: {e}");
         assert_eq!(s.doc.features.len(), before.features.len());
     }
-    for pick in [json!(name)] {
+    {
+        let pick = json!(name);
         let mut s = Session::new(before.clone());
         run(&mut s, "solid.offset_face", json!({"faces": [pick], "body": "Cylinder", "distance": 2}));
         let state = s.model.state();
