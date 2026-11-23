@@ -16,6 +16,7 @@
 //! Surfaces*, §3.2 (normal sections, Meusnier).
 
 pub mod agreement;
+pub mod chart;
 pub mod check;
 pub mod collapse;
 pub mod curve;
@@ -38,6 +39,7 @@ pub mod surface;
 pub mod uv;
 pub mod vec;
 
+pub use chart::Chart;
 pub use collapse::{Collapse, OntoKnots};
 pub use curve::{CurveEval, CurveJet};
 pub use geodesic::{
