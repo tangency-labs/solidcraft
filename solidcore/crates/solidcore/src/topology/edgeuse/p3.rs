@@ -436,13 +436,24 @@ pub(crate) fn fit_tolerance(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> 
     // the edge uses' gap caches as it found them; a failed calculation, ignored as
     // `GetMaxEdgeFaceGap` ignores it, adds no gap)
     let mut gap = 0.0_f64;
+    let mut measured_faces = std::collections::BTreeSet::new();
     for eu in b.edge(e)?.edgeuses.clone() {
         let g = if !eu1::has_edge_face_gap(b, eu)? {
             None
         } else if eu1::is_max_edge_face_gap_init(b, eu)? {
             eu1::cached_max_edge_face_gap(b, eu)?
         } else {
-            ignored(eu1::calc_max_edge_face_gap(k, b, eu, false))?
+            // Uncached uses of this edge on one face measure the same curve over
+            // the same interval against the same surface, including at a seam.
+            let face = eu1::face(b, eu)?;
+            if measured_faces.contains(&face) {
+                continue;
+            }
+            let measured = ignored(eu1::calc_max_edge_face_gap(k, b, eu, false))?;
+            if measured.is_some() {
+                measured_faces.insert(face);
+            }
+            measured
         };
         if let Some(g) = g {
             if g.gap_3d > gap {
@@ -486,6 +497,7 @@ pub fn create_uv_trim_curve(
     want_deviation: bool,
     opt_drop_curve_fail: Option<&mut DropCurveFail<ObjectHandle>>,
 ) -> Result<CreatedUvTrimCurve> {
+    k.work_counters.add_uv_trim_build();
     // always collect DropCurveData
     let mut local_fail = DropCurveFail::<ObjectHandle>::default();
     let fail: &mut DropCurveFail<ObjectHandle> = match opt_drop_curve_fail {
@@ -2705,6 +2717,7 @@ pub(crate) fn trim_deviation_bound(
     let ivl = edge_rec.interval;
     // (below a thousandth of the fit tolerance a tighter bound changes nothing)
     let floor = TRIM_BOUND_FLOOR * fit;
+    k.work_counters.add_trim_deviation_bound();
     crate::query::curve_surface_gap::trim_image_gap_bound_within(
         k,
         &surface,

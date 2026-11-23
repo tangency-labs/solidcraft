@@ -187,13 +187,25 @@ pub(crate) fn paint(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, 
     }
     let ctx = ui.ctx();
     let drawn = app.viewport.draw_stats.as_ref().and_then(|s| s.lock().ok().map(|s| *s)).unwrap_or_default();
-    if app.frame_rate.record(f64::from(ctx.input(|i| i.unstable_dt))) {
-        let ms = ctx.input(|i| i.unstable_dt) * 1000.0;
+    let dt = f64::from(ctx.input(|i| i.unstable_dt));
+    // Only the pass that counted a frame may ask for the next one: egui runs a frame over more
+    // than one pass, and a later pass of the same frame has no gap at all (`unstable_dt` 0),
+    // which `record` leaves out without touching the mean. Arming from such a pass would keep
+    // the window drawing with the mean of the frames before it, one wake per idle gap, forever.
+    // The frame before this one was an idle gap: something else woke the window (a plugin
+    // discovery scan's 50 ms collection frame is the one the app bar asks for), and this frame
+    // counts only because of it. Arming here would wake the window once more, and that frame
+    // would be another such maintenance frame, forever: the readout must let it go.
+    let was_idle = app.frame_rate.idle;
+    let counted = app.frame_rate.record(dt);
+    if counted {
         let rebuilt = app.frame_rate.scene_key != app.viewport.key;
-        app.frame_rate.push(Sample { ms, triangles: drawn.triangles, rebuilt });
+        app.frame_rate.push(Sample { ms: (dt * 1000.0) as f32, triangles: drawn.triangles, rebuilt });
     }
     app.frame_rate.scene_key = app.viewport.key;
-    if app.frame_rate.fps().is_some() {
+    if counted && !was_idle && app.frame_rate.fps().is_some() {
+        // Past IDLE_AFTER, so the frame it brings is read as idle ("0 FPS"): a wake inside the
+        // threshold would count as one more frame, which would arm the next one in turn.
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(IDLE_AFTER + 0.1));
     }
     let Some(text) = app.frame_rate.label() else { return };
@@ -436,6 +448,44 @@ mod tests {
         assert!(l9.is_some_and(|l| l.starts_with("9 FPS")));
         assert!(steady.is_some());
         assert_eq!([slow, fast, idle], [steady; 3], "the readout's width changed with its text");
+    }
+
+    /// A pass that counted no frame asks for no wake. egui may run a frame over several passes,
+    /// and a later pass of it sees a zero gap, which `record` leaves out: arming there would
+    /// keep the window drawing with the mean an earlier frame left, once per idle gap, forever.
+    #[test]
+    fn a_pass_that_counted_no_frame_arms_no_wake() {
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.preferences.show_frame_rate = true;
+        let ctx = crate::fonts::test_context();
+        // `app` is passed in rather than captured, so a test can read it between frames.
+        let frame = |app: &mut crate::SolveApp, time: f64| -> Option<std::time::Duration> {
+            let raw = egui::RawInput { time: Some(time), ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                let rect = ui.max_rect();
+                let painter = ui.painter().clone();
+                super::paint(app, ui, &painter, rect);
+            });
+            out.textures_delta.clear();
+            out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.repaint_delay)
+        };
+        for i in 0..10 {
+            frame(&mut app, f64::from(i) / 60.0);
+        }
+        // A second pass of the frame just drawn: no gap at all, while the frames before left a
+        // running mean to arm from (`fps()` is still Some here).
+        let repeat = frame(&mut app, 9.0 / 60.0);
+        assert!(repeat.is_some_and(|d| d.as_secs_f64() > 3600.0), "a pass that counted no frame asked for a frame after {repeat:?}");
+        // The pass that sees the pause: the view is idle, and it asks for none either.
+        let idle = frame(&mut app, 9.0 / 60.0 + 1.102);
+        assert!(idle.is_some_and(|d| d.as_secs_f64() > 3600.0), "the idle frame asked for a frame after {idle:?}");
+        assert_eq!(app.frame_rate.label().as_deref(), Some("0 FPS"));
+        // And a maintenance frame 50 ms after it — the app bar's plugin discovery collection,
+        // which the window wakes for — counts as a frame, but must not arm the next wake: that
+        // is the 1 Hz loop itself. (It does update the running mean, so the label is no longer
+        // "0 FPS"; what matters is that it asks for nothing.)
+        let maint = frame(&mut app, 9.0 / 60.0 + 1.152);
+        assert!(maint.is_some_and(|d| d.as_secs_f64() > 3600.0), "a maintenance frame after an idle gap asked for a frame after {maint:?}");
     }
 
     #[test]

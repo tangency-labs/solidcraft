@@ -339,8 +339,9 @@ pub fn paint_focus(painter: &Painter, rect: Rect, radius: u8) {
 
 /// App-owned edit responses share the native item's paint offsets, including hover lift.
 pub fn paint_item_outline(ui: &egui::Ui, id: &str, rect: Rect, radius: u8, width: f32) {
-    let lift =
-        ui.ctx().data(|d| d.get_temp::<HoverLift>(egui::Id::unique(("appbar_hover_lift", ui.ctx().viewport_id(), id)))).map_or(0.0, |s| s.drawn);
+    // The id outside `data`: a context lock taken inside another can freeze the window (#21091).
+    let lift_id = egui::Id::unique(("appbar_hover_lift", ui.ctx().viewport_id(), id));
+    let lift = ui.ctx().data(|d| d.get_temp::<HoverLift>(lift_id)).map_or(0.0, |s| s.drawn);
     paint_outline(ui.painter(), drawn_rect(ui.ctx(), id, rect).translate(vec2(0.0, lift)), radius, width);
 }
 
