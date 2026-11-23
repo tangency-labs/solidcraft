@@ -17,6 +17,7 @@
 # blend.fillet_executive_p1, topology.edge, topology.face_p3: main's files with the rows whose gap-cache flags go from 1 to 0 where edge::set_interval now clears the gaps of the old interval (#20939): 3, 43 and 20 rows, no other value moved
 # topology.brep_p1: main's file with the 141 SetSize rows whose kernel-context columns keep the defaults (50, 1e-5, 1000) after a B-rep size setter, which no longer writes the context (tangency-labs/solidcraft#20938)
 # blend.fillet_executive_p3, corpus.parity, surface.trim_srf_cache, topology.brep_p10, topology.face_p3: the point test follows the face (#20179): the digests are this branch's files with the rows put back (fillet_executive_p3 and face_p3 on top of #18490's lines above, both moving the same sphere_diff_3cylinders cases, blessed again on the merged kernel; fillet_executive_p3 also holds #20237's law-cube and law-box lines, the line above). Lines moved against this main: fillet_executive_p3's 6 sphere_diff_3cylinders rows (UV trims on five edges, 1 to 2; wr493_rows proves them), surface.trim_srf_cache's 7 editing-mode native_face rows (point tests agree with the face's classification), and the Fillet/sphere_diff_3cylinders.smb reads of corpus.parity (1), topology.face_p3 (22) and topology.brep_p10 (read_Fillet_sphere_diff_3cylinders and gen0026: +5 classified trims), each main's row hash once tolsub::replay puts the trims back (CLASSIFIED_READ_ROWS). gen0026's row moves its 12 values 85 places on (a uniform shift: each new value occurs exactly at its row's 12 positions; brep_p10's certificate re-checks every entity on the new body) and gains 10: attaching the five classified trims (SetUVTrimCurve's 2x margin, #20912) raises edges 20, 22, 27, 31 and 33 from 1e-5 to twice each trim's raise distance and vertices 12, 13, 14, 18 and 19 with them, each derived by DROP_MARGIN (drop_margin_raise: the drop replayed on main's read gives the tolerance bit for bit); edges 20 and 33 stay open as UNCOVERED, their face-3/4 trims past main's 1e-5 too (#20906)
+# blend.fillet_executive_p3, offset.offset_executive_p2: every shell ends with its exact analytic edges (WR-545's flag retired): the digests are this branch's files with the rows put back. fillet_executive_p3 lines moved against this main: real-box-fillet1v-r3-shell-closed and real-box-fillet4v-r3-shell-closed (the rim's edges exact arcs and lines, its vertices on them, the shell's area nearer its closed form; wr545_moved_rows_are_exact proves them); their rows lose the 26 rounding entries of vertex coordinates the exact edges move (6 and 20), and keep every moved tolerance. offset_executive_p2 lines moved: its 62 rows (59 lines where B-spline edges were, the vertex bounds of 36 of them moved by at most 1.7e-12, all proved by wr545_moved_rows_are_exact).
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -24,7 +25,7 @@ blend.fillet_corner_p3	41ff3e1d687449c4
 blend.fillet_custom_solver	d5a7b6227772dc0a
 blend.fillet_executive_p1	29550c0f9b47966c
 blend.fillet_executive_p2	68a6e765f600c883
-blend.fillet_executive_p3	c3ed3b682cf28b41
+blend.fillet_executive_p3	41f0a7853e9141f0
 blend.fillet_geom_p1	82c1f975f967a59d
 blend.fillet_geom_p2	4a54b5291270572a
 blend.fillet_geom_p3	15646cd3bfb41d7e
@@ -190,7 +191,7 @@ nurbs.b_spline_surface_p2	f6eae99ab71257f5
 nurbs.nurbs_crv	c78af304772ea823
 nurbs.nurbs_srf	5ea987b73e360223
 offset.offset_executive_p1	369d6f853189d32e
-offset.offset_executive_p2	f2d62f772f5ebd2f
+offset.offset_executive_p2	c6012e3e9432cae6
 offset.offset_geometry_creation	e8c98d82f6680670
 primitive.api_curve_ops	631989d29fe6f1dc
 primitive.api_curves	b384f5e70c20e9db
