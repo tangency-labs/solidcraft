@@ -30,7 +30,11 @@
 //! expansion and the root round's bound is 7.42e-5 (the square corner's still 1.04e-26).
 //! Since #19306 it is so only near a focal distance, which neither case comes near (the
 //! ball rolls away from the cylinder's axis, and a plane has none): the sum's bounds, 7.88e-5
-//! and 1.04e-26, again. The spans and points are the fork's, bit for bit.
+//! and 1.04e-26, again. Since a span whose least values are over the target is left at its
+//! first piece for its halves (`SpanReuse::over_is_halved`, #13692), the halves take their
+//! own levels, not its finest interval pieces: the root round's bound is another level's,
+//! 1.49e-5, still under its target and above the net's distance at every point checked. The
+//! spans and points are the fork's, bit for bit.
 
 #![allow(clippy::unwrap_used, clippy::panic)]
 
@@ -249,8 +253,9 @@ fn the_root_round_is_the_fork_s_order_1_definition() {
     assert_eq!(spans, 16);
     // the fork's 9.034_561_390_963_572e-5; tighter here (module docs, #13984, #14405; the
     // offset point enclosed as one expansion, #16652: 7.424_961_576_754_573e-5, and as the
-    // sum again away from a focal distance since #19306)
-    assert_eq!(bound, 7.884_813_700_446_398e-5);
+    // sum again away from a focal distance since #19306: 7.884_813_700_446_398e-5; the
+    // halves' own levels, #13692)
+    assert_eq!(bound, 1.490_752_459_228_076e-5);
     let net = net_of(&s);
     assert_pt(
         net.evaluate_point(Point2::new(0.37, 0.5)).unwrap(),

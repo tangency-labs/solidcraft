@@ -353,6 +353,55 @@ fn nearest_on_polyline(pts: &[Vec3], p: Vec3) -> Option<Vec3> {
         .or_else(|| pts.first().copied())
 }
 
+/// How one of a chamfer's two arrows is drawn: as always, in the accent colour and thicker (the
+/// distance being edited), or dimmed (the other one).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ArrowLook {
+    Plain,
+    Active,
+    Dimmed,
+}
+
+/// The looks of a two-distance chamfer's Distance 1 and Distance 2 arrows, given the distance
+/// being edited (0 or 1; none while neither field has been used: both as always). Flip needs no
+/// say here: it swaps which face each arrow runs along ([`chamfer_face_dirs`] hands the faces over
+/// already swapped), never which arrow belongs to which distance.
+pub(crate) fn chamfer_arrow_looks(editing: Option<usize>) -> [ArrowLook; 2] {
+    match editing {
+        Some(k) if k < 2 => [0, 1].map(|i| if i == k { ArrowLook::Active } else { ArrowLook::Dimmed }),
+        _ => [ArrowLook::Plain; 2],
+    }
+}
+
+/// The key in a chamfer dialog's `extra` for the distance last focused (0 or 1).
+const CHAMFER_EDITING: &str = "chamfer_distance";
+
+/// The distance (0 for Distance 1, 1 for Distance 2) a chamfer of two distances is editing: the
+/// one whose field, in the window or on the canvas, last held the keyboard. None for any other
+/// dialog, or before either did.
+pub(crate) fn chamfer_editing(d: &Dialog) -> Option<usize> {
+    let Kind::Fillet { chamfer: true, ctype: 1, .. } = &d.kind else { return None };
+    d.extra.get(CHAMFER_EDITING).and_then(serde_json::Value::as_u64).filter(|k| *k < 2).map(|k| k as usize)
+}
+
+/// Note that distance `k` of a chamfer is the one being edited.
+pub(crate) fn set_chamfer_editing(d: &mut Dialog, k: usize) {
+    if matches!(d.kind, Kind::Fillet { chamfer: true, ctype: 1, .. }) {
+        note_chamfer_editing(&mut d.extra, k);
+    }
+}
+
+/// [`set_chamfer_editing`] for a caller that holds the dialog's kind borrowed.
+pub(crate) fn note_chamfer_editing(extra: &mut serde_json::Map<String, serde_json::Value>, k: usize) {
+    if k < 2 && extra.get(CHAMFER_EDITING).and_then(serde_json::Value::as_u64) != Some(k as u64) {
+        extra.insert(CHAMFER_EDITING.into(), serde_json::json!(k));
+    }
+}
+
+fn chamfer_look(d: &Dialog, distance: usize) -> ArrowLook {
+    chamfer_arrow_looks(chamfer_editing(d))[distance.min(1)]
+}
+
 /// The directions Distance 1 and Distance 2 of a chamfer of two distances run from its edge at
 /// `at`: along the face that faces up most, or the other one with Flip, and along the remaining
 /// face (the kernel's `chamfer_tool_sides` picks them the same way). None for any other dialog.
@@ -392,6 +441,7 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
 
 /// Draw the manipulator and the value box (called by the viewport after the model is drawn).
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) {
+    let _tool_window = ToolWindow::enter(app);
     crate::extrude_face_snap::set(None);
     // While OK computes, the inputs hold what it computes: no arrow to drag, no box to type in.
     if app.applying.is_some() {
@@ -727,25 +777,29 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     }
     // A chamfer of two distances: Distance 2 gets its own arrow along the other face.
     let faces = chamfer_face_dirs(app, d, base);
+    let look2 = chamfer_look(d, 1);
+    let mut dragged2 = false;
+    let mut tip2 = None;
     if let (Kind::Fillet { distance2, .. }, Some((_, t2))) = (&mut d.kind, faces)
         && let Some(l2) = crate::length_input::eval(&app.session.doc, distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
-        drag_arrow(
+        let before = distance2.clone();
+        tip2 = drag_arrow_looked(
             &app.session.doc,
             ui,
             painter,
             proj,
-            base,
-            bs,
-            t2,
-            l2,
-            false,
+            (base, bs, t2),
+            (l2, false, 0.0),
             egui::Id::unique("sc_manipulator2"),
-            half_height,
-            0.0,
-            decimals,
+            (half_height, decimals),
+            look2,
             distance2,
         );
+        dragged2 = *distance2 != before;
+    }
+    if dragged2 {
+        set_chamfer_editing(d, 1);
     }
     // A rectangular pattern's second direction gets its own arrow for Spacing 2 (#2462), as the
     // first direction's arrow sets Spacing.
@@ -911,7 +965,22 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // With To Object picked the box holds To Offset, which is used, whatever All says: the
     // engine takes To Object first.
     let names_all = all_on && !d.inputs.iter().any(|input| input.label == "To Object");
+    // A chamfer of two distances: the box shows and edits the distance whose field was used last
+    // (a copy, written back below), and names it.
+    let look1 = chamfer_look(d, 0);
+    let two_distances = matches!(d.kind, Kind::Fillet { chamfer: true, ctype: 1, .. });
+    let on_second = two_distances && chamfer_editing(d) == Some(1);
+    let second_before = match &d.kind {
+        Kind::Fillet { distance2, .. } if on_second => Some(distance2.clone()),
+        _ => None,
+    };
+    let mut second = second_before.clone();
     let Some((label, kind, value)) = d.primary() else { return };
+    let label = match (two_distances, on_second) {
+        (true, true) => "Distance 2",
+        (true, false) => "Distance 1",
+        _ => label,
+    };
     let len = all_span.or_else(|| {
         if to_span.is_some() && value.trim().is_empty() {
             Some(0.0)
@@ -940,7 +1009,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             ui,
             painter,
             proj,
-            ArrowLine { base, bs, n, l: half + baseline, signed, clear_px: clear },
+            ArrowLine { base, bs, n, l: half + baseline, signed, clear_px: clear, look: look1 },
             arrow_id,
             half_height,
             &stops,
@@ -973,6 +1042,10 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             }
         }
     }
+    if on_second && let Some(t2) = tip2 {
+        box_at = t2 + vec2(14.0, -12.0);
+        anchor = t2;
+    }
     let note = crate::drag_extrude::step_note(app);
     // Also without an arrow (the value does not evaluate yet): the box still keeps off the handles.
     // Clear of the command window first, then off the placement handles: the handles have the
@@ -992,11 +1065,28 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // extrude reaches, so the field is empty and its hint names the extent. Text typed there is
     // the new Distance. Like any empty box it has no number to step (Up, Down, the wheel).
     let shows_all = names_all && *value == before;
-    let select_all = focus || *value != before;
+    let changed = match (&second, &second_before) {
+        (Some(now), Some(was)) => now != was,
+        _ => *value != before,
+    };
+    let select_all = focus || changed;
     let mut typed = String::new();
-    let shown = if shows_all { &mut typed } else { &mut *value };
+    let shown = match second.as_mut() {
+        Some(second) => second,
+        None if shows_all => &mut typed,
+        None => &mut *value,
+    };
     let hint = if shows_all { "All" } else { "" };
     value_box_noted(ui, label, shown, box_at, select_all, hint, note.as_deref(), BoxPlace { dialog: None, ..place });
+    // The box's distance, or the arrow's, is the one being edited now.
+    let box_has_keyboard = ui.ctx().memory(|m| m.has_focus(egui::Id::unique("sc_canvas_value")));
+    let editing_now = if two_distances && *value != before {
+        Some(0)
+    } else if two_distances && box_has_keyboard {
+        Some(usize::from(on_second))
+    } else {
+        None
+    };
     // Spaces alone are not an entry: the field has the keyboard as the dialog opens.
     let entered = !typed.trim().is_empty();
     if entered {
@@ -1007,6 +1097,15 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         && let Kind::Extrude { all, .. } = &mut d.kind
     {
         *all = false;
+    }
+    if let (Some(text), Some(was)) = (second, second_before)
+        && text != was
+        && let Kind::Fillet { distance2, .. } = &mut d.kind
+    {
+        *distance2 = text;
+    }
+    if let Some(k) = editing_now {
+        set_chamfer_editing(d, k);
     }
     // Double-clicking the arrow reverses the direction, as the window's Reverse Direction does
     // (#17402). Symmetric has no direction to reverse.
@@ -1056,8 +1155,32 @@ pub(crate) fn boxes_shown(ctx: &egui::Context) -> bool {
 
 /// Whether the command's value box takes the keyboard this frame: as the window opens, and after
 /// a pick. Without boxes in the view, it is left for the command window's value field (#9479).
+/// Only the window that shows the command has value boxes (see [`ToolWindow`]).
 fn take_focus(ctx: &egui::Context, d: &mut Dialog) -> bool {
-    boxes_shown(ctx) && std::mem::take(&mut d.focus)
+    boxes_shown(ctx) && TOOL_WINDOW.get() && std::mem::take(&mut d.focus)
+}
+
+thread_local! {
+    /// Whether the window being drawn shows the open command (always, with one window).
+    static TOOL_WINDOW: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// While it lives, value boxes are drawn only if the window being drawn shows the open command.
+/// The keyboard is in that window. Views of the design in other windows draw the manipulator
+/// alone: their box would share its field's text state, and its keyboard, with the real one.
+struct ToolWindow;
+
+impl ToolWindow {
+    fn enter(app: &SolveApp) -> ToolWindow {
+        TOOL_WINDOW.set(crate::view_windows::shows_tool(app));
+        ToolWindow
+    }
+}
+
+impl Drop for ToolWindow {
+    fn drop(&mut self) {
+        TOOL_WINDOW.set(true);
+    }
 }
 
 /// The command's main value in the viewport, next to the geometry: the keyboard goes here while
@@ -1116,7 +1239,7 @@ fn value_box_full(
     place: BoxPlace,
 ) -> Option<egui::Rect> {
     // Off in Preferences: the value is typed in the command window only (#9479).
-    if !boxes_shown(ui.ctx()) {
+    if !boxes_shown(ui.ctx()) || !TOOL_WINDOW.get() {
         return None;
     }
     let t = Tokens::get();
@@ -1336,7 +1459,24 @@ fn drag_arrow(
     decimals: u8,
     value: &mut String,
 ) -> Option<Pos2> {
-    let line = ArrowLine { base, bs, n, l, signed, clear_px };
+    drag_arrow_looked(doc, ui, painter, proj, (base, bs, n), (l, signed, clear_px), id, (half_height, decimals), ArrowLook::Plain, value)
+}
+
+/// [`drag_arrow`] drawn with `look` (a chamfer's two arrows tell which distance is being edited).
+#[allow(clippy::too_many_arguments)]
+fn drag_arrow_looked(
+    doc: &solidcraft_engine::doc::Document,
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    proj: &Proj,
+    (base, bs, n): (Vec3, Pos2, Vec3),
+    (l, signed, clear_px): (f64, bool, f32),
+    id: egui::Id,
+    (half_height, decimals): (f64, u8),
+    look: ArrowLook,
+    value: &mut String,
+) -> Option<Pos2> {
+    let line = ArrowLine { base, bs, n, l, signed, clear_px, look };
     drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], decimals, value).map(|(ts, _, _)| ts)
 }
 
@@ -1350,6 +1490,7 @@ struct ArrowLine {
     l: f64,
     signed: bool,
     clear_px: f32,
+    look: ArrowLook,
 }
 
 /// [`drag_arrow`] that also stops at `stops` (#2398): a drag whose tip comes near a stop's
@@ -1368,7 +1509,7 @@ fn drag_arrow_to(
     decimals: u8,
     value: &mut String,
 ) -> Option<(Pos2, Option<crate::extrude_face_snap::Stop>, bool)> {
-    let ArrowLine { base, bs, n, l, signed, clear_px } = line;
+    let ArrowLine { base, bs, n, l, signed, clear_px, look } = line;
     let mut stopped = None;
     let t = Tokens::get();
     let min = f64::from(40.0 + clear_px) * 2.0 * half_height / f64::from(proj.rect.height().max(1.0));
@@ -1429,8 +1570,13 @@ fn drag_arrow_to(
     // Using the old distance here made both trail the drag by another frame.
     crate::scenario::publish_handle(if id == egui::Id::unique("sc_manipulator") { "arrow" } else { "arrow2" }, ts);
     let hot = r.hovered() || r.dragged();
-    let col = if hot { t.accent } else { t.manipulator };
-    arrow(painter, start(ts), ts, col);
+    let (col, width) = match look {
+        _ if hot => (t.accent, 2.0),
+        ArrowLook::Plain => (t.manipulator, 2.0),
+        ArrowLook::Active => (t.accent, 3.5),
+        ArrowLook::Dimmed => (t.manipulator.gamma_multiply(0.4), 2.0),
+    };
+    arrow_wide(painter, start(ts), ts, col, width);
     if hot {
         painter.circle_stroke(ts, 8.0, Stroke::new(1.5, col));
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
@@ -2322,6 +2468,11 @@ pub(crate) fn projected_rotation_angle(
     Some((a + b) / 2.0)
 }
 fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32) {
+    arrow_wide(painter, a, b, col, 2.0);
+}
+
+/// [`arrow`] with a stem `width` points wide.
+fn arrow_wide(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32, width: f32) {
     let v = b - a;
     let l = v.length();
     if l < 1.0 {
@@ -2329,7 +2480,7 @@ fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32) {
     }
     let u = v / l;
     let n = vec2(-u.y, u.x);
-    painter.line_segment([a, b], Stroke::new(2.0, col));
+    painter.line_segment([a, b], Stroke::new(width, col));
     let head = 11.0f32.min(l * 0.6);
     painter.add(egui::Shape::convex_polygon(vec![b, b - u * head + n * head * 0.45, b - u * head - n * head * 0.45], col, Stroke::NONE));
 }

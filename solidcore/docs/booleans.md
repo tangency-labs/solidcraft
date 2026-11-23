@@ -324,7 +324,7 @@ there; where that edge's 3D curve lies farther from the surface than its toleran
 2.8e-3 on an imported edge) the curve/edge intersection finds no crossing, and the end, taken for
 inside the face, became a vertex short of the edge with the loop open beside it.
 
-**A curve that runs along an edge without crossing it.** With `classify_edge_interval` (WR-305) an interval between two points on a face's boundary edge whose middle lies within the band of that edge is on the edge, not inside the face. An end the edge intersections find no crossing for (an arc 1.4e-11 from another arc, ending 2.8e-5 short of that arc's corner) used to stay unclassified, so the interval was imprinted as a second edge beside the first; now such an end counts as on the edge when it lies within the band of it and clear of its vertices, the curve is tangent to the edge (within the angle tolerance) at both ends of the interval, and the whole curve over the interval is proved within the band of the edge on control points: the curve piece's control points against the chord of its ends, those ends against the edge piece's ends, and the edge piece's control points against its own chord, rounding counted (`piece_within_band`); the end is then classified to the edge with its parameter on it (`CurveClassification::classify_edge_interval`, `intersect/curve_class/p3.rs`). Without the tangency (a curve that crosses the edge at the interval's classified end and stops a hair past it, whose short piece lies within the band whatever its angle) or the proof (another curve kind, or a curve that bows out of the band between its ends) the end stays unclassified. An interval whose ends both classify onto the edge is still decided by WR-305 alone (a straight piece along a straight edge by its ends, a curved one by its midpoint).
+**A curve that runs along an edge without crossing it.** An interval between two points on a face's boundary edge that runs within the band of that edge is on the edge, not inside the face (WR-305). A curved interval runs along the edge when its ends are farther apart than the band and the whole curve over it and the edge piece between its ends' drops are proved within the band of each other on enclosures, the pair halved where the bound is too coarse (`curve_runs_along`); on a closed edge the pair may run through the edge's seam, and a piece whose ends are one point runs along it only all the way round. A curved interval with an end in the ball of one of the edge's vertices, past the band but certified within that vertex's tolerance as a whole (typically a round's arc leaving a straight edge tangentially at its end), raises the edge's tolerance to its certified distance (cascading to the edge's vertices) and is then on the edge (`EdgeToleranceRaise`). The fork read the interval's midpoint alone, which also took a curve bowing far out of the band between its ends, and a piece about as short as the band that crosses the edge (a sphere clipping a box corner by about the tolerance, whose arc on a side face cuts across the corner: taken as on the edge, the union failed to relate the operands' entities). An end the edge intersections find no crossing for (an arc 1.4e-11 from another arc, ending 2.8e-5 short of that arc's corner) used to stay unclassified, so the interval was imprinted as a second edge beside the first; now such an end counts as on the edge when it lies within the band of it and clear of its vertices, the curve is tangent to the edge (within the angle tolerance) at both ends of the interval, and the whole curve over the interval is proved within the band of the edge on control points: the curve piece's control points against the chord of its ends, those ends against the edge piece's ends, and the edge piece's control points against its own chord, rounding counted (`piece_within_band`); the end is then classified to the edge with its parameter on it (`CurveClassification::classify_edge_interval`, `intersect/curve_class/p3.rs`). Without the tangency (a curve that crosses the edge at the interval's classified end and stops a hair past it, whose short piece lies within the band whatever its angle) or the proof (another curve kind, or a curve that bows out of the band between its ends) the end stays unclassified. An interval whose ends both classify onto the edge is decided by the run test alone (a straight piece along a straight edge by its ends, a curved one by `curve_runs_along`).
 
 **One image for each vertex.** Where two faces of one operand that are not adjacent come within the
 tolerance of each other, as the two faces of a wedge do near its knife edge, the operand is thinner
@@ -766,7 +766,9 @@ What the port does today:
   faster than linearly from a touching point beyond one of its ends (a point solution, or where
   the two curves' interval ends meet) at which the curves are tangent, when the range stops short
   of the touch and its far end, exact, lies off the ends of both curves: the touch is the
-  intersection. A coincidence through the touch reaches it, and one that ends where a curve ends
+  intersection. The growth is read at the range's two exact ends, not between the range and the
+  touch, where a fitted intersection curve strays by up to its fit tolerance, more than the flank's
+  gap. A coincidence through the touch reaches it, and one that ends where a curve ends
   is not a flank; along a coincidence the gap is rounding and shows no growth either way. The
   range is dropped before point contacts move to the curve ends (`move_contacts_to_curve_ends`),
   which leaves a point whose stretch to the end crosses a range where it is: the flank's points
@@ -787,6 +789,18 @@ What the port does today:
   it meets the circle where it pierces the plane, and the chord's midpoint lies off the line.
   The other line/circle callers keep upstream's zero. The touching point is found only where
   it lies on both curves' intervals.
+  The wall such an arc sweeps reads the contact the same way against the plane of that
+  flat side (`surface/cone/p3.rs`, with `contact_tol_3d` as the rim does, where either
+  surface is a face's): the plane, a hair inside
+  the wall, crosses it in two lines and stays within that hair of it between them, and its
+  tangent line is off a face that starts between them. Such a face touches the plane along
+  the end of its sweep that lies between the tangent line and the crossing, one tangent
+  line, where it used to keep the crossing a little further on. The face's edge at that end
+  lies on the plane by every tolerance, so the crossing was a second line of the same
+  contact: the flat side's edge was split at both, and the piece of intersection between
+  them had no vertex to end on (a plate cut by notches whose entry arcs are tangent to its
+  side). The touch is taken only along an end that the requested part of the wall holds and
+  where its line meets the plane's own patch; else the crossing stays.
 
 **The refusal that names a tangent contact.** The kernel's boolean has none today. The `ssi` crate
 refuses a contact it cannot prove with `Error::Tangent`, code `BOOLEAN_TANGENT`, carrying where it
@@ -847,7 +861,7 @@ small error.
 | an intersection loop stays open across a cut | two curve ends on an edge with a loose tolerance lie apart (each face's curve ends where its own surface meets the other face, up to tol / sin φ along the edge), or one ends inside a face; the face is not cut through and the flood crosses the gap | the two causes found are closed before the imprint: one proto vertex per crossing of an edge with a face, and a curve end classified by the face's trims (§5); a loop still open is classified as before, wrong for the set flooded across the gap | a refusal by name for a loop left open across a cut; a crossing whose piece of the edge is not proved inside the band |
 | an imprint fails half way | both bodies are partly imprinted | the imprint's error is returned, not overwritten (`topology_intersector/p2.rs`) | |
 | union deletes a face between the outside and a solid | the solid merges into the infinite region | after post-processing, a union is refused with `SM_ERR` naming the face (`merge/p4.rs`) if the solid side of any such face (the uses of that solid's faces that stay) lies in no solid region, even when another solid region is left; when none of those uses is left, it is refused if no solid region is left | a leak whose solid's remaining face uses all end in solid regions is kept without a check that the union is right (no known input records one) |
-| result not a solid | an open or inward body from solid operands | ops refuses with `Error::NotSolid` | |
+| result not a solid | an open or inward body from solid operands | ops refuses with `Error::NotSolid` under the closed contract, or `Error::NotSolidBecause` naming the test under the proved contract | |
 | result empty | no faces left | ops returns `None` (`boolean`) or `Error::Empty` (`union_all`, `imprint`) | |
 
 **Refusals.** The kernel refuses with `SolidError` statuses: `SM_ERR` (a failed classification, a
@@ -892,7 +906,7 @@ A reviewer can check each of these on a change to the boolean.
 - Definitions carried through face splits and copies (§7), tested on a round.
 - The ops entry points with the result contract (`solidcore-ops/src/boolean.rs`).
 - The rig: 130 boolean cases in `solidcore/tests/kernel_cases/booleans/`, two listed in
-  `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
+  `kernel_cases_known_failing/` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
   returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
 - No opt-in fixes are left for the cases in §5, §6 and §8. Always on: the operand's exact trims on
   a face B gives to A (WR-361), the union's solid-leak refusal (WR-619), a boolean

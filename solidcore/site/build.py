@@ -234,6 +234,7 @@ def load_solids():
 
 
 KERNEL_CASES = ROOT / "crates/solidcore/tests/kernel_cases"
+KNOWN_FAILING_CASES = ROOT / "crates/solidcore/tests/kernel_cases_known_failing"
 CASE_STATUS_TEXT = {"pass": "passes", "refused": "refused as expected", "failing": "known failing"}
 CASE_STATUS_CLASS = {"pass": "PASS", "refused": "REFUSED", "failing": "FAIL"}
 
@@ -242,10 +243,11 @@ def load_gallery():
     """{area: [case]} for the case gallery: every case of each area that has a render.
 
     A render is `<area>/<case>.jpg` beside the case's entry. A case's status comes from the
-    data alone: listed in known_failing.json -> failing (with its reason); `expected.outcome`
+    data alone: listed in kernel_cases_known_failing/ -> failing (with its reason); `expected.outcome`
     "refused" -> refused as expected; otherwise it passes.
     """
-    listed = {e["case"]: e for e in json.loads((KERNEL_CASES / "known_failing.json").read_text())}
+    listed = {p.relative_to(KNOWN_FAILING_CASES).with_suffix("").as_posix(): json.loads(p.read_text())
+              for p in KNOWN_FAILING_CASES.rglob("*.json")}
     areas = sorted({p.parent for p in KERNEL_CASES.rglob("*.jpg")})
     gallery = {}
     for d in areas:
@@ -323,7 +325,7 @@ def gallery_body(gallery):
 status: {counts["pass"]} pass, {counts["refused"]} are refused as they expect, {counts["failing"]} are known failing
 ({total} in all). Generated from the entries in
 <a href="{REPO_URL}/tree/main/crates/solidcore/tests/kernel_cases"><code>crates/solidcore/tests/kernel_cases/</code></a>
-and <a href="{REPO_URL}/blob/main/crates/solidcore/tests/kernel_cases/known_failing.json"><code>known_failing.json</code></a>:
+and <a href="{REPO_URL}/tree/main/crates/solidcore/tests/kernel_cases_known_failing"><code>kernel_cases_known_failing/</code></a>:
 a case on that list is known failing, with its reason; a case whose <code>expected.outcome</code> is
 <code>refused</code> is refused as expected; any other case passes. A render is
 <code>&lt;area&gt;/&lt;case&gt;.jpg</code> beside the case; a refused or stopped case shows the part as it was before

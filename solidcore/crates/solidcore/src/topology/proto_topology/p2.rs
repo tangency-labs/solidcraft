@@ -1281,8 +1281,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// (`SmVertex::GetCommonEdges`, `SmEdge::IsConnectedToFace`) and its curve over its
     /// interval and the definition's curve over its interval are proved within the larger of
     /// the face's and the definition's tolerance of each other as wholes
-    /// ([`curve_runs_along`]: a bound on control points, never samples). The first such edge
-    /// is taken.
+    /// ([`curve_runs_along`]: a bound on control points, never samples; for two coplanar
+    /// circle arcs, within that tolerance plus the coordinates' resolution, `√3 ulp` of their
+    /// magnitude, #18065). The first such edge is taken.
     ///
     /// # Errors
     ///
