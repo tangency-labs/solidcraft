@@ -1032,6 +1032,12 @@ fn partition_feature(k: &mut Kernel, base: &mut Brep, feature: &mut Feature) -> 
     if feature.is_partitioned {
         return Ok(());
     }
+    // "Cannot partition Feature from Base": a caller may clear `defeature_ready` through
+    // `features_mut`; the feature stays unpartitioned, and the caller reads `is_partitioned`
+    // and passes on only unported or cancelled errors, so this is control flow
+    if !feature.defeature_ready {
+        return Ok(());
+    }
     let fbrep = feature.fbrep.insert(new_brep(k)?);
     let save_base = base.editing_enabled();
     let save_feat = fbrep.editing_enabled();
