@@ -67,7 +67,7 @@
 //! null closest edge (dereferenced upstream) is a null-pointer error, a null
 //! same-oriented edge use or end mate a defect, a null blended face is `RelatePair`'s
 //! invalid input, and any failed `CreateCornerBlend` is `SM_ERR` (`SER(SM_ERR)`),
-//! unported callees aside.
+//! unported callees and defects aside, which are passed on.
 //!
 //! Failures (the conversion guide, `docs/failure-codes-and-reproduction.md` §6): each keeps
 //! the status upstream's site returned. A link or entity of a B-rep, or of the executive's
@@ -1709,7 +1709,10 @@ impl OffsetExecutive {
                 self.tangency_tol_radians,
             ) {
                 Ok(surfaces) => surfaces,
-                Err(error) if error.is_unported_or_cancelled() => return Err(error),
+                // a defect is passed on, never read as a blend that could not be made
+                Err(error) if error.is_unported_or_cancelled() || error.is_defect() => {
+                    return Err(error)
+                }
                 Err(_) => return Err(SolidError::sm_err(OP)),
             };
 
@@ -4880,13 +4883,21 @@ mod tests {
                 key_of: &loopuse::notify_ref,
             },
         );
-        // a kind the routine cannot handle, named, with the status it replaced
+        // a kind the routine cannot handle, named with the base's type, with the status it
+        // replaced
         assert_eq!(
             outcome(&status),
             (ErrorKind::Unsupported, Some(SM_ERR), false),
             "{status:?}"
         );
-        assert_eq!(status.unwrap_err().operation(), OP);
+        let e = status.unwrap_err();
+        assert_eq!(e.operation(), OP);
+        assert_eq!(
+            e.offset_failure(),
+            Some(&OffsetFailure::OffsetBaseKindUnsupported {
+                surface_type: crate::surface::surface::p2::OFFSET_SURFACE_TYPE
+            })
+        );
     }
 
     /// The class, the status the goldens read and whether it is a defect, of `r`'s error.
@@ -4904,9 +4915,13 @@ mod tests {
         // no edge use to synchronize: the caller's input
         let r = sync(&mut executive, None, None);
         assert_eq!(outcome(&r), (ErrorKind::InvalidInput, null, false), "{r:?}");
+        let e = r.unwrap_err();
+        assert_eq!(e.offset_failure(), Some(&OffsetFailure::EdgeuseNotGiven));
         // no vertex to offset: the caller's input
         let r = executive.build_offset_of_vertex(&Kernel::default(), &Brep::new(), None);
         assert_eq!(outcome(&r), (ErrorKind::InvalidInput, null, false), "{r:?}");
+        let e = r.unwrap_err();
+        assert_eq!(e.offset_failure(), Some(&OffsetFailure::VertexNotGiven));
         // a mapped edge use with no offset B-rep to read it in: the executive's fault
         let (a, b) = (EdgeuseId::from_index(80), EdgeuseId::from_index(81));
         executive.relate_edgeuses(a, b);
@@ -4955,9 +4970,45 @@ mod tests {
         let line_use = add_use(&mut brep, 0.0, 1.0, 1.0);
         let e = no_trimmed_curve(&brep, edge_of(&brep, line_use).unwrap());
         assert_eq!(
-            (e.kind(), e.is_defect()),
-            (ErrorKind::StageFailed, true),
+            (e.kind(), crate::error::upstream_status(&e), e.is_defect()),
+            (ErrorKind::StageFailed, null, true),
             "{e}"
+        );
+        // a curve of no B-spline kind (here a Hermite curve): named at the input's edge for
+        // the pipe (`SM_ERR_NULL_POINTER`), and with `SM_ERR` for the arc and line tests
+        let hermite = Curve::from(crate::curve::hermite_curve::HermiteCurve::new(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::new(1.0, 1.0, 0.0),
+            Vec3::Y,
+            3,
+        ));
+        let curve_type = hermite.type_code();
+        brep.edge_mut(offset_edge).unwrap().curve = Some(hermite);
+        let e = no_trimmed_curve(&brep, offset_edge);
+        assert_eq!(
+            (e.kind(), crate::error::upstream_status(&e)),
+            (ErrorKind::Unsupported, null)
+        );
+        assert_eq!(
+            e.offset_failure(),
+            Some(&OffsetFailure::CurveKindUnsupported {
+                edge: Some(offset_edge),
+                curve_type
+            })
+        );
+        let r = bspline_edge_curve(&brep, offset_edge);
+        assert_eq!(
+            outcome(&r),
+            (ErrorKind::Unsupported, Some(SM_ERR), false),
+            "{r:?}"
+        );
+        assert_eq!(
+            r.unwrap_err().offset_failure(),
+            Some(&OffsetFailure::CurveKindUnsupported {
+                edge: None,
+                curve_type
+            })
         );
         // a defect is passed on; another failure is a step that did not apply
         assert!(ignored_unless_defect(Err::<(), _>(defect(NO_OFFSET, SM_ERR))).is_err());
@@ -5113,27 +5164,36 @@ mod tests {
         let live = add_use(&mut result, 0.0, 1.0, 1.0);
         let missing = EdgeuseId::from_index(99);
         exec.set_offset_brep(result);
-        // Either failing gap fill is a problem; both run, then the pipe fallback.
-        for (first, second) in [(missing, live), (live, missing), (missing, missing)] {
+        let fill = |exec: &mut OffsetExecutive, kernel: &mut Kernel, first, second| {
             let synchronized = SynchronizedEdgeuses {
                 gaps: vec![first],
                 other_gaps: vec![second],
                 ..SynchronizedEdgeuses::default()
             };
-            // the pipe fallback runs (CreatePipeSweep): this fixture's offset B-rep has no
-            // region to sweep into, a failure upstream returns too, not a missing call;
-            // the offset B-rep is handed back either way
-            let r = with_state(|state| {
-                exec.fill_offset_edgeuse_gaps(
-                    &mut kernel,
-                    &original,
-                    edge,
-                    &synchronized,
-                    &[],
-                    state,
-                )
-            });
-            assert!(matches!(&r, Err(e) if !e.is_unported()), "{r:?}");
+            with_state(|state| {
+                exec.fill_offset_edgeuse_gaps(kernel, &original, edge, &synchronized, &[], state)
+            })
+        };
+        // Both failing gap fills (an edge use that is not there) are problems; both run,
+        // then the pipe fallback (CreatePipeSweep): this fixture's offset B-rep has no
+        // region to sweep into, a failure upstream returns too, not a missing call, and not
+        // p1's; the offset B-rep is handed back
+        let r = fill(&mut exec, &mut kernel, missing, missing);
+        assert!(
+            matches!(&r, Err(e) if !e.is_unported() && !e.is_defect() && e.operation() != OP),
+            "{r:?}"
+        );
+        assert!(exec.offset_brep().is_some());
+        // An edge use with no vertex use, met by either fill, is a defect: passed on, never
+        // read as a gap left open, so the pipe is not swept
+        for (first, second) in [(missing, live), (live, missing)] {
+            let r = fill(&mut exec, &mut kernel, first, second);
+            assert_eq!(
+                outcome(&r),
+                (ErrorKind::StageFailed, Some(SM_ERR_NULL_POINTER), true),
+                "{r:?}"
+            );
+            assert!(r.unwrap_err().to_string().contains(EU_NO_VERTEXUSE));
             assert!(exec.offset_brep().is_some());
         }
     }
