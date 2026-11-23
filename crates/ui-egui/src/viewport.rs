@@ -877,6 +877,75 @@ pub(crate) fn failed_sketches(
     (cache.placed.clone(), cache.bounds)
 }
 
+/// Where a lost projection's face, edge or vertex was on the model (#5048): the point it was
+/// picked at (`at`) and the point under it in its sketch's plane (`foot`), both placed where the
+/// world places the sketch.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct LostSource {
+    pub at: Vec3,
+    pub foot: Vec3,
+}
+
+/// The sources of `unplaced`'s lost face, edge and vertex projections, placed as `placed` (the same
+/// sketch where the world shows it) places its plane. A pick point is kept where the sketch was
+/// evaluated, as its plane was, so it is read against that plane and set down against the placed
+/// one: a component's placement moves both alike.
+fn lost_sources_of(unplaced: &solidcraft_engine::doc::SolvedSketch, placed: &solidcraft_engine::doc::SolvedSketch, out: &mut Vec<LostSource>) {
+    use solidcraft_engine::sketch::LinkSource;
+    for link in unplaced.sketch.links.iter().filter(|l| l.lost) {
+        let (LinkSource::Edge { at, .. } | LinkSource::Face { at, .. } | LinkSource::Vertex { at, .. }) = &link.source else { continue };
+        if !at.is_finite() {
+            continue;
+        }
+        let foot = placed.plane.to_world(unplaced.plane.to_local(*at));
+        out.push(LostSource { at: foot + placed.plane.normal() * unplaced.plane.height(*at), foot });
+    }
+}
+
+/// The lost projections' sources to mark: those of the sketch open for editing, and of every
+/// failed sketch shown ([`failed_sketches`]). Display only, as those sketches are.
+pub(crate) fn lost_sources(app: &SolveApp) -> Vec<LostSource> {
+    let mut out = Vec::new();
+    if let Some(sid) = app.session.active_sketch {
+        let model = app.session.model.state();
+        let world = crate::open_meshing::shown_world(app);
+        if let (Some(unplaced), Some(placed)) = (model.sketch(sid), world.sketch(sid)) {
+            lost_sources_of(unplaced, placed, &mut out);
+        }
+    }
+    let built = failed_sketches_built(app);
+    let (placed, _) = failed_sketches(app);
+    for placed in placed.iter() {
+        if let Some(unplaced) = built.iter().find(|b| b.feature == placed.feature) {
+            lost_sources_of(unplaced, placed, &mut out);
+        }
+    }
+    out
+}
+
+/// A red ring where each lost projection's face, edge or vertex was ([`lost_sources`]), and a
+/// dashed line from it to its sketch's plane, so the user sees what on the model it referred to.
+fn paint_lost_sources(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    let sources = lost_sources(app);
+    if sources.is_empty() {
+        return;
+    }
+    let colour = Tokens::get().sketch_lost;
+    for source in sources {
+        let Some(at) = proj.to_screen(source.at) else { continue };
+        if let Some(foot) = proj.to_screen(source.foot)
+            && foot.distance(at) > LOST_SOURCE_RING
+        {
+            painter.extend(Shape::dashed_line(&[at, foot], Stroke::new(1.5, colour), 4.0, 3.0));
+        }
+        painter.circle_stroke(at, LOST_SOURCE_RING, Stroke::new(2.0, colour));
+        painter.circle_filled(at, 2.0, colour);
+    }
+}
+
+/// The radius of the ring [`paint_lost_sources`] draws, in points.
+pub(crate) const LOST_SOURCE_RING: f32 = 7.0;
+
 /// What Home, Fit and the orbit pivot frame: the bodies and sketches shown now, where they are
 /// now (see [`solidcraft_engine::view::bounds`]).
 pub fn view_bounds(app: &SolveApp) -> solidcraft_engine::geom::Aabb3 {
@@ -8467,6 +8536,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::dialogs_assembly::joint_glyphs(app, &painter, &proj);
     }
     crate::joint_handles::show(app, ui, &painter, &proj);
+    paint_lost_sources(app, &painter, &proj);
     overlays(app, &painter, &proj);
     crate::browser::dims_overlay(app, &painter, &proj);
     paint_device_pivot(app, &painter, &proj);
@@ -10224,7 +10294,13 @@ pub(crate) struct DrawnNote {
     pub text_rect: Rect,
     /// The note's text.
     pub text: String,
+    /// The text as laid out for the box: wrapped at the callout's width, so the box and the
+    /// text drawn in it are measured from the same layout.
+    pub galley: std::sync::Arc<egui::Galley>,
 }
+
+/// The widest a note's text runs (screen points) before it wraps onto the next line.
+pub(crate) const NOTE_WRAP_WIDTH: f32 = 240.0;
 
 /// Where the visible notes are drawn this frame (screen space), for painting and hit tests.
 pub(crate) fn note_callouts(app: &SolveApp, painter: &egui::Painter, proj: &Proj) -> Vec<DrawnNote> {
@@ -10239,9 +10315,9 @@ pub(crate) fn note_callouts(app: &SolveApp, painter: &egui::Painter, proj: &Proj
         .filter(|n| !n.hidden)
         .filter_map(|n| {
             let anchor = proj.to_screen(n.anchor)?;
-            let galley = painter.layout(n.text.clone(), FontId::proportional(t.font_small), t.text, 240.0);
+            let galley = painter.layout(n.text.clone(), FontId::proportional(t.font_small), t.text, NOTE_WRAP_WIDTH);
             let text_rect = Rect::from_min_size(anchor + vec2(14.0, -14.0) - vec2(0.0, galley.size().y + 8.0), galley.size() + vec2(12.0, 8.0));
-            Some(DrawnNote { anchor, text_rect, text: n.text.clone() })
+            Some(DrawnNote { anchor, text_rect, text: n.text.clone(), galley })
         })
         .collect()
 }
@@ -10258,7 +10334,9 @@ fn draw_notes(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         painter.circle_filled(note.anchor, 3.0, t.accent);
         painter.rect_filled(note.text_rect, 4.0, t.panel);
         painter.rect_stroke(note.text_rect, 4.0, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
-        painter.text(note.text_rect.min + vec2(6.0, 4.0), Align2::LEFT_TOP, &note.text, FontId::proportional(t.font_small), t.text);
+        // The wrapped layout the box was sized from, not a fresh single-line one: a long note
+        // wraps inside its box instead of running out of it.
+        painter.galley(note.text_rect.min + vec2(6.0, 4.0), note.galley.clone(), t.text);
     }
 }
 
