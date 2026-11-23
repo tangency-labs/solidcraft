@@ -1,0 +1,1 @@
+resolves a projection's references by the display mesh

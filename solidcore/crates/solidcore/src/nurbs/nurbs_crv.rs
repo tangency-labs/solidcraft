@@ -32,14 +32,21 @@
 //! | [`basis_find_global_max`]          | `sm_BasisFindGlobalMax`                     |
 //! | [`is_ncrv_degenerate`]             | `sm_IsNCrvDegenerate`                       |
 //! | [`MAX_DEGREE`], [`MAX_DERIV`]      | `GW_MAX_DEGREE`, `GW_MAX_DERIV`             |
-//! | [`crv_span_boxes`]                 | none (not upstream)                         |
 //! | [`crv_hull_points`]                | none (not upstream)                         |
+//! | [`crv_point_by_insertion`]         | none (not upstream)                         |
 //!
 //! Deviations:
-//! - [`crv_span_boxes`] and its helpers are not upstream: the boxes of the control
-//!   points of every knot span, a certified cover of the curve used to prune coincidence
-//!   queries; [`crv_hull_points`] gives the control points themselves, whose convex hull
-//!   holds the curve over an interval.
+//! - [`crv_split`] and [`crv_trim`] insert knots with [`CPoint::affine2`]: a coordinate
+//!   the two combined control points share is kept exactly (upstream's rounded
+//!   `alf*x + (1 - alf)*x` can land an ulp off it), so a piece of a curve along an
+//!   iso-line stays on that iso-line (WR-361: a UV trim on a seam split at an edge's
+//!   new vertex ended an ulp past its face's domain).
+//! - [`crv_point_by_insertion`] is not upstream: the point at a parameter by de Boor's
+//!   triangle on the curve's own control points, which a trimmed iso curve's right end
+//!   takes so that it meets its neighbouring side exactly (#17896, `BSplineSurface::
+//!   create_iso_parametric_curve`).
+//! - [`crv_hull_points`] and its helpers are not upstream: the control points whose
+//!   convex hull holds the curve over an interval.
 //! - Out-params become return values. Routines that fill caller-allocated curves
 //!   (`sm_CreateBezSegments`, `sm_CrvSplit`, `sm_CrvTrim` with `pExisting*`) allocate
 //!   their outputs with exactly the sizes upstream checks for, so the size-mismatch
@@ -99,6 +106,7 @@
 use crate::error::nurbs::BSplineFailure;
 use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::certified::{next_down, next_up};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::tol::{in_tol, scaled_zero, scaled_zero2};
@@ -136,6 +144,7 @@ const NOK: usize = 10;
 const OP_BEZ: &str = "nurbs::nurbs_crv::create_bez_segments";
 const OP_SPLIT: &str = "nurbs::nurbs_crv::crv_split";
 const OP_TRIM: &str = "nurbs::nurbs_crv::crv_trim";
+const OP_POINT_INS: &str = "nurbs::nurbs_crv::crv_point_by_insertion";
 const OP_BDERIVS: &str = "nurbs::nurbs_crv::basis_derivs";
 const OP_RBDERIVS: &str = "nurbs::nurbs_crv::crv_rational_basis_derivs";
 const OP_CDERIVS: &str = "nurbs::nurbs_crv::crv_derivs";
@@ -586,8 +595,7 @@ pub fn crv_split(cur: &Curve, u: f64) -> Result<(Curve, Curve)> {
             for j in 0..=p - i - mlt {
                 let alf =
                     (u - get(uk, k + j, OP)?) / (get(uk, spn + j + 1, OP)? - get(uk, k + j, OP)?);
-                let oma = 1.0 - alf;
-                let v = CPoint::combine2(alf, get(&sw, j + 1, OP)?, oma, get(&sw, j, OP)?);
+                let v = CPoint::affine2(alf, get(&sw, j + 1, OP)?, get(&sw, j, OP)?);
                 set(&mut sw, j, v, OP)?;
             }
             set(lw, k, get(&sw, 0, OP)?, OP)?;
@@ -671,8 +679,7 @@ pub fn crv_trim(cur: &Curve, ul: f64, ur: f64) -> Result<Curve> {
         for j in 0..=p - i - mll {
             let left = get(up, ll + i + j, OP)?;
             let alf = (ul - left) / (get(up, spl + j + 1, OP)? - left);
-            let oma = 1.0 - alf;
-            let v = CPoint::combine2(alf, get(qw, j + 1, OP)?, oma, get(qw, j, OP)?);
+            let v = CPoint::affine2(alf, get(qw, j + 1, OP)?, get(qw, j, OP)?);
             set(qw, j, v, OP)?;
         }
     }
@@ -689,8 +696,7 @@ pub fn crv_trim(cur: &Curve, ul: f64, ur: f64) -> Result<Curve> {
                 left = ul;
             }
             let alf = (ur - left) / (get(up, spr + j + 1, OP)? - left);
-            let oma = 1.0 - alf;
-            let v = CPoint::combine2(alf, get(qw, k, OP)?, oma, get(qw, k - 1, OP)?);
+            let v = CPoint::affine2(alf, get(qw, k, OP)?, get(qw, k - 1, OP)?);
             set(qw, k, v, OP)?;
             j -= 1;
         }
@@ -712,6 +718,58 @@ pub fn crv_trim(cur: &Curve, ul: f64, ur: f64) -> Result<Curve> {
         set(uq, j, ur, OP)?;
     }
     Ok(cur_q)
+}
+
+/// The control point a curve gets at `u` when `u` is inserted up to the degree (not
+/// upstream): de Boor's triangle on the curve's own control points, in the arithmetic of
+/// [`crv_split`] and of the left knot of [`crv_trim`] (and of `N_SrfExtractIsoCrv`, which
+/// runs it on each row of a net). The domain ends give the end control points and a knot
+/// of multiplicity at least the degree the control point already there.
+///
+/// [`crv_trim`]'s right end is not this point where its two insertions share control
+/// points: it combines points the left insertion already rounded, which lands it an ulp
+/// or two from here.
+///
+/// # Errors
+///
+/// [`NurbsFailure::Parameter`] for `u` outside the domain; those of
+/// [`KnotVector::find_span_and_mult`](crate::nurbs::knots::KnotVector::find_span_and_mult).
+pub fn crv_point_by_insertion(cur: &Curve, u: f64) -> Result<CPoint> {
+    const OP: &str = OP_POINT_INS;
+    let pu = cur.degree();
+    let p = sx(pu, OP)?;
+    let n = sx(cur.n(), OP)?;
+    let m = sx(cur.m(), OP)?;
+    let pw = cur.cpts();
+    let uk = cur.knots();
+    if u < get(uk, p, OP)? || u > get(uk, m - p, OP)? {
+        return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
+    }
+    if u == get(uk, p, OP)? {
+        return get(pw, 0, OP);
+    }
+    if u == get(uk, m - p, OP)? {
+        return get(pw, n, OP);
+    }
+    let (spn, mlt) = cur.knot_vector()?.find_span_and_mult(pu, u, Side::Left)?;
+    let (spn, mlt) = (sx(spn, OP)?, sx(mlt, OP)?);
+    if mlt >= p {
+        return get(pw, spn - mlt, OP);
+    }
+    let base = spn - p;
+    let mut rw = Vec::new();
+    for i in 0..=p - mlt {
+        rw.push(get(pw, base + i, OP)?);
+    }
+    for i in 1..=p - mlt {
+        for j in 0..=p - i - mlt {
+            let left = get(uk, base + i + j, OP)?;
+            let alf = (u - left) / (get(uk, spn + j + 1, OP)? - left);
+            let v = CPoint::affine2(alf, get(&rw, j + 1, OP)?, get(&rw, j, OP)?);
+            set(&mut rw, j, v, OP)?;
+        }
+    }
+    get(&rw, 0, OP)
 }
 
 /// The Euclidean images of control points `k..=l` (`sm_CrvGetEPolygon`).
@@ -1180,19 +1238,19 @@ pub fn crv_eval(cur: &Curve, u: f64, side: Side) -> Result<Vec3> {
     let mut cw = CPoint::new(0.0, 0.0, 0.0, 0.0);
     // Upstream reads Pw[spn - p + i] unchecked; a span below p (a NaN u on a curve
     // with fewer than p + 1 control points) reads before Pw (UB-288): SM_ERR instead.
-    let spn_p = span.checked_sub(p).ok_or_else(|| {
+    let short = || {
         SolidError::b_spline(
             OP,
-            BSplineFailure::Failed("the curve has fewer control points than its span needs"),
+            BSplineFailure::ControlPointsShort {
+                span,
+                degree: p,
+                count: pw.len(),
+            },
         )
-    })?;
+    };
+    let spn_p = span.checked_sub(p).ok_or_else(short)?;
     for (i, &alpha) in values.iter().enumerate().take(p + 1) {
-        let aw = pw.get(spn_p + i).copied().ok_or_else(|| {
-            SolidError::b_spline(
-                OP,
-                BSplineFailure::Failed("the curve has fewer control points than its span needs"),
-            )
-        })?;
+        let aw = pw.get(spn_p + i).copied().ok_or_else(short)?;
         // MAC_A_updcpt: skip zero weights, add without multiplying for one.
         if alpha == 1.0 {
             cw.x += aw.x;
@@ -2154,52 +2212,17 @@ pub(crate) fn points_box(points: impl IntoIterator<Item = Vec3>) -> Option<Exten
     Some(bx)
 }
 
-/// One box per non-empty knot span of `cur` that meets `ivl`, in knot order: the piece
-/// of the curve on span `[U[i], U[i+1]]` is a convex combination of control points
-/// `i-p..=i` (non-negative weights summing to one, also for a rational curve whose
-/// weights are all positive, whose Euclidean points are then the convex-combination
-/// vertices), so it lies in the box of those Euclidean points.
-///
-/// `None`, meaning no certified boxes, when a weight is not positive and finite, the
-/// curve is 2D, a knot is not finite or the knots are not sized for the net, or `ivl` is
-/// not a finite interval inside the natural domain `[U[p], U[n+1]]`.
-///
-/// Not upstream.
-#[must_use]
-pub fn crv_span_boxes(cur: &Curve, ivl: &Extent1d) -> Option<Vec<Extent3d>> {
-    let (p, n) = (cur.degree(), cur.n());
-    let knots = cur.knots();
-    let spans = nonempty_spans(knots, p, n)?;
-    let (lo, hi) = (ivl.min(), ivl.max());
-    if !(lo.is_finite() && hi.is_finite() && lo <= hi)
-        || lo < *knots.get(p)?
-        || hi > *knots.get(n.checked_add(1)?)?
-    {
-        return None;
-    }
-    let points: Vec<Vec3> = cur
-        .cpts()
-        .iter()
-        .map(|&c| hull_point(c))
-        .collect::<Option<_>>()?;
-    let mut boxes = Vec::new();
-    for i in spans {
-        if *knots.get(i)? <= hi && *knots.get(i + 1)? >= lo {
-            boxes.push(points_box(
-                points.get(i.checked_sub(p)?..=i)?.iter().copied(),
-            )?);
-        }
-    }
-    Some(boxes)
-}
-
 /// The Euclidean control points `i-p..=i` of the non-empty knot spans of `cur` that meet
 /// `ivl`, each once and each with the error bound of its coordinates (`0` for a
 /// polynomial point, `γ_1` of its largest coordinate for a rational point, the division
-/// by its weight): the curve over `ivl` lies in their convex hull (the piece on a span is
-/// a convex combination of that span's points, see [`crv_span_boxes`]).
+/// by its weight): the curve over `ivl` lies in their convex hull. The piece of the curve
+/// on span `[U[i], U[i+1]]` is a convex combination of control points `i-p..=i`
+/// (non-negative weights summing to one, also for a rational curve whose weights are all
+/// positive, whose Euclidean points are then the convex-combination vertices).
 ///
-/// `None` under the conditions of [`crv_span_boxes`].
+/// `None`, meaning no certified hull, when a weight is not positive and finite, the curve
+/// is 2D, a knot is not finite or the knots are not sized for the net, or `ivl` is not a
+/// finite interval inside the natural domain `[U[p], U[n+1]]`.
 ///
 /// Not upstream.
 #[must_use]
@@ -2245,7 +2268,8 @@ pub(crate) fn crv_hull_points(cur: &Curve, ivl: &Extent1d) -> Option<Vec<(Vec3, 
 /// also covers the division by the weight.
 ///
 /// `None`, meaning no certified piece, when `cur` is not clamped, under the conditions of
-/// [`crv_span_boxes`], or when a split fails.
+/// [`crv_hull_points`], when a knot-span subtraction is not finite, or when a split
+/// fails.
 ///
 /// Not upstream.
 #[must_use]
@@ -2255,7 +2279,12 @@ pub(crate) fn crv_piece_hull_points(cur: &Curve, ivl: &Extent1d) -> Option<Vec<(
     nonempty_spans(knots, p, n)?;
     let (lo, hi) = (ivl.min(), ivl.max());
     let (first, last) = (*knots.get(p)?, *knots.get(n.checked_add(1)?)?);
-    let inside = lo.is_finite() && hi.is_finite() && first <= lo && lo <= hi && hi <= last;
+    let inside = lo.is_finite()
+        && hi.is_finite()
+        && (last - first).is_finite()
+        && first <= lo
+        && lo <= hi
+        && hi <= last;
     if !inside || !is_clamped(knots, p) {
         return None;
     }
@@ -2277,30 +2306,54 @@ pub(crate) fn crv_piece_hull_points(cur: &Curve, ivl: &Extent1d) -> Option<Vec<(
         .collect()
 }
 
-/// Rounding allowance for boxes of pieces made by `levels` convex-combination steps
-/// from control points `cpts` (homogeneous, all weights positive): `16 * levels * eps *
-/// M * (wmax / wmin)`, with `M` the largest Euclidean coordinate magnitude.
+/// Rounding allowance for pieces made by `levels` convex-combination steps from
+/// homogeneous control points. Includes gradual underflow, with every bound rounded
+/// outward. A caller must exclude overflow in the split coefficient's knot arithmetic.
 ///
-/// Derivation: a step computes `(1-a) P + a Q` with `a` in `[0, 1]` itself rounded; its
-/// rounding error is at most about `5 eps` times the largest homogeneous component
-/// (`eps` for `a`, times `|Q - P|`, plus three roundings), and a later step cannot
-/// amplify an earlier error since the combination weights sum to one. So after
-/// `levels` steps each homogeneous component is off by at most `8 levels eps` times its
-/// bound, `wmax * M` for `w x` and `wmax` for `w`. Dividing by the piece's weight, at
-/// least `wmin` (a convex combination of weights), turns the `w x` error and `|x|` times
-/// the `w` error into at most `16 levels eps M wmax / wmin`; the division's own
-/// rounding is within that. `None` when a weight is not positive and finite.
+/// For each homogeneous component, a step's coefficient (two subtractions and a
+/// quotient), its complement and the two products and sum contribute at most
+/// `16u` times its largest input magnitude. With `N = 16 levels + 2`, their inherited
+/// error is bounded by `gamma(N) H + N eta (1 + gamma(N))`, where `H` is the largest
+/// component magnitude and `eta = 2^-1074` bounds each absolute underflow rounding.
+/// The extra two operations cover the initial Euclidean coordinate bound.
+///
+/// Let `dx` and `dw` bound the spatial and weight errors, `M` the largest exact
+/// Euclidean control coordinate, and `wmin` the smallest positive weight. The
+/// computed weight is at least `wmin - dw`, so the Euclidean error before the last
+/// division's rounding is at most `(dx + M dw) / (wmin - dw)`. Add that division's
+/// `gamma(1) (M + error) + eta`. `None` when the denominator cannot be proved
+/// positive, the operation count is too large, or any bound is not finite.
 #[must_use]
 pub(crate) fn piece_slack(cpts: impl IntoIterator<Item = CPoint>, levels: usize) -> Option<f64> {
-    let (mut scale, mut wmin, mut wmax) = (0.0_f64, f64::INFINITY, 0.0_f64);
+    let (mut scale, mut homogeneous, mut wmin, mut wmax) =
+        (0.0_f64, 0.0_f64, f64::INFINITY, 0.0_f64);
     for c in cpts {
         let p = hull_point(c)?;
         scale = scale.max(p.x.abs()).max(p.y.abs()).max(p.z.abs());
+        homogeneous = homogeneous.max(c.x.abs()).max(c.y.abs()).max(c.z.abs());
         let w = if c.w == NOW { 1.0 } else { c.w };
         wmin = wmin.min(w);
         wmax = wmax.max(w);
     }
-    let slack = 16.0 * levels as f64 * f64::EPSILON * scale * (wmax / wmin);
+    let scale = next_up(scale);
+    let steps = levels.checked_mul(16)?.checked_add(2)?;
+    let relative = next_up(gamma(steps));
+    // This also bounds steps below 2^52: its conversion to f64, multiplication by
+    // u, and subtraction from one are exact; next_up encloses gamma's division.
+    if !(relative > 0.0 && relative < 1.0 && wmin.is_finite()) {
+        return None;
+    }
+    let eta = f64::from_bits(1);
+    let absolute = next_up(next_up(steps as f64 * eta) * next_up(1.0 + relative));
+    let dx = next_up(next_up(relative * homogeneous) + absolute);
+    let dw = next_up(next_up(relative * wmax) + absolute);
+    let denominator = next_down(wmin - dw);
+    if !denominator.is_finite() || denominator <= 0.0 {
+        return None;
+    }
+    let error = next_up(next_up(dx + next_up(scale * dw)) / denominator);
+    let division = next_up(next_up(next_up(gamma(1)) * next_up(scale + error)) + eta);
+    let slack = next_up(error + division);
     slack.is_finite().then_some(slack)
 }
 
@@ -2629,7 +2682,7 @@ pub(crate) fn crv_accel_bound(cur: &Curve, ivl: &Extent1d) -> Option<f64> {
 
 /// Not upstream: a bound on the error of each coordinate of the point the evaluation
 /// returns at any parameter ([`crv_eval`] inside the domain, an end control point at an
-/// end): [`piece_slack`]'s `16 levels eps M (w_max / w_min)` with `2p + 2` levels, `M`
+/// end): `16 levels eps M (w_max / w_min)` with `2p + 2` levels, `M`
 /// the largest coordinate of all control points (a missing `z` is `0`).
 ///
 /// Derivation: the basis recursion runs `p` levels; each value is `saved + N (r / d)`
@@ -2659,21 +2712,6 @@ pub(crate) fn crv_point_error(cur: &Curve) -> Option<f64> {
     slack.is_finite().then_some(slack)
 }
 
-/// The control-point boxes of `pieces` (`None` when a point has no hull point).
-fn curve_piece_boxes(pieces: &[Curve]) -> Option<Vec<Extent3d>> {
-    pieces
-        .iter()
-        .map(|c| {
-            points_box(
-                c.cpts()
-                    .iter()
-                    .map(|&p| hull_point(p))
-                    .collect::<Option<Vec<_>>>()?,
-            )
-        })
-        .collect()
-}
-
 /// Whether the knot vector is clamped (its first and last `p + 1` knots equal), which
 /// Bezier extraction assumes.
 pub(crate) fn is_clamped(knots: &[f64], p: usize) -> bool {
@@ -2682,113 +2720,6 @@ pub(crate) fn is_clamped(knots: &[f64], p: usize) -> bool {
         |s: Option<&[f64]>| s.is_some_and(|s| s.windows(2).all(|w| matches!(w, [a, b] if a == b)));
     ends_equal(knots.get(..k))
         && ends_equal(knots.len().checked_sub(k).and_then(|i| knots.get(i..)))
-}
-
-/// A certified cover of a curve over an interval that can be refined span by span.
-///
-/// Level 0 is [`crv_span_boxes`]. [`CurveCover::pieces`] splits a span's Bezier segment
-/// (`create_bez_segments`) at its parameter midpoint (`crv_split`) `depth` times and
-/// returns the control-point boxes of the `2^depth` pieces, the allowance
-/// [`CurveCover::slack`] is to be added to distances to them; made once per span and kept. Where a
-/// refinement cannot be made (unclamped knots, a split or weight failure) the span
-/// keeps its level 0 box: a coarser, still certified cover, never an error.
-///
-/// Not upstream.
-pub struct CurveCover {
-    curve: Curve,
-    /// Indices into the non-empty spans of the curve, one per level 0 box.
-    spans: Vec<usize>,
-    coarse: Vec<Extent3d>,
-    depth: usize,
-    slack: f64,
-    segments: Option<Vec<Curve>>,
-    refined: Vec<Option<Vec<Extent3d>>>,
-}
-
-impl CurveCover {
-    /// The cover of `cur` over `ivl`, to be refined `depth` times; `None` as for
-    /// [`crv_span_boxes`].
-    #[must_use]
-    pub fn new(cur: &Curve, ivl: &Extent1d, depth: usize) -> Option<Self> {
-        let coarse = crv_span_boxes(cur, ivl)?;
-        let p = cur.degree();
-        let knots = cur.knots();
-        let all = nonempty_spans(knots, p, cur.n())?;
-        let (lo, hi) = (ivl.min(), ivl.max());
-        let spans: Vec<usize> = all
-            .iter()
-            .enumerate()
-            .filter(|&(_, &i)| {
-                matches!((knots.get(i), knots.get(i + 1)), (Some(&a), Some(&b)) if a <= hi && b >= lo)
-            })
-            .map(|(k, _)| k)
-            .collect();
-        // Bezier extraction chains at most `p` insertions per span, each split of a
-        // degree `p` curve `p` more.
-        let levels = p.saturating_mul(all.len().saturating_add(depth));
-        let slack = piece_slack(cur.cpts().iter().copied(), levels)?;
-        let refined = vec![None; coarse.len()];
-        Some(Self {
-            curve: cur.clone(),
-            spans,
-            coarse,
-            depth,
-            slack,
-            segments: None,
-            refined,
-        })
-    }
-
-    /// The level 0 boxes, one per span that meets the interval, in knot order.
-    #[must_use]
-    pub fn coarse(&self) -> &[Extent3d] {
-        &self.coarse
-    }
-
-    /// The rounding allowance to add to a distance test against boxes of
-    /// [`CurveCover::pieces`] (see [`piece_slack`]).
-    #[must_use]
-    pub const fn slack(&self) -> f64 {
-        self.slack
-    }
-
-    /// The boxes of span `i` split `depth` times, the level 0 box alone when it cannot
-    /// be refined; empty for an `i` out of range.
-    pub fn pieces(&mut self, i: usize) -> &[Extent3d] {
-        if self.refined.get(i).is_some_and(Option::is_none) {
-            let made = self.refine(i);
-            let fallback = self.coarse.get(i).copied();
-            if let Some(slot) = self.refined.get_mut(i) {
-                *slot = made.or_else(|| fallback.map(|b| vec![b]));
-            }
-        }
-        self.refined
-            .get(i)
-            .and_then(Option::as_deref)
-            .unwrap_or(&[])
-    }
-
-    fn refine(&mut self, i: usize) -> Option<Vec<Extent3d>> {
-        if !is_clamped(self.curve.knots(), self.curve.degree()) {
-            return None;
-        }
-        if self.segments.is_none() {
-            self.segments = Some(create_bez_segments(&self.curve).ok()?);
-        }
-        let mut level = vec![self.segments.as_ref()?.get(*self.spans.get(i)?)?.clone()];
-        for _ in 0..self.depth {
-            let mut next = Vec::new();
-            for piece in &level {
-                let knots = piece.knots();
-                let mid = 0.5 * (knots.first()? + knots.last()?);
-                let (a, b) = crv_split(piece, mid).ok()?;
-                next.push(a);
-                next.push(b);
-            }
-            level = next;
-        }
-        curve_piece_boxes(&level)
-    }
 }
 
 #[cfg(test)]
@@ -2912,6 +2843,15 @@ mod tests {
                     assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
                     assert_eq!(e.entity(), None);
                     assert!(!e.is_nurbs_failure());
+                    assert_eq!(
+                        e.nurbs_failure(),
+                        Some(&NurbsFailure::BSpline(BSplineFailure::ControlPointsShort {
+                            span: 2,
+                            degree: 3,
+                            count: 2,
+                        }))
+                    );
+                    assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
                 }
                 other => panic!("{other:?}"),
             }
@@ -2963,6 +2903,55 @@ mod tests {
             crv_trim(&c, 0.5, 0.5),
             Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
+    }
+
+    /// WR-361: a piece of a curve along an iso-line stays on it. `issue_2479`'s seam trim
+    /// (u = 6 pi, v 0 to 22) cut at v = 1 got u an ulp past 6 pi from the rounded
+    /// `alf*u + (1 - alf)*u`.
+    #[test]
+    fn split_and_trim_keep_a_shared_coordinate() {
+        let u = 18.849_555_921_538_76;
+        let pw = vec![
+            CPoint::new(u, 0.0, NOZ, NOW),
+            CPoint::new(u, 22.0, NOZ, NOW),
+        ];
+        let c = Curve::new(pw, 1, vec![0.0, 0.0, 22.0, 22.0]).unwrap();
+        let t = crv_trim(&c, 1.0, 21.0).unwrap();
+        let (l, r) = crv_split(&c, 1.0).unwrap();
+        for p in t.cpts().iter().chain(l.cpts()).chain(r.cpts()) {
+            assert_eq!(p.x, u);
+        }
+        assert_eq!(t.cpts()[0].y, 1.0);
+        // a combination without a finite weight (a zero-length span) stays NaN, shared
+        // coordinates included: the shared-coordinate rule never hides a failed insertion
+        let a = CPoint::new(u, 0.0, NOZ, NOW);
+        let nan = CPoint::affine2(f64::NAN, a, a);
+        assert!(nan.x.is_nan() && nan.y.is_nan(), "{nan:?}");
+    }
+
+    /// #17896: [`crv_point_by_insertion`] is the end of [`crv_split`]'s left piece and the
+    /// start of its right piece (one triangle); at the domain end the last control point,
+    /// at a knot of multiplicity the degree the control point already there; outside the
+    /// domain an error.
+    #[test]
+    fn point_by_insertion_is_the_split_point() {
+        let c = cubic();
+        for u in [0.05, 0.3, 0.31, 0.45, 0.6, 0.99] {
+            let (l, r) = crv_split(&c, u).unwrap();
+            let at = crv_point_by_insertion(&c, u).unwrap();
+            assert_eq!(at, *l.cpts().last().unwrap(), "u = {u}");
+            assert_eq!(at, r.cpts()[0], "u = {u}");
+        }
+        assert_eq!(crv_point_by_insertion(&c, 1.0).unwrap(), c.cpts()[5]);
+        assert_eq!(crv_point_by_insertion(&c, 0.0).unwrap(), c.cpts()[0]);
+        let u = vec![0.0, 0.0, 0.0, 0.25, 0.5, 0.5, 1.0, 1.0, 1.0];
+        let full = Curve::new(c.cpts().to_vec(), 2, u).unwrap();
+        let (l, _) = crv_split(&full, 0.5).unwrap();
+        let at = crv_point_by_insertion(&full, 0.5).unwrap();
+        assert_eq!(at, *l.cpts().last().unwrap());
+        assert!(c.cpts().contains(&at), "{at:?}");
+        assert!(crv_point_by_insertion(&c, 1.5).is_err());
+        assert!(crv_point_by_insertion(&c, -0.5).is_err());
     }
 
     #[test]
@@ -3181,116 +3170,5 @@ mod tests {
         assert!(allocate_nurb_curve(1 << 47, 3, 3).is_err());
         assert!(allocate_nurb_curve(3, 3, 1 << 48).is_err());
         assert!(allocate_nurb_curve(3, 3, 7).is_ok());
-    }
-
-    /// A rational quadratic quarter circle of radius 2 in the xy plane, weights
-    /// `1, mid_weight, 1` (`sqrt(2)/2` makes it exact).
-    fn quarter_circle(mid_weight: f64) -> Curve {
-        let pw = vec![
-            CPoint::weighted(Vec3::new(2.0, 0.0, 0.0), 1.0),
-            CPoint::weighted(Vec3::new(2.0, 2.0, 0.0), mid_weight),
-            CPoint::weighted(Vec3::new(0.0, 2.0, 0.0), 1.0),
-        ];
-        Curve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap()
-    }
-
-    /// Samples of `cur` on `[a, b]`.
-    fn samples(cur: &Curve, a: f64, b: f64) -> Vec<(f64, Vec3)> {
-        (0..=40)
-            .map(|i| {
-                let u = a + (b - a) * f64::from(i) / 40.0;
-                (u, cur.eval(u, Side::Left).unwrap())
-            })
-            .collect()
-    }
-
-    #[test]
-    fn span_boxes_hold_every_sample_of_their_span() {
-        let c = cubic();
-        let boxes = crv_span_boxes(&c, &Extent1d::from_min_max(0.0, 1.0)).unwrap();
-        let spans = [(0.0, 0.3), (0.3, 0.6), (0.6, 1.0)];
-        assert_eq!(boxes.len(), spans.len());
-        for (bx, &(a, b)) in boxes.iter().zip(&spans) {
-            for (u, p) in samples(&c, a, b) {
-                assert!(bx.contains_point(p, 1e-13), "u={u} p={p:?} box={bx:?}");
-            }
-        }
-        // Rational: the Euclidean control points, not the weighted ones, bound the arc.
-        let arc = quarter_circle(std::f64::consts::FRAC_1_SQRT_2);
-        let boxes = crv_span_boxes(&arc, &Extent1d::from_min_max(0.0, 1.0)).unwrap();
-        assert_eq!(boxes.len(), 1);
-        for (u, p) in samples(&arc, 0.0, 1.0) {
-            assert!(boxes[0].contains_point(p, 1e-13), "u={u} p={p:?}");
-        }
-        assert_eq!(boxes[0].max_at(0), 2.0);
-        assert_eq!(boxes[0].max_at(1), 2.0);
-    }
-
-    #[test]
-    fn span_boxes_only_cover_the_spans_meeting_the_interval() {
-        let c = cubic();
-        let one = crv_span_boxes(&c, &Extent1d::from_min_max(0.4, 0.5)).unwrap();
-        assert_eq!(one.len(), 1);
-        let two = crv_span_boxes(&c, &Extent1d::from_min_max(0.2, 0.4)).unwrap();
-        assert_eq!(two.len(), 2);
-        // Outside the natural domain, reversed, or not finite: no certified cover.
-        for (a, b) in [(-0.1, 0.5), (0.5, 1.1), (f64::NAN, 0.5)] {
-            let ivl = Extent1d::from_raw(a, b);
-            assert!(crv_span_boxes(&c, &ivl).is_none(), "[{a}, {b}]");
-        }
-        assert!(crv_span_boxes(&c, &Extent1d::from_raw(0.6, 0.4)).is_none());
-    }
-
-    #[test]
-    fn a_non_positive_or_non_finite_weight_gives_no_boxes() {
-        let ivl = Extent1d::from_min_max(0.0, 1.0);
-        for w in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-            assert!(crv_span_boxes(&quarter_circle(w), &ivl).is_none(), "w={w}");
-            assert!(
-                CurveCover::new(&quarter_circle(w), &ivl, 2).is_none(),
-                "w={w}"
-            );
-        }
-        // A 2D curve has no certified 3D cover.
-        let mut flat = quarter_circle(1.0);
-        flat.to_2d();
-        assert!(crv_span_boxes(&flat, &ivl).is_none());
-    }
-
-    #[test]
-    fn refined_pieces_hold_the_curve_and_are_tighter() {
-        let ivl = Extent1d::from_min_max(0.0, 1.0);
-        for curve in [cubic(), quarter_circle(0.6)] {
-            let mut cover = CurveCover::new(&curve, &ivl, 3).unwrap();
-            let coarse = cover.coarse().to_vec();
-            let slack = cover.slack();
-            // 1e-13 of 5 units of coordinate and a few hundred levels: far below 1e-9.
-            assert!(slack > 0.0 && slack < 1e-9, "slack={slack}");
-            let all = samples(&curve, 0.0, 1.0);
-            for (i, whole) in coarse.iter().enumerate() {
-                let pieces = cover.pieces(i).to_vec();
-                assert_eq!(pieces.len(), 8);
-                assert!(pieces.iter().all(|p| p.is_contained_by(whole, slack)));
-                // Pieces are strictly smaller than the span box somewhere.
-                assert!(pieces.iter().all(|p| (0..3)
-                    .any(|a| p.max_at(a) - p.min_at(a) < whole.max_at(a) - whole.min_at(a))));
-                for &(_, p) in &all {
-                    if whole.contains_point(p, 0.0) {
-                        // Every sample inside the span box lies in some piece or on a
-                        // neighbouring span's pieces (spans share end points).
-                        let near = pieces.iter().any(|b| b.contains_point(p, slack));
-                        let elsewhere = coarse.iter().enumerate().any(|(j, _)| {
-                            j != i
-                                && cover
-                                    .pieces(j)
-                                    .to_vec()
-                                    .iter()
-                                    .any(|b| b.contains_point(p, slack))
-                        });
-                        assert!(near || elsewhere, "p={p:?}");
-                    }
-                }
-            }
-        }
     }
 }

@@ -51,6 +51,8 @@ also saves every joint's current values, and **Revert Position** puts the joints
 clamped to their limits, together with the parts, as one undo step. SolidCraft asks before the
 next command if a move wasn't captured. **Ground** fixes an occurrence in place, and
 **Unground** (the same row of **Placement** in the browser's context menu) frees it again.
+A joint solve that moves a part drops the part's move not captured, so the part is shown where
+its joints put it; an exploded view stays shown.
 
 The design's first part is grounded when it is made: the first occurrence placed directly in the
 design by **New Component**, **Create Components from Bodies** or an import. Parts made after it,
@@ -166,19 +168,21 @@ point, its x and y running along the two edges into the face. The edge, the face
 are found again by name, so a bracket set 40 mm in from a panel's corner (a planar joint with
 values `[40, 40, 0]`) stays 40 mm in from that corner when the panel changes size.
 
-A joint's Z offset, angle and values can be typed as expressions over the design's parameters
-(`"offset": "gap + 2"`, `"values": ["travel"]`). The joint keeps them and works them out again
-whenever the design changes, so a part seated `gap` above a panel moves with `gap`. Renaming a
+A joint's Z offset, angle, values and the minimum and maximum of its limits can be typed as
+expressions over the design's parameters (`"offset": "gap + 2"`, `"values": ["travel"]`,
+`"limits": [[0, "travel"]]`). The joint keeps them and works them out again whenever the design
+changes, so a part seated `gap` above a panel moves with `gap`, and a slider limited to `travel`
+stops at the new `travel` (its value is held inside the new limits). Renaming a
 parameter carries into the joints that use it, and deleting one they use is refused. If an
 expression stops working out (say a parameter becomes an angle), the joint is left out of the
 solve and `joint.solve` gives the reason, instead of placing the part from old numbers. Typing a
 plain number, or driving the value, drops that expression.
 
 **Edit Joint → Position** shows **Offset X**, **Offset Y** and **Offset Z**. X and Y move along
-the saved first attachment's axes. Their expressions are evaluated once, as during creation;
-scripts use `offset_x` and `offset_y`. Older designs keep their saved attachment positions,
-with X and Y initially zero for additional shifts from those positions. Assembly constraints
-keep their existing controls and reference geometry until changed to a plain joint.
+the saved first attachment's axes, and expressions typed for them follow their parameters just as
+Offset Z does; scripts use `offset_x` and `offset_y`. Older designs keep their saved attachment
+positions, with X and Y initially zero for additional shifts from those positions. Assembly
+constraints keep their existing controls and reference geometry until changed to a plain joint.
 
 **Relations** are joints that tie only part of a placement, so a part is placed the way a
 designer describes it, one relation at a time: `parallel` (z along z, free to move and turn
@@ -309,9 +313,12 @@ picked in the browser, or on the first joint that moves when none is picked.
 grabbed follows the pointer in the plane through it that faces the view, the joints on the
 part's chain take the values that bring it nearest, within their limits, through motion links,
 and with closed loops kept closed, and a four-bar's rocker stops at the end of its swing. The
-whole drag is one undo step. A grounded part, or one its joints hold fixed, is not moved; a drag
-on it draws a selection box. Each frame runs `joint.reach`, which scripts and agents use
-directly to put a part's point somewhere: `joint.reach {occurrence, point}` moves the joints on
+whole drag is one undo step, and Escape puts the part back. A grounded part, or one its joints
+hold fixed, is not moved; a drag on it draws a selection box. While you drag, the part is only
+shown moving (the design, and what depends on where parts are, follow when you let go). With
+contact sets on, each step of the drag changes the design instead, so that the drag stops where
+two parts of a set touch, and Escape leaves the part where it is. The
+release runs `joint.reach` once, which scripts and agents use directly to put a part's point somewhere: `joint.reach {occurrence, point}` moves the joints on
 its chain from where they are to the nearest pose (the arm keeps its elbow up or down, and a
 linkage stays on its branch). `at` picks the part's point (the centre of its bodies by
 default), `z` with `axis` also turns one of its axes, and `joints` names the only joints to
@@ -327,6 +334,16 @@ part ("Pedestal:1 is not connected to anything grounded"), the Drive Joints dial
 row, `motion.play` lists such joints under `unmoved`, and `joint.list` names every such chain under
 `floating`. Ground a part of the chain, or join it to a grounded part (a rigid as-built joint keeps
 it where it is), and it moves.
+
+An imported assembly holds each of its parts with a rigid joint, so `joint.list` on it can run to
+hundreds of rows. Filters keep only the rows asked for: `moving_only` leaves out rigid and
+suppressed joints, `exclude_rigid` every rigid joint, `exclude_rigid_groups` only the rigid joints
+that hold a component's contents together (the ones Unlock Contents removes), `kinds` keeps the
+listed joint types, and `occurrences` keeps the joints with an end at those parts or at a part
+inside them. `dof_free_only` lists only the parts that can still move under `dof`, and
+`joint.solve` takes it too. The reply's `omitted` counts what was left out, by type, and
+`summary: true` adds every joint counted by type, with one row per component for the rigid joints
+that hold its contents (the 20 largest; `more_rigid_groups` counts the rest). `joint.inspect` takes the same filters.
 
 Driving a joint turns the side that is held by no grounded part, with everything joined to it
 rigidly. A rigid joint whose origin is lost (its face was deleted) still holds its two parts as
@@ -482,7 +499,9 @@ Preferences › Design › **Insert Design lists the designs open in other tabs 
 off. A STEP or mesh file picked there is inserted as **Insert STEP** or **Insert
 Mesh** would. The part's solid bodies come
 in as they sit in that design, and they are kept in the assembly, so it opens even without the
-part file. The link is stored relative to the assembly's folder once the assembly is saved.
+part file. Its mesh bodies, such as the parts of a KiCad board, come in too, in the same linked
+component, and **Update Links** follows them as well. A design with mesh bodies only can't be
+linked yet. The link is stored relative to the assembly's folder once the assembly is saved.
 For scripts, `translate: [x,y,z]` places the design's origin in millimetres from the destination
 parent's origin (the active component unless `parent` is supplied). It defaults to `[0,0,0]`.
 With `reuse: true`, insertion reuses the existing linked component but uses the same coordinates;
@@ -495,6 +514,20 @@ a checkout. The parts it reads come in as one step, so one **Undo** takes them a
 that cannot be read keeps its bodies, is tried again the next time, and holds up no other.
 **Update changed linked designs when a tab comes back** (Preferences, Design,
 `update_changed_links`) turns this off.
+
+Linked files from other folders load after you allow them. When an assembly opens, the parts in
+its own folder, or below it, are read again by themselves as above. If a changed part is in
+another folder, SolidCraft asks once, naming the folders: **Load** reads those parts now and
+remembers the folders, so designs that link files from them load them as they open from then
+on; **Not now** leaves them out of date, and **Update Links** reads them whenever you choose.
+The folders you allowed are kept in your own settings, never in a design, and are listed under
+Preferences › General › Files, where you can remove one or forget them all.
+A design opened by a program (the command line, an MCP client, the control channel or the
+assistant) never asks: its parts in other folders stay out of date, also in folders you
+allowed, and running `component.update_links` (all links, or `components: [ids]`) reads them.
+The command line and a headless MCP session don't read links by themselves when a design
+opens, so there `component.update_links` is the way to bring in changed parts.
+
 To edit the source, right-click a linked component or occurrence in the Browser and choose
 **Open Linked Design**. It opens the part in another tab and reports if its file is missing.
 **Break Link** (`component.break_link`) keeps the bodies and forgets the file, and
@@ -550,7 +583,9 @@ While the window is open, the view marks the centre of mass with the three princ
 standing out of it. Descendants and
 repeated instances contribute to assembly totals; pending moves are included. A component
 uses its first placement; `occurrence.properties` selects a specific instance. Root Properties
-measures the complete assembly. Volumes are summed, including overlapping bodies, rather than
+measures the complete assembly. A placement that counts as a reference (a bill of materials
+type, below) adds nothing, nor does anything inside it; the component or occurrence measured
+counts whatever its type. Volumes are summed, including overlapping bodies, rather than
 measuring their union. The same workflow is available through `component.properties` and
 `occurrence.properties`; see
 [placement and measurement details](https://github.com/tangency-labs/solidcraft/blob/main/docs/assembly-properties.md).
@@ -562,7 +597,7 @@ revision, other tools' data under a reverse-DNS key (the same rules as the desig
 properties), and free text properties such as a material grade or a finish. Every occurrence of
 the component shares them, Paste New copies them, and they are saved with the component.
 `component.metadata {component}` reads them and
-`component.metadata.set {component, part_number?, description?, revision?, bom_type?, values?, properties?}`
+`component.metadata.set {component, part_number?, description?, revision?, bom_type?, material?, bom_quantity?, virtual?, values?, properties?}`
 changes them in one undo step (an empty value removes a field). The root component is the
 design itself: its properties are `document.metadata`'s. Standard parts (`parts.insert`) get a
 part number from their standard and size (`ISO 4762 M6x20`, `GOST 7798-70 M12x60`, or a bearing's
@@ -574,6 +609,15 @@ designation) and a description; **Change Part Size** renumbers them, keeping a f
   subassemblies: a part placed once in a subassembly that is placed twice counts 2. A
   subassembly is listed through its parts, unless it has bodies of its own.
 - `levels: "top"` lists the direct children, a subassembly as one row.
+- `levels: "all"` lists the direct children as `top` does, and under each subassembly its own
+  rows, to any depth: items 1.1, 1.1.1, with `each` per row above and `count` in all.
+  Subassemblies with one part number share a row only when what they hold is the same all the
+  way down. As JSON the rows come one after another, each followed by the rows under it, as in
+  the CSV.
+- `show_purchased_contents: true`, with `levels: "all"`, lists what a purchased part holds under
+  its row too. The part is still one row, weighed whole.
+- A part a configuration switches off (it has no bodies and a suppressed feature of its own) is
+  left out of every list, parts list and balloon; `show_suppressed_parts: true` lists it as placed.
 - `group_by: ["part_number"]` (the default) puts definitions with the same part number in one
   row; a definition without a part number gets a row of its own. `["definition"]` gives every
   definition its own row.
@@ -586,6 +630,9 @@ designation) and a description; **Change Part Size** renumbers them, keeping a f
   still has no children listed. Parts without a part number are not grouped this way.
 - `component` lists one subassembly's parts instead of the design's.
 
+A list walks at most 64 levels and 100,000 placements in all, the children of folded parts
+included; a larger assembly is refused rather than listed in part.
+
 A component's **bill of materials type** (`bom_type`, a part property set with
 `component.metadata.set {component, bom_type}`) decides how it counts in the assemblies it is
 placed in. Without one it is `normal`.
@@ -593,7 +640,7 @@ placed in. Without one it is `normal`.
 | Type | For | In the assembly it is placed in |
 |---|---|---|
 | `normal` | Something you make | A row of its own; every occurrence adds to its quantity |
-| `phantom` | Something just to group (a fastener set) | No row: what it holds counts as if it were placed there directly, in the same rows as the same parts placed there |
+| `phantom` | Something just to group (a fastener set) | No row: what it holds counts as if it were placed there directly, in the same rows as the same parts placed there. Its own bodies, if it has any, are a row of their own |
 | `reference` | Something to use as a reference (a fixture shown for context) | Counted nowhere, and nothing inside it is counted either |
 | `purchased` | Something you buy (a gearbox) | One row; nothing inside it is counted or listed |
 | `inseparable` | Something made as one piece: welded, glued, riveted and so on (a welded frame) | One row; in parts only, the purchased parts inside it are listed too, and the rest of what it holds is listed in its own bill of materials |
@@ -601,10 +648,38 @@ placed in. Without one it is `normal`.
 Two components with the same part number share a row only when their types agree. A
 component's own bill of materials (`component`) lists what it holds whatever its type.
 
+One occurrence can count as another type than its component:
+`occurrence.bom_type {occurrence, bom_type}` sets it for that occurrence only (one bracket of
+four kept for reference, or one bought instead of made), and `same_as_component` (or `null`)
+clears it. Occurrences of one component that count as different types are different rows. An
+occurrence inside a subassembly belongs to the subassembly's definition, so its type holds
+wherever the subassembly is placed. Paste New keeps the types of the occurrences it copies;
+Paste (Instance) places one that counts as its component.
+
 Rows are sorted by part number (rows without one come last) and hold `item`, `part_number`,
-`description`, `revision`, `bom_type`, `count`, `definition` (the component names), `components` (their ids)
-and `properties`, with `total_occurrences` beside them. `path` writes them to a `.csv` file
-(the columns item, part_number, description, revision, count and definition, every field
+`description`, `revision`, `bom_type`, `count`, `definition` (the component names), `material`,
+`components` (their ids) and `properties`, with `total_occurrences` beside them. `material` names the
+physical materials of the definition's own bodies (`Physical Material`, the ones mass is worked out from;
+an unassigned body's is `Default`), with `; ` between several. A row that stands for an assembly (a
+subassembly at the top level, a purchased or inseparable part with parts inside it, a folded part) names a
+material only when everything it weighs shares it, so a frame of steel and aluminium parts is blank and a
+bought bearing of steel parts reads Steel. A physical material is set on bodies. A **static material**
+(`component.metadata.set {component, material}`, any text) is what a component's rows say instead, at
+every level and in every view, and those rows carry `static: ["material"]`. It also stands for the part
+in the one material an assembly around it shares, so two parts typed in as S355 make their frame read
+S355. Where several definitions share a row, the first one's static material wins. It doesn't change
+the mass, which still comes from the bodies, and clearing it (empty or null) brings the worked-out
+material back.
+A free property such as a material grade stays in `properties`. `mass: true` adds `mass_g`: what one of the row's parts weighs in grams, with
+what is placed inside it except what the list shows as rows of their own beside it, so the rows of any
+list add up to the assembly. It adds `total_mass_g` beside the rows too: what the assembly weighs, measured
+from the design rather than added up from the rows. At the top level a row weighs all it holds. In parts only a part's contents
+are rows of their own, so it weighs its own bodies, except a folded part (its row is the kit), a purchased
+one (all it holds) and an inseparable one (all but its purchased parts). A reference placement adds
+nothing. Every part is measured for it, once per definition, so it takes longer. It is `null` when nothing
+in the part has a body, a body can't be measured, or the definitions sharing the row's part number weigh
+differently (by more than the measurement can tell apart: one part modelled two ways weighs the same). `path` writes them to a `.csv` file
+(the columns item, part_number, description, revision, count, definition, material and quantity, every field
 quoted, and a field that a spreadsheet would run as a formula written with a `'` before it so the
 spreadsheet shows it as text; children follow their row) or a `.json` file. A formula field is one that
 starts with `=`, `+`, `-` or `@`, their full-width forms, a tab or a line break, after any spaces and
@@ -616,5 +691,170 @@ spreadsheet that saves the file again as CSV can drop it (Excel does), and the f
 time that file opens. Export again from SolidCraft instead of passing on a CSV a spreadsheet has saved.
 The window lists the same rows, switches
 between the levels and groupings and shows children under their part, edits a picked row's part
-number, description and revision, and exports them. Changing part properties changes no
-geometry, so it doesn't evaluate the model or re-seat joints again.
+number, description and revision, and exports them. Changing part properties or a bill of
+materials type changes no geometry, so it doesn't evaluate the model or re-seat joints again.
+
+**Item numbers.** Until a view is numbered, a row's `item` is its place in the list, and it can
+change as parts come and go. Numbering a view saves its numbers in the design, one numbering for
+each assembly (the design, or a `component`) and each `levels`, with the list options it was
+numbered with:
+
+- `assembly.bom.renumber {component?, levels?, start?, step?, order?}` numbers every row from
+  `start` by `step` (both 1 by default), each level on its own: in `all`, the rows under a row
+  are numbered within it (2.1, 2.2). `order: "list"` (the default) goes by part number, as an
+  unnumbered list does; `order: "item"` keeps the current order and closes the gaps.
+- `assembly.bom.item.set {component?, levels?, row, item?, locked?}` changes one row, named by
+  the item it shows now (`"3"`, or `"2.1"` under row 2). A number another row already has is
+  allowed, and both rows say `duplicate`. A locked number stays through a renumber, which skips
+  it, so no two rows get one number.
+
+Once a view is numbered, a part added takes the highest number at its level + 1, saved in the
+same undo step as the change that added it. A part removed leaves a gap until the next renumber,
+and if it comes back it gets its old number, so a number on a printed drawing never comes to mean
+another part. The number follows the row through part-number edits. A numbered view lists each
+level by item number, and `assembly.bom` says `numbered: true`; a row says `provisional` when its
+number isn't saved yet (a list made with other options), and `locked` and `duplicate` when they
+apply. Saved numbers are plain numbers: how they are padded (007) is up to the table that shows
+them. Numbering changes no geometry, so it doesn't evaluate the model.
+
+**Quantities.** A component's **quantity** (`bom_quantity`, a part property) says what one
+placement of it means: a number of pieces (`4`, a pack of four) or a length (`2.5 m`). It is an
+expression evaluated with the design's parameters, so `cable_length` or `2 * span + 50 mm` follows
+the design. A row of such components gives `quantity`, what its placements add up to, with
+`quantity_unit` `pieces` or `mm` (lengths are given in millimetres, as masses are in grams): a
+2.5 m cable placed three times reads 7500 mm. A placement without a quantity counts one piece.
+Pieces and a length in one row can't be added, so its `quantity` is `null` with
+`quantity_unknown: "mixed"`; a quantity that doesn't evaluate (a parameter it names is in error)
+gives `"invalid"`, and the rest of the list still works. A quantity uses its parameters as any
+expression does: renaming one renames it in the quantity, and one in use can't be deleted. Rows without quantities read as before.
+Masses and volumes (50 g of grease) and areas are not supported yet: they need expression units.
+
+**Virtual components.** `component.create {virtual: true, bom_quantity?}` makes a component with
+no geometry, such as grease, paint, a label or packaging: it is listed in every view with its
+quantity and weighs nothing. It holds nothing: it can't be the active component, and any command
+that would put a body, a sketch or a component into it is refused. An empty component can be
+made virtual with `component.metadata.set {component, virtual: true}`.
+
+## Finding things in the browser
+
+The magnifier in the Browser panel's header (or Ctrl+F with the pointer over the browser, unless you gave Ctrl+F to a command) opens a
+search box in the header, in place of the panel's title. The box holds the magnifier, the field, a filter and **×**. It finds components, bodies, sketches, joints, and construction planes, axes and points by name. It finds the text anywhere in a name,
+ignoring case. With `*` (any text) or `?` (any one character) in it, the whole name must match:
+`*:1` finds every first instance. Each placement of a component is found on its own, so a bolt
+placed six times is listed six times, each under the components that hold it.
+
+Only the matches and their parents stay in the tree, opened for the search; closing a row there
+leaves the tree's own folds as they were. The filter narrows the search to the kinds
+you tick, each with how many it matches, or with nothing typed lists everything of those kinds;
+**All kinds** clears them. **Select all** selects what was found, and **Hide others** hides every
+body it didn't find; the line under the field then says how many it hid, with **Undo**. Esc, **×**
+or the magnifier in the box ends the search and closes the box. Scripts and agents
+search the same way with `browser.find`.
+
+## Secondary joint alignment
+
+Joint creation and editing offer optional **Alignment 1** and **Alignment 2** inputs.
+Pick a planar face, a straight or circular edge, a cylindrical face's axis, a sketch line,
+or an axis/plane of construction geometry on the same occurrence as that side's primary
+face, circle, plane or axis origin. Planes supply their normal, straight lines their direction,
+and cylindrical faces their axis. Circular rims selected in the UI align by centre; the API also accepts their axis. The direction is projected square to the
+primary joint axis. The root origin widget can reference a root-side joint origin; it cannot silently stand for
+a different part's frame. Scripts may explicitly name an origin axis/plane in that side's
+component frame.
+
+Each alignment picker only offers references on its primary origin's exact occurrence.
+Hovering or clicking the other component leaves the confirmed reference and pose unchanged.
+A circular hole rim shows the **Circle center alignment** marker; cylindrical face and
+construction-axis references show their direction. An exact circular edge with a unique adjacent cylinder and end face supplies the persistent
+identity. Multiple possible cylinders are refused
+rather than choosing one arbitrarily.
+
+The UI orders the references by the solved motion: **Alignment 1** is on the moving
+component and **Alignment 2** on the fixed component, independently of primary pick order.
+With both references empty, hovering only highlights geometry and shows snap markers.
+Click the first reference before hovering the second to preview its temporary solution;
+leaving restores the confirmed solution. Wrong-component and degenerate picks are ignored.
+
+Circular rim references automatically use their center. The reference stores the cylindrical
+face and the adjacent face naming the picked rim. Its clocking direction is the vector from
+the primary origin to that circle centre, projected into the joint plane. Thus another hole
+can orient two plates even when the hole axes are parallel. The centre is recomputed when
+geometry changes; a lost/ambiguous rim or a centre on the primary axis is refused. Construction
+axes and cylindrical face directions retain direction semantics and refuse parallel axes.
+Previously saved directional references remain compatible without being reinterpreted.
+Assembly motion displays the solved body as solid and its original placement as the ghost;
+it never treats display-mesh volume drift as material removal.
+
+One **Invert alignment** checkbox reverses the relative secondary orientation. The authored **Angle**
+expression, component **Flip**, motion values, limits and degrees of freedom keep their meaning.
+After choosing the primary origins, picking and highlighting continue on the solved placement.
+An incomplete or invalid secondary input keeps the last valid pose while explaining the error.
+Once its counterpart is confirmed, hovering a valid reference previews that candidate
+temporarily; leaving it restores the authored pose, and only a click fills the selection.
+Cancel discards the operation; accepted edits can be undone.
+
+Preferences > Design offers **Invert joint selection order**, off by default. Its visible help
+explains moving-then-fixed selection when enabled. The primary fields retain their original
+**Component 1** and **Component 2** labels in either mode. Off preserves
+the fixed-then-moving primary pick order; on reverses the two primary input rows while the
+backend keeps the same fixed/moving origins. The preference is captured when a new Joint
+command opens: changing it never reorders a dialog in progress or an existing joint.
+Secondary alignment always starts with the actual moving component, independently of this
+preference. A hovered circular rim stays selectable across preview updates and small pointer
+movements within that hole's projected footprint; leaving that region restores the confirmed pose.
+
+References keep persistent geometry names or feature/curve identities through save/reopen,
+geometry changes and independent component copies. Missing, ambiguous, wrong-component,
+unsupported curve or parallel-axis references are errors. They never silently attach to nearby
+geometry. Clear removes the reference and keeps the current turn as a direction without following
+the cleared geometry. An invalid reference can also be cleared.
+
+Picking a circular hole rim as a primary origin keeps the unique cylindrical face and rim-end
+names, just like picking its cylindrical wall. The displayed hole center therefore remains a
+round origin when the first secondary alignment is added. A generic primary point/edge or an
+ambiguous/unnamed rim can still define a basic joint, but the dialog explains the limitation and
+disables secondary picking until compatible primary origins are selected. Nonzero Offset X/Y
+and nested occurrence paths still need a supported origin; no secondary reference is converted
+to a static frame. Offset Z remains available.
+Existing joints without secondary alignment keep their previous behavior.
+
+Scripts use `a_alignment` and `b_alignment` on `joint.create` or `joint.edit`:
+`{"face": "<persistent planar face name>", "occurrence": "<occurrence name>", "reverse": true}`,
+or a typed reference, for example
+`{"reference": {"type": "edge", "name": "<persistent edge name>"}, "occurrence": "<occurrence name>"}`.
+The other reference types are `circle_center` (`name` of the cylindrical face and `end` naming
+the adjacent rim face), `cylinder` (`name`), `construction` (`feature` id), `sketch_line`
+(`sketch` id and `curve` id), `construction_plane` (`feature` id), `origin_axis` (`axis`: X/Y/Z), and `origin_plane` (`plane`: XY/XZ/YZ).
+Omit a field to leave that side unchanged; pass `null` to clear it. Supplying `occurrence`
+also checks the exact picked instance of a shared definition.
+
+### Alignment preview in the Joint dialog
+
+In the right-hand **Joint** or **Edit Joint** panel, **Options > Preview alignment on hover**
+controls temporary secondary-alignment previews, including hole rims.
+It starts enabled each time a dialog opens. The checkbox belongs to that dialog
+and is not saved in Preferences or in the design.
+Turn it off to keep the confirmed pose while hovering. Click a reference to apply
+its alignment in either mode. Toggling it does not change primary origins,
+saved joints, reference validation or the command API.
+
+### Associative construction-axis references
+
+A construction axis can supply the secondary X direction of a face, circle, plane or axis
+origin. Use its feature ID, returned by the construction command:
+
+```json
+{"occurrence": 0, "plane": "XY", "x": {"reference": {"type": "construction", "feature": 17}}}
+```
+
+The same X object is accepted by `joint.origin` and inline origins in `joint.create` and
+`joint.edit`. The Joint dialog can pick the construction axis through its alignment fields.
+A string in `x` retains its legacy meaning: a persistent face name. Construction axes use
+the typed object above. Renaming the feature keeps its identity.
+
+For positional clocking, create two construction points attached to the selected hole
+centres, then a two-point construction axis from the primary centre to the other centre.
+The joint resolves that axis again and projects its direction square to primary Z; the
+primary origin and Z retain their references. Construction-only edits invalidate the
+resolved frame even when no body changes. An axis parallel to Z is refused. Point origins
+continue to accept only numeric X directions.

@@ -55,6 +55,21 @@ pub struct Unpacked {
     pub files: Vec<safe_zip::File>,
 }
 
+impl Unpacked {
+    /// Optional artwork never prevents installation. Uses exactly the bytes being reviewed.
+    pub fn swatch_warnings(&self) -> Vec<String> {
+        let Some(runtime) = &self.manifest.runtime else { return Vec::new() };
+        craft_plugin::swatches::check(&runtime.entries, |path| {
+            let file = self.files.iter().find(|file| file.path == path).ok_or_else(|| "not found in the package".to_string())?;
+            if file.bytes.len() > craft_plugin::swatches::MAX_BYTES {
+                return Err("file is larger than 64 KiB".into());
+            }
+            Ok(file.bytes.clone())
+        })
+        .warnings
+    }
+}
+
 /// Files a desktop zip tool adds that are not part of the plugin.
 fn is_junk(path: &str) -> bool {
     path.starts_with("__MACOSX/") || path.rsplit('/').next().is_some_and(|name| name == ".DS_Store" || name == "Thumbs.db")
@@ -63,7 +78,14 @@ fn is_junk(path: &str) -> bool {
 /// Checks `zip`: one plugin (`plugin.json` and its module) at the top or in one top-level folder,
 /// a manifest the host accepts, safe paths and sizes.
 pub fn unpack(zip: &[u8]) -> Result<Unpacked, InstallError> {
-    let files: Vec<_> = safe_zip::read(zip, LIMITS)?.into_iter().filter(|f| !is_junk(&f.path)).collect();
+    let files = safe_zip::read(zip, LIMITS)?;
+    from_files(files, format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(zip)))
+}
+
+/// Checks a plugin's files as [`unpack`] reads them from a `.zip`, with `archive` the hash of what
+/// they came from. `plugin check` reads a package folder into the same checks.
+pub fn from_files(files: Vec<safe_zip::File>, archive: String) -> Result<Unpacked, InstallError> {
+    let files: Vec<_> = files.into_iter().filter(|f| !is_junk(&f.path)).collect();
     let manifests: Vec<&str> =
         files.iter().filter(|f| f.path == "plugin.json" || f.path.ends_with("/plugin.json")).map(|f| f.path.as_str()).collect();
     let prefix = match manifests.as_slice() {
@@ -91,6 +113,16 @@ pub fn unpack(zip: &[u8]) -> Result<Unpacked, InstallError> {
         crate::EngineError::Plugin(e) => InstallError::Manifest(e),
         e => InstallError::Manifest(HostError::InvalidManifest { field: "manifest".into(), reason: e.to_string() }),
     })?;
+    // An install may ask for approval above the user's default, never above this hard ceiling.
+    if let Some(runtime) = &manifest.runtime
+        && runtime.limits.fuel > craft_plugin::MAX_APPROVED_FUEL
+    {
+        return Err(InstallError::Manifest(HostError::OverCeiling {
+            limit: "fuel".into(),
+            requested: runtime.limits.fuel,
+            allowed: craft_plugin::MAX_APPROVED_FUEL,
+        }));
+    }
     if let Some(runtime) = &manifest.runtime
         && !files.iter().any(|f| f.path == runtime.module)
     {
@@ -126,7 +158,6 @@ pub fn unpack(zip: &[u8]) -> Result<Unpacked, InstallError> {
         &[]
     };
     let approval = super::package_hash(text, component);
-    let archive = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(zip));
     Ok(Unpacked { manifest, approval, archive, files })
 }
 

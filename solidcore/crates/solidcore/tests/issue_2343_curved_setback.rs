@@ -59,14 +59,12 @@ use solidcore::topology::{edge, EdgeId, FaceId, VertexId};
 use solidcore::{Brep, Kernel};
 use std::f64::consts::PI;
 
-/// Every fix but `geometric_g2_continuity`.
+/// Every fix.
 fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -1320,6 +1318,69 @@ fn a_setback_set_on_the_corner_beside_a_curved_face_is_the_setback() {
     assert_eq!(rounded.setbacks, vec![4.0; 3]);
     graded(&mut k, &mut b, &case, 3);
     springs_are_the_fills(&k, &b, &rounded, case.name, 3);
+}
+
+/// #16408: the D prism's corner of unequal rounds (2, 2.5, 3), the Setback by the rule before
+/// any setback is set, set back on the made corner (`add_set_back_vertex`, then
+/// `set_corner_setback`) by the setback the growth names (3.05 x 1.06, `the_named_setback_builds`).
+/// Before, the Setback read only the fills asked (`set_set_back_fill`) and built the rule's
+/// setbacks, [3, 4.5, 3.75], dropping the one set; now it builds the one set on every edge,
+/// graded as above.
+#[test]
+fn a_setback_set_on_an_unequal_corner_beside_a_curved_face_builds_as_asked() {
+    let (mut k, mut b, edges, case) = d_prism_case();
+    let named = 3.05 * 1.06;
+    let r = round_set_back(
+        &mut k,
+        &mut b,
+        &edges,
+        &[2.0, 2.5, 3.0],
+        case.v,
+        Some(named),
+        true,
+    );
+    assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
+    assert!(r.ok, "asked {named}: {}", r.reason);
+    assert_eq!(r.setbacks, vec![named; 3]);
+    graded(&mut k, &mut b, &case, 3);
+    springs_are_the_fills(&k, &b, &r, case.name, 3);
+}
+
+/// #16408: the same corner set back 4 on the made corner over an ease of 1. Beside a curved
+/// face the Setback's fill is G1 only, so it cannot take the ease: the corner is refused
+/// (`CornerUnsupported`, naming why) rather than built with the rule's setbacks and no ease,
+/// which is not what was asked.
+#[test]
+fn an_eased_setback_set_on_an_unequal_corner_beside_a_curved_face_is_refused() {
+    let (mut k, mut b, edges, case) = d_prism_case();
+    let xs = vec![FilletSurfaceGeneratorType::Circular; edges.len()];
+    let vid = vertex_at(&b, case.v);
+    let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+    s.prepare_per_edge_constant_radius(&mut k, &edges, &[2.0, 2.5, 3.0], &xs, 1, 1.0)
+        .unwrap();
+    s.add_set_back_vertex(vid);
+    s.create_corners(&k, None).unwrap();
+    let mut set = 0;
+    for c in s.fillet_corners().unwrap() {
+        if s.corner(c).unwrap().vertex == Some(vid) {
+            assert!(s
+                .corner(c)
+                .unwrap()
+                .blend
+                .is_some_and(solidcore::blend::blend_corner::BlendCorner::is_setback));
+            s.set_corner_setback(c, 4.0).unwrap();
+            s.set_corner_ease(c, 1.0).unwrap();
+            set += 1;
+        }
+    }
+    assert_eq!(set, 1);
+    assert!(s.do_filleting(&mut k, None).is_err());
+    let info = s.error_info();
+    assert_eq!(info.code, 9, "{}", info.comment);
+    assert_eq!(
+        info.comment,
+        "Fillet Error: a setback with an ease is asked for at a setback corner beside a curved face, whose fill is G1 only, so it would not be built as asked"
+    );
 }
 
 /// The D prism with flat a 8 (R 10, H 20), bored about its axis with radius `bore` where

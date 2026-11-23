@@ -1015,3 +1015,20 @@ fn cloned_datum_references_follow_the_copy() {
         "a datum into another tree cannot follow the copy"
     );
 }
+
+/// Paste New of an imported assembly: the copy's parts are held by a rigid group of its own,
+/// so the copy moves as one too, and unlocking one leaves the other held.
+#[test]
+fn paste_new_of_an_imported_assembly_copies_its_rigid_group() {
+    let path = format!("{}/../../tests/step-conformance/cylinder_twice.step", env!("CARGO_MANIFEST_DIR"));
+    let mut s = Session::default();
+    let import = run(&mut s, "file.insert_step", json!({"path": path}))["component"].as_u64().unwrap();
+    assert_eq!(s.doc.assembly.rigid_groups.len(), 1);
+    let copied = run(&mut s, "component.paste_new", json!({"component": import}))["component"].as_u64().unwrap();
+    let [first, second] = s.doc.assembly.rigid_groups.as_slice() else { panic!("{:?}", s.doc.assembly.rigid_groups) };
+    assert_eq!((first.component, second.component), (import, copied));
+    assert_ne!(first.id, second.id);
+    assert_eq!(s.doc.rigid_group_members(first).len(), s.doc.rigid_group_members(second).len());
+    run(&mut s, "component.unlock", json!({"component": import}));
+    assert!(s.doc.rigid_group_of(copied).is_some() && s.doc.rigid_group_of(import).is_none());
+}

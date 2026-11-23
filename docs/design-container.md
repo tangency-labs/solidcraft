@@ -108,8 +108,10 @@ either retain that document or fail required-part CRC/hash validation. Optional
 preview success never validates source blobs or makes a document editable. An invalid required blob still
 fails the later document read. ZIP directory scans can touch a bounded suffix of a
 stored blob; deferral means not loading or decoding the complete payload, not zero
-physical reads of its byte range. Optional cache metadata is capped at 16 MiB;
-larger metadata misses the cache and uses the normal authoritative part-size budget.
+physical reads of its byte range. Standalone previews cap `document.json` at 16 MiB.
+When opening a design with a model cache, Open can check the cache against the full
+`document.json` within the authoritative part-size budget. Open reuses those bytes
+for document validation and loading.
 
 ## Model cache
 
@@ -182,8 +184,9 @@ without the application's version, `.cargo/config.toml`, and the cache's own rea
 that changed none of it (the interface, the commands, other file formats, a new
 version number) opens designs from the caches the build before it wrote (#7168);
 one that changed any of it (a kernel fix, the codec, a dependency) evaluates them
-again, once, and the next save writes a cache of its own. A build of unknown source
-(a tarball without git) never reads a cache.
+again, once, and the next save writes a cache of its own. Without `git` (Docker,
+Nix, or a source archive), `build.rs` hashes those same inputs from disk; a build
+whose source cannot be read (`"unknown"`) never reads a cache.
 
 The fixed budgets of earlier caches (4,096 bodies, 100,000 faces, 64 MiB) scale
 with the design now: up to 200,000 body records, 100,000 distinct bodies, a 32 MiB
@@ -199,7 +202,9 @@ repeat for longest), each while what it adds still fits: the bodies no state kep
 so far holds (a body is stored once however many states hold it) and the records
 of the state, those bodies, their names and sketches. Sheet bodies, like sketches, are
 written once and named by place in the states (most features leave the sheets as they were); a
-thinned cache keeps all of them. So are the tap markings (cosmetic threads): a state lists the
+thinned cache keeps all of them. Sheets made from surfaces are written the same way, in a
+list of their own (`surface_sheets`; format 9 wrote them out again in every state). So are the
+tap markings (cosmetic threads): a state lists the
 markings of every feature before it, so writing them with each state grew with the square of the
 features (400 marked cylinders: 34 of a 37 MB manifest); each marking is written once and a state
 names its markings as runs of places, and a thinned cache keeps all of them. So are the states' sketch keys (the evaluation key of each

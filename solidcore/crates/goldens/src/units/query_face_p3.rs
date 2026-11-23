@@ -1501,5 +1501,39 @@ mod tests {
         }
         assert!(compared * 10 > n, "only {compared} of {n} compared");
     }
+
+    /// #18342: on every plane face of the adversarial bisector fixtures, the bisector, the
+    /// uv line from u = -1234567 to 1234567 at the face's middle v, enters and leaves the
+    /// face at `u_min` and `u_max` of its domain: its boundaries are the closed form
+    /// 0.5 + u / 2469134, to 1 ulp. The 0.001-wide faces (`adv_bis_plane{0..3}_2`) leave
+    /// at 0.5 + 0.001 / 2469134 = 0.5000000004050003; before the fix that crossing, 4.05e-10
+    /// of parameter from the entry at 0.5 but 1e-3 away in uv, snapped onto it.
+    #[test]
+    fn plane_bisector_boundaries_are_the_closed_form() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/query.face_p3/review_adversarial.json");
+        let fixture: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let mut seen = 0;
+        for c in fixture["cases"].as_array().unwrap() {
+            let name = c["name"].as_str().unwrap();
+            if !name.starts_with("adv_bis_plane") {
+                continue;
+            }
+            let dom = &c["inputs"]["brep"]["dom"];
+            let (u_min, u_max) = (dom[0].as_f64().unwrap(), dom[2].as_f64().unwrap());
+            let i: Inputs = serde_json::from_value(c["inputs"].clone()).unwrap();
+            let out = rust(&i).unwrap();
+            assert_eq!(out.error, None, "{name}");
+            let b = out.values.get("interval_bounds").unwrap();
+            let near = |got: f64, want: f64| (got - want).abs() <= want.abs() * f64::EPSILON;
+            let (enter, leave) = (0.5 + u_min / 2469134.0, 0.5 + u_max / 2469134.0);
+            assert_eq!(b.len(), 6, "{name} {b:?}");
+            assert_eq!((b[0], b[5]), (0.0, 1.0), "{name} {b:?}");
+            assert!(b[1] == b[2] && near(b[1], enter), "{name} {b:?} enter {enter}");
+            assert!(b[3] == b[4] && near(b[3], leave), "{name} {b:?} leave {leave}");
+            seen += 1;
+        }
+        assert_eq!(seen, 16);
+    }
 }
 

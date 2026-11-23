@@ -1027,55 +1027,61 @@ impl UnitDiff for Runner {
 
 #[cfg(test)]
 mod review_geometry_tests {
+    use super::super::surface_surface_point_solve_p3::witness;
     use super::*;
 
-    /// A reported maximum must beat every admissible witness, or be a named known failure.
+    /// Every `Solve` case of the unit that claims an optimum is challenged by a grid of
+    /// in-domain witnesses over its domain, as the p3 runner's global solves are
+    /// ([`witness`]: one witness refutes an optimum, none proves one). A `Solve` claims
+    /// one when its operation [`witness::ranks`] points and it succeeded with a solution;
+    /// the unit's other operations are the solver's internals (guesses, refinements, seam
+    /// partners, single steps and their tests), which claim no optimum. A witness better
+    /// by more than the case's distance tolerance refutes the solve, and the case must be
+    /// listed known failing under [`witness::MAXIMUM_ISSUE`] (maximise) or
+    /// [`witness::REACHED_ISSUE`] (minimise, directed maximise); a case listed under either
+    /// must still be refuted. This unit's record of a `Solve` does not hold the
+    /// out-of-bounds restoration flag the p3 runner records.
     #[test]
-    fn review_maximum_outputs_have_geometric_evidence() {
+    fn review_every_claimed_optimum_survives_its_witnesses() {
         let k = Kernel::default();
         let known =
             crate::golden::known_failing(&crate::golden::default_dir(), Runner.id()).unwrap();
-        let mut unexplained = Vec::new();
-        for name in ["rev_gen0057", "gen0808"] {
-            let case = crate::case::regression_case(&Runner, name);
+        let context = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let mut claims = Vec::new();
+        for case in Runner.cases(&context).unwrap() {
             let input: Inputs = case.parse().unwrap();
-            assert_eq!(input.solver, 4);
-            let surface = any_surface(&k, input.wrap, &input.surf).unwrap();
+            let op = solver_op(input.solver).unwrap();
+            if !witness::ranks(op) || !matches!(input.op, OpIn::Solve) {
+                continue;
+            }
             let output = rust(&input).unwrap();
+            if output.deferred.is_some() || output.values["status"] != [0.0] {
+                continue;
+            }
             let values = &output.values["out"];
-            let reported = values[3];
-            let actual = surface
-                .evaluate_point(&k, p2([values[1], values[2]]))
-                .unwrap()
-                .distance(v3(input.test));
-            assert!((actual - reported).abs() < 1e-11 * actual.max(1.0));
-            let mut witness = (0.0_f64, [0.0; 2]);
-            for iu in 0..=10 {
-                for iv in 0..=10 {
-                    let uv = [
-                        input.dom[0] + (input.dom[2] - input.dom[0]) * f64::from(iu) / 10.0,
-                        input.dom[1] + (input.dom[3] - input.dom[1]) * f64::from(iv) / 10.0,
-                    ];
-                    let distance = surface
-                        .evaluate_point(&k, p2(uv))
-                        .unwrap()
-                        .distance(v3(input.test));
-                    if distance > witness.0 {
-                        witness = (distance, uv);
-                    }
-                }
+            let n = values[0] as usize;
+            if n == 0 {
+                continue;
             }
-            eprintln!(
-                "{name}: reported={reported:?}; farther witness={witness:?}; tol={:?}",
-                input.tol
-            );
-            if witness.0 > reported + input.tol && !known.contains_key(name) {
-                unexplained.push(name);
-            }
+            let solutions: Vec<([f64; 2], f64)> = (0..n)
+                .map(|j| ([values[1 + 6 * j], values[2 + 6 * j]], values[3 + 6 * j]))
+                .collect();
+            let surface = any_surface(&k, input.wrap, &input.surf).unwrap();
+            claims.push(witness::global(
+                &k,
+                &surface,
+                &case.name,
+                op,
+                "global".to_owned(),
+                input.test,
+                input.dom,
+                input.tol,
+                &solutions,
+            ));
         }
-        assert!(
-            unexplained.is_empty(),
-            "wrong maxima still blessed: {unexplained:?}"
-        );
+        witness::check(Runner.id(), &claims, &known);
     }
 }

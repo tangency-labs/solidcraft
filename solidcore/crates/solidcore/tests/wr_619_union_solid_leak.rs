@@ -7,7 +7,8 @@
 //! radius: since #15718 decides B's corner on A's face as one event (`split_edges_at_vertices`)
 //! the union is the narrow strip's closed form, one valid solid of volume 128 - 20.2 d^2, as
 //! `wr_614_coincident_strip_crossing.rs` derives for d <= 1e-5. The union's WR-619 guard
-//! (`boolean/merge/p4.rs`, refusing a union whose face deletion leaves no solid region) then
+//! (`boolean/merge/p4.rs`, refusing a union where the solid side of a deleted face between a
+//! solid and the outside ends in no solid region) then
 //! has no leak to refuse and leaves the union as it is.
 //!
 //! A union that still leaks is refused: tangency-labs/solidcraft#16350's wider A with a
@@ -164,5 +165,56 @@ fn wr_619_union_leaking_both_solids_is_refused() {
             ),
             "pocket {cut:?}: {e:?}"
         );
+    }
+}
+
+/// A partial leak: the #16350 pocketed union with a separate 2 mm cube far from both
+/// operands added to one of them (A, then B), so the operand has two disjoint solids. The
+/// pocketed strips' face deletion still merges their solid into the outside, while the cube
+/// stays a solid region of its own: a region count sees a solid left, yet the union has lost
+/// A and B. The guard checks each leak: the solid side of every deleted face between a solid
+/// and the outside must still lie in a solid region, so the union is refused.
+#[test]
+fn wr_619_union_leaking_one_of_two_solids_is_refused() {
+    for (cut, z0, h) in [((0.5, 3.5), 1.0, 2.0), ((2.0, 5.0), 2.5, 1.0)] {
+        for cube_in_a in [true, false] {
+            let mut k = Kernel::default();
+            let (a, b) = pocketed_operands(&mut k, cut, z0, h, 5e-6);
+            let c = create_box(&mut k, Point3::new(40.0, 40.0, 0.0), 2.0, 2.0, 2.0).unwrap();
+            let (a, b) = if cube_in_a {
+                (boolean_union(&mut k, a, c).unwrap(), b)
+            } else {
+                (a, boolean_union(&mut k, b, c).unwrap())
+            };
+            let with_cube = if cube_in_a { &a } else { &b };
+            assert_eq!(
+                solid_regions(with_cube),
+                2,
+                "pocket {cut:?}: two disjoint solids"
+            );
+            let e = match boolean_union(&mut k, a, b) {
+                Ok(mut u) => {
+                    let store = AttributeStore::default();
+                    let attrs = PropertyAttributes {
+                        store: &store,
+                        key_of: &|_| ObjectKey(0),
+                    };
+                    let v = brep_volume(&k, &mut u, 1e-6, &attrs).unwrap_or(f64::NAN);
+                    panic!(
+                        "pocket {cut:?}, cube in A {cube_in_a}: union returned a body with {} \
+                         solid regions, volume {v}",
+                        solid_regions(&u)
+                    )
+                }
+                Err(e) => e,
+            };
+            assert!(
+                matches!(
+                    e.failure().map(|f| &f.reason),
+                    Some(Reason::Boolean(BooleanFailure::SolidLeaks { .. }))
+                ),
+                "pocket {cut:?}, cube in A {cube_in_a}: {e:?}"
+            );
+        }
     }
 }

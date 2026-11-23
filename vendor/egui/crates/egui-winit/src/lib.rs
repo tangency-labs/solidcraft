@@ -840,10 +840,15 @@ impl State {
             return false;
         }
 
-        self.egui_input.events.push(egui::Event::MouseMoved(Vec2 {
+        let event = egui::Event::MouseMoved(Vec2 {
             x: delta.0 as f32,
             y: delta.1 as f32,
-        }));
+        });
+        push_motion(
+            &mut self.egui_input.events,
+            event,
+            self.any_pointer_button_down,
+        );
         true
     }
 
@@ -951,9 +956,11 @@ impl State {
                 });
             }
         } else {
-            self.egui_input
-                .events
-                .push(egui::Event::PointerMoved(pos_in_points));
+            push_motion(
+                &mut self.egui_input.events,
+                egui::Event::PointerMoved(pos_in_points),
+                self.any_pointer_button_down,
+            );
         }
     }
 
@@ -1551,6 +1558,36 @@ fn is_paste_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {
     keycode == egui::Key::Paste
         || (modifiers.command_only() && keycode == egui::Key::V)
         || (cfg!(target_os = "windows") && modifiers.shift && keycode == egui::Key::Insert)
+}
+
+/// Queue pointer motion for the next frame. While no button is held, motion joins the motion of
+/// the same kind in the run of motion events at the end of the queue: a `PointerMoved` takes the
+/// later position, a `MouseMoved` adds the deltas (platforms report the two interleaved). An app
+/// that skips the frames pointer motion asks for (`RawInput::repaint_on_pointer_move`) then holds
+/// at most one of each between two other events, not one per platform report. Every other event
+/// keeps its place between the motions; with a button held every report is kept, so a drag sees
+/// the whole path.
+fn push_motion(events: &mut Vec<egui::Event>, event: egui::Event, button_down: bool) {
+    if !button_down {
+        let run = events
+            .iter_mut()
+            .rev()
+            .take_while(|e| matches!(e, egui::Event::PointerMoved(_) | egui::Event::MouseMoved(_)));
+        for queued in run {
+            match (queued, &event) {
+                (egui::Event::PointerMoved(last), egui::Event::PointerMoved(pos)) => {
+                    *last = *pos;
+                    return;
+                }
+                (egui::Event::MouseMoved(last), egui::Event::MouseMoved(delta)) => {
+                    *last += *delta;
+                    return;
+                }
+                _ => {}
+            }
+        }
+    }
+    events.push(event);
 }
 
 fn translate_mouse_button(button: winit::event::MouseButton) -> Option<egui::PointerButton> {
@@ -2674,5 +2711,54 @@ pub fn short_window_event_description(event: &winit::event::WindowEvent) -> &'st
         WindowEvent::ThemeChanged { .. } => "WindowEvent::ThemeChanged",
         WindowEvent::Occluded { .. } => "WindowEvent::Occluded",
         WindowEvent::PanGesture { .. } => "WindowEvent::PanGesture",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::push_motion;
+    use egui::{Event, PointerButton, pos2, vec2};
+
+    /// Motion queued between frames collapses to one event of each run while no button is held,
+    /// and keeps its order around the other events; with a button held every report stays.
+    #[test]
+    fn queued_pointer_motion_collapses_between_other_events() {
+        let press = Event::PointerButton {
+            pos: pos2(3.0, 3.0),
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Default::default(),
+        };
+        let mut events = Vec::new();
+        // Window and raw motion come interleaved, one of each per report.
+        for i in 0..1000 {
+            push_motion(&mut events, Event::PointerMoved(pos2(i as f32, 1.0)), false);
+            push_motion(&mut events, Event::MouseMoved(vec2(1.0, 0.5)), false);
+        }
+        assert_eq!(
+            events,
+            [
+                Event::PointerMoved(pos2(999.0, 1.0)),
+                Event::MouseMoved(vec2(1000.0, 500.0))
+            ]
+        );
+        events.push(press.clone());
+        push_motion(&mut events, Event::MouseMoved(vec2(1.0, 2.0)), false);
+        push_motion(&mut events, Event::MouseMoved(vec2(3.0, -1.0)), false);
+        push_motion(&mut events, Event::PointerMoved(pos2(5.0, 5.0)), false);
+        assert_eq!(
+            events,
+            [
+                Event::PointerMoved(pos2(999.0, 1.0)),
+                Event::MouseMoved(vec2(1000.0, 500.0)),
+                press,
+                Event::MouseMoved(vec2(4.0, 1.0)),
+                Event::PointerMoved(pos2(5.0, 5.0)),
+            ]
+        );
+        push_motion(&mut events, Event::PointerMoved(pos2(6.0, 6.0)), true);
+        push_motion(&mut events, Event::MouseMoved(vec2(1.0, 0.0)), true);
+        push_motion(&mut events, Event::MouseMoved(vec2(1.0, 0.0)), true);
+        assert_eq!(events.len(), 8, "a held button keeps the whole path: {events:?}");
     }
 }

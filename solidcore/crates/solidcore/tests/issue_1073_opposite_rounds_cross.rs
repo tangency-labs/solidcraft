@@ -8,6 +8,10 @@
 //! `fillet_refuse_crossing_rails`, which refused it with a bare 1001 after the fillet's
 //! B-rep was built, is retired: the band test is the one test of two bands on a face.)
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)] // test helpers
+
+#[path = "support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use solidcore::blend::fillet_executive::api::{
     fillet_edges, fillet_edges_per_edge, variable_radius_fillet,
 };
@@ -15,26 +19,19 @@ use solidcore::blend::fillet_executive::{FitKind, NoRoomReason};
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::error::blend::BlendFailure;
 use solidcore::error::ErrorKind;
-use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::{edge, vertex, EdgeId};
 use solidcore::{Brep, Kernel, Result, SolidError};
 
-/// SolidCraft's fix list (`tests/kernel_cases/fixes.json`), or the pinned SMLib's
+/// SolidCraft's fix list (`support/solidcraft_fixes.rs`), or the pinned SMLib's
 /// (`Kernel::default`).
 fn kernel(fixed: bool) -> Kernel {
     if !fixed {
         return Kernel::default();
     }
-    let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
-    let mut f = UpstreamFixes::default();
-    for name in &names {
-        if let Some(flag) = f.flag_mut(name) {
-            *flag = true;
-        }
-    }
+    let f = solidcraft_fixes::solidcraft_fixes();
     Kernel {
         fixes: f,
         ..Kernel::default()
@@ -112,12 +109,17 @@ fn issue_1073_the_default_kernels_open_body_is_refused() {
                 b.face_list().len()
             );
         };
-        assert_eq!(error.kind(), ErrorKind::Failed, "{name}: {error:?}");
+        // #19823: an open result the construction built instead of refusing is the
+        // kernel's defect (it keeps the status 1001)
+        assert_eq!(error.kind(), ErrorKind::StageFailed, "{name}: {error:?}");
+        assert!(
+            matches!(error.blend_failure(), Some(BlendFailure::Defect { .. })),
+            "{name}: {error:?}"
+        );
+        assert!(error.is_defect(), "{name}: {error:?}");
         assert_eq!(
-            error.blend_failure(),
-            Some(&BlendFailure::Failed(
-                "the result is not a closed manifold solid"
-            )),
+            solidcore::error::upstream_status(&error),
+            Some(1001),
             "{name}: {error:?}"
         );
         assert_eq!(error.operation(), "blend::fillet_executive::api", "{name}");
