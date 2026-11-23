@@ -146,7 +146,7 @@ fn an_open_curve_inside_the_face_is_refused() {
 #[test]
 fn a_complete_sheet_cuts_regions_without_extending_its_faces() {
     let target = planar_faces(&square(0.0, 10.0, 0.0)).unwrap();
-    let cutter = solidcore_ops::sweep::extrude(
+    let cutter = extrude(
         &[
             line([-5.0, 3.0, -5.0], [5.0, 3.0, -5.0]),
             line([5.0, 3.0, -5.0], [15.0, 7.0, -5.0]),
@@ -154,7 +154,7 @@ fn a_complete_sheet_cuts_regions_without_extending_its_faces() {
         [0.0, 0.0, 1.0],
         10.0,
         0.0,
-        solidcore_ops::sweep::DraftCorner::Tangent,
+        DraftCorner::Tangent,
         false,
     )
     .unwrap();
