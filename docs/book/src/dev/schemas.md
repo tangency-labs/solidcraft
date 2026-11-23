@@ -259,7 +259,8 @@ calling that reader.
 | `EdgeRef`, `EdgeRefs` | an edge by a point on it or `{body, index}`; fillet's and chamfer's `edges` | `features::edge_points` |
 | `ProfilesParam` | which sketch profiles | `features::profiles` |
 | `ScaleFactors` | scale's `factors`: three `NumberExpr`s (strict words a bad item differently; see its doc) | `features::scale` |
-| `AxisDir` | X, Y or Z, or a non-zero `[x, y, z]` / `{x, y, z}` (cylinder's, cone's and coil's `axis`) | `features::axis_dir_form` |
+| `AxisDir` | X, Y or Z, or a non-zero `[x, y, z]` / `{x, y, z}` (cone's and coil's `axis`) | `features::axis_dir_form` |
+| `AxisDirExpr` | X, Y or Z, or `[x, y, z]` / `{x, y, z}` of numbers or unitless expressions (`-sin(t)`, or `n / 1 mm` for a parameter added as a plain number, which is a length), non-zero when all are numbers (cylinder's `axis`) | `features::axis_expr_form` |
 | `FeatureCommon` | `name`, `body_name`, `body_names`, `participants`, flattened | `features::add_feature` |
 | `ConstructionCommon`, `PlaneCommon` | `name` and `participants` of a construction axis or point, or of a construction plane (whose `name` is a `PlaneName`), flattened | `features::add_feature` |
 | `PlaneName` | a construction plane's name, which may not be an origin plane's (strict names the command called; see its doc) | `features::check_plane_name` |
