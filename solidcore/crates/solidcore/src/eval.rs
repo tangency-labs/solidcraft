@@ -21,6 +21,7 @@ pub mod collapse;
 pub mod curve;
 pub mod folded;
 pub mod form;
+pub mod geodesic;
 pub mod geometry;
 pub mod label;
 pub mod normal_section;
@@ -39,6 +40,9 @@ pub mod vec;
 
 pub use collapse::{Collapse, OntoKnots};
 pub use curve::{CurveEval, CurveJet};
+pub use geodesic::{
+    distance, geodesic, Geodesic, GeodesicError, GeodesicSolver, DEFAULT_TOLERANCE,
+};
 pub use geometry::{Curve, Curve2, Frame, Surface};
 pub use spline::{
     EvalCurve, EvalSurface, Partials, MAX_EVAL_KNOTS, MAX_EVAL_POINTS, MAX_PARTIAL_ORDER,
