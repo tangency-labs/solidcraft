@@ -332,8 +332,11 @@
 //! the lifted rectangle's edges, made of both pieces' edges, and its degree and winding
 //! argument needs only continuity across the seam. Its stretches merged are a connected arc
 //! of the turn: one piece covering the whole range is a whole turn, whose lift is no
-//! rectangle less than a turn wide ([`Why::WholeTurn`], undecided; so is any component
-//! whose boxes cover the whole range). What a box touches across a seam (a leaf at its
+//! rectangle less than a turn wide, so a component whose boxes cover the whole range and
+//! that holds a box left at the floor is undecided ([`Why::WholeTurn`]: the side chart's
+//! degree and winding and the foot chain read a lift); one whose boxes are all regular is
+//! typed by its count, which reads no lift (each root unique in its native box and off the
+//! seam, the end certificate and the placing box by box; answer11, Q3). What a box touches across a seam (a leaf at its
 //! limit or not run, a trim cull) is read only for a component joined across it
 //! ([`facing`]): one that is not keeps the flags it had, its seam sides facing a trim cull
 //! boundaries. A partial turn, or a solve over part of the range, never wraps.
@@ -2155,8 +2158,8 @@ pub(crate) struct Component {
     /// budget).
     pub at_boundary: bool,
     /// Whether its boxes cover the whole knots' range in a direction the solve wraps in
-    /// (joined across the seam or not): no lift of it is a rectangle less than a turn wide
-    /// ([`Why::WholeTurn`]).
+    /// (joined across the seam or not): no lift of it is a rectangle less than a turn wide,
+    /// so its sides and foot are not read ([`Why::WholeTurn`]; its count is).
     pub whole_turn: bool,
     /// The hull of its boxes' line parameters (each the feet widened by the tolerance).
     pub t: Ivl,
@@ -3247,9 +3250,10 @@ pub(crate) enum Why {
     /// The foot's branch is not certified over its line parameters (the foot rule), and
     /// where it failed.
     FootNotShown(FootWhy),
-    /// Its boxes cover the whole knots' range in a direction the solve wraps in: no lift of
-    /// it is a rectangle less than a turn wide (module docs, "The seam"; answer10 asks it of
-    /// every component, a count too).
+    /// It holds a box left at the floor and its boxes cover the whole knots' range in a
+    /// direction the solve wraps in: no lift of it is a rectangle less than a turn wide, which
+    /// the side chart (its degree and winding) and the foot chain read (module docs, "The
+    /// seam"). A count reads no lift and is not refused (answer11, Q3).
     WholeTurn,
 }
 
@@ -3437,7 +3441,10 @@ fn type_one(
     (t, others): (Ivl, Option<Overlap>),
     bounds: &mut Option<Vec<SideBound>>,
 ) -> Typed {
-    if c.whole_turn {
+    // (a whole turn has no lift less than a turn wide, which only the side chart and the
+    // foot chain read; the count reads no lift, its boxes all regular, each root unique in
+    // its native box and off the seam: answer11, Q3)
+    if c.whole_turn && c.holds.left > 0 {
         return Typed::Undecided(Why::WholeTurn);
     }
     // a certified root whose enclosure reaches a seam the solve wraps is not counted, by any
@@ -7548,7 +7555,8 @@ mod tests {
         assert!(!c.list[0].at_boundary, "{:?}", c.list[0]);
     }
 
-    /// A component around the whole turn stays undecided (answer10, Q1, condition 7): a
+    /// A component around the whole turn holding boxes left at the floor stays undecided
+    /// (answer10, Q1, condition 7; answer11, Q3: its sides and foot read a lift): a
     /// cylinder of radius `4·10⁻⁴` and height `2·10⁻³` about z lies within the tolerance
     /// `10⁻³` of the line along z through it all round, so its boxes cover the whole knots'
     /// range in u, which the solve wraps: no lift of the component is a rectangle less than
@@ -7580,6 +7588,62 @@ mod tests {
             &[whole],
         );
         assert_eq!(c.list.len(), 1, "{:?}", c.list);
+        assert!(c.list[0].whole_turn, "{:?}", c.list[0]);
+        assert_eq!(
+            (c.list[0].contact, c.list[0].typed),
+            (Contact::Undecided, Typed::Undecided(Why::WholeTurn)),
+            "{:?}",
+            c.list[0]
+        );
+    }
+
+    /// A component around the whole turn whose boxes are all regular is typed by its count
+    /// (answer11, Q3): the count reads no lift (every box regular, a root unique in its native
+    /// box and off the seam, the end certificate and the placing box by box), so a whole turn
+    /// does not refuse it. On records over the unit cylinder's net: two boxes with no root
+    /// covering the whole turn in u, one band in v, their line parameters overlapping, are one
+    /// component covering the whole range, a count of no root, touching (before, undecided
+    /// by its whole turn); with a box left at the floor among them it stays undecided by its
+    /// whole turn (the side chart and the foot chain read a lift).
+    #[test]
+    fn a_whole_turn_of_regular_boxes_is_typed_by_its_count() {
+        let k = Kernel::default();
+        let s = cylinder(&k);
+        let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let net = LineNet::of(&k, &s).unwrap().unwrap();
+        let [[u0, u1], [v0, v1]] = net.range;
+        let (um, vm) = (0.5 * (u0 + u1), 0.5 * (v0 + v1));
+        let h = 1.0e-3 * (v1 - v0);
+        let line = PassLine {
+            point: Vec3::new(-2.0, 0.0, 0.5),
+            vector: Vec3::new(4.0, 0.0, 0.0),
+            span: [0.0, 1.0],
+            solve_domain: whole,
+            tol: 1.0e-2,
+        };
+        let seams = net.seams(&whole);
+        let sides = leaf_sides(&[whole], &whole, seams);
+        let typed = |second: FloorKind| {
+            let at = |kind: FloorKind, [a, b]: [f64; 2]| FloorBox {
+                t: Some(Ivl::new(0.4, 0.6)),
+                ..rec(kind, [a, b], [vm - h, vm + h])
+            };
+            let floor = vec![at(FloorKind::NoRoot, [u0, um]), at(second, [um, u1])];
+            let leaves = [leaf_of(whole, Stop::Finished, Some(floor))];
+            let mut c = components(&leaves, &sides, [0.0, 1.0], seams);
+            type_components(&net, &line, &leaves, &sides, &mut c, None).unwrap();
+            c
+        };
+        let c = typed(FloorKind::NoRoot);
+        assert_eq!(c.list.len(), 1, "{:?}", c.list);
+        assert!(c.list[0].whole_turn, "{:?}", c.list[0]);
+        assert_eq!(
+            (c.list[0].contact, c.list[0].typed),
+            (Contact::Touching, Typed::Count(0)),
+            "{:?}",
+            c.list[0]
+        );
+        let c = typed(FloorKind::Left);
         assert!(c.list[0].whole_turn, "{:?}", c.list[0]);
         assert_eq!(
             (c.list[0].contact, c.list[0].typed),
