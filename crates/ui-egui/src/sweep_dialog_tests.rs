@@ -248,9 +248,9 @@ fn a_sweep_path_curve_deleted_from_its_sketch_can_be_picked_again() {
     assert_eq!(path_sketch.0, other, "the sweep still follows the stale path");
     assert_eq!(path, &vec![PathEntry::OfPathSketch("l1".into())]);
     assert!(
-        h.app.session.model.result(swept).unwrap().error.is_none(),
+        h.app.session.model.result(f.id).unwrap().error.is_none(),
         "the sweep does not build: {:?}",
-        h.app.session.model.result(swept).unwrap().error
+        h.app.session.model.result(f.id).unwrap().error
     );
     assert!(h.app.dialog.is_none(), "the sweep was not applied: {:?}", h.app.preview.error);
 }
