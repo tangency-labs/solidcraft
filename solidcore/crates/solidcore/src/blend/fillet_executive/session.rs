@@ -1574,6 +1574,8 @@ fn replay_solver_error(
     error.edge_type = note.edge_type;
     // (not upstream) the note's own site, written below, or none of it
     error.no_room_without_site = note.no_room_without_site;
+    // (not upstream) a solver's note is not explained by an earlier corner's classification
+    error.corner_cause = None;
     error.edge = map(note.edge);
     for (from, to) in [
         (&note.surfaces, &mut error.surfaces),
@@ -1612,6 +1614,7 @@ fn replay_corner_error(
     error.corner_type = note.corner_type;
     error.vertex = map(note.vertex);
     error.no_room_without_site = false; // (not upstream: it names the vertex)
+    error.corner_cause = None; // (not upstream: nor is it an earlier classification's)
     for surface in &note.surfaces {
         let surface = map(*surface);
         if !error.surfaces.contains(&surface) {
@@ -2406,7 +2409,10 @@ impl<'target> FilletSession<'target> {
                     // The vertex's point feeds the opt-in vertex error note, as the
                     // fork's corrected overload reads it from the vertex itself.
                     let location = crate::topology::vertex::point(target, vertex).ok();
-                    return Ok(CornerCreation::Unsupported { location });
+                    return Ok(CornerCreation::Unsupported {
+                        location,
+                        cause: None,
+                    });
                 };
                 // the Roll-over's second pass (#10876): its corner at V, where the concave
                 // chain meets the cliff, looks for rail ends across the cliff's tangent seam;
@@ -2464,7 +2470,8 @@ impl<'target> FilletSession<'target> {
                 // The fork's (WR-697, 79d4763): three equal rounds of one convexity, every
                 // edge there blended, are the blend corner's Ball
                 // (SmBlendCorner::ClassifyBall, in SmFilletCorner::Create's three-solver
-                // case before the 3x3 corner); a failed classification builds no corner.
+                // case before the 3x3 corner); a failed classification builds no corner and
+                // its error stays with the note of the vertex.
                 // Since smlib#125 (278bf77) four or more rounds that one ball touches are
                 // the Ball too (ClassifyBall in the NxN case, before ClassifySetBack, where
                 // every edge use is a solver's). A chamfer corner's rounds are not
@@ -2502,10 +2509,7 @@ impl<'target> FilletSession<'target> {
                         &lookup,
                     );
                     match event {
-                        Err(_) => {
-                            let location = crate::topology::vertex::point(target, vertex).ok();
-                            return Ok(CornerCreation::Unsupported { location });
-                        }
+                        Err(cause) => return unclassified_corner(target, vertex, cause),
                         Ok(crate::blend::blend_corner::BlendCornerEvent::Ball) => {
                             let mut ball = FilletCorner::new(
                                 FilletCornerKind::NByTwo,
@@ -2528,8 +2532,8 @@ impl<'target> FilletSession<'target> {
                 // The fork's (smlib#104 61547af): a corner where every edge is blended,
                 // three or more, that the blend corner sets back and fills
                 // (SmBlendCorner::ClassifySetBack, in SmFilletCorner::Create's NxN case,
-                // after the Ball); a failed classification builds no corner. The others as
-                // before.
+                // after the Ball); a failed classification builds no corner and its error
+                // stays with the note of the vertex. The others as before.
                 if corner.blend.is_none()
                     && matches!(
                         corner.kind,
@@ -2553,10 +2557,7 @@ impl<'target> FilletSession<'target> {
                         set_back_fills,
                     );
                     match classified {
-                        Err(_) => {
-                            let location = crate::topology::vertex::point(target, vertex).ok();
-                            return Ok(CornerCreation::Unsupported { location });
-                        }
+                        Err(cause) => return unclassified_corner(target, vertex, cause),
                         Ok(class)
                             if class.event
                                 == crate::blend::blend_corner::BlendCornerEvent::Setback =>
@@ -6087,6 +6088,47 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             .iter()
             .all(|side| side.is_some_and(|e| rim.contains(&e))))
     }
+    fn geometry_overflows_into_material(
+        &mut self,
+        _k: &mut Kernel,
+        solver: FilletObject,
+        left_across: &[Option<EdgeId>],
+        return_across: &[Option<EdgeId>],
+        wraps: bool,
+        boundaries_into_material: bool,
+    ) -> Result<bool> {
+        use crate::blend::fillet_solver::p5::edge_bounds_material;
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        if self.solver(id)?.constant_offsets()?.is_none()
+            || left_across.is_empty()
+            || !boundaries_into_material
+        {
+            return Ok(false);
+        }
+        if wraps {
+            let FilletObject::Topology(FilletBody::Target, EntityRef::Edge(edge)) =
+                self.geometry_edge(solver)?
+            else {
+                return Err(invalid("solver edge is not a target edge"));
+            };
+            if !crate::topology::edge::is_closed(self.target, edge)? {
+                return Ok(false);
+            }
+        }
+        for &side in left_across.iter().chain(return_across) {
+            let Some(edge) = side else {
+                return Ok(false);
+            };
+            if !crate::topology::edge::is_manifold(self.target, edge)?
+                || !edge_bounds_material(self.target, edge)?
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
     fn geometry_mitred_corner_edges(
         &self,
         corner: FilletObject,
@@ -8819,6 +8861,31 @@ impl CornerAdjustmentAccess<FilletObject> for SessionObjects<'_> {
     }
 }
 
+/// What a corner whose blend classification failed with `cause` at `vertex` of `target` gives
+/// (`classify_ball`, `classify_setback`): an unsupported corner that keeps the classification's
+/// error (#19803), except for a cancellation, an unported call or a certificate out of its work
+/// budget (`is_unported_or_cancelled`), which is passed on as it is, as [`super::p3::caught`] and
+/// the setback-request classification do (#20216): work given up is never reported as a corner
+/// the kernel does not support.
+///
+/// # Errors
+///
+/// `cause`, where it is unported, cancelled or not certified.
+fn unclassified_corner<O>(
+    target: &Brep,
+    vertex: VertexId,
+    cause: SolidError,
+) -> Result<CornerCreation<O>> {
+    if cause.is_unported_or_cancelled() {
+        return Err(cause);
+    }
+    let location = crate::topology::vertex::point(target, vertex).ok();
+    Ok(CornerCreation::Unsupported {
+        location,
+        cause: Some(cause),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -9064,6 +9131,215 @@ mod tests {
     /// edge of the unit cube: five times the faces, so the fillet surface fails (code 4,
     /// not a no-room refusal) and the edge has no corner to note.
     const STALE_CASE_RADIUS: f64 = 5.0;
+
+    /// What a fillet of the three edges at the unit cube's corner at the origin, rounded by
+    /// 0.2, reports when `spoil` is done to its session once it is prepared: the returned
+    /// error of `do_fillet`, the session's error info after it, and the corner's vertex and
+    /// point.
+    fn spoiled_cube_corner(
+        spoil: impl FnOnce(&mut FilletSession<'_>, VertexId),
+    ) -> (
+        Result<()>,
+        ErrorInfo<FilletObject>,
+        Option<FilletObject>,
+        Option<Point3>,
+    ) {
+        let mut k = Kernel::default();
+        let mut body =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                .unwrap();
+        let corner = crate::topology::brep::p1::vertices(&body, None)
+            .unwrap()
+            .into_iter()
+            .find(|v| crate::topology::vertex::point(&body, *v).unwrap() == Point3::ZERO)
+            .unwrap();
+        let edges = crate::topology::brep::p1::edges(&body, None)
+            .unwrap()
+            .into_iter()
+            .filter(|e| {
+                crate::topology::edge::vertices(&body, *e, None)
+                    .unwrap()
+                    .contains(&Some(corner))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(edges.len(), 3);
+        let at = crate::topology::vertex::point(&body, corner).ok();
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &edges, 0.2, 1, 1, 1.0)
+            .unwrap();
+        spoil(&mut session, corner);
+        let result = session.do_fillet(&mut k);
+        let vertex = FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(corner));
+        (result, session.error_info().clone(), Some(vertex), at)
+    }
+
+    /// [`spoiled_cube_corner`] with the surface of one face at the corner taken away, so
+    /// the classification of the corner fails where it tests the convexity of the corner's
+    /// edges; with `set_back`, the corner is marked set back, which is no Ball, so the
+    /// Ball's classification passes it by and the Setback's is the one that fails.
+    fn cube_corner_with_a_face_without_surface(
+        set_back: bool,
+    ) -> (
+        Result<()>,
+        ErrorInfo<FilletObject>,
+        Option<FilletObject>,
+        Option<Point3>,
+    ) {
+        spoiled_cube_corner(|session, corner| {
+            if set_back {
+                session.add_set_back_vertex(corner);
+            }
+            let target = &mut *session.objects.target;
+            let face = crate::topology::vertex::faces(target, corner).unwrap()[0];
+            target.face_mut(face).unwrap().surface = None;
+        })
+    }
+
+    /// The error the classification of [`cube_corner_with_a_face_without_surface`] fails
+    /// with.
+    fn face_without_surface() -> SolidError {
+        SolidError::InvalidInput {
+            operation: "topology::edgeuse::p3",
+            reason: "EvaluateBinormal: face without surface",
+        }
+    }
+
+    /// The note of the corner whose classification failed, as before (#19803): unsupported,
+    /// a failure, the fork's comment, at the corner's vertex and point; and the filleting's
+    /// own failure returned, its operation, status and cause unchanged.
+    fn assert_noted_as_before(
+        (result, error, vertex, at): &(
+            Result<()>,
+            ErrorInfo<FilletObject>,
+            Option<FilletObject>,
+            Option<Point3>,
+        ),
+    ) {
+        assert_eq!(error.code, FilletErrorType::CornerUnsupported as i32);
+        assert_eq!(error.status, FilStatus::Failure as i32);
+        assert_eq!(error.comment, "Corner case not implemented");
+        assert_eq!(error.vertex, *vertex);
+        assert_eq!(error.location, *at);
+        let e = result.as_ref().unwrap_err();
+        assert_eq!(e.operation(), "blend::fillet_executive::session::finish");
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
+        // the stage's error here is not a record that can keep a cause, so the
+        // classification's error is not chained onto it: the chain is as it was
+        assert_eq!(e.cause(), Some(&face_without_surface()), "{e:?}");
+    }
+
+    #[test]
+    fn a_failed_ball_classification_is_kept_with_the_unsupported_corner() {
+        let run = cube_corner_with_a_face_without_surface(false);
+        assert_noted_as_before(&run);
+        assert_eq!(
+            run.1.unsupported_corner_cause(),
+            Some(&face_without_surface())
+        );
+    }
+
+    #[test]
+    fn a_failed_setback_classification_is_kept_with_the_unsupported_corner() {
+        let run = cube_corner_with_a_face_without_surface(true);
+        assert_noted_as_before(&run);
+        assert_eq!(
+            run.1.unsupported_corner_cause(),
+            Some(&face_without_surface())
+        );
+    }
+
+    /// Without the spoil the cube's corner is the Ball and the fillet builds: the spoil, not
+    /// the case, is what fails the classifications above.
+    /// #20216: a corner classification that fails with a cancellation, an unported call or a
+    /// certificate out of its budget passes that error on, not an unsupported corner; any other
+    /// failure (the face without a surface of #19803) is the unsupported corner keeping it. No
+    /// model reaches the arms with the first kind today (no cancellation is polled under the
+    /// classifications, and nothing under them makes an unported or not-certified error), so the
+    /// errors are given to the arms' function as the classification would return them.
+    #[test]
+    fn a_classification_cancelled_or_unported_is_passed_on_not_an_unsupported_corner() {
+        let mut k = Kernel::default();
+        let body =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                .unwrap();
+        let vertex = crate::topology::brep::p1::vertices(&body, None)
+            .unwrap()
+            .into_iter()
+            .find(|v| crate::topology::vertex::point(&body, *v).unwrap() == Point3::ZERO)
+            .unwrap();
+        let not_certified = SolidError::blend(
+            "blend::fillet_geom::tangent_end_rib",
+            crate::error::blend::BlendFailure::NotCertified {
+                halvings: 3,
+                stations: 9,
+            },
+        );
+        for given in [
+            SolidError::cancelled("blend::blend_corner::ball"),
+            SolidError::unported("evaluate_binormal", "unit"),
+            not_certified,
+        ] {
+            match unclassified_corner::<FilletObject>(&body, vertex, given.clone()) {
+                Err(e) => assert_eq!(e, given),
+                Ok(made) => panic!("{given:?} became {made:?}"),
+            }
+        }
+        match unclassified_corner::<FilletObject>(&body, vertex, face_without_surface()) {
+            Ok(CornerCreation::Unsupported { location, cause }) => {
+                assert_eq!(location, Some(Point3::ZERO));
+                assert_eq!(cause, Some(face_without_surface()));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_unspoiled_cube_corner_builds() {
+        let (result, error, _, _) = spoiled_cube_corner(|_, _| {});
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(error.unsupported_corner_cause(), None);
+    }
+
+    /// The pentagonal pyramid with three of its five apex edges rounded by 0.5:
+    /// `do_fillet`'s result and the error info after it.
+    fn pyramid_apex() -> (Result<()>, ErrorInfo<FilletObject>) {
+        let mut k = Kernel::default();
+        let mut body = pentagonal_pyramid(&mut k);
+        let apex = crate::topology::brep::p1::vertices(&body, None)
+            .unwrap()
+            .into_iter()
+            .find(|vertex| crate::topology::vertex::point(&body, *vertex).unwrap().z > 1.0)
+            .unwrap();
+        let side_edges = crate::topology::brep::p1::edges(&body, None)
+            .unwrap()
+            .into_iter()
+            .filter(|edge| {
+                crate::topology::edge::vertices(&body, *edge, None)
+                    .unwrap()
+                    .contains(&Some(apex))
+            })
+            .collect::<Vec<_>>();
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &side_edges[..3], 0.5, 1, 1, 1.0)
+            .unwrap();
+        let result = session.do_fillet(&mut k);
+        (result, session.error_info().clone())
+    }
+
+    /// #19803: the failure a missing corner produces is the one `do_fillet`'s chain keeps a
+    /// failed classification's error under (`finish::is_missing_corner`): the pyramid's apex,
+    /// unsupported by its kind, gives it as the root of the later failure. Its corner made
+    /// no classification, so nothing is kept under it and the chain is as before.
+    #[test]
+    fn the_missing_corner_is_the_root_a_classification_error_goes_under() {
+        let (result, error) = pyramid_apex();
+        let e = result.unwrap_err();
+        assert!(finish::is_missing_corner(e.root_cause()), "{e:?}");
+        assert_eq!(error.code, FilletErrorType::CornerUnsupported as i32);
+        assert_eq!(error.unsupported_corner_cause(), None);
+    }
 
     #[test]
     fn a_no_room_refusal_after_an_unsupported_corner_names_no_stale_site() {

@@ -221,7 +221,7 @@ pub(super) fn paste(
     params: &Value,
 ) -> Result<Value> {
     let (scratch, out) = build(s, &Source::of(s), component, source_occurrence, transform, parent, None, params)?;
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     Ok(out)
 }
 
