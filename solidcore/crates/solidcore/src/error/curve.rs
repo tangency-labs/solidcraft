@@ -224,6 +224,103 @@ pub enum CurveFailure {
         /// The tolerance given.
         tolerance: f64,
     },
+    /// The offset direction given for a curve, `direction`, is not 1 (left), 2 (right)
+    /// or 3 (both sides). [`ErrorKind::InvalidInput`].
+    OffsetDirectionUnknown {
+        /// The direction given.
+        direction: u64,
+    },
+    /// No curve gave an offset: there were no segments, or every segment's offset was
+    /// degenerate and dropped. [`ErrorKind::Degenerate`].
+    NoOffsetCurve,
+    /// The curve has no span of non-zero length to build its cache or Bezier spans
+    /// from (none within the cache's interval, or its NURB has none).
+    /// [`ErrorKind::Degenerate`].
+    NoSpans,
+    /// The curve, or the knot list given, has `knots` knots, fewer than the two a span
+    /// needs: there is nothing to span, so it is degenerate, whoever gave the list (a
+    /// control polygon too short to measure is a malformed span instead,
+    /// [`CurveFailure::ControlPolygonTooShort`]). [`ErrorKind::Degenerate`].
+    TooFewKnots {
+        /// The knots there are.
+        knots: usize,
+    },
+    /// The span given to the span measure is not a B-spline curve.
+    /// [`ErrorKind::InvalidInput`].
+    SpanNotBSpline,
+    /// The span given to the span measure has `points` control points, fewer than the
+    /// two its base line needs. [`ErrorKind::InvalidInput`].
+    ControlPolygonTooShort {
+        /// The control points there are.
+        points: usize,
+    },
+    /// The angle `angle_deg` is outside the arc from `start_deg` to `end_deg` it is
+    /// converted in: the caller's angle (the conversion's own call passes an angle within
+    /// its table's span, so there it would mean a table whose angles do not increase).
+    /// [`ErrorKind::InvalidInput`].
+    AngleOutsideArc {
+        /// The angle given, in degrees.
+        angle_deg: f64,
+        /// The arc's start angle, in degrees.
+        start_deg: f64,
+        /// The arc's end angle, in degrees.
+        end_deg: f64,
+    },
+    /// The span's quadratic for the angle `angle_deg` has no root in `[0, 1]`: rounding at a
+    /// span of 180 degrees or more (its discriminant is a square, never negative exactly),
+    /// or a span whose end angles are not those of one rational quadratic arc in standard
+    /// form. [`ErrorKind::Failed`].
+    AngleHasNoNurbParameter {
+        /// The angle, in degrees.
+        angle_deg: f64,
+    },
+    /// The fast point drop does not take this curve or this solve (the callers then run
+    /// the general point solver). [`ErrorKind::Unsupported`].
+    FastDropUnavailable {
+        /// What the fast drop lacks.
+        reason: FastDropBlock,
+    },
+    /// The uniform scale asked for, `scale`, is within the kernel's zero: a curve scaled to
+    /// nothing has no shape. [`ErrorKind::InvalidInput`].
+    ZeroScale {
+        /// The scale asked for.
+        scale: f64,
+    },
+    /// The ellipse's placement, scaled, could not be set (the placement's error is the
+    /// cause). [`ErrorKind::Failed`]; whether it is a defect is its cause's.
+    PlacementNotSet,
+    /// The ellipse's NURB could not be transformed (the transform's error is the cause).
+    /// [`ErrorKind::Failed`]; whether it is a defect is its cause's.
+    NurbNotTransformed,
+    /// The ellipse has no NURB to set up its polar conversion from: an empty ellipse, or one
+    /// whose NURB build failed (the constructors ignore that status). [`ErrorKind::Degenerate`].
+    EllipseWithoutNurb,
+    /// The ellipse's NURB does not start and end in knots of full multiplicity (3), so
+    /// its spans do not start at its ends and the polar conversion does not apply.
+    /// [`ErrorKind::Unsupported`].
+    EndKnotsNotClamped,
+}
+
+/// What the fast point drop ([`CurveFailure::FastDropUnavailable`]) lacks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FastDropBlock {
+    /// The ellipse's polar conversion is not set up.
+    NoPolarConversion,
+    /// The ellipse is not a circle.
+    NotACircle,
+    /// The solve is neither a minimisation nor an intersection.
+    Operation,
+}
+
+impl core::fmt::Display for FastDropBlock {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::NoPolarConversion => "the ellipse's polar conversion is not set up",
+            Self::NotACircle => "the ellipse is not a circle",
+            Self::Operation => "the solve is neither a minimisation nor an intersection",
+        })
+    }
 }
 
 /// An edit of a curve that [`CurveFailure::BaseCurveNotOwned`] refuses.
@@ -299,7 +396,21 @@ impl CurveFailure {
             | Self::ProjectionVectorZero
             | Self::AuxiliaryVectorZero
             | Self::StartsApart { .. }
-            | Self::EndsApart { .. } => SM_ERR,
+            | Self::EndsApart { .. }
+            | Self::OffsetDirectionUnknown { .. }
+            | Self::NoOffsetCurve
+            | Self::NoSpans
+            | Self::TooFewKnots { .. }
+            | Self::SpanNotBSpline
+            | Self::ControlPolygonTooShort { .. }
+            | Self::AngleOutsideArc { .. }
+            | Self::AngleHasNoNurbParameter { .. }
+            | Self::FastDropUnavailable { .. }
+            | Self::ZeroScale { .. }
+            | Self::PlacementNotSet
+            | Self::NurbNotTransformed
+            | Self::EllipseWithoutNurb
+            | Self::EndKnotsNotClamped => SM_ERR,
             Self::Missing(_) | Self::PointSolveOptionMissing { .. } => SM_ERR_NULL_POINTER,
             Self::ZeroDirection(_) | Self::AuxiliaryAlongProjection => SM_ERR_INVALID_INPUT,
         }
@@ -314,8 +425,10 @@ impl CurveFailure {
     /// [`ErrorKind::PortInvariant`] for a piece outside its span, a port invariant broken;
     /// [`ErrorKind::InvalidInput`] for a check of the caller's argument or curve,
     /// [`ErrorKind::Unsupported`] for what the routine does not do,
-    /// [`ErrorKind::Degenerate`] for an arc too flat for its form and
-    /// [`ErrorKind::NotWithinTolerance`] for curves whose ends lie apart.
+    /// [`ErrorKind::Degenerate`] for a curve, arc or offset with no extent to work on,
+    /// [`ErrorKind::NotWithinTolerance`] for curves whose ends lie apart, and
+    /// [`ErrorKind::Failed`] for a step whose error is the cause or a conversion with no
+    /// root.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
@@ -335,11 +448,25 @@ impl CurveFailure {
             | Self::ContinuityUndefined { .. }
             | Self::ProjectionVectorZero
             | Self::AuxiliaryVectorZero
-            | Self::AuxiliaryAlongProjection => ErrorKind::InvalidInput,
+            | Self::AuxiliaryAlongProjection
+            | Self::OffsetDirectionUnknown { .. }
+            | Self::SpanNotBSpline
+            | Self::ControlPolygonTooShort { .. }
+            | Self::AngleOutsideArc { .. }
+            | Self::ZeroScale { .. } => ErrorKind::InvalidInput,
             Self::NonUniformScale { .. }
             | Self::NoEvaluationOfItsOwn
-            | Self::CornerByCurveExtension => ErrorKind::Unsupported,
-            Self::MidTangentOffChord { .. } => ErrorKind::Degenerate,
+            | Self::CornerByCurveExtension
+            | Self::FastDropUnavailable { .. }
+            | Self::EndKnotsNotClamped => ErrorKind::Unsupported,
+            Self::MidTangentOffChord { .. }
+            | Self::NoOffsetCurve
+            | Self::NoSpans
+            | Self::TooFewKnots { .. }
+            | Self::EllipseWithoutNurb => ErrorKind::Degenerate,
+            Self::AngleHasNoNurbParameter { .. }
+            | Self::PlacementNotSet
+            | Self::NurbNotTransformed => ErrorKind::Failed,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::ZeroDirection(_)
@@ -388,7 +515,21 @@ impl CurveFailure {
             | Self::AuxiliaryVectorZero
             | Self::AuxiliaryAlongProjection
             | Self::StartsApart { .. }
-            | Self::EndsApart { .. } => true,
+            | Self::EndsApart { .. }
+            | Self::OffsetDirectionUnknown { .. }
+            | Self::NoOffsetCurve
+            | Self::NoSpans
+            | Self::TooFewKnots { .. }
+            | Self::SpanNotBSpline
+            | Self::ControlPolygonTooShort { .. }
+            | Self::AngleOutsideArc { .. }
+            | Self::AngleHasNoNurbParameter { .. }
+            | Self::FastDropUnavailable { .. }
+            | Self::ZeroScale { .. }
+            | Self::PlacementNotSet
+            | Self::NurbNotTransformed
+            | Self::EllipseWithoutNurb
+            | Self::EndKnotsNotClamped => true,
         }
     }
 }
@@ -498,6 +639,45 @@ impl core::fmt::Display for CurveFailure {
                 f,
                 "the end curve's mated point lies {gap:e} from the base curve's end, more than the tolerance {tolerance:e}"
             ),
+            Self::OffsetDirectionUnknown { direction } => {
+                write!(f, "the offset direction {direction} is not 1, 2 or 3")
+            }
+            Self::NoOffsetCurve => f.write_str(
+                "no curve gave an offset: there were no segments, or every offset was degenerate",
+            ),
+            Self::NoSpans => f.write_str("the curve has no span of non-zero length"),
+            Self::TooFewKnots { knots } => {
+                write!(f, "there are {knots} knots, fewer than the two a span needs")
+            }
+            Self::SpanNotBSpline => f.write_str("the span is not a B-spline curve"),
+            Self::ControlPolygonTooShort { points } => write!(
+                f,
+                "the span's control polygon has {points} points, fewer than two"
+            ),
+            Self::AngleOutsideArc {
+                angle_deg,
+                start_deg,
+                end_deg,
+            } => write!(
+                f,
+                "the angle {angle_deg} degrees is outside the arc from {start_deg} to {end_deg} degrees"
+            ),
+            Self::AngleHasNoNurbParameter { angle_deg } => write!(
+                f,
+                "the span's quadratic has no root in [0, 1] for the angle {angle_deg} degrees"
+            ),
+            Self::FastDropUnavailable { reason } => {
+                write!(f, "the fast point drop does not apply: {reason}")
+            }
+            Self::ZeroScale { scale } => write!(f, "the scale {scale:e} is within zero"),
+            Self::PlacementNotSet => f.write_str("the ellipse's scaled placement could not be set"),
+            Self::NurbNotTransformed => f.write_str("the ellipse's NURB could not be transformed"),
+            Self::EllipseWithoutNurb => {
+                f.write_str("the ellipse has no NURB to set up its polar conversion from")
+            }
+            Self::EndKnotsNotClamped => {
+                f.write_str("the ellipse's NURB does not end in knots of full multiplicity")
+            }
         }
     }
 }
@@ -796,6 +976,66 @@ mod tests {
                 SM_ERR,
                 ErrorKind::NotWithinTolerance,
             ),
+            (
+                CurveFailure::OffsetDirectionUnknown { direction: 4 },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (CurveFailure::NoOffsetCurve, SM_ERR, ErrorKind::Degenerate),
+            (CurveFailure::NoSpans, SM_ERR, ErrorKind::Degenerate),
+            (
+                CurveFailure::TooFewKnots { knots: 1 },
+                SM_ERR,
+                ErrorKind::Degenerate,
+            ),
+            (
+                CurveFailure::SpanNotBSpline,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::ControlPolygonTooShort { points: 1 },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::AngleOutsideArc {
+                    angle_deg: 100.0,
+                    start_deg: 0.0,
+                    end_deg: 90.0,
+                },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::AngleHasNoNurbParameter { angle_deg: 45.0 },
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                CurveFailure::FastDropUnavailable {
+                    reason: FastDropBlock::NotACircle,
+                },
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+            (
+                CurveFailure::ZeroScale { scale: 0.0 },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (CurveFailure::PlacementNotSet, SM_ERR, ErrorKind::Failed),
+            (CurveFailure::NurbNotTransformed, SM_ERR, ErrorKind::Failed),
+            (
+                CurveFailure::EllipseWithoutNurb,
+                SM_ERR,
+                ErrorKind::Degenerate,
+            ),
+            (
+                CurveFailure::EndKnotsNotClamped,
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
         ];
         for (cause, status, kind) in cases {
             let e = SolidError::curve("curve::op", cause);
@@ -855,8 +1095,6 @@ mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/curve/composite_curve/p2.rs", 2),
-            ("solidcore/src/curve/crv_on_surf.rs", 2),
             ("solidcore/src/curve/curve/p1.rs", 13),
             ("solidcore/src/curve/curve/p2.rs", 9),
             ("solidcore/src/curve/curve/p3.rs", 1),
@@ -865,8 +1103,6 @@ mod tests {
             ("solidcore/src/curve/curve/p6.rs", 2),
             ("solidcore/src/curve/curve/p8.rs", 8),
             ("solidcore/src/curve/curve/p9.rs", 5),
-            ("solidcore/src/curve/curve_cache.rs", 7),
-            ("solidcore/src/curve/ellipse/p2.rs", 15),
             ("solidcore/src/curve/line.rs", 4),
             ("solidcore/src/curve/offset_curve.rs", 8),
         ];
