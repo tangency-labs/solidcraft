@@ -44,6 +44,7 @@
 //! | [`BlendFailure::ArcLengthNotConverged`] | [`ErrorKind::NotConverged`] (4) |
 //! | [`BlendFailure::OverflowPointDoesNotDrop`], [`BlendFailure::NoBlendedEdgeNearExtension`] | [`ErrorKind::NotFound`] (2) |
 //! | [`BlendFailure::WeldNotBuilt`]         | [`ErrorKind::Unsupported`] (5): neither defect nor refusal |
+//! | [`BlendFailure::Trace`]               | the cause's ([`TraceFailure::class`])         |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -61,6 +62,7 @@
 //! | [`BlendFailure::InvalidValue`], the fillet executive's other checks of the caller's arguments | `SM_ERR_INVALID_INPUT` |
 //! | [`BlendFailure::CrossingNotFinite`]    | `SM_ERR`                          |
 //! | [`BlendFailure::CrossingInputMissing`] | `SM_ERR_NULL_POINTER` |
+//! | [`BlendFailure::Trace`]               | the cause's, as each [`TraceFailure`] variant says |
 //! | [`BlendFailure::Inconsistent`]         | `SM_ERR_ASSERT_FAILURE`           |
 //! | [`BlendFailure::BadIntersections`]     | `SM_ERR_BAD_INTERSECTIONS`        |
 //! | [`BlendFailure::NotConverged`]         | `SM_ERR_NOT_CONVERGING`           |
@@ -101,6 +103,9 @@ use super::{
 };
 use crate::blend::fillet_exact::BlendSpine;
 use crate::blend::fillet_executive::NoRoomReason;
+
+pub mod trace;
+pub use trace::TraceFailure;
 
 /// The phrase causes, by variant name: the one list [`BlendFailure::is_phrase`] and the
 /// phrase-site scan's test (`phrase_sites::BLEND`) read. It only shrinks, as sites move to
@@ -489,6 +494,10 @@ pub enum BlendFailure {
         /// The parameter where the iteration stopped.
         stopped_at: f64,
     },
+    /// The fillet trace failed, for the reason the [`TraceFailure`] names: the standard and
+    /// custom fillet solvers, the fillet intersector and the law corners. Its class and
+    /// status are the cause's ([`TraceFailure::class`]).
+    Trace(TraceFailure),
     /// A face or edge a blend's overflow reads lacks the input named (a face's surface, an
     /// edge's curve or one of its vertices). The overflows' helpers, which the trims at
     /// creases and the kept features share, read the caller's body and the sheet the
@@ -670,193 +679,6 @@ pub enum BlendFailure {
     /// the gap named: not a fact of the geometry and not a defect, so no size is named. Its
     /// class is [`ErrorKind::Unsupported`]. Not upstream.
     WeldNotBuilt(WeldGap),
-}
-
-/// What the exact round at a radius law's corner looked for and did not find
-/// ([`BlendFailure::LawCornerNotFound`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum LawCornerSearch {
-    /// The edge the faces on either side of the corner share.
-    SharedEdge,
-    /// The edge of a side's face between the corner's rail points.
-    CornerEdge,
-    /// The curve where the sides of a peak cross, from rail point to rail point.
-    Crossing,
-    /// A side's corner curve, oriented from its edge's start vertex to its end vertex.
-    CurveBetweenEnds,
-}
-
-impl LawCornerSearch {
-    const fn what(self) -> &'static str {
-        match self {
-            Self::SharedEdge => "edge shared by the faces on either side",
-            Self::CornerEdge => "edge between the rail points on a side's face",
-            Self::Crossing => "crossing of the sides between the rail points",
-            Self::CurveBetweenEnds => "corner curve between its edge's end vertices",
-        }
-    }
-}
-
-/// Which input of a rail crossing's judgement is missing ([`BlendFailure::CrossingInputMissing`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum CrossingInput {
-    /// The tangency budget of the round a sheet face belongs to.
-    SheetFaceTangencyBudget,
-    /// The radial edge use of the edge use that bounds material.
-    MaterialEdgeUseRadial,
-    /// The curve of the side edge a rail crosses.
-    SideEdgeCurve,
-    /// The place on the side edge where the rail crosses it.
-    CrossingOnSideEdge,
-}
-
-impl CrossingInput {
-    /// What is missing, as a phrase ("the side edge's curve").
-    #[must_use]
-    pub const fn what(self) -> &'static str {
-        match self {
-            Self::SheetFaceTangencyBudget => "the sheet face's tangency budget",
-            Self::MaterialEdgeUseRadial => "the material edge use's radial",
-            Self::SideEdgeCurve => "the side edge's curve",
-            Self::CrossingOnSideEdge => "the rollover event on the side edge",
-        }
-    }
-}
-
-/// What a G^n section's certificate could not prove ([`BlendFailure::SectionNotProved`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum SectionProof {
-    /// A face's weights positive over a box.
-    FaceWeightPositive,
-    /// A curve's weight positive over a span.
-    CurveWeightPositive,
-    /// The section's weight positive over an extension.
-    SectionWeightPositive,
-    /// The ball's radius positive over a box.
-    RadiusPositive,
-    /// The definition's enclosure over a box.
-    Enclosure,
-    /// A bound or a box the certificate computes finite.
-    BoundFinite,
-}
-
-impl SectionProof {
-    /// What was not proved, as a phrase.
-    #[must_use]
-    pub const fn what(self) -> &'static str {
-        match self {
-            Self::FaceWeightPositive => "a face's weights positive over the box",
-            Self::CurveWeightPositive => "the curve's weight positive over the span",
-            Self::SectionWeightPositive => "the section's weight positive over the extension",
-            Self::RadiusPositive => "the ball's radius positive over the box",
-            Self::Enclosure => "the definition's enclosure over the box",
-            Self::BoundFinite => "a bound of the certificate finite",
-        }
-    }
-}
-
-/// How a G^n section degenerates ([`BlendFailure::SectionDegenerate`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum SectionDegeneracy {
-    /// The section's area does not fall as its thumbweight grows, so no thumbweight is the
-    /// equal area one.
-    AreaDoesNotFall,
-    /// A weight or a length of the section is zero at the point.
-    WeightOrLengthZero,
-    /// A section of the ball's circle is a half turn or more.
-    ArcHalfTurn,
-    /// The varying balls' centres stand still.
-    CentresStandStill,
-    /// A vector the section normalises vanishes (a face's normal at a foot, the leader's
-    /// tangent).
-    VectorVanishes,
-    /// The blend's system is singular at a station: its faces' normals agree there.
-    NormalsAgree,
-    /// The rails, or the round's stations, have no length.
-    NoLength,
-    /// The ball has no radius at the rails' start.
-    BallHasNoRadius,
-    /// A span to be halved has no parameter strictly inside it.
-    SpanCannotSplit,
-    /// The parameter interval lies in no span of the curve (a curve whose knots are all
-    /// one value).
-    NoSpanCoversInterval,
-}
-
-impl SectionDegeneracy {
-    /// How it degenerates, as a phrase.
-    #[must_use]
-    pub const fn what(self) -> &'static str {
-        match self {
-            Self::AreaDoesNotFall => "the section's area does not fall with its thumbweight",
-            Self::WeightOrLengthZero => "a weight or a length of the section is zero",
-            Self::ArcHalfTurn => "a section of the ball's circle is a half turn or more",
-            Self::CentresStandStill => "the balls' centres stand still",
-            Self::VectorVanishes => {
-                "a vector the section normalises vanishes (a face's normal at a foot, or the leader's tangent)"
-            }
-            Self::NormalsAgree => {
-                "the blend's system is singular at a station (its faces' normals agree there)"
-            }
-            Self::NoLength => "the rails or the round's stations have no length",
-            Self::BallHasNoRadius => "the ball has no radius at the rails' start",
-            Self::SpanCannotSplit => "a span has no midpoint inside it to be split at",
-            Self::NoSpanCoversInterval => "no span of the curve covers the parameter",
-        }
-    }
-}
-
-/// What a G^n section does not handle ([`BlendFailure::SectionUnsupported`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum SectionLimit {
-    /// A face that is not a NURBS surface: its section of order 2 and up, and its
-    /// certificate, need one.
-    FaceNotNurbs,
-    /// A curve or face of degree 0 in a direction.
-    DegreeBelowOne,
-    /// A face's weight that is not positive.
-    FaceWeightNotPositive,
-    /// A curve's weight that is not positive.
-    CurveWeightNotPositive,
-    /// A face that is a blend by its definition, enclosed only for a round of one radius on
-    /// a round of one radius between NURBS faces.
-    DefinitionFaceNotOneRadius,
-    /// A derivative order past the most the series hold.
-    OrderPastSeries {
-        /// The order asked.
-        order: usize,
-        /// The most the series hold.
-        most: usize,
-    },
-}
-
-/// Which inputs of a G^n section do not fit together ([`BlendFailure::SectionInputInvalid`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum SectionInput {
-    /// The round's range is not within its stations.
-    RangeOutsideStations,
-    /// The rails and the centre line run over different intervals.
-    IntervalsDiffer,
-    /// The span asked for starts at or past the definition's last station.
-    SpanPastLastStation,
-}
-
-impl SectionInput {
-    /// What does not fit, as a phrase.
-    #[must_use]
-    pub const fn what(self) -> &'static str {
-        match self {
-            Self::RangeOutsideStations => "the round's range is not within its stations",
-            Self::IntervalsDiffer => "the rails and the centre line run over different intervals",
-            Self::SpanPastLastStation => "the span asked for is past the definition's last station",
-        }
-    }
 }
 
 /// A shape of the edges at a filleted vertex that the fillet corner topology
@@ -1406,6 +1228,193 @@ impl core::fmt::Display for SolverFailure {
     }
 }
 
+/// What the exact round at a radius law's corner looked for and did not find
+/// ([`BlendFailure::LawCornerNotFound`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LawCornerSearch {
+    /// The edge the faces on either side of the corner share.
+    SharedEdge,
+    /// The edge of a side's face between the corner's rail points.
+    CornerEdge,
+    /// The curve where the sides of a peak cross, from rail point to rail point.
+    Crossing,
+    /// A side's corner curve, oriented from its edge's start vertex to its end vertex.
+    CurveBetweenEnds,
+}
+
+impl LawCornerSearch {
+    const fn what(self) -> &'static str {
+        match self {
+            Self::SharedEdge => "edge shared by the faces on either side",
+            Self::CornerEdge => "edge between the rail points on a side's face",
+            Self::Crossing => "crossing of the sides between the rail points",
+            Self::CurveBetweenEnds => "corner curve between its edge's end vertices",
+        }
+    }
+}
+
+/// Which input of a rail crossing's judgement is missing ([`BlendFailure::CrossingInputMissing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CrossingInput {
+    /// The tangency budget of the round a sheet face belongs to.
+    SheetFaceTangencyBudget,
+    /// The radial edge use of the edge use that bounds material.
+    MaterialEdgeUseRadial,
+    /// The curve of the side edge a rail crosses.
+    SideEdgeCurve,
+    /// The place on the side edge where the rail crosses it.
+    CrossingOnSideEdge,
+}
+
+impl CrossingInput {
+    /// What is missing, as a phrase ("the side edge's curve").
+    #[must_use]
+    pub const fn what(self) -> &'static str {
+        match self {
+            Self::SheetFaceTangencyBudget => "the sheet face's tangency budget",
+            Self::MaterialEdgeUseRadial => "the material edge use's radial",
+            Self::SideEdgeCurve => "the side edge's curve",
+            Self::CrossingOnSideEdge => "the rollover event on the side edge",
+        }
+    }
+}
+
+/// What a G^n section's certificate could not prove ([`BlendFailure::SectionNotProved`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SectionProof {
+    /// A face's weights positive over a box.
+    FaceWeightPositive,
+    /// A curve's weight positive over a span.
+    CurveWeightPositive,
+    /// The section's weight positive over an extension.
+    SectionWeightPositive,
+    /// The ball's radius positive over a box.
+    RadiusPositive,
+    /// The definition's enclosure over a box.
+    Enclosure,
+    /// A bound or a box the certificate computes finite.
+    BoundFinite,
+}
+
+impl SectionProof {
+    /// What was not proved, as a phrase.
+    #[must_use]
+    pub const fn what(self) -> &'static str {
+        match self {
+            Self::FaceWeightPositive => "a face's weights positive over the box",
+            Self::CurveWeightPositive => "the curve's weight positive over the span",
+            Self::SectionWeightPositive => "the section's weight positive over the extension",
+            Self::RadiusPositive => "the ball's radius positive over the box",
+            Self::Enclosure => "the definition's enclosure over the box",
+            Self::BoundFinite => "a bound of the certificate finite",
+        }
+    }
+}
+
+/// How a G^n section degenerates ([`BlendFailure::SectionDegenerate`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SectionDegeneracy {
+    /// The section's area does not fall as its thumbweight grows, so no thumbweight is the
+    /// equal area one.
+    AreaDoesNotFall,
+    /// A weight or a length of the section is zero at the point.
+    WeightOrLengthZero,
+    /// A section of the ball's circle is a half turn or more.
+    ArcHalfTurn,
+    /// The varying balls' centres stand still.
+    CentresStandStill,
+    /// A vector the section normalises vanishes (a face's normal at a foot, the leader's
+    /// tangent).
+    VectorVanishes,
+    /// The blend's system is singular at a station: its faces' normals agree there.
+    NormalsAgree,
+    /// The rails, or the round's stations, have no length.
+    NoLength,
+    /// The ball has no radius at the rails' start.
+    BallHasNoRadius,
+    /// A span to be halved has no parameter strictly inside it.
+    SpanCannotSplit,
+    /// The parameter interval lies in no span of the curve (a curve whose knots are all
+    /// one value).
+    NoSpanCoversInterval,
+}
+
+impl SectionDegeneracy {
+    /// How it degenerates, as a phrase.
+    #[must_use]
+    pub const fn what(self) -> &'static str {
+        match self {
+            Self::AreaDoesNotFall => "the section's area does not fall with its thumbweight",
+            Self::WeightOrLengthZero => "a weight or a length of the section is zero",
+            Self::ArcHalfTurn => "a section of the ball's circle is a half turn or more",
+            Self::CentresStandStill => "the balls' centres stand still",
+            Self::VectorVanishes => {
+                "a vector the section normalises vanishes (a face's normal at a foot, or the leader's tangent)"
+            }
+            Self::NormalsAgree => {
+                "the blend's system is singular at a station (its faces' normals agree there)"
+            }
+            Self::NoLength => "the rails or the round's stations have no length",
+            Self::BallHasNoRadius => "the ball has no radius at the rails' start",
+            Self::SpanCannotSplit => "a span has no midpoint inside it to be split at",
+            Self::NoSpanCoversInterval => "no span of the curve covers the parameter",
+        }
+    }
+}
+
+/// What a G^n section does not handle ([`BlendFailure::SectionUnsupported`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SectionLimit {
+    /// A face that is not a NURBS surface: its section of order 2 and up, and its
+    /// certificate, need one.
+    FaceNotNurbs,
+    /// A curve or face of degree 0 in a direction.
+    DegreeBelowOne,
+    /// A face's weight that is not positive.
+    FaceWeightNotPositive,
+    /// A curve's weight that is not positive.
+    CurveWeightNotPositive,
+    /// A face that is a blend by its definition, enclosed only for a round of one radius on
+    /// a round of one radius between NURBS faces.
+    DefinitionFaceNotOneRadius,
+    /// A derivative order past the most the series hold.
+    OrderPastSeries {
+        /// The order asked.
+        order: usize,
+        /// The most the series hold.
+        most: usize,
+    },
+}
+
+/// Which inputs of a G^n section do not fit together ([`BlendFailure::SectionInputInvalid`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SectionInput {
+    /// The round's range is not within its stations.
+    RangeOutsideStations,
+    /// The rails and the centre line run over different intervals.
+    IntervalsDiffer,
+    /// The span asked for starts at or past the definition's last station.
+    SpanPastLastStation,
+}
+
+impl SectionInput {
+    /// What does not fit, as a phrase.
+    #[must_use]
+    pub const fn what(self) -> &'static str {
+        match self {
+            Self::RangeOutsideStations => "the round's range is not within its stations",
+            Self::IntervalsDiffer => "the rails and the centre line run over different intervals",
+            Self::SpanPastLastStation => "the span asked for is past the definition's last station",
+        }
+    }
+}
+
 /// A face input required to trim a blend at a cliff.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -1940,6 +1949,7 @@ impl BlendFailure {
             | Self::ExtensionEndOnTwoSideLines
             | Self::NoBlendedEdgeNearExtension
             | Self::Failed(_) => SM_ERR,
+            Self::Trace(t) => t.comparison_status(),
             Self::Missing(_)
             | Self::BandInputMissing(_)
             | Self::CliffInputMissing { .. }
@@ -2006,6 +2016,7 @@ impl BlendFailure {
     pub const fn class(&self) -> ErrorKind {
         match self {
             Self::NoRoom(reason) => no_room_class(*reason),
+            Self::Trace(t) => t.class(),
             Self::RemovalRefused(reason) => removal_class(*reason),
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TrimLoopOpen | Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
@@ -2161,6 +2172,7 @@ impl BlendFailure {
             | Self::EaseNotBuilt(_)
             | Self::EaseGeometryNotBSpline(_)
             | Self::ArcLengthNotConverged { .. }
+            | Self::Trace(_)
             | Self::OverflowInputMissing(_)
             | Self::OverflowPointDoesNotDrop(_)
             | Self::ExtensionEndOnTwoSideLines
@@ -2462,6 +2474,7 @@ impl core::fmt::Display for BlendFailure {
                 "{}: the search for the parameter {length} along the curve from {start} stopped at {stopped_at}",
                 self.class()
             ),
+            Self::Trace(t) => write!(f, "{}: {t}", t.class()),
             Self::OverflowInputMissing(input) => write!(f, "{}: {}", self.class(), input.what()),
             Self::OverflowPointDoesNotDrop(drop) => {
                 write!(f, "{}: {}", self.class(), drop.what())
