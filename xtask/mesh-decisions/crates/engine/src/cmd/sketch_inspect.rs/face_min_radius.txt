@@ -1,0 +1,1 @@
+measures a face's least radius from mesh normals

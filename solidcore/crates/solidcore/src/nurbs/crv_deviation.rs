@@ -41,6 +41,7 @@
 //! Deviations: none (no upstream counterpart). Non-rational 3D curves only, of degree 1 to
 //! [`MAX_DEGREE`]; their knot vectors clamped, on one domain for [`certified_distance`].
 
+use crate::error::query::QueryFailure;
 use crate::error::{Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::crv_basic::Curve;
@@ -59,8 +60,8 @@ const OP_FIT: &str = "nurbs::crv_deviation::interpolation_bound";
 ///
 /// `InvalidInput` for a rational or 2D curve, a parameter count other than the points', or a
 /// number not finite;
-/// a query failure when the bound is not finite; those of the evaluation (a parameter
-/// outside the knots).
+/// [`QueryFailure::BoundOverflows`] when the bound overflows the floating range; those of the
+/// evaluation (a parameter outside the knots).
 pub fn interpolation_bound(c: &Curve, params: &[f64], points: &[Vec3]) -> Result<f64> {
     if c.cpts().iter().any(|p| p.w != NOW || p.z == NOZ) {
         return Err(SolidError::invalid_input(OP_FIT, "a rational or 2D curve"));
@@ -95,15 +96,15 @@ pub fn interpolation_bound(c: &Curve, params: &[f64], points: &[Vec3]) -> Result
             .derivs(u, Side::Left, 0)?
             .first()
             .copied()
-            .ok_or_else(|| SolidError::query_failed(OP_FIT, "no point evaluated"))?;
+            .ok_or_else(|| SolidError::query(OP_FIT, QueryFailure::Defect { why: "the curve's evaluation of order 0 returned no point, though an evaluation that succeeds returns the point it is asked for" }))?;
         let d = norm_up(p.x - q.x, p.y - q.y, p.z - q.z)
-            .ok_or_else(|| SolidError::query_failed(OP_FIT, "the bound is not finite"))?;
+            .ok_or_else(|| SolidError::query(OP_FIT, QueryFailure::BoundOverflows))?;
         largest = largest.max(d);
     }
     let eval_err = gamma(c.degree().saturating_mul(12).saturating_add(4)) * size;
     let bound = (largest + 2.0 * eval_err) * (1.0 + gamma(2));
     if !bound.is_finite() {
-        return Err(SolidError::query_failed(OP_FIT, "the bound is not finite"));
+        return Err(SolidError::query(OP_FIT, QueryFailure::BoundOverflows));
     }
     Ok(bound)
 }
@@ -117,8 +118,8 @@ pub fn interpolation_bound(c: &Curve, params: &[f64], points: &[Vec3]) -> Result
 /// # Errors
 ///
 /// `InvalidInput` for a rational or 2D curve, a number not finite, knots not clamped, or two
-/// curves on different domains; a query failure when their pieces do not share their spans or the bound is not
-/// finite; those of the refinement, the extraction and the elevation.
+/// curves on different domains; [`QueryFailure::BoundOverflows`] when the bound overflows the
+/// floating range; those of the refinement, the extraction and the elevation.
 pub fn certified_distance(a: &Curve, b: &Curve) -> Result<f64> {
     check(a, OP)?;
     check(b, OP)?;
@@ -139,7 +140,7 @@ pub fn certified_distance(a: &Curve, b: &Curve) -> Result<f64> {
     let largest = largest_gap(&pa, &pb, OP)?;
     let bound = (largest + 2.0 * (ea + eb)) * (1.0 + gamma(2));
     if !bound.is_finite() {
-        return Err(SolidError::query_failed(OP, "the bound is not finite"));
+        return Err(SolidError::query(OP, QueryFailure::BoundOverflows));
     }
     Ok(bound)
 }
@@ -209,10 +210,7 @@ pub fn certified_hausdorff(a: &Curve, ia: [f64; 2], b: &Curve, ib: [f64; 2]) -> 
     };
     let (ca, cb) = (over(&pa, c0, c1), over(&pb, c0, c1));
     if ca.is_empty() {
-        return Err(SolidError::query_failed(
-            OP_HAUSDORFF,
-            "the curves' pieces do not share their spans",
-        ));
+        return Err(SolidError::query(OP_HAUSDORFF, QueryFailure::Defect { why: "every interval end is a breakpoint of both curves' pieces and the intervals overlap past a point, so a piece lies in their common interval" }));
     }
     let largest = largest_gap(&ca, &cb, OP_HAUSDORFF)?;
     // the largest distance of a piece past the common interval from the curve's point there,
@@ -221,10 +219,7 @@ pub fn certified_hausdorff(a: &Curve, ia: [f64; 2], b: &Curve, ib: [f64; 2]) -> 
         let first = common.first().and_then(|x| x.cpts().first());
         let last = common.last().and_then(|x| x.cpts().last());
         let (Some(&at_c0), Some(&at_c1)) = (first, last) else {
-            return Err(SolidError::query_failed(
-                OP_HAUSDORFF,
-                "a piece without points",
-            ));
+            return Err(SolidError::query(OP_HAUSDORFF, QueryFailure::Defect { why: "the common pieces were checked to pair up, and a Bézier piece of degree 1 or more has at least two control points" }));
         };
         let mut s = None;
         for (lo, hi, end) in [(lo, c0, at_c0), (c1, hi, at_c1)] {
@@ -232,9 +227,8 @@ pub fn certified_hausdorff(a: &Curve, ia: [f64; 2], b: &Curve, ib: [f64; 2]) -> 
                 continue;
             }
             for r in over(p, lo, hi).iter().flat_map(Curve::cpts) {
-                let d = norm_up(r.x - end.x, r.y - end.y, r.z - end.z).ok_or_else(|| {
-                    SolidError::query_failed(OP_HAUSDORFF, "the bound is not finite")
-                })?;
+                let d = norm_up(r.x - end.x, r.y - end.y, r.z - end.z)
+                    .ok_or_else(|| SolidError::query(OP_HAUSDORFF, QueryFailure::BoundOverflows))?;
                 s = Some(s.map_or(d, |m: f64| m.max(d)));
             }
         }
@@ -249,9 +243,9 @@ pub fn certified_hausdorff(a: &Curve, ia: [f64; 2], b: &Curve, ib: [f64; 2]) -> 
         }
     };
     if !bound.is_finite() {
-        return Err(SolidError::query_failed(
+        return Err(SolidError::query(
             OP_HAUSDORFF,
-            "the bound is not finite",
+            QueryFailure::BoundOverflows,
         ));
     }
     Ok(bound)
@@ -279,28 +273,19 @@ fn in_own_frame(a: &Curve, b: &Curve, op: &'static str) -> Result<(Curve, Curve)
 /// degree on the same spans (computed, each rounded up by `γ_8`).
 fn largest_gap(pa: &[Curve], pb: &[Curve], op: &'static str) -> Result<f64> {
     if pa.len() != pb.len() {
-        return Err(SolidError::query_failed(
-            op,
-            "the curves' pieces do not share their spans",
-        ));
+        return Err(SolidError::query(op, QueryFailure::Defect { why: "both curves are cut into Bézier pieces at the union of their breakpoints, so their pieces pair up span by span" }));
     }
     let mut largest = 0.0_f64;
     for (x, y) in pa.iter().zip(pb) {
         if x.knots().first() != y.knots().first() || x.knots().last() != y.knots().last() {
-            return Err(SolidError::query_failed(
-                op,
-                "the curves' pieces do not share their spans",
-            ));
+            return Err(SolidError::query(op, QueryFailure::Defect { why: "both curves are cut into Bézier pieces at the union of their breakpoints, so their pieces pair up span by span" }));
         }
         if x.cpts().len() != y.cpts().len() {
-            return Err(SolidError::query_failed(
-                op,
-                "the curves' pieces are not of one degree",
-            ));
+            return Err(SolidError::query(op, QueryFailure::Defect { why: "both curves' pieces are raised to the higher of the two degrees, so paired pieces have as many control points" }));
         }
         for (p, r) in x.cpts().iter().zip(y.cpts()) {
             let d = norm_up(p.x - r.x, p.y - r.y, p.z - r.z)
-                .ok_or_else(|| SolidError::query_failed(op, "the bound is not finite"))?;
+                .ok_or_else(|| SolidError::query(op, QueryFailure::BoundOverflows))?;
             largest = largest.max(d);
         }
     }
@@ -571,6 +556,27 @@ mod tests {
             interpolation_bound(&nan, &params, &on[..]),
             Err(SolidError::InvalidInput { .. })
         ));
+    }
+
+    /// Finite curves too far apart for the bound: each difference of control points is
+    /// finite, its length is not.
+    #[test]
+    fn curves_too_far_apart_for_the_bound_overflow_by_name() {
+        use crate::error::query::QueryFailure;
+        let a = spline(&[[8e307, 8e307, 0.0], [8e307, 8e307, 1.0]], 1);
+        let b = spline(&[[-8e307, -8e307, 0.0], [-8e307, -8e307, 1.0]], 1);
+        for e in [
+            certified_distance(&a, &b).unwrap_err(),
+            certified_hausdorff(&a, [0.0, 1.0], &b, [0.0, 1.0]).unwrap_err(),
+        ] {
+            assert_eq!(
+                e.query_failure(),
+                Some(&QueryFailure::BoundOverflows),
+                "{e}"
+            );
+            assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+            assert!(!e.is_defect());
+        }
     }
 
     #[test]

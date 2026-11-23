@@ -24,6 +24,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<CopyResult>)
         .params("features: [ids or names] (in timeline order on paste)"),
     CommandSpec::new("timeline.paste", "Paste Features", crate::checked!("timeline.paste", paste))
+        .begins_edit()
         .icon("paste")
         .contract(&PASTE_CONTRACT)
         .output(output_schema_for::<PasteResult>)

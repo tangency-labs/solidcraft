@@ -43,8 +43,15 @@ use crate::topology::{Brep, EdgeId, EdgeuseId, RegionId, VertexId, VertexuseId};
 
 const C: i64 = class::BREP;
 
-/// `SmBrep::AssertValid`.
-pub(super) fn brep(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, walk: bool) -> Result<bool> {
+/// `SmBrep::AssertValid`; without `pointers` its `ValidatePointers` is taken as succeeding
+/// with no report (see `check_brep_with_keys`).
+pub(super) fn brep(
+    k: &mut Kernel,
+    b: &mut Brep,
+    cx: &mut Cx<'_>,
+    walk: bool,
+    pointers: bool,
+) -> Result<bool> {
     let this = brep_object();
 
     // Init rtn value, and invoke higher-level checks.
@@ -56,8 +63,11 @@ pub(super) fn brep(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, walk: bool) ->
     }
 
     // Old style checks: ValidatePointers() and ValidateAndUpdateTolerances().
-    let (status, exclusion_failed) =
-        super::validate_pointers_excluding(k, b, cx.rep.array.as_deref_mut(), 0, walk, cx.keys)?;
+    let (status, exclusion_failed) = if pointers {
+        super::validate_pointers_excluding(k, b, cx.rep.array.as_deref_mut(), 0, walk, cx.keys)?
+    } else {
+        (super::SUCCESS, false)
+    };
     if status != super::SUCCESS {
         return Ok(false);
     }

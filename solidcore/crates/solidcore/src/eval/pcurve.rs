@@ -53,6 +53,23 @@ pub enum Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
+/// Whether a stored trim's control hull leaves a periodic direction's base range.
+/// This is a topology-edit request, not permission to clamp or discard a piece of a trim.
+/// A billionth of a period at the ends allows only parameter rounding.
+pub fn leaves_base_period(domain: Domain, trim: &Curve2) -> bool {
+    points(trim).iter().any(|p| {
+        p.iter()
+            .zip(domain.range)
+            .zip(domain.period)
+            .any(|((x, range), period)| match (range, period) {
+                (Some((lo, hi)), Some(period)) => {
+                    !x.is_finite() || *x < lo - 1e-9 * period || *x > hi + 1e-9 * period
+                }
+                _ => false,
+            })
+    })
+}
+
 impl From<EvalError> for Error {
     fn from(e: EvalError) -> Self {
         match e {

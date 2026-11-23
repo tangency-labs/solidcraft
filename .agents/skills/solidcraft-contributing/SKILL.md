@@ -238,7 +238,7 @@ with `main`. Explain progress and ask before publishing each update.
 
 ### Faster local builds
 
-Both are opt-in tools on your machine. The repository doesn't require them, and CI builds without them.
+sccache is an opt-in tool on your machine. The repository doesn't require it, and CI builds without it.
 
 - **sccache** shares compiled crates across worktrees and branches, so a new worktree or a rebase
   recompiles only what changed. Install it with `cargo install sccache --locked` or your system's
@@ -251,15 +251,10 @@ Both are opt-in tools on your machine. The repository doesn't require them, and 
     build), so those are rebuilt as usual and the gain is in everything else. The usual
     combination is sccache plus debug info off (`CARGO_PROFILE_DEV_DEBUG=0`,
     `CARGO_PROFILE_TEST_DEBUG=0`): smaller targets and faster links.
-- **blaze** (https://github.com/indexable-inc/blaze, MIT or Apache-2.0) is an incremental build
-  daemon that keeps the workspace compiled in memory. Edit-build-test loops get much faster,
-  especially tests.
-  - Install it from crates.io (`cargo install cargo-blaze --locked`) or with Nix, as its README
-    describes. Prefer either over piping an install script from the web.
-  - Use it in the loop: `blaze check`, `blaze test`, `blaze run`, with cargo's usual flags.
-  - It uses its own code generation, so `cargo xtask fast`, `cargo xtask ci` and CI stay the
-    final word before you push.
-  - The daemon holds the project in memory (a few GB). Run one per machine, not one per worktree.
+- **blaze** (https://github.com/indexable-inc/blaze) doesn't build this workspace yet, so don't
+  plan around it. As of blaze 0.20261027 it stops on thread-local statics in tests
+  (`unsupported: writable static`) and on `unsupported: vector in the C ABI` in the app, and it
+  builds with its own toolchain instead of the pinned rustc. Keep sccache as the speed-up.
 
 ## 6. Show the result
 

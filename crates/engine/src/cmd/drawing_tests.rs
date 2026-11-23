@@ -78,6 +78,37 @@ fn a_drawing_starts_from_a_template() {
     assert_eq!(tolerances(&made), json!(template::ASSEMBLY_NOTE));
 }
 
+/// A one-part STEP draws as a part (#19753), rounded or not; two parts, or one beside a body, as an assembly.
+#[test]
+fn an_opened_step_part_draws_from_the_part_template() {
+    let folder = Folder::new("drawing-step-part");
+    let step = folder.path("plate.step");
+    run(&mut design(), "file.export", json!({"path": step}));
+    let made = |s: &mut Session| {
+        let made = run(s, "drawing.create", json!({}));
+        run(s, "drawing.close", json!({}));
+        (made["sheets"][0]["size_mm"].clone(), tolerances(&made))
+    };
+    let part = (json!([420.0, 297.0]), json!(template::PART_NOTE));
+    let assembly = (json!([594.0, 420.0]), json!(template::ASSEMBLY_NOTE));
+
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": step}));
+    assert_eq!(s.doc.occurrences.len(), 1);
+    assert_eq!(made(&mut s), part, "one imported part");
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 15, 10]], "radius": 2}));
+    run(&mut s, "solid.hole", json!({"position": [10, 10, 10], "direction": [0, 0, -1], "diameter": 4, "depth": 5}));
+    assert!(s.doc.features.iter().all(|f| f.component != 0), "a round and a hole go in their body's component");
+    assert_eq!(made(&mut s), part, "one imported part, rounded and drilled with the root active");
+
+    run(&mut s, "file.insert_step", json!({"path": step}));
+    assert_eq!(made(&mut s), assembly, "two imported parts");
+
+    let mut s = design();
+    run(&mut s, "file.insert_step", json!({"path": step}));
+    assert_eq!(made(&mut s), assembly, "an imported part beside the design's own body");
+}
+
 #[test]
 fn a_drawing_with_standard_views_is_one_model_undo_step() {
     let mut s = design();
@@ -1224,7 +1255,7 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
 fn sheet_records_do_not_redirect_the_shared_model_sketch_store() {
     use crate::cmd::sketch_store;
     use solidcore_record::Vec2;
-    use solidcraft_doc::drawing::SheetSketch;
+    use solidcraft_doc::drawing::{Owner, SheetSketch};
     use solidcraft_sketch::Sketch;
 
     let mut s = Session::default();
@@ -1242,7 +1273,7 @@ fn sheet_records_do_not_redirect_the_shared_model_sketch_store() {
         for id in [model_id, separate] {
             drawing.sketches.push(Arc::new(SheetSketch {
                 id,
-                sheet: drawing.sheets[0].id,
+                owner: Owner::Sheet(drawing.sheets[0].id),
                 name: "Sheet sketch".into(),
                 sketch: sheet_sketch.clone(),
             }));
@@ -1302,6 +1333,467 @@ fn sheet_editor() -> (Session, u64, u64, Value) {
     let d = ids::decode(made["drawing"].as_str().unwrap()).unwrap();
     let sk = ids::decode(made["sketch"].as_str().unwrap()).unwrap();
     (s, d, sk, made)
+}
+
+fn sheet_tile_context(drawing: u64, sheet: u64, focus: u64, owner_window: u64) -> crate::ViewContext {
+    use solidcraft_views::ViewKind;
+    let subject = format!("{}/{}", ids::encode(drawing), ids::encode(sheet));
+    crate::ViewContext::new(
+        vec![
+            crate::ViewDescriptor { id: 1, kind: ViewKind::Model, window: 0, subject: None },
+            crate::ViewDescriptor { id: 2, kind: ViewKind::Sheet, window: owner_window, subject: Some(subject.clone()) },
+            crate::ViewDescriptor { id: 3, kind: ViewKind::Sheet, window: 0, subject: Some(subject) },
+            crate::ViewDescriptor { id: 4, kind: ViewKind::Render, window: 0, subject: None },
+        ],
+        focus,
+        vec![focus, if focus == 2 { 3 } else { 2 }, 1],
+    )
+    .unwrap()
+}
+
+fn hosted_sheet_editor(on_view: bool) -> (Session, Value) {
+    let mut s = design();
+    let drawing = run(&mut s, "drawing.create", json!({}));
+    let drawing_id = ids::decode(drawing["id"].as_str().unwrap()).unwrap();
+    let sheet = ids::decode(drawing["sheets"][0]["id"].as_str().unwrap()).unwrap();
+    let owner = if on_view {
+        run(&mut s, "drawing.view.base", json!({"sheet":ids::encode(sheet),"scale":"1:1"}))["view"].clone()
+    } else {
+        json!(ids::encode(sheet))
+    };
+    s.set_view_context(sheet_tile_context(drawing_id, sheet, 2, 0)).unwrap();
+    let made = run(&mut s, "drawing.sketch.create", json!({"owner":owner,"view":2}));
+    (s, made)
+}
+
+fn parked_sketch_exit_fixture(sheet_edit: bool, focused_model: bool) -> (Session, u64, u64, u64, u64) {
+    let mut s = design();
+    let owner = run(&mut s, "drawing.create", json!({"name":"Editing drawing"}));
+    let other = run(&mut s, "drawing.create", json!({"name":"Focused drawing"}));
+    let owner_id = ids::decode(owner["id"].as_str().unwrap()).unwrap();
+    let other_id = ids::decode(other["id"].as_str().unwrap()).unwrap();
+    let note = run(&mut s, "drawing.note.add", json!({"anchor":{"sheet":other["sheets"][0]["id"]},"at":[20,20],"content":"Selected source"}));
+    let note = ids::decode(note["note"].as_str().unwrap()).unwrap();
+    let context = |focused| {
+        crate::ViewContext::new(
+            vec![
+                crate::ViewDescriptor { id: 1, kind: solidcraft_views::ViewKind::Model, window: 0, subject: None },
+                crate::ViewDescriptor {
+                    id: 2,
+                    kind: solidcraft_views::ViewKind::Sheet,
+                    window: 1,
+                    subject: Some(format!("{}/{}", owner["id"].as_str().unwrap(), owner["sheets"][0]["id"].as_str().unwrap())),
+                },
+                crate::ViewDescriptor {
+                    id: 3,
+                    kind: solidcraft_views::ViewKind::Sheet,
+                    window: 0,
+                    subject: Some(format!("{}/{}", other["id"].as_str().unwrap(), other["sheets"][0]["id"].as_str().unwrap())),
+                },
+            ],
+            focused,
+            vec![focused, if focused == 2 { 3 } else { 2 }],
+        )
+        .unwrap()
+    };
+    s.open_drawing = Some(owner_id);
+    s.model_focus = !sheet_edit;
+    s.set_view_context(context(if sheet_edit { 2 } else { 1 })).unwrap();
+    let made = if sheet_edit {
+        run(&mut s, "drawing.sketch.create", json!({"owner":owner["sheets"][0]["id"],"view":2}))
+    } else {
+        run(&mut s, "sketch.create", json!({"plane":"XY","view":1}))
+    };
+    let sketch = if sheet_edit { ids::decode(made["sketch"].as_str().unwrap()).unwrap() } else { made["sketch"].as_u64().unwrap() };
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
+    s.set_view_context(context(if focused_model { 1 } else { 3 })).unwrap();
+    s.open_drawing = Some(other_id);
+    s.model_focus = focused_model;
+    s.selection = if focused_model {
+        vec![crate::Sel::Feature { id: s.doc.features[0].id }]
+    } else {
+        vec![crate::Sel::Drawing { drawing: other_id, object: note }]
+    };
+    (s, owner_id, other_id, sketch, note)
+}
+
+#[test]
+fn canonical_finish_and_cancel_target_the_parked_edit_and_keep_the_focused_receiver() {
+    for sheet_edit in [true, false] {
+        for command in ["sketch.finish", "sketch.cancel"] {
+            for focused_model in [false, true] {
+                if !sheet_edit && focused_model {
+                    continue;
+                }
+                let (mut s, owner, other, sketch, _) = parked_sketch_exit_fixture(sheet_edit, focused_model);
+                let focused = (s.open_drawing, s.model_focus, s.selection.clone(), s.camera, s.view_context.clone());
+                let foreign = s.doc.drawing(other).unwrap().clone();
+                let history = s.undo.len();
+                let evaluations = s.evaluations;
+                assert!(find_command(command).unwrap().allowed(&s).is_ok());
+                let reply = run(&mut s, command, json!({}));
+                assert_eq!(reply["sketch"], if sheet_edit { json!(ids::encode(sketch)) } else { json!(sketch) });
+                assert!(s.active_sketch.is_none() && s.active_sheet_sketch.is_none());
+                assert_eq!((s.open_drawing, s.model_focus, s.selection.clone(), s.camera, s.view_context.clone()), focused);
+                assert!(Arc::ptr_eq(s.doc.drawing(other).unwrap(), &foreign));
+                assert_eq!(s.undo.last().unwrap().part, if sheet_edit { Some(owner) } else { None });
+                if command == "sketch.cancel" {
+                    assert_eq!(s.undo.len(), history + 1);
+                    s.open_drawing = if sheet_edit { Some(owner) } else { Some(other) };
+                    s.model_focus = !sheet_edit;
+                    run(&mut s, "edit.undo", json!({}));
+                    if sheet_edit {
+                        assert!(s.doc.drawing(owner).unwrap().sheet_sketch(sketch).is_some());
+                    } else {
+                        assert!(s.doc.feature(sketch).is_some());
+                    }
+                }
+                if sheet_edit {
+                    assert_eq!(s.evaluations, evaluations, "Sheet exits and undo do not rebuild the Model");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn parked_lifecycle_refusals_restore_the_receiver_and_authorize_the_actual_edit() {
+    for level in crate::schema::ParamCheck::ALL {
+        let (mut s, owner, _, _, _) = parked_sketch_exit_fixture(true, false);
+        s.param_check = level;
+        let before = (s.doc.to_json(), s.open_drawing, s.model_focus, s.selection.clone(), s.active_sheet_sketch.clone(), s.undo.len());
+        assert!(s.execute("sketch.finish", &json!({"restore_marker":"invalid"})).is_err());
+        assert_eq!((s.doc.to_json(), s.open_drawing, s.model_focus, s.selection.clone(), s.active_sheet_sketch.clone(), s.undo.len()), before);
+        s.set_command_check(Some(Arc::new(move |command, _, session| {
+            if command == "sketch.cancel" {
+                assert_eq!(session.open_drawing, Some(owner));
+                assert!(!session.model_focus);
+                return Err("denied actual edit receiver".into());
+            }
+            Ok(())
+        })));
+        assert!(s.execute("sketch.cancel", &json!({})).is_err());
+        assert_eq!((s.doc.to_json(), s.open_drawing, s.model_focus, s.selection.clone(), s.active_sheet_sketch.clone(), s.undo.len()), before);
+    }
+}
+
+#[test]
+fn starting_a_drawing_tool_preserves_the_other_focused_receivers_selected_source() {
+    let (mut s, owner, other, sketch, note) = parked_sketch_exit_fixture(true, false);
+    let selection = s.selection.clone();
+    let event = s.prepare_edit_start("drawing.note.add", &Value::Null).unwrap().unwrap();
+    assert_eq!(event.sketch, sketch);
+    assert_eq!(s.selection, selection, "ending parked Sheet A does not erase Sheet B's selected source");
+    let sheet = ids::encode(s.doc.drawing(other).unwrap().sheets[0].id);
+    let reply = run(&mut s, "drawing.note.add", json!({"anchor":{"sheet":sheet},"at":[30,30],"content":"New note"}));
+    assert_eq!(reply["finished_sketch"], event.name);
+    assert_eq!(s.open_drawing, Some(other));
+    assert_eq!(s.selection, vec![crate::Sel::Drawing { drawing: other, object: note }]);
+    assert!(s.doc.drawing(owner).unwrap().sheet_sketch(sketch).is_some());
+    assert_eq!(s.undo.last().unwrap().part, Some(other));
+}
+
+#[test]
+fn canonical_parked_sketch_lifecycle_preserves_focus_selection_and_history_domain() {
+    for sheet_edit in [false, true] {
+        for command in ["sketch.finish", "sketch.cancel"] {
+            let (mut s, drawing, _, sketch, _) = parked_sketch_exit_fixture(sheet_edit, sheet_edit);
+            let focused = (s.open_drawing, s.model_focus, s.selection.clone(), s.camera, s.view_context.clone());
+            let history = s.undo.len();
+            assert!(find_command(command).unwrap().allowed(&s).is_ok());
+            let reply = run(&mut s, command, json!({}));
+            assert_eq!(reply["sketch"], if sheet_edit { json!(ids::encode(sketch)) } else { json!(sketch) });
+            assert!(s.active_sketch.is_none() && s.active_sheet_sketch.is_none());
+            assert_eq!((s.open_drawing, s.model_focus, s.selection.clone(), s.camera, s.view_context.clone()), focused);
+            assert_eq!(s.undo.last().unwrap().part, if sheet_edit { Some(drawing) } else { None });
+            if command == "sketch.cancel" {
+                assert_eq!(s.undo.len(), history + 1);
+                s.open_drawing = Some(drawing);
+                s.model_focus = !sheet_edit;
+                run(&mut s, "edit.undo", json!({}));
+                if sheet_edit {
+                    assert!(s.doc.drawing(drawing).unwrap().sheet_sketch(sketch).is_some());
+                } else {
+                    assert!(s.doc.feature(sketch).is_some());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn parked_sketch_lifecycle_refusals_restore_focus_and_authorize_the_actual_edit() {
+    for level in crate::schema::ParamCheck::ALL {
+        for sheet_edit in [false, true] {
+            let (mut s, drawing, other, _, _) = parked_sketch_exit_fixture(sheet_edit, sheet_edit);
+            s.param_check = level;
+            let before =
+                (s.doc.to_json(), s.open_drawing, s.model_focus, s.selection.clone(), s.active_sketch, s.active_sheet_sketch.clone(), s.undo.len());
+            assert!(s.execute("sketch.finish", &json!({"restore_marker":"invalid"})).is_err());
+            assert_eq!(
+                (s.doc.to_json(), s.open_drawing, s.model_focus, s.selection.clone(), s.active_sketch, s.active_sheet_sketch.clone(), s.undo.len()),
+                before
+            );
+            s.set_command_check(Some(Arc::new(move |command, _, session| {
+                if command == "sketch.cancel" {
+                    assert_eq!(session.open_drawing, Some(if sheet_edit { drawing } else { other }));
+                    assert_eq!(session.model_focus, !sheet_edit);
+                    return Err("denied actual edit receiver".into());
+                }
+                Ok(())
+            })));
+            assert!(s.execute("sketch.cancel", &json!({})).is_err());
+            assert_eq!(
+                (s.doc.to_json(), s.open_drawing, s.model_focus, s.selection.clone(), s.active_sketch, s.active_sheet_sketch.clone(), s.undo.len()),
+                before
+            );
+        }
+    }
+}
+
+#[test]
+fn automatic_parked_sketch_finish_keeps_the_focused_receivers_selection() {
+    for sheet_edit in [false, true] {
+        let (mut s, _, _, sketch, _) = parked_sketch_exit_fixture(sheet_edit, sheet_edit);
+        let selected = s.selection.clone();
+        let command = if sheet_edit { "solid.box" } else { "drawing.note.add" };
+        let event = s.prepare_edit_start(command, &Value::Null).unwrap().unwrap();
+        assert_eq!(event.sketch, sketch);
+        assert_eq!(s.selection, selected);
+        assert!(s.active_sketch.is_none() && s.active_sheet_sketch.is_none());
+    }
+}
+
+#[test]
+fn sheet_sketch_mode_owns_a_stable_tile_without_changing_the_model_camera() {
+    for on_view in [false, true] {
+        let (mut s, made) = hosted_sheet_editor(on_view);
+        let entry = s.active_sheet_sketch.clone().unwrap();
+        let sheet = entry.sheet(&s.doc).unwrap();
+        assert_eq!(made["sketching_view"], 2);
+        let schema = crate::schema::output_schema_for::<crate::schema::drawing_sketch::Reading>();
+        assert!(crate::schema::tests::conforms(schema.as_value(), schema.as_value(), &made));
+        assert_eq!(made.get("view").is_some(), on_view, "drawing geometry ownership is distinct from the editing tile");
+        assert_eq!((s.editing_view(), s.sketching_view, s.active_sketch), (Some(2), None, None));
+        let camera = s.camera;
+        let evaluations = s.evaluations;
+        run(&mut s, "sketch.line", json!({"points":[[10,10],[20,10]]}));
+        s.set_view_context(sheet_tile_context(entry.drawing, sheet, 3, 7)).unwrap();
+        assert_eq!(s.editing_view(), Some(2), "focus and moving to another window preserve ownership");
+        assert!(s.prepare_view_close(3).unwrap().is_none());
+        let event = s.prepare_view_close(2).unwrap().unwrap();
+        assert_eq!((event.sketch, event.view), (entry.sketch, Some(2)));
+        assert_eq!(event.domain, crate::SketchDomain::Sheet { drawing: entry.drawing, sheet });
+        assert!(s.active_sheet_sketch.is_none());
+        assert_eq!(s.camera, camera);
+        assert_eq!(s.evaluations, evaluations, "sheet lifecycle never rebuilds the Model");
+        assert_eq!(s.take_sketch_finish_event().unwrap(), event);
+        assert!(s.take_sketch_finish_event().is_none());
+        let reopened = run(&mut s, "drawing.sketch.edit", json!({"sketch":made["sketch"]}));
+        assert_eq!(reopened["sketching_view"], 3);
+        assert_eq!(s.editing_view(), Some(3));
+        run(&mut s, "sketch.create", json!({"plane":"XY","view":1}));
+        run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
+        run(&mut s, "drawing.sketch.edit", json!({"sketch":made["sketch"],"view":2}));
+        let sheet_exit = s.take_sketch_finish_event().unwrap();
+        let model_exit = s.take_sketch_finish_event().unwrap();
+        assert_eq!((sheet_exit.view, model_exit.view), (Some(3), Some(1)));
+        assert!(matches!(sheet_exit.domain, crate::SketchDomain::Sheet { .. }));
+        assert_eq!(model_exit.domain, crate::SketchDomain::Model);
+        assert!(model_exit.sequence > sheet_exit.sequence);
+        assert_eq!((s.editing_view(), s.active_sketch), (Some(2), None));
+        assert_eq!(s.camera, camera, "neither Sheet transition changes the Model camera");
+    }
+}
+
+#[test]
+fn focusing_another_drawing_preserves_the_sheet_edit_and_its_receiver() {
+    let mut s = design();
+    let first = run(&mut s, "drawing.create", json!({"name":"First"}));
+    let second = run(&mut s, "drawing.create", json!({"name":"Second"}));
+    let first_id = ids::decode(first["id"].as_str().unwrap()).unwrap();
+    let context = |focus| {
+        crate::ViewContext::new(
+            vec![
+                crate::ViewDescriptor { id: 1, kind: solidcraft_views::ViewKind::Model, window: 0, subject: None },
+                crate::ViewDescriptor {
+                    id: 2,
+                    kind: solidcraft_views::ViewKind::Sheet,
+                    window: 0,
+                    subject: Some(format!("{}/{}", first["id"].as_str().unwrap(), first["sheets"][0]["id"].as_str().unwrap())),
+                },
+                crate::ViewDescriptor {
+                    id: 3,
+                    kind: solidcraft_views::ViewKind::Sheet,
+                    window: 1,
+                    subject: Some(format!("{}/{}", second["id"].as_str().unwrap(), second["sheets"][0]["id"].as_str().unwrap())),
+                },
+            ],
+            focus,
+            vec![focus, if focus == 2 { 3 } else { 2 }, 1],
+        )
+        .unwrap()
+    };
+    run(&mut s, "drawing.open", json!({"drawing":first["id"]}));
+    s.set_view_context(context(2)).unwrap();
+    let made = run(&mut s, "drawing.sketch.create", json!({"owner":first["sheets"][0]["id"],"view":2}));
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
+    let entry = s.active_sheet_sketch.clone();
+    let evaluations = s.evaluations;
+    s.set_view_context(context(3)).unwrap();
+    run(&mut s, "drawing.open", json!({"drawing":second["id"]}));
+    assert_eq!(s.active_sheet_sketch, entry);
+    assert!(!s.sheet_sketching());
+    refused(&mut s, "sketch.point", json!({"point":[5,7]}));
+    assert_eq!(s.active_sheet_sketch, entry);
+    s.set_view_context(context(2)).unwrap();
+    run(&mut s, "drawing.open", json!({"drawing":first["id"]}));
+    assert!(s.sheet_sketching());
+    run(&mut s, "sketch.point", json!({"point":[5,7]}));
+    s.set_view_context(context(3)).unwrap();
+    run(&mut s, "drawing.open", json!({"drawing":second["id"]}));
+    let event = s.prepare_view_close(2).unwrap().unwrap();
+    assert_eq!(event.sketch, ids::decode(made["sketch"].as_str().unwrap()).unwrap());
+    assert!(matches!(event.domain,crate::SketchDomain::Sheet {drawing,..} if drawing==first_id));
+    assert_eq!(s.open_drawing, ids::decode(second["id"].as_str().unwrap()));
+    assert!(s.active_sheet_sketch.is_none());
+    assert_eq!(s.evaluations, evaluations);
+}
+
+#[test]
+fn sheet_sketch_targets_reject_invalid_or_mismatched_views_at_every_check_level() {
+    for level in crate::schema::ParamCheck::ALL {
+        let (mut s, made) = hosted_sheet_editor(false);
+        run(&mut s, "sketch.point", json!({"point":[5,7]}));
+        run(&mut s, "sketch.finish", json!({}));
+        s.param_check = level;
+        let before = s.doc.to_json();
+        let history = (s.undo.len(), s.redo.len(), s.ids.seed());
+        for view in [json!(0), json!(-1), json!(1.5), json!("2"), json!(true), json!([]), json!(1), json!(4), json!(99), json!(u64::MAX)] {
+            for command in ["drawing.sketch.create", "drawing.sketch.edit"] {
+                let params = if command == "drawing.sketch.create" {
+                    json!({"owner":made["sheet"],"view":view})
+                } else {
+                    json!({"sketch":made["sketch"],"view":view})
+                };
+                refused(&mut s, command, params);
+                assert_eq!(s.doc.to_json(), before);
+                assert_eq!((s.undo.len(), s.redo.len(), s.ids.seed()), history);
+                assert!(s.active_sheet_sketch.is_none());
+            }
+        }
+        let context = crate::ViewContext::new(
+            vec![crate::ViewDescriptor { id: 2, kind: solidcraft_views::ViewKind::Sheet, window: 0, subject: Some("another sheet".into()) }],
+            2,
+            vec![2],
+        )
+        .unwrap();
+        s.set_view_context(context).unwrap();
+        refused(&mut s, "drawing.sketch.edit", json!({"sketch":made["sketch"],"view":2}));
+        refused(&mut s, "drawing.sketch.edit", json!({"sketch":made["sketch"]}));
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
+
+#[test]
+fn headless_sheet_sketches_keep_no_tile_identity_and_finish_keeps_a_command_made_sketch() {
+    let (mut s, drawing, empty, made) = sheet_editor();
+    assert!(!s.view_context.is_hosted());
+    assert_eq!(s.editing_view(), None);
+    assert!(made.get("sketching_view").is_none());
+    run(&mut s, "sketch.finish", json!({}));
+    // #19654: only an empty sketch a person entered is deleted on finish; one a command made stays.
+    assert!(s.doc.drawing(drawing).unwrap().sheet_sketch(empty).is_some());
+    let made = run(&mut s, "drawing.sketch.create", json!({"owner":made["sheet"]}));
+    run(&mut s, "sketch.point", json!({"point":[5,7]}));
+    let point = ids::decode(made["sketch"].as_str().unwrap()).unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    assert!(s.doc.drawing(drawing).unwrap().sheet_sketch(point).is_some());
+    run(&mut s, "drawing.sketch.edit", json!({"sketch":made["sketch"]}));
+    let event = s.prepare_edit_start("solid.box", &Value::Null).unwrap().unwrap();
+    assert_eq!((event.sketch, event.view), (point, None), "headless exits never manufacture a view identity");
+    assert!(matches!(event.domain, crate::SketchDomain::Sheet { .. }));
+    let reply = run(&mut s, "solid.box", json!({"length":5,"width":5,"height":5,"corner":[60,0,0],"operation":"new"}));
+    assert_eq!(reply["finished_sketch"], event.name);
+}
+
+#[test]
+fn legacy_sheet_subjects_are_accepted_only_when_the_drawing_is_unambiguous() {
+    let (mut s, drawing, _, made) = sheet_editor();
+    run(&mut s, "sketch.point", json!({"point":[5,7]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let legacy = crate::ViewContext::new(
+        vec![crate::ViewDescriptor {
+            id: 2,
+            kind: solidcraft_views::ViewKind::Sheet,
+            window: 0,
+            subject: made["sheet"].as_str().map(str::to_string),
+        }],
+        2,
+        vec![2],
+    )
+    .unwrap();
+    s.set_view_context(legacy).unwrap();
+    run(&mut s, "drawing.sketch.edit", json!({"sketch":made["sketch"],"view":2}));
+    run(&mut s, "sketch.finish", json!({}));
+    let mut duplicate = (**s.doc.drawing(drawing).unwrap()).clone();
+    duplicate.id = drawing ^ (1_u64 << 62);
+    duplicate.name = "Other drawing with the same local sheet ID".into();
+    s.doc_mut().put_drawing(Arc::new(duplicate));
+    refused(&mut s, "drawing.sketch.edit", json!({"sketch":made["sketch"],"view":2}));
+    let sheet = ids::decode(made["sheet"].as_str().unwrap()).unwrap();
+    s.set_view_context(sheet_tile_context(drawing, sheet, 2, 0)).unwrap();
+    run(&mut s, "drawing.sketch.edit", json!({"sketch":made["sketch"],"view":2}));
+    assert_eq!(s.editing_view(), Some(2));
+}
+
+#[test]
+fn sheet_sketch_history_and_prepared_commands_never_restore_a_closed_tile() {
+    let (mut s, made) = hosted_sheet_editor(false);
+    let entry = s.active_sheet_sketch.clone().unwrap();
+    run(&mut s, "sketch.line", json!({"points":[[10,10],[20,10]]}));
+    let checkpoint = s.checkpoint();
+    run(&mut s, "sketch.finish", json!({}));
+    let commands = vec![("drawing.sketch.edit".into(), json!({"sketch":made["sketch"],"view":2}))];
+    let prepared = s.scratch().compute_commands(&commands, None).unwrap();
+    let mut raw = s.scratch();
+    run(&mut raw, "drawing.sketch.edit", json!({"sketch":made["sketch"],"view":2}));
+    let context =
+        crate::ViewContext::new(vec![crate::ViewDescriptor { id: 1, kind: solidcraft_views::ViewKind::Model, window: 0, subject: None }], 1, vec![1])
+            .unwrap();
+    s.set_view_context(context.clone()).unwrap();
+    let before = (s.doc.to_json(), s.undo.len(), s.revision);
+    assert!(!prepared.is_current(&s));
+    assert!(s.accept_commands(prepared).is_err());
+    assert!(s.accept_computed(raw).is_err());
+    assert_eq!((s.doc.to_json(), s.undo.len(), s.revision), before);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.active_sheet_sketch.is_none());
+    run(&mut s, "edit.redo", json!({}));
+    assert!(s.active_sheet_sketch.is_none());
+    s.restore_checkpoint(checkpoint).unwrap();
+    assert!(s.doc.drawing(entry.drawing).unwrap().sheet_sketch(entry.sketch).is_some());
+    assert!(s.active_sheet_sketch.is_none());
+    assert_eq!(s.view_context, context);
+}
+
+#[test]
+fn deleting_drawing_objects_finishes_sheet_mode_but_erasing_sketch_geometry_preserves_it() {
+    let (mut s, made) = hosted_sheet_editor(true);
+    let entry = s.active_sheet_sketch.clone().unwrap();
+    let line = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}))["curves"][0].clone();
+    let evaluations = s.evaluations;
+    run(&mut s, "selection.delete", json!({"items":[{"type":"sketch_curve","id":line}]}));
+    assert_eq!(s.active_sheet_sketch.as_ref().unwrap().sketch, entry.sketch);
+    assert!(s.take_sketch_finish_event().is_none());
+    assert_eq!(s.evaluations, evaluations);
+    run(&mut s, "sketch.point", json!({"point":[5,7]}));
+    let reply = run(&mut s, "selection.delete", json!({"items":[{"type":"drawing","drawing":made["drawing"],"object":made["view"]}]}));
+    assert!(reply.get("finished_sketch").is_some());
+    let event = s.take_sketch_finish_event().unwrap();
+    assert_eq!((event.sketch, event.view), (entry.sketch, Some(2)));
+    assert!(s.active_sheet_sketch.is_none());
+    assert!(s.doc.drawing(entry.drawing).unwrap().sheet_sketch(entry.sketch).is_none());
 }
 
 /// A 40 by 20 paper-mm rectangle with an optional 10 by 10 hole.
@@ -1614,11 +2106,13 @@ fn sheet_editor_computed_creation_never_reuses_a_retired_sketch_id() {
         } else {
             let mut computed = s.scratch();
             let made = run(&mut computed, "drawing.sketch.create", params.clone());
-            s.accept_computed(computed);
+            s.accept_computed(computed).unwrap();
             made
         };
         assert_eq!(made["sketch"], discarded_id, "discarding a scratch consumes no id");
+        run(&mut s, "sketch.point", json!({"point":[5,7]}));
         run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "edit.undo", json!({}));
         run(&mut s, "edit.undo", json!({}));
         assert!(s.drawing("test").unwrap().sketches.is_empty());
         run(&mut s, "drawing.set", json!({"name":"After retirement"}));
@@ -1631,6 +2125,7 @@ fn sheet_editor_computed_creation_never_reuses_a_retired_sketch_id() {
 #[test]
 fn sheet_editor_owner_deletion_requires_finish_and_explicit_contents() {
     let (mut s, drawing, sketch, _) = sheet_editor();
+    run(&mut s, "sketch.point", json!({"point":[5,7]}));
     let first = ids::encode(s.doc.drawing(drawing).unwrap().sheets[0].id);
     let added = run(&mut s, "drawing.sheet.add", json!({"name":"Other"}));
     let before = s.doc.clone();
@@ -1803,7 +2298,6 @@ fn sheet_editor_rejects_cross_targets_model_tools_and_source_mutation() {
         ("drawing.close", json!({})),
         ("drawing.open", json!({"drawing": made["drawing"]})),
         ("drawing.delete", json!({"drawing": made["drawing"]})),
-        ("drawing.sketch.create", json!({"owner": made["sheet"]})),
     ] {
         refused(&mut s, command, params);
         assert!(Arc::ptr_eq(&s.doc, &before), "{command}");
@@ -1817,6 +2311,93 @@ fn sheet_editor_rejects_cross_targets_model_tools_and_source_mutation() {
     assert!(result.unwrap_err().to_string().contains("cannot change the source design"));
     assert!(Arc::ptr_eq(&s.doc, &before) && Arc::ptr_eq(&s.model.state(), &state));
     assert_eq!(s.open_drawing, Some(d));
+}
+
+#[test]
+fn sheet_editor_new_edits_finish_the_previous_receiver_even_when_refused() {
+    for command in ["sketch.create", "drawing.sketch.create"] {
+        let (mut s, drawing, sketch, made) = sheet_editor();
+        run(&mut s, "sketch.line", json!({"points":[[10,10],[20,10]]}));
+        let evaluations = s.evaluations;
+        if command == "sketch.create" {
+            // A model sketch ends the sheet sketch first, then opens.
+            run(&mut s, command, json!({"plane":"XY"}));
+            assert!(s.active_sheet_sketch.is_none());
+            assert!(s.active_sketch.is_some());
+        } else {
+            let next = run(&mut s, command, json!({"owner":made["sheet"]}));
+            assert_ne!(next["sketch"], made["sketch"]);
+            assert_ne!(s.active_sheet_sketch.as_ref().unwrap().sketch, sketch);
+        }
+        let event = s.take_sketch_finish_event().unwrap();
+        assert_eq!(event.sketch, sketch);
+        assert!(matches!(event.domain, crate::SketchDomain::Sheet { drawing: owner, .. } if owner == drawing));
+        assert!(s.take_sketch_finish_event().is_none());
+        if command != "sketch.create" {
+            assert_eq!(s.evaluations, evaluations);
+        }
+    }
+}
+
+#[test]
+fn a_sheet_edit_finishes_before_a_model_feature_or_sketch_starts() {
+    let (mut s, drawing, sketch, _) = sheet_editor();
+    run(&mut s, "sketch.line", json!({"points":[[10,10],[20,10]]}));
+    let features = s.doc.features.len();
+    let reply = run(&mut s, "solid.box", json!({"length":5,"width":5,"height":5,"corner":[60,0,0],"operation":"new"}));
+    assert_eq!(reply["finished_sketch"], "Detail");
+    assert_eq!(s.doc.features.len(), features + 1);
+    assert!(s.active_sheet_sketch.is_none() && s.active_sketch.is_none());
+    assert_eq!(s.open_drawing, Some(drawing));
+    assert_eq!(s.undo.last().unwrap().part, None);
+    assert_eq!(s.take_sketch_finish_event().unwrap().sketch, sketch);
+    let made = run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.point", json!({"point":[3,4]}));
+    assert_eq!(s.active_sketch, made["sketch"].as_u64());
+    assert!(s.active_sheet_sketch.is_none());
+    assert_eq!(s.undo.last().unwrap().part, None, "model sketch geometry belongs to model history with the drawing retained");
+}
+
+#[test]
+fn model_focus_routes_history_without_closing_the_drawing() {
+    let mut s = design();
+    run(&mut s, "drawing.create", json!({"name":"Paper"}));
+    let open = s.open_drawing;
+    let features = s.doc.features.len();
+    s.model_focus = true;
+    run(&mut s, "solid.box", json!({"length":5,"width":5,"height":5,"corner":[60,0,0],"operation":"new"}));
+    s.model_focus = false;
+    run(&mut s, "drawing.set", json!({"name":"Revised paper"}));
+    s.model_focus = true;
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.features.len(), features);
+    assert_eq!(s.drawing("test").unwrap().name, "Revised paper");
+    assert_eq!(s.open_drawing, open);
+    assert!(s.model_focus);
+    s.model_focus = false;
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.drawing("test").unwrap().name, "Paper");
+    assert_eq!(s.doc.features.len(), features);
+    assert_eq!(s.open_drawing, open);
+}
+
+#[test]
+fn model_history_never_reopens_an_editor_beside_an_active_sheet_sketch() {
+    let mut s = design();
+    let drawing = run(&mut s, "drawing.create", json!({}));
+    s.model_focus = true;
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    s.model_focus = false;
+    run(&mut s, "drawing.sketch.create", json!({"owner":drawing["sheets"][0]["id"]}));
+    run(&mut s, "sketch.line", json!({"points":[[10,10],[20,10]]}));
+    let sheet = s.active_sheet_sketch.clone();
+    s.model_focus = true;
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.active_sheet_sketch, sheet);
+    assert!(s.active_sketch.is_none() && s.sketching_view.is_none());
+    assert!(s.take_sketch_finish_event().is_none(), "history does not invent a new finish event");
 }
 
 #[test]
@@ -1847,14 +2428,82 @@ fn sheet_editor_new_commands_validate_hostile_inputs_and_declare_schemas() {
     s.param_check = crate::schema::ParamCheck::Strict;
     let made = run(&mut s, "drawing.sketch.create", json!({"owner": drawing["sheets"][0]["id"]}));
     assert!(made["editing"].as_bool().unwrap());
+    run(&mut s, "sketch.point", json!({"point":[5,7]}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "drawing.sketch.edit", json!({"sketch": made["sketch"]}));
     run(&mut s, "sketch.cancel", json!({}));
 }
 
+/// A sketch can belong to a view (#5425). `drawing.sketch.create` makes one from the view's id, and
+/// it is edited, finished and cancelled as a sheet's is, its replies naming its view as well as its
+/// sheet. While it is being edited, neither its view nor its view's sheet can be deleted. Copying
+/// the view to a sheet copies it, owned by the copy; deleting its view takes it, as it takes the
+/// view's notes.
+#[test]
+fn a_view_sketch_is_made_edited_copied_and_deleted_with_its_view() {
+    use solidcraft_doc::drawing::Owner;
+    let (mut s, d, on_sheet, made) = sheet_editor();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let sheet = made["sheet"].clone();
+    let other = run(&mut s, "drawing.sheet.add", json!({"name": "Other"}))["sheet"].clone();
+    let view = run(&mut s, "drawing.view.base", json!({"sheet": sheet, "scale": "1:1"}))["view"].clone();
+    let view_id = ids::decode(view.as_str().unwrap()).unwrap();
+    let before = open_one(&s);
+    let e = refused(&mut s, "drawing.sketch.create", json!({"owner": ids::encode(on_sheet)}));
+    assert!(e.contains("no such sheet or view"), "{e}");
+    assert!(Arc::ptr_eq(&before, &open_one(&s)) && s.active_sheet_sketch.is_none(), "a refused owner changes nothing");
+
+    let undo = s.undo.len();
+    let made = run(&mut s, "drawing.sketch.create", json!({"owner": view, "name": "On the view"}));
+    assert_eq!((&made["sheet"], &made["view"], made["editing"].as_bool()), (&sheet, &view, Some(true)));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    let on_view = ids::decode(made["sketch"].as_str().unwrap()).unwrap();
+    assert_eq!(open_one(&s).sheet_sketch(on_view).unwrap().owner, Owner::View(view_id));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]]}));
+    let item = json!({"items": [{"type": "drawing", "drawing": ids::encode(d), "object": view}]});
+    let mut preview = item.clone();
+    preview["dry_run"] = json!(true);
+    let e = refused(&mut s, "selection.delete", preview);
+    assert!(e.contains("finish or cancel"), "{e}");
+    let e = refused(&mut s, "drawing.sheet.delete", json!({"sheet": sheet, "contents": "delete"}));
+    assert!(e.contains("finish or cancel"), "{e}");
+    let finished = run(&mut s, "sketch.finish", json!({}));
+    assert_eq!((&finished["view"], finished["editing"].as_bool()), (&view, Some(false)));
+
+    let kept = open_one(&s).sheet_sketch(on_view).unwrap().clone();
+    let entered = run(&mut s, "drawing.sketch.edit", json!({"sketch": made["sketch"]}));
+    assert_eq!((&entered["view"], entered["editing"].as_bool()), (&view, Some(true)));
+    run(&mut s, "sketch.line", json!({"points": [[0, 10], [30, 10]]}));
+    let cancelled = run(&mut s, "sketch.cancel", json!({}));
+    assert_eq!((&cancelled["sheet"], &cancelled["view"], cancelled["removed"].as_bool()), (&sheet, &view, Some(false)));
+    assert!(Arc::ptr_eq(open_one(&s).sheet_sketch(on_view).unwrap(), &kept), "cancel restores it");
+    let entered = run(&mut s, "drawing.sketch.edit", json!({"sketch": ids::encode(on_sheet)}));
+    assert!(entered.get("view").is_none(), "a sheet's sketch names no view: {entered}");
+    run(&mut s, "sketch.finish", json!({}));
+
+    let copy = run(&mut s, "drawing.view.copy_to_sheet", json!({"view": view, "sheet": other}))["view"].clone();
+    let copy = ids::decode(copy.as_str().unwrap()).unwrap();
+    let after = open_one(&s);
+    let copies: Vec<_> = after.sketches.iter().filter(|record| record.owner == Owner::View(copy)).collect();
+    assert_eq!(copies.len(), 1, "the copy takes its view's sketch");
+    assert!(copies[0].id != on_view && copies[0].sketch == kept.sketch && copies[0].name == kept.name);
+    assert!(Arc::ptr_eq(after.sheet_sketch(on_view).unwrap(), &kept), "the original is unchanged");
+
+    let deleted = run(&mut s, "selection.delete", item);
+    assert_eq!(
+        (&deleted["views"], &deleted["sketches"], &deleted["fills"]),
+        (&json!([view]), &json!([ids::encode(on_view)]), &json!([])),
+        "{deleted}"
+    );
+    let after = open_one(&s);
+    assert!(after.sheet_sketch(on_view).is_none(), "the view's sketch goes with it");
+    assert!(after.sheet_sketch(on_sheet).is_some() && after.sheet_sketch(copies[0].id).is_some(), "the others stay");
+}
+
 #[test]
 fn sheet_editor_same_numeric_id_in_two_drawings_and_model_never_retargets_geometry() {
-    use solidcraft_doc::drawing::SheetSketch;
+    use solidcraft_doc::drawing::{Owner, SheetSketch};
     use solidcraft_sketch::Sketch;
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Model"}));
@@ -1864,7 +2513,7 @@ fn sheet_editor_same_numeric_id_in_two_drawings_and_model_never_retargets_geomet
     let model = s.doc.sketch(id).unwrap().clone();
     run(&mut s, "drawing.create", json!({"name": "First"}));
     s.edit_drawing("test", |drawing| {
-        drawing.sketches.push(Arc::new(SheetSketch { id, sheet: drawing.sheets[0].id, name: "Same id".into(), sketch: Sketch::new() }));
+        drawing.sketches.push(Arc::new(SheetSketch { id, owner: Owner::Sheet(drawing.sheets[0].id), name: "Same id".into(), sketch: Sketch::new() }));
         Ok(())
     })
     .unwrap();
@@ -1919,7 +2568,7 @@ fn sheet_editor_commands_and_refusals_do_not_evaluate_a_stale_model() {
     assert!(s.model.is_stale());
     assert!(Arc::ptr_eq(&model, &s.model.state()));
     assert_eq!(s.evaluations, count);
-    assert_eq!(s.active_sketch, Some(model_sketch), "model active state was not overwritten");
+    assert!(s.active_sketch.is_none(), "entering the sheet sketch finished the model edit");
 }
 
 // W38a review: an unchanged Arc is not a validation certificate.
@@ -1999,7 +2648,7 @@ fn sheet_next_snap_directives_cannot_modify_an_active_model_sketch() {
             assert!(Arc::ptr_eq(&s.doc, &before));
             assert!(Arc::ptr_eq(&s.model.state(), &state));
             assert_eq!(s.active_sheet_sketch, entry);
-            assert_eq!(s.active_sketch, Some(model_id));
+            assert!(s.active_sketch.is_none());
             assert_eq!((s.undo.len(), s.redo.len(), s.evaluations), history);
         }
     }
@@ -2152,7 +2801,7 @@ fn sheet_next_accept_computed_adopts_the_open_owner_entry_and_cancel_boundary() 
     assert_ne!(s.open_drawing, computed.open_drawing);
     let entry = computed.active_sheet_sketch.clone();
     let additional_steps = computed.undo.len();
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert_eq!(s.open_drawing, Some(drawing));
     assert_eq!(s.active_sheet_sketch, entry);
     assert_eq!(s.path.as_deref(), Some("computed-sheet.synthetic.solidcraft"));
@@ -2169,7 +2818,7 @@ fn sheet_next_accept_computed_adopts_the_open_owner_entry_and_cancel_boundary() 
     let mut closed = s.scratch();
     run(&mut closed, "sketch.finish", json!({}));
     run(&mut closed, "drawing.close", json!({}));
-    s.accept_computed(closed);
+    s.accept_computed(closed).unwrap();
     assert!(s.open_drawing.is_none() && s.active_sheet_sketch.is_none());
     run(&mut s, "edit.restore_checkpoint", json!({"checkpoint":checkpoint}));
     assert_eq!(s.open_drawing, Some(ids::decode(a["id"].as_str().unwrap()).unwrap()));
@@ -3750,7 +4399,7 @@ fn sheet_batch_compound_edits_preserve_foreign_redo_and_refuse_atomically() {
         // adopting the unchanged failed attempt must preserve every old redo branch.
         let mut failed_attempt = s.scratch();
         refused(&mut failed_attempt, command, failed);
-        s.accept_computed(failed_attempt);
+        s.accept_computed(failed_attempt).unwrap();
         assert!(Arc::ptr_eq(&s.doc, &before), "{command}");
         assert!(Arc::ptr_eq(&s.model.state(), &model), "{command}");
         assert_eq!(s.active_sheet_sketch, entry, "{command}");
@@ -3809,6 +4458,7 @@ fn sheet_batch_computed_history_replaces_each_touched_owner_only() {
     let cid = ids::decode(c["id"].as_str().unwrap()).unwrap();
     let made = run(&mut s, "drawing.sketch.create", json!({"owner":c["sheets"][0]["id"]}));
     let sketch = ids::decode(made["sketch"].as_str().unwrap()).unwrap();
+    run(&mut s, "sketch.point", json!({"point":[5,7]}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "drawing.set", json!({"name":"C old future"}));
     run(&mut s, "edit.undo", json!({}));
@@ -3822,7 +4472,7 @@ fn sheet_batch_computed_history_replaces_each_touched_owner_only() {
     let mut read_only = s.scratch();
     run(&mut read_only, "drawing.open", the(bid));
     run(&mut read_only, "drawing.inspect", json!({}));
-    s.accept_computed(read_only);
+    s.accept_computed(read_only).unwrap();
     assert_eq!(s.open_drawing, Some(bid));
     assert!(Arc::ptr_eq(&s.doc, &before_read));
     same_redo(&s, &redos);
@@ -3840,7 +4490,7 @@ fn sheet_batch_computed_history_replaces_each_touched_owner_only() {
     assert!(rolled_back.doc.drawings.is_empty());
     run(&mut rolled_back, "edit.restore_checkpoint", json!({"checkpoint":checkpoint}));
     assert!(Arc::ptr_eq(&rolled_back.doc, &s.doc));
-    s.accept_computed(rolled_back);
+    s.accept_computed(rolled_back).unwrap();
     same_redo(&s, &redos);
 
     let mut computed = s.scratch();
@@ -3863,9 +4513,9 @@ fn sheet_batch_computed_history_replaces_each_touched_owner_only() {
     run(&mut nested, "sketch.finish", json!({}));
     run(&mut nested, "drawing.open", the(bid));
     assert!(nested.undo.is_empty() && nested.redo.is_empty());
-    computed.accept_computed(nested);
+    computed.accept_computed(nested).unwrap();
     assert!(computed.undo.iter().all(|step| step.part == Some(bid)), "neither A nor C survives in retained history");
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert_eq!(s.open_drawing, Some(bid));
     assert_eq!(s.doc.drawing(aid).unwrap().name, "A new");
     assert_eq!(s.doc.drawing(bid).unwrap().name, format!("B new{}", crate::MAX_UNDO));
@@ -3926,7 +4576,7 @@ fn sheet_batch_computed_visibility_invalidates_model_redo_after_history_eviction
     assert_eq!(rolled_back.visibility, changed_visibility, "a refused visibility edit is atomic");
     run(&mut rolled_back, "edit.restore_checkpoint", json!({"checkpoint":checkpoint}));
     assert_eq!(rolled_back.visibility, original_visibility);
-    s.accept_computed(rolled_back);
+    s.accept_computed(rolled_back).unwrap();
     assert_eq!(s.redo.len(), redos.len());
     for (after, before) in s.redo.iter().zip(&redos) {
         assert_eq!((&after.label, after.part), (&before.label, before.part));
@@ -3946,7 +4596,7 @@ fn sheet_batch_computed_visibility_invalidates_model_redo_after_history_eviction
     }
     assert_eq!(computed.undo.len(), crate::MAX_UNDO);
     assert!(computed.undo.iter().all(|step| step.part == Some(aid)), "the model visibility snapshot really was evicted");
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert_eq!(s.redo.len(), 1, "the stale model future was invalidated");
     assert_eq!(s.redo[0].part, Some(bid));
     assert!(Arc::ptr_eq(&s.redo[0].doc, &b_redo.doc), "the unrelated drawing future was retained");
@@ -4005,6 +4655,14 @@ fn sheet_editor_model_cancel_refuses_foreign_drawing_changes_without_losing_them
             }
         }
         run(&mut s, "drawing.close", json!({}));
+        if scenario != "new drawing" {
+            assert!(s.active_sketch.is_none(), "entering the sheet editor finished the model sketch");
+            assert!(s.doc.feature(model_sketch).is_some());
+            let before = s.doc.clone();
+            refused(&mut s, "sketch.cancel", json!({}));
+            assert!(Arc::ptr_eq(&s.doc, &before), "Cancel cannot erase the completed sketch or drawing edits");
+            continue;
+        }
         assert_eq!(s.active_sketch, Some(model_sketch));
         let before = s.doc.clone();
         let model = s.model.state();
@@ -4082,7 +4740,7 @@ fn sheet_editor_post_publication_refusal_preserves_stale_model_and_history() {
     assert!(Arc::ptr_eq(&s.doc, &before));
     assert!(Arc::ptr_eq(&s.model.state(), &model), "a drawing-only refusal must not recompute its stale source");
     assert_eq!(s.active_sheet_sketch, entry);
-    assert_eq!(s.active_sketch, Some(model_sketch));
+    assert!(s.active_sketch.is_none(), "the sheet editor finished the earlier model edit");
     assert_eq!(s.open_drawing, ids::decode(made["drawing"].as_str().unwrap()));
     assert_eq!(s.evaluations, evaluations);
     assert!(s.model.is_stale());
@@ -4317,11 +4975,9 @@ fn sheet_sketch_creation_reserves_current_and_retired_image_ids() {
     }
 }
 
-/// A sheet sketch being edited holds no model command: one runs against the model with the
-/// sheet sketch still open, as its own model step, and the model's undo leaves the sheet sketch
-/// being edited. Entering a model sketch from a script (nothing shows the model) ends the sheet
-/// sketch as Finish would, since the shared sketch tools reach one sketch only; the model's
-/// command is never refused.
+/// A model command started while a sheet sketch is being edited ends that sheet sketch as Finish
+/// would (starting another edit finishes the open sketch), then runs as its own model step; the
+/// model's undo leaves the sheet sketch finished. The model's command is never refused.
 #[test]
 fn a_sheet_sketch_holds_no_model_command() {
     let mut s = design();
@@ -4333,13 +4989,13 @@ fn a_sheet_sketch_holds_no_model_command() {
     let features = s.doc.features.len();
     run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [60, 0, 0], "operation": "new"}));
     assert_eq!(s.doc.features.len(), features + 1, "the model changes under the sheet sketch");
-    assert_eq!(s.active_sheet_sketch, editing, "which stays open");
+    assert!(s.active_sheet_sketch.is_none(), "starting a model command ends the sheet sketch, as Finish would");
     assert_eq!(s.undo.last().unwrap().part, None, "the box is the model's step");
     s.model_focus = true;
     assert!(!s.sheet_sketching(), "with the model shown, the sketch tools are the model's");
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.doc.features.len(), features, "the model's undo");
-    assert_eq!(s.active_sheet_sketch, editing, "leaves the sheet sketch being edited");
+    assert!(s.active_sheet_sketch.is_none(), "and the sheet sketch stays finished");
     s.model_focus = false;
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     assert!(s.active_sketch.is_some(), "the model's sketch is entered");
@@ -4362,4 +5018,30 @@ fn an_open_drawing_allows_every_model_command_it_would_without_one() {
     s.model_focus = true;
     run(&mut s, "select.all", json!({}));
     assert!(!s.selection.is_empty(), "Select All in Design picks the model's bodies with a drawing open");
+}
+
+/// A circumscribed polygon's size naming a source parameter works on a sheet sketch: the support
+/// circle's dimension keeps the expression and no model parameter is defined (#20920).
+#[test]
+fn sheet_circumscribed_polygon_keeps_a_parameter_named_size_as_a_sheet_expression() {
+    use solidcraft_sketch::{ConstraintKind, CurveKind};
+    for (key, expr, want_r) in [("radius", "SheetR", 7.0), ("diameter", "2 * SheetR", 7.0)] {
+        let (mut s, d, sk, _) = sheet_editor();
+        s.doc_mut().set_param("SheetR", "7 mm", Some("mm"), None).unwrap();
+        let source = s.doc.clone();
+        let out = run(&mut s, "sketch.polygon.circumscribed", json!({"center":[60,45], key: expr, "sides":4}));
+        assert_eq!((&s.doc.params, &s.doc.features), (&source.params, &source.features), "{key}: no source parameter is defined");
+        let record = s.doc.drawing(d).unwrap().sheet_sketch(sk).unwrap();
+        let support = out["support_circle"].as_str().unwrap();
+        let index = record.sketch.curve_index(support).unwrap();
+        let CurveKind::Circle { r, .. } = record.sketch.curves[index].kind else { panic!("support circle") };
+        assert!((r - want_r).abs() < 1e-6, "{key}: radius {r}");
+        let dim = record
+            .sketch
+            .constraints
+            .iter()
+            .find(|c| matches!(c.kind, ConstraintKind::Radius { c, .. } | ConstraintKind::Diameter { c, .. } if c == index))
+            .expect("the support circle is dimensioned");
+        assert_eq!(dim.param.as_deref(), Some(expr), "{key}: the authored expression stays on the dimension");
+    }
 }
