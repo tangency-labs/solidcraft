@@ -364,3 +364,19 @@ fn a_cases_grants_and_fixtures_stay_inside_its_tests_and_scratch_folders() {
         }
     }
 }
+
+#[test]
+fn plugin_test_approves_requested_fuel_by_default_and_accepts_explicit_fuel_grants() {
+    let scratch = Scratch::new();
+    let fuel = 10_000_000_000_000_u64;
+    let mut manifest = command_manifest();
+    manifest["runtime"]["limits"]["fuel"] = json!(fuel);
+    let path = package(
+        &scratch.0,
+        &manifest,
+        &command_component("call $box"),
+        &[("default", json!({"entry":"make"})), ("explicit", json!({"entry":"make","grants":{"fuel":fuel}}))],
+    );
+    let output = cli(&["plugin", "test", &path]);
+    assert!(output.status.success(), "{}\n{}", text(&output.stdout), text(&output.stderr));
+}

@@ -1045,6 +1045,16 @@ pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Resu
     add_feature_in(s, p, kind, true)
 }
 
+/// Bare lengths typed in an inch (or cm…) design mean that unit: `kind`'s inputs with it written
+/// out, as the feature is made and as a preview of it is read.
+pub(super) fn in_design_units(s: &Session, kind: &mut FeatureKind) {
+    if s.doc.units.trim() != "mm" {
+        for (_, e, k) in kind.inputs_mut() {
+            *e = s.doc.with_design_unit(e, k).into();
+        }
+    }
+}
+
 /// A constructor whose persistent attachment is already authored in the active frame.
 pub(super) fn add_feature_local(s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
     add_feature_in(s, p, kind, false)
@@ -1066,13 +1076,7 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
         super::component::to_active_frame(s, &mut kind);
     }
     super::component::pin_picked_placements(s, &mut kind);
-    // Bare lengths typed in an inch (or cm…) design mean that unit.
-    if s.doc.units.trim() != "mm" {
-        let doc = s.doc.clone();
-        for (_, e, k) in kind.inputs_mut() {
-            *e = doc.with_design_unit(e, k).into();
-        }
-    }
+    in_design_units(s, &mut kind);
     // Profiles picked by index are kept by the curves around them: a recompute can renumber a
     // sketch's profiles (a face sketch's projected outline rebuilt), never the curves.
     stable_profiles(s, &mut kind, exact_regions(p))?;
@@ -2035,6 +2039,65 @@ pub(crate) fn axis_dir_form(v: &Value) -> std::result::Result<Vec3, &'static str
     }
 }
 
+/// What a cylinder's `axis` (#18822) is read as, without the design: X, Y, Z or a non-zero
+/// `[x, y, z]` of numbers as [`axis_dir_form`] reads them (normalized, saved as numbers), else
+/// `[x, y, z]` (or `{x, y, z}`) whose components are numbers or unitless expressions, kept as
+/// given. Whether those evaluate, and to a direction that isn't zero, needs the design.
+pub(crate) fn axis_expr_form(v: &Value) -> std::result::Result<solidcraft_doc::DirExpr, &'static str> {
+    if let Ok(d) = axis_dir_form(v) {
+        return Ok(solidcraft_doc::dir_expr(d));
+    }
+    let coords: Vec<&Value> = match v {
+        Value::Array(a) if a.len() == 3 => a.iter().collect(),
+        Value::Object(o) => ["x", "y", "z"].iter().filter_map(|k| o.get(*k)).collect(),
+        _ => Vec::new(),
+    };
+    // Three numbers: a direction however short or long, refused only when zero.
+    if coords.len() == 3 && coords.iter().all(|c| c.is_number()) {
+        let n: Option<Vec<f64>> = coords.iter().map(|c| c.as_f64().filter(|x| x.is_finite())).collect();
+        return n
+            .and_then(|n| <[f64; 3]>::try_from(n).ok())
+            .and_then(|[x, y, z]| solidcraft_doc::unit_direction(Vec3::new(x, y, z)))
+            .map(solidcraft_doc::dir_expr)
+            .ok_or("`axis` must be X, Y, Z or a non-zero [x, y, z]");
+    }
+    if coords.len() != 3 {
+        return axis_dir_form(v).map(solidcraft_doc::dir_expr);
+    }
+    let parts: Option<Vec<Expr>> = coords.into_iter().map(|c| expr(&json!({ "v": c }), "v")).collect();
+    parts
+        .and_then(|p| <[Expr; 3]>::try_from(p).ok())
+        .ok_or("`axis` must be X, Y, Z or [x, y, z] of numbers or unitless expressions such as \"-sin(t)\"")
+}
+
+/// A cylinder's `axis` (#18822): what [`axis_expr_form`] reads, each component evaluated now
+/// as a number without a unit. Returns the expressions to keep and the direction they give now.
+fn axis_expr_param(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_doc::DirExpr, Vec3)> {
+    let Some(v) = p.get("axis") else { return Ok((solidcraft_doc::dir_expr(Vec3::Z), Vec3::Z)) };
+    let d = axis_expr_form(v).map_err(|why| bad(cmd, why))?;
+    let mut now = [0.0; 3];
+    for ((slot, e), axis) in now.iter_mut().zip(&d).zip(["x", "y", "z"]) {
+        // A parameter added as a plain number is a length, which an axis can't take as it is.
+        let x = s.doc.eval(e, Kind::Unitless).map_err(|err| {
+            let hint = if s.doc.eval(e, Kind::Length).is_ok() { " (an axis has no unit: divide a length by its unit, as in `n / 1 mm`)" } else { "" };
+            bad(cmd, format!("axis {axis}: {err}{hint}"))
+        })?;
+        if !x.is_finite() {
+            return Err(bad(cmd, format!("axis {axis} is not a finite number")));
+        }
+        *slot = x;
+    }
+    let [x, y, z] = now;
+    let dir = solidcraft_doc::unit_direction(Vec3::new(x, y, z))
+        .ok_or_else(|| bad(cmd, "`axis` is [0, 0, 0] with these parameter values: give a direction that isn't zero"))?;
+    // An axis that uses no parameter is a fixed direction: saved normalized, as numbers, the
+    // way an axis given as numbers is.
+    if d.iter().all(|e| solidcraft_doc::expr::references(e).is_empty()) {
+        return Ok((solidcraft_doc::dir_expr(dir), dir));
+    }
+    Ok((d, dir))
+}
+
 fn prim_box(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.box";
     let (l, w, h) = (req_expr(cmd, p, "length")?, req_expr(cmd, p, "width")?, req_expr(cmd, p, "height")?);
@@ -2058,7 +2121,7 @@ fn prim_cylinder(s: &mut Session, p: &Value) -> Result<Value> {
     check_expr(s, &radius, Kind::Length, cmd, "radius")?;
     check_expr(s, &height, Kind::Length, cmd, "height")?;
     let base = point_param(s, p, "base", cmd)?.unwrap_or_else(|| point_expr(Vec3::ZERO));
-    let axis = axis_dir_param(p, cmd)?;
+    let (axis_exprs, axis) = axis_expr_param(s, p, cmd)?;
     // Reference edges (#6380), as a Single hole's: the base centre sits at these distances from
     // straight edges of the face it stands on, and `base` keeps where those put it.
     let references = hole_reference_params(s, p, cmd)?;
@@ -2071,7 +2134,7 @@ fn prim_cylinder(s: &mut Session, p: &Value) -> Result<Value> {
             .ok_or_else(|| bad(cmd, "`references` place a cylinder by its `base` given as numbers, not length expressions"))?;
         point_expr(referenced_centre(s, cmd, &references, at, -axis)?)
     };
-    add_feature(s, p, FeatureKind::Cylinder { base, axis: Dir(axis), radius, height, operation: operation(p, cmd)?, references })
+    add_feature(s, p, FeatureKind::Cylinder { base, axis: axis_exprs, radius, height, operation: operation(p, cmd)?, references })
 }
 
 fn prim_sphere(s: &mut Session, p: &Value) -> Result<Value> {

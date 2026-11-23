@@ -3054,7 +3054,7 @@
   "plugin_error.design_too_large": "створений ним проєкт більший за {allowed} MiB — це максимум, який плагін може передати.",
   "plugin_error.failed": "{plugin}: {reason}",
   "plugin_error.failed_file": "{plugin} не зміг відкрити {file}: {reason}",
-  "plugin_error.fuel_ceiling": "він запитує {requested} пального, а плагіни можуть використовувати {allowed}. Збільште «Максимум пального плагіна» в Налаштування › Плагіни (у solidcraft-cli — max_fuel у файлі --plugin-limits).",
+  "plugin_error.fuel_ceiling": "він запитує {requested} пального, а плагіни можуть використовувати {allowed}. Установіть плагін знову й дозвольте його запит пального або збільште «Максимум пального плагіна» в Налаштування › Плагіни (у solidcraft-cli — max_fuel у файлі --plugin-limits).",
   "plugin_error.memory_ceiling": "він запитує {requested} MiB пам’яті, а плагіни можуть використовувати {allowed} MiB. Встановіть плагін знову й дозвольте його запит пам’яті або збільште «Максимум пам’яті плагіна (MiB)» в Налаштування › Плагіни (у solidcraft-cli — max_memory_mib у файлі --plugin-limits).",
   "plugin_error.out_of_fuel": "він використав усі запитані {allowed} пального й був зупинений. Попросіть автора підвищити ліміт пального.",
   "plugin_error.out_of_memory": "йому знадобилося понад {allowed} MiB запитаної пам’яті, і його зупинено. Попросіть автора підвищити ліміт пам’яті.",

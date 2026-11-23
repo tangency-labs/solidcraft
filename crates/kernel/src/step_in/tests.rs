@@ -6070,6 +6070,238 @@ fn a_cap_whose_rim_is_one_closed_edge_measures_its_whole_volume() {
     assert_closed_solid(&text, 2, 2.0 * std::f64::consts::PI * 100.0_f64.powi(3) / 3.0);
 }
 
+/// A STEP point: its number.
+fn step_point(w: &mut Entities, p: [f64; 3]) -> usize {
+    w.add(format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", p[0], p[1], p[2]))
+}
+
+/// A line edge between two vertices (given with their places) along an axis-aligned or any straight run.
+fn step_line_edge(w: &mut Entities, (v1, p): (usize, [f64; 3]), (v2, q): (usize, [f64; 3])) -> usize {
+    let d = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
+    let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+    let dir = w.add(format!("DIRECTION('',({:?},{:?},{:?}))", d[0] / len, d[1] / len, d[2] / len));
+    let vec = w.add(format!("VECTOR('',#{dir},{len:?})"));
+    let origin = step_point(w, p);
+    let line = w.add(format!("LINE('',#{origin},#{vec})"));
+    w.add(format!("EDGE_CURVE('',#{v1},#{v2},#{line},.T.)"))
+}
+
+/// A face of several bounds, each a loop of `(edge, orientation)` uses (the first the outer one).
+fn step_face_with_bounds(w: &mut Entities, loops: &[&[(usize, bool)]], surface: usize, sense: bool) -> usize {
+    let mut bounds = Vec::new();
+    for (k, uses) in loops.iter().enumerate() {
+        let oes: Vec<String> =
+            uses.iter().map(|&(e, o)| format!("#{}", w.add(format!("ORIENTED_EDGE('',*,*,#{e},.{}.)", if o { "T" } else { "F" })))).collect();
+        let l = w.add(format!("EDGE_LOOP('',({}))", oes.join(",")));
+        let kind = if k == 0 { "FACE_OUTER_BOUND" } else { "FACE_BOUND" };
+        bounds.push(format!("#{}", w.add(format!("{kind}('',#{l},.T.)"))));
+    }
+    w.add(format!("ADVANCED_FACE('',({}),#{surface},.{}.)", bounds.join(","), if sense { "T" } else { "F" }))
+}
+
+/// The file's stated tolerance is 1e-5 mm, as Inventor writes it, not the builder's.
+fn with_file_tolerance(text: String) -> String {
+    text.replace("LENGTH_MEASURE(1.E-3)", "LENGTH_MEASURE(1.E-5)")
+}
+
+/// A quarter of a cylinder (radius 10, height 20) whose round face is an exact rational net
+/// (weights 1, √½, 1 round the arc, one weight along it) ending `short` mm below the top edge.
+fn quarter_cylinder_with_short_net(short: f64) -> String {
+    let (r, h) = (10.0_f64, 20.0_f64);
+    let mut w = Entities::default();
+    let v = |w: &mut Entities, p: [f64; 3]| (w.vertex(p), p);
+    let (o0, a0, b0) = (v(&mut w, [0.0, 0.0, 0.0]), v(&mut w, [r, 0.0, 0.0]), v(&mut w, [0.0, r, 0.0]));
+    let (oh, ah, bh) = (v(&mut w, [0.0, 0.0, h]), v(&mut w, [r, 0.0, h]), v(&mut w, [0.0, r, h]));
+    let arc = |w: &mut Entities, z: f64, from: usize, to: usize| {
+        let a = w.axis([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let c = w.add(format!("CIRCLE('',#{a},{r:?})"));
+        w.add(format!("EDGE_CURVE('',#{from},#{to},#{c},.T.)"))
+    };
+    let (arc_bottom, arc_top) = (arc(&mut w, 0.0, a0.0, b0.0), arc(&mut w, h, ah.0, bh.0));
+    let (o0a0, o0b0, ohah, ohbh) =
+        (step_line_edge(&mut w, o0, a0), step_line_edge(&mut w, o0, b0), step_line_edge(&mut w, oh, ah), step_line_edge(&mut w, oh, bh));
+    let (a0ah, b0bh, o0oh) = (step_line_edge(&mut w, a0, ah), step_line_edge(&mut w, b0, bh), step_line_edge(&mut w, o0, oh));
+    let top = h - short;
+    let net = [[[r, 0.0, 0.0], [r, 0.0, top]], [[r, r, 0.0], [r, r, top]], [[0.0, r, 0.0], [0.0, r, top]]];
+    let ids: Vec<String> =
+        net.iter().map(|row| format!("({})", row.iter().map(|p| format!("#{}", step_point(&mut w, *p))).collect::<Vec<_>>().join(","))).collect();
+    let c = std::f64::consts::FRAC_1_SQRT_2;
+    let surface = w.add(format!(
+        "(BOUNDED_SURFACE()B_SPLINE_SURFACE(2,1,({}),.UNSPECIFIED.,.F.,.F.,.F.)B_SPLINE_SURFACE_WITH_KNOTS((3,3),(2,2),(0.0,1.0),(0.0,1.0),.UNSPECIFIED.)GEOMETRIC_REPRESENTATION_ITEM()RATIONAL_B_SPLINE_SURFACE(((1.0,1.0),({c:?},{c:?}),(1.0,1.0)))REPRESENTATION_ITEM('')SURFACE())",
+        ids.join(",")
+    ));
+    let plane = |w: &mut Entities, o: [f64; 3], z: [f64; 3], x: [f64; 3]| {
+        let a = w.axis(o, z, x);
+        w.add(format!("PLANE('',#{a})"))
+    };
+    let round = w.face(&[(arc_bottom, true), (b0bh, true), (arc_top, false), (a0ah, false)], surface);
+    let (p1, p2, p3, p4) = (
+        plane(&mut w, [0.0; 3], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]),
+        plane(&mut w, [0.0, 0.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]),
+        plane(&mut w, [0.0; 3], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]),
+        plane(&mut w, [0.0; 3], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+    );
+    let faces = [
+        round,
+        w.face(&[(o0b0, true), (arc_bottom, false), (o0a0, false)], p1),
+        w.face(&[(ohah, true), (arc_top, true), (ohbh, false)], p2),
+        w.face(&[(o0a0, true), (a0ah, true), (ohah, false), (o0oh, false)], p3),
+        w.face(&[(o0oh, true), (ohbh, true), (b0bh, false), (o0b0, false)], p4),
+    ];
+    with_file_tolerance(w.solid(&faces))
+}
+
+/// A rational face whose pcurve ends a hair past its net's range, inside the file's tolerance
+/// (8e-6 mm against 1e-5), is moved onto the range and the solid closes: the net is straight
+/// along the overrun, with one weight there, so the move is bounded (#20530).
+#[test]
+fn a_rational_net_ending_just_short_of_its_edge_within_the_tolerance_imports_closed() {
+    let volume = std::f64::consts::PI * 100.0 * 20.0 / 4.0;
+    assert!((volume - 1570.7963).abs() < 1e-4 * volume, "{volume}");
+    assert_closed_solid(&quarter_cylinder_with_short_net(0.0), 5, volume);
+    assert_closed_solid(&quarter_cylinder_with_short_net(8e-6), 5, volume);
+}
+
+/// A 10 mm cube whose top is a cubic B-spline net with a raised middle (its boundary rows straight
+/// at z = 10) and whose front top edge is split 0.0002 mm before its end, the short piece a cubic
+/// on the knot range `knots`, its inner control points 0.002 mm above the face.
+fn cube_with_short_edge_on_spline_top(knots: (f64, f64)) -> String {
+    let l = 10.0_f64;
+    let mut w = Entities::default();
+    let corner = |i: usize| [(i & 1) as f64 * l, ((i >> 1) & 1) as f64 * l, ((i >> 2) & 1) as f64 * l];
+    let verts: Vec<usize> = (0..8).map(|i| w.vertex(corner(i))).collect();
+    let q = [l - 2e-4, 0.0, l];
+    let vq = w.vertex(q);
+    let mut edges = std::collections::HashMap::new();
+    let mut edge = |w: &mut Entities, i: usize, j: usize| {
+        let (a, b) = (i.min(j), i.max(j));
+        let id = *edges.entry((a, b)).or_insert_with(|| step_line_edge(w, (verts[a], corner(a)), (verts[b], corner(b))));
+        (id, i == a)
+    };
+    let e_long = step_line_edge(&mut w, (verts[4], corner(4)), (vq, q));
+    let p5 = corner(5);
+    // The net's row at y = 0 is straight at z = 10, with x running linearly in the first
+    // parameter. The two inner control points lie `LIFT` above it, so the edge runs up to 1.5e-3 mm off
+    // the face: further than SMLib tolerates, which is when it gives the edge's trim on [0, 1]
+    // whatever the edge's own knot range is.
+    const LIFT: f64 = 2e-3;
+    let on_row = |t: f64, lift: f64| [q[0] + (p5[0] - q[0]) * t, 0.0, l + lift];
+    let pts: Vec<usize> = [(0.0, 0.0), (0.2, LIFT), (0.7, LIFT), (1.0, 0.0)].iter().map(|(t, lift)| step_point(&mut w, on_row(*t, *lift))).collect();
+    let curve = w.add(format!(
+        "B_SPLINE_CURVE_WITH_KNOTS('',3,(#{},#{},#{},#{}),.UNSPECIFIED.,.F.,.F.,(4,4),({:?},{:?}),.UNSPECIFIED.)",
+        pts[0], pts[1], pts[2], pts[3], knots.0, knots.1
+    ));
+    let e_short = w.add(format!("EDGE_CURVE('',#{vq},#{},#{curve},.T.)", verts[5]));
+    // The net: Greville abscissae of each direction's knots, the middle raised 2 mm.
+    let greville = |kn: &[f64], mult: &[usize]| -> Vec<f64> {
+        let u: Vec<f64> = kn.iter().zip(mult).flat_map(|(k, m)| std::iter::repeat_n(*k, *m)).collect();
+        (0..u.len() - 4).map(|i| ((u[i + 1] + u[i + 2] + u[i + 3]) / 3.0 - u[0]) / (u[u.len() - 1] - u[0])).collect()
+    };
+    let (ku, mu) = ([0.0, 0.2, 0.4, 0.6, 0.8, 1.0], [4usize, 1, 1, 1, 1, 4]);
+    let (kv, mv) = ([-6.0, -3.0, 0.0, 7.5, 15.0, 21.0], [4usize, 2, 3, 1, 3, 4]);
+    let (gu, gv) = (greville(&ku, &mu), greville(&kv, &mv));
+    let rows: Vec<String> = gu
+        .iter()
+        .enumerate()
+        .map(|(i, x)| {
+            let row: Vec<String> = gv
+                .iter()
+                .enumerate()
+                .map(|(j, y)| {
+                    let inner = i > 0 && i + 1 < gu.len() && j > 0 && j + 1 < gv.len();
+                    format!("#{}", step_point(&mut w, [l * x, l * y, l + if inner { 2.0 } else { 0.0 }]))
+                })
+                .collect();
+            format!("({})", row.join(","))
+        })
+        .collect();
+    let list = |a: &[f64]| a.iter().map(|x| format!("{x:?}")).collect::<Vec<_>>().join(",");
+    let ints = |a: &[usize]| a.iter().map(ToString::to_string).collect::<Vec<_>>().join(",");
+    let top = w.add(format!(
+        "B_SPLINE_SURFACE_WITH_KNOTS('',3,3,({}),.UNSPECIFIED.,.F.,.F.,.F.,({}),({}),({}),({}),.UNSPECIFIED.)",
+        rows.join(","),
+        ints(&mu),
+        ints(&mv),
+        list(&ku),
+        list(&kv)
+    ));
+    let plane = |w: &mut Entities, o: usize, n: [f64; 3], x: [f64; 3]| {
+        let a = w.axis(corner(o), n, x);
+        w.add(format!("PLANE('',#{a})"))
+    };
+    let mut faces = Vec::new();
+    let planes = [
+        (plane(&mut w, 0, [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]), vec![edge(&mut w, 0, 2), edge(&mut w, 2, 3), edge(&mut w, 3, 1), edge(&mut w, 1, 0)]),
+        (
+            plane(&mut w, 0, [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]),
+            vec![edge(&mut w, 0, 1), edge(&mut w, 1, 5), (e_short, false), (e_long, false), edge(&mut w, 4, 0)],
+        ),
+        (plane(&mut w, 2, [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]), vec![edge(&mut w, 2, 6), edge(&mut w, 6, 7), edge(&mut w, 7, 3), edge(&mut w, 3, 2)]),
+        (plane(&mut w, 0, [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]), vec![edge(&mut w, 0, 4), edge(&mut w, 4, 6), edge(&mut w, 6, 2), edge(&mut w, 2, 0)]),
+        (plane(&mut w, 1, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]), vec![edge(&mut w, 1, 3), edge(&mut w, 3, 7), edge(&mut w, 7, 5), edge(&mut w, 5, 1)]),
+    ];
+    for (surface, uses) in &planes {
+        faces.push(step_face_with_bounds(&mut w, &[uses.as_slice()], *surface, true));
+    }
+    let top_uses = [(e_long, true), (e_short, true), edge(&mut w, 5, 7), edge(&mut w, 7, 6), edge(&mut w, 6, 4)];
+    faces.push(step_face_with_bounds(&mut w, &[&top_uses[..]], top, true));
+    with_file_tolerance(w.solid(&faces))
+}
+
+/// A short edge on a spline face is kept whatever knot range its curve is written on: the part
+/// of the edge SMLib gives its trim for is the same, so the face is not left out because the
+/// trim's unit range differs from the edge's parameters (#20530). The raised interior control
+/// points add 2 mm · 0.9 · 0.91667 · 100 mm² to the 1000 mm³ cube.
+#[test]
+fn a_short_edge_on_a_spline_face_imports_closed_on_any_knot_range() {
+    let volume = 1000.0 + 2.0 * 0.9 * 0.916_666_666_7 * 100.0;
+    for knots in [(0.0, 1.0), (8.17, 8.172_65), (0.0, 0.5)] {
+        assert_closed_solid(&cube_with_short_edge_on_spline_top(knots), 6, volume);
+    }
+}
+
+/// A stepped shaft (radius 6 up to z = 10, then 5.99 to z = 20) whose shoulder is a cone `eps`
+/// radians short of flat, falling `0.01 · tan(eps)` over its 0.01 mm width.
+fn shaft_with_flat_cone_shoulder(eps: f64) -> String {
+    let (r_out, r_in) = (6.0_f64, 5.99_f64);
+    let d = (r_out - r_in) * eps.tan();
+    let mut w = Entities::default();
+    let ring = |w: &mut Entities, r: f64, z: f64| {
+        let v = w.vertex([r, 0.0, z]);
+        let a = w.axis([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let c = w.add(format!("CIRCLE('',#{a},{r:?})"));
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{c},.T.)"))
+    };
+    let (c0, c1, c2, c3) = (ring(&mut w, r_out, 0.0), ring(&mut w, r_out, 10.0), ring(&mut w, r_in, 10.0 - d), ring(&mut w, r_in, 20.0));
+    let place = |w: &mut Entities, z: f64| w.axis([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let down = w.axis([0.0; 3], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+    let bottom_plane = w.add(format!("PLANE('',#{down})"));
+    let (a0, a1, a2, a3) = (place(&mut w, 0.0), place(&mut w, 10.0), place(&mut w, 10.0 - d), place(&mut w, 20.0));
+    let cyl_out = w.add(format!("CYLINDRICAL_SURFACE('',#{a0},{r_out:?})"));
+    let cone = w.add(format!("CONICAL_SURFACE('',#{a1},{r_out:?},{:?})", std::f64::consts::FRAC_PI_2 - eps));
+    let cyl_in = w.add(format!("CYLINDRICAL_SURFACE('',#{a2},{r_in:?})"));
+    let top_plane = w.add(format!("PLANE('',#{a3})"));
+    let faces = [
+        step_face_with_bounds(&mut w, &[&[(c0, false)]], bottom_plane, true),
+        step_face_with_bounds(&mut w, &[&[(c0, true)], &[(c1, false)]], cyl_out, true),
+        step_face_with_bounds(&mut w, &[&[(c1, true)], &[(c2, false)]], cone, false),
+        step_face_with_bounds(&mut w, &[&[(c2, true)], &[(c3, false)]], cyl_in, true),
+        step_face_with_bounds(&mut w, &[&[(c3, true)]], top_plane, true),
+    ];
+    with_file_tolerance(w.solid(&faces))
+}
+
+/// A shoulder whose cone is flatter and narrower than SMLib names a cone (a drop of 5e-7 mm over
+/// 0.01 mm) is kept, as its exact NURBS form: the shaft closes with its volume of revolution
+/// (the two cylinders; the shoulder's sliver is below the check's accuracy) (#20530).
+#[test]
+fn a_shoulder_cone_flatter_than_smlib_names_a_cone_imports_closed() {
+    let pi = std::f64::consts::PI;
+    let volume = pi * (36.0 * 10.0 + 5.99 * 5.99 * 10.0);
+    assert_closed_solid(&shaft_with_flat_cone_shoulder(1e-3), 5, volume);
+    assert_closed_solid(&shaft_with_flat_cone_shoulder(5e-5), 5, volume);
+}
+
 type P3 = [f64; 3];
 
 fn cross3(a: P3, b: P3) -> P3 {
