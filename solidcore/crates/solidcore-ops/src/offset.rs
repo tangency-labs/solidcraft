@@ -230,6 +230,7 @@ fn offset_refused(
         OffsetFailure::ExactCurveUncut => OffsetRefusal::ExactCurveUncut,
         OffsetFailure::FacesApart { .. } => OffsetRefusal::FacesApart,
         OffsetFailure::PastSide { largest, .. } => OffsetRefusal::PastSide { largest },
+        OffsetFailure::FaceCloses { largest, .. } => OffsetRefusal::FaceCloses { largest },
         OffsetFailure::ReachUncertified { .. } => OffsetRefusal::ReachUncertified,
         OffsetFailure::LoopGapUncertified { .. } => OffsetRefusal::LoopGapUncertified,
         OffsetFailure::Unsound { what } => match unsound(what, index) {
@@ -481,7 +482,7 @@ pub fn offset_faces(body: &Body, order: &Order, faces: &[usize], distance: f64) 
 }
 
 /// The sheet `body` thickened by `thickness` along its normals, or (`symmetric`) moved back by
-/// half first: a closed solid ([`Expect::SOLID`], [`Error::NotSolid`] if not).
+/// half first: a closed solid ([`Expect::SOLID`], [`Error::NotSolidBecause`] if not).
 ///
 /// # Errors
 /// [`Error::Argument`] for a thickness not finite, zero or past 1e6, or a body that is a
@@ -669,6 +670,9 @@ pub fn draft(
         replace(k, b, drafted, expect)
     })?
 }
+
+mod surface;
+pub use surface::offset_surface;
 
 #[cfg(test)]
 mod tests;

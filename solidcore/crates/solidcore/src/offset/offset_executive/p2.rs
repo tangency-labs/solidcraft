@@ -95,7 +95,6 @@ use crate::sweep::topology_sweep::store::SweepIdentities;
 use crate::topology::edge::{NotificationStores, NotifyState};
 use crate::topology::edgeuse::{p1 as eu, p2 as eu2};
 use crate::topology::face::p2 as face;
-#[cfg(test)]
 use crate::topology::topology::Topology;
 use crate::topology::{Brep, BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, RegionId, VertexId};
 
@@ -2163,7 +2162,9 @@ pub fn offset_brep_simple(
 /// with notification identities of its own, as [`offset_brep_simple`]: for a caller that
 /// keeps no notification stores (`SmBrep::LocalOperation` on a B-rep of the caller's).
 /// The B-rep's attributes stay on its faces as upstream's notifications carry them; its
-/// [`Brep::key`] is restored.
+/// [`Brep::key`] is restored. A complete inward cylindrical draft with fixed axial
+/// end planes uses its exact closed radial removal volume before the executive;
+/// this also trims intervening walls against the drafted support.
 ///
 /// # Errors
 ///
@@ -2174,6 +2175,13 @@ pub fn local_operation_simple(
     faces: &[FaceId],
     surfaces: Vec<crate::surface::surface::Surface>,
 ) -> Result<()> {
+    if crate::topology::brep::local_operation::contract_complete_cylinder(
+        kernel, b, faces, &surfaces,
+    )?
+    .is_some()
+    {
+        return Ok(());
+    }
     let saved_key = b.key();
     b.set_key(attributes::original_key(EntityRef::Brep(BrepId::from_index(0))).key);
     let mut records = attributes::simple_records(b);
@@ -2200,6 +2208,34 @@ pub fn local_operation_simple(
     result
 }
 
+/// Carries the selected face's own attributes onto a static local operation's
+/// swept wall, using the normal Copy handlers and disjoint source/result identities.
+pub(crate) fn copy_local_sweep_attributes(
+    kernel: &mut Kernel,
+    source: &Brep,
+    face: FaceId,
+    target: &mut Brep,
+    wall: FaceId,
+) -> Result<()> {
+    let mut store = AttributeStore::default();
+    attributes::seed_attributes(source, &attributes::original_key, &mut store)?;
+    let from = attributes::original_key(EntityRef::Face(face));
+    let to = attributes::result_key(EntityRef::Face(wall));
+    let mut records = attributes::simple_records(source);
+    records.insert(to.key, Topology::new());
+    crate::topology::topology::notify(
+        &mut records,
+        &mut store,
+        Some(&mut kernel.context),
+        NotifyOperation::Copy,
+        from,
+        Some(to),
+        None,
+        None,
+    )?;
+    attributes::write_back_attributes(target, &attributes::result_key, &store)
+}
+
 /// (not upstream) [`api_shell_brep_full`] with notification identities of its own,
 /// on faces of `original` (`faces` removed: open faces; empty: a closed shell). The
 /// source's attributes reach the result as upstream's notifications carry them; the
@@ -2215,7 +2251,10 @@ pub fn shell_brep_simple(
     faces: &[FaceId],
 ) -> Result<Brep> {
     let source_id = BrepId::from_index(0);
-    let mut source = original.clone_standing_for_self()?;
+    // The working copy keeps the faces' definitions (not upstream: an exact round's
+    // definition rides beside its net, #2485), so that a round offsets by its definition
+    // (#2487: the round of the moved radius on the offset supports), never by its net.
+    let mut source = original.clone_standing_for_self_keeping_definitions()?;
     source.set_key(attributes::original_key(EntityRef::Brep(source_id)).key);
     let mut records = attributes::simple_records(&source);
     let mut store = AttributeStore::default();

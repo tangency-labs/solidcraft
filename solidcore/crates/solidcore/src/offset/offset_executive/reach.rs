@@ -2646,7 +2646,15 @@ pub fn local_extension_reach(
     let is_moved = |f: Option<FaceId>| f.is_some_and(|f| moved.iter().any(|(m, _)| *m == f));
     let uncertified = || match own_face {
         Some(face) => Failure::new(LOCAL_OP, OffsetFailure::ReachUncertified { face }).into_error(),
-        None => SolidError::offset_stage_failed(LOCAL_OP, crate::error::SM_ERR_NULL_POINTER),
+        None => Failure::new(
+            LOCAL_OP,
+            OffsetFailure::Defect {
+                why: "the face use whose extension reach is asked has no face, though the kernel \
+                      links every face use to its face",
+            },
+        )
+        .with_status(crate::error::SM_ERR_NULL_POINTER)
+        .into_error(),
     };
     // each face's exact class, proved once
     let mut classes: Vec<(FaceId, Option<Exact>)> = Vec::new();

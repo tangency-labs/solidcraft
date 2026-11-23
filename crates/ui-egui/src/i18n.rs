@@ -33,6 +33,7 @@ static NORWEGIAN: Catalog = Catalog::new("nb", "Norsk bokmål", include_str!(con
 static DUTCH: Catalog = Catalog::new("nl", "Nederlands", include_str!(concat!(env!("OUT_DIR"), "/locales/nl.json")));
 static POLISH: Catalog = Catalog::new("pl", "Polski", include_str!(concat!(env!("OUT_DIR"), "/locales/pl.json")));
 static PORTUGUESE_BR: Catalog = Catalog::new("pt-BR", "Português (Brasil)", include_str!(concat!(env!("OUT_DIR"), "/locales/pt-BR.json")));
+static PORTUGUESE_PT: Catalog = Catalog::new("pt-PT", "Português (Portugal)", include_str!(concat!(env!("OUT_DIR"), "/locales/pt-PT.json")));
 static ROMANIAN: Catalog = Catalog::new("ro", "Română", include_str!(concat!(env!("OUT_DIR"), "/locales/ro.json")));
 static RUSSIAN: Catalog = Catalog::new("ru", "Русский", include_str!(concat!(env!("OUT_DIR"), "/locales/ru.json")));
 static SERBIAN: Catalog = Catalog::new("sr", "Српски", include_str!(concat!(env!("OUT_DIR"), "/locales/sr.json")));
@@ -74,6 +75,7 @@ pub const LOCALES: &[&Catalog] = &[
     &DUTCH,
     &POLISH,
     &PORTUGUESE_BR,
+    &PORTUGUESE_PT,
     &ROMANIAN,
     &RUSSIAN,
     &SERBIAN,
@@ -348,6 +350,7 @@ mod tests {
         let failure = PluginFailure {
             plugin: "Dutchman".into(),
             file: Some("cube.f3d".into()),
+            exporting: false,
             error: solidcraft_engine::plugin::HostError::OverCeiling { limit: "memory_mib".into(), requested: 2048, allowed: 128 },
         };
         let _scope = scope("de");
@@ -449,7 +452,7 @@ mod tests {
         assert_eq!(match_system_tags(&tags(&["zh_CN"])), "zh", "underscores normalize");
         assert_eq!(match_system_tags(&tags(&["FR"])), "fr", "case-insensitive");
         assert_eq!(match_system_tags(&tags(&["nl"])), "nl", "bare base tag");
-        assert_eq!(match_system_tags(&tags(&["pt-PT"])), "en", "pt has no catalog: English");
+        assert_eq!(match_system_tags(&tags(&["pt-PT"])), "pt-PT", "exact tag");
         assert_eq!(match_system_tags(&tags(&["xx-YY"])), "en", "unknown: English");
         assert_eq!(match_system_tags(&tags(&[])), "en", "nothing: English");
         assert_eq!(match_system_tags(&tags(&["xx-YY", "de-DE"])), "de", "the first tag that matches wins");
@@ -671,6 +674,7 @@ mod tests {
             curves: vec![curve.into()],
             points: Vec::new(),
             name: "F2:side:l1".into(),
+            from: Vec::new(),
         };
         let lost_error = |n: usize| {
             let links = [("j1", "Tray", "l1"), ("j2", "Cover", "l2"), ("j3", "Tray", "l3"), ("j4", "Tray", "l4")];
@@ -734,6 +738,62 @@ mod tests {
         assert_eq!(uk.text("ui.design_properties.organization"), "Organisation");
         assert_eq!(uk.text("ui.preferences"), english.text("ui.preferences"));
         assert_eq!(english.label("Center X"), "Center X");
+    }
+
+    /// English is in US spelling (#9194, #13470): no message spells a word the British way,
+    /// and English (UK) still reads the ones it changed in British spelling.
+    #[test]
+    fn english_messages_are_in_us_spelling() {
+        install();
+        // Names keep their own spelling: a font's licence and a filament's colour name.
+        let names = ["Ubuntu Font Licence", "ABS - Grey"];
+        let british = [
+            "centre",
+            "centres",
+            "centred",
+            "colour",
+            "colours",
+            "coloured",
+            "moulding",
+            "modelling",
+            "labelled",
+            "behaviour",
+            "cancelled",
+            "towards",
+            "favourite",
+            "licence",
+            "neighbouring",
+            "millimetres",
+            "modelled",
+            "moulded",
+            "cancelling",
+            "aluminium",
+            "summarises",
+            "recolour",
+            "cancellable",
+        ];
+        let mut found = Vec::new();
+        solidcraft_ui_text::each_english_message(|id, text| {
+            let mut rest = text.to_string();
+            for name in names {
+                rest = rest.replace(name, "");
+            }
+            let words = rest.split(|c: char| !c.is_ascii_alphabetic()).map(str::to_ascii_lowercase);
+            if let Some(word) = words.into_iter().find(|w| british.contains(&w.as_str())) {
+                found.push(format!("{id}: {word}"));
+            }
+        });
+        assert!(found.is_empty(), "British spelling in English: {found:#?}");
+        let uk = Locale::for_language("en-GB");
+        assert_eq!(
+            Locale::for_language("en").text("help.sketch.circle.center"),
+            "Draws a circle from its center and its diameter. Use it for holes, bosses and other round features whose center is known."
+        );
+        assert_eq!(
+            uk.text("help.sketch.circle.center"),
+            "Draws a circle from its centre and its diameter. Use it for holes, bosses and other round features whose centre is known."
+        );
+        assert!(uk.text("refused.face_flat").contains("modelling"), "{}", uk.text("refused.face_flat"));
     }
 
     /// A new design's name, `Untitled`, is a default name like `Sketch1`: it shows translated
@@ -923,6 +983,50 @@ mod tests {
     /// escapes and test modules are handled, and calls inside macros count too. UI-kit calls that
     /// translate their label themselves (`row`, imported as `form_row`, and the rest of
     /// `KIT_CALLS`) are read at the same argument positions the kit translates.
+    /// A command's label comes from its own entry, in every language (#20610). The English
+    /// text of a command's label can be the text of other entries too ("Export": the
+    /// command, the start page's button and two of Preferences'; "Ground": the command and
+    /// a render scene's floor), and the label adapter takes one of them by id order, so the
+    /// Spanish Export command read "Exportar perfil". For every command with an entry of
+    /// its own (`cmd.<id>`, or with its dots as underscores) whose English text is the
+    /// command's label, and every language that has that entry, `command` gives that
+    /// entry's text; a command without one, a label shown in a command's place and an id
+    /// that is no command's go by the label as before.
+    #[test]
+    fn a_command_is_labelled_from_its_own_entry_in_every_language() {
+        install();
+        let english = ENGLISH.messages();
+        let own_entry = |id: &str, label: &str| {
+            [format!("cmd.{id}"), format!("cmd.{}", id.replace('.', "_"))].into_iter().find(|key| english.get(key).is_some_and(|text| text == label))
+        };
+        let commands = solidcraft_engine::command_specs();
+        let mut told_apart = Vec::new();
+        for catalog in LOCALES {
+            let locale = Locale::new(catalog);
+            for command in &commands {
+                match own_entry(command.id, command.label).filter(|key| catalog.messages().contains_key(key)) {
+                    Some(key) => {
+                        assert_eq!(locale.command(command.id, command.label), locale.text(&key), "{}: {}", catalog.id, command.id);
+                        if locale.label(command.label) != locale.text(&key) {
+                            told_apart.push((catalog.id, command.id));
+                        }
+                    }
+                    None => assert_eq!(locale.command(command.id, command.label), locale.label(command.label), "{}: {}", catalog.id, command.id),
+                }
+            }
+        }
+        // the reported one, and that it is not the only one
+        assert!(told_apart.contains(&("es", "file.export")), "{told_apart:?}");
+        assert!(told_apart.len() > 100, "{}", told_apart.len());
+        let spanish = Locale::for_language("es");
+        assert_eq!(spanish.command("file.export", "Export"), "Exportar");
+        assert_eq!(spanish.command("occurrence.ground", "Ground"), "Fijar");
+        assert_eq!(spanish.command("file.export", "Preferences"), spanish.label("Preferences"));
+        assert_eq!(spanish.command("no.such_command", "Export"), spanish.label("Export"));
+        let _spanish = scope("es");
+        assert_eq!(solidcraft_ui_text::tr_command("file.export", "Export"), "Exportar");
+    }
+
     #[test]
     fn english_only_render_aliases_do_not_hide_existing_label_translations() {
         install();
@@ -1423,6 +1527,20 @@ mod tests {
         assert!(is_supported("pt-BR"));
         assert_eq!(pt.text("ui.preferences"), "Preferências");
         assert_eq!(pt.format("document.save_changes", &[("name", "My {design}")]), "Salvar as alterações em My {design}?");
+        assert_eq!(pt.format("dialog.selected_count", &[("count", "2")]), "↖ 2 selecionados");
+        assert_eq!(pt.label("NonExistentKey"), "NonExistentKey");
+    }
+
+    #[test]
+    fn european_portuguese_catalog_is_registered_and_translates_keys() {
+        install();
+        let pt = Locale::for_language("pt-PT");
+        assert_eq!(pt.name(), "Português (Portugal)");
+        assert!(is_supported("pt-PT"));
+        assert_eq!(pt.text("ui.preferences"), "Preferências");
+        assert_eq!(pt.text("ui.save"), "Guardar");
+        assert_eq!(pt.text("ui.file"), "Ficheiro");
+        assert_eq!(pt.format("document.save_changes", &[("name", "My {design}")]), "Guardar as alterações em My {design}?");
         assert_eq!(pt.format("dialog.selected_count", &[("count", "2")]), "↖ 2 selecionados");
         assert_eq!(pt.label("NonExistentKey"), "NonExistentKey");
     }
