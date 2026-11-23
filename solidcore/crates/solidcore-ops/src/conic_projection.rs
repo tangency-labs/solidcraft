@@ -241,6 +241,25 @@ pub fn project_fit(
     Ok(coalesce_linear(out))
 }
 
+/// Project the circular arcs `arcs` of the `source` plane onto `target` exactly: a full circle
+/// as an ellipse, arcs as rational quadratic conics, and a circle or arc seen edge on as the
+/// whole line it covers, out to its own extremes (not to those of samples of it). `None` when a
+/// piece is not an arc.
+pub fn project_arcs(
+    source: &Plane,
+    target: &Plane,
+    arcs: &[solidcore_record::Seg2],
+    max_coord: f64,
+) -> Result<Option<Vec<Projection>>> {
+    let pieces: Vec<_> = arcs
+        .iter()
+        .map(|s| solidcore::prism::read::PlanarPiece::Seg(solidcore_convert::seg2(s)))
+        .collect();
+    k::project_arcs(&plane(target), &plane(source), &pieces, max_coord)
+        .map(|g| g.map(|g| g.into_iter().map(record_projection).collect()))
+        .map_err(status)
+}
+
 /// Classify already projected native pieces, using the kernel's exact spline splitting.
 pub fn classify_pieces(
     target: &Plane,
