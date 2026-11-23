@@ -73,7 +73,7 @@ pub use solidcore::sweep::api_brep::TaperCornerRefusal as CornerRefusal;
 use crate::body::{finish, Body, Expect};
 use crate::error::status;
 use crate::order::{self, Order};
-use crate::session::{run, with_body};
+use crate::session::{read_body, run, with_body};
 use crate::{Error, Result};
 
 /// A call's own refusal, else the value: as the kernel's calls answer inside [`run`].
@@ -1670,7 +1670,7 @@ pub fn drop_curves(
     if !tolerance_ok(tolerance) {
         return Err(Error::Argument);
     }
-    with_body("drop_curves", body, |k, b| {
+    read_body("drop_curves", body, |k, b| {
         let given = parsed!(parse(k, curves));
         let face = parsed!(face_of(b, order, face));
         let domain = b.face(face)?.uv_domain;

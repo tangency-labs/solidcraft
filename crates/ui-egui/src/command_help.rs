@@ -260,6 +260,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sketch.spline.control_point",
     "sketch.spline.control_point_5",
     "sketch.spline.fit_point",
+    "sketch.spline.fit_tolerance",
     "sketch.spline3d",
     "sketch.spun_profile",
     "sketch.text",
