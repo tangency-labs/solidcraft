@@ -1800,6 +1800,8 @@ fn opened_design(
     // A file that belongs to another design says so in its header (#6892): kept for its saves,
     // and reported, so whoever opened it can say what it is.
     s.internal_of = solidcraft_io::read_internal_of_file(path);
+    // What the file holds is the document's own copy again.
+    s.internal_held.clear();
     let internal_of = s.internal_of.as_ref().map(|tag| InternalOfReport { design: tag.design.clone(), key: tag.key.clone() });
     // Both from the reading the design came from (`read_design`): the signature check, when it
     // was asked for, is the check of these bytes.
@@ -2209,7 +2211,14 @@ fn write_bytes(
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, true).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     // A first save or a Save As: the internal components are unpacked beside the new file
     // too, so its links find them (#6892). The file itself holds them either way.
-    for why in super::design_internal::carry(&s.doc, s.path.as_deref(), path) {
+    // The session now holds the internal components as this file does (#6892): a later save
+    // still has a part whose work file has gone since.
+    if format == "container"
+        && let Ok(held) = solidcraft_io::internal_components(&bytes)
+    {
+        s.internal_held = held.into_iter().map(|(name, part)| (name, part.into())).collect();
+    }
+    for why in super::design_internal::carry(&s.doc, &s.internal_held, s.path.as_deref(), path) {
         notes.push(format!("A part stored inside the design was not unpacked beside {path}: {why}"));
     }
     // The drawing files beside it now hold the drawings as saved (#6892).
@@ -2592,7 +2601,7 @@ impl Session {
     ) -> solidcraft_io::Result<Vec<u8>> {
         let mut design = self.design_at(path);
         // The internal components go in from the files they are unpacked to (#6892).
-        super::design_internal::pack(&mut design, self.path.as_deref(), &self.recovery_components);
+        super::design_internal::pack(&mut design, &self.internal_held, self.path.as_deref(), &self.recovery_components);
         let geometry = cache.then(|| saved_geometry(self, &design)).flatten();
         let preview = preview.then(|| saved_preview(self)).flatten();
         let thumbnail = cache.then(|| thumbnail::saved(self)).flatten();

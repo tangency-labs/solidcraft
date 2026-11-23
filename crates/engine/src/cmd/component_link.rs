@@ -1151,7 +1151,10 @@ fn read_linked(s: &Session, comp: u64, link: &DesignLink, notes: &mut Vec<String
     // A recovery component is read as the file holds it too, until it is restored or discarded.
     let member = solidcraft_doc::internal::linked(&link.path);
     let unpacked = solidcraft_io::vfs::design_path_is_file(&file.to_string_lossy(), s.path.as_deref()) == Some(true);
-    if let Some(kept) = member.filter(|name| s.recovery_components.contains(*name) || !unpacked).and_then(|name| s.doc.internal.get(name)) {
+    if let Some(kept) = member
+        .filter(|name| s.recovery_components.contains(*name) || !unpacked)
+        .and_then(|name| super::design_internal::stored(&s.doc, &s.internal_held, name))
+    {
         return Ok(((old.clone(), records.clone()), file, kept.as_bytes().to_vec()));
     }
     // Not where the link says: a library folder may have it (experimental, #6892). The link keeps
@@ -1476,6 +1479,9 @@ fn make_internal(s: &mut Session, p: &Value) -> Result<Value> {
     let file =
         super::design_internal::work_file(Some(&own), &member).ok_or_else(|| bad(cmd, "this design's file has no folder to unpack the part to"))?;
     super::design_internal::write(&file, &bytes).map_err(|why| bad(cmd, why))?;
+    // Kept by the session too, until a save puts it in the file: the part is not lost with its
+    // work file.
+    s.internal_held.insert(member.clone(), bytes.clone().into());
     if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
         kept.path = solidcraft_doc::internal::link(&member);
         // The copy is what the component shows now, so it is up to date with it.
@@ -1513,6 +1519,7 @@ fn write_back(s: &mut Session, p: &Value) -> Result<Value> {
         super::design_internal::work_file(Some(&own), &member).ok_or_else(|| bad(cmd, "this design's file has no folder for the component"))?;
     let bytes = read_link(&file, Some(&own)).map_err(|e| bad(cmd, e.to_string()))?;
     let written = super::design_internal::write_back(&own, &member, &bytes).map_err(|why| bad(cmd, why))?;
+    s.internal_held.insert(member.clone(), bytes.clone().into());
     // The file is ours as written: the next save does not take it for another program's change.
     s.disk = solidcraft_io::design_lock::stamp(&own);
     reply(cmd, WriteBackResult { component: comp, member, bytes: written, param_warnings: Vec::new() })
@@ -1542,8 +1549,9 @@ fn settle_recovery(s: &mut Session, p: &Value, cmd: &str, restore: bool) -> Resu
     let file = super::design_internal::work_file(s.path.as_deref(), &member).ok_or_else(|| bad(cmd, "this design has no file"))?;
     let mut backup = None;
     if !restore {
-        let held =
-            s.doc.internal.get(&member).cloned().ok_or_else(|| bad(cmd, "this design's file holds no copy of that component to go back to"))?;
+        let held = super::design_internal::stored(&s.doc, &s.internal_held, &member)
+            .cloned()
+            .ok_or_else(|| bad(cmd, "this design's file holds no copy of that component to go back to"))?;
         solidcraft_io::vfs::check_new(&file.to_string_lossy()).map_err(|e| bad(cmd, e.to_string()))?;
         // Atomic, and the work being dropped stays beside it as `<file>.bak`.
         solidcraft_io::write_atomic(&file, held.as_bytes(), true).map_err(|e| bad(cmd, format!("{}: {e}", file.display())))?;

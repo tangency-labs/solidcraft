@@ -141,15 +141,22 @@ pub(crate) fn write(file: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 /// The bytes of the stored part `name` of `doc`, the design saved at `own`: its work file's when
-/// there is one, else the ones the design's file held.
-pub(crate) fn bytes(doc: &Document, own: Option<&str>, name: &str) -> Option<Blob> {
-    work_file(own, name).and_then(|file| read_linked_file(&file, own).ok()).map(Blob::from).or_else(|| doc.internal.get(name).cloned())
+/// there is one, else the ones the design's file holds: `held`, what this session last put
+/// there, before what the file held when it was opened.
+pub(crate) fn bytes(doc: &Document, held: &BTreeMap<String, Blob>, own: Option<&str>, name: &str) -> Option<Blob> {
+    work_file(own, name).and_then(|file| read_linked_file(&file, own).ok()).map(Blob::from).or_else(|| stored(doc, held, name).cloned())
+}
+
+/// The stored part `name` as the design's file holds it: `held`, what this session last put
+/// there, else what the file held when it was opened.
+pub(crate) fn stored<'a>(doc: &'a Document, held: &'a BTreeMap<String, Blob>, name: &str) -> Option<&'a Blob> {
+    held.get(name).or_else(|| doc.internal.get(name))
 }
 
 /// Pack the internal components into `design`, the copy a save of the design at `own` writes:
 /// each one it links, from its work file, and none it no longer links. One in `recovery` (not yet
 /// restored or discarded) keeps what the design's file held: a save takes no recovery file unasked.
-pub(crate) fn pack(design: &mut Cow<'_, Document>, own: Option<&str>, recovery: &BTreeSet<String>) {
+pub(crate) fn pack(design: &mut Cow<'_, Document>, held: &BTreeMap<String, Blob>, own: Option<&str>, recovery: &BTreeSet<String>) {
     let names = linked(design);
     if names.is_empty() && design.internal.is_empty() {
         return;
@@ -158,14 +165,14 @@ pub(crate) fn pack(design: &mut Cow<'_, Document>, own: Option<&str>, recovery: 
     let packed: BTreeMap<String, Blob> = names
         .into_iter()
         .filter_map(|name| {
-            let held = recovery.contains(&name).then(|| design.internal.get(&name).cloned()).flatten();
+            let kept = recovery.contains(&name).then(|| stored(design, held, &name).cloned()).flatten();
             // A work file that still holds what the design holds is not read again ([`Stamps`]).
             let unchanged = || {
-                let stored = design.internal.get(&name)?;
+                let stored = stored(design, held, &name)?;
                 let same = stamps.as_mut()?.holds(&name, stored.as_bytes(), || super::design_stamps::digest(stored.as_bytes()));
                 (same == Some(true)).then(|| stored.clone())
             };
-            held.or_else(unchanged).or_else(|| bytes(design, own, &name)).map(|blob| (name, blob))
+            kept.or_else(unchanged).or_else(|| bytes(design, held, own, &name)).map(|blob| (name, blob))
         })
         .collect();
     if let Some(stamps) = stamps.as_mut() {
@@ -266,7 +273,7 @@ pub fn in_work_folder(design: &str, file: &str) -> bool {
 
 /// The design `doc`, saved at `own` until now (`None`: never), was written to `path`: its stored
 /// parts get work files beside the new file where they have none, so its links still find them.
-pub(crate) fn carry(doc: &Document, own: Option<&str>, path: &str) -> Vec<String> {
+pub(crate) fn carry(doc: &Document, held: &BTreeMap<String, Blob>, own: Option<&str>, path: &str) -> Vec<String> {
     let mut failed = Vec::new();
     if cfg!(target_arch = "wasm32") || own == Some(path) {
         return failed;
@@ -276,7 +283,7 @@ pub(crate) fn carry(doc: &Document, own: Option<&str>, path: &str) -> Vec<String
         if target.exists() {
             continue;
         }
-        match bytes(doc, own, &name) {
+        match bytes(doc, held, own, &name) {
             Some(blob) => {
                 if let Err(why) = write(&target, blob.as_bytes()) {
                     failed.push(format!("{name}: {why}"));

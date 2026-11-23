@@ -1970,3 +1970,57 @@ fn unchanged_work_files_are_not_read_on_open_or_save_and_a_changed_one_is_still_
     assert!(reads() <= 1, "only the changed file can need a read");
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// A design's work folder deleted while the design is open loses nothing (#6892): the next save
+/// still holds each part as this session last had it, whether it was just made internal or
+/// written back by Finish Edit, and the next open unpacks it again.
+#[test]
+fn a_work_folder_deleted_while_the_design_is_open_loses_no_part() {
+    crate::set_experimental_file_kinds(true);
+    let root = folder("work-folder-deleted");
+    part(&root.join("bracket.scprt"), 10);
+    let design = root.join("counter.sc");
+    let work = root.join(".~counter.sc.parts");
+    let held = |file: &Path| solidcraft_io::read_design(&std::fs::read(file).unwrap()).unwrap().internal;
+    let mut s = Session::default();
+    run(&mut s, "file.save", json!({"path": design}));
+    run(&mut s, "component.insert_design", json!({"path": root.join("bracket.scprt")}));
+    run(&mut s, "component.make_internal", json!({"component": "bracket"}));
+    // Made internal and not saved yet: the folder goes, and the save still stores the part.
+    std::fs::remove_dir_all(&work).unwrap();
+    run(&mut s, "file.save", json!({}));
+    let first = held(&design);
+    assert_eq!(first.keys().map(String::as_str).collect::<Vec<_>>(), ["bracket.scprt"], "the part made internal is in the file");
+
+    // Opened again, the part edited in its work file and written back as Finish Edit does; then
+    // the folder is deleted and the design saved.
+    let mut again = Session::default();
+    run(&mut again, "doc.open", json!({"path": design}));
+    part(&work.join("bracket.scprt"), 25);
+    run(&mut again, "component.update_links", json!({}));
+    run(&mut again, "component.write_back", json!({"component": "bracket"}));
+    let edited = held(&design);
+    assert_ne!(edited, first, "Finish Edit put the edit in the file");
+    std::fs::remove_dir_all(&work).unwrap();
+    run(&mut again, "file.save", json!({}));
+    assert_eq!(held(&design), edited, "a save without the folder keeps the edit");
+
+    // The same after a save took the edit: edited, saved, the folder deleted, saved again.
+    let mut third = Session::default();
+    run(&mut third, "doc.open", json!({"path": design}));
+    part(&work.join("bracket.scprt"), 40);
+    run(&mut third, "component.update_links", json!({}));
+    run(&mut third, "file.save", json!({}));
+    let saved = held(&design);
+    assert_ne!(saved, edited, "the save packed the edit");
+    std::fs::remove_dir_all(&work).unwrap();
+    run(&mut third, "file.save", json!({}));
+    assert_eq!(held(&design), saved, "a second save without the folder keeps it");
+
+    // The next open unpacks the part again, with nothing to ask.
+    let mut last = Session::default();
+    let reply = run(&mut last, "doc.open", json!({"path": design}));
+    assert!(reply.get("missing_links").is_none() && reply.get("recovery_components").is_none(), "{reply}");
+    assert_eq!(std::fs::read(work.join("bracket.scprt")).unwrap(), saved["bracket.scprt"].as_bytes());
+    let _ = std::fs::remove_dir_all(root);
+}
