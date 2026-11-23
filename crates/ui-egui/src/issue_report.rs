@@ -741,6 +741,12 @@ pub(crate) fn refused(app: &mut SolveApp) -> bool {
     true
 }
 
+/// An error toast offers Report… only where a report can open: tickets work here, and the
+/// organization's policy hasn't turned problem reports off.
+pub fn toast_offers_report(app: &SolveApp) -> bool {
+    app.policy.allows("problem_reports") && ticket::enabled(app)
+}
+
 /// Reopening must not replace the reviewed context or the typing waiting for its screenshot.
 fn keep_open_draft(app: &mut SolveApp, new_context: bool) -> bool {
     let state = &mut app.issue_report;
@@ -1114,6 +1120,17 @@ mod tests {
         h.app.policy = crate::policy::Policy::from_json(r#"{"AllowProblemReports": 1}"#);
         begin(&mut h.app, &ctx, None, Some("Fillet failed"));
         assert!(h.app.issue_report.draft.is_some());
+    }
+
+    /// With problem reports turned off, a failed operation's toast offers no Report… (#10260).
+    #[test]
+    fn an_error_toast_offers_report_only_while_the_policy_allows_reports() {
+        let (mut app, _, _, _) = ticket_app(true, None);
+        assert!(toast_offers_report(&app));
+        app.policy = crate::policy::Policy::from_json(r#"{"AllowProblemReports": 0}"#);
+        assert!(!toast_offers_report(&app), "no Report… while the policy turns reports off");
+        app.policy = crate::policy::Policy::from_json(r#"{"AllowProblemReports": 1}"#);
+        assert!(toast_offers_report(&app));
     }
 
     fn click_commands(h: &mut crate::scenario::Harness, label: &str) -> Vec<egui::OutputCommand> {
