@@ -1074,7 +1074,8 @@ impl<'t> Assembly<'t> {
             let order = crate::kernel::radial_order(edge.parameters(), edge.interval, &radial_faces)?;
             edge.uses = order.into_iter().map(|i| edge.uses.get(i).copied().ok_or("radial edge use reference")).collect::<Result<Vec<_>, &str>>()?;
         }
-        let mut brep = Brep { version: brep::VERSION, tolerance: self.tol, regions, shells: out_shells, faces, edges, vertices };
+        let mut brep =
+            Brep { version: brep::VERSION, tolerance: self.tol, regions, shells: out_shells, faces, edges, vertices, screw_owners: Vec::new() };
         if reoriented {
             // Parity fixes relative sides only. Certify every shell's absolute side,
             // including cavities: the traversal's starting face may itself be reversed.

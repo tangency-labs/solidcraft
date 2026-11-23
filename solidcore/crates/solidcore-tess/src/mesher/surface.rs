@@ -126,6 +126,9 @@ pub(crate) fn eval_surface(surface: &brep::Surface, domain: [[f64; 2]; 2]) -> Re
             let value = solidcore_convert::surface(surface).map_err(|e| TessError::Invalid(format!("tessellation: {e}")))?;
             match solidcore::eval::SurfaceEval::new(&value) {
                 Ok(solidcore::eval::SurfaceEval::Eval(e, _)) => Ok((evaluator_form(&e), Params::Same)),
+                // Display only: a procedural face keeps its exact definition in the record while
+                // the mesher draws its certified fitted net.
+                Ok(solidcore::eval::SurfaceEval::ProceduralSweep(s)) => Ok((evaluator_form(s.approximation()), Params::Same)),
                 Ok(_) => Err(invalid("an analytic surface out of place")),
                 Err(e) => Err(TessError::Failed(format!("not supported yet: tessellation: {}", crate::eval_message(e)))),
             }

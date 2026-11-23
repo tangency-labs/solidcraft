@@ -173,6 +173,7 @@ fn polyhedron(corners: &[[f64; 3]], cycles: &[&[usize]], tols: Tols) -> Record {
         faces,
         edges,
         vertices,
+        screw_owners: Vec::new(),
     }
 }
 

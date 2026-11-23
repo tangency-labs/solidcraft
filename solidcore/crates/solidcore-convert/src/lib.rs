@@ -39,7 +39,9 @@
 pub mod blend;
 pub mod brep;
 pub mod cell_grid;
+pub mod curve_context;
 pub mod develop;
+mod sweep;
 
 use solidcore::eval as k;
 use solidcore::prism::profile as kp;
@@ -139,6 +141,7 @@ macro_rules! depth_check {
                 $types::Curve::SurfaceIntersection {
                     surfaces, leader, ..
                 } => surfaces.iter().all(|s| $surface(s, depth + 1)) && $curve(leader, depth + 1),
+                $types::Curve::OnSurface { surface, .. } => $surface(surface, depth + 1),
                 _ => true,
             }
         }
@@ -174,6 +177,9 @@ fn dismantle(root: KernelNode) {
                 pending.push(KernelNode::Curve(*leader));
                 pending.push(KernelNode::Surface(*a));
                 pending.push(KernelNode::Surface(*b));
+            }
+            KernelNode::Curve(k::Curve::OnSurface { surface, .. }) => {
+                pending.push(KernelNode::Surface(*surface));
             }
             KernelNode::Surface(k::Surface::PlacedRevolution { profile, .. }) => {
                 pending.push(KernelNode::Curve(*profile));
@@ -215,6 +221,24 @@ fn curve_inner(c: &Curve) -> Result<k::Curve, Invalid> {
             knots: knots.clone(),
             homogeneous: homogeneous.clone(),
         },
+        Curve::OnSurface {
+            surface,
+            uv_curve,
+            domain,
+        } => k::Curve::OnSurface {
+            surface: Box::new(surface_inner(surface)?),
+            uv_curve: curve2(uv_curve),
+            domain: *domain,
+        },
+        Curve::OnSurfaceRef {
+            owner,
+            uv_curve,
+            domain,
+        } => k::Curve::OnSurfaceRef {
+            owner: *owner,
+            uv_curve: curve2(uv_curve),
+            domain: *domain,
+        },
         Curve::SurfaceIntersection {
             surfaces: [a, b],
             leader,
@@ -251,6 +275,24 @@ fn record_curve_inner(c: k::Curve) -> Curve {
         k::Curve::RationalSpline { knots, homogeneous } => {
             Curve::RationalSpline { knots, homogeneous }
         }
+        k::Curve::OnSurface {
+            surface,
+            uv_curve,
+            domain,
+        } => Curve::OnSurface {
+            surface: Box::new(record_surface_inner(*surface)),
+            uv_curve: record_curve2(uv_curve),
+            domain,
+        },
+        k::Curve::OnSurfaceRef {
+            owner,
+            uv_curve,
+            domain,
+        } => Curve::OnSurfaceRef {
+            owner,
+            uv_curve: record_curve2(uv_curve),
+            domain,
+        },
         k::Curve::SurfaceIntersection {
             surfaces: [a, b],
             leader,
@@ -266,6 +308,22 @@ fn record_curve_inner(c: k::Curve) -> Curve {
     }
 }
 
+/// A portable procedural sweep as the kernel's DTO, copying each stored field.
+#[must_use]
+pub fn procedural_sweep(
+    s: &solidcore_record::brep::sweep::ProceduralSweepRecord,
+) -> solidcore::eval::geometry::sweep::ProceduralSweepRecord {
+    sweep::sweep(s)
+}
+
+/// The kernel's procedural-sweep DTO as the portable record.
+#[must_use]
+pub fn record_procedural_sweep(
+    s: solidcore::eval::geometry::sweep::ProceduralSweepRecord,
+) -> solidcore_record::brep::sweep::ProceduralSweepRecord {
+    sweep::record_sweep(s)
+}
+
 /// A record surface as the kernel's; refuses geometry deeper than [`MAX_DEPTH`].
 pub fn surface(s: &Surface) -> Result<k::Surface, Invalid> {
     if !record_surface_fits(s, 0) {
@@ -277,6 +335,7 @@ pub fn surface(s: &Surface) -> Result<k::Surface, Invalid> {
 /// definition crosses with [`blend`].
 fn surface_inner(s: &Surface) -> Result<k::Surface, Invalid> {
     Ok(match s {
+        Surface::ProceduralSweep(s) => k::Surface::ProceduralSweep(Box::new(sweep::sweep(s))),
         Surface::Plane {
             origin,
             u_axis,
@@ -376,6 +435,9 @@ pub fn record_surface(s: k::Surface) -> Result<Surface, Invalid> {
 }
 fn record_surface_inner(s: k::Surface) -> Surface {
     match s {
+        k::Surface::ProceduralSweep(s) => {
+            Surface::ProceduralSweep(Box::new(sweep::record_sweep(*s)))
+        }
         k::Surface::Plane {
             origin,
             u_axis,

@@ -5261,6 +5261,7 @@ fn polyhedron_record(corners: &[[f64; 3]], cycles: &[&[usize]], tol: f64) -> sol
         faces,
         edges,
         vertices,
+        screw_owners: Vec::new(),
     }
 }
 

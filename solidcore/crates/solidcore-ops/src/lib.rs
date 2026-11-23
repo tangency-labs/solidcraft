@@ -78,6 +78,7 @@ pub mod pcurve;
 pub mod pick;
 pub mod point_identity;
 pub mod prism;
+pub mod procedural_sweep;
 pub mod provenance;
 pub mod query;
 pub mod record_check;

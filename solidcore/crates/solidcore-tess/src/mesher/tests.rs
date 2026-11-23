@@ -303,6 +303,7 @@ fn cylinder_with_displaced_boundary(offset: f64) -> brep::Brep {
         }],
         edges,
         vertices: points.into_iter().map(|point| brep::Vertex { point, tolerance: tol }).collect(),
+        screw_owners: Vec::new(),
     }
 }
 
@@ -745,6 +746,7 @@ fn crossing_test_nodes(f: f64) -> Vec<edges::Nodes> {
 #[test]
 fn near_end_crossings_part_in_one_round_on_forward_and_reversed_uses() {
     let b = crate::fixtures::fixture("box_10x6x4");
+    let curves = solidcore_convert::curve_context::BodyCurveContext::new(&b).expect("curve context");
     let evals = [poles::Face::new(
         EvalSurface::Plane {
             origin: Vec3::ZERO,
@@ -760,7 +762,7 @@ fn near_end_crossings_part_in_one_round_on_forward_and_reversed_uses() {
         let split = crossing_parameters(&[0], &boundaries, &evals, &nodes);
         assert_eq!(split[&0], vec![f]);
         for (e, ts) in split {
-            edges::insert_crossings(&b, e as usize, &mut nodes[e as usize], &ts).expect("inserted");
+            edges::insert_crossings(&b, &curves, e as usize, &mut nodes[e as usize], &ts).expect("inserted");
         }
         assert_eq!(nodes[0].params, vec![0.0, f, 1.0]);
         let after = crossing_test_boundary(&nodes, reversed, [1.0; 2]);
@@ -774,6 +776,7 @@ fn near_end_crossings_part_in_one_round_on_forward_and_reversed_uses() {
 #[test]
 fn two_faces_report_one_crossing_event_despite_metric_rounding() {
     let b = crate::fixtures::fixture("box_10x6x4");
+    let curves = solidcore_convert::curve_context::BodyCurveContext::new(&b).expect("curve context");
     let mut nodes = crossing_test_nodes(0.3);
     let evals: Vec<_> = (0..2)
         .map(|_| {
@@ -799,7 +802,7 @@ fn two_faces_report_one_crossing_event_despite_metric_rounding() {
         split[&0], first[&0],
         "one canonical parameter for both faces"
     );
-    edges::insert_crossings(&b, 0, &mut nodes[0], &split[&0]).expect("inserted");
+    edges::insert_crossings(&b, &curves, 0, &mut nodes[0], &split[&0]).expect("inserted");
     assert_eq!(nodes[0].points.len(), 3, "one node for the event");
 }
 
@@ -913,4 +916,200 @@ fn a_thin_half_torus_is_sized_by_its_edges_not_its_vertices() {
             assert!(segments as f64 <= 2.0 * (len / chord).ceil(), "{t:?}: {segments} segments over {len} mm at a chord of {chord} mm");
         }
     }
+}
+
+// The continuous offset M20 of the screw-sweep threads (#13891): its exact edges share one
+// screw owner per wall, and the mesher evaluates them through the body's curve context.
+/// The mesh of `p`, every face of which evaluates (none refused).
+fn m20_evaluated(p: &TessPlan) -> crate::Mesh {
+    let (m, refused) = p.evaluate();
+    assert!(
+        refused.is_empty(),
+        "faces refused at evaluation: {refused:?}"
+    );
+    m
+}
+
+/// Every triangle edge, with vertices merged by exact position, is shared by exactly two
+/// triangles: the mesh is closed and its faces meet exactly (no cracks, no T-junctions).
+fn m20_assert_watertight(m: &crate::Mesh, name: &str) {
+    // By value: −0.0 and 0.0 are one position (adding 0.0 makes −0.0 into 0.0).
+    let key = |i: u32| {
+        m.positions.get(i as usize).map(|p| {
+            [
+                (p.x + 0.0).to_bits(),
+                (p.y + 0.0).to_bits(),
+                (p.z + 0.0).to_bits(),
+            ]
+        })
+    };
+    let mut uses: HashMap<([u64; 3], [u64; 3]), i32> = HashMap::new();
+    for t in &m.triangles {
+        for e in 0..3 {
+            let (Some(a), Some(b)) = (key(t[e]), key(t[(e + 1) % 3])) else {
+                panic!("{name}: bad index")
+            };
+            if a == b {
+                continue;
+            }
+            // Directed: a closed, consistently oriented mesh uses each edge once each way.
+            *uses.entry((a, b)).or_default() += 1;
+            *uses.entry((b, a)).or_default() -= 1;
+        }
+    }
+    let open: Vec<_> = uses.iter().filter(|(_, n)| **n != 0).collect();
+    assert!(
+        open.is_empty(),
+        "{name}: {} unmatched directed edges, e.g. {:?}",
+        open.len(),
+        open.first()
+    );
+}
+
+/// The signed volume `m` encloses (the divergence theorem: positive only with outward normals).
+fn m20_volume(m: &crate::Mesh) -> f64 {
+    let mut v6 = 0.0;
+    for t in &m.triangles {
+        let [a, b, c] = t.map(|i| m.positions[i as usize]);
+        v6 += a.dot(b.cross(c));
+    }
+    v6 / 6.0
+}
+
+#[test]
+fn a_continuous_offset_m20_with_shared_exact_edges_has_a_complete_display_plan() {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::curve::curve::Curve as KernelCurve;
+    use solidcore::geom::tol::{SmallTopoType, brep_approx_tol_3d};
+    use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
+    use solidcore::math::{Point3, Vec3 as KernelVec3};
+    use solidcore::offset::offset_faces::OffsetFacesExecutive;
+    use solidcore::primitive::api_curves::create_line_segment;
+    use solidcore::primitive::api_primitives::create_cylinder;
+    use solidcore::sweep::screw::screw_sweep;
+    use solidcore::topology::brep::p2::is_manifold_solid;
+    use solidcore::topology::brep::validation::{CheckLevel, check_brep};
+
+    let mut k = Kernel::new(&KernelOptions::default());
+    k.fixes = UpstreamFixes::all();
+    let base = Point3::new(-1.0, -64.0, 0.0);
+    let pitch = 2.5;
+    let root = 10.0 - 5.0 * pitch * 3.0_f64.sqrt() / 16.0;
+    let outer = 10.0 + 0.05 * pitch;
+    let half_root = pitch / 8.0;
+    let half_outer = half_root + (outer - root) / 3.0_f64.sqrt();
+    let points = [
+        Point3::new(base.x + root, base.y, -pitch - half_root),
+        Point3::new(base.x + outer, base.y, -pitch - half_outer),
+        Point3::new(base.x + outer, base.y, -pitch + half_outer),
+        Point3::new(base.x + root, base.y, -pitch + half_root),
+    ];
+    let profile: Vec<KernelCurve> = points
+        .iter()
+        .zip(points.iter().cycle().skip(1))
+        .map(|(&a, &b)| KernelCurve::from(create_line_segment(a, b).unwrap()))
+        .collect();
+    let stock = create_cylinder(&mut k, base, 10.0, 20.0).unwrap();
+    let tolerance = brep_approx_tol_3d(&k, &stock, SmallTopoType::NormalSize);
+    let groove = screw_sweep(
+        &mut k,
+        &profile,
+        base,
+        KernelVec3::Z,
+        pitch,
+        10.0,
+        tolerance,
+    )
+    .unwrap();
+    let mut body = boolean_difference(&mut k, stock, groove).unwrap();
+    let strict = |k: &mut Kernel, b: &mut solidcore::Brep| {
+        assert!(is_manifold_solid(b).unwrap());
+        let check = check_brep(k, b, CheckLevel::Level2).unwrap();
+        assert_eq!(check.assert_valid, Some(true), "{:?}", check.reports);
+        assert_eq!(check.failures().count(), 0, "{:?}", check.reports);
+    };
+    strict(&mut k, &mut body);
+    let picked: Vec<_> = body
+        .faces()
+        .ids()
+        .filter(|&id| {
+            body.face(id)
+                .unwrap()
+                .surface
+                .as_ref()
+                .unwrap()
+                .procedural_sweep()
+                .is_some()
+        })
+        .collect();
+    assert_eq!(picked.len(), 2);
+    OffsetFacesExecutive::new()
+        .offset_faces(&mut k, &mut body, &picked, -0.1)
+        .unwrap();
+    strict(&mut k, &mut body);
+    assert_eq!(
+        body.faces()
+            .iter()
+            .filter(|(_, face)| {
+                face.surface
+                    .as_ref()
+                    .and_then(solidcore::surface::surface::Surface::procedural_sweep)
+                    .is_some_and(|s| s.definition().is_normal_offset())
+            })
+            .count(),
+        2
+    );
+    let (record, _) = kernel::brep::to_record(&mut k, &mut body).unwrap();
+    record.validate_built().unwrap();
+    record.validate().unwrap();
+    assert_eq!(record.screw_owners.len(), 2);
+    let shared_edges = record
+        .edges
+        .iter()
+        .filter(|e| matches!(e.curve, Curve::OnSurfaceRef { .. }))
+        .count();
+    assert_eq!(shared_edges, 52);
+
+    // The outer stock is a 20 mm diameter, 20 mm high cylinder. Display rules
+    // use its exact box diagonal; the requested chord is the standard 0.05 mm.
+    let (planned, stats) = plan(
+        &record,
+        &crate::MeshTolerance::display(0.05),
+        20.0 * 3.0_f64.sqrt(),
+    )
+    .unwrap();
+    assert!(stats.unmeshed.is_empty(), "{:?}", stats.unmeshed);
+    assert!(
+        stats.unsampled_edges.is_empty(),
+        "{:?}",
+        stats.unsampled_edges
+    );
+    assert!(stats.lenient.is_empty(), "{:?}", stats.lenient);
+    assert!(
+        stats.over_tolerance.is_empty(),
+        "{:?}",
+        stats.over_tolerance
+    );
+    assert!(stats.edges_capped.is_empty(), "{:?}", stats.edges_capped);
+    assert!(stats.kept_strict.is_empty(), "{:?}", stats.kept_strict);
+    assert!(
+        planned
+            .faces_with_triangles(record.faces.len())
+            .into_iter()
+            .all(|has| has)
+    );
+    assert_eq!(planned.edges.len(), record.edges.len());
+    for (edge, nodes) in record.edges.iter().zip(&planned.edges) {
+        assert!(nodes.len() >= 2);
+        for (actual, vertex) in [nodes.first().unwrap(), nodes.last().unwrap()]
+            .into_iter()
+            .zip(edge.vertices)
+        {
+            let [x, y, z] = record.vertices[vertex as usize].point;
+            assert_eq!(*actual, solidcore_record::Vec3::new(x, y, z));
+        }
+    }
+    let mesh = m20_evaluated(&planned);
+    m20_assert_watertight(&mesh, "continuous offset M20 with shared exact edges");
+    assert!(m20_volume(&mesh) > 0.0);
 }

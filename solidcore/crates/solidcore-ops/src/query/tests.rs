@@ -143,6 +143,7 @@ fn faceted(points: &[[f64; 3]], shells: &[&[&[usize]]], regions: Vec<Region>) ->
         faces: Vec::new(),
         edges: Vec::new(),
         vertices: Vec::new(),
+        screw_owners: Vec::new(),
     };
     let mut vertex_of = vec![None; points.len()];
     let mut vertex = |b: &mut Brep, p: usize| -> u32 {
@@ -320,6 +321,7 @@ fn tube() -> Brep {
                 tolerance: 1e-7,
             },
         ],
+        screw_owners: Vec::new(),
     };
     list_uses(&mut b);
     on_forms(&mut b);
@@ -379,6 +381,7 @@ fn one_face(
                 tolerance: 1e-7,
             })
             .collect(),
+        screw_owners: Vec::new(),
     };
     list_uses(&mut b);
     on_forms(&mut b);
@@ -639,6 +642,46 @@ fn a_ray_names_a_face_it_cannot_meet_exactly() {
         Query::new(&b).ray(Vec3::new(0., 0., 0.5), Vec3::X, 1e-9),
         Err(0)
     );
+}
+
+/// A helix stored as a shared screw edge remains available to the ordinary record queries.
+#[test]
+fn a_shared_screw_edge_evaluates_through_the_record_query() {
+    use crate::sweep::{screw_sweep, Curve as ProfileCurve};
+
+    // Each side changes radius, so the sweep has no cylindrical wall that would
+    // split the helix into half-turn pieces.
+    let points = [[4.1, 0.0, 0.0], [5.0, 0.0, 0.3], [4.5, 0.0, 0.6]];
+    let profile: Vec<_> = points
+        .iter()
+        .zip(points.iter().cycle().skip(1))
+        .map(|(&start, &end)| ProfileCurve::Line { start, end })
+        .collect();
+    let coil = screw_sweep(&profile, [0.0; 3], [0.0, 0.0, 1.0], 1.5, 2.0, None, 1.5e-4).unwrap();
+    let (record, _) = coil.to_record().unwrap();
+    let (index, edge) = record
+        .edges
+        .iter()
+        .enumerate()
+        .find(|(_, edge)| {
+            let [a, b] = edge.vertices.map(|i| record.vertices[i as usize].point[2]);
+            matches!(edge.parameters(), Curve::OnSurfaceRef { .. }) && (b - a).abs() > 2.5
+        })
+        .expect("shared two-turn screw edge");
+    let query = Query::new(&record);
+    let [a, b] = query.edge_interval(index).unwrap();
+    let (middle, tangent) = query.edge_at(index, 0.5 * (a + b)).unwrap();
+    assert!(len(tangent) > 0.0);
+    assert!(query.edge_distance(index, middle, 1e-4).unwrap() < 1e-6);
+    let points = query.edge_points(index, 1e-4).unwrap();
+    assert!(points.len() > 2, "two turns cannot be drawn by one chord");
+    for ((_, point), vertex) in [points.first().unwrap(), points.last().unwrap()]
+        .into_iter()
+        .zip(edge.vertices)
+    {
+        let [x, y, z] = record.vertices[vertex as usize].point;
+        assert!(len(Vec3::new(point.x - x, point.y - y, point.z - z)) <= edge.tolerance);
+    }
 }
 
 /// A tetrahedron seen from above: its slanted face faces the viewer, its floor faces away and its

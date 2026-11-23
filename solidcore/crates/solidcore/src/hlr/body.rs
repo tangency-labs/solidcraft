@@ -173,6 +173,7 @@ fn curve(c: &Curve, t: [f64; 3]) -> Option<Curve> {
             leader: Box::new(curve(leader, t)?),
             tolerance: *tolerance,
         },
+        Curve::OnSurface { .. } | Curve::OnSurfaceRef { .. } => return None,
     })
 }
 
@@ -292,6 +293,7 @@ fn surface(s: &Surface, t: [f64; 3]) -> Option<Surface> {
             matrix: compose(&shift(t).m, matrix),
             forward: *forward,
         },
+        Surface::ProceduralSweep(_) => return None,
     })
 }
 

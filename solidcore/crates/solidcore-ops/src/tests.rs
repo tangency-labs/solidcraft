@@ -1055,6 +1055,7 @@ fn periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell() {
         }],
         edges,
         vertices,
+        screw_owners: Vec::new(),
     };
     crate::record_check::validate(&source).unwrap();
     crate::record_check::agreement(&source).unwrap();

@@ -154,6 +154,7 @@ fn body(
         });
     }
     Brep {
+        screw_owners: Vec::new(),
         version: 4,
         tolerance: 1e-6,
         regions: vec![Region {

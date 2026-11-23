@@ -89,7 +89,16 @@ pub fn split_edges(brep: &Brep, at: &[(u32, f64)]) -> Result<Part> {
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    let loose = Brep { version: brep.version, tolerance: brep.tolerance, regions: brep.regions.clone(), shells, faces, edges, vertices };
+    let loose = Brep {
+        version: brep.version,
+        tolerance: brep.tolerance,
+        regions: brep.regions.clone(),
+        shells,
+        faces,
+        edges,
+        vertices,
+        screw_owners: brep.screw_owners.clone(),
+    };
     let mut part = loose.canonical()?;
     for e in &mut part.edges {
         *e = source.get(*e as usize).copied().ok_or(Invalid("split edge reference"))?;

@@ -115,6 +115,9 @@ impl SurfaceEval {
             // A label with no (u, v) of its own: its face evaluates its NURBS form.
             Surface::BallPatch { .. } => Err(unsupported("a ball patch's label (evaluate its NURBS form)")),
             Surface::Blend { .. } => Err(unsupported("a blend's label (evaluate its NURBS form)")),
+            // Its fitted net is only certified near the exact sweep; evaluating the net here would
+            // answer with the approximation.
+            Surface::ProceduralSweep(_) => Err(unsupported("a procedural sweep surface")),
             Surface::Spline { u_knots, v_knots, points } => {
                 let rows: Vec<Vec<[f64; 4]>> = points.iter().map(|r| r.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()).collect();
                 eval(nurbs(u_knots, v_knots, &rows)?)
@@ -388,6 +391,7 @@ impl CurveEval {
                     leader,
                 }))
             }
+            Curve::OnSurface { .. } | Curve::OnSurfaceRef { .. } => return Err(unsupported("a curve on a procedural sweep")),
         })
     }
 

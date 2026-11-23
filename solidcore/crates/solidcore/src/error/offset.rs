@@ -11,6 +11,7 @@
 //! | [`OffsetFailure::Collapses`]           | `SM_ERR` (#2350, solidcore-native)        |
 //! | [`OffsetFailure::WallsMeetAcross`]     | `SM_ERR` (#18239, solidcore-native)       |
 //! | [`OffsetFailure::WallsTouch`]          | `SM_ERR_OFFSET_WALLS_TOUCH` (fork a759622) |
+//! | [`OffsetFailure::SectionOrderLost`]    | `SM_ERR_OFFSET_WALLS_TOUCH` (solidcore-native) |
 //! | [`OffsetFailure::LoopsCross`]          | `SM_ERR_BAD_INTERSECTIONS` (WR-345)       |
 //! | [`OffsetFailure::EdgeVanishes`]        | `SM_ERR_OFFSET_EDGE_VANISHES` (fork 34318f4) |
 //! | [`OffsetFailure::DistanceUnresolved`]  | `SM_ERR_INVALID_INPUT` (solidcore-native) |
@@ -75,6 +76,20 @@ use crate::topology::{EdgeId, FaceId};
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum OffsetFailure {
+    /// Periodic thread sections first cease to bound two ordered lands. The
+    /// offset refuses this topology change; it does not assert that the entire
+    /// threaded void has disappeared. All requested displacements are scaled
+    /// together from the input body when locating this event.
+    SectionOrderLost {
+        /// The two retained screw faces whose neighboring sections meet.
+        faces: [FaceId; 2],
+        /// Magnitude of the largest requested face displacement.
+        distance: f64,
+        /// Certified magnitude enclosure of the first boundary-extinction event.
+        /// Its lower endpoint is a lower bound on the supremum of the regular
+        /// ordered thread-band offsets; the limiting zero-width land is refused.
+        limit: [f64; 2],
+    },
     /// The offset of `face` by `distance` folds: the wall is thicker than a radius of
     /// curvature of the face on its side (WR-718; every offset but the local operation).
     Folds {
@@ -603,7 +618,10 @@ impl OffsetFailure {
     #[must_use]
     pub fn entity(&self) -> Option<EntityRef> {
         match *self {
-            Self::Folds { face, .. }
+            Self::SectionOrderLost {
+                faces: [face, _], ..
+            }
+            | Self::Folds { face, .. }
             | Self::NotCertified { face, .. }
             | Self::Collapses { face, .. }
             | Self::WallsMeetAcross { face, .. }
@@ -741,6 +759,7 @@ impl OffsetFailure {
             | Self::Collapses { .. }
             | Self::WallsMeetAcross { .. }
             | Self::WallsTouch { .. }
+            | Self::SectionOrderLost { .. }
             | Self::LoopsCross { .. }
             | Self::EdgeVanishes { .. }
             | Self::DistanceUnresolved { .. }
@@ -810,6 +829,7 @@ impl OffsetFailure {
             | Self::Collapses { .. }
             | Self::WallsMeetAcross { .. }
             | Self::WallsTouch { .. }
+            | Self::SectionOrderLost { .. }
             | Self::LoopsCross { .. }
             | Self::EdgeVanishes { .. }
             | Self::DistanceUnresolved { .. }
@@ -916,7 +936,7 @@ impl OffsetFailure {
             | Self::UnnamedFaceHasNoSurface => SM_ERR_NULL_POINTER,
             Self::FaceMoveEmpty { .. } | Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
-            Self::WallsTouch { .. } => SM_ERR_OFFSET_WALLS_TOUCH,
+            Self::WallsTouch { .. } | Self::SectionOrderLost { .. } => SM_ERR_OFFSET_WALLS_TOUCH,
             Self::LoopsCross { .. } => SM_ERR_BAD_INTERSECTIONS,
             Self::EdgeVanishes { .. } => SM_ERR_OFFSET_EDGE_VANISHES,
             Self::DistanceUnresolved { .. } | Self::ToleranceUnresolved { .. } => {
@@ -933,7 +953,7 @@ impl OffsetFailure {
             Self::Collapses { .. } | Self::WallsMeetAcross { .. } | Self::MoveCollapses { .. } => {
                 ErrorKind::OffsetCollapses
             }
-            Self::WallsTouch { .. } => ErrorKind::OffsetWallsTouch,
+            Self::WallsTouch { .. } | Self::SectionOrderLost { .. } => ErrorKind::OffsetWallsTouch,
             Self::LoopsCross { .. } => ErrorKind::OffsetLoopsCross,
             Self::EdgeVanishes { .. } => ErrorKind::OffsetEdgeVanishes,
             Self::SeamOpened { .. }
@@ -1109,6 +1129,18 @@ impl core::fmt::Display for Unsoundness {
 impl core::fmt::Display for OffsetFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match *self {
+            Self::SectionOrderLost {
+                faces: [a, b],
+                distance,
+                limit: [lo, hi],
+            } => write!(
+                f,
+                "thread faces {} and {} lose their section ordering at offset magnitude {distance}: \
+                 the largest offset preserving their ordered lands is bounded by [{lo}, {hi}] \
+                 (the limiting zero-width land is refused)",
+                a.index(),
+                b.index()
+            ),
             Self::Folds {
                 face,
                 distance,
@@ -1938,6 +1970,17 @@ mod tests {
                 false,
                 false,
             ),
+            // a thread band's sections that stop bounding their ordered lands: a refusal
+            (
+                O::SectionOrderLost {
+                    faces: [face, FaceId::from_index(2)],
+                    distance: 0.5,
+                    limit: [0.25, 0.3],
+                },
+                ErrorKind::OffsetWallsTouch,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -1998,6 +2041,7 @@ mod tests {
                 O::LocalFaceNotListed => 54,
                 O::VertexArcsNotOneSphere => 55,
                 O::UnnamedFaceHasNoSurface => 56,
+                O::SectionOrderLost { .. } => 57,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {

@@ -27,6 +27,7 @@
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
 use std::cell::OnceCell;
+use std::sync::Arc;
 
 use super::vec::{v3, VecExt};
 use super::{form, Curve, Curve2, CurveEval, Surface, SurfaceEval};
@@ -125,7 +126,7 @@ pub struct Record {
 #[derive(Debug)]
 pub struct Query {
     record: Record,
-    curves: Vec<Option<CurveEval>>,
+    curves: Vec<Option<Arc<CurveEval>>>,
     surfaces: Vec<Option<SurfaceEval>>,
     /// Each face's edge loops in its own parameters, as the Bézier pieces of their pcurves
     /// ([`Query::trim_loops`]), read when first asked for.
@@ -138,10 +139,24 @@ impl Query {
     /// The record made ready: each curve and surface set up to evaluate.
     #[must_use]
     pub fn new(record: Record) -> Query {
+        Self::with_shared_edges(record, |_| None)
+    }
+
+    /// Set up a record, evaluating each shared screw edge with the caller's body-scoped
+    /// evaluator for that edge index. Standalone curves are evaluated directly.
+    #[must_use]
+    pub fn with_shared_edges(
+        record: Record,
+        mut shared_edge: impl FnMut(usize) -> Option<Arc<CurveEval>>,
+    ) -> Query {
         let curves = record
             .edges
             .iter()
-            .map(|e| e.curve.as_ref().and_then(|c| CurveEval::new(c).ok()))
+            .enumerate()
+            .map(|(i, edge)| match edge.curve.as_ref()? {
+                Curve::OnSurfaceRef { .. } => shared_edge(i),
+                curve => CurveEval::new(curve).ok().map(Arc::new),
+            })
             .collect();
         let surfaces = record
             .faces
@@ -197,11 +212,12 @@ impl Query {
         let [t0, t1] = self.edge_interval(e)?;
         let at = |t: f64| curve.point(t);
         let (p0, p1) = (at(t0)?, at(t1)?);
-        if matches!(curve, CurveEval::Line { .. }) {
+        if matches!(curve.as_ref(), CurveEval::Line { .. }) {
             return Some(vec![(t0, p0), (t1, p1)]);
         }
         let sag = sag.max(1e-12);
         let turn = (std::f64::consts::TAU / 20.0).cos();
+        let screw_edge = matches!(curve.as_ref(), CurveEval::OnSurface(_));
         let mut out = vec![(t0, p0)];
         // Pieces still to look at; the last pushed is looked at first, so pushing the right half
         // before the left keeps the output in order.
@@ -215,11 +231,15 @@ impl Query {
             } else {
                 pm.dist(pa)
             };
+            // A whole number of screw turns can agree at both tangents and at the
+            // midpoint. The chord still runs in a different direction from either tangent.
+            let direction = if screw_edge { chord.normalized() } else { None };
             let bent = match (curve.derivs(a), curve.derivs(b)) {
-                (Some((_, da)), Some((_, db))) => da
-                    .normalized()
-                    .zip(db.normalized())
-                    .is_none_or(|(x, y)| x.dot(y) < turn),
+                (Some((_, da)), Some((_, db))) => {
+                    da.normalized().zip(db.normalized()).is_none_or(|(x, y)| {
+                        x.dot(y) < turn || direction.is_some_and(|d| x.dot(d).min(y.dot(d)) < turn)
+                    })
+                }
                 _ => false,
             };
             if (off > sag || bent || (depth == 0 && pa.dist(pb) <= sag))
@@ -334,8 +354,8 @@ impl Query {
     /// Where the ray from `o` along `d` meets the faces ahead of `o` (further than `accept`):
     /// each meeting's distance along `d` (a unit vector), face and point, nearest first. Faces on
     /// planes, cylinders, cones and spheres (a ball patch's sphere too) are met exactly. A face on
-    /// a torus, a spline, a revolution or a blend is not met exactly here yet, and an answer
-    /// without it could miss a meeting.
+    /// a torus, a spline, a revolution, a blend or a procedural sweep is not met exactly here
+    /// yet, and an answer without it could miss a meeting.
     ///
     /// # Errors
     /// The first face the ray cannot meet exactly.
@@ -393,7 +413,7 @@ impl Query {
 
     /// Whether `p` lies within `accept` mm of one of face `f`'s loops, measured in space: from
     /// the curve of one of its edges ([`near`]), or a vertex loop's point. An edge with no NURBS
-    /// form (a traced intersection) is measured by [`Query::edge_distance`].
+    /// form, such as a traced intersection or a screw edge, is measured by [`Query::edge_distance`].
     fn on_loops(&self, f: usize, p: Vec3, accept: f64) -> bool {
         let Some(face) = self.record.faces.get(f) else {
             return false;
@@ -457,8 +477,7 @@ impl Query {
 
     /// Edge `e`'s Bézier pieces in space over its interval, on its NURBS form: a line's own
     /// segment, a polyline's segments, a circle's or an ellipse's rational arcs
-    /// ([`form::curve`]), a spline's own pieces. `None` for a traced intersection, which has no
-    /// such form.
+    /// ([`form::curve`]), a spline's own pieces. `None` for an edge without such a form.
     fn edge_form(&self, e: usize) -> Option<Pieces> {
         let edge = self.record.edges.get(e)?;
         let [t0, t1] = edge.interval;
@@ -488,7 +507,9 @@ impl Query {
                 spline_pieces(&nurbs, interval)
             }
             c @ (Curve::Spline { .. } | Curve::RationalSpline { .. }) => spline_pieces(c, [t0, t1]),
-            Curve::SurfaceIntersection { .. } => None,
+            Curve::SurfaceIntersection { .. }
+            | Curve::OnSurface { .. }
+            | Curve::OnSurfaceRef { .. } => None,
         }
     }
 }
@@ -874,7 +895,8 @@ fn ray_surface(surface: &Surface, o: Vec3, d: Vec3) -> Option<Vec<f64>> {
         Surface::Torus { .. }
         | Surface::Spline { .. }
         | Surface::RationalSpline { .. }
-        | Surface::PlacedRevolution { .. } => return None,
+        | Surface::PlacedRevolution { .. }
+        | Surface::ProceduralSweep(_) => return None,
     })
 }
 

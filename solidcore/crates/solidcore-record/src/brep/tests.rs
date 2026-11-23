@@ -45,6 +45,7 @@ fn list_uses(b: &mut Brep) {
 fn faceted(points: &[[f64; 3]], shells: &[&[&[usize]]], regions: Vec<Region>) -> Brep {
     let mut b = Brep {
         version: VERSION,
+        screw_owners: Vec::new(),
         tolerance: 1e-7,
         regions,
         shells: Vec::new(),
@@ -146,6 +147,182 @@ fn tetra() -> Brep {
             },
         ],
     )
+}
+
+#[test]
+fn shared_screw_owner_records_are_bounded_and_remapped() {
+    fn knots(n: usize) -> Vec<f64> {
+        let mut k = Vec::with_capacity(n + 2);
+        k.push(0.0);
+        k.extend((0..n).map(|i| i as f64));
+        k.push((n - 1) as f64);
+        k
+    }
+
+    use super::sweep::{
+        NurbsCurveRecord, NurbsSurfaceRecord, ProceduralSweepRecord, ScrewMotionRecord,
+        SweepDefinitionRecord,
+    };
+    let profile = NurbsCurveRecord {
+        dim: 3,
+        points_3d: true,
+        degree: 1,
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![
+            [2.0, -0.0, 0.0],
+            [f64::from_bits(3.0_f64.to_bits() + 1), 0.0, 1.0],
+        ],
+        weights: None,
+    };
+    let owner = ProceduralSweepRecord {
+        definition: SweepDefinitionRecord::Screw {
+            profile,
+            motion: ScrewMotionRecord {
+                origin: [0.0; 3],
+                axis: [0.0, 0.0, 1.0],
+                pitch: 1.0,
+                law: None,
+            },
+            offset: None,
+        },
+        net: NurbsSurfaceRecord {
+            u_degree: 1,
+            v_degree: 1,
+            u_count: 2,
+            v_count: 2,
+            u_knots: vec![0.0, 0.0, 1.0, 1.0],
+            v_knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![[2.0, 0.0, 0.0]; 4],
+            weights: None,
+        },
+        stations: vec![0.0, 1.0],
+        half: 0.5,
+        bound: 0.1,
+        map_a: [0.0, 0.0],
+        map_b: [1.0, 1.0],
+        swapped: false,
+    };
+    let old = tetra();
+    let old_json = serde_json::to_string(&old).unwrap();
+    assert!(!old_json.contains("screw_owners"));
+    let decoded: Brep = serde_json::from_str(&old_json).unwrap();
+    assert!(decoded.screw_owners.is_empty());
+
+    let mut b = old;
+    b.screw_owners.push(owner);
+    b.edges[0].curve = Curve::OnSurfaceRef {
+        owner: 0,
+        uv_curve: segment(0.0, 1.0),
+        domain: [[0.0, 1.0], [0.0, 1.0]],
+    };
+    b.validate().unwrap();
+    let saved = serde_json::to_string(&b).unwrap();
+    let reopened: Brep = serde_json::from_str(&saved).unwrap();
+    reopened.validate().unwrap();
+    let SweepDefinitionRecord::Screw { profile, .. } = &reopened.screw_owners[0].definition;
+    assert_eq!(profile.points[0][1].to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(profile.points[1][0].to_bits(), 3.0_f64.to_bits() + 1);
+    let part = reopened.part(&[1]).unwrap();
+    assert_eq!(part.brep.screw_owners.len(), 1);
+    let mut positive_zero = reopened.clone();
+    let SweepDefinitionRecord::Screw { profile, .. } =
+        &mut positive_zero.screw_owners[0].definition;
+    profile.points[0][1] = 0.0;
+    let combined = part::compound(&[&reopened, &positive_zero]).unwrap();
+    assert_eq!(combined.brep.screw_owners.len(), 2);
+    assert!(
+        combined
+            .brep
+            .edges
+            .iter()
+            .any(|e| matches!(e.curve, Curve::OnSurfaceRef { owner: 1, .. }))
+    );
+    // Copies of one curve on a screw from two solids name equal owners at different
+    // positions: they are the same curve; a different owner is not.
+    let twice = part::compound(&[&reopened, &reopened]).unwrap().brep;
+    let refs: Vec<&Curve> = twice
+        .edges
+        .iter()
+        .map(|e| &e.curve)
+        .filter(|c| matches!(c, Curve::OnSurfaceRef { .. }))
+        .collect();
+    assert!(matches!(
+        refs.as_slice(),
+        [a @ Curve::OnSurfaceRef { owner: 0, .. }, b @ Curve::OnSurfaceRef { owner: 1, .. }]
+            if twice.same_curve(a, b)
+    ));
+    let mut other_pitch = reopened.clone();
+    let SweepDefinitionRecord::Screw { motion, .. } = &mut other_pitch.screw_owners[0].definition;
+    motion.pitch = 2.0;
+    let two = part::compound(&[&reopened, &other_pitch]).unwrap().brep;
+    let refs: Vec<&Curve> = two
+        .edges
+        .iter()
+        .map(|e| &e.curve)
+        .filter(|c| matches!(c, Curve::OnSurfaceRef { .. }))
+        .collect();
+    assert!(matches!(refs.as_slice(), [a, b] if !two.same_curve(a, b)));
+
+    // The serialized inline net is below MAX_ITEMS, but constructing the
+    // evaluator and kernel surface needs several simultaneous copies.
+    let mut inline = reopened.clone();
+    let mut owner = inline.screw_owners.pop().unwrap();
+    owner.net.u_count = 1100;
+    owner.net.v_count = 1000;
+    owner.net.u_knots = knots(1100);
+    owner.net.v_knots = knots(1000);
+    owner.net.points = vec![[2.0, 0.0, 0.0]; 1_100_000];
+    inline.edges[0].curve = Curve::OnSurface {
+        surface: Box::new(Surface::ProceduralSweep(Box::new(owner))),
+        uv_curve: segment(0.0, 1.0),
+        domain: [[0.0, 1.0], [0.0, 1.0]],
+    };
+    inline.validate_built().unwrap();
+    assert!(matches!(inline.validate(), Err(Invalid("item budget"))));
+    let Curve::OnSurface { surface, .. } =
+        std::mem::replace(&mut inline.edges[0].curve, tetra().edges[0].curve.clone())
+    else {
+        panic!("inline curve")
+    };
+    let Surface::ProceduralSweep(mut face_owner) = *surface else {
+        panic!("screw face")
+    };
+    face_owner.net.u_count = 1000;
+    face_owner.net.v_count = 900;
+    face_owner.net.u_knots = knots(1000);
+    face_owner.net.v_knots = knots(900);
+    face_owner.net.points = vec![[2.0, 0.0, 0.0]; 900_000];
+    inline.faces[0].surface = Surface::ProceduralSweep(face_owner);
+    inline.faces[0].nurbs = None;
+    inline.faces[0].domain = [[0.0, 1.0], [0.0, 1.0]];
+    inline.validate_built().unwrap();
+    assert!(
+        matches!(inline.validate(), Err(Invalid("item budget"))),
+        "ordinary face evaluator expansion must be charged"
+    );
+    let SweepDefinitionRecord::Screw { profile: first, .. } =
+        &combined.brep.screw_owners[0].definition;
+    let SweepDefinitionRecord::Screw {
+        profile: second, ..
+    } = &combined.brep.screw_owners[1].definition;
+    assert_eq!(first.points[0][1].to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(second.points[0][1].to_bits(), 0.0_f64.to_bits());
+
+    let mut invalid = b.clone();
+    if let Curve::OnSurfaceRef { owner, .. } = &mut invalid.edges[0].curve {
+        *owner = 1;
+    }
+    assert!(invalid.validate().is_err());
+    let mut invalid = b.clone();
+    if let Curve::OnSurfaceRef { domain, .. } = &mut invalid.edges[0].curve {
+        domain[0][1] = 2.0;
+    }
+    assert!(invalid.validate().is_err());
+    let mut wide = b;
+    wide.screw_owners[0].stations = (0..10_000).map(f64::from).collect();
+    let edge = wide.edges[0].clone();
+    wide.edges.extend(std::iter::repeat_n(edge, 500));
+    assert!(matches!(wide.validate(), Err(Invalid("item budget"))));
 }
 /// A tetrahedron with a tetrahedral void inside it.
 fn hollow() -> Brep {

@@ -80,7 +80,8 @@ pub struct WireCurve {
 
 impl WireCurve {
     /// The piece carried by the rigid motion `point` of points and `vector` of directions (a
-    /// placement). `None` for an intersection curve, whose surfaces are not carried here.
+    /// placement). `None` for an intersection curve or a curve on a procedural sweep, whose
+    /// surfaces are not carried here.
     pub fn mapped(&self, point: &impl Fn(Vec3) -> Vec3, vector: &impl Fn(Vec3) -> Vec3) -> Option<WireCurve> {
         use solidcore_record::brep::{Curve, Frame};
         let a = |q: [f64; 3]| Vec3::new(q[0], q[1], q[2]);
@@ -103,7 +104,7 @@ impl WireCurve {
                     })
                     .collect(),
             },
-            Curve::SurfaceIntersection { .. } => return None,
+            Curve::SurfaceIntersection { .. } | Curve::OnSurface { .. } | Curve::OnSurfaceRef { .. } => return None,
         };
         Some(WireCurve { curve, interval: self.interval })
     }

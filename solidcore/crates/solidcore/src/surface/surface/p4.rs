@@ -883,6 +883,7 @@ impl SurfaceEval<'_> {
     ///
     /// [`SolidError::Unported`] from [`SurfaceEval::eval`]; those of `EvaluateNormal`.
     pub fn eval_normal(&mut self, k: &Kernel) -> Result<()> {
+        self.refresh_net_scope();
         if *self.state_mut().normal_set {
             return Ok(());
         }
@@ -963,6 +964,7 @@ impl SurfaceEval<'_> {
     /// Those of [`evaluate_normal_section`] (`surface.surface_p1`); [`SolidError::Unported`] from the
     /// evaluations.
     pub fn eval_normal_section(&mut self, k: &Kernel) -> Result<()> {
+        self.refresh_net_scope();
         if *self.state_mut().sect_dir_set {
             return Ok(());
         }

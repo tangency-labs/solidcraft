@@ -81,6 +81,7 @@ fn polyhedron(corners: &[[f64; 3]], cycles: &[&[usize]]) -> Record {
         faces,
         edges,
         vertices,
+        screw_owners: Vec::new(),
     }
 }
 
@@ -257,6 +258,7 @@ fn only_a_tube_clear_of_its_axis_is_a_ring_torus() {
             faces: vec![face],
             edges: Vec::new(),
             vertices: Vec::new(),
+            screw_owners: Vec::new(),
         };
         let made = analytic::analytic(&record).unwrap();
         made.faces[0].surface.clone()
@@ -302,6 +304,7 @@ fn a_patch_across_an_extruded_circles_seam_is_its_exact_cylinder() {
             .map(|_| Edge { nurbs: None, curve: line.clone(), interval: [0.0, 1.0], vertices: [0, 0], tolerance: 1e-6, uses: Vec::new() })
             .collect(),
         vertices: Vec::new(),
+        screw_owners: Vec::new(),
     };
     let made = analytic::analytic(&record).unwrap();
     let f = &made.faces[0];

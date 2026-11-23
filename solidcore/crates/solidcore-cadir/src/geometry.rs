@@ -312,6 +312,9 @@ impl Similarity {
             BCurve::SurfaceIntersection { .. } => {
                 return Err(unsupported("a placed intersection curve"));
             }
+            BCurve::OnSurface { .. } | BCurve::OnSurfaceRef { .. } => {
+                return Err(unsupported("a placed curve on a procedural sweep"));
+            }
         })
     }
 
@@ -436,7 +439,9 @@ fn curve_reach(c: &BCurve, fit: Fit) -> f64 {
                 .iter()
                 .map(|h| [h[0] / h[3], h[1] / h[3], h[2] / h[3]]),
         ),
-        BCurve::SurfaceIntersection { .. } => f64::INFINITY,
+        BCurve::SurfaceIntersection { .. }
+        | BCurve::OnSurface { .. }
+        | BCurve::OnSurfaceRef { .. } => f64::INFINITY,
     }
 }
 
@@ -482,6 +487,7 @@ fn surface_kind(s: &BSurface) -> &'static str {
         BSurface::Spline { .. } | BSurface::RationalSpline { .. } => "spline surface",
         BSurface::PlacedRevolution { .. } => "surface of revolution",
         BSurface::Blend { .. } => "blend surface",
+        BSurface::ProceduralSweep(_) => "procedural sweep surface",
     }
 }
 

@@ -1755,6 +1755,7 @@ fn merged(parts: &[&Brep], regions: Vec<solidcore_record::brep::Region>) -> Brep
         faces: Vec::new(),
         edges: Vec::new(),
         vertices: Vec::new(),
+        screw_owners: Vec::new(),
     };
     for r in parts {
         let at = |n: usize| u32::try_from(n).unwrap();
@@ -2393,6 +2394,7 @@ fn the_comparison_tells_an_arc_from_the_rest_of_its_circle() {
                 tolerance: 1e-6,
             })
             .to_vec(),
+        screw_owners: Vec::new(),
     };
     let mut same = quarter.clone();
     same.nurbs = None;

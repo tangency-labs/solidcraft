@@ -138,7 +138,7 @@ fn weight(w: f64) -> W<NonZeroReal> {
 }
 
 /// A record curve as a CADIR curve, with CADIR's parameter against the record's; `None` for a
-/// curve CADIR has no exact form for (a traced intersection).
+/// curve CADIR has no exact form for, such as a traced intersection or a curve on a procedural sweep.
 pub(crate) fn curve(c: &BCurve) -> W<Option<(SolvedCurveGeometry, Param)>> {
     let nurbs = |n: Result<NurbsCurve, _>| -> W<SolvedCurveGeometry> {
         n.map(SolvedCurveGeometry::Nurbs)
@@ -224,14 +224,16 @@ pub(crate) fn curve(c: &BCurve) -> W<Option<(SolvedCurveGeometry, Param)>> {
                 Param::IDENTITY,
             )
         }
-        BCurve::SurfaceIntersection { .. } => return Ok(None),
+        BCurve::SurfaceIntersection { .. }
+        | BCurve::OnSurface { .. }
+        | BCurve::OnSurfaceRef { .. } => return Ok(None),
     }))
 }
 
 /// A record surface as a CADIR carrier, with CADIR's (u, v) against the record's; `None` for a
 /// label that stands for its face's NURBS form, which a valid record holds with it: a ball
-/// patch's, a blend's, and a placed revolution's (whose form's side is not measured against the
-/// revolution's yet).
+/// patch's, a blend's, a procedural sweep's, and a placed revolution's (whose form's side is not
+/// measured against the revolution's yet).
 pub(crate) fn surface(s: &BSurface) -> W<Option<(SolvedSurfaceGeometry, Chart)>> {
     let solved = |g: SolvedSurfaceGeometry, chart: Chart| Ok(Some((g, chart)));
     match s {
@@ -321,9 +323,10 @@ pub(crate) fn surface(s: &BSurface) -> W<Option<(SolvedSurfaceGeometry, Chart)>>
             )?;
             solved(SolvedSurfaceGeometry::Nurbs(n), Chart::IDENTITY)
         }
-        BSurface::BallPatch { .. } | BSurface::Blend { .. } | BSurface::PlacedRevolution { .. } => {
-            Ok(None)
-        }
+        BSurface::BallPatch { .. }
+        | BSurface::Blend { .. }
+        | BSurface::PlacedRevolution { .. }
+        | BSurface::ProceduralSweep(_) => Ok(None),
     }
 }
 

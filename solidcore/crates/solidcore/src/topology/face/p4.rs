@@ -73,6 +73,13 @@
 //!   once and dropped at the end (`SmObjDelete`). Statuses upstream ignores
 //!   (`NormalizedEvaluate` of the CW neighbour, `DropPoint`, the curve `Evaluate`) are
 //!   ignored, keeping [`SolidError::Unported`]; a failed `SER` returns its error.
+//! - **`FindVertexSector` at a seam vertex.** Upstream measures the curve's UV only to
+//!   the sector's begin arm (pEU1's start, or its other end for an edge running seam to
+//!   seam) and skips the sector when it lies across the domain. A sector that straddles
+//!   the seam (its end arm, the CW neighbour, arriving on the other side, along a seam
+//!   edge already at the vertex) has the vertex's other UV image there; the port also
+//!   measures to it, so the seam's next piece finds its sector (a both-hands thread's
+//!   coincident cylinder walls, merged into one face across the seam).
 //! - **`HasSeamProblem`** returns [`SeamCheck`]. Its stage-2 face properties branch
 //!   returns `SM_SUCCESS` (`1000`) as its `SmBoolean`, so `has_problem` is `true` there
 //!   whatever the properties found, as upstream (WR-176). A seam curve
@@ -1202,6 +1209,19 @@ pub fn find_vertex_sector(
                     if dist_uv2 < test_dist_uv {
                         eu1_uv = eu1_uv2;
                         dist_uv = dist_uv2;
+                    }
+                    // Not upstream: a sector at a vertex on the seam can straddle it, its
+                    // begin arm (pEU1) leaving from one side and its end arm (the CW
+                    // neighbour, ending at the vertex) arriving on the other, where a seam
+                    // edge already runs from the vertex: the vertex has both UV images in
+                    // this sector, and the curve's UV is measured to the nearer.
+                    if dist_uv > test_dist_uv && uv_curve.is_some() {
+                        if let Some(eu_cw) = eu1::cw_edgeuse(b, eu1)? {
+                            if eu1::uv_trim_curve(b, eu_cw)?.0.is_some() {
+                                let cw_uv = eu_uv_at(k, b, eu_cw, 1.0, uv_space_okay)?;
+                                dist_uv = min_of(dist_uv, vertex_uv.distance(cw_uv));
+                            }
+                        }
                     }
                 }
             }

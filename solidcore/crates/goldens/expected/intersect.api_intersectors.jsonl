@@ -325,7 +325,7 @@
 {"case":"ssi-sphere-cone-rim-on-sphere-short-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14029.732050807568,14036.66025403784,28137.39230484541]],"n":24},"status":[1000.0]}}
 {"case":"ssi-sphere-cone-tangent","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14019.732050807568,14036.66025403784,28005.105117766514]],"n":24},"status":[1000.0]}}
 {"case":"ssi-sphere-cone-tangent-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14019.732050807568,14036.66025403784,28005.105117766514]],"n":24},"status":[1000.0]}}
-{"case":"ssi-sphere-cylinder-coaxial","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28082.533446554186,28107.85390377505,378923.0852227225]],"n":47},"status":[1000.0]}}
+{"case":"ssi-sphere-cylinder-coaxial","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28082.533569225674,28107.85390377505,378955.087964185]],"n":47},"status":[1000.0]}}
 {"case":"ssi-sphere-cylinder-coaxial-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28048.0,28073.32050807568,378834.18584287044]],"n":47},"status":[1000.0]}}
 {"case":"ssi-sphere-cylinder-coaxial-tangent","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14048.54210771009,14056.542066030806,28161.23985750358]],"n":24},"status":[1000.0]}}
 {"case":"ssi-sphere-cylinder-coaxial-tangent-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14025.0,14033.0,28059.0]],"n":24},"status":[1000.0]}}

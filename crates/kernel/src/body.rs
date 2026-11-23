@@ -1,5 +1,6 @@
 use serde::Serialize;
 use solidcore_record::Vec3;
+use solidcore_record::brep::sweep::ProceduralSweepRecord;
 use solidcore_record::brep::{self, Brep, Curve, Loop, Shell, Surface};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb3, Mesh};
@@ -586,6 +587,7 @@ pub(crate) fn empty_record() -> Brep {
         faces: Vec::new(),
         edges: Vec::new(),
         vertices: Vec::new(),
+        screw_owners: Vec::new(),
     }
 }
 
@@ -684,7 +686,9 @@ impl SurfaceKind {
             S::Cone { .. } => SurfaceKind::Cone,
             S::Sphere { .. } | S::BallPatch { .. } => SurfaceKind::Sphere,
             S::Torus { .. } => SurfaceKind::Torus,
-            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } | S::Blend { .. } => SurfaceKind::Freeform,
+            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } | S::Blend { .. } | S::ProceduralSweep(_) => {
+                SurfaceKind::Freeform
+            }
         }
     }
 }
@@ -1692,8 +1696,10 @@ impl Body {
         let size = self.size();
         let tol = (size * 1e-6).max(1e-9);
         let chord = (size * 1e-3).max(1e-4);
+        let rec = self.record();
+        let curve_query = std::cell::OnceCell::new();
         let mut crossed = Vec::new();
-        for (fi, f) in self.record.faces.iter().enumerate() {
+        for (fi, f) in rec.faces.iter().enumerate() {
             let Some(plane) = self.planar_face(fi) else { continue };
             let (o, u, v) = (plane.origin, plane.x, plane.y);
             let flat = |p: Vec3| {
@@ -1708,8 +1714,10 @@ impl Body {
                 for l in &f.loops {
                     let Loop::Edges { edges } = l else { continue };
                     for use_ in edges {
-                        let e = self.record.edges.get(use_.edge as usize).ok_or_else(|| KernelError::Invalid("edge reference".into()))?;
-                        let pts = edge_points(e, if fine { edge_chord(e, chord) } else { chord })?;
+                        let i = use_.edge as usize;
+                        let e = rec.edges.get(i).ok_or_else(|| KernelError::Invalid("edge reference".into()))?;
+                        let chord = if fine { edge_chord(e, chord, &rec.screw_owners) } else { chord };
+                        let pts = edge_points(e, chord, i, rec, &curve_query)?;
                         segs.extend(pts.windows(2).filter_map(|q| Some((flat(*q.first()?), flat(*q.get(1)?)))));
                         if segs.len() > MAX_SEGMENTS {
                             return Ok(None);
@@ -1799,9 +1807,10 @@ impl Body {
                 .collect());
         }
         let rec = self.record();
+        let curve_query = std::cell::OnceCell::new();
         let mut out = Vec::with_capacity(rec.edges.len());
         for (index, edge) in rec.edges.iter().enumerate() {
-            let points = edge_points(edge, tol)?;
+            let points = edge_points(edge, tol, index, rec, &curve_query)?;
             let (mid, length) = polyline_mid(&points);
             out.push(EdgeInfo { index, points, mid, length });
         }
@@ -2271,9 +2280,9 @@ impl Body {
 /// `chord`, or a thousandth of the edge's own extent where that is finer: the body's size says
 /// nothing of how finely a small edge on a large body must be followed (a 1 mm chord on a 1 m body
 /// draws a Ø0.9 mm circle as two segments over its diameter, which cross a notch beside it, #19687).
-fn edge_chord(e: &brep::Edge, chord: f64) -> f64 {
+fn edge_chord(e: &brep::Edge, chord: f64, owners: &[ProceduralSweepRecord]) -> f64 {
     let mut b = Aabb3::EMPTY;
-    curve_hull(e.parameters(), e.interval, &mut b);
+    curve_hull(e.parameters(), e.interval, owners, &mut b);
     if b.is_empty() {
         return chord;
     }
@@ -2281,8 +2290,21 @@ fn edge_chord(e: &brep::Edge, chord: f64) -> f64 {
 }
 
 /// Points of an edge's curve over its interval, within `chord` of it: lines by their ends, the
-/// rest at the evaluator's points (capped).
-fn edge_points(e: &brep::Edge, chord: f64) -> Result<Vec<Vec3>> {
+/// rest at the evaluator's points (capped). Screw curves use a query shared across this body's edges.
+fn edge_points<'a>(
+    e: &brep::Edge,
+    chord: f64,
+    index: usize,
+    record: &'a Brep,
+    curve_query: &std::cell::OnceCell<solidcore_ops::query::Query<'a>>,
+) -> Result<Vec<Vec3>> {
+    if matches!(e.parameters(), Curve::OnSurface { .. } | Curve::OnSurfaceRef { .. }) {
+        return curve_query
+            .get_or_init(|| solidcore_ops::query::Query::new(record))
+            .edge_points(index, chord)
+            .map(|points| points.into_iter().map(|(_, point)| point).collect())
+            .ok_or_else(|| KernelError::Invalid(format!("cannot evaluate screw edge {index}")));
+    }
     const MAX_POINTS: usize = 4096;
     let curve = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).map_err(|err| KernelError::Invalid(err.to_string()))?;
     let [t0, t1] = e.interval;
@@ -2308,8 +2330,9 @@ fn edge_points(e: &brep::Edge, chord: f64) -> Result<Vec<Vec3>> {
 
 /// Grow `b` by a curve's hull over `interval`: its control points for splines, its points for
 /// lines, circles and ellipses (their exact extreme points), the leader's hull for an
-/// intersection curve.
-fn curve_hull(c: &Curve, interval: [f64; 2], b: &mut Aabb3) {
+/// intersection curve, and its sweep's net hull widened by the net's certified bound for a curve
+/// on a procedural sweep (`owners`: the record's screw owners).
+fn curve_hull(c: &Curve, interval: [f64; 2], owners: &[ProceduralSweepRecord], b: &mut Aabb3) {
     match c {
         Curve::Line { .. } | Curve::Circle { .. } | Curve::Ellipse { .. } => {
             if let Ok(e) = solidcraft_geom::brep::eval::CurveEval::new(c) {
@@ -2329,7 +2352,25 @@ fn curve_hull(c: &Curve, interval: [f64; 2], b: &mut Aabb3) {
                 }
             }
         }
-        Curve::SurfaceIntersection { leader, .. } => curve_hull(leader, interval, b),
+        Curve::SurfaceIntersection { leader, .. } => curve_hull(leader, interval, owners, b),
+        Curve::OnSurface { surface, .. } => {
+            if let Surface::ProceduralSweep(s) = surface.as_ref() {
+                sweep_hull(s, b);
+            }
+        }
+        Curve::OnSurfaceRef { owner, .. } => {
+            if let Some(s) = usize::try_from(*owner).ok().and_then(|i| owners.get(i)) {
+                sweep_hull(s, b);
+            }
+        }
+    }
+}
+
+/// Grow `b` by the kernel's outline box of a procedural sweep.
+fn sweep_hull(s: &ProceduralSweepRecord, b: &mut Aabb3) {
+    if let Some((lo, hi)) = solidcore_ops::procedural_sweep::outline(s) {
+        b.add(Vec3::new(lo[0], lo[1], lo[2]));
+        b.add(Vec3::new(hi[0], hi[1], hi[2]));
     }
 }
 
@@ -2356,7 +2397,7 @@ fn record_outline(record: &Brep) -> Aabb3 {
         b.add(v3(v.point));
     }
     for e in &record.edges {
-        curve_hull(e.parameters(), e.interval, &mut b);
+        curve_hull(e.parameters(), e.interval, &record.screw_owners, &mut b);
     }
     b
 }

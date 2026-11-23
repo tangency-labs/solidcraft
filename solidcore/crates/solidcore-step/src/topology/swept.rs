@@ -723,6 +723,7 @@ fn step_profile(c: &BCurve) -> R<Option<Curve>> {
         BCurve::Polyline { points } => Curve::Polyline(points.clone()),
         BCurve::Spline { .. } | BCurve::RationalSpline { .. } => return Ok(None),
         BCurve::SurfaceIntersection { .. } => return Err(unsupported("an intersection curve as a profile")),
+        BCurve::OnSurface { .. } | BCurve::OnSurfaceRef { .. } => return Err(unsupported("a curve on a procedural sweep as a profile")),
     }))
 }
 

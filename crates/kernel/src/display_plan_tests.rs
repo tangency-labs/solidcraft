@@ -770,6 +770,7 @@ fn pyramid_past_a_near_pole(pole_tolerance: f64) -> solidcore_record::brep::Brep
         faces: vec![face],
         edges,
         vertices: vec![vertex([0.0, 0.0, 1.0], pole_tolerance), vertex(corner(0, 1.0, 0.0), 1e-7), vertex(corner(2, 1.0, 0.0), 1e-7)],
+        screw_owners: Vec::new(),
     };
     ok(loose.canonical().map_err(|e| crate::KernelError::Invalid(format!("{e:?}")))).brep
 }

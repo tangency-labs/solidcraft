@@ -1907,6 +1907,7 @@ pub(crate) fn record_edge(curve: BCurve, ps: P3, pe: P3, closed: bool, full: boo
         // Ends at one point, one vertex or two: the whole closed curve, as for a conic.
         BCurve::Spline { .. } | BCurve::RationalSpline { .. } | BCurve::Polyline { .. } => open_or_closed(curve, ps, pe, true, full, tol)?,
         BCurve::SurfaceIntersection { .. } => return Err(unsupported("an intersection curve without an interval")),
+        BCurve::OnSurface { .. } | BCurve::OnSurfaceRef { .. } => return Err(unsupported("a curve on a procedural sweep without an interval")),
     };
     Ok((mapped.curve, mapped.interval, mapped.with_step))
 }

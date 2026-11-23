@@ -5,6 +5,7 @@
 //! answer is the kernel's ([`solidcore::eval::query`]); nothing here computes.
 
 use solidcore::eval::query as k;
+use solidcore_convert::curve_context::BodyCurveContext;
 use solidcore_convert::{record_vec3, vec3};
 use solidcore_record::brep::{Brep, Loop, Shell};
 use solidcore_record::Vec3;
@@ -34,6 +35,11 @@ impl<'a> Query<'a> {
     /// one the queries cannot evaluate, as a malformed one.
     #[must_use]
     pub fn new(record: &'a Brep) -> Query<'a> {
+        let curves = if record.screw_owners.is_empty() {
+            None
+        } else {
+            BodyCurveContext::new(record).ok()
+        };
         let mut forward = vec![None; record.faces.len()];
         for shell in &record.shells {
             if let Shell::Faces { faces, .. } = shell {
@@ -85,7 +91,9 @@ impl<'a> Query<'a> {
             .collect();
         Query {
             record,
-            inner: k::Query::new(k::Record { edges, faces }),
+            inner: k::Query::with_shared_edges(k::Record { edges, faces }, |i| {
+                curves.as_ref()?.edge(i).ok()
+            }),
         }
     }
 
@@ -186,7 +194,7 @@ impl<'a> Query<'a> {
     /// face and point, nearest first.
     ///
     /// # Errors
-    /// The first face the ray cannot meet exactly (a torus, a spline, a revolution or a blend).
+    /// The first face the ray cannot meet exactly, such as a torus or procedural sweep.
     pub fn ray(&self, o: Vec3, d: Vec3, accept: f64) -> Result<Vec<(f64, usize, Vec3)>, usize> {
         self.inner.ray(vec3(o), vec3(d), accept).map(|v| {
             v.into_iter()

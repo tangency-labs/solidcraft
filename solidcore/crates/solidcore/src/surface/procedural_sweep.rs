@@ -57,7 +57,17 @@
 // The range tests are NaN-safe negations (`!(x > y)`), as `sweep::screw`'s.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+mod checked;
+mod derivatives;
+mod offset;
+mod offset_profile;
+pub(crate) use offset_profile::affine_source;
+mod record;
+mod refined_net;
+pub mod screw_offset;
+
 use std::f64::consts::TAU;
+use std::sync::OnceLock;
 
 use crate::blend::fillet_section::interval::{round_up, Ivl};
 use crate::blend::fillet_section::recertify::transform_rounding;
@@ -80,7 +90,12 @@ pub use path::PathMotion;
 const OP_CREATE: &str = "surface::procedural_sweep::ProceduralSweep::create";
 const OP_MOTION: &str = "surface::procedural_sweep::ScrewMotion::new";
 const OP_LAW: &str = "surface::procedural_sweep::RadialLaw::new";
+/// A screw definition's `S`, `S_w`, `S_t` and `S_wt` at one `(w, t)`.
+type ScrewPartials = (Vec3, Vec3, Vec3, Vec3);
+/// The checked turn and rotation a screw evaluation took.
+type TurnedBy = (checked::Turn, checked::Rotation);
 const OP_EVAL: &str = "surface::procedural_sweep::ProceduralSweep::evaluate_definition";
+const OP_EXACT: &str = "surface::procedural_sweep::SweepRef::evaluate";
 
 /// The widest half angle of a span of a screw sweep's net: its spans turn at most an
 /// eighth of a turn ([`crate::sweep::screw`]), so `tau <= tan(pi / 16)`.
@@ -273,6 +288,7 @@ impl ScrewMotion {
     }
 
     /// Rodrigues: `v` turned right-handed about the axis by `a`.
+    #[cfg(test)]
     fn turn(&self, v: Vec3, a: f64) -> Vec3 {
         let k = self.axis;
         v * a.cos() + k.cross(v) * a.sin() + k * (k.dot(v) * (1.0 - a.cos()))
@@ -324,12 +340,22 @@ pub enum Motion {
 #[derive(Debug, Clone)]
 pub struct ProceduralSweep {
     profile: BSplineCurve,
+    offset: Option<offset_profile::OffsetProfile>,
     motion: Motion,
     stations: Vec<f64>,
     half: f64,
     tau: f64,
     bound: f64,
     map: SweepMap,
+    /// A successful definition-wide runtime proof, never a sampled point result.
+    /// Every mutation of S or its parameter map invalidates this independent slot.
+    runtime_allowance: OnceLock<f64>,
+    /// Values the checked evaluator derives from the definition alone (its exact
+    /// screw section, each station span's turn constants, its latest checked turns and
+    /// points), cleared with `runtime_allowance`: a hit returns the bits a fresh
+    /// derivation would. Copies share it until one is edited, since every edit clears it
+    /// first (and replaces it in that copy alone).
+    checked_cache: std::sync::Arc<checked::CheckedCache>,
 }
 
 /// `sum_{n >= 0} (-1)^n c(n) p0 r^n` enclosed, for `0 <= p0`, `0 <= r` and terms that fall
@@ -341,21 +367,42 @@ fn alternating(p0: Ivl, r: Ivl, c: impl Fn(u32) -> Ivl) -> Ivl {
     let mut power = p0;
     let mut sum = Ivl::from(0.0);
     let mut n = 0;
+    // `term` is always `c(n) * power` for the current `n` and `power`: the term tested
+    // against the sum is the one added next, and the one left out is the remainder, each
+    // formed once.
+    let mut term = c(n) * power;
     while n < SERIES_TERMS {
-        let term = c(n) * power;
         sum = if n % 2 == 0 { sum + term } else { sum - term };
         power = power * r;
         n += 1;
-        if (c(n) * power).mag() <= sum.mig() * f64::powi(2.0, -64) {
+        term = c(n) * power;
+        if term.mag() <= sum.mig() * f64::powi(2.0, -64) {
             break;
         }
     }
-    let rest = (c(n) * power).mag();
+    let rest = term.mag();
     sum + Ivl::new(-rest, rest)
 }
 
-/// `1 / m` enclosed.
+/// `1 / m` enclosed, kept for the `m` the series' coefficients take ([`RECIPROCALS`]).
 fn reciprocal(m: u32) -> Ivl {
+    static KEPT: OnceLock<[Ivl; RECIPROCALS]> = OnceLock::new();
+    let kept = KEPT.get_or_init(|| {
+        std::array::from_fn(|m| reciprocal_formed(u32::try_from(m).unwrap_or(u32::MAX)))
+    });
+    usize::try_from(m)
+        .ok()
+        .and_then(|m| kept.get(m))
+        .copied()
+        .unwrap_or_else(|| reciprocal_formed(m))
+}
+
+/// How many [`reciprocal`]s are kept: every `1 / (2n + 1)` and `1 / (2n + 3)` the series
+/// take for `n <= SERIES_TERMS`. A pure function of `m`, so a kept one is the one formed.
+const RECIPROCALS: usize = 2 * SERIES_TERMS as usize + 4;
+
+/// `1 / m` enclosed, formed.
+fn reciprocal_formed(m: u32) -> Ivl {
     Ivl::from(1.0) / Ivl::from(f64::from(m))
 }
 
@@ -493,14 +540,42 @@ impl ProceduralSweep {
         }
         let mut profile = profile.copy();
         profile.set_out_of_bounds_enabled(false);
+        // Joined walls retain their original arc spans, which can have different
+        // widths. The largest bounds every span; turn_at uses each local width.
+        let half = stations.windows(2).fold(half, |largest, pair| match pair {
+            [a, b] => largest.max(0.5 * (b - a)),
+            _ => largest,
+        });
+        let rounded_past_limit = stations.windows(2).any(|pair| match pair {
+            [a, b] if b - a == 2.0 * MAX_HALF_ANGLE => {
+                // TwoSum's residual for b + (-a) disambiguates an exact span
+                // just above the limit that rounded down to it. The sum is
+                // finite here; no overflow is possible in these residuals.
+                // Shewchuk (1997), §2.4, https://www.cs.cmu.edu/~quake/robust.html.
+                let span = b - a;
+                let bv = span - b;
+                let av = span - bv;
+                (b - av) + (-a - bv) > 0.0
+            }
+            _ => false,
+        });
+        if half > MAX_HALF_ANGLE || rounded_past_limit {
+            return Err(SolidError::invalid_input(
+                OP_CREATE,
+                "a station span exceeds the certified half-angle limit",
+            ));
+        }
         let mut sweep = Self {
             profile,
+            offset: None,
             motion: Motion::Screw(motion),
             stations: stations.to_vec(),
             half,
             tau: (0.5 * half).tan(),
             bound: 0.0,
             map: SweepMap::default(),
+            runtime_allowance: OnceLock::new(),
+            checked_cache: std::sync::Arc::default(),
         };
         sweep.bound = sweep.certify()?;
         Ok(sweep)
@@ -586,17 +661,21 @@ impl ProceduralSweep {
     /// (clamped to the stations), and `d theta / dt`.
     #[must_use]
     pub fn turn_at(&self, t: f64) -> (f64, f64) {
+        self.turn_at_side(t, false)
+    }
+
+    fn turn_at_side(&self, t: f64, ending_span: bool) -> (f64, f64) {
         if !matches!(self.motion, Motion::Screw(_)) {
             return (t, 1.0);
         }
         let (Some(&first), Some(&last)) = (self.stations.first(), self.stations.last()) else {
             return (t, 1.0);
         };
-        let t = t.clamp(first, last);
+        let t = crate::math::clamp_between(t, first, last);
         let spans = self.stations.len().saturating_sub(1);
         let i = self
             .stations
-            .partition_point(|&x| x <= t)
+            .partition_point(|&x| if ending_span { x < t } else { x <= t })
             .saturating_sub(1)
             .min(spans.saturating_sub(1));
         let (Some(&t0), Some(&t1)) = (self.stations.get(i), self.stations.get(i + 1)) else {
@@ -604,9 +683,10 @@ impl ProceduralSweep {
         };
         let width = t1 - t0;
         let s = 2.0 * (t - t0) / width - 1.0;
-        let x = self.tau * s;
+        let tau = (0.25 * width).tan();
+        let x = tau * s;
         let theta = 0.5 * (t0 + t1) + 2.0 * x.atan();
-        let rate = 2.0 * self.tau / (1.0 + x * x) * (2.0 / width);
+        let rate = 2.0 * tau / (1.0 + x * x) * (2.0 / width);
         (theta, rate)
     }
 
@@ -616,7 +696,8 @@ impl ProceduralSweep {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` for an order above 1; those of evaluating the profile.
+    /// `InvalidInput` for a screw order above four or a path order above one;
+    /// those of evaluating the retained profile or exact offset section.
     pub fn evaluate_definition(
         &self,
         uv: Point2,
@@ -626,10 +707,10 @@ impl ProceduralSweep {
         self.evaluate_definition_side(uv, highest_u_deriv, highest_v_deriv, false)
     }
 
-    /// [`ProceduralSweep::evaluate_definition`] at a joint of the path (a node of the map):
-    /// the segment that starts there, or the one that ends there when `left`, as a face that
-    /// ends at the joint reads it ([`SweepRef`] asks for it at the face's end). A screw has
-    /// no joint.
+    /// [`ProceduralSweep::evaluate_definition`] at a joint of the parameter map: the span
+    /// that starts there, or the one that ends there when `left`, as a face that ends at
+    /// the joint reads it. Unequal rational screw spans have different one-sided parameter
+    /// rates even where the screw surface is smooth.
     ///
     /// # Errors
     ///
@@ -641,6 +722,9 @@ impl ProceduralSweep {
         highest_v_deriv: usize,
         left: bool,
     ) -> Result<Vec<Vec<Vec3>>> {
+        if self.screw().is_some() && (highest_u_deriv > 1 || highest_v_deriv > 1) {
+            return self.screw_derivatives(uv, highest_u_deriv, highest_v_deriv, left);
+        }
         if highest_u_deriv > 1 || highest_v_deriv > 1 {
             return Err(SolidError::invalid_input(
                 OP_EVAL,
@@ -649,26 +733,54 @@ impl ProceduralSweep {
         }
         let wt = self.definition_parameters(uv);
         let first = highest_u_deriv + highest_v_deriv > 0;
-        let (s, s_w, s_t, s_wt) = match &self.motion {
-            Motion::Screw(m) => self.screw_partials(m, wt, first)?,
-            Motion::Path(m) => self.path_partials(m, wt, first, left)?,
+        let ((s, s_w, s_t, s_wt), turned) = match &self.motion {
+            Motion::Screw(m) => {
+                let (partials, turned) = self.screw_partials(m, wt, first, left)?;
+                (partials, Some(turned))
+            }
+            Motion::Path(m) => (self.path_partials(m, wt, first, left)?, None),
         };
+        if let Some((turn, rotation)) = turned {
+            // the point checked with the turn and rotation the partials took
+            self.verify_turned_point(uv, s, &turn, &rotation)?;
+        }
         Ok(self.assemble(s, s_w, s_t, s_wt, highest_u_deriv, highest_v_deriv))
     }
 
-    /// The screw definition's `S`, `S_w`, `S_t` and `S_wt` at `(w, t)`.
+    /// The screw definition's `S`, `S_w`, `S_t` and `S_wt` at `(w, t)`, and the checked
+    /// turn and rotation they took ([`Self::checked_turn_rotation`]).
     fn screw_partials(
         &self,
         m: &ScrewMotion,
         wt: Point2,
         first: bool,
-    ) -> Result<(Vec3, Vec3, Vec3, Vec3)> {
-        let p = self
-            .profile
-            .evaluate(wt.x, usize::from(first), false, false)?;
-        let point = p.first().copied().unwrap_or(Vec3::ZERO);
-        let tangent = p.get(1).copied().unwrap_or(Vec3::ZERO);
-        let (theta, rate) = self.turn_at(wt.y);
+        left: bool,
+    ) -> Result<(ScrewPartials, TurnedBy)> {
+        let domain = self.profile.natural_interval();
+        let ordered = domain.min() <= domain.max();
+        if !ordered {
+            return Err(SolidError::invalid_input(
+                OP_EVAL,
+                "a screw profile needs ordered parameter bounds",
+            ));
+        }
+        let w = crate::math::clamp_between(wt.x, domain.min(), domain.max());
+        let (point, tangent) = if let Some(offset) = &self.offset {
+            self.offset_point(offset, m, w)?
+        } else {
+            // At a profile knot, the profile span the face starts with, as the higher-order
+            // partials take it (`screw_derivatives_with_flags`).
+            let from_left = !(self.map.b[0] < 0.0);
+            let p = self
+                .profile
+                .evaluate(w, usize::from(first), from_left, false)?;
+            (
+                p.first().copied().unwrap_or(Vec3::ZERO),
+                p.get(1).copied().unwrap_or(Vec3::ZERO),
+            )
+        };
+        let (turn, rotation) = self.checked_turn_rotation(wt.y, left)?;
+        let (theta, rate) = (turn.theta, turn.rate);
         let (first_t, last_t) = (
             self.stations.first().copied().unwrap_or(0.0),
             self.stations.last().copied().unwrap_or(0.0),
@@ -678,13 +790,15 @@ impl ProceduralSweep {
             .as_ref()
             .map_or(0.0, |l| l.slope_over(first_t, last_t));
         let (shift, shift_rate) = m.shift(theta, slope);
-        let arm = m.turn(point - m.origin + shift, theta);
+        let arm = rotation.turn(m.axis, point - m.origin + shift);
         let s = m.origin + arm + m.axis * m.lift(theta);
         // dS/dw, dS/dt and d2S/dw dt
-        let s_w = m.turn(tangent, theta);
-        let s_t = (m.axis.cross(arm) + m.turn(shift_rate, theta) + m.axis * (m.pitch / TAU)) * rate;
+        let s_w = rotation.turn(m.axis, tangent);
+        let s_t =
+            (m.axis.cross(arm) + rotation.turn(m.axis, shift_rate) + m.axis * (m.pitch / TAU))
+                * rate;
         let s_wt = m.axis.cross(s_w) * rate;
-        Ok((s, s_w, s_t, s_wt))
+        Ok(((s, s_w, s_t, s_wt), (turn, rotation)))
     }
 
     /// The path definition's `S`, `S_w`, `S_t` and `S_wt` at `(w, v)`, `v` the net's
@@ -775,7 +889,8 @@ impl ProceduralSweep {
             Ivl::from(0.0)
         };
         let exact = (lift * lift + offset * offset).sqrt().hi;
-        let bound = round_up(exact + self.floor()?);
+        let section = self.offset.as_ref().map_or(0.0, |offset| offset.bound);
+        let bound = (Ivl::from(exact) + Ivl::from(section) + Ivl::from(self.floor()?)).hi;
         if bound.is_finite() && bound > 0.0 {
             Ok(bound)
         } else {
@@ -867,6 +982,7 @@ impl ProceduralSweep {
     /// The net's parameter in `u` (or v) became `w'` with `w = alpha + beta w'` (a
     /// reversal or reparametrisation of the net): the map follows.
     pub(crate) fn reparametrize_map(&mut self, u: bool, alpha: f64, beta: f64) {
+        self.invalidate_runtime_allowance();
         // u drives w unless swapped
         let idx = usize::from(u == self.map.swapped);
         if let (Some(a), Some(&b)) = (self.map.a.get_mut(idx), self.map.b.get(idx)) {
@@ -879,6 +995,7 @@ impl ProceduralSweep {
 
     /// The net's u and v swapped: the map follows.
     pub(crate) fn swap_map(&mut self) {
+        self.invalidate_runtime_allowance();
         self.map.swapped = !self.map.swapped;
     }
 
@@ -914,6 +1031,8 @@ impl ProceduralSweep {
                 "a sweep's definition moves rigidly or by a uniform scale",
             ));
         }
+        // Clear before the first fallible mutation, including partial transforms.
+        self.invalidate_runtime_allowance();
         let factor = scale.map_or(1.0, |s| s.x);
         let (x, y) = (rotate_n_move.x_axis(), rotate_n_move.y_axis());
         let eta = (x.dot(x) - 1.0)
@@ -924,6 +1043,11 @@ impl ProceduralSweep {
         let m = match &mut self.motion {
             Motion::Screw(m) => {
                 self.profile.transform(rotate_n_move, scale)?;
+                if let Some(offset) = &mut self.offset {
+                    offset.source.transform(rotate_n_move, scale)?;
+                    offset.distance *= factor;
+                    offset.bound *= factor;
+                }
                 m
             }
             Motion::Path(p) => {
@@ -1031,6 +1155,7 @@ impl ProceduralSweep {
         let stations = motion.nodes().iter().map(|n| n.0).collect();
         let sweep = Self {
             profile,
+            offset: None,
             motion: Motion::Path(motion),
             stations,
             half: 0.0,
@@ -1040,6 +1165,8 @@ impl ProceduralSweep {
                 swapped: true,
                 ..SweepMap::default()
             },
+            runtime_allowance: OnceLock::new(),
+            checked_cache: std::sync::Arc::default(),
         };
         Ok((sweep, net))
     }
@@ -1056,6 +1183,7 @@ impl ProceduralSweep {
         let stations = motion.nodes().iter().map(|n| n.0).collect();
         Ok(Self {
             profile,
+            offset: None,
             motion: Motion::Path(motion),
             stations,
             half: 0.0,
@@ -1065,6 +1193,8 @@ impl ProceduralSweep {
                 swapped,
                 ..SweepMap::default()
             },
+            runtime_allowance: OnceLock::new(),
+            checked_cache: std::sync::Arc::default(),
         })
     }
 }
@@ -1124,11 +1254,15 @@ impl<'a> SweepRef<'a> {
         if self.sweep.net_answers(k) {
             return self.net.evaluate_point(uv);
         }
+        // every exact point is checked against its certificate: a solve that asks for
+        // many stops at the next one once cancelled
+        k.check_cancelled(OP_EXACT)?;
         self.sweep.evaluate_definition_point(uv)
     }
 
-    /// The partials at `uv` to the first order in each parameter, the net's or the
-    /// definition's as [`SweepRef::evaluate_point`] chooses.
+    /// The partials at `uv`, the net's or the definition's as
+    /// [`SweepRef::evaluate_point`] chooses. Exact screw partials support order
+    /// four in each parameter; exact path partials support order one.
     ///
     /// # Errors
     ///
@@ -1148,6 +1282,7 @@ impl<'a> SweepRef<'a> {
                 EvaluateFlags::default(),
             );
         }
+        k.check_cancelled(OP_EXACT)?;
         self.sweep.evaluate_definition_side(
             uv,
             highest_u_deriv,
@@ -1190,6 +1325,124 @@ impl<'a> DefinitionRef<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The certificate reads the profile, motion, stations and half angle, not the map:
+    /// after the map is reparametrized and swapped, `certify()` is the bound `create`
+    /// stored, bit for bit, so reopening a record takes that bound rather than certifying
+    /// twice ([`ProceduralSweep::from_record`]).
+    #[test]
+    fn the_certificate_does_not_read_the_map() {
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(8.0, 0.0, 0.0),
+            Vec3::new(10.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, 0.3, 0.7, 1.2, 1.25];
+        let mut definition = ProceduralSweep::create(&profile, motion, &stations, 0.3).unwrap();
+        let stored = definition.bound.to_bits();
+        assert_eq!(definition.certify().unwrap().to_bits(), stored);
+        definition.reparametrize_map(true, 1e8, -2.0);
+        definition.reparametrize_map(false, -3.0, 0.5);
+        definition.swap_map();
+        assert_eq!(definition.certify().unwrap().to_bits(), stored);
+    }
+
+    /// The alternating series forms each term once; its sums are, bit for bit, those of the
+    /// loop that formed the next term twice (to test it, then to add it), for atan and for
+    /// the lift's error bound over the spans' range of `tau`.
+    #[test]
+    fn the_alternating_series_forms_each_term_once() {
+        fn twice(p0: Ivl, r: Ivl, c: impl Fn(u32) -> Ivl) -> Ivl {
+            let mut power = p0;
+            let mut sum = Ivl::from(0.0);
+            let mut n = 0;
+            while n < SERIES_TERMS {
+                let term = c(n) * power;
+                sum = if n % 2 == 0 { sum + term } else { sum - term };
+                power = power * r;
+                n += 1;
+                if (c(n) * power).mag() <= sum.mig() * f64::powi(2.0, -64) {
+                    break;
+                }
+            }
+            let rest = (c(n) * power).mag();
+            sum + Ivl::new(-rest, rest)
+        }
+        let same =
+            |a: Ivl, b: Ivl| a.lo.to_bits() == b.lo.to_bits() && a.hi.to_bits() == b.hi.to_bits();
+        for x in [0.0, 1e-300, 1e-9, 0.01, 0.123_456_789, 0.25, 0.4, 0.5] {
+            let xi = Ivl::from(x);
+            let c = |n: u32| reciprocal(2 * n + 1);
+            assert!(same(atan_point(x), twice(xi, xi * xi, c)), "atan {x}");
+        }
+        for tau in [1e-6, 0.01, 0.1, 0.2, 0.5] {
+            let t2 = Ivl::from(tau) * Ivl::from(tau);
+            let c = |n: u32| reciprocal((2 * n + 1) * (2 * n + 3));
+            assert!(
+                same(alternating(t2, t2, c), twice(t2, t2, c)),
+                "kappa {tau}"
+            );
+        }
+    }
+
+    /// The kept reciprocals are the ones formed, bit for bit, and past the table they are
+    /// formed.
+    #[test]
+    fn kept_reciprocals_are_the_formed_ones() {
+        for m in 0..(RECIPROCALS as u32 + 8) {
+            let (kept, formed) = (reciprocal(m), reciprocal_formed(m));
+            assert_eq!(
+                [kept.lo, kept.hi].map(f64::to_bits),
+                [formed.lo, formed.hi].map(f64::to_bits),
+                "1 / {m}"
+            );
+        }
+        assert_eq!(reciprocal(1_000_003), reciprocal_formed(1_000_003));
+    }
+
+    /// At a corner of the profile inside a face, the first-order partials and the higher-order
+    /// ones take the same profile span, so they give the same tangent.
+    #[test]
+    fn first_and_higher_order_partials_agree_at_a_profile_corner() {
+        let corner = BSplineCurve::create_canonical(&crate::nurbs::b_spline_curve::CanonicalData {
+            dim: 3,
+            degree: 1,
+            control_points: &[
+                Point3::new(2.0, 0.0, 0.0),
+                Point3::new(3.0, 0.0, 0.5),
+                Point3::new(2.0, 0.0, 1.0),
+            ],
+            form: crate::nurbs::b_spline_curve::BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[2, 1, 2],
+            knots: &[0.0, 0.5, 1.0],
+            knot_type: crate::nurbs::b_spline_curve::KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap();
+        let motion = ScrewMotion::new(Point3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, 0.3, 0.6];
+        let definition = ProceduralSweep::create(&corner, motion, &stations, 0.15).unwrap();
+        // The face's (u, v) at the profile corner w = 0.5, inverting the parameter map
+        // (`definition_parameters`: w = a + b p).
+        let at = |w: f64, t: f64| {
+            let m = &definition.map;
+            let (p, q) = ((w - m.a[0]) / m.b[0], (t - m.a[1]) / m.b[1]);
+            if m.swapped {
+                Point2::new(q, p)
+            } else {
+                Point2::new(p, q)
+            }
+        };
+        assert_eq!(definition.definition_parameters(at(0.5, 0.2)).x, 0.5);
+        let uv = at(0.5, 0.2);
+        let first = definition.evaluate_definition(uv, 1, 1).unwrap();
+        let higher = definition.evaluate_definition(uv, 2, 2).unwrap();
+        assert_eq!(first[1][0], higher[1][0]);
+        assert_eq!(first[0][1], higher[0][1]);
+    }
 
     /// The series enclosure holds the library's atan, and is tight.
     #[test]
@@ -1246,6 +1499,30 @@ mod tests {
     }
 
     #[test]
+    fn the_actual_station_half_angle_obeys_the_certified_limit() {
+        let line =
+            BSplineCurve::create_line_segment(3, Point3::X, Point3::new(2.0, 0.0, 1.0)).unwrap();
+        let motion = ScrewMotion::new(Point3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let at_limit = [0.0, 2.0 * MAX_HALF_ANGLE];
+        let definition = ProceduralSweep::create(&line, motion.clone(), &at_limit, 0.01).unwrap();
+        assert_eq!(definition.half_angle(), MAX_HALF_ANGLE);
+        assert!(definition.bound().is_finite());
+
+        // The supplied half angle is only a lower estimate for joined spans. The
+        // actual stations must satisfy the same contract as the screw-net builder.
+        for stations in [
+            vec![0.0, 2.0 * MAX_HALF_ANGLE + 1e-6],
+            vec![0.0, MAX_HALF_ANGLE, std::f64::consts::PI],
+            vec![-2.0_f64.powi(-55), 2.0 * MAX_HALF_ANGLE],
+        ] {
+            assert!(
+                ProceduralSweep::create(&line, motion.clone(), &stations, MAX_HALF_ANGLE).is_err(),
+                "an oversized station span was admitted: {stations:?}"
+            );
+        }
+    }
+
+    #[test]
     fn hostile_definitions_are_refused() {
         let line = BSplineCurve::create_line_segment(
             3,
@@ -1275,5 +1552,189 @@ mod tests {
         assert!(RadialLaw::new(Vec3::X, vec![1.0, 0.0], vec![0.0, 0.0]).is_err());
         assert!(RadialLaw::new(Vec3::X, vec![0.0], vec![f64::NAN]).is_err());
         assert!(RadialLaw::new(Vec3::ZERO, vec![0.0], vec![0.0]).is_err());
+    }
+
+    fn split_screw_end_jets(order: usize) {
+        use crate::nurbs::b_spline_surface::SurfParamType;
+        use crate::nurbs::knots::Side;
+        use crate::surface::surface::Surface;
+
+        let k = Kernel::default();
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(2.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, TAU, None).unwrap();
+        let stations = [0.0, 0.2, 0.8];
+        let definition = ProceduralSweep::create(&profile, motion.clone(), &stations, 0.3).unwrap();
+        let net = crate::sweep::screw::screw_net(&profile, &motion, &stations).unwrap();
+        let (before, after) = net.split_at(0.2, SurfParamType::V).unwrap();
+        let _exact = NetScope::exact(&k);
+
+        // The rational circle parameter has endpoint rate 2*sin(width/2)/width.
+        // Unequal spans meet on the same screw but have different one-sided jets.
+        let rates = [0.2_f64, 0.6].map(|width| 2.0 * (width * 0.5).sin() / width);
+        assert!((rates[0] - rates[1]).abs() > 0.01);
+        for (ending, width, rate) in [(true, 0.2_f64, rates[0]), (false, 0.6, rates[1])] {
+            let side = if ending { Side::Right } else { Side::Left };
+            let flags = EvaluateFlags {
+                v_side: side,
+                ..EvaluateFlags::default()
+            };
+            let uv = Point2::new(0.37, 0.2);
+            let control = definition
+                .screw_derivatives_with_flags(uv, 2, 2, flags)
+                .unwrap();
+            let arm = motion.turn(Vec3::new(1.37, 0.0, 0.37), 0.2);
+            let velocity = Vec3::Z.cross(arm) + Vec3::Z;
+            let tau = (width * 0.25).tan();
+            let x = if ending { tau } else { -tau };
+            let alpha = 2.0 * tau / width;
+            let second = -4.0 * alpha * alpha * x / (1.0 + x * x).powi(2);
+            let expected = [
+                velocity * rate,
+                Vec3::Z.cross(Vec3::Z.cross(arm)) * (rate * rate) + velocity * second,
+            ];
+            for (j, value) in expected.iter().enumerate() {
+                let rounding = gamma(128) * (1.0 + value.length());
+                assert!((control[0][j + 1] - *value).length() <= rounding);
+            }
+        }
+
+        for (ending, piece) in [(true, before), (false, after)] {
+            for edit in 0..4 {
+                let mut surface = Surface::from(piece.copy());
+                surface.set_sweep_definition(definition.clone());
+                match edit {
+                    1 => surface.reverse(&k, SurfParamType::V).unwrap(),
+                    2 => surface.swap_uv(&k).unwrap(),
+                    3 => {
+                        surface.reverse(&k, SurfParamType::V).unwrap();
+                        surface.swap_uv(&k).unwrap();
+                    }
+                    _ => {}
+                }
+                let sweep = surface.procedural_sweep().unwrap();
+                let definition = sweep.definition();
+                let uv = definition.face_parameters(Point2::new(0.37, 0.2)).unwrap();
+                assert_eq!(sweep.joint_side_is_left(uv), ending);
+                let (_, scale, swapped) = definition.definition_map();
+                // Side::Right is the ending face span; a negative map reverses it.
+                let side = if ending == (scale[1] < 0.0) {
+                    Side::Left
+                } else {
+                    Side::Right
+                };
+                let flags = if swapped {
+                    EvaluateFlags {
+                        u_side: side,
+                        ..EvaluateFlags::default()
+                    }
+                } else {
+                    EvaluateFlags {
+                        v_side: side,
+                        ..EvaluateFlags::default()
+                    }
+                };
+                let expected = definition
+                    .screw_derivatives_with_flags(uv, order, order, flags)
+                    .unwrap();
+                let control = surface.evaluate(&k, uv, order, order, flags).unwrap();
+                let actual = sweep.evaluate(&k, uv, order, order).unwrap();
+                for (i, row) in expected.iter().enumerate() {
+                    for (j, value) in row.iter().enumerate() {
+                        let rounding = gamma(128) * (1.0 + value.length());
+                        assert!(
+                            (control[i][j] - *value).length() <= rounding,
+                            "explicit flags: ending={ending}, edit={edit}, derivative=({i},{j})"
+                        );
+                        assert!(
+                            (actual[i][j] - *value).length() <= rounding,
+                            "face side: ending={ending}, edit={edit}, derivative=({i},{j})"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_split_screw_face_uses_its_own_first_derivatives_at_an_unequal_span_joint() {
+        split_screw_end_jets(1);
+    }
+
+    #[test]
+    fn a_split_screw_face_uses_its_own_second_derivatives_at_an_unequal_span_joint() {
+        split_screw_end_jets(2);
+    }
+
+    #[test]
+    fn checked_runtime_points_cover_sources_maps_axes_and_joints() {
+        use super::offset_profile::OffsetProfile;
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(4.0, 0.0, 0.0),
+            Vec3::new(5.0, 0.0, 1.0),
+        )
+        .unwrap();
+        for axis in [Vec3::Z, Vec3::new(1.0, 0.3, 0.9)] {
+            let motion = ScrewMotion::new(Vec3::ZERO, axis, 1.5, None).unwrap();
+            for offset in [false, true] {
+                let mut definition =
+                    ProceduralSweep::create(&profile, motion.clone(), &[0.0, 0.2, 0.7], 0.25)
+                        .unwrap();
+                if offset {
+                    definition.offset = Some(OffsetProfile {
+                        source: profile.clone(),
+                        distance: 0.05,
+                        bound: 0.0,
+                    });
+                }
+                for map in [
+                    SweepMap::default(),
+                    SweepMap {
+                        a: [1e8, -1e8],
+                        b: [-2.0, 0.5],
+                        swapped: true,
+                    },
+                ] {
+                    definition.invalidate_runtime_allowance();
+                    definition.map = map;
+                    let allowance = definition.runtime_evaluation_allowance().unwrap();
+                    assert!(allowance.is_finite() && allowance > 0.0);
+                    for wt in [
+                        Point2::new(0.0, 0.0),
+                        Point2::new(0.37, 0.2),
+                        Point2::new(1.0, 0.7),
+                    ] {
+                        let uv = definition.face_parameters(wt).unwrap();
+                        for order in [0, 1, 4] {
+                            let point =
+                                definition.evaluate_definition(uv, order, order).unwrap()[0][0];
+                            definition.verify_runtime_point(uv, point).unwrap();
+                            assert!(definition
+                                .verify_runtime_point(uv, point + Vec3::X * (1.0 + allowance))
+                                .is_err());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn checked_runtime_refuses_unproved_argument_reduction() {
+        let profile =
+            BSplineCurve::create_line_segment(3, Vec3::X, Vec3::new(2.0, 0.0, 1.0)).unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 1.5, None).unwrap();
+        let definition =
+            ProceduralSweep::create(&profile, motion, &[3e15, 3e15 + 0.5], 0.25).unwrap();
+        for order in [0, 1, 4] {
+            assert!(definition
+                .evaluate_definition(Point2::new(0.37, 3e15), order, order)
+                .is_err());
+        }
     }
 }

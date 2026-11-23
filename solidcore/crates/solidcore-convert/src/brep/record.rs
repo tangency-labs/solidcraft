@@ -87,6 +87,218 @@ fn data_index(x: u64) -> R<usize> {
     usize::try_from(x).map_err(|_| Unsupported::Invalid("data index"))
 }
 
+// PartialEq alone merges signed zeros. The tuple of structure equality and every
+// float's stored bits is the exact owner identity used by the shared table.
+fn screw_bits(r: &r::sweep::ProceduralSweepRecord) -> Vec<u64> {
+    fn curve(out: &mut Vec<u64>, c: &r::sweep::NurbsCurveRecord) {
+        out.extend(c.knots.iter().map(|x| x.to_bits()));
+        out.extend(c.points.iter().flatten().map(|x| x.to_bits()));
+        if let Some(weights) = &c.weights {
+            out.extend(weights.iter().map(|x| x.to_bits()));
+        }
+    }
+    let mut out = Vec::new();
+    let r::sweep::SweepDefinitionRecord::Screw {
+        profile,
+        motion,
+        offset,
+    } = &r.definition;
+    curve(&mut out, profile);
+    out.extend(
+        motion
+            .origin
+            .iter()
+            .chain(motion.axis.iter())
+            .map(|x| x.to_bits()),
+    );
+    out.push(motion.pitch.to_bits());
+    if let Some(law) = &motion.law {
+        out.extend(
+            law.direction
+                .iter()
+                .chain(law.angles.iter())
+                .chain(law.offsets.iter())
+                .map(|x| x.to_bits()),
+        );
+    }
+    if let Some(offset) = offset {
+        curve(&mut out, &offset.source);
+        out.extend([
+            offset.signed_distance.to_bits(),
+            offset.approximation_bound.to_bits(),
+        ]);
+    }
+    out.extend(
+        r.net
+            .u_knots
+            .iter()
+            .chain(r.net.v_knots.iter())
+            .map(|x| x.to_bits()),
+    );
+    out.extend(r.net.points.iter().flatten().map(|x| x.to_bits()));
+    if let Some(weights) = &r.net.weights {
+        out.extend(weights.iter().map(|x| x.to_bits()));
+    }
+    out.extend(
+        r.stations
+            .iter()
+            .chain(r.map_a.iter())
+            .chain(r.map_b.iter())
+            .map(|x| x.to_bits()),
+    );
+    out.extend([r.half.to_bits(), r.bound.to_bits()]);
+    out
+}
+
+fn intern_screw_owner(
+    owners: &mut Vec<r::sweep::ProceduralSweepRecord>,
+    keys: &mut Vec<Vec<u64>>,
+    owner: r::sweep::ProceduralSweepRecord,
+) -> R<u32> {
+    let bits = screw_bits(&owner);
+    if let Some(found) = owners
+        .iter()
+        .zip(keys.iter())
+        .position(|(old, key)| old == &owner && *key == bits)
+    {
+        return index(found);
+    }
+    let id = index(owners.len())?;
+    owners.push(owner);
+    keys.push(bits);
+    Ok(id)
+}
+
+#[cfg(test)]
+mod owner_tests {
+    use super::{intern_screw_owner, r};
+
+    #[test]
+    fn interning_preserves_signed_zero_in_literal_owners() {
+        use r::sweep::{
+            NurbsCurveRecord, NurbsSurfaceRecord, ProceduralSweepRecord, ScrewMotionRecord,
+            SweepDefinitionRecord,
+        };
+        let owner = ProceduralSweepRecord {
+            definition: SweepDefinitionRecord::Screw {
+                profile: NurbsCurveRecord {
+                    dim: 3,
+                    points_3d: true,
+                    degree: 1,
+                    knots: vec![0.0, 0.0, 1.0, 1.0],
+                    points: vec![[2.0, 0.0, 0.0], [3.0, 0.0, 1.0]],
+                    weights: None,
+                },
+                motion: ScrewMotionRecord {
+                    origin: [0.0; 3],
+                    axis: [0.0, 0.0, 1.0],
+                    pitch: 1.0,
+                    law: None,
+                },
+                offset: None,
+            },
+            net: NurbsSurfaceRecord {
+                u_degree: 1,
+                v_degree: 1,
+                u_count: 2,
+                v_count: 2,
+                u_knots: vec![0.0, 0.0, 1.0, 1.0],
+                v_knots: vec![0.0, 0.0, 1.0, 1.0],
+                points: vec![[2.0, 0.0, 0.0]; 4],
+                weights: None,
+            },
+            stations: vec![0.0, 1.0],
+            half: 0.5,
+            bound: 0.1,
+            map_a: [0.0; 2],
+            map_b: [1.0; 2],
+            swapped: false,
+        };
+        let mut opposite = owner.clone();
+        let SweepDefinitionRecord::Screw { motion, .. } = &mut opposite.definition;
+        motion.axis[0] = -0.0;
+        assert_eq!(
+            owner, opposite,
+            "ordinary equality alone merges signed zeros"
+        );
+        let (mut owners, mut keys) = (Vec::new(), Vec::new());
+        assert_eq!(
+            intern_screw_owner(&mut owners, &mut keys, owner.clone()).unwrap(),
+            0
+        );
+        assert_eq!(
+            intern_screw_owner(&mut owners, &mut keys, opposite).unwrap(),
+            1
+        );
+        assert_eq!(
+            intern_screw_owner(&mut owners, &mut keys, owner).unwrap(),
+            0
+        );
+        assert_eq!(owners.len(), 2);
+
+        let body = r::Brep {
+            version: r::VERSION,
+            tolerance: 1e-6,
+            regions: vec![],
+            shells: vec![],
+            faces: vec![r::Face {
+                surface: r::Surface::ProceduralSweep(Box::new(owners[0].clone())),
+                nurbs: None,
+                domain: [[0.0, 1.0], [0.0, 1.0]],
+                loops: vec![],
+            }],
+            edges: vec![],
+            vertices: vec![],
+            screw_owners: vec![],
+        };
+        assert!(!super::super::needs_curve_owner_budget(&body));
+        assert!(super::super::needs_evaluator_budget(&body));
+    }
+
+    #[test]
+    fn owner_budget_detector_bounds_a_deep_geometry_graph() {
+        let plane = || r::Surface::Plane {
+            origin: [0.0; 3],
+            u_axis: [1.0, 0.0, 0.0],
+            v_axis: [0.0, 1.0, 0.0],
+        };
+        let line = || r::Curve::Line {
+            start: [0.0; 3],
+            end: [1.0, 0.0, 0.0],
+        };
+        let mut curve = line();
+        for _ in 0..100_000 {
+            curve = r::Curve::SurfaceIntersection {
+                surfaces: [Box::new(plane()), Box::new(plane())],
+                leader: Box::new(curve),
+                tolerance: 1e-6,
+            };
+        }
+        let mut body = r::Brep {
+            version: r::VERSION,
+            tolerance: 1e-6,
+            regions: vec![],
+            shells: vec![],
+            faces: vec![],
+            edges: vec![r::Edge {
+                curve,
+                nurbs: None,
+                interval: [0.0, 1.0],
+                vertices: [0, 1],
+                tolerance: 1e-6,
+                uses: vec![],
+            }],
+            vertices: vec![],
+            screw_owners: vec![],
+        };
+        assert!(super::super::needs_evaluator_budget(&body));
+        let mut curve = std::mem::replace(&mut body.edges[0].curve, line());
+        while let r::Curve::SurfaceIntersection { leader, .. } = curve {
+            curve = *leader;
+        }
+    }
+}
+
 /// One face before renumbering: its record geometry, loops relative to the record's normal as
 /// (edge, forward), and each use's pcurve and data edgeuse.
 #[derive(Clone)]
@@ -165,17 +377,41 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
     // Edges along their records' parameters.
     let mut edges = Vec::new();
     let mut kernel_intervals = Vec::new();
+    let mut screw_owners: Vec<r::sweep::ProceduralSweepRecord> = Vec::new();
+    let mut owner_bits: Vec<Vec<u64>> = Vec::new();
     for (i, ed) in bd.edges.iter().enumerate() {
         let curve = edge::curve(b, *at(&edge_ids, i)?)?
             .ok_or(Unsupported::Invalid("an edge without a curve"))?;
         let made = record_of(k, curve, &ed.interval)?;
+        let curve = match crate::record_curve(made.curve)? {
+            r::Curve::OnSurface {
+                surface,
+                uv_curve,
+                domain,
+            } => match *surface {
+                r::Surface::ProceduralSweep(owner) => {
+                    let owner = intern_screw_owner(&mut screw_owners, &mut owner_bits, *owner)?;
+                    r::Curve::OnSurfaceRef {
+                        owner,
+                        uv_curve,
+                        domain,
+                    }
+                }
+                surface => r::Curve::OnSurface {
+                    surface: Box::new(surface),
+                    uv_curve,
+                    domain,
+                },
+            },
+            curve => curve,
+        };
         let vertex = |v: u64| -> R<u32> {
             let v = data_index(v)?;
             at(&vertex_ids, v)?;
             index(v)
         };
         edges.push(Edge {
-            curve: crate::record_curve(made.curve)?,
+            curve,
             nurbs: made.nurbs.map(crate::record_curve).transpose()?,
             interval: made.interval,
             vertices: [vertex(ed.start_vertex)?, vertex(ed.end_vertex)?],
@@ -362,7 +598,7 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
                         _ => {
                             return Err(Unsupported::NotYet(
                                 "a face between two material regions or two empty ones",
-                            ))
+                            ));
                         }
                     }
                 }
@@ -443,7 +679,7 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
         regions,
         radial,
     };
-    let (brep, order) = canonical(parts, bd.vertices.len(), &bd, &tolerances)?;
+    let (brep, order) = canonical(parts, bd.vertices.len(), &bd, &tolerances, screw_owners)?;
     let kernel = Order {
         faces: order
             .faces
@@ -638,7 +874,7 @@ fn record_regions(
                 _ => {
                     return Err(Unsupported::NotYet(
                         "solids touching round pockets of empty space that no one shell bounds",
-                    ))
+                    ));
                 }
             }
         };
@@ -777,6 +1013,7 @@ fn canonical(
     n_vertices: usize,
     bd: &BrepData,
     tolerances: &Tolerances,
+    screw_owners: Vec<r::sweep::ProceduralSweepRecord>,
 ) -> R<(r::Brep, Sources)> {
     let Parts {
         mut faces,
@@ -978,6 +1215,7 @@ fn canonical(
         faces: face_records,
         edges: edge_records,
         vertices,
+        screw_owners,
     };
     brep.validate_built()
         .map_err(|e| Unsupported::Invalid(e.0))?;
