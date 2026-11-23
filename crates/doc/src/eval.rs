@@ -5198,6 +5198,26 @@ fn draft_corner_for(ss: &SolvedSketch, r: &Region2, distance: f64, taper: f64, n
     })
 }
 
+/// The profiles of `ss` that index picks `indices` name, numbered as `order` says, as indices
+/// into `ss.profiles` (#19163). An index this build's numbering has no profile for stays as it is,
+/// for the error that names it; one the older numbering has none for is an error here.
+pub fn picked_indices(ss: &SolvedSketch, indices: &[usize], order: solidcraft_sketch::ProfileOrder) -> Result<Vec<usize>> {
+    if order.is_current() {
+        return Ok(indices.to_vec());
+    }
+    let numbered = solidcraft_sketch::profiles_in_order(&ss.sketch, &ss.profiles, order);
+    indices
+        .iter()
+        .map(|k| {
+            numbered
+                .get(*k)
+                .copied()
+                .flatten()
+                .ok_or_else(|| DocError::Unknown(format!("profile {k} of {} as builds before 0.42.0 numbered its profiles", ss.name)))
+        })
+        .collect()
+}
+
 pub fn select_profiles(ss: &SolvedSketch, sel: &ProfileSel) -> Result<Vec<Region2>> {
     let ps = &ss.profiles;
     if ps.is_empty() {
@@ -5212,11 +5232,11 @@ pub fn select_profiles(ss: &SolvedSketch, sel: &ProfileSel) -> Result<Vec<Region
             let chosen = if drawn.is_empty() { ps.clone() } else { drawn };
             solidcraft_sketch::without_text_counters(&ss.sketch, chosen).into_iter().map(|p| p.region).collect()
         }
-        ProfileSel::Indices { indices } => {
+        ProfileSel::Indices { indices, order } => {
             // A design file may list a profile more than once; it is still one profile.
             let mut seen = std::collections::BTreeSet::new();
             let mut v = Vec::new();
-            for i in indices.iter().filter(|i| seen.insert(**i)) {
+            for i in picked_indices(ss, indices, *order)?.iter().filter(|i| seen.insert(**i)) {
                 v.push(ps.get(*i).ok_or_else(|| DocError::Unknown(format!("profile {i} of {}", ss.name)))?.region.clone());
             }
             v

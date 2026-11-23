@@ -13,7 +13,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             if let Some(sk) = sketch {
                 let ss = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk} (it must come earlier in the timeline)")))?;
                 // An empty index list means the caller asked only for 3D loops (#741).
-                if !matches!(profiles, ProfileSel::Indices { indices } if indices.is_empty()) {
+                if !matches!(profiles, ProfileSel::Indices { indices, .. } if indices.is_empty()) {
                     let regions = solidcraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
                     for r in &regions {
                         made.push(kernel::patch_region(&ss.plane, r)?);

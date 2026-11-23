@@ -190,8 +190,14 @@ impl<'de> Deserialize<'de> for WholeProfileBoundary {
 pub enum ProfileSel {
     /// Every profile.
     All,
-    /// Profiles by index in the solved sketch's profile list.
-    Indices { indices: Vec<usize> },
+    /// Profiles by index in the solved sketch's profile list, numbered as `order` says: this
+    /// build's numbering, or, for a pick saved before 0.42.0, the numbering those builds gave the
+    /// profiles (#19163).
+    Indices {
+        indices: Vec<usize>,
+        #[serde(default, skip_serializing_if = "solidcraft_sketch::ProfileOrder::is_current")]
+        order: solidcraft_sketch::ProfileOrder,
+    },
     /// Profiles whose outer loop is made of exactly these curves, or pieces of them where other
     /// curves cut them (order and repeats don't matter; see `sketch::profile_by_curves`). Found
     /// again on every evaluation, so stable across parameter changes; no match or several is

@@ -35,7 +35,9 @@ fn profile_refill_resolves_each_region_once_for_extrude_and_sweep() {
         let curve = &state.sketch(path).unwrap().sketch.curves[0].id;
         let made = h.app.run(command, json!({"sketch":sketch,"profiles":[1,0],"distance":10,"path_sketch":path,"path":[curve]})).unwrap();
         let feature = made["feature"].as_u64().unwrap();
-        for selection in [ProfileSel::Points { points }, ProfileSel::Curves { loops }, ProfileSel::Indices { indices: order.clone() }] {
+        for selection in
+            [ProfileSel::Points { points }, ProfileSel::Curves { loops }, ProfileSel::Indices { indices: order.clone(), order: Default::default() }]
+        {
             let kind = &mut h.app.session.doc_mut().feature_mut(feature).unwrap().kind;
             match kind {
                 FeatureKind::Extrude { profiles, .. } | FeatureKind::Sweep { profiles, .. } => *profiles = selection,

@@ -3351,3 +3351,66 @@ fn a_body_pattern_of_a_split_surface_copies_its_split_faces() {
     assert_eq!(shown.len(), 3, "{shown:?}");
     assert!(shown.iter().all(|(_, faces, edges)| (*faces, *edges) == (2, 6)), "{shown:?}");
 }
+
+/// The design of #19163 as a build of format `format` saves it: a circle of radius 200 crossed
+/// by eight circles of radius 4.3 at (±80, ±180) and (±180, ±80), and an extrude `Lens` of
+/// profile `index`, picked by index, 1 mm thick, as body `R`.
+pub(crate) fn rim_lens_design(format: u32, index: usize) -> solidcraft_doc::Document {
+    let mut points = vec![json!({"fixed": true, "id": "origin", "pos": [0.0, 0.0]}), json!({"id": "c1.center", "pos": [0.0, 0.0]})];
+    let mut curves = vec![json!({"c": 1, "id": "c1", "r": 200.0, "type": "circle"})];
+    for (k, (x, y)) in [(80, 180), (180, 80), (-80, 180), (-180, 80), (80, -180), (180, -80), (-80, -180), (-180, -80)].iter().enumerate() {
+        points.push(json!({"id": format!("c{}.center", k + 2), "pos": [f64::from(*x), f64::from(*y)]}));
+        curves.push(json!({"c": k + 2, "id": format!("c{}", k + 2), "r": 4.3, "type": "circle"}));
+    }
+    let file = json!({"format": solidcraft_doc::format::format_string(format), "name": "rim", "units": "mm", "next_id": 3, "params": [], "features": [
+        {"id": 1, "name": "Sketch1", "plane": {"name": "XY", "type": "origin"}, "type": "sketch",
+         "sketch": {"constraints": [{"id": "k1", "p": 0, "q": 1, "type": "coincident"}], "curves": curves, "points": points}},
+        {"id": 2, "name": "Lens", "type": "extrude", "sketch": 1, "profiles": {"type": "indices", "indices": [index]}, "operation": "new_body",
+         "body_names": ["R"], "extent": {"convention": "total_distance", "direction": "positive", "distance": "1"}},
+    ]});
+    solidcraft_doc::Document::from_json(&file.to_string()).unwrap()
+}
+
+/// The volume and the centre of mass of every body of `s`, by name.
+pub(crate) fn bodies_at(s: &Session) -> Vec<(String, f64, [f64; 3])> {
+    let st = s.model.state();
+    st.bodies
+        .iter()
+        .map(|b| {
+            let m = solidcraft_kernel::measure(&b.body).unwrap();
+            (b.name.clone(), m.volume, [m.centroid.x, m.centroid.y, m.centroid.z])
+        })
+        .collect()
+}
+
+/// #19163: a pattern and a mirror of an extrude that picks a lens of the rim by index in a design
+/// saved by 0.30.1 (format 48, its pick marked with the older numbering) copy the lens the extrude
+/// builds: each copy of a 1 mm lens is that lens moved 5 mm up, and the mirror across YZ has the
+/// same volume at the opposite x. Which lens profile 3 is depends on the round-off in the lenses'
+/// areas, so the copies are compared with the extrude, not with a lens written down. The same
+/// holds for a design saved from 0.42.0 on (format 63, no mark).
+#[test]
+fn patterns_and_mirrors_of_an_index_pick_copy_the_region_it_builds() {
+    for format in [48, 63] {
+        let mut s = Session::new(rim_lens_design(format, 3));
+        s.refresh();
+        let source = bodies_at(&s).into_iter().find(|b| b.0 == "R").unwrap();
+        assert!((source.1 - 52.6548).abs() < 1e-3, "format {format}: profile 3 is an inner lens: {source:?}");
+        run(&mut s, "solid.pattern.rectangular", json!({"features": ["Lens"], "dir1": [0, 0, 1], "count1": 2, "spacing1": 5, "name": "Up"}));
+        run(&mut s, "solid.mirror", json!({"features": ["Lens"], "plane": "YZ", "name": "Across"}));
+        let all = bodies_at(&s);
+        assert_eq!(all.len(), 3, "format {format}: {all:?}");
+        let up = all.iter().filter(|b| (b.2[2] - 5.5).abs() < 1e-6).collect::<Vec<_>>();
+        assert_eq!(up.len(), 1, "format {format}: one copy 5 mm up: {all:?}");
+        assert!(
+            (up[0].1 - source.1).abs() < 1e-6 && (up[0].2[0] - source.2[0]).abs() < 1e-6 && (up[0].2[1] - source.2[1]).abs() < 1e-6,
+            "format {format}: {up:?} vs {source:?}"
+        );
+        let across = all.iter().filter(|b| (b.2[2] - 0.5).abs() < 1e-6 && b.0 != "R").collect::<Vec<_>>();
+        assert_eq!(across.len(), 1, "format {format}: one mirrored copy: {all:?}");
+        assert!(
+            (across[0].1 - source.1).abs() < 1e-6 && (across[0].2[0] + source.2[0]).abs() < 1e-6 && (across[0].2[1] - source.2[1]).abs() < 1e-6,
+            "format {format}: {across:?} vs {source:?}"
+        );
+    }
+}

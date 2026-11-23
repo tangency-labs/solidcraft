@@ -7881,7 +7881,9 @@ pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &P
     let ps = &ss.profiles;
     let mut indices: Vec<usize> = match sel {
         ProfileSel::All => (0..ps.len()).collect(),
-        ProfileSel::Indices { indices } => indices.iter().copied().filter(|i| *i < ps.len()).collect(),
+        ProfileSel::Indices { indices, order } => {
+            solidcraft_engine::doc::picked_indices(ss, indices, *order).unwrap_or_default().into_iter().filter(|i| *i < ps.len()).collect()
+        }
         ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
             solidcraft_engine::doc::profile_selection_indices(ss, sel).unwrap_or_default()
         }
