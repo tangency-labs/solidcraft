@@ -7,7 +7,7 @@ use std::f64::consts::PI;
 use solidcore_record::brep as b;
 
 use super::boolean::boolean;
-use super::{Body, from_arrays, make_box, make_cone, make_cylinder, make_sphere, make_torus, to_arrays, volume};
+use super::{Body, counts, from_arrays, make_box, make_cone, make_cylinder, make_sphere, make_torus, to_arrays, volume};
 use crate::BooleanOp;
 use crate::export::native;
 use crate::import::{self, Arrays};
@@ -272,6 +272,17 @@ fn a_sealed_void_crosses_the_arrays_outer_shell_first() {
     assert!(rel(v, SEALED_VOID_VOLUME) < 1e-9, "round trip: {v}");
 }
 
+#[test]
+fn an_import_with_a_sealed_void_reuses_its_proven_shell_order() {
+    let unordered = shells_reversed(&to_arrays(&sealed_void()).unwrap());
+    let imported = crate::Brep::from_arrays(&unordered).unwrap();
+    let (record, _, prepared, _) = imported.to_native_prepared().unwrap();
+    let prepared = prepared.expect("the exact containment test established the outer shell");
+    let rebuilt = crate::Brep::from_record(&record, true).unwrap();
+    assert_eq!(prepared.to_native_ordered().unwrap().0, rebuilt.to_native_ordered().unwrap().0);
+    assert!(rel(prepared.volume(1e-9).unwrap(), SEALED_VOID_VOLUME) < 1e-9);
+}
+
 /// Arrays listing the solid region's void shell before the box around it import with the box
 /// first (SMLib takes a region's first shell as its enclosing one), the volume unchanged.
 #[test]
@@ -362,4 +373,51 @@ fn nurbs_weights_far_from_the_origin_compare_within_their_rounding() {
     assert!(super::convert::same_nurbs(s.gw_nurb().unwrap(), make(&w).gw_nurb().unwrap(), 0.01));
     w[1] += 1e-9;
     assert!(!super::convert::same_nurbs(s.gw_nurb().unwrap(), make(&w).gw_nurb().unwrap(), 0.01));
+}
+
+/// A Ø1 × 1000 cylinder 1600 below the origin drafted 0.02° in about its base: its top circle (r
+/// 0.15 at z = -600) is written as a circle whose NURBS lies about 3e-10 off it, rounding of the
+/// coordinates' size that the export's own check allows. The import reads it back with the same
+/// allowance instead of refusing "a conic NURBS off its conic", and the frustum keeps its volume.
+#[test]
+fn a_drafted_circle_far_from_the_origin_comes_back_as_written() {
+    let (big, h, angle) = (0.5, 1000.0, 0.02f64.to_radians());
+    let small = big - h * angle.tan();
+    let cyl = make_cylinder([0.0, 0.0, -1600.0], big, h).unwrap();
+    let drafted = super::offset::draft(&cyl, &[[big, 0.0, -1100.0]], 1e-5, [0.0, 0.0, -1600.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], angle).unwrap();
+    let back = from_arrays(&to_arrays(&drafted).unwrap()).unwrap();
+    let want = PI * h * (big * big + big * small + small * small) / 3.0;
+    let v = volume(&back, 1e-9).unwrap();
+    assert!(rel(v, want) < 1e-7, "{v} vs {want}");
+}
+
+/// A Ø3800 × Ø800 torus with a Ø96 hole cut 200 deep into its outer equator, the hole's rim
+/// 0.005 across the torus's 0° seam (#19254). The rim meets the equator (radius 1900) at
+/// -3.8e-5°, so the equator's piece up to the seam is an arc 1.27e-3 long, under 1e-6 of its
+/// radius. The body comes back from its arrays with the same faces, edges, vertices and volume,
+/// and so does the join of an 80 × 80 × 160 block wholly inside the tube, which leaves it as it is.
+/// The equator's other piece, 96 long, is still written as a circle of radius 1900.
+#[test]
+fn a_hole_cut_a_hair_across_a_torus_seam_comes_back() {
+    use crate::flat::{CURVE_CIRCLE, EDGE_CIRCLE_RADIUS, EDGE_CURVE_TYPE};
+    let torus = make_torus([0.0; 3], 1500.0, 400.0).unwrap();
+    let hole = make_cylinder([1899.3937162045017, 47.9949043425656, -200.0], 48.0, 200.0).unwrap();
+    let cut = boolean(&torus, &hole, BooleanOp::Subtract).unwrap().unwrap();
+    let want = volume(&cut, 1e-9).unwrap();
+    let arrays = to_arrays(&cut).unwrap();
+    let circles = arrays.ints[&EDGE_CURVE_TYPE].iter().filter(|&&t| t == i64::from(CURVE_CIRCLE)).count();
+    let radii = &arrays.reals[&EDGE_CIRCLE_RADIUS];
+    assert_eq!(radii.len(), circles);
+    assert!(radii.iter().any(|r| (r - 1900.0).abs() <= 1e-9 * 1900.0), "no circle of radius 1900 among {radii:?}");
+    let back = from_arrays(&arrays).unwrap();
+    assert_eq!(counts(&back).unwrap(), counts(&cut).unwrap());
+    let v = volume(&back, 1e-9).unwrap();
+    assert!(rel(v, want) < 1e-9, "round trip: {v} vs {want}");
+
+    let block = make_box([1460.0, 80.0, -160.0], [80.0, 80.0, 160.0]).unwrap();
+    let joined = boolean(&back, &block, BooleanOp::Union).unwrap().unwrap();
+    let again = from_arrays(&to_arrays(&joined).unwrap()).unwrap();
+    assert_eq!(counts(&again).unwrap(), counts(&cut).unwrap());
+    let v = volume(&again, 1e-9).unwrap();
+    assert!(rel(v, want) < 1e-9, "joined: {v} vs {want}");
 }

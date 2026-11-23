@@ -84,6 +84,13 @@ mod imp {
         touched();
         std::fs::create_dir_all(path)
     }
+    /// A new folder and any missing folders above it, authorized as a new destination
+    /// ([`check_new`]): its parents need not exist yet, but those that do must be in scope.
+    pub fn create_new_dir_all(path: &str) -> Result<()> {
+        check_new(path)?;
+        touched();
+        std::fs::create_dir_all(path)
+    }
     /// The paths of the regular files directly in a folder, sorted; at most `max` of them.
     pub fn files_in(dir: &str, max: usize) -> Result<Vec<String>> {
         check(dir)?;
@@ -157,6 +164,10 @@ mod imp {
     pub fn create_dir_all(_path: &str) -> Result<()> {
         Ok(())
     }
+    /// As [`create_dir_all`]: nothing to make.
+    pub fn create_new_dir_all(_path: &str) -> Result<()> {
+        Ok(())
+    }
     pub fn insert(path: &str, bytes: Vec<u8>) {
         FILES.with(|f| f.borrow_mut().insert(path.to_string(), bytes));
     }
@@ -195,6 +206,9 @@ pub struct PathScope {
     design_roots: Vec<std::path::PathBuf>,
     /// Folders named on purpose that could not be resolved (#16662), kept to explain a refusal.
     rejected: Vec<RejectedRoot>,
+    /// Whether hidden files and folders inside `roots` are out of reach too, as they always are
+    /// inside design folders ([`PathScope::without_hidden`]).
+    roots_skip_hidden: bool,
 }
 
 /// A folder named for a [`PathScope`] that could not be used, and why (#16662).
@@ -329,6 +343,14 @@ impl PathScope {
         if given > 0 && scope.roots.is_empty() { Err(rejected) } else { Ok((scope, rejected)) }
     }
 
+    /// The same scope, with hidden files and folders inside its named folders out of reach, as
+    /// they are inside design folders: for folders a person granted a plugin, whose own reads
+    /// skip hidden names. The named folders themselves count even inside a hidden folder.
+    pub fn without_hidden(mut self) -> PathScope {
+        self.roots_skip_hidden = true;
+        self
+    }
+
     /// The folders named for this scope that were left out, with the reason.
     pub fn rejected(&self) -> &[RejectedRoot] {
         &self.rejected
@@ -455,8 +477,9 @@ impl PathScope {
 
     /// Whether the resolved path `p` lies inside one of the folders.
     fn contains(&self, p: &std::path::Path) -> bool {
-        let inside_design = || self.design_roots.iter().any(|r| p.strip_prefix(r).is_ok_and(|rel| !rel.components().any(|c| hidden(c.as_os_str()))));
-        self.roots.iter().any(|r| p.starts_with(r)) || inside_design()
+        let visible = |rel: &std::path::Path| !rel.components().any(|c| hidden(c.as_os_str()));
+        let inside_design = || self.design_roots.iter().any(|r| p.strip_prefix(r).is_ok_and(visible));
+        self.roots.iter().any(|r| p.strip_prefix(r).is_ok_and(|rel| !self.roots_skip_hidden || visible(rel))) || inside_design()
     }
 
     /// The "folder does not exist" error for a path whose folder is missing, but only when the
@@ -1416,7 +1439,7 @@ mod tests {
         let expected = ((roots.capacity() + design_roots.capacity()) * std::mem::size_of::<std::path::PathBuf>()
             + roots[0].capacity()
             + design_roots[0].capacity()) as u64;
-        let scope = super::PathScope { roots, design_roots, rejected: Vec::new() };
+        let scope = super::PathScope { roots, design_roots, rejected: Vec::new(), roots_skip_hidden: false };
         let before = scope.clone();
         assert_eq!(scope.retained_heap_bytes().unwrap(), expected);
         assert_eq!(scope, before);

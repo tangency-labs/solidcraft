@@ -6,7 +6,9 @@
 //! [`solidcore::Transform::uniform_scaling`], [`solidcore::Transform::reflection`],
 //! [`solidcore::Transform::concat`], [`solidcore::Transform::inverse`]); ops checks the
 //! numbers and passes them on. Beside them, how far a point or a box reaches along a direction
-//! ([`distance_along`], [`span_along`]), as the kernel measures it.
+//! ([`distance_along`], [`span_along`]), as the kernel measures it, a point under a map
+//! ([`apply_point`]), and the quads a pinned picture is drawn on ([`picture_frame`],
+//! [`lifted_quad`], [`parallelogram_point`]).
 
 use solidcore::geom::certified::Verdict;
 use solidcore::geom::extent3d::Extent3d;
@@ -152,6 +154,65 @@ pub fn inverse(matrix: &Matrix) -> Result<Matrix> {
 /// the distance itself). Negative behind `origin`.
 pub fn distance_along(origin: [f64; 3], direction: [f64; 3], point: [f64; 3]) -> f64 {
     Vec3::from(point).distance_along(Vec3::from(origin), Vec3::from(direction))
+}
+
+/// `point` under `matrix` (the row-vector convention above: `p·A + t`), through
+/// [`Transform::transform_points`].
+pub fn apply_point(matrix: &Matrix, point: [f64; 3]) -> [f64; 3] {
+    let mut points = [point];
+    Transform { m: *matrix }.transform_points(&mut points);
+    let [p] = points;
+    p
+}
+
+/// The corners of a picture pinned to points of a plane, in that plane's coordinates, through
+/// [`solidcore::math::picture_frame`]: its bottom edge from `bl` to `br`, its top-left corner
+/// `top_left` when it may stretch, else `aspect` (height over width) times as high as wide with
+/// its top on the left of the bottom edge. Bottom-left, bottom-right, top-right, top-left;
+/// `None` for corners that give no area.
+pub fn picture_frame(
+    bl: [f64; 2],
+    br: [f64; 2],
+    top_left: Option<[f64; 2]>,
+    aspect: f64,
+) -> Option<[[f64; 2]; 4]> {
+    let on = |[x, y]: [f64; 2]| Vec3::new(x, y, 0.0);
+    let corners = solidcore::math::picture_frame(
+        on(bl),
+        on(br),
+        top_left.map(on),
+        Vec3::new(0.0, 0.0, 1.0),
+        aspect,
+    )?;
+    Some(corners.map(|p| [p.x, p.y]))
+}
+
+/// How a picture `aspect` (height over width) times as high as wide fits a frame pinned at `bl`,
+/// `br` and `tl`, through [`solidcore::math::picture_fit`]: its width, and whether the frame
+/// stretches it. `None` for a frame with no area.
+pub fn picture_fit(bl: [f64; 3], br: [f64; 3], tl: [f64; 3], aspect: f64) -> Option<(f64, bool)> {
+    solidcore::math::picture_fit(vec3(bl), vec3(br), vec3(tl), aspect)
+}
+
+/// A quad's unit normal, its corners lifted along that normal and its corners lifted against it,
+/// as [`lifted_quad`] returns them.
+pub type LiftedQuad = ([f64; 3], [[f64; 3]; 4], [[f64; 3]; 4]);
+
+/// A quad lifted `lift` clear of its own plane on both sides, through
+/// [`solidcore::math::lifted_quad`]: the quad's unit normal (bottom edge cross left edge), its
+/// corners moved `lift` along that normal and its corners moved `lift` against it. `None` for
+/// numbers not finite or corners with no area.
+pub fn lifted_quad(corners: [[f64; 3]; 4], lift: f64) -> Option<LiftedQuad> {
+    let (n, front, back) = solidcore::math::lifted_quad(corners.map(vec3), lift)?;
+    let arr = |p: Vec3| [p.x, p.y, p.z];
+    Some((arr(n), front.map(arr), back.map(arr)))
+}
+
+/// The point `s` along the edge `u` and `t` along the edge `v` of the parallelogram with a
+/// corner at `corner`, through [`solidcore::math::parallelogram_point`].
+pub fn parallelogram_point(corner: [f64; 3], u: [f64; 3], v: [f64; 3], s: f64, t: f64) -> [f64; 3] {
+    let p = solidcore::math::parallelogram_point(vec3(corner), vec3(u), vec3(v), s, t);
+    [p.x, p.y, p.z]
 }
 
 /// How far the box from `min` to `max` (a body's box, say) reaches from `origin` along
@@ -397,6 +458,71 @@ mod tests {
         assert!((distance_along(o, d, [9.0, 6.0, -4.0]) - 4.0).abs() < 1e-12);
         assert!((distance_along(o, d, [1.0, -1.0, 3.0]) + 3.0).abs() < 1e-12);
         assert_eq!(distance_along(o, d, o), 0.0);
+    }
+
+    /// A picture 2:1 on a 40 mm bottom edge is 20 mm high, on the edge's left; a top-left point
+    /// stretches it; corners on one line give none.
+    #[test]
+    fn a_picture_frame_follows_its_bottom_edge_and_its_shape_or_top_corner() {
+        assert_eq!(
+            picture_frame([0.0, 0.0], [40.0, 0.0], None, 0.5),
+            Some([[0.0, 0.0], [40.0, 0.0], [40.0, 20.0], [0.0, 20.0]])
+        );
+        assert_eq!(
+            picture_frame([0.0, 0.0], [40.0, 0.0], Some([0.0, 30.0]), 0.5),
+            Some([[0.0, 0.0], [40.0, 0.0], [40.0, 30.0], [0.0, 30.0]])
+        );
+        assert_eq!(picture_frame([0.0, 0.0], [0.0, 0.0], None, 0.5), None);
+        assert_eq!(
+            picture_frame([0.0, 0.0], [40.0, 0.0], Some([20.0, 0.0]), 0.5),
+            None
+        );
+        assert_eq!(picture_frame([f64::NAN, 0.0], [40.0, 0.0], None, 0.5), None);
+    }
+
+    /// A 2:1 picture on a 40 mm edge in the XZ plane fits a frame 20 mm high, and one 30 mm high
+    /// stretches it; a top-left corner on the bottom edge's line gives no frame.
+    #[test]
+    fn a_picture_fits_a_frame_of_its_shape_and_a_taller_one_stretches_it() {
+        let (bl, br) = ([0.0, 0.0, 0.0], [40.0, 0.0, 0.0]);
+        assert_eq!(
+            picture_fit(bl, br, [0.0, 0.0, 20.0], 0.5),
+            Some((40.0, false))
+        );
+        assert_eq!(
+            picture_fit(bl, br, [0.0, 0.0, 30.0], 0.5),
+            Some((40.0, true))
+        );
+        assert_eq!(picture_fit(bl, br, [20.0, 0.0, 0.0], 0.5), None);
+    }
+
+    /// A 10 mm square at z = 5 lifted 0.2 mm: the front 0.2 mm above, the back 0.2 mm below.
+    #[test]
+    fn a_lifted_quad_lies_either_side_of_its_plane() {
+        let square = [
+            [0.0, 0.0, 5.0],
+            [10.0, 0.0, 5.0],
+            [10.0, 10.0, 5.0],
+            [0.0, 10.0, 5.0],
+        ];
+        let (n, front, back) = lifted_quad(square, 0.2).unwrap();
+        assert_eq!(n, [0.0, 0.0, 1.0]);
+        assert!(front
+            .iter()
+            .zip(square)
+            .all(|(f, s)| near(*f, [s[0], s[1], 5.2], 1e-12)));
+        assert!(back
+            .iter()
+            .zip(square)
+            .all(|(b, s)| near(*b, [s[0], s[1], 4.8], 1e-12)));
+        assert_eq!(lifted_quad([[1.0, 1.0, 1.0]; 4], 0.2), None);
+        assert_eq!(lifted_quad(square, f64::NAN), None);
+        assert_eq!(
+            parallelogram_point([1.0, 0.0, 0.0], [4.0, 0.0, 0.0], [0.0, 2.0, 0.0], 0.5, 0.25),
+            [3.0, 0.5, 0.0]
+        );
+        let moved = translation([1.0, 2.0, 3.0]).unwrap();
+        assert_eq!(apply_point(&moved, [1.0, 1.0, 1.0]), [2.0, 3.0, 4.0]);
     }
 
     #[test]

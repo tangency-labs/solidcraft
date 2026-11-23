@@ -50,15 +50,17 @@ fn check(s: &mut Session, p: &Value) -> Result<Value> {
         Some(named) => vec![crate::drawing_scene::sheet_id(&d, named, CHECK)?],
         None => d.sheets.iter().map(|sheet| sheet.id).collect(),
     };
-    // Each sheet read once, as it shows the model: for its findings and for what its views draw.
+    // Each sheet read once, as it shows the model: for its findings, for what its views draw, and for
+    // what a held sheet shows as it last was, which is out of date and nothing more until Update.
     let mut findings = Vec::new();
-    let (mut drawn, mut seen) = (coverage::Drawn::default(), Vec::new());
+    let (mut drawn, mut seen, mut held) = (coverage::Drawn::default(), Vec::new(), HashSet::new());
     for &sheet in &sheets {
         let shown = crate::drawing_scene::as_shown(s, &d, sheet)?;
         add_drawn(&mut drawn, &mut seen, &shown);
+        held.extend(shown.out_of_date.iter().copied());
         findings.extend(on_sheet(&d, sheet, shown)?);
     }
-    findings.extend(references(s, &d, &sheets)?);
+    findings.extend(references(s, &d, &sheets, &held)?);
     findings.extend(fields_and_rows(s, &d, &sheets));
     // In sheet order, then by the record each names: ids decode, as every finding's came from one.
     let at = |id: &str| ids::decode(id).and_then(|id| d.sheets.iter().position(|sheet| sheet.id == id));
@@ -181,11 +183,15 @@ fn status_finding(sheet: u64, object: CheckedObject, status: Status) -> Option<F
 
 /// The balloons and notes in views on `sheets` whose references don't stand with the model: one
 /// read of each kind for each state of the assembly the views draw, each body's names worked out
-/// once per state. A note on a sheet reads no model, so it is never read here.
-fn references(s: &Session, d: &Drawing, sheets: &[u64]) -> Result<Vec<Finding>> {
+/// once per state. A note on a sheet reads no model, so it is never read here, and nor is what a
+/// held sheet lists out of date (`held`, by id and kind): the sheet shows it as it last was.
+fn references(s: &Session, d: &Drawing, sheets: &[u64], held: &HashSet<(u64, ObjectKind)>) -> Result<Vec<Finding>> {
     let on = |view: u64| d.view(view).map(|v| v.sheet).filter(|sheet| sheets.contains(sheet));
-    let balloons: Vec<(u64, u64, u64)> = d.balloons.iter().filter_map(|b| Some((b.id, b.view, on(b.view)?))).collect();
-    let notes: Vec<(u64, u64, u64)> = d.notes.iter().filter_map(|n| Some((n.id, n.anchor.view()?, on(n.anchor.view()?)?))).collect();
+    let read = |id: u64, kind: ObjectKind| !held.contains(&(id, kind));
+    let balloons = d.balloons.iter().filter(|b| read(b.id, ObjectKind::Balloon));
+    let balloons: Vec<(u64, u64, u64)> = balloons.filter_map(|b| Some((b.id, b.view, on(b.view)?))).collect();
+    let notes = d.notes.iter().filter(|n| read(n.id, ObjectKind::Note));
+    let notes: Vec<(u64, u64, u64)> = notes.filter_map(|n| Some((n.id, n.anchor.view()?, on(n.anchor.view()?)?))).collect();
     let wanted = |records: &[(u64, u64, u64)]| records.iter().map(|(id, view, _)| (*id, *view)).collect::<Vec<_>>();
     // Each on the session its view draws from (#13048), as the sheet reads its dimensions.
     let mut sessions = crate::drawing_view::ViewSessions::new(s);

@@ -6,15 +6,20 @@
 //! An assembly keeps its shape (#5296): each occurrence a body is placed through is a node named
 //! after it, placed in its parent as the occurrence is, and the body's node sits under it with its
 //! mesh in the component's frame. A viewer can then pick and move a part on its own, turning it
-//! about the component's origin.
+//! about the component's origin. Occurrences of one part (a reused component, #19468) write its
+//! mesh once and their body nodes all point at it, since the mesh is in the component's frame.
+//! Without `hierarchy`, every body is a node of the root in world coordinates under its world
+//! name, as SolidCraft 0.40 wrote it.
 //!
-//! Only opaque looks are written. A transparent body or face is refused with a message that names
-//! it rather than written as an opaque colour; image textures are refused by the engine, which
-//! knows the render setups that bind them.
+//! A look that is not opaque is alpha blended (#5296). Glass a render setup gives a body is
+//! written with glTF's transmission, IOR and volume extensions, and dispersion and a thin film
+//! where it has them; Glass that scatters light inside it is refused, as glTF has no place for
+//! it. Image textures are refused by the engine, which knows the render setups that bind them.
 
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
+use solidcraft_doc::render_optics::{OpticalBoundary, OpticalMaterial};
 use solidcraft_doc::{Document, Mat, ModelState};
 use solidcraft_geom::Mesh;
 
@@ -41,7 +46,8 @@ const ELEMENT_ARRAY_BUFFER: u32 = 34963;
 const FLOAT: u32 = 5126;
 const UNSIGNED_INT: u32 = 5125;
 
-/// A glTF material: a look's name, sRGB colour, metallic, roughness and index of refraction.
+/// A glTF material: a look's name, sRGB colour, metallic, roughness, index of refraction and
+/// opacity (`alpha`, 1 for an opaque look), or the Glass a render setup gives a body.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct GlbMaterial {
     pub name: String,
@@ -49,37 +55,112 @@ pub(crate) struct GlbMaterial {
     pub metallic: f64,
     pub roughness: f64,
     pub ior: f64,
+    pub alpha: f64,
+    pub glass: Option<GlbGlass>,
+}
+
+/// Glass as glTF's transmission extensions write it. `tint` is the linear colour light keeps
+/// passing through (the absorption of a thin sheet); `thickness` is 0 for a thin sheet, else the
+/// body's thickness in its mesh's millimetres, with `attenuation` (a linear colour and the
+/// distance in metres light travels to keep it) when the glass absorbs. `dispersion` is glTF's
+/// (20 over the Abbe number) and `film` a thin film's IOR and thickness in nanometres.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct GlbGlass {
+    pub tint: [f64; 3],
+    pub thickness: f64,
+    pub attenuation: Option<([f64; 3], f64)>,
+    pub dispersion: Option<f64>,
+    pub film: Option<(f64, f64)>,
 }
 
 impl GlbMaterial {
-    /// The material of an opaque look; `None` for a transparent one.
-    fn of_look(look: &solidcraft_doc::appearance::Look) -> Option<GlbMaterial> {
-        if !(look.opacity >= 1.0) {
-            return None;
-        }
+    /// The material of a look, its opacity written as alpha blending.
+    fn of_look(look: &solidcraft_doc::appearance::Look) -> GlbMaterial {
         let (metallic, roughness, ior) =
             look.pbr.map_or((PLAIN_METALLIC, PLAIN_ROUGHNESS, DEFAULT_IOR), |p| (p.metallic(), p.roughness(), p.dielectric_ior()));
-        Some(GlbMaterial { name: look.name.clone(), color: look.color, metallic, roughness, ior })
+        GlbMaterial { name: look.name.clone(), color: look.color, metallic, roughness, ior, alpha: unit(look.opacity), glass: None }
     }
 
-    /// Two materials are one when every value glTF writes is the same.
-    fn key(&self) -> (String, [u8; 3], u64, u64, u64) {
-        (self.name.clone(), self.color, self.metallic.to_bits(), self.roughness.to_bits(), self.ior.to_bits())
+    /// The glass of `optics` on a body named `name` whose mesh is `mesh`. Subsurface scattering
+    /// is refused: glTF has no place for it, and the glass without it would look clear.
+    fn of_glass(name: &str, optics: &OpticalMaterial, mesh: &Mesh) -> Result<GlbMaterial> {
+        if optics.subsurface.is_some_and(|s| s.active()) {
+            return Err(IoError::Invalid(format!(
+                "{name}: its Glass scatters light inside it (subsurface scattering), which GLB cannot hold; turn the scattering off in the render setup, or leave the body out with `bodies`"
+            )));
+        }
+        let absorb = optics.absorption_per_mm.map(|a| if a.is_finite() { a.max(0.0) } else { 0.0 });
+        let model = optics.model;
+        let thin = optics.boundary == OpticalBoundary::ThinSheet;
+        let glass = if thin {
+            // A thin sheet has no volume in glTF: the light its thickness absorbs tints it.
+            let t = if optics.thickness_mm.is_finite() { optics.thickness_mm.max(0.0) } else { 0.0 };
+            GlbGlass { tint: absorb.map(|a| (-a * t).exp()), thickness: 0.0, attenuation: None, dispersion: None, film: None }
+        } else {
+            // Beer-Lambert: light keeps exp(-a d) of each channel over d millimetres, so over
+            // 1 / (strongest a) it keeps exp(-a / strongest), and glTF's distance is in metres.
+            let strongest = absorb.iter().copied().fold(0.0, f64::max);
+            let attenuation = (strongest > 0.0).then(|| (absorb.map(|a| (-a / strongest).exp()), 0.001 / strongest));
+            let dispersion = model.and_then(|m| m.dispersion).map(|d| 20.0 / d.abbe_number).filter(|d| d.is_finite() && *d >= 0.0);
+            GlbGlass { tint: [1.0; 3], thickness: thickness(mesh), attenuation, dispersion, film: None }
+        };
+        let film = model.and_then(|m| m.thin_film).map(|f| (f.ior, f.thickness_nm));
+        Ok(GlbMaterial {
+            name: name.to_string(),
+            color: [255; 3],
+            metallic: 0.0,
+            roughness: model.map_or(0.0, |m| m.roughness),
+            ior: optics.ior,
+            alpha: 1.0,
+            glass: Some(GlbGlass { film, ..glass }),
+        })
     }
 
-    /// The glTF material: linear base colour, metallic and roughness, and IOR when it is written.
+    /// The glTF material: linear base colour, metallic and roughness, alpha blending when the
+    /// look is not opaque, and the extensions IOR and glass need.
     fn json(&self) -> Value {
-        let [r, g, b] = self.color.map(solidcraft_color::srgb::decode8);
+        let [r, g, b] = match &self.glass {
+            Some(glass) => glass.tint.map(unit),
+            None => self.color.map(solidcraft_color::srgb::decode8),
+        };
         let mut m = json!({
             "name": self.name,
             "pbrMetallicRoughness": {
-                "baseColorFactor": [r, g, b, 1.0],
+                "baseColorFactor": [r, g, b, unit(self.alpha)],
                 "metallicFactor": unit(self.metallic),
                 "roughnessFactor": unit(self.roughness),
             },
         });
+        if self.alpha < 1.0 {
+            m["alphaMode"] = json!("BLEND");
+        }
+        let mut extensions = serde_json::Map::new();
         if self.writes_ior() {
-            m["extensions"] = json!({"KHR_materials_ior": {"ior": self.ior}});
+            extensions.insert("KHR_materials_ior".into(), json!({"ior": self.ior}));
+        }
+        if let Some(glass) = &self.glass {
+            extensions.insert("KHR_materials_transmission".into(), json!({"transmissionFactor": 1.0}));
+            if glass.thickness.is_finite() && glass.thickness > 0.0 {
+                let mut volume = json!({"thicknessFactor": glass.thickness});
+                if let Some((color, distance)) = glass.attenuation.filter(|(_, d)| d.is_finite() && *d > 0.0) {
+                    volume["attenuationColor"] = json!(color.map(unit));
+                    volume["attenuationDistance"] = json!(distance);
+                }
+                extensions.insert("KHR_materials_volume".into(), volume);
+                if let Some(d) = glass.dispersion.filter(|d| d.is_finite() && *d > 0.0) {
+                    extensions.insert("KHR_materials_dispersion".into(), json!({"dispersion": d}));
+                }
+            }
+            if let Some((ior, nm)) = glass.film.filter(|(i, t)| i.is_finite() && *i >= 1.0 && t.is_finite() && *t >= 0.0) {
+                extensions.insert(
+                    "KHR_materials_iridescence".into(),
+                    // Without a thickness texture glTF reads the maximum alone.
+                    json!({"iridescenceFactor": 1.0, "iridescenceIor": ior, "iridescenceThicknessMaximum": nm}),
+                );
+            }
+        }
+        if !extensions.is_empty() {
+            m["extensions"] = Value::Object(extensions);
         }
         m
     }
@@ -88,6 +169,14 @@ impl GlbMaterial {
     fn writes_ior(&self) -> bool {
         self.ior.is_finite() && self.ior >= 1.0 && self.ior != DEFAULT_IOR
     }
+}
+
+/// A closed body's thickness for glTF's volume: the smallest side of its mesh's bounding box (0
+/// when it has no points), which a viewer without the geometry uses to darken light through it.
+fn thickness(mesh: &Mesh) -> f64 {
+    let b = solidcraft_geom::MeshGeom::bounds(mesh);
+    let side = (b.max.x - b.min.x).min(b.max.y - b.min.y).min(b.max.z - b.min.z);
+    if side.is_finite() { side.max(0.0) } else { 0.0 }
 }
 
 /// A fraction between 0 and 1 (0 when it is not a number).
@@ -108,13 +197,12 @@ pub(crate) struct GlbBody {
 }
 
 /// An occurrence's node: its name, the node it sits in (`None`: the root) and its placement there
-/// as a glTF translation (mm) and unit rotation quaternion (x, y, z, w).
+/// (millimetres, column-major, as glTF's node `matrix` and the document's [`Mat`] both are).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct GlbNode {
     pub name: String,
     pub parent: Option<usize>,
-    pub translation: [f64; 3],
-    pub rotation: [f64; 4],
+    pub matrix: Mat,
 }
 
 /// The occurrence nodes made so far, by occurrence path, each with its world transform.
@@ -149,69 +237,64 @@ impl Tree {
             return None;
         }
         let m = solidcraft_doc::mat_mul(&above, &o.transform);
-        let t = o.transform;
-        self.nodes.push(GlbNode { name: o.name.clone(), parent, translation: [t[3][0], t[3][1], t[3][2]], rotation: quaternion(&t) });
+        self.nodes.push(GlbNode { name: o.name.clone(), parent, matrix: o.transform });
         let found = (self.nodes.len() - 1, m);
         self.by_path.insert(path.to_vec(), found);
         Some(found)
     }
 }
 
-/// The unit quaternion (x, y, z, w) of a placement's rotation (`m[col][row]`).
-fn quaternion(m: &Mat) -> [f64; 4] {
-    let r = |row: usize, col: usize| m[col][row];
-    let trace = r(0, 0) + r(1, 1) + r(2, 2);
-    let q = if trace > 0.0 {
-        let s = 2.0 * (trace + 1.0).sqrt();
-        [(r(2, 1) - r(1, 2)) / s, (r(0, 2) - r(2, 0)) / s, (r(1, 0) - r(0, 1)) / s, s / 4.0]
-    } else if r(0, 0) >= r(1, 1) && r(0, 0) >= r(2, 2) {
-        let s = 2.0 * (1.0 + r(0, 0) - r(1, 1) - r(2, 2)).max(0.0).sqrt();
-        [s / 4.0, (r(0, 1) + r(1, 0)) / s, (r(0, 2) + r(2, 0)) / s, (r(2, 1) - r(1, 2)) / s]
-    } else if r(1, 1) >= r(2, 2) {
-        let s = 2.0 * (1.0 + r(1, 1) - r(0, 0) - r(2, 2)).max(0.0).sqrt();
-        [(r(0, 1) + r(1, 0)) / s, s / 4.0, (r(1, 2) + r(2, 1)) / s, (r(0, 2) - r(2, 0)) / s]
-    } else {
-        let s = 2.0 * (1.0 + r(2, 2) - r(0, 0) - r(1, 1)).max(0.0).sqrt();
-        [(r(0, 2) + r(2, 0)) / s, (r(1, 2) + r(2, 1)) / s, s / 4.0, (r(1, 0) - r(0, 1)) / s]
-    };
-    let len = q.iter().map(|x| x * x).sum::<f64>().sqrt();
-    if len.is_finite() && len > 0.0 { q.map(|x| x / len) } else { [0.0, 0.0, 0.0, 1.0] }
-}
-
 /// `mesh` moved by `m` (an inverse placement: a rotation and a translation), its normals turned.
 fn moved(mut mesh: Mesh, m: &Mat) -> Mesh {
     for p in &mut mesh.positions {
-        let (x, y, z) = (p.x, p.y, p.z);
-        p.x = m[0][0] * x + m[1][0] * y + m[2][0] * z + m[3][0];
-        p.y = m[0][1] * x + m[1][1] * y + m[2][1] * z + m[3][1];
-        p.z = m[0][2] * x + m[1][2] * y + m[2][2] * z + m[3][2];
+        *p = solidcraft_doc::apply_point(m, *p);
     }
     for n in &mut mesh.normals {
-        let (x, y, z) = (n.x, n.y, n.z);
-        n.x = m[0][0] * x + m[1][0] * y + m[2][0] * z;
-        n.y = m[0][1] * x + m[1][1] * y + m[2][1] * z;
-        n.z = m[0][2] * x + m[1][2] * y + m[2][2] * z;
+        *n = solidcraft_doc::apply_vector(m, *n);
     }
     mesh
 }
 
+/// How a GLB is written: the mesh quality, whether an assembly keeps its occurrence nodes, and
+/// the Glass a render setup gives bodies, by world name.
+#[derive(Clone, Debug)]
+pub struct GlbOptions {
+    pub quality: MeshQuality,
+    pub hierarchy: bool,
+    pub glass: BTreeMap<String, OpticalMaterial>,
+}
+
+impl GlbOptions {
+    /// Options with no Glass.
+    pub fn new(quality: MeshQuality, hierarchy: bool) -> GlbOptions {
+        GlbOptions { quality, hierarchy, glass: BTreeMap::new() }
+    }
+}
+
 /// The GLB of the given bodies of `world`, the model placed in the world (all when `bodies` is
-/// empty): each with the colour, metallic and roughness the design shows it with, as the render
-/// workspace resolves them (a face's look over its body's, a body's over its component's and
-/// material's, else the colour it was imported with). `model` is the model before placing, which
-/// says the occurrence each placed body comes through: those bodies sit under their occurrences'
-/// nodes. `name` names the scene. A transparent body or face is refused.
-pub fn export_glb(doc: &Document, model: &ModelState, world: &ModelState, bodies: &[String], name: &str, quality: MeshQuality) -> Result<Vec<u8>> {
+/// empty): each with the colour, metallic, roughness and opacity the design shows it with, as
+/// the render workspace resolves them (a face's look over its body's, a body's over its
+/// component's and material's, else the colour it was imported with). A look that is not opaque
+/// is alpha blended; a body `opts` gives Glass is glass on every face. `model` is the model
+/// before placing, which says the occurrence each placed body comes through: those bodies sit
+/// under their occurrences' nodes; `doc`'s occurrences must place them as `world` has them.
+/// Without `opts.hierarchy` every body is written in the world under the root, by its world
+/// name. `name` names the scene.
+pub fn export_glb(doc: &Document, model: &ModelState, world: &ModelState, bodies: &[String], name: &str, opts: &GlbOptions) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "export_glb");
     let sel = selected(world, bodies)?;
     // Each placed body's occurrence path, by its world name.
-    let paths: BTreeMap<String, Vec<u64>> =
-        if doc.occurrences.is_empty() { BTreeMap::new() } else { doc.body_frames(model).into_iter().map(|(n, _, path, _)| (n, path)).collect() };
+    let paths: BTreeMap<String, Vec<u64>> = if !opts.hierarchy || doc.occurrences.is_empty() {
+        BTreeMap::new()
+    } else {
+        doc.body_frames(model).into_iter().map(|(n, _, path, _)| (n, path)).collect()
+    };
     let mut tree = Tree::default();
     let mut materials: Vec<GlbMaterial> = Vec::new();
-    let mut index: BTreeMap<(String, [u8; 3], u64, u64, u64), usize> = BTreeMap::new();
+    // Two materials are one when glTF writes them the same.
+    let mut index: BTreeMap<String, usize> = BTreeMap::new();
     let mut add = |m: GlbMaterial| {
-        *index.entry(m.key()).or_insert_with(|| {
+        *index.entry(m.json().to_string()).or_insert_with(|| {
             materials.push(m);
             materials.len() - 1
         })
@@ -219,47 +302,57 @@ pub fn export_glb(doc: &Document, model: &ModelState, world: &ModelState, bodies
     let mut out = Vec::with_capacity(sel.len());
     let mut total = 0;
     for b in sel {
-        let opacity = doc.model_body_opacity(b);
-        if !(opacity >= 1.0) {
-            return Err(transparent(&b.name, None));
-        }
-        let material = match doc.model_body_look(b) {
-            Some(look) => GlbMaterial::of_look(&look).ok_or_else(|| transparent(&b.name, None))?,
-            None => {
-                let to8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-                let color = doc.body_color(b).map_or(DEFAULT_COLOR, |c| c.map(to8));
-                GlbMaterial { name: b.name.clone(), color, metallic: PLAIN_METALLIC, roughness: PLAIN_ROUGHNESS, ior: DEFAULT_IOR }
-            }
-        };
-        let material = add(material);
-        let mut faces = BTreeMap::new();
-        for (face, look) in doc.face_colors(b) {
-            let m = GlbMaterial::of_look(&look).ok_or_else(|| transparent(&b.name, Some(face)))?;
-            let face = u32::try_from(face).map_err(|_| IoError::Invalid(format!("{}: face {face} is out of range for GLB", b.name)))?;
-            faces.insert(face, add(m));
-        }
-        let mesh = display_mesh_at(&b.body, quality)?;
+        let mesh = display_mesh_at(&b.body, opts.quality)?;
         // Under its occurrence, in the component's frame, named as the component names it; a body
         // not placed through an occurrence stays in the world under its world name.
         let placed =
             paths.get(&b.name).and_then(|path| tree.node(doc, path)).and_then(|(node, m)| solidcraft_doc::mat_inverse(&m).map(|inv| (node, inv)));
-        let body = match placed {
-            Some((node, inv)) => GlbBody { name: b.definition_name().to_string(), mesh: moved(mesh, &inv), material, faces, parent: Some(node) },
-            None => GlbBody { name: b.name.clone(), mesh, material, faces, parent: None },
+        let (body_name, mesh, parent) = match placed {
+            Some((node, inv)) => (b.definition_name().to_string(), moved(mesh, &inv), Some(node)),
+            None => (b.name.clone(), mesh, None),
         };
+        let mut faces = BTreeMap::new();
+        let material = match opts.glass.get(&b.name) {
+            Some(optics) => {
+                // Named as its part names the body, as the plain material is below.
+                let mut glass = GlbMaterial::of_glass(&b.name, optics, &mesh)?;
+                glass.name = b.definition_name().to_string();
+                add(glass)
+            }
+            None => {
+                let material = match doc.model_body_look(b) {
+                    Some(look) => GlbMaterial::of_look(&look),
+                    None => {
+                        // Named as its part names the body, so the placements of a part share one
+                        // material (and so one mesh, #19468).
+                        let to8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                        let color = doc.body_color(b).map_or(DEFAULT_COLOR, |c| c.map(to8));
+                        let alpha = unit(doc.model_body_opacity(b));
+                        GlbMaterial {
+                            name: b.definition_name().to_string(),
+                            color,
+                            metallic: PLAIN_METALLIC,
+                            roughness: PLAIN_ROUGHNESS,
+                            ior: DEFAULT_IOR,
+                            alpha,
+                            glass: None,
+                        }
+                    }
+                };
+                let material = add(material);
+                for (face, look) in doc.face_colors(b) {
+                    let face = u32::try_from(face).map_err(|_| IoError::Invalid(format!("{}: face {face} is out of range for GLB", b.name)))?;
+                    faces.insert(face, add(GlbMaterial::of_look(&look)));
+                }
+                material
+            }
+        };
+        let body = GlbBody { name: body_name, mesh, material, faces, parent };
         // Refused as soon as the meshes kept so far are too large, not after meshing them all.
         total = add_to_budget(total, &body)?;
         out.push(body);
     }
     glb(name, &tree.nodes, &out, &materials)
-}
-
-/// Why a transparent body or face is not written.
-fn transparent(body: &str, face: Option<usize>) -> IoError {
-    let what = face.map_or_else(|| String::from("the body"), |f| format!("face {f}"));
-    IoError::Invalid(format!(
-        "{body}: {what} is transparent, and GLB export writes opaque bodies only; make it opaque, or leave the body out with `bodies`"
-    ))
 }
 
 /// A body's arrays as they go in the binary chunk, checked: positions (mm, f32), unit normals
@@ -324,6 +417,38 @@ fn arrays(b: &GlbBody, materials: usize) -> Result<Arrays> {
         groups.entry(material).or_default().push(*t);
     }
     Ok(Arrays { positions, min, max, normals, groups })
+}
+
+impl Arrays {
+    /// Whether `other` writes the same mesh: the same triangles per material and the same points
+    /// and normals, to within the rounding a placement's inverse leaves behind (a quarter turn
+    /// leaves 1e-16 where the other occurrence has 0), far below what an f32 file can show.
+    fn same_as(&self, other: &Arrays) -> bool {
+        let close = |a: &[[f32; 3]], b: &[[f32; 3]], abs: f32, rel: f32| {
+            a.len() == b.len() && a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() <= abs + rel * x.abs().max(y.abs()))
+        };
+        let normals = match (&self.normals, &other.normals) {
+            (Some(a), Some(b)) => close(a, b, 1e-5, 0.0),
+            (None, None) => true,
+            _ => false,
+        };
+        normals && self.groups == other.groups && close(&self.positions, &other.positions, 1e-6, 2e-6)
+    }
+}
+
+/// A hash of what two bodies' meshes share when they are the same: name, point count, whether
+/// there are normals, and the triangles per material (points and normals are compared after).
+fn mesh_hash(name: &str, a: &Arrays) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::hash::DefaultHasher::new();
+    name.hash(&mut h);
+    a.positions.len().hash(&mut h);
+    a.normals.is_some().hash(&mut h);
+    for (material, tris) in &a.groups {
+        material.hash(&mut h);
+        tris.hash(&mut h);
+    }
+    h.finish()
 }
 
 /// Why `body` is not written: the file would pass [`MAX_GLB_BYTES`].
@@ -409,12 +534,22 @@ pub(crate) fn glb(name: &str, tree: &[GlbNode], bodies: &[GlbBody], materials: &
             return Err(IoError::Invalid(format!("occurrence node {i} sits in a later one")));
         }
         children[at].push(i + 1);
-        nodes.push(json!({"name": n.name, "translation": n.translation, "rotation": n.rotation}));
+        nodes.push(json!({"name": n.name, "matrix": n.matrix.iter().flatten().collect::<Vec<_>>()}));
     }
     let mut meshes = Vec::new();
+    // Meshes written so far, by hash, as (name, arrays, mesh index): a body whose name, points,
+    // normals and triangles per material are exactly those of one written (a reused component's
+    // other occurrences) points its node at that mesh instead of writing it again.
+    let mut written: std::collections::HashMap<u64, Vec<(&str, Arrays, usize)>> = std::collections::HashMap::new();
     for b in bodies {
         let a = arrays(b, materials.len())?;
         if a.groups.is_empty() {
+            continue;
+        }
+        let hash = mesh_hash(&b.name, &a);
+        if let Some((_, _, mesh)) = written.get(&hash).and_then(|c| c.iter().find(|(n, w, _)| *n == b.name && w.same_as(&a))) {
+            nodes.push(json!({"name": b.name, "mesh": mesh}));
+            children[slot(b.parent)?].push(nodes.len());
             continue;
         }
         let view = chunk.vec3s(&a.positions)?;
@@ -441,6 +576,7 @@ pub(crate) fn glb(name: &str, tree: &[GlbNode], bodies: &[GlbBody], materials: &
             primitives.push(json!({"attributes": attributes, "indices": indices, "material": material}));
         }
         meshes.push(json!({"name": b.name, "primitives": primitives}));
+        written.entry(hash).or_default().push((&b.name, a, meshes.len() - 1));
         nodes.push(json!({"name": b.name, "mesh": meshes.len() - 1}));
         children[slot(b.parent)?].push(nodes.len());
     }
@@ -469,8 +605,13 @@ pub(crate) fn glb(name: &str, tree: &[GlbNode], bodies: &[GlbBody], materials: &
         "bufferViews": chunk.views,
         "buffers": [{"byteLength": chunk.bin.len()}],
     });
-    if materials.iter().any(GlbMaterial::writes_ior) {
-        gltf["extensionsUsed"] = json!(["KHR_materials_ior"]);
+    let used: std::collections::BTreeSet<String> = materials
+        .iter()
+        .filter_map(|m| m.json().get("extensions").and_then(Value::as_object).map(|e| e.keys().cloned().collect::<Vec<_>>()))
+        .flatten()
+        .collect();
+    if !used.is_empty() {
+        gltf["extensionsUsed"] = json!(used);
     }
     let json = serde_json::to_vec(&gltf).map_err(|e| IoError::Invalid(e.to_string()))?;
     container(&json, &chunk.bin)

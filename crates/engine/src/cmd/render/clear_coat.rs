@@ -121,7 +121,7 @@ mod stable_tests {
             assert_eq!(s.doc.materials, before.materials);
             assert_eq!(physical, s.execute("component.properties", &json!({})).unwrap());
             let saved = s.doc.clone();
-            let loaded = solidcraft_doc::Document::from_json(&saved.to_json()).unwrap();
+            let loaded = solidcraft_io::read_design(&solidcraft_io::write_design_container(&saved).unwrap()).unwrap();
             assert_eq!(loaded.render, saved.render);
             let original = crate::product_scene::extract(&s).unwrap();
             let mut scene = original.clone();

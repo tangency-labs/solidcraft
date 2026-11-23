@@ -32,7 +32,6 @@ fn kernel(solidcraft: bool) -> Kernel {
     let mut k = Kernel::default();
     if solidcraft {
         k.fixes = UpstreamFixes::all();
-        k.fixes.fillet_refuse_rounds_breaking_through = false;
     }
     k
 }

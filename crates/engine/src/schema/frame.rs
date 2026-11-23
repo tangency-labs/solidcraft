@@ -4,10 +4,10 @@
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether a sketch exists, a dimension evaluates
 //! or a profile can be built stays the handler's to check. A key the handler refuses when it is
-//! left out (`profile`, `sketch`) is optional in the type and required in the schema, so that the
-//! handler's message, not the check's "is required", is what a caller sees. A call with several
-//! problems may get a different one first in strict than with the check off (the check goes key
-//! by key, the handlers in their own order).
+//! left out (`profile`, and `sketch` when there are no `pairs`) is optional in the type and
+//! required in the schema, so that the handler's message, not the check's "is required", is what
+//! a caller sees. A call with several problems may get a different one first in strict than with
+//! the check off (the check goes key by key, the handlers in their own order).
 //!
 //! `frame.member` reads some keys only in some cases. With `profile` (a built-in profile) it
 //! never reads `profiles` or `exact_regions`, which pick among a section sketch's profiles; with
@@ -24,12 +24,12 @@ use serde_json::{Map, Value, json};
 use solidcore_record::Vec2;
 use solidcraft_doc::Expr;
 use solidcraft_doc::frame::sizes::Family;
-use solidcraft_doc::frame::{self, Anchor, MAX_MEMBERS, Profile, ProfileSpec};
+use solidcraft_doc::frame::{self, Anchor, CornerOverride, CornerType, MAX_MEMBERS, MemberRef, Profile, ProfileSpec};
 
-use super::check::{keyed, located, whole};
+use super::check::{keyed, located, parse_issue, whole};
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
-use super::types::{AngleExpr, Point2, ProfilesParam, SketchRef, StringList, not_blank_pattern, present};
+use super::types::{AngleExpr, GeoRefParam, LengthExpr, Point2, ProfilesParam, SketchRef, StringList, not_blank_pattern, present};
 use crate::params;
 
 /// The words `Anchor` is spelled with, as the handlers' message lists them.
@@ -347,6 +347,211 @@ pub struct ProfilePropertiesResult {
 }
 
 // ---------------------------------------------------------------------------------------------
+// frame.remove_member
+// ---------------------------------------------------------------------------------------------
+
+/// `members` as `frame.remove_member` reads it (the handler and the contract both): 1 to 1000
+/// `{feature, line}`, each the Frame Member by id or name and the member's line or pair id.
+/// Whether the feature and the member exist is the handler's to check.
+pub fn removed_members(v: Option<&Value>) -> Result<Vec<(Value, String)>, String> {
+    let list = match v {
+        Some(Value::Array(a)) if !a.is_empty() && a.len() <= MAX_MEMBERS => a,
+        _ => return Err(format!("`members` must list 1…{MAX_MEMBERS} tubes: [{{feature, line}}]")),
+    };
+    list.iter()
+        .enumerate()
+        .map(|(i, m)| match (m.get("feature"), m.get("line")) {
+            (Some(f @ (Value::Number(_) | Value::String(_))), Some(Value::String(line))) if m.as_object().is_some_and(|o| o.len() == 2) => {
+                Ok((f.clone(), line.clone()))
+            }
+            _ => Err(format!("`members[{i}]` must be {{feature, line}}: the Frame Member (id or name) and the tube's line or pair id")),
+        })
+        .collect()
+}
+
+/// `members`: the tubes to take out, read by [`removed_members`].
+#[derive(Debug)]
+pub struct RemovedMembers(pub Vec<(Value, String)>);
+
+impl<'de> Deserialize<'de> for RemovedMembers {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        removed_members(Some(&Value::deserialize(d)?)).map(RemovedMembers).map_err(|e| D::Error::custom(whole(e)))
+    }
+}
+
+impl JsonSchema for RemovedMembers {
+    fn schema_name() -> Cow<'static, str> {
+        "RemovedMembers".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The tubes to take out, all of one Frame Member: the feature by id or name, and the tube's line or pair id.",
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"feature": {"type": ["integer", "string"], "minimum": 0}, "line": {"type": "string"}},
+                "required": ["feature", "line"],
+                "additionalProperties": false
+            },
+            "minItems": 1, "maxItems": MAX_MEMBERS
+        })
+    }
+}
+
+/// Take tubes out of a Frame Member, as one undo step: a pair goes from its `pairs`, a sketch
+/// line from its `lines` (the line stays in its sketch). Taking out its last tube deletes the
+/// Frame Member. Returns the edited feature, or `{deleted}` with the deleted feature's name.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = members_required)]
+pub struct RemoveMemberParams {
+    // Required in the schema (`members_required`), optional in the type.
+    /// The tubes to take out.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "RemovedMembers")]
+    pub members: Option<RemovedMembers>,
+}
+
+fn members_required(schema: &mut Schema) {
+    require(schema, "members");
+}
+
+/// What `frame.remove_member` returns when its last tube went with the feature.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MemberFeatureDeleted {
+    /// The name of the Frame Member deleted with its last tube.
+    pub deleted: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `frame.remove_member` returns: the edited feature, or the deleted one's name.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum RemoveMemberResult {
+    Edited(Box<super::features::FeatureResult>),
+    Deleted(MemberFeatureDeleted),
+}
+
+// ---------------------------------------------------------------------------------------------
+// frame.multi_trim
+// ---------------------------------------------------------------------------------------------
+
+/// What `frame.multi_trim`'s `members` must be.
+pub const TRIM_MEMBERS: &str = "`members` must list 2…1000 members that meet: line or pair ids, or {feature?, line}";
+
+/// `members` as `frame.multi_trim` reads it (the handler and the contract both): 2 to 1000 members, each a line or
+/// pair id or `{feature?, line}`. Whether they are the frame's and meet is the handler's to check.
+pub fn trim_members(v: Option<&Value>) -> Result<Vec<MemberRef>, String> {
+    match v {
+        Some(Value::Array(a)) if (2..=MAX_MEMBERS).contains(&a.len()) => a
+            .iter()
+            .map(|m| match m {
+                Value::String(line) => Some(MemberRef { feature: None, line: line.clone() }),
+                Value::Object(_) => serde_json::from_value(m.clone()).ok(),
+                _ => None,
+            })
+            .collect::<Option<_>>()
+            .ok_or_else(|| TRIM_MEMBERS.to_string()),
+        _ => Err(TRIM_MEMBERS.to_string()),
+    }
+}
+
+/// `members`: the members of the corner, read by [`trim_members`].
+#[derive(Debug)]
+pub struct TrimMembers(pub Vec<MemberRef>);
+
+impl<'de> Deserialize<'de> for TrimMembers {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        trim_members(Some(&Value::deserialize(d)?)).map(TrimMembers).map_err(|e| D::Error::custom(whole(e)))
+    }
+}
+
+impl JsonSchema for TrimMembers {
+    fn schema_name() -> Cow<'static, str> {
+        "TrimMembers".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The members that meet at the corner, crossing or overlap, in order (the first runs through, or stays whole): line or pair ids, or {feature?, line} (`feature` only the frame's own name).",
+            "type": "array", "minItems": 2, "maxItems": MAX_MEMBERS,
+            "items": {"anyOf": [
+                {"type": "string"},
+                {"type": "object", "properties": {"feature": {"type": "string"}, "line": {"type": "string"}}, "required": ["line"]}
+            ]}
+        })
+    }
+}
+
+/// What `frame.multi_trim`'s `kind` must be.
+pub const TRIM_KIND: &str = "`kind` must be auto, none, mitre or butt";
+
+/// `kind` as `frame.multi_trim` reads it (`coped_butt` is not taken: Coped is the frame's).
+pub fn trim_kind(v: &Value) -> Option<CornerType> {
+    serde_json::from_value(v.clone()).ok().filter(|k| *k != CornerType::CopedButt)
+}
+
+/// `kind`, read by [`trim_kind`].
+#[derive(Debug)]
+pub struct TrimKind(pub CornerType);
+
+impl<'de> Deserialize<'de> for TrimKind {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        trim_kind(&Value::deserialize(d)?).map(TrimKind).ok_or_else(|| D::Error::custom(whole(TRIM_KIND)))
+    }
+}
+
+impl JsonSchema for TrimKind {
+    fn schema_name() -> Cow<'static, str> {
+        "TrimKind".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The corner's type: auto (the frame's own type, with this order), none, mitre or butt.",
+            "type": "string",
+            "enum": ["auto", "none", "mitre", "butt"]
+        })
+    }
+}
+
+/// Set, change or remove one corner override of a Frame Member, as one undo step: the corner, crossing or overlap
+/// `members` meet at finished its own way. Replaces the override of the same members, or adds one. Returns the
+/// edited feature as `frame.member` does.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = trim_required)]
+pub struct MultiTrimParams {
+    // `feature` and `members` are required in the schema (`trim_required`), optional in the type.
+    /// The Frame Member, by id or name.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "super::edit::FeatureRef")]
+    pub feature: Option<super::edit::FeatureRef>,
+    /// The members that meet there, in order.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "TrimMembers")]
+    pub members: Option<TrimMembers>,
+    /// The corner's type. Default: auto.
+    #[serde(default)]
+    pub kind: Option<TrimKind>,
+    /// The first two members as today's rules order them, swapped: the other one runs through. Without it the
+    /// members are saved in the order given.
+    #[serde(default)]
+    pub flip: Option<bool>,
+    /// The corner's own weld gap (0 to 1000 mm, a length or an expression). Default: the frame's. An overlap takes
+    /// none.
+    #[serde(default)]
+    pub gap: Option<MemberGap>,
+    /// Take the override of these members away (the corner goes back to the frame's own rules); no `kind`, `flip`
+    /// or `gap` with it.
+    #[serde(default)]
+    pub remove: Option<bool>,
+}
+
+fn trim_required(schema: &mut Schema) {
+    require(schema, "feature");
+    require(schema, "members");
+}
+
+// ---------------------------------------------------------------------------------------------
 // frame.profile.insert
 // ---------------------------------------------------------------------------------------------
 
@@ -471,6 +676,102 @@ pub struct ProfileInsertResult {
 // frame.member
 // ---------------------------------------------------------------------------------------------
 
+/// How two members are finished where they meet, as `CornerType` is spelled in JSON.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CornerParam(pub CornerType);
+
+impl<'de> Deserialize<'de> for CornerParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        serde_json::from_value::<CornerType>(Value::deserialize(d)?)
+            .map(CornerParam)
+            .map_err(|_| D::Error::custom(whole("`corner` must be auto, none, mitre or butt")))
+    }
+}
+
+impl JsonSchema for CornerParam {
+    fn schema_name() -> Cow<'static, str> {
+        "CornerParam".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "How members ending at one point are cut.",
+            "type": "string",
+            "enum": ["auto", "none", "mitre", "butt"]
+        })
+    }
+}
+
+/// `corners`: up to 1000 corner overrides, as `frame.member` reads them. Whether the members are
+/// the feature's and meet at a corner is the handler's to check.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CornersParam(pub Vec<CornerOverride>);
+
+/// What a `corners` entry must be.
+pub const CORNER_ENTRY: &str = "`corners` entries must be {members: [2 to 1000 line or pair ids, or {line}], kind, gap?}";
+
+/// A `corners` entry, either shape (`corner` for `kind`, members as bare ids), and its `flip` when it gives one (an
+/// older script's, or the dialog's: the handler saves it as an order). `None` for anything else.
+pub fn corner_entry(v: &Value) -> Option<(CornerOverride, Option<bool>)> {
+    let flip = match v.get("flip") {
+        None | Some(Value::Null) => None,
+        Some(f) => Some(f.as_bool()?),
+    };
+    // `gap` as any length parameter: a number or an expression.
+    let gap = match v.get("gap") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(params::expr(v, "gap")?),
+    };
+    let mut v = v.clone();
+    v.as_object_mut()?.remove("gap");
+    let entry: CornerOverride = serde_json::from_value(v).ok()?;
+    Some((CornerOverride { gap, ..entry }, flip))
+}
+
+impl<'de> Deserialize<'de> for CornersParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let fail = || D::Error::custom(whole(format!("`corners` must be a list of up to {MAX_MEMBERS} corner overrides")));
+        let Value::Array(a) = Value::deserialize(d)? else { return Err(fail()) };
+        if a.len() > MAX_MEMBERS {
+            return Err(fail());
+        }
+        a.iter()
+            .map(|v| corner_entry(v).map(|e| e.0).ok_or_else(|| D::Error::custom(whole(CORNER_ENTRY))))
+            .collect::<Result<_, _>>()
+            .map(CornersParam)
+    }
+}
+
+impl JsonSchema for CornersParam {
+    fn schema_name() -> Cow<'static, str> {
+        "CornersParam".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Corners, crossings and overlaps finished their own way: the 2 to 1000 members that meet there (lines' or pairs' ids), in order (the first runs through, or stays whole), and the corner type. An older script's `corner` reads as `kind`, and its `flip` is saved as today's order with the first two swapped.",
+            "type": "array", "maxItems": MAX_MEMBERS,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "members": {"type": "array", "minItems": 2, "maxItems": MAX_MEMBERS, "items": {"anyOf": [
+                        {"type": "string"},
+                        {"type": "object", "properties": {"feature": {"type": "string"}, "line": {"type": "string"}}, "required": ["line"]}
+                    ]}},
+                    "kind": {"type": "string", "enum": ["auto", "none", "mitre", "butt"]},
+                    "corner": {"type": "string", "enum": ["auto", "none", "mitre", "butt"]},
+                    "flip": {"type": "boolean"},
+                    "gap": {"type": ["string", "number"]}
+                },
+                // Its type as `kind` or an older `corner`, one of them, as the handler reads it.
+                "required": ["members"],
+                "anyOf": [
+                    {"required": ["kind"], "not": {"required": ["corner"]}},
+                    {"required": ["corner"], "not": {"required": ["kind"]}}
+                ]
+            }
+        })
+    }
+}
+
 /// `lines`: one to 1000 curve ids, none twice, as `frame.member` reads them (a single id isn't
 /// taken).
 #[derive(Clone, Debug, PartialEq)]
@@ -589,6 +890,123 @@ impl JsonSchema for MemberAngle {
     }
 }
 
+/// `gap` as `frame.member` reads it: a length or an expression, with its message. Whether the expression evaluates as
+/// a length, and within 0…1000 mm, is the handler's to check.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MemberGap(pub Expr);
+
+impl<'de> Deserialize<'de> for MemberGap {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        params::expr(&wrap("gap", Value::deserialize(d)?), "gap")
+            .map(MemberGap)
+            .ok_or_else(|| D::Error::custom(whole("`gap` must be a length expression")))
+    }
+}
+
+impl JsonSchema for MemberGap {
+    fn schema_name() -> Cow<'static, str> {
+        "MemberGap".into()
+    }
+    fn inline_schema() -> bool {
+        true
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        generator.subschema_for::<LengthExpr>()
+    }
+}
+
+/// A group's located profile point, with the same bounds and errors as the member handler.
+fn member_locate<'de, D: Deserializer<'de>>(d: D) -> Result<Option<[f64; 2]>, D::Error> {
+    let value = Value::deserialize(d)?;
+    if value.is_null() {
+        return Ok(None);
+    }
+    let Some([x, y]) = value.as_array().map(Vec::as_slice) else {
+        return Err(D::Error::custom(whole("`locate` must be [x, y] in the profile's own coordinates")));
+    };
+    let x = x.as_f64().filter(|v| v.is_finite()).ok_or_else(|| D::Error::custom(whole("`locate` x must be a finite length")))?;
+    let y = y.as_f64().filter(|v| v.is_finite()).ok_or_else(|| D::Error::custom(whole("`locate` y must be a finite length")))?;
+    if x.abs() > frame::MAX_PROFILE_SIZE || y.abs() > frame::MAX_PROFILE_SIZE {
+        return Err(D::Error::custom(whole("`locate` is outside the largest profile")));
+    }
+    Ok(Some([x, y]))
+}
+
+fn member_locate_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"anyOf": [
+        {"type": "null"},
+        {"type": "array", "minItems": 2, "maxItems": 2,
+         "items": {"type": "number", "minimum": -frame::MAX_PROFILE_SIZE, "maximum": frame::MAX_PROFILE_SIZE}}
+    ]})
+}
+
+/// One group's explicit lines and independent placement, in the feature's shared section.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MemberGroupParams {
+    /// The frame sketch's line ids, each once; a group must list its lines.
+    pub lines: LineIds,
+    /// The profile point on each line. Default: origin.
+    #[serde(default)]
+    pub anchor: Option<AnchorParam>,
+    /// The profile point on each line, [x, y] in mm from the profile's own origin. Takes
+    /// precedence over `anchor`.
+    #[serde(default, deserialize_with = "member_locate")]
+    #[schemars(schema_with = "member_locate_schema")]
+    pub locate: Option<[f64; 2]>,
+    /// The profile's rotation about each line. Default: zero.
+    #[serde(default)]
+    pub angle: Option<MemberAngle>,
+    /// Mirror the section before turning it. Default: false.
+    #[serde(default)]
+    pub mirror: Option<bool>,
+    /// The base name of this group's members. Default: the profile's description.
+    #[serde(default)]
+    pub body_name: Option<MemberName>,
+}
+
+/// A bounded list of groups. Cross-group line ownership and the total member limit are checked
+/// by the handler, along with sketch references and angle expressions.
+#[derive(Debug)]
+pub struct MemberGroups(pub Vec<MemberGroupParams>);
+
+impl<'de> Deserialize<'de> for MemberGroups {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(d)?;
+        let groups = match value.as_array() {
+            Some(groups) if !groups.is_empty() && groups.len() <= MAX_MEMBERS && groups.iter().all(Value::is_object) => groups,
+            _ => {
+                return Err(D::Error::custom(whole(format!(
+                    "`groups` must list 1…{MAX_MEMBERS} groups, each {{lines, anchor?, locate?, angle?, mirror?, body_name?}}"
+                ))));
+            }
+        };
+        groups
+            .iter()
+            .enumerate()
+            .map(|(k, group)| {
+                if group.get("lines").is_none_or(Value::is_null) {
+                    return Err(D::Error::custom(whole(format!("group {}: `lines` must list 1…{MAX_MEMBERS} curve ids", k + 1))));
+                }
+                serde_path_to_error::deserialize(group).map_err(|e| D::Error::custom(whole(format!("group {}: {}", k + 1, parse_issue(&e).message))))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(MemberGroups)
+    }
+}
+
+impl JsonSchema for MemberGroups {
+    fn schema_name() -> Cow<'static, str> {
+        "MemberGroups".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let mut schema = Vec::<MemberGroupParams>::json_schema(generator);
+        schema.insert("minItems".into(), json!(1));
+        schema.insert("maxItems".into(), json!(MAX_MEMBERS));
+        schema
+    }
+}
+
 /// `participants`, read as `features::add_feature` reads it: a name or a list of names, with the
 /// message of `params::string_list`.
 #[derive(Clone, Debug, PartialEq)]
@@ -616,23 +1034,117 @@ impl JsonSchema for Participants {
     }
 }
 
-/// `sketch` is required and one of `profile` and `profile_sketch`, not both, as the schema says;
-/// the type leaves them to the handler's messages.
-fn member_required(schema: &mut Schema) {
-    require(schema, "sketch");
-    let only = |key: &str, other: &str| json!({"required": [key], "not": {"required": [other]}});
-    schema.insert("anyOf".into(), json!([only("profile", "profile_sketch"), only("profile_sketch", "profile")]));
+/// One member between two points: from `a` to `b`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MemberPairParam {
+    /// The pair's id (`pair<N>`, below `next_pair`) as the feature has it, which Edit Feature
+    /// gives back for each pair it keeps. Default: the next free one.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// Where the member starts: a vertex, a sketch point (a 3D sketch node as `wire:index`), a
+    /// construction point, a snap point or the origin. Not a fixed point.
+    pub a: GeoRefParam,
+    /// Where it ends, somewhere else; a point as `a` is.
+    pub b: GeoRefParam,
 }
 
-/// Lay structural members along the lines of a frame sketch: one body per line, from its start
-/// to its end, its cross-section square to the line. The section is a built-in `profile` or the
-/// profiles of a `profile_sketch`, one of them. Each member keeps its name when other lines are
-/// added or deleted. Returns the feature and the bodies it made.
+/// `pairs`: one to 1000 pairs of points, as `frame.member` reads them.
+#[derive(Debug)]
+pub struct MemberPairs(pub Vec<MemberPairParam>);
+
+impl<'de> Deserialize<'de> for MemberPairs {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let fail = || D::Error::custom(whole(format!("`pairs` must list one pair of points or more, at most {MAX_MEMBERS}: [{{a, b}}]")));
+        match Value::deserialize(d)? {
+            Value::Array(a) if !a.is_empty() && a.len() <= MAX_MEMBERS => {
+                serde_json::from_value(Value::Array(a)).map(MemberPairs).map_err(|e| D::Error::custom(whole(format!("`pairs`: {e}"))))
+            }
+            _ => Err(fail()),
+        }
+    }
+}
+
+impl JsonSchema for MemberPairs {
+    fn schema_name() -> Cow<'static, str> {
+        "MemberPairs".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let pair = generator.subschema_for::<MemberPairParam>();
+        json_schema!({
+            "description": "Pairs of points, one member each, from `a` to `b`.",
+            "type": "array", "items": pair, "minItems": 1, "maxItems": MAX_MEMBERS
+        })
+    }
+}
+
+/// `next_pair`: the number the next new pair's id takes, a whole number, as `frame.member` reads
+/// it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NextPair(pub u32);
+
+impl<'de> Deserialize<'de> for NextPair {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+            .map(NextPair)
+            .ok_or_else(|| D::Error::custom(whole("`next_pair` must be a whole number (the number the next new pair's id takes)")))
+    }
+}
+
+impl JsonSchema for NextPair {
+    fn schema_name() -> Cow<'static, str> {
+        "NextPair".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The number the next new pair's id takes (`pair<N>`).",
+            "type": "integer", "minimum": 0, "maximum": u32::MAX
+        })
+    }
+}
+
+/// `sketch` or `pairs` (or both), and one of `profile` and `profile_sketch`, not both, as the
+/// schema says; the type leaves them to the handler's messages.
+fn member_required(schema: &mut Schema) {
+    let only = |key: &str, other: &str| json!({"required": [key], "not": {"required": [other]}});
+    schema.insert(
+        "allOf".into(),
+        json!([
+            {"anyOf": [{"required": ["sketch"]}, {"required": ["pairs"]}]},
+            {"anyOf": [only("profile", "profile_sketch"), only("profile_sketch", "profile")]},
+            // With groups, placement keys live inside each group, never beside them.
+            {"anyOf": [
+                {"properties": {"groups": {"type": "null"}}},
+                {"required": ["sketch"], "properties": {
+                    "lines": {"type": "null"}, "anchor": {"type": "null"}, "locate": {"type": "null"}, "angle": {"type": "null"},
+                    "mirror": {"type": "null"}, "body_name": {"type": "null"}
+                }}
+            ]},
+            // One group is canonical flat form. Several currently stay independent and square-ended.
+            {"anyOf": [
+                {"properties": {"groups": {"maxItems": 1}}},
+                {"properties": {
+                    "pairs": {"type": "null"}, "corner": {"enum": ["none", null]}, "corners": {"maxItems": 0},
+                    "flip": {"enum": [false, null]}, "fit_ends": {"enum": [false, null]},
+                    "coped": {"enum": [false, null]}, "gap": {"type": "null"}
+                }}
+            ]}
+        ]),
+    );
+}
+
+/// Lay structural members along the lines of a frame sketch and between pairs of points: one
+/// body per line or pair, from its start to its end, its cross-section square to it. The section
+/// is a built-in `profile` or the profiles of a `profile_sketch`, one of them. Each member keeps
+/// its name when other lines or pairs are added or deleted. Returns the feature and the bodies it
+/// made.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = member_required)]
 pub struct FrameMemberKeys {
-    // Optional in the type and required in the schema (`member_required`).
-    /// The frame sketch, 2D or 3D, by id or name.
+    // `sketch` or `pairs` is required in the schema (`member_required`).
+    /// The frame sketch, 2D or 3D, by id or name. Give it, `pairs` or both.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]
     pub sketch: Option<SketchRef>,
@@ -641,6 +1153,18 @@ pub struct FrameMemberKeys {
     /// length.
     #[serde(default)]
     pub lines: Option<LineIds>,
+    /// Independently placed groups sharing the profile. Multi-group frames currently need
+    /// sketch lines with corner none and no corner overrides, point pairs or finishing options.
+    #[serde(default)]
+    pub groups: Option<MemberGroups>,
+    /// Members between two points, one each, after the lines' members; each point is found
+    /// again whenever the design changes, so the member follows it. Give it, `sketch` or both.
+    #[serde(default)]
+    pub pairs: Option<MemberPairs>,
+    /// The number the next new pair's id takes, which Edit Feature gives back so that a removed
+    /// pair's id is never given again. Default: one past the highest id given.
+    #[serde(default)]
+    pub next_pair: Option<NextPair>,
     /// The section as a built-in profile. Give it or `profile_sketch`, not both.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ProfileParam")]
@@ -670,6 +1194,31 @@ pub struct FrameMemberKeys {
     /// when the profile's size changes.
     #[serde(default)]
     pub locate: Option<[f64; 2]>,
+    /// How two members ending at one point are cut: `none` (ends square to their lines),
+    /// `mitre`, `butt` or `auto` (each corner by its angle). Default: none. An older script's
+    /// `coped_butt` reads as `butt` with `coped`.
+    #[serde(default)]
+    pub corner: Option<CornerParam>,
+    /// With a butt: the other member runs through. Default: false.
+    #[serde(default)]
+    pub flip: Option<bool>,
+    /// Free ends are fitted to the tubes of earlier Frame Members. Default: false.
+    #[serde(default)]
+    pub fit_ends: Option<bool>,
+    /// Every butt joint cut to the other tube's real shape (its outline, radii kept, hole filled):
+    /// butts, ends on a tube's middle, crossings, overlaps and fitted ends. Mitres stay mitres; not
+    /// under `none`. Default: false.
+    #[serde(default)]
+    pub coped: Option<bool>,
+    /// Corners finished their own way, each named by its members' (2 to 1000) line or pair ids.
+    #[serde(default)]
+    pub corners: Option<CornersParam>,
+    /// The weld gap left at every welded end (0 to 1000 mm, a length or an expression): each mitre plane moves half
+    /// of it back along its member, a butting end stops this far off the member it meets, and every fitted or coped
+    /// end, a crossing's pieces' included, stands this far off; through members keep their length, and tubes notched
+    /// where they overlap take none. A corner's own `gap` takes precedence. Default: 0.
+    #[serde(default)]
+    pub gap: Option<MemberGap>,
     /// How far the profile turns about the line, a number of degrees or an expression. Default:
     /// 0, which puts its y as near world up as the line allows (a vertical member's x along
     /// world X).
@@ -705,6 +1254,14 @@ impl<'de> Deserialize<'de> for FrameMemberParams {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let mut value = Value::deserialize(d)?;
         if let Some(keys) = value.as_object_mut() {
+            if keys.get("groups").is_some_and(|groups| !groups.is_null())
+                && let Some(key) = ["lines", "anchor", "locate", "angle", "mirror", "body_name", "continuous"]
+                    .iter()
+                    .find(|key| keys.get(**key).is_some_and(|v| !v.is_null()))
+            {
+                return Err(D::Error::custom(whole(format!("give `{key}` in each of `groups`, not beside them"))));
+            }
+
             // A key counts as given when it is there, `null` included, as the handler tests it.
             match (keys.contains_key("profile"), keys.contains_key("profile_sketch")) {
                 // A built-in profile: the sketch's profile picks are never read.

@@ -833,6 +833,10 @@ impl Two {
     /// trim curves.
     fn put_edge_state(&self, o: &mut Vec<f64>, e: H) -> Result<(), HarnessError> {
         let b = self.brep_r(e).map_err(|e| harness(format!("{e}")))?;
+        // the edge's B-rep as this state shows it, for the tolerance certificate
+        // (`certify::trim_tolerance`)
+        #[cfg(test)]
+        crate::certify::written(b);
         let edge = b.edge(eid(e)).map_err(|e| harness(format!("{e}")))?;
         put_curve(o, edge.curve.as_ref())?;
         o.extend([edge.interval.min(), edge.interval.max(), edge.tolerance]);
@@ -909,6 +913,13 @@ impl solidcore::surface::surface_cache::face_context::FaceQueries<H> for Two {
             return Err(invalid("cache classifier expected a face handle"));
         }
         fp2::tolerance(self.brep_r(face)?, fid(face))
+    }
+
+    fn face_has_loopuses(&self, face: H) -> solidcore::Result<bool> {
+        if face.kind != K_FACE {
+            return Err(invalid("cache classifier expected a face handle"));
+        }
+        solidcore::topology::face::p4::has_loopuses(self.brep_r(face)?, fid(face))
     }
 
     fn face_point_classify(

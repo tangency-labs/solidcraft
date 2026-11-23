@@ -9,15 +9,16 @@
 //!
 //! | Rust                                       | Fork                                      |
 //! |--------------------------------------------|-------------------------------------------|
-//! | `FilletSession::holds_its_law` (private)   | `sm_HoldsItsLaw`                          |
+//! | `SessionObjects::holds_its_law` (private)   | `sm_HoldsItsLaw`                          |
 //!
 //! Deviations: none.
 
-use super::{invalid, FilletObject, FilletSession, SolverObject};
+use super::{invalid, FilletExecutive, FilletObject, FilletSession, SessionObjects, SolverObject};
 use crate::blend::fillet_cliff_overflow::Refusal;
 use crate::blend::fillet_geom::p1::{FilletGeomId, FilletSurfaceStorage};
 use crate::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::blend::{BlendFailure, OverflowInput};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::kernel::Kernel;
 use crate::math::{Vec3, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::surface::surface::p4::NoObject;
@@ -25,6 +26,20 @@ use crate::surface::surface::p5::DropPointOptions;
 use crate::topology::{edge, edgeuse::p1 as eu1, FaceId};
 
 const OP: &str = "blend::fillet_executive::session::cliff_overflow";
+
+/// A missing thing the executive built ([`BlendFailure::Defect`] keeping the upstream `NER`
+/// status `SM_ERR_NULL_POINTER`), `why` saying why it is always there.
+#[track_caller]
+fn null_defect(why: &'static str) -> SolidError {
+    Failure::new(OP, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// Why a solver's rolling edge use and its edge are there.
+pub(super) const SOLVER_EDGE: &str =
+    "a solver has no edge use, or its edge use no edge: a solver rolls \
+     on an edge use of the filleted edge it is made for";
 
 /// `smos_Max` of two doubles.
 fn smos_max(a: f64, b: f64) -> f64 {
@@ -47,20 +62,23 @@ fn smos_min(a: f64, b: f64) -> f64 {
 impl FilletSession<'_> {
     /// `GetFilletErrorInfo()->NoteError(code, comment)` of a [`Refusal`].
     pub(super) fn note_refusal(&mut self, refusal: Refusal) {
-        self.executive.error.code = refusal.code as i32;
-        self.executive.error.comment = refusal.comment.into();
-        self.executive.error.no_room = refusal.reason;
-        self.executive.error.no_room_without_site = true;
+        self.executive.note_trim_refusal(refusal);
     }
+}
 
-    /// Note `note`'s refusal, if any, and pass `result` on.
-    pub(super) fn noted<T>(&mut self, note: Option<Refusal>, result: Result<T>) -> Result<T> {
-        if let Some(refusal) = note {
-            self.note_refusal(refusal);
-        }
-        result
+impl FilletExecutive<FilletObject> {
+    /// Preserve the cause and fit metadata of the sheet boundary construction.
+    pub(super) fn note_trim_refusal(&mut self, refusal: Refusal) {
+        self.error.code = refusal.code as i32;
+        self.error.comment = refusal.comment.into();
+        self.error.no_room = refusal.reason;
+        self.error.no_room_without_site = true;
+        // (not upstream) a refusal noted here is not an earlier classification's
+        self.error.corner_cause = None;
     }
+}
 
+impl SessionObjects<'_> {
     /// The fork's `sm_HoldsItsLaw`: whether a variable round on planar faces holds its
     /// radius law between the filleted edge's ends.
     ///
@@ -82,7 +100,7 @@ impl FilletSession<'_> {
         let FilletObject::Solver(id) = solver else {
             return Err(invalid("object is not a solver"));
         };
-        let object = self.objects.solver(id)?;
+        let object = self.solver(id)?;
         let SolverObject::VariableRadius(vr) = object else {
             return Ok(true);
         };
@@ -95,9 +113,13 @@ impl FilletSession<'_> {
         }
         let mut normals = [Vec3::UNDEF; 2];
         for (rail, normal) in normals.iter_mut().enumerate() {
-            let offset = base
-                .surface(rail)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
+            let offset = base.surface(rail)?.ok_or_else(|| {
+                null_defect(
+                    "a loaded solver has no offset surface for a rail: the solver set-up \
+                         gives each rail the offset of its face's surface before the solver is \
+                         loaded",
+                )
+            })?;
             let planar = offset.surface.base_surface().is_planar(k, EFF_ZERO)?;
             if !planar.is_planar {
                 return Ok(true);
@@ -109,18 +131,19 @@ impl FilletSession<'_> {
         let [geom] = base.fillet_geoms[..] else {
             return Ok(true);
         };
-        let Some(fillet) = self.objects.fillet_surface(geom)? else {
+        let Some(fillet) = self.fillet_surface(geom)? else {
             return Ok(true);
         };
         let fillet = fillet.clone_for_evaluation()?;
-        let eu = base
-            .edgeuse(0)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
-        let target = &*self.objects.target;
-        let e = eu1::edge(target, eu)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
-        let curve = edge::curve(target, e)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+        let eu = base.edgeuse(0)?.ok_or_else(|| null_defect(SOLVER_EDGE))?;
+        let target = &*self.target;
+        let e = eu1::edge(target, eu)?.ok_or_else(|| null_defect(SOLVER_EDGE))?;
+        let curve = edge::curve(target, e)?.ok_or_else(|| {
+            SolidError::blend(
+                OP,
+                BlendFailure::OverflowInputMissing(OverflowInput::EdgeCurve),
+            )
+        })?;
         if !curve.is_linear(k, EFF_ZERO, false)?.linear {
             return Ok(true);
         }
@@ -138,9 +161,13 @@ impl FilletSession<'_> {
             i += 1;
             let edge_pv = curve.evaluate(k, t, 1, true, false)?;
             let [pnt, edge_d, ..] = *edge_pv.as_slice() else {
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "the edge curve has no point and derivative",
+                    BlendFailure::Defect {
+                        why: "the filleted edge's curve evaluated with one derivative gives no \
+                              point and derivative: a curve's evaluation returns its point and \
+                              each derivative asked for",
+                    },
                 ));
             };
             let [r, dr, _] = law.evaluate(t, &vr.law_interval, vr.law_orientation)?;
@@ -204,12 +231,11 @@ impl FilletSession<'_> {
         let FilletObject::Solver(id) = solver else {
             return Err(invalid("object is not a solver"));
         };
-        let body = self
-            .objects
-            .intermediate_identity(EntityRef::Brep(crate::topology::BrepId::from_index(0)))?;
+        let body =
+            self.intermediate_identity(EntityRef::Brep(crate::topology::BrepId::from_index(0)))?;
         let mut out = Vec::new();
-        for &g in &self.objects.solver(id)?.base().fillet_geoms {
-            let face = match self.objects.pseudo.geom(g)?.fillet_surface {
+        for &g in &self.solver(id)?.base().fillet_geoms {
+            let face = match self.pseudo.geom(g)?.fillet_surface {
                 Some(FilletSurfaceStorage::ManagedFace { body: owner, face }) if owner == body => {
                     Some(face)
                 }
