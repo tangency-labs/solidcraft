@@ -995,7 +995,7 @@ fn execute<H: PluginHost + 'static>(
     })();
     // Fuel can run out between epoch ticks. If a hook has also crossed its deadline, report
     // the typed timeout even when the fuel trap was the first opportunity to stop it.
-    let expired = dialog && Instant::now() >= store.data().deadline;
+    let expired = dialog && store.data().deadline.expired(Instant::now());
     (store.into_data(), outcome.map_err(|error| with_limits(if expired { deadline() } else { error }, limits)))
 }
 
@@ -1445,7 +1445,7 @@ pub(super) fn run_export<H: PluginHost + 'static>(
         calls: 0,
         max_calls: MAX_IMPORT_CALLS,
         log_bytes: 0,
-        deadline: Instant::now() + Duration::from_millis(limits.deadline_ms),
+        deadline: GuestDeadline::new(limits.deadline_ms),
         limits: store_limits(limits, 1_000_000),
         import: None,
     };
@@ -1472,7 +1472,7 @@ pub(super) fn run_export<H: PluginHost + 'static>(
             return Err(HostError::Cancelled);
         }
         // A last host call can finish after the deadline, before the next epoch tick sees it.
-        if Instant::now() >= store.data().deadline {
+        if store.data().deadline.expired(Instant::now()) {
             return Err(deadline());
         }
         Ok(file)
