@@ -2085,6 +2085,16 @@ pub fn close_bead_body(k: &mut Kernel, body: &mut Brep, tol: f64) -> Result<()> 
             "the bead's own faces, made to meet, did not close into a manifold solid",
         ));
     }
+    // The section face is fitted to `tol` at samples, so its edges carry about `tol` (a little
+    // past it between the samples); a body's edge must stay below 1000 times the body's
+    // tolerance (check_brep, test 59). The body's tolerance is raised to a thousandth of its
+    // widest edge's, with 1 % room (and every smaller face, edge and vertex tolerance with
+    // it), so each of its edges is an edge of a valid body.
+    let mut widest = tolerance;
+    for &e in body.edge_list() {
+        widest = widest.max(body.edge(e)?.tolerance);
+    }
+    crate::topology::brep::p2::set_tolerance(k, body, widest * 1.01 / 1000.0, true, true)?;
     body.use_arena_naming()
 }
 
