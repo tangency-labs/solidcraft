@@ -1691,6 +1691,71 @@ pub struct SurfaceCache<O> {
     pole_memo: Option<PoleMemo>,
 }
 
+/// The state bits of a [`SurfaceCache`] that `GlobalPointSolve`'s fast-drop face test
+/// reads (whether the cache is trimmed, point testing, the modified-face bit, and the
+/// face the cache is bound to), read from the cache without copying it:
+/// [`SurfaceCache::state`] for the cache itself, [`SurfaceCache::mapped_state`] for the
+/// copy [`SurfaceCache::map_handles`] would hand out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SurfaceCacheState<O> {
+    /// [`SurfaceCache::is_trimmed`].
+    trimmed: bool,
+    /// [`SurfaceCache::point_test_enabled`].
+    pub point_test_enabled: bool,
+    /// [`SurfaceCache::face_was_modified`].
+    pub face_was_modified: bool,
+    /// The face the cache's surface reaches (`Surface::face`).
+    surface_face: Option<object::ObjectRef>,
+    /// The owner key the cache's face handle was bound under.
+    face_key: Option<object::ObjectRef>,
+    /// The cache's face handle.
+    face: Option<O>,
+}
+
+impl<O: Copy> SurfaceCacheState<O> {
+    /// [`SurfaceCache::is_trimmed`] of the cache read.
+    #[must_use]
+    pub const fn is_trimmed(&self) -> bool {
+        self.trimmed
+    }
+
+    /// [`SurfaceCache::face`] of the cache read.
+    ///
+    /// # Errors
+    ///
+    /// As [`SurfaceCache::face`].
+    pub fn face(&self) -> Result<Option<O>> {
+        bound_face(self.surface_face, self.face_key, self.face)
+    }
+}
+
+/// The face a cache answers (`GetFace`) from the face its surface reaches
+/// (`surface_face`) and its face binding (`face_key`, `face`).
+fn bound_face<O>(
+    surface_face: Option<object::ObjectRef>,
+    face_key: Option<object::ObjectRef>,
+    face: Option<O>,
+) -> Result<Option<O>> {
+    match surface_face {
+        None if face_key.is_none() => Ok(None),
+        Some(key) if face_key == Some(key) => face.map(Some).ok_or_else(|| {
+            SolidError::unported("mapped face of trimmed cache", "topology.face_p2")
+        }),
+        // An object key is not a typed arena index or a caller handle.
+        // UNPORTED(topology.face_p2): SmSurface::GetFace (the SmFace handle of a
+        // face-owned surface whose cache was made without its face). Reachable: a
+        // solve on a B-rep face's surface without face context lands here (seen in
+        // blend.fillet_geom_p6 on own-reader targets, which now pass the face's
+        // B-rep through BrepFaceServices). Callers thread it with the
+        // `*_with_context` variants or `get_surface_cache_with_face`.
+        Some(_) if face_key.is_none() => Err(SolidError::unported(
+            "SmFace handle of a surface's face",
+            "topology.face_p2",
+        )),
+        None | Some(_) => Err(invalid(OP_CLASSIFY, "surface cache face binding is stale")),
+    }
+}
+
 impl<O: Clone> Clone for SurfaceCache<O> {
     fn clone(&self) -> Self {
         // Keep the prior infallible copy semantics; exact evaluation copies can
@@ -1966,6 +2031,64 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         })
     }
 
+    /// The fast-drop state bits of this cache, read in place.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::face`].
+    pub fn state(&self) -> Result<SurfaceCacheState<O>> {
+        Ok(SurfaceCacheState {
+            trimmed: self.trimmed_dispatch,
+            point_test_enabled: self.point_test_enabled,
+            face_was_modified: self.face_was_modified,
+            surface_face: self.surface.face()?,
+            face_key: self.trimmed_face_key,
+            face: self.trimmed_face,
+        })
+    }
+
+    /// The state bits `self.map_handles(|o| Ok(map(o)))` would answer
+    /// ([`SurfaceCache::state`] of that copy), read without making the copy: the copy
+    /// keeps the bits, and its surface (an evaluation copy, which keeps the owner) reaches
+    /// the same face, so only a face binding that is not current is dropped, as the copy
+    /// drops it. The copy's errors are kept: its evaluation copies' nesting bound
+    /// ([`SurfaceCache::check_evaluation_copy_depth`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`SurfaceCache::map_handles`] with an infallible map.
+    pub fn mapped_state<P: Copy + PartialEq>(
+        &self,
+        map: impl Fn(O) -> P,
+    ) -> Result<SurfaceCacheState<P>> {
+        self.check_evaluation_copy_depth()?;
+        let surface_face = self.surface.face()?;
+        let binding_current = self.trimmed_face_key == surface_face;
+        Ok(SurfaceCacheState {
+            trimmed: self.trimmed_dispatch,
+            point_test_enabled: self.point_test_enabled,
+            face_was_modified: self.face_was_modified,
+            surface_face,
+            face_key: self.trimmed_face_key.filter(|_| binding_current),
+            face: self.trimmed_face.filter(|_| binding_current).map(map),
+        })
+    }
+
+    /// The nesting bound the evaluation copies of [`SurfaceCache::map_handles`] check
+    /// (its subdivision surfaces, then its surface), without copying: each
+    /// [`Surface::clone_for_evaluation`] first walks its whole geometry against the
+    /// bound, and fails only there.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::clone_for_evaluation`].
+    pub(crate) fn check_evaluation_copy_depth(&self) -> Result<()> {
+        for (_, s) in &self.subdivision_surfaces {
+            s.check_evaluation_copy_depth(0)?;
+        }
+        self.surface.check_evaluation_copy_depth(0)
+    }
+
     /// `SmSurfaceCache_TYPE` (`GetType`).
     #[must_use]
     pub const fn type_code(&self) -> i64 {
@@ -2194,26 +2317,11 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// Those of [`Surface::face`]; [`SolidError::Unported`] when a face-owned surface
     /// has no validated caller-handle binding, or the binding's owner became stale.
     pub fn face(&self) -> Result<Option<O>> {
-        match self.surface.face()? {
-            None if self.trimmed_face_key.is_none() => Ok(None),
-            Some(key) if self.trimmed_face_key == Some(key) => {
-                self.trimmed_face.map(Some).ok_or_else(|| {
-                    SolidError::unported("mapped face of trimmed cache", "topology.face_p2")
-                })
-            }
-            // An object key is not a typed arena index or a caller handle.
-            // UNPORTED(topology.face_p2): SmSurface::GetFace (the SmFace handle of a
-            // face-owned surface whose cache was made without its face). Reachable: a
-            // solve on a B-rep face's surface without face context lands here (seen in
-            // blend.fillet_geom_p6 on own-reader targets, which now pass the face's
-            // B-rep through BrepFaceServices). Callers thread it with the
-            // `*_with_context` variants or `get_surface_cache_with_face`.
-            Some(_) if self.trimmed_face_key.is_none() => Err(SolidError::unported(
-                "SmFace handle of a surface's face",
-                "topology.face_p2",
-            )),
-            None | Some(_) => Err(invalid(OP_CLASSIFY, "surface cache face binding is stale")),
-        }
+        bound_face(
+            self.surface.face()?,
+            self.trimmed_face_key,
+            self.trimmed_face,
+        )
     }
 
     /// Whether `uv_point` passes the trim boundary test (`PointTest`): always with

@@ -434,6 +434,7 @@ impl FaceQueries<CacheObject> for RaySurfaceContext<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::surface::surface_cache::SurfaceCacheState;
 
     #[test]
     fn classification_reads_the_prepared_cache_before_vertex_fallback() {
@@ -557,7 +558,7 @@ mod tests {
             .unwrap();
         k.context.set_doing_boolean(true);
         let handle = Some(CacheObject::Surface(face));
-        let on = |c: &SurfaceCache<CacheObject>| {
+        let on = |c: &SurfaceCacheState<CacheObject>| {
             c.is_trimmed() && c.point_test_enabled && !c.face_was_modified
         };
 
@@ -580,10 +581,9 @@ mod tests {
         let state = services
             .surface_cache_without_get_tree(&k, &surface, handle)
             .unwrap();
-        assert!(state.tree().is_none());
+        assert!(services.into_caches()[&face].tree().is_none());
         assert!(on(&state));
         assert_eq!(live_on, Some(on(&state)));
-        drop(services);
 
         // outside a Boolean operation, on fresh B-reps (no cache kept from the first half):
         // both readers make the face's cache with its tree, whose build on a face without
@@ -613,11 +613,80 @@ mod tests {
         let state = services
             .surface_cache_without_get_tree(&k, &surface, handle)
             .unwrap();
-        assert!(state.tree().is_some());
+        assert!(services.into_caches()[&face].tree().is_some());
         assert!(!state.is_trimmed());
         assert!(!state.point_test_enabled);
         assert!(!on(&state));
         assert_eq!(live_on, Some(false));
+    }
+
+    /// The state bits a solve reads from a face's kept cache
+    /// ([`SurfaceSolveContext::surface_cache_without_get_tree`], read in place by
+    /// [`SurfaceCache::mapped_state`]) are those a copy of the cache (`map_handles`)
+    /// answers, on a kept cache without its tree (during a Boolean operation) and with
+    /// it, and with a stale face binding, where the copy drops the binding: the face
+    /// reads as the copy's, not the kept cache's own stale-binding error.
+    #[test]
+    fn kept_cache_state_reads_as_its_copy() {
+        let read_and_copy = |cache: &SurfaceCache<CacheObject>| {
+            (
+                cache.mapped_state(|c| c).unwrap(),
+                cache.map_handles(Ok).unwrap().state().unwrap(),
+            )
+        };
+        let face_answer = |s: &SurfaceCacheState<CacheObject>| format!("{:?}", s.face());
+        for doing_boolean in [true, false] {
+            let mut k = Kernel::default();
+            let mut b = crate::primitive::api_primitives::create_cylinder(
+                &mut k,
+                crate::math::Point3::ZERO,
+                5.0,
+                20.0,
+            )
+            .unwrap();
+            let face = crate::topology::brep::p1::faces(&b, None).unwrap()[0];
+            let surface = b
+                .face(face)
+                .unwrap()
+                .surface
+                .as_ref()
+                .unwrap()
+                .clone_for_evaluation()
+                .unwrap();
+            k.context.set_doing_boolean(doing_boolean);
+            let mut services = BrepFaceServices::new(&mut b);
+            let state = services
+                .surface_cache_without_get_tree(&k, &surface, Some(CacheObject::Surface(face)))
+                .unwrap();
+            let mut caches = services.into_caches();
+            let cache = caches.get_mut(&face).unwrap();
+            assert_eq!(cache.tree().is_some(), !doing_boolean);
+            let (read, copy) = read_and_copy(cache);
+            assert_eq!(read, copy);
+            assert_eq!(state, read);
+            assert_eq!(read, cache.state().unwrap());
+            assert!(read.face().unwrap().is_some());
+
+            // the surface no longer owned by the bound face: the copy reads no face
+            let owner = cache.surface_mut().set_owner(None).unwrap();
+            assert!(cache.state().unwrap().face().is_err());
+            let (read, copy) = read_and_copy(cache);
+            assert_eq!(read, copy);
+            assert_eq!(read.face().unwrap(), None);
+
+            // owned by another face: the copy's answer for that face's handle
+            cache
+                .surface_mut()
+                .set_owner(Some(crate::geom::object::ObjectRef {
+                    key: crate::geom::attribute::ObjectKey(owner.key.0.wrapping_add(1)),
+                    ..owner
+                }));
+            let own = cache.state().unwrap();
+            let (read, copy) = read_and_copy(cache);
+            assert_eq!(read, copy);
+            assert_eq!(face_answer(&read), face_answer(&copy));
+            assert_ne!(face_answer(&read), face_answer(&own));
+        }
     }
 
     #[test]
