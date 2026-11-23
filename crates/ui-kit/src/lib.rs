@@ -8,6 +8,7 @@
 
 // Components: each takes plain data and returns the action chosen.
 pub mod app_bar;
+pub mod app_bar_items;
 pub mod app_bar_layout;
 pub mod blur;
 pub mod browser;
@@ -23,7 +24,10 @@ pub mod theme_files;
 pub mod theme_options;
 pub mod toast;
 pub mod view_compass;
+pub mod view_layout_menu;
 pub mod window_chrome;
+pub mod window_options_menu;
+mod window_preview;
 
 mod actions;
 mod assistant;
@@ -75,6 +79,7 @@ mod preferences_small;
 mod radial;
 pub mod recent_colors;
 mod reports;
+pub mod reveal;
 mod review;
 mod search;
 pub mod settings_search;
@@ -168,6 +173,7 @@ pub use text::ellipsize_middle;
 pub use text::paint_text;
 pub use text_menu::menu_open as text_menu_open;
 pub use theme_picker::*;
+pub use toast::measure_inline_notice;
 pub use tree::*;
 pub use value_focus::*;
 pub use viewport_status::*;

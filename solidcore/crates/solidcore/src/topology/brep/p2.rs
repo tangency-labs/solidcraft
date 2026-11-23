@@ -13,6 +13,7 @@
 //! | [`min_edge_bbox_size`]       | `SmBrep::GetMinEdgeBBoxSize`              |
 //! | [`set_tolerance`]            | `SmBrep::SetTolerance` (`SM_USE_OLDTOL`)  |
 //! | [`rebuild_uv_trim_curves`]   | `SmBrep::RebuildUVTrimCurves`             |
+//! | [`create_missing_uv_trim_curves`] | (not upstream) the kernel's own UV trim curve for every edge use on a face that holds none |
 //! | [`check_and_fix_uv_trim_curves`] | `sm_CheckAndFixUVTrimCurves` (file static) |
 //! | [`swap_uv`]                  | `SmBrep::SwapUV`                          |
 //! | [`notify`], [`NotifyArg`], [`brep_ref`] | `SmBrep::Notify`               |
@@ -473,6 +474,41 @@ pub fn rebuild_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
 
     // all done
     ret
+}
+
+/// (Not upstream) Gives every edge use on a face that holds no UV trim curve the kernel's
+/// own, the step a body takes before it is written out as data.
+///
+/// The walk is [`edgeuses`]`(b, None)`, listed once before any trim is made: the edges in
+/// B-rep edge list order, each edge's uses in its radial list order from its head. An edge
+/// use is skipped when it has no face use ([`eu1::faceuse`]: a wire edge use) or when its
+/// own slot already holds a curve ([`eu1::uv_trim_curve_pointer`]; the mate's slot is not
+/// looked at). Every other one gets
+/// [`get_or_create_uv_trim_curve`](eu3::get_or_create_uv_trim_curve)`(k, b, eu, false,
+/// false, true)`: no distance and no deviation wanted, a UV-space curve allowed. Where the
+/// mate holds a curve that call builds nothing (the pair shares the mate's curve) and
+/// returns the status of the edge use's own drop record; otherwise it builds a curve and
+/// attaches it as that routine does, with whatever tolerance the attaching raises.
+///
+/// The walk stops at the first failure and nothing is undone: the edge uses before the
+/// failing one keep the curves (and tolerances) they were given, the failing one is as its
+/// call left it, and the ones after it are not visited. Afterwards, on success, every edge
+/// use on a face has a UV trim curve ([`eu1::uv_trim_curve`]: its own or its mate's), and a
+/// second call changes nothing.
+///
+/// # Errors
+///
+/// The first failure of the walk: an error of a read or of
+/// [`get_or_create_uv_trim_curve`](eu3::get_or_create_uv_trim_curve), or the failing
+/// status it returned ([`eu3::UvTrimCurveFetch::status`]).
+pub fn create_missing_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
+    for eu in edgeuses(b, None)? {
+        if eu1::faceuse(b, eu)?.is_none() || eu1::uv_trim_curve_pointer(b, eu)?.is_some() {
+            continue;
+        }
+        eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
+    }
+    Ok(())
 }
 
 /// `sm_CheckAndFixUVTrimCurves` (file static, called by `SmBrep::ReadFromFile`):
@@ -3487,23 +3523,21 @@ pub fn mate_lamina_edge_to_surface(
                     true,
                 )?
             } else {
-                // the face's surface reaches its face's cache (smsurf_GetSurfaceCache),
-                // made on the B-rep: an exact evaluation copy of the surface meanwhile
+                // the face's surface (an exact evaluation copy, as the B-rep is borrowed
+                // meanwhile); the lift reads its continuities and makes no cache
                 let surface = b
                     .face(face)?
                     .surface
                     .as_ref()
                     .ok_or(null_deref("face without surface"))?
                     .clone_for_evaluation()?;
-                surface.lift_curve_with_context(
+                surface.lift_curve(
                     k,
                     &face_domain,
                     &side_curve,
                     &side_curve.natural_interval(),
                     tol,
                     true,
-                    &mut crate::query::brep::BrepFaceServices::new(b),
-                    Some(CacheObject::Surface(face)),
                 )?
             };
             let new_3d = lifted.curve;
@@ -4041,14 +4075,17 @@ mod tests {
         let mut k = Kernel::default();
         let mut breps = read_part_file(&mut k, "ss_plane_sph1.smp");
         let b = breps.first_mut().unwrap();
-        // (the part file's cover raises: its sheet's trims run off their edges)
-        assert!(!b.trim_cover_raises().edges.is_empty());
+        // (the sheet's sphere keeps the file's NURB, so its kept trims are the file's on
+        // their own surface: each is within its edge's tolerance as read, proved below, and
+        // the cover raises nothing)
+        assert!(b.trim_cover_raises().edges.is_empty());
         let mut widest = 0.0_f64;
-        let mut failures = Vec::new();
+        let (mut failures, mut kept) = (Vec::new(), 0);
         for eu in edgeuses(b, None).unwrap() {
             let Some(bound) = proved_distance(&k, b, eu) else {
                 continue;
             };
+            kept += 1;
             let e = eu1::edge(b, eu).unwrap().unwrap();
             let tol = edge::tolerance(b, e).unwrap();
             let sampled = sampled_distance(&k, b, eu, 256);
@@ -4056,7 +4093,8 @@ mod tests {
                 failures.push(format!("eu {}: {bound:e} {sampled:e} {tol:e}", eu.index()));
             }
         }
-        assert!(failures.is_empty(), "{failures:#?}");
+        // (the sheet's eight edges each have one trimmed use: four B-spline trims, four lines)
+        assert!(kept == 8 && failures.is_empty(), "{kept}: {failures:#?}");
         for (e, _) in b.edges().iter() {
             widest = widest.max(edge::tolerance(b, e).unwrap());
         }

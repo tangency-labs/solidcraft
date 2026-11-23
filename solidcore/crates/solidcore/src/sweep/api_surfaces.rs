@@ -11,6 +11,7 @@
 //! | `copy_skin_primitive_curves` (private)       | `SmApiCopySkinPrimitiveCurves` (static)        |
 //! | [`create_skin_primitive`], [`SkinPrimitive`] | `SmApiCreateSkinPrimitive`                     |
 //! | [`create_skin_primitive_with_sources`], [`SkinSources`], [`NotTraced`] | (not upstream: #3139) |
+//! | [`create_skin_primitive_with_ends`] | (not upstream: the skin with [`SkinEnd`]s) |
 //! | [`create_skin_from_faces`], [`SkinFromFaces`] | `SmApiCreateSkinFromFaces`                    |
 //! | [`create_extrude`]                           | `SmApiCreateExtrude`                           |
 //! | [`create_sweep`]                             | `SmApiCreateSweep`                             |
@@ -48,7 +49,8 @@
 //!   failure) and then returns `SM_ERR`, a path the port does not have.
 
 use crate::curve::curve::Curve;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::sweep::SweepFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -60,6 +62,7 @@ use crate::primitive::primitive_creation::p3::skin_sources::SkinTrace;
 pub use crate::primitive::primitive_creation::p3::skin_sources::{NotTraced, SkinSources};
 use crate::primitive::primitive_creation::p3::RepeatedSweepOptions;
 use crate::surface::surface::Surface;
+use crate::sweep::skin_ends::SkinEnd;
 use crate::topology::{Brep, FaceId};
 
 const OP_SKIN_PRIMITIVE: &str = "sweep::api_surfaces::create_skin_primitive";
@@ -149,8 +152,8 @@ fn validate_skin_primitive_inputs(
 fn copy_skin_primitive_curves(k: &Kernel, input_curves: &[Option<&Curve>]) -> Result<Vec<Curve>> {
     let mut curve_copies = Vec::new();
     for curve in input_curves {
-        let curve =
-            curve.ok_or_else(|| SolidError::sweep_missing(OP_SKIN_PRIMITIVE, "a curve to skin"))?;
+        let curve = curve
+            .ok_or_else(|| SolidError::sweep(OP_SKIN_PRIMITIVE, SweepFailure::NullProfileCurve))?;
         curve_copies.push(curve.copy(k)?);
     }
     Ok(curve_copies)
@@ -174,7 +177,45 @@ pub fn create_skin_primitive(
     degree: usize,
     cap_ends: bool,
 ) -> Result<SkinPrimitive> {
-    skin_primitive(k, curves_in_each_profile, curves_3d, degree, cap_ends, None)
+    skin_primitive(
+        k,
+        curves_in_each_profile,
+        curves_3d,
+        degree,
+        cap_ends,
+        [SkinEnd::Free; 2],
+        None,
+    )
+}
+
+/// [`create_skin_primitive`] with how the skin leaves its first profile and arrives at its
+/// last (not upstream). A [`SkinEnd::Square`] end leaves square to its profile's plane, on the
+/// side the next profile is on, each point with the end's weight times the speed of its
+/// straight way to the next profile ([`crate::sweep::skin_ends`]); with both ends
+/// [`SkinEnd::Free`] the skin is `create_skin_primitive`'s, bit for bit.
+///
+/// # Errors
+///
+/// Those of [`create_skin_primitive`]; for a square end, `InvalidInput` for profiles that
+/// are not closed planar loops, a weight that is not a number above 0, and an end whose
+/// neighbouring profile's centre lies in its plane (no side to leave to).
+pub fn create_skin_primitive_with_ends(
+    k: &mut Kernel,
+    curves_in_each_profile: &[usize],
+    curves_3d: &[Option<&Curve>],
+    degree: usize,
+    cap_ends: bool,
+    ends: [SkinEnd; 2],
+) -> Result<SkinPrimitive> {
+    skin_primitive(
+        k,
+        curves_in_each_profile,
+        curves_3d,
+        degree,
+        cap_ends,
+        ends,
+        None,
+    )
 }
 
 /// [`create_skin_primitive`], also returning which of `curves_3d` each side face was
@@ -190,9 +231,9 @@ pub fn create_skin_primitive(
 /// profile, and within a profile in the caller's order). The faces split at the
 /// skin's knots of continuity G1 or less, judged on the knots: each join of two curves
 /// is one, tangent or not (a rounded square's eight curves make eight walls), and a
-/// curve with a kink of its own spans several. [`SkinSources::NotTraced`] says why there is no answer: open
-/// profiles, or sections whose joined curves differ in degree or knots (the skin's
-/// compatibility step can then move a curve's ends; see [`NotTraced`]).
+/// curve with a kink of its own spans several. Open profiles trace as closed ones do,
+/// through the segments of each one's joined curve. [`SkinSources::NotTraced`] says why
+/// there is no answer (see [`NotTraced`]).
 ///
 /// # Errors
 ///
@@ -211,6 +252,7 @@ pub fn create_skin_primitive_with_sources(
         curves_3d,
         degree,
         cap_ends,
+        [SkinEnd::Free; 2],
         Some(&mut trace),
     )?;
     Ok((skin, trace.into_sources()))
@@ -223,6 +265,7 @@ fn skin_primitive(
     curves_3d: &[Option<&Curve>],
     degree: usize,
     cap_ends: bool,
+    ends: [SkinEnd; 2],
     trace: Option<&mut SkinTrace>,
 ) -> Result<SkinPrimitive> {
     validate_skin_primitive_inputs(curves_in_each_profile, curves_3d, degree)?;
@@ -231,11 +274,26 @@ fn skin_primitive(
 
     let mut curves: Vec<Option<Curve>> = curve_copies.into_iter().map(Some).collect();
     let copy_count = curves.len();
-    let (brep, (start_faces, side_faces, end_faces)) =
-        PrimitiveModel::build_new(k, |pc, model| {
+    let (brep, (start_faces, side_faces, end_faces)) = PrimitiveModel::build_new(
+        k,
+        |pc, model| {
             let (mut start, mut side, mut end) = (Vec::new(), Vec::new(), Vec::new());
             let mut transferred = Vec::new();
+            let free = ends == [SkinEnd::Free; 2];
             let status = match trace {
+                trace if !free => pc.create_skin_primitive_with_ends(
+                    model,
+                    PrimitiveModel::MAIN,
+                    curves_in_each_profile,
+                    &mut curves,
+                    0.0,
+                    degree,
+                    cap_ends,
+                    [&mut start, &mut side, &mut end],
+                    &mut transferred,
+                    ends,
+                    trace,
+                ),
                 None => pc.create_skin_primitive(
                     model,
                     PrimitiveModel::MAIN,
@@ -265,16 +323,24 @@ fn skin_primitive(
             match status {
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 // Ownership is indeterminate for copies without a report entry.
-                _ if transferred.len() != copy_count => {
-                    return Err(SolidError::sweep_failed(
+                status if transferred.len() != copy_count => {
+                    let defect = Failure::new(
                         OP_SKIN_PRIMITIVE,
-                        "a skinning curve copy has no ownership record",
-                    ));
+                        SweepFailure::Defect {
+                            why: "create_skin_primitive records each curve copy's owner, or that it stayed with the caller, so every copy has a record",
+                        },
+                    );
+                    return Err(match status {
+                        Err(e) => defect.caused_by(e),
+                        Ok(()) => defect,
+                    }
+                    .into_error());
                 }
                 other => other?,
             }
             Ok((start, side, end))
-        })?;
+        },
+    )?;
     // Not upstream: the flat side walls are their planes (WR-782).
     let mut brep = brep;
     crate::sweep::skin_flat_walls::flat_walls_as_planes(k, &mut brep, &side_faces)?;
@@ -414,9 +480,12 @@ pub fn create_surface_revolution(
     })?
     .first()
     .copied()
-    .ok_or_else(|| SolidError::sweep_failed(OP_REVOLUTION, "the revolved body has no face"))?;
+    .ok_or_else(|| SolidError::sweep(OP_REVOLUTION, SweepFailure::RevolutionSweepsNoFace))?;
     let mut surface = brep.face_mut(face)?.surface.take().ok_or_else(|| {
-        SolidError::sweep_failed(OP_REVOLUTION, "the revolved face has no surface")
+        SolidError::sweep_defect(
+            OP_REVOLUTION,
+            "surface_owners lists only faces that own a surface, and the face's was not taken before",
+        )
     })?;
     surface.set_owner(None);
     Ok(surface)

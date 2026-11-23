@@ -210,6 +210,51 @@ fn linked_cosmetic_threads_refuse_invalid_saved_records_without_partial_state() 
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A design's canvases and decals come with it through Insert Design: in the linked component,
+/// where the design shows them on its bodies, so they move with its placement. One that follows
+/// sketch points comes in where they put it, and a name the assembly already uses is told apart.
+#[test]
+fn linked_designs_bring_their_canvases_and_decals() {
+    let png = |w: u32, h: u32| {
+        let mut b = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        b.extend(w.to_be_bytes());
+        b.extend(h.to_be_bytes());
+        b.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+        crate::tests::image_file(&b)
+    };
+    let dir = folder("images-insert");
+    let file = dir.join("panel.sc");
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [0,0,0]}));
+    run(&mut source, "canvas.decal", json!({"path": png(20, 10), "face": [10,10,10], "width": 10, "name": "Logo"}));
+    let tag = run(&mut source, "canvas.insert", json!({"path": png(10, 10), "plane": "XY", "center": [30,10], "width": 8, "name": "Tag"}))["canvas"]
+        .as_u64()
+        .unwrap();
+    run(&mut source, "canvas.frame_sketch", json!({"canvas": tag}));
+    run(&mut source, "file.save", json!({"path": file}));
+    let corners = |s: &Session, name: &str| {
+        let (vals, _) = s.doc.param_values();
+        let c = s.doc.canvases.iter().find(|c| c.name == name).unwrap_or_else(|| panic!("no image `{name}`"));
+        s.doc.canvas_corners(&vals, c, &s.model.state()).unwrap()
+    };
+    let expected = [corners(&source, "Logo"), corners(&source, "Tag")];
+    let mut s = Session::default();
+    run(&mut s, "canvas.insert", json!({"path": png(10, 10), "plane": "XY", "width": 5, "name": "Logo"}));
+    let inserted = run(&mut s, "component.insert_design", json!({"path": file, "translate": [100,0,0]}));
+    let component = inserted["component"].as_u64().unwrap();
+    let carried: Vec<_> = s.doc.canvases.iter().filter(|c| c.component == component).cloned().collect();
+    assert_eq!(carried.len(), 2, "both images come with the design");
+    let logo = carried.iter().find(|c| c.name.starts_with("Logo (")).map(|c| c.name.clone()).expect("the taken name is told apart");
+    assert!(carried.iter().all(|c| c.anchor.is_none()), "the copies follow no sketch of this design");
+    assert_eq!(carried.iter().find(|c| c.name == logo).unwrap().bytes(), source.doc.canvases.iter().find(|c| c.name == "Logo").unwrap().bytes());
+    for (name, want) in [(logo.as_str(), expected[0]), ("Tag", expected[1])] {
+        let got = corners(&s, name);
+        for (g, e) in got.iter().zip(want) {
+            assert!((g.x - e.x - 100.0).abs() < 1e-6 && (g.y - e.y).abs() < 1e-6 && (g.z - e.z).abs() < 1e-6, "{name}: {got:?} vs {want:?}");
+        }
+    }
+}
+
 fn volume(s: &mut Session) -> f64 {
     run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap()
 }

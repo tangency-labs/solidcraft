@@ -190,7 +190,7 @@ fn case(name: &str) -> Case {
                     vec![[10.0 - d, 5.0 + d, 20.0], [10.0 + d, 5.0 - d, 20.0], [5.0, 0.0, 20.0], [15.0, 0.0, 20.0]],
                     3.0,
                 ),
-                Expect::Fails(Error::CornerUnsupported),
+                Expect::Fails(Error::CornerUnsupported { why: None, at: None }),
             )
         }
         // √3 from all three edges at the corner (0, 0, 10).
@@ -257,7 +257,11 @@ type Got = std::result::Result<Measured, Error>;
 /// `e` without the size solidcore names for a blend too large ([`Error::TooLarge`]): the C++
 /// kernel's [`Error::NoRoom`], which the capi here does not size.
 fn without_size(e: Error) -> Error {
-    if matches!(e, Error::TooLarge { .. }) { Error::NoRoom } else { e }
+    match e {
+        Error::TooLarge { .. } => Error::NoRoom,
+        Error::CornerUnsupported { .. } => Error::CornerUnsupported { why: None, at: None },
+        e => e,
+    }
 }
 
 /// Checks a kernel's result against the case's closed form; what it measured, or its error.
@@ -316,18 +320,18 @@ cases!(
     pick_ambiguous,
 );
 
-/// What solidcore does not have yet is refused as not supported, after the capi's own checks.
+/// A cornered radius law builds, and a chamfer pick that misses still reports no match.
 #[test]
-fn fork_only_blends_are_not_supported_yet() {
-    let r = timed("unsupported", || {
+fn cornered_variable_fillet_builds_and_chamfer_pick_reports_no_match() {
+    let r = timed("cornered_fillet_and_missing_chamfer_edge", || {
         let b = BLOCK.core();
         // 1 to 2 and back to 1: a corner at the middle.
-        let bent = fillet_variable(&b, TOP_FRONT, TOL, [0.0, 0.0, 10.0], 1, &[0.0, 0.0, 0.5, 1.0, 1.0], &[1.0, 2.0, 1.0]).err();
+        let bent = fillet_variable(&b, TOP_FRONT, TOL, [0.0, 0.0, 10.0], 1, &[0.0, 0.0, 0.5, 1.0, 1.0], &[1.0, 2.0, 1.0]).map(|_| ());
         // A pick that fails still says so first.
         let far = chamfer_sides(&b, &[[100.0; 3]], TOL, 2.0, ChamferSecond::Distance(3.0), [0.0, 0.0, 1.0]).err();
         (bent, far)
     });
-    assert_eq!(r.0, Some(Error::Unsupported));
+    assert_eq!(r.0, Ok(()));
     assert_eq!(r.1, Some(Error::NoMatch { point: 0 }));
 }
 
@@ -1219,4 +1223,63 @@ mod history {
     fn tags_cross_a_chamfer() {
         check(Blend::Chamfer, 2.0);
     }
+}
+
+/// A ledge between two parabolas that thins to nothing at (−10, −10); its straight rim chamfered 1 mm
+/// runs off the ledge before the corner, where solidcore's Nx1 corner has no topology to make.
+#[test]
+fn a_chamfer_ending_where_its_face_comes_to_a_point_is_refused_with_a_reason() {
+    use super::sweep::extrude;
+    use crate::sweeps::{Curve, DraftCorner};
+    let para = |a: [f64; 2], c: [f64; 2], b: [f64; 2], t: f64| -> [f64; 2] {
+        let w = [(1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t];
+        [a[0] * w[0] + c[0] * w[1] + b[0] * w[2], a[1] * w[0] + c[1] * w[1] + b[1] * w[2]]
+    };
+    let (a3, c3, b3) = ([-12.5, -12.5], [12.5, -12.5], [12.5, 12.5]);
+    // Where the outer parabola crosses y = -10 (t0) and, by symmetry, x = 10 (1 - t0).
+    let (mut lo, mut hi) = (0.0, 0.5);
+    for _ in 0..80 {
+        let m = 0.5 * (lo + hi);
+        if para(a3, c3, b3, m)[1] < -10.0 { lo = m } else { hi = m }
+    }
+    let (t0, t1) = (0.5 * (lo + hi), 1.0 - 0.5 * (lo + hi));
+    // The piece t0..t1 of the parabola as a quadratic Bezier: its end tangents meet at the control point.
+    let d = |t: f64| [2.0 * ((1.0 - t) * (c3[0] - a3[0]) + t * (b3[0] - c3[0])), 2.0 * ((1.0 - t) * (c3[1] - a3[1]) + t * (b3[1] - c3[1]))];
+    let (p0, p1, d0, d1) = (para(a3, c3, b3, t0), para(a3, c3, b3, t1), d(t0), d(t1));
+    let s = ((p1[0] - p0[0]) * d1[1] - (p1[1] - p0[1]) * d1[0]) / (d0[0] * d1[1] - d0[1] * d1[0]);
+    let ctrl = [p0[0] + d0[0] * s, p0[1] + d0[1] * s];
+    let z = 0.0;
+    let nurbs = |pts: [[f64; 2]; 3], z: f64| Curve::Nurbs {
+        degree: 2,
+        points: vec![[pts[0][0], pts[0][1], z, 1.0], [pts[1][0], pts[1][1], z, 1.0], [pts[2][0], pts[2][1], z, 1.0]],
+        knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    };
+    let line = |a: [f64; 2], b: [f64; 2], z: f64| Curve::Line { start: [a[0], a[1], z], end: [b[0], b[1], z] };
+    let lower = vec![
+        line([-10.0, -10.0], p0, z),
+        nurbs([p0, ctrl, p1], z),
+        line(p1, [10.0, 10.0], z),
+        line([10.0, 10.0], [-10.0, 10.0], z),
+        line([-10.0, 10.0], [-10.0, -10.0], z),
+    ];
+    let upper = vec![
+        nurbs([[-10.0, -10.0], [10.0, -10.0], [10.0, 10.0]], 10.0),
+        line([10.0, 10.0], [-10.0, 10.0], 10.0),
+        line([-10.0, 10.0], [-10.0, -10.0], 10.0),
+    ];
+    let base = extrude(&lower, [0.0, 0.0, 1.0], 10.0, 0.0, DraftCorner::default(), true).unwrap();
+    let top = extrude(&upper, [0.0, 0.0, 1.0], 10.0, 0.0, DraftCorner::default(), true).unwrap();
+    let body = boolean(&base, &top, BooleanOp::Union).unwrap().unwrap();
+    // The ledge's straight rim: the side y = -10 from the corner to the outer parabola, at z = 10.
+    let side = [0.5 * (-10.0 + p0[0]), -10.0, 10.0];
+    let e = blend(&body, Blend::Chamfer, &[side], &[1.0], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err();
+    // No room, the rail leaving its face (main: Status(1001)); a chamfer's words name no rolling ball.
+    assert_eq!(e, Error::NoRoom);
+    assert!(!e.to_string().contains("ball"), "{e}");
+    // The wide part of the ledge takes the chamfer: one face more, 0.5 mm² along ~14 mm of parabola.
+    let mid = para(a3, c3, b3, 0.5);
+    let chamfered = blend(&body, Blend::Chamfer, &[[mid[0], mid[1], 10.0]], &[1.0], TOL, &[], &[], Corners::Filled).unwrap();
+    assert_eq!(counts(&chamfered).unwrap()[0], counts(&body).unwrap()[0] + 1);
+    let removed = volume(&body, 1e-7).unwrap() - volume(&chamfered, 1e-7).unwrap();
+    assert!(removed > 5.0 && removed < 9.0, "removed {removed}");
 }

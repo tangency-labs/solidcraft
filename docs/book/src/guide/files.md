@@ -19,7 +19,7 @@ design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSO
 | Rhino `.3dm` | solids, through cadmpeg | |
 | 3MF, STL, OBJ | mesh bodies | yes |
 | glTF 2.0 (`.glb`, `.gltf` with its `.bin` files) | mesh bodies in the node tree's components, materials as appearances | `.glb`: placed bodies with their colours, metallic and roughness, in metres with Y up |
-| OpenUSD (`.usd`, `.usda`, `.usdc`, `.usdz`), through cadmpeg | mesh bodies in the prim tree's components, materials as appearances | each part's exact B-rep and a mesh of it, colours, the component tree; in metres with Z up |
+| OpenUSD (`.usd`, `.usda`, `.usdc`, `.usdz`), through cadmpeg | mesh bodies in the prim tree's components, materials as appearances; with `geometry: "exact"`, its B-reps as B-rep bodies | each part's exact B-rep and a mesh of it, colours, the component tree; in metres with Z up |
 | 3MF with face tags | as 3MF | each triangle tagged with its B-rep face, exact coordinates |
 | URDF | | the assembly as a robot: links with meshes, mass and inertia, joints from the assembly's joints |
 | DXF, SVG | into a sketch | sketches and flat patterns as DXF |
@@ -88,6 +88,19 @@ and a stage that says Y is up (or says nothing, as OpenUSD then means Y) is turn
 constant display colour, become the body's appearance. Scaled or mirrored prims are baked into their
 meshes. Invisible prims, NURBS patches, B-rep with no mesh, curves, intrinsic shapes such as `Cube`,
 and references to other files are left out with a warning.
+
+With the `geometry: "exact"` parameter (on the `doc.open` and `file.insert_mesh` commands, and the
+MCP tools that call them), an OpenUSD file comes in by its exact geometry instead, as a FreeCAD or
+Rhino file read with cadmpeg does: each B-rep (a `BrepArray` prim's solids and shells, such as
+SolidCraft's own exports carry) becomes a B-rep body of one Import feature, with exact faces and edges
+to pick, fillet and measure, and only a mesh with no B-rep beside it becomes a mesh body of that
+feature. A mesh that only shows a B-rep (its fallback mesh) is not read a second time, unless that
+B-rep cannot be built: the body then comes in as its fallback mesh, with a warning saying why. A
+`NurbsPatch` is left out with a warning for now: its boundary is not read. The prim tree becomes the component tree, a part placed again another occurrence of it,
+and the stage's up axis stands the import up as for its meshes (`up: "z"` keeps its axes). Each body
+takes its material's base colour and opacity. Unlike the mesh import, metallic and roughness are not
+carried, a prim placed by a scale or a mirror is left out with the reason rather than baked, and an
+invisible prim comes in hidden. The default, `geometry: "meshes"`, is the mesh import above.
 
 A 3MF project saved by a slicer comes in too, also when it keeps its objects in model parts of
 their own inside the file (the 3MF Production extension): each object on the build plates becomes
@@ -176,6 +189,11 @@ ordinary 3MF in which every triangle also names the B-rep face it lies on and ev
 is the tessellation's own double-precision value. Meshing and analysis tools can use the tags to
 keep a model's faces (for loads, boundary conditions or feature edges); other 3MF readers ignore
 them. The format is specified in [`docs/formats/3mf-face-tags.md`](https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/3mf-face-tags.md).
+
+`file.export` with `format: "stla"` (or `file.export_stl` with `ascii: true`) and `solids: "face"` writes an ASCII STL with
+one named `solid` block per B-rep face, named by the face's persistent name, so CFD meshers such as snappyHexMesh and
+cfMesh make a boundary patch of each. It is command-only for now. The naming rule is in
+[`docs/formats/stl-face-solids.md`](https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/stl-face-solids.md).
 
 **File → Export URDF…** (`file.export` with a `.urdf` path) writes the assembly for robot
 simulators and ROS: a link per component placement with its mesh, mass and inertia, and the
@@ -282,8 +300,9 @@ a separate app.
 ## Large files
 
 SolidCraft opens STEP, IGES and the other CAD files it imports up to **512 MB**, and design files
-up to **256 MB**. Mesh files (3MF, STL, OBJ, PLY) and point cloud files (PLY, XYZ, PTS) follow the
-limit for import files: a point cloud file is read up to 1 GB, and more when that limit is raised.
+up to **256 MB**. Mesh files (3MF, STL, OBJ, PLY) and point cloud files (PLY, PCD, E57, XYZ, PTS,
+ASC) follow the limit for import files: a point cloud file is read up to 1 GB, and more when that
+limit is raised.
 A larger file is refused before it is read, and the message says how to raise the limit. In the
 desktop app you can raise both:
 
@@ -410,6 +429,49 @@ Drive) can be open on two computers at once. The desktop app watches for two wri
 Scripts, the CLI and the control channel never get these questions. `doc.open` opens the design
 and reports `open_elsewhere` in its result (`read_only: true` opens it read-only), and `file.save`
 over a file that changed on disk fails with an error until it is given `overwrite: true`.
+
+## Designs in Git
+
+A design saved as `.json` is plain text, so Git shows what changed in it with no setup. A design
+saves as the same text each time, with a short list of numbers such as a point `[40.0, 6.0]` on one
+line. Choose `.json` with **Save As** for a design without imported files that you keep in a
+repository. A `.json` design keeps an imported STEP file inside it as one very long line, so for a
+design with imports, keep the `.sc` container and set up textconv as below. The first save of a
+`.json` design written by an earlier version puts its short lists of numbers on one line, so commit
+that save on its own.
+
+A `.sc` design or a `.scdwg` drawing is a container (a ZIP file), which Git shows only as changed
+binary data. To see its changes as text in `git diff`, `git log -p` and `git show`, have Git run
+`solidcraft-cli textconv` on it. Add these lines to the repository's `.gitattributes` and commit
+them.
+
+```text
+*.sc diff=solidcraft
+*.solidcraft diff=solidcraft
+*.scdwg diff=solidcraft
+```
+
+Then run this once on each computer.
+
+```text
+git config --global diff.solidcraft.textconv "solidcraft-cli textconv"
+```
+
+Git never runs a program that a repository names, which is why the second step is needed on each
+computer. If `solidcraft-cli` is not on your `PATH`, put its full path in the quotes, with forward
+slashes. A path with a space needs single quotes of its own inside the double quotes, for example
+`"'C:/Program Files/SolidCraft/solidcraft-cli.exe' textconv"`. `git diff --no-textconv` shows the
+raw change again. The Snap and Flatpak builds can't read the files Git hands to textconv, so use
+the AppImage, a `.deb` or `.rpm` package, or a release download for this.
+
+For a container, textconv prints its `container.json` on one line, then the design or drawing, laid
+out as a `.json` save lays it out. Then each other file the container holds, such as an imported
+STEP file or the signature log, gets one line with
+its size and SHA-256, so a changed import shows as a changed line. The model cache, the preview and
+a plugin's own cache are left out, because a save or the plugin writes them afresh. A file textconv
+cannot show prints one line with its size and SHA-256 instead, and Git goes on with the rest of the
+diff. Web pages that show a repository's changes do not run textconv, so a `.sc` design still shows
+as binary there.
 
 ## Saving in the web app
 

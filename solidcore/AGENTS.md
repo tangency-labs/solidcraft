@@ -63,7 +63,8 @@ request that names it. Check all three, and build on the existing work rather th
 - [docs/offset-and-shell.md](docs/offset-and-shell.md): offsets of the definition, folds and the
   largest wall, the offset construction, shell and thicken.
 - [docs/failure-codes-and-reproduction.md](docs/failure-codes-and-reproduction.md): a failure's
-  stable code, a failed call as a rig entry, single-entry replay and the case reducer (design).
+  stable code, a failed call as a rig entry, single-entry replay and the case reducer (design),
+  and how to convert a failure site to a named cause, a refusal or a defect (§6).
 - [docs/coordinating.md](docs/coordinating.md): if you lead other agents: how to understand the
   problem, search for related work, split it into briefs and inspect what comes back.
 
@@ -98,7 +99,8 @@ anywhere (including dependencies; `deny.toml` bans copyleft crates).
 - No `unwrap`/`expect`/`panic!`/`todo!`/unchecked `[i]` indexing (denied by lints; tests
   are exempt). Use `.get()`, iterators, `?` and `SolidError`.
 - Deterministic: no clock, no hashing of addresses, no `HashMap` iteration order in
-  results (use `Vec`, `BTreeMap`, or sort), randomness only from `kernel.rng`.
+  results (use `Vec`, `BTreeMap`, or sort), randomness only from a
+  generator the call makes itself from the kernel's seed (`Kernel::seeded_rng`).
 - No global or `static mut`/`thread_local` state. Everything lives in `Kernel`.
 - Must build for `wasm32-unknown-unknown`: no filesystem or `std::time`, and no threads in
   library code for now (§4c).

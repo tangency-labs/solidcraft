@@ -116,14 +116,12 @@ use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::{BlendNeighbour, OrientType};
 use crate::nurbs::crv_fit::p1::ParamMethod;
-use crate::query::brep::BrepFaceServices;
 use crate::surface::plane::Plane;
 use crate::surface::surface::p1::map_to_2d_dir;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p7::{
     make_face_with_curves, make_face_with_curves_transfer, FaceCurvesInput, NewFace,
 };
-use crate::topology::brep_cache::CacheObject;
 use crate::topology::edge;
 use crate::topology::edgeuse::p1::{self as eu1, primary_edgeuse};
 use crate::topology::trimming_tools::{trim_surface_with_model_space_curves, TrimInput};
@@ -2794,15 +2792,13 @@ impl FilletBrep {
             // Lift it to 3D
             let uv_domain = base_surf.natural_uv_domain_with_nurb(k)?;
             let face_tol = crate::topology::face::p2::tolerance(target, face)?;
-            let lifted = base_surf.lift_curve_with_context(
+            let lifted = base_surf.lift_curve(
                 k,
                 &uv_domain,
                 &Curve::from(new_uv_curve.clone()),
                 &ivl,
                 crate::geom::tol::approx_tol3d(k, face_tol),
                 false,
-                &mut BrepFaceServices::new(target),
-                Some(CacheObject::Surface(face)),
             )?;
             let crv_ivl = lifted.curve.natural_interval();
             set_edge_curve(self.brep_mut(), rail, Some(lifted.curve))?;

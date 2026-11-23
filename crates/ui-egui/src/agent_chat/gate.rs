@@ -299,6 +299,38 @@ pub fn tool_key(method: &str, params: &Value) -> String {
     }
 }
 
+/// What "Always allow" must cover for a request the gate asks about: each command in a batch that
+/// asks (by its registered id), or the request's [`tool_key`]. An answer given for one batch never
+/// covers another batch's file, design, upload or slicer steps.
+pub fn asking_keys(method: &str, params: &Value, undo_left: usize) -> Vec<String> {
+    if method != "engine.batch" {
+        return vec![tool_key(method, params)];
+    }
+    let steps = params.get("commands").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+    let mut keys: Vec<String> = Vec::new();
+    let mut undo_left = undo_left;
+    for s in steps.iter().take(10_000) {
+        let id = command_of(s).unwrap_or("");
+        match command(id, s.get("params").unwrap_or(&Value::Null), undo_left) {
+            Verdict::Ask(_) => {
+                let key = resolve(id).map_or_else(|| id.chars().take(120).collect(), String::from);
+                if !keys.contains(&key) {
+                    keys.push(key);
+                }
+            }
+            Verdict::Run { change } => {
+                if resolve(id) == Some("edit.undo") {
+                    undo_left = undo_left.saturating_sub(1);
+                } else if change {
+                    undo_left += 1;
+                }
+            }
+            Verdict::Refuse(_) | Verdict::Unknown(_) => {}
+        }
+    }
+    if keys.is_empty() { vec![tool_key(method, params)] } else { keys }
+}
+
 /// A request as an approval card says it: the command, or a batch's commands.
 pub fn describe(method: &str, params: &Value) -> String {
     match method {
@@ -578,6 +610,20 @@ mod tests {
         assert_eq!(describe("engine.batch", &json!({"commands": [{"command": "FILE.NEW"}]})), "batch: file.new");
         // The window's own pick has no engine entry and still runs.
         assert_eq!(exec("view.pick", json!({"x": 1, "y": 1})), Verdict::Run { change: true });
+    }
+
+    /// "Always allow" for a batch that asks must cover each command that asked, by its own id.
+    #[test]
+    fn a_batch_that_asks_is_keyed_by_the_commands_that_ask() {
+        let batch = json!({"commands": [
+            {"command": "solid.box"},
+            {"command": "FILE.SAVE", "params": {"path": "a.sc"}},
+            {"id": "file.export", "params": {"path": "a.stl"}},
+            {"command": "file.save", "params": {"path": "b.sc"}},
+        ]});
+        assert_eq!(asking_keys("engine.batch", &batch, 0), ["file.save", "file.export"]);
+        assert_eq!(asking_keys("engine.batch", &json!({"commands": [{"command": "solid.box"}]}), 0), ["batch"]);
+        assert_eq!(asking_keys("engine.execute", &json!({"command": "File.Save"}), 0), ["file.save"]);
     }
 
     #[test]
