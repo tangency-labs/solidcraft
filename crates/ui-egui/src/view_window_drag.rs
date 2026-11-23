@@ -620,8 +620,10 @@ fn cancel(state: &mut State, ctx: &Context, drag: Drag) {
     if let Some(target) = &drag.target {
         ctx.request_repaint_of(target.viewport(drag.viewport));
     }
+    // The id outside `data`: a context lock taken inside another can freeze the window (#21091).
+    let morph = morph_id(ctx, drag.view.id);
     if ctx.global_style().animation_time > 0.0
-        && let Some(morph) = ctx.data(|data| data.get_temp::<Morph>(morph_id(ctx, drag.view.id)))
+        && let Some(morph) = ctx.data(|data| data.get_temp::<Morph>(morph))
     {
         state.flight = Some(Flight { view: drag.view, viewport: drag.viewport, from: morph.rect, origin: drag.origin, start: ctx.input(|i| i.time) });
         ctx.request_repaint();
@@ -1068,10 +1070,8 @@ mod tests {
                     assert!(keyboard_active(&app, ui.ctx()));
                 } else {
                     route(&mut app, ui.ctx(), view, origin, pos2(230.0, 80.0), false);
-                    assert!(
-                        ui.ctx().data(|data| data.get_temp::<Morph>(morph_id(ui.ctx(), view))).is_some(),
-                        "the preview paints in the first drag frame"
-                    );
+                    let morph = morph_id(ui.ctx(), view);
+                    assert!(ui.ctx().data(|data| data.get_temp::<Morph>(morph)).is_some(), "the preview paints in the first drag frame");
                 }
                 assert!(app.view_window_drag.drag.is_some());
             });

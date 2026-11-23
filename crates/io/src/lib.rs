@@ -9,6 +9,10 @@
 #![forbid(unsafe_code)]
 
 mod airfoil;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[allow(dead_code)]
+#[path = "../build.rs"]
+mod build_script;
 pub mod catalog;
 mod design;
 pub mod design_lock;
@@ -72,6 +76,7 @@ pub use glb::GlbOptions;
 pub use glb::MAX_GLB_BYTES;
 pub use glb::export_glb;
 mod legacy_dir;
+pub mod library;
 pub mod library_files;
 pub mod limits;
 #[cfg(test)]

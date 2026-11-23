@@ -1494,7 +1494,13 @@ impl Session {
         let single_surface_analysis = self.single_surface_analysis;
         let disabled_plugins = self.disabled_plugins.clone();
         let plugin_limits = self.plugin_limits;
-        let plugin_state = self.plugin_state.clone();
+        let mut plugin_state = self.plugin_state.clone();
+        for package in plugin_state.panels.values_mut() {
+            for data in package.data.values_mut() {
+                *data = Default::default();
+            }
+        }
+        plugin_state.ui_caller = None;
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
         let keep_print_faces = self.keep_print_faces;
@@ -2791,6 +2797,23 @@ impl Session {
             return self.execute("plugin.run", &call);
         }
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        self.execute_spec(spec, params)
+    }
+
+    fn execute_spec(&mut self, spec: &cmd::CommandSpec, params: &Value) -> Result<Value> {
+        // Plugin data is transient view state, so it stays out of undo snapshots.
+        // Restore it for every command error, including failures after guest publication.
+        let plugin_panels_before = (spec.id == "plugin.run").then(|| self.plugin_state.panels.clone());
+        let result = self.execute_spec_inner(spec, params);
+        if result.is_err()
+            && let Some(panels) = plugin_panels_before
+        {
+            self.plugin_state.panels = panels;
+        }
+        result
+    }
+
+    fn execute_spec_inner(&mut self, spec: &cmd::CommandSpec, params: &Value) -> Result<Value> {
         if panels::commands::is_command(spec.id) {
             // Layout is application state. Even a missing capability must not
             // clear live links, map picks, snapshot, evaluate or refresh a design.
@@ -3561,6 +3584,11 @@ impl Session {
                     usage::note_compute(spec.id, ms);
                 }
             }
+        }
+        // A model worker that did not update panels must keep newer view state on
+        // the window (including data merged into a frame or a panel the user closed).
+        if prepared.computed.plugin_state.panels != prepared.source.plugin_state.panels {
+            self.plugin_state.panels.clone_from(&prepared.computed.plugin_state.panels);
         }
         // Disk checks and no-op source reads may finish after a newer live observation.
         // Merge only entries whose source observation is still current in the live session.
