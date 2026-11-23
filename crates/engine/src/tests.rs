@@ -4739,6 +4739,53 @@ fn counterbore_for_a_cap_screw_head() {
     assert!(rel(v3 - volume(&mut s), removed(4.5, 9.0, 5.0)) < 1e-3);
 }
 
+/// #17728: a countersunk screw's head (ISO 10642) gets a 90° countersink as wide as its head plus
+/// `head_gap` each side, so the head sits `head_gap` below the face.
+#[test]
+fn countersink_for_a_countersunk_screw_head() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 10}));
+    let v0 = volume(&mut s);
+    let hole = cmd::clearance_diameter("M6", "normal").unwrap();
+    // A through hole with a 90° countersink `d` wide at the face: the cone's frustum, then the hole.
+    let removed = |d: f64| {
+        let h = (d - hole) / 2.0;
+        PI * h / 12.0 * (d * d + d * hole + hole * hole) + PI * hole * hole / 4.0 * (10.0 - h)
+    };
+    let recess = |s: &Session| match s.doc.features.last().map(|f| &f.kind) {
+        Some(solidcraft_doc::FeatureKind::Hole { hole: solidcraft_doc::HoleKind::Countersink { cs_diameter, cs_angle, .. }, .. }) => {
+            (cs_diameter.as_str().to_string(), cs_angle.as_str().to_string())
+        }
+        other => panic!("not a countersink: {other:?}"),
+    };
+    // ISO 10642 M6: dk 13.44, plus the 0.5 mm gap each side; the type follows the head.
+    run(&mut s, "solid.hole", json!({"position": [10, 15, 10], "clearance": "M6", "head": "ISO 10642"}));
+    let v1 = volume(&mut s);
+    assert_eq!(recess(&s), ("14.44 mm".to_string(), "90 deg".to_string()));
+    assert!(rel(v0 - v1, removed(14.44)) < 1e-3, "{} vs {}", v0 - v1, removed(14.44));
+    // The family name parts.insert takes, no gap, and the type written out: flush with the face.
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [30, 15, 10], "clearance": "M6", "head": "countersunk_socket_screw", "head_gap": 0, "type": "countersink"}),
+    );
+    let v2 = volume(&mut s);
+    assert_eq!(recess(&s).0, "13.44 mm");
+    assert!(rel(v1 - v2, removed(13.44)) < 1e-3, "{}", v1 - v2);
+    // A diameter given by hand keeps its value.
+    run(&mut s, "solid.hole", json!({"position": [50, 15, 10], "clearance": "M6", "head": "ISO 10642", "cs_diameter": 15}));
+    assert_eq!(recess(&s).0, "15");
+}
+
+#[test]
+fn head_countersink_is_the_head_plus_the_default_gap() {
+    assert_eq!(cmd::head_countersink("ISO 10642", "M6"), Some(14.44), "dk 13.44");
+    assert_eq!(cmd::head_countersink("countersunk_socket_screw", "M4x0.7"), Some(9.96), "dk 8.96, the pitch written out");
+    assert_eq!(cmd::head_countersink("ISO 10642", "M2"), None, "the table starts at M3");
+    assert_eq!(cmd::head_countersink("ISO 4762", "M6"), None, "a socket head is no countersunk head");
+    assert_eq!(cmd::head_counterbore("ISO 10642", "M6"), None, "nor a counterbore's");
+}
+
 /// In an inch design, a bare length typed into a feature means inches (stored with the unit);
 /// lengths with units and angles are left alone.
 #[test]
