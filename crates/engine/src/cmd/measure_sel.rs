@@ -6,6 +6,7 @@
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
+use solidcore_record::brep::{Curve, Frame};
 use solidcraft_geom::mesh_distance::TriangleSet;
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Mesh, UnitVec3};
@@ -198,6 +199,17 @@ fn sketch_curve(ss: &solidcraft_doc::SolvedSketch, id: &str) -> Option<Item> {
         CurveKind::Line { a, b } => {
             let (a, b) = (at(a)?, at(b)?);
             (Shape::Line { a, b }, densify(&[a, b]))
+        }
+        // An ellipse measures its exact length, not its drawn polyline's (#21129).
+        CurveKind::Ellipse { c, m, r } => {
+            let (center, major) = (at(c)?, at(m)?);
+            let x = (major - center).normalized()?;
+            let frame = Frame { origin: center.into(), x_axis: x.into(), y_axis: normal.cross(x).into() };
+            let ellipse = Curve::Ellipse { frame, radii: [center.dist(major), r] };
+            let length = solidcore_ops::curve::arc_length(&ellipse, Some([0.0, std::f64::consts::TAU])).ok()?;
+            let pts: Vec<Vec3> = sk.polyline(index).into_iter().map(|p| ss.plane.to_world(p)).collect();
+            let json = json!({"type": "sketch_curve", "id": id, "length_mm": length});
+            return Some(Item { geo: Geo::Points(pts), dir: None, json, shape: Shape::Other, slot: None, exact: None });
         }
         _ => return None,
     };
