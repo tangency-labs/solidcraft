@@ -2593,9 +2593,9 @@ fn assert_body_is_profile(k: usize, (volume, at): (f64, Vec2), p: &solidcraft_sk
 
 /// #19163: a design saved by 0.30.1 (format 48) whose extrudes pick the 17 regions of a sketch by
 /// index opens with each pick marked as numbered by the builds before 0.42.0, and body `Rk` is
-/// the region those builds numbered k, on this system (the lenses of each kind are congruent, so
-/// which is which is the round-off in their areas: on Windows and Linux this build numbers them
-/// exactly as 0.30.1 did). Every region is built once, and a save and reopen keeps the marks.
+/// the region those builds numbered k (the lenses of each kind are congruent, so which is which is
+/// the round-off in their areas), which is the region 0.30.1 built (checked against 0.30.1's
+/// bodies). Every region is built once, and a save and reopen keeps the marks.
 #[test]
 fn index_picks_saved_before_0_42_build_the_regions_they_were_saved_with() {
     let json = rim_regions_design(48);
@@ -2611,6 +2611,34 @@ fn index_picks_saved_before_0_42_build_the_regions_they_were_saved_with() {
     }
     for which in every_rim_region() {
         assert_eq!(got.iter().filter(|body| is_rim_region(**body, which)).count(), 1, "{which:?}");
+    }
+    // The issue's ground truth: the regions 0.30.1 built from this design (the centres of mass of
+    // its bodies, R0 to R16), which the older numbering gives on Windows and on Linux. The lenses'
+    // order is their round-off, so a system whose maths library rounds them otherwise could
+    // differ here; this build's own numbering differs at 16 of the 17 places on both.
+    let inner = |x, y| Some((x, y, true));
+    let outer = |x, y| Some((x, y, false));
+    let built_by_0_30_1 = [
+        None,
+        inner(180, -80),
+        inner(-180, 80),
+        inner(-180, -80),
+        inner(180, 80),
+        inner(80, 180),
+        inner(80, -180),
+        inner(-80, 180),
+        inner(-80, -180),
+        outer(-80, -180),
+        outer(-80, 180),
+        outer(80, -180),
+        outer(80, 180),
+        outer(180, 80),
+        outer(-180, 80),
+        outer(-180, -80),
+        outer(180, -80),
+    ];
+    for (k, (body, which)) in got.iter().zip(built_by_0_30_1).enumerate() {
+        assert!(is_rim_region(*body, which), "R{k} is {} mm³ at {:?}, 0.30.1 built {which:?}", body.0, body.1);
     }
     let reopened = Document::from_json(&doc.to_json()).unwrap();
     assert!(reopened.features[1..].iter().all(older), "saved and opened again, the picks keep their numbering");
