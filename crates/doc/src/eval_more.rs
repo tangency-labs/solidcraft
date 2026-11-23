@@ -1720,6 +1720,10 @@ fn takes_part(f: &Feature, targets: &[String], b: &ModelBody) -> bool {
     all || if targets.is_empty() { b.component == f.component || b.feature == f.id } else { targets.contains(&b.name) }
 }
 
+/// How near a corner of a tool's footprint in an unfolded flat lies to a piece's outline (a bend
+/// line, a joint, the flat's edge) to count as on it, in mm: the grid the sew finds vertices on.
+const CORNER_ON_OUTLINE: f64 = 1e-6;
+
 /// What an extrude cut takes from the sheets made from surfaces it reaches, of the bodies it takes
 /// part in (see [`takes_part`]), read straight into their outlines (#6748): each tool a prism
 /// along a flat panel's normal, through its whole thickness, its footprint clear inside the
@@ -1835,6 +1839,17 @@ pub(super) fn surface_prism_cut(
                     let w = inv.point(plane.to_world(q));
                     Vec2::new(w.x, w.y)
                 });
+                // A corner of the footprint on a piece's outline (a bend line, a joint, the flat's
+                // edge) would meet that outline at a point: the body's cut reads it.
+                let on_outline = g
+                    .outer
+                    .segs
+                    .iter()
+                    .map(Seg2::start)
+                    .any(|q| pieces.iter().any(|(_, r)| crate::sheet_surface_cuts::outline_gap(r, q) <= CORNER_ON_OUTLINE));
+                if on_outline {
+                    return Ok(false);
+                }
                 let gb = crate::sheet_surface_cuts::loop_box(&g.outer);
                 let apart = |panel: usize, r: &Region2| {
                     let Some(Some(at)) = dev.placements.get(panel) else { return false };

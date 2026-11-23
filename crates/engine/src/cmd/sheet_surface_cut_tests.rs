@@ -1264,4 +1264,3 @@ fn a_hole_over_the_bend_next_to_an_earlier_cut_of_the_flat_is_the_bodys_cut() {
     let v = exact_volume(&s);
     assert!((v - drilled).abs() < 1e-6 * drilled, "{v} vs {drilled}");
 }
-
