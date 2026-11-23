@@ -39,6 +39,18 @@ fn authored_library_search_is_bounded_and_concepts_are_not_runtime_presets() {
     assert_eq!(s.execute("render.library.list", &json!({"kind":"surfaces","query":"SURF-001"})).unwrap()["total"], 1);
 }
 
+/// A target search may be a whole body name a rename gives: a hundred CJK characters are 300
+/// bytes, under `MAX_BODY_NAME_BYTES`; a longer query is refused.
+#[test]
+fn a_target_search_takes_a_whole_long_body_name() {
+    let mut s = Session::default();
+    let long = "中".repeat(100);
+    s.execute("solid.box", &json!({"length":20,"width":15,"height":10,"body_name":long})).unwrap();
+    let targets = s.execute("render.library.targets", &json!({"query":long})).unwrap();
+    assert_eq!(targets["items"][0]["name"], json!(long));
+    assert!(s.execute("render.library.targets", &json!({"query":"x".repeat(513)})).is_err());
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn custom_surface_fixture() -> (Session, std::path::PathBuf, Vec<u8>, Value) {
     let mut s = Session::default();
@@ -82,7 +94,7 @@ fn imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resour
     std::fs::remove_file(&path).unwrap();
     let saved = s.doc.to_json();
     assert!(!saved.contains(path.to_str().unwrap()));
-    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    let mut reopened = Session::new(solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap());
     reopened.execute("render.scene", &json!({})).unwrap();
     let scene = crate::product_scene::extract(&reopened).unwrap();
     let bindings = &reopened.doc.render.setups["Wood"].surfaces;
@@ -215,7 +227,7 @@ fn builtin_hdr_capture_is_atomic_undoable_deduplicated_and_path_independent() {
     let id = options.hdr.unwrap().resource;
     assert_eq!(s.doc.render.resources.required(&id).unwrap().bytes(), super::super::library_data::asset("HDR-001").unwrap().0);
     let saved = s.doc.to_json();
-    let reopened = solidcraft_doc::Document::from_json(&saved).unwrap();
+    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
     assert_eq!(reopened.render.resources.required(&id).unwrap().id(), id);
     let before = s.undo.len();
     assert!(s.execute("render.library.environment.apply", &request).is_err(), "replacement must be explicit");
@@ -334,8 +346,7 @@ fn saved_wood_grain_angle_reopens_and_rotates_with_only_its_occurrence() {
     )
     .unwrap();
     assert_eq!((s.doc.materials.clone(), s.doc.features.clone()), physical);
-    let saved = s.doc.to_json();
-    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    let mut reopened = Session::new(solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap());
     reopened.execute("render.scene", &json!({})).unwrap();
     let bindings = reopened.doc.render.setups["Grain"].surfaces.clone();
     let lower = |session: &Session| {
@@ -427,8 +438,7 @@ fn saved_authored_maps_roundtrip_and_resolve_without_paths_or_captured_ordinals(
     assert_eq!(s.doc.materials, before.materials);
     assert_eq!(s.doc.appearances, before.appearances);
     assert_eq!(s.doc.features, before.features);
-    let saved = s.doc.to_json();
-    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    let mut reopened = Session::new(solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap());
     reopened.execute("render.scene", &json!({})).unwrap();
     let scene = crate::product_scene::extract(&reopened).unwrap();
     let bindings = &reopened.doc.render.setups["Portable"].surfaces;
@@ -551,7 +561,7 @@ fn saved_passive_ground_keeps_cad_unchanged_and_is_revalidated_after_product_mot
     super::super::staging::apply(&mut staged, &setup, "test").unwrap();
     assert_eq!(staged.meshes.len(), 2);
     assert!(Arc::ptr_eq(&staged.meshes[0].mesh, &original.meshes[0].mesh));
-    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
     assert_eq!(reopened.render.setups["Stage"], setup);
     assert!(s.execute("render.stage.ground", &request).is_err(), "never replace a stage silently");
     s.execute("render.stage.clear", &json!({"name":"Stage"})).unwrap();
@@ -657,7 +667,7 @@ fn cpu_saved_surface_binding_is_offline_undoable_portable_and_preserves_geometry
     let setup = s.doc.render.setups["CPU maps"].clone();
     assert_eq!(setup.surfaces.len(), 1);
     assert_eq!(setup.camera, camera);
-    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
     assert_eq!(reopened, *s.doc);
     let snapshot = s.doc.clone();
     let history = (s.revision, s.undo.len(), s.redo.len());
@@ -738,7 +748,7 @@ fn cpu_path_maps_bind_beside_saved_glass_and_targeted_aging_without_weakening_ta
     assert_eq!(saved.features, before.features);
     assert_eq!(saved.materials, before.materials);
     assert_eq!(saved.appearances, before.appearances);
-    assert_eq!(solidcraft_doc::Document::from_json(&saved.to_json()).unwrap(), *saved);
+    assert_eq!(solidcraft_io::read_design(&solidcraft_io::write_design_container(&saved).unwrap()).unwrap(), *saved);
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(s.doc, before);
     s.execute("edit.redo", &json!({})).unwrap();

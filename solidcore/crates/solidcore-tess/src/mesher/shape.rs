@@ -96,7 +96,8 @@ struct Mesh<'a> {
     tris: &'a mut Vec<[u32; 3]>,
     /// The triangles on each side, by its two nodes in index order.
     sides: BitsMap<(u32, u32), Vec<u32>>,
-    /// The boundary sides, by their two nodes in index order, each as its nodes in loop order.
+    /// The boundary sides, by the two nodes the triangles name them by in index order, each as
+    /// its nodes in loop order.
     fixed: BitsMap<(u32, u32), (u32, u32)>,
     /// Triangles shaping gave up on until they change.
     stuck: Vec<bool>,
@@ -112,6 +113,13 @@ struct Mesh<'a> {
 
 fn key(a: u32, b: u32) -> (u32, u32) {
     (a.min(b), a.max(b))
+}
+
+/// Whether the triangle `a`, `b`, `c` is lower than `tol` over its longest side: its smallest
+/// height, `|ab x ac| / longest`, is under `tol`.
+fn narrower_than(a: Vec3, b: Vec3, c: Vec3, tol: f64) -> bool {
+    let longest = a.dist(b).max(b.dist(c)).max(c.dist(a));
+    (b - a).cross(c - a).len() < tol * longest
 }
 
 /// Twice the signed area of the (u, v) triangle `a`, `b`, `c`.
@@ -336,24 +344,33 @@ enum Located {
 
 /// Shape the face's triangulation `tris` of nodes `uv` (the first `fixed` of them its boundary,
 /// in `loops`, at the 3D points `pos` has for them), adding nodes, by `rules` on the surface
-/// `point`. `pos` holds every node's 3D point and grows with `uv`.
+/// `point`. `pos` holds every node's 3D point and grows with `uv`. `loops` comes with each
+/// boundary node as the triangles name it (by index; a node past its end names itself): where a
+/// loop passes one point twice, the triangulation has one node there, its first, and each
+/// boundary side is kept by the nodes the triangles name it by.
 pub(crate) fn shape(
     uv: &mut Vec<[f64; 2]>,
     pos: &mut Vec<Vec3>,
     tris: &mut Vec<[u32; 3]>,
-    loops: &[std::ops::Range<usize>],
+    (loops, named): (&[std::ops::Range<usize>], &[u32]),
     caps: (&[(u32, u32)], std::ops::Range<usize>, &std::collections::BTreeSet<u32>),
     point: Point<'_>,
     rules: &Rules,
 ) -> Shaped {
     let (ring_sides, fans, poles) = caps;
+    // The boundary's nodes: those of the loops, numbered first.
+    let boundary = loops.iter().map(|r| r.end).max().unwrap_or(0);
     let mut fixed: BitsMap<(u32, u32), (u32, u32)> = BitsMap::default();
     for r in loops {
         let n = r.len();
         for k in 0..n {
             let (Ok(a), Ok(b)) = (u32::try_from(r.start + k), u32::try_from(r.start + (k + 1) % n)) else { continue };
-            if a != b {
-                fixed.entry(key(a, b)).or_insert((a, b));
+            let name = |i: u32| named.get(i as usize).copied().unwrap_or(i);
+            let (na, nb) = (name(a), name(b));
+            if na != nb {
+                // A side the loops run twice (a slit's two runs, one edge) keeps its first run's
+                // nodes: either names the edge's segment.
+                fixed.entry(key(na, nb)).or_insert((a, b));
             }
         }
     }
@@ -492,7 +509,17 @@ pub(crate) fn shape(
         }
         if !near.is_empty() {
             let edge_sides: Vec<(u32, u32)> = near.into_iter().filter(|e| m.fixed.contains_key(e)).collect();
+            // A triangle of boundary nodes alone, with at most one side on the boundary, that is
+            // narrower than the chord lies where the face is narrower than the chord, finer than
+            // the mesh resolves anything (two curves of the face within the chord of each other: a
+            // sliver). Splitting its sides would halve them round after round toward the sliver's
+            // width, without making it wider: it is left as it is. A triangle with two sides on
+            // the boundary (an ear of one curve, whose height is that curve's sag) is split as
+            // before.
+            let on_boundary = (0..3).filter(|&k| matches!(super::rot3(t, k), [x, y, _] if m.fixed.contains_key(&key(x, y)))).count();
+            let narrow = t.iter().all(|&i| (i as usize) < boundary) && on_boundary <= 1 && narrower_than(a, b, c, rules.tol);
             match rules.whole {
+                None if narrow && !edge_sides.is_empty() => give_up(&mut m, ti, Some(ShapeLimit::Narrow), &mut limits),
                 None => {
                     for e in edge_sides {
                         if let Some(&side) = m.fixed.get(&e) {

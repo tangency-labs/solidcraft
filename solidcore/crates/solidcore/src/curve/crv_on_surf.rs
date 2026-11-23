@@ -2317,6 +2317,32 @@ mod tests {
         .unwrap()
     }
 
+    /// On a curve-bounded surface, whose generic `GetKnots` fails, the classification
+    /// against the surface knot lines fails, so `GetKnots` of the curve on it returns
+    /// a failing status. `FindParameterAtArcLength` and `CurveMaxDistanceBetween` pass
+    /// that status on, as the fork's `SER` does, instead of using the unclassified
+    /// knots (WR-663).
+    #[test]
+    fn a_failing_knot_status_is_passed_on_by_the_arc_length_and_max_distance() {
+        use crate::geom::extent1d::Extent1d;
+        use crate::surface::curve_bounded_surface::CurveBoundedSurface;
+        let k = Kernel::default();
+        let bounded = CurveBoundedSurface::new(patch().into(), vec![], vec![], true).unwrap();
+        let c = Curve::from(CrvOnSurf::new(&k, uv(), bounded.into(), None, 3).unwrap());
+        let ws = c.knots_with_status(&k, None).unwrap();
+        let Err(status) = ws.status else {
+            panic!("the classification succeeded: {:?}", ws.knots)
+        };
+        let empty = |e: &SolidError| e.to_string().contains("the knot vector is empty");
+        assert!(empty(&status), "{status}");
+        let arc = c.find_parameter_at_arc_length(&k, 0.0, 0.1);
+        assert!(arc.as_ref().is_err_and(empty), "{:?}", arc.map(|_| ()));
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let other = c.clone();
+        let maxd = c.curve_max_distance_between(&k, &ivl, &other, 0.0, 1.0, 0, None);
+        assert!(maxd.as_ref().is_err_and(empty), "{:?}", maxd.map(|_| ()));
+    }
+
     /// A 2D quadratic UV curve on `[0, 1]`.
     fn uv() -> Curve {
         let mut cur = allocate_nurb_curve(2, 2, 5).unwrap();

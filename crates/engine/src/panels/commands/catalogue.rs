@@ -58,6 +58,32 @@ impl CatalogueState {
     /// names/IDs, envelope node/depth/byte bounds, rejected recovery and total
     /// budgets are checked before the result can be published by any catalogue.
     pub fn hydrate(bytes: &[u8], registry: &PanelRegistry) -> PanelResult<Self> {
+        Ok(Self::hydrate_inner(bytes, registry, None)?.0)
+    }
+
+    /// Like `hydrate`, but one stored layout that cannot be read is dropped on its
+    /// own instead of rejecting the whole snapshot. A dropped built-in or
+    /// remembered layout is replaced by the same entry of `defaults` when it has
+    /// one; a dropped user preset is gone. Framing, counts, duplicate identities
+    /// and aggregate budgets remain hard errors. The bytes on disk are not touched.
+    pub fn hydrate_lenient(bytes: &[u8], registry: &PanelRegistry, defaults: &Self) -> PanelResult<(Self, Vec<SkippedEntry>)> {
+        Self::hydrate_inner(bytes, registry, Some(defaults))
+    }
+
+    /// Replace one workspace's remembered layout with its registered default.
+    pub fn reset_remembered_to_default(&mut self, workspace: &WorkspaceId, registry: &PanelRegistry) -> PanelResult<()> {
+        let descriptor = self.workspaces.get(workspace).ok_or_else(|| error(Rule::MissingTarget, "workspace is not registered"))?;
+        let stored =
+            self.builtins.get(&descriptor.default_preset).ok_or_else(|| error(Rule::MissingTarget, "workspace default is not registered"))?;
+        let raw = decode_retained_record(stored.bytes(), registry)?;
+        let mut envelope = stored.project_envelope(registry, &raw.layout.workspace)?;
+        envelope.layout.workspace = workspace.clone();
+        self.remembered.insert(workspace.clone(), StoredEnvelope::new(&envelope, None, registry)?);
+        self.validate()
+    }
+
+    fn hydrate_inner(bytes: &[u8], registry: &PanelRegistry, lenient: Option<&Self>) -> PanelResult<(Self, Vec<SkippedEntry>)> {
+        let mut skipped = Vec::new();
         if bytes.len() > MAX_CATALOGUE_SNAPSHOT_BYTES {
             return Err(error(Rule::CollectionLimit, "catalogue snapshot byte cap"));
         }
@@ -76,7 +102,16 @@ impl CatalogueState {
                 if next.find_preset_name(&name).is_some() {
                     return Err(error(Rule::DuplicateId, "duplicate stored preset identity"));
                 }
-                let record = reader.record(registry)?;
+                let raw = reader.raw_record()?;
+                let record = match StoredEnvelope::from_record(raw.0, raw.1, registry) {
+                    Ok(record) => record,
+                    Err(_) if lenient.is_some() => {
+                        let raw = RawRecord { bytes: raw.0.to_vec(), rejected: raw.1.map(<[u8]>::to_vec) };
+                        skipped.push(if builtin { SkippedEntry::Builtin(name, raw) } else { SkippedEntry::User(name, raw) });
+                        continue;
+                    }
+                    Err(reason) => return Err(reason),
+                };
                 if builtin {
                     next.builtins.insert(name, record);
                 } else {
@@ -99,17 +134,162 @@ impl CatalogueState {
             if next.remembered.contains_key(&workspace) {
                 return Err(error(Rule::DuplicateId, "duplicate remembered workspace identity"));
             }
-            let record = reader.record(registry)?;
+            let raw = reader.raw_record()?;
             // A remembered record belongs to its key, unlike a reusable preset.
-            record.envelope(registry, &workspace)?;
-            next.remembered.insert(workspace, record);
+            let checked =
+                StoredEnvelope::from_record(raw.0, raw.1, registry).and_then(|record| record.envelope(registry, &workspace).map(|_| record));
+            match checked {
+                Ok(record) => {
+                    next.remembered.insert(workspace, record);
+                }
+                Err(_) if lenient.is_some() => {
+                    skipped.push(SkippedEntry::Remembered(workspace, RawRecord { bytes: raw.0.to_vec(), rejected: raw.1.map(<[u8]>::to_vec) }))
+                }
+                Err(reason) => return Err(reason),
+            }
         }
         if reader.at != bytes.len() {
             return Err(error(Rule::Schema, "trailing catalogue snapshot data"));
         }
+        if let Some(defaults) = lenient {
+            for entry in &skipped {
+                match entry {
+                    SkippedEntry::Builtin(name, _) => {
+                        if let Some(record) = defaults.builtins.get(name) {
+                            next.builtins.insert(name.clone(), record.clone());
+                        }
+                    }
+                    SkippedEntry::Remembered(workspace, _) => {
+                        if let Some(record) = defaults.remembered.get(workspace) {
+                            next.remembered.insert(workspace.clone(), record.clone());
+                        }
+                    }
+                    SkippedEntry::User(..) => {}
+                }
+            }
+        }
         next.validate()?;
-        Ok(next)
+        Ok((next, skipped))
     }
+}
+
+/// Bytes as a plain JSON value: their text when they are UTF-8 (`{"text": ...}`, a layout record
+/// is JSON text), else the bytes as numbers (`{"bytes": [...]}`). Never base64.
+pub fn plain_bytes(bytes: &[u8]) -> Value {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => json!({ "text": text }),
+        Err(_) => json!({ "bytes": bytes }),
+    }
+}
+
+/// The bytes [`plain_bytes`] wrote, at most `max` of them.
+pub fn bytes_from_plain(value: &Value, max: usize) -> PanelResult<Vec<u8>> {
+    let bad = || error(Rule::Schema, "invalid stored panel bytes");
+    let bytes = match (value.get("text"), value.get("bytes")) {
+        (Some(Value::String(text)), None) => text.as_bytes().to_vec(),
+        (None, Some(Value::Array(list))) if list.len() <= max => {
+            list.iter().map(|n| n.as_u64().and_then(|n| u8::try_from(n).ok())).collect::<Option<Vec<u8>>>().ok_or_else(bad)?
+        }
+        _ => return Err(bad()),
+    };
+    if bytes.len() > max {
+        return Err(error(Rule::CollectionLimit, "stored panel bytes cap"));
+    }
+    Ok(bytes)
+}
+
+/// A catalogue snapshot ([`CatalogueState::export`]) as plain JSON, for preferences and settings
+/// profiles: its presets, workspaces and remembered layouts with their records' text, exactly.
+/// Framing only, as `hydrate` reads it: nothing is decoded, so a record that won't load is kept.
+pub fn snapshot_value(bytes: &[u8]) -> PanelResult<Value> {
+    if bytes.len() > MAX_CATALOGUE_SNAPSHOT_BYTES {
+        return Err(error(Rule::CollectionLimit, "catalogue snapshot byte cap"));
+    }
+    let mut reader = Reader { bytes, at: 0 };
+    if reader.take(HEADER.len())? != HEADER {
+        return Err(error(Rule::Version, "unsupported catalogue snapshot"));
+    }
+    let record = |raw: (&[u8], Option<&[u8]>)| {
+        let mut value = json!({ "record": plain_bytes(raw.0) });
+        if let Some(rejected) = raw.1 {
+            value["rejected"] = plain_bytes(rejected);
+        }
+        value
+    };
+    let mut presets = [Vec::new(), Vec::new()];
+    for list in &mut presets {
+        for _ in 0..reader.count(MAX_USER_PRESETS)? {
+            let name = reader.text(256)?;
+            let mut value = record(reader.raw_record()?);
+            value["name"] = json!(name);
+            list.push(value);
+        }
+    }
+    let mut workspaces = Vec::new();
+    for _ in 0..reader.count(MAX_WORKSPACES)? {
+        let (id, title_key, default_preset) = (reader.text(MAX_ID_BYTES)?, reader.text(MAX_ID_BYTES)?, reader.text(256)?);
+        workspaces.push(json!({ "id": id, "title_key": title_key, "default_preset": default_preset }));
+    }
+    let mut remembered = Vec::new();
+    for _ in 0..reader.count(MAX_WORKSPACES)? {
+        let workspace = reader.text(MAX_ID_BYTES)?;
+        let mut value = record(reader.raw_record()?);
+        value["workspace"] = json!(workspace);
+        remembered.push(value);
+    }
+    if reader.at != bytes.len() {
+        return Err(error(Rule::Schema, "trailing catalogue snapshot data"));
+    }
+    let [builtins, users] = presets;
+    Ok(json!({ "builtins": builtins, "users": users, "workspaces": workspaces, "remembered": remembered }))
+}
+
+/// The snapshot [`snapshot_value`] wrote, byte for byte, within the snapshot's own caps.
+pub fn snapshot_from_value(value: &Value) -> PanelResult<Vec<u8>> {
+    let bad = |what: &str| error(Rule::Schema, format!("invalid stored panel catalogue: {what}"));
+    let list = |key: &str, max: usize| -> PanelResult<&Vec<Value>> {
+        let list = value.get(key).and_then(Value::as_array).ok_or_else(|| bad(key))?;
+        if list.len() > max {
+            return Err(error(Rule::CollectionLimit, "catalogue record/count cap"));
+        }
+        Ok(list)
+    };
+    let text =
+        |entry: &Value, key: &str| -> PanelResult<String> { entry.get(key).and_then(Value::as_str).map(str::to_owned).ok_or_else(|| bad(key)) };
+    let mut writer = Writer(Vec::new());
+    writer.put(HEADER)?;
+    let record = |writer: &mut Writer, entry: &Value| -> PanelResult<()> {
+        writer.bytes(&bytes_from_plain(entry.get("record").ok_or_else(|| bad("record"))?, MAX_ENVELOPE_BYTES)?)?;
+        match entry.get("rejected") {
+            Some(rejected) => {
+                writer.put(&[1])?;
+                writer.bytes(&bytes_from_plain(rejected, MAX_ENVELOPE_BYTES)?)
+            }
+            None => writer.put(&[0]),
+        }
+    };
+    for key in ["builtins", "users"] {
+        let presets = list(key, MAX_USER_PRESETS)?;
+        writer.count(presets.len())?;
+        for entry in presets {
+            writer.bytes(text(entry, "name")?.as_bytes())?;
+            record(&mut writer, entry)?;
+        }
+    }
+    let workspaces = list("workspaces", MAX_WORKSPACES)?;
+    writer.count(workspaces.len())?;
+    for entry in workspaces {
+        for key in ["id", "title_key", "default_preset"] {
+            writer.bytes(text(entry, key)?.as_bytes())?;
+        }
+    }
+    let remembered = list("remembered", MAX_WORKSPACES)?;
+    writer.count(remembered.len())?;
+    for entry in remembered {
+        writer.bytes(text(entry, "workspace")?.as_bytes())?;
+        record(&mut writer, entry)?;
+    }
+    Ok(writer.0)
 }
 
 struct Writer(Vec<u8>);
@@ -167,13 +347,14 @@ impl<'a> Reader<'a> {
     fn text(&mut self, max: usize) -> PanelResult<String> {
         std::str::from_utf8(self.bytes(max)?).map(str::to_owned).map_err(|_| error(Rule::Schema, "invalid catalogue UTF-8"))
     }
-    fn record(&mut self, registry: &PanelRegistry) -> PanelResult<StoredEnvelope> {
+    /// Framing only: the record's bytes and recovery bytes, undecoded.
+    fn raw_record(&mut self) -> PanelResult<(&'a [u8], Option<&'a [u8]>)> {
         let bytes = self.bytes(MAX_ENVELOPE_BYTES)?;
         let rejected = match self.take(1)? {
             [0] => None,
             [1] => Some(self.bytes(MAX_ENVELOPE_BYTES)?),
             _ => return Err(error(Rule::Schema, "invalid catalogue recovery tag")),
         };
-        StoredEnvelope::from_record(bytes, rejected, registry)
+        Ok((bytes, rejected))
     }
 }

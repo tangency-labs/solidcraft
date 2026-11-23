@@ -292,6 +292,47 @@ fn oriented(s: Surface, n: vec3<f32>) -> vec3<f32> {
     return n;
 }
 
+// Whether `(u, v)` is within the surface's parameter range: a step from a pole must stay on
+// the surface, as the CPU evaluator's step inside does, or an extrapolated normal (the wrong
+// side of a sphere's pole) is drawn.
+fn inside(s: Surface, u: f32, v: f32) -> bool {
+    if (s.kind == PLANE) {
+        return true;
+    }
+    if (s.kind == NURBS) {
+        let u0 = data[s.knots_u + s.pu];
+        let u1 = data[s.knots_u + s.nu];
+        let v0 = data[s.knots_v + s.pv];
+        let v1 = data[s.knots_v + s.nv];
+        return u >= u0 && u <= u1 && v >= v0 && v <= v1;
+    }
+    // Revolved: the profile parameter is bounded; the angle is not.
+    let t = select(u, v, s.swap != 0u);
+    let t0 = data[s.knots_u + s.pu];
+    let t1 = data[s.knots_u + s.nu];
+    return t >= t0 && t <= t1;
+}
+
+// Whether `(u, v)` is on a parameter boundary of the surface: a pole, a seam or a trim edge.
+// The first partials there are the ones f32 cancellation makes least reliable, so the normal is
+// taken from a step inside even when the cross product does not look degenerate.
+fn on_boundary(s: Surface, u: f32, v: f32) -> bool {
+    if (s.kind == PLANE) {
+        return false;
+    }
+    if (s.kind == NURBS) {
+        let u0 = data[s.knots_u + s.pu];
+        let u1 = data[s.knots_u + s.nu];
+        let v0 = data[s.knots_v + s.pv];
+        let v1 = data[s.knots_v + s.nv];
+        return u <= u0 || u >= u1 || v <= v0 || v >= v1;
+    }
+    let t = select(u, v, s.swap != 0u);
+    let t0 = data[s.knots_u + s.pu];
+    let t1 = data[s.knots_u + s.nu];
+    return t <= t0 || t >= t1;
+}
+
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = gid.x;
@@ -303,7 +344,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let d = derivs(s, vert.u, vert.v);
     var n = oriented(s, cross(d.du, d.dv));
     let scale = length(d.du) * length(d.dv);
-    if (!(length(n) > 1e-6 * scale) || !d.ok) {
+    if (!(length(n) > 1e-6 * scale) || !d.ok || on_boundary(s, vert.u, vert.v)) {
         // A degenerate point (a pole): the normal from a step inside.
         let h = 1e-4 * (1.0 + max(abs(vert.u), abs(vert.v)));
         // Steps (h, h), (-h, h), (h, -h), (-h, -h), without an array indexed by k (FXC).
@@ -314,7 +355,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             let dv = select(h, -h, (k & 2u) != 0u);
             let e = derivs(s, vert.u + du, vert.v + dv);
             let m = oriented(s, cross(e.du, e.dv));
-            if (e.ok && length(m) > 0.0) {
+            if (e.ok && inside(s, vert.u + du, vert.v + dv) && length(m) > 0.0) {
                 n = m;
                 searching = false;
             }

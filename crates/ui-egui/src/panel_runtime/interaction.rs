@@ -1310,6 +1310,25 @@ pub(crate) fn keyboard_resize_action(
             if edge != HostResizeEdge::BottomRight && ((horizontal && dx == 0.0) || (!horizontal && dy == 0.0)) {
                 return Err(error(Rule::Availability, "resize key is perpendicular to focused edge"));
             }
+            let source = service.layout().section(&section)?;
+            let dx = if horizontal && let Some(column) = &source.column {
+                let direction = if edge == HostResizeEdge::Left { -1.0 } else { 1.0 };
+                let width = outer.size.width;
+                let requested = (width + dx * direction).max(1.0);
+                if resolve_column_width(service.layout(), service.registry(), column, requested)? == width {
+                    let ranges = column_widths(service.layout(), service.registry(), column)?;
+                    let next = if dx * direction > 0.0 {
+                        ranges.iter().map(|range| range.0).find(|min| *min > width)
+                    } else {
+                        ranges.iter().rev().map(|range| range.1).find(|max| *max < width)
+                    };
+                    next.map_or(dx, |next| (next - width) * direction)
+                } else {
+                    dx
+                }
+            } else {
+                dx
+            };
             resize_preview(service, layout, &section, edge, size, outer, dx, dy)
         }
         Some(GestureKind::Pair { first, second, first_size, second_size, zone, outer }) => {
@@ -1913,7 +1932,7 @@ fn resize_preview(
         Ok((candidate, bounds))
     })();
     match result {
-        Ok((candidate, bounds)) => resized_preview(candidate, bounds, outer),
+        Ok((candidate, bounds)) => resized_preview(layout, candidate, bounds, outer),
         Err(reason) => HostPreview { rejection: Some(reason), ..HostPreview::empty(outer) },
     }
 }
@@ -1923,8 +1942,14 @@ fn project_resize(service: &LayoutService, reference: &HostLayout, candidate: &L
     resolve_host_projected(service, &proposed, reference)
 }
 
-fn resized_preview(candidate: LayoutAction, bounds: LogicalRect, original: LogicalRect) -> HostPreview {
-    HostPreview { action: if bounds == original { None } else { Some(candidate) }, ..HostPreview::empty(bounds) }
+fn resized_preview(layout: &HostLayout, candidate: LayoutAction, bounds: LogicalRect, original: LogicalRect) -> HostPreview {
+    // The pointer may resolve back onto the current width across a whole gap.
+    // Keep showing that valid landing without committing a no-op resize.
+    if bounds == original {
+        HostPreview { projected: Some(layout.clone()), ..HostPreview::empty(bounds) }
+    } else {
+        HostPreview { action: Some(candidate), ..HostPreview::empty(bounds) }
+    }
 }
 
 fn pair_preview(
@@ -1967,7 +1992,7 @@ fn pair_preview(
         Ok((original, bounds))
     })();
     match result {
-        Ok((candidate, bounds)) => resized_preview(candidate, bounds, outer),
+        Ok((candidate, bounds)) => resized_preview(layout, candidate, bounds, outer),
         Err(reason) => HostPreview { rejection: Some(reason), ..HostPreview::empty(outer) },
     }
 }

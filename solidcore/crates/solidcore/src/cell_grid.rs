@@ -1,0 +1,929 @@
+//! Cell grids: fills the area of a sketch with cells of one shape (hexagons, squares, triangles,
+//! circles or regular polygons) and returns the cells as closed 2D loops, with the counts and the
+//! open area. This is the pure planning half of the cell grid feature: it knows a field and the
+//! grid's parameters, not a body, a command or a cut.
+//!
+//! # The field
+//! A list of closed loops of lines and arcs in the sketch plane, nested by depth: an outer loop
+//! is a field, a loop inside it is a keep-out (a boss, a screw hole, a label), a loop inside that
+//! is a field again. Curves that are neither lines nor arcs (splines, conics) decide which cells
+//! are kept by their exact distance to a cell ([`exact`]), are followed to within [`FLATTEN_TOL`]
+//! where a cell is trimmed to them, and their loop is never snapped.
+//!
+//! # The lattice
+//! With `s` the cell `size` (its inscribed diameter), `w` the `web` between neighbours and
+//! `p = s + w`, cells of a hexagon grid stack in columns along Y at pitch `p`, the columns
+//! `p * sqrt(3) / 2` apart and offset by `p / 2` from each other. Cell `(i, j)` has its centre at
+//! `anchor + rotate(angle) * (i * h, i * p / 2 + j * p)`, always worked out from the integer
+//! indices. Two fields with the same shape, size, web, angle and anchor therefore get the same
+//! lattice, which is how a grid split over two parts lines up. With `angle` 0 a hexagon is
+//! flat-top; the other shapes follow the same pattern (see [`CellShape`]).
+//!
+//! # Clipping, at a field's edge
+//! The field as drawn is the limit: no mode puts a cell outside it or over a keep-out.
+//! - [`Clip::Whole`]: only cells entirely inside the field.
+//! - [`Clip::Free`]: cells crossing an edge are trimmed to the field exactly (`cell ∩ field`).
+//! - [`Clip::Snap`]: one unbroken lattice, with gaps only around openings, and a partial cell only
+//!   where an edge cuts it along a line between two of its vertices. Each straight edge that runs
+//!   along a lattice-line direction moves onto the nearest lattice line on the solid side (fields
+//!   shrink, keep-outs grow). A loop with an arc, a spline or an off-direction edge keeps its
+//!   drawn shape, and a cell it crosses gets the largest single-chord piece that fits inside the
+//!   field, or stays solid. Triangles, circles and polygons have no chords, so only the
+//!   tilings (hexagon, square, triangle) snap; circles and polygons act as `Whole`.
+//!
+//! Not upstream: SolidCraft's cell grid planner, a kernel primitive because it computes
+//! geometry any client could use (docs/layers.md §1). The field is the kernel's own planar profile
+//! ([`crate::prism::profile::Loop2`]); a curve that is neither a line nor an arc is flattened, as
+//! the kernel has no exact clip of a free-form loop against a cell. No recursion.
+//!
+//! Inputs are hostile: sizes and the field are checked, and a field that would reach more than
+//! [`MAX_CELLS`] lattice cells is refused rather than planned.
+
+#![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing range tests, kept as written
+
+mod exact;
+mod free;
+pub(crate) mod lattice;
+pub(crate) mod region;
+pub(crate) mod snap;
+mod vec;
+
+#[cfg(test)]
+mod tests;
+
+use crate::math::Vec2;
+use crate::prism::profile::{Loop2, Region2, Seg2, MAX_BEZIER_DEGREE};
+
+use free::Cell as FreeCell;
+use lattice::Lattice;
+use region::{
+    poly_area, poly_centroid, rotate, union_tiles, Convex, Loop, Prim, Region, MAX_LOOPS, MAX_PRIMS,
+};
+use vec::{ring_next, Vec2Ext};
+
+pub use lattice::MAX_CELLS;
+
+/// Most sides of a polygon cell.
+pub const MAX_SIDES: u32 = 64;
+/// Most lattice lines a snapped field edge may be moved in.
+pub const MAX_SNAP_INSET: u32 = 1000;
+/// Largest coordinate (mm) of the field or the anchor.
+pub const MAX_COORD: f64 = 1e9;
+/// Smallest cell size and web (mm).
+pub const MIN_SIZE: f64 = 1e-3;
+/// How closely a curve that is neither a line nor an arc is followed (mm).
+pub const FLATTEN_TOL: f64 = 1e-4;
+/// A loop whose ends are farther apart than this (mm) is not closed.
+const OPEN_TOL: f64 = 1e-4;
+
+/// What a cell looks like. Every shape has its inscribed diameter `size`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CellShape {
+    /// Regular hexagons, flat-top at angle 0, tiling the plane with an even web.
+    #[default]
+    Hexagon,
+    /// Axis-aligned squares of side `size`.
+    Square,
+    /// Equilateral triangles pointing up and down alternately; parallel sides of neighbours are
+    /// one web apart. A triangle has no chord that is not a side, so a triangle is only ever cut whole.
+    Triangle,
+    /// Circles of diameter `size` on a [`DotGrid`].
+    Circle,
+    /// Regular polygons with `sides` sides and inscribed diameter `size`, a flat at the bottom,
+    /// on a [`DotGrid`].
+    Polygon,
+}
+
+/// The grid of centres for circles and polygons, which have no grid of their own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum DotGrid {
+    /// Rows of centres offset by half a pitch, as hexagons stack.
+    #[default]
+    Hexagonal,
+    /// Centres on a square grid.
+    Square,
+}
+
+/// What happens to a cell the field's edge crosses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Clip {
+    /// Only cells entirely inside the field.
+    Whole,
+    /// Edges move onto lattice lines; partial cells are cut along the cell's own chords.
+    #[default]
+    Snap,
+    /// Cells are trimmed to the field as drawn.
+    Free,
+}
+
+/// The grid's parameters, all in the sketch's units (mm and radians).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CellGridSpec {
+    /// The cell's shape.
+    pub shape: CellShape,
+    /// Sides of a [`CellShape::Polygon`] cell, 3 to [`MAX_SIDES`].
+    pub sides: u32,
+    /// For circles and polygons.
+    pub dot_grid: DotGrid,
+    /// The cell's inscribed diameter, at least [`MIN_SIZE`].
+    pub size: f64,
+    /// The gap between neighbouring cells, at least [`MIN_SIZE`].
+    pub web: f64,
+    /// The grid's rotation about the anchor, in the sketch plane.
+    pub angle: f64,
+    /// A cell centre sits here (sketch coordinates): this pins the lattice's phase.
+    pub anchor: Vec2,
+    /// What happens to a cell the field's edge crosses.
+    pub clip: Clip,
+    /// What happens to a cell a keep-out's edge crosses (`None`: the same as `clip`).
+    pub keepout_clip: Option<Clip>,
+    /// With [`Clip::Snap`], how many lattice lines further in each straight field edge moves
+    /// after it snaps (0: onto the nearest line). Keep-outs are not moved.
+    pub snap_inset: u32,
+    /// The least clearance from a cell's outline to every edge of the field and its keep-outs, with
+    /// [`Clip::Whole`] (0: a cell may touch an edge). Measured exactly, on the edges' own curves.
+    pub margin: f64,
+}
+
+impl Default for CellGridSpec {
+    fn default() -> Self {
+        CellGridSpec {
+            shape: CellShape::Hexagon,
+            sides: 8,
+            dot_grid: DotGrid::Hexagonal,
+            size: 5.0,
+            web: 1.2,
+            angle: 0.0,
+            anchor: Vec2::ZERO,
+            clip: Clip::Snap,
+            keepout_clip: None,
+            snap_inset: 0,
+            margin: 0.0,
+        }
+    }
+}
+
+impl CellGridSpec {
+    fn validate(&self) -> Result<(), CellGridError> {
+        let bad = |what: &str, v: f64| {
+            CellGridError::Parameter(format!("{what} must be a finite number, not {v}"))
+        };
+        if !self.size.is_finite() {
+            return Err(bad("the cell size", self.size));
+        }
+        if !self.web.is_finite() {
+            return Err(bad("the web", self.web));
+        }
+        if self.size < MIN_SIZE || self.size > MAX_COORD {
+            return Err(CellGridError::Parameter(format!(
+                "the cell size must be from {MIN_SIZE} to {MAX_COORD} mm, not {}",
+                self.size
+            )));
+        }
+        if self.web < MIN_SIZE || self.web > MAX_COORD {
+            return Err(CellGridError::Parameter(format!(
+                "the web must be from {MIN_SIZE} to {MAX_COORD} mm, not {}",
+                self.web
+            )));
+        }
+        if self.snap_inset > MAX_SNAP_INSET {
+            return Err(CellGridError::Parameter(format!(
+                "the snap inset must be from 0 to {MAX_SNAP_INSET} lattice lines, not {}",
+                self.snap_inset
+            )));
+        }
+        if self.snap_inset > 0 && self.clip != Clip::Snap {
+            return Err(CellGridError::Parameter(
+                "a snap inset needs `clip: snap`: it moves the lines the field's edges snap to"
+                    .into(),
+            ));
+        }
+        if !(self.margin.is_finite() && (0.0..=MAX_COORD).contains(&self.margin)) {
+            return Err(CellGridError::Parameter(format!(
+                "the margin must be from 0 to {MAX_COORD} mm, not {}",
+                self.margin
+            )));
+        }
+        if self.margin > 0.0
+            && (self.clip != Clip::Whole || self.keepout_clip.is_some_and(|c| c != Clip::Whole))
+        {
+            return Err(CellGridError::Parameter(
+                "a margin needs `clip: whole`: snapped and trimmed cells meet the edge by design"
+                    .into(),
+            ));
+        }
+        if !self.angle.is_finite() || self.angle.abs() > 1e6 {
+            return Err(CellGridError::Parameter(format!(
+                "the angle must be finite and within a million radians, not {}",
+                self.angle
+            )));
+        }
+        if !(self.anchor.is_finite()
+            && self.anchor.x.abs() <= MAX_COORD
+            && self.anchor.y.abs() <= MAX_COORD)
+        {
+            return Err(CellGridError::Parameter(
+                "the anchor must be a finite point within a billion mm of the origin".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn lattice(&self) -> Result<Lattice, CellGridError> {
+        self.validate()?;
+        Lattice::new(self.shape, self.size, self.web, self.dot_grid, self.sides)
+    }
+}
+
+/// Why a cell grid could not be planned.
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
+pub enum CellGridError {
+    #[error("cell grid: {0}")]
+    /// A parameter is refused.
+    Parameter(String),
+    #[error("cell grid: the field: {0}")]
+    /// The field is refused.
+    Field(String),
+    #[error("cell grid: the field reaches {cells} lattice cells, more than the {max} allowed: use larger cells or a smaller field")]
+    /// The field reaches more lattice cells than allowed.
+    TooManyCells {
+        /// The cells it reaches.
+        cells: u64,
+        /// The most allowed.
+        max: usize,
+    },
+}
+
+/// How a cell's opening came about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CellKind {
+    /// The whole cell.
+    Whole,
+    /// A cell cut exactly along snapped edges: every cut runs along a line between two of its vertices.
+    Exact,
+    /// A cell next to an edge that could not snap, cut to the largest single-chord piece that fits.
+    Fallback,
+    /// A cell trimmed to the field as drawn (`free` clipping).
+    Free,
+}
+
+/// One cell's opening.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GridCell {
+    /// Lattice indices: with the grid's parameters they name the cell.
+    pub i: i64,
+    /// The second lattice index.
+    pub j: i64,
+    /// How the opening came about.
+    pub kind: CellKind,
+    /// The lattice centre of the cell, in the sketch plane (the centre of a partial cell's whole cell).
+    pub center: Vec2,
+    /// The opening's closed loops in the sketch plane: outer loops counter-clockwise, holes
+    /// clockwise. One loop unless a keep-out splits the cell or sits inside it.
+    pub loops: Vec<Loop2>,
+    /// The opening's area (mm²).
+    pub area: f64,
+}
+
+/// The cells to open, and what they add up to.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct CellGridPlan {
+    /// The cells.
+    pub cells: Vec<GridCell>,
+    /// Cells opened whole.
+    pub whole: usize,
+    /// Cells opened partially, fallback cells included.
+    pub partial: usize,
+    /// Partial cells next to an edge that could not snap.
+    pub fallback: usize,
+    /// The total area of the openings (mm²).
+    pub open_area: f64,
+    /// Things worth telling the user: a loop that collapsed when snapped and was kept as drawn,
+    /// curves followed approximately.
+    pub warnings: Vec<String>,
+}
+
+impl GridCell {
+    /// The opening as regions: each counter-clockwise loop an outer loop, each clockwise loop a
+    /// hole of the outer loop that holds it.
+    ///
+    /// # Errors
+    ///
+    /// [`CellGridError::Field`] when a loop has no decided orientation, or a hole lies in no outer
+    /// loop.
+    pub fn regions(&self) -> Result<Vec<Region2>, CellGridError> {
+        let mut regions: Vec<Region2> = Vec::new();
+        let mut holes: Vec<&Loop2> = Vec::new();
+        for lp in &self.loops {
+            let area = lp
+                .signed_area()
+                .map_err(|e| CellGridError::Field(format!("a cell's loop has no area: {e}")))?;
+            match area.sign() {
+                Some(true) => regions.push(Region2 {
+                    outer: lp.clone(),
+                    holes: Vec::new(),
+                }),
+                Some(false) => holes.push(lp),
+                None => {
+                    return Err(CellGridError::Field(
+                        "a cell's loop has no decided orientation".into(),
+                    ))
+                }
+            }
+        }
+        for hole in holes {
+            let probe = hole
+                .segs
+                .first()
+                .map(|s| s.point_at(0.5))
+                .ok_or_else(|| CellGridError::Field("a cell's hole is empty".into()))?;
+            // The innermost outer loop that holds it: an island inside a hole has holes of its
+            // own, and they lie inside the outer loops around it as well.
+            let mut owner: Option<(f64, &mut Region2)> = None;
+            for r in &mut regions {
+                if r.outer.holds(probe) != Some(true) {
+                    continue;
+                }
+                let area = r
+                    .outer
+                    .signed_area()
+                    .map_err(|e| CellGridError::Field(format!("a cell's loop has no area: {e}")))?
+                    .value;
+                if owner.as_ref().is_none_or(|(best, _)| area < *best) {
+                    owner = Some((area, r));
+                }
+            }
+            let (_, owner) = owner
+                .ok_or_else(|| CellGridError::Field("a cell's hole lies in no loop".into()))?;
+            owner.holes.push(hole.clone());
+        }
+        Ok(regions)
+    }
+}
+
+/// The centre, in the sketch plane, of lattice cell `(i, j)` of a grid.
+pub fn cell_center(spec: &CellGridSpec, i: i64, j: i64) -> Result<Vec2, CellGridError> {
+    let lat = spec.lattice()?;
+    Ok(spec.anchor + rotate(lat.center(i, j), spec.angle))
+}
+
+/// The cells of a grid over a field given as closed loops (see the module docs).
+pub fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGridError> {
+    let lat = spec.lattice()?;
+    let mut warnings = Vec::new();
+    let (loops, edges, flattened) = lattice_loops(field, spec, &mut warnings)?;
+    // Without lattice lines there is nothing to snap to.
+    let usable = |c: Clip| {
+        if c == Clip::Snap && !lat.snappable() {
+            Clip::Whole
+        } else {
+            c
+        }
+    };
+    let field_clip = usable(spec.clip);
+    let keepout_clip = usable(spec.keepout_clip.unwrap_or(spec.clip));
+    let any_snap = field_clip == Clip::Snap || keepout_clip == Clip::Snap;
+    let mut region = Region::from_loops(loops, lat.p);
+    if any_snap {
+        let (snapped, notes) = snap::snap_region(
+            &region,
+            &lat,
+            (field_clip == Clip::Snap, keepout_clip == Clip::Snap),
+            spec.snap_inset,
+        );
+        region = snapped;
+        warnings.extend(notes);
+    }
+    // Curves other than lines and arcs, round cells and a margin are decided on the exact edges.
+    let exact =
+        (flattened || lat.round || spec.margin > 0.0).then(|| exact::ExactField::new(edges, lat.p));
+    let mut out = CellGridPlan {
+        warnings,
+        ..CellGridPlan::default()
+    };
+    let Some(bounds) = region.bounds() else {
+        return Ok(out);
+    };
+    for (i, j) in lat.cells_in(&bounds)? {
+        let c = lat.center(i, j);
+        let key = lat.key(i, j);
+        let poly: Vec<Vec2> = lat.outline(key).iter().map(|&q| q + c).collect();
+        let Some(convex) = Convex::new(poly) else {
+            continue;
+        };
+        let mut hits = region.hits(&convex);
+        if let Some(exact) = &exact {
+            // The boundary's own curves and the cell's own outline decide, not the chords and the
+            // polygon round a circle; a sentinel index stands for an edge the chords missed.
+            let outline = if lat.round {
+                exact::CellOutline::Circle { c, r: lat.s / 2.0 }
+            } else {
+                exact::CellOutline::Polygon(&convex)
+            };
+            if !exact.meets(&outline, spec.margin) {
+                // The exact edges are the field as drawn. Snapping moves the straight loops off
+                // them (fields shrink, keep-outs grow), so with `Snap` the hits on the moved
+                // loops must stay: only the other modes may clear a hit the chords made.
+                if !any_snap {
+                    hits.clear();
+                }
+            } else if hits.is_empty() {
+                hits.push(usize::MAX);
+            }
+        }
+        let whole = |lat: &Lattice| -> Vec<Vec<Prim>> {
+            if lat.round {
+                vec![vec![Prim::arc(c, lat.s / 2.0, 0.0, std::f64::consts::TAU)]]
+            } else {
+                vec![points_to_prims(&convex.pts)]
+            }
+        };
+        if hits.is_empty() {
+            if region.contains(c) {
+                push(
+                    &mut out,
+                    spec,
+                    (i, j, c),
+                    CellKind::Whole,
+                    whole(&lat),
+                    lat.cell_area,
+                );
+            }
+            continue;
+        }
+        // A cell is clipped by the mode of the loops it meets; one that meets both kinds gets
+        // the stricter: dropped for whole, else trimmed for free, else cut along the grid.
+        let on_keepout = |h: &usize| region.keepout.get(*h).copied().unwrap_or(false);
+        let clip = match (
+            hits.iter().any(|h| !on_keepout(h)),
+            hits.iter().any(on_keepout),
+        ) {
+            (false, true) => keepout_clip,
+            (_, false) => field_clip,
+            (true, true) => match (field_clip, keepout_clip) {
+                (Clip::Whole, _) | (_, Clip::Whole) => Clip::Whole,
+                (Clip::Free, _) | (_, Clip::Free) => Clip::Free,
+                _ => Clip::Snap,
+            },
+        };
+        match clip {
+            Clip::Whole => {}
+            Clip::Free => {
+                let cell = if lat.round {
+                    FreeCell::Circle { c, r: lat.s / 2.0 }
+                } else {
+                    FreeCell::Polygon(&convex)
+                };
+                match free::clip_cell(&region, &cell) {
+                    Some(pieces) => {
+                        let area: f64 = pieces.iter().map(|p| p.1).sum();
+                        if area > 1e-9 {
+                            push(
+                                &mut out,
+                                spec,
+                                (i, j, c),
+                                CellKind::Free,
+                                pieces.into_iter().map(|p| p.0).collect(),
+                                area,
+                            );
+                        }
+                    }
+                    None => out.warnings.push(format!(
+                        "cell ({i}, {j}) could not be trimmed to the field and was left solid"
+                    )),
+                }
+            }
+            Clip::Snap => {
+                if hits
+                    .iter()
+                    .all(|&h| region.prims.get(h).is_some_and(Prim::is_lattice))
+                {
+                    let inside: Vec<Vec<Vec2>> = lat
+                        .tiles(key)
+                        .iter()
+                        .map(|t| t.iter().map(|&q| q + c).collect::<Vec<_>>())
+                        .filter(|t| region.contains(poly_centroid(t)))
+                        .collect();
+                    if inside.is_empty() {
+                        continue;
+                    }
+                    let area: f64 = inside.iter().map(|t| poly_area(t)).sum();
+                    if area >= lat.cell_area * (1.0 - 1e-9) {
+                        push(
+                            &mut out,
+                            spec,
+                            (i, j, c),
+                            CellKind::Whole,
+                            whole(&lat),
+                            lat.cell_area,
+                        );
+                    } else {
+                        let loops = union_tiles(&inside)
+                            .iter()
+                            .map(|l| points_to_prims(l))
+                            .collect();
+                        push(&mut out, spec, (i, j, c), CellKind::Exact, loops, area);
+                    }
+                    continue;
+                }
+                for (piece, cand) in lat.candidates(key) {
+                    let q: Vec<Vec2> = cand.iter().map(|&p| p + c).collect();
+                    if region.holds(q.clone()) {
+                        if *piece == lattice::PieceKind::Whole {
+                            push(
+                                &mut out,
+                                spec,
+                                (i, j, c),
+                                CellKind::Whole,
+                                whole(&lat),
+                                lat.cell_area,
+                            );
+                        } else {
+                            let area = poly_area(&q);
+                            push(
+                                &mut out,
+                                spec,
+                                (i, j, c),
+                                CellKind::Fallback,
+                                vec![points_to_prims(&q)],
+                                area,
+                            );
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Adds a cell to the plan, its loops carried from the lattice frame to the sketch plane.
+fn push(
+    out: &mut CellGridPlan,
+    spec: &CellGridSpec,
+    (i, j, c): (i64, i64, Vec2),
+    kind: CellKind,
+    loops: Vec<Vec<Prim>>,
+    area: f64,
+) {
+    out.cells.push(GridCell {
+        i,
+        j,
+        kind,
+        center: spec.anchor + rotate(c, spec.angle),
+        loops: loops
+            .into_iter()
+            .filter_map(|l| loop_to_sketch(&l, spec))
+            .collect(),
+        area,
+    });
+    out.open_area += area;
+    if kind == CellKind::Whole {
+        out.whole += 1;
+    } else {
+        out.partial += 1;
+    }
+    if kind == CellKind::Fallback {
+        out.fallback += 1;
+    }
+}
+
+fn points_to_prims(pts: &[Vec2]) -> Vec<Prim> {
+    let n = pts.len();
+    (0..n)
+        .filter_map(|k| Some(Prim::line(*pts.get(k)?, *pts.get(ring_next(k, n))?)))
+        .collect()
+}
+
+/// A lattice-frame loop as a loop of the sketch plane.
+fn loop_to_sketch(prims: &[Prim], spec: &CellGridSpec) -> Option<Loop2> {
+    let segs: Vec<Seg2> = prims
+        .iter()
+        .map(|p| match p.moved(spec.angle, spec.anchor) {
+            Prim::Line { a, b, .. } => Seg2::Line { a, b },
+            Prim::Arc {
+                c, r, a0, sweep, ..
+            } => Seg2::Arc {
+                center: c,
+                radius: r,
+                start: a0,
+                sweep,
+            },
+        })
+        .collect();
+    (!segs.is_empty()).then_some(Loop2 { segs })
+}
+
+/// The field's loops in the lattice frame (the sketch frame moved to the anchor and turned by
+/// the angle), welded at their joints.
+fn lattice_loops(
+    field: &[Loop2],
+    spec: &CellGridSpec,
+    warnings: &mut Vec<String>,
+) -> Result<(Vec<Loop>, Vec<exact::Edge>, bool), CellGridError> {
+    if field.len() > MAX_LOOPS {
+        return Err(CellGridError::Field(format!(
+            "{} loops, more than the {MAX_LOOPS} allowed",
+            field.len()
+        )));
+    }
+    let turn = -spec.angle;
+    let shift = rotate(-spec.anchor, turn);
+    let mut total = 0usize;
+    let mut flattened = false;
+    let mut loops = Vec::new();
+    let mut edges = Vec::new();
+    for (n, lp) in field.iter().enumerate() {
+        let wrong = |what: &str| CellGridError::Field(format!("loop {n}: {what}"));
+        if lp.segs.is_empty() {
+            return Err(wrong("has no segments"));
+        }
+        let mut prims: Vec<Prim> = Vec::new();
+        let mut loop_flattened = false;
+        for seg in &lp.segs {
+            check_seg(seg, MAX_COORD).map_err(wrong)?;
+            edges.push(
+                exact::Edge::of(&exact::moved_seg(seg, turn, shift)).ok_or_else(|| {
+                    wrong("has a curve too complex to measure to within 0.001 mm")
+                })?,
+            );
+            match *seg {
+                Seg2::Line { a, b } => prims.push(Prim::line(a, b)),
+                Seg2::Arc {
+                    center,
+                    radius,
+                    start,
+                    sweep,
+                } => {
+                    prims.push(Prim::arc(center, radius, start, sweep));
+                }
+                _ => {
+                    loop_flattened = true;
+                    flattened = true;
+                    let pts = flatten(seg, FLATTEN_TOL)
+                        .ok_or_else(|| wrong("has a curve too complex to follow"))?;
+                    prims.extend(
+                        pts.windows(2)
+                            .filter_map(|w| Some(Prim::line(*w.first()?, *w.get(1)?))),
+                    );
+                }
+            }
+            if total + prims.len() > MAX_PRIMS {
+                return Err(CellGridError::Field(format!(
+                    "more than {MAX_PRIMS} boundary pieces"
+                )));
+            }
+        }
+        total += prims.len();
+        if !lp.is_closed(OPEN_TOL) {
+            return Err(wrong("is not closed"));
+        }
+        let moved: Vec<Prim> = prims.iter().map(|p| p.moved(turn, shift)).collect();
+        loops.push(
+            Loop::new(moved, Some(loop_flattened))
+                .ok_or_else(|| wrong("has a coordinate that is not finite"))?,
+        );
+    }
+    if flattened {
+        warnings.push(format!("curves other than lines and arcs: cells are kept or dropped by their exact distance to them, a trimmed piece is followed to within {FLATTEN_TOL} mm, and their loop never snaps"));
+    }
+    Ok((loops, edges, flattened))
+}
+
+/// Checks a segment read from outside before anything evaluates it: every stored coordinate
+/// finite and at most `max_abs` in size (a Bézier's unused slots too), a radius in
+/// 1e-12..=`max_abs`, an arc's start within ±1e6 radians and its absolute sweep 1e-12 to one turn
+/// (with 1e-12 radians of allowance), a conic weight in 1e-12..=1e12, a Bézier degree of 1 to
+/// [`MAX_BEZIER_DEGREE`], controls not all at one point, and finite ends.
+fn check_seg(seg: &Seg2, max_abs: f64) -> Result<(), &'static str> {
+    const MIN_POSITIVE: f64 = 1e-12;
+    const MAX_WEIGHT: f64 = 1e12;
+    const MAX_START_ANGLE: f64 = 1e6;
+    let require = |ok: bool, what: &'static str| if ok { Ok(()) } else { Err(what) };
+    let coordinates = |values: &mut dyn Iterator<Item = f64>| {
+        require(
+            {
+                let mut ok = true;
+                for v in values {
+                    ok &= v.is_finite() && v.abs() <= max_abs;
+                }
+                ok
+            },
+            "non-finite or excessive coordinate",
+        )
+    };
+    let controls = |points: &[Vec2]| -> Result<(), &'static str> {
+        coordinates(&mut points.iter().flat_map(|p| [p.x, p.y]))?;
+        let Some((first, rest)) = points.split_first() else {
+            return Err("empty controls");
+        };
+        require(rest.iter().any(|p| p != first), "collapsed curve")
+    };
+    match *seg {
+        Seg2::Line { a, b } => controls(&[a, b])?,
+        Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => {
+            coordinates(&mut [center.x, center.y].into_iter())?;
+            require(
+                radius.is_finite() && (MIN_POSITIVE..=max_abs).contains(&radius),
+                "arc radius",
+            )?;
+            require(
+                start.is_finite() && start.abs() <= MAX_START_ANGLE,
+                "arc start angle",
+            )?;
+            require(
+                sweep.is_finite()
+                    && (MIN_POSITIVE..=std::f64::consts::TAU + 1e-12).contains(&sweep.abs()),
+                "arc sweep",
+            )?;
+        }
+        Seg2::Cubic { p0, p1, p2, p3 } => controls(&[p0, p1, p2, p3])?,
+        Seg2::Conic { a, apex, b, w } => {
+            controls(&[a, apex, b])?;
+            require(
+                w.is_finite() && (MIN_POSITIVE..=MAX_WEIGHT).contains(&w),
+                "conic weight",
+            )?;
+        }
+        Seg2::Bezier { n, ref p } => {
+            require(
+                (1..=MAX_BEZIER_DEGREE).contains(&usize::from(n)),
+                "Bezier degree",
+            )?;
+            coordinates(&mut p.iter().flat_map(|q| [q.x, q.y]))?;
+            controls(p.get(..=usize::from(n)).ok_or("Bezier degree")?)?;
+        }
+    }
+    require(
+        seg.start().is_finite() && seg.end().is_finite(),
+        "non-finite curve endpoint",
+    )
+}
+
+/// The most pieces a curve is cut into.
+const MAX_FLATTEN_PIECES: usize = 4096;
+
+/// A curve that is neither a line nor an arc as a polyline (both end points included), every
+/// chord within about `tol` of the curve and every point of it within `tol` of a chord (both ways,
+/// the points of the polyline lying on the curve). `None` when that takes more than
+/// [`MAX_FLATTEN_PIECES`] pieces: the curve is then too complex to follow within `tol`.
+///
+/// A cubic's or Bézier's piece count comes from the second differences of its controls (chord
+/// error of `n` pieces is at most the largest second difference over `8 n^2`, proved from the
+/// bound on its second derivative). A conic's comes from [`flatten_conic`], a bound that holds for
+/// every positive weight.
+fn flatten(seg: &Seg2, tol: f64) -> Option<Vec<Vec2>> {
+    let tol = tol.max(1e-9);
+    let pieces = |bow: f64| {
+        let n = (bow / (8.0 * tol)).sqrt().ceil();
+        if n.is_finite() && n <= MAX_FLATTEN_PIECES as f64 {
+            Some((n as usize).max(2))
+        } else {
+            None
+        }
+    };
+    let n = match *seg {
+        Seg2::Cubic { p0, p1, p2, p3 } => pieces(
+            (p0 - p1 * 2.0 + p2)
+                .length()
+                .max((p1 - p2 * 2.0 + p3).length())
+                * 6.0,
+        )?,
+        Seg2::Conic { a, apex, b, w } => return flatten_conic(a, apex, b, w, tol),
+        Seg2::Bezier { n, ref p } => {
+            let c = p.get(..=usize::from(n)).unwrap_or(&[]);
+            let d2 = c.windows(3).map(|w| match w {
+                [a, b, c] => (*a - *b * 2.0 + *c).length(),
+                _ => 0.0,
+            });
+            pieces(d2.fold(0.0, f64::max) * f64::from(n) * (f64::from(n) - 1.0))?
+        }
+        Seg2::Line { a, b } => return Some(vec![a, b]),
+        Seg2::Arc { .. } => 8,
+    };
+    Some((0..=n).map(|i| seg.point_at(i as f64 / n as f64)).collect())
+}
+
+/// A conic (the rational quadratic Bézier from `a` to `b` with control `apex`, end weights 1 and
+/// apex weight `w`) as a polyline whose points lie on it, cut by halving.
+///
+/// A piece is again a conic with positive weights `(w0, w1, w2)`, split at `t = 1/2` by rational
+/// de Casteljau: the new controls are convex combinations of the old (`(w0 P0 + w1 P1) / (w0 +
+/// w1)`, and so on), with weights `(w0 + w1) / 2` and `(w0 + 2 w1 + w2) / 4`, so no weight
+/// from 1e-12 to 1e12 loses precision, and a large weight's shoulder is found within a few
+/// levels.
+///
+/// Exact arithmetic first. With every weight positive a piece lies in its control triangle `a,
+/// apex, b`, so every point of the piece is within `h`, the distance of the apex from the segment
+/// `ab`, of the chord `ab`; and the piece, a curve from `a` to `b` inside the triangle, crosses
+/// the perpendicular to the chord at each of its points within `h` of it, so every chord point is
+/// within `h` of the piece. A piece is taken as a chord when `h <= tol - 2 * slack`.
+///
+/// Rounding (`u = 2^-53`, `gamma_k = k u / (1 - k u)`, `M` the largest coordinate of the three
+/// controls, so every control point of every piece is in the box `[-M, M]^2` and any two are at
+/// most `2 sqrt(2) M` apart); the computed pieces are those of the conic at most
+/// `D = 64 * 16 u M` from the true one, pointwise in the parameter, and `slack` covers that:
+/// - (a) one level's points. `mix` sums at most three weights (two additions, so `s` has relative
+///   error `gamma_2`), divides (`gamma_3` on each coefficient), multiplies (`gamma_4`) and sums
+///   at most three terms (two more additions, `gamma_2` of the sum of their sizes); the
+///   coefficients add to 1 and the points are in the box, so a child's point is off the exact
+///   weighted mean of its computed parent by at most `(gamma_4 + gamma_2) M <= 8 u M`; a
+///   convex combination of points each so far off is that far off.
+/// - (b) one level's weights. `left` and `right` are one addition (relative error `u`), `mid` two
+///   (`gamma_2`); a relative error `theta <= 2.01 u` in each weight changes a point's
+///   coefficients `lambda_i` to at most `lambda_i (1 + theta) / (1 - theta)` times themselves, so
+///   `sum |d lambda_i| <= 2 theta / (1 - theta) <= 4.1 u`, and as they still add to 1 the point
+///   moves at most half of that times `2 sqrt(2) M`: `<= 6 u M`. With (a) a computed child is
+///   within `d1 = 16 u M` (14 u M, and room for the product of the two) of the exact child of
+///   its computed parent, at every parameter.
+/// - Over at most `MAX_LEVELS = 64` levels the exact child of a conic within `e` of another is
+///   within `e` of the same child of it (the same parameter), so the computed piece is within
+///   `D = 64 d1 = 1024 u M` of the true curve, at the same parameter; its ends too.
+/// - (c) the height. `to_segment` takes `f = o - p` and `d = e - o` from the nearer end (each
+///   coordinate one subtraction, `u`), `|d|^2` (`gamma_3`), and, when the foot is inside, the
+///   perpendicular `|f.x d.y - f.y d.x| / |d|`: the two products and their difference are within
+///   `gamma_4 (|f.x d.y| + |f.y d.x|) <= sqrt(2) gamma_4 |f| |d|`, and the division and root add
+///   `gamma_2`'s worth of `h`, so the error is at most `sqrt(2) gamma_4 |f| + 4 u h <= 5.7 u *
+///   2.83 M + 4 u * 2.83 M <= 28 u M`; at an end it is the length of `f` (`gamma_5 |f| <= 15 u
+///   M`). Taken as `E = 32 u M`. When `|d|^2 < MIN_POSITIVE / EPSILON` (below that, `gamma_3`
+///   no longer bounds its rounding, for it may underflow) `h` is instead the smaller of the
+///   distances of the apex from the two ends, never less than its distance from the segment;
+///   each is a `hypot` of one-subtraction differences (no underflow, within `gamma_5 |f|`), so
+///   the same `E` covers it.
+/// - (d) the decision. Accepted, the computed `h_c <= tol - 2 slack`, so the computed triangle's
+///   true height is at most `tol - 2 slack + E`. The computed piece lies in that triangle, so is
+///   within that of its chord, and the true curve within `D` more of it (and the other way for
+///   a chord point): within `tol - 2 slack + E + D`, which is at most `tol` when `slack >= (E +
+///   D) / 2 = 528 u M = 264 EPSILON M`. `slack` is `288 EPSILON M`, the whole rounded up.
+///
+/// A weight not positive and finite, more than 64 levels, a `slack` over `tol / 4`, or more than
+/// [`MAX_FLATTEN_PIECES`] chords is `None`.
+fn flatten_conic(a: Vec2, apex: Vec2, b: Vec2, w: f64, tol: f64) -> Option<Vec<Vec2>> {
+    const MAX_LEVELS: usize = 64;
+    if !(w.is_finite() && w > 0.0) {
+        return None;
+    }
+    let m = [a, apex, b]
+        .iter()
+        .fold(0.0_f64, |m, p| m.max(p.x.abs()).max(p.y.abs()));
+    let slack = 288.0 * f64::EPSILON * m;
+    let limit = tol - 2.0 * slack;
+    if !(m.is_finite() && limit > 0.5 * tol) {
+        return None;
+    }
+    let mix = |ws: &[f64], ps: &[Vec2]| {
+        let s: f64 = ws.iter().sum();
+        ws.iter()
+            .zip(ps)
+            .fold(Vec2::ZERO, |acc, (&k, &p)| acc + p * (k / s))
+    };
+    let mut out = vec![a];
+    let mut stack = vec![([a, apex, b], [1.0, w, 1.0], 0usize)];
+    let mut visits = 0usize;
+    while let Some((p, k, level)) = stack.pop() {
+        visits += 1;
+        if visits > 4 * MAX_FLATTEN_PIECES {
+            return None;
+        }
+        let [p0, p1, p2] = p;
+        let d = p2 - p0;
+        let h = if d.x * d.x + d.y * d.y < f64::MIN_POSITIVE / f64::EPSILON {
+            // The chord's squared length is too small to be a normal number, so `to_segment`'s
+            // division is not within the bound of (c): the nearer end's distance stands in.
+            (p1 - p0)
+                .x
+                .hypot((p1 - p0).y)
+                .min((p1 - p2).x.hypot((p1 - p2).y))
+        } else {
+            exact::to_segment(p1, p0, p2)
+        };
+        if !h.is_finite() {
+            return None;
+        }
+        if h <= limit {
+            out.push(p2);
+            if out.len() > MAX_FLATTEN_PIECES {
+                return None;
+            }
+            continue;
+        }
+        if level >= MAX_LEVELS {
+            return None;
+        }
+        let [w0, w1, w2] = k;
+        let q1 = mix(&[w0, w1], &[p0, p1]);
+        let q2 = mix(&[w0, 2.0 * w1, w2], &[p0, p1, p2]);
+        let r1 = mix(&[w1, w2], &[p1, p2]);
+        let left = (w0 + w1) / 2.0;
+        let mid = (w0 + 2.0 * w1 + w2) / 4.0;
+        stack.push(([q2, r1, p2], [mid, (w1 + w2) / 2.0, w2], level + 1));
+        stack.push(([p0, q1, q2], [w0, left, mid], level + 1));
+    }
+    Some(out)
+}

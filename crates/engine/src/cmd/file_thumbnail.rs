@@ -43,7 +43,8 @@ fn transparent(renderer: &crate::capture::Renderer, scene: &mut Scene, camera: &
 /// Saved (`exported` is None): the shown bodies' warm display meshes only. Exported: the bodies the
 /// file holds (none named, every body), meshed here when cold, as a headless export has drawn nothing.
 fn scene(s: &Session, zoom: f64, exported: Option<&[String]>) -> Option<(Scene, Camera)> {
-    if s.active_sketch.is_some() || !s.pending_moves.is_empty() || s.model.results.iter().any(|r| r.error.is_some()) {
+    // Nor while a joint drag shows a frame: the world placed for it is not the design's.
+    if s.active_sketch.is_some() || !s.pending_moves.is_empty() || !s.drag_moves().is_empty() || s.model.results.iter().any(|r| r.error.is_some()) {
         return None;
     }
     let world = s.cached_world_state()?;
@@ -71,7 +72,7 @@ fn scene(s: &Session, zoom: f64, exported: Option<&[String]>) -> Option<(Scene, 
         let face_colors =
             s.doc.face_colors(body).into_iter().map(|(face, look)| (face as u32, Rgb(look.color[0], look.color[1], look.color[2]))).collect();
         let opacity = s.doc.model_body_opacity(body) as f32;
-        scene.meshes.push(SceneMesh { mesh, color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default() });
+        scene.meshes.push(SceneMesh { mesh, color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default(), values: None });
     }
     if bounds.is_empty() {
         return None;

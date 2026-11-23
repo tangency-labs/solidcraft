@@ -73,8 +73,13 @@ pub fn check_arguments(defs: &[Value], name: &str, args: &Value) -> Result<(), S
         }
     }
     let props = schema["properties"].as_object();
+    let additional = schema.get("additionalProperties").and_then(Value::as_bool).unwrap_or(false);
     for (k, v) in a {
         let Some(p) = props.and_then(|p| p.get(k)) else {
+            // Open schemas delegate unknown keys to the tool, such as desktop preferences.
+            if additional {
+                continue;
+            }
             let valid: Vec<&str> = props.map(|p| p.keys().map(String::as_str).collect()).unwrap_or_default();
             let valid = if valid.is_empty() { "none".to_string() } else { valid.join(", ") };
             let k: String = k.chars().take(64).collect();
@@ -83,13 +88,19 @@ pub fn check_arguments(defs: &[Value], name: &str, args: &Value) -> Result<(), S
         if v.is_null() {
             continue;
         }
-        let ok = match &p["type"] {
+        // An argument of several types lists them as `anyOf` (Gemini refuses a list of types).
+        let types: Vec<&Value> = match p["anyOf"].as_array() {
+            Some(alts) => alts.iter().map(|alt| &alt["type"]).collect(),
+            None => vec![&p["type"]],
+        };
+        let ok = types.iter().any(|t| match t {
             Value::String(t) => type_matches(t, v),
             Value::Array(ts) => ts.iter().filter_map(Value::as_str).any(|t| type_matches(t, v)),
             _ => true,
-        };
+        });
         if !ok {
-            return Err(format!("{name}: argument `{k}` must be of type {}", p["type"]));
+            let expected = if types.len() == 1 { types[0].clone() } else { Value::Array(types.into_iter().cloned().collect()) };
+            return Err(format!("{name}: argument `{k}` must be of type {expected}"));
         }
         if let Some(allowed) = p["enum"].as_array()
             && !allowed.contains(v)

@@ -192,16 +192,17 @@ fn null(reason: &'static str) -> SolidError {
 impl Brep {
     /// `GetThisModelSizeEstimate`: the B-rep's model size estimate; with
     /// `chase_defaults` (upstream default `TRUE`) a stored [`tol::USE_DEFAULT`] is
-    /// replaced by the context's estimate (`m_cpContext->GetThisModelSizeEstimate()`,
-    /// the kernel context).
+    /// replaced by the kernel's configured default, the context's estimate
+    /// (`m_cpContext->GetThisModelSizeEstimate()`, the kernel context). No operation
+    /// on a B-rep writes that default: it is what the caller configured.
     #[must_use]
     pub fn this_model_size_estimate(&self, k: &Kernel, chase_defaults: bool) -> f64 {
         if !chase_defaults {
-            self.model_size_estimate
-        } else if self.model_size_estimate == tol::USE_DEFAULT {
+            *self.model_size_estimate
+        } else if *self.model_size_estimate == tol::USE_DEFAULT {
             k.context.this_model_size_estimate(k)
         } else {
-            self.model_size_estimate
+            *self.model_size_estimate
         }
     }
 
@@ -210,8 +211,8 @@ impl Brep {
     #[must_use]
     pub fn this_large_small_size_ratio(&self, k: &Kernel, chase_defaults: bool) -> f64 {
         if !chase_defaults {
-            self.large_small_size_ratio
-        } else if self.large_small_size_ratio == tol::USE_DEFAULT {
+            *self.large_small_size_ratio
+        } else if *self.large_small_size_ratio == tol::USE_DEFAULT {
             // SmContext::GetThisLargeSmallSizeRatio
             let ratio = k.context.stored_large_small_size_ratio();
             if ratio == tol::USE_DEFAULT {
@@ -220,31 +221,26 @@ impl Brep {
                 ratio
             }
         } else {
-            self.large_small_size_ratio
+            *self.large_small_size_ratio
         }
     }
 
     /// `SetThisModelSizeEstimate` (upstream default `SM_USE_DEFAULT`): stores the
-    /// estimate, passes it to the B-rep's context (the kernel context) and sets the
-    /// B-rep tolerance to [`tol::size_estimate_to_zone_tol_3d`] of it; returns that
-    /// tolerance.
-    pub fn set_this_model_size_estimate(
-        &mut self,
-        k: &mut Kernel,
-        model_size_estimate: f64,
-    ) -> f64 {
-        self.model_size_estimate = model_size_estimate;
-        k.context.set_this_model_size_estimate(model_size_estimate);
-        self.tolerance = tol::size_estimate_to_zone_tol_3d(self.model_size_estimate);
-        self.tolerance
+    /// estimate and sets the B-rep tolerance to [`tol::size_estimate_to_zone_tol_3d`]
+    /// of it; returns that tolerance. The estimate is this B-rep's alone: the kernel
+    /// context keeps what its caller configured (upstream passes the estimate on to
+    /// the B-rep's context, which there is one model's; the kernel context here is
+    /// every B-rep's, so a write to it would change what the other B-reps answer).
+    pub fn set_this_model_size_estimate(&mut self, model_size_estimate: f64) -> f64 {
+        *self.model_size_estimate = model_size_estimate;
+        *self.tolerance = tol::size_estimate_to_zone_tol_3d(*self.model_size_estimate);
+        *self.tolerance
     }
 
     /// `SetThisLargeSmallSizeRatio` (upstream default `SM_USE_DEFAULT`): stores the
-    /// ratio and passes it to the B-rep's context (the kernel context).
-    pub fn set_this_large_small_size_ratio(&mut self, k: &mut Kernel, large_small_size_ratio: f64) {
-        self.large_small_size_ratio = large_small_size_ratio;
-        k.context
-            .set_this_large_small_size_ratio(large_small_size_ratio);
+    /// ratio, on this B-rep alone (see [`Brep::set_this_model_size_estimate`]).
+    pub fn set_this_large_small_size_ratio(&mut self, large_small_size_ratio: f64) {
+        *self.large_small_size_ratio = large_small_size_ratio;
     }
 
     /// `SetInfiniteRegion`: makes `region` the infinite region (the raw member write;
@@ -279,7 +275,7 @@ impl Brep {
     /// [`SolidError::InvalidInput`] otherwise.
     pub fn set_face_list(&mut self, order: Vec<FaceId>) -> Result<()> {
         check_order(&order, self.faces.ids())?;
-        self.face_list = order;
+        *self.face_list = order;
         Ok(())
     }
 
@@ -291,7 +287,7 @@ impl Brep {
     /// [`SolidError::InvalidInput`] otherwise.
     pub fn set_edge_list(&mut self, order: Vec<EdgeId>) -> Result<()> {
         check_order(&order, self.edges.ids())?;
-        self.edge_list = order;
+        *self.edge_list = order;
         Ok(())
     }
 
@@ -303,7 +299,7 @@ impl Brep {
     /// [`SolidError::InvalidInput`] otherwise.
     pub fn set_vertex_list(&mut self, order: Vec<VertexId>) -> Result<()> {
         check_order(&order, self.vertices.ids())?;
-        self.vertex_list = order;
+        *self.vertex_list = order;
         Ok(())
     }
 
@@ -311,7 +307,7 @@ impl Brep {
     /// the first region record.
     #[must_use]
     pub const fn region_list_head(&self) -> Option<RegionId> {
-        self.region_list_head
+        *self.region_list_head.inner()
     }
 
     /// Sets the head of the B-rep's region list (the friend write `m_pList = ..`). The
@@ -321,8 +317,8 @@ impl Brep {
         if let Some(pos) = region.and_then(|r| order.iter().position(|&x| x == r)) {
             order.rotate_left(pos);
         }
-        self.region_order = order;
-        self.region_list_head = region;
+        *self.region_order = order;
+        *self.region_list_head = region;
     }
 
     /// The regions on the list in link order from `Brep::region_order`'s start
@@ -352,7 +348,7 @@ impl Brep {
         {
             order.rotate_left(pos);
         }
-        self.region_order = order;
+        *self.region_order = order;
     }
 
     /// `AddDeletedSurface`: keeps a surface removed from the B-rep until the operation
@@ -817,18 +813,17 @@ pub fn is_degenerate(k: &Kernel, b: &Brep, tol_3d: f64) -> Result<bool> {
     }
 
     // If Brep might be degenerate - Do expensive full check (CalculateBoundingBox's
-    // status is ignored: a failure leaves the default box)
+    // status is ignored upstream: a failure leaves the default box)
     // CalculateBoundingBox(sBBox): header defaults bApprox = FALSE, bTight = FALSE,
     // bExpandByZoneTol3d = TRUE
-    let bbox = match ignored(qbrep::calculate_bounding_box(
+    let Some(bbox) = ignored(qbrep::calculate_bounding_box(
         k,
         b,
         BoundingBoxOptions::default(),
-    ))? {
-        Some(bbox) => bbox,
+    ))?
+    else {
         // fork 60a8a51: without a box there is no evidence the B-rep is a point
-        None if k.fixes.brep_edit_statuses_pass_on => return Ok(false),
-        None => crate::geom::extent3d::Extent3d::default(),
+        return Ok(false);
     };
     Ok(bbox.is_point_sized(tol_3d))
 }
@@ -890,15 +885,12 @@ pub fn reset_infinite_region(
     // manage IsVoid region bits
     match void_setting {
         SetRegionVoidType::NestedSolid => {
-            // status ignored upstream; the port's null-dereference marker still propagates
+            // status ignored upstream; passed on here (WR-658)
             match set_region_is_void_flags_for_nested_solids(k, b) {
                 Err(e @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
                     return Err(e)
                 }
-                r => ignore_status(crate::error::passed_on(
-                    r,
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?,
+                r => r?,
             }
         }
         SetRegionVoidType::InfiniteRegionOnly => {
@@ -972,12 +964,7 @@ pub fn set_region_is_void_flags_for_nested_solids(k: &mut Kernel, b: &mut Brep) 
 
         // the shells mated to this one (increments an unused mark value)
         // (status ignored upstream: a failed call is read as no mated shells)
-        for mated in ignored(crate::error::passed_on(
-            shell_mated_shells(k, b, shell),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .unwrap_or_default()
-        {
+        for mated in shell_mated_shells(k, b, shell)? {
             let nested = shell_region(b, mated)?.ok_or_else(|| {
                 null("SetRegionIsVoidFlagsForNestedSolids: mated shell without region")
             })?;
@@ -1481,11 +1468,7 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
         .curve
         .as_ref()
         .ok_or_else(|| null("sm_CheckUVTrimCurve: edge without curve"))?;
-    let edge_3d_start = ignored(crate::error::passed_on(
-        curve.evaluate_point(k, edge_ivl.evaluate(0.0)),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?
-    .unwrap_or(Point3::UNDEF);
+    let edge_3d_start = curve.evaluate_point(k, edge_ivl.evaluate(0.0))?;
 
     let mate_vertex = |b: &Brep| -> Result<VertexId> {
         start_vertex(
@@ -1504,11 +1487,7 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
         eu1::face(b, eu)?.ok_or_else(|| null("sm_CheckUVTrimCurve: edge use without face"))?;
     let surf = face2::surface(b, face)?
         .ok_or_else(|| null("sm_CheckUVTrimCurve: face without surface"))?;
-    let face_3d_start = ignored(crate::error::passed_on(
-        surf.evaluate_point(k, Point2::new(start_uv.x, start_uv.y)),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?
-    .unwrap_or(Point3::UNDEF);
+    let face_3d_start = surf.evaluate_point(k, Point2::new(start_uv.x, start_uv.y))?;
 
     let face_tol = face2::tolerance(b, face)?;
     let edge_tol = edge::tolerance(b, e)?;
@@ -1530,22 +1509,14 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
     }
 
     // Now the other end:
-    let edge_3d_end = ignored(crate::error::passed_on(
-        curve.evaluate_point(k, edge_ivl.evaluate(1.0)),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?
-    .unwrap_or(Point3::UNDEF);
+    let edge_3d_end = curve.evaluate_point(k, edge_ivl.evaluate(1.0))?;
     let end_vtx = if reverse {
         start_vertex(b, eu)?
     } else {
         mate_vertex(b)?
     };
     let vrtx_3d_end = vertex::point(b, end_vtx)?;
-    let face_3d_end = ignored(crate::error::passed_on(
-        surf.evaluate_point(k, Point2::new(end_uv.x, end_uv.y)),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?
-    .unwrap_or(Point3::UNDEF);
+    let face_3d_end = surf.evaluate_point(k, Point2::new(end_uv.x, end_uv.y))?;
     vrtx_tol = vertex::tolerance(b, end_vtx)?; // have to update this to End vtx.
 
     let dist_face_vrtx_end = face_3d_end.distance(vrtx_3d_end);
@@ -1703,52 +1674,6 @@ fn evaluate_binormal(
         use_3d_only,
         &BinormalOptions::default(),
     )
-}
-
-/// `EvaluateBinormal(dParameter, TRUE, rPos, rBinormal, &rTangent, &rNormal)` with its
-/// status ignored, as `CreateEdgeEdgeBlend` calls it: the outputs upstream goes on with.
-/// The out-params start as `SM_UNDEF_DOUBLE` (`SmVector3d`'s default). `EvaluateBinormal`
-/// writes them all only on success; its one status before its "Init outputs" step (not
-/// a loop edge use) leaves them undefined, every later one leaves the point, tangent and
-/// normal zeroed and the binormal undefined. `Err` for [`SolidError::Unported`] and for
-/// `topology.edgeuse_p3`'s own [`SolidError::InvalidInput`] (an upstream null dereference).
-fn evaluate_binormal_status_ignored(
-    k: &Kernel,
-    b: &mut Brep,
-    eu: EdgeuseId,
-    parameter: f64,
-) -> Result<BinormalEval> {
-    let undefined = BinormalEval {
-        point: Vec3::UNDEF,
-        binormal: Vec3::UNDEF,
-        tangent: Vec3::UNDEF,
-        face_normal: Vec3::UNDEF,
-        uv: Point2::UNDEF,
-    };
-    // fork 60a8a51 passes the status on (`SER`)
-    if k.fixes.brep_edit_statuses_pass_on {
-        return evaluate_binormal(k, b, eu, parameter, true);
-    }
-    if !eu1::is_loop_edgeuse(b, eu)? {
-        return Ok(undefined); // SER(SM_ERR_INVALID_INPUT) before the outputs are set
-    }
-    match evaluate_binormal(k, b, eu, parameter, true) {
-        Ok(eval) => Ok(eval),
-        Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(
-            e @ SolidError::InvalidInput {
-                operation: "topology::edgeuse::p3",
-                ..
-            },
-        ) => Err(e),
-        // a status after "Init outputs": point, tangent and normal set to zero
-        Err(_) => Ok(BinormalEval {
-            point: Vec3::new(0.0, 0.0, 0.0),
-            tangent: Vec3::new(0.0, 0.0, 0.0),
-            face_normal: Vec3::new(0.0, 0.0, 0.0),
-            ..undefined
-        }),
-    }
 }
 
 // ---- curve side (sm_FindSideOfCurve) ----------------------------------------------------
@@ -2202,8 +2127,9 @@ pub fn update_vertex_edge_intervals(
                         None,
                     ))?;
                     // (fork 60a8a51 passes this status on: `SER`)
-                    let status = get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
-                    crate::error::status_passed_on(status, k.fixes.brep_edit_statuses_pass_on)?;
+                    if let Some(e) = get_or_create_uv_trim_curve(k, b, eu, false, false, true)? {
+                        return Err(e);
+                    }
                 }
             }
         }
@@ -2224,9 +2150,10 @@ pub fn update_vertex_edge_intervals(
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] for a seam without exactly four edge uses or missing
-/// trim curves; those of UV trim creation, endpoint evaluations, the singularity
-/// test and the trim curve swap. No trims are swapped after a failed prerequisite.
+/// [`SolidError::InvalidInput`] when the seam's own edge uses have no UV trim curve;
+/// those of the singularity test and the trim curve swap. As the fork does (60a8a51),
+/// a seam without exactly four edge uses, a neighbour whose trim curve cannot be
+/// created, or an end point that cannot be evaluated swaps nothing (`Ok(false)`).
 pub fn redistribute_seam_uv_trim_curves(
     k: &Kernel,
     b: &mut Brep,
@@ -2243,15 +2170,8 @@ pub fn redistribute_seam_uv_trim_curves(
     let eus = b.edge(new_edge)?.edgeuses.clone();
     // fork 60a8a51: without its four edge uses, their trim curves and their end points
     // there is nothing to compare, so nothing is swapped.
-    let soft = k.fixes.brep_edit_statuses_pass_on;
-    if soft && eus.len() != 4 {
-        return Ok(false);
-    }
-    // SM_ASSERT upstream; this algorithm handles exactly two mated pairs (#520).
     if eus.len() != 4 {
-        return Err(null(
-            "sm_RedistributeSeamUVTrimCurves: expected 4 edge uses",
-        ));
+        return Ok(false);
     }
     // sEdgeuse[0] = Starts At StartVertex OneFace, sEdgeuse[3] = Starts At EndVertex OtherFace
     let this_eu = *eus
@@ -2272,18 +2192,13 @@ pub fn redistribute_seam_uv_trim_curves(
         }
     }
 
-    // Both the outer Result and the retained projection status must succeed.
-    // Upstream checks these statuses and curves only with SM_ASSERT (#520).
+    // Upstream checks these statuses and curves only with SM_ASSERT (#520); a neighbour
+    // without its trim curve swaps nothing (fork 60a8a51).
     for eu in [prev_this, prev_other] {
         let fetched = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
-        if soft && (fetched.status.is_err() || eu1::uv_trim_curve(b, eu)?.0.is_none()) {
+        // (a missing dependency or a cancellation still propagates)
+        if ignored(fetched.status)?.is_none() || eu1::uv_trim_curve(b, eu)?.0.is_none() {
             return Ok(false);
-        }
-        fetched.status?;
-        if eu1::uv_trim_curve(b, eu)?.0.is_none() {
-            return Err(null(
-                "sm_RedistributeSeamUVTrimCurves: neighbor without UV trim curve",
-            ));
         }
     }
 
@@ -2299,15 +2214,10 @@ pub fn redistribute_seam_uv_trim_curves(
         (prev_this, 1.0),
         (prev_other, 1.0),
     ]) {
-        let r = normalized_evaluate(k, b, eu, t, true, true);
-        *slot = if soft {
-            match ignored(r)? {
-                Some(p) => p,
-                None => return Ok(false),
-            }
-        } else {
-            r?
-        };
+        match ignored(normalized_evaluate(k, b, eu, t, true, true))? {
+            Some(p) => *slot = p,
+            None => return Ok(false),
+        }
     }
     let [this_point_uv, other_point_uv, prev_this_point_uv, prev_other_point_uv] = end_uvs;
 
@@ -2824,15 +2734,9 @@ pub fn make_vertex_split_uv_trim_curve(
     //    sIvl13D, sIvl23D = 3DCurve     [start,SplitParam],   [SplitParam,   end]
     let mut ivl2 = ivl1;
     // (the SetMinMax statuses are not checked upstream)
-    ignored(crate::error::passed_on(
-        ivl1.set_min_max(ivl1.min(), edge_split_parameter_uv),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    ivl1.set_min_max(ivl1.min(), edge_split_parameter_uv)?;
     let ivl1_3d = Extent1d::from_min_max(ivl1.min(), edge_split_parameter);
-    ignored(crate::error::passed_on(
-        ivl2.set_min_max(edge_split_parameter_uv, ivl2.max()),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    ivl2.set_min_max(edge_split_parameter_uv, ivl2.max())?;
     let ivl2_3d = Extent1d::from_min_max(edge_split_parameter, ivl2.max());
 
     // trim and bind UVTrimCurves to Edgeuses (the attached curve is edited in place)
@@ -3446,20 +3350,8 @@ pub fn create_edge_edge_blend(
                 // (evaluation statuses are not checked upstream: a failure leaves the
                 // sample unset; undefined coordinates here)
                 let t = ii as f64 / (num_loc - 1) as f64;
-                rail1_pos.push(
-                    ignored(crate::error::passed_on(
-                        rail1.evaluate_point(ivl1.evaluate(t)),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?
-                    .unwrap_or(Point3::UNDEF),
-                );
-                rail2_pos.push(
-                    ignored(crate::error::passed_on(
-                        rail2.evaluate_point(ivl2.evaluate(t)),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?
-                    .unwrap_or(Point3::UNDEF),
-                );
+                rail1_pos.push(rail1.evaluate_point(ivl1.evaluate(t))?);
+                rail2_pos.push(rail2.evaluate_point(ivl2.evaluate(t))?);
             }
 
             // Check under which orientation the distance between rail curves is less
@@ -3490,19 +3382,19 @@ pub fn create_edge_edge_blend(
     }
 
     // set the bIntoFace values for curve/Surface pairs
-    // (both statuses ignored upstream: a failure leaves defined UNDEF / zero outputs)
+    // (both statuses ignored upstream; fork 60a8a51 passes them on: `SER`)
     let BinormalEval {
         binormal: edge1_binormal,
         tangent: mut edge1_tangent,
         face_normal: mut face1_normal,
         ..
-    } = evaluate_binormal_status_ignored(k, b_1, eu_1, ivl1.evaluate(0.5))?;
+    } = evaluate_binormal(k, b_1, eu_1, ivl1.evaluate(0.5), true)?;
     let BinormalEval {
         binormal: edge2_binormal,
         tangent: mut edge2_tangent,
         face_normal: mut face2_normal,
         ..
-    } = evaluate_binormal_status_ignored(k, b2_mut!(), eu_2, ivl2.evaluate(0.5))?;
+    } = evaluate_binormal(k, b2_mut!(), eu_2, ivl2.evaluate(0.5), true)?;
     if eu1::orientation(b_1, eu_1)? == OrientType::Opposite {
         edge1_tangent = -edge1_tangent;
     }
@@ -3530,11 +3422,7 @@ pub fn create_edge_edge_blend(
     // make sure two curve intervals run in the same direction and share a common parameterization
     if !same_dir_curves {
         // (status not checked upstream; the interval is left as is on failure)
-        ivl2 = ignored(crate::error::passed_on(
-            rail2.reverse_parameterization(&ivl2),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .unwrap_or(ivl2);
+        ivl2 = rail2.reverse_parameterization(&ivl2)?;
         in_from_the_left = !in_from_the_left;
     }
 
@@ -3548,14 +3436,8 @@ pub fn create_edge_edge_blend(
             let nat = rail2.natural_interval();
             let mut new_ivl = nat;
             // (neither status is checked upstream)
-            ignored(crate::error::passed_on(
-                new_ivl.set_min_max(nat.min() * scale + offset, nat.max() * scale + offset),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
-            ignored(crate::error::passed_on(
-                rail2.edit_parameterization(&new_ivl),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            new_ivl.set_min_max(nat.min() * scale + offset, nat.max() * scale + offset)?;
+            rail2.edit_parameterization(&new_ivl)?;
             *ivl2 = ivl1;
         }
         Ok(())
@@ -3578,11 +3460,7 @@ pub fn create_edge_edge_blend(
     // make sure two curve intervals run in the same direction and share a common
     // parameterization (upstream repeats both steps here)
     if !same_dir_curves {
-        ivl2 = ignored(crate::error::passed_on(
-            rail2.reverse_parameterization(&ivl2),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .unwrap_or(ivl2);
+        ivl2 = rail2.reverse_parameterization(&ivl2)?;
     }
     rescale(&mut rail2, &mut ivl2)?;
 
@@ -3853,20 +3731,17 @@ pub fn heal_brep(
 ) -> Result<()> {
     let mut heal_data = HealData::<HealLoopHandle>::default();
     // pass the call along (status ignored upstream)
-    ignored(crate::error::passed_on(
-        heal_data.heal_brep(
-            k,
-            Some(b),
-            healer_op,
-            HealBrepTargets {
-                vertices: opt_vertices,
-                edges: opt_edges,
-                faces: opt_faces,
-            },
-            make_uv_trim_curves,
-        ),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    heal_data.heal_brep(
+        k,
+        Some(b),
+        healer_op,
+        HealBrepTargets {
+            vertices: opt_vertices,
+            edges: opt_edges,
+            faces: opt_faces,
+        },
+        make_uv_trim_curves,
+    )?;
     Ok(())
 }
 
@@ -3949,7 +3824,9 @@ mod tests {
     #[test]
     fn brep_intersect_mut_empty_controls_and_point_options() {
         let mut k = Kernel::default();
-        // Native also returns no singular point for this exact tangency.
+        // At z = 0 the paraboloid z = (u - 1/2)^2 + (v - 1/2)^2 touches the plane at its
+        // apex (1/2, 1/2, 0) only, with both normals along z: no curve, one touching point
+        // (WR-74's contact point search). At z = -1/8 they do not meet.
         for z in [0.0, -0.125] {
             for reverse in [false, true] {
                 for want_points in [false, true] {
@@ -3962,7 +3839,18 @@ mod tests {
                     let (curves, points) =
                         brep_intersect_mut(&k, first, second, 1e-6, 2.0, want_points).unwrap();
                     assert!(curves.is_empty());
-                    assert_eq!(points, want_points.then(Vec::new));
+                    let Some(points) = points else {
+                        assert!(!want_points);
+                        continue;
+                    };
+                    assert!(want_points);
+                    if z == 0.0 {
+                        assert_eq!(points.len(), 1, "{points:?}");
+                        let apex = Point3::new(0.5, 0.5, 0.0);
+                        assert!((points[0] - apex).length() <= 1e-12, "{points:?}");
+                    } else {
+                        assert!(points.is_empty(), "{points:?}");
+                    }
                 }
             }
         }
@@ -4139,8 +4027,8 @@ mod tests {
                 fail_status: SM_ERR_INVALID_INPUT,
                 ..DropCurveFail::default()
             }));
-            assert!(redistribute_fixture(&mut b, edge)
-                .is_err_and(|e| e.upstream_status() == Some(SM_ERR_INVALID_INPUT)));
+            // a neighbour whose trim curve cannot be created swaps nothing (fork 60a8a51)
+            assert!(!redistribute_fixture(&mut b, edge).unwrap());
             assert_eq!(seam_sides(&b, uses), [0.0, 1.0]);
         }
     }
@@ -4151,12 +4039,19 @@ mod tests {
         for count in [0, 2, 6] {
             let mut bad = b.clone_standing_for_self().unwrap();
             bad.edge_mut(edge).unwrap().edgeuses = uses.into_iter().cycle().take(count).collect();
-            assert!(redistribute_fixture(&mut bad, edge).is_err());
+            // without its four edge uses nothing is swapped (fork 60a8a51)
+            assert!(
+                !redistribute_fixture(&mut bad, edge).unwrap(),
+                "{count} uses"
+            );
         }
         for eu in [uses[0], uses[2], previous[0], previous[1]] {
             let mut bad = b.clone_standing_for_self().unwrap();
             bad.edgeuse_mut(eu).unwrap().uv_trim_curve = Some(Curve::from(BSplineCurve::default()));
-            assert!(redistribute_fixture(&mut bad, edge).is_err());
+            // an end point that cannot be evaluated swaps nothing (fork 60a8a51)
+            let before = format!("{bad:?}");
+            assert!(!redistribute_fixture(&mut bad, edge).unwrap(), "{eu:?}");
+            assert_eq!(format!("{bad:?}"), before);
         }
         for eu in [uses[0], uses[2]] {
             let mut bad = b.clone_standing_for_self().unwrap();
@@ -4384,12 +4279,22 @@ mod tests {
             b.this_model_size_estimate(&k, true),
             tol::MODEL_SIZE_ESTIMATE
         );
-        assert_eq!(b.set_this_model_size_estimate(&mut k, 1000.0), 1.0e-4);
+        // a B-rep's own estimate and ratio stay off the context
+        assert_eq!(b.set_this_model_size_estimate(1000.0), 1.0e-4);
         assert_eq!(b.tolerance(), 1.0e-4);
-        assert_eq!(k.context.stored_model_size_estimate(), 1000.0);
-        b.set_this_large_small_size_ratio(&mut k, 7.0);
+        assert_eq!(k.context.stored_model_size_estimate(), tol::USE_DEFAULT);
+        assert_eq!(k.context.this_zone_tol_3d(), 1.0e-5);
+        b.set_this_large_small_size_ratio(7.0);
         assert_eq!(b.this_large_small_size_ratio(&k, false), 7.0);
-        assert_eq!(k.context.stored_large_small_size_ratio(), 7.0);
+        assert_eq!(k.context.stored_large_small_size_ratio(), tol::USE_DEFAULT);
+        // a B-rep that stores the default follows what the caller set on the context
+        let defaulted = Brep::new();
+        k.context.set_this_model_size_estimate(0.05);
+        k.context.set_this_large_small_size_ratio(3.0);
+        assert_eq!(defaulted.this_model_size_estimate(&k, true), 0.05);
+        assert_eq!(defaulted.this_large_small_size_ratio(&k, true), 3.0);
+        assert_eq!(b.this_model_size_estimate(&k, true), 1000.0);
+        assert_eq!(b.this_large_small_size_ratio(&k, true), 7.0);
     }
 
     #[test]

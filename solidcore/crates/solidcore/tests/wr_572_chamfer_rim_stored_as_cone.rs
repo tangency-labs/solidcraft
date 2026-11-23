@@ -3,8 +3,8 @@
 //! `fillet_chamfer_cone_on_arc` (WR-421) `CalcTorusFilletGeom` revolves a chamfer's
 //! linear section about the rim's axis, but keeps the revolution as an
 //! `SmSurfOfRevolution`, which reads back as a rational B-spline, not the cone it is.
-//! With `fillet_chamfer_cone_stored_as_cone` the revolution's NURBS form goes through
-//! `CopyAndAddAnalytics` and the cone it gives is stored, the rails made on it.
+//! The port passes the revolution's NURBS form through `CopyAndAddAnalytics` and stores
+//! the cone it gives, the rails made on it.
 //!
 //! The body is #379's: a 10 cube with a radius 2 through hole, every edge chamfered by a
 //! chord of 1/sqrt(2) (legs 0.5). Each rim's chamfer is the cone between the circles of
@@ -37,12 +37,10 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     brep_volume(k, b, 1e-6, &attrs).unwrap()
 }
 
-/// The holed cube chamfered with WR-421 on and WR-572 as given: the volume before, the
-/// kernel and the body.
-fn chamfered(stored_as_cone: bool) -> (f64, Kernel, Brep) {
+/// The holed cube chamfered with WR-421 on: the volume before, the kernel and the body.
+fn chamfered() -> (f64, Kernel, Brep) {
     let mut k = Kernel::default();
     k.fixes.fillet_chamfer_cone_on_arc = true;
-    k.fixes.fillet_chamfer_cone_stored_as_cone = stored_as_cone;
     let cube = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
     let hole = create_cylinder(&mut k, Point3::new(5.0, 5.0, -1.0), 2.0, 12.0).unwrap();
     let mut body = boolean_difference(&mut k, cube, hole).unwrap();
@@ -82,13 +80,8 @@ fn removed_want(a: f64) -> f64 {
 }
 
 #[test]
-fn wr_572_flag_is_off_by_default() {
-    assert!(!Kernel::default().fixes.fillet_chamfer_cone_stored_as_cone);
-}
-
-#[test]
 fn wr_572_rim_chamfers_are_stored_as_cones() {
-    let (before, k, mut body) = chamfered(true);
+    let (before, k, mut body) = chamfered();
     solidcore::topology::integrity::check(&body).unwrap();
     assert!(is_manifold_solid(&body).unwrap(), "not a closed solid");
     assert_eq!(revolved_and_cones(&body), (0, 2));
@@ -98,10 +91,4 @@ fn wr_572_rim_chamfers_are_stored_as_cones() {
         (removed - want).abs() <= 1e-6 * before,
         "{removed} vs {want}"
     );
-}
-
-#[test]
-fn wr_572_without_the_opt_in_the_rims_stay_revolutions() {
-    let (_, _, body) = chamfered(false);
-    assert_eq!(revolved_and_cones(&body), (2, 0));
 }

@@ -41,8 +41,8 @@ it with +Z would reverse the normal. `Plane::flipped` reverses an in-plane axis
 and therefore the derived normal; validation does not choose an orientation.
 
 The future Stage A request adapter must preserve the existing
-[`inspect.section`][section-command] conventions: `offset` follows the named
-plane's normal; `at` is the world Z/Y/X coordinate for XY/XZ/YZ respectively;
+[`inspect.section`][section-command] conventions: `offset` runs against the
+named plane's normal (a positive offset cuts more away); `at` is the world Z/Y/X coordinate for XY/XZ/YZ respectively;
 `offset` and `at` are mutually exclusive; `flip` changes the cut direction without
 moving the requested plane. These request fields are not part of W01a's DTO.
 

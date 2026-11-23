@@ -1,18 +1,19 @@
 //! tangency-labs/solidcore#1981 (WR-654): chamfering the four rim edges of a pocket (box
 //! (0,0,0) 60 x 40 x 10 minus box (15,10,5) 30 x 20 x 6, so the pocket is 5 deep) with
 //! leg 5.5, straight on the Boolean's direct body, fails with error code 3 "Fillet Corner
-//! Error: Corner Edge Computation Failure" when `keep_operand_uv_trims` (WR-361) is on
-//! together with the fillet fixes SolidCraft runs with (`fillet_refuse_rails_leaving_faces`,
-//! `fillet_trace_reaches_rails`, `fillet_rail_end_on_continued_surface`,
-//! `fillet_cliff_overflow`, `fillet_mitre_concave_face_corners`).
+//! Error: Corner Edge Computation Failure" now that the Boolean keeps the operand's exact
+//! UV trims (WR-361, always on since its flag was retired), with the fillet fixes SolidCraft runs with (`fillet_trace_reaches_rails`,
+//! the WR-642 mitre; the refusal of rails leaving their faces, the rail
+//! end on the continued surface and the cliff overflow, once flags too, are the only path).
 //!
-//! The Boolean's copy of the cut box's trims is exact; the cut box's faces at x = 15 and
-//! y = 30 carry the exact degree-1 B-spline trims `SwapUV` mirrors onto them, the other
-//! walls lines. WR-610's run-on (`fillet_trace_reaches_rails`) widens a side edge's
+//! The Boolean copied the cut box's trims: its faces at x = 15 and y = 30 carry the exact
+//! degree-1 B-spline trims `SwapUV` mirrors onto them, the other walls lines (since
+//! solidcraft#17896 a plane keeps `MakeFace`'s exact UV line for a line edge instead, but a
+//! lone box still mixes the two, as below). WR-610's run-on (`fillet_trace_reaches_rails`) widens a side edge's
 //! parameter interval past its ends, but a B-spline trim clamps the parameter to its own
 //! interval, so one wall's rail met the pocket's vertical edge past the floor and the
-//! other's not at all, and the bevel vertex split. `fillet_run_on_bspline_trims` lets the
-//! widened B-spline trim run on along its line, as a line trim does.
+//! other's not at all, and the bevel vertex split. The widened B-spline trim now runs on
+//! along its line, as a line trim does (formerly behind `fillet_run_on_bspline_trims`).
 //!
 //! The expected volume is the fork's closed form for mitred chamfers of leg `d` round a
 //! 30 x 20 rim: `21000 - (50 d^2 + 4/3 d^3)`, 19265.666666667 at `d = 5.5`.
@@ -41,16 +42,10 @@ fn expected() -> f64 {
     21000.0 - (50.0 * D * D + 4.0 / 3.0 * D * D * D)
 }
 
-/// SolidCraft's fillet flag set, with `keep_operand_uv_trims` and the WR-654 fix as given.
-fn kernel(keep_operand_uv_trims: bool, run_on_bspline_trims: bool) -> Kernel {
+/// SolidCraft's fillet flag set.
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
-    k.fixes.fillet_mitre_concave_face_corners = true;
-    k.fixes.keep_operand_uv_trims = keep_operand_uv_trims;
-    k.fixes.fillet_run_on_bspline_trims = run_on_bspline_trims;
     k
 }
 
@@ -103,11 +98,8 @@ fn rim_edges(b: &Brep) -> Vec<EdgeId> {
 }
 
 /// Chamfers the rim; `Err` carries the fillet session's error code and comment.
-fn chamfer_rim(
-    keep_operand_uv_trims: bool,
-    run_on_bspline_trims: bool,
-) -> Result<f64, (i32, String)> {
-    let mut k = kernel(keep_operand_uv_trims, run_on_bspline_trims);
+fn chamfer_rim() -> Result<f64, (i32, String)> {
+    let mut k = kernel();
     let mut b = pocket(&mut k);
     let ids = rim_edges(&b);
     let mut s = FilletSession::new(&mut k, &mut b).unwrap();
@@ -122,8 +114,8 @@ fn chamfer_rim(
 }
 
 /// Rounds the long edge at (`x`, `y`) of a 5 x 5 x 30 box with radius `r`.
-fn round_bar_edge(x: f64, y: f64, r: f64, run_on_bspline_trims: bool) -> Result<f64, i32> {
-    let mut k = kernel(false, run_on_bspline_trims);
+fn round_bar_edge(x: f64, y: f64, r: f64) -> Result<f64, i32> {
+    let mut k = kernel();
     let mut b = create_box(&mut k, Point3::ZERO, 5.0, 5.0, 30.0).unwrap();
     let e = b
         .edges()
@@ -145,24 +137,10 @@ fn round_bar_edge(x: f64, y: f64, r: f64, run_on_bspline_trims: bool) -> Result<
 
 #[test]
 fn pocket_chamfer_on_a_boolean_body() {
-    let v = chamfer_rim(true, true).unwrap_or_else(|(code, comment)| panic!("{code} {comment}"));
+    let v = chamfer_rim().unwrap_or_else(|(code, comment)| panic!("{code} {comment}"));
     let want = expected();
     eprintln!("pocket chamfer, operand trims kept: {v:.12} (want {want:.12})");
     assert!((v - want).abs() / want < 1e-8, "{v} vs {want}");
-}
-
-/// With `keep_operand_uv_trims` off the pocket's walls carry line trims only, so the fix
-/// changes nothing: both give the expected volume, bit for bit the same.
-#[test]
-fn pocket_chamfer_without_operand_trims() {
-    let want = expected();
-    let off =
-        chamfer_rim(false, false).unwrap_or_else(|(code, comment)| panic!("{code} {comment}"));
-    assert!((off - want).abs() / want < 1e-8, "{off} vs {want}");
-    let fixed =
-        chamfer_rim(false, true).unwrap_or_else(|(code, comment)| panic!("{code} {comment}"));
-    eprintln!("pocket chamfer, no operand trims: {off} (with the fix {fixed})");
-    assert_eq!(fixed.to_bits(), off.to_bits(), "{fixed} vs {off}");
 }
 
 /// The 5 x 5 x 30 bar after a round of radius `r` (between 5 and 10) on one long edge: 30
@@ -176,15 +154,14 @@ fn rounded_bar_volume(r: f64) -> f64 {
 }
 
 /// The same gap on a box primitive, no Boolean: its long edge (0,5), whose side edges
-/// carry `SwapUV`'s B-spline trims, fails (code 4) without the fix; with it, it rounds to
-/// the closed-form volume, as its mirror image (5,0) does without it.
+/// carry `SwapUV`'s B-spline trims, failed (code 4) before WR-654's fix; it rounds to the
+/// closed-form volume, as its mirror image (5,0) does.
 #[test]
 fn bar_edge_with_bspline_side_trims_rounds() {
     let r = 10.0;
     let want = rounded_bar_volume(r);
-    assert_eq!(round_bar_edge(0.0, 5.0, r, false), Err(4));
-    let mirror = round_bar_edge(5.0, 0.0, r, false).unwrap_or_else(|code| panic!("{code}"));
-    let v = round_bar_edge(0.0, 5.0, r, true).unwrap_or_else(|code| panic!("{code}"));
+    let mirror = round_bar_edge(5.0, 0.0, r).unwrap_or_else(|code| panic!("{code}"));
+    let v = round_bar_edge(0.0, 5.0, r).unwrap_or_else(|code| panic!("{code}"));
     eprintln!("bar edge (0,5) r {r}: {v} (mirror image (5,0): {mirror}; want {want})");
     assert!((mirror - want).abs() / want < 1e-9, "{mirror} vs {want}");
     assert!((v - want).abs() / want < 1e-9, "{v} vs {want}");
