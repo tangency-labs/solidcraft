@@ -10,14 +10,14 @@ macro_rules! plugins_preferences {
         $next! { $($rest),* ; $($fields)*
             /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
             disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
+            /// Opt into picking an importer file before its options; off keeps the options-first dialog.
+            plugin_import_file_first: bool = false, PAGE_PLUGINS;
             /// User ceilings, not automatic increases to a package's approved execution budget.
             plugin_max_fuel: u64 = solidcraft_engine::plugin::HostLimits::default().max_fuel, PAGE_PLUGINS;
             plugin_max_memory_mib: usize = solidcraft_engine::plugin::HostLimits::default().max_memory_mib, PAGE_PLUGINS;
             /// Remember a moved plugin command window's position for the current design, until the
             /// application closes (#18684). Off keeps the previously centred reopen behaviour.
             plugin_remember_dialog_position: bool = false, PAGE_PLUGINS;
-            /// Opt into picking an importer file before its options; off keeps the options-first dialog.
-            plugin_import_file_first: bool = false, PAGE_PLUGINS;
         }
     };
 }
