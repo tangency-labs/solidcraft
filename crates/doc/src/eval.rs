@@ -4848,7 +4848,7 @@ impl Model {
                     let mut st = (*r.state).clone();
                     for b in st.bodies.iter_mut().filter(|b| b.name == old) {
                         b.name = new.to_string();
-                        b.names = b.names.renamed();
+                        b.names = b.names.renamed(old, new);
                     }
                     // The names the design must not use again travel with the state (#4957).
                     st.reserved_body_names = doc.reserved_body_names.clone();
