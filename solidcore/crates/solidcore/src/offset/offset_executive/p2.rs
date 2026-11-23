@@ -6142,10 +6142,152 @@ mod tests {
             .result
         };
         for wall in [5.0, 6.0] {
-            // WR-454's typed refusal (1007)
-            assert_status(shell(wall), 1007);
+            // WR-454's typed refusal (1007), named: the inset collapses the whole body
+            let e = shell(wall).unwrap_err();
+            assert_eq!(e.sm_status(), Some(1007));
+            assert!(e.offset_failure().is_some(), "{e}");
+            assert_eq!(e.kind(), crate::error::ErrorKind::OffsetCollapses, "{e}");
         }
         let thin = shell(1.0).unwrap();
         assert!(brep_is_manifold_solid(&thin).unwrap());
+    }
+
+    /// TE-O-18 part 5 (#19851): what the offset and the shell refuse of their input, and
+    /// the extended offset's refusals, are named offset causes that keep the status upstream
+    /// returned (`solidcore/docs/failure-codes-and-reproduction.md` §6, rules 1, 7 and 9).
+    #[test]
+    fn the_inputs_and_refusals_of_p2_are_named_causes_with_their_statuses() {
+        use crate::error::{ErrorKind, SM_ERR_INVALID_INPUT};
+        let named = |e: SolidError, kind: ErrorKind, status: i32| {
+            assert!(e.offset_failure().is_some(), "{e}");
+            assert_eq!(e.kind(), kind, "{e}");
+            assert_eq!(e.sm_status(), Some(status), "{e}");
+            assert!(!e.is_defect(), "{e}");
+        };
+        // a shell wall below twice the body's tolerance
+        named(
+            check_shell_radius(0.1, 0.125).unwrap_err(),
+            ErrorKind::InvalidInput,
+            SM_ERR_INVALID_INPUT,
+        );
+        // no B-rep given: native 1007 at the API, 1006 at the executive
+        let mut kernel = Kernel::default();
+        let original = source_brep();
+        let mut fixture = NotificationFixture::new(&original);
+        named(
+            api_offset_brep_full(
+                &mut kernel,
+                None,
+                OffsetOptions::default(),
+                &mut fixture.context(),
+            )
+            .unwrap_err(),
+            ErrorKind::InvalidInput,
+            SM_ERR_INVALID_INPUT,
+        );
+        named(
+            executive()
+                .do_solid_offset(
+                    &mut kernel,
+                    None,
+                    SolidOffsetOptions::default(),
+                    &mut fixture.context(),
+                )
+                .unwrap_err(),
+            ErrorKind::InvalidInput,
+            SM_ERR_NULL_POINTER,
+        );
+        named(
+            executive()
+                .do_extended_offset(&mut kernel, None, &mut fixture.context())
+                .unwrap_err(),
+            ErrorKind::InvalidInput,
+            SM_ERR_NULL_POINTER,
+        );
+        // a face selection that is empty or names no face of the shell's body
+        let (brep, face) = one_face(true);
+        let good = Some((BrepId::from_index(3), face));
+        for selection in [None, Some((BrepId::from_index(4), face))] {
+            named(
+                validate_shell_faces(source(&brep, 3), &[good, selection]).unwrap_err(),
+                ErrorKind::InvalidInput,
+                SM_ERR_INVALID_INPUT,
+            );
+        }
+        // an extended offset's face whose offset surface collapses, and one whose offset
+        // surface meets itself
+        let mut exec = executive();
+        exec.set_merge_results(true);
+        named(
+            exec.skip_offset_face_geometry(true, false, 0).unwrap_err(),
+            ErrorKind::OffsetCollapses,
+            SM_ERR,
+        );
+        named(
+            exec.skip_offset_face_geometry(true, true, 1).unwrap_err(),
+            ErrorKind::Unsupported,
+            SM_ERR,
+        );
+        // an offset face's trim past both its surface's domain and the extension's
+        let inside = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let extension = Extent2d::from_bounds(-1.0, -1.0, 2.0, 2.0);
+        let outside = Extent2d::from_bounds(-2.0, -2.0, 3.0, 3.0);
+        named(
+            choose_extended_domain(&outside, &inside, &extension, crate::math::EFF_ZERO, || {
+                Ok(())
+            })
+            .unwrap_err(),
+            ErrorKind::Unsupported,
+            SM_ERR,
+        );
+    }
+
+    /// TE-O-18 part 5 (#19851): a link of the input's B-rep, or the executive's own offset
+    /// B-rep, that is not there is a defect that says which, with the status of upstream's
+    /// `NER` (the conversion guide, rule 2).
+    #[test]
+    fn a_missing_link_or_offset_brep_is_a_defect_that_says_which() {
+        let defect = |e: SolidError, says: &str| {
+            assert!(e.is_defect(), "{e}");
+            assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER), "{e}");
+            assert!(e.to_string().contains(says), "{e}");
+        };
+        // a step run before the offset B-rep is allocated
+        let mut kernel = Kernel::default();
+        let (brep, face) = one_face(true);
+        let mut fixture = NotificationFixture::new(&brep);
+        defect(
+            executive()
+                .extend_result_faces_prefix(&mut kernel, MarkType::Mark, &mut fixture.context())
+                .unwrap_err(),
+            "the offset B-rep is not there",
+        );
+        // the face's links, each cut once
+        let faceuse = brep.face(face).unwrap().faceuse.unwrap();
+        let shell = brep.faceuse(faceuse).unwrap().shell.unwrap();
+        let mut no_faceuse = one_face(true).0;
+        no_faceuse.face_mut(face).unwrap().faceuse = None;
+        defect(
+            select_offset_faceuse(&no_faceuse, face, false, false, OP_SOLID).unwrap_err(),
+            "has no face use",
+        );
+        let mut no_shell = one_face(true).0;
+        no_shell.faceuse_mut(faceuse).unwrap().shell = None;
+        defect(
+            select_offset_faceuse(&no_shell, face, false, false, OP_SOLID).unwrap_err(),
+            "has no shell",
+        );
+        let mut no_region = one_face(true).0;
+        no_region.shell_mut(shell).unwrap().region = None;
+        defect(
+            select_offset_faceuse(&no_region, face, true, false, OP_EXTENDED).unwrap_err(),
+            "has no region",
+        );
+        let mut no_mate = one_face(true).0;
+        no_mate.faceuse_mut(faceuse).unwrap().mate = None;
+        defect(
+            select_offset_faceuse(&no_mate, face, false, true, OP_SOLID).unwrap_err(),
+            "has no mate",
+        );
     }
 }
