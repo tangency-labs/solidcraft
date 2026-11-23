@@ -435,6 +435,37 @@ mod tests {
         assert_eq!(p.edges[corner].faces.len(), 2);
     }
 
+    /// `swept_origins` on its own (not through `sweep_origins`' recorded history): a tool with a
+    /// start cap in the profile's plane, an end cap, planar walls and a curved wall. The start
+    /// cap is the planar face whose centroid lies in the profile's plane; each wall is the
+    /// profile segment under its edges in that plane (sampled at the tool's size × 1e-3); the
+    /// face with no edge there is the end cap.
+    #[test]
+    fn swept_origins_names_the_caps_and_each_planar_and_curved_wall() {
+        use solidcore_record::{Loop2, Plane, Region2, Vec2};
+
+        let plane = Plane::named("XY").unwrap();
+        // A 40 × 30 rectangle (segments 0: bottom, 1: right, 2: top, 3: left) round a hole.
+        let rect = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(40.0, 0.0), Vec2::new(40.0, 30.0), Vec2::new(0.0, 30.0)]);
+        let region = Region2 { outer: rect, holes: vec![Loop2::circle(Vec2::new(20.0, 15.0), 5.0).reversed()] };
+        let tool = crate::extrude(&plane, std::slice::from_ref(&region), 0.0, 10.0).unwrap().remove(0);
+        let o = super::swept_origins(&tool, &plane, std::slice::from_ref(&region)).unwrap();
+        assert_eq!(o.len(), tool.face_count());
+        // The caps: the start one in the profile's plane, the end one with no edge there.
+        assert_eq!(o[face_at(&tool, Vec3::new(5.0, 5.0, 0.0))], FaceOrigin::Cap { end: false });
+        assert_eq!(o[face_at(&tool, Vec3::new(5.0, 5.0, 10.0))], FaceOrigin::Cap { end: true });
+        // Each planar wall from the rectangle side it sweeps.
+        for (at, segment) in [((20.0, 0.0), 0), ((40.0, 15.0), 1), ((20.0, 30.0), 2), ((0.0, 15.0), 3)] {
+            assert_eq!(o[face_at(&tool, Vec3::new(at.0, at.1, 5.0))], FaceOrigin::Profile { segment }, "wall at {at:?}");
+        }
+        // The curved wall from the hole's circle (its segments follow the rectangle's).
+        let curved = face_at(&tool, Vec3::new(25.0, 15.0, 5.0));
+        assert!(matches!(o[curved], FaceOrigin::Profile { segment: 4 | 5 }), "{:?}", o[curved]);
+        // Nothing else: one start cap, one end cap, every other face a wall.
+        assert_eq!(o.iter().filter(|x| **x == FaceOrigin::Cap { end: false }).count(), 1, "{o:?}");
+        assert_eq!(o.iter().filter(|x| **x == FaceOrigin::Cap { end: true }).count(), 1, "{o:?}");
+    }
+
     #[test]
     fn provenance_of_sweeps_blends_and_shells() {
         use solidcore_record::{Loop2, Plane, Region2, Vec2};
