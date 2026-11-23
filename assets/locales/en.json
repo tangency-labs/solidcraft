@@ -6648,7 +6648,7 @@
   "ui.edit_section_analysis": "Edit Section Analysis",
   "ui.edit_sketch_empty": "No sketches to edit",
   "ui.ellipse": "Ellipse",
-  "ui.emboss_wrap_note": "Orthogonal line profiles tangent to one supported cylinder wrap automatically. Pick a wall to choose a target.",
+  "ui.emboss_wrap_note": "Leave Target Face empty to use the face the sketch lies on, or the cylinder it touches. Pick a face if Emboss chooses the wrong one.",
   "ui.end": "End",
   "ui.end_cap.chamfer": "Corner Chamfer",
   "ui.end_cap.direction": "Direction",

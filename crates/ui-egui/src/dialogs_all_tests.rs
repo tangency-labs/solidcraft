@@ -997,7 +997,10 @@ fn hand_drawn_dialog_texts_are_translated() {
         ("motion.study", "Loop"),
         ("surface.stitch", "tight"),
         ("sheet.flange", "Base"),
-        ("solid.emboss", "Orthogonal line profiles tangent to one supported cylinder wrap automatically. Pick a wall to choose a target."),
+        (
+            "solid.emboss",
+            "Leave Target Face empty to use the face the sketch lies on, or the cylinder it touches. Pick a face if Emboss chooses the wrong one.",
+        ),
     ] {
         let mut d = Dialog::for_command(&h.app, command).unwrap();
         let mut painted = Vec::new();

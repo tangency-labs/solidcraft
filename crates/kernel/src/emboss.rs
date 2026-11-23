@@ -377,13 +377,17 @@ pub fn infer_cylinder_emboss(body: &Body, plane: &Plane, regions: &[Region2], de
                     if !profile_interval_overlaps(plane, regions, o, wrap_x, -std::f64::consts::PI * r, std::f64::consts::PI * r)? {
                         continue;
                     }
-                    if let Some((lo, hi)) = wall_angles(&rec, face, o, a, radial, wrap_x) {
-                        if lo >= -tol / r || hi <= tol / r {
-                            continue;
-                        }
-                        if !profile_interval_overlaps(plane, regions, o, wrap_x, lo * r, hi * r)? {
-                            continue;
-                        }
+                    // A wall whose angles cannot be read off two arcs and two lines (a round
+                    // that meets another at a corner) is never a wrap candidate, so it does not
+                    // claim a profile that lies on a flat face beside it (#21195).
+                    let Some((lo, hi)) = wall_angles(&rec, face, o, a, radial, wrap_x) else {
+                        continue;
+                    };
+                    if lo >= -tol / r || hi <= tol / r {
+                        continue;
+                    }
+                    if !profile_interval_overlaps(plane, regions, o, wrap_x, lo * r, hi * r)? {
+                        continue;
                     }
                     let relevant = match face_axial_bounds(&rec, face, o, a)? {
                         Some((lo, hi)) => profile_interval_overlaps(plane, regions, o, a, lo, hi)?,
