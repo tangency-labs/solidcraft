@@ -3304,13 +3304,16 @@ pub(crate) enum Stretch {
     /// Jacobian, a step not finite, or the net refusing a point on its knots' range).
     Newton,
     /// Newton's steps toward the foot at the stretch's middle leave the knots' range, or
-    /// settle off it.
+    /// settle off it, past an end the solve does not wrap at (a border of the net) or at a
+    /// point with a coordinate that is no number.
     NewtonOff,
     /// The box reaches the net's knots' range or the solve's domain.
     LeavesDomain,
-    /// Krawczyk's operator cannot be formed: the box crosses a crease knot line (the net
-    /// below `C¹` across it), or it reaches only across a seam the solve wraps, which it
-    /// would straddle.
+    /// A crease stops the rule: Krawczyk's operator cannot be formed because the box crosses
+    /// a crease knot line (the net below `C¹` across it), or it reaches only across a seam
+    /// the solve wraps, which it would straddle; or, before any box, Newton's steps toward
+    /// the foot leave the knots' range only past ends the solve wraps at (the same seam, one
+    /// step earlier: answer12, Q1).
     Crease,
     /// Krawczyk's operator cannot be formed: the Jacobian at the box's middle is not
     /// inverted.
@@ -4236,20 +4239,53 @@ fn foot_box(
 }
 
 /// Newton's foot of `L(t)` on the net from `start`: why not where the steps do not settle,
-/// or leave the knots' range or settle off it.
+/// or leave the knots' range or settle off it. Leaving it is told by where (answer12, Q1):
+/// with every point asked for off the range, and the settled point where it is off it, past
+/// ends of directions the solve wraps in only ([`LineNet::seams`]), the steps stopped at a
+/// seam, where a foot box would have to straddle it: [`Stretch::Crease`], the reason
+/// [`foot_box`] gives a box that reaches only across such a seam, one step earlier (it names
+/// the border that stopped the rule, not where the foot is: the steps may be diverging too).
+/// Past any other end, or at a point with a coordinate that is no number,
+/// [`Stretch::NewtonOff`]. A diagnosis only: either way the stretch has no foot box.
 fn newton_foot(
     net: &LineNet,
     line: &ScratchLine,
     t: f64,
     start: [f64; 2],
 ) -> core::result::Result<[f64; 2], Stretch> {
-    // (whether a step asked for a point off the knots' range)
+    let [[u0, u1], [v0, v1]] = net.range;
+    let [wu, wv] = net.seams(&line.solve_domain).wrap;
+    // whether a point off the knots' range lies past ends of wrapped directions only: each
+    // end it lies past (u low, u high, v low, v high, as `out` in [`foot_box`]) one the solve
+    // wraps at; a point with a NaN coordinate is not
+    let only_wrapped = |[u, v]: [f64; 2]| {
+        let out = [u < u0, u > u1, v < v0, v > v1];
+        !(u.is_nan() || v.is_nan())
+            && out.contains(&true)
+            && out.iter().zip([wu, wu, wv, wv]).all(|(&o, w)| !o || w)
+    };
+    // (whether a step asked for a point off the knots' range, and whether every such point
+    // lay past wrapped ends only)
     let left = core::cell::Cell::new(false);
+    let wrapped = core::cell::Cell::new(true);
+    let off = |p: [f64; 2]| {
+        left.set(true);
+        if !only_wrapped(p) {
+            wrapped.set(false);
+        }
+    };
+    let leaving = || {
+        if wrapped.get() {
+            Stretch::Crease
+        } else {
+            Stretch::NewtonOff
+        }
+    };
     let at = |p: [f64; 2]| -> Result<Linearised<2>> {
         let [u, v] = p;
         let (bu, bv) = (Ivl::from(u), Ivl::from(v));
         if !net.holds(bu, bv) {
-            left.set(true);
+            off(p);
         }
         let (Some([s, s_u, s_v]), Some([s_uu, s_uv, s_vv])) =
             (net.over(bu, bv, line.p), net.second(bu, bv, line.p))
@@ -4271,7 +4307,7 @@ fn newton_foot(
         .flatten()
         .ok_or_else(|| {
             if left.get() {
-                Stretch::NewtonOff
+                leaving()
             } else {
                 Stretch::Newton
             }
@@ -4280,7 +4316,8 @@ fn newton_foot(
     if net.holds(Ivl::from(pu), Ivl::from(pv)) {
         Ok(p)
     } else {
-        Err(Stretch::NewtonOff)
+        off(p);
+        Err(leaving())
     }
 }
 
@@ -7553,6 +7590,87 @@ mod tests {
         );
         // (the seam is a crease, no boundary: a gap of the typing, not another ray's case)
         assert!(!c.list[0].at_boundary, "{:?}", c.list[0]);
+    }
+
+    /// The closed quadratic B-spline ring of
+    /// [`a_seam_not_proved_c1_takes_no_foot_box_across_it`]: its seam at `(1, 0)`, `u = 0`,
+    /// which it leaves along +y at the low end (`y ≈ 20 u`) and reaches from −y at the high
+    /// end, z from 0 to 1 along v.
+    fn crease_ring() -> Surface {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        let ring = [
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [-1.0, 1.0],
+            [-1.0, -1.0],
+            [1.0, -1.0],
+            [1.0, 0.0],
+        ];
+        let net = ring
+            .iter()
+            .map(|&[x, y]| vec![CPoint::new(x, y, 0.0, NOW), CPoint::new(x, y, 1.0, NOW)])
+            .collect();
+        Surface::from(BSplineSurface::from_nurb(
+            NlSurface::new(
+                net,
+                2,
+                1,
+                vec![0.0, 0.0, 0.0, 0.1, 0.5, 0.7, 1.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            false,
+        ))
+    }
+
+    /// Newton's steps toward the closest-point foot that leave the knots' range are told by
+    /// where they leave it (answer12, Q1), on the ring of [`crease_ring`] and the line along y
+    /// at `x = 1 + tol / 2`. From `(u, v) = (0.005, ½)` (the low end, `y ≈ 0.1`) toward the
+    /// foot of the line's point at `y = −0.05` (`t = 0.475`), which lies across the seam on
+    /// the high end, the first step asks for `u ≈ −0.003` (to first order `0.005 − 0.15 / 20`,
+    /// the curvature term making it a little longer): off the low end of
+    /// u alone, v unmoved (the point's height ½ is the start's). The solve over the whole
+    /// range wraps in u, so the steps stopped at the seam a foot box would straddle: a
+    /// crease. The same steps in a solve over half the range in u (no wrap: its border there
+    /// is a boundary) leave past a border: `NewtonOff`, as before. So do steps past the high
+    /// end of v, which never wraps here (the ring is open along z): toward a point at height
+    /// `1.5`, with u leaving too (`y = −0.05`) or not (`y = 0.1`, `t = 0.55`). A foot on the
+    /// range is found (`y = 0.1` at height ½).
+    #[test]
+    fn newton_leaving_only_past_a_wrapped_end_stops_at_a_crease() {
+        let k = Kernel::default();
+        let s = crease_ring();
+        let net = LineNet::of(&k, &s).unwrap().unwrap();
+        let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let (lo, hi) = (whole.min(), whole.max());
+        let part = Extent2d::from_bounds(lo.x, lo.y, 0.5 * (lo.x + hi.x), hi.y);
+        assert_eq!(net.seams(&whole).wrap, [true, false]);
+        assert_eq!(net.seams(&part).wrap, [false, false]);
+        let tol = 1.0e-6;
+        let scratch = |solve: Extent2d, z: f64| {
+            ScratchLine::of(
+                &PassLine {
+                    point: Vec3::new(1.0 + 0.5 * tol, -1.0, z),
+                    vector: Vec3::new(0.0, 2.0, 0.0),
+                    span: [0.0, 1.0],
+                    solve_domain: solve,
+                    tol,
+                },
+                &Extent1d::from_min_max(0.0, 1.0),
+            )
+            .unwrap()
+        };
+        let start = [0.005, 0.5];
+        let foot =
+            |solve: Extent2d, z: f64, t: f64| newton_foot(&net, &scratch(solve, z), t, start);
+        assert_eq!(foot(whole, 0.5, 0.475), Err(Stretch::Crease));
+        assert_eq!(foot(part, 0.5, 0.475), Err(Stretch::NewtonOff));
+        assert_eq!(foot(whole, 1.5, 0.475), Err(Stretch::NewtonOff));
+        assert_eq!(foot(whole, 1.5, 0.55), Err(Stretch::NewtonOff));
+        let [u, v] = foot(whole, 0.5, 0.55).unwrap();
+        assert!(u > 0.0 && u < 0.1 && (v - 0.5).abs() < 1.0e-9, "{u} {v}");
     }
 
     /// A crossing beside a seam the net is not proved `C¹` across (answer11, the 8 + 2
