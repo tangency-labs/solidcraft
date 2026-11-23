@@ -8047,12 +8047,10 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             } else if app.tool.is_some() {
                 crate::tools::on_click(app, &proj, p, mods.shift);
             } else if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
-                let drawn = app
-                    .dialog
-                    .as_ref()
-                    .is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { three_d: true, .. })))
-                    .then(|| crate::sketch3d::drawn_at(app, &proj, p))
-                    .flatten();
+                let copy_free_3d_move = app.dialog.as_ref().is_some_and(|d| {
+                    matches!(d.kind, crate::dialogs::Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { three_d: true, copy: false, .. }))
+                });
+                let drawn = (copy_free_3d_move && app.applying.is_none()).then(|| crate::sketch3d::drawn_at(app, &proj, p)).flatten();
                 if add && crate::dialogs_move::add_body_click(app, &hits, allow_toggle) {
                     // Ctrl/Shift+click: one more body for Move, which stays on From, Point or Axis.
                 } else if let Some((hit, None)) = &cand

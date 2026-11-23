@@ -556,12 +556,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
             dragging = true;
         }
         crate::gizmo::give_way(false);
-        let at = sketch_move_triad(app, &d, pivot).map_or(pivot, |t| t.center);
+        let triad = sketch_move_triad(app, &d, pivot);
+        let at = triad.as_ref().map_or(pivot, |t| t.center);
+        let mut place = box_place(app, proj);
+        place.handles = triad.as_ref().and_then(|t| crate::gizmo::handles_region(proj, t));
         let focus = std::mem::take(&mut d.focus);
         if let Some(bs) = proj.to_screen(at)
             && let Some((label, _, value)) = d.primary()
         {
-            value_box(ui, label, value, bs + vec2(crate::gizmo::LEN_PX as f32 + 16.0, -12.0), focus || dragging, box_place(app, proj));
+            value_box(ui, label, value, bs + vec2(crate::gizmo::LEN_PX as f32 + 16.0, -12.0), focus || dragging, place);
         }
         app.dialog = Some(d);
         return;
@@ -645,14 +648,27 @@ pub(crate) fn sketch_move_triad(app: &SolveApp, d: &Dialog, pivot: Vec3) -> Opti
     if app.preferences.sketch_move_classic {
         return None;
     }
-    let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { x, y, z, three_d, .. }) = &d.kind else { return None };
+    let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { x, y, z, angle, three_d, .. }) = &d.kind else { return None };
     let st = crate::open_meshing::session_world(&app.session);
     let plane = app.session.active_sketch.and_then(|id| st.sketch(id))?.plane;
     let (px, py, pn) = (plane.x, plane.y, plane.normal());
-    let len = |v: &String| app.session.doc.eval(v, ValueKind::Length).ok().filter(|v| v.is_finite()).unwrap_or(0.0);
+    let len = |v: &String| sketch_move_len(app, v);
     let dz = if *three_d { len(z) } else { 0.0 };
+    let turn = crate::length_input::eval(&app.session.doc, angle, ValueKind::Angle).ok().filter(|v| v.is_finite()).unwrap_or(0.0);
+    let centre = d
+        .inputs
+        .get(1)
+        .and_then(|i| i.items.first())
+        .and_then(|sel| crate::sketch_modify_ui::point_id(&app.session, sel))
+        .and_then(|id| sketch_point_at(app, &st, id))
+        .unwrap_or(plane.origin);
+    // The command turns the in-plane part about the centre, then moves it.
+    let from = pivot - centre;
+    let (u, v) = (from.dot(px), from.dot(py));
+    let (sin, cos) = turn.sin_cos();
+    let turned = pivot + px * ((u * cos - v * sin) - u) + py * ((u * sin + v * cos) - v);
     Some(crate::gizmo::Triad {
-        center: pivot + px * len(x) + py * len(y) + pn * dz,
+        center: turned + px * len(x) + py * len(y) + pn * dz,
         translate: true,
         rotate: true,
         frame: [px, py, pn],
@@ -661,12 +677,17 @@ pub(crate) fn sketch_move_triad(app: &SolveApp, d: &Dialog, pivot: Vec3) -> Opti
     })
 }
 
+/// A Move/Copy Sketch Entities distance field in mm, read as the command reads it (design units).
+fn sketch_move_len(app: &SolveApp, text: &str) -> f64 {
+    crate::length_input::eval(&app.session.doc, text, ValueKind::Length).ok().filter(|v| v.is_finite()).unwrap_or(0.0)
+}
+
 /// A triad drag on Move/Copy Sketch Entities, added to the values it had when the drag began.
 fn sketch_move_drag(app: &SolveApp, d: &mut Dialog, t: &crate::gizmo::Triad, g: crate::gizmo::Drag) {
     let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { x, y, z, angle, .. }) = &d.kind else { return };
     if g.started || !d.extra.contains_key("drag0") {
-        let len = |v: &String| app.session.doc.eval(v, ValueKind::Length).ok().filter(|v| v.is_finite()).unwrap_or(0.0);
-        let deg = app.session.doc.eval(angle, ValueKind::Angle).ok().filter(|v| v.is_finite()).unwrap_or(0.0).to_degrees();
+        let len = |v: &String| sketch_move_len(app, v);
+        let deg = crate::length_input::eval(&app.session.doc, angle, ValueKind::Angle).ok().filter(|v| v.is_finite()).unwrap_or(0.0).to_degrees();
         d.extra.insert("drag0".into(), serde_json::json!([len(x), len(y), len(z), deg]));
     }
     let v0: [f64; 4] = d.extra.get("drag0").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
