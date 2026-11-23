@@ -667,6 +667,36 @@ fn emboss_and_deboss_on_a_face() {
 }
 
 #[test]
+fn projected_emboss_on_a_full_revolve_changes_only_the_sketch_side() {
+    use solidcore_record::Vec3;
+    use solidcraft_kernel::PointClass;
+
+    // The flat top keeps the spline wall clear of the revolve axis. The mark is 6 by 4 mm.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,0,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"Profile"}));
+    run(&mut s, "sketch.spline.control_point", json!({"points":[[20,0],[20,20],[10,30],[5,30]]}));
+    run(&mut s, "sketch.line", json!({"points":[[5,30],[0,30],[0,0],[20,0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":"y","angle":"360 deg","operation":"new","body_name":"Dome"}));
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,-60,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"Mark"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[-3,8],"p1":[3,12]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    // At z = 10 the cubic has radius 19.08248 mm. Offsetting its meridian by 1 mm along
+    // the outward unit normal gives radius 20.10069 mm at the same height.
+    let points = [Vec3::new(0.0, -20.08, 10.0), Vec3::new(0.0, 19.5, 10.0), Vec3::new(0.0, -20.12, 10.0)];
+    let classes = |s: &Session| s.model.state().body("Dome").unwrap().body.classify_points(&points).unwrap();
+    assert_eq!(classes(&s), [PointClass::Outside; 3]);
+    run(
+        &mut s,
+        "solid.emboss",
+        json!({"sketch":"Mark","depth":1,"face":[12.790737518975714,-14.613635681307521,7.741993784911808],"targets":"Dome"}),
+    );
+    assert_eq!(classes(&s), [PointClass::Inside, PointClass::Outside, PointClass::Outside]);
+    assert_eq!(s.model.state().body("Dome").unwrap().body.shell_count(), 1);
+}
+
+#[test]
 fn overlapping_text_glyphs_deboss_and_emboss() {
     // #20422: negative letter_spacing crosses curved glyph outlines, leaving vertical self-touching
     // polynomial spline edges across sequential profile booleans. Both with and without an explicit

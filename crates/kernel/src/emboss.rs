@@ -173,7 +173,7 @@ pub fn emboss_project_face(body: &Body, face: usize, at: Vec3, plane: &Plane, re
         let overlap = (d * 0.2).clamp(0.1, 2.0);
         let (lo, hi) = if depth > 0.0 { (-overlap, d) } else { (-d, overlap) };
         let mut prisms = Vec::new();
-        let mut through = false;
+        let mut prism_heights = None;
         let slab = if let Some(Surf::Cylinder { o, a, r, convex }) = surf_of(&rec, face) {
             // The prisms below reach at most the radius either side of the wall (further, they
             // would meet the ring's far side), so a deeper slab would be cut short.
@@ -259,26 +259,40 @@ pub fn emboss_project_face(body: &Body, face: usize, at: Vec3, plane: &Plane, re
             let sheet = crate::surfaces::offset_faces(body, &[face], lo, (body.size() * 1e-7).max(1e-7))?;
             let slab = crate::thicken(&sheet, hi - lo, false)?;
             let (h0, h1) = span(slab.exact_bounds()?, plane.origin, plane.normal());
-            prisms = crate::extrude(plane, regions, h0 - d - 1.0, h1 + d + 1.0)?;
-            through = true;
+            let (start, end) = (h0 - d - 1.0, h1 + d + 1.0);
+            prisms = crate::extrude(plane, regions, start, end)?;
+            prism_heights = Some((start, end));
             slab
         };
         // Every region must reach the face: one that misses it would leave its letter out.
         let mut pieces = Vec::new();
         let mut missed = Vec::new();
         for (i, prism) in prisms.iter().enumerate() {
-            match crate::boolean(prism, &slab, crate::BoolOp::Intersect)? {
-                // A prism runs right through the slab: what is left of it is one part above and
-                // one below, unless the slab cuts it short (over the face's edge or a hole),
-                // where the two join round the side.
-                Some(_)
-                    if through && crate::boolean(prism, &slab, crate::BoolOp::Cut)?.map_or(0, |rest| rest.lumps().map_or(0, |l| l.len())) != 2 =>
-                {
-                    missed.push((i + 1).to_string())
+            let Some(mut piece) = crate::boolean(prism, &slab, crate::BoolOp::Intersect)? else {
+                missed.push((i + 1).to_string());
+                continue;
+            };
+            if let Some((start, end)) = prism_heights {
+                let patches = piece.lumps()?;
+                let fits = if patches.len() == 1 {
+                    // A profile over an edge or a hole leaves the two ends connected round the side.
+                    crate::boolean(prism, &slab, crate::BoolOp::Cut)?.map_or(0, |rest| rest.lumps().map_or(0, |l| l.len())) == 2
+                } else if let Some(patch) = nearest_projected_patch(body, face, at, patches)? {
+                    // A face can cross the prism on both sides of a closed body. The picked
+                    // patch alone must separate the end caps, even if a farther patch fits.
+                    piece = patch;
+                    let ends = crate::boolean(prism, &piece, crate::BoolOp::Cut)?.map(|rest| rest.lumps()).transpose()?.unwrap_or_default();
+                    let has_cap = |part, h| crate::splitface::has_cap_at(part, plane, h, end - start);
+                    matches!(ends.as_slice(), [a, b] if (has_cap(a, start) && has_cap(b, end)) || (has_cap(b, start) && has_cap(a, end)))
+                } else {
+                    false
+                };
+                if !fits {
+                    missed.push((i + 1).to_string());
+                    continue;
                 }
-                Some(piece) => pieces.push(piece),
-                None => missed.push((i + 1).to_string()),
             }
+            pieces.push(piece);
         }
         if !missed.is_empty() {
             let which = match missed.split_last() {
@@ -290,6 +304,21 @@ pub fn emboss_project_face(body: &Body, face: usize, at: Vec3, plane: &Plane, re
         }
         apply_pieces(body, pieces, depth)
     })
+}
+
+/// Resolve separate crossings by distance to the exact picked face point.
+fn nearest_projected_patch(body: &Body, face: usize, at: Vec3, patches: Vec<Body>) -> Result<Option<Body>> {
+    let Some(pick) = crate::point_closest(at, body, crate::Members::Faces(&[face]))? else { return Ok(None) };
+    let mut ranked = Vec::with_capacity(patches.len());
+    for patch in patches {
+        let faces: Vec<_> = (0..patch.face_count()).collect();
+        let Some(hit) = crate::point_closest(pick.to, &patch, crate::Members::Faces(&faces))? else { return Ok(None) };
+        ranked.push((hit.distance, patch));
+    }
+    ranked.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let [(first, patch), (second, next_patch), ..] = ranked.as_slice() else { return Ok(None) };
+    let tol = body.record().tolerance.max(patch.record().tolerance).max(next_patch.record().tolerance);
+    Ok((second - first > tol).then(|| patch.clone()))
 }
 
 /// The heights of a box's corners above `o` along `dir`: lowest and highest.
