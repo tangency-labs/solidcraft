@@ -2847,6 +2847,12 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             }
         })
         .collect();
+    // The tab groups: their labels and menus, each tab's group rows, and a name being typed.
+    let group_parts = crate::tab_group_ui::StripGroups::build(app);
+    let group_menus = group_parts.group_menus();
+    let group_labels = group_parts.labels(&group_menus);
+    let tab_menus = group_parts.tab_menus();
+    let mut group_edit = crate::tab_group_ui::take_rename(app);
     // Local views expose their editor in both the switcher and sub-tab presentations.
     let mut view_edit = app.docs.view_rename.take().filter(|r| !app.home.open && app.docs.views.get(r.view).is_some());
     let view_place = view_edit.as_ref().and_then(|r| design_views.get(selected)?.iter().position(|(view, _, _, _)| view.id == r.view));
@@ -2888,12 +2894,6 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         .collect();
     let more_text = solidcraft_ui_text::tr("tab_strip.more");
     let plus_menu = crate::design_view_ui::plus_menu(solidcraft_theme::is_dark());
-    // The tab groups: their labels and menus, each tab's group rows, and a name being typed.
-    let group_parts = crate::tab_group_ui::StripGroups::build(app);
-    let group_menus = group_parts.group_menus();
-    let group_labels = group_parts.labels(&group_menus);
-    let tab_menus = group_parts.tab_menus();
-    let mut group_edit = crate::tab_group_ui::take_rename(app);
     let window_entries = crate::design_view_ui::window_menu_entries(app);
     let window_rows = crate::design_view_ui::window_menu_rows(app, &window_entries);
     let view_menu = crate::design_view_ui::view_menu_rows(app, &window_rows);
