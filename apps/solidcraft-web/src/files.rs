@@ -102,7 +102,7 @@ type SaveOutcome = Result<(), String>;
 struct Write {
     path: String,
     bytes: Vec<u8>,
-    done: Option<Sender<SaveOutcome>>,
+    done: Option<(vfs::Snapshot, Sender<SaveOutcome>)>,
 }
 
 impl Files {
@@ -377,8 +377,9 @@ pub fn flush(files: &Rc<Files>) {
 /// closes its writable stream (or local storage accepts the value).
 pub fn persist_design(files: &Rc<Files>, path: String, bytes: Vec<u8>) -> Receiver<SaveOutcome> {
     flush(files);
+    let snapshot = vfs::snapshot(&path);
     let (done, reply) = std::sync::mpsc::channel();
-    enqueue(files, Write { path, bytes, done: Some(done) });
+    enqueue(files, Write { path, bytes, done: Some((snapshot, done)) });
     reply
 }
 
@@ -400,9 +401,9 @@ fn enqueue(files: &Rc<Files>, write: Write) {
                 // in-memory filesystem only. The regular Save picker never returns one.
                 disk::WriteTo::Memory => Ok(()),
             };
-            if let Some(done) = done {
+            if let Some((snapshot, done)) = done {
                 if result.is_ok() {
-                    vfs::insert(&path, bytes);
+                    vfs::insert_if_unchanged(&path, snapshot, bytes);
                     // This acknowledged write supersedes any earlier write the old command
                     // queue asked the shell to mark unsaved.
                     files.unsaved.borrow_mut().retain(|failed| failed != &path);

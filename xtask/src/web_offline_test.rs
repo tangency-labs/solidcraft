@@ -392,6 +392,34 @@ const API_TEST: &str = r#"(async () => {
     await app.request('ui.inspect');
     const [x, y] = await app.request('ui.at', {handle: 'dialog:Export DXF…'});
     await app.request('ui.click', {x, y});
+    // An export to the same explicit path can publish newer virtual bytes while Save is waiting.
+    {
+        const handle = FileSystemFileHandle.prototype;
+        const createWritable = handle.createWritable;
+        const sharedPath = '/opfs/concurrent-write.sc';
+        let opened, finish;
+        const opening = new Promise(resolve => { opened = resolve; });
+        const allowWrite = new Promise(resolve => { finish = resolve; });
+        handle.createWritable = function (...args) {
+            if (this.name !== 'concurrent-write.sc') return createWritable.apply(this, args);
+            opened();
+            return allowWrite.then(() => createWritable.apply(this, args));
+        };
+        await app.execute('parameters.add', {name: 'newer_value', expression: '5 mm'});
+        const saving = app.execute('file.save_as', {path: sharedPath});
+        try {
+            await Promise.race([opening, saving.then(() => { throw new Error('save completed before storage opened'); })]);
+            await app.execute('parameters.export', {path: sharedPath, format: 'json'});
+            finish();
+            await saving;
+        } finally {
+            finish();
+            handle.createWritable = createWritable;
+        }
+        await app.execute('parameters.delete', {name: 'newer_value'});
+        const imported = await app.execute('parameters.import', {path: sharedPath});
+        check(imported.imported.includes('newer_value'), 'save completion preserves the newer virtual file');
+    }
     // Browser files exist only in the VFS: native filesystem metadata cannot find them.
     await app.execute('file.save', {path: '/upload/linked-part.sc'});
     await app.execute('file.new');
