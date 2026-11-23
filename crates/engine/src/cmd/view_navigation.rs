@@ -6,12 +6,13 @@ use solidcraft_viewport::{Camera, StandardView};
 use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
 use crate::schema::view_navigation::{
-    AmbientOcclusionParams, AmbientOcclusionResult, CameraReply, DisplayToggleParams, DisplayToggleResult, FitHomeParams, FitHomeResult,
-    GraphicsPreset, GraphicsPresetParams, GraphicsPresetResult, HistoryDock, HistoryLayoutParams, HistoryLayoutResult, LayoutMode, LayoutParams,
-    LayoutResult, NavigateParams, NavigateResult, NavigationBarParams, NavigationBarResult, NavigationTool, NavigatorParams, NormalToParams,
-    PerspectiveParams, PerspectiveResult, PresetQuality, RenderBrowser, RenderFocus, RenderLive, RenderPanelVisibilityParams,
-    RenderPanelVisibilityResult, RenderSelect, RenderStageParams, RenderStageResult, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams,
-    TabStep, TabStepParams, ToolParams, ToolResult, VisualStyle, VisualStyleParams, VisualStyleResult, ZoomTool,
+    AmbientOcclusionParams, AmbientOcclusionResult, BrowserTreeParams, BrowserTreeResult, CameraReply, DisplayToggleParams, DisplayToggleResult,
+    FitHomeParams, FitHomeResult, GraphicsPreset, GraphicsPresetParams, GraphicsPresetResult, HistoryDock, HistoryLayoutParams, HistoryLayoutResult,
+    LayoutMode, LayoutParams, LayoutResult, NavigateParams, NavigateResult, NavigationBarParams, NavigationBarResult, NavigationTool,
+    NavigatorParams, NormalToParams, PerspectiveParams, PerspectiveResult, PresetQuality, RenderBrowser, RenderFocus, RenderLive,
+    RenderPanelVisibilityParams, RenderPanelVisibilityResult, RenderSelect, RenderStageParams, RenderStageResult, RibbonTabsOnly,
+    RibbonTabsOnlyParams, StandardViewParams, TabStep, TabStepParams, ToolParams, ToolResult, ToolbarResetAll, ToolbarResetAllParams, VisualStyle,
+    VisualStyleParams, VisualStyleResult, ZoomTool,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
@@ -28,6 +29,8 @@ const TAB_STEP_CONTRACT: TypedContract<TabStepParams> = TypedContract::new();
 const STANDARD_VIEW_CONTRACT: TypedContract<StandardViewParams> = TypedContract::new();
 const NORMAL_TO_CONTRACT: TypedContract<NormalToParams> = TypedContract::new();
 const RIBBON_TABS_ONLY_CONTRACT: TypedContract<RibbonTabsOnlyParams> = TypedContract::new();
+const TOOLBAR_RESET_ALL_CONTRACT: TypedContract<ToolbarResetAllParams> = TypedContract::new();
+const BROWSER_TREE_CONTRACT: TypedContract<BrowserTreeParams> = TypedContract::new();
 const LAYOUT_CONTRACT: TypedContract<LayoutParams> = TypedContract::new();
 const HISTORY_LAYOUT_CONTRACT: TypedContract<HistoryLayoutParams> = TypedContract::new();
 const GRAPHICS_PRESET_CONTRACT: TypedContract<GraphicsPresetParams> = TypedContract::new();
@@ -69,6 +72,10 @@ CommandSpec::new("view.status_items", "Viewport Status Items", crate::checked!("
     .icon("list").noundo().doc_only()
     .contract(&STATUS_ITEMS_CONTRACT).output(output_schema_for::<crate::status_items::StatusItems>)
     .params("no parameters → {items}; persistent viewport effects, oldest slot first, with structured settings and executable clear requests; read-only, no model evaluation"),
+CommandSpec::new("view.browser", "Browser Tree", crate::checked!("view.browser", browser_tree))
+    .icon("list").noundo().doc_only()
+    .contract(&BROWSER_TREE_CONTRACT).output(output_schema_for::<BrowserTreeResult>)
+    .params("visible?: bool (omitted: toggle) → visible?; show or hide the Browser tree panel, the design's tree of components, bodies and sketches (window setting)"),
 CommandSpec::new("view.fit", "Fit", crate::checked!("view.fit", fit))
     .icon("fit").key("F6").noundo().doc_only().any_part()
     .contract(&FIT_HOME_CONTRACT).output(output_schema_for::<FitHomeResult>)
@@ -112,6 +119,9 @@ CommandSpec::new("view.navigator", "Custom View Navigator", crate::checked!("vie
 CommandSpec::new("view.ribbon_tabs_only", "Ribbon Tabs Only", crate::checked!("view.ribbon_tabs_only", ribbon_tabs_only))
     .icon("chevron").noundo().doc_only().contract(&RIBBON_TABS_ONLY_CONTRACT).output(output_schema_for::<RibbonTabsOnly>)
     .params("on?: bool (omitted: switch) → on?; fold the ribbon to its tab row, a tab click shows its panels over the view (window setting)"),
+CommandSpec::new("view.toolbar_reset_all", "Reset All Toolbar Tabs", crate::checked!("view.toolbar_reset_all", toolbar_reset_all))
+    .icon("restore").noundo().doc_only().contract(&TOOLBAR_RESET_ALL_CONTRACT).output(output_schema_for::<ToolbarResetAll>)
+    .params("{} → {}; put the buttons of every toolbar tab back to their defaults (window setting; hidden tabs stay hidden); never asks"),
 CommandSpec::new("view.render_focus", "Render Focus View", crate::checked!("view.render_focus", render_focus))
     .icon("render_scene").noundo().doc_only()
     .contract(&FOCUS_CONTRACT).output(output_schema_for::<RenderFocus>)
@@ -391,6 +401,21 @@ fn navigation_bar(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.navigation_bar", "visible")
 }
 
+/// `view.browser`: the Browser tree panel is a window setting, so the engine only checks the
+/// request and echoes it. The window opens or closes the panel; the design is not changed.
+fn browser_tree(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.browser";
+    // The request is an object: serde would read a list as the fields in order, so a call
+    // like `[]` would answer instead of being refused.
+    let p = match p {
+        Value::Null => json!({}),
+        Value::Object(_) => p.clone(),
+        _ => return Err(bad(cmd, "parameters must be an object")),
+    };
+    let request: BrowserTreeParams = serde_json::from_value(p).map_err(|e| bad(cmd, e.to_string()))?;
+    serde_json::to_value(BrowserTreeResult { visible: request.visible, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
+}
+
 fn ribbon_tabs_only(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.ribbon_tabs_only";
     let p = match p {
@@ -400,6 +425,19 @@ fn ribbon_tabs_only(_s: &mut Session, p: &Value) -> Result<Value> {
     };
     let request: RibbonTabsOnlyParams = serde_json::from_value(p).map_err(|e| bad(cmd, e.to_string()))?;
     serde_json::to_value(RibbonTabsOnly { on: request.on, param_warnings: Vec::new() }).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
+/// `view.toolbar_reset_all`: check that the call has no parameters. The window then resets its
+/// toolbar customisation; the session and the design are not changed.
+fn toolbar_reset_all(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.toolbar_reset_all";
+    let p = match p {
+        Value::Null => json!({}),
+        Value::Object(_) => p.clone(),
+        _ => return Err(bad(cmd, "parameters must be an object")),
+    };
+    let _: ToolbarResetAllParams = serde_json::from_value(p).map_err(|e| bad(cmd, e.to_string()))?;
+    serde_json::to_value(ToolbarResetAll { param_warnings: Vec::new() }).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
 fn status_items(s: &mut Session, p: &Value) -> Result<Value> {
@@ -744,6 +782,20 @@ mod tests {
         assert!(s.camera.is_none());
     }
 
+    /// `view.toolbar_reset_all` takes no parameters, refuses any, and leaves the design and undo.
+    #[test]
+    fn toolbar_reset_all_takes_no_parameters_and_leaves_the_design() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        assert_eq!(s.execute("view.toolbar_reset_all", &json!({})).unwrap(), json!({}));
+        assert_eq!(s.execute("view.toolbar_reset_all", &Value::Null).unwrap(), json!({}));
+        for params in [json!({"tab":"MODEL"}), json!({"all":true}), json!(true), json!([])] {
+            assert!(s.execute("view.toolbar_reset_all", &params).is_err(), "{params}");
+        }
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
+    }
+
     /// Fit, Home and the pan and zoom tools also frame and move a drawing's sheet, so they run with
     /// a drawing open; the other view commands act on the model and run there too, as every model
     /// command does. None makes an undo step or changes the design.
@@ -774,6 +826,30 @@ mod tests {
         }
         for params in [json!({"on":0}), json!({"on":"true"}), json!({"on":[]}), json!({"unexpected":true}), json!(true), json!([])] {
             assert!(s.execute("view.ribbon_tabs_only", &params).is_err(), "{params}");
+        }
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
+    }
+
+    #[test]
+    fn browser_tree_echoes_the_request_without_editing_the_design() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        assert_eq!(s.execute("view.browser", &json!({})).unwrap(), json!({}));
+        assert_eq!(s.execute("view.browser", &Value::Null).unwrap(), json!({}));
+        for visible in [false, true] {
+            assert_eq!(s.execute("view.browser", &json!({"visible":visible})).unwrap(), json!({"visible":visible}));
+        }
+        for params in [
+            json!({"visible":0}),
+            json!({"visible":"true"}),
+            json!({"visible":null}),
+            json!({"visible":[]}),
+            json!({"unexpected":true}),
+            json!(true),
+            json!([]),
+        ] {
+            assert!(s.execute("view.browser", &params).is_err(), "{params}");
         }
         assert_eq!(s.doc.to_json(), before);
         assert!(s.undo.is_empty());

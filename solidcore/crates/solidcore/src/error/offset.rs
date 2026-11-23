@@ -23,6 +23,7 @@
 //! | [`OffsetFailure::LooseTangentEdge`]    | `SM_ERR` (WR-530, solidcore-native)       |
 //! | [`OffsetFailure::FacesApart`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::PastSide`]            | `SM_ERR` (#18564, solidcore-native)       |
+//! | [`OffsetFailure::FaceCloses`]          | `SM_ERR` (#19904, solidcore-native)       |
 //! | [`OffsetFailure::ReachUncertified`]    | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::LoopGapUncertified`]  | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::Unsound`]             | `SM_ERR` (solidcore-native)               |
@@ -236,6 +237,22 @@ pub enum OffsetFailure {
         /// The face beside it whose surface ends, of the operation's input.
         side: FaceId,
         /// How far the face could move and still meet the side.
+        largest: f64,
+    },
+    /// In a local operation, `face`, a band bounded by the two faces `beside` (a ring between
+    /// a countersink's cone and the well below it, or the cone itself between the ring and
+    /// the hole above), closes to nothing as the faces move: its two sides, each where its
+    /// surface meets a neighbour's new surface, pass over each other, so keeping the face
+    /// would turn it inside out. Decided in closed form where
+    /// the three surfaces are planes, cylinders and cones about one axis, before anything
+    /// changes. `largest` is how far the faces could move before the band closes: the
+    /// fraction of the move at which its two edges meet, times the move (#19904).
+    FaceCloses {
+        /// The face that closes, of the operation's input.
+        face: FaceId,
+        /// The faces across its two edges, of the operation's input.
+        beside: [FaceId; 2],
+        /// How far the faces could move before it closes.
         largest: f64,
     },
     /// In a local operation, a surface beside an edge or at a vertex of `face` moves, and
@@ -610,6 +627,7 @@ impl OffsetFailure {
             | Self::SeamOpened { face }
             | Self::FacesApart { face }
             | Self::PastSide { face, .. }
+            | Self::FaceCloses { face, .. }
             | Self::ReachUncertified { face }
             | Self::BlendSectionNotFound { face }
             | Self::FaceHasNoSurface { face }
@@ -753,6 +771,7 @@ impl OffsetFailure {
             | Self::PeriodicBranchAmbiguous
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
+            | Self::FaceCloses { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
@@ -822,6 +841,7 @@ impl OffsetFailure {
             | Self::PeriodicBranchAmbiguous
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
+            | Self::FaceCloses { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
@@ -872,6 +892,7 @@ impl OffsetFailure {
             | Self::SeamOpened { .. }
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
+            | Self::FaceCloses { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
@@ -939,6 +960,7 @@ impl OffsetFailure {
             Self::SeamOpened { .. }
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
+            | Self::FaceCloses { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
@@ -1209,6 +1231,18 @@ impl core::fmt::Display for OffsetFailure {
                 face.index(),
                 side.index()
             ),
+            Self::FaceCloses {
+                face,
+                beside,
+                largest,
+            } => write!(
+                f,
+                "face {} between faces {} and {} closes to nothing as the faces move: its \
+                 edges pass over each other once they move more than {largest}",
+                face.index(),
+                beside[0].index(),
+                beside[1].index()
+            ),
             Self::ReachUncertified { face } => write!(
                 f,
                 "a surface beside an edge or at a vertex of face {} moves, and how far the \
@@ -1439,14 +1473,6 @@ impl crate::SolidError {
             .into_error()
     }
 
-    /// [`crate::SolidError::Failed`] for something an offset routine needs that is not
-    /// there, as the phrase says, with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)`
-    /// on a `NULL` pointer).
-    #[must_use]
-    pub(crate) fn offset_missing(operation: &'static str, what: &'static str) -> Self {
-        Self::offset(operation, OffsetFailure::Missing(what))
-    }
-
     /// The offset failure behind this error, for a [`crate::SolidError::Failed`] with a
     /// [`Reason::Offset`].
     #[must_use]
@@ -1470,7 +1496,7 @@ mod tests {
     /// operation, and answer as the status did; their class is their own (a defect's is
     /// [`ErrorKind::StageFailed`]), and so is their entity (the input face a cause names, where
     /// the stage failure named none). A sample of each converted file
-    /// (`offset_executive/{cavity,reach,step_gaps}`, `draft`).
+    /// (`offset_executive/{crossing_loops,cavity,reach,step_gaps}`, `draft`).
     #[test]
     fn offset_failures_keep_the_status_of_the_upstream_they_replace() {
         let face = FaceId::from_index(3);
@@ -1478,10 +1504,22 @@ mod tests {
         // (the operation, the failure, the status kept, its class)
         let samples = [
             (
+                "offset::offset_executive::crossing_loops::resolve_crossing_loops",
+                defect,
+                Some(SM_ERR_ASSERT_FAILURE),
+                ErrorKind::StageFailed,
+            ),
+            (
                 "offset::offset_executive::cavity::is_cavity_region",
                 defect,
                 Some(SM_ERR_NULL_POINTER),
                 ErrorKind::StageFailed,
+            ),
+            (
+                "offset::offset_executive::crossing_loops::resolve_crossing_loops",
+                OffsetFailure::FaceHasNoSurface { face },
+                None,
+                ErrorKind::InvalidInput,
             ),
             (
                 "offset::draft",
@@ -1532,6 +1570,8 @@ mod tests {
             ),
         ];
         let statuses = [
+            SM_ERR_ASSERT_FAILURE,
+            SM_ERR_NULL_POINTER,
             SM_ERR_NULL_POINTER,
             SM_ERR_INVALID_INPUT,
             SM_ERR_INVALID_INPUT,
@@ -1585,10 +1625,6 @@ mod tests {
             .to_string(),
             "offset::op: the gap search of an offset face's loops closes one gap per pass and \
              reached its limit of 64 passes before a pass found no gap (face 3)"
-        );
-        assert_eq!(
-            SolidError::offset_missing("offset::op", "the face's surface").to_string(),
-            "offset::op: the face's surface is missing"
         );
         // a refusal replaced no status and does not answer as one
         let folds = SolidError::offset(
@@ -1938,6 +1974,16 @@ mod tests {
                 false,
                 false,
             ),
+            (
+                O::FaceCloses {
+                    face,
+                    beside: [face, face],
+                    largest: 0.5,
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -1998,6 +2044,7 @@ mod tests {
                 O::LocalFaceNotListed => 54,
                 O::VertexArcsNotOneSphere => 55,
                 O::UnnamedFaceHasNoSurface => 56,
+                O::FaceCloses { .. } => 57,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
@@ -2006,10 +2053,13 @@ mod tests {
             assert_eq!(o.is_phrase(), *phrase, "{o:?}");
             assert_eq!(o.is_defect(), *defect, "{o:?}");
             // what replaced a bare status is a phrase, a stage failure built on purpose, or a
-            // cause named at a site that returned a status (the rows from 26 on: TE-O-18, TE-O-19)
+            // cause named at a site that returned a status (the rows from 26 on: TE-O-18, TE-O-19;
+            // not `FaceCloses`, a refusal of its own raised where no status was returned)
             assert_eq!(
                 o.replaces_upstream_status(),
-                *phrase || matches!(o, O::StageFailed | O::Defect { .. }) || i >= 26,
+                *phrase
+                    || matches!(o, O::StageFailed | O::Defect { .. })
+                    || (i >= 26 && !matches!(o, O::FaceCloses { .. })),
                 "{o:?}"
             );
         }
@@ -2254,9 +2304,7 @@ mod tests {
             wrappers: Wrappers::Phrase,
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-        const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/offset/offset_executive/crossing_loops.rs", 5),
-        ];
+        const PINNED: &[(&str, usize)] = &[];
         assert_pinned("offset phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

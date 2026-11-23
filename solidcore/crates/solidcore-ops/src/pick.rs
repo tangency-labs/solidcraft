@@ -32,7 +32,7 @@ use solidcore::{Brep, Kernel, Point3};
 
 use crate::body::Body;
 use crate::order::{self, Order};
-use crate::session::{answer, read_body, with_body, Answer};
+use crate::session::{answer, read_body, Answer};
 use crate::{Error, Result};
 
 /// The largest tolerance a pick takes.
@@ -169,7 +169,7 @@ impl Body {
             return Err(Error::Argument);
         }
         let point = Point3::new(p[0], p[1], p[2]);
-        let found = with_body("face_at", self, |k, b| {
+        let found = read_body("face_at", self, |k, b| {
             let mut classifier = BrepClassifier::of_brep(b);
             let pc = match classifier.point_3d_classify(k, point, reach, true) {
                 Ok(pc) => pc,
@@ -213,7 +213,7 @@ impl Body {
             .enumerate()
             .map(|(i, &f)| (f, i))
             .collect();
-        let grown = with_body("faces_on_one_surface", self, |_, b| {
+        let grown = read_body("faces_on_one_surface", self, |_, b| {
             let mut out: Vec<FaceId> = Vec::new();
             for f in seeds {
                 if !out.contains(&f) {
