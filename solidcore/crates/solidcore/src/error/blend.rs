@@ -3613,6 +3613,65 @@ mod tests {
         );
     }
 
+    /// #19825: each cause the overflows name is no phrase, replaces the status it
+    /// keeps, has its class (a missing input is `Missing`, neither a defect nor a refusal:
+    /// the overflow's helpers read the caller's body and the executive's sheet alike), and
+    /// is worded with its class.
+    #[test]
+    fn the_cliff_overflow_causes_keep_their_status_and_class() {
+        let mut rows = Vec::new();
+        for input in [
+            OverflowInput::FaceSurface,
+            OverflowInput::EdgeCurve,
+            OverflowInput::EdgeStartVertex,
+            OverflowInput::EdgeEndVertex,
+            OverflowInput::EdgeOtherVertex,
+        ] {
+            rows.push((
+                BlendFailure::OverflowInputMissing(input),
+                ErrorKind::Missing,
+                SM_ERR_NULL_POINTER,
+            ));
+        }
+        for drop in [
+            OverflowDrop::EdgePieceEndOntoEdge,
+            OverflowDrop::EdgeMiddleOntoFilletFace,
+            OverflowDrop::LoopSampleOntoSurface,
+        ] {
+            rows.push((
+                BlendFailure::OverflowPointDoesNotDrop(drop),
+                ErrorKind::NotFound,
+                SM_ERR,
+            ));
+        }
+        rows.push((
+            BlendFailure::ExtensionEndOnTwoSideLines,
+            ErrorKind::Unsupported,
+            SM_ERR,
+        ));
+        rows.push((
+            BlendFailure::NoBlendedEdgeNearExtension,
+            ErrorKind::NotFound,
+            SM_ERR,
+        ));
+        for (cause, class, status) in rows {
+            assert!(!cause.is_phrase(), "{cause:?}");
+            assert!(cause.replaces_upstream_status(), "{cause:?}");
+            assert_eq!(cause.class(), class, "{cause:?}");
+            assert_eq!(cause.comparison_status(), status, "{cause:?}");
+            let text = cause.to_string();
+            assert!(text.starts_with(&format!("{class}: ")), "{text}");
+            let error = SolidError::blend("blend::op", cause);
+            assert_eq!(error.kind(), class, "{error:?}");
+            assert_eq!(error.upstream_status(), Some(status), "{error:?}");
+            assert!(!error.is_defect(), "{error:?}");
+        }
+        assert_eq!(
+            BlendFailure::OverflowInputMissing(OverflowInput::FaceSurface).to_string(),
+            "missing: a face a blend's overflow reads has no surface"
+        );
+    }
+
     /// The `BlendFailure` variants the per-file scan (`phrase_sites::BLEND`) counts are
     /// exactly the phrase causes (`phrase_causes!`, which [`BlendFailure::is_phrase`] is
     /// built from), so the per-file pins in `error/phrase_sites.rs` see every phrase cause.
