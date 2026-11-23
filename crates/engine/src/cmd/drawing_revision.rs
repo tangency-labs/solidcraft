@@ -45,14 +45,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ADD_CONTRACT)
         .output(output_schema_for::<RevisionsResult>)
         .params("set?: {revision?, description?, designer?, checker?, date?, hidden?}: the new row's texts (the revision, when not given, the next one: after the highest the drawing has given) → {row: its id, rows, next}. One undo step."),
-    CommandSpec::new(TAG_ADD, "Add Revision Tag", crate::checked!("drawing.revision.tag.add", tag_add))
+    CommandSpec::new(TAG_ADD, "Add Revision Tag", crate::checked!("drawing.revision.tag.add", tag_add)).begins_edit()
         .icon("new")
         .in_drawing()
         .doc_only()
         .contract(&TAG_ADD_CONTRACT)
         .output(output_schema_for::<RevisionsResult>)
         .params("row: a row's id; sheet: id or name; at: [x, y] on paper; size_mm?: its side, 1 to 50 (default 8.3, for a 2.5 mm revision); text?: shown in place of the row's revision → {tag, rows, next, tags: [{tag, row, sheet, at, size_mm, shows, lost}]}. Drawn on the sheet as a triangle round what it shows, its place the centroid."),
-    CommandSpec::new(TAG_EDIT, "Edit Revision Tag", crate::checked!("drawing.revision.tag.edit", tag_edit))
+    CommandSpec::new(TAG_EDIT, "Edit Revision Tag", crate::checked!("drawing.revision.tag.edit", tag_edit)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("edit")
         .in_drawing()
         .doc_only()

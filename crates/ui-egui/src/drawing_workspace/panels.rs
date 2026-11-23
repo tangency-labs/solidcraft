@@ -28,13 +28,14 @@ pub(super) enum Tool {
     Note(Option<u64>),
     PartsList(Option<u64>),
     Export,
+    Detail,
 }
 
 impl Tool {
     /// The placed object whose options these are, if they are one's.
     pub(super) fn object(self) -> Option<u64> {
         match self {
-            Self::Base | Self::Projected | Self::Export => None,
+            Self::Base | Self::Projected | Self::Export | Self::Detail => None,
             Self::Edit(object) | Self::Dimension(object) | Self::Note(object) | Self::PartsList(object) => object,
         }
     }
@@ -48,6 +49,7 @@ impl Tool {
             "drawing.note" => Some(Self::Note(None)),
             "drawing.parts_list" => Some(Self::PartsList(None)),
             "drawing.export" => Some(Self::Export),
+            "drawing.view.detail" | "drawing.view.detail.planned" => Some(Self::Detail),
             _ => None,
         }
     }
@@ -61,6 +63,7 @@ impl Tool {
             Self::Note(_) => tr("ui.drawing_panel.note"),
             Self::PartsList(_) => tr("ui.drawing_panel.parts_list"),
             Self::Export => tr("ui.drawing_export.title"),
+            Self::Detail => tr("ui.drawing_detail.title"),
         }
     }
 }
@@ -128,7 +131,7 @@ pub(super) fn tool_body(app: &SolveApp, ui: &mut egui::Ui, tool: Tool) {
         Tool::Base | Tool::Projected => base_view(ui, &app.session.doc.name, tool == Tool::Projected),
         Tool::Edit(_) => {}
         Tool::Dimension(selected) => dimension(ui, drawing, sheet, selected),
-        Tool::Note(_) | Tool::Export => {}
+        Tool::Note(_) | Tool::Export | Tool::Detail => {}
         Tool::PartsList(table) => parts_list(ui, drawing, sheet, table, &app.session.doc.name),
     }
 }
@@ -463,6 +466,9 @@ fn parts_list(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, 
 
 #[derive(Clone)]
 pub(super) struct AddSheet {
+    pub(super) document: u64,
+    pub(super) drawing: u64,
+    pub(super) window: solidcraft_views::WindowId,
     name: String,
     after: usize,
     paper: PaperChoice,
@@ -502,7 +508,15 @@ impl AddSheet {
             None => drawing.sheets.len().checked_sub(1)?,
         };
         let paper = PaperChoice::new(drawing.sheets.get(after)?.sheet);
-        Some(Self { name: String::new(), after, paper, title_block: 0 })
+        Some(Self {
+            document: app.session.uid,
+            drawing: drawing.id,
+            window: app.view_windows.current_window(),
+            name: String::new(),
+            after,
+            paper,
+            title_block: 0,
+        })
     }
 }
 
@@ -569,6 +583,11 @@ pub(super) fn add_window(app: &mut SolveApp, ctx: &egui::Context, mut form: AddS
             Ok(result) => {
                 if let Some(id) = result.get("sheet").and_then(Value::as_str).and_then(ids::decode) {
                     select_sheet(app, id);
+                    if app.preferences.design_sub_tab_sheets
+                        && let Err(error) = crate::sheet_views::open_in(app, drawing.id, id, false)
+                    {
+                        app.set_status(error, true);
+                    }
                 }
                 return None;
             }

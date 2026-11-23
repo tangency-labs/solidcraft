@@ -61,9 +61,9 @@
 //!   upstream. `SmCurve::EvaluateGeometric` failing with `SM_ERR` marks the point touching
 //!   (other failures propagate; upstream would read uninitialised vectors). The shape
 //!   variables only read on paths where they were set start at zero. With an edge and a
-//!   face, osculating circles overlapping past touching by less than [`contact_tol_3d`]
-//!   are tangent (WR-787, #15429), and so are a line and an osculating circle (#14599); a
-//!   bare curve or surface keeps upstream's zero.
+//!   face, osculating circles overlapping past touching by up to [`contact_tol_3d`] (read
+//!   by `within_contact_tol`) are tangent (WR-787, #15429), and so are a line and an
+//!   osculating circle (#14599); a bare curve or surface keeps upstream's zero.
 //! - **Kernel.** `is_on_seam` and `global_point_solve` (and `global_point_solve_starts`)
 //!   take the [`Kernel`] that the tolerance, drop and cache callees now need.
 //! - **Unported callees** (return [`SolidError::Unported`]): the zone tolerance of a face's
@@ -1728,18 +1728,16 @@ impl Surface {
                             }
                         }
                     } else if let Some(context) = context.as_deref_mut() {
-                        let built;
-                        let cache = if let Some(cache) = cache {
-                            cache
+                        let state = if let Some(cache) = cache {
+                            cache.state()?
                         } else {
-                            built = context.surface_cache_state(k, self, surface)?;
-                            &built
+                            context.surface_cache_without_get_tree(k, self, surface)?
                         };
-                        if cache.is_trimmed()
-                            && cache.point_test_enabled
-                            && !cache.face_was_modified
+                        if state.is_trimmed()
+                            && state.point_test_enabled
+                            && !state.face_was_modified
                         {
-                            let face = cache.face()?.ok_or_else(|| {
+                            let face = state.face()?.ok_or_else(|| {
                                 SolidError::surface_missing(
                                     "surface::surface::p4::global_point_solve",
                                     "the cache's face",

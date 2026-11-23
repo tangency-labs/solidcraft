@@ -40,6 +40,7 @@ pub const DOCUMENTED: &[&str] = &[
     "construct.plane.midplane",
     "construct.plane.offset",
     "construct.plane.perpendicular",
+    "construct.plane.square_to_line",
     "construct.plane.tangent",
     "construct.plane.three_points",
     "construct.plane.two_edges",
@@ -60,7 +61,10 @@ pub const DOCUMENTED: &[&str] = &[
     "document.inspect",
     "document.units",
     "drawing.export",
+    "drawing.print",
+    "drawing.sketch.create",
     "drawing.table.edit",
+    "drawing.view.detail",
     "edit.checkpoint",
     "edit.restore_checkpoint",
     "explode.create",
@@ -242,6 +246,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sketch.project",
     "sketch.project_to_surface",
     "sketch.rectangle.center",
+    "sketch.rectangle.edge_center",
     "sketch.rectangle.rounded",
     "sketch.rectangle.three_point",
     "sketch.rectangle.two_point",
@@ -255,6 +260,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sketch.spline.control_point",
     "sketch.spline.control_point_5",
     "sketch.spline.fit_point",
+    "sketch.spline.fit_tolerance",
     "sketch.spline3d",
     "sketch.spun_profile",
     "sketch.text",
@@ -336,7 +342,10 @@ pub const DOCUMENTED: &[&str] = &[
 ];
 
 /// The help for `command` in the current language, when it has any.
+/// A ribbon button kept as its planned entry for its artwork (`drawing.view.detail.planned`) shows
+/// the help of the working command it opens (`drawing.view.detail`).
 pub fn help(command: &str) -> Option<String> {
+    let command = command.strip_suffix(".planned").filter(|working| DOCUMENTED.contains(working)).unwrap_or(command);
     if !DOCUMENTED.contains(&command) {
         return None;
     }
@@ -406,6 +415,14 @@ mod tests {
             "toolbar commands without help: {missing:?}. Add `help.<id>` (two short sentences: what the tool does, \
              then when to use it) to a file in assets/locales/pending/ and the id to DOCUMENTED."
         );
+    }
+
+    /// The ribbon's Detail View, kept as its planned entry for its artwork, shows the tool's help.
+    #[test]
+    fn a_planned_ribbon_entry_shows_its_working_commands_help() {
+        crate::i18n::install();
+        assert_eq!(help("drawing.view.detail.planned"), help("drawing.view.detail"));
+        assert!(help("drawing.view.detail").is_some());
     }
 
     #[test]

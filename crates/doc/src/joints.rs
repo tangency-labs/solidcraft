@@ -1532,7 +1532,7 @@ pub fn joint_values(asm: &Assembly) -> BTreeMap<u64, Vec<f64>> {
 /// unless flipped. Two datum references (a plane or an axis on each side) both point along the
 /// geometry's own normal rather than out of a body, so they mate aligned - each part keeps its
 /// side of the datum - and `flip` asks for the mated relation.
-fn flip_of(j: &Joint) -> Mat {
+pub fn flip_of(j: &Joint) -> Mat {
     // An angle relation's `angle` is its tilt (`tail`); a perpendicular one has none.
     let turn = if matches!(j.kind, JointKind::Angle | JointKind::Perpendicular) { 0.0 } else { j.angle };
     let mut m = rot_z(turn);
@@ -3034,13 +3034,14 @@ pub use edge::{edge_axis, edge_snap};
 
 #[path = "joints_reach.rs"]
 mod reach;
+pub use reach::ball_values_from_rotation_vector;
 
 #[path = "joints_face.rs"]
 mod face;
 pub use face::{end_faces, face_name_at, named_face_spot, pin_end, round_end_at};
 #[path = "joints_relations.rs"]
 mod relations;
-pub use reach::{REACH_TOL, Reach, Reached, reach};
+pub use reach::{FrameCarry, REACH_TOL, Reach, Reached, reach, reach_frame};
 pub use relations::relation_values;
 
 #[path = "joints_rigid_groups.rs"]

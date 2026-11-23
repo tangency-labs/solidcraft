@@ -18,6 +18,7 @@ use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::primitive::api_primitives as api;
+use solidcore::primitive::primitive_creation::model::PrimitiveModel;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
@@ -397,12 +398,13 @@ fn a_slice_by_a_solid_fails_with_a_typed_reason() {
     let (a, b, _) = operands(&mut k, "box-box-union").unwrap();
     let error = boolean(&mut k, a, b, BooleanOperation::Slice).unwrap_err();
     assert!(matches!(error, SolidError::Failed(_)), "{error:?}");
-    assert_eq!(error.kind(), ErrorKind::Failed);
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
     assert_eq!(error.sm_status(), Some(solidcore::error::SM_ERR));
     assert_eq!(error.operation(), "boolean::merge::p4::manifold_boolean");
     assert_eq!(
         error.to_string(),
-        "boolean::merge::p4::manifold_boolean: a slice needs a sheet, and the B-rep is not one"
+        "boolean::merge::p4::manifold_boolean: a slice needs a sheet, and the other B-rep is \
+         not one"
     );
     assert!(!error.is_port_failure());
 }
@@ -914,7 +916,22 @@ fn a_tiny_sphere_and_a_box_whose_edge_crosses_it_twice_give_exact_volumes() {
         (Op::Difference, "difference", sphere - common, [3, 5, 4]),
     ] {
         let mut k = Kernel::default();
-        let a = api::create_sphere(&mut k, Point3::new(c[0], c[1], c[2]), r).unwrap();
+        // the sphere as the generated case gave it, with its negative radius:
+        // `create_sphere` refuses that now, so it is built as `create_sphere` built it,
+        // by the primitive creation itself (the sphere of the radius's magnitude from
+        // the mirrored profile, which is where this case's seam is)
+        let mut frame = Axis2Placement::default();
+        frame
+            .set_canonical(
+                Point3::new(c[0], c[1], c[2]),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            )
+            .unwrap();
+        let (a, ()) = PrimitiveModel::build_new(&mut k, |pc, model| {
+            pc.create_partial_sphere(model, PrimitiveModel::MAIN, r, 0.0, 360.0, &frame)
+        })
+        .unwrap();
         let b = api::create_box(&mut k, Point3::new(o[0], o[1], o[2]), d[0], d[1], d[2]).unwrap();
         let result = match op {
             Op::Union => boolean_union(&mut k, a, b),
@@ -980,6 +997,118 @@ fn a_tiny_sphere_and_a_box_whose_edge_crosses_it_twice_give_exact_volumes() {
         };
         if !(1.6e-4..1.8e-4).contains(&apart) {
             failures.push(format!("{name}: crossings {crossings:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A unit sphere cut by the plane y = -3e-5, which passes 3e-5 from both poles and runs
+/// 3e-5 beside the sphere's seam: the intersection is the cap y <= -3e-5, bounded by one
+/// circle. Near a pole the circle's trim curve on the sphere turns through a quarter of the
+/// u domain within a few 3e-5 of the curve; the drop that makes it accepted a first span
+/// 1/8192 of the circle long whatever its samples said, and that span's UV cubic reached
+/// u = 1.42 of the [0, 1] domain, its image up to 5e-4 off the circle (tolerance 1e-5): the trim
+/// jumped across the seam (`SmEdgeuse` test 7) and the union's and difference's sphere faces
+/// had intersecting loops (`SmFace` test 38). A span whose image is proved off the curve is
+/// now subdivided. Every trim curve on the sphere lies within the tolerance of the plane
+/// (sampled), inside the sphere's domain, the result has the cap's faces, edge and vertex
+/// and its exact volume, and the check reports neither test.
+#[test]
+fn a_circle_passing_near_a_spheres_poles_gets_a_trim_curve_on_the_circle() {
+    use solidcore::surface::surface::SurfaceKind;
+    use solidcore::topology::{edge, edgeuse, face};
+    let delta = 3e-5;
+    let tol = 1e-5;
+    let h = 1.0 - delta;
+    let cap = PI * h * h * (3.0 - h) / 3.0;
+    let mut failures = Vec::new();
+    for (op, name) in [(Op::Intersection, "intersection"), (Op::Union, "union")] {
+        let mut k = Kernel::default();
+        let a = api::create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0).unwrap();
+        let b =
+            api::create_box(&mut k, Point3::new(-2.0, -2.0, -2.0), 4.0, 2.0 - delta, 4.0).unwrap();
+        let result = match op {
+            Op::Intersection => boolean_intersection(&mut k, a, b),
+            _ => boolean_union(&mut k, a, b),
+        };
+        let mut brep = match result {
+            Ok(b) => b,
+            Err(e) => {
+                failures.push(format!("{name}: {e}"));
+                continue;
+            }
+        };
+        for eu in solidcore::topology::brep::p2::edgeuses(&brep, None).unwrap() {
+            let f = edgeuse::p1::face(&brep, eu).unwrap().unwrap();
+            let surface = face::p2::surface(&brep, f).unwrap().unwrap();
+            if !matches!(surface.kind(), SurfaceKind::Sphere(_)) {
+                continue;
+            }
+            // the circle's edge uses (not the seam's, in the union)
+            let e = edgeuse::p1::edge(&brep, eu).unwrap().unwrap();
+            let on_plane = edge::curve(&brep, e).unwrap().is_some_and(|c| {
+                let ivl = edge::interval(&brep, e).unwrap();
+                let mid = c.evaluate_point(&k, 0.5 * (ivl.min() + ivl.max())).unwrap();
+                (mid.y + delta).abs() <= tol
+            });
+            let trim = edgeuse::p1::uv_trim_curve(&brep, eu).unwrap().0;
+            let Some(trim) = trim.filter(|_| on_plane) else {
+                continue;
+            };
+            let ivl = trim.natural_interval();
+            let mut worst = (0.0_f64, 0.0_f64);
+            let mut nonfinite = false;
+            for i in 0..=20_000 {
+                let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 20_000.0;
+                let uv = trim.evaluate_point(&k, t).unwrap();
+                let p = surface
+                    .evaluate_point(&k, solidcore::geom::vector2d::Point2::new(uv.x, uv.y))
+                    .unwrap();
+                // how far the image is from the plane, and the trim from the domain [0, 1]^2
+                let outside = (-uv.x).max(uv.x - 1.0).max(-uv.y).max(uv.y - 1.0);
+                let off = (p.y + delta).abs();
+                // f64::max drops a NaN, so a non-finite sample fails here, not in the maxima
+                if !(off.is_finite() && outside.is_finite()) {
+                    nonfinite = true;
+                    break;
+                }
+                worst = (worst.0.max(off), worst.1.max(outside));
+            }
+            if nonfinite {
+                failures.push(format!("{name}: a sphere trim sample is not finite"));
+            } else if !(worst.0 <= tol && worst.1 <= 1e-9) {
+                failures.push(format!(
+                    "{name}: a sphere trim is {:e} off the plane, {:e} outside the domain",
+                    worst.0, worst.1
+                ));
+            }
+        }
+        if let Op::Intersection = op {
+            let counts = [
+                solidcore::topology::brep::p1::faces(&brep, None)
+                    .unwrap()
+                    .len(),
+                solidcore::topology::brep::p1::edges(&brep, None)
+                    .unwrap()
+                    .len(),
+                solidcore::topology::brep::p1::vertices(&brep, None)
+                    .unwrap()
+                    .len(),
+            ];
+            if counts != [2, 1, 1] {
+                failures.push(format!("{name}: faces/edges/vertices {counts:?}"));
+            }
+            let v = volume_of(&k, &mut brep);
+            let rel = (v - cap).abs() / cap;
+            if rel.is_nan() || rel > VOLUME_REL_TOL {
+                failures.push(format!("{name}: volume {v:e} vs {cap:e} (rel {rel:.2e})"));
+            }
+        }
+        let check = check_brep(&mut k, &mut brep, CheckLevel::Level2).unwrap();
+        for line in check.lines() {
+            if line.contains("SmEdgeuse::Test #7 ") || line.contains("SmFace::Test #38 ") {
+                failures.push(format!("{name}: {line}"));
+            }
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
@@ -1449,6 +1578,58 @@ fn a_boss_a_hair_past_a_cylinders_rim_joins() {
             let joined = boolean_union(&mut k, base, boss)
                 .unwrap_or_else(|e| panic!("r {r}, overhang {overhang}: {e}"));
             let want = PI * (r * r * h + boss_r * boss_r * boss_h);
+            assert_closed_with_volume(&mut k, joined, want, want * 1e-9);
+        }
+    }
+}
+
+/// The shape of stress corpus item S0051: a ball of radius 25 cut flat at z = 15 (a rim of
+/// radius 20 about z, through the ball's seam at +x), and a boss of radius 2.4 and height 4.8
+/// standing on the flat face at x = 17.6 + `gap`, so that its bottom circle passes `gap`
+/// outside the rim where the seam meets it, at a zone tolerance of 1e-5 and of 1e-7. Below
+/// the contact tolerance (the zone tolerance) the two coplanar circles touch at one point
+/// (docs/booleans.md §6, "Circles a hair less than tangent"); they cross `2√(2δ r R / (R -
+/// r))` apart, 4.7e-3 for δ 1e-6. The surface intersection of the ball with the boss's wall
+/// met the lens at its two crossings, and the plane of the flat face cut the boss's circle
+/// at the side of its domain, the rim's tangent there: those points were made vertices of
+/// their own beside the touch, and the union failed for every gap below 7e-6 ("the related
+/// vertex is not an end of the edge use", or a merged vertex refused for the tolerance its
+/// gaps needed). The union is one valid solid of the two volumes added, the ball less its
+/// cap, `4/3 π R³ - π c² (3R - c) / 3` (c = 10), and the boss, `π r² h`: the boss stands on the
+/// flat face and overhangs it only in the air.
+#[test]
+fn a_boss_a_hair_past_a_cut_balls_rim_joins() {
+    let (big, cut, r, h) = (25.0_f64, 15.0_f64, 2.4_f64, 4.8_f64);
+    let c = big - cut;
+    let want = 4.0 / 3.0 * PI * big.powi(3) - PI * c * c * (3.0 * big - c) / 3.0 + PI * r * r * h;
+    let kernel = |zone: f64| Kernel {
+        fixes: solidcraft_fixes::solidcraft_fixes(),
+        ..Kernel::new(&solidcore::KernelOptions {
+            tolerances: solidcore::Tolerances {
+                zone_tol_3d: zone,
+                xsect_tol_3d: 2.0 * zone,
+                approx_tol_3d: zone / 2.0,
+                ..solidcore::Tolerances::default()
+            },
+            ..solidcore::KernelOptions::default()
+        })
+    };
+    let rows: [(f64, &[f64]); 2] = [
+        (1e-5, &[1e-7, 1e-6, 3e-6, 5e-6, 7e-6, 9e-6]),
+        (1e-7, &[1e-8, 9e-8]),
+    ];
+    for (zone, gaps) in rows {
+        for &gap in gaps {
+            let mut k = kernel(zone);
+            let p = Point3::new;
+            let ball = api::create_sphere(&mut k, p(0.0, 0.0, 0.0), big).unwrap();
+            let above = api::create_box(&mut k, p(-30.0, -30.0, cut), 60.0, 60.0, 20.0).unwrap();
+            let body = boolean_difference(&mut k, ball, above).unwrap();
+            let boss = api::create_cylinder(&mut k, p(20.0 - r + gap, 0.0, cut), r, h).unwrap();
+            let joined = boolean_union(&mut k, body, boss)
+                .unwrap_or_else(|e| panic!("zone {zone:e}, gap {gap:e}: {e}"));
+            // the ball's face, the flat face, the boss's wall and top
+            assert_eq!(counts(&joined), [4, 6, 4], "zone {zone:e}, gap {gap:e}");
             assert_closed_with_volume(&mut k, joined, want, want * 1e-9);
         }
     }

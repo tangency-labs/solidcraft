@@ -11,7 +11,8 @@
 //! ([`crate::validation::failing_check`]), and stands only when SMLib takes it, and its check
 //! fails fewer tests than the check that decided the heal and no kind of test more often, and
 //! the same against SMLib's own check of the body as it was (when the healed body still fails
-//! some test: one that passes is better than any).
+//! some test: one that passes is better than any). An import has already run that check on the
+//! part it heals, and hands it over ([`heal_given_check`]) rather than have it run again.
 //!
 //! Whether imports and Repair heal at all is the app's preference
 //! ([`set_heals_tolerance_defects`]): on by default; off, an import keeps a part its check
@@ -142,9 +143,22 @@ pub enum HealFailure {
 /// record's. A failure met while the token is stopped is [`HealFailure::Stopped`], whatever
 /// failed: as the import's check takes it.
 pub fn heal_tolerance_defects(body: &Body) -> Result<Option<(Body, ToleranceHeal)>> {
-    let Some((ops, order)) = body.ops_body() else {
+    heal_given_check(body, None)
+}
+
+/// [`heal_tolerance_defects`], given SMLib's check of `body` when the caller has already run it
+/// on this very body: `own` is what [`crate::validation::failing_check`] of `body` found failing
+/// (`None`: not known, so it is run here when the heal needs it). A STEP import passes the
+/// check it ran on the part, which would otherwise be run again here on the same body: the
+/// heal decides the same either way, with one check fewer.
+///
+/// # Errors
+/// As [`heal_tolerance_defects`].
+pub(crate) fn heal_given_check(body: &Body, own: Option<&CheckFailure>) -> Result<Option<(Body, ToleranceHeal)>> {
+    let Some(form) = body.ops_body() else {
         return Ok(None);
     };
+    let (ops, order) = &*form;
     let heal = || solidcore_ops::heal::heal_tolerance_defects(ops, order);
     let healed = match solidcraft_smlib::stop::token() {
         Some(token) => solidcore_ops::cancel::within(&token, heal),
@@ -185,14 +199,22 @@ pub fn heal_tolerance_defects(body: &Body) -> Result<Option<(Body, ToleranceHeal
         return Ok(None);
     }
     // The deciding check above is solidcore-ops' of the body it converted. SMLib's own check of
-    // the body as it is must be bettered as well: a heal is kept only when both say so.
+    // the body as it is must be bettered as well: a heal is kept only when both say so. A
+    // caller that already checked the body gave that check (`own`); else it is run now.
     if check.is_some() {
-        let own = crate::validation::failing_check(body).map_err(|e| match e {
-            e @ KernelError::Internal(_) => e,
-            _ if stopped() => KernelError::Heal(HealFailure::Stopped),
-            e => KernelError::Heal(HealFailure::CouldNotRun(format!("SMLib's check of the body: {e}"))),
-        })?;
-        if let Some(why) = own.as_ref().map_or(Some("SMLib's check passes the body".to_string()), |own| worse_than(own, check.as_ref())) {
+        let checked;
+        let own = match own {
+            Some(own) => Some(own),
+            None => {
+                checked = crate::validation::failing_check(body).map_err(|e| match e {
+                    e @ KernelError::Internal(_) => e,
+                    _ if stopped() => KernelError::Heal(HealFailure::Stopped),
+                    e => KernelError::Heal(HealFailure::CouldNotRun(format!("SMLib's check of the body: {e}"))),
+                })?;
+                checked.as_ref()
+            }
+        };
+        if let Some(why) = own.map_or(Some("SMLib's check passes the body".to_string()), |own| worse_than(own, check.as_ref())) {
             log::debug!(target: "repair", "tolerance heal not kept: {why}");
             return Ok(None);
         }
