@@ -43,7 +43,7 @@ fn resolved(s: &mut Session, p: &Value) -> Result<Look> {
     let fallback = crate::view::colors::BODY;
     let color =
         s.doc.body_color(body).map(|rgb| rgb.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)).unwrap_or([fallback.0, fallback.1, fallback.2]);
-    Ok(Look { name: "Default".into(), color, opacity: 1.0, pbr: None })
+    Ok(Look { name: "Default".into(), color, opacity: 1.0, pbr: None, grain: None })
 }
 
 pub(in crate::cmd) fn pick_up(s: &mut Session, p: &Value) -> Result<Value> {
@@ -76,7 +76,7 @@ pub(in crate::cmd) fn favorite(_s: &mut Session, p: &Value) -> Result<Value> {
 pub(in crate::cmd) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     let look = s.appearance_clipboard.as_ref().ok_or_else(|| bad("appearance.paste", "copy a look first"))?;
     let mut params = p.as_object().cloned().ok_or_else(|| bad("appearance.paste", "give assignment targets"))?;
-    for key in ["appearance", "name", "color", "opacity", "pbr"] {
+    for key in ["appearance", "name", "color", "opacity", "pbr", "grain"] {
         params.remove(key);
     }
     for (key, value) in super::look_json(look).as_object().into_iter().flatten() {

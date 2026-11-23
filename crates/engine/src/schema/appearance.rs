@@ -56,6 +56,23 @@ pub struct AppearanceAssignParams {
     /// recipe keeps its own; `null` clears it.
     #[serde(default)]
     pub pbr: Option<PbrParam>,
+    /// Procedural 3D wood grain (the starter woods carry theirs): `{species, axis, seed, scale,
+    /// ring_spacing_mm, figure, pith_offset_mm, shift_mm, stock_mm, ply_mm, contrast, pores, streaks, rotate_deg, variation, knots, burl}`, each optional. `species`: oak-honey, oak-smoked, walnut-dark,
+    /// maple-light, cherry-warm, ash-pale, birch-cream, birch-plywood or teak-golden. `axis`: `"long"` (default:
+    /// along each body's longest direction), `"X"`, `"Y"`, `"Z"` or `[x, y, z]`. `seed`: 0…16777215
+    /// (default: from each body's name). `scale`: 0.05…20 (1: real size). `ring_spacing_mm`:
+    /// 0.2…50. `figure`: 0…5 (how much the rings wander). `pith_offset_mm`: where the log's centre
+    /// lies from the board's middle, `[across width, across thickness]` or one number (across
+    /// the thickness), ±100000 mm; default `[0, 0]`, rings centred on the board. `shift_mm`: slides the grain along its
+    /// length. `stock_mm`: `[board width, board length]` or one number (the width): the body shows as boards
+    /// glued edge to edge (length 0: full-length boards), each with its own grain; `null`: one piece. `ply_mm`: 0.2…50, a plywood's ply thickness (default 1.4; an odd number of plies fills each body's thickness). `contrast`: 0…3, how strongly the rings
+    /// show (1: the species'). `pores`, `streaks`: 0…1 (default: the species'). `rotate_deg`: `[turn, tilt, roll]` in degrees or one number (the turn): the grain swung on the
+    /// body's broad face, leaned out of it, and its rings rolled about the grain (plywood turns only). `variation`: 0…2, how uneven the rings are (0: even and round; default 1).
+    /// `knots`: 0…1 (default 0: clear timber). `burl`: 0…1 (default 0): swirling grain with eyes. The look's own
+    /// `color` tints the wood and its `pbr.roughness` is the finish's gloss. `true`: the species' defaults; `null`
+    /// removes the grain.
+    #[serde(default)]
+    pub grain: Option<Value>,
 }
 
 /// `appearance.assign`'s `faces`: at most 10000 points, each `[x, y, z]` (or `{x, y, z}`) or
@@ -223,11 +240,20 @@ pub struct LookReply {
     /// Its opaque PBR response, when it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pbr: Option<PbrReply>,
+    /// Its procedural wood grain, when it has one (as `appearance.assign` takes it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grain: Option<Value>,
 }
 
 impl From<&Look> for LookReply {
     fn from(l: &Look) -> Self {
-        LookReply { name: l.name.clone(), color: l.hex(), opacity: l.opacity, pbr: l.pbr.map(PbrReply::from) }
+        LookReply {
+            name: l.name.clone(),
+            color: l.hex(),
+            opacity: l.opacity,
+            pbr: l.pbr.map(PbrReply::from),
+            grain: l.grain.as_ref().and_then(|g| serde_json::to_value(g).ok()),
+        }
     }
 }
 
@@ -297,6 +323,9 @@ pub struct StarterAppearance {
     pub opacity: f64,
     /// Its opaque PBR response; `null` for a recipe that has none (glass).
     pub pbr: Option<PbrReply>,
+    /// Its procedural wood grain (the woods), as `appearance.assign` takes `grain`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grain: Option<Value>,
     /// False for a recipe this build can't show (the glass ones need refraction).
     pub available: bool,
     /// What showing it needs: opaque_pbr, refraction, certified_thin_or_closed.

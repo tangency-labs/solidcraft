@@ -133,6 +133,7 @@ fn decode_look(value: &Value) -> Option<Look> {
         color: dialogs_appearance::parse_color(value.get("color")?)?,
         opacity: value.get("opacity")?.as_f64()?,
         pbr: value.get("pbr").filter(|v| !v.is_null()).and_then(|p| serde_json::from_value(p.clone()).ok()),
+        grain: None,
     })
 }
 pub(super) fn chains(app: &mut SolveApp, targets: &Targets) -> Result<Vec<[Option<Look>; 4]>, String> {
@@ -497,7 +498,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
         return Ok(());
     }
     if let Some(to) = replacement.and_then(|id| id.parse::<usize>().ok()).and_then(|index| replacements.get(index)) {
-        let to = Look { name: to.name.clone(), color: to.color, opacity: to.opacity, pbr: to.pbr };
+        let to = Look { name: to.name.clone(), color: to.color, opacity: to.opacity, pbr: to.pbr, grain: None };
         let step = view.inspected.filter(|step| *step != LookStep::Material).unwrap_or(mode_step(view.mode));
         let replace_targets = targets(app, step);
         assign(app, &replace_targets, from, &to, view.all_users)?;

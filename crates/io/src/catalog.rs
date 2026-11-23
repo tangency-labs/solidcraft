@@ -66,7 +66,7 @@ impl LibraryLook {
         Ok(out)
     }
     pub fn to_look(&self) -> Look {
-        Look { name: self.name.clone(), color: self.color, opacity: self.opacity, pbr: self.pbr }
+        Look { name: self.name.clone(), color: self.color, opacity: self.opacity, pbr: self.pbr, grain: None }
     }
     fn validate(&self) -> Result<()> {
         if !text(&self.name, 128) || !self.opacity.is_finite() || !(0.0..=1.0).contains(&self.opacity) {

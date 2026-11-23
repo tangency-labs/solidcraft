@@ -21,6 +21,10 @@ pub struct Look {
     pub opacity: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pbr: Option<crate::pbr_appearance::PbrParameters>,
+    /// Procedural wood grain (`None`: a plain colour). `color` stays the wood's average colour,
+    /// for exports that carry one colour per body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grain: Option<crate::wood_grain::Grain>,
 }
 
 #[derive(Deserialize)]
@@ -31,6 +35,8 @@ struct LookWire {
     opacity: f64,
     #[serde(default)]
     pbr: Option<crate::pbr_appearance::PbrParameters>,
+    #[serde(default)]
+    grain: Option<crate::wood_grain::Grain>,
 }
 
 impl TryFrom<LookWire> for Look {
@@ -39,7 +45,7 @@ impl TryFrom<LookWire> for Look {
         if value.pbr.is_some() && value.opacity != 1.0 {
             return Err("opaque PBR requires opacity 1; refraction/transmission is not supported".into());
         }
-        Ok(Self { name: value.name, color: value.color, opacity: value.opacity, pbr: value.pbr })
+        Ok(Self { name: value.name, color: value.color, opacity: value.opacity, pbr: value.pbr, grain: value.grain })
     }
 }
 
@@ -68,14 +74,14 @@ pub fn unnamed_colour(color: [u8; 3], opacity: f64) -> String {
 
 impl Look {
     pub fn custom(color: [u8; 3], opacity: f64) -> Look {
-        Look { name: CUSTOM.into(), color, opacity: opacity.clamp(0.0, 1.0), pbr: None }
+        Look { name: CUSTOM.into(), color, opacity: opacity.clamp(0.0, 1.0), pbr: None, grain: None }
     }
 
     /// A colour read from a file: called what the file calls it, else [`unnamed_colour`].
     pub fn imported(color: [u8; 3], opacity: f64, name: Option<&str>) -> Look {
         let opacity = opacity.clamp(0.0, 1.0);
         let name = name.map_or_else(|| unnamed_colour(color, opacity), str::to_string);
-        Look { name, color, opacity, pbr: None }
+        Look { name, color, opacity, pbr: None, grain: None }
     }
 
     /// The name to write with this look's colour in a file (a STEP `COLOUR_RGB` name): its own,
@@ -273,11 +279,11 @@ pub fn library(name: &str) -> Option<Look> {
     LIBRARY
         .iter()
         .find(|(n, _, _)| n.eq_ignore_ascii_case(name.trim()))
-        .map(|(n, c, o)| Look { name: n.to_string(), color: *c, opacity: *o, pbr: None })
+        .map(|(n, c, o)| Look { name: n.to_string(), color: *c, opacity: *o, pbr: None, grain: None })
         .or_else(|| {
             let (name, color, metallic, roughness) = OPAQUE_FINISHES.iter().find(|(n, ..)| n.eq_ignore_ascii_case(name.trim()))?;
             let pbr = crate::pbr_appearance::PbrParameters::new(*metallic, *roughness, 1.5).ok()?;
-            Some(Look { name: (*name).to_string(), color: *color, opacity: 1.0, pbr: Some(pbr) })
+            Some(Look { name: (*name).to_string(), color: *color, opacity: 1.0, pbr: Some(pbr), grain: None })
         })
         .or_else(|| crate::appearance_pack::find(name)?.opaque_look().ok())
 }
@@ -286,7 +292,7 @@ pub fn library(name: &str) -> Option<Look> {
 pub fn material_look(material: &str) -> Option<Look> {
     let color = crate::material_color(material)?;
     let opacity = if material == "Glass" { 0.25 } else { 1.0 };
-    Some(Look { name: material.to_string(), color, opacity, pbr: None })
+    Some(Look { name: material.to_string(), color, opacity, pbr: None, grain: None })
 }
 
 impl Document {
@@ -872,7 +878,7 @@ mod tests {
                 assert_eq!(find(preset.name), Some(preset));
             }
             for (category, count) in [
-                (Category::Wood, 8),
+                (Category::Wood, 16),
                 (Category::Metal, 10),
                 (Category::Plastic, 10),
                 (Category::Glass, 6),
@@ -964,12 +970,21 @@ mod tests {
                     assert!(preset.preview_note.contains("Uniform opaque preview only"));
                     assert_eq!(recipe.id, format!("{}.maps-v1", preset.id));
                     assert!(recipe.repeat_mm.iter().all(|v| v.is_finite() && *v > 0.0 && *v <= 10000.0));
-                    assert_eq!(recipe.grain_axis, if preset.category == Category::Wood { Some(TextureAxis::V) } else { None });
+                    assert_eq!(recipe.grain_axis, None);
+                    assert_ne!(preset.category, Category::Wood, "woods are procedural now");
                     assert_eq!(preset.requirements, &[Requirement::OpaquePbr]);
                     recipes += 1;
                 }
+                // Every wood carries its species' procedural grain, and says so.
+                if preset.category == Category::Wood {
+                    let look = preset.opaque_look().unwrap();
+                    let grain = look.grain.expect("a starter wood has grain");
+                    assert!(preset.id.ends_with(&grain.species), "{}", preset.id);
+                    assert!(!preset.name.contains("Uniform"), "{}", preset.name);
+                    assert!(preset.preview_note.contains("Procedural 3D grain"));
+                }
             }
-            assert!(recipes >= 14);
+            assert!(recipes >= 6);
         }
     }
 }

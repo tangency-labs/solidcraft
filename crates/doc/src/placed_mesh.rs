@@ -322,6 +322,30 @@ fn proper_rigid(m: &crate::Mat) -> bool {
         && y.dot(z).abs() < 1e-9
         && (x.cross(y).dot(z) - 1.).abs() < 1e-9
 }
+/// Wood grain as a body's display mesh shows it.
+impl crate::Document {
+    /// A body's wood grain, from its own look (face overrides aside), set up for its display
+    /// mesh: `None` when its look has no grain.
+    pub fn model_body_wood(&self, body: &crate::ModelBody) -> Option<solidcraft_viewport::wood::WoodShade> {
+        self.look_wood(body, &self.model_body_look(body)?)
+    }
+
+    /// The wood grain `look` gives `body` (on any of its faces: the grain runs through the
+    /// whole body, so a face's grain lines up with its neighbours').
+    pub fn look_wood(&self, body: &crate::ModelBody, look: &crate::appearance::Look) -> Option<solidcraft_viewport::wood::WoodShade> {
+        let grain = look.grain.as_ref()?;
+        let mesh = body.mesh();
+        let shade = grain.shade(&body.name, &mesh.positions, &mesh.triangles)?;
+        // The look's own colour and roughness finish the wood: its colour tints the species
+        // (from its starter preset's colour), its roughness is the gloss.
+        let preset = crate::appearance_pack::find(&format!("starter.wood.{}", grain.species)).and_then(|p| match p.recipe {
+            crate::appearance_pack::Recipe::Opaque(r) => Some(r.color),
+            _ => None,
+        });
+        Some(crate::wood_grain::Grain::finished(shade, preset, look.color, look.pbr.map(|p| p.roughness())))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use solidcore_record::{Plane, Vec2};

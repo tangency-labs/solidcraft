@@ -875,7 +875,7 @@ fn look_of(m: &gltf::Material<'_>) -> Look {
             solidcraft_doc::pbr_appearance::PbrParameters::new(finite(pbr.metallic_factor(), 1.0), finite(pbr.roughness_factor(), 1.0), 1.5).ok()
         })
         .flatten();
-    Look { name, color, opacity, pbr }
+    Look { name, color, opacity, pbr, grain: None }
 }
 
 /// A GLB container of `json` and an optional binary chunk (each padded to four bytes).

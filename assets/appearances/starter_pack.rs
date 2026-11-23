@@ -1,7 +1,8 @@
 //! Original starter visual data, MIT OR Apache-2.0. No external material library.
 use crate::appearance_pack::{Category, GlassBoundary, GlassRecipe, OpaqueRecipe, TextureAxis, TextureRecipe, VisualPreset};
 
-const WOOD: &str = "Uniform opaque preview only; grain resources/mapping are not applied";
+const WOOD: &str = "Procedural 3D grain (rings, figure, streaks, pores) in the shaded view; rendered pictures and exports that carry one colour per body keep this average colour";
+const PLYWOOD: &str = "Procedural 3D grain and plies (face veneers, alternating plies and glue lines on every edge and cut) in the shaded view; rendered pictures and exports that carry one colour per body keep this average colour";
 const SOLAR: &str = "Uniform opaque preview only; no cell grid, busbars, electricity or efficiency claim";
 const REGOLITH: &str = "Uniform opaque preview only; no granular displacement or measured lunar optical data";
 const OPAQUE: &str = "Illustrative opaque isotropic PBR; no measured alloy, polymer or engineering properties";
@@ -17,69 +18,72 @@ const fn glass(transmission_linear_rgb: [f64; 3], ior: f64, reference_path_mm: f
 }
 
 pub const STARTER_PACK: &[VisualPreset] = &[
+    VisualPreset::opaque("starter.wood.oak-honey", "Wood - Honey Oak", Category::Wood, look([188, 142, 84], 0.0, 0.36, 1.5), WOOD, None),
+    VisualPreset::opaque("starter.wood.oak-honey-raw", "Wood - Honey Oak (Raw)", Category::Wood, look([190, 163, 129], 0.0, 0.84, 1.5), WOOD, None),
+    VisualPreset::opaque("starter.wood.oak-smoked", "Wood - Smoked Oak", Category::Wood, look([92, 72, 54], 0.0, 0.36, 1.5), WOOD, None),
+    VisualPreset::opaque("starter.wood.oak-smoked-raw", "Wood - Smoked Oak (Raw)", Category::Wood, look([120, 108, 97], 0.0, 0.84, 1.5), WOOD, None),
+    VisualPreset::opaque("starter.wood.walnut-dark", "Wood - Dark Walnut", Category::Wood, look([108, 68, 43], 0.0, 0.36, 1.5), WOOD, None),
     VisualPreset::opaque(
-        "starter.wood.oak-honey",
-        "Wood - Honey Oak Uniform Preview",
+        "starter.wood.walnut-dark-raw",
+        "Wood - Dark Walnut (Raw)",
         Category::Wood,
-        look([190, 145, 88], 0.0, 0.64, 1.5),
+        look([142, 118, 101], 0.0, 0.84, 1.5),
         WOOD,
-        maps("starter.wood.oak-honey.maps-v1", [120.0, 240.0], true),
+        None,
+    ),
+    VisualPreset::opaque("starter.wood.maple-light", "Wood - Light Maple", Category::Wood, look([224, 196, 146], 0.0, 0.36, 1.5), WOOD, None),
+    VisualPreset::opaque(
+        "starter.wood.maple-light-raw",
+        "Wood - Light Maple (Raw)",
+        Category::Wood,
+        look([220, 204, 175], 0.0, 0.84, 1.5),
+        WOOD,
+        None,
+    ),
+    VisualPreset::opaque("starter.wood.cherry-warm", "Wood - Warm Cherry", Category::Wood, look([172, 102, 64], 0.0, 0.36, 1.5), WOOD, None),
+    VisualPreset::opaque(
+        "starter.wood.cherry-warm-raw",
+        "Wood - Warm Cherry (Raw)",
+        Category::Wood,
+        look([174, 134, 111], 0.0, 0.84, 1.5),
+        WOOD,
+        None,
+    ),
+    VisualPreset::opaque("starter.wood.ash-pale", "Wood - Pale Ash", Category::Wood, look([206, 180, 138], 0.0, 0.36, 1.5), WOOD, None),
+    VisualPreset::opaque("starter.wood.ash-pale-raw", "Wood - Pale Ash (Raw)", Category::Wood, look([207, 192, 167], 0.0, 0.84, 1.5), WOOD, None),
+    VisualPreset::opaque("starter.wood.birch-cream", "Wood - Cream Birch", Category::Wood, look([226, 204, 160], 0.0, 0.36, 1.5), WOOD, None),
+    VisualPreset::opaque(
+        "starter.wood.birch-cream-raw",
+        "Wood - Cream Birch (Raw)",
+        Category::Wood,
+        look([223, 210, 184], 0.0, 0.84, 1.5),
+        WOOD,
+        None,
     ),
     VisualPreset::opaque(
-        "starter.wood.oak-smoked",
-        "Wood - Smoked Oak Uniform Preview",
+        "starter.wood.birch-plywood",
+        "Wood - Baltic Birch Plywood",
         Category::Wood,
-        look([91, 72, 55], 0.0, 0.68, 1.5),
-        WOOD,
-        maps("starter.wood.oak-smoked.maps-v1", [120.0, 240.0], true),
+        look([226, 204, 160], 0.0, 0.36, 1.5),
+        PLYWOOD,
+        None,
     ),
     VisualPreset::opaque(
-        "starter.wood.walnut-dark",
-        "Wood - Dark Walnut Uniform Preview",
+        "starter.wood.birch-plywood-raw",
+        "Wood - Baltic Birch Plywood (Raw)",
         Category::Wood,
-        look([99, 66, 43], 0.0, 0.60, 1.5),
-        WOOD,
-        maps("starter.wood.walnut-dark.maps-v1", [100.0, 220.0], true),
+        look([223, 210, 184], 0.0, 0.84, 1.5),
+        PLYWOOD,
+        None,
     ),
+    VisualPreset::opaque("starter.wood.teak-golden", "Wood - Golden Teak", Category::Wood, look([166, 118, 62], 0.0, 0.36, 1.5), WOOD, None),
     VisualPreset::opaque(
-        "starter.wood.maple-light",
-        "Wood - Light Maple Uniform Preview",
+        "starter.wood.teak-golden-raw",
+        "Wood - Golden Teak (Raw)",
         Category::Wood,
-        look([221, 192, 141], 0.0, 0.57, 1.5),
+        look([172, 144, 111], 0.0, 0.84, 1.5),
         WOOD,
-        maps("starter.wood.maple-light.maps-v1", [100.0, 200.0], true),
-    ),
-    VisualPreset::opaque(
-        "starter.wood.cherry-warm",
-        "Wood - Warm Cherry Uniform Preview",
-        Category::Wood,
-        look([164, 99, 65], 0.0, 0.58, 1.5),
-        WOOD,
-        maps("starter.wood.cherry-warm.maps-v1", [110.0, 220.0], true),
-    ),
-    VisualPreset::opaque(
-        "starter.wood.ash-pale",
-        "Wood - Pale Ash Uniform Preview",
-        Category::Wood,
-        look([209, 186, 146], 0.0, 0.70, 1.5),
-        WOOD,
-        maps("starter.wood.ash-pale.maps-v1", [120.0, 260.0], true),
-    ),
-    VisualPreset::opaque(
-        "starter.wood.birch-cream",
-        "Wood - Cream Birch Uniform Preview",
-        Category::Wood,
-        look([228, 206, 163], 0.0, 0.63, 1.5),
-        WOOD,
-        maps("starter.wood.birch-cream.maps-v1", [100.0, 200.0], true),
-    ),
-    VisualPreset::opaque(
-        "starter.wood.teak-golden",
-        "Wood - Golden Teak Uniform Preview",
-        Category::Wood,
-        look([167, 122, 66], 0.0, 0.61, 1.5),
-        WOOD,
-        maps("starter.wood.teak-golden.maps-v1", [110.0, 250.0], true),
+        None,
     ),
     VisualPreset::opaque(
         "starter.metal.carbon-steel-polished",

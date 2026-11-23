@@ -983,3 +983,62 @@ fn appearance_reads_and_scopes_take_a_placed_copys_name() {
     assert!(s.execute("appearance.replace", &json!({"from":"ABS - Blue","to":"ABS - Red","scope":{"bodies":["KB (K:9)"]}})).is_err());
     assert!(s.execute("appearance.replace", &json!({"from":"ABS - Blue","to":"ABS - Red","scope":{"components":["K:9"]}})).is_err());
 }
+
+/// A starter wood carries its procedural grain to the model scene; `grain` overrides survive undo,
+/// redo, saving and cold reopening, copy and paste, and an old file without grain opens as it was.
+#[test]
+fn wood_grain_settings_survive_undo_save_reopen_and_copy_paste() {
+    let mut s = fixture();
+    s.execute("solid.box", &json!({"body_name":"Other","length":40,"width":10,"height":5,"corner":[0,40,0]})).unwrap();
+    let plain = s.doc.to_json();
+    s.execute(
+        "appearance.assign",
+        &json!({"bodies":["Specimen"],"appearance":"starter.wood.walnut-dark",
+        "grain":{"axis":"Y","seed":42,"ring_spacing_mm":5.5,"figure":0.5,"scale":1.25}}),
+    )
+    .unwrap();
+    let grain = s.doc.appearances.bodies["Specimen"].grain.clone().expect("walnut has grain");
+    assert_eq!(
+        serde_json::to_value(&grain).unwrap(),
+        json!({"species":"walnut-dark","axis":[0.0,1.0,0.0],"seed":42,"scale":1.25,"ring_spacing_mm":5.5,"figure":0.5})
+    );
+    // The model scene's wood follows the settings: the seed, the ring spacing, and the grain
+    // along Y (scaled by 1/1.25).
+    let st = s.model.state();
+    let body = st.bodies.iter().find(|b| b.name == "Specimen").unwrap();
+    let wood = s.doc.model_body_wood(body).expect("the body has wood");
+    assert_eq!(wood.look.seed, 42);
+    assert!((wood.look.ring_mm - 5.5).abs() < 1e-6);
+    assert!((wood.to_grain[0][1] - 0.8).abs() < 1e-5, "{:?}", wood.to_grain);
+    let saved = s.doc.to_json();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(s.doc.appearances.bodies.get("Specimen").is_none());
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(s.doc.appearances.bodies["Specimen"].grain.as_ref(), Some(&grain));
+    let mut reopened = Session::new(crate::doc::Document::from_json(&saved).unwrap());
+    assert_eq!(reopened.doc.appearances.bodies["Specimen"].grain.as_ref(), Some(&grain));
+    let reopened_state = reopened.model.state();
+    let reopened_body = reopened_state.bodies.iter().find(|b| b.name == "Specimen").unwrap();
+    assert_eq!(reopened.doc.model_body_wood(reopened_body), Some(wood));
+    // Copy and paste carry the grain settings to another body (its own frame, the same settings).
+    reopened.execute("appearance.copy", &json!({"target":{"body":"Specimen"}})).unwrap();
+    reopened.execute("appearance.paste", &json!({"bodies":["Other"]})).unwrap();
+    assert_eq!(reopened.doc.appearances.bodies["Other"].grain.as_ref(), Some(&grain));
+    // Replacing the look by its settings finds it; `grain: null` removes the grain.
+    reopened.execute("appearance.assign", &json!({"bodies":["Other"],"appearance":"starter.wood.walnut-dark","grain":null})).unwrap();
+    assert!(reopened.doc.appearances.bodies["Other"].grain.is_none());
+    // Refusals change nothing.
+    for bad in [json!({"species":"balsa"}), json!({"axis":[0,0,0]}), json!({"seed":-1}), json!({"knots":true})] {
+        let history = (s.undo.len(), s.revision);
+        assert!(s.execute("appearance.assign", &json!({"bodies":["Specimen"],"appearance":"starter.wood.oak-honey","grain":bad})).is_err(), "{bad}");
+        assert_eq!((s.undo.len(), s.revision), history);
+    }
+    // A plain colour with grain needs a species.
+    assert!(s.execute("appearance.assign", &json!({"bodies":["Other"],"color":"#806040","grain":{"axis":"X"}})).is_err());
+    s.execute("appearance.assign", &json!({"bodies":["Other"],"color":"#806040","grain":{"species":"cherry-warm"}})).unwrap();
+    assert_eq!(s.doc.appearances.bodies["Other"].grain.as_ref().map(|g| g.species.as_str()), Some("cherry-warm"));
+    // A file from before grain opens without it and saves the same.
+    let old = crate::doc::Document::from_json(&plain).unwrap();
+    assert!(old.appearances.bodies.values().all(|l| l.grain.is_none()));
+    assert_eq!(old.to_json(), plain);
+}
