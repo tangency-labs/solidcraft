@@ -2263,12 +2263,12 @@ fn selection_row(
     let left = ui.cursor().left();
     crate::scenario::publish_handle(&format!("plugin_dialog:field:{}", field.key), egui::pos2(left + width * 0.8, top + row / 2.0));
     if let Some(picker) = picker {
-        crate::dialogs::input_rows_range(picker, ui, &app.session, names, index..index + 1);
+        crate::dialogs::input_rows_range(picker, ui, &app.session, names, index..index + 1, &mut crate::sketch_corner_rows::Kept::default());
         return;
     }
     let mut idle = crate::dialogs::Dialog::new(crate::dialogs::Kind::PluginPick { dialog: id }, vec![selection_input(field, picks)]);
     idle.active = usize::MAX;
-    crate::dialogs::input_rows_range(&mut idle, ui, &app.session, names, 0..1);
+    crate::dialogs::input_rows_range(&mut idle, ui, &app.session, names, 0..1, &mut crate::sketch_corner_rows::Kept::default());
     if let Some(input) = idle.inputs.first() {
         picks.clone_from(&input.items);
     }

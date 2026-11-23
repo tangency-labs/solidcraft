@@ -944,7 +944,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
     let lit = hovered.and_then(|h| crate::selection::items(&d.inputs, 2).iter().position(|p| *p == h));
     let folded = matches!(&d.kind, Kind::Frame(m) if !m.overrides_open);
     lit_rows(ui, "Corner Overrides", lit.is_some() && folded, |ui| {
-        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 2..3);
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 2..3, &mut crate::sketch_corner_rows::Kept::default());
     });
     let mut crossings: Vec<bool> = crate::selection::items(&d.inputs, 2).iter().map(|p| crossing(&app.session, &d.kind, &d.inputs, p)).collect();
     crossings.extend(kept_crossings(&app.session, d));
