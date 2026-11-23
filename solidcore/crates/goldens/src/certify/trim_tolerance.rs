@@ -36,10 +36,10 @@
 //! bound past twice upstream's distance) must cover the same way, and the old one must not have: for an edge
 //! one of its trims' `B` exceeds `o` (the raise was needed for the enclosure; `B` is an upper
 //! bound, so this argues rather than proves that `o` was short), for a vertex `o` does not
-//! cover an edge end that `n` does. One raise is upstream's margin instead: a vertex at twice
-//! its gap to its edges' ends (`topology::face::p3`'s UV trim gaps, which the stitch reaches
-//! while it edits since WR-732's retirement, #18934), still covering every end
-//! ([`vertex_is_twice_its_end_gap`]).
+//! cover an edge end that `n` does. One raise is upstream's margin instead, in the units and
+//! numbers [`VERTEX_MARGIN`] pins: a vertex at twice its gap to its edge uses' starts, to the
+//! bit (`topology::face::p3`'s UV trim gaps, which the stitch reaches while it edits since
+//! WR-732's retirement, #18934), still covering every end ([`vertex_is_twice_its_end_gap`]).
 
 use solidcore::curve::curve::p2::CurveKind;
 use solidcore::curve::curve::Curve;
@@ -978,32 +978,48 @@ fn vertex_covers_its_ends(k: &Kernel, b: &Brep, v: VertexId, n: f64) -> bool {
     true
 }
 
-/// Whether `n` is upstream's margin on the gap from the point of `v` to its edges' ends:
-/// twice the largest distance from the point to an end of an edge of `v` that ends there,
-/// to a few roundings. `topology::face::p3`'s UV trim gaps with `adjust_tolerances` raise a
-/// vertex whose tolerance is below twice its 3D gap to an edge use's end to that (#18934: the
-/// stitch now makes its faces' trims while it edits, by the B-rep ray's implant); that gap is
-/// evaluated on the edge use and this one on the edge curve's end, so the two agree to
-/// rounding, not to the bit (measured within 1e-16 relative on `heal.stitch_p1`).
+/// The units whose vertices the stitch raises to upstream's margin while it edits
+/// (#18934), with how many raised vertices each row set holds there; a raise of that kind
+/// anywhere else, or another count, fails.
+const VERTEX_MARGIN: &[(&str, usize)] = &[("heal.stitch_p1", 24), ("heal.stitch_p2", 14)];
+
+/// Whether `n` is upstream's margin on the gap of `v`, bit for bit as the kernel computes
+/// it: `topology::face::p3`'s UV trim gaps with `adjust_tolerances` raise a vertex below
+/// `2 gap` to `2 gap`, `gap` the distance from its point to the 3D point of an edge use
+/// that starts there, at the use's start (`NormalizedEvaluate(0)`). So `n` is twice the
+/// largest such gap of `v`'s edge uses, to the bit (doubling is exact), and every gap is
+/// finite (a NaN fails). The stitch reaches those gaps while it edits since WR-732's
+/// retirement (#18934), where main kept the gap plus the zone tolerance.
 fn vertex_is_twice_its_end_gap(k: &Kernel, b: &Brep, v: VertexId, n: f64) -> bool {
+    let Ok(mut b) = b.clone_standing_for_self() else {
+        return false;
+    };
     let at = b.vertex(v).expect("vertex").point;
-    let mut gap: f64 = 0.0;
-    for e in solidcore::topology::vertex::edges(b, v, None).expect("edges") {
-        let rec = b.edge(e).expect("edge");
-        let Some(curve) = rec.curve.as_ref() else {
-            continue;
+    let starts: Vec<EdgeuseId> = b
+        .edgeuses()
+        .iter()
+        .filter(|(_, u)| {
+            u.vertexuse
+                .and_then(|vu| b.vertexuse(vu).ok())
+                .and_then(|vu| vu.vertex)
+                == Some(v)
+        })
+        .map(|(eu, _)| eu)
+        .collect();
+    let mut gap = None::<f64>;
+    for eu in starts {
+        let Ok(e) = solidcore::topology::edgeuse::p3::normalized_evaluate(
+            k, &mut b, eu, 0.0, false, false, true,
+        ) else {
+            return false;
         };
-        let (v0, v1) = edge::start_end_vertices(b, e).expect("ends");
-        for (end, t) in [
-            (v0, rec.interval.evaluate(0.0)),
-            (v1, rec.interval.evaluate(1.0)),
-        ] {
-            if end == Some(v) {
-                gap = gap.max(at.distance(curve.evaluate_point(k, t).expect("end point")));
-            }
+        let d = at.distance(e.point);
+        if !d.is_finite() {
+            return false;
         }
+        gap = Some(gap.map_or(d, |g| if d > g { d } else { g }));
     }
-    gap > 0.0 && (n - 2.0 * gap).abs() <= 8.0 * f64::EPSILON * n
+    gap.is_some_and(|g| g > 0.0 && (2.0 * g).to_bits() == n.to_bits())
 }
 
 /// What one unit's moved values were certified by.
@@ -1016,8 +1032,9 @@ struct Tally {
     edges: usize,
     /// Moved vertices within their tolerance of their edges' ends.
     vertices: usize,
-    /// Raised vertices at upstream's margin, twice their gap to their edges' ends
-    /// ([`vertex_is_twice_its_end_gap`]), still covering every end.
+    /// Raised vertices at upstream's margin, twice their gap to their edge uses' starts
+    /// ([`vertex_is_twice_its_end_gap`]), still covering every end; as many as
+    /// [`VERTEX_MARGIN`] pins.
     vertex_margin: usize,
     /// Trims bounded (or faces, for an edge without trims).
     trims: usize,
@@ -1416,7 +1433,8 @@ fn certify(unit: &str) -> Tally {
                     // (upstream's margin: a vertex the UV trim gaps raise to twice its gap to
                     // an end of its edges, which the old tolerance covered already; the new
                     // one must still cover every end)
-                    if vertex_is_twice_its_end_gap(&k, b, v, new)
+                    if VERTEX_MARGIN.iter().any(|m| m.0 == unit)
+                        && vertex_is_twice_its_end_gap(&k, b, v, new)
                         && vertex_covers_its_ends(&k, b, v, new)
                     {
                         tally.vertex_margin += 1;
@@ -1447,6 +1465,14 @@ fn certify(unit: &str) -> Tally {
         }
     }
     println!("{unit}: {tally:?}");
+    assert_eq!(
+        tally.vertex_margin,
+        VERTEX_MARGIN
+            .iter()
+            .find(|m| m.0 == unit)
+            .map_or(0, |m| m.1),
+        "{unit}: vertices at upstream's margin (VERTEX_MARGIN)"
+    );
     assert_eq!(
         open_seen,
         open.keys().cloned().collect(),

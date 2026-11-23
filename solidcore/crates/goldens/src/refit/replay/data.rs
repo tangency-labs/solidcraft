@@ -14,8 +14,8 @@
 //! tree against its current trims) moves the mass of the four
 //! `stubs4-delete-edge-sphere_diff_3cylinders-e1/e4` rows through the fillet's own
 //! classifications (by up to 1.7e-10 of the area; with main's read of the file put back
-//! they move all the same), so they hold the hash of the refit run with that change
-//! instead; `tests/wr493_moved_rows_are_classified` classifies their moved mass entries
+//! they move all the same), so the refit can no longer give main's row: their entries are
+//! deleted. `tests/wr493_moved_rows_are_classified` classifies their moved mass entries
 //! against a certified enclosure.
 //!
 //! The `blend.fillet_executive_p3` hashes are of those lines without the
@@ -1010,28 +1010,8 @@ pub(super) static DATA: &[Row] = &[
     ),
     (
         "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0x53b35219de7093b1,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x3be6a9d75b7fd613,
-    ),
-    (
-        "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
         0x405209a464313f0e,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0xba863f1e84328990,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x30159fc81b20cbbe,
     ),
     (
         "blend.fillet_executive_p3",

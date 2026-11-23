@@ -1116,8 +1116,10 @@ const TRIM_COUNT: usize = 17;
 /// [`CLASSIFIED_TRIM_ROWS`] row of `blend.fillet_executive_p3` (any other row is left as
 /// is): the row the result body records without the trims the classification made
 /// ([`sphere_diff_3cylinders_rows_move_only_by_the_classified_trims`] proves it entry for
-/// entry). The replays that hold these rows to main's (`refit::replay`, `tolsub::replay`)
-/// hash it.
+/// entry). The sums test ([`sphere_diff_3cylinders_rows_are_their_sums`]) compares it with
+/// main's committed blocks. (The replays that hold these rows to main's, `refit::replay` and
+/// `tolsub::replay`, run them on main's read instead, `tolsub::state::strip_classified_trims`,
+/// which gives main's row to the bit.)
 pub(crate) fn without_classified_trims(unit: &str, case: &str, output: &mut crate::output::Output) {
     if unit != "blend.fillet_executive_p3" || !CLASSIFIED_TRIM_ROWS.contains(&case) {
         return;
@@ -1141,17 +1143,22 @@ pub(crate) fn without_classified_trims(unit: &str, case: &str, output: &mut crat
 ///   its use on the face;
 /// * with those five trims taken off, the body's record is the run's with exactly those
 ///   five trim counts lowered from 2 to 1 ([`without_classified_trims`]) and nothing else
-///   changed, bit for bit; that row hashes to main's row (`refit::replay`'s and
-///   `tolsub::replay`'s put-back runs) and digests to main's committed blocks within
-///   rounding ([`sphere_diff_3cylinders_rows_are_their_sums`]);
-/// * the five are bit for bit the trims the file's read holds on the same edge uses (since
-///   WR-732's retirement, #18934, the read makes them by implanting the cone face's current
-///   trims while it is edited): the fillet keeps them as the read makes them, so they are
-///   no change of the fillet's;
+///   changed, bit for bit; that row's result geometry digests to main's committed blocks
+///   within rounding ([`sphere_diff_3cylinders_rows_are_their_sums`]), and the row run on
+///   main's read is main's row to the bit (`refit::replay`'s and `tolsub::replay`'s
+///   put-back runs);
+/// * the five are bit for bit the trims the file's read holds on the same edge uses, so the
+///   fillet keeps them as the read makes them; and with them taken off the read, one B-rep
+///   ray classification while it is edited makes them again, bit for bit (since WR-732's
+///   retirement, #18934, the ray builds the cone face's tree against its current trims, and
+///   the implant makes them): they are what the implant makes, not another change;
 /// * each trim's same-parameter gap to its edge is certified (`curve_uv_gap_bound`,
 ///   interval Taylor models, every rounding included) within the edge's tolerance.
 ///
-/// The mass properties do not move (the sums test holds them to main's).
+/// The mass properties move with the trims' bits since #18934 (entry 0 by up to 1.7e-10 of
+/// the area); the sums test pins the entries beyond its rounding bands, and
+/// `tests/wr493_moved_rows_are_classified` classifies them EQUAL against a certified
+/// enclosure.
 #[test]
 fn sphere_diff_3cylinders_rows_move_only_by_the_classified_trims() {
     use solidcore::curve::curve::CurveKind;
@@ -1170,7 +1177,7 @@ fn sphere_diff_3cylinders_rows_move_only_by_the_classified_trims() {
         crate::util::trim_curve::put_trim_curve(k, &mut enc, Some(c)).unwrap();
         enc.iter().map(|x| x.to_bits()).collect::<Vec<u64>>()
     };
-    // the file's read, as the runner reads it: its five classified trims are the implant's
+    // the file's read, as the runner reads it
     let read = {
         let path = crate::case::repo_root()
             .join(crate::fixtures::UPSTREAM_TEST_FILES)
@@ -1179,6 +1186,39 @@ fn sphere_diff_3cylinders_rows_move_only_by_the_classified_trims() {
         crate::own_reader::read_file(&mut k, path.to_str().unwrap())
             .unwrap()
             .unwrap()
+    };
+    // the read with its five classified trims taken off, and one B-rep ray classification
+    // while it is edited: the ray builds the cone face's tree against its current trims,
+    // and the implant makes the five (from 20 off the read's box middle along y, whose rays
+    // cross the cone face; from the middle itself they do not reach it)
+    let remade = {
+        use solidcore::query::brep::BrepQuery;
+        let k = crate::runner_kernel();
+        // (the box on a copy of the read: building it leaves caches on the B-rep it measures)
+        let mid = {
+            let mut c = read.clone_standing_for_self().unwrap();
+            solidcore::query::brep::calculate_tight_bounding_box(&k, &mut c)
+                .unwrap()
+                .mid()
+        };
+        let mut b = read.clone_standing_for_self().unwrap();
+        let ids: Vec<_> = b
+            .edgeuses()
+            .iter()
+            .filter(|(id, _)| crate::tolsub::state::CLASSIFIED_READ_TRIMS.contains(&id.index()))
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(ids.len(), 5, "the read's classified edge uses");
+        for id in ids {
+            assert!(b.edgeuse_mut(id).unwrap().uv_trim_curve.take().is_some());
+        }
+        let p = solidcore::math::Point3::new(mid.x, mid.y + 20.0, mid.z);
+        b.set_editing_enabled(true);
+        BrepQuery::of_brep(&b)
+            .point_3d_classify(&k, &mut b, p, 1e-6, false)
+            .unwrap();
+        b.set_editing_enabled(false);
+        b
     };
     for case in CLASSIFIED_TRIM_ROWS {
         let mut output = run(&blend_fillet_executive_p3::Runner, case);
@@ -1276,11 +1316,17 @@ fn sphere_diff_3cylinders_rows_move_only_by_the_classified_trims() {
             "{case}: not the read's classified trims"
         );
         // the five are the read's own trims, bit for bit: the fillet keeps them as the read
-        // of the file makes them (`read`, the implant's)
+        // of the file makes them (`read`), and the ray's implant makes them (`remade`)
         for (i, eu, bits) in &taken {
-            let made = read.edgeuse(*eu).unwrap().uv_trim_curve.as_ref();
-            let made = made.unwrap_or_else(|| panic!("{case}: edge {i}: not on the read"));
-            assert_eq!(&encoding(&k, made), bits, "{case}: edge {i}: another trim");
+            for (what, b) in [("the read", &read), ("the ray's implant", &remade)] {
+                let made = b.edgeuse(*eu).unwrap().uv_trim_curve.as_ref();
+                let made = made.unwrap_or_else(|| panic!("{case}: edge {i}: not on {what}"));
+                assert_eq!(
+                    &encoding(&k, made),
+                    bits,
+                    "{case}: edge {i}: another trim on {what}"
+                );
+            }
         }
     }
 }

@@ -4,11 +4,10 @@
 //!
 //! The `stubs4-delete-edge-sphere_diff_3cylinders` rows' main hashes are of main's
 //! run after #18971 (a fillet's rail cut near a knot snaps onto the knot), which moves
-//! those rows apart from the cover. `topology.brep_cutting`'s `gen0050` hash is of the
-//! put-back run after WR-732's retirement (#18934: the cut classifies against the faces'
-//! current trims while it edits, which raises edge 8 from 1.03e-3 to 1.48e-3 and its
-//! vertices with it, and vertex 32 from 5.9e-4 to 1.19e-3), which moves the row apart from
-//! the cover.
+//! those rows apart from the cover. WR-732's retirement (#18934) moves
+//! `topology.brep_cutting`'s `gen0050` apart from the cover (edge 8 from 1.03e-3 to 1.48e-3
+//! and its vertices with it, vertex 32 from 5.9e-4 to 1.19e-3), so its entry is deleted; its
+//! raises are certified in `certify::trim_tolerance`.
 //!
 //! The rows #17739's vertex step moves as well (19 `blend.fillet_executive_p3` bottle
 //! rows, `corpus.parity`'s `Fillet__bolt.smb`) are replayed from [`super::DATA`], with
@@ -273,7 +272,6 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
         "write_bytes_file_revolution_binary",
         0xa150d2288f547d54,
     ),
-    ("topology.brep_cutting", "gen0050", 0x3036cdc993212cf9),
     ("topology.brep_cutting", "gen0068", 0xb157bdeddcc948f6),
     (
         "topology.brep_local_operation",

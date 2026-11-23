@@ -464,9 +464,9 @@ const TRIM_COVER_REFIT: &[(&str, &str)] = &[
 /// `uv_trim_f0`/`f1`/`f4`/`f5`/`f8`/`f9`, which its classified trims move, and #18934
 /// re-blessed `uv_trim_f6`, whose read now holds four of the classified read's vertex/face
 /// gaps again, computed after the implant set the trims: their put-back above is main's
-/// hash, and their committed line is now this branch's run. #18934 also re-blessed
-/// `topology.brep_cutting`'s `gen0050`, whose put-back is held in [`TRIM_COVER`] as the run
-/// with that change.)
+/// hash, and their committed line is now this branch's run. #18934 also moved
+/// `topology.brep_cutting`'s `gen0050` apart from the cover, so its [`TRIM_COVER`] entry is
+/// deleted; its raises are certified in `certify::trim_tolerance`.)
 const TRIM_COVER_WITHIN_COMPARATOR: &[(&str, &str)] = &[
     ("blend.fillet_removal", "nurb_fillet_face18"),
     ("heal.stitch_p1", "file_boolean_trees_result.smb_advanced"),
@@ -593,7 +593,7 @@ replay_trim_cover_tests! {
     heal_stitch_p1_rows_move_only_through_the_trim_cover: "heal.stitch_p1", 4;
     heal_stitch_p2_rows_move_only_through_the_trim_cover: "heal.stitch_p2", 8;
     topology_api_files_rows_move_only_through_the_trim_cover: "topology.api_files", 12;
-    topology_brep_cutting_rows_move_only_through_the_trim_cover: "topology.brep_cutting", 2;
+    topology_brep_cutting_rows_move_only_through_the_trim_cover: "topology.brep_cutting", 1;
     topology_brep_local_operation_rows_move_only_through_the_trim_cover: "topology.brep_local_operation", 27;
     topology_brep_mirror_rows_move_only_through_the_trim_cover: "topology.brep_mirror", 2;
     topology_brep_p2_rows_move_only_through_the_trim_cover: "topology.brep_p2", 9;
@@ -660,33 +660,41 @@ fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usiz
 /// Each hash is of the line without the `fillet_point_step` key, which recorded the retired
 /// step latch (#18916). WR-732's retirement (#18934) moves the four rows' mass through the
 /// fillet's own classifications while it edits (by up to 1.7e-10 of the area), so each
-/// hash is of this branch's committed line with that change; its moved mass entries are
-/// classified against a certified enclosure (`tests/wr493_moved_rows_are_classified`).
+/// hash is of main's line without its `mass_properties` key too (main's expected file at
+/// e97d2814d7); the moved mass entries are classified against a certified enclosure
+/// (`tests/wr493_moved_rows_are_classified`).
 const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0xe1e3_635c_8163_baf4,
+        KEPT_E1_R01,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x8bac_794b_d40c_eff1,
+        KEPT_E1_R05,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0xbeeb_d6e3_3007_7bc7,
+        KEPT_E4_R01,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x40d1_d34a_5faf_fa8a,
+        KEPT_E4_R05,
     ),
 ];
 
-/// Each [`KEPT_MAIN_ROW`] row, run as is, is main's committed line to the bit and this
-/// branch's committed line.
+/// The hashes of [`KEPT_MAIN_ROW`]: main's committed line of each row (e97d2814d7) without
+/// its `mass_properties` key.
+const KEPT_E1_R01: u64 = 0x977c_63d7_b621_5306;
+const KEPT_E1_R05: u64 = 0x2c5d_ffd0_302a_cccf;
+const KEPT_E4_R01: u64 = 0x6d3c_42d8_6b25_81f2;
+const KEPT_E4_R05: u64 = 0x8557_8f8e_7925_20db;
+
+/// Each [`KEPT_MAIN_ROW`] row, run as is, is this branch's committed line, and without its
+/// `mass_properties` key it is main's committed line to the bit.
 #[test]
 fn rows_the_lazy_raise_keeps_are_main_s() {
     for &(unit_id, name, main_hash) in KEPT_MAIN_ROW {
@@ -702,11 +710,20 @@ fn rows_the_lazy_raise_keeps_are_main_s() {
             .get(name)
             .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
         let line = run(u.as_ref(), case);
-        assert_eq!(hash(&line), main_hash, "{unit_id} {name}: not main's line");
         assert_eq!(
             golden.get(name),
             Some(&line),
             "{unit_id} {name}: not the committed line"
+        );
+        let mut without_mass = line.clone();
+        let removed = without_mass["values"]
+            .as_object_mut()
+            .and_then(|v| v.remove("mass_properties"));
+        assert!(removed.is_some(), "{unit_id} {name}: no mass_properties");
+        assert_eq!(
+            hash(&without_mass),
+            main_hash,
+            "{unit_id} {name}: not main's line without its mass"
         );
     }
 }
@@ -749,11 +766,11 @@ fn record() {
 /// `_rebuild` rows hold main's row after #18490 moved them (main at 0cfdad69ff: the hash of
 /// main's blessed line, MEASURED equal to this branch's run with the trims put back); the eight
 /// `uv_trim_f2`, `f3`, `f10` and `f11` rows (each with its `_rebuild`) hold main's blessed line
-/// after #20939 cleared their gap-cache flags (main at 1562e5f516). `topology.brep_p10`'s
-/// `gen0026` (`drop_uv` 2, healer on) holds its put-back run after WR-732's retirement
-/// (#18934), which moves 62 of the row's doubles by up to 1.7e-8 against main's put-back
-/// run (MEASURED at e97d2814d7) apart from the classified trims, whose put-back is the
-/// same as before. The two
+/// after #20939 cleared their gap-cache flags (main at 1562e5f516). WR-732's retirement
+/// (#18934) moves `topology.brep_p10`'s `gen0026` (`drop_uv` 2, healer on) apart from the
+/// classified trims (62 of its doubles by up to 1.7e-8 against main's put-back run,
+/// MEASURED at e97d2814d7, within the comparator), so its entry is deleted; its moved
+/// tolerances stay certified in `certify::trim_tolerance`. The two
 /// `uv_trim_f6` rows read the file too but do not move with #20179; they are listed so that
 /// the put-back is shown to keep them.
 const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
@@ -762,7 +779,6 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
         "Fillet__sphere_diff_3cylinders.smb",
         0x0fe4ffda86f0023a,
     ),
-    ("topology.brep_p10", "gen0026", 0xa46e34a6b84a2841),
     (
         "topology.brep_p10",
         "read_Fillet_sphere_diff_3cylinders",

@@ -2072,7 +2072,10 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 /// digest `0x6c4db4a115acc49e`). #18162's lazy UV trim raise moves it once more: the result's
 /// two edges at the fillet's end keep 4e-5 instead of main's raise to 8.05e-5, and one trim
 /// on face 16 is refit at that tolerance; that result is proved in
-/// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`].
+/// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`]. WR-732's
+/// retirement (#18934: a B-rep ray classifies against the faces' current trims while the
+/// body is edited) moves it again (#18162's digest `0xa20e4479c358841c`), and the same
+/// proof holds on the new result.
 const FILLET_MAIN: [u64; 29] = [
     0x24f613f551b1b3ab,
     0x241377ca06fbe761,
@@ -2088,7 +2091,7 @@ const FILLET_MAIN: [u64; 29] = [
     0xb5382d964fe60518,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
-    0xa20e4479c358841c,
+    0x58ea0b39ae78b510,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
@@ -2117,7 +2120,10 @@ const FILLET_MAIN: [u64; 29] = [
 /// integrator fits the trims it integrates over to the edges' tolerances);
 /// [`BOTTLE_E8_BEFORE`] holds main's bits and
 /// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`] proves both
-/// within the case's accuracy of a certified enclosure of the exact properties.
+/// within the case's accuracy of a certified enclosure of the exact properties. WR-732's
+/// retirement (#18934) moves entry 14's area and its tenth value again (from
+/// `0x40408bcce08a27a7` and `0x3f6aed5192670b82`, 4.5e-9 of the area); that proof holds the
+/// new values within the accuracy as well.
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         1,
@@ -2173,7 +2179,7 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         14,
         [
-            0x40408bcce08a27a7,
+            0x40408bccdf46e312,
             0x402621896ddff26a,
             0x402621896ddff26a,
             0x3f10d1d4e45e31cd,
@@ -2182,7 +2188,7 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
             0x4050316570dd0323,
             0x4050a9c381d7a010,
             0x40151aaab4b86a07,
-            0x3f6aed5192670b82,
+            0x3f6aed5192670ba2,
             0x3f66b6ad970f3f0b,
             0xbf3c98793964744e,
         ],
