@@ -96,6 +96,18 @@ const OP_TRIM: &str = "curve::offset_curve::OffsetCurve::trim";
 const OP_BASE: &str = "curve::offset_curve::OffsetCurve";
 const OP_WRITE: &str = "curve::offset_curve::OffsetCurve::write_to_db";
 
+/// The unit binormal derivatives failed for a binormal `unitize` accepted: they refuse only
+/// the binormals it refuses, so this is the kernel's fault.
+fn binormal_defect() -> SolidError {
+    SolidError::curve(
+        OP_EVAL,
+        CurveFailure::Defect {
+            why: "the unit binormal derivatives failed for a binormal that unitized, and they \
+                  refuse only the binormals unitizing refuses",
+        },
+    )
+}
+
 /// Derivatives [`OffsetCurve::evaluate`] computes (`clMaxDerivs`).
 const MAX_DERIVS: usize = 3;
 
@@ -391,8 +403,9 @@ impl OffsetCurve {
     /// # Errors
     ///
     /// `SM_ERR` when the base curve's first derivative stays zero after a
-    /// finite-difference retry; `SM_ERR_INVALID_INPUT` when the binormal is zero; those
-    /// of the base curve's evaluator.
+    /// finite-difference retry; `SM_ERR_INVALID_INPUT` when the binormal is zero;
+    /// `SM_ERR` (a defect) if the unit binormal derivatives fail after the binormal
+    /// unitized; those of the base curve's evaluator.
     pub fn evaluate(
         &self,
         k: &Kernel,
@@ -492,17 +505,21 @@ impl OffsetCurve {
             let bin_tt = pv[3].cross(self.normal);
             // `unitize` above refused |bin|^2 < EFF_ZERO_SQ; the helpers fail only for
             // |bin| < EFF_ZERO, the same binormals (sqrt is monotone and
-            // sqrt(EFF_ZERO_SQ) == EFF_ZERO), so neither fails here. On failure they hold
-            // the values upstream writes, which are kept.
-            let (Ok([a, b]) | Err([a, b])) = bin.unitized_derivative2(bin_t, bin_tt);
+            // sqrt(EFF_ZERO_SQ) == EFF_ZERO), so neither fails here. Kept an error, as on
+            // main, so no path returns unchecked derivatives.
+            let [a, b] = bin
+                .unitized_derivative2(bin_t, bin_tt)
+                .map_err(|_| binormal_defect())?;
             ubin_t = a;
             ubin_tt = b;
         } else if num_calc == 3 {
             let bin_t = pv[2].cross(self.normal);
             let bin_tt = pv[3].cross(self.normal);
             let bin_ttt = pv[4].cross(self.normal);
-            // cannot fail, as for two derivatives
-            let (Ok([a, b, c]) | Err([a, b, c])) = bin.unitized_derivative3(bin_t, bin_tt, bin_ttt);
+            // cannot fail, as for two derivatives; kept an error the same way
+            let [a, b, c] = bin
+                .unitized_derivative3(bin_t, bin_tt, bin_ttt)
+                .map_err(|_| binormal_defect())?;
             ubin_t = a;
             ubin_tt = b;
             ubin_ttt = c;
