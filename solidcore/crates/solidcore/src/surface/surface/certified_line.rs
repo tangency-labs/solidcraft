@@ -180,43 +180,73 @@
 //!   apart, and the component is undecided when two are neither. It is undecided too when a
 //!   box has a side on a boundary (the surface's, a seam among them, or the solve's): a root
 //!   there may be counted again by the patch across it. Any kind of surface.
-//! - **A box left at the floor**, on a surface of revolution whose net is a sphere, a
-//!   cylinder or cone, or a ring torus ([`Revolved`]): the side function `f` (the distance
-//!   to the sphere, the radius past the cylinder's or the cone's line in the half-plane
-//!   through the axis, the distance to the torus's tube circle in that half-plane) is
-//!   continuous on all of space and vanishes exactly on the complete surface Σ (the whole
-//!   sphere or torus, the infinite cylinder, one infinite nappe of the cone), with one sign
-//!   on each side; every point of Σ is the meridian rotation of one point of its profile
-//!   (the closest point of Σ to `X` lies in `X`'s half-plane through the axis). With
-//!   `[t₀, t₁]` the component's line parameters and σ the line over them: (1) `f` at
-//!   `L(t₀)` and at `L(t₁)` is proved apart from 0 (each is at least the tolerance from the
-//!   surface over the component, its line parameters ending a tolerance past every foot);
-//!   (2) no other component's line parameters meet `[t₀, t₁]`; (3) the component's
-//!   `(u, v)` hull `H` is covered by the domains of searched leaves and strips (no trim cull
-//!   inside it) and, on a cone, clear of the apex; (4) every piece of σ over which `f` is not
-//!   proved more than half the tolerance from 0 lies in `S(H)`, read in coordinates each
-//!   point of Σ has one value of: its direction about the axis inside the directions of
-//!   `H`'s ends in the turn (each of the net's knot spans a rational quadratic arc, less than
-//!   half a turn; no test for a whole turn), and its height inside the heights of `H`'s
-//!   profile ends (cone; monotone along the profile) or its direction in the half-plane
-//!   about the profile circle's centre inside theirs (sphere, torus; at a pole the height
-//!   hardly changes, the direction does), the pieces halved within a budget
-//!   ([`MAX_SIDE_PIECES`]). Then every zero of
-//!   `f` on σ is a root `S(u, v) = L(t)` with `(u, v)` in `H`; by (3) it lies in a recorded
-//!   box of a searched leaf whose line parameters hold `t`, a box of a component meeting
-//!   `[t₀, t₁]`, so by (2) of this one; and the sign of `f` changes along σ an odd number of
-//!   times exactly when it differs at the two ends: a crossing for opposite signs, touching
-//!   for one. (2) also keeps a point of Σ two parameters name (a seam, a pole) from being
-//!   counted by two components: a sphere's pole is decided this way, a cone's apex is not.
-//!   Any other kind with a box left is undecided: a foot certified at each end alone does
-//!   not show that the sign changes in this component.
+//! - **A box left at the floor**, on a surface of revolution whose net is a patch of a
+//!   sphere, a cylinder or cone, or a ring torus ([`Revolved`], its stored axes orthonormal
+//!   to within [`FRAME_DEFECT`]): the side function `f` (the distance to the sphere, the
+//!   radius past the cylinder's or the cone's line in the half-plane through the axis, the
+//!   distance to the torus's tube circle in that half-plane), continuous on all of space,
+//!   zero exactly on the complete surface Σ (the whole sphere or torus, the infinite
+//!   cylinder, one infinite nappe of the cone), one sign on each side. The net is not Σ: its
+//!   control points are rounded. With `[t₀, t₁]` the component's line parameters, `σ` the
+//!   line over them and `H` its `(u, v)` hull:
+//!   1. `|f|` at `L(t₀)` and at `L(t₁)` is proved above half the tolerance;
+//!   2. no other component's line parameters meet `[t₀, t₁]`;
+//!   3. `H` is covered by the domains of searched leaves and strips (no trim cull inside);
+//!   4. **ε**: a certified bound on `|f|` over the net above `H`, below a quarter of the
+//!      tolerance: the implicit polynomial `F` of Σ composed with each Bézier patch `H`
+//!      meets, in homogeneous coordinates and Bernstein form, enclosed with the rounding of
+//!      the patches' knot insertions ([`side_bounds`]), over a lower bound of `F`'s other
+//!      factor ([`side_eps`]: `|w| + r ≥ r` for the sphere; for the torus
+//!      `(d + r)((ρ + R)² + h² − r²) ≥ r (R² − r²)`; for the cone `ρ + R ≥ R > 0`, `R`
+//!      the closed form's radius at the heights of the net over `H`, which also certifies
+//!      the nappe `f` describes, `F` vanishing on both; where it is not positive, at the
+//!      apex, undecided);
+//!   5. **the chart**: the net over `H` lies off the axis and off the profile circle's
+//!      centre ([`in_the_chart_domain`], from ε), and its four edges, enclosed in pieces,
+//!      certify a chart `C` ([`Chart`]): every edge piece's direction about the axis within
+//!      a quarter turn of one direction `d` (and its direction about the profile circle's
+//!      centre within a quarter turn of one `d′`, sphere and torus); and every piece of σ
+//!      over which `|f|` is not proved above half the tolerance lies strictly in `C`: within
+//!      those quarter turns, its direction about the axis strictly past every edge piece of
+//!      the turn's low edge and before every one of its high edge, and its height (cone) or
+//!      its direction about the profile circle's centre (sphere, torus) strictly past every
+//!      piece of the profile's low edge and before every one of its high edge, in the
+//!      orientation the net's points give (each test is of the piece's whole enclosure, the
+//!      edge pieces' quantities in a centred form along the edge, halved within the budget
+//!      [`MAX_SIDE_PIECES`]).
+//!
+//!   Then the parity of the net's crossings over the component (the degree mod 2 of
+//!   `Φ = S − L` over `H × [t₀, t₁]`, the count of its roots when all are transversal, as
+//!   [`by_count`] reads it) is that of `f`'s sign change between the ends: (a) where
+//!   `|f| > ε` a point is off the net over `H`, and the net's side there agrees with the sign
+//!   of `f`; (b) `G = (χ, f)`, `χ` the direction about the axis with the height or the
+//!   direction about the profile circle's centre, is smooth and one to one with a smooth
+//!   inverse off the axis and the centre, so `G ∘ S − G ∘ L` has `Φ`'s zeros and degree mod
+//!   2, with this step: the angles of `χ ∘ S` are lifted on `H` (off the axis and the
+//!   centre, by the chart's domain), and the lifts on `∂H` stay within a quarter turn of
+//!   `d` (and `d′`), though `S` over the inside of `H` may wind; a root whose lifts differ
+//!   from `L`'s by whole turns `(k, m) ≠ (0, 0)` is a zero of the map shifted by them, one
+//!   coordinate of which keeps one sign on all of `∂H` (every edge piece passes the
+//!   quarter-turn tests), so that class has winding number 0 and degree 0 under the
+//!   homotopy of (d), and the parity is that of the unshifted map (`det DG` keeps one sign,
+//!   so the local indices carry over); (c) by 5, for each value `c` of `χ` on the pieces of
+//!   σ, `χ ∘ S − c` on `∂H` is negative on one edge and positive on the opposite one in
+//!   each coordinate, so it is homotopic without a zero to the rectangle's affine map
+//!   (Poincaré–Miranda), of degree ±1: the net over `H` covers `C`; (d) the `t` where
+//!   `|f(L(t))|` is not above half the tolerance lie in runs strictly inside `[t₀, t₁]`
+//!   (at the ends `|f|` is above it, by 1), and on a closed run `[a, b]`, `|f| = tol/2` at
+//!   `a` and `b`, the homotopy `(χ(S) − χ(L((1 − s) t + s a)), (1 − s) f(S) − f(L(t)))` has no zero on its boundary
+//!   (by (c) on `∂H`, by `|f| ≥ tol/2 > ε` at `a` and `b`), and at `s = 1` it is a product of
+//!   degree ±1 times the sign change of `f` over the run; (e) between runs `f` keeps its
+//!   sign. So opposite signs at the ends make a crossing, one sign touching; by 2 and 3 the
+//!   roots over `H × [t₀, t₁]` are this component's. A hull reaching a sphere's pole is
+//!   undecided (the net over it is not off the axis, so no chart's domain holds it), and so
+//!   is one spanning a whole turn (no half-plane holds its edges) and a cone's apex.
+//!   Any other kind with a box left is undecided.
 //!
 //! The distinct roots of a component are counted from its root boxes: one where an
 //! enclosure lies in the other's unique box, two where the enclosures are apart, and the
-//! component is undecided when two are neither. The side test also asks, at its ends, that
-//! the side function be more than half the tolerance from 0 (its pieces are skipped only
-//! past that too), so that it does not rest on the net and the closed form agreeing to the
-//! last bit, only to well within half the tolerance.
+//! component is undecided when two are neither.
 //!
 //! The solutions of the solve are then typed ([`type_solutions`]). With a cull not placed
 //! or the components not built, every one is undecided, and so is every range. A point is
@@ -270,6 +300,7 @@ use crate::geom::solution_array::{Contact, SideRecord};
 use crate::kernel::{CancelToken, Kernel};
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
+use crate::surface::implicit::{side_bounds, Revolution, SideBound};
 use crate::surface::surface::Surface;
 
 const OP: &str = "surface::surface::certified_line::isolate";
@@ -308,6 +339,9 @@ pub(crate) struct LineNet {
     /// The complete surface of revolution the net is a patch of, for the kinds the side
     /// test reads ([`Revolved`]); `None` for every other surface.
     revolved: Option<Revolved>,
+    /// The net as the surface stores it, for [`side_bounds`] (with
+    /// [`LineNet::revolved`] only).
+    form: Option<crate::nurbs::srf_basic::Surface>,
 }
 
 impl LineNet {
@@ -338,12 +372,23 @@ impl LineNet {
         };
         let creases = [creases(&net.u, net.p, u), creases(&net.v, net.q, v)];
         let revolved = Revolved::of(surface, &net);
+        let form = revolved.and_then(|_| base.gw_nurb().cloned());
         Ok(Some(Self {
             net,
             range: [u, v],
             creases,
             revolved,
+            form,
         }))
+    }
+
+    /// The certified bounds of [`side_bounds`] over the net's Bézier patches, for its
+    /// surface of revolution; none for another surface, or where the decomposition fails.
+    fn side_bounds(&self) -> Vec<SideBound> {
+        match (&self.form, &self.revolved) {
+            (Some(form), Some(rev)) => side_bounds(form, &rev.revolution()).unwrap_or_default(),
+            _ => Vec::new(),
+        }
     }
 
     /// Whether a side of the `(u, v)` box `b` lies on a border where a path down the gap to
@@ -2063,11 +2108,15 @@ pub(crate) struct Revolved {
     shape: Shape,
     /// Whether the net's u is the turn about the axis (else its v).
     turn_in_u: bool,
-    /// Whether the turn is a whole one (the analytic angles span 360°).
-    whole_turn: bool,
-    /// Whether the profile is a whole circle (a torus whose minor angles span 360°).
-    whole_profile: bool,
 }
+
+/// How far each entry of the Gram matrix of a [`Revolved`]'s stored axes may be from the
+/// identity's ([`Revolved::of`]).
+const FRAME_DEFECT: f64 = 1.0e-12;
+
+/// A lower bound of every eigenvalue of that Gram matrix, `1 − 3 FRAME_DEFECT`
+/// (Gershgorin's discs), below by a margin for its rounding.
+const GRAM_FLOOR: f64 = 1.0 - 4.0 * FRAME_DEFECT;
 
 /// The profile of a [`Revolved`] in its half-plane through the axis (radius from the axis,
 /// height along it).
@@ -2128,7 +2177,19 @@ impl Revolved {
             return None;
         }
         let place = &rev.position;
-        let angles = rev.anal_uv_domain;
+        let frame = [f3(place.x_axis()), f3(place.y_axis()), f3(place.z_axis())];
+        // the stored axes orthonormal to within `FRAME_DEFECT` in every entry of their Gram
+        // matrix, enclosed: the frame is then nonsingular, with every eigenvalue of the Gram
+        // matrix at least `GRAM_FLOOR` (Gershgorin)
+        let orthonormal = frame.iter().enumerate().all(|(i, a)| {
+            frame.iter().enumerate().all(|(j, b)| {
+                let g = dot(*a, &b.map(Ivl::from)) - Ivl::from(if i == j { 1.0 } else { 0.0 });
+                g.mag() <= FRAME_DEFECT
+            })
+        });
+        if !orthonormal {
+            return None;
+        }
         Some(Self {
             origin: f3(place.origin()),
             x: f3(place.x_axis()),
@@ -2136,9 +2197,32 @@ impl Revolved {
             z: f3(place.z_axis()),
             shape,
             turn_in_u,
-            whole_turn: angles.max().x - angles.min().x >= 360.0,
-            whole_profile: torus && angles.max().y - angles.min().y >= 360.0,
         })
+    }
+
+    /// The surface as [`side_bounds`] reads it: the same side function,
+    /// from the same stored origin and axes.
+    fn revolution(&self) -> Revolution {
+        let origin = v3(self.origin);
+        let frame = [v3(self.x), v3(self.y), v3(self.z)];
+        match self.shape {
+            Shape::Sphere { radius } => Revolution::Sphere {
+                centre: origin,
+                radius,
+            },
+            Shape::Cone { radius, slope } => Revolution::Cone {
+                origin,
+                frame,
+                radius,
+                slope,
+            },
+            Shape::Torus { major, minor } => Revolution::Torus {
+                origin,
+                frame,
+                major,
+                minor,
+            },
+        }
     }
 
     /// The point `w + origin` in the placement: its two coordinates in the plane of the
@@ -2199,80 +2283,335 @@ fn cross2(a: [Ivl; 2], b: [Ivl; 2]) -> Ivl {
     a0 * b1 - a1 * b0
 }
 
-/// A range of directions in a plane: the directions at its ends and at the knots between,
-/// turning counterclockwise, each step less than half a turn (a rational quadratic arc's).
-/// `None` in [`Chart`] for a whole turn, which holds every direction.
-#[derive(Debug, Clone)]
-struct Sector {
-    edges: Vec<[Ivl; 2]>,
-    /// Whether the directions turned clockwise in the order of the parameter (and were
-    /// reversed).
-    reversed: bool,
+/// One piece of an edge of a component's `(u, v)` hull (one of its parameters a single
+/// number), with the net over it less the axis's origin enclosed: over the piece (`w`), at
+/// its middle (`mid`), and its partial along the parameter that runs (`dw`), with half that
+/// parameter's width (`r`), for the centred form of the tests ([`centred`]).
+#[derive(Debug, Clone, Copy)]
+struct EdgePiece {
+    u: Ivl,
+    v: Ivl,
+    w: I3,
+    mid: I3,
+    dw: I3,
+    r: f64,
 }
 
-impl Sector {
-    /// The sector of the directions `edges` (in the order of the parameter), or `None` where
-    /// a direction is not proved apart from 0 or the steps do not all turn one way.
-    fn of(mut edges: Vec<[Ivl; 2]>) -> Option<Self> {
-        let apart_from_0 = |e: &[Ivl; 2]| length_squared(&[e[0], e[1], Ivl::from(0.0)]).lo > 0.0;
-        if edges.len() < 2 || !edges.iter().all(apart_from_0) {
-            return None;
-        }
-        let turns: Vec<Ivl> = edges
-            .windows(2)
-            .filter_map(|w| match *w {
-                [a, b] => Some(cross2(a, b)),
-                _ => None,
-            })
-            .collect();
-        let reversed = if turns.iter().all(|c| c.hi < 0.0) {
-            edges.reverse();
-            true
-        } else if turns.iter().all(|c| c.lo > 0.0) {
-            false
-        } else {
-            return None;
-        };
-        Some(Self { edges, reversed })
-    }
+/// A test of an edge piece: from the net's point `X` (less the origin, enclosed) and its
+/// partial `X'` along the edge, the tested quantity and its derivative along the edge, each
+/// enclosed. The test passes where the quantity is proved positive.
+type EdgeTest<'a> = &'a dyn Fn(&I3, &I3) -> (Ivl, Ivl);
 
-    /// Whether every direction of the plane vectors `w` lies in the sector: `w` apart from 0,
-    /// and between the ends of a run of steps that turns less than half a turn in all (each
-    /// step does, and so does the run when its ends' cross product is positive, the run being
-    /// less than a whole turn).
-    fn holds(&self, w: [Ivl; 2]) -> bool {
-        if !(length_squared(&[w[0], w[1], Ivl::from(0.0)]).lo > 0.0) {
-            return false;
+/// The tested quantity over an edge piece, enclosed: the met of its value over the piece's
+/// enclosure and its centred form, the value at the middle plus the derivative over the
+/// piece times `[−r, r]` (the mean value theorem along the edge, on one polynomial piece of
+/// the net, so the edge is smooth there). The centred form is what makes a quantity that
+/// hardly changes along the edge (a direction about the axis along a meridian, the height
+/// or the profile's direction along a circle of latitude) tight: the enclosure of the
+/// points alone is as wide as the piece is long.
+fn centred(p: &EdgePiece, g: EdgeTest<'_>) -> Ivl {
+    let (at_mid, _) = g(&p.mid, &p.dw);
+    let (naive, slope) = g(&p.w, &p.dw);
+    let c = at_mid + slope * Ivl::new(-p.r, p.r);
+    // (both hold the quantity; apart, a rounding has gone wrong, and nothing is shown)
+    meet(naive, c).unwrap_or_else(|| Ivl::new(f64::NAN, f64::NAN))
+}
+
+/// The coverage certificate of a component's `(u, v)` hull `H` on a surface of revolution
+/// (module docs, "Typing"): the net over `H`'s four edges in pieces (never hulled), in the
+/// order turn low, turn high, profile low, profile high; a plane direction `d` every edge
+/// piece's direction about the axis lies within a quarter turn of (and, for the sphere and
+/// the torus, a direction `d_tube` every edge piece's direction about the profile circle's
+/// centre does); and the orientation of each coordinate along the hull, read from the net's
+/// points (a choice of which test to run, never assumed: a wrong one only fails the tests).
+#[derive(Debug, Clone)]
+struct Chart {
+    edges: [Vec<EdgePiece>; 4],
+    d: [f64; 2],
+    d_tube: Option<[f64; 2]>,
+    /// Whether the directions about the axis turn counterclockwise from the turn-low edge
+    /// to the turn-high one.
+    turn_ccw: bool,
+    /// Whether the profile coordinate rises from the profile-low edge to the profile-high
+    /// one (the height for the cone, the direction about the centre counterclockwise for the
+    /// sphere and the torus).
+    profile_up: bool,
+}
+
+/// `d · v` of a plane direction and a plane vector of intervals.
+fn dot2(d: [f64; 2], v: [Ivl; 2]) -> Ivl {
+    let [a, b] = v;
+    Ivl::from(d[0]) * a + Ivl::from(d[1]) * b
+}
+
+/// The derivative of the point's vector in the profile's half-plane ([`Revolved::in_the_tube`])
+/// along the edge, from the point `x` and its partial `dx`: `(ρ', h')` with
+/// `ρ' = (a a' + b b') / ρ`; the whole line where `ρ` is not proved positive.
+fn tube_slope(rev: &Revolved, x: &I3, dx: &I3) -> [Ivl; 2] {
+    let ([a, b], _) = rev.coordinates(x);
+    let ([da, db], dh) = rev.coordinates(dx);
+    let rho = radius_of(a, b);
+    let drho = if rho.lo > 0.0 {
+        (a * da + b * db) / rho
+    } else {
+        Ivl::whole()
+    };
+    [drho, dh]
+}
+
+impl Chart {
+    /// The certificate of the hull `[u, v]` (module docs, "Typing"), within `budget`
+    /// enclosures (spent from it); `None` where it is not shown: a hull reaching a pole or
+    /// a whole turn (no half-plane holds its edges), an edge piece not enclosed, or the
+    /// budget spent.
+    fn of(net: &LineNet, rev: &Revolved, u: Ivl, v: Ivl, budget: &mut usize) -> Option<Self> {
+        let (turn, profile) = if rev.turn_in_u { (u, v) } else { (v, u) };
+        let point = |t: f64, p: f64| -> Option<I3> {
+            let (pu, pv) = if rev.turn_in_u { (t, p) } else { (p, t) };
+            net.at(pu, pv, rev.origin)
+        };
+        let plane = |w: &I3| rev.coordinates(w).0;
+        let tube = |w: &I3| rev.in_the_tube(w);
+        let mid_of = |x: [Ivl; 2]| x.map(Ivl::mid);
+        // the directions read from the net's points (choices, not assumptions)
+        let centre = point(turn.mid(), profile.mid())?;
+        let d = unit2(mid_of(plane(&centre)))?;
+        let d_tube = match rev.shape {
+            Shape::Cone { .. } => None,
+            _ => Some(unit2(mid_of(tube(&centre)))?),
+        };
+        let (t_lo, t_hi) = (
+            point(turn.lo, profile.mid())?,
+            point(turn.hi, profile.mid())?,
+        );
+        let turn_ccw = cross2(plane(&t_lo), plane(&t_hi)).mid() > 0.0;
+        let (p_lo, p_hi) = (
+            point(turn.mid(), profile.lo)?,
+            point(turn.mid(), profile.hi)?,
+        );
+        let profile_up = match d_tube {
+            None => rev.coordinates(&p_hi).1.mid() > rev.coordinates(&p_lo).1.mid(),
+            Some(_) => cross2(tube(&p_lo), tube(&p_hi)).mid() > 0.0,
+        };
+        // the four edges, cut at the net's knots
+        let edge = |fixed_turn: Option<f64>, fixed_profile: Option<f64>| -> Vec<(Ivl, Ivl)> {
+            let (in_u, run) = if fixed_turn.is_some() {
+                (!rev.turn_in_u, profile)
+            } else {
+                (rev.turn_in_u, turn)
+            };
+            let mut at = vec![run.lo];
+            at.extend(knots_inside(net, in_u, [run.lo, run.hi]));
+            at.push(run.hi);
+            at.windows(2)
+                .filter_map(|w| match *w {
+                    [a, z] => Some(Ivl::new(a, z)),
+                    _ => None,
+                })
+                .map(|piece| {
+                    let (t, p) = match (fixed_turn, fixed_profile) {
+                        (Some(t), _) => (Ivl::from(t), piece),
+                        (_, Some(p)) => (piece, Ivl::from(p)),
+                        _ => (piece, piece),
+                    };
+                    if rev.turn_in_u {
+                        (t, p)
+                    } else {
+                        (p, t)
+                    }
+                })
+                .collect()
+        };
+        let params = [
+            edge(Some(turn.lo), None),
+            edge(Some(turn.hi), None),
+            edge(None, Some(profile.lo)),
+            edge(None, Some(profile.hi)),
+        ];
+        let mut edges: [Vec<EdgePiece>; 4] = Default::default();
+        for (slot, list) in edges.iter_mut().zip(params) {
+            for (pu, pv) in list {
+                slot.push(enclose_edge(net, rev, pu, pv, budget)?);
+            }
         }
-        let n = self.edges.len();
-        for i in 0..n {
-            for j in i + 1..n {
-                let (Some(&a), Some(&b)) = (self.edges.get(i), self.edges.get(j)) else {
-                    continue;
-                };
-                let narrow = j == i + 1 || cross2(a, b).lo > 0.0;
-                if narrow && cross2(a, w).lo >= 0.0 && cross2(w, b).lo >= 0.0 {
-                    return true;
+        let mut chart = Self {
+            edges,
+            d,
+            d_tube,
+            turn_ccw,
+            profile_up,
+        };
+        // every edge piece within a quarter turn of `d` (and of `d_tube`)
+        let in_d = |x: &I3, dx: &I3| (dot2(d, plane(x)), dot2(d, plane(dx)));
+        for e in 0..4 {
+            if !chart.clear(net, rev, e, budget, &in_d) {
+                return None;
+            }
+            if let Some(dt) = d_tube {
+                let in_dt = |x: &I3, dx: &I3| (dot2(dt, tube(x)), dot2(dt, tube_slope(rev, x, dx)));
+                if !chart.clear(net, rev, e, budget, &in_dt) {
+                    return None;
                 }
             }
         }
-        false
+        Some(chart)
+    }
+
+    /// Whether every piece of the edge `e` passes `test` ([`centred`]), halving the pieces
+    /// that do not (each half enclosed, within `budget`); `false` where one cannot be made
+    /// to, and at once where the net's point at a failing piece's middle fails it too (no
+    /// halving of the edge passes that; a test against a piece of the line may still pass
+    /// once the line's piece is halved, which the caller does).
+    fn clear(
+        &mut self,
+        net: &LineNet,
+        rev: &Revolved,
+        e: usize,
+        budget: &mut usize,
+        test: EdgeTest<'_>,
+    ) -> bool {
+        let Some(list) = self.edges.get_mut(e) else {
+            return false;
+        };
+        let mut done: Vec<EdgePiece> = Vec::new();
+        let mut work: Vec<EdgePiece> = std::mem::take(list);
+        work.reverse();
+        let mut ok = true;
+        while let Some(piece) = work.pop() {
+            if !ok || centred(&piece, test).lo > 0.0 {
+                done.push(piece);
+                continue;
+            }
+            if !(test(&piece.mid, &piece.dw).0.lo > 0.0) {
+                ok = false;
+                done.push(piece);
+                continue;
+            }
+            // halve along the parameter that runs
+            let split_u = piece.u.lo < piece.u.hi;
+            let run = if split_u { piece.u } else { piece.v };
+            let mid = run.mid();
+            let halves = (mid > run.lo && mid < run.hi).then(|| {
+                let (a, b) = (Ivl::new(run.lo, mid), Ivl::new(mid, run.hi));
+                if split_u {
+                    [(a, piece.v), (b, piece.v)]
+                } else {
+                    [(piece.u, a), (piece.u, b)]
+                }
+            });
+            let enclosed = halves.and_then(|[(u0, v0), (u1, v1)]| {
+                Some([
+                    enclose_edge(net, rev, u0, v0, budget)?,
+                    enclose_edge(net, rev, u1, v1, budget)?,
+                ])
+            });
+            if let Some([first, second]) = enclosed {
+                work.push(second);
+                work.push(first);
+            } else {
+                ok = false;
+                done.push(piece);
+            }
+        }
+        if let Some(list) = self.edges.get_mut(e) {
+            *list = done;
+        }
+        ok
+    }
+
+    /// Whether every point of `w + origin` lies strictly inside the chart (module docs,
+    /// "Typing"): within a quarter turn of `d`, its direction about the axis strictly past
+    /// every turn-low edge piece's and before every turn-high one's, and its height
+    /// (cone) or its direction about the profile circle's centre (within a quarter turn of
+    /// `d_tube`) strictly past every profile-low edge piece's and before every profile-high
+    /// one's, each in the chart's orientation. Halves edge pieces within `budget`.
+    fn holds(&mut self, net: &LineNet, rev: &Revolved, w: &I3, budget: &mut usize) -> bool {
+        let (pw, hw) = rev.coordinates(w);
+        if !(dot2(self.d, pw).lo > 0.0) {
+            return false;
+        }
+        let plane = |x: &I3| rev.coordinates(x).0;
+        // (the turn: `cross2(edge, w) > 0` past the low edge, `cross2(w, edge) > 0` before
+        // the high one, counterclockwise; the other way round clockwise)
+        let sign = Ivl::from(if self.turn_ccw { 1.0 } else { -1.0 });
+        let past_low =
+            |x: &I3, dx: &I3| (sign * cross2(plane(x), pw), sign * cross2(plane(dx), pw));
+        let before_high =
+            |x: &I3, dx: &I3| (sign * cross2(pw, plane(x)), sign * cross2(pw, plane(dx)));
+        if !self.clear(net, rev, 0, budget, &past_low)
+            || !self.clear(net, rev, 1, budget, &before_high)
+        {
+            return false;
+        }
+        let up = Ivl::from(if self.profile_up { 1.0 } else { -1.0 });
+        match self.d_tube {
+            None => {
+                let height = |x: &I3| rev.coordinates(x).1;
+                let above_low =
+                    |x: &I3, dx: &I3| (up * (hw - height(x)), Ivl::from(0.0) - up * height(dx));
+                let below_high = |x: &I3, dx: &I3| (up * (height(x) - hw), up * height(dx));
+                self.clear(net, rev, 2, budget, &above_low)
+                    && self.clear(net, rev, 3, budget, &below_high)
+            }
+            Some(dt) => {
+                let tw = rev.in_the_tube(w);
+                if !(dot2(dt, tw).lo > 0.0) {
+                    return false;
+                }
+                let tube = |x: &I3| rev.in_the_tube(x);
+                let past_low = |x: &I3, dx: &I3| {
+                    (
+                        up * cross2(tube(x), tw),
+                        up * cross2(tube_slope(rev, x, dx), tw),
+                    )
+                };
+                let before_high = |x: &I3, dx: &I3| {
+                    (
+                        up * cross2(tw, tube(x)),
+                        up * cross2(tw, tube_slope(rev, x, dx)),
+                    )
+                };
+                self.clear(net, rev, 2, budget, &past_low)
+                    && self.clear(net, rev, 3, budget, &before_high)
+            }
+        }
     }
 }
 
-/// The part of the complete surface of revolution a component's `(u, v)` hull covers, in
-/// the coordinates every point of the surface has one value of: its direction about the
-/// axis, and its height (cone) or its direction in the half-plane about the profile
-/// circle's centre (sphere, torus).
-#[derive(Debug, Clone)]
-struct Chart {
-    /// The directions about the axis; `None` for a whole turn.
-    turn: Option<Sector>,
-    /// The heights, a range proved inside the hull's (cone).
-    height: Option<Ivl>,
-    /// The directions about the profile circle's centre (sphere, torus); `None` for a whole
-    /// circle or a cone.
-    tube: Option<Sector>,
+/// The unit vector along `v`, `None` where it is not finite or of no length.
+fn unit2(v: [f64; 2]) -> Option<[f64; 2]> {
+    let [a, b] = v;
+    let len = a.hypot(b);
+    (len > 0.0 && len.is_finite()).then(|| [a / len, b / len])
+}
+
+/// The edge piece `[u, v]` (one of them a single number) enclosed ([`EdgePiece`]), one
+/// enclosure spent from `budget`; `None` where it cannot be (or the budget is spent).
+fn enclose_edge(
+    net: &LineNet,
+    rev: &Revolved,
+    u: Ivl,
+    v: Ivl,
+    budget: &mut usize,
+) -> Option<EdgePiece> {
+    if *budget == 0 {
+        return None;
+    }
+    *budget = budget.saturating_sub(1);
+    let [w, s_u, s_v] = net.over(u, v, rev.origin)?;
+    let mid = net.at(u.mid(), v.mid(), rev.origin)?;
+    let in_u = u.lo < u.hi;
+    let run = if in_u { u } else { v };
+    let m = run.mid();
+    let r = round_up(cmax(m - run.lo, run.hi - m));
+    Some(EdgePiece {
+        u,
+        v,
+        w,
+        mid,
+        dw: if in_u { s_u } else { s_v },
+        r,
+    })
 }
 
 /// The most piece enclosures one component's side test makes (module docs, "Typing"): a
@@ -2316,18 +2655,21 @@ pub(crate) enum Why {
     /// No side function for the kind (a B-spline, an extrusion, a general surface of
     /// revolution).
     NoSideFunction,
-    /// The closed form is not shown to be the net's at the hull's corners.
+    /// The net over its hull is not shown within a quarter of the tolerance of the closed
+    /// form (a patch without a certified bound, or one too large).
     NotTheNet,
     /// The side function at an end is not proved apart from 0.
     EndNotShown,
     /// Another component's line parameters meet its own.
     Overlapped,
-    /// Its hull reaches the cone's apex.
+    /// The cone's radius at the net's heights over its hull is not shown positive (the
+    /// apex, or the other nappe).
     Apex,
     /// Its hull is not covered by the searched leaves and strips (a trim cull inside it).
     Uncovered,
     /// A point of the line between its ends that may lie on the complete surface is not
-    /// shown inside its hull's part of it.
+    /// shown strictly inside the chart its hull's edges certify, or no chart is certified
+    /// (a pole or a whole turn on its edge, the net near the axis).
     OutsideHull,
     /// The side test ran out of its budget.
     Budget,
@@ -2354,6 +2696,9 @@ pub(crate) fn type_components(
     let [s0, s1] = line.span;
     let scratch = ScratchLine::of(line, &Extent1d::from_min_max(s0, s1));
     let overlapped = overlapped(&comps.list.iter().map(|c| c.t).collect::<Vec<Ivl>>());
+    // the net's side bounds, made once for the solve when a side test first reads them (a
+    // decomposition that fails gives none: every side test is then undecided)
+    let mut bounds: Option<Vec<SideBound>> = None;
     for (ci, c) in comps.list.iter_mut().enumerate() {
         if let Some(token) = cancel {
             token.check(OP)?;
@@ -2375,7 +2720,8 @@ pub(crate) fn type_components(
                     by_count(net, line, sides, &boxes, n)
                 } else {
                     let others = overlapped.get(ci).copied().unwrap_or(true);
-                    by_sides(net, scratch, leaves, c, others)
+                    let bounds = bounds.get_or_insert_with(|| net.side_bounds());
+                    by_sides(net, scratch, leaves, c, others, bounds)
                 }
             }
         };
@@ -2530,18 +2876,22 @@ fn by_count(
 }
 
 /// The side test of a component holding a box left at the floor (module docs, "Typing"),
-/// for a surface of revolution: the side function at the line's points at the two ends
-/// of its line parameters, each proved apart from 0; no other component's line parameters
-/// meet its own (`others`); its hull clear of a cone's apex and covered by searched leaves
-/// and strips; and every point of the line between the ends that may lie on the complete
-/// surface shown inside the hull's part of it. Sets the component's contact (crossing for
-/// opposite sides, touching for one) and returns [`Typed::Sides`], or why it is undecided.
+/// for a surface of revolution: the side function at the line's points at the two ends of
+/// its line parameters, each proved more than half the tolerance from 0; no other
+/// component's line parameters meet its own (`others`); its hull covered by searched leaves
+/// and strips; the net over its hull within a certified `ε` below a quarter of the
+/// tolerance of the closed form (`bounds`, [`side_bounds`]), on a cone's one nappe; and
+/// every point of the line between the ends that may lie within `ε` of the complete
+/// surface strictly inside the chart its hull's edges certify ([`Chart`]). Sets the
+/// component's contact (crossing for opposite sides, touching for one) and returns
+/// [`Typed::Sides`], or why it is undecided.
 fn by_sides(
     net: &LineNet,
     line: &ScratchLine,
     leaves: &[SearchedLeaf],
     c: &mut Component,
     others: bool,
+    bounds: &[SideBound],
 ) -> Typed {
     let Some(rev) = net.revolved else {
         return Typed::Undecided(Why::NoSideFunction);
@@ -2554,8 +2904,8 @@ fn by_sides(
         [t * d0 - o0, t * d1 - o1, t * d2 - o2]
     };
     let ends = [c.t.lo, c.t.hi].map(|t| rev.side(&at(Ivl::from(t))));
-    // (half the tolerance: an end is at least the tolerance from the surface over the
-    // component, and the net need only agree with the closed form to within the margin)
+    // (half the tolerance: the ends are at least the tolerance from the net over the
+    // component, and the net is within a quarter of it of the closed form)
     let half = 0.5 * line.tol;
     let shown = |f: Ivl| f.lo > half || f.hi < -half;
     let [lo, hi] = ends;
@@ -2565,54 +2915,39 @@ fn by_sides(
     if others {
         return Typed::Undecided(Why::Overlapped);
     }
-    let Some(chart) = chart_of(net, &rev, c.u, c.v, line.tol) else {
-        return Typed::Undecided(Why::OutsideHull);
-    };
-    // (a guard that the closed form is the net's: within a quarter of the tolerance at the
-    // hull's corners)
-    let on_the_net = [
-        (c.u.lo, c.v.lo),
-        (c.u.lo, c.v.hi),
-        (c.u.hi, c.v.lo),
-        (c.u.hi, c.v.hi),
-    ]
-    .iter()
-    .all(|&(u, v)| {
-        net.at(u, v, rev.origin)
-            .is_some_and(|w| rev.side(&w).mag() <= 0.25 * line.tol)
-    });
-    if !on_the_net {
-        return Typed::Undecided(Why::NotTheNet);
-    }
-    if let Shape::Cone { radius, slope } = rev.shape {
-        // (the apex's height, −radius / slope, against the hull's heights: the chart's
-        // heights lie inside them, so the test reads the hull's own ends)
-        if slope != 0.0 {
-            let apex = Ivl::from(-radius) / Ivl::from(slope);
-            let near = hull_heights(net, &rev, c.u, c.v).is_none_or(|h| meet(apex, h).is_some());
-            if near {
-                return Typed::Undecided(Why::Apex);
-            }
-        }
-    }
     if !covered_by_leaves(c.u, c.v, leaves) {
         return Typed::Undecided(Why::Uncovered);
     }
-    // every piece of the line between the ends that may meet the surface lies in the
-    // hull's part of it, halving pieces within the budget
+    let eps = match side_eps(net, &rev, bounds, c.u, c.v) {
+        Ok(eps) if eps < 0.25 * line.tol => eps,
+        Err(why) => return Typed::Undecided(why),
+        Ok(_) => return Typed::Undecided(Why::NotTheNet),
+    };
+    let mut budget = MAX_SIDE_PIECES;
+    if !in_the_chart_domain(net, &rev, c.u, c.v, eps) {
+        return Typed::Undecided(Why::OutsideHull);
+    }
+    let Some(mut chart) = Chart::of(net, &rev, c.u, c.v, &mut budget) else {
+        return Typed::Undecided(if budget == 0 {
+            Why::Budget
+        } else {
+            Why::OutsideHull
+        });
+    };
+    // every piece of the line between the ends that may meet the net lies strictly in the
+    // chart, halving pieces within the budget
     let mut work = vec![c.t];
-    let mut spent = 0_usize;
     while let Some(piece) = work.pop() {
-        if spent >= MAX_SIDE_PIECES {
+        if budget == 0 {
             return Typed::Undecided(Why::Budget);
         }
-        spent += 1;
+        budget = budget.saturating_sub(1);
         let w = at(piece);
         let f = rev.side(&w);
         if shown(f) {
             continue;
         }
-        if chart.holds(&rev, &w) {
+        if chart.holds(net, &rev, &w, &mut budget) {
             continue;
         }
         let mid = piece.mid();
@@ -2630,20 +2965,87 @@ fn by_sides(
     Typed::Sides
 }
 
-impl Chart {
-    /// Whether every point of `w + origin` that lies on the complete surface lies in the
-    /// chart's part of it: its direction about the axis in the turn (where it is not
-    /// whole), its height in the heights, its direction about the tube's centre in the
-    /// tube's sector (where it is not whole).
-    fn holds(&self, rev: &Revolved, w: &I3) -> bool {
-        let (plane, h) = rev.coordinates(w);
-        let turn = self.turn.as_ref().is_none_or(|s| s.holds(plane));
-        let height = self.height.is_none_or(|range| within(h, range));
-        let tube = self
-            .tube
-            .as_ref()
-            .is_none_or(|s| s.holds(rev.in_the_tube(w)));
-        turn && height && tube
+/// The certified bound `ε` on the side function over the net above the `(u, v)` hull
+/// `[u, v]` (module docs, "Typing"): the largest bound on `|F|` of the Bézier patches the
+/// hull meets ([`side_bounds`]; a hull on a patch's edge reads the patch it lies in) over
+/// a lower bound of `F`'s other factor there: the radius for the sphere, `r (R² − r²)` for
+/// the torus, and for the cone `R √(1 + s²)` with `R` the radius of the closed form at the
+/// heights of the net over the hull, enclosed, which must be positive (the nappe the side
+/// function describes; otherwise [`Why::Apex`]). [`Why::NotTheNet`] where a patch the hull
+/// meets has no bound, or it meets none.
+fn side_eps(
+    net: &LineNet,
+    rev: &Revolved,
+    bounds: &[SideBound],
+    u: Ivl,
+    v: Ivl,
+) -> core::result::Result<f64, Why> {
+    let meets = |x: Ivl, [a, z]: [f64; 2]| {
+        if x.lo < x.hi {
+            x.lo < z && a < x.hi
+        } else {
+            x.lo <= z && a <= x.hi
+        }
+    };
+    let mut residual: Option<f64> = None;
+    for b in bounds {
+        let [su, sv] = b.span;
+        if meets(u, su) && meets(v, sv) {
+            let r = b.residual.ok_or(Why::NotTheNet)?;
+            residual = Some(residual.map_or(r, |m: f64| m.max(r)));
+        }
+    }
+    let residual = residual.ok_or(Why::NotTheNet)?;
+    let factor = match rev.shape {
+        Shape::Sphere { radius } => Ivl::from(radius),
+        Shape::Torus { major, minor } => {
+            let (big, small) = (Ivl::from(major), Ivl::from(minor));
+            small * (big * big - small * small)
+        }
+        Shape::Cone { radius, slope } => {
+            let w = net.value_over(u, v, rev.origin).ok_or(Why::NotTheNet)?;
+            let s = Ivl::from(slope);
+            let big_r = Ivl::from(radius) + s * rev.coordinates(&w).1;
+            if !(big_r.lo > 0.0) {
+                return Err(Why::Apex);
+            }
+            Ivl::new(big_r.lo, big_r.lo) * (Ivl::from(1.0) + s * s).sqrt()
+        }
+    };
+    if !(factor.lo > 0.0 && factor.is_finite()) {
+        return Err(Why::NotTheNet);
+    }
+    let eps = (Ivl::from(residual) / Ivl::new(factor.lo, factor.lo)).hi;
+    if eps.is_finite() {
+        Ok(eps)
+    } else {
+        Err(Why::NotTheNet)
+    }
+}
+
+/// Whether the net over the `(u, v)` hull `[u, v]`, within `eps` of the complete surface,
+/// lies off its axis and off its profile circle's centre, where the chart's coordinates are
+/// smooth (module docs, "Typing"): for the cone, its radius `ρ ≥ R − ε √(1 + s²) > 0` with
+/// `R` enclosed over the hull; for the torus, `R − r − ε > 0` and `r − ε > 0`; for the
+/// sphere, `r − ε > 0` and `ρ² ≥ λ (r − ε)² − h² > 0`, `h` enclosed over the hull and `λ`
+/// the least eigenvalue bound of the stored frame's Gram matrix ([`Revolved::of`]).
+fn in_the_chart_domain(net: &LineNet, rev: &Revolved, u: Ivl, v: Ivl, eps: f64) -> bool {
+    let e = Ivl::from(eps);
+    match rev.shape {
+        Shape::Torus { major, minor } => {
+            let (big, small) = (Ivl::from(major), Ivl::from(minor));
+            (big - small - e).lo > 0.0 && (small - e).lo > 0.0
+        }
+        Shape::Cone { radius, slope } => net.value_over(u, v, rev.origin).is_some_and(|w| {
+            let s = Ivl::from(slope);
+            let big_r = Ivl::from(radius) + s * rev.coordinates(&w).1;
+            (big_r - e * (Ivl::from(1.0) + s * s).sqrt()).lo > 0.0
+        }),
+        Shape::Sphere { radius } => net.value_over(u, v, rev.origin).is_some_and(|w| {
+            let off = Ivl::from(radius) - e;
+            let h = rev.coordinates(&w).1;
+            off.lo > 0.0 && (Ivl::from(GRAM_FLOOR) * off * off - h * h).lo > 0.0
+        }),
     }
 }
 
@@ -2653,129 +3055,6 @@ fn knots_inside(net: &LineNet, in_u: bool, [a, z]: [f64; 2]) -> Vec<f64> {
     let mut out: Vec<f64> = knots.iter().copied().filter(|&k| k > a && k < z).collect();
     out.dedup();
     out
-}
-
-/// The point of the net at the turn parameter `turn` and the profile parameter `profile`,
-/// less the axis's origin, enclosed.
-fn net_point(net: &LineNet, rev: &Revolved, turn: f64, profile: f64) -> Option<I3> {
-    let (u, v) = if rev.turn_in_u {
-        (turn, profile)
-    } else {
-        (profile, turn)
-    };
-    net.at(u, v, rev.origin)
-}
-
-/// The heights of the net's points at the ends of the hull's profile range, enclosed
-/// together (sphere and cone: the height is monotone along the profile).
-fn hull_heights(net: &LineNet, rev: &Revolved, u: Ivl, v: Ivl) -> Option<Ivl> {
-    let (turn, profile) = if rev.turn_in_u { (u, v) } else { (v, u) };
-    let h = |p: f64| net_point(net, rev, turn.mid(), p).map(|w| rev.coordinates(&w).1);
-    Some(h(profile.lo)?.hull(h(profile.hi)?))
-}
-
-/// The chart of the `(u, v)` hull `[u, v]` of a component on the surface of revolution
-/// `rev` (module docs, "Typing"), `tol` the line's tolerance; `None` where it cannot be
-/// shown (a direction at its ends not apart from the axis or the centre, heights not
-/// apart).
-fn chart_of(net: &LineNet, rev: &Revolved, u: Ivl, v: Ivl, tol: f64) -> Option<Chart> {
-    let (turn, profile) = if rev.turn_in_u { (u, v) } else { (v, u) };
-    let [[r0, r1], [p0, p1]] = if rev.turn_in_u {
-        net.range
-    } else {
-        let [a, b] = net.range;
-        [b, a]
-    };
-    // a whole turn by the analytic angles, held to the net: the hull spans its whole range
-    // in the turn, and the net's directions at the two ends of that range agree (a net
-    // covering less than the analytic angles does not pass)
-    let same = |a: [Ivl; 2], b: [Ivl; 2]| {
-        let [a0, a1] = a;
-        let [b0, b1] = b;
-        let c = cross2(a, b);
-        c.lo <= 0.0 && 0.0 <= c.hi && (a0 * b0 + a1 * b1).lo > 0.0
-    };
-    let turn_at = |t: f64| net_point(net, rev, t, profile.mid()).map(|w| rev.coordinates(&w).0);
-    let whole_turn = rev.whole_turn
-        && turn.lo <= r0
-        && turn.hi >= r1
-        && matches!((turn_at(r0), turn_at(r1)), (Some(a), Some(b)) if same(a, b));
-    let turn_sector = if whole_turn {
-        None
-    } else {
-        let mut at: Vec<f64> = vec![turn.lo];
-        at.extend(knots_inside(net, rev.turn_in_u, [turn.lo, turn.hi]));
-        at.push(turn.hi);
-        let edges: Option<Vec<[Ivl; 2]>> = at.iter().map(|&t| turn_at(t)).collect();
-        Some(Sector::of(edges?)?)
-    };
-    let (height, tube) = match rev.shape {
-        Shape::Cone { .. } => {
-            let h = |p: f64| net_point(net, rev, turn.mid(), p).map(|w| rev.coordinates(&w).1);
-            let (a, b) = (h(profile.lo)?, h(profile.hi)?);
-            // the heights the hull's profile range reaches lie between the ends' (the
-            // height is monotone along the profile): a range proved inside them
-            let inner = if a.hi < b.lo {
-                Ivl::new(a.hi, b.lo)
-            } else if b.hi < a.lo {
-                Ivl::new(b.hi, a.lo)
-            } else {
-                return None;
-            };
-            (Some(inner), None)
-        }
-        // (the sphere's profile is a half circle about the origin, the torus's a circle
-        // about the tube's centre: a direction about that centre, which near a pole tells
-        // points apart where the height hardly changes)
-        Shape::Sphere { .. } | Shape::Torus { .. } => {
-            let tube_at = |p: f64| net_point(net, rev, turn.mid(), p).map(|w| rev.in_the_tube(&w));
-            let whole = rev.whole_profile
-                && profile.lo <= p0
-                && profile.hi >= p1
-                && matches!((tube_at(p0), tube_at(p1)), (Some(a), Some(b)) if same(a, b));
-            if whole {
-                (None, None)
-            } else {
-                let mut at: Vec<f64> = vec![profile.lo];
-                at.extend(knots_inside(net, !rev.turn_in_u, [profile.lo, profile.hi]));
-                at.push(profile.hi);
-                // (a sphere's profile end on the axis is its pole, exactly the axis's
-                // direction: the net's pole point lies off the axis by its rounding alone,
-                // within the margin the closed form is held to. The edge is turned on past
-                // the axis, to the half-plane's far side, where no point lies (the radius
-                // is never below 0): the sector holds the same points of the surface, and
-                // the axis itself is inside it rather than on its edge, where an enclosure
-                // cannot show it)
-                let pole = |e: [Ivl; 2]| -> [Ivl; 2] {
-                    let [rho, h] = e;
-                    let sphere = matches!(rev.shape, Shape::Sphere { .. });
-                    if sphere && rho.hi <= 0.25 * tol && (h.lo > 0.0 || h.hi < 0.0) {
-                        [
-                            Ivl::from(-1.0),
-                            Ivl::from(if h.lo > 0.0 { 1.0 } else { -1.0 }),
-                        ]
-                    } else {
-                        e
-                    }
-                };
-                let plain: Option<Vec<[Ivl; 2]>> = at.iter().map(|&p| tube_at(p)).collect();
-                let plain = plain?;
-                let turned: Vec<[Ivl; 2]> = plain.iter().map(|&e| pole(e)).collect();
-                // (the orientation is the net's own directions'; a turned pole edge that
-                // turns a step the other way is no sector of the hull)
-                let (plain, turned) = (Sector::of(plain)?, Sector::of(turned)?);
-                if plain.reversed != turned.reversed {
-                    return None;
-                }
-                (None, Some(turned))
-            }
-        }
-    };
-    Some(Chart {
-        turn: turn_sector,
-        height,
-        tube,
-    })
 }
 
 /// The most leaves and strips the coverage test of a hull reads; past it the hull is not
@@ -4886,12 +5165,91 @@ mod tests {
         }
     }
 
+    /// The certified bound of the net from its closed form ([`side_bounds`], [`side_eps`]):
+    /// on the placed sphere, cone, cylinder and torus of the side function's test, every
+    /// Bézier patch has a bound, the patches tile the net's range, and `ε` over the whole
+    /// net is at the rounding of a net of size 5, widened by the interval products of its
+    /// equation (the torus's of degree 4: measured 3.6e-10), below 1e-8 (a hundredth of the
+    /// tolerance 1e-6 the solves read). A bound is never below a value `F` takes: against the sphere of radius
+    /// `r' = r (1 + 10⁻⁶)` the net's points (on the sphere of radius `r` to rounding) have
+    /// `|F| = r'² − r² ≈ 2 r² 10⁻⁶ = 1.25e-5`, so every patch's bound is at least 1.2e-5.
+    #[test]
+    fn the_net_is_within_a_certified_bound_of_its_closed_form() {
+        let k = Kernel::default();
+        let (o, x, y) = (
+            Vec3::new(1.0, -2.0, 3.0),
+            Vec3::new(0.6, 0.8, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        );
+        let mut sphere = crate::surface::sphere::Sphere::new(
+            &k,
+            o,
+            x,
+            y,
+            Extent2d::from_bounds(0.0, -90.0, 360.0, 90.0),
+            2.5,
+            crate::surface::sphere::SphereOptions::default(),
+        )
+        .unwrap();
+        sphere.make_nurb(&k).unwrap();
+        let mut cone = Cone::new_bounded(o, x, y, 1.5, 0.8, 0.0, 300.0, 2.0, false, false, false);
+        cone.make_nurb(&k).unwrap();
+        let mut cylinder =
+            Cone::new_cylinder_bounded(o, x, y, 1.5, 0.0, 300.0, 2.0, false, false, true);
+        cylinder.make_nurb(&k).unwrap();
+        let mut torus = Torus::new(
+            &k,
+            o,
+            x,
+            y,
+            Extent2d::from_bounds(0.0, 0.0, 360.0, 360.0),
+            4.0,
+            1.0,
+            TorusOptions::default(),
+        )
+        .unwrap();
+        torus.make_nurb(&k).unwrap();
+        let sphere = Surface::from(sphere);
+        for s in [
+            sphere.clone(),
+            Surface::from(cone),
+            Surface::from(cylinder),
+            Surface::from(torus),
+        ] {
+            let net = LineNet::of(&k, &s).unwrap().unwrap();
+            let rev = net.revolved.expect("a surface of revolution");
+            let bounds = net.side_bounds();
+            assert!(!bounds.is_empty(), "{s:?}");
+            assert!(bounds.iter().all(|b| b.residual.is_some()), "{bounds:?}");
+            let [[u0, u1], [v0, v1]] = net.range;
+            let area: f64 = bounds
+                .iter()
+                .map(|b| (b.span[0][1] - b.span[0][0]) * (b.span[1][1] - b.span[1][0]))
+                .sum();
+            assert!(((u1 - u0) * (v1 - v0) - area).abs() < 1.0e-12, "{bounds:?}");
+            let eps = side_eps(&net, &rev, &bounds, Ivl::new(u0, u1), Ivl::new(v0, v1)).unwrap();
+            assert!(eps < 1.0e-8, "{eps}");
+        }
+        let net = LineNet::of(&k, &sphere).unwrap().unwrap();
+        let rev = net.revolved.expect("a sphere");
+        let off = Revolution::Sphere {
+            centre: v3(rev.origin),
+            radius: 2.5 * (1.0 + 1.0e-6),
+        };
+        let bounds = side_bounds(net.form.as_ref().unwrap(), &off).unwrap();
+        assert!(!bounds.is_empty());
+        for b in &bounds {
+            assert!(b.residual.unwrap() >= 1.2e-5, "{b:?}");
+        }
+    }
+
     /// A line tangent to the sphere touches it: one component of boxes left at the floor,
     /// typed by the side function at its ends (both outside the sphere). Missing it within
     /// the tolerance is touching too. A secant crosses it twice: two components, each a
-    /// count of one certified root. A line along the axis through both poles crosses at
-    /// each pole: two components, each a crossing by the side function (each turns about
-    /// the whole axis, so no other component shares the pole).
+    /// count of one certified root. A line along the axis through both poles meets the
+    /// sphere at each pole: two components, each turning about the whole axis, undecided,
+    /// since no chart of the net over them is certified (a pole row lies on the hull's edge,
+    /// where the line passes, so no half-plane about the axis holds the edges).
     #[test]
     fn a_sphere_is_touched_by_a_tangent_and_crossed_by_a_secant_and_through_its_poles() {
         let k = Kernel::default();
@@ -4929,9 +5287,10 @@ mod tests {
             tol,
             &[whole],
         );
-        assert_eq!(
-            types(&c),
-            vec![(Contact::Crossing, Typed::Sides); 2],
+        assert_eq!(c.list.len(), 2, "{:?}", c.list);
+        assert!(
+            c.list.iter().all(|x| x.contact == Contact::Undecided
+                && x.typed == Typed::Undecided(Why::OutsideHull)),
             "{:?}",
             c.list
         );
