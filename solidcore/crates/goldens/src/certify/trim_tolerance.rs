@@ -73,8 +73,8 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 ///   `u = 71.94`, `v` from 0 to 139.4, far outside the face's B-spline domain
 ///   `[-0.05, 1.05]^2`, so its image is the surface's extrapolation; the trim is in another
 ///   parameterisation than its face's, in both kernels, and no tolerance covers it);
-/// - `rounding-bound`: a vertex of `primitive.api_primitives`' `gen0244`, `gen0893` and
-///   `gen1157`, about 8e8 from the origin, where the evaluation's own error bound at that
+/// - `rounding-bound`: a vertex of `primitive.api_primitives`' `gen1157`, about 8e8 from
+///   the origin, where the evaluation's own error bound at that
 ///   scale exceeds what the tolerance can show: its edge ends evaluate onto its point, but
 ///   their curves' error bounds (1.4e-5 to 2.4e-5 a coordinate, times `sqrt 3`) exceed both
 ///   tolerances;
@@ -442,8 +442,8 @@ fn use_bound(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId) -> UseBound {
 /// curve and the surface moved by `-T`, where the move is exact: every distance of the copy
 /// is the original's, so its bound is a bound of the original pair (#18166: a body built at
 /// the origin, its tolerances proved there, then moved about 8e8 away, where the enclosures
-/// widen with the coordinates: `primitive.api_primitives`' `gen0244`, `gen0893` and `gen1157`,
-/// whose moved edges the body as built leaves uncertified are certified on this copy).
+/// widen with the coordinates: `primitive.api_primitives`' `gen1157`, whose moved edges the
+/// body as built leaves uncertified are certified on this copy).
 ///
 /// `T` is a sum of steps, each exact on its own, so the whole move is exact. A step is, per
 /// axis, the power of two at most the middle of the moved curve's control points' coordinate
@@ -1347,24 +1347,24 @@ struct GoldenChange {
 const FILLET_UV_CHANGES: &[GoldenChange] = &[
     GoldenChange {
         case: "issue-880-half-arc-rim-0-setbacks-1-1",
-        old_hash: 0xb0e61815c7d93b13,
-        new_hash: 0x2e7fdccee3201ccc,
+        old_hash: 0x0c84b1bb5aabdeb6,
+        new_hash: 0x064c8b893b765eaf,
         reason: "Keep the domain-proved oblique UV jets on the procedural surface: the old \
                  boundary fix-up flattened slopes of 5.3e-5 to 8.5e-4 and moved control \
                  polygons by up to 2.2e-5 in UV without a bound on the procedural surface.",
     },
     GoldenChange {
         case: "issue-880-half-arc-rim-0-setbacks-1-2",
-        old_hash: 0x9ae25a8b1d9a6a99,
-        new_hash: 0x40f0fbb85329c802,
+        old_hash: 0x0c29e482175fe1e2,
+        new_hash: 0x94a9c0596e8f0db7,
         reason: "Keep the domain-proved oblique UV jets on the procedural surface for the \
                  unequal setbacks too; the old boundary flattening and polygon moves have \
                  no bound on that surface, and preserving the jets moves the mass integral.",
     },
     GoldenChange {
         case: "source-file-nurb_box-edge0",
-        old_hash: 0xddae5c6cc008ae31,
-        new_hash: 0xe3faf9d321c91634,
+        old_hash: 0xfa66dbe7062ca1e2,
+        new_hash: 0xdcf4807bfc81eec3,
         reason: "Preserve the procedural drop's transverse UV tangent (at most 7e-13) \
                  instead of zeroing it in four spans. The polygon stays unchanged; the \
                  resulting mass estimate moves far below its requested 1e-4 accuracy.",
