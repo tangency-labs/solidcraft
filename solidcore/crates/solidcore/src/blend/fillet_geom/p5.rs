@@ -1691,6 +1691,39 @@ impl FilletBrep {
                     ),
                     _ => (if start_tangent { end_pnt } else { start_pnt }, None),
                 };
+                // Not upstream: what the model allows between the tangent end's seam T (the
+                // side edge its rail crosses) and the end face, the gap the edge's check takes
+                // (`SmEdge::AssertValid` test 13, `edge_form`): the standoff the end rib may
+                // be built with where the seam is a touch (`tangent_end_rib::Standoff`).
+                // None where the end surface is not a face's.
+                let standoff_tol = match surface2_id {
+                    Some(ExecutiveErrorObject::TargetFaceSurface { face, .. }) => {
+                        let tangent_fv = if start_tangent { start_fv } else { end_fv };
+                        let seam = match self
+                            .fillet_vertex(tangent_fv)?
+                            .point_classification()
+                            .object()
+                        {
+                            Some(crate::EntityRef::Edgeuse(eu)) => eu1::edge(target, eu)?,
+                            _ => None,
+                        };
+                        match seam {
+                            Some(seam) => {
+                                use crate::geom::tol::{xsect_tol_3d_from_zones, zone_tol3d};
+                                xsect_tol_3d_from_zones(
+                                    k,
+                                    zone_tol3d(k, edge::tolerance(target, seam)?),
+                                    zone_tol3d(
+                                        k,
+                                        crate::topology::face::p2::tolerance(target, face)?,
+                                    ),
+                                )
+                            }
+                            None => 0.0,
+                        }
+                    }
+                    _ => 0.0,
+                };
                 match &surface {
                     Some(surface) => super::tangent_end_rib::tangent_end_rib(
                         k,
@@ -1702,6 +1735,7 @@ impl FilletBrep {
                         stop,
                         !start_tangent,
                         approx_tol,
+                        standoff_tol,
                     )
                     .map(|rib| SrfSrfCurves {
                         curve_3d: Some(Curve::from(rib.curve_3d)),

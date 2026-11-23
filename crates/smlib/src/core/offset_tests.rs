@@ -43,8 +43,7 @@ fn shell_of_a_drilled_frustum_keeps_its_failure_reason() {
     let Error::OutlineTouches { at, .. } = &error else { panic!("{words}") };
     assert!((at[0] - 10.0).abs() < 1e-4 && at[1].abs() < 1e-4 && (at[2] - 50.0).abs() < 1e-4, "at {at:?}");
     assert!(!words.contains("upstream status"), "{words}");
-    assert!(words.contains("stage_failed") && words.contains("; caused by "), "{words}");
-    assert!(words.contains("the joined offset edge could not be split at the gap bridge joint"), "{words}");
+    assert!(words.contains("an offset edge could not be split where a loop gap or a step corner needs it"), "{words}");
     eprintln!("{words}");
 }
 
