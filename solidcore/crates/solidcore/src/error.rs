@@ -1155,9 +1155,9 @@ impl Reason {
             | Self::Query(_)
             | Self::Topology(_)
             | Self::Surface(_)
-            | Self::Blend(_)
             | Self::FootPastDomainEnd { .. }
             | Self::EdgeOffItsFaces { .. } => None,
+            Self::Blend(b) => b.entity(),
             Self::Offset(o) => o.entity(),
             Self::Boolean(b) => b.entity(),
         }
@@ -1820,7 +1820,7 @@ impl SolidError {
     /// ([`crate::error::blend::BlendFailure::NotCertified`]): like a cancellation, work given
     /// up never becomes a different geometric result.
     #[must_use]
-    pub(crate) fn is_unported_or_cancelled(&self) -> bool {
+    pub fn is_unported_or_cancelled(&self) -> bool {
         matches!(
             self,
             Self::Unported { .. } | Self::Cancelled { .. } | Self::FaceTrimsUnavailable { .. }

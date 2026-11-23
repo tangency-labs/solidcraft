@@ -246,6 +246,21 @@ pub struct RibbonTabsOnlyParams {
     pub on: Option<bool>,
 }
 
+/// `view.toolbar_reset_all`: put every toolbar tab's buttons back to their defaults (#11471).
+/// It takes no parameters.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ToolbarResetAllParams {}
+
+/// What `view.toolbar_reset_all` returns: nothing to report. The window resets its toolbar
+/// customisation; the design is not changed and nothing is added to undo.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ToolbarResetAll {
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What `view.ribbon_tabs_only` returns: the request echoed. The window applies it to its
 /// preference; the design is not changed and nothing is added to undo.
 #[derive(Debug, Serialize, JsonSchema)]
@@ -253,6 +268,30 @@ pub struct RibbonTabsOnly {
     /// The requested state; absent when the call asked to switch.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on: Option<bool>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// `view.browser`: show or hide the Browser tree panel, the design's tree of components, bodies
+/// and sketches. A window setting the app keeps: not saved with the design, not an undo step,
+/// and it never opens a dialog.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserTreeParams {
+    /// True shows the Browser tree panel, false hides it; omitted toggles it.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub visible: Option<bool>,
+}
+
+/// What `view.browser` returns: the request echoed. The window applies it to the Browser tree
+/// panel and the design is not changed.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BrowserTreeResult {
+    /// The requested state; absent when the call asked to toggle it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visible: Option<bool>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

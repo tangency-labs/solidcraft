@@ -87,8 +87,14 @@
 //!   [`MAX_SPAN_DEPTH`] drop points deep (upstream fixtures reach about 15: a span
 //!   passes once shorter than `1/8000` of the interval; upstream is unbounded,
 //!   plan/upstream-issues.md HANG-38); deeper is
-//!   [`SolidError::NotConverged`]. No compared case reaches the second `GetNextPoint` of
-//!   a span yet (the offset surface defers first), so the bound, the span stack and
+//!   [`SolidError::NotConverged`]. The depth alone does not end the loop: a failing
+//!   span whose midpoint rounds onto its start is split there, its empty half passes
+//!   without moving the start, and the span comes back at the same depth. Once, that
+//!   can settle a seam branch (the start dropped again lands on the other side of the
+//!   seam); a span that comes back unchanged loops for ever (#21092: a span one ulp long
+//!   across a closed seam). Not upstream: more spans of no length passed in a row than
+//!   [`MAX_SPAN_DEPTH`] are [`SolidError::NotConverged`] too. No compared case reaches
+//!   the second `GetNextPoint` of a span yet (the offset surface defers first), so the bound, the span stack and
 //!   `sm_AddToCurve` are untested until `surface.offset_surface` lands.
 //! - **C0 knot lines.** Not upstream: the UV curve turns its corner on a `C0` knot line
 //!   of a B-spline surface across which the surface is smooth ([`KnotLines`]). A span with such a line between its ends is
@@ -1621,7 +1627,14 @@ impl Surface {
                 let mut stack = vec![(start.t, end)];
                 let mut stop_spans = false;
                 let mut span_failure_path = CreateUvTrimCurvePathType::DropStartPointFail;
+                // not upstream: spans passed in a row without moving the start on (#21092)
+                let mut stalled = 0usize;
                 while let Some(&(queued_start_t, saved_end)) = stack.last() {
+                    // not upstream: a curve that lies farther off the surface than the
+                    // tolerance fails the accuracy test at every halving, down to an
+                    // eight-thousandth of the curve, so the walk is stopped by the caller's
+                    // token (a work limit, or a cancelled job)
+                    k.check_cancelled(OP)?;
                     // A pending endpoint was dropped relative to an earlier start. Its
                     // parameter and UV point and tangent are taken from the stack, as
                     // upstream. Only when the new span makes a closed-surface seam
@@ -1818,6 +1831,21 @@ impl Surface {
                                 .into_error());
                             }
                             max_approx_dev += b.spent();
+                        }
+
+                        // not upstream: a span of no length moves the trace nowhere. More of
+                        // them in a row than the stack is deep can only be a span coming back
+                        // unchanged, so the trace does not converge (#21092)
+                        stalled = if (end.t - start.t).abs() > 0.0 {
+                            0
+                        } else {
+                            stalled + 1
+                        };
+                        if stalled > MAX_SPAN_DEPTH {
+                            return Err(SolidError::NotConverged {
+                                operation: OP,
+                                iterations: u32::try_from(stalled).unwrap_or(u32::MAX),
+                            });
                         }
 
                         // next span starts at this end
@@ -2309,6 +2337,95 @@ mod tests {
         }
         assert!(out.max_drop_to_surf <= 0.01, "{out:?}");
         assert!(out.max_approx_dev <= 0.01, "{out:?}");
+    }
+
+    /// The span walk polls the kernel's token once per step (#20575), so a drop stopped by a
+    /// poll limit is stopped by the walk's own poll. A curve on a flat B-spline patch is
+    /// dropped under a counting token: the unbounded drop gives a curve and a count of polls,
+    /// and the same drop under a limit at each of those polls is refused as cancelled where it polls. The
+    /// refusal at the walk's poll names this operation; the other polls of the drop (the start
+    /// solve, the next-point solve) name their own. Without the walk's poll no limit would
+    /// name this operation, so the assertion fails.
+    #[test]
+    fn a_poll_limit_stops_the_span_walk_with_its_own_refusal() {
+        use crate::kernel::CancelToken;
+
+        let net = [0.0, 1.0]
+            .into_iter()
+            .map(|u| {
+                [0.0, 1.0]
+                    .into_iter()
+                    .map(|v| CPoint::new(u, v, 0.0, NOW))
+                    .collect()
+            })
+            .collect();
+        let nurb = crate::nurbs::srf_basic::Surface::new(
+            net,
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let surface = Surface::from(BSplineSurface::from_nurb(nurb, false));
+        let source = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(
+                vec![
+                    CPoint::new(0.1, 0.1, 0.0, NOW),
+                    CPoint::new(0.4, 0.9, 0.0, NOW),
+                    CPoint::new(0.6, 0.1, 0.0, NOW),
+                    CPoint::new(0.9, 0.9, 0.0, NOW),
+                ],
+                3,
+                vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            false,
+        ));
+        let drop = |k: &Kernel| {
+            surface.drop_curve_base::<NoObject>(
+                k,
+                &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+                &source,
+                &Extent1d::from_min_max(0.0, 1.0),
+                1.0e-3,
+                true,
+                None,
+            )
+        };
+
+        // no token: the drop makes its curve
+        let free = drop(&Kernel::default()).unwrap();
+        assert!(!free.uv_curves.is_empty());
+
+        // a token that only counts: the polls the whole drop makes
+        let counting = CancelToken::after_polls(u64::MAX);
+        let mut k = Kernel::default();
+        k.set_cancel_token(counting.clone());
+        let counted = drop(&k).unwrap();
+        assert_eq!(counted.uv_curves.len(), free.uv_curves.len());
+        let total = counting.polls().unwrap();
+        assert!(total > 0);
+
+        // a limit at each poll stops the drop; one past the last lets it finish
+        let mut refused_by_the_walk = 0;
+        for limit in 1..=total {
+            let mut k = Kernel::default();
+            k.set_cancel_token(CancelToken::after_polls(limit));
+            if let Err(SolidError::Cancelled { operation }) = drop(&k) {
+                if operation == OP {
+                    refused_by_the_walk += 1;
+                }
+            }
+        }
+        assert!(
+            refused_by_the_walk > 0,
+            "no limit stopped the drop at the span walk's own poll"
+        );
+        let mut k = Kernel::default();
+        k.set_cancel_token(CancelToken::after_polls(total + 1));
+        assert_eq!(drop(&k).unwrap().uv_curves.len(), free.uv_curves.len());
     }
 
     // ---- WR-100: the V degeneracy test ------------------------------------------------
