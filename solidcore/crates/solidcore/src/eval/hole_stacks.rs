@@ -9,7 +9,8 @@
 //! ends of an obround slot; a countersink or a chamfer that opens out of a wall's end is a
 //! coaxial `Cone` face whose narrow rim is the wall's own circle, and the wall's extent runs on
 //! through it. Axes, radii and rims come from the faces' analytic data, extents from the faces'
-//! `v` domains (the height along the axis, the analytic surfaces' own parameter), the rest from
+//! `v` domains held to the `v` their loops' pcurves' control points bound (the height along the
+//! axis, the analytic surfaces' own parameter), the rest from
 //! the boundary edges' evaluated ends and middles. Nothing here meshes the body, and no `u`
 //! parameter or edge interval value is read for its own meaning: an interval only says where
 //! an edge's points are.
@@ -28,7 +29,7 @@
 use std::collections::BTreeMap;
 
 use super::curve::CurveEval;
-use super::geometry::{Curve, Frame, Surface};
+use super::geometry::{Curve, Curve2, Frame, Surface};
 use super::query::{Face, Loop, Record};
 use super::vec::{v3, VecExt};
 use crate::error::{Result, SolidError};
@@ -344,11 +345,51 @@ fn frame_axis(frame: &Frame) -> Option<(Vec3, Vec3)> {
     (point.is_finite() && axis.is_finite()).then_some((point, axis))
 }
 
-/// The face's extent along its surface's axis: its `v` domain, the height in the surface's own
-/// parameters.
+/// The face's extent along its surface's axis: the `v` span of its loops. The `v` domain is a
+/// rectangle around the loops, and a body rebuilt later in a design's timeline can hold it
+/// looser than the face's own boundary, so the loops' pcurves' control points bound it too
+/// (a spline or rational spline lies within its control points' `v`, held inside the domain):
+/// the tighter of the two holds. A face with no loops takes its domain.
 fn frame_extent(f: &Face) -> Option<[f64; 2]> {
-    let (t0, t1) = (f.domain[1][0], f.domain[1][1]);
-    (t0.is_finite() && t1.is_finite() && t0 < t1).then_some([t0, t1])
+    let (d0, d1) = (f.domain[1][0], f.domain[1][1]);
+    if !(d0.is_finite() && d1.is_finite() && d0 < d1) {
+        return None;
+    }
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    for l in &f.loops {
+        let Loop::Edges(edges) = l else { continue };
+        for u in edges {
+            let vs: Vec<f64> = match &u.pcurve {
+                Curve2::Spline { points, .. } => points.iter().map(|p| p[1]).collect(),
+                Curve2::RationalSpline { homogeneous, .. } => homogeneous
+                    .iter()
+                    .filter(|h| h[2].is_finite() && h[2] > 0.0)
+                    .map(|h| h[1] / h[2])
+                    .collect(),
+            };
+            for v in vs {
+                if v.is_finite() {
+                    let v = if v < d0 {
+                        d0
+                    } else if v > d1 {
+                        d1
+                    } else {
+                        v
+                    };
+                    lo = lo.min(v);
+                    hi = hi.max(v);
+                }
+            }
+        }
+    }
+    // No loops at all: the domain is all the face says about its extent.
+    let (lo, hi) = if lo < hi {
+        (d0.max(lo), d1.min(hi))
+    } else {
+        (d0, d1)
+    };
+    (lo < hi).then_some([lo, hi])
 }
 
 /// The slot two facing partial walls make: its centre, axis, extent and shape. `None` when

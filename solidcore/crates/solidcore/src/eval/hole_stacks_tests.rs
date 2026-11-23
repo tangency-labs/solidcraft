@@ -7,14 +7,6 @@ use crate::math::Vec3;
 
 use super::{bores, stacks, Bore, Options, Slot};
 
-/// A pcurve our code never reads, in the shape a degree-1 two-point spline takes.
-fn pcurve() -> Curve2 {
-    Curve2::Spline {
-        knots: vec![0.0, 0.0, 1.0, 1.0],
-        points: vec![[0.0, 0.0], [1.0, 1.0]],
-    }
-}
-
 /// A frame at `origin` with x and y the world's, so z is the world's +z.
 fn frame(origin: [f64; 3]) -> Frame {
     Frame {
@@ -24,11 +16,15 @@ fn frame(origin: [f64; 3]) -> Frame {
     }
 }
 
-fn use_of(edge: usize) -> Use {
+/// The face's use of `edge`, with a pcurve spanning `v0` to `v1` (a rim's, `v0 == v1`).
+fn use_of(edge: usize, v0: f64, v1: f64) -> Use {
     Use {
         edge,
         forward: true,
-        pcurve: pcurve(),
+        pcurve: Curve2::Spline {
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![[0.0, v0], [0.0, v1]],
+        },
     }
 }
 
@@ -67,10 +63,10 @@ fn round_hole() -> Record {
         domain: [[0.0, std::f64::consts::TAU * 2.5], [0.0, 2.0]],
         forward: Some(false),
         loops: vec![Loop::Edges(vec![
-            use_of(1),
-            use_of(0),
-            use_of(2),
-            use_of(0),
+            use_of(1, 0.0, 0.0),
+            use_of(0, 0.0, 2.0),
+            use_of(2, 2.0, 2.0),
+            use_of(0, 0.0, 2.0),
         ])],
     };
     Record {
@@ -91,7 +87,12 @@ fn slot() -> Record {
         }),
         domain: [[0.0, std::f64::consts::PI * 3.0], [0.0, 3.0]],
         forward: Some(false),
-        loops: vec![Loop::Edges(uses.iter().map(|&e| use_of(e)).collect())],
+        loops: vec![Loop::Edges(vec![
+            use_of(uses[0], 0.0, 3.0),
+            use_of(uses[1], 0.0, 3.0),
+            use_of(uses[2], 0.0, 0.0),
+            use_of(uses[3], 3.0, 3.0),
+        ])],
     };
     Record {
         edges: vec![
@@ -136,10 +137,10 @@ fn countersink() -> Record {
         domain: [[0.0, std::f64::consts::TAU * 2.5], [0.0, 0.5]],
         forward: Some(false),
         loops: vec![Loop::Edges(vec![
-            use_of(1),
-            use_of(0),
-            use_of(2),
-            use_of(0),
+            use_of(1, 0.0, 0.0),
+            use_of(0, 0.0, 0.5),
+            use_of(2, 0.5, 0.5),
+            use_of(0, 0.0, 0.5),
         ])],
     };
     // The cone: its frame at the top face with z the world's −z, radius 4 there, closing by 45°
@@ -183,10 +184,10 @@ fn bitten() -> Record {
         domain: [[0.0, std::f64::consts::FRAC_PI_2 * 3.0], [0.0, 2.0]],
         forward: Some(false),
         loops: vec![Loop::Edges(vec![
-            use_of(0),
-            use_of(1),
-            use_of(2),
-            use_of(3),
+            use_of(0, 0.0, 2.0),
+            use_of(1, 0.0, 2.0),
+            use_of(2, 0.0, 0.0),
+            use_of(3, 2.0, 2.0),
         ])],
     };
     Record {
