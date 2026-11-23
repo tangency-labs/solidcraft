@@ -342,7 +342,7 @@ pub(super) fn wire_context(
     let doc = placed_candidate(s, &s.doc);
     let (vals, _) = doc.param_values();
     let before = s.model.state_before(id);
-    let mut bodies = doc.sketch(id).ok()?.linked_bodies();
+    let mut bodies = super::sketch_store::read(&doc, id).ok()?.linked_bodies();
     bodies.extend_from_slice(named);
     let st = state_for_sketch(s, &doc, id, &before, &bodies).ok()?.into_owned();
     let plane = sketch_plane(&doc, id, &st).ok()?;
