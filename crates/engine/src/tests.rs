@@ -6856,6 +6856,32 @@ fn default_extrude_profiles_keep_even_depth_islands_and_separate_outlines() {
     assert!(rel(actual, expected) < 1e-6, "{actual} vs {expected}");
 }
 
+/// Four closed strips laid out as a # cross each other and close off a square in the middle that
+/// lies inside none of them. A cut with `profiles` left out takes the strips and keeps the middle
+/// (#19963); four separate cuts give the same block.
+#[test]
+fn default_extrude_profiles_leave_the_gap_overlapping_loops_enclose() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 3, "corner": [-5, -5, 0], "operation": "new_body", "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Strips"}));
+    for points in [
+        [[-6, 3], [6, 3], [6, 4], [-6, 4]],
+        [[-6, -4], [6, -4], [6, -3], [-6, -3]],
+        [[-4, -6], [-3, -6], [-3, 6], [-4, 6]],
+        [[3, -6], [4, -6], [4, 6], [3, 6]],
+    ] {
+        run(&mut s, "sketch.line", json!({"points": points, "closed": true}));
+    }
+    run(&mut s, "sketch.solve", json!({}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Strips", "distance": 5, "start_offset": -1, "operation": "cut", "targets": ["Block"]}));
+    // The block, 300, less the strips inside it: four 10 x 1 x 3 bars less the four 1 x 1 x 3
+    // crossings counted twice. The 6 x 6 middle, the four corners and the four edge pieces stay.
+    let expected = 300.0 - (4.0 * 30.0 - 4.0 * 3.0);
+    let actual = volume(&mut s);
+    assert!(rel(actual, expected) < 1e-6, "{actual} vs {expected}");
+}
+
 /// The face of `body` whose normal points along +x, as a plane pick.
 fn side_face_pick(s: &Session, body: &str) -> Value {
     let world = s.world_state().unwrap();

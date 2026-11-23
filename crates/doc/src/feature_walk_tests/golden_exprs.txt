@@ -341,6 +341,7 @@ sheet_path
   inputs:
     Bend radius = path.radius (Length)
   expressions: path.radius
+sheet_tab
 sheet_unfold
 sheet_convert
 sheet_surface_convert
