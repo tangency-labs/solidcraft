@@ -82,9 +82,11 @@ pub(super) fn open_github(draft: &mut Draft, ctx: &egui::Context, path: &str) {
     draft.opened_github = true;
 }
 
-const ALL_GUIDANCE: [&str; 6] = [
-    "ui.report_screenshot_copied",
-    "ui.report_screenshot_open",
+/// The screenshot notes, as message ids; [`ALL_GUIDANCE`] holds the plain-text notes. The card
+/// reserves the tallest of both.
+const SCREENSHOT_GUIDANCE: [&str; 2] = ["ui.report_screenshot_copied", "ui.report_screenshot_open"];
+
+const ALL_GUIDANCE: [&str; 4] = [
     "Report text copied. Paste it into GitHub and submit your report there.",
     "Review your report on GitHub and click Submit new issue to publish it.",
     "Opens your browser and copies the report text for you to paste into GitHub.",
@@ -272,6 +274,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                         let font = egui::FontId::proportional(t.font_small);
                         let tallest = ALL_GUIDANCE
                             .iter()
+                            .chain(SCREENSHOT_GUIDANCE.iter())
                             .map(|g| ui.painter().layout(tr_label(g).to_string(), font.clone(), t.form_dim, width).size().y)
                             .fold(0.0_f32, f32::max);
                         ui.allocate_ui(vec2(width, tallest), |ui| {
