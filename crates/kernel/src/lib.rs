@@ -233,6 +233,7 @@ pub use body::RayPick;
 pub use body::Refusal;
 pub use body::SurfaceKind;
 pub use body::colour_name;
+pub use body::display_tolerance;
 pub use body::placed_mesh;
 pub use boundary::Boundary;
 pub use boundary::boundary_patch;
