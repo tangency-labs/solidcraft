@@ -358,6 +358,7 @@ render.texture.remove             rendering image resources; crates/engine/src/c
 select.all                        the selection
 select.clear                      the selection
 select.filter                     the selection
+select.invert                     the selection
 select.mode                       the selection: engine cmd/edit_tests.rs, ui-egui selection_mode_tests.rs
 select.same_look                  the selection
 select.set                        the selection
