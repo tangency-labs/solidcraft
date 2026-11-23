@@ -10,7 +10,7 @@
 
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::error::weld::WeldFailure;
-use solidcore::error::Reason;
+use solidcore::error::{FitMeasure, Reason};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::{Kernel, KernelOptions};
 use solidcore::math::{Point3, Vec3};
@@ -252,7 +252,7 @@ fn a_face_not_flat_or_not_square_is_refused() {
 }
 
 /// A spot of 5 on a 3 × 3 sheet passes its edges; its fit is the largest diameter that fits,
-/// 3 (the distance to the nearest edge, twice).
+/// 3 (the distance to the nearest edge, twice), as a diameter.
 #[test]
 fn a_footprint_past_a_face_edge_is_refused_with_the_diameter_that_fits() {
     let mut k = kernel();
@@ -264,8 +264,18 @@ fn a_footprint_past_a_face_edge_is_refused_with_the_diameter_that_fits() {
         "{why:?}"
     );
     assert!((fit.unwrap() - 3.0).abs() < 1e-9, "fit {fit:?}");
-    // just under the diameter that fits it builds
     let face = face_at(&k, &lower, Point3::new(0.0, 0.0, 0.0));
+    let err = spot_site(
+        &k,
+        &[&lower, &small],
+        0,
+        face,
+        Point3::new(0.0, 0.0, 0.0),
+        D,
+    )
+    .unwrap_err();
+    assert_eq!(err.fit().unwrap().measure, FitMeasure::Diameter);
+    // just under the diameter that fits it builds
     assert!(spot_site(
         &k,
         &[&lower, &small],

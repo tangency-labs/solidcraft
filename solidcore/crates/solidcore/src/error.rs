@@ -815,6 +815,8 @@ pub enum FitMeasure {
     Leg,
     /// A weld bead's sagitta (#15129): how far the arc's middle may stand off the chord.
     Sagitta,
+    /// A spot weld's diameter (#18407).
+    Diameter,
 }
 
 impl FitMeasure {
@@ -830,6 +832,7 @@ impl FitMeasure {
             Self::Distance => "distance",
             Self::Leg => "leg",
             Self::Sagitta => "sagitta",
+            Self::Diameter => "diameter",
         }
     }
 }

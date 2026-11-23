@@ -165,7 +165,7 @@ pub fn spot_site(
                 diameter,
             }),
         )
-        .with_fit(Fit::new(2.0 * room, FitMeasure::Distance, None))
+        .with_fit(Fit::new(2.0 * room, FitMeasure::Diameter, None))
         .into_error());
     }
 
