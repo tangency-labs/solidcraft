@@ -106,8 +106,8 @@ fn shared_edge_rectangles() {
     let mut s = new_sketch();
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
     let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 0], "p1": [25, 10]}));
-    // Three of its sides' directions and its two corners on the first one.
-    assert_eq!(r["constraints"].as_array().map(Vec::len), Some(5), "{r}");
+    // Three of its sides' directions (the two corners on the first rectangle merge into its points).
+    assert_eq!(r["constraints"].as_array().map(Vec::len), Some(3), "{r}");
     let rep = report(&s);
     assert_eq!(rep.dof, 3, "the first one's width and height, the second one's width");
     assert!(rep.redundant.is_empty());
@@ -226,8 +226,17 @@ fn dragging_the_shared_corner_moves_every_rectangle() {
     assert!(rep.ok(), "{rep:?}");
     let to = Vec2::new(56.0, 47.0);
     // Each rectangle still has a corner on the moved one and is still a rectangle.
-    let near: usize = sk.points.iter().filter(|p| p.pos.dist(to) < 1e-6).count();
-    assert!(near >= 4, "{near} corners at the dragged spot");
+    let near_ends: usize = sk
+        .curves
+        .iter()
+        .filter_map(|c| match c.kind {
+            solidcraft_sketch::CurveKind::Line { a, b } => {
+                Some(usize::from(sk.points[a].pos.dist(to) < 1e-6) + usize::from(sk.points[b].pos.dist(to) < 1e-6))
+            }
+            _ => None,
+        })
+        .sum();
+    assert!(near_ends >= 8, "{near_ends} rectangle side ends at the dragged spot");
     for l in &sk.curves {
         let solidcraft_sketch::CurveKind::Line { a, b } = l.kind else { continue };
         let d = sk.points[b].pos - sk.points[a].pos;

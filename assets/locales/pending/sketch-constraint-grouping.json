@@ -1,0 +1,42 @@
+{
+  "en": {
+    "prefs.constraint_group_never": "Never",
+    "prefs.constraint_group_threshold": "Group constraints over",
+    "prefs.constraint_group_threshold_note": "Group constraint glyphs on the same curve or coincident point when there are more than this many. Set to Never to show every constraint separately."
+  },
+  "ar": {
+    "prefs.constraint_group_never": "أبدًا",
+    "prefs.constraint_group_threshold": "تجميع القيود الأكثر من",
+    "prefs.constraint_group_threshold_note": "تجميع رموز القيود على نفس المنحنى أو النقطة المتطابقة عندما يتجاوز عددها هذا الحد. اختر أبدًا لإظهار كل قيد على حدة."
+  },
+  "de": {
+    "prefs.constraint_group_never": "Nie",
+    "prefs.constraint_group_threshold": "Bindungen gruppieren ab mehr als",
+    "prefs.constraint_group_threshold_note": "Gruppiert Bindungssymbole derselben Kurve oder desselben koinzidenten Punkts, wenn es mehr als diese Anzahl sind. Auf Nie stellen, um jede Bindung einzeln anzuzeigen."
+  },
+  "he": {
+    "prefs.constraint_group_never": "אף פעם",
+    "prefs.constraint_group_threshold": "קבץ אילוצים מעל",
+    "prefs.constraint_group_threshold_note": "קיבוץ סמלי אילוצים על אותה עקומה או נקודה חופפת כאשר יש יותר ממספר זה. הגדר לאף פעם כדי להציג כל אילוץ בנפרד."
+  },
+  "ja": {
+    "prefs.constraint_group_never": "なし",
+    "prefs.constraint_group_threshold": "拘束をまとめる上限",
+    "prefs.constraint_group_threshold_note": "同じ曲線または一致点上の拘束がこの数を超える場合、1つの記号にまとめます。「なし」にするとすべての拘束を個別に表示します。"
+  },
+  "ko": {
+    "prefs.constraint_group_never": "사용 안 함",
+    "prefs.constraint_group_threshold": "구속 조건 그룹 기준",
+    "prefs.constraint_group_threshold_note": "같은 곡선이나 일치하는 점의 구속 조건이 이 개수를 초과하면 하나의 기호로 묶습니다. '사용 안 함'으로 설정하면 모든 구속 조건을 개별 표시합니다."
+  },
+  "vi": {
+    "prefs.constraint_group_never": "Không bao giờ",
+    "prefs.constraint_group_threshold": "Nhóm ràng buộc khi vượt quá",
+    "prefs.constraint_group_threshold_note": "Nhóm các biểu tượng ràng buộc trên cùng đường cong hoặc điểm trùng nhau khi số lượng vượt quá mức này. Chọn Không bao giờ để luôn hiện riêng từng ràng buộc."
+  },
+  "zh": {
+    "prefs.constraint_group_never": "从不",
+    "prefs.constraint_group_threshold": "约束分组阈值",
+    "prefs.constraint_group_threshold_note": "当同一曲线或重合点上的约束数量超过此值时将其合并为一个分组符号。设为“从不”则单独显示每个约束。"
+  }
+}
