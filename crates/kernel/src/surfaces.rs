@@ -1987,6 +1987,35 @@ mod tests {
         assert!(reverse_faces(&box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap(), &[]).is_err());
     }
 
+    /// A wall (the line y = 0 from x = 0 to 10, swept 10 up z) offset by 2 moves to y = ±2 along
+    /// its normal; turned over, the same offset moves it 2 the other way, and so does a half of
+    /// it trimmed off at x = 5 after the turn (#13640). Thickened by 1, the turned wall grows on
+    /// that side too.
+    #[test]
+    fn a_turned_wall_offsets_and_thickens_to_its_new_side() {
+        let line = vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) }];
+        let wall = extrude_sheet(&Plane::XY, &[line], 0.0, 10.0).unwrap();
+        let turned = reverse_faces(&wall, &[]).unwrap();
+        let y = |b: &Body| {
+            let bb = measure(b).unwrap().bbox;
+            (bb.min.y, bb.max.y)
+        };
+        let (a, _) = y(&crate::offset_surface(&wall, &[0], 2.0, 0.01).unwrap());
+        let side = if a > 1.0 { 1.0 } else { -1.0 };
+        assert!(((a - 2.0 * side).abs()) < 1e-9, "{a}");
+        let (b, _) = y(&crate::offset_surface(&turned, &[0], 2.0, 0.01).unwrap());
+        assert!((b + 2.0 * side).abs() < 1e-9, "{b} vs side {side}");
+        let cut = crate::SplitTool::Plane(Plane::new(Vec3::new(5.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap());
+        let half = crate::trim(&turned, &cut, Vec3::new(1.0, 0.0, 5.0)).unwrap();
+        let (c, _) = y(&crate::offset_surface(&half, &[0], 2.0, 0.01).unwrap());
+        assert!((c + 2.0 * side).abs() < 1e-9, "{c} vs side {side}");
+        let (lo, hi) = y(&thicken(&turned, 1.0, false).unwrap());
+        let (want_lo, want_hi) = if side > 0.0 { (-1.0, 0.0) } else { (0.0, 1.0) };
+        assert!((lo - want_lo).abs() < 1e-9 && (hi - want_hi).abs() < 1e-9, "{lo}..{hi} vs side {side}");
+        let (lo, hi) = y(&thicken(&half, 1.0, false).unwrap());
+        assert!((lo - want_lo).abs() < 1e-9 && (hi - want_hi).abs() < 1e-9, "half: {lo}..{hi} vs side {side}");
+    }
+
     /// A box's top taken away without healing: a five-face surface; patching the opening and
     /// stitching closes the same box. Every face, or none, is refused.
     #[test]

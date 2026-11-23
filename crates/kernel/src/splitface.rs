@@ -1241,4 +1241,23 @@ mod tests {
         assert!(split_faces(&b, &[0], &SplitTool::Plane(pl)).is_err());
         assert!(split_faces(&b, &[99], &SplitTool::Plane(Plane::XY)).is_err());
     }
+
+    /// A wall (the line y = 0 from x = 0 to 10, swept 10 up z) turned over with Reverse Normal
+    /// splits at x = 5 into two halves of 50 (#13640), each facing as the turned wall did: the
+    /// other way from the wall.
+    #[test]
+    fn a_turned_wall_splits_and_its_pieces_keep_its_side() {
+        let line = vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) }];
+        let wall = crate::extrude_sheet(&Plane::XY, &[line], 0.0, 10.0).unwrap();
+        let turned = crate::reverse_faces(&wall, &[]).unwrap();
+        let normal = |b: &Body| b.faces(0.01).unwrap().iter().map(|f| f.plane_normal.unwrap()).collect::<Vec<_>>();
+        let [n] = normal(&turned)[..] else { panic!("one face") };
+        let [m] = normal(&wall)[..] else { panic!("one face") };
+        assert!(n.dot(m) < -1.0 + 1e-9, "{n:?} vs {m:?}");
+        let pl = Plane::new(Vec3::new(5.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
+        let s = split_faces(&turned, &[0], &SplitTool::Plane(pl)).unwrap();
+        assert_eq!(s.face_count(), 2);
+        assert!(s.faces(0.01).unwrap().iter().all(|f| rel(f.area, 50.0) < 1e-9));
+        assert!(normal(&s).iter().all(|k| k.dot(n) > 1.0 - 1e-9), "{:?} vs {n:?}", normal(&s));
+    }
 }
