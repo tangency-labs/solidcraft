@@ -1,0 +1,6 @@
+{
+  "en": {
+    "prefs.dimension_corner_drag": "Drag a corner to dimension its angle",
+    "prefs.dimension_corner_drag_note": "With Dimension active, drag from a corner shared by two straight lines to place their angle. Off: a drag acts as a click where it ends."
+  }
+}
