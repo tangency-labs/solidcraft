@@ -67,7 +67,7 @@ Built: `KERNEL_CASES_ENTRY=<entry.json> cargo test -p solidcore-ops --test kerne
 
 `cargo xtask kernel-cases --reduce <entry>` writes `<case>-min.json` and its bodies. Each step replays and keeps a change only when the replay still fails with the **same code**; the code is what makes "still the same failure" a comparison, not a judgement.
 
-1. **One call.** Replace every call before the failing one by the failing call's operand bodies as records. If that no longer fails, stop: the failure depends on the kernel's state across calls (its random generator, caches, the fillet step latch; #13672). Report that on the case.
+1. **One call.** Replace every call before the failing one by the failing call's operand bodies as records. If that no longer fails, stop: the failure depends on the kernel's state across calls (its random generator, caches; #13672). Report that on the case.
 2. **The neighbourhood.** Keep the faces at the error's `Site` (or the call's picks) and one ring of neighbours, remove the rest (`trim::remove_faces`), renumber the picks in `params`.
 3. **Least faces.** Try removing each remaining face, each picked edge, each extra section; keep every removal that still fails with the same code. A removal that changes the failure (a solid become a sheet and refused for that) fails the check and is undone.
 4. **Conditions.** On the minimal case, measure at the site with the kernel's own measures: the dihedral angle along the edge, the least radius of curvature of each face near it, the edge's length, the edge and vertex tolerances, gaps; and print them beside the call's parameters ("fillet radius 5.0; face 2 curves at radius 4.8 within 1 mm of the site; dihedral 178.3°").
