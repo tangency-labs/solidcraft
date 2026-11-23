@@ -1,8 +1,10 @@
-//! Untrim and extend of a sheet's faces. Each returns a new body and leaves its input unchanged;
-//! faces and holes are chosen by points, as [`crate::ops`] chooses them.
+//! Untrim and extend of a sheet's faces, and a body trimmed along curves dropped square onto its
+//! faces. Each returns a new body and leaves its input unchanged; faces, holes and regions are
+//! chosen by points, as [`crate::ops`] chooses them.
 
 use serde_json::json;
 
+use crate::sweeps::Curve;
 use crate::trace;
 use crate::{Brep, Result, core};
 
@@ -67,5 +69,47 @@ impl Brep {
     /// (`SmFace::CalculateAnInternalPoint`).
     pub fn face_points(&self) -> Result<Vec<[f64; 3]>> {
         core::trim::face_points(self.core())
+    }
+
+    /// A copy cut along `chains` (each a list of curves meeting end to end) dropped square onto its
+    /// faces (each point of a curve to its foot on the face's surface, within `tolerance`), keeping
+    /// the regions the faces nearest `points` lie in: solidcore's `trim::trim_by_dropped_curves`. A
+    /// face a chain bounds nothing on stays whole. Tags follow each face to its pieces. A chain that
+    /// divides no face, a curve that lands on no face and a point as near one region as another are
+    /// [`crate::Error::Refused`] with solidcore-ops' own refusal (`CurveDoesNotCut`, `Unsupported`).
+    pub fn trim_by_dropped_curves(&self, chains: &[Vec<Curve>], points: &[[f64; 3]], tolerance: f64) -> Result<Brep> {
+        let dropped: Vec<Vec<solidcore_ops::sweep::Curve>> = chains.iter().map(|chain| chain.iter().map(ops_curve).collect()).collect();
+        let r = core::call::ops_as("trim_by_dropped_curves", &[("brep", self.core())], trim_refusal, || {
+            solidcore_ops::trim::trim_by_dropped_curves(self.core(), &dropped, points, tolerance)
+        })
+        .map(Brep::made_core);
+        trace::made(
+            "trim_by_dropped_curves",
+            &[self],
+            &r,
+            || json!({"chains": chains.iter().map(|chain| trace::curves(chain)).collect::<Vec<_>>(), "points": points, "tolerance": tolerance}),
+        );
+        r
+    }
+}
+
+/// A dropped-curve trim's refusals an application words itself, carried as solidcore-ops types
+/// them; any other error as every call's ([`core::call::error`]).
+fn trim_refusal(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> crate::Error {
+    match e {
+        e @ (solidcore_ops::Error::CurveDoesNotCut | solidcore_ops::Error::Unsupported(_)) => crate::Error::Refused(e),
+        e => core::call::error(call, e, detail),
+    }
+}
+
+/// This crate's curve as solidcore-ops' (the same lines, arcs and NURBS, field for field).
+fn ops_curve(c: &Curve) -> solidcore_ops::sweep::Curve {
+    use solidcore_ops::sweep::Curve as Ops;
+    match c {
+        Curve::Line { start, end } => Ops::Line { start: *start, end: *end },
+        Curve::Arc { center, axis, reference, radius, start, end } => {
+            Ops::Arc { center: *center, axis: *axis, reference: *reference, radius: *radius, start: *start, end: *end }
+        }
+        Curve::Nurbs { degree, points, knots } => Ops::Nurbs { degree: *degree, points: points.clone(), knots: knots.clone() },
     }
 }

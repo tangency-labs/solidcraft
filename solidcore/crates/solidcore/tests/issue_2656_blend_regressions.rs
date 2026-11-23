@@ -61,8 +61,8 @@ use solidcore::Kernel;
 use std::f64::consts::FRAC_PI_4;
 
 /// SolidCraft's whole preset (`support/solidcraft_fixes.rs`). That includes the 5d2635d36 bump's
-/// other fixes (tangency-labs/solidcraft#11875: `closed_smooth_pole_tangent_limit` and
-/// `fillet_chamfer_corner`; its `face_swap_uv_transposes_trims` is no longer a flag).
+/// other fixes (tangency-labs/solidcraft#11875: `closed_smooth_pole_tangent_limit`; its
+/// `fillet_chamfer_corner` and `face_swap_uv_transposes_trims` are no longer flags).
 /// Every value here is unchanged under it.
 fn solidcraft_kernel() -> Kernel {
     Kernel {

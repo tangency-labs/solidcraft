@@ -19,6 +19,9 @@ struct App {
     /// The sensitive group `app.write` is in, and the groups the user granted.
     write_group: Option<String>,
     groups: BTreeSet<String>,
+    panel_data: craft_plugin::ui::PanelData,
+    saved_panel_data: Option<craft_plugin::ui::PanelData>,
+    panel_visible: bool,
     interactive: bool,
     forms: Vec<(String, Value)>,
 }
@@ -57,6 +60,7 @@ impl PluginHost for App {
     }
     fn begin_transaction(&mut self) -> Result<()> {
         self.saved = Some(self.value);
+        self.saved_panel_data = Some(self.panel_data.clone());
         self.begins += 1;
         Ok(())
     }
@@ -73,6 +77,7 @@ impl PluginHost for App {
     }
     fn rollback_transaction(&mut self) -> Result<()> {
         self.value = self.saved.take().unwrap();
+        self.panel_data = self.saved_panel_data.take().unwrap();
         self.rollbacks += 1;
         self.forms.clear();
         Ok(())
@@ -82,6 +87,20 @@ impl PluginHost for App {
     }
     fn granted_command_groups(&self) -> BTreeSet<String> {
         self.groups.clone()
+    }
+    fn ui_set_data(&mut self, panel: &str, updates: &[craft_plugin::ui::Datum]) -> Result<()> {
+        assert_eq!(panel, "jobs");
+        self.panel_data.set_data(updates)
+    }
+    fn ui_clear_data(&mut self, panel: &str) -> Result<()> {
+        assert_eq!(panel, "jobs");
+        self.panel_data.clear_data();
+        Ok(())
+    }
+    fn ui_show_panel(&mut self, panel: &str, visible: bool) -> Result<()> {
+        assert_eq!(panel, "jobs");
+        self.panel_visible = visible;
+        Ok(())
     }
     fn log(&mut self, _: &str) {}
     fn progress(&mut self, _: f32, _: &str) {}
@@ -114,6 +133,143 @@ fn component_for(version: &str, code: &str) -> Vec<u8> {
     assert!(template.contains(original));
     wat::parse_str(template.replacen(original, &format!("      {code}\n"), 1)).unwrap()
 }
+fn panel_manifest() -> Manifest {
+    let mut manifest = manifest();
+    manifest.capabilities.push("ui@0.1".into());
+    manifest.runtime.as_mut().unwrap().ui = Some(
+        serde_json::from_value(json!({
+            "ui_version":1,"panels":[{"id":"jobs","title":"Jobs","zones":["bottom"],"layout":{"root":0,"nodes":[{"widget":{"table":{
+                "bind":"/jobs","row_id":"id","columns":[{"key":"state","label":"state","unit":null}],
+                "select":"single","on_select":"make","on_edit":"make"
+            }}}]}}],"workspaces":[]
+        }))
+        .unwrap(),
+    );
+    manifest
+}
+fn panel_component() -> Vec<u8> {
+    let (package, version) = API.split_once('@').unwrap();
+    wat::parse_str(
+        include_str!("../ui_fixture.wat")
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("__COMMAND__", "app.write")
+            .replace("__COMMAND_LEN__", "9")
+            .replace("__ARGS__", "{}")
+            .replace("__ARGS_LEN__", "2"),
+    )
+    .unwrap()
+}
+#[test]
+fn panel_table_updates_and_actions_share_the_ordinary_entry_transaction() {
+    let manifest = panel_manifest();
+    let component = panel_component();
+    check_component(&manifest, &component, RuntimeOptions::default()).unwrap();
+    let (app, declarations) = crate::describe_ui(App::default(), &manifest, &component);
+    assert_eq!(declarations.unwrap(), manifest.runtime.as_ref().unwrap().ui.clone().unwrap());
+    assert_eq!(app.begins, 0);
+    let (mut app, result) = crate::run(app, &manifest, &component, "make", &json!({}));
+    result.unwrap();
+    assert_eq!(app.panel_data.get("/jobs/0/state"), None);
+    app.panel_data.merge_frame();
+    assert_eq!(app.panel_data.get("/jobs/0/state"), Some(&craft_plugin::ui::UiValue::Text("ready".into())));
+    let event = craft_plugin::ui::UiEvent {
+        panel: "jobs".into(),
+        event: craft_plugin::ui::EventKind::Select,
+        path: "/jobs".into(),
+        row: Some("op1".into()),
+        value: None,
+    };
+    let (mut app, result) = crate::run_ui_event(app, &manifest, &component, "make", &json!({}), &event);
+    result.unwrap();
+    app.panel_data.merge_frame();
+    assert_eq!(app.panel_data.get("/jobs/0/state"), Some(&craft_plugin::ui::UiValue::Text("posted".into())));
+    assert_eq!((app.value, app.begins, app.commits, app.rollbacks), (2, 2, 2, 0));
+}
+#[test]
+fn panel_imports_require_the_declared_ui_capability() {
+    let (app, result) = crate::run(App::default(), &manifest(), &panel_component(), "make", &json!({}));
+    assert!(matches!(result, Err(HostError::PermissionDenied { permission }) if permission.contains("ui")));
+    assert_eq!((app.value, app.commits, app.rollbacks), (0, 0, 1));
+
+    let mut undeclared = panel_manifest();
+    undeclared.capabilities.retain(|capability| !capability.starts_with("ui@"));
+    let (app, result) = crate::run(App::default(), &undeclared, &panel_component(), "make", &json!({}));
+    assert!(matches!(result, Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+    assert_eq!((app.value, app.begins), (0, 0));
+    assert!(check_component(&undeclared, &panel_component(), RuntimeOptions::default()).is_err());
+    let (_, result) = crate::describe_ui(App::default(), &undeclared, &panel_component());
+    assert!(matches!(result, Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+
+    let mut patch = panel_manifest();
+    patch.capabilities.retain(|capability| !capability.starts_with("ui@"));
+    patch.capabilities.push("ui@0.1.7".into());
+    check_component(&patch, &panel_component(), RuntimeOptions::default()).unwrap();
+}
+
+#[test]
+fn panel_provider_declarations_must_match_approved_manifest() {
+    let (package, version) = API.split_once('@').unwrap();
+    let component = wat::parse_str(
+        include_str!("../ui_fixture.wat")
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("__COMMAND__", "app.write")
+            .replace("__COMMAND_LEN__", "9")
+            .replace("__ARGS__", "{}")
+            .replace("__ARGS_LEN__", "2")
+            .replace("\"Jobs\"", "\"Evil\""),
+    )
+    .unwrap();
+    let (app, error) = crate::run(App::default(), &panel_manifest(), &component, "make", &json!({}));
+    assert!(matches!(error,Err(HostError::InvalidManifest {field,..}) if field=="runtime.ui"));
+    assert_eq!((app.value, app.begins, app.commits, app.rollbacks), (0, 1, 0, 1));
+}
+#[test]
+fn reading_panel_declarations_has_no_command_authority_and_obeys_fuel() {
+    let (package, version) = API.split_once('@').unwrap();
+    let source = include_str!("../ui_fixture.wat")
+        .replace("__PACKAGE__", package)
+        .replace("__VERSION__", version)
+        .replace("__COMMAND__", "app.write")
+        .replace("__COMMAND_LEN__", "9")
+        .replace("__ARGS__", "{}")
+        .replace("__ARGS_LEN__", "2");
+    let hostile = wat::parse_str(source.replace("(result i32) i32.const 3000)", "(result i32) call $box i32.const 3000)")).unwrap();
+    let (app, result) = crate::describe_ui(App::default(), &panel_manifest(), &hostile);
+    assert!(matches!(result, Err(HostError::PermissionDenied { .. })));
+    assert_eq!((app.value, app.begins), (0, 0));
+    let looping = wat::parse_str(source.replace("(result i32) i32.const 3000)", "(result i32) (loop $forever br $forever) i32.const 3000)")).unwrap();
+    let (app, result) = crate::describe_ui(App::default(), &panel_manifest(), &looping);
+    assert!(matches!(result, Err(HostError::Exhausted { limit, .. }) if limit == "fuel"));
+    assert_eq!((app.value, app.begins), (0, 0));
+}
+
+#[test]
+fn panel_invalid_updates_are_fatal_even_when_guest_ignores_the_host_error() {
+    let (package, version) = API.split_once('@').unwrap();
+    let component = wat::parse_str(
+        include_str!("../ui_fixture.wat")
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("__COMMAND__", "app.write")
+            .replace("__COMMAND_LEN__", "9")
+            .replace("__ARGS__", "{}")
+            .replace("__ARGS_LEN__", "2")
+            .replace("/jobs/0/state", "!jobs/0/state"),
+    )
+    .unwrap();
+    let (app, result) = crate::run(App::default(), &panel_manifest(), &component, "make", &json!({}));
+    assert!(matches!(result, Err(HostError::InvalidInput { .. })));
+    assert_eq!((app.value, app.begins, app.commits, app.rollbacks), (0, 1, 0, 1));
+    assert!(app.panel_data.values().is_empty());
+}
+
+#[test]
+fn ui_capability_requires_provider_exports() {
+    assert!(check_component(&panel_manifest(), &component("call $box"), RuntimeOptions::default()).is_err());
+}
+
 fn form_component() -> Vec<u8> {
     form_component_with_dialog(false)
 }
@@ -568,6 +724,7 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         design_tokens: false,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
+        created_dirs: Vec::new(),
         clock: false,
         forms: false,
         limits: StoreLimitsBuilder::new().build(),
@@ -577,8 +734,33 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         log_bytes: 0,
         deadline: Instant::now() + Duration::from_secs(5),
         import: None,
+        panels: None,
     }
 }
+#[test]
+fn panel_imports_validate_typed_data_and_allow_read_entries_to_update_their_panels() {
+    use panel_ui::Host;
+    let mut state = state(App::default());
+    state.effect = Effect::Read;
+    state.panels = panel_manifest().runtime.unwrap().ui;
+    state.set_data("jobs".into(), vec![types::Datum { path: "/jobs/0/state".into(), value: types::Value::Text("ready".into()) }]).unwrap();
+    state.show_panel("jobs".into(), true).unwrap();
+    assert!(state.host.panel_visible);
+    state.host.panel_data.merge_frame();
+    assert_eq!(state.host.panel_data.get("/jobs/0/state"), Some(&craft_plugin::ui::UiValue::Text("ready".into())));
+    state.clear_data("jobs".into()).unwrap();
+    state.host.panel_data.merge_frame();
+    assert!(state.host.panel_data.values().is_empty());
+    assert!(state.show_panel("unknown".into(), true).is_err());
+    assert!(state.failed.is_some());
+
+    let mut state = super::tests::state(App::default());
+    state.panels = panel_manifest().runtime.unwrap().ui;
+    assert!(state.set_data("jobs".into(), vec![types::Datum { path: "/number".into(), value: types::Value::Number(f64::NAN) }]).is_err());
+    assert!(state.failed.is_some());
+    assert!(state.host.panel_data.values().is_empty());
+}
+
 #[test]
 fn form_import_requires_capability_and_refuses_programmatic_hosts() {
     let mut denied = state(App::default());
@@ -916,6 +1098,49 @@ fn reading_a_missing_file_is_an_answer_and_the_entry_can_then_write_it() {
 }
 
 #[test]
+fn a_write_into_a_missing_sub_folder_makes_it_and_a_discarded_run_removes_it_again() {
+    // #20493: `NewProject/network.json` in a granted folder with no `NewProject` yet.
+    use files::Host;
+    let root = std::env::temp_dir().join(format!("craft-plugin-subfolder-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("plain"), b"file").unwrap();
+    let granted = |host: &mut State<App>| {
+        host.folders.insert(
+            "projects".into(),
+            Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+        );
+    };
+
+    // Published: the folders stay with the file in them.
+    let mut host = state(App::default());
+    granted(&mut host);
+    host.write_file("projects".into(), "NewProject/pipes/network.json".into(), b"{}".to_vec()).unwrap();
+    assert_eq!(host.read_file("projects".into(), "NewProject/pipes/network.json".into()).unwrap(), b"{}");
+    assert_eq!(host.failed, None);
+    host.publish_writes().unwrap();
+    host.discard_writes();
+    assert_eq!(std::fs::read(root.join("NewProject/pipes/network.json")).unwrap(), b"{}");
+    drop(host);
+
+    // Not published (a trap, a refusal, a failed commit): nothing is left behind, and a folder
+    // that was already there stays.
+    let mut host = state(App::default());
+    granted(&mut host);
+    host.write_file("projects".into(), "NewProject/other/a/b.json".into(), b"{}".to_vec()).unwrap();
+    assert!(root.join("NewProject/other/a").is_dir());
+    host.discard_writes();
+    assert!(!root.join("NewProject/other").exists());
+    assert!(root.join("NewProject/pipes/network.json").exists());
+
+    // A file where a folder should be is a wrong path, not a denied permission.
+    let refused = host.write_file("projects".into(), "plain/network.json".into(), b"{}".to_vec()).unwrap_err();
+    assert!(matches!(&refused, PluginError::InvalidInput(types::FieldFailure { field, .. }) if field == "path"), "{refused:?}");
+    assert_eq!(std::fs::read(root.join("plain")).unwrap(), b"file");
+    drop(host);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn every_file_operation_refuses_hidden_names_inside_a_granted_folder() {
     use files::Host;
     let root = std::env::temp_dir().join(format!("craft-plugin-hidden-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
@@ -1244,4 +1469,147 @@ fn an_exporter_reaches_no_file_even_through_a_command_its_manifest_lists() {
     // A component built for the command world (it imports `files`) does not link as an exporter.
     let (_, failure) = crate::run_export(App::default(), &exporter_manifest(), &files_component(true, false), "copy", &json!({}));
     assert!(failure.is_err());
+}
+
+/// An empty folder for one compile-cache test. Wasmtime's cache wants an absolute path.
+fn cache_folder() -> PathBuf {
+    let root = std::env::temp_dir().join(format!("craft-plugin-cache-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::canonicalize(root).unwrap()
+}
+/// The compiled entries Wasmtime's cache wrote under `root`, leaving out its usage-statistics files.
+fn cache_entries(root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let Ok(versions) = std::fs::read_dir(root.join("modules")) else { return found };
+    for version in versions.flatten() {
+        for entry in std::fs::read_dir(version.path()).unwrap().flatten() {
+            if !entry.file_name().to_string_lossy().contains('.') {
+                found.push(entry.path());
+            }
+        }
+    }
+    found.sort();
+    found
+}
+fn compile_cached(bytes: &[u8], cache: &wasmtime::Cache) -> Result<(Engine, Component)> {
+    compile_with(bytes, 512 * 1024, Some(cache.clone()))
+}
+#[test]
+fn a_compiled_component_is_read_back_from_the_disk_cache_by_a_new_engine() {
+    let root = cache_folder();
+    let cache = open_disk_cache(&root).unwrap();
+    let bytes = importer_component();
+    let (engine, component) = compile_cached(&bytes, &cache).unwrap();
+    let first = check_imports(&engine, &component).unwrap();
+    assert_eq!((cache.cache_hits(), cache.cache_misses(), cache_entries(&root).len()), (0, 1, 1));
+    // Every compile makes a new engine, as a new session does: this one reads the entry back.
+    let (engine, component) = compile_cached(&bytes, &cache).unwrap();
+    assert_eq!(check_imports(&engine, &component).unwrap(), first);
+    assert_eq!((cache.cache_hits(), cache.cache_misses(), cache_entries(&root).len()), (1, 1, 1));
+    // Entries live under a folder named for the compiler and its version, so another Wasmtime never reads them.
+    let versions: Vec<String> =
+        std::fs::read_dir(root.join("modules")).unwrap().flatten().map(|v| v.file_name().to_string_lossy().into_owned()).collect();
+    assert!(versions.len() == 1 && versions[0].starts_with("wasmtime-"), "{versions:?}");
+    let _ = std::fs::remove_dir_all(root); // best effort: Wasmtime's cache worker may still be writing here
+}
+#[test]
+fn a_changed_component_or_compile_setting_gets_its_own_cache_entry() {
+    let root = cache_folder();
+    let cache = open_disk_cache(&root).unwrap();
+    compile_cached(&importer_component(), &cache).unwrap();
+    // A plugin update: other bytes, another entry, never the old code.
+    compile_cached(&component("call $box"), &cache).unwrap();
+    assert_eq!((cache.cache_hits(), cache.cache_misses(), cache_entries(&root).len()), (0, 2, 2));
+    // The same module under another setting is another entry too: the key covers the
+    // configuration, fuel metering included.
+    let module = wat::parse_str(r#"(module (func (export "run") (loop br 0)))"#).unwrap();
+    for fuel in [true, false, true] {
+        let mut config = Config::new();
+        config.cache(Some(cache.clone())).consume_fuel(fuel).epoch_interruption(true);
+        wasmtime::Module::new(&Engine::new(&config).unwrap(), &module).unwrap();
+    }
+    assert_eq!((cache.cache_hits(), cache.cache_misses(), cache_entries(&root).len()), (1, 4, 4));
+    let _ = std::fs::remove_dir_all(root); // best effort: Wasmtime's cache worker may still be writing here
+}
+#[test]
+fn fuel_still_stops_code_read_back_from_the_disk_cache() {
+    let root = cache_folder();
+    let cache = open_disk_cache(&root).unwrap();
+    let module = wat::parse_str(r#"(module (func (export "run") (loop br 0)))"#).unwrap();
+    for _ in 0..2 {
+        let mut config = Config::new();
+        config.cache(Some(cache.clone())).consume_fuel(true).epoch_interruption(true);
+        let engine = Engine::new(&config).unwrap();
+        let module = wasmtime::Module::new(&engine, &module).unwrap();
+        let mut store = wasmtime::Store::new(&engine, ());
+        store.set_fuel(10_000).unwrap();
+        store.set_epoch_deadline(u64::MAX);
+        let instance = wasmtime::Instance::new(&mut store, &module, &[]).unwrap();
+        let run = instance.get_typed_func::<(), ()>(&mut store, "run").unwrap();
+        let failure = run.call(&mut store, ()).unwrap_err();
+        assert_eq!(failure.downcast_ref::<wasmtime::Trap>(), Some(&wasmtime::Trap::OutOfFuel));
+    }
+    assert_eq!((cache.cache_hits(), cache.cache_misses()), (1, 1));
+    let _ = std::fs::remove_dir_all(root); // best effort: Wasmtime's cache worker may still be writing here
+}
+#[test]
+fn a_damaged_or_mismatched_cache_entry_is_compiled_again() {
+    let root = cache_folder();
+    let cache = open_disk_cache(&root).unwrap();
+    let bytes = importer_component();
+    compile_cached(&bytes, &cache).unwrap();
+    let [entry] = cache_entries(&root).try_into().unwrap();
+    let good = std::fs::read(&entry).unwrap();
+    // An entry compiled under another configuration (no fuel metering), put where this one's
+    // key points: Wasmtime checks the settings recorded in it and refuses it.
+    let other_root = cache_folder();
+    let other = open_disk_cache(&other_root).unwrap();
+    let mut config = Config::new();
+    config.cache(Some(other)).consume_fuel(false).epoch_interruption(true).wasm_memory64(false).wasm_multi_memory(false).max_wasm_stack(512 * 1024);
+    config.async_stack_size(512 * 1024 + (1 << 20));
+    Component::from_binary(&Engine::new(&config).unwrap(), &bytes).unwrap();
+    let [mismatched] = cache_entries(&other_root).try_into().unwrap();
+    let mismatched = std::fs::read(mismatched).unwrap();
+    for (damage, contents) in [
+        ("not compressed data", b"not a cache entry".to_vec()),
+        ("cut short", good[..good.len() / 2].to_vec()),
+        ("empty", Vec::new()),
+        ("another configuration's code", mismatched),
+    ] {
+        std::fs::write(&entry, &contents).unwrap();
+        let misses = cache.cache_misses();
+        let (engine, component) = compile_cached(&bytes, &cache).unwrap_or_else(|e| panic!("{damage}: {e}"));
+        check_imports(&engine, &component).unwrap_or_else(|e| panic!("{damage}: {e}"));
+        assert_eq!(cache.cache_misses(), misses + 1, "{damage}");
+        // The compile wrote a good entry back in its place, which the next compile reads.
+        let hits = cache.cache_hits();
+        compile_cached(&bytes, &cache).unwrap();
+        assert_eq!(cache.cache_hits(), hits + 1, "{damage}");
+    }
+    let _ = std::fs::remove_dir_all(root); // best effort: Wasmtime's cache worker may still be writing here
+    let _ = std::fs::remove_dir_all(other_root); // best effort: Wasmtime's cache worker may still be writing here
+}
+#[test]
+fn a_cache_folder_that_cannot_be_made_or_written_still_compiles() {
+    let root = cache_folder();
+    // A file where the folder should be: the cache can't be opened, and compiling works as before.
+    let blocked = root.join("blocked");
+    std::fs::write(&blocked, b"a file").unwrap();
+    assert!(open_disk_cache(&blocked.join("plugin-compile")).is_none());
+    compile_with(&importer_component(), 512 * 1024, None).unwrap();
+    // A folder that opens but can't be written: every compile still succeeds.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let read_only = root.join("read-only");
+        std::fs::create_dir_all(&read_only).unwrap();
+        let cache = open_disk_cache(&read_only).unwrap();
+        std::fs::set_permissions(&read_only, std::fs::Permissions::from_mode(0o555)).unwrap();
+        for _ in 0..2 {
+            let (engine, component) = compile_cached(&importer_component(), &cache).unwrap();
+            check_imports(&engine, &component).unwrap();
+        }
+        std::fs::set_permissions(&read_only, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let _ = std::fs::remove_dir_all(root); // best effort: Wasmtime's cache worker may still be writing here
 }
