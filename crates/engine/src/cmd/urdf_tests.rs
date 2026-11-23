@@ -1695,3 +1695,617 @@ fn file_export_urdf_takes_the_mimic_and_collision_choices() {
     assert!(xml.contains("-collision.stl"), "{xml}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// Robot exports read back as any URDF reader reads them. Each design is exported with
+// `file.export` as the desktop dialog does it (motion links as `<mimic>`), the written file is
+// read with a general XML reader, and the expected values are worked out by hand, never taken
+// from SolidCraft's output. What a simulator does with the file is checked through the numbers it
+// reads: the pendulum's period from the written inertia, a free slide from the joint's axis and
+// dynamics, and where a dropped ball first touches each collision shape.
+
+/// Lengths in m: the URDF's own units.
+type M4 = [[f64; 4]; 4];
+
+const I4: M4 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+
+fn m4_mul(a: &M4, b: &M4) -> M4 {
+    let mut out = [[0.0; 4]; 4];
+    for (r, row) in out.iter_mut().enumerate() {
+        for (c, v) in row.iter_mut().enumerate() {
+            *v = (0..4).map(|k| a[r][k] * b[k][c]).sum();
+        }
+    }
+    out
+}
+
+fn m4_apply(m: &M4, p: [f64; 3]) -> [f64; 3] {
+    std::array::from_fn(|r| m[r][0] * p[0] + m[r][1] * p[1] + m[r][2] * p[2] + m[r][3])
+}
+
+fn m4_turn(m: &M4, v: [f64; 3]) -> [f64; 3] {
+    std::array::from_fn(|r| m[r][0] * v[0] + m[r][1] * v[1] + m[r][2] * v[2])
+}
+
+fn m4_shift(v: [f64; 3]) -> M4 {
+    let mut m = I4;
+    for r in 0..3 {
+        m[r][3] = v[r];
+    }
+    m
+}
+
+/// Rotation by `angle` about the unit `axis` (Rodrigues).
+fn m4_rot(axis: [f64; 3], angle: f64) -> M4 {
+    let [x, y, z] = axis;
+    let (s, c) = angle.sin_cos();
+    let t = 1.0 - c;
+    [
+        [t * x * x + c, t * x * y - s * z, t * x * z + s * y, 0.0],
+        [t * x * y + s * z, t * y * y + c, t * y * z - s * x, 0.0],
+        [t * x * z - s * y, t * y * z + s * x, t * z * z + c, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+}
+
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn norm(a: [f64; 3]) -> f64 {
+    dot(a, a).sqrt()
+}
+
+/// An `<origin xyz rpy>`: fixed-axis roll, pitch, yaw, as the URDF spec reads it.
+#[derive(Clone, Copy, Default, Debug)]
+struct XOrigin {
+    xyz: [f64; 3],
+    rpy: [f64; 3],
+}
+
+impl XOrigin {
+    fn frame(&self) -> M4 {
+        let r = m4_mul(&m4_mul(&m4_rot([0.0, 0.0, 1.0], self.rpy[2]), &m4_rot([0.0, 1.0, 0.0], self.rpy[1])), &m4_rot([1.0, 0.0, 0.0], self.rpy[0]));
+        m4_mul(&m4_shift(self.xyz), &r)
+    }
+}
+
+#[derive(Debug)]
+enum XGeom {
+    Box([f64; 3]),
+    Cylinder { radius: f64, length: f64 },
+    Sphere(f64),
+    Mesh { file: String, scale: [f64; 3] },
+}
+
+#[derive(Default, Debug)]
+struct XLink {
+    name: String,
+    /// The inertial's origin, mass and `ixx ixy ixz iyy iyz izz`.
+    inertial: Option<(XOrigin, f64, [f64; 6])>,
+    collision: Vec<(XOrigin, Option<XGeom>)>,
+}
+
+#[derive(Default, Debug)]
+struct XJoint {
+    name: String,
+    kind: String,
+    parent: String,
+    child: String,
+    origin: XOrigin,
+    axis: Option<[f64; 3]>,
+    limit: std::collections::BTreeMap<String, f64>,
+    dynamics: std::collections::BTreeMap<String, f64>,
+    /// The joint it follows, multiplier and offset.
+    mimic: Option<(String, f64, f64)>,
+}
+
+#[derive(Default, Debug)]
+struct XRobot {
+    links: Vec<XLink>,
+    joints: Vec<XJoint>,
+}
+
+fn numbers(text: &str) -> Vec<f64> {
+    text.split_whitespace().map(|t| t.parse::<f64>().unwrap_or_else(|e| panic!("{t:?} is not a number: {e}"))).collect()
+}
+
+fn three(text: &str) -> [f64; 3] {
+    let v = numbers(text);
+    assert_eq!(v.len(), 3, "{text:?}: three numbers");
+    [v[0], v[1], v[2]]
+}
+
+/// Reads a URDF with quick-xml, as any URDF reader would: links, joints and what a simulator uses.
+fn read_robot(xml: &str) -> XRobot {
+    use quick_xml::events::Event;
+    let mut reader = quick_xml::Reader::from_str(xml);
+    let mut robot = XRobot::default();
+    let mut path: Vec<String> = Vec::new();
+    loop {
+        let (e, empty) = match reader.read_event() {
+            Ok(Event::Start(e)) => (e, false),
+            Ok(Event::Empty(e)) => (e, true),
+            Ok(Event::End(_)) => {
+                path.pop();
+                continue;
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => continue,
+            Err(e) => panic!("the URDF is not XML: {e}"),
+        };
+        let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+        let a: std::collections::BTreeMap<String, String> = e
+            .attributes()
+            .map(|a| {
+                let a = a.unwrap_or_else(|e| panic!("<{name}>: {e}"));
+                (String::from_utf8_lossy(a.key.as_ref()).to_string(), String::from_utf8_lossy(&a.value).to_string())
+            })
+            .collect();
+        let get = |k: &str| a.get(k).cloned().unwrap_or_else(|| panic!("<{name}> has no {k}"));
+        let origin = || XOrigin { xyz: a.get("xyz").map_or([0.0; 3], |t| three(t)), rpy: a.get("rpy").map_or([0.0; 3], |t| three(t)) };
+        let inside = |what: &str| path.iter().any(|p| p == what);
+        match (path.first().map(String::as_str), name.as_str()) {
+            (Some("robot"), "link") if path.len() == 1 => robot.links.push(XLink { name: get("name"), ..Default::default() }),
+            (Some("robot"), "joint") if path.len() == 1 => robot.joints.push(XJoint { name: get("name"), kind: get("type"), ..Default::default() }),
+            _ => {}
+        }
+        let in_link = path.len() >= 2 && path[1] == "link";
+        let in_joint = path.len() >= 2 && path[1] == "joint";
+        if in_link && let Some(link) = robot.links.last_mut() {
+            match name.as_str() {
+                "inertial" => link.inertial = Some((XOrigin::default(), 0.0, [0.0; 6])),
+                "origin" if inside("inertial") => {
+                    if let Some(i) = link.inertial.as_mut() {
+                        i.0 = origin();
+                    }
+                }
+                "mass" if inside("inertial") => {
+                    if let Some(i) = link.inertial.as_mut() {
+                        i.1 = numbers(&get("value"))[0];
+                    }
+                }
+                "inertia" if inside("inertial") => {
+                    if let Some(i) = link.inertial.as_mut() {
+                        i.2 = ["ixx", "ixy", "ixz", "iyy", "iyz", "izz"].map(|k| numbers(&get(k))[0]);
+                    }
+                }
+                "collision" => link.collision.push((XOrigin::default(), None)),
+                "origin" if inside("collision") => {
+                    if let Some(c) = link.collision.last_mut() {
+                        c.0 = origin();
+                    }
+                }
+                "box" | "cylinder" | "sphere" | "mesh" if inside("collision") => {
+                    let g = match name.as_str() {
+                        "box" => XGeom::Box(three(&get("size"))),
+                        "cylinder" => XGeom::Cylinder { radius: numbers(&get("radius"))[0], length: numbers(&get("length"))[0] },
+                        "sphere" => XGeom::Sphere(numbers(&get("radius"))[0]),
+                        _ => XGeom::Mesh { file: get("filename"), scale: a.get("scale").map_or([1.0; 3], |t| three(t)) },
+                    };
+                    if let Some(c) = link.collision.last_mut() {
+                        c.1 = Some(g);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if in_joint && let Some(j) = robot.joints.last_mut() {
+            match name.as_str() {
+                "origin" => j.origin = origin(),
+                "parent" => j.parent = get("link"),
+                "child" => j.child = get("link"),
+                "axis" => j.axis = Some(three(&get("xyz"))),
+                "limit" | "dynamics" => {
+                    let into = if name == "limit" { &mut j.limit } else { &mut j.dynamics };
+                    for (k, v) in &a {
+                        into.insert(k.clone(), numbers(v)[0]);
+                    }
+                }
+                "mimic" => {
+                    let n = |k: &str, d: f64| a.get(k).map_or(d, |t| numbers(t)[0]);
+                    j.mimic = Some((get("joint"), n("multiplier", 1.0), n("offset", 0.0)));
+                }
+                _ => {}
+            }
+        }
+        if !empty {
+            path.push(name);
+        }
+    }
+    robot
+}
+
+impl XRobot {
+    fn link(&self, name: &str) -> &XLink {
+        self.links
+            .iter()
+            .find(|l| l.name == name)
+            .unwrap_or_else(|| panic!("no link {name}: {:?}", self.links.iter().map(|l| &l.name).collect::<Vec<_>>()))
+    }
+
+    fn joint(&self, name: &str) -> &XJoint {
+        self.joints
+            .iter()
+            .find(|j| j.name == name)
+            .unwrap_or_else(|| panic!("no joint {name}: {:?}", self.joints.iter().map(|j| &j.name).collect::<Vec<_>>()))
+    }
+
+    /// What urdfdom's `check_urdf` refuses: a joint naming a missing link, a link with two
+    /// parents, a tree with other than one root, an unknown joint type, or a moving joint without
+    /// a usable axis or limits.
+    fn assert_valid(&self) {
+        let names: std::collections::BTreeSet<&str> = self.links.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names.len(), self.links.len(), "link names repeat");
+        let mut parents = std::collections::BTreeMap::new();
+        for j in &self.joints {
+            assert!(names.contains(j.parent.as_str()) && names.contains(j.child.as_str()), "{}: {} -> {}", j.name, j.parent, j.child);
+            assert!(parents.insert(j.child.as_str(), j.name.as_str()).is_none(), "{} has two parents", j.child);
+            assert!(["revolute", "continuous", "prismatic", "fixed", "floating", "planar"].contains(&j.kind.as_str()), "{}: type {}", j.name, j.kind);
+            if j.kind != "fixed" {
+                let axis = j.axis.unwrap_or([1.0, 0.0, 0.0]);
+                assert!((norm(axis) - 1.0).abs() < 1e-9, "{}: axis {axis:?}", j.name);
+            }
+            if j.kind == "revolute" || j.kind == "prismatic" {
+                for k in ["effort", "velocity"] {
+                    assert!(j.limit.contains_key(k), "{}: <limit> has no {k}", j.name);
+                }
+            }
+        }
+        let roots: Vec<&str> = names.iter().copied().filter(|n| !parents.contains_key(n)).collect();
+        assert_eq!(roots, ["base_link"], "one root");
+    }
+
+    /// The value each joint takes when the given joints take theirs, the rest 0, followers
+    /// following their `<mimic>`.
+    fn values(&self, q: &[(&str, f64)]) -> std::collections::BTreeMap<String, f64> {
+        let given = |n: &str| q.iter().find(|(k, _)| *k == n).map_or(0.0, |(_, v)| *v);
+        self.joints
+            .iter()
+            .map(|j| {
+                let v = match &j.mimic {
+                    Some((driver, m, o)) => m * given(driver) + o,
+                    None => given(&j.name),
+                };
+                (j.name.clone(), v)
+            })
+            .collect()
+    }
+
+    /// The link's frame in base_link's at those joint values.
+    fn frame(&self, link: &str, q: &std::collections::BTreeMap<String, f64>) -> M4 {
+        let Some(j) = self.joints.iter().find(|j| j.child == link) else { return I4 };
+        m4_mul(&self.joint_frame(j, q), &self.motion(j, q.get(&j.name).copied().unwrap_or(0.0)))
+    }
+
+    /// A joint's frame (its origin in its parent) in base_link's.
+    fn joint_frame(&self, j: &XJoint, q: &std::collections::BTreeMap<String, f64>) -> M4 {
+        m4_mul(&self.frame(&j.parent, q), &j.origin.frame())
+    }
+
+    fn motion(&self, j: &XJoint, v: f64) -> M4 {
+        let axis = j.axis.unwrap_or([1.0, 0.0, 0.0]);
+        match j.kind.as_str() {
+            "revolute" | "continuous" => m4_rot(axis, v),
+            "prismatic" => m4_shift(axis.map(|x| x * v)),
+            _ => I4,
+        }
+    }
+
+    /// The links a joint moves: its child and everything below it.
+    fn moved_by(&self, joint: &str) -> Vec<&XLink> {
+        let mut out = vec![self.joint(joint).child.as_str()];
+        let mut k = 0;
+        while k < out.len() {
+            let below: Vec<&str> = self.joints.iter().filter(|j| j.parent == out[k]).map(|j| j.child.as_str()).collect();
+            out.extend(below);
+            k += 1;
+        }
+        out.into_iter().map(|n| self.link(n)).collect()
+    }
+}
+
+/// Builds the design from its commands and exports it as the desktop dialog does.
+fn checker_case(tag: &str, commands: &[(&str, Value)]) -> (XRobot, PathBuf) {
+    let mut s = Session::default();
+    for (id, p) in commands {
+        run(&mut s, id, p.clone());
+    }
+    let dir = temp(&format!("checker-{tag}"));
+    let path = dir.join(format!("{tag}.urdf"));
+    run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "mimic": true}));
+    let xml = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{tag}: {e}"));
+    let robot = read_robot(&xml);
+    robot.assert_valid();
+    (robot, dir)
+}
+
+/// 10 mm cubes in components `A` (grounded, at the origin) and `B` (at x = 20), with `joint`
+/// from B's bottom face to A's top face.
+fn cubes_with(kind: &str, name: &str) -> Vec<(&'static str, Value)> {
+    vec![
+        ("component.activate", json!({"component": "root"})),
+        ("component.create", json!({"name": "A"})),
+        ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0]})),
+        ("component.activate", json!({"component": "root"})),
+        ("component.create", json!({"name": "B"})),
+        ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]})),
+        ("occurrence.ground", json!({"occurrence": "A:1", "grounded": true})),
+        ("joint.create", json!({"type": kind, "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": name})),
+    ]
+}
+
+/// The angle a rotation turns by.
+fn turn_of(r: &M4) -> f64 {
+    ((r[0][0] + r[1][1] + r[2][2] - 1.0) / 2.0).clamp(-1.0, 1.0).acos()
+}
+
+/// The rotation from the link's rest pose to its pose at `q`.
+fn relative_turn(robot: &XRobot, link: &str, q: &[(&str, f64)]) -> M4 {
+    let rest = robot.frame(link, &robot.values(&[]));
+    let at = robot.frame(link, &robot.values(q));
+    let mut rel = [[0.0; 4]; 4];
+    for (r, row) in rel.iter_mut().enumerate().take(3) {
+        for (c, v) in row.iter_mut().enumerate().take(3) {
+            *v = (0..3).map(|k| at[r][k] * rest[c][k]).sum();
+        }
+    }
+    rel[3][3] = 1.0;
+    rel
+}
+
+fn origin_at(robot: &XRobot, link: &str, q: &[(&str, f64)]) -> [f64; 3] {
+    m4_apply(&robot.frame(link, &robot.values(q)), [0.0; 3])
+}
+
+/// At `q`, the link's origin is at `xyz` (m) and it has turned by `turn` about `about`.
+fn assert_turned(robot: &XRobot, link: &str, q: &[(&str, f64)], xyz: [f64; 3], turn: f64, about: Option<[f64; 3]>) {
+    let at = origin_at(robot, link, q);
+    assert!(norm(sub(at, xyz)) < 1e-6, "{link} at {q:?}: origin {at:?}, expected {xyz:?}");
+    let rel = relative_turn(robot, link, q);
+    assert!((turn_of(&rel) - turn).abs() < 1e-6, "{link} at {q:?}: turned {}, expected {turn}", turn_of(&rel));
+    if let Some(axis) = about {
+        assert!(norm(sub(m4_turn(&rel, axis), axis)) < 1e-6, "{link} at {q:?}: did not turn about {axis:?}");
+    }
+}
+
+#[test]
+fn checker_hinge_turns_b_about_the_hinge_axis() {
+    let (robot, dir) = checker_case("hinge", &cubes_with("revolute", "Hinge"));
+    // The hinge's axis is the joint face's normal, z, through the top face's centre (5, 5, 10) mm.
+    assert_turned(&robot, "B", &[("Hinge", 0.5)], [0.005, 0.005, 0.01], 0.5, Some([0.0, 0.0, 1.0]));
+    assert_turned(&robot, "B", &[("Hinge", -1.2)], [0.005, 0.005, 0.01], 1.2, Some([0.0, 0.0, 1.0]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn checker_hinge_dynamics_are_what_a_reader_gets() {
+    let mut cmds = cubes_with("revolute", "Hinge");
+    cmds.push(("joint.dynamics", json!({"joint": "Hinge", "effort": 12.5, "velocity": 2.0, "damping": 0.1, "friction": 0.05})));
+    let (robot, dir) = checker_case("hinge_dynamics", &cmds);
+    let j = robot.joint("Hinge");
+    for (map, key, want) in [(&j.limit, "effort", 12.5), (&j.limit, "velocity", 2.0), (&j.dynamics, "damping", 0.1), (&j.dynamics, "friction", 0.05)]
+    {
+        let got = map.get(key).copied();
+        assert!(got.is_some_and(|g| (g - want).abs() < 1e-6), "Hinge {key}: {got:?}, expected {want}");
+    }
+    assert_turned(&robot, "B", &[("Hinge", 0.5)], [0.005, 0.005, 0.01], 0.5, Some([0.0, 0.0, 1.0]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn checker_mass_override_is_the_links_mass() {
+    let mut cmds = cubes_with("revolute", "Hinge");
+    cmds.push(("component.physical_override", json!({"component": "B", "mass": 2.5})));
+    let (robot, dir) = checker_case("mass_override", &cmds);
+    let mass = robot.link("B").inertial.map(|i| i.1);
+    assert!(mass.is_some_and(|m| (m - 2.5).abs() < 1e-6), "B's mass: {mass:?}");
+    assert_turned(&robot, "B", &[("Hinge", 0.5)], [0.005, 0.005, 0.01], 0.5, Some([0.0, 0.0, 1.0]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn checker_tool_frame_turns_with_its_part() {
+    let mut cmds = cubes_with("revolute", "Hinge");
+    cmds.push(("joint.origin", json!({"name": "tool0", "occurrence": "B:1", "face": [5, 5, 20], "export_frame": true})));
+    let (robot, dir) = checker_case("tool_frame", &cmds);
+    // B's top face centre, 10 mm above the hinge on its axis: it stays put and turns.
+    assert_turned(&robot, "tool0", &[("Hinge", 0.6)], [0.005, 0.005, 0.02], 0.6, Some([0.0, 0.0, 1.0]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Cubes `H` (grounded), `A` and `B` (at x = 0, 20, 40), A and B each on a revolute or slider
+/// from H's top face, and the motion link `link` between them.
+fn driven_pair(b_kind: &str, link: (&'static str, Value)) -> Vec<(&'static str, Value)> {
+    let mut cmds = Vec::new();
+    for (name, x) in [("H", 0), ("A", 20), ("B", 40)] {
+        cmds.push(("component.activate", json!({"component": "root"})));
+        cmds.push(("component.create", json!({"name": name})));
+        cmds.push(("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})));
+    }
+    cmds.push(("occurrence.ground", json!({"occurrence": "H:1", "grounded": true})));
+    cmds.push((
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": "H:1", "face": [5, 5, 10]}, "b": {"occurrence": "A:1", "face": [25, 5, 0]}, "name": "JA"}),
+    ));
+    cmds.push((
+        "joint.create",
+        json!({"type": b_kind, "a": {"occurrence": "H:1", "face": [5, 5, 10]}, "b": {"occurrence": "B:1", "face": [45, 5, 0]}, "name": "JB"}),
+    ));
+    cmds.push(link);
+    cmds
+}
+
+#[test]
+fn checker_gear_pair_turns_b_half_as_far() {
+    let (robot, dir) = checker_case("gear_pair", &driven_pair("revolute", ("joint.gear", json!({"a": "JA", "b": "JB", "ra": 10, "rb": 20}))));
+    // Radii 10 and 20: B turns 0.4 × 10 / 20 = 0.2 while A turns 0.4, both on H's top face.
+    assert_turned(&robot, "A", &[("JA", 0.4)], [0.005, 0.005, 0.01], 0.4, Some([0.0, 0.0, 1.0]));
+    assert_turned(&robot, "B", &[("JA", 0.4)], [0.005, 0.005, 0.01], 0.2, Some([0.0, 0.0, 1.0]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn checker_rack_and_pinion_slides_b_by_the_arc() {
+    let (robot, dir) = checker_case("rack_pinion", &driven_pair("slider", ("joint.rack_pinion", json!({"a": "JA", "b": "JB", "radius": 5}))));
+    assert_turned(&robot, "A", &[("JA", 0.4)], [0.005, 0.005, 0.01], 0.4, Some([0.0, 0.0, 1.0]));
+    // Radius 5 mm: 0.4 rad of A moves B 5 × 0.4 = 2 mm along the slider.
+    let moved = norm(sub(origin_at(&robot, "B", &[("JA", 0.4)]), [0.005, 0.005, 0.01]));
+    assert!((moved - 0.002).abs() < 1e-6, "B moved {moved} m, expected 0.002");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn checker_ball_joint_chain_turns_and_swings_as_the_cube_should() {
+    let (robot, dir) = checker_case("ball_chain", &cubes_with("ball", "Ball"));
+    assert_turned(&robot, "B", &[("Ball_dof1", 0.4)], [0.005, 0.005, 0.01], 0.4, Some([0.0, 0.0, 1.0]));
+    assert_turned(&robot, "B", &[("Ball_dof2", 0.3)], [0.005, 0.005, 0.01], 0.3, None);
+    // Hung from the joint at the top face's centre (gravity +z), B swings about Ball_dof2's axis
+    // as a physical pendulum: the 10 mm cube's centre is d = 5 mm from the pivot, and about the
+    // pivot I = m (a² / 6 + d²), so T = 2π √((a² / 6 + d²) / (g d)) = 0.1831 s for any mass.
+    // A simulator reads exactly this from the file: each moved link's mass, centre and inertia
+    // (the chain's in-between links weigh 1e-6 kg), about the joint's axis.
+    let q = robot.values(&[]);
+    let j = robot.joint("Ball_dof2");
+    let jf = robot.joint_frame(j, &q);
+    let pivot = m4_apply(&jf, [0.0; 3]);
+    let axis = m4_turn(&jf, j.axis.unwrap_or([1.0, 0.0, 0.0]));
+    let gravity_arm = |r: [f64; 3]| {
+        let along = dot(r, axis);
+        sub(r, axis.map(|x| x * along))
+    };
+    let (mut inertia, mut moment) = (0.0, [0.0; 3]);
+    for link in robot.moved_by(&j.name) {
+        let Some((origin, mass, i)) = link.inertial else { continue };
+        let frame = m4_mul(&robot.frame(&link.name, &q), &origin.frame());
+        let n = (0..3).map(|c| (0..3).map(|r| frame[r][c] * axis[r]).sum::<f64>()).collect::<Vec<_>>();
+        let [ixx, ixy, ixz, iyy, iyz, izz] = i;
+        let own = n[0] * n[0] * ixx + n[1] * n[1] * iyy + n[2] * n[2] * izz + 2.0 * (n[0] * n[1] * ixy + n[0] * n[2] * ixz + n[1] * n[2] * iyz);
+        let arm = gravity_arm(sub(m4_apply(&frame, [0.0; 3]), pivot));
+        inertia += own + mass * dot(arm, arm);
+        moment = std::array::from_fn(|k| moment[k] + mass * arm[k]);
+    }
+    let period = 2.0 * std::f64::consts::PI * (inertia / (9.81 * norm(moment))).sqrt();
+    assert!((period - 0.1831).abs() < 0.03 * 0.1831, "period {period:.4} s, expected 0.1831 s");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn checker_planar_joint_slides_and_turns_in_its_plane() {
+    let (robot, dir) = checker_case("planar_chain", &cubes_with("planar", "Plane"));
+    for (joint, d) in [("Plane_dof1", 0.03), ("Plane_dof2", 0.02)] {
+        let at = origin_at(&robot, "B", &[(joint, d)]);
+        let moved = norm(sub(at, [0.005, 0.005, 0.01]));
+        assert!((moved - d).abs() < 1e-6 && (at[2] - 0.01).abs() < 1e-6, "B at {joint} = {d}: {at:?}");
+    }
+    assert_turned(&robot, "B", &[("Plane", 0.7)], [0.005, 0.005, 0.01], 0.7, Some([0.0, 0.0, 1.0]));
+    // Sliding freely under gravity along Plane_dof1 for 0.1 s covers ½ g t² = 0.04905 m: nothing
+    // in the file holds it back (no damping or friction, a range that reaches that far) and it
+    // carries B's mass.
+    let j = robot.joint("Plane_dof1");
+    assert_eq!(j.kind, "prismatic");
+    for k in ["damping", "friction"] {
+        assert!(j.dynamics.get(k).is_none_or(|v| *v == 0.0), "Plane_dof1 {k}: {:?}", j.dynamics);
+    }
+    let reach: f64 = 0.5 * 9.81 * 0.1 * 0.1;
+    assert!((reach - 0.04905).abs() < 1e-9);
+    if let Some(upper) = j.limit.get("upper") {
+        assert!(*upper >= reach, "Plane_dof1 stops at {upper} m");
+    }
+    let carried: f64 = robot.moved_by("Plane_dof1").iter().filter_map(|l| l.inertial.map(|i| i.1)).sum();
+    assert!(carried > 1e-3, "Plane_dof1 carries {carried} kg");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Where a ball of radius `r` dropped straight down at `xy` first touches a collision shape,
+/// as the height of its centre (`None`: it falls past them all).
+fn drop_height(robot: &XRobot, dir: &std::path::Path, xy: [f64; 2], r: f64) -> Option<f64> {
+    let q = robot.values(&[]);
+    let mut best: Option<f64> = None;
+    let mut keep = |z: f64| best = Some(best.map_or(z, |b: f64| b.max(z)));
+    for link in &robot.links {
+        for (origin, geom) in &link.collision {
+            let frame = m4_mul(&robot.frame(&link.name, &q), &origin.frame());
+            let centre = m4_apply(&frame, [0.0; 3]);
+            let mut tris: Vec<[[f64; 3]; 3]> = Vec::new();
+            match geom {
+                Some(XGeom::Sphere(radius)) => {
+                    let h = norm(sub([xy[0], xy[1], 0.0], [centre[0], centre[1], 0.0]));
+                    if h <= radius + r {
+                        keep(centre[2] + ((radius + r).powi(2) - h * h).sqrt());
+                    }
+                }
+                Some(XGeom::Box(size)) => {
+                    let h = size.map(|s| s / 2.0);
+                    let c = |i: usize| {
+                        [if i & 1 == 0 { -h[0] } else { h[0] }, if i & 2 == 0 { -h[1] } else { h[1] }, if i & 4 == 0 { -h[2] } else { h[2] }]
+                    };
+                    for [a, b, cc, d] in [[0, 1, 3, 2], [4, 5, 7, 6], [0, 1, 5, 4], [2, 3, 7, 6], [0, 2, 6, 4], [1, 3, 7, 5]] {
+                        tris.push([c(a), c(b), c(cc)].map(|p| m4_apply(&frame, p)));
+                        tris.push([c(a), c(cc), c(d)].map(|p| m4_apply(&frame, p)));
+                    }
+                }
+                Some(XGeom::Cylinder { radius, length }) => {
+                    // Its axis is the shape frame's z: the caps as fans of 64 triangles.
+                    for z in [-length / 2.0, length / 2.0] {
+                        for k in 0..64 {
+                            let p = |k: usize| {
+                                let t = k as f64 * std::f64::consts::TAU / 64.0;
+                                [radius * t.cos(), radius * t.sin(), z]
+                            };
+                            tris.push([[0.0, 0.0, z], p(k), p(k + 1)].map(|p| m4_apply(&frame, p)));
+                        }
+                    }
+                }
+                Some(XGeom::Mesh { file, scale }) => {
+                    let bytes = std::fs::read(dir.join(file)).unwrap_or_else(|e| panic!("{file}: {e}"));
+                    for t in solidcraft_io::read_stl(&bytes).unwrap_or_else(|e| panic!("{file}: {e}")) {
+                        tris.push(t.map(|p| m4_apply(&frame, std::array::from_fn(|k| p[k] as f64 * scale[k]))));
+                    }
+                }
+                None => panic!("{}: a <collision> with no geometry", link.name),
+            }
+            // The ball comes down on a face's top: under its centre, the highest triangle.
+            for [a, b, c] in tris {
+                let area = |p: [f64; 3], q: [f64; 3], s: [f64; 2]| (q[0] - p[0]) * (s[1] - p[1]) - (q[1] - p[1]) * (s[0] - p[0]);
+                let (wa, wb, wc) = (area(b, c, xy), area(c, a, xy), area(a, b, xy));
+                let whole = wa + wb + wc;
+                if whole.abs() < 1e-15 || !(wa / whole >= -1e-9 && wb / whole >= -1e-9 && wc / whole >= -1e-9) {
+                    continue;
+                }
+                keep((wa * a[2] + wb * b[2] + wc * c[2]) / whole + r);
+            }
+        }
+    }
+    best
+}
+
+#[test]
+fn checker_a_dropped_ball_lands_on_each_collision_shape() {
+    let mut cmds = Vec::new();
+    for (k, shape) in ["mesh", "convex_hull", "box", "cylinder", "sphere", "none"].into_iter().enumerate() {
+        let (component, body) = (format!("S{k}"), format!("B{k}"));
+        cmds.push(("component.activate", json!({"component": "root"})));
+        cmds.push(("component.create", json!({"name": component})));
+        cmds.push(("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30 * k, 0, 0], "body_name": body})));
+        cmds.push(("body.collision", json!({"body": body, "shape": shape})));
+        cmds.push(("occurrence.ground", json!({"occurrence": format!("{component}:1"), "grounded": true})));
+    }
+    let (robot, dir) = checker_case("collision_shapes", &cmds);
+    // A 5 mm ball over each 10 mm cube's centre comes to rest on its top at 10 + 5 mm; the
+    // sphere is the cube's bounding one, radius 5√3 mm about the cube's centre, so the ball rests
+    // at 5 + 5√3 + 5 mm; through `none` it falls.
+    let sphere = 0.005 + 0.005 * 3f64.sqrt() + 0.005;
+    for (k, want) in [Some(0.015), Some(0.015), Some(0.015), Some(0.015), Some(sphere), None].into_iter().enumerate() {
+        let got = drop_height(&robot, &dir, [0.005 + 0.03 * k as f64, 0.005], 0.005);
+        match (got, want) {
+            (Some(g), Some(w)) => assert!((g - w).abs() < 1e-3, "shape {k}: the ball lands at {g:.4} m, expected {w:.4} m"),
+            (None, None) => {}
+            _ => panic!("shape {k}: lands at {got:?}, expected {want:?}"),
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
