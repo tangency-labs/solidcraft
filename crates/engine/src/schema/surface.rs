@@ -573,7 +573,7 @@ fn trim_curves_schema(_: &mut SchemaGenerator) -> Schema {
         "properties": {
             "sketch": {"description": "The sketch: its id or name.", "type": ["integer", "string"]},
             "curves": {"description": "Curve ids, chains meeting end to end. Default: every curve.", "type": "array", "items": {"type": "string"}, "maxItems": 1000},
-            "direction": {"description": "`normal`, along the sketch's normal (the default), or a direction [x, y, z] to sweep the curves onto the surface along."}
+            "direction": {"description": "`normal`, along the sketch's normal (the default), or a direction [x, y, z] to sweep the curves onto the surface along; or `face_normal`, to project them along the surface's own normal (each point of a curve to its nearest point of the surface)."}
         },
         "required": ["sketch"],
         "additionalProperties": false

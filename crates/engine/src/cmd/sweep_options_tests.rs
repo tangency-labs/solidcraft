@@ -183,6 +183,81 @@ fn hostile_sweep_options_are_refused() {
     }
 }
 
+/// #14456: a sweep's profile can be a planar face of a body, as in Extrude and Revolve. The
+/// face's edges are projected into a sketch on it, and the sweep runs from that face along the
+/// path: a 10 mm square face swept up a 40 mm line is a 10 x 10 x 40 column standing on it.
+#[test]
+fn a_sweep_from_a_body_face_sweeps_the_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-5, -5, 0], "length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "P"}));
+    // The XZ sketch's y runs down world Z: the line starts at the top face's centre.
+    run(&mut s, "sketch.line", json!({"points": [[0, -10], [0, -50]], "ids": ["up"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.sweep",
+        json!({"face": [0, 0, 10], "face_body": "Block", "path_sketch": "P", "path": ["up"], "operation": "new", "body_name": "Column"}),
+    );
+    let m = measure(&s, "Column");
+    assert!((m.volume - 4000.0).abs() < 2e-3 * 4000.0, "volume {}", m.volume);
+    // The column stands on the face it was swept from and ends at the path's end.
+    assert!((m.bbox.min.z - 10.0).abs() < 1e-6, "{:?}", m.bbox);
+    assert!((m.bbox.max.z - 50.0).abs() < 1e-6, "{:?}", m.bbox);
+    assert!((m.bbox.min.x + 5.0).abs() < 1e-6 && (m.bbox.max.x - 5.0).abs() < 1e-6, "{:?}", m.bbox);
+    // The face's sketch is in the timeline, and the sweep names it as its profile.
+    let kind = s.doc.features.last().unwrap().kind.clone();
+    let solidcraft_doc::FeatureKind::Sweep { sketch, .. } = kind else { panic!("the last feature is not a sweep") };
+    assert!(
+        s.doc.feature(sketch.0).is_some_and(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. })),
+        "the face's sketch is in the timeline"
+    );
+}
+
+/// A face that is not a body's, a curved one, or a face given with a sketch is refused, and the
+/// design is left as it was.
+#[test]
+fn a_sweep_refuses_a_face_it_cannot_sweep() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-5, -5, 0], "length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "P"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, -10], [0, -50]], "ids": ["up"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = s.doc.features.len();
+    let sweep_with = |s: &mut Session, extra: Value| {
+        let mut p = json!({"path_sketch": "P", "path": ["up"], "operation": "new"});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        s.execute("solid.sweep", &p).map_err(|e| e.to_string())
+    };
+    // No body face at the point.
+    assert!(sweep_with(&mut s, json!({"face": [0, 0, 50]})).is_err());
+    // A face that is not a point.
+    assert!(sweep_with(&mut s, json!({"face": [0, 0]})).is_err());
+    // A face of another body than the one named.
+    assert!(sweep_with(&mut s, json!({"face": [0, 0, 10], "face_body": "Other"})).is_err());
+    // A face and a sketch profile at once.
+    assert!(sweep_with(&mut s, json!({"face": [0, 0, 10], "face_body": "Block", "sketch": "P"})).is_err());
+    assert_eq!(s.doc.features.len(), before);
+}
+
+/// The face's boundary is the profile: it stays profile geometry even when the design
+/// projects references as construction, or the sketch would have no profile to sweep.
+#[test]
+fn a_sweep_from_a_body_face_works_with_construction_projections() {
+    let mut s = Session { project_construction: true, ..Session::default() };
+    run(&mut s, "solid.box", json!({"corner": [-5, -5, 0], "length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "P"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, -10], [0, -50]], "ids": ["up"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.sweep",
+        json!({"face": [0, 0, 10], "face_body": "Block", "path_sketch": "P", "path": ["up"], "operation": "new", "body_name": "Column"}),
+    );
+    let m = measure(&s, "Column");
+    assert!((m.volume - 4000.0).abs() < 2e-3 * 4000.0, "volume {}", m.volume);
+}
+
 /// #3345: a 4 x 3 profile drawn at the middle of the bottom line of a closed rounded rectangle
 /// (60 x 40, corners r8), swept round all of it, path picked from that line's start. The path is
 /// followed from the profile: the tube stays on the path (Pappus: A L), within 2 mm of it

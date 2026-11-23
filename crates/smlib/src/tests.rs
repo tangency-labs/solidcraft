@@ -186,6 +186,7 @@ const ANSWERING: &[&str] = &[
     "untrim_face",
     "extend_sheet",
     "face_points",
+    "trim_by_dropped_curves",
     "stitch",
     "offset_sheet",
     "classify_point",
@@ -327,6 +328,7 @@ fn every_entry_point_answers() {
     says("untrim_face", sheet.untrim_face(p(5.0, 5.0, 5.0), 0.1, Holes::All, true, false));
     says("extend_sheet", sheet.extend_sheet(p(5.0, 5.0, 5.0), 0.1, 1.0, Continuation::Natural));
     says("face_points", a.face_points());
+    says("trim_by_dropped_curves", sheet.trim_by_dropped_curves(std::slice::from_ref(&lines), &[p(5.0, 5.0, 5.0)], 1e-6));
     says("stitch", sheet.stitch(0.1));
     says("offset_sheet", sheet.offset_sheet(1.0));
     says("classify_point", a.classify_point([1.0; 3]));

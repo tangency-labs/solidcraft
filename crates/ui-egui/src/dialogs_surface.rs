@@ -102,10 +102,12 @@ crate::dialog_descriptor::dialog_descriptors! {
                 round: bool,
             },
             /// `direction`: the stored sweep direction of trimming curves (none: the sketch's normal).
+            /// `face_normal`: the stored choice to project them along the surface's normal instead.
             Trim {
                 extend: bool,
                 stitch: bool,
                 direction: Option<Vec3>,
+                face_normal: bool,
             },
             /// `holes`: an index into [`UNTRIM_HOLES`].
             Untrim {
@@ -277,7 +279,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "surface.ruled" => {
             Surf::Ruled { distance: crate::dialogs::length_default(&app.session, "10"), mode: 0, angle: "5 deg".into(), flip: false, round: false }
         }
-        "surface.trim" => Surf::Trim { extend: false, stitch: false, direction: None },
+        "surface.trim" => Surf::Trim { extend: false, stitch: false, direction: None, face_normal: false },
         "surface.untrim" => Surf::Untrim { holes: 0, outer: false, in_place: false },
         "solid.split_face" => Surf::SplitFace,
         _ => Surf::simple_start(id)?.0,
@@ -831,7 +833,7 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             let edges: Vec<Value> = items(inputs, 0).edge_points().into_iter().map(pt).collect();
             ("surface.extend", json!({"body": body, "edges": edges}))
         }
-        Surf::Trim { extend, stitch, direction } => {
+        Surf::Trim { extend, stitch, direction, face_normal } => {
             let need_trim = |i: usize, message| {
                 if items(inputs, i).is_empty() { Err(app.tr(message).to_string()) } else { Ok(()) }
             };
@@ -882,7 +884,10 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
                     }
                     let sketch = crate::dialogs::picks_sketch(app, picks, None).ok_or_else(|| app.tr("ui.trim_curve_sketch").to_string())?;
                     let mut c = Map::from_iter([("sketch".into(), json!(sketch)), ("curves".into(), json!(curves))]);
-                    if let Some(d) = direction {
+                    // What the dialog does not show is kept as the feature was made (Edit Feature).
+                    if *face_normal {
+                        c.insert("direction".into(), json!("face_normal"));
+                    } else if let Some(d) = direction {
                         c.insert("direction".into(), pt(*d));
                     }
                     p.insert("curves".into(), Value::Object(c));
@@ -1253,7 +1258,12 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 },
             };
             (
-                Surf::Trim { extend: *extend, stitch: *stitch, direction: curves.as_ref().and_then(|c| c.direction.map(|d| d.0)) },
+                Surf::Trim {
+                    extend: *extend,
+                    stitch: *stitch,
+                    direction: curves.as_ref().and_then(|c| c.direction.map(|d| d.0)),
+                    face_normal: curves.as_ref().is_some_and(|c| c.face_normal),
+                },
                 vec![
                     vec![Sel::Body { name: body.to_string() }],
                     tools,

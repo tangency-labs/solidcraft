@@ -45,7 +45,7 @@ pub enum SplitTool<'a> {
 }
 
 /// Most segments a sketch tool may hold.
-const MAX_SEGMENTS: usize = 4096;
+pub(crate) const MAX_SEGMENTS: usize = 4096;
 
 fn invalid(what: impl Into<String>) -> KernelError {
     KernelError::Invalid(what.into())
