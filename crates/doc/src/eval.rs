@@ -15768,6 +15768,13 @@ mod named_face_lookup_tests {
     }
 
     #[test]
+    fn planar_normal_at_evaluates_exact_brep_plane() {
+        let b = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let n = more::planar_normal_at(&b, Vec3::new(5.0, 5.0, 10.0));
+        assert_eq!(n, Some(Vec3::Z));
+    }
+
+    #[test]
     fn body_at_picks_nearest_body_using_exact_bounds() {
         let st = parts(3);
         let hit = body_at(&st, &None, &[Vec3::new(22.0, 5.0, 5.0)]).unwrap();
