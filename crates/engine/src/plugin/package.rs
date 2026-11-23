@@ -21,6 +21,7 @@ fn requested(manifest: &Manifest) -> Grants {
             .iter()
             .map(|g| FileGrant { name: g.name.clone(), folder: PathBuf::new(), read: g.read, write: g.write })
             .collect(),
+        fuel: Some(rt.limits.fuel),
         memory_mib: Some(rt.limits.memory_mib),
         input_folder: rt.permissions.input_folder,
     })
@@ -32,6 +33,10 @@ pub fn validate_grants(manifest: &Manifest, grants: &Grants) -> Result<()> {
         return Err(deny().into());
     }
     if grants.input_folder && !asked.input_folder {
+        return Err(deny().into());
+    }
+    // Fuel, like memory, approves exactly the manifest request within a fixed host ceiling.
+    if grants.fuel.is_some_and(|fuel| asked.fuel != Some(fuel) || !(1..=MAX_APPROVED_FUEL).contains(&fuel)) {
         return Err(deny().into());
     }
     // Memory is approved as the manifest asks for it: no more, and never past the Wasm32 limit.
@@ -111,8 +116,14 @@ pub fn remove(s: &mut Session, id: &str) -> Result<RemoveResult> {
         return Err(invalid("installed package must be a directory, not a symlink"));
     }
     check_remove_tree(&path)?;
-    std::fs::remove_dir_all(path).map_err(io)?;
+    s.plugin_state.refresh_stored();
+    // The approvals go first: a store that cannot be written leaves the package installed, with
+    // nothing granted in this session, and the error is reported. A record left behind could
+    // otherwise approve the same package again if it were copied back.
     s.plugin_state.grants.remove(id);
+    s.plugin_state.persist_stored()?;
+    s.plugin_state.forget_stored(id)?;
+    std::fs::remove_dir_all(path).map_err(io)?;
     s.plugin_state.packages.remove(id);
     s.disabled_plugins.remove(id);
     Ok(RemoveResult { id: id.into(), removed: true, param_warnings: vec![] })

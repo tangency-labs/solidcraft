@@ -11,7 +11,7 @@
 
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI, TAU};
 
-use super::extrude::extrude_region;
+use super::extrude::{extrude_region, symmetric_offset_intervals, symmetric_offset_probe_points};
 use super::measure::{equivalent, section};
 use super::placement::LoopPlacement;
 use super::profile::rational_curve;
@@ -19,7 +19,9 @@ use super::profile::{
     check_regions, curve_on_frame, largest_arc_sweep, smallest_arc_sweep, tapered_flange_ends,
     Loop2, ProfileRefusal, Region2, Seg2,
 };
-use super::read::{arc_before_line, planar_curves, planar_pieces, PlanarPiece, Run};
+use super::read::{
+    arc_before_line, circular_boundary, planar_curves, planar_pieces, PlanarPiece, Run,
+};
 use super::sheet::{region_loops, sheet_regions};
 use crate::boolean::api_brep::{boolean_2d, Boolean2dOutcome};
 use crate::curve::curve::{Curve, CurveKind};
@@ -44,6 +46,45 @@ fn xy() -> Frame {
 
 fn p(x: f64, y: f64) -> Point2 {
     Vec2::new(x, y)
+}
+
+#[test]
+fn chord_coordinates_preserve_aspect_ratio_and_refuse_unrepresentable_inputs() {
+    use super::import_geometry::chord_coordinates;
+
+    // c = 1.5 - 0.25 = 1.25; 0.625/c = 0.5, 0.15625/c = 0.125.
+    assert_eq!(
+        chord_coordinates(p(0.875, 0.15625), 0.25, 1.5).unwrap(),
+        p(0.5, 0.125)
+    );
+    assert_eq!(
+        chord_coordinates(p(0.25, 0.0), 0.25, 1.5).unwrap(),
+        Vec2::ZERO
+    );
+    assert_eq!(
+        chord_coordinates(p(1.5, 0.0), 0.25, 1.5).unwrap(),
+        p(1.0, 0.0)
+    );
+    assert_eq!(
+        chord_coordinates(p(0.5, -0.125), 0.0, 1.0).unwrap(),
+        p(0.5, -0.125)
+    );
+    for (point, leading, trailing) in [
+        (p(0.0, 0.0), 0.0, 0.0),
+        (p(0.0, 0.0), 1.0, 0.0),
+        (p(f64::NAN, 0.0), 0.0, 1.0),
+        (p(0.0, f64::INFINITY), 0.0, 1.0),
+        (p(0.0, 0.0), f64::NEG_INFINITY, 1.0),
+        (p(0.0, 0.0), 0.0, f64::INFINITY),
+        (p(0.0, 0.0), -f64::MAX, f64::MAX),
+        (p(f64::MAX, 0.0), -f64::MAX, 0.0),
+        (p(0.0, 1.0), 0.0, f64::from_bits(1)),
+    ] {
+        assert!(
+            chord_coordinates(point, leading, trailing).is_err(),
+            "{point:?}, {leading}, {trailing}"
+        );
+    }
 }
 
 fn polygon(pts: &[Point2]) -> Loop2 {
@@ -1049,6 +1090,39 @@ fn a_curve_near_a_circle_is_not_an_arc_ending_off_it() {
     }
 }
 
+/// A circular reading keeps the arc only when each end it returns lies within the tolerance of its
+/// vertex: a vertex just inside is read, one just outside is refused (the edge stays a spline),
+/// and one exactly on the circle is read.
+#[test]
+fn a_circular_reading_ends_within_tolerance_of_its_vertices() {
+    let k = Kernel::default();
+    let w = FRAC_1_SQRT_2;
+    // the quarter of the unit circle from (1, 0) to (0, 1)
+    let (c, iv) = spline(
+        &k,
+        vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        vec![[1.0, 0.0, 0.0, 1.0], [w, w, 0.0, w], [0.0, 1.0, 0.0, 1.0]],
+    );
+    let tol = 1e-6;
+    let read_at = |first_x: f64, last_y: f64| {
+        let run = Run {
+            curve: &c,
+            interval: iv,
+            forward: true,
+            ends: [
+                crate::geom::vector3d::Vec3::new(first_x, 0.0, 0.0),
+                crate::geom::vector3d::Vec3::new(0.0, last_y, 0.0),
+            ],
+        };
+        circular_boundary(&k, &run, &xy(), p(0.0, 0.0), 1.0, tol, &mut 2_000_000)
+    };
+    assert!(read_at(1.0, 1.0).is_some());
+    assert!(read_at(1.0 + 0.9 * tol, 1.0).is_some());
+    assert!(read_at(1.0, 1.0 - 0.9 * tol).is_some());
+    assert!(read_at(1.0 + 1.1 * tol, 1.0).is_none());
+    assert!(read_at(1.0, 1.0 + 1.1 * tol).is_none());
+}
+
 /// A spline of several spans reads as the one B-spline it is for a sketch, run back, its ends
 /// exact.
 #[test]
@@ -1307,6 +1381,28 @@ fn a_tapered_flange_changes_by_half_its_length_times_the_slope_tangent() {
     assert!(((toe + root) / 2.0 - 14.2).abs() < 1e-12);
     // A non-finite input gives a non-finite answer, never a panic.
     assert!(tapered_flange_ends(f64::NAN, 1.0, 5.0).0.is_nan());
+}
+
+#[test]
+fn directed_planar_sweep_keeps_quadrants_and_tiny_seam_angles() {
+    let sweep = super::profile::counterclockwise_sweep;
+    let center = Point2::new(0.0, 0.0);
+    let x = Point2::new(1.0, 0.0);
+    let y = Point2::new(0.0, 1.0);
+    assert_eq!(sweep(center, x, y), Some(FRAC_PI_2));
+    assert_eq!(sweep(center, y, x), Some(3.0 * FRAC_PI_2));
+    assert_eq!(sweep(center, x, x), Some(0.0));
+    for delta in [0.5e-12_f64, 1e-12, 2e-12] {
+        let end = Point2::new(delta.cos(), delta.sin());
+        assert_eq!(sweep(center, x, end), Some(delta));
+        let start = Point2::new(-1.0, delta / 2.0);
+        let end = Point2::new(-1.0, -delta / 2.0);
+        let expected = (end.y.atan2(end.x) - start.y.atan2(start.x)).rem_euclid(TAU);
+        assert_eq!(sweep(center, start, end), Some(expected));
+        assert!(expected > 0.0 && expected < 3e-12);
+    }
+    assert_eq!(sweep(center, center, x), None);
+    assert_eq!(sweep(center, x, Point2::new(f64::NAN, 0.0)), None);
 }
 
 mod recognition {
@@ -2884,4 +2980,31 @@ mod path_export_regressions {
         assert!(!pts.contains(&Vec2::new(0.0, -1.0)));
         assert_eq!(pts.len(), 5);
     }
+}
+
+#[test]
+fn symmetric_offset_intervals_and_probes_are_symmetric_about_sketch_plane() {
+    assert_eq!(
+        symmetric_offset_intervals(3.0, 5.0),
+        [(3.0, 8.0), (-8.0, -3.0)]
+    );
+    assert_eq!(
+        symmetric_offset_intervals(-3.0, 5.0),
+        [(3.0, 8.0), (-8.0, -3.0)]
+    );
+
+    // `base` in auto-operation is already shifted by `start` along `n`.
+    let n = [0.0, 0.0, 1.0];
+    let pos_start_probes = symmetric_offset_probe_points([0.0, 0.0, 3.0], n, 3.0, 10.0, 0.5);
+    assert_eq!(
+        pos_start_probes,
+        [
+            [0.0, 0.0, 3.5],
+            [0.0, 0.0, 5.5],
+            [0.0, 0.0, -3.5],
+            [0.0, 0.0, -5.5],
+        ]
+    );
+    let neg_start_probes = symmetric_offset_probe_points([0.0, 0.0, -3.0], n, -3.0, 10.0, 0.5);
+    assert_eq!(neg_start_probes, pos_start_probes);
 }

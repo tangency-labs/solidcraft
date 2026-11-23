@@ -23,6 +23,8 @@ use solidcore_record::{Loop2, MAX_BEZIER_DEGREE, Seg2, Vec2};
 use crate::{IoError, Result};
 
 mod export_compatibility;
+mod export_profile;
+pub use export_profile::{DXF_PROFILE_FORMAT, DXF_PROFILE_VERSION, DxfExportProfile, DxfRole, DxfRoleStyle, MAX_DXF_PROFILE_BYTES};
 mod file_model;
 pub use file_model::{
     DxfFile, DxfGeometryBounds, DxfSourceBlock, DxfTextRecordKind, DxfTextSource, Entity as DxfFileEntity, EntityWeight as DxfEntityWeight,
@@ -826,9 +828,20 @@ struct EntityView<'a> {
 /// Extents remain the existing sampled/control-polygon approximation.
 pub fn write_dxf_file(file: &DxfFile<DxfShape>) -> Result<String> {
     if let Some(budget) = file.compatibility {
-        return export_compatibility::write(file, budget);
+        return export_compatibility::write(file, budget, None);
     }
     write_dxf_file_limited(file, crate::MAX_DRAWING_BYTES, MAX_DXF_FILE_VALUES)
+}
+
+/// Write a flat pattern's file as a DXF profile says: each role on the profile's layer, in its
+/// colour and linetype, and the roles it turns off left out. The file is checked under the
+/// flat-pattern contract first, as [`write_dxf_file`] checks it; the neutral profile writes the
+/// same bytes. Any other file is refused.
+pub fn write_dxf_file_as(file: &DxfFile<DxfShape>, profile: &DxfExportProfile) -> Result<String> {
+    let Some(budget) = file.compatibility else {
+        return Err(IoError::Invalid("a DXF profile styles the flat pattern's roles only".into()));
+    };
+    export_compatibility::write(file, budget, Some(profile))
 }
 
 /// Write owned geometry including explicit TEXT alignments. For AlignedText,
@@ -841,7 +854,7 @@ where
     F: FnMut(&DxfShape) -> Result<DxfGeometryBounds>,
 {
     if let Some(budget) = file.compatibility {
-        return export_compatibility::write(file, budget);
+        return export_compatibility::write(file, budget, None);
     }
     write_dxf_file_limited_with_text_bounds(file, crate::MAX_DRAWING_BYTES, MAX_DXF_FILE_VALUES, text_bounds)
 }
@@ -3194,6 +3207,231 @@ mod tests {
         let layer = wrong.declare_layer("BEND_UP", 1, DxfLinetype::Dashed, None).unwrap();
         wrong.push(layer, DxfShape::Circle { c: Vec2::ZERO, r: 1.0 }, None).unwrap();
         assert!(write_dxf_file(&wrong).unwrap_err().to_string().contains("declared producer"));
+    }
+
+    // A rolled flat's ROLL layer holds the roll's lines only, green and continuous, and a flat with
+    // every named role and a pocket under each contour fits the plan's layer count.
+    #[test]
+    fn flat_profile_admits_roll_lines_on_their_own_layer() {
+        let mut file = DxfFile::for_flat_pattern_export(1, 1, 0).unwrap();
+        let roll = file.declare_layer("ROLL", 3, DxfLinetype::Continuous, None).unwrap();
+        file.push(roll, DxfShape::Line(Vec2::ZERO, Vec2::X), None).unwrap();
+        let written = write_dxf_file(&file).unwrap();
+        assert_eq!(entities(&written).iter().map(|e| field(&e.1, 8)).collect::<Vec<_>>(), ["ROLL"]);
+
+        let mut circle = DxfFile::for_flat_pattern_export(1, 1, 0).unwrap();
+        let roll = circle.declare_layer("ROLL", 3, DxfLinetype::Continuous, None).unwrap();
+        circle.push(roll, DxfShape::Circle { c: Vec2::ZERO, r: 1.0 }, None).unwrap();
+        assert!(write_dxf_file(&circle).unwrap_err().to_string().contains("declared producer"));
+        let mut dashed = DxfFile::for_flat_pattern_export(1, 1, 0).unwrap();
+        let declared = dashed.declare_layer("ROLL", 3, DxfLinetype::Dashed, None);
+        assert!(declared.unwrap_err().to_string().contains("declared producer"));
+
+        let mut every = DxfFile::for_flat_pattern_export(1, 1, 1).unwrap();
+        for (name, color, linetype) in [
+            ("OUTLINE", 7, DxfLinetype::Continuous),
+            ("CUT", 4, DxfLinetype::Continuous),
+            ("TEXT", 2, DxfLinetype::Continuous),
+            ("ETCH", 6, DxfLinetype::Continuous),
+            ("BEND_UP", 1, DxfLinetype::Dashed),
+            ("BEND_DOWN", 5, DxfLinetype::Dashed),
+            ("BEND_NOTES", 8, DxfLinetype::Continuous),
+            ("PERFORATION", 3, DxfLinetype::Continuous),
+            ("ROLL", 3, DxfLinetype::Continuous),
+            ("POCKET_TOP_Z0.000000_TO_1.000000_MM", 3, DxfLinetype::Continuous),
+        ] {
+            every.declare_layer(name, color, linetype, None).unwrap();
+        }
+        assert_eq!(every.layers().len(), 11);
+        write_dxf_file(&every).unwrap();
+    }
+
+    /// A flat pattern's file with every role's standard layer and one entity of its kind on each,
+    /// in the order of `DxfRole::ALL`.
+    fn flat_with_every_role() -> DxfFile<DxfShape> {
+        let neutral = DxfExportProfile::neutral();
+        let mut file = DxfFile::for_flat_pattern_export(4, 4, 1).unwrap();
+        for role in DxfRole::ALL {
+            let style = neutral.role(role).unwrap();
+            let name = if role == DxfRole::Pockets { format!("{}_TOP_Z0.000000_TO_1.000000_MM", style.layer) } else { style.layer.clone() };
+            // The neutral profile holds what the producer's contract admits, or this is refused.
+            let layer = file.declare_layer(&name, style.color, style.linetype, None).unwrap();
+            let shape = match role {
+                DxfRole::BendNotes => DxfShape::Text { at: Vec2::ZERO, height: 3.0, angle_deg: 0.0, text: "B1 UP 90° R1".into() },
+                DxfRole::Perforation => DxfShape::Circle { c: Vec2::ZERO, r: 1.0 },
+                _ => DxfShape::Line(Vec2::ZERO, Vec2::new(10.0, 0.0)),
+            };
+            file.push(layer, shape, None).unwrap();
+        }
+        file
+    }
+
+    /// The LAYER table as (name, colour, linetype), in the file's order.
+    fn layer_rows(dxf: &str) -> Vec<(String, String, String)> {
+        table_records(&pairs(dxf), "LAYER").iter().map(|r| (field(r, 2).to_string(), field(r, 62).to_string(), field(r, 6).to_string())).collect()
+    }
+
+    fn profile(roles: serde_json::Value) -> Result<DxfExportProfile> {
+        DxfExportProfile::from_json(&serde_json::json!({"format": "solidcraft-dxf-profile", "version": 1, "roles": roles}))
+    }
+
+    #[test]
+    fn the_neutral_dxf_profile_writes_the_bytes_of_no_profile() {
+        let file = flat_with_every_role();
+        let plain = write_dxf_file(&file).unwrap();
+        assert_eq!(write_dxf_file_as(&file, &DxfExportProfile::neutral()).unwrap(), plain);
+        // A profile that names no role, and the neutral profile read back from its own file, are
+        // the neutral profile.
+        assert_eq!(write_dxf_file_as(&file, &profile(serde_json::json!({})).unwrap()).unwrap(), plain);
+        let neutral = DxfExportProfile::neutral();
+        assert_eq!(DxfExportProfile::read(neutral.to_json().to_string().as_bytes()).unwrap(), neutral);
+        // The format page prints the neutral profile in full: its first JSON block is that profile.
+        let page = include_str!("../../../docs/formats/dxf-profiles.md");
+        let example = page.split("```json").nth(1).and_then(|rest| rest.split("```").next()).unwrap();
+        assert_eq!(DxfExportProfile::read(example.as_bytes()).unwrap(), neutral);
+        // The page's second block is a shop's profile, and reads.
+        let shop = page.split("```json").nth(2).and_then(|rest| rest.split("```").next()).unwrap();
+        assert_ne!(DxfExportProfile::read(shop.as_bytes()).unwrap(), neutral);
+    }
+
+    #[test]
+    fn a_dxf_profile_renames_restyles_shares_and_leaves_out_layers() {
+        let file = flat_with_every_role();
+        let shop = profile(serde_json::json!({
+            "outline": {"layer": "CUT", "color": 7},
+            "cut": {"color": 7},
+            "cut_text": {"layer": "#LETTERS"},
+            "bend_up": {"layer": "FOLD", "color": 3, "linetype": "Hidden"},
+            "bend_down": {"layer": "fold", "color": 3, "linetype": "hidden"},
+            "bend_notes": {"on": false},
+            "pockets": {"layer": "MILL", "color": 6, "linetype": "dashed"},
+            "roll": {"on": false, "layer": "UNUSED", "color": 200}
+        }))
+        .unwrap();
+        let dxf = write_dxf_file_as(&file, &shop).unwrap();
+        // 0 first, then by name; outline and cut share CUT, both bend directions share FOLD (layer
+        // names ignore case), the notes and the roll have no layer, and what the profile leaves
+        // alone (ETCH, PERFORATION, the letters' colour) is as it was.
+        let row = |name: &str, color: &str, linetype: &str| (name.to_string(), color.to_string(), linetype.to_string());
+        assert_eq!(
+            layer_rows(&dxf),
+            [
+                row("0", "7", "Continuous"),
+                row("#LETTERS", "2", "Continuous"),
+                row("CUT", "7", "Continuous"),
+                row("ETCH", "6", "Continuous"),
+                row("FOLD", "3", "HIDDEN"),
+                row("MILL_TOP_Z0.000000_TO_1.000000_MM", "6", "DASHED"),
+                row("PERFORATION", "3", "Continuous"),
+            ]
+        );
+        // The entities, in the file's order, each on its role's layer; the note and the roll's line
+        // are not written.
+        let written = entities(&dxf);
+        assert_eq!(
+            written.iter().map(|e| (e.0.as_str(), field(&e.1, 8))).collect::<Vec<_>>(),
+            [
+                ("LINE", "CUT"),
+                ("LINE", "CUT"),
+                ("LINE", "#LETTERS"),
+                ("LINE", "ETCH"),
+                ("LINE", "FOLD"),
+                ("LINE", "fold"),
+                ("LINE", "MILL_TOP_Z0.000000_TO_1.000000_MM"),
+                ("CIRCLE", "PERFORATION"),
+            ]
+        );
+        // The linetypes the layers name are defined in the file.
+        let types = table_records(&pairs(&dxf), "LTYPE");
+        let types: Vec<&str> = types.iter().map(|r| field(r, 2)).collect();
+        assert!(types.contains(&"HIDDEN") && types.contains(&"DASHED"), "{types:?}");
+        assert_eq!(crate::read_dxf_file(&dxf).unwrap().entities().len(), 8);
+
+        // Every role off: a file with layer 0 only.
+        let off: serde_json::Map<String, serde_json::Value> =
+            DxfRole::ALL.iter().map(|r| (r.key().to_string(), serde_json::json!({"on": false}))).collect();
+        let empty = write_dxf_file_as(&file, &profile(off.into()).unwrap()).unwrap();
+        assert_eq!(layer_rows(&empty), [row("0", "7", "Continuous")]);
+        assert!(entities(&empty).is_empty());
+    }
+
+    #[test]
+    fn a_dxf_profile_still_checks_the_flat_pattern_and_styles_nothing_else() {
+        // A shape that is not its role's is refused before the profile is looked at, even when
+        // the profile leaves that role out.
+        let mut wrong = DxfFile::for_flat_pattern_export(0, 1, 0).unwrap();
+        let layer = wrong.declare_layer("BEND_UP", 1, DxfLinetype::Dashed, None).unwrap();
+        wrong.push(layer, DxfShape::Circle { c: Vec2::ZERO, r: 1.0 }, None).unwrap();
+        let off = profile(serde_json::json!({"bend_up": {"on": false}})).unwrap();
+        assert!(write_dxf_file_as(&wrong, &off).unwrap_err().to_string().contains("declared producer"));
+        // The current view's file and an ordinary file have no roles.
+        let neutral = DxfExportProfile::neutral();
+        for file in [DxfFile::for_current_view_export(0, 0, 0).unwrap(), DxfFile::new().unwrap()] {
+            assert!(write_dxf_file_as(&file, &neutral).unwrap_err().to_string().contains("flat pattern"));
+        }
+        // A pocket layer and a plain role's layer that come to one name must agree on its style.
+        let file = flat_with_every_role();
+        let clash = profile(serde_json::json!({"pockets": {"layer": "M"}, "cut": {"layer": "M_TOP_Z0.000000_TO_1.000000_MM"}})).unwrap();
+        assert!(write_dxf_file_as(&file, &clash).unwrap_err().to_string().contains("share a layer"));
+    }
+
+    #[test]
+    fn a_dxf_profile_that_cannot_be_used_is_refused_and_says_why() {
+        use serde_json::json;
+        for (given, why) in [
+            (json!([]), "a profile is a JSON object"),
+            (json!({}), "`format` must be \"solidcraft-dxf-profile\""),
+            (json!({"format": "solidcraft-sheet-rules"}), "`format` must be"),
+            (json!({"format": "solidcraft-dxf-profile", "version": 2}), "the profile is version 2; this SolidCraft reads version 1"),
+            (json!({"format": "solidcraft-dxf-profile", "version": "1"}), "`version` must be 1"),
+            (json!({"format": "solidcraft-dxf-profile", "units": "inch"}), "`units` is not known"),
+            (json!({"format": "solidcraft-dxf-profile", "name": "a\nb"}), "`name` must be text of at most 128 characters on one line"),
+            (json!({"format": "solidcraft-dxf-profile", "roles": []}), "`roles` must be an object"),
+        ] {
+            let error = DxfExportProfile::from_json(&given).unwrap_err().to_string();
+            assert!(error.starts_with("DXF profile: ") && error.contains(why), "{given}: {error}");
+        }
+        for (roles, why) in [
+            (
+                json!({"bend_sideways": {}}),
+                "role `bend_sideways` is not known; the roles are outline, cut, cut_text, etch, bend_up, bend_down, bend_notes, pockets, perforation, roll",
+            ),
+            (json!({"OUTLINE": {}}), "role `OUTLINE` is not known"),
+            (json!({"cut": true}), "role `cut` must be an object"),
+            (json!({"cut": {"lineweight": 0.25}}), "role `cut`: `lineweight` is not known; a role has on, layer, color and linetype"),
+            (json!({"cut": {"on": "no"}}), "role `cut`: `on` must be true or false"),
+            (json!({"cut": {"color": 0}}), "role `cut`: `color` must be an AutoCAD colour index, a whole number from 1 to 255, not 0"),
+            (json!({"cut": {"color": 256}}), "not 256"),
+            (json!({"cut": {"color": 1.5}}), "not 1.5"),
+            (json!({"cut": {"color": "red"}}), "not \"red\""),
+            (json!({"cut": {"color": [255, 0, 0]}}), "role `cut`: `color` must be"),
+            (json!({"bend_up": {"linetype": "center"}}), "role `bend_up`: `linetype` must be continuous, dashed or hidden, not \"center\""),
+            (json!({"bend_up": {"linetype": 2}}), "role `bend_up`: `linetype` must be"),
+            (json!({"etch": {"layer": ""}}), "role `etch`: `layer` must be 1 to 200 characters"),
+            (json!({"etch": {"layer": "M".repeat(201)}}), "role `etch`: `layer` must be 1 to 200 characters"),
+            (json!({"etch": {"layer": 7}}), "role `etch`: `layer` must be text"),
+            (json!({"etch": {"layer": "0"}}), "role `etch`: `layer` cannot be 0"),
+            (json!({"etch": {"layer": "MARK/ETCH"}}), "role `etch`: layer \"MARK/ETCH\" cannot be a DXF layer name"),
+            (json!({"etch": {"layer": " MARK"}}), "cannot be a DXF layer name"),
+            (json!({"etch": {"layer": "GRAVÉ"}}), "cannot be a DXF layer name"),
+            (json!({"etch": {"layer": "A\nB"}}), "cannot be a DXF layer name"),
+            (
+                json!({"bend_up": {"layer": "FOLD"}, "bend_down": {"layer": "Fold"}}),
+                "roles `bend_up` and `bend_down` share layer \"FOLD\" but give it different colours or linetypes",
+            ),
+        ] {
+            let error = profile(roles.clone()).unwrap_err().to_string();
+            assert!(error.starts_with("DXF profile: ") && error.contains(why), "{roles}: {error}");
+        }
+        // A role that is off may name a layer another role styles differently: it has no layer.
+        profile(json!({"bend_up": {"layer": "FOLD"}, "bend_down": {"layer": "FOLD", "on": false}})).unwrap();
+        // A file: UTF-8 JSON (a byte order mark is passed over), at most 1 MiB.
+        let neutral = DxfExportProfile::neutral();
+        let text = format!("\u{feff}{}", neutral.to_json());
+        assert_eq!(DxfExportProfile::read(text.as_bytes()).unwrap(), neutral);
+        assert!(DxfExportProfile::read(&[0xff, 0xfe]).unwrap_err().to_string().contains("not UTF-8"));
+        assert!(DxfExportProfile::read(b"{format").unwrap_err().to_string().contains("not valid JSON"));
+        assert!(DxfExportProfile::read(&vec![b' '; MAX_DXF_PROFILE_BYTES + 1]).unwrap_err().to_string().contains("at most 1048576 bytes"));
     }
 
     #[test]

@@ -42,3 +42,24 @@ fn repeated_first_point_is_neutral_and_drawing_can_continue() {
         assert_eq!(h.app.session.doc.to_json(), before, "{command}");
     }
 }
+
+/// The square chord on a rectangle's second corner: a corner the square moves loses its snap, a
+/// corner that is already square to the first point keeps the place and the snap it was clicked
+/// with.
+#[test]
+fn a_squared_corner_keeps_its_snap_only_where_it_was_clicked() {
+    use solidcore_record::Vec2;
+    for command in ["sketch.rectangle.two_point", "sketch.rectangle.center"] {
+        let mut tool = super::Tool::for_command(command).unwrap();
+        tool.pts.push((Vec2::new(20.0, 0.0), None));
+        let snap = Some("on:side:50,30".to_string());
+        crate::tool_modifiers::set_square_rectangle(true);
+        let kept = super::squared(&tool, (Vec2::new(50.0, 30.0), snap.clone()));
+        let moved = super::squared(&tool, (Vec2::new(50.0, 25.0), Some("on:side:50,25".to_string())));
+        crate::tool_modifiers::set_square_rectangle(false);
+        let free = super::squared(&tool, (Vec2::new(50.0, 25.0), snap.clone()));
+        assert_eq!(kept, (Vec2::new(50.0, 30.0), snap.clone()), "{command}: already square");
+        assert_eq!(moved, (Vec2::new(50.0, 30.0), None), "{command}: moved to the square");
+        assert_eq!(free, (Vec2::new(50.0, 25.0), snap), "{command}: without the chord");
+    }
+}

@@ -305,7 +305,10 @@ fn brep_out(k: &Kernel, b: &Brep) -> Result<Output, HarnessError> {
 
 fn finish(k: &Kernel, r: solidcore::Result<Brep>) -> Result<Output, HarnessError> {
     match r {
-        Ok(b) => brep_out(k, &b),
+        Ok(mut b) => {
+            crate::trim_hook::observe(&mut b);
+            brep_out(k, &b)
+        }
         Err(e) => Ok(failed(&e)),
     }
 }

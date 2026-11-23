@@ -23,6 +23,8 @@ use super::config::RowRef;
 use super::types::{not_blank_pattern, present};
 use crate::cmd::LinkState;
 use crate::params;
+use crate::schema::component::{ExprMatrixParam, MatrixTolerance, MoveAngle};
+use crate::schema::types::Point3;
 
 /// The most components `component.update_links` and `component.replace_with_link` read from a
 /// list, as the handlers do.
@@ -176,7 +178,7 @@ impl JsonSchema for Translation {
 /// linked gets another placement instead of another link.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = path_only_required)]
-pub struct InsertDesignParams {
+pub struct InsertDesignKeys {
     // Optional in the type and required in the schema (`path_only_required`).
     /// The design (`.sc`) to link, by file path.
     #[serde(default, deserialize_with = "path_required", skip_serializing_if = "Option::is_none")]
@@ -194,12 +196,74 @@ pub struct InsertDesignParams {
     #[schemars(with = "ComponentRef")]
     pub parent: Option<ComponentRef>,
     /// Where to place it, in mm from the parent's origin. Default: [0, 0, 0], also with `reuse`.
+    /// Not with `matrix` or `to_matrix`.
     #[serde(default)]
     pub translate: Option<Translation>,
+    /// The axis to turn about. Default: [0, 0, 1]. Not with `matrix` or `to_matrix`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point3")]
+    pub axis: Option<Point3>,
+    /// The turn about `axis`: radians (a number) or an angle expression such as "90 deg". Default: 0.
+    /// Not with `matrix` or `to_matrix`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "MoveAngle")]
+    pub angle: Option<MoveAngle>,
+    /// The point the turn is about, in mm. Default: [0, 0, 0]. Not with `matrix` or `to_matrix`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point3")]
+    pub origin: Option<Point3>,
+    /// A rigid placement as a row-major 3x4 or 4x4 matrix, flat or as rows, its translation column
+    /// numbers or length expressions. Not with `translate`, `axis`, `angle`, `origin` or `to_matrix`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ExprMatrixParam")]
+    pub matrix: Option<ExprMatrixParam>,
+    /// Absolute rigid placement as a row-major 3x4 or 4x4 matrix, flat or as rows, its translation column
+    /// numbers or length expressions. Not with `translate`, `axis`, `angle`, `origin` or `matrix`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ExprMatrixParam")]
+    pub to_matrix: Option<ExprMatrixParam>,
+    /// With `matrix` or `to_matrix`: largest accepted |RᵀR − I| per entry (default 1e-9, at most 1e-3).
+    #[serde(default)]
+    pub tolerance: Option<MatrixTolerance>,
     /// Reuse an existing link to the same file and configuration when there is one, placing
     /// another occurrence of it. Default: false.
     #[serde(default)]
     pub reuse: Option<bool>,
+}
+
+/// `component.insert_design` parameters: [`InsertDesignKeys`].
+#[derive(Debug)]
+pub struct InsertDesignParams(pub InsertDesignKeys);
+
+impl<'de> Deserialize<'de> for InsertDesignParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(d)?;
+        if value.get("matrix").is_some() && value.get("to_matrix").is_some() {
+            return Err(D::Error::custom(whole("give either to_matrix or matrix, not both")));
+        }
+        if let Some(key) = ["to_matrix", "matrix"].into_iter().find(|k| value.get(*k).is_some())
+            && let Some(k) = ["translate", "axis", "angle", "origin"].into_iter().find(|k| value.get(*k).is_some())
+        {
+            return Err(D::Error::custom(whole(format!("give either {key} or {k}, not both"))));
+        }
+        serde_path_to_error::deserialize(&value).map(InsertDesignParams).map_err(|e| D::Error::custom(located(&e)))
+    }
+}
+
+impl std::ops::Deref for InsertDesignParams {
+    type Target = InsertDesignKeys;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl JsonSchema for InsertDesignParams {
+    fn schema_name() -> Cow<'static, str> {
+        "InsertDesignParams".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        InsertDesignKeys::json_schema(generator)
+    }
 }
 
 /// What `component.insert_design` returns.

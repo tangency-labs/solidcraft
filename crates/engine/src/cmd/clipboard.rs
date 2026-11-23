@@ -24,6 +24,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<CopyResult>)
         .params("features: [ids or names] (in timeline order on paste)"),
     CommandSpec::new("timeline.paste", "Paste Features", crate::checked!("timeline.paste", paste))
+        .begins_edit()
         .icon("paste")
         .contract(&PASTE_CONTRACT)
         .output(output_schema_for::<PasteResult>)
@@ -288,6 +289,12 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
             if let (Some(captured), Some(stored)) = (placed.feature(pasted.id), s.doc_mut().feature_mut(pasted.id)) {
                 stored.kind = captured.kind.clone();
             }
+        }
+    }
+    for pasted in &made {
+        let frame = s.doc.feature(pasted.id).and_then(|f| super::features::cross_component_profile_frame_for(s, f.component, &f.kind));
+        if let Some(f) = s.doc_mut().feature_mut(pasted.id) {
+            f.profile_frame = frame;
         }
     }
     s.refresh();

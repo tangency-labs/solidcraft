@@ -572,6 +572,57 @@ mod tests {
     }
 
     #[test]
+    fn noninteractive_forced_quit_discards_recovery_but_refusal_and_legacy_force_keep_it() {
+        use crate::control::{ControlRequest, Outcome, handle};
+
+        for (tag, params, discards) in [
+            ("control-refused", json!({"ask": false}), false),
+            ("control-discard", json!({"ask": false, "force": true}), true),
+            ("control-legacy-force", json!({"force": true}), false),
+        ] {
+            let (mut app, dir) = app(tag, Duration::ZERO);
+            name(&mut app, "Background design");
+            edit(&mut app);
+            documents::new_tab(&mut app);
+            name(&mut app, "Active design");
+            edit(&mut app);
+            tick_and_wait(&mut app);
+            let before = entries(&dir);
+            assert_eq!(before.len(), 2, "both dirty tabs already have recovery copies");
+            assert!(documents::any_dirty(&app));
+            let active = app.session.document_id.clone();
+            let (req, _rx) = ControlRequest::new("app.quit", params.clone());
+            let Outcome::Done(reply) = handle(&mut app, &egui::Context::default(), &req) else {
+                panic!("quit must answer without requesting a screenshot");
+            };
+            if params.get("force") == Some(&json!(true)) {
+                assert_eq!(reply["ok"], true, "{tag}: {reply}");
+                assert_eq!(reply["result"]["quitting"], true, "{tag}: {reply}");
+                assert!(app.quit_requested);
+            } else {
+                assert_eq!(reply["ok"], false, "{reply}");
+                let error = reply["error"].as_str().unwrap();
+                assert!(error.contains("Background design") && error.contains("Active design"), "{reply}");
+                assert!(!app.quit_requested);
+                assert_eq!(app.session.document_id, active);
+                assert!(app.session.is_dirty());
+                assert!(app.docs.background_mut().all(|slot| slot.session.is_dirty()));
+                assert_eq!(entries(&dir), before, "refusal keeps every existing recovery copy");
+            }
+            assert!(app.docs.closing.is_none(), "{tag}: quit never opens a save prompt");
+            assert!(app.docs.quitting.is_none(), "{tag}: quit never starts an interactive quit");
+            close(&mut app); // The native host calls this when the window exits.
+            let remaining = recovery::orphans(&dir);
+            assert_eq!(remaining.len(), if discards { 0 } else { 2 }, "{tag}: only explicit noninteractive discard removes recovery");
+            if !discards {
+                assert_eq!(entries(&dir), before);
+            }
+            drop(app);
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
     fn cadence_and_big_operations_follow_the_document_and_preferences() {
         let (mut app, dir) = app("cadence", Duration::from_secs(3600));
         app.session.crash_journal = true;
@@ -627,6 +678,37 @@ mod tests {
         fs::remove_dir(&blocked).unwrap();
         tick_and_wait(&mut app);
         assert_eq!(recovery::load(&dir, &id).unwrap().0.features.len(), 2);
+        drop(app);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A drawing the autosave leaves out (one that breaks a rule, or one too large to save) is
+    /// never skipped silently: the status line names it, and the rest of the design is kept (#3890).
+    #[test]
+    fn a_drawing_the_autosave_leaves_out_is_named_on_the_status_line() {
+        let (mut app, dir) = app("left-out-drawing", Duration::ZERO);
+        name(&mut app, "Plate");
+        edit(&mut app);
+        app.run("drawing.create", json!({"name": "Kept"})).unwrap();
+        app.run("drawing.create", json!({"name": "Broken"})).unwrap();
+        let mut doc = (*app.session.doc).clone();
+        let broken = doc.drawings.iter_mut().find(|d| d.name == "Broken").unwrap();
+        std::sync::Arc::make_mut(broken).language = "?".into();
+        app.session.doc = std::sync::Arc::new(doc);
+        let named = |app: &SolveApp| {
+            app.status.as_ref().is_some_and(|(message, _, error)| *error && message.starts_with(r#"autosave failed: drawing "Broken" ("#))
+        };
+        let deadline = Instant::now() + Duration::from_secs(60);
+        tick(&mut app);
+        while !named(&app) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+            tick(&mut app);
+        }
+        assert!(named(&app), "{:?}", app.status);
+        let saved = entries(&dir);
+        assert_eq!(saved.len(), 1);
+        let kept = recovery::load(&dir, &saved[0].id).unwrap().0;
+        assert_eq!(kept.drawings.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["Kept"]);
         drop(app);
         fs::remove_dir_all(dir).unwrap();
     }

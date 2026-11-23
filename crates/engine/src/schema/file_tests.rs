@@ -3,9 +3,9 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use super::{
-    Export3mfParams, ExportMeshParams, ExportParams, ExportStepParams, ExportStlParams, ExportUrdfParams, FileExportResult, NewerFileReport,
-    OpenElsewhere, OpenParams, OpenResult, OpenedDesign, RecoverParams, RecoverResult, RecoveryDiscardParams, RecoveryDiscardResult,
-    RecoveryListParams, RecoveryListResult,
+    Export3mfParams, ExportMeshParams, ExportParams, ExportSdfParams, ExportStepParams, ExportStlParams, ExportUrdfParams, FileExportResult,
+    NewerFileReport, OpenElsewhere, OpenParams, OpenResult, OpenedDesign, RecoverParams, RecoverResult, RecoveryDiscardParams, RecoveryDiscardResult,
+    RecoveryListParams, RecoveryListResult, UsdPurpose,
 };
 use crate::Session;
 use crate::recovery::Autosaver;
@@ -16,16 +16,55 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ExportStepParams>(), &["bodies", "path"]);
     assert_keys(input_schema_for::<ExportMeshParams>(), &["bodies", "path", "quality"]);
-    assert_keys(input_schema_for::<ExportStlParams>(), &["bodies", "lay_on_print_faces", "path", "quality"]);
+    assert_keys(input_schema_for::<ExportStlParams>(), &["ascii", "bodies", "lay_on_print_faces", "path", "quality", "solids"]);
     assert_keys(input_schema_for::<Export3mfParams>(), &["bodies", "lay_on_print_faces", "objects", "path", "quality"]);
-    assert_keys(input_schema_for::<ExportUrdfParams>(), &["effort", "mesh_prefix", "path", "velocity"]);
+    assert_keys(input_schema_for::<ExportUrdfParams>(), &["effort", "images", "mesh_prefix", "path", "velocity"]);
+    assert_keys(input_schema_for::<ExportSdfParams>(), &["bodies", "model_uris", "name", "path", "quality", "static"]);
     assert_keys(
         input_schema_for::<ExportParams>(),
-        &["bodies", "effort", "format", "lay_on_print_faces", "mesh_prefix", "objects", "path", "quality", "velocity"],
+        &[
+            "bodies",
+            "effort",
+            "exact_brep",
+            "format",
+            "hierarchy",
+            "images",
+            "lay_on_print_faces",
+            "mesh_prefix",
+            "model_uris",
+            "name",
+            "objects",
+            "options",
+            "path",
+            "physics",
+            "purpose",
+            "quality",
+            "render_setup",
+            "solids",
+            "static",
+            "velocity",
+            "writer",
+        ],
     );
     assert_keys(
         input_schema_for::<OpenParams>(),
-        &["folder", "format", "history", "max_points", "names", "options", "origin", "path", "read_only", "reuse_import", "units", "up", "verify"],
+        &[
+            "folder",
+            "format",
+            "geometry",
+            "history",
+            "max_points",
+            "names",
+            "options",
+            "origin",
+            "path",
+            "read_only",
+            "reader",
+            "reuse_import",
+            "units",
+            "up",
+            "verify",
+        ],
     );
     assert_keys(input_schema_for::<RecoveryListParams>(), &["dir"]);
     assert_keys(input_schema_for::<RecoverParams>(), &["dir", "discard", "id"]);
@@ -224,7 +263,7 @@ fn bad_calls_say_what_is_wrong_and_write_nothing() {
     std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("{e}"));
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap_or_else(|e| panic!("{e}"));
-    for cmd in ["file.export_step", "file.export_stl", "file.export_3mf", "file.export_obj", "file.export_urdf"] {
+    for cmd in ["file.export_step", "file.export_stl", "file.export_3mf", "file.export_obj", "file.export_urdf", "file.export_sdf"] {
         let e = s.execute(cmd, &json!({})).unwrap_err().to_string();
         assert!(e.contains(cmd) && e.contains("path"), "{cmd}: {e}");
     }
@@ -237,6 +276,11 @@ fn bad_calls_say_what_is_wrong_and_write_nothing() {
     s.param_check = ParamCheck::Off;
     let e = s.execute("file.export_urdf", &json!({"path": at, "effort": -1})).unwrap_err().to_string();
     assert!(e.contains("effort"), "{e}");
+    let model = dir.join("Model").to_string_lossy().to_string();
+    for (key, value) in [("static", json!("yes")), ("model_uris", json!(1)), ("name", json!("a/b")), ("bodies", json!(["Nope"]))] {
+        let e = s.execute("file.export_sdf", &json!({"path": model, key: value})).unwrap_err().to_string();
+        assert!(e.contains(key) || e.contains("Nope") || e.contains("a/b"), "{key}: {e}");
+    }
     assert_eq!(std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0), 0, "nothing written");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -308,6 +352,11 @@ fn strict_keeps_todays_errors() {
         ("file.export", json!({"path": at("a.obj"), "lay_on_print_faces": true})),
         ("file.export", json!({"path": at("a.stl"), "lay_on_print_faces": "yes"})),
         ("file.export", json!({"path": at("a.3mf"), "lay_on_print_faces": 1})),
+        ("file.export", json!({"path": at("a.urdf"), "physics": true})),
+        ("file.export", json!({"path": at("a.sdf"), "physics": "yes"})),
+        ("file.export", json!({"path": at("a.step"), "physics": true})),
+        ("file.export", json!({"path": at("a.urdf"), "render_setup": "Studio"})),
+        ("file.export", json!({"path": at("a.sdf"), "render_setup": 5})),
         ("file.export_stl", json!({"path": at("a.stl"), "lay_on_print_faces": "yes"})),
         ("file.export_3mf", json!({"path": at("a.3mf"), "lay_on_print_faces": [true]})),
         ("doc.open", json!({"path": ""})),
@@ -360,6 +409,33 @@ fn the_export_type_reads_each_key_only_for_its_format() {
     }
     let e = read(json!({"path": "a.stl", "lay_on_print_faces": "yes"})).expect_err("a string");
     assert!(e.contains("must be true or false"), "{e}");
+    // `purpose` is one of OpenUSD's two forms, as the type, the schema and the handler read it.
+    assert_eq!(ok(json!({"path": "a.usda", "purpose": "distribution"})).purpose, Some(UsdPurpose::Distribution));
+    let e = read(json!({"path": "a.usda", "purpose": "viewer"})).expect_err("a purpose OpenUSD does not have");
+    assert!(e.contains("`purpose` must be interchange or distribution"), "{e}");
+}
+
+/// OpenUSD's `purpose` and `exact_brep` are refused for every other format, URDF, SDF and laid-out
+/// prints included, by the type and by the handler alike.
+#[test]
+fn openusd_only_options_are_refused_for_every_other_format() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let calls = [
+        (json!({"path": "robot.urdf", "purpose": "distribution"}), "`purpose` is for OpenUSD"),
+        (json!({"path": "world.sdf", "purpose": "interchange"}), "`purpose` is for OpenUSD"),
+        (json!({"path": "robot.urdf", "exact_brep": true}), "`exact_brep` is for OpenUSD"),
+        (json!({"path": "part.step", "exact_brep": false}), "`exact_brep` is for OpenUSD"),
+        (json!({"path": "part.stl", "lay_on_print_faces": true, "exact_brep": false}), "`exact_brep` is for OpenUSD"),
+    ];
+    for (p, says) in calls {
+        let typed = serde_json::from_value::<ExportParams>(p.clone()).expect_err("the type refuses").to_string();
+        assert!(typed.contains(says), "{p}: {typed}");
+        let handled = s.execute("file.export", &p).expect_err("the handler refuses").to_string();
+        assert!(handled.contains(says), "{p}: {handled}");
+    }
+    // Absent or null, they are the defaults for any format.
+    assert!(serde_json::from_value::<ExportParams>(json!({"path": "robot.urdf", "purpose": null, "exact_brep": null})).is_ok());
 }
 
 /// (`conforms` does not read `oneOf`, so `quality` and `objects` values are checked by the type,
@@ -374,6 +450,9 @@ fn the_export_schema_takes_what_the_handler_reads() {
         (json!({"path": "robot.urdf", "mesh_prefix": "package://robot/meshes/", "effort": 50, "velocity": 2.5}), true),
         (json!({"path": "a.step", "bodies": "Body1"}), true),
         (json!({"path": "a.stl", "lay_on_print_faces": true}), true),
+        (json!({"path": "a.step", "writer": "cadmpeg"}), true),
+        (json!({"path": "a.igs", "writer": "solidcraft"}), true),
+        (json!({"path": "a.usda", "purpose": "distribution"}), true),
         (json!({}), false),
         (json!({"path": "a.stl", "lay_on_print_faces": "yes"}), false),
         (json!({"path": "a.stl", "bodies": [1]}), false),
@@ -381,6 +460,29 @@ fn the_export_schema_takes_what_the_handler_reads() {
     ] {
         assert_eq!(conforms(schema, schema, &p), takes, "{p}");
     }
+    // OpenUSD's `purpose` offers its two forms in the schema, not any string.
+    let mut allowed = allows(schema, &schema["properties"]["purpose"]);
+    allowed.sort();
+    assert_eq!(allowed, ["distribution", "interchange"], "{:?}", schema["properties"]["purpose"]);
+}
+
+/// The string values a property's schema allows, through a `$ref` and an `Option`'s, an `enum`'s
+/// and a closed list's branches.
+fn allows(root: &Value, node: &Value) -> Vec<String> {
+    let node =
+        node.get("$ref").and_then(Value::as_str).and_then(|r| r.strip_prefix("#/$defs/")).and_then(|name| root["$defs"].get(name)).unwrap_or(node);
+    if let Some(list) = node.get("enum").and_then(Value::as_array) {
+        return list.iter().filter_map(Value::as_str).map(str::to_string).collect();
+    }
+    if let Some(only) = node.get("const").and_then(Value::as_str) {
+        return vec![only.to_string()];
+    }
+    ["anyOf", "oneOf"]
+        .into_iter()
+        .filter_map(|key| node.get(key).and_then(Value::as_array))
+        .flatten()
+        .flat_map(|branch| allows(root, branch))
+        .collect()
 }
 
 /// Real exports of every format in warn: no `param_warnings`, and each reply matches the output
@@ -404,6 +506,9 @@ fn export_replies_match_the_output_schema() {
         // body is a part of a component's object, so it stays as it lies).
         json!({"path": at("i.stl"), "lay_on_print_faces": true}),
         json!({"path": at("j.3mf"), "objects": "component", "lay_on_print_faces": true}),
+        json!({"path": at("k.step"), "writer": "cadmpeg"}),
+        json!({"path": at("l.igs"), "writer": "cadmpeg"}),
+        json!({"path": at("m.3dm")}),
     ];
     for level in [ParamCheck::Warn, ParamCheck::Strict] {
         let mut s = two_cubes();
@@ -414,6 +519,14 @@ fn export_replies_match_the_output_schema() {
             assert!(reply.get("param_warnings").is_none(), "{p}: {reply}");
             assert!(conforms(schema, schema, &reply), "{p}: {reply} doesn't match {schema}");
         }
+        // #18780: ExportResult with skipped bodies conforms to schema
+        let reply_with_skipped = json!({
+            "path": at("k.3mf"),
+            "bytes": 1024,
+            "format": "ThreeMf",
+            "skipped": ["BrokenBody"]
+        });
+        assert!(conforms(schema, schema, &reply_with_skipped));
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -381,7 +381,7 @@ fn keep_dimension_start(s: &mut Session, name: &str) {
             continue;
         }
         let reference: Vec<_> = stored.points.iter().map(|p| p.pos).collect();
-        let solved = if trial.offsets.is_empty() && trial.freeform_offsets.is_empty() {
+        let solved = if trial.offsets.is_empty() && trial.freeform_offsets.is_empty() && trial.freeform_chain_offsets.is_empty() {
             let hold = Hold { points, radii: Vec::new() };
             solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation()
         } else {

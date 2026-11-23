@@ -6,7 +6,8 @@
 //! wind around a periodic surface, frames turned so a round face's form covers it once, each
 //! edge's label and NURBS form, every use's pcurve (closed forms where the geometry has them, the
 //! kernel's [`Trims`] for the rest), outer loops and face sides checked against the pcurves,
-//! tolerances raised to the gaps the geometry has, regions, and the canonical order.
+//! loops of a face that touch at one vertex made one loop, tolerances raised to the gaps the
+//! geometry has, regions, and the canonical order.
 //!
 //! A face on a surface whose record form depends on the face (a linear sweep or a revolution of
 //! a record curve, a cone that may be the plane it nearly is) gets that surface from
@@ -24,7 +25,7 @@
 //! outer loop runs counter-clockwise), and whether the face's side is that normal.
 
 use crate::vec::Vec3Geom as _;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::f64::consts::TAU;
 
 use crate::kernel::{CurveEval, SurfaceEval, face_flux};
@@ -39,8 +40,12 @@ use crate::geom::P3;
 use crate::read::R;
 use crate::topology::swept::Extent;
 
+mod extend;
 mod frames;
+mod reseam;
 pub(crate) mod seams;
+mod slivers;
+mod touching;
 mod wound;
 
 /// Most control points in one direction of a schema spline.
@@ -60,6 +65,9 @@ pub(crate) const EDGE_GAP_SAMPLES: usize = 16;
 /// within which SMLib takes two of a surface's sides for one (#12757: a planar sliver face
 /// 1e-5 mm wide).
 pub(crate) const OPEN_DOMAIN_SPAN: f64 = 1e-3;
+/// Most faces a refusal of failed pcurves names (`face #origin` each), so a reader can leave
+/// them out of one read again together; the rest are named by the next read's refusal.
+pub(crate) const MAX_NAMED_FAILURES: usize = 64;
 /// An edge's tolerance over the largest gap measured between its pcurves and its curve, as the
 /// record check measures it: with margin, as a vertex's.
 pub(crate) const EDGE_GAP_MARGIN: f64 = 1.5;
@@ -101,21 +109,32 @@ pub enum Kind {
     /// A surface model: open shells in the infinite region, and closed ones each bounding a
     /// region of its own.
     Model,
+    /// A region of a general body (CADIR's, a solid's regions beside a sheet's): a solid with
+    /// voids ([`Kind::Voids`]) when it has several shells and every one is closed, else a
+    /// surface model ([`Kind::Model`]).
+    General,
     /// A solid with faces left out (`crate::topology::read_solid_without`): its shells are
     /// sheets, but for a shell still closed, which bounds a region of its own (a void's cavity,
     /// where `voids`: the solid's shells after the first are its voids).
     Open {
         /// The solid's shells after the first are its voids.
         voids: bool,
+        /// The first shell is the solid's outer one. False where every face of the outer shell
+        /// was left out: then each shell is one of its voids, a cavity still.
+        outer: bool,
     },
 }
 
 /// A curve the edge can be read on, and how its parameter relates to its vertices.
+#[derive(Clone)]
 pub(crate) struct EdgeB {
     pub(crate) curve: BCurve,
     pub(crate) interval: [f64; 2],
     pub(crate) vertices: [u32; 2],
     pub(crate) tolerance: f64,
+    /// Allowance for constructing pcurves: the importer's precision plus measured gaps,
+    /// independent of the sending system's possibly coarse distance uncertainty.
+    pub(crate) pcurve_tolerance: f64,
     /// The curve's NURBS form and its interval there (`form::edge`), set before the pcurves.
     pub(crate) form: Option<(BCurve, [f64; 2])>,
 }
@@ -130,6 +149,7 @@ pub enum Bound {
     Vertex(u32),
 }
 
+#[derive(Clone)]
 pub(crate) struct FaceB {
     /// What the reader names the face by in notes and refusals (`face #origin`), and what
     /// [`Solid::face_origin`] gives back.
@@ -180,6 +200,7 @@ pub enum SweptSurface {
 }
 
 /// Faces, edges and vertices being assembled into a record ([`Assembly::finish`]).
+#[derive(Clone)]
 pub struct Assembly<'t> {
     pub(crate) tol: f64,
     /// Makes the pcurves of uses that have no closed form; without it such a face is refused.
@@ -193,11 +214,30 @@ pub struct Assembly<'t> {
     pub(crate) lines_between_vertices: usize,
     /// Inner loops written running the way the outer loop runs, run the other way.
     pub(crate) inner_loops_turned: usize,
+    /// Loops that touched another loop of their face at one vertex, made one loop with it
+    /// (`touching::join`).
+    pub(crate) loops_joined: usize,
+    /// The faces whose loops touch and are left as written: each one's origin and the first
+    /// vertex they touch at.
+    pub(crate) loops_left_touching: Vec<(u64, P3)>,
+    /// Spline patches continued past their knot range to their face's trims ([`extend`]).
+    pub(crate) patches_extended: usize,
+    /// Loops run along a side of a spline face the file wrote as one vertex, its tolerance raised.
+    pub(crate) sides_in_vertices: usize,
+    /// Faces on a closed spline patch whose seam was moved off them ([`reseam`]).
+    pub(crate) reseamed: HashSet<usize>,
     /// Edges added with their vertices at the other ends of their intervals, turned round
     /// ([`Assembly::add_edge`]).
     pub(crate) edges_turned: usize,
     /// Spline surfaces whose first and last control lines met within the tolerance, closed.
     pub(crate) splines_closed: usize,
+    /// Control points of spline curves and surfaces whose polygon turned back on itself within
+    /// the tolerance, moved to take the turn out ([`crate::topology::unfolded_curve`],
+    /// [`crate::topology::unfolded_surface`]).
+    pub(crate) points_unfolded: usize,
+    /// Sides of spline surfaces that collapsed to within the tolerance of a point, made exact
+    /// poles ([`crate::topology::poles_within`]).
+    pub(crate) poles_made_exact: usize,
     /// Edges whose tolerance was raised to the gap their curve has to a face's surface.
     pub(crate) raised_edges: HashSet<u32>,
 }
@@ -216,8 +256,15 @@ impl<'t> Assembly<'t> {
             sense_mismatches: 0,
             lines_between_vertices: 0,
             inner_loops_turned: 0,
+            loops_joined: 0,
+            loops_left_touching: Vec::new(),
+            patches_extended: 0,
+            sides_in_vertices: 0,
+            reseamed: HashSet::new(),
             edges_turned: 0,
             splines_closed: 0,
+            points_unfolded: 0,
+            poles_made_exact: 0,
             raised_edges: HashSet::new(),
         }
     }
@@ -246,6 +293,15 @@ impl<'t> Assembly<'t> {
     /// gap (with margin) as its tolerance, and one too far off refuses the edge, named
     /// `edge #origin`.
     pub fn add_edge(&mut self, origin: u64, curve: BCurve, interval: [f64; 2], ends: [u32; 2]) -> R<(u32, bool)> {
+        // A control polygon that turns back on itself within the tolerance is a wiggle of the
+        // file's, taken out before anything is measured on the curve.
+        let curve = match crate::topology::unfolded_curve(&curve, self.tol) {
+            Some((unfolded, moved)) => {
+                self.points_unfolded += moved;
+                unfolded
+            }
+            None => curve,
+        };
         let eval = CurveEval::new(&curve).map_err(|m| format!("edge #{origin}: {m}"))?;
         let mut at = [Vec3::new(0.0, 0.0, 0.0); 2];
         for (slot, t) in at.iter_mut().zip(interval) {
@@ -265,7 +321,7 @@ impl<'t> Assembly<'t> {
             self.raise_vertex(v, t.dist(p), origin)?;
         }
         let i = index(self.edges.len())?;
-        self.edges.push(EdgeB { curve, interval, vertices, tolerance: self.tol, form: None });
+        self.edges.push(EdgeB { curve, interval, vertices, tolerance: self.tol, pcurve_tolerance: self.pcurve_tolerance(), form: None });
         Ok((i, along))
     }
 
@@ -298,15 +354,38 @@ impl<'t> Assembly<'t> {
         let e = index(self.edges.len())?;
         let frame = Frame { origin, x_axis: [x.x, x.y, x.z], y_axis: [z.x, z.y, z.z] };
         let half = std::f64::consts::FRAC_PI_2;
-        self.edges.push(EdgeB { curve: BCurve::Circle { frame, radius }, interval: [-half, half], vertices: ends, tolerance: self.tol, form: None });
+        self.edges.push(EdgeB {
+            curve: BCurve::Circle { frame, radius },
+            interval: [-half, half],
+            vertices: ends,
+            tolerance: self.tol,
+            pcurve_tolerance: self.pcurve_tolerance(),
+            form: None,
+        });
         Ok(vec![Bound::Edges(vec![(e, true), (e, false)])])
+    }
+
+    /// An edge between vertices `ends` on `curve` where the producer gives no interval: the
+    /// interval is where the vertices lie on the curve (the whole of a closed curve when both
+    /// ends are one vertex or one point), the edge running from `ends[0]` along the curve, as a
+    /// STEP edge is read. Then as [`Assembly::add_edge`].
+    pub fn add_edge_on(&mut self, origin: u64, curve: BCurve, ends: [u32; 2]) -> R<(u32, bool)> {
+        let (ps, pe) = (self.point(ends[0])?, self.point(ends[1])?);
+        let closed = ends[0] == ends[1];
+        let full = closed || ps == pe;
+        let (curve, interval, with) =
+            crate::topology::record_edge(curve, ps, pe, closed, full, self.tol).map_err(|m| format!("edge #{origin}: {m}"))?;
+        let (e, along) = self.add_edge(origin, curve, interval, if with { ends } else { [ends[1], ends[0]] })?;
+        Ok((e, along == with))
     }
 
     /// A face on `surface` bounded by `bounds`, its index. Each bound is relative to the
     /// surface's natural normal; `outer` is the outer bound's index in `bounds` when the reader
     /// knows it (the pcurves decide otherwise, [`Assembly::finish`]); `forward` says the face's
     /// side is the natural normal. A spline surface whose first and last control lines meet
-    /// within the tolerance is closed on itself (noted). `origin` names the face.
+    /// within the tolerance is closed on itself (noted), a side that closes to a point within it is
+    /// made an exact pole (noted), and a control net that turns back on itself within it is
+    /// unfolded (noted). `origin` names the face.
     pub fn add_face(&mut self, origin: u64, surface: BSurface, bounds: Vec<Bound>, outer: Option<usize>, forward: bool) -> R<u32> {
         // A sphere bounded by its poles alone is the whole sphere, with a meridian for its seam.
         let bounds = match &surface {
@@ -324,6 +403,24 @@ impl<'t> Assembly<'t> {
             }
             None => surface,
         };
+        // A side only close to a point is an exact pole before anything is measured on it.
+        let corners: Vec<Vec3> = bounds
+            .iter()
+            .flat_map(|b| match b {
+                Bound::Edges(es) => es.iter().filter_map(|(e, _)| self.edges.get(*e as usize)).flat_map(|e| e.vertices).collect::<Vec<u32>>(),
+                Bound::Vertex(v) => vec![*v],
+            })
+            .filter_map(|v| self.vertices.get(v as usize).map(|p| v3(p.point)))
+            .collect();
+        if let Some((poled, sides)) = crate::topology::poles_within(&surface, self.tol, &corners) {
+            self.poles_made_exact += sides;
+            surface = poled;
+        }
+        // A control net that turns back on itself within the tolerance is unfolded.
+        if let Some((unfolded, moved)) = crate::topology::unfolded_surface(&surface, self.tol) {
+            self.points_unfolded += moved;
+            surface = unfolded;
+        }
         if bounds.len() == 2
             && let BSurface::Sphere { frame, .. } = &mut surface
         {
@@ -429,7 +526,18 @@ impl<'t> Assembly<'t> {
     /// torus) the edge's distance from it is measured along the edge before its pcurve is made,
     /// and the edge's tolerance covers it. A spline face's gaps are measured on the pcurves its
     /// kernel makes (`raise_edges`): an iterative nearest point may settle elsewhere on it.
-    fn measure_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>]) -> R<()> {
+    ///
+    /// `form_box` is the face's box on its NURBS form where it has one (`form::surface_within`).
+    /// The form ends on a quarter line its boundary runs past by up to the file's tolerance, so
+    /// an edge that runs past lies off the face as the record keeps it (the label over the
+    /// form's box) by more than off the label: that gap is measured too, to the label's point at
+    /// the nearest parameters in the box, and the edge's pcurve tolerance covers it, as it covers
+    /// a gap to the label ([`Self::cover_edge`]), up to the file's tolerance: the form ends short
+    /// of the boundary by no more than that, and pcurves are never made looser than the file
+    /// states. Its closed-form pcurve then has its ends put in the box, which the pcurves'
+    /// construction asks for; the record's tolerances cover the move as before (`onto_form`,
+    /// `raise_edges`).
+    fn measure_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], form_box: Option<[[f64; 2]; 2]>) -> R<()> {
         // Only where the nearest point is in closed form: on a spline the search may settle on
         // another part of the surface, or on its boundary for a point a hair past it, and report a
         // gap the edge does not have (2.9 mm on Poppy Humanoid's leg shells, whose edges lie within
@@ -448,6 +556,41 @@ impl<'t> Assembly<'t> {
         }
         let on = SurfaceEval::new(surface).map_err(|m| m.to_string())?;
         let starts = crate::kernel::Starts::default();
+        let period = on.domain().period;
+        // The form's box in the label's angles, along the directions that are angles (a cylinder's
+        // or cone's height is the form's own parameter, and its form does not end short of it).
+        let angular = match surface {
+            BSurface::Cylinder { .. } | BSurface::Cone { .. } => [true, false],
+            BSurface::Sphere { .. } | BSurface::Torus { .. } => [true, true],
+            _ => [false, false],
+        };
+        let bounds = form_box.map(|d| {
+            [0, 1].map(|k| match (angular.get(k), d.get(k)) {
+                (Some(true), Some(&[a, b])) => Some([crate::kernel::form::angle(a), crate::kernel::form::angle(b)]),
+                _ => None,
+            })
+        });
+        // `q` moved to the nearest parameters in the box, where it lies past it.
+        let in_box = |q: [f64; 2]| -> Option<[f64; 2]> {
+            let bounds = bounds.as_ref()?;
+            let mut c = q;
+            let mut moved = false;
+            for ((x, range), p) in c.iter_mut().zip(bounds).zip(period) {
+                let Some([lo, hi]) = *range else { continue };
+                let y = crate::kernel::unwrap(*x, 0.5 * (lo + hi), p);
+                let z = if y < lo {
+                    lo
+                } else if y > hi {
+                    hi
+                } else {
+                    y
+                };
+                if z != y {
+                    (*x, moved) = (z, true);
+                }
+            }
+            moved.then_some(c)
+        };
         for l in edge_loops {
             for &(e, _) in l {
                 let edge = self.edges.get(e as usize).ok_or("edge reference")?;
@@ -456,15 +599,22 @@ impl<'t> Assembly<'t> {
                     None => (&edge.curve, edge.interval),
                 };
                 let eval = CurveEval::new(curve).map_err(|m| m.to_string())?;
-                let mut gap = 0.0f64;
-                for k in 0..=EDGE_GAP_SAMPLES {
-                    let t = if k == EDGE_GAP_SAMPLES { t1 } else { t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64) };
+                let (mut gap, mut off_form) = (0.0f64, 0.0f64);
+                for t in gap_samples(curve, [t0, t1], matches!(surface, BSurface::Plane { .. } | BSurface::PlaneThrough { .. })) {
                     let Some(p) = eval.point(t) else { continue };
                     // A point with no nearest point is the pcurves' to refuse, with why.
-                    let Some(s) = on.project_with(&starts, p, None, f64::INFINITY).and_then(|q| on.point(q)) else { continue };
+                    let Some(q) = on.project_with(&starts, p, None, f64::INFINITY) else { continue };
+                    let Some(s) = on.point(q) else { continue };
                     gap = gap.max(s.dist(p));
+                    if let Some(s) = in_box(q).and_then(|c| on.point(c)) {
+                        off_form = off_form.max(s.dist(p));
+                    }
                 }
                 self.cover_edge(e, gap, pcurve::SURFACE_GAP_MARGIN)?;
+                let allowance = (pcurve::SURFACE_GAP_MARGIN * off_form).min(self.tol);
+                if let Some(x) = self.edges.get_mut(e as usize) {
+                    x.pcurve_tolerance = x.pcurve_tolerance.max(allowance);
+                }
             }
         }
         Ok(())
@@ -473,6 +623,8 @@ impl<'t> Assembly<'t> {
     /// Edge `e`'s tolerance covers `gap` with `margin`: refused if far off.
     fn cover_edge(&mut self, e: u32, gap: f64, margin: f64) -> R<()> {
         let Some(x) = self.edges.get_mut(e as usize) else { return Err("edge reference".into()) };
+        // A real gap must be covered even when it is smaller than the file's uncertainty.
+        x.pcurve_tolerance = x.pcurve_tolerance.max(margin * gap);
         if margin * gap <= x.tolerance {
             return Ok(());
         }
@@ -487,6 +639,35 @@ impl<'t> Assembly<'t> {
             if let Some(vx) = self.vertices.get_mut(v as usize) {
                 vx.tolerance = vx.tolerance.max(tolerance);
             }
+        }
+        Ok(())
+    }
+
+    /// The edges and vertices of `bound` hold `deviation` (mm): how far, as their producer states
+    /// it, the curves or the surface they stand on may lie from what they stand for (a sampled
+    /// curve's chordal deflection, a fitted cache's fit tolerance), so the record keeps that
+    /// allowance instead of taking the fit for the exact geometry. More than [`MAX_TOLERANCE`]
+    /// is refused, as a gap that large is.
+    pub fn hold_deviation(&mut self, bound: &Bound, deviation: f64) -> R<()> {
+        if !(deviation <= MAX_TOLERANCE) {
+            return Err(format!("a fit stated within {deviation} mm, more than an edge's tolerance holds"));
+        }
+        let mut vertices = Vec::new();
+        match bound {
+            Bound::Edges(uses) => {
+                for &(e, _) in uses {
+                    let Some(x) = self.edges.get_mut(e as usize) else { return Err("edge reference".into()) };
+                    x.tolerance = x.tolerance.max(deviation);
+                    x.pcurve_tolerance = x.pcurve_tolerance.max(deviation);
+                    vertices.extend(x.vertices);
+                }
+            }
+            Bound::Vertex(v) => vertices.push(*v),
+        }
+        // A vertex's tolerance covers every edge that meets it, as in any tolerant record.
+        for v in vertices {
+            let Some(x) = self.vertices.get_mut(v as usize) else { return Err("vertex reference".into()) };
+            x.tolerance = x.tolerance.max(deviation);
         }
         Ok(())
     }
@@ -524,21 +705,57 @@ impl<'t> Assembly<'t> {
     /// Pcurves, outer loops, domains and the canonical order: the finished record of body item
     /// `item` named `name`, whose shells are `shells` (each a list of faces and whether the shell
     /// uses each on its side), making a body of `kind`.
+    ///
+    /// A body with faces narrower than the tolerance ([`slivers`]) is read with them first; where
+    /// that is refused, the slivers the refusal names (each refused on its own: such a face has
+    /// no area in its own parameters) are left out, their sides made one, and it is read again. A
+    /// sliver the refusal does not name reads, and is kept; a refusal that names none stands.
     pub fn finish(mut self, item: u64, name: String, shells: Vec<Vec<(u32, bool)>>, kind: Kind) -> R<Solid> {
+        if !self.has_slivers()? {
+            return self.finish_as_given(item, name, shells, kind, &mut Vec::new());
+        }
+        let mut named = Vec::new();
+        let refusal = match self.clone().finish_as_given(item, name.clone(), shells.clone(), kind, &mut named) {
+            Ok(solid) => return Ok(solid),
+            Err(m) => m,
+        };
+        let (shells, slivers) = self.collapse_slivers(shells, &named)?;
+        if slivers == 0 {
+            return Err(refusal);
+        }
+        let note = format!("{slivers} faces narrower than {} mm left out, their two sides made one edge", self.tol);
+        let mut solid = self.finish_as_given(item, name, shells, kind, &mut Vec::new())?;
+        solid.notes.insert(0, note);
+        Ok(solid)
+    }
+
+    /// [`Self::finish`] with the faces as the reader gave them. The file faces a refusal names
+    /// (each whose pcurves failed, up to [`MAX_NAMED_FAILURES`], or the one the record check
+    /// disagrees on) are added to `named`.
+    fn finish_as_given(mut self, item: u64, name: String, shells: Vec<Vec<(u32, bool)>>, kind: Kind, named: &mut Vec<u64>) -> R<Solid> {
         let mut notes = Vec::new();
+        let mut shells = shells;
+        let hairpins = self.drop_hairpin_faces(&mut shells)?;
+        if hairpins > 0 {
+            notes.push(format!("{hairpins} walls no wider than {} mm left out (an outline running out and back along itself)", self.tol));
+        }
         let twins = self.merge_twin_edges()?;
         if twins > 0 {
             notes.push(format!("{twins} edges the file writes twice (two edges on the same vertices and one curve, each used by one face) made one"));
+        }
+        let paired = self.pair_slit_edges()?;
+        if paired > 0 {
+            notes.push(format!("{paired} loops of no area written on two coincident edges rewritten to run out and back on one"));
         }
         // A face bounded by a slit alone is the whole of its closed surface, closed by its seams
         // (a sphere's frame put on the slit), before anything is measured on the frame or split
         // at its poles.
         self.complete_slits()?;
-        // A face on a torus that is the rest of it round a patch its loop bounds gets the
-        // torus's seams, its loop a hole in it.
+        // A face on a sphere or torus that is the rest of it round a patch its loop bounds gets
+        // the surface's seams, its loop a hole in it.
         let outsides = self.complete_outsides()?;
         if outsides > 0 {
-            notes.push(format!("{outsides} faces on a torus that are the outside of their loops given the torus's seams"));
+            notes.push(format!("{outsides} faces on a sphere or torus that are the outside of their loops given the surface's seams"));
         }
         // A torus face's seams where its torus starts, so its (u, v) box is read whole.
         self.seat_torus_seams()?;
@@ -565,8 +782,17 @@ impl<'t> Assembly<'t> {
                 self.splines_closed, self.tol
             ));
         }
-        if self.inner_loops_turned > 0 {
-            notes.push(format!("{} inner loops written the way their outer loop runs turned round", self.inner_loops_turned));
+        if self.points_unfolded > 0 {
+            notes.push(format!(
+                "{} control points of spline curves and surfaces whose polygon turned back on itself by less than {} mm moved to take the turn out",
+                self.points_unfolded, self.tol
+            ));
+        }
+        if self.poles_made_exact > 0 {
+            notes.push(format!(
+                "{} sides of spline surfaces that close to a point within {} mm made exact poles (their control points made one)",
+                self.poles_made_exact, self.tol
+            ));
         }
         if self.lines_between_vertices > 0 {
             notes.push(format!("{} line edges whose vertices lie off their LINE read as the segment between them", self.lines_between_vertices));
@@ -611,7 +837,7 @@ impl<'t> Assembly<'t> {
         let mut face_forms: Vec<Option<BSurface>> = Vec::with_capacity(self.faces.len());
         let mut domains = Vec::with_capacity(self.faces.len());
         let mut turned = vec![false; self.faces.len()];
-        let (mut failed, mut first_failure) = (0usize, None);
+        let (mut failed, mut first_failure, mut failed_faces) = (0usize, None, Vec::new());
         for fi in 0..self.faces.len() {
             match self.face_pcurves(fi) {
                 Ok((pc, domain, flipped, form)) => {
@@ -624,7 +850,12 @@ impl<'t> Assembly<'t> {
                 }
                 Err(m) => {
                     failed += 1;
-                    first_failure.get_or_insert_with(|| format!("face #{}: {m}", self.faces.get(fi).map_or(0, |f| f.origin)));
+                    let origin = self.faces.get(fi).map_or(0, |f| f.origin);
+                    if failed_faces.len() < MAX_NAMED_FAILURES {
+                        failed_faces.push(format!("face #{origin}"));
+                        named.push(origin);
+                    }
+                    first_failure.get_or_insert_with(|| format!("face #{origin}: {m}"));
                     pcs.push(Vec::new());
                     domains.push([[0.0; 2]; 2]);
                     face_forms.push(None);
@@ -632,7 +863,24 @@ impl<'t> Assembly<'t> {
             }
         }
         if let Some(first) = first_failure {
-            return Err(format!("pcurves failed on {failed} of {} faces; first: {first}", self.faces.len()));
+            // Every face that failed is named (up to `MAX_NAMED_FAILURES`), the first first.
+            let named = if failed > 1 { format!(" ({})", failed_faces.join(", ")) } else { String::new() };
+            return Err(format!("pcurves failed on {failed} of {} faces{named}; first: {first}", self.faces.len()));
+        }
+        if !self.reseamed.is_empty() {
+            notes.push(format!("{} closed spline patches started elsewhere, off the face across their seam", self.reseamed.len()));
+        }
+        if self.patches_extended > 0 {
+            notes.push(format!("{} spline patches continued past their knot range to their faces' trims", self.patches_extended));
+        }
+        if self.inner_loops_turned > 0 {
+            notes.push(format!("{} inner loops written the way their outer loop runs turned round", self.inner_loops_turned));
+        }
+        if self.sides_in_vertices > 0 {
+            notes.push(format!(
+                "{} sides of spline faces the file wrote as one vertex run along, the vertex's tolerance raised to reach along them",
+                self.sides_in_vertices
+            ));
         }
         if !self.raised_edges.is_empty() {
             let most = self.raised_edges.iter().filter_map(|&e| self.edges.get(e as usize)).map(|e| e.tolerance).fold(0.0, f64::max);
@@ -642,24 +890,54 @@ impl<'t> Assembly<'t> {
                 self.tol
             ));
         }
+        if self.loops_joined > 0 {
+            notes.push(format!(
+                "{} loops that touch another loop of their face at one vertex (a hole that touches its face's edge) made one loop with it",
+                self.loops_joined
+            ));
+        }
+        if let Some((origin, [x, y, z])) = self.loops_left_touching.first() {
+            let more = match self.loops_left_touching.len() {
+                0 | 1 => String::new(),
+                n => format!(", and {} more faces", n - 1),
+            };
+            notes.push(format!(
+                "face #{origin}: its loops touch at ({x}, {y}, {z}) mm and are left as written{more}: they make no single loop through that point (three or more of their edges' ends meet there, or the loops touch at another point as well). A face whose loops share a vertex fails the body's check, so features on the body are refused until the loops are moved apart in the source model"
+            ));
+        }
         let flipped = turned.iter().filter(|t| **t).count();
         if flipped > 0 {
             notes.push(format!("{flipped} faces turned over: their loops disagree with their same_sense"));
         }
-        let shells: Vec<Vec<(u32, bool)>> = shells
+        let mut shells: Vec<Vec<(u32, bool)>> = shells
             .into_iter()
             .map(|s| s.into_iter().map(|(f, fwd)| (f, if turned.get(f as usize).copied().unwrap_or(false) { !fwd } else { fwd })).collect())
             .collect();
 
         // Regions: which shells are closed (every edge used at least twice among its faces).
         let closed: Vec<bool> = shells.iter().map(|s| self.closed(s)).collect();
+        let kind = match kind {
+            Kind::General if closed.len() > 1 && closed.iter().all(|c| *c) => Kind::Voids,
+            Kind::General => Kind::Model,
+            k => k,
+        };
+        // A closed solid's edge sides must cancel. Local loop normalization alone can
+        // preserve an exporter's inconsistent shell sides (#17149).
+        let mut reoriented = false;
+        if matches!(kind, Kind::Solid | Kind::Voids) {
+            for (shell, closed) in shells.iter_mut().zip(&closed) {
+                if *closed {
+                    reoriented |= self.orient_shell(shell)?;
+                }
+            }
+        }
         // A void's faces face into the cavity, out of the material: it encloses volume of the
         // opposite sign to the outer shell's. The ORIENTED_CLOSED_SHELL flag alone doesn't say
         // so: some exporters write .F. over a shell already facing into the cavity (#3730),
         // SolidCraft .T.; read by the flag, such a void added its cavity's volume to the solid's.
         // A void enclosing volume of the outer shell's sign is turned inside out, the signs the
         // faces' own surfaces and pcurves give (`face_flux` of p / 3, the divergence theorem).
-        let shells = if kind == Kind::Voids && closed.iter().all(|c| *c) {
+        let shells = if !reoriented && kind == Kind::Voids && closed.iter().all(|c| *c) {
             let volume = |s: &[(u32, bool)]| -> Option<f64> {
                 let mut sum = 0.0;
                 for &(f, forward) in s {
@@ -703,7 +981,7 @@ impl<'t> Assembly<'t> {
                     regions.push(Region { shells: vec![index(v)?], void: true });
                 }
             }
-            Kind::Open { voids } => {
+            Kind::Open { voids, outer } => {
                 if let Some(r) = regions.first_mut() {
                     r.shells = (0..index(shells.len())?).collect();
                 }
@@ -711,11 +989,11 @@ impl<'t> Assembly<'t> {
                 // the inside of an outer shell or a model's shell still whole.
                 for (k, c) in closed.iter().enumerate() {
                     if *c {
-                        regions.push(Region { shells: vec![index(k)?], void: voids && k > 0 });
+                        regions.push(Region { shells: vec![index(k)?], void: voids && (k > 0 || !outer) });
                     }
                 }
             }
-            Kind::Model => {
+            Kind::Model | Kind::General => {
                 if let Some(r) = regions.first_mut() {
                     r.shells = (0..index(shells.len())?).collect();
                 }
@@ -895,10 +1173,199 @@ impl<'t> Assembly<'t> {
             }
             out_shells.push(Shell::Faces { faces, wires: Vec::new() });
         }
-        let brep = Brep { version: brep::VERSION, tolerance: self.tol, regions, shells: out_shells, faces, edges, vertices };
+        // The file lists faces, not their radial order. At an edge more than two
+        // faces use, order their inward directions on the actual shared segment.
+        // Keep two-use edges in their existing order, including periodic seams.
+        for edge in &mut edges {
+            if edge.uses.len() <= 2 {
+                continue;
+            }
+            let radial_faces = edge
+                .uses
+                .iter()
+                .map(|u| {
+                    let face = faces.get(u.face as usize).ok_or("radial face reference")?;
+                    let Some(Loop::Edges { edges }) = face.loops.get(u.r#loop as usize) else {
+                        return Err("radial loop reference");
+                    };
+                    let oriented = edges.get(u.position as usize).ok_or("radial edge use reference")?;
+                    Ok((face.parameters(), &oriented.pcurve, oriented.forward))
+                })
+                .collect::<Result<Vec<_>, &str>>()?;
+            let order = crate::kernel::radial_order(edge.parameters(), edge.interval, &radial_faces)?;
+            edge.uses = order.into_iter().map(|i| edge.uses.get(i).copied().ok_or("radial edge use reference")).collect::<Result<Vec<_>, &str>>()?;
+        }
+        let mut brep = Brep { version: brep::VERSION, tolerance: self.tol, regions, shells: out_shells, faces, edges, vertices };
+        if reoriented {
+            // Parity fixes relative sides only. Certify every shell's absolute side,
+            // including cavities: the traversal's starting face may itself be reversed.
+            for shell in 0..brep.shells.len() {
+                let positive = crate::kernel::shell_volume_positive(&brep, shell)?;
+                let cavity = kind == Kind::Voids && shell > 0;
+                if positive == cavity {
+                    let Some(Shell::Faces { faces, .. }) = brep.shells.get_mut(shell) else { return Err("shell reference".into()) };
+                    for side in faces {
+                        side.forward = !side.forward;
+                    }
+                }
+            }
+            // Face order is unchanged; shell sides also determine the edge/vertex walk.
+            brep = brep.canonical().map_err(|e| e.to_string())?.brep;
+        }
+        // Trim construction returns a continuous lift on a periodic surface. Only now, with
+        // the whole body mutable, can its crossed cuts become edges and its trim pieces be
+        // moved into the base period. An internal seam used on both sides is replaced rather
+        // than retained as a boundary that would divide the same material into sliver faces.
+        if let Some((completed, from)) = pcurve::complete_periodic_seams(&brep).map_err(|e| e.to_string())? {
+            face_origin = from
+                .iter()
+                .map(|&i| face_origin.get(i).copied().ok_or_else(|| pcurve::PeriodicSeamError::InputFaceLost(i).to_string()))
+                .collect::<R<Vec<_>>>()?;
+            turned_faces =
+                from.iter().enumerate().filter(|(_, i)| turned_faces.contains(&(**i as u32))).map(|(i, _)| index(i)).collect::<R<Vec<_>>>()?;
+            brep = completed;
+        }
         solidcore_ops::record_check::validate(&brep).map_err(|e| format!("the record is invalid: {e}"))?;
-        solidcore_ops::record_check::agreement(&brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
+        // A disagreement on a face names the file's face too, so a reader can leave it out.
+        solidcore_ops::record_check::agreement(&brep).map_err(|e| {
+            use solidcore_ops::record_check::Record;
+            if let Record::Face(f) | Record::Use { face: f, .. } | Record::VertexLoop { face: f, .. } | Record::Loop { face: f, .. } = e.record
+                && let Some(o) = face_origin.get(f as usize)
+            {
+                named.push(*o);
+            }
+            disagreement(&e, &face_origin)
+        })?;
         Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes, turned: turned_faces })
+    }
+
+    /// Leaves out each face that is no wider than the tolerance: one loop whose two open edges
+    /// are the same curve record over the same interval between the same two vertices (its two
+    /// sides one line), its other edges closed edges whose curves stay within the tolerance of
+    /// their vertex. Such a face is a wall an outline makes where it runs out and back along
+    /// itself (a hairpin some exporters write, tangency-labs/solidcore#3292's [T-24]); kept, its
+    /// two sides are coincident edges of one face (`SmFace` tests #33 and #34) and the body
+    /// fails the check before any operation. Left out, its closed edges (points at the
+    /// tolerance) drop out of the faces beside it (a face they alone bound, the wall's cap, goes
+    /// too), and its two sides, each now used by one face, are one edge
+    /// ([`Self::merge_twin_edges`]). Faces are renumbered in `shells`. Returns how many walls were
+    /// left out.
+    ///
+    /// [T-24]: https://tickets.solidcraft.io/t/24
+    fn drop_hairpin_faces(&mut self, shells: &mut [Vec<(u32, bool)>]) -> R<usize> {
+        let mut gone: Vec<usize> = Vec::new();
+        let mut points: HashSet<u32> = HashSet::new();
+        for (fi, face) in self.faces.iter().enumerate() {
+            let [Bound::Edges(es)] = face.loops.as_slice() else { continue };
+            let (mut open, mut closed): (Vec<u32>, Vec<u32>) = (Vec::new(), Vec::new());
+            for &(e, _) in es {
+                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let [a, b] = edge.vertices;
+                if a == b { closed.push(e) } else { open.push(e) }
+            }
+            let [x, y] = open.as_slice() else { continue };
+            let (ex, ey) = (self.edges.get(*x as usize).ok_or("edge reference")?, self.edges.get(*y as usize).ok_or("edge reference")?);
+            let same_ends = {
+                let ([a, b], [c, d]) = (ex.vertices, ey.vertices);
+                (a == c && b == d) || (a == d && b == c)
+            };
+            if x == y || !same_ends || ex.curve != ey.curve || ex.interval != ey.interval {
+                continue;
+            }
+            let mut narrow = true;
+            for &e in &closed {
+                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let at = v3(self.point(edge.vertices[0])?);
+                let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+                let [lo, hi] = edge.interval;
+                for k in 0..=32 {
+                    let p = c.point(lo + (hi - lo) * f64::from(k) / 32.0).ok_or("edge point")?;
+                    if !(p.dist(at) <= self.tol) {
+                        narrow = false;
+                    }
+                }
+            }
+            if narrow {
+                gone.push(fi);
+                points.extend(closed);
+            }
+        }
+        if gone.is_empty() {
+            return Ok(0);
+        }
+        let walls = gone.len();
+        // A face bounded by those closed edges alone (the wall's cap, inside the outline's
+        // excursion) is no wider than the tolerance either: it goes too.
+        for (fi, face) in self.faces.iter().enumerate() {
+            let edge_loops: Vec<&Vec<(u32, bool)>> = face
+                .loops
+                .iter()
+                .filter_map(|l| match l {
+                    Bound::Edges(es) => Some(es),
+                    Bound::Vertex(_) => None,
+                })
+                .collect();
+            if !gone.contains(&fi) && !edge_loops.is_empty() && edge_loops.iter().all(|es| es.iter().all(|(e, _)| points.contains(e))) {
+                gone.push(fi);
+            }
+        }
+        // The closed edges out of every other loop. A hole of nothing else (the outline's
+        // excursion seen from the face it runs into) goes with them; an outer loop of nothing
+        // else keeps its face whole.
+        for (fi, face) in self.faces.iter_mut().enumerate() {
+            if gone.contains(&fi) {
+                continue;
+            }
+            let outer = face.outer.unwrap_or(0);
+            let mut kept = Vec::new();
+            let mut new_outer = None;
+            for (k, mut l) in std::mem::take(&mut face.loops).into_iter().enumerate() {
+                if let Bound::Edges(es) = &mut l {
+                    if es.iter().all(|(e, _)| points.contains(e)) {
+                        if k != outer {
+                            continue;
+                        }
+                    } else {
+                        es.retain(|(e, _)| !points.contains(e));
+                    }
+                }
+                if k == outer && face.outer.is_some() {
+                    new_outer = Some(kept.len());
+                }
+                kept.push(l);
+            }
+            face.loops = kept;
+            if face.outer.is_some() {
+                face.outer = new_outer;
+            }
+        }
+        // The faces out, the rest renumbered in the shells.
+        let mut new_index: Vec<Option<u32>> = Vec::new();
+        let mut next = 0u32;
+        for fi in 0..self.faces.len() {
+            if gone.contains(&fi) {
+                new_index.push(None);
+            } else {
+                new_index.push(Some(next));
+                next += 1;
+            }
+        }
+        let mut k = 0usize;
+        self.faces.retain(|_| {
+            let keep = !gone.contains(&k);
+            k += 1;
+            keep
+        });
+        for shell in shells.iter_mut() {
+            shell.retain_mut(|(f, _)| match new_index.get(*f as usize).copied().flatten() {
+                Some(n) => {
+                    *f = n;
+                    true
+                }
+                None => false,
+            });
+        }
+        Ok(walls)
     }
 
     /// Edges the file writes twice: two EDGE_CURVEs on the same two vertices and the same curve
@@ -951,6 +1418,162 @@ impl<'t> Assembly<'t> {
             }
         }
         Ok(redirect.len())
+    }
+
+    /// A two-edge loop that runs out along one line on one edge and back on another edge of the
+    /// same vertices, curve record and interval (a bore that touches a flat face along a line
+    /// writes the loop so), where each of the two edges is also used by exactly one other face.
+    /// The loop is a slit of no area, so it is rewritten to use one edge twice, and the other
+    /// faces then share the other edge: the pairing a file that writes the slit as one edge has.
+    /// Without this the loop is not seen as a slit and the shell reads as contradictory.
+    /// Returns how many loops were rewritten.
+    fn pair_slit_edges(&mut self) -> R<usize> {
+        let mut uses: HashMap<u32, Vec<(usize, usize, usize)>> = HashMap::new();
+        for (fi, face) in self.faces.iter().enumerate() {
+            for (li, l) in face.loops.iter().enumerate() {
+                if let Bound::Edges(es) = l {
+                    for (pos, (e, _)) in es.iter().enumerate() {
+                        uses.entry(*e).or_default().push((fi, li, pos));
+                    }
+                }
+            }
+        }
+        // (face, loop, the loop's use of x, the loop's use of y, x, y, y runs against x)
+        let mut work: Vec<(usize, usize, usize, usize, u32, u32, bool)> = Vec::new();
+        let mut touched: HashSet<u32> = HashSet::new();
+        for (fi, face) in self.faces.iter().enumerate() {
+            for (li, l) in face.loops.iter().enumerate() {
+                let Bound::Edges(es) = l else { continue };
+                let [(x, dx), (y, dy)] = es.as_slice() else { continue };
+                let (x, y) = (*x, *y);
+                if x == y {
+                    continue;
+                }
+                let (ex, ey) = (self.edges.get(x as usize).ok_or("edge reference")?, self.edges.get(y as usize).ok_or("edge reference")?);
+                let [a, b] = ex.vertices;
+                let against = ex.vertices[0] != ey.vertices[0];
+                let same_ends = a != b && ((ey.vertices == [a, b]) || (ey.vertices == [b, a]));
+                if !same_ends || ex.curve != ey.curve || ex.interval != ey.interval {
+                    continue;
+                }
+                // Out along one, back along the other: the two uses run against each other on
+                // the line.
+                if (dx == dy) != against {
+                    continue;
+                }
+                let (Some(ux), Some(uy)) = (uses.get(&x), uses.get(&y)) else { continue };
+                if ux.len() != 2 || uy.len() != 2 || touched.contains(&x) || touched.contains(&y) {
+                    continue;
+                }
+                // Each edge's other use is a different face's, and not this loop's twin.
+                let other = |u: &Vec<(usize, usize, usize)>| u.iter().find(|&&(f, l, _)| !(f == fi && l == li)).copied();
+                let (Some(ox), Some(oy)) = (other(ux), other(uy)) else { continue };
+                if ox.0 == fi || oy.0 == fi || ox.0 == oy.0 {
+                    continue;
+                }
+                touched.insert(x);
+                touched.insert(y);
+                work.push((fi, li, 0, 1, x, y, against));
+            }
+        }
+        let count = work.len();
+        for (fi, li, px, _py, x, y, against) in work {
+            let Some(oy) = uses.get(&y).and_then(|u| u.iter().find(|&&(f, l, _)| !(f == fi && l == li)).copied()) else { continue };
+            // The other face that used y now uses x, run the way its vertices run against x's.
+            let face = self.faces.get_mut(oy.0).ok_or("face reference")?;
+            if let Some(Bound::Edges(es)) = face.loops.get_mut(oy.1)
+                && let Some(u) = es.get_mut(oy.2)
+            {
+                *u = (x, u.1 != against);
+            }
+            // This loop's use of x becomes a use of y, so the loop is y out and y back.
+            let face = self.faces.get_mut(fi).ok_or("face reference")?;
+            if let Some(Bound::Edges(es)) = face.loops.get_mut(li)
+                && let Some(u) = es.get_mut(px)
+            {
+                *u = (y, u.1 != against);
+            }
+        }
+        Ok(count)
+    }
+
+    /// Orient a closed manifold shell by exact shared-edge parity. Across an edge,
+    /// the two physical traversals oppose: equal directions require opposite flips.
+    /// An already coherent shell keeps its sides, including a nonmanifold shell and one whose
+    /// line where four faces meet is written as two edges paired either way; an inconsistent
+    /// nonmanifold or disconnected shell has no supported repair.
+    fn orient_shell(&self, shell: &mut [(u32, bool)]) -> R<bool> {
+        let mut uses: BTreeMap<u32, Vec<(usize, bool)>> = BTreeMap::new();
+        for (side, &(f, forward)) in shell.iter().enumerate() {
+            let face = self.faces.get(f as usize).ok_or("face reference")?;
+            for bound in &face.loops {
+                if let Bound::Edges(edges) = bound {
+                    for &(edge, along) in edges {
+                        uses.entry(edge).or_default().push((side, along == forward));
+                    }
+                }
+            }
+        }
+        // An edge the file writes twice where four faces meet along one line (two edges on the
+        // same vertices, interval and curve, each used by two of them) counts as one edge: the
+        // file may pair the faces across the twins either way, and the sides are coherent where
+        // the line's uses cancel.
+        let mut twins: HashMap<[u32; 2], Vec<u32>> = HashMap::new();
+        let mut pooled: BTreeMap<u32, (usize, usize)> = BTreeMap::new();
+        for (&e, sides) in &uses {
+            let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+            let same = twins.entry(edge.vertices).or_default();
+            let twin =
+                same.iter().copied().find(|t| self.edges.get(*t as usize).is_some_and(|t| t.interval == edge.interval && t.curve == edge.curve));
+            let key = twin.unwrap_or_else(|| {
+                same.push(e);
+                e
+            });
+            let along = sides.iter().filter(|(_, forward)| *forward).count();
+            let count = pooled.entry(key).or_default();
+            *count = (count.0 + along, count.1 + sides.len().saturating_sub(along));
+        }
+        if pooled.values().all(|(along, against)| along == against) {
+            return Ok(false);
+        }
+        let mut adjacent: BTreeMap<usize, Vec<(usize, bool)>> = BTreeMap::new();
+        for sides in uses.values() {
+            let [(a, along_a), (b, along_b)] = sides.as_slice() else {
+                return Err(unsupported("orienting an inconsistent shell with a nonmanifold edge"));
+            };
+            let opposite = along_a == along_b;
+            adjacent.entry(*a).or_default().push((*b, opposite));
+            adjacent.entry(*b).or_default().push((*a, opposite));
+        }
+        let mut flips = BTreeMap::new();
+        let mut started = false;
+        for seed in 0..shell.len() {
+            if flips.contains_key(&seed) {
+                continue;
+            }
+            if started {
+                return Err(unsupported("orienting an inconsistent shell with disconnected faces"));
+            }
+            started = true;
+            let mut pending = vec![(seed, false)];
+            while let Some((side, flip)) = pending.pop() {
+                if let Some(&known) = flips.get(&side) {
+                    if known != flip {
+                        return Err(unsupported("a shell with contradictory edge orientations"));
+                    }
+                    continue;
+                }
+                flips.insert(side, flip);
+                for &(next, opposite) in adjacent.get(&side).into_iter().flatten() {
+                    pending.push((next, flip != opposite));
+                }
+            }
+        }
+        for (side, (_, forward)) in shell.iter_mut().enumerate() {
+            let flip = flips.get(&side).ok_or("face side reference")?;
+            *forward ^= *flip;
+        }
+        Ok(true)
     }
 
     /// Every edge of the shell's faces used at least twice among them.
@@ -1018,6 +1641,7 @@ impl<'t> Assembly<'t> {
     /// marks none (or marks one that another loop encloses), and turns the face over when its
     /// outer loop runs clockwise about the natural normal on a surface where that cannot be a
     /// face's outer boundary.
+    /// Loops that touch at one vertex are then one loop through it ([`touching::join`]).
     fn face_pcurves(&mut self, fi: usize) -> R<(Vec<Vec<Curve2>>, [[f64; 2]; 2], bool, Option<BSurface>)> {
         let face = self.faces.get(fi).ok_or("face reference")?;
         let label = face.surface.clone();
@@ -1061,14 +1685,37 @@ impl<'t> Assembly<'t> {
             Some((f, d, e)) => (Some(f), Some(d), Some(e)),
             None => (None, None, None),
         };
-        let surface = form.clone().unwrap_or_else(|| label.clone());
+        let mut surface = form.clone().unwrap_or_else(|| label.clone());
         // A face that winds round its axis more than a turn is on a form that does not close:
         // no analytic surface has it (SMLib's cylinder is one turn), so it is a spline face.
         let wound = extent.is_some_and(crate::kernel::form::winds);
+        let mut extended = false;
         // How far each edge lies off this surface, so its closed form is checked at that.
-        self.measure_edges(&label, &edge_loops)?;
+        self.measure_edges(&label, &edge_loops, box_on_form.filter(|_| !wound))?;
         // Closed forms where the geometry has them; the kernel makes the rest (`trims`).
-        let mut exact = pcurve::exact_pcurves(&surface, &uses_of(&self.edges, &edge_loops, None)?, tol, box_on_form).map_err(|e| e.to_string())?;
+        let fit = self.pcurve_tolerance();
+        let mut exact = pcurve::exact_pcurves(&surface, &uses_of(&self.edges, &edge_loops, None)?, fit, box_on_form).map_err(|e| e.to_string())?;
+        // A form ends on the quarter line its face's boundary runs past by up to the tolerance,
+        // so an edge that lies wholly past that line (a few µm of a tube circle beyond it) has no
+        // closed form on it, and the kernel's trims are made for an edge off their surface. Its
+        // closed form is taken on the face's form not cut short (the same quarter grid, so the
+        // same parameters), and put on the range below as the others are ([`onto_form`]).
+        let mut uncut_forms = false;
+        if !wound
+            && exact.iter().flatten().any(Option::is_none)
+            && let (Some(e), Some(_)) = (extent, &form)
+            && let Some((uncut, d)) = crate::kernel::form::surface_within(&label, e, 0.0)
+        {
+            let wide = pcurve::exact_pcurves(&uncut, &uses_of(&self.edges, &edge_loops, None)?, fit, Some(d)).map_err(|e| e.to_string())?;
+            for (l, w) in exact.iter_mut().zip(wide) {
+                for (pc, w) in l.iter_mut().zip(w) {
+                    if pc.is_none() && w.is_some() {
+                        *pc = w;
+                        uncut_forms = true;
+                    }
+                }
+            }
+        }
         // On a form of many turns a closed form does not say which turn each of its ends is on:
         // an arc's two ends came out turns apart. An edge that goes round the axis (an arc, a
         // helix) takes its pcurve from its own angle, followed ([`wound::pcurve`]); a ruling,
@@ -1085,20 +1732,33 @@ impl<'t> Assembly<'t> {
 
         // Without a kernel, a use with neither is refused below with why.
         let missing = exact.iter().flatten().any(Option::is_none);
+        // Closed forms taken on the uncut form are given as they are: made again on the form,
+        // they would have none.
         let made = match self.trims {
+            _ if uncut_forms && !missing => {
+                Some(exact.iter().map(|l| l.iter().cloned().collect::<Option<Vec<_>>>()).collect::<Option<Vec<_>>>().ok_or("a closed form")?)
+            }
             // A face that winds round its axis is on a form SMLib's trims hop sheets on.
             _ if wound && missing => Some(self.wound_pcurves(&label, &edge_loops, &exact)?),
             Some(trims) if missing => {
                 let domain = match box_on_form {
                     Some(d) => d,
-                    None => natural_box(&surface).ok_or_else(|| unsupported("a face on an unbounded surface without closed-form pcurves"))?,
+                    None => match natural_box(&surface) {
+                        Some(d) => d,
+                        // An unbounded surface (a plane) is bounded where the face is: its
+                        // boundary's box, with room round it.
+                        None => self
+                            .face_extent(fi)?
+                            .and_then(|e| bounded_by(&surface, e, tol))
+                            .ok_or_else(|| unsupported("a face on an unbounded surface without closed-form pcurves"))?,
+                    },
                 };
                 Some(trims.trims(&self.trim_face(&label, form.as_ref(), domain, &edge_loops, exact)?)?)
             }
             _ => None,
         };
         let mut pcs =
-            pcurve::pcurves_within(&surface, &uses_of(&self.edges, &edge_loops, made.as_ref())?, tol, box_on_form).map_err(|e| e.to_string())?;
+            pcurve::pcurves_within(&surface, &uses_of(&self.edges, &edge_loops, made.as_ref())?, fit, box_on_form).map_err(|e| e.to_string())?;
         // Each loop's uses are moved by whole turns (four form parameters) to run on from one
         // another, on the form that does not close.
         if wound {
@@ -1126,6 +1786,13 @@ impl<'t> Assembly<'t> {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             onto_knots(&surface, &tolerances, &mut pcs);
+            // Pcurves still past the range (moving them would move the surface more than their
+            // edges' tolerance) are on the patch continued to reach them ([`extend`]).
+            if let Some(longer) = extend::extended(&surface, pcurve_box(&pcs), tol) {
+                surface = longer;
+                extended = true;
+                self.patches_extended += 1;
+            }
         }
         self.raise_edges(&surface, &edge_loops, &pcs)?;
         // Signed areas of the loops that close in (u, v).
@@ -1180,6 +1847,38 @@ impl<'t> Assembly<'t> {
                             poles.as_ref().and_then(|s| s.point(q))
                         };
                         let closed = matches!((ends_at(*a), ends_at(*b)), (Some(p), Some(q)) if p.dist(q) <= reach);
+                        // A side of a spline face the file made one vertex (a corner patch's
+                        // side a few µm long, its two corners written as one): where every point
+                        // of it lies within the vertex's tolerance of the vertex, the loop runs
+                        // along it, as at a pole, the vertex's tolerance raised to reach along
+                        // it from the loop's point there, as the record check measures it.
+                        if !closed
+                            && form.is_none()
+                            && let Some(e) = &poles
+                            && let Some(x) = self.vertices.get(v as usize)
+                            && let Some(r) = side_reach(e, *start, d, [*a, *b], Vec3::from(x.point), reach)
+                        {
+                            if let Some(x) = self.vertices.get_mut(v as usize) {
+                                x.tolerance = x.tolerance.max(r);
+                            }
+                            self.sides_in_vertices += 1;
+                            continue;
+                        }
+                        // The patch started instead inside the widest gap the face's boundary
+                        // leaves round it ([`reseam`]), and the face's pcurves made on that
+                        // (once: a face whose loop still jumps is refused).
+                        if closed && form.is_none() && !self.reseamed.contains(&fi) {
+                            // Each pcurve's control hull along `d` encloses it there, so the gap
+                            // the seam goes in is one no pcurve reaches into.
+                            let along: Option<Vec<[f64; 2]>> = pcs.iter().flatten().map(|c| pcurve_span(c, d)).collect();
+                            if let Some(moved) =
+                                along.and_then(|along| reseam::gap_middle_of(&along, [*a, *b])).and_then(|at| reseam::reseamed(&surface, d, at))
+                            {
+                                self.reseamed.insert(fi);
+                                self.faces.get_mut(fi).ok_or("face reference")?.surface = moved;
+                                return self.face_pcurves(fi);
+                            }
+                        }
                         return Err(unsupported(if closed {
                             "a loop across a closed spline surface's seam without a seam edge".to_string()
                         } else {
@@ -1195,7 +1894,25 @@ impl<'t> Assembly<'t> {
         let shapes: Vec<Option<f64>> = edge_loops.iter().zip(&pcs).map(|(l, pc)| loop_area(l, pc, periods)).collect();
         let face = self.faces.get_mut(fi).ok_or("face reference")?;
         let marked = face.outer.and_then(|o| positions.iter().position(|p| *p == o));
-        let largest = shapes.iter().enumerate().filter_map(|(i, a)| a.map(|a| (i, a.abs()))).max_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i);
+        // Which loop is largest is decided on the areas the loops' pcurves enclose, integrated
+        // along them, not on polygons: nested loops of nearly one size (a thin ring) must not swap
+        // places by how finely, or in how many edges, each is sampled.
+        // Each with an estimate of its integration error: `(area, error)`.
+        let sizes: Vec<Option<(f64, f64)>> = if edge_loops.len() > 1 {
+            edge_loops
+                .iter()
+                .zip(&pcs)
+                .zip(&shapes)
+                .map(|((l, pc), coarse)| coarse.and_then(|scale| loop_area_integrated(l, pc, scale.abs())))
+                .collect()
+        } else {
+            shapes.iter().map(|a| a.map(|a| (a, 0.0))).collect()
+        };
+        // Certainly the largest; else the file's own outer bound; else, with nothing better, the
+        // largest measured.
+        let largest = largest_loop(&sizes).or(marked).or_else(|| {
+            sizes.iter().enumerate().filter_map(|(i, a)| a.map(|(a, _)| (i, a.abs()))).max_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i)
+        });
         let outer = match (marked, largest) {
             // A marked outer loop that closes in (u, v) but another encloses more: that one.
             (Some(m), Some(l)) if shapes.get(m).copied().flatten().is_some() => l,
@@ -1204,7 +1921,7 @@ impl<'t> Assembly<'t> {
             (None, _) => 0,
         };
         face.outer = positions.get(outer).copied();
-        if wound {
+        if wound || extended {
             face.surface = surface.clone();
         }
         let can_turn = matches!(
@@ -1229,6 +1946,8 @@ impl<'t> Assembly<'t> {
             face.forward = !face.forward;
         }
         let mut pcs: Vec<Vec<Curve2>> = if rerun { pcs.into_iter().map(|l| l.into_iter().rev().collect()).collect() } else { pcs };
+        // Each loop's area as it now runs.
+        let mut areas: Vec<Option<f64>> = shapes.iter().map(|a| a.map(|a| if rerun { -a } else { a })).collect();
         // An inner bound written the way the outer one runs (its FACE_BOUND orientation wrong):
         // on a face whose loops all close in (u, v), each loop but the outer runs clockwise, so
         // such a loop is run the other way. Its uses and their pcurves are the same.
@@ -1245,8 +1964,97 @@ impl<'t> Assembly<'t> {
                 if let Some(l) = pcs.get_mut(i) {
                     l.reverse();
                 }
+                if let Some(slot) = areas.get_mut(i) {
+                    *slot = Some(-a);
+                }
                 self.inner_loops_turned += 1;
             }
+        }
+        // Loops that touch at one vertex are one loop through it, where they bound one region
+        // that way ([`touching::join`]); the others are noted, with where they touch.
+        let mut starts: Vec<Vec<u32>> = Vec::new();
+        let mut places: Vec<Vec<Option<[f64; 2]>>> = Vec::new();
+        for (&p, pc) in positions.iter().zip(&pcs) {
+            let Some(Bound::Edges(es)) = face.loops.get(p) else { return Err("loop reference".into()) };
+            let mut vs = Vec::new();
+            for &(e, forward) in es {
+                let [a, z] = self.edges.get(e as usize).ok_or("edge reference")?.vertices;
+                vs.push(if forward { a } else { z });
+            }
+            starts.push(vs);
+            places.push(
+                es.iter()
+                    .zip(pc)
+                    .map(|(&(_, forward), c)| {
+                        let [a, b] = c.interval()?;
+                        solidcore_ops::pcurve::eval(c, if forward { a } else { b })
+                    })
+                    .collect(),
+            );
+        }
+        // The outer loop runs counter-clockwise and every other loop clockwise.
+        let sound: Vec<bool> = areas.iter().enumerate().map(|(i, a)| a.is_some_and(|a| if i == outer { a > 0.0 } else { a < 0.0 })).collect();
+        // Two uses that start at one vertex start at one place of (u, v), not a period apart.
+        let place = |(l, k): (usize, usize)| places.get(l).and_then(|ps| ps.get(k)).copied().flatten();
+        let same_place = |a: (usize, usize), b: (usize, usize)| {
+            let (Some(p), Some(q)) = (place(a), place(b)) else { return false };
+            natural.iter().zip(p.iter().zip(&q)).all(|(n, (x, y))| {
+                let half = match n {
+                    Natural::Periodic => 0.5 * TAU,
+                    Natural::Range(lo, hi) => 0.5 * (hi - lo),
+                };
+                (x - y).abs() < half
+            })
+        };
+        let joins = touching::join(&starts, Some(outer), &sound, &same_place);
+        if let Some(&v) = joins.left.first() {
+            let at = self.vertices.get(v as usize).ok_or("vertex reference")?.point;
+            self.loops_left_touching.push((face.origin, at));
+        }
+        if !joins.walks.is_empty() {
+            let written: Vec<Vec<(u32, bool)>> = positions
+                .iter()
+                .map(|&p| match face.loops.get(p) {
+                    Some(Bound::Edges(es)) => es.clone(),
+                    _ => Vec::new(),
+                })
+                .collect();
+            for (stay, walk) in &joins.walks {
+                let (mut uses, mut curves) = (Vec::new(), Vec::new());
+                for &(l, k) in walk {
+                    uses.push(*written.get(l).and_then(|es| es.get(k)).ok_or("edge use")?);
+                    curves.push(pcs.get(l).and_then(|pc| pc.get(k)).cloned().ok_or("pcurve")?);
+                }
+                if let Some(Bound::Edges(es)) = positions.get(*stay).and_then(|&p| face.loops.get_mut(p)) {
+                    *es = uses;
+                }
+                if let Some(pc) = pcs.get_mut(*stay) {
+                    *pc = curves;
+                }
+            }
+            // The loops now part of another leave the face, and the outer loop's index follows.
+            let gone = |i: usize| joins.gone.get(i).copied().unwrap_or(false);
+            let mut leaves = vec![false; face.loops.len()];
+            for (i, &p) in positions.iter().enumerate() {
+                if gone(i)
+                    && let Some(slot) = leaves.get_mut(p)
+                {
+                    *slot = true;
+                }
+            }
+            let outer_at = positions.get(outer).copied();
+            face.outer = outer_at.map(|o| o - leaves.iter().take(o).filter(|g| **g).count());
+            let mut at = 0;
+            face.loops.retain(|_| {
+                at += 1;
+                !leaves.get(at - 1).copied().unwrap_or(false)
+            });
+            let mut at = 0;
+            pcs.retain(|_| {
+                at += 1;
+                !gone(at - 1)
+            });
+            self.loops_joined += joins.gone.iter().filter(|g| **g).count();
         }
         let domain = face_domain(&surface, &pcs)?;
         Ok((pcs, domain, flip, if wound { None } else { form }))
@@ -1279,7 +2087,7 @@ impl<'t> Assembly<'t> {
                 if !matches!(edge.curve, BCurve::Spline { .. } | BCurve::RationalSpline { .. }) {
                     continue;
                 }
-                let Ok(ends) = wound::piece_ends(&label, &edge.curve, edge.interval, self.tol) else { continue };
+                let Ok(ends) = wound::piece_ends(&label, &edge.curve, edge.interval, edge.pcurve_tolerance) else { continue };
                 let pieces = ends.len().saturating_sub(1);
                 let half = MAX_SPLINE_POINTS >> 1;
                 let parts = wound::points_of(pieces).saturating_add(half.saturating_sub(1)).checked_div(half).unwrap_or(0);
@@ -1317,7 +2125,7 @@ impl<'t> Assembly<'t> {
                             Some((c, i)) => (c, *i),
                             None => (&edge.curve, edge.interval),
                         };
-                        wound::pcurve(label, curve, interval, self.tol)?
+                        wound::pcurve(label, curve, interval, edge.pcurve_tolerance)?
                     }
                 });
             }
@@ -1364,7 +2172,7 @@ impl<'t> Assembly<'t> {
                             None => (&edge.curve, None, edge.interval),
                         };
                         let i = index(edges.len())?;
-                        edges.push(TrimEdge { curve, nurbs, interval, vertices: ends, tolerance: edge.tolerance });
+                        edges.push(TrimEdge { curve, nurbs, interval, vertices: ends, tolerance: edge.pcurve_tolerance });
                         edge_at.insert(e, i);
                         i
                     }
@@ -1373,7 +2181,13 @@ impl<'t> Assembly<'t> {
             }
             loops.push(uses);
         }
-        Ok(TrimFace { surface, nurbs, domain, edges, vertices, vertex_tolerances, loops, tolerance: self.tol })
+        Ok(TrimFace { surface, nurbs, domain, edges, vertices, vertex_tolerances, loops, tolerance: self.pcurve_tolerance() })
+    }
+
+    /// Source uncertainty bounds the data's gaps; it is not a target for fitting new curves.
+    /// Keep finer declarations, but never fit more loosely than an import with no declaration.
+    pub(crate) fn pcurve_tolerance(&self) -> f64 {
+        self.tol.min(crate::topology::DEFAULT_TOLERANCE)
     }
 }
 
@@ -1404,11 +2218,92 @@ fn uses_of<'e>(edges: &'e [EdgeB], edge_loops: &[Vec<(u32, bool)>], given: Optio
                 Some(g) => Some(g.get(li).and_then(|l| l.get(p)).ok_or("a pcurve the kernel did not make")?),
                 None => None,
             };
-            u.push(EdgeUse { edge: e, curve, interval, forward, tolerance: edge.tolerance, given });
+            u.push(EdgeUse { edge: e, curve, interval, forward, tolerance: edge.pcurve_tolerance, given });
         }
         uses.push(u);
     }
     Ok(uses)
+}
+
+/// Points along a side of a spline face measured against the vertex it was made ([`side_reach`]).
+const SIDE_SAMPLES: usize = 32;
+
+/// The tolerance a vertex at `start` (its point `vertex`, its tolerance `tolerance`) needs for a
+/// loop to run along the face's side through `start` in direction `d` over `[a, b]` as at a pole:
+/// the least of a few steps past the side's farthest sampled point from `start` at which the
+/// side, certified, stays within that of `start` ([`SurfaceEval::pole_within`], which the record
+/// check asks again of the finished record: what the vertex's raised tolerance claims is that
+/// certificate, not the samples). `None` unless the side's points at `SIDE_SAMPLES + 1`
+/// parameters lie within `tolerance` of the vertex: a screen for a side the file made one vertex
+/// (it decides only whether the certificate is asked for), and where no step's reach is certified
+/// up to two and a half times the tolerance.
+fn side_reach(surface: &SurfaceEval, start: [f64; 2], d: usize, [a, b]: [f64; 2], vertex: Vec3, tolerance: f64) -> Option<f64> {
+    let at = |x: f64| {
+        let mut q = start;
+        *q.get_mut(d)? = x;
+        surface.point(q)
+    };
+    let from = surface.point(start)?;
+    let mut far = 0.0f64;
+    for k in 0..=SIDE_SAMPLES {
+        let p = at(a + (b - a) * (k as f64 / SIDE_SAMPLES as f64))?;
+        if !(p.dist(vertex) <= tolerance) {
+            return None;
+        }
+        far = far.max(p.dist(from));
+    }
+    [1.01, 1.1, 1.25, 1.5]
+        .into_iter()
+        .map(|m| m * far)
+        .filter(|r| *r > 0.0 && *r <= 2.5 * tolerance)
+        .find(|r| surface.pole_within(start, *r).ok().and_then(|p| p.get(d).copied()).unwrap_or(false))
+}
+
+/// The refusal of a record whose geometry disagrees with its topology: on a face (not an edge
+/// alone), naming the file's face too (`face #origin`, of `face_origin`), so a reader can leave it
+/// out.
+pub(crate) fn disagreement(e: &solidcore_ops::record_check::Mismatch, face_origin: &[u64]) -> String {
+    use solidcore_ops::record_check::Record;
+    let face = match e.record {
+        Record::Face(f) | Record::Use { face: f, .. } | Record::VertexLoop { face: f, .. } | Record::Loop { face: f, .. } => Some(f),
+        Record::Edge(_) => None,
+    };
+    match face.and_then(|f| face_origin.get(f as usize)) {
+        Some(o) => format!("the record's geometry disagrees: {e}: face #{o}"),
+        None => format!("the record's geometry disagrees: {e}"),
+    }
+}
+
+/// The interval a pcurve's control points span along `d`: the pcurve lies within it (its control
+/// hull). `None` for a rational pcurve with a weight that is not positive, whose hull does not
+/// enclose it, or for no control points.
+fn pcurve_span(c: &Curve2, d: usize) -> Option<[f64; 2]> {
+    let xs: Vec<f64> = match c {
+        Curve2::Spline { points, .. } => points.iter().map(|p| p.get(d).copied()).collect::<Option<_>>()?,
+        Curve2::RationalSpline { homogeneous, .. } => {
+            homogeneous.iter().map(|h| if h[2] > 0.0 { h.get(d).map(|x| x / h[2]) } else { None }).collect::<Option<_>>()?
+        }
+    };
+    let out = xs.iter().fold([f64::INFINITY, f64::NEG_INFINITY], |o, x| [o[0].min(*x), o[1].max(*x)]);
+    (out[0] <= out[1]).then_some(out)
+}
+
+/// On a plane also a spline's knot spans' middles, where its closed-form pcurve is checked:
+/// crowded knots can lie off it only between the even samples, and a plane has no bounded
+/// domain for the kernel's trims to fall back on (#11652).
+fn gap_samples(curve: &BCurve, [t0, t1]: [f64; 2], on_plane: bool) -> Vec<f64> {
+    let mut ts: Vec<f64> =
+        (0..=EDGE_GAP_SAMPLES).map(|k| if k == EDGE_GAP_SAMPLES { t1 } else { t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64) }).collect();
+    if let (true, BCurve::Spline { knots, .. } | BCurve::RationalSpline { knots, .. }) = (on_plane, curve) {
+        let mut cut = vec![t0];
+        cut.extend(knots.iter().copied().filter(|k| *k > t0 && *k < t1));
+        cut.push(t1);
+        ts.extend(cut.windows(2).filter_map(|w| match w {
+            [a, b] if a < b => Some(0.5 * (a + b)),
+            _ => None,
+        }));
+    }
+    ts
 }
 
 /// A spline surface's parameter box: its knot ranges.
@@ -1417,6 +2312,28 @@ fn natural_box(s: &BSurface) -> Option<[[f64; 2]; 2]> {
         [Natural::Range(a, b), Natural::Range(c, d)] if [a, b, c, d].iter().all(|x| x.is_finite()) => Some([[a, b], [c, d]]),
         _ => None,
     }
+}
+
+/// The box an unbounded surface's face is trimmed within: the face's `extent`, a quarter of its
+/// size (and at least ten times `tol`) wider on every side along a direction the surface does not
+/// bound, its natural range along one it does. `None` for an extent that is not finite.
+fn bounded_by(s: &BSurface, extent: [[f64; 2]; 2], tol: f64) -> Option<[[f64; 2]; 2]> {
+    let natural = solidcore_ops::label::surface_natural(s);
+    let mut out = extent;
+    for (d, o) in out.iter_mut().enumerate() {
+        let [a, b] = *o;
+        if !(a.is_finite() && b.is_finite() && a <= b) {
+            return None;
+        }
+        *o = match natural.get(d) {
+            Some(Natural::Range(lo, hi)) if lo.is_finite() && hi.is_finite() => [*lo, *hi],
+            _ => {
+                let pad = (0.25 * (b - a)).max(10.0 * tol);
+                [a - pad, b + pad]
+            }
+        };
+    }
+    Some(out)
 }
 
 /// Every edge of the loop is used in it exactly twice, once each way: a loop of seam uses alone.
@@ -1445,11 +2362,119 @@ fn natural_periods(s: &BSurface) -> [bool; 2] {
 /// The signed area a loop encloses in (u, v) (positive counter-clockwise), or `None` when it
 /// does not close there (it winds around a periodic direction) or is degenerate.
 fn loop_area(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2]) -> Option<f64> {
+    loop_area_sampled(l, pcs, periodic, 16)
+}
+
+/// The loop that encloses the most, by `sizes` (`(area, error estimate)` per loop, `None` for one
+/// that doesn't close): only when its lead over every other loop is more than their error
+/// estimates together and rounding. `None` when the areas can't tell; the file's own outer bound
+/// (`FACE_OUTER_BOUND`, the file's declaration of which loop is outer) then decides.
+fn largest_loop(sizes: &[Option<(f64, f64)>]) -> Option<usize> {
+    let known: Vec<(usize, f64, f64)> = sizes.iter().enumerate().filter_map(|(i, s)| s.map(|(a, e)| (i, a.abs(), e))).collect();
+    let &(best, area, error) = known.iter().max_by(|a, b| a.1.total_cmp(&b.1))?;
+    let certain = known.iter().all(|&(i, other, other_error)| i == best || area - error > other + other_error + 4.0 * f64::EPSILON * (area + other));
+    certain.then_some(best)
+}
+
+/// The signed area a closed loop of pcurves encloses in (u, v), integrated along the curves, and
+/// an estimate of the integration's error: half of the integral of `(u - u0) dv - (v - v0) du`
+/// (Green), with `(u0, v0)` the loop's first point. Each edge is integrated knot span by knot span
+/// (the curve is smooth within a span) by an adaptive eight-point Gauss–Legendre rule: a piece is
+/// halved until its halves agree with it, so a rational arc is measured to rounding however its
+/// parameter runs, and where the halving budget ends first the disagreement left is the reported
+/// error. Halves agree once they differ by rounding: relative to the piece, or to `scale` (the
+/// loop's rough area, [`loop_area`]) for a piece that adds little. A gap between one edge's end
+/// and the next edge's start (within the file's tolerance) is closed by a straight chord. `None`
+/// for a malformed pcurve. Only call it on a loop [`loop_area`] found closed.
+fn loop_area_integrated(l: &[(u32, bool)], pcs: &[Curve2], scale: f64) -> Option<(f64, f64)> {
+    let floor = 1e-15 * scale;
+    let ends = |c: &Curve2, forward: bool| -> Option<([f64; 2], [f64; 2])> {
+        let [a, b] = c.interval()?;
+        let (p, q) = (solidcore_ops::pcurve::eval(c, a)?, solidcore_ops::pcurve::eval(c, b)?);
+        Some(if forward { (p, q) } else { (q, p) })
+    };
+    let (&(_, first_forward), first_curve) = (l.first()?, pcs.first()?);
+    let origin = ends(first_curve, first_forward)?.0;
+    let cross = |p: [f64; 2], q: [f64; 2]| (p[0] - origin[0]) * (q[1] - origin[1]) - (q[0] - origin[0]) * (p[1] - origin[1]);
+    let mut budget = GREEN_BUDGET;
+    let (mut twice, mut error) = (0.0, 0.0);
+    let mut previous_end: Option<[f64; 2]> = None;
+    for (&(_, forward), c) in l.iter().zip(pcs) {
+        let [t0, t1] = c.interval()?;
+        let knots = match c {
+            Curve2::Spline { knots, .. } | Curve2::RationalSpline { knots, .. } => knots,
+        };
+        let mut breaks = vec![t0];
+        breaks.extend(knots.iter().copied().filter(|k| *k > t0 && *k < t1));
+        breaks.push(t1);
+        breaks.dedup();
+        let mut edge = 0.0;
+        for span in breaks.windows(2) {
+            let (a, b) = (*span.first()?, *span.get(1)?);
+            let whole = green_piece(c, origin, a, b)?;
+            let (value, e) = green_adaptive(c, origin, [a, b], whole, floor, GREEN_DEPTH, &mut budget)?;
+            edge += value;
+            error += e;
+        }
+        let (start, end) = ends(c, forward)?;
+        if let Some(prev) = previous_end {
+            twice += cross(prev, start);
+        }
+        twice += if forward { edge } else { -edge };
+        previous_end = Some(end);
+    }
+    twice += cross(previous_end?, origin);
+    (twice.is_finite() && error.is_finite()).then_some((0.5 * twice, 0.5 * error))
+}
+
+/// Most halvings of one piece in [`loop_area_integrated`].
+const GREEN_DEPTH: u32 = 40;
+/// Most pieces [`loop_area_integrated`] integrates for one loop.
+const GREEN_BUDGET: usize = 100_000;
+
+/// `(u - u0) v' - (v - v0) u'` of `c` over `[a, b]` by eight-point Gauss–Legendre.
+fn green_piece(c: &Curve2, origin: [f64; 2], a: f64, b: f64) -> Option<f64> {
+    const NODES: &[f64] = &[0.1834346424956498, 0.525532409916329, 0.7966664774136267, 0.9602898564975363];
+    const WEIGHTS: &[f64] = &[0.362683783378362, 0.3137066458778873, 0.2223810344533745, 0.1012285362903763];
+    let (mid, half) = (0.5 * (a + b), 0.5 * (b - a));
+    let mut sum = 0.0;
+    for (x, w) in NODES.iter().zip(WEIGHTS) {
+        for t in [mid - half * x, mid + half * x] {
+            let (p, d) = solidcore_ops::pcurve::eval_d1(c, t)?;
+            sum += w * half * ((p[0] - origin[0]) * d[1] - (p[1] - origin[1]) * d[0]);
+        }
+    }
+    Some(sum)
+}
+
+/// [`green_piece`] over `[a, b]` (`whole` its value there) refined by halving until the halves
+/// agree with the whole to rounding (relative, or within `floor`), at most `depth` times and within
+/// `budget` pieces: the value, and the disagreement left where the refining ended early.
+fn green_adaptive(c: &Curve2, origin: [f64; 2], [a, b]: [f64; 2], whole: f64, floor: f64, depth: u32, budget: &mut usize) -> Option<(f64, f64)> {
+    let m = 0.5 * (a + b);
+    let (left, right) = (green_piece(c, origin, a, m)?, green_piece(c, origin, m, b)?);
+    *budget = budget.saturating_sub(2);
+    let halves = left + right;
+    let gap = (halves - whole).abs();
+    if gap <= 1e-13 * (left.abs() + right.abs()) + floor || depth == 0 || *budget == 0 {
+        return Some((halves, gap));
+    }
+    let (l, el) = green_adaptive(c, origin, [a, m], left, floor, depth - 1, budget)?;
+    let (r, er) = green_adaptive(c, origin, [m, b], right, floor, depth - 1, budget)?;
+    Some((l + r, el + er))
+}
+
+/// [`loop_area`] with `steps` chords on each edge. A rational arc sampled evenly in its parameter
+/// is not sampled evenly in its angle, so a coarse polygon of one circle can be a percent smaller
+/// than a polygon of another circle of nearly the same size; telling nested loops apart by their
+/// size takes a finer one.
+fn loop_area_sampled(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2], steps: u32) -> Option<f64> {
+    let steps = steps.max(1);
     let mut pts: Vec<[f64; 2]> = Vec::new();
     for (&(_, forward), c) in l.iter().zip(pcs) {
         let [a, b] = c.interval()?;
-        for k in 0..=16 {
-            let s = f64::from(k) / 16.0;
+        for k in 0..=steps {
+            let s = f64::from(k) / f64::from(steps);
             let t = if forward { a + (b - a) * s } else { b - (b - a) * s };
             pts.push(solidcore_ops::pcurve::eval(c, t)?);
         }
@@ -1471,17 +2496,21 @@ fn loop_area(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2]) -> Option<f
     (area.abs() > 1e-9 * magnitude && magnitude > 0.0).then_some(0.5 * area)
 }
 
-/// The angles `tolerance` (mm) makes along the two directions of a face on `label` over the
-/// height `v`: on the widest circle of the face about the axis (a cylinder or cone), and on a
-/// sphere's meridian or a torus's tube. `form::surface_within` ends a face's form on a quarter
-/// line its domain ends within these angles of; zero along a direction that is no angle.
+/// The parameters `tolerance` (mm) moves a face on `label` over the height `v` by, along its two
+/// directions: the angle on the widest circle of the face about the axis (a cylinder or cone), and
+/// on a sphere's meridian or a torus's tube; along a cylinder's or cone's height, the height that
+/// moves the surface by `tolerance` along its line (the whole of it on a cylinder, its cosine of
+/// the half angle on a cone). `form::surface_within` ends a face's form on a quarter line its
+/// domain ends within these angles of, and at the heights its domain ends at; zero along another
+/// direction.
 fn form_reach(label: &BSurface, v: [f64; 2], tolerance: f64) -> [f64; 2] {
     let reach = |radius: f64| if tolerance > 0.0 && radius > 0.0 && radius.is_finite() { tolerance / radius } else { 0.0 };
+    let along = |cosine: f64| if tolerance > 0.0 && cosine.is_finite() { tolerance * cosine } else { 0.0 };
     match label {
-        BSurface::Cylinder { radius, .. } => [reach(radius.abs()), 0.0],
+        BSurface::Cylinder { radius, .. } => [reach(radius.abs()), along(1.0)],
         BSurface::Cone { radius_at_origin, half_angle, .. } => {
             let slope = half_angle.tan();
-            [reach(v.iter().map(|h| (radius_at_origin + h * slope).abs()).fold(0.0, f64::max)), 0.0]
+            [reach(v.iter().map(|h| (radius_at_origin + h * slope).abs()).fold(0.0, f64::max)), along(half_angle.cos().abs())]
         }
         BSurface::Sphere { radius, .. } => [reach(radius.abs()), reach(radius.abs())],
         BSurface::Torus { major_radius, minor_radius, .. } => [reach(major_radius.abs() + minor_radius.abs()), reach(minor_radius.abs())],
@@ -1494,7 +2523,10 @@ fn form_reach(label: &BSurface, v: [f64; 2], tolerance: f64) -> [f64; 2] {
 /// quarter's end the form ends there, but the boundary still lies where its edges do, as much as
 /// `tolerance` past it: a pcurve control point past the form's end by no more than the form
 /// parameter of that angle (less than the angle: a quarter's parameter changes by at most 1/√2
-/// per radian, [`form_reach`]) is moved onto the end. A B-spline is a convex combination of its
+/// per radian, [`form_reach`]) is moved onto the end. Along a cylinder's or cone's height the form
+/// ends where the domain does, and a pcurve's end fitted a few µm past it (an edge's end that lies
+/// within its tolerance of the vertex, not on it) is moved onto it where that height moves the
+/// surface by no more than `tolerance`. A B-spline is a convex combination of its
 /// control points, so each pcurve then lies on the form, and the face's domain, which ends at
 /// the form's, holds it; the pcurve moves by no more than its points did, a gap the edges'
 /// tolerances are measured to cover (`raise_edges`). A point further out is left as it is, for
@@ -1503,7 +2535,11 @@ pub(crate) fn onto_form(form: &BSurface, label: &BSurface, domain: [[f64; 2]; 2]
     let reach = form_reach(label, domain[1], tolerance);
     let ranges = solidcore_ops::label::surface_natural(form);
     let mut moved = 0;
+    // A move along one direction by its whole reach moves the surface by up to `tolerance`; moves
+    // along both add (the triangle inequality), so a point is moved along a second direction only
+    // while the two moves' shares of their reaches sum to at most one.
     let mut onto = |p: &mut [f64; 2]| {
+        let mut spent = 0.0;
         for (d, reach) in reach.iter().enumerate() {
             let (Some(Natural::Range(a, b)), Some(x)) = (ranges.get(d), p.get_mut(d)) else { continue };
             let end = if *x < *a {
@@ -1513,7 +2549,9 @@ pub(crate) fn onto_form(form: &BSurface, label: &BSurface, domain: [[f64; 2]; 2]
             } else {
                 continue;
             };
-            if (*x - end).abs() <= *reach {
+            let share = (*x - end).abs() / *reach;
+            if *reach > 0.0 && spent + share <= 1.0 {
+                spent += share;
                 *x = end;
                 moved += 1;
             }
@@ -1541,8 +2579,9 @@ pub(crate) fn onto_form(form: &BSurface, label: &BSurface, domain: [[f64; 2]; 2]
 /// that moves the surface within their edge's tolerance (`tolerances`, as `pcs`): the parameter
 /// tolerance that edge has on this patch. The kernel moves the control points and proves the
 /// bound, along u and v at once ([`SurfaceEval::pcurve_onto_knots`]); the gap to the edge is then
-/// measured and covered (`raise_edges`). A pcurve it refuses (farther past, on a rational or
-/// closed patch) is left as it is, for the record check to refuse. The number of moves made.
+/// measured and covered (`raise_edges`). A pcurve it refuses (farther past, past both ranges of
+/// a rational patch, or on a closed patch) is left as it is: the patch is continued to reach it
+/// where it can be ([`extend`]), else the record check refuses it. The number of moves made.
 pub(crate) fn onto_knots(surface: &BSurface, tolerances: &[Vec<f64>], pcs: &mut [Vec<Curve2>]) -> usize {
     let Ok(on) = SurfaceEval::new(surface) else { return 0 };
     let mut moved = 0;
@@ -1555,6 +2594,25 @@ pub(crate) fn onto_knots(surface: &BSurface, tolerances: &[Vec<f64>], pcs: &mut 
         }
     }
     moved
+}
+
+/// The parameter box around every pcurve's control points (`[[u_lo, u_hi], [v_lo, v_hi]]`): a
+/// pcurve lies within it. Empty (lows above highs) where there are none.
+pub(crate) fn pcurve_box(pcs: &[Vec<Curve2>]) -> [[f64; 2]; 2] {
+    let mut out = [[f64::INFINITY, f64::NEG_INFINITY]; 2];
+    for c in pcs.iter().flatten() {
+        let pts: Vec<[f64; 2]> = match c {
+            Curve2::Spline { points, .. } => points.clone(),
+            Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter().filter(|h| h[2] > 0.0).map(|h| [h[0] / h[2], h[1] / h[2]]).collect(),
+        };
+        for p in pts {
+            for (o, x) in out.iter_mut().zip(p) {
+                o[0] = o[0].min(x);
+                o[1] = o[1].max(x);
+            }
+        }
+    }
+    out
 }
 
 /// The parameter box around every pcurve's control points, padded a little, within the
@@ -1630,16 +2688,30 @@ pub(crate) fn face_domain(surface: &BSurface, pcs: &[Vec<Curve2>]) -> R<[[f64; 2
 /// that evaluates a periodic spline modulo its period): the curve and interval the record takes,
 /// the interval moved into the range by whole periods, and the curve restarted there (exactly:
 /// knot insertion) when the edge runs across the seam, as the STEP reader reads such an edge.
+/// An end a rounding from the seam is at the seam: an edge all the way round, start to end, is
+/// the curve as it is.
 pub fn periodic_edge(curve: BCurve, [t0, t1]: [f64; 2]) -> R<(BCurve, [f64; 2])> {
     let Natural::Range(a, b) = curve.natural() else { return Err("a periodic spline without a range".into()) };
     let period = b - a;
-    if !(period > 0.0) || !(t0 <= t1) || !(t1 - t0 <= period) {
+    // Rounding is allowed for (`eps`): an edge all the way round may be written a rounding long.
+    let eps = 1e-9 * period;
+    if !(period > 0.0) || !(t0 <= t1) || !(t1 - t0 <= period + eps) {
         return Err("an edge longer than its periodic spline's period".into());
     }
     let turns = ((t0 - a) / period).floor();
-    let (lo, hi) = (t0 - turns * period, t1 - turns * period);
-    if hi <= b {
-        return Ok((curve, [lo, hi]));
+    let (mut lo, mut hi) = (t0 - turns * period, t1 - turns * period);
+    // Moving by whole periods rounds: a start a rounding short of the range's end is the seam
+    // (the range's start), and an end a rounding past it is that end, as the STEP reader takes an
+    // end within a rounding of its seam. A restart is only ever strictly inside the range. An edge
+    // that ends before the range does (a short one a rounding short of it) stays where it is.
+    if b - lo <= eps && hi > b {
+        (lo, hi) = (a, hi - period);
+    }
+    if lo - a <= eps {
+        lo = a;
+    }
+    if hi <= b + eps {
+        return Ok((curve, [lo, hi.min(b)]));
     }
     Ok((crate::kernel::restart_curve(&curve, lo)?, [lo, hi]))
 }

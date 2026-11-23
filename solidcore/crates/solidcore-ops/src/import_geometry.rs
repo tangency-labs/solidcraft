@@ -7,6 +7,15 @@ use solidcore_record::Vec2;
 pub fn scale_point(point: Vec2, scale: f64) -> Vec2 {
     convert::record_vec2(kernel::scale_point(convert::vec2(point), scale))
 }
+/// Express a source point in units of its chord through the kernel's affine conversion.
+///
+/// # Errors
+/// [`crate::Error::Refused`] for a non-finite input, invalid chord or non-finite result.
+pub fn chord_coordinates(point: Vec2, leading_x: f64, trailing_x: f64) -> crate::Result<Vec2> {
+    kernel::chord_coordinates(convert::vec2(point), leading_x, trailing_x)
+        .map(convert::record_vec2)
+        .map_err(crate::error::status)
+}
 /// Whether unit conversion collapsed a nonzero coordinate.
 pub fn collapsed_coordinate(source: Vec2, scaled: Vec2) -> bool {
     kernel::collapsed_coordinate(convert::vec2(source), convert::vec2(scaled))

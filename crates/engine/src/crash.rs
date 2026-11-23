@@ -43,9 +43,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use serde_json::{Value, json};
-use solidcraft_doc::Document;
+use solidcraft_doc::{Document, drawing};
 
 use crate::Session;
+use crate::io::civil;
 
 /// Reports kept (the oldest, and recovered kernel panics, go first).
 pub const MAX_REPORTS: usize = 20;
@@ -189,21 +190,6 @@ fn now() -> u64 {
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
-}
-
-/// `secs` since 1970 as (year, month, day, hour, minute, second) in UTC.
-fn civil(secs: u64) -> (i64, i64, i64, u64, u64, u64) {
-    let days = i64::try_from(secs / 86_400).unwrap_or(0);
-    let rem = secs % 86_400;
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    (yoe + era * 400 + i64::from(m <= 2), m, d, rem / 3600, rem % 3600 / 60, rem % 60)
 }
 
 /// `2026-10-12T14:03:22Z`.
@@ -646,7 +632,7 @@ pub(crate) fn command_begin(s: &Session, id: &str, params: &Value) {
     let ptr = std::sync::Arc::as_ptr(&s.doc) as usize;
     if ptr != j.last_doc {
         // The design changed outside commands (opened, a new tab, a dialog): what is it now?
-        j.rebase(&journal_base(s), ptr);
+        j.rebase(&journal_base(s), ptr, Some(s.ids.seed()));
     }
     j.run(id, params);
 }
@@ -679,8 +665,9 @@ pub(crate) fn accepted_command(
     let Ok(mut j) = state.journal.lock() else { return };
     let ptr = std::sync::Arc::as_ptr(before) as usize;
     if ptr != j.last_doc {
-        let base = if std::sync::Arc::ptr_eq(&s.doc, before) { journal_base(s) } else { json!("unknown") };
-        j.rebase(&base, ptr);
+        let at_session = std::sync::Arc::ptr_eq(&s.doc, before);
+        let base = if at_session { journal_base(s) } else { json!("unknown") };
+        j.rebase(&base, ptr, at_session.then(|| s.ids.seed()));
     }
     j.run(id, params);
     j.done(&Ok(()), changed);
@@ -688,14 +675,14 @@ pub(crate) fn accepted_command(
 }
 
 /// A top-level command ended: the journal records how, and panics caught inside it are reported
-/// with `before` (the design it started from) and the command, which together reproduce them.
+/// with `before` (the design it started from) and the command (its id, its parameters and the
+/// session's id seed when it started), which together reproduce them.
 pub(crate) fn command_done(
     journaled: bool,
     changed: bool,
     before: &Document,
     after: &std::sync::Arc<Document>,
-    id: &str,
-    params: &Value,
+    (id, params, ids): (&str, &Value, u64),
     outcome: std::result::Result<(), String>,
 ) {
     let Some(state) = STATE.get() else { return };
@@ -718,16 +705,18 @@ pub(crate) fn command_done(
             p.recovered = true;
         }
         let kind = if p.recovered { "kernel_panic_recovered" } else { "command_panic" };
-        let design = solidcraft_io::write_design(before);
-        let replay = json!({ "commands": [{ "command": id, "params": params }] });
+        let (openable, left_out) = drawing::openable(before);
+        // A container, as the design's own file is: it carries binary data a JSON design can't.
+        let design = solidcraft_io::write_design_container(&openable).ok();
+        let replay = json!({ "commands": [{ "command": id, "params": params }], "ids": ids });
         let recent = if journaled { read_live_journal(state).recent } else { Vec::new() };
         let extra = Extra {
             command: Some(json!({ "command": id, "params": params })),
-            design: Some(design),
+            design,
             replay: Some(replay),
             recent,
             base: json!("the design as it was when the command started"),
-            notes: Vec::new(),
+            notes: left_out,
             fields: serde_json::Map::new(),
             attach: Vec::new(),
         };
@@ -750,7 +739,7 @@ pub(crate) fn rebased(s: &Session, file: Option<&Path>, autosave: bool) {
         (None, _) if s.doc.features.is_empty() => json!("new"),
         _ => json!("unknown"),
     };
-    j.rebase(&base, std::sync::Arc::as_ptr(&s.doc) as usize);
+    j.rebase(&base, std::sync::Arc::as_ptr(&s.doc) as usize, Some(s.ids.seed()));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -793,7 +782,7 @@ impl Journal {
             running: false,
             environment: None,
         };
-        j.rebase(&json!("new"), 0);
+        j.rebase(&json!("new"), 0, None);
         j
     }
 
@@ -809,7 +798,9 @@ impl Journal {
         self.write(&v.to_string());
     }
 
-    fn rebase(&mut self, base: &Value, doc: usize) {
+    /// A new base: `base`, the design the commands after it start from, and `ids`, the session's
+    /// id seed there.
+    fn rebase(&mut self, base: &Value, doc: usize, ids: Option<u64>) {
         if let Some(f) = &self.file
             && f.set_len(0).is_err()
         {
@@ -821,7 +812,11 @@ impl Journal {
         self.last_doc = doc;
         let h = self.header.clone();
         self.write(&h);
-        self.record(&json!({ "base": base }));
+        let mut line = json!({ "base": base });
+        if let Some(ids) = ids {
+            line["ids"] = json!(ids);
+        }
+        self.record(&line);
         for line in [self.phase.clone(), self.environment.clone()].into_iter().flatten() {
             self.write(&line);
         }
@@ -872,6 +867,8 @@ impl Journal {
 struct JournalRead {
     header: Value,
     base: Value,
+    /// The session's id seed at the base, when it was kept.
+    ids: Option<u64>,
     /// Commands since the base that changed something or did nothing wrong, in order.
     replay: Vec<Value>,
     /// The command that was running, if one was.
@@ -914,6 +911,7 @@ fn read_journal_file(mut file: File) -> JournalRead {
         }
         if let Some(b) = v.get("base") {
             r.base = b.clone();
+            r.ids = v.get("ids").and_then(Value::as_u64);
             r.replay.clear();
             r.recent.clear();
             running = None;
@@ -1144,7 +1142,10 @@ fn from_journal(j: JournalRead) -> Extra {
     Extra {
         command: j.in_flight,
         design,
-        replay: replay.then(|| json!({ "commands": commands })),
+        replay: replay.then(|| match j.ids {
+            Some(ids) => json!({ "commands": commands, "ids": ids }),
+            None => json!({ "commands": commands }),
+        }),
         recent: j.recent,
         base: j.base,
         notes,
