@@ -3148,6 +3148,7 @@ impl Surface {
                 cache,
                 Some(context),
                 point_test_off,
+                None,
             )?
         } else {
             self.simple_coincidence_checker::<O>(

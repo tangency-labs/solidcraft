@@ -2090,11 +2090,13 @@ impl Body {
         if let Some(m) = &self.mesh {
             return Ok((face_index == 0).then(|| crate::meshbody::mesh_line_hit(m, through, d)).flatten().map(|t| through + d * t));
         }
-        let Some(form) = self.ops_body() else { return Ok(None) };
-        let (body, order) = &*form;
         if face_index >= self.record.faces.len() {
             return Ok(None);
         }
+        let Some(form) = self.ops_body() else {
+            return Err(KernelError::Failed("line meets face: exact face form unavailable".into()));
+        };
+        let (body, order) = &*form;
         match body.face_line_hits(order, face_index, [through.x, through.y, through.z], [d.x, d.y, d.z]) {
             Ok(hits) => {
                 let Some(nearest) = hits.iter().map(|h| h.parameter.abs()).min_by(f64::total_cmp) else { return Ok(None) };

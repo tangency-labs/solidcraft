@@ -3636,6 +3636,13 @@ mod tests {
                 solutions
                     .as_slice()
                     .iter()
+                    .any(|s| s.solution_type == SolutionType::RangeOfValues),
+                "through {through:?}: the ruling must come back as a range: {solutions:?}"
+            );
+            assert!(
+                solutions
+                    .as_slice()
+                    .iter()
                     .all(|s| s.solution_type != SolutionType::SingleValue),
                 "through {through:?}: {solutions:?}"
             );

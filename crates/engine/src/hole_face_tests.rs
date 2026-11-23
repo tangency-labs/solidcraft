@@ -270,6 +270,33 @@ fn a_hole_placed_on_a_curved_faces_display_facet_starts_on_the_exact_surface() {
     }
 }
 
+/// The same place picked inside the surface, with an oblique axis (radial component 0.1, the rest
+/// along the face): the axis meets the exact surface about 0.19 mm behind the place, more than the
+/// 0.02 mm gap the place is inside the surface. The start is still where the axis meets it.
+#[test]
+fn an_oblique_axis_from_a_place_inside_a_curved_face_starts_on_the_exact_surface() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 40, "body_name": "Part"}));
+    let (u, w) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+    let placed = Vec3::new(0.0, 0.0, 20.0) + u * 19.98;
+    let dir = (u * -0.1 + w * (1.0 - 0.01_f64).sqrt()).normalized().unwrap();
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [placed.x, placed.y, placed.z], "direction": [dir.x, dir.y, dir.z], "diameter": 2, "depth": 2, "name": "Hole"}),
+    );
+    run(&mut s, "timeline.suppress", json!({"feature": "Hole"}));
+    let f = s.doc.find_feature("Hole").unwrap().clone();
+    let start = solidcraft_doc::hole_start(&s.model.state(), &f, placed, dir);
+    // The axis meets the cylinder where |(placed - axis) + t dir| = 20, the nearer root.
+    let rel = placed - Vec3::new(0.0, 0.0, 20.0);
+    let (b, c) = (rel.dot(dir), rel.dot(rel) - 400.0);
+    let t = -b - (b * b - c).sqrt();
+    let expected = placed + dir * t;
+    assert!(t.abs() > 0.1, "the meeting lies well beyond the 0.02 gap: {t}");
+    assert!(start.dist(expected) < 1e-6, "hole_start is {start:?}, not {expected:?}");
+}
+
 /// A hole whose axis runs along its face: placed on the Ø40 cylinder's side at 33° (z = 30), or
 /// exactly on its top rim (z = 40), drilled straight down. The axis lies on the side (a ruling),
 /// so the side meets it at no single place; the hole starts where it was placed, silently, with no
