@@ -14,6 +14,7 @@ use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::FilletErrorType;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::tol::contact_tol_3d;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
@@ -301,6 +302,73 @@ fn hole_rim_just_below_the_contact_builds_a_valid_solid() {
     );
 }
 
+/// The open rail y = r meets the hole's rim at (5, 2.5, 10) when r = 2.5.
+/// The top face's outer boundary and hole become one loop through that vertex,
+/// rather than two touching loops. Contacts within modelling tolerance do too.
+#[test]
+fn outer_edge_round_tangent_to_the_hole_joins_the_top_face_loops() {
+    for tolerances in [0.0, -0.5, 0.5] {
+        let mut k = kernel(|f| *f = UpstreamFixes::all());
+        let (mut b, _) = cube_with_round_hole(&mut k);
+        let outer = edge_between(&k, &b, [0.0, 0.0, 10.0], [10.0, 0.0, 10.0]);
+        let r = 2.5 + tolerances * contact_tol_3d(&k);
+        fillet_edges(&mut k, &mut b, &[outer], r, 1, 1, 1.0).unwrap();
+        assert!(is_manifold_solid(&b).unwrap(), "r{r}");
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "r{r}: {lines:?}");
+
+        let mut top_faces = 0;
+        for face in b.faces().ids() {
+            let vertices =
+                solidcore::topology::face::p4::vertices(&b, face, None, false, None).unwrap();
+            if !vertices.is_empty()
+                && vertices
+                    .iter()
+                    .all(|&v| (b.vertex(v).unwrap().point.z - 10.0).abs() < 1e-6)
+            {
+                top_faces += 1;
+                let loops = solidcore::topology::face::p2::loops(&b, face, false, None).unwrap();
+                assert_eq!(loops.len(), 1, "r{r}: {face:?}");
+            }
+        }
+        assert_eq!(top_faces, 1, "r{r}");
+
+        // Cube minus the cylindrical hole minus the extruded round's spandrel:
+        // its r-square less its quarter disk, swept along the 10 mm edge.
+        // At exact contact these regions do not overlap. Above it by delta,
+        // any overlap is in a strip at most 5 mm wide and 10 mm deep, so its
+        // volume is at most 50 delta (< 0.0003 mm^3 for these perturbations).
+        // The round's area is below 85 mm^2; its 4e-5 mm construction tolerance
+        // contributes under 0.0034 mm^3, plus the integrator's 1e-6.
+        let pi = std::f64::consts::PI;
+        let expected = 1000.0 - pi * 2.5 * 2.5 * 10.0 - 10.0 * r * r * (1.0 - pi / 4.0);
+        let got = volume(&k, &mut b);
+        assert!(
+            (got - expected).abs() < 0.01,
+            "r{r}: volume {got}, expected {expected}"
+        );
+    }
+}
+
+/// Either side of contact stays buildable: r = 2.499 misses the hole and
+/// r = 2.501 crosses its rim, taking the existing cliff trimming path.
+#[test]
+fn outer_edge_round_either_side_of_the_hole_contact_stays_valid() {
+    for r in [2.499, 2.501] {
+        let mut k = kernel(|f| *f = UpstreamFixes::all());
+        let (mut b, _) = cube_with_round_hole(&mut k);
+        let outer = edge_between(&k, &b, [0.0, 0.0, 10.0], [10.0, 0.0, 10.0]);
+        fillet_edges(&mut k, &mut b, &[outer], r, 1, 1, 1.0).unwrap();
+        assert!(is_manifold_solid(&b).unwrap(), "r{r}");
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "r{r}: {lines:?}");
+    }
+}
+
 // ---- WR-303: the end of a round that crosses more than one face at a three-edge vertex ----
 
 // ---- WR-300: a variable round whose rail ends at a rounded corner's arc ----
@@ -387,21 +455,17 @@ fn top_rim(k: &Kernel, b: &Brep) -> EdgeId {
 /// top's centre (the fork's `FacesOutlastTheirBlends`, WR-320, refuses a blend meeting the
 /// face it takes whole at an angle). A chamfer of 10 on the top rim of a cylinder of
 /// radius 10 is a cone with its apex there, the top's one closed edge closing to a point
-/// (#17198), and builds with `fillet_refuse_face_consuming_blends`. A round of
-/// 10 closes the top as a hemisphere tangent to it, as the fork's amendment
-/// (tangency-labs/smlib `8bffb23`) lets it, and builds either way, as does everything
-/// below the full width.
+/// (#17198), and builds with that refusal on. A round of 10 closes the top as a
+/// hemisphere tangent to it, as the fork's amendment (tangency-labs/smlib `8bffb23`) lets
+/// it, and builds, as does everything below the full width.
 #[test]
 fn chamfer_as_wide_as_its_face_is_a_cone() {
     // the chamfer of 10: the cylinder (pi 100 20) less the ring between the r 10, h 10
     // cylinder and the cone in it (2/3 pi 1000)
     let cone = std::f64::consts::PI * (2000.0 - 2000.0 / 3.0);
     // with the fixes SolidCraft runs (the cone's rail of no length needs more of them than
-    // the refusal's flag: upstream's own build fails to find the cone's edge)
-    let mut k = kernel(|f| {
-        *f = UpstreamFixes::all();
-        f.fillet_refuse_face_consuming_blends = true;
-    });
+    // the refusal: upstream's own build fails to find the cone's edge)
+    let mut k = kernel(|f| *f = UpstreamFixes::all());
     let got = cylinder_rim(&mut k, 10.0, 0);
     let Outcome::Built { volume, manifold } = got else {
         panic!("the chamfer of 10: {got:?}");
@@ -415,24 +479,19 @@ fn chamfer_as_wide_as_its_face_is_a_cone() {
 
     // the round of 10: the cylinder (pi 100 10) and a hemisphere (2/3 pi 1000)
     let hemisphere = std::f64::consts::PI * (1000.0 + 2000.0 / 3.0);
-    for on in [false, true] {
-        let mut k = kernel(|f| f.fillet_refuse_face_consuming_blends = on);
-        let Outcome::Built { volume, manifold } = cylinder_rim(&mut k, 10.0, 1) else {
-            panic!("on {on}: refused");
-        };
+    let mut k = Kernel::default();
+    let Outcome::Built { volume, manifold } = cylinder_rim(&mut k, 10.0, 1) else {
+        panic!("refused");
+    };
+    assert!(manifold && near(volume, hemisphere, 5e-3), "{volume}");
+    for xsect in [0, 1] {
         assert!(
-            manifold && near(volume, hemisphere, 5e-3),
-            "on {on}: {volume}"
+            matches!(
+                cylinder_rim(&mut k, 9.99, xsect),
+                Outcome::Built { manifold: true, .. }
+            ),
+            "xsect {xsect}"
         );
-        for xsect in [0, 1] {
-            assert!(
-                matches!(
-                    cylinder_rim(&mut k, 9.99, xsect),
-                    Outcome::Built { manifold: true, .. }
-                ),
-                "on {on} xsect {xsect}"
-            );
-        }
     }
 }
 
@@ -518,7 +577,7 @@ fn no_room_reason(
 /// below.)
 #[test]
 fn no_room_refusals_are_named() {
-    let mut k = kernel(|f| f.fillet_refuse_face_consuming_blends = true);
+    let mut k = Kernel::default();
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
     let top = [
         edge_between(&k, &b, [0.0, 0.0, 10.0], [10.0, 0.0, 10.0]),
