@@ -445,19 +445,35 @@ impl FileView {
         recover: &str,
         discard: Option<&str>,
     ) -> (Response, Option<Response>) {
-        recovery_panel(ui, id, message, recover, discard, true)
+        let (recover, discard, _) = recovery_panel(ui, id, message, recover, discard, None, true);
+        (recover, discard)
+    }
+
+    /// The recovery banner with a close (×) after its buttons, named `close` for screen readers
+    /// and hover: it hides the banner and leaves the designs to recover.
+    pub fn recovery_banner_closable(
+        ui: &mut Ui,
+        id: &str,
+        message: RecoveryMessage<'_>,
+        recover: &str,
+        discard: Option<&str>,
+        close: &str,
+    ) -> (Response, Option<Response>, Option<Response>) {
+        recovery_panel(ui, id, message, recover, discard, Some(close), true)
     }
 
     pub fn recovery_review(ui: &mut Ui, id: &str, title: &str, detail: &str, recover: &str, discard: &str) -> (Response, Option<Response>) {
         let separated = format!("\n{}", detail.trim_start());
-        recovery_panel(
+        let (recover, discard, _) = recovery_panel(
             ui,
             id,
             RecoveryMessage { title, before_filename: &separated, filename: "", after_filename: "" },
             recover,
             Some(discard),
+            None,
             false,
-        )
+        );
+        (recover, discard)
     }
 }
 
@@ -520,8 +536,9 @@ fn recovery_panel(
     message: RecoveryMessage<'_>,
     recover: &str,
     discard: Option<&str>,
+    close: Option<&str>,
     banner: bool,
-) -> (Response, Option<Response>) {
+) -> (Response, Option<Response>, Option<Response>) {
     let t = Tokens::get();
     let fill = if banner { t.file_recovery } else { t.file_surface };
     let border = if banner { t.file_recovery_border } else { t.file_border };
@@ -539,7 +556,8 @@ fn recovery_panel(
             };
             let recover_width = button_width(recover);
             let discard_width = discard.map_or(0.0, button_width);
-            let actions_width = recover_width + if discard.is_some() { t.space_8 + discard_width } else { 0.0 };
+            let close_width = if close.is_some() { t.space_8 + t.file_action_height } else { 0.0 };
+            let actions_width = recover_width + if discard.is_some() { t.space_8 + discard_width } else { 0.0 } + close_width;
             let icon_width = if banner { t.file_recovery_icon + t.space_14 } else { 0.0 };
             let wrapped = width < icon_width + t.form_card_width + actions_width + t.space_14;
             let text_width = (width - icon_width - if wrapped { 0.0 } else { actions_width + t.space_14 }).max(0.0);
@@ -588,7 +606,12 @@ fn recovery_panel(
                     super::actions::Button::Normal,
                 )
             });
-            (a, b)
+            // The close (×) ends the row, a square as tall as the buttons.
+            let after = if discard.is_some() { discard_rect.right() } else { recover_rect.right() };
+            let close_size = t.file_action_height * scale;
+            let close_rect = Rect::from_min_size(pos2(after + t.space_8 * scale, action_top), vec2(close_size, t.file_action_height));
+            let c = close.map(|label| ui.push_id(format!("{id}:close"), |ui| super::actions::icon_button_at(ui, close_rect, "close", label)).inner);
+            (a, b, c)
         },
     )
     .inner
