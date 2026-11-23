@@ -49,6 +49,10 @@
 //! Debug drawing/assertions are omitted. Ignored ordinary Trim failures stay ignored;
 //! failed Copy returns an error rather than dereferencing a null native result.
 //! `insert_topology_intersections` rejects `object_index > 1`, which upstream accepts.
+//! With tangency ignored, `sm_InsertSolutions` drops a run shorter than a twentieth of
+//! the classified interval as a tangent touch; a run that reaches an end of the
+//! classified interval or of the edge at each of its ends is inserted instead: the curve
+//! runs along the edge there ([`run_reaches_ends`]; SolidCraft #17345's lobes).
 //! `p5_closed` errors on an unresolved curve, where upstream returns FALSE.
 //! The differential runner's face zone tolerance of zero is not compared against C++.
 
@@ -1637,6 +1641,9 @@ impl<O: ClassObject> CurveClassification<O> {
 /// Converts sub-tolerance ranges to points and inserts curve/edge/plane intersections,
 /// over a read-only adapter: where an edge-end vertex tolerance would be raised to the
 /// edge's (`SmVertex::SetTolerance`), this defers ([`insert_solutions_mut`] raises it).
+/// With tangency ignored, a run under a twentieth of the classified interval is a tangent
+/// touch (only its ends on the interval's ends are inserted) unless it reaches an end of
+/// the interval or of the edge at each of its ends ([`run_reaches_ends`]).
 ///
 /// `xsect_tolerance` defaults to the sum of source and target zones. Solutions are
 /// modified in place when a range collapses; their end records are preserved.
@@ -1851,12 +1858,20 @@ fn insert_solutions_in<O: ClassObject>(
                 // cancel the scheduled insertion; check for end point intersections and
                 // insert them here (upstream maps the tolerance on pEdgeCurve, which a
                 // curve or plane target leaves NULL)
-                let (Some(_), Some(e_curve)) = (edge, target) else {
+                let (Some(e), Some(e_curve)) = (edge, target) else {
                     return Err(SolidError::invalid_input(
                         OP,
                         "native short-range tangency filtering requires an edge",
                     ));
                 };
+                // Not upstream: a run that reaches an end of the classified interval or of
+                // the edge at each of its ends is the curve running along the edge, not a
+                // tangent touch, and is inserted whatever its length
+                // ([`run_reaches_ends`]).
+                if run_reaches_ends(k, geometry, classification, sol, e, e_curve, tol)? {
+                    classification.insert_curve_interval(k, geometry, &ivl)?;
+                    continue;
+                }
                 let cc_ivl = classification.interval();
                 let start_tol = map_to_1d_on_curve(k, tol, sol.start.param(0)?, e_curve)?;
                 if cc_ivl
@@ -1889,6 +1904,63 @@ fn insert_solutions_in<O: ClassObject>(
         }
     }
     Ok(())
+}
+
+/// Not upstream: whether the run `sol` (a range of the classification's curve within `tol`
+/// of `edge`, whose curve is `edge_curve`) runs along the edge: its pieces of both curves are
+/// longer than `tol` end to end, and each of its ends lies on an end of the classification's
+/// interval or of the edge's interval, within `tol` mapped to that curve's parameter there.
+///
+/// The intersector reports a run where the two curves lie within `tol` of each other, and
+/// ends it where they part or where one of the two intervals ends. A tangent touch parts
+/// the curves at both ends of its run, inside both intervals: there the distance between
+/// them reaches `tol`. A run that ends at each end on an end of one of the intervals has no
+/// end where the curves part: over its whole extent the curve runs within `tol` along the
+/// edge (an arc of a circle split at a seam vertex and at a rail's vertex, along the edge
+/// between those vertices), so it is the edge's coincidence, not a tangency, whatever its
+/// length against the classified interval's. A run whose piece of either curve has its ends
+/// within `tol` of each other (both ends dropping onto one end of the edge) is a touch at a
+/// point, not a run along the edge.
+///
+/// # Errors
+///
+/// Those of the edge's interval lookup and of the curves' evaluations.
+fn run_reaches_ends<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    classification: &CurveClassification<O>,
+    sol: &Solution<O>,
+    edge: O,
+    edge_curve: &Curve,
+    tol: f64,
+) -> Result<bool> {
+    let source = classification.curve_geometry(geometry)?;
+    let source_ivl = classification.interval();
+    let edge_ivl = super::p3::edge_interval(geometry, edge)?;
+    for (curve, i) in [(source, 0), (edge_curve, 1)] {
+        let a = curve.evaluate_point(k, sol.start.param(i)?)?;
+        let b = curve.evaluate_point(k, sol.end.param(i)?)?;
+        let length = a.distance(b);
+        if length.is_nan() || length <= tol {
+            return Ok(false);
+        }
+    }
+    for end in [&sol.start, &sol.end] {
+        let (t, s) = (end.param(0)?, end.param(1)?);
+        let on_source = source_ivl
+            .is_value_on_boundary(t, map_to_1d_on_curve(k, tol, t, source)?)
+            .0;
+        if on_source {
+            continue;
+        }
+        let on_edge = edge_ivl
+            .is_value_on_boundary(s, map_to_1d_on_curve(k, tol, s, edge_curve)?)
+            .0;
+        if !on_edge {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// The vertex check of `sm_InsertSolutions` for an edge target: a point solution within

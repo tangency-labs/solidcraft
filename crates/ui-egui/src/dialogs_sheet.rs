@@ -1454,7 +1454,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             return Some((Kind::Sheet(k), ins, extra));
         }
-        FeatureKind::SheetUnfold { body, refold } => {
+        FeatureKind::SheetUnfold { body, refold, .. } => {
             (Sm::Unfold { refold: *refold }, body.iter().map(|n| Sel::Body { name: n.to_string() }).collect())
         }
         FeatureKind::SheetConvert { body, face, faces, rule, bends, engrave, direction } => {

@@ -922,6 +922,19 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
         if construction && b.label == "Length" && text.is_empty() {
             text = INFINITE.to_owned();
         }
+        // A key that moves the caret (Left, Right, Home, End) in a box that follows the cursor
+        // keeps its value where it is, so the caret can move into it and the user can add to
+        // it (`50.00` then `-5`); otherwise the next frame selects the whole text again and
+        // typing replaces it (#20607).
+        if has_focus
+            && !b.locked
+            && !b.value.is_empty()
+            && ui.input(|input| {
+                [egui::Key::ArrowLeft, egui::Key::ArrowRight, egui::Key::Home, egui::Key::End].into_iter().any(|key| input.key_pressed(key))
+            })
+        {
+            b.locked = true;
+        }
         // While a box follows the cursor its whole text is selected, so typing replaces it.
         if (has_focus || (focus && i == 0)) && !b.locked {
             let mut s = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
