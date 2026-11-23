@@ -76,16 +76,10 @@ impl Document {
         let bodies: BTreeSet<String> = self.body_components.iter().filter(|(_, c)| inside.contains(*c)).map(|(name, _)| name.clone()).collect();
         self.body_components.retain(|_, c| !inside.contains(c));
         self.body_offsets.retain(|name, _| !bodies.contains(name));
+        // A kept component sat under the tree it was made in: it moves up to the component the
+        // removed root sat in, which is left (read before the root goes).
+        let up = self.components.iter().find(|c| c.id == root).map_or(0, |c| c.parent);
         self.components.retain(|c| !inside.contains(&c.id));
-        // A kept component sat under the tree it was made in: it moves up to the nearest
-        // component that is left.
-        let up = {
-            let mut up = self.components.iter().find(|c| c.id == root).map_or(0, |c| c.parent);
-            while up != 0 && inside.contains(&up) {
-                up = self.components.iter().find(|c| c.id == up).map_or(0, |c| c.parent);
-            }
-            up
-        };
         for c in self.components.iter_mut().filter(|c| kept.contains(&c.id) && inside.contains(&c.parent)) {
             c.parent = up;
         }

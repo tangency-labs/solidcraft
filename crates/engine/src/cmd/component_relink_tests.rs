@@ -1478,3 +1478,26 @@ fn deleting_a_component_keeps_a_linked_part_another_component_still_places() {
     assert!(s.model.state().bodies.is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// #20890: a kept linked part moves up to the component the deleted one sat in, not to the root.
+#[test]
+fn a_kept_linked_part_moves_up_to_the_component_the_deleted_one_sat_in() {
+    let dir = folder("delete-shared-link-nested");
+    let file = dir.join("part.sc");
+    part(&file, 30);
+    let mut s = Session::default();
+    let outer = run(&mut s, "component.create", json!({"name": "Outer", "grounded": false}))["component"].as_u64().unwrap();
+    let inner = run(&mut s, "component.create", json!({"name": "Inner", "grounded": false}))["component"].as_u64().unwrap();
+    assert_eq!(s.doc.components.iter().find(|c| c.id == inner).map(|c| c.parent), Some(outer));
+    let first = run(&mut s, "component.insert_design", json!({"path": file, "name": "Elbow", "reuse": false, "translate": [500, 0, 0]}));
+    let elbow = first["component"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "component.create", json!({"name": "Other", "grounded": false}));
+    run(&mut s, "component.insert_design", json!({"path": file, "name": "Elbow", "reuse": true, "translate": [1000, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    run(&mut s, "component.delete", json!({"component": "Inner"}));
+    assert!(s.doc.components.iter().all(|c| c.id != inner));
+    assert_eq!(s.doc.components.iter().find(|c| c.id == elbow).map(|c| c.parent), Some(outer));
+    let _ = std::fs::remove_dir_all(dir);
+}
