@@ -178,7 +178,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("delete_face")
         .contract(&DELETE_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("faces: [[x,y,z] points on the faces, or face names from model.faces]; body?; heal?: bool (default true: the neighbouring planes close the gap, as when a rounded edge, hole or boss is taken off; false: the gap stays open and the faces left are a surface body)"),
+        .params("faces: [[x,y,z] points on the faces, or face names from model.faces]; body?; heal?: bool (default true closes the gap. Select every round in a tangent chain to restore straight or circular sharp edges. An open chain must end on planar faces. With false, the gap stays open and the remaining faces form a surface body)"),
     CommandSpec::new("solid.offset_face", "Offset Face", crate::checked!("solid.offset_face", offset_face)).begins_edit()
         .at("SOLID", "MODIFY")
         .icon("offset_face")
