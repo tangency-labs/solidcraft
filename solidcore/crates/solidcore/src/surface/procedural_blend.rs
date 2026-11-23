@@ -55,6 +55,7 @@
 //!   [`BLEND_MAX_DEPTH`] deep (the fork's cap, checked at [`ProceduralBlend::create`]),
 //!   so every walk over the supports is bounded by 3.
 
+pub mod bead;
 pub mod chamfer;
 pub mod convert;
 pub mod corner;
@@ -67,7 +68,8 @@ use std::sync::Arc;
 
 use crate::blend::fillet_section::section::GnSectionFsg;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::tol::are_same;
@@ -329,9 +331,9 @@ fn read_curve(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<BSpli
             Ok(b)
         }
         // "a curve of its definition is not a B-spline"
-        _ => Err(SolidError::surface_failed(
+        _ => Err(SolidError::surface(
             OP_READ,
-            "a curve of the definition is not a B-spline",
+            SurfaceFailure::BlendCurveNotBSpline,
         )),
     }
 }
@@ -966,7 +968,7 @@ impl ProceduralBlend {
         let (order, swapped, has_law, values) = if ascii {
             let st = db
                 .in_stream_mut()
-                .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
+                .ok_or_else(|| SolidError::surface(OP_READ, SurfaceFailure::NoInputStream))?;
             let order = st.extract_ulong();
             let swapped = st.extract_int();
             let has_law = st.extract_int();
@@ -974,7 +976,7 @@ impl ProceduralBlend {
             let mut values = [0.0_f64; 10];
             let st = db
                 .in_stream_mut()
-                .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
+                .ok_or_else(|| SolidError::surface(OP_READ, SurfaceFailure::NoInputStream))?;
             let mut read = true;
             for v in &mut values {
                 match st.extract_double() {
@@ -988,9 +990,9 @@ impl ProceduralBlend {
                 (Some(o), Some(s), Some(h)) if read && !failed => (o, s != 0, h != 0, values),
                 // "its definition could not be read"
                 _ => {
-                    return Err(SolidError::surface_failed(
+                    return Err(SolidError::surface(
                         OP_READ,
-                        "the definition could not be read",
+                        SurfaceFailure::BlendDefinitionUnreadable,
                     ))
                 }
             }
@@ -1016,7 +1018,7 @@ impl ProceduralBlend {
             let (kind, sizes) = if ascii {
                 let st = db
                     .in_stream_mut()
-                    .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
+                    .ok_or_else(|| SolidError::surface(OP_READ, SurfaceFailure::NoInputStream))?;
                 let kind = st.extract_int();
                 let mut sizes = [0.0_f64; 3];
                 let mut read = true;
@@ -1032,9 +1034,9 @@ impl ProceduralBlend {
                     Some(kd) if read && !failed => (i64::from(kd), sizes),
                     // "its definition could not be read"
                     _ => {
-                        return Err(SolidError::surface_failed(
+                        return Err(SolidError::surface(
                             OP_READ,
-                            "the definition could not be read",
+                            SurfaceFailure::BlendDefinitionUnreadable,
                         ))
                     }
                 }
@@ -1051,8 +1053,8 @@ impl ProceduralBlend {
         } else {
             None
         };
-        let mut supports = Vec::new();
-        for _ in 0..2 {
+        // the two supports, then the leader and the two seeds, in the file's order
+        let read_support = |db: &mut DatabaseReader| -> Result<Surface> {
             if ascii {
                 db.go_to_next_line();
             }
@@ -1060,19 +1062,22 @@ impl ProceduralBlend {
                 .read_type(false)?
                 .type_code
                 .ok_or_else(|| SolidError::invalid_input(OP_READ, "surface type not read"))?;
-            supports.push(Surface::read_from_db(k, ty, db, version)?);
-        }
+            Surface::read_from_db(k, ty, db, version)
+        };
+        let s0 = read_support(db)?;
+        let s1 = read_support(db)?;
         if ascii {
             db.go_to_next_line();
         }
         let leader = read_curve(k, db, version)?;
-        let mut seeds = Vec::new();
-        for _ in 0..2 {
+        let read_seed = |db: &mut DatabaseReader| -> Result<BSplineCurve> {
             if ascii {
                 db.go_to_next_line();
             }
-            seeds.push(read_curve(k, db, version)?);
-        }
+            read_curve(k, db, version)
+        };
+        let seed0 = read_seed(db)?;
+        let seed1 = read_seed(db)?;
         let law = if has_law {
             if ascii {
                 db.go_to_next_line();
@@ -1095,19 +1100,8 @@ impl ProceduralBlend {
                 "its parametrization is singular",
             ));
         }
-        let (Some(s0), Some(s1), Some(seed0), Some(seed1)) = (
-            supports.first(),
-            supports.get(1),
-            seeds.first(),
-            seeds.get(1),
-        ) else {
-            return Err(SolidError::surface_failed(
-                OP_READ,
-                "the definition has fewer than two supports or seeds",
-            ));
-        };
         let input = BlendDefinitionInput {
-            supports: [s0, s1],
+            supports: [&s0, &s1],
             sides: [side0, side1],
             offsets: [r0, r1],
             law: law.as_ref(),
@@ -1115,7 +1109,7 @@ impl ProceduralBlend {
             order: u32::try_from(order).unwrap_or(u32::MAX),
             thumbweight,
             leader: &leader,
-            seeds: [seed0, seed1],
+            seeds: [&seed0, &seed1],
             bound,
             chamfer,
         };
@@ -1498,9 +1492,9 @@ impl ProceduralBlend {
         if let Some(sc) = scale {
             #[allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-refusing test
             if !are_same(sc.x, sc.y) || !are_same(sc.x, sc.z) || !(sc.x > EFF_ZERO) {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_TRANSFORM,
-                    "the scale is not uniform and positive",
+                    SurfaceFailure::ScaleNotUniform,
                 ));
             }
             factor = sc.x;
@@ -1547,13 +1541,10 @@ pub fn recertify_faces(k: &Kernel, b: &crate::topology::Brep) -> Result<()> {
                 if e.is_cancelled() {
                     return e;
                 }
-                SolidError::surface_at(
-                    OP_RECERTIFY,
-                    crate::error::surface::SurfaceFailure::Failed(
-                        "the face's net is not proved within its bound of its definition",
-                    ),
-                    crate::error::EntityRef::Face(f),
-                )
+                Failure::new(OP_RECERTIFY, SurfaceFailure::NetNotCertified)
+                    .at(crate::error::EntityRef::Face(f))
+                    .caused_by(e)
+                    .into_error()
             })?;
         }
     }

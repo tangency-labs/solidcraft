@@ -74,6 +74,7 @@ pub use construct_auto::{construct_method, construct_methods, is_construct_tool}
 pub use design_link::{LinkProblem, LinkState};
 pub use drawing_dimension::preview_scene as drawing_dimension_preview;
 pub use drawing_ui::pending_icon as drawing_pending_icon;
+pub(crate) use edit::pick_mode;
 pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::move_matrix_params;
 pub(crate) use features::profiles as feature_profiles;
@@ -84,15 +85,17 @@ pub(crate) use features_more::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mas
 pub(crate) use file::import::realign_imports;
 pub(crate) use file::mesh_crease_angle;
 pub use file::open_steps::OpenSteps;
-pub use file::runs_plugin_importer;
 pub use file::use_import_cache_dir;
 pub(crate) use file::{GEOMETRY_MESSAGE, NAMES_MESSAGE, READER_MESSAGE, UP_MESSAGE, names_form, up_form, usable_path};
+pub use file::{runs_plugin_exporter, runs_plugin_importer};
 pub use frame::member_section_view;
 pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
+pub use joints::{MAX_REACH_JOINTS, posed_joints, reach_from, reach_preview};
 pub use parts::part_length_label;
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
+pub(crate) use sketch::finish_model_edit;
 pub use sketch_construction::{
     ConstructionLine, construction_line_choice, construction_line_mode, construction_line_solutions, construction_line_takes_length,
     construction_segment,
@@ -199,6 +202,7 @@ mod surface;
 mod surface_analysis;
 mod surface_boundary;
 mod surface_match;
+mod tab_layouts;
 mod tab_views;
 mod view_dxf;
 mod view_navigation;
@@ -250,6 +254,8 @@ pub struct CommandSpec {
     pub enabled: Enabled,
     pub run: Run,
     pub undoable: bool,
+    /// Reviewed edit entry semantics, independent of undoability or authority.
+    pub edit_start: crate::EditStart,
     /// Command authority, independent of undo history. New commands require edit authority.
     pub effect: craft_plugin::Effect,
     /// What runs instead of `run` when the command is given `live: true` (a frame of an
@@ -285,6 +291,7 @@ impl CommandSpec {
             enabled: always,
             run,
             undoable: true,
+            edit_start: crate::EditStart::Preserve,
             effect: craft_plugin::Effect::Edit,
             live: None,
             reads_model: true,
@@ -295,6 +302,25 @@ impl CommandSpec {
             part: Part::Model,
         }
     }
+    /// This registered operation starts a new edit and commits any open sketch first.
+    pub const fn begins_edit(mut self) -> Self {
+        self.edit_start = crate::EditStart::Begin;
+        self
+    }
+    /// Mixed setters use an explicit reviewed parameter predicate for edit entry.
+    pub const fn begins_edit_when(mut self, predicate: fn(&Value) -> bool) -> Self {
+        self.edit_start = crate::EditStart::Conditional(predicate);
+        self
+    }
+    /// Whether this request enters an edit; toolbar/effect metadata never decides this.
+    pub fn starts_edit(&self, params: &Value) -> bool {
+        self.edit_start.starts(params)
+    }
+    pub(crate) const fn selection_edit(mut self) -> Self {
+        self.edit_start = crate::EditStart::SelectionDelete;
+        self
+    }
+
     /// Not built yet; `issue` tracks building it.
     pub const fn planned(mut self, issue: &'static str) -> Self {
         self.planned = Some(issue);
@@ -379,7 +405,10 @@ impl CommandSpec {
     /// Whether the command can run in `s` now: on the part open, and enabled. The one check
     /// running a command, running it inside another and listing it make.
     pub fn allowed(&self, s: &Session) -> std::result::Result<(), String> {
-        if s.active_sheet_sketch.is_some() && matches!(self.id, "drawing.create" | "drawing.open" | "drawing.close" | "drawing.delete") {
+        if let Some(entry) = &s.active_sheet_sketch
+            && matches!(self.id, "drawing.create" | "drawing.open" | "drawing.close" | "drawing.delete")
+            && !(entry.view.is_some() && matches!(self.id, "drawing.open" | "drawing.close"))
+        {
             return Err("finish or cancel the sheet sketch before switching drawings".into());
         }
         // Nothing a drawing does holds the model's commands: an open drawing, or a sheet sketch
@@ -399,13 +428,11 @@ impl CommandSpec {
     /// Run inside another command: when it is allowed, its `run` (the caller's command owns the
     /// undo step and the evaluation).
     pub(crate) fn run_nested(&self, s: &mut Session, p: &Value) -> Result<Value> {
-        self.allowed(s).map_err(|why| crate::EngineError::Disabled(self.id.to_string(), why))?;
-        let r = (self.run)(s, p);
-        // A parameter error that did not name the command names it here (see `Session::execute`).
-        match r {
-            Err(crate::EngineError::BadParams { cmd, msg }) if cmd.is_empty() => Err(crate::EngineError::BadParams { cmd: self.id.to_string(), msg }),
-            other => other,
-        }
+        s.run_nested_edit(self, p, false)
+    }
+    /// Rebuild/continue an existing operation without entering another edit mode.
+    pub(crate) fn run_nested_continuing(&self, s: &mut Session, p: &Value) -> Result<Value> {
+        s.run_nested_edit(self, p, true)
     }
     /// The refusal this command gives when it is not available in this session: none when it
     /// is. It is the engine's own wording (`EngineError::Disabled`), so a caller that only has
@@ -464,6 +491,11 @@ pub fn in_sketch(s: &Session) -> std::result::Result<(), String> {
     } else {
         Err("no sketch is being edited (Create Sketch or Edit Sketch first)".into())
     }
+}
+
+/// Lifecycle actions address the one active edit even when its owning tile is not focused.
+pub fn has_sketch_edit(s: &Session) -> std::result::Result<(), String> {
+    if s.active_sketch.is_some() || s.active_sheet_sketch.is_some() { Ok(()) } else { in_sketch(s) }
 }
 
 /// The mirror of [`in_sketch`], for a command that acts on bodies and has nothing to offer the
@@ -544,6 +576,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(libraries::COMMANDS.iter());
     v.extend(section::COMMANDS.iter());
     v.extend(view_navigation::COMMANDS.iter());
+    v.extend(tab_layouts::COMMANDS.iter());
     v.extend(tab_views::COMMANDS.iter());
     v.extend(view_pick::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());
@@ -609,12 +642,15 @@ pub fn normalize_command_id(id: &str) -> Option<&str> {
 /// The end of an unknown command's error: up to three ids like `id`. Alternative verbs in
 /// the same namespace (`note.create` → `note.add`) come first. Otherwise, ids a few
 /// letters away (`solid.extrud` → `solid.extrude`) come before ids that end in the same word
-/// (`file.open` → `doc.open`). Empty when nothing is close.
+/// (`file.open` → `doc.open`). The command an MCP tool of that name stands for comes first
+/// (`set_parameter` → `parameters.change`). Empty when nothing is close.
 pub(crate) fn did_you_mean(id: &str) -> String {
     let id = id.to_ascii_lowercase();
     if id.len() > 64 {
         return String::new();
     }
+    let tool_name = id.replace(['-', ' '], "_");
+    let tool = crate::agent_tools::tool_command(&tool_name);
     let last = |s: &str| s.rsplit('.').next().unwrap_or(s).to_string();
     let near = (id.chars().count() / 4).max(2);
     let mut found: Vec<(bool, bool, usize, &str)> = command_specs()
@@ -625,7 +661,11 @@ pub(crate) fn did_you_mean(id: &str) -> String {
             (alternative || d <= near || last(&id) == last(c.id)).then_some((!alternative, d > near, d, c.id))
         })
         .collect();
+    if let Some(c) = tool {
+        found.push((false, false, 0, c));
+    }
     found.sort();
+    found.dedup_by_key(|(_, _, _, c)| *c);
     let ids: Vec<String> = found.iter().take(3).map(|(_, _, _, c)| format!("`{c}`")).collect();
     match ids.as_slice() {
         [] => String::new(),

@@ -24,7 +24,7 @@ use std::cell::RefCell;
 use std::sync::{Arc, Weak};
 
 use egui::{Pos2, vec2};
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::frame::{Anchor, SectionView};
@@ -213,11 +213,12 @@ pub(crate) fn section_view(app: &SolveApp, p: &Value) -> Result<SectionView, Str
     cached(app, p, |entry| entry.view.clone()).unwrap_or_else(|| Err("no section".into()))
 }
 
-/// The `frame.member` parameters the dialog's values make; none while they are unfinished. A
-/// half-typed offset leaves the last applied `locate` in them, so the section stays in view.
+/// The `frame.member` parameters of the group the dialog shows, as one member; none while they
+/// are unfinished. A half-typed offset leaves the group's last applied `locate` in them, so the
+/// section stays in view.
 fn params(app: &SolveApp, d: &Dialog) -> Option<Value> {
     let Kind::Frame(m) = &d.kind else { return None };
-    crate::dialogs_frame::params(app, m, &d.inputs, &d.extra).ok()
+    crate::dialogs_frame::shown_params(app, m, &d.inputs, &d.extra).ok()
 }
 
 /// The section the dialog's values put on the first line, as the overlay draws it.
@@ -300,8 +301,8 @@ fn set_anchor(d: &mut Dialog, index: usize) {
     if let Kind::Frame(m) = &mut d.kind {
         m.anchor = index;
         m.offset = Default::default();
+        m.locate = None;
     }
-    d.extra.remove("locate");
     d.error = None;
 }
 
@@ -316,7 +317,7 @@ fn set_offset(app: &SolveApp, d: &mut Dialog, view: &SectionView, off: [f64; 2],
             *text = crate::length_input::model(&app.session.doc, v);
         }
     }
-    d.extra.insert("locate".into(), json!(at));
+    m.locate = Some(at);
     d.error = None;
     true
 }
@@ -726,8 +727,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let arrows = if handles { shown.arrows } else { [None, None] };
 
     // What the dialog holds now: the anchor in use is ringed, none while a point is located.
-    let (anchor, located) = match app.dialog.as_ref().map(|d| (&d.kind, d.extra.contains_key("locate"))) {
-        Some((Kind::Frame(m), located)) => (m.anchor, located),
+    let (anchor, located) = match app.dialog.as_ref().map(|d| &d.kind) {
+        Some(Kind::Frame(m)) => (m.anchor, m.locate.is_some()),
         _ => (0, false),
     };
     let active_at = if located { None } else { sh.points.get(anchor).copied().flatten() };

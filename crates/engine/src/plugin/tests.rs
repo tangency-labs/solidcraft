@@ -127,7 +127,7 @@ fn named_tool_refusals_keep_plugin_file_and_budget_details() {
                 json!({"plugin":"sample","grant":"memory_mib","approve":tools::APPROVE}),
             ),
         ] {
-            let failure = PluginFailure { plugin: "Sample".into(), file: file.map(String::from), error };
+            let failure = PluginFailure { plugin: "Sample".into(), file: file.map(String::from), exporting: false, error };
             let original = failure.text();
             let explained = explain_named(&session, &manifest, "make", EngineError::PluginFailed(Box::new(failure))).to_string();
             assert!(explained.starts_with(&original), "{explained}");
@@ -136,6 +136,7 @@ fn named_tool_refusals_keep_plugin_file_and_budget_details() {
         let failure = PluginFailure {
             plugin: "Sample".into(),
             file: file.map(String::from),
+            exporting: false,
             error: HostError::Exhausted { limit: "fuel".into(), allowed: 100000 },
         };
         let original = failure.text();
@@ -311,7 +312,15 @@ fn file_scopes_require_separate_read_and_write_approvals() {
     assert!(approved_file_folders(&more_grant, &[], false).is_empty(), "a missing manifest declaration confers no access");
     assert!(approved_file_folders(&[], &more_manifest, false).is_empty(), "a missing user grant confers no access");
 
-    for command in ["file.insert_step", "file.insert_mesh", "file.insert_gerber", "file.gerber_files", "sketch.insert_dxf", "sketch.insert_svg"] {
+    for command in [
+        "component.insert_design",
+        "file.insert_step",
+        "file.insert_mesh",
+        "file.insert_gerber",
+        "file.gerber_files",
+        "sketch.insert_dxf",
+        "sketch.insert_svg",
+    ] {
         assert!(input_only_command(command), "{command} reads its supplied file");
     }
     for command in ["file.save_as", "file.copy", "file.move", "file.trash", "file.export_step", "doc.open", "doc.recovery_discard", "library.export"]
@@ -429,7 +438,7 @@ fn nested_plugin_edits_save_their_current_token_without_retagging_at_acceptance(
     assert_eq!(host.transaction.as_ref().unwrap().design_token(), edited);
     host.commit_transaction().unwrap();
     assert_eq!(host.session.design_token(), edited);
-    accepted.accept_computed(host.session);
+    accepted.accept_computed(host.session).unwrap();
     assert_eq!(accepted.design_token().revision, edited.revision);
     assert_eq!(accepted.design_token().document_id, identity);
 }
@@ -499,6 +508,7 @@ fn a_failure_message_shows_braces_in_a_file_name_or_reason_as_they_are() {
     let failure = |file: &str, reason: &str| PluginFailure {
         plugin: "Sample".into(),
         file: Some(file.into()),
+        exporting: false,
         error: craft_plugin::HostError::Unsupported { reason: reason.into() },
     };
     assert_eq!(failure("part{reason}.smp", "no {file} solids").text(), "Sample does not support part{reason}.smp: no {file} solids");
@@ -1089,6 +1099,357 @@ mod native {
         s.disabled_plugins.insert("sample".into());
         design_changed(&mut s, Some(token));
         assert_eq!(s.plugin_state.listener_data["sample.make"], json!({"design":null}));
+    }
+
+    #[test]
+    fn linked_file_listeners_name_observed_and_read_sources_without_changing_legacy_payloads() {
+        let f = Fixture::new("i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
+        let mut m = manifest();
+        m["capabilities"] = json!(["commands@0.2", "design@0.1"]);
+        m["runtime"]["commands"] = json!([]);
+        m["runtime"]["permissions"]["files"] = json!([{"name":"project","read":true,"write":false}]);
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{"type":"object"}}]);
+        m["runtime"]["listeners"] = json!([{"entry":"make","on":["design.links_changed"]}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let source = f.0.join("part.sc");
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+        part.execute("file.save", &json!({"path":source})).unwrap();
+        let mut s = Session::default();
+        f.install(&mut s, json!({"folders":[{"name":"project","path":f.0,"read":true,"write":false}]}));
+        let inserted = s.execute("component.insert_design", &json!({"path":source,"name":"Bracket"})).unwrap();
+        let component = inserted["component"].as_u64().unwrap();
+        let token = s.design_token();
+        let before = s.doc.to_json();
+        let history = s.undo.len();
+        part.execute("document.metadata.set", &json!({"key":"description","value":"New file contents"})).unwrap();
+        part.execute("file.save", &json!({})).unwrap();
+        let checked = s.scratch().compute_commands(&[("component.links".into(), json!({}))], None).unwrap();
+        assert!(s.plugin_state.link_changes.is_empty(), "checks on a copy do not publish before acceptance");
+        assert_eq!(s.accept_commands(checked).unwrap()[0].1["links"][0]["changed"], true);
+        let observations = s.plugin_state.link_changes.clone();
+        s.execute("component.links", &json!({})).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&observations, &s.plugin_state.link_changes), "identical checks do not enqueue events");
+        let links: Vec<_> = observations.values().cloned().collect();
+        design_notifications(&mut s, Some(token.clone()), false, &links);
+        let expected = json!({"design":token,"links":[{"component":component,"name":"Bracket","path":source,"read":false}]});
+        assert_eq!(s.plugin_state.listener_data["sample.make"], expected);
+        assert!(s.plugin_state.listener_failures.is_empty(), "{:?}", s.plugin_state.listener_failures);
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), history);
+        assert_eq!(s.design_token(), token);
+
+        // The actual worker acceptance path must retain the successful read observation.
+        let prepared = s.scratch().compute_commands(&[("component.update_links".into(), json!({}))], None).unwrap();
+        assert!(!s.plugin_state.link_changes[&component].read, "computing alone does not read into the live design");
+        s.accept_commands(prepared).unwrap();
+        assert!(s.plugin_state.link_changes[&component].read);
+        let links: Vec<_> = s.plugin_state.link_changes.values().cloned().collect();
+        let updated_token = s.design_token();
+        design_notifications(&mut s, Some(updated_token.clone()), true, &links);
+        let mut expected = expected;
+        expected["design"] = json!(updated_token);
+        expected["links"][0]["read"] = json!(true);
+        assert_eq!(s.plugin_state.listener_data["sample.make"], expected);
+        assert_eq!(s.execute("component.links", &json!({})).unwrap()["links"][0]["changed"], false);
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.plugin_state.link_changes.is_empty(), "undo forgets observations of bytes the design no longer holds");
+        let observations = s.plugin_state.link_changes.clone();
+        s.execute("edit.redo", &json!({})).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&observations, &s.plugin_state.link_changes), "redo does not read a source file");
+        let missing = f.0.join("missing.sc");
+        assert!(s.execute("component.relink", &json!({"component":component,"path":missing})).is_err());
+        assert!(std::sync::Arc::ptr_eq(&observations, &s.plugin_state.link_changes), "failed reads publish nothing");
+        let replacement = f.0.join("replacement.sc");
+        part.execute("file.save", &json!({"path":replacement})).unwrap();
+        s.execute("component.relink", &json!({"component":component,"path":replacement})).unwrap();
+        let links: Vec<_> = s.plugin_state.link_changes.values().cloned().collect();
+        let updated_token = s.design_token();
+        design_notifications(&mut s, Some(updated_token.clone()), true, &links);
+        assert_eq!(
+            s.plugin_state.listener_data["sample.make"],
+            json!({"design":updated_token,"links":[{"component":component,"name":"Bracket","path":replacement,"read":true}]})
+        );
+
+        m["runtime"]["listeners"][0]["on"] = json!(["design.changed"]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        f.install(&mut s, json!({"folders":[{"name":"project","path":f.0,"read":true,"write":false}]}));
+        s.plugin_state.listener_data = Default::default();
+        design_notifications(&mut s, Some(updated_token.clone()), false, &links);
+        assert!(s.plugin_state.listener_data.is_empty(), "old listeners skip disk-only observations");
+        design_notifications(&mut s, Some(updated_token.clone()), true, &links);
+        assert_eq!(s.plugin_state.listener_data["sample.make"], json!({"design":updated_token}));
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.plugin_state.link_changes.is_empty(), "undoing relink cannot replay an observation of the replaced path");
+    }
+
+    #[test]
+    fn unread_link_notifications_require_approved_read_folders_but_read_versions_do_not() {
+        let f = Fixture::new("i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
+        let inside = f.0.join("allowed");
+        let outside = f.0.join("allowed-other");
+        std::fs::create_dir_all(&inside).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let sources = [inside.join("part.sc"), outside.join("part.sc")];
+        let mut m = manifest();
+        m["capabilities"] = json!(["commands@0.2", "design@0.1"]);
+        m["runtime"]["commands"] = json!([]);
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{"type":"object"}}]);
+        m["runtime"]["listeners"] = json!([{"entry":"make","on":["design.links_changed"]}]);
+        m["runtime"]["permissions"]["files"] = json!([{"name":"project","read":true,"write":false}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        f.install(&mut s, json!({"folders":[{"name":"project","path":inside,"read":true,"write":false}]}));
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+        part.execute("file.save", &json!({"path":sources[0]})).unwrap();
+        std::fs::copy(&sources[0], &sources[1]).unwrap();
+        let components: Vec<_> = sources
+            .iter()
+            .zip(["Allowed", "Private"])
+            .map(|(path, name)| s.execute("component.insert_design", &json!({"path":path,"name":name})).unwrap()["component"].as_u64().unwrap())
+            .collect();
+        part.execute("document.metadata.set", &json!({"key":"description","value":"Changed source bytes"})).unwrap();
+        part.execute("file.save", &json!({})).unwrap();
+        std::fs::copy(&sources[0], &sources[1]).unwrap();
+        let checked = s.execute("component.links", &json!({})).unwrap();
+        assert!(checked["links"].as_array().unwrap().iter().all(|link| link["changed"] == true));
+        let token = s.design_token();
+        let links: Vec<_> = s.plugin_state.link_changes.values().cloned().collect();
+        design_notifications(&mut s, Some(token.clone()), false, &links);
+        assert_eq!(
+            s.plugin_state.listener_data["sample.make"],
+            json!({"design":token,"links":[{"component":components[0],"name":"Allowed","path":sources[0],"read":false}]})
+        );
+        assert!(s.plugin_state.listener_failures.is_empty(), "{:?}", s.plugin_state.listener_failures);
+        s.plugin_state.listener_data = Default::default();
+        let hidden: Vec<_> = links.iter().filter(|link| link.component == components[1]).cloned().collect();
+        design_notifications(&mut s, Some(token.clone()), false, &hidden);
+        assert!(s.plugin_state.listener_data.is_empty(), "a links-only listener is not invoked when every unread source is outside its folders");
+        #[cfg(unix)]
+        {
+            let alias = inside.join("outside.sc");
+            std::os::unix::fs::symlink(&sources[1], &alias).unwrap();
+            let mut escaped = hidden[0].clone();
+            escaped.path = alias.to_string_lossy().into_owned();
+            design_notifications(&mut s, Some(token), false, &[escaped]);
+            assert!(s.plugin_state.listener_data.is_empty(), "a symlink inside the approved folder cannot reveal an outside source");
+        }
+
+        s.execute("component.update_links", &json!({})).unwrap();
+        let token = s.design_token();
+        let links: Vec<_> = s.plugin_state.link_changes.values().cloned().collect();
+        design_notifications(&mut s, Some(token.clone()), true, &links);
+        assert_eq!(
+            s.plugin_state.listener_data["sample.make"],
+            json!({"design":token,"links":[
+                {"component":components[0],"name":"Allowed","path":sources[0],"read":true},
+                {"component":components[1],"name":"Private","path":sources[1],"read":true}
+            ]})
+        );
+    }
+
+    #[test]
+    fn prepared_link_checks_preserve_newer_live_observations() {
+        let f = Fixture::new("");
+        let source = f.0.join("part.sc");
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+        part.execute("file.save", &json!({"path":source})).unwrap();
+        let original = std::fs::read(&source).unwrap();
+        let mut s = Session::default();
+        let component = s.execute("component.insert_design", &json!({"path":source})).unwrap()["component"].as_u64().unwrap();
+        part.execute("document.metadata.set", &json!({"key":"description","value":"Changed source bytes"})).unwrap();
+        part.execute("file.save", &json!({})).unwrap();
+        let newer = std::fs::read(&source).unwrap();
+        let prepared = s.scratch().compute_commands(&[("component.links".into(), json!({}))], None).unwrap();
+        s.execute("component.links", &json!({})).unwrap();
+        assert!(!s.plugin_state.link_changes[&component].read);
+        std::fs::write(&source, &original).unwrap();
+        s.execute("component.links", &json!({})).unwrap();
+        assert!(s.plugin_state.link_changes[&component].read);
+        let live = s.plugin_state.link_changes.clone();
+        let token = s.design_token();
+        s.accept_commands(prepared).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&live, &s.plugin_state.link_changes), "a stale check cannot overwrite the live observation");
+        assert_eq!(s.design_token(), token);
+
+        let inherited = s.scratch().compute_commands(&[("component.links".into(), json!({}))], None).unwrap();
+        std::fs::write(&source, &newer).unwrap();
+        s.execute("component.links", &json!({})).unwrap();
+        let live = s.plugin_state.link_changes.clone();
+        s.accept_commands(inherited).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&live, &s.plugin_state.link_changes), "inherited read flags are not new source reads");
+
+        std::fs::write(&source, &original).unwrap();
+        s.execute("component.links", &json!({})).unwrap();
+        std::fs::write(&source, &newer).unwrap();
+        let prepared = s.scratch().compute_commands(&[("component.links".into(), json!({}))], None).unwrap();
+        s.accept_commands(prepared).unwrap();
+        assert!(!s.plugin_state.link_changes[&component].read, "without an intervening observation acceptance still publishes the check");
+
+        std::fs::write(&source, &original).unwrap();
+        let held = s.scratch().compute_commands(&[("component.links".into(), json!({}))], None).unwrap();
+        part.execute("document.metadata.set", &json!({"key":"description","value":"A third, newer observation of the source"})).unwrap();
+        part.execute("file.save", &json!({"overwrite":true})).unwrap();
+        s.execute("component.links", &json!({})).unwrap();
+        let live = s.plugin_state.link_changes.clone();
+        s.accept_commands(held).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&live, &s.plugin_state.link_changes), "a check's read:true also obeys the source observation guard");
+    }
+
+    #[test]
+    fn unchanged_link_reads_supersede_stale_observations_only_for_successful_selected_links() {
+        let f = Fixture::new("");
+        let sources = [f.0.join("good.sc"), f.0.join("failed.sc"), f.0.join("unselected.sc")];
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+        part.execute("file.save", &json!({"path":sources[0]})).unwrap();
+        let original = std::fs::read(&sources[0]).unwrap();
+        let mut s = Session::default();
+        let components: Vec<_> = sources
+            .iter()
+            .map(|path| {
+                std::fs::write(path, &original).unwrap();
+                s.execute("component.insert_design", &json!({"path":path})).unwrap()["component"].as_u64().unwrap()
+            })
+            .collect();
+        let digest = s.doc.links[&components[0]].file_sha256.clone();
+        part.execute("document.metadata.set", &json!({"key":"description","value":"Changed source bytes"})).unwrap();
+        part.execute("file.save", &json!({"overwrite":true})).unwrap();
+        let newer = std::fs::read(&sources[0]).unwrap();
+        for source in &sources {
+            std::fs::write(source, &newer).unwrap();
+        }
+        s.execute("component.links", &json!({})).unwrap();
+        assert!(components.iter().all(|component| !s.plugin_state.link_changes[component].read));
+        std::fs::write(&sources[0], &original).unwrap();
+        std::fs::write(&sources[1], b"invalid design").unwrap();
+        let params = json!({"components":[components[0],components[1]]});
+        let reply = s.execute("component.update_links", &params).unwrap();
+        assert_eq!(reply["failed"][0]["component"], components[1]);
+        assert_eq!(s.doc.links[&components[0]].file_sha256, digest);
+        assert!(s.plugin_state.link_changes[&components[0]].read, "reading the held version clears the older disk observation");
+        assert!(!s.plugin_state.link_changes[&components[1]].read, "failed links are not marked read");
+        assert!(!s.plugin_state.link_changes[&components[2]].read, "unselected links are not marked read");
+
+        // The same no-op source read must survive the worker's acceptance path too.
+        std::fs::write(&sources[0], &newer).unwrap();
+        s.execute("component.links", &json!({})).unwrap();
+        std::fs::write(&sources[0], &original).unwrap();
+        let prepared = s.scratch().compute_commands(&[("component.update_links".into(), params.clone())], None).unwrap();
+        assert!(!s.plugin_state.link_changes[&components[0]].read);
+        s.accept_commands(prepared).unwrap();
+        assert_eq!(s.doc.links[&components[0]].file_sha256, digest);
+        assert!(s.plugin_state.link_changes[&components[0]].read);
+        assert!(!s.plugin_state.link_changes[&components[1]].read);
+        assert!(!s.plugin_state.link_changes[&components[2]].read);
+
+        // Plugin transactions accept evaluated sessions directly, sometimes in two layers.
+        std::fs::write(&sources[0], &newer).unwrap();
+        s.execute("component.links", &json!({})).unwrap();
+        std::fs::write(&sources[0], &original).unwrap();
+        let mut transaction = s.scratch();
+        transaction.execute("component.update_links", &params).unwrap();
+        let mut plugin_call = s.scratch();
+        plugin_call.accept_computed(transaction).unwrap();
+        s.accept_computed(plugin_call).unwrap();
+        assert!(s.plugin_state.link_changes[&components[0]].read, "no-op reads survive nested transaction acceptance");
+        assert!(!s.plugin_state.link_changes[&components[1]].read);
+        assert!(!s.plugin_state.link_changes[&components[2]].read);
+    }
+
+    #[test]
+    fn computed_noop_link_reads_preserve_newer_disk_observations() {
+        fn accept(s: &mut Session, prepared: crate::ComputedCommands, commands: bool) {
+            if commands {
+                s.accept_commands(prepared).unwrap();
+            } else {
+                s.accept_computed(prepared.computed).unwrap();
+            }
+        }
+
+        for commands in [false, true] {
+            let f = Fixture::new("");
+            let source = f.0.join("part.sc");
+            let mut part = Session::default();
+            part.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+            part.execute("file.save", &json!({"path":source})).unwrap();
+            let original = std::fs::read(&source).unwrap();
+            let mut s = Session::default();
+            let component = s.execute("component.insert_design", &json!({"path":source})).unwrap()["component"].as_u64().unwrap();
+            let held = s.doc.links[&component].file_sha256.clone();
+            part.execute("document.metadata.set", &json!({"key":"description","value":"Changed source bytes"})).unwrap();
+            part.execute("file.save", &json!({})).unwrap();
+            let newer = std::fs::read(&source).unwrap();
+            let update = [("component.update_links".into(), json!({"component":component}))];
+
+            // The worker read A, then a live check observed B before that no-op was accepted.
+            std::fs::write(&source, &original).unwrap();
+            let prepared = s.scratch().compute_commands(&update, None).unwrap();
+            std::fs::write(&source, &newer).unwrap();
+            s.execute("component.links", &json!({})).unwrap();
+            let observed = s.plugin_state.link_changes.clone();
+            assert!(!observed[&component].read);
+            accept(&mut s, prepared, commands);
+            assert_eq!(s.doc.links[&component].file_sha256, held);
+            assert!(std::sync::Arc::ptr_eq(&observed, &s.plugin_state.link_changes), "a no-op read cannot overwrite a newer disk check");
+
+            // Without an intervening observation, the same no-op read is still published.
+            std::fs::write(&source, &original).unwrap();
+            let prepared = s.scratch().compute_commands(&update, None).unwrap();
+            accept(&mut s, prepared, commands);
+            assert!(s.plugin_state.link_changes[&component].read);
+            assert_eq!(Some(&s.plugin_state.link_changes[&component].digest), held.as_ref());
+
+            // Applying changed source bytes supersedes a check even when that check is newer.
+            std::fs::write(&source, &newer).unwrap();
+            let prepared = s.scratch().compute_commands(&update, None).unwrap();
+            s.execute("component.links", &json!({})).unwrap();
+            assert!(!s.plugin_state.link_changes[&component].read);
+            accept(&mut s, prepared, commands);
+            assert_ne!(s.doc.links[&component].file_sha256, held);
+            assert!(s.plugin_state.link_changes[&component].read);
+            assert_eq!(s.doc.links[&component].file_sha256.as_ref(), Some(&s.plugin_state.link_changes[&component].digest));
+        }
+    }
+
+    #[test]
+    fn listener_success_clears_only_that_entrys_failure() {
+        let f = Fixture::new(
+            "local.get 0 i32.load8_u i32.const 102 i32.eq if unreachable end
+             i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store",
+        );
+        let mut m = manifest();
+        m["capabilities"] = json!(["commands@0.2", "design@0.1"]);
+        m["runtime"]["commands"] = json!([]);
+        m["runtime"]["entries"] = json!([
+            {"name":"fail","effect":"read","input_schema":{"type":"object"}},
+            {"name":"refresh","effect":"read","input_schema":{"type":"object"}}
+        ]);
+        m["runtime"]["listeners"] = json!([
+            {"entry":"fail","on":["design.changed"]}, {"entry":"refresh","on":["design.links_changed"]}
+        ]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        f.install(&mut s, json!({}));
+        let token = s.design_token();
+        design_changed(&mut s, Some(token.clone()));
+        let failure = s.plugin_state.listener_entry_failures["sample"]["fail"].clone();
+        let diagnostic = s.plugin_state.listener_failures["sample"].clone();
+        let links = [LinkChange { component: 1, name: Some("Bracket".into()), path: "part.sc".into(), read: true, digest: "new".into() }];
+        design_notifications(&mut s, Some(token.clone()), false, &links);
+        assert!(s.plugin_state.listener_data.contains_key("sample.refresh"), "the other listener succeeded");
+        assert_eq!(s.plugin_state.listener_entry_failures["sample"]["fail"], failure);
+        assert_eq!(s.plugin_state.listener_failures["sample"], diagnostic, "links-only success retains the design listener's diagnostic");
+        design_notifications(&mut s, Some(token.clone()), true, &links);
+        assert_eq!(s.plugin_state.listener_entry_failures["sample"]["fail"], failure, "later success in the same delivery cannot clear it");
+
+        std::fs::write(f.0.join("sample/plugin.wasm"), component("i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store")).unwrap();
+        f.install(&mut s, json!({}));
+        design_changed(&mut s, Some(token));
+        assert!(!s.plugin_state.listener_entry_failures.contains_key("sample"), "that entry's own success clears its failure");
+        assert!(!s.plugin_state.listener_failures.contains_key("sample"));
     }
 
     #[test]
@@ -1896,7 +2257,7 @@ fn host_resource_policy_is_exact_user_state_and_never_design_data() {
 
 #[test]
 fn command_effects_are_explicit_and_independent_of_undo() {
-    let host = SolidCraftHost {
+    let mut host = SolidCraftHost {
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
@@ -1912,11 +2273,30 @@ fn command_effects_are_explicit_and_independent_of_undo() {
     for command in ["sketch.edit", "sketch.finish", "sketch.cancel", "solid.box", "sketch.export_dxf"] {
         assert_eq!(catalog.iter().find(|c| c.name == command).unwrap().effect, Effect::Edit, "{command}");
     }
-    for command in
-        ["model.mesh", "model.faces", "model.edges", "document.inspect", "timeline.inspect", "inspect.measure", "sketch.inspect", "sketch.solve"]
-    {
+    for command in [
+        "model.mesh",
+        "model.faces",
+        "model.edges",
+        "document.inspect",
+        "timeline.inspect",
+        "inspect.classify_points",
+        "inspect.measure",
+        "sketch.inspect",
+        "sketch.solve",
+    ] {
         assert_eq!(catalog.iter().find(|c| c.name == command).unwrap().effect, Effect::Read, "{command}");
     }
+    // A read listener has no command-group grants. It can query exact geometry anyway.
+    host.session.execute("solid.box", &json!({"length":2, "width":3, "height":4, "body_name":"Block"})).unwrap();
+    host.session.plugin_state.listener_design = Some(Some(host.session.design_token()));
+    let before = host.session.doc.clone();
+    host.begin_transaction().unwrap();
+    let queried = host.run_command("inspect.classify_points", &json!({"body":"Block", "points":[[1,1,1], [0,1,1]]})).unwrap();
+    assert_eq!(queried["results"][0]["class"], "inside");
+    assert_eq!(queried["results"][1]["class"], "on");
+    assert_eq!(queried["results"][1]["normal"], json!([-1., 0., 0.]));
+    host.commit_transaction().unwrap();
+    assert_eq!(host.session.doc, before);
     // A test-only command: its id goes through a variable so the icon audit, which reads command ids
     // registered under crates/engine/src, doesn't take this fixture for a real command without an icon.
     let id = "sample.new";
@@ -2295,6 +2675,235 @@ mod importers {
     }
 }
 
+/// Exporter plugins: an export slot writes the open design as a file of an extension it claims.
+#[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+mod exporters {
+    use super::*;
+
+    fn exporter_manifest(commands: Value) -> Value {
+        let slot = |name: &str, extension: &str| json!({"name":name,"kind":"exporter","extensions":[extension]});
+        json!({"id":"smp","name":"Sample Exporter","version":"1","capabilities":["formats@0.1"],"runtime":{
+            "module":"exporter.wasm","commands":commands,
+            "entries":[slot("copy","smp"),slot("error","bad"),slot("trap","bad"),slot("loop","bad"),slot("write","bad")],
+            "limits":{"fuel":10_000_000,"memory_mib":2,"deadline_ms":5000}}})
+    }
+    struct Fixture(std::path::PathBuf);
+    impl Fixture {
+        fn new(name: &str) -> Self {
+            let root = Self(solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-exporter-{}-{name}", std::process::id())));
+            let _ = std::fs::remove_dir_all(&root.0);
+            root
+        }
+    }
+    impl std::ops::Deref for Fixture {
+        type Target = Path;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A session with a box whose plugins folder holds the original exporter fixture, and a folder
+    /// to export into. The fixture's `copy` slot writes the reply of `document.inspect`.
+    fn installed(name: &str) -> (Session, Fixture) {
+        let root = Fixture::new(name);
+        let (package, version) = API.split_once('@').unwrap();
+        let component = wat::parse_str(include_str!("exporter_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap();
+        let dir = root.join("plugins/smp");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("plugin.json"), exporter_manifest(json!(["document.inspect"])).to_string()).unwrap();
+        std::fs::write(dir.join("exporter.wasm"), &component).unwrap();
+        std::fs::create_dir_all(root.join("files")).unwrap();
+        let mut s = Session::new(solidcraft_doc::Document::new("Bracket"));
+        s.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
+        s.plugin_state.plugins_dir = Some(root.join("plugins"));
+        (s, root)
+    }
+    fn at(root: &Path, name: &str) -> String {
+        root.join("files").join(name).to_string_lossy().into_owned()
+    }
+    fn files(root: &Path) -> Vec<String> {
+        let mut names: Vec<String> =
+            std::fs::read_dir(root.join("files")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn the_exporter_fixture_cleans_up_on_return_and_unwind() {
+        for unwind in [false, true] {
+            let fixture = Fixture::new(if unwind { "cleanup-unwind" } else { "cleanup-return" });
+            let path = fixture.0.clone();
+            let result = std::panic::catch_unwind(move || {
+                let root = fixture;
+                std::fs::create_dir_all(root.join("plugins")).unwrap();
+                std::fs::write(root.join("partial.wasm"), b"partial setup").unwrap();
+                if unwind {
+                    panic!("fixture setup interrupted");
+                }
+            });
+            assert_eq!(result.is_err(), unwind);
+            assert!(!path.exists(), "fixture files remain at {}", path.display());
+        }
+    }
+
+    #[test]
+    fn an_installed_exporter_id_takes_precedence_over_a_native_file_name() {
+        let (mut s, root) = installed("native-name");
+        let mut manifest = exporter_manifest(json!(["document.inspect"]));
+        manifest["runtime"]["entries"][0]["name"] = json!("step");
+        std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
+        let reply = s.execute("file.export", &json!({"path": at(&root, "bracket.step"), "format": "smp.step"})).unwrap();
+        assert_eq!(reply["format"], "smp.step");
+        let written: Value = serde_json::from_slice(&std::fs::read(at(&root, "bracket.step")).unwrap()).unwrap();
+        let mut inspected = s.execute("document.inspect", &json!({})).unwrap();
+        inspected["undo"] = json!(0);
+        assert_eq!(written, inspected);
+    }
+
+    #[test]
+    fn an_export_slot_writes_what_it_read_of_the_design_and_changes_nothing() {
+        let (mut s, root) = installed("round-trip");
+        let listed = s.execute("plugin.list", &json!({})).unwrap();
+        assert_eq!(listed["exporters"][0]["id"], "smp.copy");
+        assert_eq!(listed["plugins"][0]["commands"], json!([]), "an exporter is not a command");
+        // An agent's output folder grants no access to the installed package itself.
+        solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([root.join("files")])), || {
+            let tools = s.execute("plugin.tools", &json!({"name":"smp.copy"})).unwrap();
+            assert_eq!(tools["tools"][0]["kind"], "exporter");
+            assert!(tools["tools"][0].get("approval").is_none(), "format tools use the package's stored grants");
+            let described = s.execute("engine.describe", &json!({"command":"smp.copy"})).unwrap();
+            assert_eq!(described["kind"], "exporter");
+            assert_eq!(described["tool"]["input"], tools["tools"][0]["input_schema"]);
+        });
+        let (before, undo) = (s.doc.to_json(), s.undo.len());
+        let mut inspected = s.execute("document.inspect", &json!({})).unwrap();
+        // The plugin reads a copy of the session that carries no undo history, so it counts none.
+        assert_eq!(inspected["undo"], 1);
+        inspected["undo"] = json!(0);
+        // The extension picks the slot; the file holds exactly what the plugin read.
+        let reply = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([root.join("files")])), || {
+            s.execute("file.export", &json!({"path": at(&root, "bracket.smp")}))
+        })
+        .unwrap();
+        assert_eq!((reply["format"].as_str(), reply["plugin"].as_str()), (Some("smp.copy"), Some("Sample Exporter")));
+        let written: Value = serde_json::from_slice(&std::fs::read(at(&root, "bracket.smp")).unwrap()).unwrap();
+        assert_eq!(written, inspected);
+        assert_eq!(reply["bytes"].as_u64(), Some(std::fs::metadata(at(&root, "bracket.smp")).unwrap().len()));
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, undo), "an export leaves the design and its history alone");
+        // `format` names a slot even for an extension SolidCraft writes; without it, SolidCraft does.
+        assert_eq!(s.execute("file.export", &json!({"path": at(&root, "copy.json"), "format": "smp.copy"})).unwrap()["format"], "smp.copy");
+        assert_eq!(s.execute("file.export", &json!({"path": at(&root, "own.json")})).unwrap()["format"], "Design");
+        assert!(s.execute("file.export", &json!({"path": at(&root, "own.stl"), "options": {}})).is_err(), "options are a plugin's");
+        assert!(s.execute("file.export", &json!({"path": at(&root, "b.smp"), "bodies": ["Box"]})).is_err());
+        assert_eq!(files(&root), ["bracket.smp", "copy.json", "own.json"]);
+        // A disabled plugin writes nothing.
+        s.disabled_plugins.insert("smp".into());
+        assert!(s.execute("file.export", &json!({"path": at(&root, "off.smp")})).is_err());
+    }
+
+    #[test]
+    fn exporter_hooks_fill_omitted_options_preserve_callers_and_fail_before_writing() {
+        let (mut s, root) = installed("dialog-hook");
+        let mut manifest = exporter_manifest(json!([]));
+        manifest["capabilities"] = json!(["formats@0.2", "dialog@0.1"]);
+        manifest["runtime"]["entries"] = json!([{"name":"copy","kind":"exporter","extensions":["smp"],"dialog_hook":true,
+        "input_schema":{"type":"object","required":["width"],"properties":{
+            "width":{"type":"number","minimum":1},
+            "size":{"type":"string","oneOf":[{"const":"small"},{"const":"large"}]}
+        }}}]);
+        std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
+        let reply = r#"{"width":{"default":24},"size":{"choices":["large"]}}"#;
+        // The command fixture echoes its inputs. Give that echo the export-file signature
+        // (string and list<u8> share the canonical layout), retaining its update-fields export.
+        let source = include_str!("../../../craft-plugin-wasm/src/dialog_fixture.wat")
+            .replace(
+                r##"(type (;7;) (func (param "entry" string) (param "params" $"#type4 json") (result 6)))"##,
+                r##"(type $export-bytes (list u8))
+                (type $export-result (result $export-bytes (error $"#type5 plugin-error")))
+                (type $export-type (func (param "slot" string) (param "options" $"#type4 json") (result $export-result)))"##,
+            )
+            .replace("(func $execute (;1;) (type 7)", "(func $execute (;1;) (type $export-type)")
+            .replace(r#"(export "execute" (func $execute))"#, r#"(export "export-file" (func $execute))"#)
+            .replace(
+                r#"(export "__PACKAGE__/entry@__VERSION__" (instance $command))"#,
+                r#"(export "__PACKAGE__/formats-provider@__VERSION__" (instance $command))"#,
+            )
+            .replace("__PACKAGE__", "craft:plugin")
+            .replace("__VERSION__", "0.2.0")
+            .replace("__REPLY_LEN__", &reply.len().to_string())
+            .replace("__REPLY__", &reply.replace('"', "\\22"));
+        let component_path = root.join("plugins/smp/exporter.wasm");
+        std::fs::write(&component_path, wat::parse_str(source.replace("__HOOK_CODE__", "")).unwrap()).unwrap();
+        let tools = s.execute("plugin.tools", &json!({"name":"smp.copy"})).unwrap();
+        let schema = &tools["tools"][0]["input_schema"];
+        check_input(schema, &json!({"path":at(&root, "defaults.smp"),"options":{}})).unwrap();
+        assert!(schema["properties"]["options"].get("required").is_none());
+        for (name, options, width) in [("defaults.smp", json!({}), 24), ("explicit.smp", json!({"width":12}), 12)] {
+            s.execute("file.export", &json!({"path":at(&root, name),"options":options})).unwrap();
+            let written: Value = serde_json::from_slice(&std::fs::read(at(&root, name)).unwrap()).unwrap();
+            assert_eq!(written["width"], width);
+        }
+        let path = at(&root, "refused.smp");
+        std::fs::write(&path, b"original").unwrap();
+        assert!(s.execute("file.export", &json!({"path":path,"options":{"size":"small"}})).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"original");
+        for code in ["unreachable", "(loop $forever br $forever)", "call $box"] {
+            std::fs::write(&component_path, wat::parse_str(source.replace("__HOOK_CODE__", code)).unwrap()).unwrap();
+            assert!(s.execute("file.export", &json!({"path":path})).is_err(), "{code}");
+            assert_eq!(std::fs::read(&path).unwrap(), b"original");
+        }
+    }
+
+    #[test]
+    fn an_export_that_errors_traps_or_runs_away_leaves_the_folder_as_it_was() {
+        let (mut s, root) = installed("failures");
+        std::fs::write(at(&root, "keep.bad"), b"original").unwrap();
+        for (slot, says) in [("error", "refused this design"), ("trap", "UnreachableCodeReached"), ("loop", "fuel")] {
+            for name in ["keep.bad", "new.bad"] {
+                let failure = s.execute("file.export", &json!({"path": at(&root, name), "format": format!("smp.{slot}")})).unwrap_err().to_string();
+                assert!(failure.contains(says), "{slot}: {failure}");
+                assert!(failure.starts_with(&format!("Sample Exporter could not export {name}:")), "{failure}");
+                if slot == "loop" {
+                    assert!(failure.contains("Ask its author to raise its fuel limit."), "{failure}");
+                }
+            }
+        }
+        assert_eq!(std::fs::read(at(&root, "keep.bad")).unwrap(), b"original");
+        assert_eq!(files(&root), ["keep.bad"], "no new file and no partial or temporary file");
+        // The next export gets a fresh instance.
+        assert!(s.execute("file.export", &json!({"path": at(&root, "after.smp")})).is_ok());
+    }
+
+    #[test]
+    fn an_exporter_reaches_no_other_path_and_may_only_read() {
+        let (mut s, root) = installed("no-files");
+        let failure = s.execute("file.export", &json!({"path": at(&root, "x.bad"), "format": "smp.write"})).unwrap_err().to_string();
+        assert!(failure.contains("file.export"), "{failure}");
+        assert_eq!(files(&root), Vec::<String>::new());
+        assert!(!Path::new("stolen.txt").exists());
+        // A manifest asking for a command that writes, edits or reaches a file is refused at once.
+        for commands in [json!(["file.export"]), json!(["solid.box"])] {
+            let refused = parse_manifest(exporter_manifest(commands.clone()).to_string().as_bytes(), "smp");
+            assert!(refused.is_err(), "{commands}");
+        }
+        let mut grants = exporter_manifest(json!([]));
+        grants["runtime"]["permissions"] = json!({"files":[{"name":"out","write":true}]});
+        assert!(parse_manifest(grants.to_string().as_bytes(), "smp").is_err());
+        // The caller's file scope decides where an export may go, before any plugin code runs.
+        let outside = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([root.join("plugins")])), || {
+            s.execute("file.export", &json!({"path": at(&root, "y.smp")}))
+        });
+        assert!(outside.is_err());
+        assert_eq!(files(&root), Vec::<String>::new());
+    }
+}
+
 mod install_zip {
     use super::*;
     use crate::plugin::install::{InstallError, unpack};
@@ -2379,7 +2988,8 @@ mod install_zip {
         );
         let reviewed = zip(&[("gears-0.1.0/plugin.json", &m[..]), ("gears-0.1.0/plugin.wasm", w), ("gears-0.1.0/data.txt", b"reviewed")]);
         let changed = zip(&[("gears-0.1.0/plugin.json", &m[..]), ("gears-0.1.0/plugin.wasm", w), ("gears-0.1.0/data.txt", b"changed")]);
-        let aux = put(&root, "aux.zip", &reviewed);
+        // Not aux.zip. Windows 10 keeps AUX for a device, whatever the extension.
+        let aux = put(&root, "auxiliary.zip", &reviewed);
         let aux_dry = s.execute("plugin.install", &json!({"path": aux, "dry_run": true})).unwrap();
         std::fs::write(&aux, &changed).unwrap();
         let error = s.execute("plugin.install", &json!({"path": aux, "approval": aux_dry["approval"], "archive": aux_dry["archive"]})).unwrap_err();
@@ -2677,18 +3287,21 @@ fn storage_commands_reach_only_the_running_plugins_data_within_its_limits() {
     assert!(s.execute("storage.get", &json!({"plugin":"other-tool"})).unwrap_err().to_string().contains("only its own data"));
     assert_eq!(s.doc.plugin_data["other-tool/data.json"].as_bytes(), other);
 
-    // A file written in parts reads back in parts; writing it as a cache file moves it.
-    let b64 = solidcraft_doc::canvas::base64_encode;
-    s.execute("storage.put_blob", &json!({"name":"paths/op3.bin","data":b64(&[1, 2, 3])})).unwrap();
-    let grown = s.execute("storage.put_blob", &json!({"name":"paths/op3.bin","data":b64(&[4, 5]),"append":true})).unwrap();
-    assert_eq!(grown["bytes"], 5);
-    let part = s.execute("storage.get_blob", &json!({"name":"paths/op3.bin","offset":3,"len":10})).unwrap();
-    assert_eq!((part["data"].clone(), part["bytes"].clone()), (json!(b64(&[4, 5])), json!(5)));
-    s.execute("storage.put_blob", &json!({"name":"paths/op3.bin","data":b64(&[9]),"cache":true})).unwrap();
+    // A file written in parts reads back in parts, as bytes; writing it as a cache file moves it.
+    assert_eq!(storage::write_blob(&mut s, "paths/op3.bin", &[1, 2, 3], false, false).unwrap(), 3);
+    assert_eq!(storage::write_blob(&mut s, "paths/op3.bin", &[4, 5], false, true).unwrap(), 5);
+    let part = storage::read_blob(&s, None, "paths/op3.bin", 3, 10).unwrap();
+    assert_eq!(part, storage::BlobBytes { data: vec![4, 5], cache: false, bytes: 5 });
+    assert!(storage::read_blob(&s, None, "paths/op3.bin", 99, 10).unwrap().data.is_empty(), "past the end");
+    storage::write_blob(&mut s, "paths/op3.bin", &[9], true, false).unwrap();
     let blobs = s.execute("storage.get", &json!({})).unwrap()["blobs"].clone();
     assert_eq!(blobs, json!([{"name":"paths/op3.bin","cache":true,"bytes":1}]));
-    assert!(s.execute("storage.put_blob", &json!({"name":"../escape","data":""})).is_err());
-    assert!(s.execute("storage.put_blob", &json!({"name":"x","data":"not base64!"})).is_err());
+    assert!(storage::write_blob(&mut s, "../escape", &[], false, false).is_err());
+    assert!(storage::read_blob(&s, None, "missing.bin", 0, 10).unwrap_err().to_string().contains("keeps no file named"));
+    // The base64 commands are gone: a file's bytes are never text.
+    for retired in ["storage.put_blob", "storage.get_blob"] {
+        assert!(crate::find_command(retired).is_none(), "{retired}");
+    }
     assert_eq!(s.execute("storage.delete_blob", &json!({"name":"paths/op3.bin"})).unwrap()["deleted"], true);
     assert_eq!(s.execute("storage.delete_blob", &json!({"name":"paths/op3.bin"})).unwrap()["deleted"], false);
     // Over the main document's limit, nothing changes.
@@ -2707,43 +3320,35 @@ fn storage_commands_reach_only_the_running_plugins_data_within_its_limits() {
 fn storage_large_main_document_reads_in_bounded_parts() {
     let mut s = Session::default();
     s.plugin_state.storage_caller = Some(storage::StorageCaller { id: "gears".into(), name: "Gears".into(), version: "1".into(), data_format: 1 });
-    let empty = s.execute("storage.get", &json!({"offset":0})).unwrap();
-    assert_eq!(empty["bytes"], 0);
-    assert_eq!(empty["data"], "");
+    assert_eq!(storage::read_document(&s, None, 0, 10).unwrap(), (Vec::new(), 0));
     let first = "x".repeat(600 * 1024);
-    // Include multibyte JSON text: chunks are bytes, not independently parsed JSON strings.
+    // Include multibyte JSON text: parts are bytes, not independently parsed JSON strings.
     let second = "é".repeat(300 * 1024);
     s.execute("storage.patch", &json!({"patch":{"first":first}})).unwrap();
     s.execute("storage.patch", &json!({"patch":{"second":second}})).unwrap();
     let expected = json!({"first":first,"second":second});
     assert!(serde_json::to_vec(&expected).unwrap().len() > 1 << 20);
     let mut joined = Vec::new();
-    for _ in 0..3 {
-        let part = s.execute("storage.get", &json!({"offset":joined.len()})).unwrap();
-        assert!(serde_json::to_vec(&part).unwrap().len() <= 1 << 20);
-        assert_eq!(part["offset"], joined.len());
-        assert!(part.get("document").is_none());
-        let decoded = solidcraft_doc::canvas::base64_decode(part["data"].as_str().unwrap()).unwrap();
-        assert!(!decoded.is_empty());
-        joined.extend_from_slice(&decoded);
-        if joined.len() as u64 == part["bytes"].as_u64().unwrap() {
+    loop {
+        let (part, bytes) = storage::read_document(&s, None, joined.len() as u64, storage::MAX_READ_BYTES).unwrap();
+        assert!(!part.is_empty() && part.len() <= storage::MAX_READ_BYTES as usize);
+        joined.extend_from_slice(&part);
+        if joined.len() as u64 == bytes {
             break;
         }
     }
     assert_eq!(serde_json::from_slice::<Value>(&joined).unwrap(), expected);
-    let prefix = s.execute("storage.get", &json!({"len":5})).unwrap();
-    assert_eq!(prefix["offset"], 0);
-    assert_eq!(solidcraft_doc::canvas::base64_decode(prefix["data"].as_str().unwrap()).unwrap(), joined[..5]);
-    let past_end = s.execute("storage.get", &json!({"offset":u64::MAX})).unwrap();
-    assert_eq!(past_end["data"], "");
+    assert_eq!(storage::read_document(&s, None, 0, 5).unwrap().0, joined[..5]);
+    assert!(storage::read_document(&s, None, u64::MAX, 5).unwrap().0.is_empty());
     for len in [0, storage::MAX_READ_BYTES + 1] {
-        assert!(s.execute("storage.get", &json!({"len":len})).is_err());
+        assert!(storage::read_document(&s, None, 0, len).is_err());
     }
-    assert!(s.execute("storage.get", &json!({"plugin":"other-tool","offset":0})).is_err());
-    s.plugin_state.storage_caller = None;
+    assert!(storage::read_document(&s, Some("other-tool"), 0, 5).is_err());
+    // The command takes no offset or length any more: its reply is the data itself.
     assert!(s.execute("storage.get", &json!({"offset":0})).is_err());
-    let outside = s.execute("storage.get", &json!({"plugin":"gears","offset":0,"len":5})).unwrap();
-    assert_eq!(outside["data"], prefix["data"]);
+    s.plugin_state.storage_caller = None;
+    assert!(storage::read_document(&s, None, 0, 5).is_err());
+    assert_eq!(storage::read_document(&s, Some("gears"), 0, 5).unwrap().0, joined[..5]);
 }
 
 // Fill a quota with one shared chunk, keeping boundary tests small in memory.
@@ -2763,13 +3368,11 @@ fn fill_storage_bytes(s: &mut Session, bytes: u64) {
 fn storage_append_preserves_bytes_when_changing_categories() {
     let mut s = Session::default();
     s.plugin_state.storage_caller = Some(storage::StorageCaller { id: "gears".into(), name: "Gears".into(), version: "1".into(), data_format: 1 });
-    let b64 = solidcraft_doc::canvas::base64_encode;
-    s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[1,2,3]),"cache":true})).unwrap();
+    storage::write_blob(&mut s, "tool.bin", &[1, 2, 3], true, false).unwrap();
     for (cache, next, expected) in [(false, 4, vec![1, 2, 3, 4]), (true, 5, vec![1, 2, 3, 4, 5])] {
-        s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[next]),"append":true,"cache":cache})).unwrap();
-        let read = s.execute("storage.get_blob", &json!({"name":"tool.bin"})).unwrap();
-        assert_eq!(read["data"], b64(&expected));
-        assert_eq!(read["cache"], cache);
+        storage::write_blob(&mut s, "tool.bin", &[next], cache, true).unwrap();
+        let read = storage::read_blob(&s, None, "tool.bin", 0, storage::MAX_READ_BYTES).unwrap();
+        assert_eq!((read.data, read.cache), (expected, cache));
         assert_eq!(s.doc.plugin_data.len(), 2);
     }
 }
@@ -2778,25 +3381,24 @@ fn storage_append_preserves_bytes_when_changing_categories() {
 fn storage_category_replacement_uses_final_file_and_byte_counts() {
     let mut s = Session::default();
     s.plugin_state.storage_caller = Some(storage::StorageCaller { id: "gears".into(), name: "Gears".into(), version: "1".into(), data_format: 1 });
-    let b64 = solidcraft_doc::canvas::base64_encode;
-    s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[1,2,3])})).unwrap();
+    storage::write_blob(&mut s, "tool.bin", &[1, 2, 3], false, false).unwrap();
     for i in 0..solidcraft_doc::plugin_data::MAX_FILES - 2 {
         s.doc_mut().plugin_data.insert(format!("filler/blobs/{i}"), Default::default());
     }
-    s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[4]),"cache":true})).unwrap();
+    storage::write_blob(&mut s, "tool.bin", &[4], true, false).unwrap();
     assert_eq!(s.doc.plugin_data.len(), solidcraft_doc::plugin_data::MAX_FILES);
     assert_eq!(storage::blob(&s.doc, "gears", "cache/tool.bin"), Some(&[4][..]));
     let before = s.doc.plugin_data.clone();
-    assert!(s.execute("storage.put_blob", &json!({"name":"new.bin","data":""})).is_err());
+    assert!(storage::write_blob(&mut s, "new.bin", &[], false, false).is_err());
     assert_eq!(s.doc.plugin_data, before);
 
     s.doc_mut().plugin_data.retain(|key, _| key.starts_with("gears/"));
     let meta_bytes = storage::blob(&s.doc, "gears", "meta.json").unwrap().len() as u64;
     fill_storage_bytes(&mut s, storage::MAX_TOTAL_BYTES - meta_bytes - 1);
     // The final total is exactly the limit even though the destination is new.
-    s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[5])})).unwrap();
+    storage::write_blob(&mut s, "tool.bin", &[5], false, false).unwrap();
     let before = s.doc.plugin_data.clone();
-    assert!(s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[6,7]),"cache":true})).is_err());
+    assert!(storage::write_blob(&mut s, "tool.bin", &[6, 7], true, false).is_err());
     assert_eq!(s.doc.plugin_data, before);
     assert_eq!(storage::blob(&s.doc, "gears", "blobs/tool.bin"), Some(&[5][..]));
 }

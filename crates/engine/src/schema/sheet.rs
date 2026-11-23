@@ -578,6 +578,11 @@ pub struct UnfoldParams {
     /// (refold).
     #[serde(default)]
     pub body: Option<String>,
+    /// Unfold: a point on the flat panel that stays where it is, so the flat lies in its plane.
+    /// Default: the largest flat panel, or the one an earlier unfold of the sheet fixed.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FixedPoint")]
+    pub fixed: Option<FixedPoint>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -1052,6 +1057,11 @@ pub struct ExportDxfParams {
     /// roles: the layer for each role. single: every entity on layer 0. Default: roles.
     #[serde(default)]
     pub layers: Option<DxfLayersParam>,
+    /// A DXF profile: which layer, colour and linetype each role is written with, and the roles
+    /// left out. A profile file's path, or the profile itself as an object
+    /// (`docs/formats/dxf-profiles.md`). Default: the standard layers. Not with `layers: single`.
+    #[serde(default)]
+    pub profile: Option<DxfProfileParam>,
     /// A file for every sheet body, or their DXF texts when there is no `path`. Not with `body`.
     /// Default: false.
     #[serde(default)]
@@ -1116,6 +1126,39 @@ impl JsonSchema for DxfLayersParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({"description": "roles or single, in any case.", "type": "string", "pattern": "^([Rr][Oo][Ll][Ee][Ss]|[Ss][Ii][Nn][Gg][Ll][Ee])$"})
+    }
+}
+
+/// A DXF export's `profile`: the path of a profile file, or the profile as an object. The export
+/// reads and checks it (`sheet::dxf_profile`), so its refusals name the role and the value.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DxfProfileParam {
+    Path(String),
+    Profile(serde_json::Map<String, Value>),
+}
+
+impl<'de> Deserialize<'de> for DxfProfileParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(path) if !path.trim().is_empty() => Ok(DxfProfileParam::Path(path)),
+            Value::Object(profile) => Ok(DxfProfileParam::Profile(profile)),
+            _ => Err(D::Error::custom("must be a DXF profile file's path or a profile object")),
+        }
+    }
+}
+
+impl JsonSchema for DxfProfileParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DxfProfile".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A DXF profile file's path, or the profile itself: {format: \"solidcraft-dxf-profile\", version?, name?, note?, roles?: {<role>: {on?, layer?, color?, linetype?}}}.",
+            "anyOf": [
+                {"type": "string", "minLength": 1},
+                {"type": "object", "required": ["format"]}
+            ]
+        })
     }
 }
 
