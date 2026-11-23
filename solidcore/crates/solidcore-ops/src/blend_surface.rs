@@ -255,6 +255,7 @@ fn seams(
 fn native_order(body: &Body) -> Order {
     let g = body.lock();
     Order {
+        split_edges: 0,
         faces: g.face_list().to_vec(),
         edges: g.edge_list().to_vec(),
         vertices: g.vertex_list().to_vec(),

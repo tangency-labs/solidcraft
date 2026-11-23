@@ -414,7 +414,7 @@ fn mesh_part(mesh: &RecordMesh) -> std::result::Result<Part, String> {
     }
     let body = crate::mesh_body(&positions, &mesh.triangles).map_err(|e| e.to_string())?;
     let closed = body.is_closed_mesh();
-    Ok(Part { body, closed, file_faces: 0, face_origin: Vec::new(), refused: None })
+    Ok(Part { body, closed, file_faces: 0, face_origin: Vec::new(), refused: None, split_edges: 0 })
 }
 
 /// The part of body `k`, a copy of body `j`: `j`'s, which must be an earlier original that
