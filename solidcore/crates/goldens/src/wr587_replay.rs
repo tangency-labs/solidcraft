@@ -277,6 +277,14 @@ pub(crate) fn certify(k: &Kernel, curves: &[Curve], own: Answer) -> Cert {
             );
             assert!(len > e_hat, "a success of no certain direction");
             let bound = 2.0 * (e_kernel + e_hat) / (len - e_hat) + 16.0 * f64::EPSILON;
+            // the bound must certify a direction, not only a unit vector (any two unit
+            // vectors are within 2 of each other): with it below 1e-6 the answer is
+            // within 1e-6 of the exact area normal, so the sense of every `Reversed`
+            // call is certified (the measured largest is 2.3e-12)
+            assert!(
+                bound < 1e-6,
+                "a success whose direction the bound does not certify ({bound:e})"
+            );
             let dev = (n - a / len).length();
             assert!(
                 dev <= bound,
