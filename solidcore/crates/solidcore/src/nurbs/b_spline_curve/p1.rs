@@ -83,8 +83,8 @@
 //!   B-spline; it is omitted.
 //! - **Missing NURB.** Upstream callers of `GetOrCreateGwNurbPointer` dereference
 //!   the `NULL` it returns for a curve built without NURB data (the
-//!   `SmBSplineCurve(ULONG)` constructor) and crash; here they return a
-//!   [`BSplineFailure::Defect`] with `SM_ERR` (the status of the failed `MakeNurb`).
+//!   `SmBSplineCurve(ULONG)` constructor) and crash; here they return
+//!   [`BSplineFailure::NoNurbsForm`] with `SM_ERR` (the status of the failed `MakeNurb`).
 //!   `GetNaturalInterval` returns `[0, 0]` and `RemoveExtraKnots` succeeds there, as
 //!   upstream.
 //! - **Ownership.** The NURB is owned ([`Curve`]); the "borrowed" flag of the fast
