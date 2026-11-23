@@ -1668,6 +1668,9 @@ impl SolveApp {
                 params.insert("view".into(), json!(target));
             }
         }
+        if matches!(id, "drawing.sketch.create" | "drawing.sketch.edit") {
+            crate::sketch_view::prepare_sheet_start(self, id, &mut params)?;
+        }
         crate::plugins::sync_policy(self);
         if plugins::busy(self) && matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
             return Err(self.tr("prefs.plugin_busy").into());
@@ -1837,6 +1840,7 @@ impl SolveApp {
             r => r,
         };
         if let Ok(v) = &r {
+            sheet_views::command_opened(self, id, v);
             if id.eq_ignore_ascii_case("plugin.inspect")
                 && let Some(id) = v.pointer("/manifest/id").and_then(Value::as_str)
             {
@@ -1900,6 +1904,7 @@ impl SolveApp {
                     self.ui.show_navigation_bar = v.get("visible").and_then(Value::as_bool).unwrap_or(!self.ui.show_navigation_bar)
                 }
                 "view.next_tab" | "view.previous_tab" => documents::cycle(self, id == "view.next_tab"),
+                "view.toolbar_reset_all" => toolbar_custom::reset_all(self),
                 "view.ribbon_tabs_only" => {
                     let on = v.get("on").and_then(Value::as_bool).unwrap_or(!self.preferences.ribbon_tabs_only);
                     self.preferences.ribbon_tabs_only = on;
@@ -2056,6 +2061,11 @@ impl SolveApp {
             Ok(value)
         });
         crate::sketch_view::project(self);
+        if workspace::sheet_scope(self) {
+            workspace::sync_context(self);
+        }
+        sheet_views::drop_deleted(self);
+        crate::drawing_sheet_page::retire_closed(self);
         if r.is_ok() && self.session.active_sketch.is_some() && !self.sketch_finish_processing {
             // A sketch some command left open: remember the view to go back to, as a command run from
             // a script does. Only the UI turns the view, and only when it starts the sketch.
@@ -2394,10 +2404,19 @@ impl SolveApp {
         if self.file_load_holds() || self.file_picker.is_some() {
             return;
         }
+        if matches!(id, "drawing.sheet_sketch" | "drawing.sketch.create")
+            || (id == "sketch.create" && self.docs.views.active().kind == solidcraft_views::ViewKind::Sheet)
+        {
+            if let Err(error) = crate::sketch_view::start_sheet(self) {
+                self.set_status(error, true);
+            }
+            return;
+        }
         if drawing_workspace::start(self, id) {
             return;
         }
         if drawing_workspace::active(self)
+            && !(self.session.active_sheet_sketch.is_some() && id.starts_with("sketch."))
             && !id.starts_with("drawing.")
             && !matches!(id, "assembly.bom" | "sheet.flat_pattern" | "document.metadata" | "document.metadata.set" | "view.layout")
             && !matches!(id, "view.fit" | "view.home" | "view.tool" | "view.tool.zoom")
@@ -4471,6 +4490,8 @@ impl SolveApp {
 
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        let host = self.view_windows.current_window();
+        let opening_host = self.view_windows.opening_host(Some(host));
         plugins::tick(self, ui.ctx(), false);
         documents::give_up_renames_of_other_designs(self);
         params_dialog::install_expressions(ui.ctx());
@@ -4518,6 +4539,7 @@ impl SolveApp {
         documents::sync_views(self);
         documents::sync_window_title(self, ui.ctx());
         plugin_events::tick(self, ui.ctx());
+        self.view_windows.opening_host(opening_host);
     }
 
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {
@@ -4668,15 +4690,21 @@ impl SolveApp {
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
-        if drawing_workspace::active(self) {
+        if view_tiles::shown(self) && (self.preferences.workspace_follows_view || !drawing_workspace::active(self)) {
+            view_tiles::show(self, ui);
+        } else if self.docs.views.active().kind == solidcraft_views::ViewKind::Sheet && !dialogs_sheet::flat_active(self) {
+            dim_view::set_model_drawn(Vec::new());
+            let id = self.docs.views.active().id;
+            drawing_sheet_page::show_view(self, ui, id);
+            view_tiles::single_sketch_chrome(self, ui);
+        } else if drawing_workspace::active(self) {
             if dialogs_sheet::flat_active(self) {
                 viewport::show(self, ui);
             } else {
                 dim_view::set_model_drawn(Vec::new());
                 drawing_workspace::show(self, ui);
+                view_tiles::single_sketch_chrome(self, ui);
             }
-        } else if view_tiles::shown(self) {
-            view_tiles::show(self, ui);
         } else if view_window_drag::unanchored(self, ui.ctx(), self.docs.views.active().id) {
             self.viewport.rect = Some(ui.max_rect());
             let t = solidcraft_theme::Tokens::get();
