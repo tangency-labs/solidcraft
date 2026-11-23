@@ -55,6 +55,7 @@
 - **Windows:** the [installer][windows-msi].
 - **macOS:** the [disk image][macos-dmg] (Apple silicon and Intel).
 - **Linux:** the [AppImage][linux-appimage], or `sudo snap install solidcraft` ([Snap Store][snap-store]).
+- **NixOS and Nix:** the flake, with pinned stable and prerelease builds and a Home Manager module ([Nix instructions](docs/nix.md)).
 - **Web:** [try it in your browser][web-app], no install.
 
 ARM64 and 32-bit builds, portable zip, .deb, .rpm, Flatpak and the other packages are on the
