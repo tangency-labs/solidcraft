@@ -53,6 +53,7 @@ mod face;
 mod loops;
 mod seams;
 mod shell;
+mod tangent_sections;
 mod vertex;
 
 use std::borrow::Cow;
