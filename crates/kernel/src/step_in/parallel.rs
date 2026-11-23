@@ -110,9 +110,11 @@ pub(super) enum Healed {
 /// A part whose check fails, healed of its tolerance-scale defects
 /// ([`crate::heal_tolerance_defects`]) when that can be proved and leaves the check failing
 /// fewer tests: a new part, with its body and its faces' file faces (the heal only removes
-/// faces) replaced. Otherwise [`Healed`] says why not.
-pub(super) fn heal(part: &Part, item: u64) -> Healed {
-    let (body, heal) = match crate::tolerance_heal::heal_tolerance_defects(&part.body) {
+/// faces) replaced. Otherwise [`Healed`] says why not. `own` is SMLib's check of `part.body`
+/// when the import already ran it ([`crate::tolerance_heal::heal_given_check`]; `None`: the heal
+/// runs it when it needs it).
+pub(super) fn heal(part: &Part, item: u64, own: Option<&crate::CheckFailure>) -> Healed {
+    let (body, heal) = match crate::tolerance_heal::heal_given_check(&part.body, own) {
         Ok(Some(healed)) => healed,
         Ok(None) => return Healed::NotKept,
         Err(KernelError::Heal(crate::HealFailure::Stopped)) => return Healed::Stopped,
