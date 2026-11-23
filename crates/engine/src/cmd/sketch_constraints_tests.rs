@@ -2052,23 +2052,25 @@ fn a_tangent_between_a_line_and_a_circle_closes_the_area() {
     run(&mut s, "sketch.constraint.tangent", json!({"a": "c1", "b": "l2"}));
     let sk = sketch(&s);
     let circle = sk.curve_index("c1").unwrap();
-    let centre = sk.center(circle).unwrap();
-    let radius = sk.radius(circle).unwrap();
     for id in ["l1", "l2"] {
-        let (a, b) = match sk.curves[sk.curve_index(id).unwrap()].kind {
-            solidcraft_sketch::CurveKind::Line { a, b } => (a, b),
-            _ => panic!("a line"),
-        };
-        let ends = [(a, sk.points[a].pos), (b, sk.points[b].pos)];
-        let near = ends.iter().min_by(|(_, p), (_, q)| p.dist(centre).total_cmp(&q.dist(centre))).unwrap().1;
-        assert!((near.dist(centre) - radius).abs() < 1e-6, "{id}: its end is {near:?}, {radius} from the centre {centre:?}");
-        let dir = sk.points[b].pos - sk.points[a].pos;
-        assert!((near - centre).dot(dir).abs() < 1e-6 * dir.len(), "{id}: the line does not touch the circle at its end");
+        let line = sk.curve_index(id).unwrap();
+        // The end of the line that lies on the circle, and the Tangent that holds it there.
+        let on = sk
+            .constraints
+            .iter()
+            .position(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p, c: cc } if cc == circle && sk.curves[line].kind.ends().is_some_and(|(a, b)| a == p || b == p)))
+            .unwrap_or_else(|| panic!("{id}: no end of the line lies on the circle"));
+        assert!(solidcraft_sketch::constraint_residual(&sk, on).unwrap().abs() < 1e-6, "{id}: its end is not on the circle");
+        let tangent = sk
+            .constraints
+            .iter()
+            .position(|c| matches!(c.kind, ConstraintKind::Tangent { a, b } if (a == line && b == circle) || (b == line && a == circle)))
+            .unwrap();
+        assert!(solidcraft_sketch::constraint_residual(&sk, tangent).unwrap().abs() < 1e-6, "{id}: the line does not touch the circle at that end");
     }
     // The circle and the two lines close one area.
     let profiles = solidcraft_sketch::find_profiles(&sk);
-    let closed = profiles.iter().find(|p| p.outer_curves.len() == 3);
-    assert!(closed.is_some(), "the circle and the two lines close no area: {profiles:?}");
+    assert!(profiles.iter().any(|p| p.outer_curves.len() == 3), "the circle and the two lines close no area: {profiles:?}");
 }
 
 /// A negative value on a sided distance dimension flips the free side to the opposite side of its

@@ -3565,23 +3565,7 @@ fn tangent_joint_operands(sk: &Sketch, p: &Value) -> Option<Value> {
 
 /// The distance from a point to a curve, over the curve's own polyline.
 fn curve_distance(sk: &Sketch, c: usize, p: Vec2) -> f64 {
-    let poly = sk.polyline(c);
-    match poly.as_slice() {
-        [] => f64::INFINITY,
-        [q] => q.dist(p),
-        _ => poly.windows(2).map(|w| point_segment_distance(p, w[0], w[1])).fold(f64::INFINITY, f64::min),
-    }
-}
-
-/// The distance from a point to a segment.
-fn point_segment_distance(p: Vec2, a: Vec2, b: Vec2) -> f64 {
-    let d = b - a;
-    let l = d.len();
-    if !(l > 1e-12) {
-        return p.dist(a);
-    }
-    let t = ((p - a).dot(d) / (l * l)).clamp(0.0, 1.0);
-    p.dist(a + d * t)
+    solidcraft_sketch::polyline_signed_dist(&sk.polyline(c), p).abs()
 }
 
 /// The point a Tangent operand names when it names no curve and no sketch axis (#12092). `x` and

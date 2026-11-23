@@ -62,6 +62,7 @@ pub use curves::fit_beziers_mode;
 pub use curves::fit_beziers_with_handles;
 pub use curves::fit_tangent_handles;
 pub use curves::fit_within_tolerance;
+pub use curves::polyline_signed_dist;
 pub use curves::spline_end_tangent;
 pub use curves::spline_end_tangent_mode;
 pub use curves::spline_end_tangent_with_handles;
