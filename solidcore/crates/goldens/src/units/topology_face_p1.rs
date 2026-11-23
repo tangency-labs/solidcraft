@@ -795,6 +795,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
             let serial =
                 solidcore::topology::brep::p3::notify_serial(&mut k.context, &mut b).map_err(e)?;
             put_owners(&mut o, &b, serial).map_err(e)?;
+            crate::trim_hook::observe(&mut b);
         }
         OpIn::SplitAtSeam { props } => {
             let face = b.face(f).map_err(e)?;

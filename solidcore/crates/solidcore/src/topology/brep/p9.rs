@@ -40,7 +40,9 @@
 //! passing refusal/projection comparisons do not certify those paths.
 //! Not upstream (WR-469, tangency-labs/solidcraft#17985): after `RefreshTolerance`, which
 //! keeps a vertex's tolerance as it was, `MakeEdgeInFaceWithVU` grows each end vertex's
-//! tolerance to twice its gap to the new edge's end (only if larger), as
+//! tolerance to twice the farthest edge end at it (the new edge's end and every other
+//! edge's end at the vertex; doubling is exact, so every such end lies within half of it;
+//! only if larger), as
 //! `UpdateVertexEdgeIntervals` sets it. The pinned C++ leaves gaps up to the full
 //! tolerance, which `AssertValid` refuses above half of it.
 //! See `plan/upstream-issues/WR-469--make-edge-in-face-vertex-tolerance-gap.md`.
@@ -75,6 +77,9 @@ use crate::topology::{
     Vertexuse, VertexuseId, VertexuseOwner,
 };
 use crate::EntityRef;
+
+#[cfg(feature = "wr469-replay")]
+pub mod replay;
 
 const OP: &str = "topology::brep::p9";
 
@@ -2050,10 +2055,39 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
             curve.evaluate_point(k, t_start)?,
             curve.evaluate_point(k, t_end)?,
         );
-        let start_gap = curve_start.distance(vertex::point(b, start_vertex)?);
-        let end_gap = curve_end.distance(vertex::point(b, end_vertex)?);
-        vertex::set_tolerance(b, start_vertex, 2.0 * start_gap, true, true)?;
-        vertex::set_tolerance(b, end_vertex, 2.0 * end_gap, true, true)?;
+        // the farthest end at the vertex, of the new edge and of every other edge there,
+        // so that every end at the vertex lies within half the grown tolerance
+        let start_gap = curve_start
+            .distance(vertex::point(b, start_vertex)?)
+            .max(farthest_end_gap(k, b, start_vertex)?);
+        let end_gap = curve_end
+            .distance(vertex::point(b, end_vertex)?)
+            .max(farthest_end_gap(k, b, end_vertex)?);
+        let start_tol = 2.0 * start_gap;
+        // (test-only seam of the WR-469 substitution replay, feature `wr469-replay`)
+        #[cfg(feature = "wr469-replay")]
+        let start_tol = replay::step(
+            k,
+            replay::VertexStep {
+                vertex: start_vertex,
+                before: vertex::tolerance(b, start_vertex)?,
+                gap: start_gap,
+                own: start_tol,
+            },
+        );
+        vertex::set_tolerance(b, start_vertex, start_tol, true, true)?;
+        let end_tol = 2.0 * end_gap;
+        #[cfg(feature = "wr469-replay")]
+        let end_tol = replay::step(
+            k,
+            replay::VertexStep {
+                vertex: end_vertex,
+                before: vertex::tolerance(b, end_vertex)?,
+                gap: end_gap,
+                own: end_tol,
+            },
+        );
+        vertex::set_tolerance(b, end_vertex, end_tol, true, true)?;
     }
     // These skeleton caches are derived from the authoritative use lists.
     sync_face_cache(b, face)?;
@@ -2062,6 +2096,38 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
     }
     sync_edge_cache(b, edge_id)?;
     Ok(output)
+}
+
+/// The farthest any edge's curve end at `v` lies from `v`'s point (0 with none): per
+/// edge at `v`, its curve at its interval's start when `v` is its start vertex and at its
+/// interval's end when `v` is its end vertex (both for a closed edge). An edge without a
+/// curve or without a resolvable start and end vertex has no end to measure.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of evaluating a curve.
+fn farthest_end_gap(k: &Kernel, b: &Brep, v: VertexId) -> Result<f64> {
+    let p = vertex::point(b, v)?;
+    let mut worst: f64 = 0.0;
+    for e in vertex::edges(b, v, None)? {
+        let Ok((start, end)) = edge::start_end_vertices(b, e) else {
+            continue;
+        };
+        let record = b.edge(e)?;
+        let Some(curve) = record.curve.as_ref() else {
+            continue;
+        };
+        let interval = edge::interval(b, e)?;
+        for (at_v, t) in [(start, interval.min()), (end, interval.max())] {
+            if at_v == Some(v) {
+                let gap = curve.evaluate_point(k, t)?.distance(p);
+                if gap > worst {
+                    worst = gap;
+                }
+            }
+        }
+    }
+    Ok(worst)
 }
 
 #[derive(Clone, Copy)]
