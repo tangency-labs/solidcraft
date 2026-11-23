@@ -192,16 +192,17 @@ fn null(reason: &'static str) -> SolidError {
 impl Brep {
     /// `GetThisModelSizeEstimate`: the B-rep's model size estimate; with
     /// `chase_defaults` (upstream default `TRUE`) a stored [`tol::USE_DEFAULT`] is
-    /// replaced by the context's estimate (`m_cpContext->GetThisModelSizeEstimate()`,
-    /// the kernel context).
+    /// replaced by the kernel's configured default, the context's estimate
+    /// (`m_cpContext->GetThisModelSizeEstimate()`, the kernel context). No operation
+    /// on a B-rep writes that default: it is what the caller configured.
     #[must_use]
     pub fn this_model_size_estimate(&self, k: &Kernel, chase_defaults: bool) -> f64 {
         if !chase_defaults {
-            self.model_size_estimate
-        } else if self.model_size_estimate == tol::USE_DEFAULT {
+            *self.model_size_estimate
+        } else if *self.model_size_estimate == tol::USE_DEFAULT {
             k.context.this_model_size_estimate(k)
         } else {
-            self.model_size_estimate
+            *self.model_size_estimate
         }
     }
 
@@ -210,8 +211,8 @@ impl Brep {
     #[must_use]
     pub fn this_large_small_size_ratio(&self, k: &Kernel, chase_defaults: bool) -> f64 {
         if !chase_defaults {
-            self.large_small_size_ratio
-        } else if self.large_small_size_ratio == tol::USE_DEFAULT {
+            *self.large_small_size_ratio
+        } else if *self.large_small_size_ratio == tol::USE_DEFAULT {
             // SmContext::GetThisLargeSmallSizeRatio
             let ratio = k.context.stored_large_small_size_ratio();
             if ratio == tol::USE_DEFAULT {
@@ -220,31 +221,26 @@ impl Brep {
                 ratio
             }
         } else {
-            self.large_small_size_ratio
+            *self.large_small_size_ratio
         }
     }
 
     /// `SetThisModelSizeEstimate` (upstream default `SM_USE_DEFAULT`): stores the
-    /// estimate, passes it to the B-rep's context (the kernel context) and sets the
-    /// B-rep tolerance to [`tol::size_estimate_to_zone_tol_3d`] of it; returns that
-    /// tolerance.
-    pub fn set_this_model_size_estimate(
-        &mut self,
-        k: &mut Kernel,
-        model_size_estimate: f64,
-    ) -> f64 {
-        self.model_size_estimate = model_size_estimate;
-        k.context.set_this_model_size_estimate(model_size_estimate);
-        self.tolerance = tol::size_estimate_to_zone_tol_3d(self.model_size_estimate);
-        self.tolerance
+    /// estimate and sets the B-rep tolerance to [`tol::size_estimate_to_zone_tol_3d`]
+    /// of it; returns that tolerance. The estimate is this B-rep's alone: the kernel
+    /// context keeps what its caller configured (upstream passes the estimate on to
+    /// the B-rep's context, which there is one model's; the kernel context here is
+    /// every B-rep's, so a write to it would change what the other B-reps answer).
+    pub fn set_this_model_size_estimate(&mut self, model_size_estimate: f64) -> f64 {
+        *self.model_size_estimate = model_size_estimate;
+        *self.tolerance = tol::size_estimate_to_zone_tol_3d(*self.model_size_estimate);
+        *self.tolerance
     }
 
     /// `SetThisLargeSmallSizeRatio` (upstream default `SM_USE_DEFAULT`): stores the
-    /// ratio and passes it to the B-rep's context (the kernel context).
-    pub fn set_this_large_small_size_ratio(&mut self, k: &mut Kernel, large_small_size_ratio: f64) {
-        self.large_small_size_ratio = large_small_size_ratio;
-        k.context
-            .set_this_large_small_size_ratio(large_small_size_ratio);
+    /// ratio, on this B-rep alone (see [`Brep::set_this_model_size_estimate`]).
+    pub fn set_this_large_small_size_ratio(&mut self, large_small_size_ratio: f64) {
+        *self.large_small_size_ratio = large_small_size_ratio;
     }
 
     /// `SetInfiniteRegion`: makes `region` the infinite region (the raw member write;
@@ -279,7 +275,7 @@ impl Brep {
     /// [`SolidError::InvalidInput`] otherwise.
     pub fn set_face_list(&mut self, order: Vec<FaceId>) -> Result<()> {
         check_order(&order, self.faces.ids())?;
-        self.face_list = order;
+        *self.face_list = order;
         Ok(())
     }
 
@@ -291,7 +287,7 @@ impl Brep {
     /// [`SolidError::InvalidInput`] otherwise.
     pub fn set_edge_list(&mut self, order: Vec<EdgeId>) -> Result<()> {
         check_order(&order, self.edges.ids())?;
-        self.edge_list = order;
+        *self.edge_list = order;
         Ok(())
     }
 
@@ -303,7 +299,7 @@ impl Brep {
     /// [`SolidError::InvalidInput`] otherwise.
     pub fn set_vertex_list(&mut self, order: Vec<VertexId>) -> Result<()> {
         check_order(&order, self.vertices.ids())?;
-        self.vertex_list = order;
+        *self.vertex_list = order;
         Ok(())
     }
 
@@ -311,7 +307,7 @@ impl Brep {
     /// the first region record.
     #[must_use]
     pub const fn region_list_head(&self) -> Option<RegionId> {
-        self.region_list_head
+        *self.region_list_head.inner()
     }
 
     /// Sets the head of the B-rep's region list (the friend write `m_pList = ..`). The
@@ -321,8 +317,8 @@ impl Brep {
         if let Some(pos) = region.and_then(|r| order.iter().position(|&x| x == r)) {
             order.rotate_left(pos);
         }
-        self.region_order = order;
-        self.region_list_head = region;
+        *self.region_order = order;
+        *self.region_list_head = region;
     }
 
     /// The regions on the list in link order from `Brep::region_order`'s start
@@ -352,7 +348,7 @@ impl Brep {
         {
             order.rotate_left(pos);
         }
-        self.region_order = order;
+        *self.region_order = order;
     }
 
     /// `AddDeletedSurface`: keeps a surface removed from the B-rep until the operation
@@ -4283,12 +4279,22 @@ mod tests {
             b.this_model_size_estimate(&k, true),
             tol::MODEL_SIZE_ESTIMATE
         );
-        assert_eq!(b.set_this_model_size_estimate(&mut k, 1000.0), 1.0e-4);
+        // a B-rep's own estimate and ratio stay off the context
+        assert_eq!(b.set_this_model_size_estimate(1000.0), 1.0e-4);
         assert_eq!(b.tolerance(), 1.0e-4);
-        assert_eq!(k.context.stored_model_size_estimate(), 1000.0);
-        b.set_this_large_small_size_ratio(&mut k, 7.0);
+        assert_eq!(k.context.stored_model_size_estimate(), tol::USE_DEFAULT);
+        assert_eq!(k.context.this_zone_tol_3d(), 1.0e-5);
+        b.set_this_large_small_size_ratio(7.0);
         assert_eq!(b.this_large_small_size_ratio(&k, false), 7.0);
-        assert_eq!(k.context.stored_large_small_size_ratio(), 7.0);
+        assert_eq!(k.context.stored_large_small_size_ratio(), tol::USE_DEFAULT);
+        // a B-rep that stores the default follows what the caller set on the context
+        let defaulted = Brep::new();
+        k.context.set_this_model_size_estimate(0.05);
+        k.context.set_this_large_small_size_ratio(3.0);
+        assert_eq!(defaulted.this_model_size_estimate(&k, true), 0.05);
+        assert_eq!(defaulted.this_large_small_size_ratio(&k, true), 3.0);
+        assert_eq!(b.this_model_size_estimate(&k, true), 1000.0);
+        assert_eq!(b.this_large_small_size_ratio(&k, true), 7.0);
     }
 
     #[test]

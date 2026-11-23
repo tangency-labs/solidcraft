@@ -21,7 +21,7 @@ use solidcore::primitive::primitive_creation::Boolean2d;
 use solidcore::prism::{extrude, measure, profile as kp, read, sheet};
 use solidcore::Brep;
 use solidcore_convert as convert;
-use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 pub use solidcore::prism::measure::Interval;
 pub use solidcore::prism::placement::LoopPlacement;
@@ -524,4 +524,29 @@ pub fn certified_round_wall_turn(points: &[Vec2], center: Vec2) -> Option<f64> {
 #[must_use]
 pub fn loop_placement(lp: &Loop2, other: &Loop2, tol: f64) -> Option<LoopPlacement> {
     convert::loop2(lp).placement(&convert::loop2(other), tol)
+}
+
+/// Positive and negative wing `(start, end)` intervals for a symmetric-offset extrude.
+#[must_use]
+pub fn symmetric_offset_intervals(gap: f64, half: f64) -> [(f64, f64); 2] {
+    extrude::symmetric_offset_intervals(gap, half)
+}
+
+/// Probe points along both wings of a symmetric-offset extrude for auto-operation detection.
+#[must_use]
+pub fn symmetric_offset_probe_points(
+    base: Vec3,
+    n: Vec3,
+    start: f64,
+    d: f64,
+    near_limit: f64,
+) -> [Vec3; 4] {
+    extrude::symmetric_offset_probe_points(
+        [base.x, base.y, base.z],
+        [n.x, n.y, n.z],
+        start,
+        d,
+        near_limit,
+    )
+    .map(|[x, y, z]| Vec3::new(x, y, z))
 }

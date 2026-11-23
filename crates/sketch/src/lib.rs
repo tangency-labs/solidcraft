@@ -50,9 +50,10 @@ mod wire;
 mod wire_solve;
 
 pub use curves::{
-    MAX_SPLINE_POINTS, bspline_beziers, conic_point, conic_rho_from_point, ellipse_point, end_curvature, fit_beziers, fit_beziers_mode,
-    fit_beziers_with_handles, fit_tangent_handles, spline_end_tangent, spline_end_tangent_mode, spline_end_tangent_with_handles, spline_point,
-    spline_point_mode, spline_point_with_handles, spline_polyline, spline_polyline_mode, spline_polyline_with_handles,
+    MAX_SPLINE_POINTS, ToleranceFit, bezier_distance, bspline_beziers, conic_point, conic_rho_from_point, ellipse_point, end_curvature, fit_beziers,
+    fit_beziers_mode, fit_beziers_with_handles, fit_tangent_handles, fit_within_tolerance, spline_end_tangent, spline_end_tangent_mode,
+    spline_end_tangent_with_handles, spline_point, spline_point_mode, spline_point_with_handles, spline_polyline, spline_polyline_mode,
+    spline_polyline_with_handles,
 };
 pub use decompose::Budget;
 pub use dims::{
@@ -90,8 +91,8 @@ pub use shape::{Shape, intersections, intersections_within, nearest_crossing, ne
 pub use solver::solve_after_edit_with_analysis;
 pub use solver::{
     Analysis, CONSISTENT, DrivingValues, Hold, MAX_COMPONENT_VARS, SolveReport, SolveStatus, constraint_residual, determined_by, fillets_kept,
-    flips_from_stored, keep_point_order, keep_sides_at_zero, measure_dimension, move_line_towards, move_point_towards, point_along, solve,
-    solve_after_edit, solve_after_link_move, solve_after_value_edit, solve_holding, solve_with,
+    flips_from_stored, keep_point_order, keep_sides_at_zero, measure_dimension, move_line_towards, move_point_towards, point_along,
+    side_flips_from_stored, solve, solve_after_edit, solve_after_link_move, solve_after_value_edit, solve_holding, solve_with,
 };
 pub use text::{
     MAX_TEXT_CHARS, TextAlign, TextMetrics, TextStyle, TextVerticalAlign, saved_text_geometry, text_geometry, text_geometry_in, text_geometry_styled,
