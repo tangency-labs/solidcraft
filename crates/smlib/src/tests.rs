@@ -150,7 +150,7 @@ const NO_KERNEL: [&str; 16] = [
     "start",
 ];
 
-const ANSWERING: [&str; 70] = [
+const ANSWERING: [&str; 71] = [
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -218,6 +218,7 @@ const ANSWERING: [&str; 70] = [
     "loft",
     "sweep_stations",
     "loft_to_point",
+    "loft_to_point_through",
     "screw_sweep",
     "screw_sweep_radial",
     "screw_sweep_with_options",
@@ -363,6 +364,8 @@ fn every_entry_point_answers() {
     let i3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     says("sweep_stations", Brep::sweep_stations(&lines, &[Affine { m: i3, t: [0.0; 3] }, Affine { m: i3, t: [0.0, 0.0, 2.0] }], Ends::Capped));
     says("loft_to_point", Brep::loft_to_point(&lines, p(5.0, 5.0, 12.0)));
+    // The base twice, at one height: its own refusal.
+    says("loft_to_point_through", Brep::loft_to_point_through(&[lines.clone(), lines.clone()], p(5.0, 5.0, 12.0), &[0.0, 0.5, 1.0]));
     says("screw_sweep", Brep::screw_sweep(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, 0.01));
     says("screw_sweep_radial", Brep::screw_sweep_radial(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, &[(0.0, 0.0), (1.0, 0.0)], 0.01));
     says(

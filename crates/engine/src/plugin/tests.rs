@@ -1226,6 +1226,11 @@ mod native {
         let hidden: Vec<_> = links.iter().filter(|link| link.component == components[1]).cloned().collect();
         design_notifications(&mut s, Some(token.clone()), false, &hidden);
         assert!(s.plugin_state.listener_data.is_empty(), "a links-only listener is not invoked when every unread source is outside its folders");
+        // The session's own scope narrows the grant too: with the granted folder outside it, the
+        // unread link inside that folder stays hidden.
+        let session_scope = solidcraft_io::vfs::PathScope::new(vec![outside.clone()]);
+        solidcraft_io::vfs::scoped(Some(session_scope), || design_notifications(&mut s, Some(token.clone()), false, &links));
+        assert!(s.plugin_state.listener_data.is_empty(), "a granted folder outside the session's scope reveals nothing unread");
         #[cfg(unix)]
         {
             let alias = inside.join("outside.sc");
