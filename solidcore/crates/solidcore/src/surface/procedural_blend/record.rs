@@ -724,6 +724,10 @@ pub struct SetbackCornerRecord {
     pub convex: bool,
     /// The most the fill stands past a face, certified (at most `tol`).
     pub containment: f64,
+    /// Whether the fill was built with the convexity certificate (#13775). Defaults in
+    /// records saved before the field: their fills were not certified.
+    #[serde(default)]
+    pub certified: bool,
     /// The patch's index: setback patches first, then the interior parts.
     pub patch: u32,
     /// The net, the patch.

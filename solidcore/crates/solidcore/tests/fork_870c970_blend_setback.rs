@@ -422,6 +422,61 @@ fn setback_box_corner(radii: [f64; 3], round_order: usize, ease: f64, order: usi
         }
     }
     let len = 10.0;
+    if order == 2 {
+        // the G2 fill is certified convex only past the least scale of the setbacks that
+        // certifies it (as the G1's is, certified_scale; #13775): grow to it
+        let build = |scale: f64| -> bool {
+            let mut rs = Vec::new();
+            for a in 0..3 {
+                let (r, sb) = (radii[a], setbacks[a] * scale);
+                let mut own = if round_order == 3 {
+                    box_corner_gn_round(&k, a, r, sb, len)
+                } else {
+                    box_corner_round(a, r, sb, len, round_order)
+                };
+                if ease > 0.0 {
+                    let g2 = box_corner_round(a, r, sb, len, 2);
+                    let ramp = [EaseRamp {
+                        from: sb + ease,
+                        to: sb,
+                    }];
+                    own = ease_surface(&own, &g2, SurfParamType::U, &ramp).unwrap();
+                }
+                rs.push(own);
+            }
+            let surfaces: Vec<Surface> = rs.iter().cloned().map(Surface::from).collect();
+            let input: Vec<Round<'_>> = surfaces
+                .iter()
+                .map(|own| Round {
+                    surface: own,
+                    along: SurfParamType::U,
+                    end: own
+                        .natural_uv_domain_with_nurb(&k)
+                        .unwrap()
+                        .u_interval()
+                        .min(),
+                    corner_above: false,
+                })
+                .collect();
+            fill_hole(&k, &faces, &input, order, 1e-9).is_ok()
+        };
+        assert!(
+            build(12.0),
+            "no setback up to 12 times the default certifies this corner"
+        );
+        let (mut lo, mut hi) = (1.0f64, 12.0f64);
+        while hi - lo > 0.01 {
+            let mid = 0.5 * (lo + hi);
+            if build(mid) {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        for x in &mut setbacks {
+            *x *= hi;
+        }
+    }
     let mut rounds = Vec::new();
     for a in 0..3 {
         let (r, s) = (radii[a], setbacks[a]);
@@ -694,6 +749,42 @@ fn box_corner_g2_eased() {
     setback_box_corner([2.0, 2.0, 2.0], 1, 2.0, 2);
 }
 
+/// A G2 fill at the corner's default setbacks is refused where its convexity certificate
+/// does not hold (the fills there carry residual saddles; #13775): the refusal names the
+/// certificate, as the G1's does at its own least setbacks.
+#[test]
+fn box_corner_g2_rounds_refused_at_the_default_setbacks() {
+    let k = Kernel::default();
+    let faces = box_corner_faces();
+    let setbacks = distances(&faces, &box_corner_edges([2.0, 2.0, 2.0]))
+        .unwrap()
+        .setbacks;
+    let rounds: Vec<Surface> = (0..3)
+        .map(|a| Surface::from(box_corner_round(a, 2.0, setbacks[a], 10.0, 2)))
+        .collect();
+    let input: Vec<Round<'_>> = rounds
+        .iter()
+        .map(|own| Round {
+            surface: own,
+            along: SurfParamType::U,
+            end: own
+                .natural_uv_domain_with_nurb(&k)
+                .unwrap()
+                .u_interval()
+                .min(),
+            corner_above: false,
+        })
+        .collect();
+    let refusal = fill_hole(&k, &faces, &input, 2, 1e-9).unwrap_err();
+    assert!(
+        refusal
+            .reason
+            .unwrap_or_default()
+            .contains("no G2 fill up to degree 9 is certified convex"),
+        "{refusal:?}"
+    );
+}
+
 /// Order-2 rounds r 2 (no ease), filled to G2.
 #[test]
 fn box_corner_g2_rounds() {
@@ -932,6 +1023,44 @@ fn corner_setbacks(k: &Kernel, radii: [f64; 3], order: usize) -> Vec<f64> {
     setbacks
 }
 
+/// The setbacks the geometric default grown to the least at which the fill of `orders` of
+/// rounds of `section`'s order certifies convex (the G1 by `certified_scale`, the G2 and the
+/// fill G2 to circular rounds by a bisection on the grid of hundredths over the same
+/// rounds: the convexity certificate needs the corner's room, #13775; the rounds moved or
+/// reparametrized are the same geometry and certify at the same setbacks).
+fn certifying_setbacks(
+    k: &Kernel,
+    radii: [f64; 3],
+    orders: FillOrders,
+    section: usize,
+) -> Vec<f64> {
+    if orders == G1 {
+        return corner_setbacks(k, radii, 1);
+    }
+    let base = corner_setbacks(k, radii, section.max(1));
+    let certifies = |scale: f64| -> bool {
+        let rounds: Vec<BSplineSurface> = (0..3)
+            .map(|a| box_corner_round(a, radii[a], base[a] * scale, 10.0, section))
+            .collect();
+        fill_of(k, &rounds, orders).is_ok()
+    };
+    assert!(
+        certifies(12.0),
+        "no setback up to 12 times the default certifies this corner"
+    );
+    // the least certifying scale on the grid of hundredths whose neighbour below fails
+    let (mut lo, mut hi) = (1.0f64, 12.0f64);
+    while hi - lo > 0.01 {
+        let mid = 0.5 * (lo + hi);
+        if certifies(mid) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    base.iter().map(|&x| x * hi).collect()
+}
+
 /// The box corner's fill to `orders` of `rounds` (u along each, from its end section at its
 /// least u, the corner below it) at the fork's tolerance 1e-9, or why it is refused.
 fn fill_of(k: &Kernel, rounds: &[BSplineSurface], orders: FillOrders) -> Result<Fill, String> {
@@ -993,7 +1122,7 @@ fn fill_moved_across(
 ) -> Result<(f64, f64), String> {
     let k = Kernel::default();
     let radii = [2.0, 3.0, 4.0];
-    let setbacks = corner_setbacks(&k, radii, orders.faces);
+    let setbacks = certifying_setbacks(&k, radii, orders, section);
     let size = setbacks.iter().copied().fold(f64::MIN, f64::max);
     let rounds = |moved: bool| -> Vec<BSplineSurface> {
         (0..3)
@@ -1099,7 +1228,56 @@ fn fill_is_the_geometry_s() {
     let k = Kernel::default();
     let radii = [2.0, 3.0, 4.0];
     for order in [1, 2] {
-        let setbacks = corner_setbacks(&k, radii, order);
+        // the least setbacks at which every parameterization certifies convex: the
+        // eased circles are another geometry than the plain rounds and may need more
+        // room than they do (#13775)
+        let orders = FillOrders {
+            rounds: order,
+            faces: order,
+        };
+        let base = corner_setbacks(&k, radii, order);
+        let setbacks = if order == 1 {
+            base
+        } else {
+            let rounds_at = |scale: f64, how: usize| -> Vec<BSplineSurface> {
+                (0..3)
+                    .map(|a| {
+                        let (r, sb) = (radii[a], base[a] * scale);
+                        match how {
+                            0 => box_corner_round(a, r, sb, 10.0, order),
+                            1 => box_corner_round_reparametrized(a, r, sb, 10.0, order, 0.3, 1.0),
+                            2 => box_corner_round_reparametrized(a, r, sb, 10.0, order, 0.65, 2.5),
+                            _ => {
+                                let ramp = [EaseRamp {
+                                    from: sb + 2.0,
+                                    to: sb,
+                                }];
+                                let circle = box_corner_round(a, r, sb, 10.0, 1);
+                                let g2 = box_corner_round(a, r, sb, 10.0, 2);
+                                ease_surface(&circle, &g2, SurfParamType::U, &ramp).unwrap()
+                            }
+                        }
+                    })
+                    .collect()
+            };
+            let all_certify = |scale: f64| -> bool {
+                (0..4usize).all(|how| fill_of(&k, &rounds_at(scale, how), orders).is_ok())
+            };
+            assert!(
+                all_certify(12.0),
+                "G{order}: no setback up to 12 times the default certifies every parameterization"
+            );
+            let (mut lo, mut hi) = (1.0f64, 12.0f64);
+            while hi - lo > 0.01 {
+                let mid = 0.5 * (lo + hi);
+                if all_certify(mid) {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            base.iter().map(|&x| x * hi).collect()
+        };
         let size = setbacks.iter().copied().fold(f64::MIN, f64::max);
         let rounds = |how: usize| -> Vec<BSplineSurface> {
             (0..3)
@@ -1121,10 +1299,6 @@ fn fill_is_the_geometry_s() {
                     }
                 })
                 .collect()
-        };
-        let orders = FillOrders {
-            rounds: order,
-            faces: order,
         };
         let own = fill_of(&k, &rounds(0), orders).unwrap();
         let ways: &[(usize, &str)] = if order == 1 {
