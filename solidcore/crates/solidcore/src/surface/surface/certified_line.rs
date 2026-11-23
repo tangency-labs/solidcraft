@@ -79,10 +79,10 @@
 //! `(u, v)` box, its line parameters and a [`FloorKind`] (excluded by t, left, no root,
 //! edge, root, unshown, or unvisited: the boxes still to visit when the pass stopped at the
 //! limit). An edge box is a box with no root one of whose sides lies on a border where a
-//! path down the gap to the line can end without a root: the net's knot range (a periodic
-//! seam among it: nothing wraps across the seam, which loses answers there, never a
-//! contact), the solve's `(u, v)` domain, an interior knot line of multiplicity at least
-//! the degree (the net below `C¹` in parameter there, a crease not proved `G¹`), or a
+//! path down the gap to the line can end without a root: the net's knot range (a seam the
+//! solve wraps across among it, below: a crease), the solve's `(u, v)` domain, an interior
+//! knot line of multiplicity at least the degree (the net below `C¹` in parameter there, a
+//! crease not proved `G¹`), or a
 //! stretch of the leaf's border that no searched leaf or culled strip covers
 //! ([`LeafSides`]: a leaf outside the face, which gets no distance verdict). A
 //! line passing within the tolerance just beyond such a border, with no root on either
@@ -142,16 +142,19 @@
 //! the connected sets of such records (closed boxes meeting, across leaf borders too), each
 //! taken whole, so no set touches another and none waits for another to drop: the release
 //! order is a single round, decided on the records as they were before any drop, so no leaf
-//! drops by reading the final records of a leaf that reads its own. A seam is a boundary
-//! side (nothing wraps across it). The side enclosures have their own budget
+//! drops by reading the final records of a leaf that reads its own. A seam side keeps a
+//! boundary's test, its own enclosure (the sets do not reach across it to the other end of
+//! the range, so a crease's second way is not read there). The side enclosures have their
+//! own budget
 //! ([`MAX_DROP_ENCLOSURES`]); past it, a set not yet shown is kept. A box left at the floor
 //! is never a member: the argument needs a regular box.
 //!
 //! **Components.** After the drop, the kept boxes of every searched leaf and strip (left,
 //! edge, plain with no root, root, unshown, unvisited, culled; not those excluded by t) and
 //! the whole domain of every leaf whose pass did not run make the solve's [`components`]:
-//! boxes join where their closed `(u, v)` boxes meet (across leaf borders too; not across a
-//! seam) and their line parameters overlap. A component records its boxes, its `(u, v)` and
+//! boxes join where their closed `(u, v)` boxes meet (across leaf borders too, and across a
+//! seam the solve wraps, below) and their line parameters overlap. A component records its
+//! boxes, its `(u, v)` and
 //! line parameter hulls, whether it reaches an end of the line's own interval, whether it
 //! lies in or touches a leaf at the limit, a leaf not run or a stretch nothing searched, and
 //! the certified roots in it. The solve's
@@ -202,8 +205,11 @@
 //!   nonsingular there). Its parity is the count of its distinct certified roots: two are
 //!   one where an enclosure lies in the other's unique box, two where their enclosures are
 //!   apart, and the component is undecided when two are neither. It is undecided too when a
-//!   box has a side on a boundary (the surface's, a seam among them, or the solve's): a root
-//!   there may be counted again by the patch across it. Any kind of surface.
+//!   box has a side on a boundary (the surface's or the solve's), or a root's enclosure
+//!   reaches the knots' range or the solve's border (a seam among them): a root there may be
+//!   counted again by the patch across it, and, at a seam, two unique boxes on its two ends
+//!   cannot be shown to hold one root (the net is not proved `C¹` across it, which Krawczyk's
+//!   operator over a box straddling it would need). Any kind of surface.
 //! - **A box left at the floor**, on a surface of revolution whose net is a patch of a
 //!   sphere, a cylinder or cone, or a ring torus ([`Revolved`], its stored axes orthonormal
 //!   to within [`FRAME_DEFECT`]): the side function `f` (the distance to the sphere, the
@@ -274,8 +280,9 @@
 //!   (S − L) · S_v) = 0`, and its side is `s(t) = n · (L(t) − S(u*, v*))`, `n = S_u × S_v`
 //!   ([`by_foot`]). With 2 and 3 as above:
 //!   1. `[t₀, t₁]` is covered by stretches `T_k` (halved within [`MAX_FOOT_BOXES`] tests),
-//!      each with a box `U_k` strictly inside the net's knots and the solve's domain (clear
-//!      of a seam, which is not joined), on which Krawczyk's operator of `G` with `t` an
+//!      each with a box `U_k` strictly inside the net's knots and the solve's domain (none
+//!      straddles a seam, which is not proved `C¹`: a stretch whose boxes lie on both of its
+//!      ends has none), on which Krawczyk's operator of `G` with `t` an
 //!      interval parameter over `T_k` lies strictly inside `U_k` ([`foot_box`]): every `t`
 //!      in `T_k` has exactly one foot in `U_k` (`S` is `C¹` over `U_k`, so `G` is Lipschitz,
 //!      piecewise `C¹`, and the mean-value form reads the hull of the one-sided second
@@ -305,6 +312,31 @@
 //! The distinct roots of a component are counted from its root boxes: one where an
 //! enclosure lies in the other's unique box, two where the enclosures are apart, and the
 //! component is undecided when two are neither.
+//!
+//! **The seam** (answer10, Q1). Where the stored net closes exactly in a direction (its
+//! first and last rows one homogeneous row up to a common factor, [`closes_exactly`]: every
+//! control point of both, so every point of the seam, with no tolerance) and the solve's
+//! domain reaches both ends of the knots' range there ([`LineNet::seams`]), the parameter
+//! space wraps: `(u₀, v) ↔ (u₁, v)` is a translation with the same `v`, so it keeps the
+//! orientation and `S` is continuous across it. The seam is then a knot line of the face,
+//! never a boundary: a crease ([`SideKind::Crease`]), since `S_u` may jump there (unequal
+//! end knot spans) and `C¹` across it is not proved, so no Krawczyk box (the leaves are
+//! native) and no foot box straddles it. [`leaf_sides`] reads the leaves on the range's
+//! other end across a seam side (a stretch none covers is a trim cull, a boundary). Two
+//! boxes on opposite ends whose stretches along the seam meet share a point of the seam,
+//! one point of the net with one foot, so [`components`] joins them where their line
+//! parameters overlap, as across a leaf border; a net 1 ulp from closing has two edge
+//! points there and never wraps. A component joined across a seam is read as its two
+//! pieces in native coordinates, glued there ([`Span`]: no shift by the range's width,
+//! which rounds); the side test encloses and covers piecewise and certifies the chart on
+//! the lifted rectangle's edges, made of both pieces' edges, and its degree and winding
+//! argument needs only continuity across the seam. Its stretches merged are a connected arc
+//! of the turn: one piece covering the whole range is a whole turn, whose lift is no
+//! rectangle less than a turn wide ([`Why::WholeTurn`], undecided; so is any component
+//! whose boxes cover the whole range). What a box touches across a seam (a leaf at its
+//! limit or not run, a trim cull) is read only for a component joined across it
+//! ([`facing`]): one that is not keeps the flags it had, its seam sides facing a trim cull
+//! boundaries. A partial turn, or a solve over part of the range, never wraps.
 //!
 //! An undecided component keeps why ([`Why`]), down to the condition that failed: for 2,
 //! what is known of the components meeting it ([`Overlap`]: across a seam or on opposite
@@ -406,8 +438,9 @@ pub(crate) struct LineNet {
     /// The net as the surface stores it, for [`side_bounds`] (with
     /// [`LineNet::revolved`] only).
     form: Option<crate::nurbs::srf_basic::Surface>,
-    /// Whether the stored net closes exactly in u and in v ([`closes_exactly`]): a
-    /// diagnosis of [`Overlap`] only.
+    /// Whether the stored net closes exactly in u and in v ([`closes_exactly`]): where the
+    /// solve covers the whole knots' range too, its parameter space wraps there
+    /// ([`LineNet::seams`]).
     closes: [bool; 2],
 }
 
@@ -460,6 +493,38 @@ impl LineNet {
         }
     }
 
+    /// Where the solve's parameter space over `solve` closes on itself (module docs, "The
+    /// seam"): in each direction in which the stored net closes exactly ([`closes_exactly`])
+    /// and `solve` reaches both ends of the knots' range (the clamped domain is the whole
+    /// range, so the seam lies inside the face). A partial turn does not close, and a solve
+    /// over part of the range keeps its border a boundary.
+    pub(crate) fn seams(&self, solve: &Extent2d) -> Seams {
+        let [[u0, u1], [v0, v1]] = self.range;
+        let (lo, hi) = (solve.min(), solve.max());
+        let [cu, cv] = self.closes;
+        Seams {
+            range: self.range,
+            wrap: [
+                cu && lo.x <= u0 && hi.x >= u1,
+                cv && lo.y <= v0 && hi.y >= v1,
+            ],
+        }
+    }
+
+    /// Whether the side `s` of the `(u, v)` box `b` (in the order of
+    /// [`LineNet::side_kinds`]) lies on a seam of the solve over `solve` ([`LineNet::seams`]).
+    fn on_a_seam(&self, solve: &Extent2d, b: Scratch, s: usize) -> bool {
+        let seams = self.seams(solve);
+        let [[u0, u1], [v0, v1]] = seams.range;
+        let [wu, wv] = seams.wrap;
+        match s {
+            0 => wu && b.u.lo <= u0,
+            1 => wu && b.u.hi >= u1,
+            2 => wv && b.v.lo <= v0,
+            _ => wv && b.v.hi >= v1,
+        }
+    }
+
     /// Whether a side of the `(u, v)` box `b` lies on a border where a path down the gap to
     /// the line can end without a root (module docs, "What the pass decided").
     fn on_a_border(&self, solve: &Extent2d, sides: &LeafSides, b: Scratch) -> bool {
@@ -469,11 +534,13 @@ impl LineNet {
     }
 
     /// What each side of the `(u, v)` box `b` lies on, in the order u = `b.u.lo`, u =
-    /// `b.u.hi`, v = `b.v.lo`, v = `b.v.hi`: a boundary (the knots' range, a periodic seam
-    /// among them since nothing wraps across it; the solve's `(u, v)` domain `solve`, on it
-    /// or past it, as a leaf is trimmed to it but a leaf within a rounding of it is kept
-    /// whole; a stretch of the leaf's border that no searched leaf or strip covers), a
-    /// crease knot line (step 0 cuts boxes exactly there), or neither.
+    /// `b.u.hi`, v = `b.v.lo`, v = `b.v.hi`: a boundary (the knots' range where the solve does
+    /// not wrap; the solve's `(u, v)` domain `solve`, on it or past it, as a leaf is trimmed
+    /// to it but a leaf within a rounding of it is kept whole; a stretch of the leaf's border
+    /// that no searched leaf or strip covers, across a seam too), a crease (an interior knot
+    /// line the net is below `C¹` across, which step 0 cuts boxes exactly at, or a seam the
+    /// solve wraps across, [`LineNet::seams`]: a knot line of the face, not proved `C¹`), or
+    /// neither.
     fn side_kinds(&self, solve: &Extent2d, sides: &LeafSides, b: Scratch) -> [SideKind; 4] {
         let [[u0, u1], [v0, v1]] = self.range;
         let [cu, cv] = &self.creases;
@@ -490,12 +557,31 @@ impl LineNet {
         };
         let on_u = |x: f64| x <= u0 || x >= u1 || x <= lo.x || x >= hi.x;
         let on_v = |y: f64| y <= v0 || y >= v1 || y <= lo.y || y >= hi.y;
+        // (where the solve wraps, it holds the knots' range, and a box lies on the range: a
+        // side on the border lies on the seam)
+        let [wu, wv] = self.seams(solve).wrap;
         let [c0, c1, c2, c3] = unsearched;
         [
-            kind(on_u(b.u.lo), cu.contains(&b.u.lo), c0),
-            kind(on_u(b.u.hi), cu.contains(&b.u.hi), c1),
-            kind(on_v(b.v.lo), cv.contains(&b.v.lo), c2),
-            kind(on_v(b.v.hi), cv.contains(&b.v.hi), c3),
+            kind(
+                on_u(b.u.lo) && !wu,
+                cu.contains(&b.u.lo) || on_u(b.u.lo),
+                c0,
+            ),
+            kind(
+                on_u(b.u.hi) && !wu,
+                cu.contains(&b.u.hi) || on_u(b.u.hi),
+                c1,
+            ),
+            kind(
+                on_v(b.v.lo) && !wv,
+                cv.contains(&b.v.lo) || on_v(b.v.lo),
+                c2,
+            ),
+            kind(
+                on_v(b.v.hi) && !wv,
+                cv.contains(&b.v.hi) || on_v(b.v.hi),
+                c3,
+            ),
         ]
     }
 
@@ -690,13 +776,24 @@ fn creases(knots: &[f64], degree: usize, [lo, hi]: [f64; 2]) -> Vec<f64> {
     out
 }
 
+/// Where the solve's parameter space closes on itself ([`LineNet::seams`]): the knots'
+/// range, and in each direction whether it wraps (module docs, "The seam").
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct Seams {
+    /// The knots' range in u and in v.
+    range: [[f64; 2]; 2],
+    /// Whether the parameter space wraps in u and in v.
+    wrap: [bool; 2],
+}
+
 /// What a side of a box lies on ([`LineNet::side_kinds`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SideKind {
     /// The surface's or the solve's boundary, or a stretch of the leaf's border that no
     /// searched leaf or strip covers: nothing across it was searched.
     Boundary,
-    /// A crease knot line (the net below `C¹` in parameter across it).
+    /// A crease knot line (the net below `C¹` in parameter across it), or a seam the solve
+    /// wraps across (not proved `C¹`).
     Crease,
     /// Neither.
     Plain,
@@ -716,6 +813,9 @@ pub(crate) struct LeafSides {
     /// For each side, the leaves across it with the stretch each covers along it (in v for
     /// the sides of constant u, in u for the others), by the stretch's start.
     across: [Vec<(usize, [f64; 2])>; 4],
+    /// Whether each side lies on a seam the solve wraps across, its leaves across on the
+    /// knots' range's other end.
+    seam: [bool; 4],
 }
 
 impl LeafSides {
@@ -726,6 +826,7 @@ impl LeafSides {
             bounds: bounds_of(domain),
             inside: [false; 4],
             across: Default::default(),
+            seam: [false; 4],
         }
     }
 
@@ -800,8 +901,11 @@ fn covered(across: &[(usize, [f64; 2])], [a, z]: [f64; 2]) -> bool {
 /// What lies across each searched leaf's sides, from the domains of every leaf the
 /// traversal searched (`domains`) and the solve's `(u, v)` domain: two leaves are across a
 /// side from each other when that side's line is the same number in both and their
-/// stretches along it meet.
-pub(crate) fn leaf_sides(domains: &[Extent2d], solve: &Extent2d) -> Vec<LeafSides> {
+/// stretches along it meet. Where the solve wraps (`seams`), a side on one end of the
+/// knots' range is across from the sides on the other end (a leaf over the whole range from
+/// itself), and lies inside the solve: a stretch of it that no searched leaf or strip
+/// covers across the seam faces a trim cull.
+pub(crate) fn leaf_sides(domains: &[Extent2d], solve: &Extent2d, seams: Seams) -> Vec<LeafSides> {
     let all: Vec<[[f64; 2]; 2]> = domains.iter().map(bounds_of).collect();
     // each leaf's sides by their line: u1, u0, v1, v0 (what a side u = u0 meets is a u1)
     let keyed = |pick: fn(&[[f64; 2]; 2]) -> f64| {
@@ -816,16 +920,27 @@ pub(crate) fn leaf_sides(domains: &[Extent2d], solve: &Extent2d) -> Vec<LeafSide
         keyed(|&[_, [v0, _]]| v0),
     ];
     let (lo, hi) = (solve.min(), solve.max());
+    let [[r0, r1], [q0, q1]] = seams.range;
+    let [wu, wv] = seams.wrap;
     all.iter()
         .enumerate()
         .map(|(i, &bounds)| {
             let [[u0, u1], [v0, v1]] = bounds;
             let lines = [u0, u1, v0, v1];
+            // each side on a seam, with the line of the other end it is glued to
+            let glued = [
+                (wu && u0 <= r0).then_some(r1),
+                (wu && u1 >= r1).then_some(r0),
+                (wv && v0 <= q0).then_some(q1),
+                (wv && v1 >= q1).then_some(q0),
+            ];
             let mut across: [Vec<(usize, [f64; 2])>; 4] = Default::default();
             for (s, slot) in across.iter_mut().enumerate() {
-                let (Some(&line), Some(keys)) = (lines.get(s), by.get(s)) else {
+                let (Some(&own), Some(keys)) = (lines.get(s), by.get(s)) else {
                     continue;
                 };
+                let seam = glued.get(s).copied().flatten();
+                let line = seam.unwrap_or(own);
                 let first = keys.partition_point(|&(x, _)| x.total_cmp(&line).is_lt());
                 let same = keys.get(first..).unwrap_or_default();
                 for &(x, j) in same {
@@ -840,18 +955,27 @@ pub(crate) fn leaf_sides(domains: &[Extent2d], solve: &Extent2d) -> Vec<LeafSide
                     } else {
                         ([a0, a1], [u0, u1])
                     };
-                    // (a domain with no area covers no stretch: nothing was searched there)
+                    // (a domain with no area covers no stretch: nothing was searched there;
+                    // across a seam a leaf over the whole range faces itself)
                     let area = a0 < a1 && c0 < c1;
-                    if j != i && area && b0 <= o1 && b1 >= o0 {
+                    if (j != i || seam.is_some()) && area && b0 <= o1 && b1 >= o0 {
                         slot.push((j, [b0, b1]));
                     }
                 }
                 slot.sort_by(|(i, [a, _]), (j, [b, _])| a.total_cmp(b).then(i.cmp(j)));
             }
+            let seam = glued.map(|g| g.is_some());
+            let [g0, g1, g2, g3] = seam;
             LeafSides {
                 bounds,
-                inside: [u0 > lo.x, u1 < hi.x, v0 > lo.y, v1 < hi.y],
+                inside: [
+                    u0 > lo.x || g0,
+                    u1 < hi.x || g1,
+                    v0 > lo.y || g2,
+                    v1 < hi.y || g3,
+                ],
                 across,
+                seam,
             }
         })
         .collect()
@@ -1807,7 +1931,14 @@ pub(crate) fn drop_fenced(
                     // the leaves across it)
                     let across_read = || own_sides.leaves_across(b, s).all(readable);
                     match kind {
+                        // (a seam keeps a boundary's test: its own enclosure, the first of
+                        // a crease's two ways, so the drop accepts no more than across a
+                        // crease; what lies across it is another leaf's end, which the
+                        // drop's sets do not reach)
                         SideKind::Boundary => want.push(side),
+                        SideKind::Crease if net.on_a_seam(&line.solve_domain, b, s) => {
+                            want.push(side);
+                        }
                         SideKind::Crease => {
                             let alone = !list.iter().any(|&j| {
                                 member(j) && scratch_of(j).is_some_and(|o| boxes_meet(o, side))
@@ -1969,10 +2100,18 @@ pub(crate) struct Touches {
 pub(crate) struct Component {
     /// Its boxes, indices of [`Components::boxes`], ascending.
     pub boxes: Vec<usize>,
-    /// The hull of its boxes in u and in v.
+    /// The hull of its boxes in u and in v, in the net's parameters.
     pub u: Ivl,
     /// The hull in v.
     pub v: Ivl,
+    /// Its hull in u and in v as the typing reads it: [`Component::u`] and
+    /// [`Component::v`], or, in a direction it is joined across a seam in, the two pieces
+    /// glued there (module docs, "The seam").
+    pub hull: [Span; 2],
+    /// Whether its boxes cover the whole knots' range in a direction the solve wraps in
+    /// (joined across the seam or not): no lift of it is a rectangle less than a turn wide
+    /// ([`Why::WholeTurn`]).
+    pub whole_turn: bool,
     /// The hull of its boxes' line parameters (each the feet widened by the tolerance).
     pub t: Ivl,
     /// Whether that hull reaches an end of the line's own interval.
@@ -1996,6 +2135,68 @@ pub(crate) struct Component {
     /// interval (a component reaching its end), as [`Component::classes`]: not counted, and
     /// a point in one's unique box is undecided.
     pub beyond: Vec<Vec<[Ivl; 2]>>,
+}
+
+/// A component's hull in one direction (module docs, "The seam"): one interval of the
+/// net's parameter, or, for a component joined across a seam in that direction, the piece
+/// `first` at the knots' range's high end glued there to the piece `then` at its low end,
+/// each in its own coordinates. The lifted interval runs from `first.lo` across the seam to
+/// `then.hi`; it is never computed as one interval (a shift by the range's width rounds).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Span {
+    /// The interval, or the piece at the high end.
+    pub first: Ivl,
+    /// The piece at the low end, glued to `first` at the seam.
+    pub then: Option<Ivl>,
+}
+
+impl Span {
+    /// One interval.
+    fn native(x: Ivl) -> Self {
+        Self {
+            first: x,
+            then: None,
+        }
+    }
+
+    /// Its pieces, in the order of the lifted interval.
+    fn pieces(&self) -> impl Iterator<Item = Ivl> + '_ {
+        core::iter::once(self.first).chain(self.then)
+    }
+
+    /// The parameter at the lifted interval's low end.
+    fn low(&self) -> f64 {
+        self.first.lo
+    }
+
+    /// The parameter at its high end.
+    fn high(&self) -> f64 {
+        self.then.map_or(self.first.hi, |t| t.hi)
+    }
+
+    /// A parameter about the middle of the lifted interval (a choice, rounded: for two
+    /// pieces, half their lengths' sum along from `first.lo`, in whichever piece it falls).
+    fn inner(&self) -> f64 {
+        let Some(then) = self.then else {
+            return self.first.mid();
+        };
+        let (a, b) = (self.first.hi - self.first.lo, then.hi - then.lo);
+        let half = 0.5 * (a + b);
+        if half <= a {
+            (self.first.lo + half).min(self.first.hi)
+        } else {
+            (then.lo + (half - a)).min(then.hi)
+        }
+    }
+}
+
+/// The native rectangles of a component's hull ([`Component::hull`]): the pieces in u by
+/// the pieces in v (one, two or four).
+fn hull_pieces(hull: &[Span; 2]) -> Vec<[Ivl; 2]> {
+    let [hu, hv] = hull;
+    hu.pieces()
+        .flat_map(|u| hv.pieces().map(move |v| [u, v]))
+        .collect()
 }
 
 /// The components of one solve (module docs, "Components").
@@ -2028,13 +2229,17 @@ impl Components {
 /// The components of a solve over the whole surface: the kept boxes of every searched leaf
 /// and culled strip (`leaves`, with `sides` what lies across each), and the whole domain of
 /// each leaf whose pass did not run, joined where their closed `(u, v)` boxes meet and their
-/// line parameters overlap. Boxes excluded by t are not in them. `span` is the line's own
-/// interval. Deterministic: the boxes are sorted, and a component is named by its first.
-/// Not built ([`Components::over_budget`]) where a leaf's records were not kept.
+/// line parameters overlap, and across each seam the solve wraps (`seams`, module docs,
+/// "The seam") where a box on one end of the knots' range and one on the other meet along
+/// the seam and their line parameters overlap. Boxes excluded by t are not in them. `span`
+/// is the line's own interval. Deterministic: the boxes are sorted, and a component is named
+/// by its first. Not built ([`Components::over_budget`]) where a leaf's records were not
+/// kept, or past the bounds on boxes and on the pairs tested.
 pub(crate) fn components(
     leaves: &[SearchedLeaf],
     sides: &[LeafSides],
     span: [f64; 2],
+    seams: Seams,
 ) -> Components {
     let mut out = Components::default();
     for (l, leaf) in leaves.iter().enumerate() {
@@ -2096,9 +2301,65 @@ pub(crate) fn components(
     if !within {
         return Components::over_budget();
     }
+    // across each seam (module docs, "The seam"): the net closes exactly there, so a box on
+    // one end and one on the other whose stretches along the seam meet share a point of the
+    // net (at a torus's corner, across the other seam too), whose foot both boxes' line
+    // parameters hold where they overlap; each such box is marked joined in that direction
+    // (and in the other, met across its seam)
+    let mut glued: [Vec<bool>; 2] = [vec![false; n], vec![false; n]];
+    let ranges = seams.range;
+    let along = |b: &PlacedBox, d: usize| if d == 0 { b.u } else { b.v };
+    let mut tests = 0_usize;
+    for d in 0..2 {
+        let (Some(&true), Some(&[e0, e1])) = (seams.wrap.get(d), ranges.get(d)) else {
+            continue;
+        };
+        let other = 1 - d;
+        let wrap_other = seams.wrap.get(other).copied().unwrap_or(false);
+        let [f0, f1] = ranges.get(other).copied().unwrap_or([f64::NAN; 2]);
+        let low: Vec<usize> = (0..n)
+            .filter(|&i| boxes.get(i).is_some_and(|b| along(b, d).lo <= e0))
+            .collect();
+        let high: Vec<usize> = (0..n)
+            .filter(|&i| boxes.get(i).is_some_and(|b| along(b, d).hi >= e1))
+            .collect();
+        for &i in &low {
+            for &j in &high {
+                tests = tests.saturating_add(1);
+                if tests > MAX_MEETING_TESTS {
+                    return Components::over_budget();
+                }
+                let (Some(a), Some(b)) = (boxes.get(i), boxes.get(j)) else {
+                    continue;
+                };
+                let (x, y) = (along(a, other), along(b, other));
+                let direct = x.lo <= y.hi && y.lo <= x.hi;
+                let corner =
+                    wrap_other && ((x.lo <= f0 && y.hi >= f1) || (y.lo <= f0 && x.hi >= f1));
+                let overlap = a.t.lo <= b.t.hi && b.t.lo <= a.t.hi;
+                if !((direct || corner) && overlap) {
+                    continue;
+                }
+                join(&mut parent, i, j);
+                let mut mark = |k: usize| {
+                    for x in [i, j] {
+                        if let Some(slot) = glued.get_mut(k).and_then(|g| g.get_mut(x)) {
+                            *slot = true;
+                        }
+                    }
+                };
+                mark(d);
+                if !direct {
+                    mark(other);
+                }
+            }
+        }
+    }
     let [s0, s1] = span;
     let mut named: Vec<Option<usize>> = vec![None; n];
     let mut of_box: Vec<usize> = Vec::new();
+    // what each component's boxes touch across a seam ([`facing`])
+    let mut seam_touches: Vec<Touches> = Vec::new();
     for i in 0..n {
         let Some(&b) = out.boxes.get(i) else {
             continue;
@@ -2115,6 +2376,8 @@ pub(crate) fn components(
                 boxes: Vec::new(),
                 u: b.u,
                 v: b.v,
+                hull: [Span::native(b.u), Span::native(b.v)],
+                whole_turn: false,
                 t: b.t,
                 reaches_end: false,
                 touches: Touches::default(),
@@ -2126,10 +2389,16 @@ pub(crate) fn components(
                 inside: true,
                 beyond: Vec::new(),
             });
+            seam_touches.push(Touches::default());
             c
         };
         of_box.push(c);
-        let flags = facing(&b, leaves, sides);
+        let (flags, across) = facing(&b, leaves, sides);
+        if let Some(t) = seam_touches.get_mut(c) {
+            t.unfinished |= across.unfinished;
+            t.not_run |= across.not_run;
+            t.unsearched |= across.unsearched;
+        }
         let Some(comp) = out.list.get_mut(c) else {
             continue;
         };
@@ -2159,6 +2428,57 @@ pub(crate) fn components(
             *count += 1;
         }
     }
+    // each component's hull: in a direction the solve wraps in, its boxes' stretches
+    // merged; one covering the whole range is a whole turn, whether or not it is joined
+    // across the seam. Joined across it, a connected component's stretches are a connected
+    // arc of the turn (boxes joined meet in that direction, or across the seam), so two
+    // pieces, one on each end of the range, glued at the seam (more than two cannot occur,
+    // and are read as a whole turn); it then reads what its boxes touch across the seam
+    for (ci, comp) in out.list.iter_mut().enumerate() {
+        comp.hull = [Span::native(comp.u), Span::native(comp.v)];
+        for (d, hull) in comp.hull.iter_mut().enumerate() {
+            let (Some(&true), Some(&[e0, e1])) = (seams.wrap.get(d), ranges.get(d)) else {
+                continue;
+            };
+            let joined = comp.boxes.iter().any(|&i| {
+                glued
+                    .get(d)
+                    .and_then(|g| g.get(i))
+                    .copied()
+                    .unwrap_or(false)
+            });
+            let mut runs: Vec<Ivl> = comp
+                .boxes
+                .iter()
+                .filter_map(|&i| out.boxes.get(i).map(|b| along(b, d)))
+                .collect();
+            runs.sort_by(|a, b| a.lo.total_cmp(&b.lo).then(a.hi.total_cmp(&b.hi)));
+            let mut merged: Vec<Ivl> = Vec::new();
+            for r in runs {
+                match merged.last_mut() {
+                    Some(m) if r.lo <= m.hi => m.hi = m.hi.max(r.hi),
+                    _ => merged.push(r),
+                }
+            }
+            match merged.as_slice() {
+                [one] if one.lo <= e0 && one.hi >= e1 => comp.whole_turn = true,
+                _ if !joined => {}
+                [low, high] if low.lo <= e0 && high.hi >= e1 => {
+                    *hull = Span {
+                        first: *high,
+                        then: Some(*low),
+                    };
+                }
+                _ => comp.whole_turn = true,
+            }
+        }
+        let lifted = comp.whole_turn || comp.hull.iter().any(|h| h.then.is_some());
+        if let (true, Some(t)) = (lifted, seam_touches.get(ci)) {
+            comp.touches.unfinished |= t.unfinished;
+            comp.touches.not_run |= t.not_run;
+            comp.touches.unsearched |= t.unsearched;
+        }
+    }
     // each certified root in the component of a box of its leaf holding it
     for (l, leaf) in leaves.iter().enumerate() {
         for root in &leaf.roots {
@@ -2186,29 +2506,43 @@ pub(crate) fn components(
 
 /// What the box `b` of a component touches across its leaf's border: a leaf whose pass
 /// stopped at its limit (or `b` lies in one), a leaf whose pass did not run (or `b` is
-/// one), and a stretch that no searched leaf or strip covers.
-fn facing(b: &PlacedBox, leaves: &[SearchedLeaf], sides: &[LeafSides]) -> Touches {
+/// one), and a stretch that no searched leaf or strip covers; apart, what it touches across
+/// a seam the solve wraps, read only for a component joined across one (or covering a whole
+/// turn). One that is not joined has no box across the seam where its own boxes meet it
+/// with overlapping line parameters, so it reaches no further than its seam sides: a side
+/// facing a trim cull across the seam is a boundary in [`LineNet::side_kinds`] (the count
+/// rule reads it as one), and what lies across is not read as a flag, which leaves every
+/// component that does not reach across a seam with the flags it had before the seam
+/// wrapped.
+fn facing(b: &PlacedBox, leaves: &[SearchedLeaf], sides: &[LeafSides]) -> (Touches, Touches) {
     let own = leaves.get(b.leaf).map(|l| l.stop);
     let mut touches = Touches {
         unfinished: own == Some(Stop::AtLimit),
         not_run: b.part == Part::NotRunLeaf,
         unsearched: false,
     };
+    let mut seam = Touches::default();
     let Some(leaf_sides) = sides.get(b.leaf) else {
-        return touches;
+        return (touches, seam);
     };
     let s = Scratch { u: b.u, v: b.v };
-    touches.unsearched = leaf_sides.faces_unsearched(s).iter().any(|&c| c);
+    for (side, &open) in leaf_sides.faces_unsearched(s).iter().enumerate() {
+        let on_seam = leaf_sides.seam.get(side).copied().unwrap_or(false);
+        let flags = if on_seam { &mut seam } else { &mut touches };
+        flags.unsearched |= open;
+    }
     for side in 0..4 {
+        let on_seam = leaf_sides.seam.get(side).copied().unwrap_or(false);
         for j in leaf_sides.leaves_across(s, side) {
+            let flags = if on_seam { &mut seam } else { &mut touches };
             match leaves.get(j).map(|l| l.stop) {
-                Some(Stop::AtLimit) => touches.unfinished = true,
-                Some(Stop::NotRun) => touches.not_run = true,
+                Some(Stop::AtLimit) => flags.unfinished = true,
+                Some(Stop::NotRun) => flags.not_run = true,
                 _ => {}
             }
         }
     }
-    touches
+    (touches, seam)
 }
 
 /// The side record of a solve (module docs, "Components"): not run when the solve has a
@@ -2541,11 +2875,13 @@ fn tube_slope(rev: &Revolved, x: &I3, dx: &I3) -> [Ivl; 2] {
 }
 
 impl Chart {
-    /// The certificate of the hull `[u, v]` (module docs, "Typing"), within `budget`
-    /// enclosures (spent from it); `None` where it is not shown: a hull reaching a pole or
-    /// a whole turn (no half-plane holds its edges), an edge piece not enclosed, or the
-    /// budget spent.
-    fn of(net: &LineNet, rev: &Revolved, u: Ivl, v: Ivl, budget: &mut usize) -> Option<Self> {
+    /// The certificate of the hull `[u, v]` (module docs, "Typing"; each a [`Span`], two
+    /// pieces glued across a seam: the edges of the lifted rectangle, those along a glued
+    /// direction made of both pieces' edges, module docs, "The seam"), within `budget`
+    /// enclosures (spent from it); `None` where it is not shown: a hull reaching a pole or a
+    /// whole turn (no half-plane holds its edges), an edge piece not enclosed, or the budget
+    /// spent.
+    fn of(net: &LineNet, rev: &Revolved, [u, v]: [Span; 2], budget: &mut usize) -> Option<Self> {
         let (turn, profile) = if rev.turn_in_u { (u, v) } else { (v, u) };
         let point = |t: f64, p: f64| -> Option<I3> {
             let (pu, pv) = if rev.turn_in_u { (t, p) } else { (p, t) };
@@ -2555,39 +2891,43 @@ impl Chart {
         let tube = |w: &I3| rev.in_the_tube(w);
         let mid_of = |x: [Ivl; 2]| x.map(Ivl::mid);
         // the directions read from the net's points (choices, not assumptions)
-        let centre = point(turn.mid(), profile.mid())?;
+        let centre = point(turn.inner(), profile.inner())?;
         let d = unit2(mid_of(plane(&centre)))?;
         let d_tube = match rev.shape {
             Shape::Cone { .. } => None,
             _ => Some(unit2(mid_of(tube(&centre)))?),
         };
         let (t_lo, t_hi) = (
-            point(turn.lo, profile.mid())?,
-            point(turn.hi, profile.mid())?,
+            point(turn.low(), profile.inner())?,
+            point(turn.high(), profile.inner())?,
         );
         let turn_ccw = cross2(plane(&t_lo), plane(&t_hi)).mid() > 0.0;
         let (p_lo, p_hi) = (
-            point(turn.mid(), profile.lo)?,
-            point(turn.mid(), profile.hi)?,
+            point(turn.inner(), profile.low())?,
+            point(turn.inner(), profile.high())?,
         );
         let profile_up = match d_tube {
             None => rev.coordinates(&p_hi).1.mid() > rev.coordinates(&p_lo).1.mid(),
             Some(_) => cross2(tube(&p_lo), tube(&p_hi)).mid() > 0.0,
         };
-        // the four edges, cut at the net's knots
+        // the four edges, each piece of the hull along them cut at the net's knots
         let edge = |fixed_turn: Option<f64>, fixed_profile: Option<f64>| -> Vec<(Ivl, Ivl)> {
             let (in_u, run) = if fixed_turn.is_some() {
                 (!rev.turn_in_u, profile)
             } else {
                 (rev.turn_in_u, turn)
             };
-            let mut at = vec![run.lo];
-            at.extend(knots_inside(net, in_u, [run.lo, run.hi]));
-            at.push(run.hi);
-            at.windows(2)
-                .filter_map(|w| match *w {
-                    [a, z] => Some(Ivl::new(a, z)),
-                    _ => None,
+            run.pieces()
+                .flat_map(|run| {
+                    let mut at = vec![run.lo];
+                    at.extend(knots_inside(net, in_u, [run.lo, run.hi]));
+                    at.push(run.hi);
+                    at.windows(2)
+                        .filter_map(|w| match *w {
+                            [a, z] => Some(Ivl::new(a, z)),
+                            _ => None,
+                        })
+                        .collect::<Vec<Ivl>>()
                 })
                 .map(|piece| {
                     let (t, p) = match (fixed_turn, fixed_profile) {
@@ -2604,10 +2944,10 @@ impl Chart {
                 .collect()
         };
         let params = [
-            edge(Some(turn.lo), None),
-            edge(Some(turn.hi), None),
-            edge(None, Some(profile.lo)),
-            edge(None, Some(profile.hi)),
+            edge(Some(turn.low()), None),
+            edge(Some(turn.high()), None),
+            edge(None, Some(profile.low())),
+            edge(None, Some(profile.high())),
         ];
         let mut edges: [Vec<EdgePiece>; 4] = Default::default();
         for (slot, list) in edges.iter_mut().zip(params) {
@@ -2860,6 +3200,10 @@ pub(crate) enum Why {
     /// The foot's branch is not certified over its line parameters (the foot rule), and
     /// where it failed.
     FootNotShown(FootWhy),
+    /// Its boxes cover the whole knots' range in a direction the solve wraps in: no lift of
+    /// it is a rectangle less than a turn wide (module docs, "The seam"; answer10 asks it of
+    /// every component, a count too).
+    WholeTurn,
 }
 
 /// What is known of a component another's line parameters meet ([`Why::Overlapped`]):
@@ -2871,7 +3215,8 @@ pub(crate) enum Why {
 pub(crate) enum Overlap {
     /// A box of each lies on an opposite end of the knots' range in a direction in which
     /// the stored net closes exactly ([`LineNet::closes`]), their stretches along those ends
-    /// meeting: one contact across the seam, which nothing joins.
+    /// meeting: one contact across the seam that the join did not join (their boxes'
+    /// line parameters apart there, or the solve not wrapping: over part of the range).
     Seam,
     /// The same on the ends of a direction in which the net is not shown to close (a
     /// sphere's two poles).
@@ -2913,7 +3258,8 @@ pub(crate) enum Stretch {
     /// The box reaches the net's knots' range or the solve's domain.
     LeavesDomain,
     /// Krawczyk's operator cannot be formed: the box crosses a crease knot line (the net
-    /// below `C¹` across it).
+    /// below `C¹` across it), or it reaches only across a seam the solve wraps, which it
+    /// would straddle.
     Crease,
     /// Krawczyk's operator cannot be formed: the Jacobian at the box's middle is not
     /// inverted.
@@ -3043,6 +3389,25 @@ fn type_one(
     (t, others): (Ivl, Option<Overlap>),
     bounds: &mut Option<Vec<SideBound>>,
 ) -> Typed {
+    if c.whole_turn {
+        return Typed::Undecided(Why::WholeTurn);
+    }
+    // a certified root whose enclosure reaches a seam the solve wraps is not counted, by any
+    // rule: its unique box and one on the seam's other end cannot be shown to hold one root
+    // without `C¹` across the seam (module docs, "The seam")
+    let seams = net.seams(&line.solve_domain);
+    let [[u0, u1], [v0, v1]] = seams.range;
+    let [wu, wv] = seams.wrap;
+    let on_seam = boxes.iter().any(|b| match b.part {
+        Part::Floor(FloorKind::Root { enclosure, .. } | FloorKind::Unshown { enclosure, .. }) => {
+            let [eu, ev, _] = enclosure;
+            (wu && (eu.lo <= u0 || eu.hi >= u1)) || (wv && (ev.lo <= v0 || ev.hi >= v1))
+        }
+        _ => false,
+    });
+    if on_seam {
+        return Typed::Undecided(Why::OnABoundary);
+    }
     let [s0, s1] = line.span;
     let past = |e: &I3| {
         let [_, _, et] = *e;
@@ -3418,8 +3783,10 @@ fn root_classes(boxes: &[PlacedBox]) -> Option<Vec<Vec<[Ivl; 2]>>> {
 /// wholly past the line's own interval): every exact root of the line on the surface over
 /// it within the interval lies in a root box, each a transversal crossing, so its parity is
 /// the count `roots` of its distinct roots within the interval. Undecided when an edge box has a side
-/// on a boundary (the surface's, a seam among them, or the solve's: the contact may lie
-/// past it) or a root's enclosure reaches one (the patch or face across may count it too).
+/// on a boundary (the surface's or the solve's, not a seam the solve wraps, which is a
+/// crease: the contact may lie past it) or a root's enclosure reaches the knots' range or
+/// the solve's border (the patch or face across may count it too; at a seam, the root's
+/// unique box and one on the other end cannot be shown to hold one root).
 fn by_count(
     net: &LineNet,
     line: &ScratchLine,
@@ -3490,14 +3857,21 @@ fn by_sides(
     if let Some(why) = others {
         return Typed::Undecided(Why::Overlapped(why));
     }
-    if !covered_by_leaves(c.u, c.v, leaves) {
+    // (the hull's native pieces: one, or, glued across a seam, two or four)
+    let pieces = hull_pieces(&c.hull);
+    if !pieces.iter().all(|&[u, v]| covered_by_leaves(u, v, leaves)) {
         return Typed::Undecided(Why::Uncovered);
     }
-    let eps = match side_eps(net, &rev, bounds, c.u, c.v) {
-        Ok(eps) if eps < 0.25 * line.tol => eps,
-        Err(why) => return Typed::Undecided(why),
-        Ok(_) => return Typed::Undecided(Why::NotTheNet),
-    };
+    let mut eps = 0.0_f64;
+    for &[u, v] in &pieces {
+        match side_eps(net, &rev, bounds, u, v) {
+            Ok(e) => eps = eps.max(e),
+            Err(why) => return Typed::Undecided(why),
+        }
+    }
+    if !(eps < 0.25 * line.tol) {
+        return Typed::Undecided(Why::NotTheNet);
+    }
     // an end clipped to the line's own interval is certified off the net: the side function
     // there more than half the tolerance and `ε` from 0 (the net over the hull within `ε` of
     // the complete surface, `|f|` a distance to it, or to the cone's profile line, no more)
@@ -3508,10 +3882,13 @@ fn by_sides(
         return Typed::Undecided(Why::ReachesEnd);
     }
     let mut budget = MAX_SIDE_PIECES;
-    if !in_the_chart_domain(net, &rev, c.u, c.v, eps) {
+    if !pieces
+        .iter()
+        .all(|&[u, v]| in_the_chart_domain(net, &rev, u, v, eps))
+    {
         return Typed::Undecided(Why::OutsideHull);
     }
-    let Some(mut chart) = Chart::of(net, &rev, c.u, c.v, &mut budget) else {
+    let Some(mut chart) = Chart::of(net, &rev, c.hull, &mut budget) else {
         return Typed::Undecided(if budget == 0 {
             Why::Budget
         } else {
@@ -3721,9 +4098,23 @@ fn foot_box(
         }
         *budget = budget.saturating_sub(1);
         let [bu, bv] = u;
-        let inside_domain = bu.lo > du[0] && bu.hi < du[1] && bv.lo > dv[0] && bv.hi < dv[1];
-        if !inside_domain {
-            return Err(Stretch::LeavesDomain);
+        let out = [
+            bu.lo <= du[0],
+            bu.hi >= du[1],
+            bv.lo <= dv[0],
+            bv.hi >= dv[1],
+        ];
+        if out.contains(&true) {
+            // (a box reaching only across a seam the solve wraps would straddle it: a
+            // crease, module docs, "The seam")
+            let [wu, wv] = net.seams(&line.solve_domain).wrap;
+            let seam = [wu, wu, wv, wv];
+            let across = out.iter().zip(seam).all(|(&o, w)| !o || w);
+            return Err(if across {
+                Stretch::Crease
+            } else {
+                Stretch::LeavesDomain
+            });
         }
         let (k, normal) = foot_operator(net, line, u, t)?;
         if inside2(&k, &u) {
@@ -3827,7 +4218,13 @@ fn by_foot(
     if let Some(why) = others {
         return Typed::Undecided(Why::Overlapped(why));
     }
-    if !covered_by_leaves(c.u, c.v, leaves) {
+    // (the hull's native pieces; joined across a seam, a stretch whose boxes lie on both of
+    // its ends has a foot box straddling it, which [`foot_box`] refuses as a crease: the
+    // seam is not proved `C¹`, module docs, "The seam")
+    if !hull_pieces(&c.hull)
+        .iter()
+        .all(|&[u, v]| covered_by_leaves(u, v, leaves))
+    {
         return Typed::Undecided(Why::Uncovered);
     }
     let mut budget = MAX_FOOT_BOXES;
@@ -5214,7 +5611,7 @@ mod tests {
             tol: TOL,
         };
         let doms: Vec<Extent2d> = leaves.iter().map(|l| l.domain).collect();
-        let sides = leaf_sides(&doms, &solve);
+        let sides = leaf_sides(&doms, &solve, net.seams(&solve));
         drop_fenced(&net, &line, leaves, &sides, None, budget).unwrap()
     }
 
@@ -5538,7 +5935,13 @@ mod tests {
             leaf_of(b, Stop::Finished, Some(set())),
         ];
         let whole = cylinder(&k).natural_uv_domain_with_nurb(&k).unwrap();
-        let c = components(&leaves, &leaf_sides(&[a, b], &whole), [0.0, 1.0]);
+        let none = Seams::default();
+        let c = components(
+            &leaves,
+            &leaf_sides(&[a, b], &whole, none),
+            [0.0, 1.0],
+            none,
+        );
         assert!(c.over_budget);
         assert_eq!(
             side_record(&leaves, &c, &[], false, [0.0, 1.0]),
@@ -5597,9 +6000,11 @@ mod tests {
         }
     }
 
-    /// A periodic seam counts as a border (nothing wraps across it): a crossing a ten
-    /// thousandth of a turn from the cylinder's seam leaves boxes with no root on the seam,
-    /// and every one of them is an edge box.
+    /// A periodic seam counts as a border of a box: a crossing a ten thousandth of a turn
+    /// from the cylinder's seam leaves boxes with no root on the seam, and every one of them
+    /// is an edge box. The cylinder's net closes exactly in u and the solve covers its whole
+    /// knots' range, so the seam is a knot line of the face, a crease (module docs, "The
+    /// seam"); over a solve covering part of the range it stays a boundary.
     #[test]
     fn a_seam_side_counts_as_a_border() {
         let k = Kernel::default();
@@ -5627,13 +6032,26 @@ mod tests {
             on_seam.iter().all(|r| r.kind == FloorKind::Edge),
             "{on_seam:?}"
         );
-        // and the side on it is a boundary's
+        // and the side on it is a crease's (the net closes, the solve is the whole range)
         let net = LineNet::of(&k, &s).unwrap().unwrap();
         let b = Scratch {
             u: Ivl::new(u0, 0.1),
             v: Ivl::new(0.4, 0.6),
         };
         let kinds = net.side_kinds(&domain, &LeafSides::whole_solve(&domain), b);
+        assert_eq!(
+            kinds,
+            [
+                SideKind::Crease,
+                SideKind::Plain,
+                SideKind::Plain,
+                SideKind::Plain
+            ]
+        );
+        assert_eq!(net.seams(&domain).wrap, [true, false]);
+        let part = Extent2d::from_bounds(u0, 0.0, 0.5 * (u0 + u1), 1.0);
+        assert_eq!(net.seams(&part).wrap, [false, false]);
+        let kinds = net.side_kinds(&part, &LeafSides::whole_solve(&part), b);
         assert_eq!(
             kinds,
             [
@@ -5664,7 +6082,8 @@ mod tests {
             solve_domain: solve,
             tol,
         };
-        let sides = leaf_sides(doms, &solve);
+        let seams = net.seams(&solve);
+        let sides = leaf_sides(doms, &solve, seams);
         let interval = Extent1d::from_min_max(0.0, 1.0);
         let mut leaves: Vec<SearchedLeaf> = doms
             .iter()
@@ -5682,7 +6101,7 @@ mod tests {
             })
             .collect();
         drop_fenced(&net, &line, &mut leaves, &sides, None, MAX_DROP_ENCLOSURES).unwrap();
-        let c = components(&leaves, &sides, [0.0, 1.0]);
+        let c = components(&leaves, &sides, [0.0, 1.0], seams);
         (leaves, c)
     }
 
@@ -5813,7 +6232,13 @@ mod tests {
             strip: true,
             ..leaf_of(quarter, found.stop, Some(found.floor))
         }];
-        let c = components(&leaves, &leaf_sides(&[quarter], &whole), [0.0, 1.0]);
+        let seams = net.seams(&whole);
+        let c = components(
+            &leaves,
+            &leaf_sides(&[quarter], &whole, seams),
+            [0.0, 1.0],
+            seams,
+        );
         assert!(c.list.is_empty());
         assert_eq!(
             side_record(&leaves, &c, &[], false, [0.0, 1.0]),
@@ -5858,7 +6283,8 @@ mod tests {
             strip: true,
             ..leaf_of(quarter, found.stop, Some(found.floor))
         }];
-        let c = components(&leaves, &leaf_sides(&[quarter], &whole), span);
+        let seams = net.seams(&whole);
+        let c = components(&leaves, &leaf_sides(&[quarter], &whole, seams), span, seams);
         let record = side_record(&leaves, &c, &[], false, span);
         let SideRecord::Undecided(spans) = &record else {
             panic!("{record:?}");
@@ -5916,7 +6342,13 @@ mod tests {
         );
         // a leaf not run among others is a component over the whole line
         let leaves = [leaf(Stop::Finished), leaf(Stop::NotRun)];
-        let c = components(&leaves, &leaf_sides(&[domain, domain], &domain), span);
+        let flat = Seams::default();
+        let c = components(
+            &leaves,
+            &leaf_sides(&[domain, domain], &domain, flat),
+            span,
+            flat,
+        );
         assert_eq!(c.list.len(), 1);
         assert!(c.list[0].touches.not_run);
         assert_eq!(
@@ -5925,7 +6357,12 @@ mod tests {
         );
         // (a leaf whose pass stopped at its limit beside one not run: undecided too)
         let leaves = [leaf(Stop::AtLimit), leaf(Stop::NotRun)];
-        let c = components(&leaves, &leaf_sides(&[domain, domain], &domain), span);
+        let c = components(
+            &leaves,
+            &leaf_sides(&[domain, domain], &domain, flat),
+            span,
+            flat,
+        );
         assert_eq!(
             side_record(&leaves, &c, &[], false, span),
             SideRecord::Undecided(vec![span])
@@ -5947,8 +6384,8 @@ mod tests {
             strip(Stop::Finished, Vec::new()),
             strip(Stop::AtLimit, kept.clone()),
         ];
-        let sides = leaf_sides(&[domain; 4], &domain);
-        let c = components(&leaves, &sides, span);
+        let sides = leaf_sides(&[domain; 4], &domain, flat);
+        let c = components(&leaves, &sides, span, flat);
         assert!(!c.list.is_empty());
         for unplaced in [false, true] {
             assert_eq!(
@@ -5959,10 +6396,10 @@ mod tests {
 
         // no solved leaf (every leaf culled): the strips decide
         let only = |strips: &[SearchedLeaf], unplaced: bool| {
-            let sides = leaf_sides(&vec![domain; strips.len()], &domain);
+            let sides = leaf_sides(&vec![domain; strips.len()], &domain, flat);
             side_record(
                 strips,
-                &components(strips, &sides, span),
+                &components(strips, &sides, span, flat),
                 &[],
                 unplaced,
                 span,
@@ -6017,7 +6454,7 @@ mod tests {
             tol,
         };
         let (leaves, mut c) = components_of(k, s, p, d, tol, doms);
-        let sides = leaf_sides(doms, &solve);
+        let sides = leaf_sides(doms, &solve, net.seams(&solve));
         type_components(&net, &line, &leaves, &sides, &mut c, None).unwrap();
         (leaves, c)
     }
@@ -6034,7 +6471,8 @@ mod tests {
             tol,
         };
         let doms = [solve];
-        let sides = leaf_sides(&doms, &solve);
+        let seams = net.seams(&solve);
+        let sides = leaf_sides(&doms, &solve, seams);
         let [s0, s1] = span;
         let interval = Extent1d::from_min_max(s0, s1);
         let mut leaves: Vec<SearchedLeaf> = doms
@@ -6053,7 +6491,7 @@ mod tests {
             })
             .collect();
         drop_fenced(&net, &line, &mut leaves, &sides, None, MAX_DROP_ENCLOSURES).unwrap();
-        let mut c = components(&leaves, &sides, span);
+        let mut c = components(&leaves, &sides, span, seams);
         type_components(&net, &line, &leaves, &sides, &mut c, None).unwrap();
         c
     }
@@ -6255,9 +6693,11 @@ mod tests {
     /// typed by the side function at its ends (both outside the sphere). Missing it within
     /// the tolerance is touching too. A secant crosses it twice: two components, each a
     /// count of one certified root. A line along the axis through both poles meets the
-    /// sphere at each pole: two components, each turning about the whole axis, undecided,
-    /// since no chart of the net over them is certified (a pole row lies on the hull's edge,
-    /// where the line passes, so no half-plane about the axis holds the edges).
+    /// sphere at each pole: two components, each turning about the whole axis, undecided:
+    /// the net closes exactly in u and the solve covers its whole range, so the solve wraps
+    /// there, and each one's boxes cover the whole turn, which no lift less than a turn
+    /// wide holds (module docs, "The seam"; no chart of the net over it is certified either:
+    /// a pole row lies on the hull's edge, where the line passes).
     #[test]
     fn a_sphere_is_touched_by_a_tangent_and_crossed_by_a_secant_and_through_its_poles() {
         let k = Kernel::default();
@@ -6297,8 +6737,10 @@ mod tests {
         );
         assert_eq!(c.list.len(), 2, "{:?}", c.list);
         assert!(
-            c.list.iter().all(|x| x.contact == Contact::Undecided
-                && x.typed == Typed::Undecided(Why::OutsideHull)),
+            c.list
+                .iter()
+                .all(|x| x.contact == Contact::Undecided
+                    && x.typed == Typed::Undecided(Why::WholeTurn)),
             "{:?}",
             c.list
         );
@@ -6623,5 +7065,376 @@ mod tests {
         assert!(equal_products(-0.0, 0.4, 0.0, 1.0));
         assert!(!equal_products(f64::NAN, 1.0, f64::NAN, 1.0));
         assert!(!equal_products(f64::INFINITY, 1.0, f64::INFINITY, 1.0));
+    }
+
+    /// [`typed_in`] on the net `net` (not rebuilt from a surface) over the solve `solve`,
+    /// one leaf, the line's interval `[0, 1]`.
+    fn typed_net(net: &LineNet, solve: Extent2d, p: Vec3, d: Vec3, tol: f64) -> Components {
+        let line = PassLine {
+            point: p,
+            vector: d,
+            span: [0.0, 1.0],
+            solve_domain: solve,
+            tol,
+        };
+        let seams = net.seams(&solve);
+        let sides = leaf_sides(&[solve], &solve, seams);
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let f = isolate(net, &line, &solve, &interval, &sides[0], None).unwrap();
+        let mut leaves = vec![SearchedLeaf {
+            domain: solve,
+            stop: f.stop,
+            floor: Some(f.floor),
+            roots: f.roots,
+            strip: false,
+            inside: true,
+        }];
+        drop_fenced(net, &line, &mut leaves, &sides, None, MAX_DROP_ENCLOSURES).unwrap();
+        let mut c = components(&leaves, &sides, [0.0, 1.0], seams);
+        type_components(net, &line, &leaves, &sides, &mut c, None).unwrap();
+        c
+    }
+
+    /// Whether a component is joined across a seam.
+    fn glued(c: &Component) -> bool {
+        c.hull.iter().any(|h| h.then.is_some())
+    }
+
+    /// The sphere of radius 5 about the origin with its placement's x axis `x` and y axis
+    /// `y` (its seam, u = 0, toward `x`).
+    fn sphere_on(k: &Kernel, x: Vec3, y: Vec3) -> Surface {
+        let mut s = crate::surface::sphere::Sphere::new(
+            k,
+            Vec3::ZERO,
+            x,
+            y,
+            Extent2d::from_bounds(0.0, -90.0, 360.0, 90.0),
+            5.0,
+            crate::surface::sphere::SphereOptions::default(),
+        )
+        .unwrap();
+        s.make_nurb(k).unwrap();
+        Surface::from(s)
+    }
+
+    /// The seam join (answer10, Q1) needs exact closure. The line along x at `y = tol / 2`,
+    /// `z = 1` leaves the sphere of radius 5 at `x = √(24 − y²)`, a root `y / x ≈ 10⁻⁷`
+    /// radians past its seam (u = 0, toward +x); the sphere's other end, below the seam, lies
+    /// within the tolerance of the line too, so boxes on both ends of the knots' range hold
+    /// that exit: joined across the seam (the net closes bitwise there, and the solve is the
+    /// whole range), one component counting one root, a crossing. Moved by one ulp (one
+    /// coordinate of an interior control point of the last row, or one weight with its
+    /// coordinates unchanged: a point 10⁻¹⁵ off), the net does not close, nothing joins, and
+    /// the line is typed as the closed net is without a wrap (its closure ignored). A solve
+    /// over part of the knots' range does not wrap either.
+    #[test]
+    fn the_seam_joins_only_where_the_net_closes_exactly() {
+        let k = Kernel::default();
+        let s = sphere(&k);
+        let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let net = LineNet::of(&k, &s).unwrap().unwrap();
+        let tol = 1.0e-6;
+        let (p, d) = (Vec3::new(-10.0, 0.5 * tol, 1.0), Vec3::new(20.0, 0.0, 0.0));
+        assert_eq!(net.closes, [true, false]);
+        assert_eq!(net.seams(&whole).wrap, [true, false]);
+        let c = typed_net(&net, whole, p, d, tol);
+        let exit: Vec<&Component> = c.list.iter().filter(|x| x.t.lo > 0.5).collect();
+        assert_eq!(exit.len(), 1, "{:?}", c.list);
+        assert!(glued(exit[0]), "{:?}", exit[0]);
+        assert_eq!(
+            (exit[0].contact, exit[0].typed),
+            (Contact::Crossing, Typed::Count(1)),
+            "{:?}",
+            exit[0]
+        );
+        // the closed net with its closure ignored: the solve without a wrap
+        let unwrapped = LineNet {
+            closes: [false, false],
+            ..net.clone()
+        };
+        let before = typed_net(&unwrapped, whole, p, d, tol);
+        assert!(before.list.iter().all(|x| !glued(x)));
+        let (last, mid) = (net.net.nu - 1, net.net.nv / 2);
+        let at = (last * net.net.nv + mid) * 4;
+        for slot in [at, at + 3] {
+            let mut moved = net.clone();
+            moved.net.pw[slot] = moved.net.pw[slot].next_up();
+            moved.closes = [
+                closes_exactly(&moved.net, true),
+                closes_exactly(&moved.net, false),
+            ];
+            assert_eq!(moved.closes, [false, false], "slot {slot}");
+            assert_eq!(moved.seams(&whole).wrap, [false, false]);
+            let c = typed_net(&moved, whole, p, d, tol);
+            assert!(c.list.iter().all(|x| !glued(x)), "slot {slot}");
+            assert_eq!(types(&c), types(&before), "slot {slot}");
+        }
+        let (lo, hi) = (whole.min(), whole.max());
+        let part = Extent2d::from_bounds(lo.x, lo.y, 0.5 * (lo.x + hi.x), hi.y);
+        assert_eq!(net.seams(&part).wrap, [false, false]);
+    }
+
+    /// The type of a line does not depend on where the seam lies (answer10, Q1): the sphere
+    /// of radius 5 with its seam toward +x, and the same sphere with its seam toward +y (its
+    /// placement turned a quarter about z, a net that closes bitwise too). The line of
+    /// [`the_seam_joins_only_where_the_net_closes_exactly`] crosses both at its exit, by
+    /// one counted root; a line tangent at `(4, 0, 3)` across the seam's meridian (along y,
+    /// and half the tolerance off it) touches both, by the side function: joined across the
+    /// seam on the first, its hull is the two pieces glued there and its chart's edges both
+    /// pieces' edges.
+    #[test]
+    fn a_line_is_typed_alike_with_the_seam_on_it_or_turned_away() {
+        let k = Kernel::default();
+        let tol = 1.0e-6;
+        let on = sphere_on(&k, Vec3::X, Vec3::Y);
+        let away = sphere_on(&k, Vec3::Y, Vec3::new(-1.0, 0.0, 0.0));
+        for s in [&on, &away] {
+            assert_eq!(LineNet::of(&k, s).unwrap().unwrap().closes, [true, false]);
+        }
+        let typed = |s: &Surface, p: Vec3, d: Vec3| {
+            let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
+            typed_of(&k, s, p, d, tol, &[whole]).1
+        };
+        let (p, d) = (Vec3::new(-10.0, 0.5 * tol, 1.0), Vec3::new(20.0, 0.0, 0.0));
+        let exit = |c: &Components| {
+            let e: Vec<(Contact, Typed)> = c
+                .list
+                .iter()
+                .filter(|x| x.t.lo > 0.5)
+                .map(|x| (x.contact, x.typed))
+                .collect();
+            e
+        };
+        let (a, b) = (typed(&on, p, d), typed(&away, p, d));
+        assert_eq!(
+            exit(&a),
+            vec![(Contact::Crossing, Typed::Count(1))],
+            "{:?}",
+            a.list
+        );
+        assert_eq!(exit(&a), exit(&b), "{:?}", b.list);
+        for gap in [0.0, 0.5 * tol] {
+            let q = Vec3::new(4.0, 0.0, 3.0) * (1.0 + gap / 5.0);
+            let (p, d) = (q - Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 20.0, 0.0));
+            let (a, b) = (typed(&on, p, d), typed(&away, p, d));
+            assert_eq!(
+                types(&a),
+                vec![(Contact::Touching, Typed::Sides)],
+                "gap {gap}: {:?}",
+                a.list
+            );
+            assert!(glued(&a.list[0]), "gap {gap}: {:?}", a.list[0]);
+            assert_eq!(types(&a), types(&b), "gap {gap}: {:?}", b.list);
+        }
+    }
+
+    /// A line crossing the cylinder exactly on its seam's meridian (along x at y = 0, its
+    /// seam toward +x) is never counted twice (answer10, Q1, condition 6): no root on the
+    /// seam itself is certified from either end (Krawczyk's operator must lie strictly in a
+    /// box on the knots' range), so the boxes about it are left at the floor on both ends,
+    /// one component joined across the seam, a crossing by the side function (the radius
+    /// past the cylinder's changes sign along the line); a root whose enclosure reached the
+    /// seam would leave it undecided. Before the join, the two ends were two components
+    /// whose line parameters overlap, each undecided. The crossing at `x = −1` is one root,
+    /// inside the range.
+    #[test]
+    fn a_crossing_on_the_seam_is_never_counted_twice() {
+        let k = Kernel::default();
+        let s = cylinder(&k);
+        let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let (_, c) = typed_of(
+            &k,
+            &s,
+            Vec3::new(-2.0, 0.0, 0.5),
+            Vec3::new(4.0, 0.0, 0.0),
+            1.0e-5,
+            &[whole],
+        );
+        assert!(
+            c.list.iter().all(|x| x.typed != Typed::Count(2)),
+            "{:?}",
+            types(&c)
+        );
+        let seam: Vec<&Component> = c.list.iter().filter(|x| x.t.lo > 0.5).collect();
+        assert_eq!(seam.len(), 1, "{:?}", c.list);
+        assert_eq!(
+            (seam[0].contact, seam[0].typed),
+            (Contact::Crossing, Typed::Sides),
+            "{:?}",
+            seam[0]
+        );
+        assert!(glued(seam[0]), "{:?}", seam[0]);
+        let far: Vec<&Component> = c.list.iter().filter(|x| x.t.hi < 0.5).collect();
+        assert_eq!(far.len(), 1, "{:?}", c.list);
+        assert_eq!(far[0].typed, Typed::Count(1), "{:?}", far[0]);
+    }
+
+    /// A closed quadratic B-spline ring about z (control points `(1, 0)`, `(1, 1)`,
+    /// `(−1, 1)`, `(−1, −1)`, `(1, −1)`, `(1, 0)`, z from 0 to 1) on the knots `0, 0, 0,
+    /// 0.1, 0.5, 0.7, 1, 1, 1`: its first and last rows are one, so it closes, but its end
+    /// spans differ, so `S_u` jumps at the seam (`2 (P₁ − P₀) / 0.1 = (0, 20)` against
+    /// `2 (P₅ − P₄) / 0.3 = (0, 6.7)`): not `C¹`. Every point has `x ≤ 1`, equal only on the
+    /// seam (`x = 1`, each end span's hull touching `x = 1` along its end edge only), so the
+    /// line along y at `x = 1 + tol / 2`, `z = ½` touches it within the tolerance across the
+    /// seam. The component is joined there, and its foot box would straddle the seam: no
+    /// foot box does (answer10, Q1, condition 3), and it stays undecided at a crease.
+    #[test]
+    fn a_seam_not_proved_c1_takes_no_foot_box_across_it() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        let k = Kernel::default();
+        let ring = [
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [-1.0, 1.0],
+            [-1.0, -1.0],
+            [1.0, -1.0],
+            [1.0, 0.0],
+        ];
+        let net = ring
+            .iter()
+            .map(|&[x, y]| vec![CPoint::new(x, y, 0.0, NOW), CPoint::new(x, y, 1.0, NOW)])
+            .collect();
+        let s = Surface::from(BSplineSurface::from_nurb(
+            NlSurface::new(
+                net,
+                2,
+                1,
+                vec![0.0, 0.0, 0.0, 0.1, 0.5, 0.7, 1.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            false,
+        ));
+        let line = LineNet::of(&k, &s).unwrap().unwrap();
+        assert_eq!(line.closes, [true, false]);
+        let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let tol = 1.0e-6;
+        let (_, c) = typed_of(
+            &k,
+            &s,
+            Vec3::new(1.0 + 0.5 * tol, -1.0, 0.5),
+            Vec3::new(0.0, 2.0, 0.0),
+            tol,
+            &[whole],
+        );
+        assert_eq!(c.list.len(), 1, "{:?}", c.list);
+        assert!(glued(&c.list[0]), "{:?}", c.list[0]);
+        assert_eq!(
+            c.list[0].typed,
+            Typed::Undecided(Why::FootNotShown(FootWhy::Floor(Stretch::Crease))),
+            "{:?}",
+            c.list[0]
+        );
+    }
+
+    /// A component around the whole turn stays undecided (answer10, Q1, condition 7): a
+    /// cylinder of radius `4·10⁻⁴` and height `2·10⁻³` about z lies within the tolerance
+    /// `10⁻³` of the line along z through it all round, so its boxes cover the whole knots'
+    /// range in u, which the solve wraps: no lift of the component is a rectangle less than
+    /// a turn wide.
+    #[test]
+    fn a_component_around_the_whole_turn_is_undecided() {
+        let k = Kernel::default();
+        let mut c = Cone::new_cylinder_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            4.0e-4,
+            0.0,
+            360.0,
+            2.0e-3,
+            false,
+            false,
+            true,
+        );
+        c.make_nurb(&k).unwrap();
+        let s = Surface::from(c);
+        let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let (_, c) = typed_of(
+            &k,
+            &s,
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::new(0.0, 0.0, 3.0),
+            TOL,
+            &[whole],
+        );
+        assert_eq!(c.list.len(), 1, "{:?}", c.list);
+        assert!(c.list[0].whole_turn, "{:?}", c.list[0]);
+        assert_eq!(
+            (c.list[0].contact, c.list[0].typed),
+            (Contact::Undecided, Typed::Undecided(Why::WholeTurn)),
+            "{:?}",
+            c.list[0]
+        );
+    }
+
+    /// The join across a seam on records alone (module docs, "The seam"), one leaf over the
+    /// whole range `[0, 1]²`: two boxes on opposite ends of u whose v stretches meet and
+    /// whose line parameters overlap are one component, its hull in u the piece at the high
+    /// end glued to the one at the low end; with their line parameters apart, or no wrap,
+    /// two components. Boxes whose stretches cover the whole range are a whole turn (two
+    /// meeting at ½, or one box over the range, joined to itself across the seam). At a
+    /// corner of a solve wrapping in both directions, boxes on opposite corners meet across
+    /// both seams and are glued in both.
+    #[test]
+    fn boxes_on_opposite_ends_join_across_a_seam() {
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let at = |u: [f64; 2], v: [f64; 2], t: [f64; 2]| FloorBox {
+            t: Some(Ivl::new(t[0], t[1])),
+            ..rec(FloorKind::Left, u, v)
+        };
+        let seams = |wu: bool, wv: bool| Seams {
+            range: [[0.0, 1.0], [0.0, 1.0]],
+            wrap: [wu, wv],
+        };
+        let run = |floor: Vec<FloorBox>, s: Seams| {
+            let leaves = [leaf_of(dom, Stop::Finished, Some(floor))];
+            components(&leaves, &leaf_sides(&[dom], &dom, s), [0.0, 1.0], s)
+        };
+        let (a, b) = (
+            at([0.9, 1.0], [0.4, 0.5], [0.2, 0.3]),
+            at([0.0, 0.1], [0.45, 0.55], [0.25, 0.35]),
+        );
+        let c = run(vec![a, b], seams(true, false));
+        assert_eq!(c.list.len(), 1, "{:?}", c.list);
+        assert_eq!(
+            c.list[0].hull[0],
+            Span {
+                first: Ivl::new(0.9, 1.0),
+                then: Some(Ivl::new(0.0, 0.1)),
+            }
+        );
+        assert_eq!(c.list[0].hull[1], Span::native(Ivl::new(0.4, 0.55)));
+        assert!(!c.list[0].whole_turn);
+        assert_eq!(run(vec![a, b], seams(false, false)).list.len(), 2);
+        let apart = at([0.0, 0.1], [0.45, 0.55], [0.5, 0.6]);
+        assert_eq!(run(vec![a, apart], seams(true, false)).list.len(), 2);
+        let halves = vec![
+            at([0.5, 1.0], [0.4, 0.5], [0.2, 0.3]),
+            at([0.0, 0.5], [0.4, 0.5], [0.2, 0.3]),
+        ];
+        let c = run(halves, seams(true, false));
+        assert_eq!(c.list.len(), 1);
+        assert!(c.list[0].whole_turn, "{:?}", c.list[0]);
+        let c = run(
+            vec![at([0.0, 1.0], [0.4, 0.5], [0.2, 0.3])],
+            seams(true, false),
+        );
+        assert!(c.list[0].whole_turn, "{:?}", c.list[0]);
+        let corner = vec![
+            at([0.9, 1.0], [0.9, 1.0], [0.2, 0.3]),
+            at([0.0, 0.1], [0.0, 0.1], [0.2, 0.3]),
+        ];
+        assert_eq!(run(corner.clone(), seams(true, false)).list.len(), 2);
+        let c = run(corner, seams(true, true));
+        assert_eq!(c.list.len(), 1, "{:?}", c.list);
+        assert!(
+            c.list[0].hull.iter().all(|h| h.then.is_some()),
+            "{:?}",
+            c.list[0]
+        );
+        assert!(!c.list[0].whole_turn);
     }
 }

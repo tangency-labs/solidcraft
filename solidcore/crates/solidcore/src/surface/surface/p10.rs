@@ -1002,7 +1002,9 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             .map(|job| job.domain)
             .chain(kept.strips.iter().copied())
             .collect();
-        let sides = certified_line::leaf_sides(&domains, &self.uv_domain);
+        // where the solve's parameter space closes on itself across a seam
+        let seams = net.seams(&self.uv_domain);
+        let sides = certified_line::leaf_sides(&domains, &self.uv_domain, seams);
         let mut searched: Vec<certified_line::SearchedLeaf> = Vec::new();
         // the records the drop and the components read, bounded
         // (`certified_line::MAX_SOLVE_BOXES`)
@@ -1107,7 +1109,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                 certified_line::MAX_DROP_ENCLOSURES,
             )?;
             k.work_counters.add_line_drops(&drops);
-            certified_line::components(&searched, &sides, span)
+            certified_line::components(&searched, &sides, span, seams)
         };
         let at_limit = searched
             .iter()
