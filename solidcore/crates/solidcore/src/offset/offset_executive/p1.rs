@@ -190,6 +190,45 @@ pub struct VertexOffset {
 /// kernels' namespaces, which share no attribute store with an offset executive.
 const DELETE_FACES_NAMESPACE: u32 = 0x00f5_e700;
 
+/// Not upstream (issue #18503's hook): the reconstruction's cut-ownership classifier
+/// ([`OffsetExecutive::set_reconstruction_classifier`]): whether the moved faces' cut
+/// removes a vanish's edge. Its `Debug` names the closure only — the closure is the
+/// reconstruction's own classification, supplied beside the eligibility provider.
+/// (issue #18503's hook) A deferred vanish's gap, recorded at the deferral for the
+/// executive's tail settlement ([`super::step_gaps`]): the gap trim's context, the
+/// WR-566 squeeze's own parameters, on the offset body the gap pass left untouched.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DeferredGap {
+    pub(crate) face: FaceId,
+    pub(crate) use_id: EdgeuseId,
+    pub(crate) vertex_point: crate::math::Point3,
+    pub(crate) tolerance: f64,
+}
+
+/// The cut-ownership classifier's closure type (issue #18503's hook): whether the moved
+/// faces' cut removes a vanish's edge's whole descendant group.
+type CutOwnershipFn = Box<dyn Fn(&mut Kernel, &mut Brep, &[FaceId], &[EdgeId]) -> Result<bool>>;
+
+pub(crate) struct CutOwnershipClassifier(pub(super) CutOwnershipFn);
+
+impl CutOwnershipClassifier {
+    pub(super) fn classify(
+        &self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        moved_faces: &[FaceId],
+        descendants: &[EdgeId],
+    ) -> Result<bool> {
+        (self.0)(k, b, moved_faces, descendants)
+    }
+}
+
+impl core::fmt::Debug for CutOwnershipClassifier {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("CutOwnershipClassifier(..)")
+    }
+}
+
 /// Topological offset state. Original ids and result ids belong to separate B-reps.
 /// Geometry-creator parameters are an immutable scalar snapshot; this executive does
 /// not retain a creator reference or implement its offset-geometry algorithms.
@@ -225,12 +264,37 @@ pub struct OffsetExecutive {
     /// Not upstream: the faces of a local operation that move to surfaces of their own
     /// (the others keep theirs), for their neighbours' reach
     /// ([`super::reach::local_extension_reach`]).
-    moved_faces: Vec<FaceId>,
+    pub(super) moved_faces: Vec<FaceId>,
     /// Not upstream: the original edges of a local operation that keep their geometry
     /// (their faces, and every face at their vertices, keep their surfaces), and their
     /// edge uses ([`Self::keep_unmoved_edges`]).
     pub(super) kept_edges: BTreeSet<EdgeId>,
     pub(super) kept_edgeuses: BTreeSet<EdgeuseId>,
+    /// Not upstream (issue #13622's hook): the original edges the crossed-boundary
+    /// reconstruction owns, supplied by the caller that consumes the vanish obligations
+    /// ([`Self::set_reconstruction_eligibility`],
+    /// `crate::topology::brep::local_operation`). `None` — an offset or a shell, no
+    /// eligibility provider — owns no vanish: one is refused as it always was.
+    pub(super) reconstruction_eligible: Option<BTreeSet<EdgeId>>,
+    /// Not upstream (issue #18503's hook): the cut-ownership classifier, supplied
+    /// beside the eligibility provider ([`Self::set_reconstruction_classifier`]): asked
+    /// at the gap pass's vanish decision whether the moved faces' cut removes the
+    /// vanish's edge. Only a certified removal is the reconstruction's to discharge
+    /// (the obligation's contract); a vanish the cut leaves alone is the gap pass's own
+    /// close and takes the squeeze as it always did (the base behavior). `None` — a
+    /// caller with no reconstruction classifier — takes every eligible vanish as the
+    /// cut's, as before.
+    pub(super) reconstruction_classifier: Option<CutOwnershipClassifier>,
+    /// Not upstream (issue #18503's hook): each deferred vanish's gap record (the
+    /// original edge's id to its [`DeferredGap`]), the executive's tail settlement's
+    /// input.
+    pub(super) deferred_gaps: BTreeMap<EdgeId, DeferredGap>,
+    /// Not upstream (issue #13622's hook): the vanish obligations the gap pass deferred
+    /// (`offset::offset_executive::step_gaps`, `close_loop_gap`), one per original edge
+    /// (id order, deduped). The reconstruction discharges each one or refuses typed; the
+    /// caller collects them before the executive goes
+    /// (`crate::topology::brep::local_operation`).
+    pub(super) pending_vanishes: BTreeSet<EdgeId>,
     /// Not upstream: the uses of the original edges of a local operation where the two new
     /// surfaces cross ([`super::reach::LocalReach::crossing`]), tangent in the input or not.
     crossing_edgeuses: BTreeSet<EdgeuseId>,
@@ -316,6 +380,10 @@ impl OffsetExecutive {
             moved_faces: Vec::new(),
             kept_edges: BTreeSet::new(),
             kept_edgeuses: BTreeSet::new(),
+            reconstruction_eligible: None,
+            reconstruction_classifier: None,
+            deferred_gaps: BTreeMap::new(),
+            pending_vanishes: BTreeSet::new(),
             crossing_edgeuses: BTreeSet::new(),
             collapsed_faces: Vec::new(),
             collapsed_displacements: Vec::new(),
@@ -494,6 +562,80 @@ impl OffsetExecutive {
     /// original edge use `edgeuse` ([`super::reach::LocalReach::crossing`]).
     pub(super) fn crosses_at_edgeuse(&self, edgeuse: EdgeuseId) -> bool {
         self.crossing_edgeuses.contains(&edgeuse)
+    }
+
+    /// Not upstream: the edges [`Self::keep_unmoved_edges`] kept, each with its id and
+    /// its curve over its interval with the tolerance each must stay clear within (its
+    /// own, at least the body's), for the local operation's check that the faces it moved
+    /// stay clear of them ([`super::clearance::all_clear`]) and for the crossed-boundary
+    /// reconstruction's event classification (`topology::brep::local_operation`,
+    /// issue #13622), which names the events by the original edge's id.
+    /// `original` is the B-rep the executive ran on.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::NotFound`] for a dangling id; a kept edge whose record carries no
+    /// curve is the kernel's own incomplete data: `OffsetFailure::Defect` on
+    /// `SM_ERR_NULL_POINTER` (the conversion guide §2), never a phrase cause.
+    pub(crate) fn kept_edge_curves(
+        &self,
+        original: &Brep,
+    ) -> Result<Vec<(EdgeId, super::clearance::KeptEdge)>> {
+        let mut kept = Vec::new();
+        for &e in &self.kept_edges {
+            // the record the kernel built for this original edge carries no curve: the
+            // kernel's own data is incomplete here (the conversion guide §2's
+            // kernel-built missing thing), kept on the status the phrase reported
+            let curve = edge::curve(original, e)?.ok_or_else(|| {
+                crate::error::Failure::new(
+                    OP,
+                    crate::error::offset::OffsetFailure::Defect {
+                        why: "the kept-edge collection reads the curve every original edge record carries, and this record has none, though the kernel writes each record with the curve it built the edge from",
+                    },
+                )
+                .with_status(crate::error::SM_ERR_NULL_POINTER)
+                .into_error()
+            })?;
+            kept.push((
+                e,
+                super::clearance::KeptEdge {
+                    curve: curve.clone(),
+                    interval: edge::interval(original, e)?,
+                    tolerance: edge::tolerance(original, e)?.max(original.tolerance()),
+                },
+            ));
+        }
+        Ok(kept)
+    }
+
+    /// Not upstream (issue #13622's hook): the eligibility provider's set of original
+    /// edges the crossed-boundary reconstruction owns
+    /// (`crate::topology::brep::local_operation`'s `crossable`). The gap pass defers the
+    /// vanish of an edge whose original is in it — where its correspondence is complete
+    /// and unambiguous ([`Self::owned_vanishing_edge`]) — instead of refusing it,
+    /// recording the obligation in [`Self::pending_vanishes`]. A caller that provides no
+    /// set (an offset or a shell) defers nothing.
+    pub(crate) fn set_reconstruction_eligibility(&mut self, eligible: BTreeSet<EdgeId>) {
+        self.reconstruction_eligible = Some(eligible);
+    }
+
+    /// Not upstream (issue #18503's hook): the cut-ownership classifier the gap pass
+    /// asks at its vanish decision (`offset::offset_executive::step_gaps`,
+    /// `close_loop_gap`): `true` — the moved faces' cut removes the vanish's edge, the
+    /// reconstruction owns the event — defers the dischargeable obligation;
+    /// `false` — the cut does not remove it — leaves the vanish to the gap pass's own
+    /// close (the base behavior). The caller that owns the reconstruction supplies it
+    /// (`crate::topology::brep::local_operation`), beside the eligibility provider.
+    pub(crate) fn set_reconstruction_classifier(&mut self, classifier: CutOwnershipFn) {
+        self.reconstruction_classifier = Some(CutOwnershipClassifier(classifier));
+    }
+
+    /// Not upstream (issue #13622's hook): the vanish obligations the gap pass deferred
+    /// ([`Self::pending_vanishes`]), for the caller to collect before this executive
+    /// goes and hand to the crossed-boundary reconstruction.
+    #[must_use]
+    pub(crate) fn pending_vanishes(&self) -> &BTreeSet<EdgeId> {
+        &self.pending_vanishes
     }
 
     /// Sets `m_eOffsetOperation`.
@@ -3522,6 +3664,69 @@ mod tests {
     use crate::surface::plane::Plane;
     use crate::surface::side::BoxSide;
     use crate::topology::{Edge, Edgeuse, Face, Faceuse, ShellId, Vertex, Vertexuse};
+
+    /// (issue #13622's hook) A vanish is the crossed-boundary reconstruction's only
+    /// where an eligibility provider says so and the correspondence through the offset
+    /// uses is complete and unambiguous: without a provider nothing is owned, a missing
+    /// mapping and an offset use mapping to two original uses own nothing, the two sides
+    /// resolving to different original edges own nothing, and an edge outside the
+    /// eligibility set is not owned — in every such case the vanish stays the gap pass's
+    /// refusal.
+    #[test]
+    fn a_vanish_is_owned_only_with_eligibility_and_unambiguous_provenance() {
+        use crate::math::Point3;
+        use crate::primitive::api_primitives::create_box;
+        use crate::topology::edge;
+        use crate::topology::edgeuse::p1 as eu;
+        let mut k = Kernel::default();
+        let original = create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0).unwrap();
+        let offset = create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0).unwrap();
+        let orig_edges: Vec<EdgeId> = original.edges().iter().map(|(e, _)| e).collect();
+        let off_edges: Vec<EdgeId> = offset.edges().iter().map(|(e, _)| e).collect();
+        let ou = edge::edgeuses(&original, orig_edges[0], None, None).unwrap()[0];
+        let other_ou = edge::edgeuses(&original, orig_edges[1], None, None).unwrap()[0];
+        let u = edge::edgeuses(&offset, off_edges[0], None, None).unwrap()[0];
+        let mate = eu::mate(&offset, u).unwrap().unwrap();
+        let owned_edge = eu::edge(&original, ou).unwrap().unwrap();
+        let other_edge = eu::edge(&original, other_ou).unwrap().unwrap();
+        let owns = |executive: &OffsetExecutive| {
+            executive
+                .owned_vanishing_edge(&original, &offset, u)
+                .unwrap()
+        };
+        // complete unambiguous provenance, but no eligibility provider (an offset or a
+        // shell): nothing is owned
+        let mut executive = OffsetExecutive::new(OffsetOperation::LocalOperation, 1.0, 1e-6);
+        executive.relate_edgeuses(ou, u);
+        assert_eq!(owns(&executive), None);
+        // the provider holds the edge: owned
+        executive.set_reconstruction_eligibility(BTreeSet::from([owned_edge]));
+        assert_eq!(owns(&executive), Some(owned_edge));
+        // the provider holds another edge only: not owned
+        executive.set_reconstruction_eligibility(BTreeSet::from([other_edge]));
+        assert_eq!(owns(&executive), None);
+        // missing provenance: no correspondence through the offset uses
+        let executive = OffsetExecutive::new(OffsetOperation::LocalOperation, 1.0, 1e-6);
+        assert_eq!(owns(&executive), None);
+        // ambiguous provenance: the offset use maps to two original uses
+        let mut executive = OffsetExecutive::new(OffsetOperation::LocalOperation, 1.0, 1e-6);
+        executive.set_reconstruction_eligibility(BTreeSet::from([owned_edge]));
+        executive.relate_edgeuses(ou, u);
+        executive.relate_edgeuses(other_ou, u);
+        assert_eq!(owns(&executive), None);
+        // the edge's two sides resolve to different original edges: ambiguous
+        let mut executive = OffsetExecutive::new(OffsetOperation::LocalOperation, 1.0, 1e-6);
+        executive.set_reconstruction_eligibility(BTreeSet::from([owned_edge, other_edge]));
+        executive.relate_edgeuses(ou, u);
+        executive.relate_edgeuses(other_ou, mate);
+        assert_eq!(owns(&executive), None);
+        // one side recorded is enough (the relation restores both from either), and the
+        // mate's record alone resolves just as well
+        let mut executive = OffsetExecutive::new(OffsetOperation::LocalOperation, 1.0, 1e-6);
+        executive.set_reconstruction_eligibility(BTreeSet::from([owned_edge]));
+        executive.relate_edgeuses(ou, mate);
+        assert_eq!(owns(&executive), Some(owned_edge));
+    }
 
     /// The fork's tangency-labs/smlib@9d8ace9 (tangency-labs/solidcore#1795, WR-344):
     /// an edge whose mate failed is left out of the merge's no-SSI pairs in the
