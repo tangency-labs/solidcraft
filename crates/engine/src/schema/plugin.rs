@@ -31,6 +31,9 @@ pub struct RunParams {
     pub entry: String,
     #[serde(default = "empty_params")]
     pub params: Value,
+    /// Explicit panel action notification, separate from the entry's ordinary arguments.
+    #[serde(default)]
+    pub ui_event: Option<crate::plugin::ui::UiEvent>,
     /// Refuse an edit unless this is still the design state the caller computed against.
     #[serde(default)]
     pub expected_design: Option<craft_plugin::DesignToken>,
@@ -312,6 +315,9 @@ pub struct InstallParams {
 }
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct InstallResult {
+    /// Host-drawn panels declared by the plugin, shown during permission review.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub panels: Vec<crate::plugin::ui::PanelSpec>,
     /// SHA-256 of the exact manifest and component. Send it as `approval` after reviewing this reply.
     pub approval: String,
     /// SHA-256 of the whole `.zip`. Send it as `archive` after reviewing this reply.
