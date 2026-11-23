@@ -687,6 +687,12 @@ pub(crate) fn draft(
             }
             surfaces.push(tilted);
         }
+        // A drafted cone that would reach a cavity's wall closes the wall: refused with the largest
+        // angle that keeps it (#20767), before anything changes.
+        let (n, p) = ([normal.x, normal.y, normal.z], [along.x, along.y, along.z]);
+        if let Err(e) = called(solidcore_ops::offset::refuse_draft_closing_wall(k, &w, &picked, neutral_origin, n, p, angle))? {
+            return Ok(Err(e));
+        }
         // `moved_faces(b, status(b->LocalOperation(faces, surfaces)))`, its marks on the picked
         // faces (`mark_moved`).
         // A face the drafted faces would cut through (a hole's wall within the draft of the side,

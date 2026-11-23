@@ -136,6 +136,10 @@ pub fn complete_periodic_seams(
     // the edge's end: the body then cannot be made a valid record, or the record fails the
     // checks the import makes of every record. The record as imported passed them, so it
     // stands: a body keeps its lifted trims rather than being refused for the completion's sake.
+    // The kernel also moves every trim piece into the base period on its own. Where a loop's
+    // consecutive uses lie either side of the cut with no seam edge between them (a vertex sits
+    // on the cut), the pieces end a whole period apart and the record no longer agrees with
+    // itself: the same checks refuse that completion too.
     let Ok((completed, order)) = to_record(&mut kernel, &mut body) else {
         return Ok(None);
     };
