@@ -85,9 +85,18 @@
 //!
 //! Deviations: not upstream (above). Used for B-spline surfaces and offsets of them;
 //! other nonprocedural surfaces keep upstream's [`super::p1::fix_boundary_curves`].
+//!
+//! **A curve no drop made.** Rules 5 and 6 alone ([`clamp_into_domain_bounded`]) keep a
+//! UV curve the surface/surface intersection traced inside its face's domain when the
+//! Boolean imprints it (`make_edge_in_face_with_vu_with_curve_identity`,
+//! tangency-labs/solidcraft#20537): a fit that overshoots a seam by a few 1e-9 in UV
+//! otherwise crosses it, and the face fails its seam check. The net is the face surface's
+//! own ([`MoveBound::of_face_surface`]): a B-spline surface, or an analytic surface, which
+//! the kernel evaluates as its net in the net's parameters.
 
 use crate::blend::fillet_section::interval::{round_down, round_up, Ivl};
 use crate::blend::fillet_section::series::V3;
+use crate::blend::fillet_section::station::as_b_spline;
 use crate::blend::fillet_section::station::Nurbs;
 use crate::error::intersect::IntersectFailure;
 use crate::error::{Result, SolidError};
@@ -95,6 +104,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::vector3d::Point3;
 use crate::kernel::Kernel;
 use crate::mass::enclosure::partials_over;
+use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
 use crate::surface::surface::p2::SurfaceKind;
 use crate::surface::surface::Surface;
 
@@ -233,6 +243,47 @@ impl MoveBound {
             }
             _ => None,
         }
+    }
+
+    /// The bound of a face's surface for a UV curve no drop made (not upstream, #20537): a
+    /// B-spline surface or a plane, sphere, torus, surface of revolution or of extrusion,
+    /// each evaluated as its net in the net's parameters ([`as_b_spline`]). `None` for a
+    /// surface that carries a procedural definition (evaluated exactly, not from its net),
+    /// a cone (evaluated from its STEP form at a parameter converted from the net's, not
+    /// always in closed form), a net in power-basis form (evaluated from its coefficients),
+    /// a net that does not agree, and any other kind.
+    ///
+    /// # Errors
+    ///
+    /// Those of making an analytic surface's NURB ([`as_b_spline`]).
+    pub fn of_face_surface(k: &Kernel, surface: &Surface, budget: f64) -> Result<Option<Self>> {
+        if surface.procedural_definition().is_some() {
+            return Ok(None);
+        }
+        if !matches!(
+            surface.kind(),
+            SurfaceKind::BSpline(_)
+                | SurfaceKind::Plane(_)
+                | SurfaceKind::Sphere(_)
+                | SurfaceKind::Torus(_)
+                | SurfaceKind::SurfOfRevolution(_)
+                | SurfaceKind::SurfOfExtrusion(_)
+        ) {
+            return Ok(None);
+        }
+        let Some(b) = as_b_spline(k, surface)? else {
+            return Ok(None);
+        };
+        if b.form() == BSplineSurfaceForm::Polynomial {
+            return Ok(None);
+        }
+        Ok(Nurbs::of(&b).ok().map(|net| Self {
+            net,
+            offset: None,
+            budget,
+            spent: Cell::new(0.0),
+            refused: Cell::new(false),
+        }))
     }
 
     /// Upper bounds of `|S_u|` and `|S_v|` over the box: the net's first partials, and for
@@ -488,16 +539,8 @@ pub fn fix_boundary_curves_bounded(
     }
 
     // 5. every control point into the domain
-    for p in ctrl_poly.iter_mut() {
-        let (x, y) = (
-            uv_domain.u_interval().clamp_value(p.x),
-            uv_domain.v_interval().clamp_value(p.y),
-        );
-        if x != p.x || y != p.y {
-            p.x = x;
-            p.y = y;
-            changed = true;
-        }
+    if clamp_all(ctrl_poly, uv_domain) {
+        changed = true;
     }
 
     // 6. the total move of every span, against the traced polygon
@@ -509,6 +552,75 @@ pub fn fix_boundary_curves_bounded(
     };
     bound.spent.set(bound.spent.get().max(spent));
     Ok(changed)
+}
+
+/// Rule 5: every control point into the domain. Returns whether one moved.
+fn clamp_all(ctrl_poly: &mut [Point3], uv_domain: &Extent2d) -> bool {
+    let mut changed = false;
+    for p in ctrl_poly.iter_mut() {
+        let (x, y) = (
+            uv_domain.u_interval().clamp_value(p.x),
+            uv_domain.v_interval().clamp_value(p.y),
+        );
+        if x != p.x || y != p.y {
+            p.x = x;
+            p.y = y;
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Rules 5 and 6 alone, for a UV curve no drop made (not upstream, #20537; module docs):
+/// every control point of the cubic Bezier polygon `ctrl_poly` (`3k + 1` points) into
+/// `uv_domain`, kept only where every span that moved is proved to move its surface image
+/// by at most `bound.budget`. Returns the largest span bound (0 when every point is in
+/// the domain already; [`MoveBound::spent`] also records it), or `None` with the polygon
+/// unchanged where a moved span is not proved within the budget. The curve, in the convex
+/// hull of its control points, then lies in the domain.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a polygon of other than `3k + 1` points (`k >= 1`), a
+/// number that is not finite, or an empty domain; [`SolidError::Cancelled`] when the
+/// kernel's cancel token fires.
+pub fn clamp_into_domain_bounded(
+    k: &Kernel,
+    ctrl_poly: &mut [Point3],
+    uv_domain: &Extent2d,
+    bound: &MoveBound,
+) -> Result<Option<f64>> {
+    let n = ctrl_poly.len();
+    if n < 4 || (n - 1) % 3 != 0 {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a cubic Bezier polygon has 3k + 1 points",
+        ));
+    }
+    let (lo, hi) = (uv_domain.min(), uv_domain.max());
+    if !(lo.x <= hi.x && lo.y <= hi.y) {
+        return Err(SolidError::invalid_input(OP, "an empty domain"));
+    }
+    if ctrl_poly
+        .iter()
+        .any(|p| !(p.x.is_finite() && p.y.is_finite()))
+    {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a control point that is not finite",
+        ));
+    }
+    let traced = ctrl_poly.to_vec();
+    let mut moved = traced.clone();
+    if !clamp_all(&mut moved, uv_domain) {
+        return Ok(Some(0.0));
+    }
+    let Some(spent) = polygon_bound(k, bound, &traced, &moved, uv_domain, bound.budget)? else {
+        return Ok(None);
+    };
+    ctrl_poly.copy_from_slice(&moved);
+    bound.spent.set(bound.spent.get().max(spent));
+    Ok(Some(spent))
 }
 
 /// The largest bound of a span's move from `traced` to `moved`, `None` where a span that
@@ -1039,5 +1151,81 @@ mod tests {
         let b = plane(1.0, 1.0, 1e-5);
         let mut p = poly(0, (0.45, 0.1), (0.5, 0.0), (0.55, 0.1));
         assert!(bounded(&mut p, &[0.0, 1.0], &DOM, &b).is_err());
+    }
+
+    /// A traced polygon in `(u, v)`, two cubic spans, with its third point `overshoot` past
+    /// u = 0 (an interior point of the first span) and its knot point on u = 0, as a fit
+    /// beside a seam leaves it (#20537).
+    fn beside_the_seam(overshoot: f64) -> Vec<Point3> {
+        [
+            (0.3, 0.1),
+            (0.2, 0.2),
+            (-overshoot, 0.4),
+            (0.0, 0.5),
+            (1e-9, 0.6),
+            (0.2, 0.8),
+            (0.3, 0.9),
+        ]
+        .iter()
+        .map(|&(u, v)| Point3::new(u, v, 0.0))
+        .collect()
+    }
+
+    /// The overshoot is clamped onto u = 0 and nothing else moves. Its move is bounded by
+    /// the interior basis maximum (4/9) times the move (5e-9) times `|S_u|` (10): 2.2e-8,
+    /// which is reported.
+    #[test]
+    fn a_traced_overshoot_is_clamped_into_the_domain_and_its_move_bounded() {
+        let b = plane(10.0, 10.0, 1e-5);
+        let traced = beside_the_seam(5e-9);
+        let mut p = traced.clone();
+        let spent = clamp_into_domain_bounded(&Kernel::default(), &mut p, &DOM, &b)
+            .expect("clamp")
+            .expect("proved within the budget");
+        assert_eq!(p[2], Point3::new(0.0, 0.4, 0.0));
+        for i in [0, 1, 3, 4, 5, 6] {
+            assert_eq!(p[i], traced[i], "point {i} moved");
+        }
+        let at_least = 4.0 / 9.0 * 5e-9 * 10.0;
+        assert!(
+            spent >= at_least && spent <= 1.000_001 * at_least,
+            "{spent}"
+        );
+        assert_eq!(b.spent(), spent);
+    }
+
+    /// A curve in another period of a closed surface is a whole period from the domain:
+    /// its move is not within the budget, and the polygon is left as it was.
+    #[test]
+    fn a_curve_a_period_away_is_left_as_it_was() {
+        let b = plane(10.0, 10.0, 1e-5);
+        let traced: Vec<_> = beside_the_seam(5e-9)
+            .iter()
+            .map(|p| Point3::new(p.x + 1.2, p.y, 0.0))
+            .collect();
+        let mut p = traced.clone();
+        let fixed = clamp_into_domain_bounded(&Kernel::default(), &mut p, &DOM, &b).expect("clamp");
+        assert_eq!(fixed, None);
+        assert_eq!(p, traced);
+    }
+
+    /// A polygon in the domain moves nothing and spends nothing.
+    #[test]
+    fn a_curve_in_the_domain_moves_nothing() {
+        let b = plane(10.0, 10.0, 1e-5);
+        let traced = beside_the_seam(0.0);
+        let mut p = traced.clone();
+        let fixed = clamp_into_domain_bounded(&Kernel::default(), &mut p, &DOM, &b).expect("clamp");
+        assert_eq!(fixed, Some(0.0));
+        assert_eq!(p, traced);
+    }
+
+    /// Only a cubic Bezier polygon of `3k + 1` points is clamped.
+    #[test]
+    fn a_polygon_of_another_size_is_refused() {
+        let b = plane(10.0, 10.0, 1e-5);
+        let mut p = beside_the_seam(5e-9);
+        p.pop();
+        assert!(clamp_into_domain_bounded(&Kernel::default(), &mut p, &DOM, &b).is_err());
     }
 }

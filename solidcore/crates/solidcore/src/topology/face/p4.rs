@@ -1849,7 +1849,10 @@ struct SeamBoundary {
 
 impl SeamBoundary {
     /// A represented seam is not a crossing of the material boundary. Otherwise,
-    /// every edge-use trim on this face must be proved clear of both seam sides.
+    /// every edge-use trim on this face must be proved clear of both seam sides, or (not
+    /// upstream, #20537) proved to lie in the closed strip between them without running
+    /// along either ([`trim_within_seam_strip`]): such a trim may touch a seam side, as a
+    /// trim ending on the seam's vertex does, but it cannot cross it.
     fn excludes<O: LoopObject, M: CurveOnClassifyBrep<O>>(
         &self,
         k: &Kernel,
@@ -1882,7 +1885,9 @@ impl SeamBoundary {
                 .any(|&fixed| trim_on_seam(trim, self.direction, fixed));
             all_seam &= on_seam;
             if all_disjoint {
-                all_disjoint = !on_seam && self.separates_trim(k, trim, interval)?;
+                all_disjoint = !on_seam
+                    && (self.separates_trim(k, trim, interval)?
+                        || trim_within_seam_strip(trim, self.direction, self.fixed));
             }
             if !all_seam && !all_disjoint {
                 return Ok(false);
@@ -1919,6 +1924,69 @@ impl SeamBoundary {
         }
         Ok(true)
     }
+}
+
+/// Not upstream (#20537): whether a B-spline trim lies in the closed strip between the
+/// two seam sides `fixed` (in the coordinate across the seam) and runs along neither.
+/// Whole-curve identities in parameter space, read from the native control
+/// coefficients, with no tolerance: every weight is positive and every homogeneous
+/// coefficient across the seam satisfies `lo W <= X <= hi W` (expansion arithmetic, so
+/// without rounding), so the trim, in the convex hull of its control points, lies in the
+/// strip; and every nonempty knot span has a control point strictly inside the strip,
+/// so on the span's interior, where each of its basis functions is positive, the trim is
+/// strictly inside it. The trim can then meet a seam side only at isolated parameters
+/// (knots and its ends), touching it without crossing it. A line or any other kind gives
+/// no certificate here.
+fn trim_within_seam_strip(trim: &Curve, direction: SurfParamType, fixed: [f64; 2]) -> bool {
+    use crate::geom::expansion;
+    use crate::nurbs::math::NOW;
+
+    let (lo, hi) = (fixed[0].min(fixed[1]), fixed[0].max(fixed[1]));
+    if !(lo.is_finite() && hi.is_finite() && lo < hi) {
+        return false;
+    }
+    let Some(net) = trim.b_spline_base().and_then(|base| base.gw_nurb()) else {
+        return false;
+    };
+    let degree = net.degree();
+    let (cpts, knots) = (net.cpts(), net.knots());
+    if net.counts_are_valid().is_err()
+        || cpts.len() <= degree
+        || knots.len() != cpts.len() + degree + 1
+    {
+        return false;
+    }
+    let axis = usize::from(direction != SurfParamType::U);
+    // the exact sign of X - c W, None where it is not computed exactly
+    let side = |p: &crate::nurbs::math::CPoint, c: f64| -> Option<i32> {
+        let weight = if p.w == NOW { 1.0 } else { p.w };
+        let value = if axis == 0 { p.x } else { p.y };
+        if !(weight.is_finite() && weight > 0.0 && value.is_finite()) {
+            return None;
+        }
+        let product = expansion::product(c, weight)?;
+        Some(expansion::sign(&expansion::sub(&[value], &product)))
+    };
+    // -1 outside, 0 on a side, 1 strictly inside
+    let mut inside = Vec::with_capacity(cpts.len());
+    for p in cpts {
+        let (Some(above), Some(below)) = (side(p, lo), side(p, hi)) else {
+            return false;
+        };
+        if above < 0 || below > 0 {
+            return false;
+        }
+        inside.push(above > 0 && below < 0);
+    }
+    // span j = [knots[j], knots[j + 1]) for j in degree..cpts.len(); its control points
+    // are j - degree ..= j
+    (degree..cpts.len()).all(|j| match (knots.get(j), knots.get(j + 1)) {
+        (Some(a), Some(b)) if a < b => inside
+            .get(j - degree..=j)
+            .is_some_and(|span| span.iter().any(|&strict| strict)),
+        (Some(_), Some(_)) => true,
+        _ => false,
+    })
 }
 
 /// Embed the UV definition as (u,v,0). In particular, a 2D native spline stores
@@ -1982,7 +2050,7 @@ fn trim_on_seam(trim: &Curve, direction: SurfParamType, fixed: f64) -> bool {
     trim_has_constant_coordinate(trim, axis, fixed)
 }
 
-fn trim_has_constant_coordinate(trim: &Curve, axis: usize, fixed: f64) -> bool {
+pub(crate) fn trim_has_constant_coordinate(trim: &Curve, axis: usize, fixed: f64) -> bool {
     use crate::geom::expansion;
     use crate::nurbs::math::NOW;
 
@@ -3364,6 +3432,77 @@ mod tests {
         assert!(!trim_on_seam(&rounded, SurfParamType::U, 0.1));
         let mixed = spline([0.5, 1.0, 0.5], [NOW, 2.0, NOW]);
         assert!(!trim_on_seam(&mixed, SurfParamType::U, 0.5));
+    }
+
+    /// #20537: a trim in the closed strip between the seam sides, by its native control
+    /// coefficients, may touch a side (ending on the seam's vertex) but not cross it or run
+    /// along it.
+    #[test]
+    fn a_trim_within_the_seam_strip_touches_without_crossing() {
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+
+        let spline = |x: &[f64], weights: &[f64], degree: usize, knots: Vec<f64>| {
+            Curve::from(BSplineCurve::from_nurb(
+                NurbCurve::new(
+                    x.iter()
+                        .zip(weights)
+                        .enumerate()
+                        .map(|(i, (&x, &w))| CPoint::new(x, i as f64, 0.0, w))
+                        .collect(),
+                    degree,
+                    knots,
+                )
+                .unwrap(),
+                2,
+                false,
+            ))
+        };
+        let quadratic =
+            |x: [f64; 3], w: [f64; 3]| spline(&x, &w, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+        let strip = [0.0, 1.0];
+        // ends on u = 0 and stays inside: a touch
+        let touching = quadratic([0.0, 0.3, 0.5], [NOW; 3]);
+        assert!(trim_within_seam_strip(&touching, SurfParamType::U, strip));
+        // the sides in either order, and the far side touched
+        let far = quadratic([0.5, 0.8, 1.0], [NOW; 3]);
+        assert!(trim_within_seam_strip(&far, SurfParamType::U, [1.0, 0.0]));
+        // a control point 1e-9 past u = 0: no certificate
+        let dipping = quadratic([0.0, -1e-9, 0.5], [NOW; 3]);
+        assert!(!trim_within_seam_strip(&dipping, SurfParamType::U, strip));
+        // rational: homogeneous X against lo W and hi W, weights positive
+        let rational = quadratic([0.0, 0.6, 0.5], [1.0, 2.0, 1.0]);
+        assert!(trim_within_seam_strip(&rational, SurfParamType::U, strip));
+        let past = quadratic([0.0, 2.2, 0.5], [1.0, 2.0, 1.0]);
+        assert!(!trim_within_seam_strip(&past, SurfParamType::U, strip));
+        let negative = quadratic([0.0, 0.6, 0.5], [1.0, -2.0, 1.0]);
+        assert!(!trim_within_seam_strip(&negative, SurfParamType::U, strip));
+        // a span along u = 0 (both its control points on it) runs along the seam
+        let along = spline(
+            &[0.0, 0.0, 0.5],
+            &[NOW; 3],
+            1,
+            vec![0.0, 0.0, 1.0, 2.0, 2.0],
+        );
+        assert!(!trim_within_seam_strip(&along, SurfParamType::U, strip));
+        // across a V seam the coordinate is v (here 0, 1, 2)
+        assert!(trim_within_seam_strip(
+            &touching,
+            SurfParamType::V,
+            [0.0, 2.0]
+        ));
+        assert!(!trim_within_seam_strip(
+            &touching,
+            SurfParamType::V,
+            [0.0, 1.5]
+        ));
+        // a line gives no certificate here
+        let line = Curve::from(crate::curve::line::Line::from_points(
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(0.5, 1.0, 0.0),
+            2,
+        ));
+        assert!(!trim_within_seam_strip(&line, SurfParamType::U, strip));
     }
 
     #[test]

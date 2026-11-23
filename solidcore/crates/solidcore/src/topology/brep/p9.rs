@@ -1500,6 +1500,166 @@ pub struct EdgeInFaceOutput {
     pub face: Option<FaceId>,
 }
 
+/// Not upstream (#20537): which coordinates of `domain` face `face` is closed across by a
+/// seam: `[u, v]`, true where an edge with the face on both sides has a trim on this face
+/// that lies on that coordinate's side of the domain, by the whole-curve identity of its
+/// native control coefficients ([`trim_has_constant_coordinate`]). Read from the face's
+/// own topology, with no sampling and no tolerance.
+///
+/// # Errors
+///
+/// Those of the topology queries.
+///
+/// [`trim_has_constant_coordinate`]: crate::topology::face::p4::trim_has_constant_coordinate
+fn seam_sides(
+    b: &Brep,
+    face: FaceId,
+    domain: &crate::geom::extent2d::Extent2d,
+) -> Result<[bool; 2]> {
+    use crate::topology::edgeuse::p1 as eu1;
+    use crate::topology::face::p4::trim_has_constant_coordinate;
+    let mut sides = [false; 2];
+    let Some(fu) = b.face(face)?.faceuse else {
+        return Ok(sides);
+    };
+    let bounds = [
+        [domain.u_min(), domain.u_max()],
+        [domain.v_min(), domain.v_max()],
+    ];
+    for lu in eu1::faceuse_loopuses(b, fu, false, None)? {
+        for eu in crate::topology::loopuse::edgeuses(b, lu, None, None)? {
+            let Some(e) = eu1::edge(b, eu)? else {
+                continue;
+            };
+            if !edge::face_on_both_sides(b, e, face)? {
+                continue;
+            }
+            let Some(trim) = eu1::uv_trim_curve(b, eu)?.0 else {
+                continue;
+            };
+            for (axis, (side, ends)) in sides.iter_mut().zip(&bounds).enumerate() {
+                if !*side {
+                    *side = ends
+                        .iter()
+                        .any(|&fixed| trim_has_constant_coordinate(trim, axis, fixed));
+                }
+            }
+        }
+    }
+    Ok(sides)
+}
+
+/// Not upstream (#20537): keeps a UV trim the caller traced inside the surface's natural
+/// domain across a seam the face has ([`seam_sides`]). A traced fit can overshoot the
+/// domain by a few 1e-9 where its curve runs beside a seam; the trim then crosses the
+/// seam, although the curve does not, and the face fails its seam check ("Face crosses
+/// Seam"). In each coordinate in `seams`, every control point of a non-rational cubic trim
+/// in Bezier form is clamped into the domain where the move of its image on the surface is
+/// proved within `budget` (the curve's tolerance) by the surface's net
+/// ([`clamp_into_domain_bounded`] with [`MoveBound::of_face_surface`]): the trim, in the
+/// convex hull of its control points, then lies between the seam's sides. Returns that
+/// bound, for the caller to add to the edge's tolerance; 0 where nothing moved: a face
+/// without a seam, a trim of another form, a surface without such a net, a trim already
+/// between the seam's sides, or a move not proved within the budget (a trim in another
+/// period of a closed surface moves a whole period), which leaves the trim as it was.
+///
+/// # Errors
+///
+/// Those of making an analytic surface's NURB, and a cancellation.
+///
+/// [`clamp_into_domain_bounded`]: crate::intersect::surface_drop_lib::boundary_moves::clamp_into_domain_bounded
+/// [`MoveBound::of_face_surface`]: crate::intersect::surface_drop_lib::boundary_moves::MoveBound::of_face_surface
+fn keep_trim_in_domain(
+    k: &Kernel,
+    surface: &Surface,
+    domain: &crate::geom::extent2d::Extent2d,
+    seams: [bool; 2],
+    trim: &mut Curve,
+    budget: f64,
+) -> Result<f64> {
+    use crate::curve::curve::CurveKind;
+    use crate::intersect::surface_drop_lib::boundary_moves::{
+        clamp_into_domain_bounded, MoveBound,
+    };
+    if !(budget.is_finite() && budget > 0.0) || seams == [false, false] {
+        return Ok(0.0);
+    }
+    // the domain across each seam; unbounded along a coordinate the face has no seam in
+    let side = |closed: bool, lo: f64, hi: f64| {
+        if closed {
+            (lo, hi)
+        } else {
+            (f64::NEG_INFINITY, f64::INFINITY)
+        }
+    };
+    let (u0, u1) = side(seams[0], domain.u_min(), domain.u_max());
+    let (v0, v1) = side(seams[1], domain.v_min(), domain.v_max());
+    let domain = &crate::geom::extent2d::Extent2d::from_bounds(u0, v0, u1, v1);
+    let CurveKind::BSpline(base) = trim.kind() else {
+        return Ok(0.0);
+    };
+    let Some(net) = base.gw_nurb().filter(|net| is_cubic_bezier_form(net)) else {
+        return Ok(0.0);
+    };
+    let mut poly: Vec<Point3> = net
+        .cpts()
+        .iter()
+        .map(|p| Point3::new(p.x, p.y, 0.0))
+        .collect();
+    if poly.iter().all(|p| {
+        domain.u_interval().clamp_value(p.x) == p.x && domain.v_interval().clamp_value(p.y) == p.y
+    }) {
+        return Ok(0.0);
+    }
+    let Some(bound) = MoveBound::of_face_surface(k, surface, budget)? else {
+        return Ok(0.0);
+    };
+    let Some(spent) = clamp_into_domain_bounded(k, &mut poly, domain, &bound)? else {
+        return Ok(0.0);
+    };
+    let CurveKind::BSpline(base) = trim.kind_mut() else {
+        return Ok(0.0);
+    };
+    let net = base.get_or_create_gw_nurb()?;
+    for (c, p) in net.cpts_mut().iter_mut().zip(&poly) {
+        c.x = p.x;
+        c.y = p.y;
+    }
+    Ok(spent)
+}
+
+/// Whether a NURB is a non-rational cubic in Bezier form: end knots of multiplicity 4,
+/// interior knots of multiplicity 3, increasing, and `3k + 1` control points.
+fn is_cubic_bezier_form(net: &crate::nurbs::crv_basic::Curve) -> bool {
+    let (cpts, knots) = (net.cpts(), net.knots());
+    let n = cpts.len();
+    if net.degree() != 3 || n < 4 || (n - 1) % 3 != 0 || knots.len() != n + 4 {
+        return false;
+    }
+    if cpts.iter().any(|p| p.w != crate::nurbs::math::NOW) {
+        return false;
+    }
+    let breaks = (n - 1) / 3;
+    let at = |i: usize| knots.get(i).copied();
+    let group = |start: usize, len: usize| -> Option<f64> {
+        let first = at(start)?;
+        (start..start + len)
+            .all(|i| at(i) == Some(first))
+            .then_some(first)
+    };
+    let mut previous = match group(0, 4) {
+        Some(k) if k.is_finite() => k,
+        _ => return false,
+    };
+    for b in 1..breaks {
+        match group(1 + 3 * b, 3) {
+            Some(k) if k.is_finite() && k > previous => previous = k,
+            _ => return false,
+        }
+    }
+    matches!(group(n, 4), Some(k) if k.is_finite() && k > previous)
+}
+
 /// `MakeEdgeInFaceWithVU`'s defined null/editing/VU-compatibility failures.
 ///
 /// # Errors
@@ -1637,6 +1797,7 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
     };
     let [eu1, eu2, eu3, eu4] = [*eu1, *eu2, *eu3, *eu4];
     let mut uv_trim = input.uv_trim;
+    let trim_given = uv_trim.is_some();
     let mut drop_fail = input.drop_fail;
     let mut max_dist = 0.0;
     let mut deviation = 0.0;
@@ -1664,6 +1825,19 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
             uv_trim = curves.pop();
             // pThisUVDropCurveFail is NULL and passed by value in the pinned
             // native signature, so projection cannot populate this pointer.
+        }
+    }
+    // Not upstream (#20537): a trim the caller traced is kept in the surface's domain, its
+    // move certified and added to the edge's tolerance (`keep_trim_in_domain`). A dropped
+    // trim was kept there by the drop.
+    let mut trim_moved_by = 0.0;
+    if trim_given {
+        if let Some(trim) = uv_trim.as_mut() {
+            let surface = required(b.face(face)?.surface.as_ref(), "face without surface")?
+                .clone_for_evaluation()?;
+            let seams = seam_sides(b, face, &domain)?;
+            trim_moved_by =
+                keep_trim_in_domain(k, &surface, &domain, seams, trim, input.curve_zone_tol_3d)?;
         }
     }
     let curve_identity = curve_identity.resolve(edge_id, &mut curve, env)?;
@@ -1768,8 +1942,13 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
         original_trim_owner = Some(top);
     }
     let distance = (max_dist * max_dist + deviation * deviation).sqrt();
-    b.edge_mut(edge_id)?.tolerance =
-        crate::math::max3(distance, input.curve_zone_tol_3d, b.tolerance());
+    // the trim lies within the curve's tolerance, and its move within the bound it proved
+    let curve_tolerance = if trim_moved_by > 0.0 {
+        crate::geom::certified::next_up(input.curve_zone_tol_3d + trim_moved_by)
+    } else {
+        input.curve_zone_tol_3d
+    };
+    b.edge_mut(edge_id)?.tolerance = crate::math::max3(distance, curve_tolerance, b.tolerance());
     face_notify(b, face, env, NotifyOperation::PreEdit)?;
     insert_brep_entity(b, EntityRef::Edge(edge_id))?;
     let mut output = EdgeInFaceOutput {
@@ -3133,6 +3312,30 @@ fn drop_curve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #20537: only a non-rational cubic in Bezier form is clamped at the imprint.
+    #[test]
+    fn a_traced_trim_is_clamped_only_in_cubic_bezier_form() {
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        let net = |w: f64, degree: usize, knots: Vec<f64>, n: usize| {
+            NurbCurve::new(
+                (0..n).map(|i| CPoint::new(i as f64, 0.0, 0.0, w)).collect(),
+                degree,
+                knots,
+            )
+            .unwrap()
+        };
+        let bezier = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0];
+        assert!(is_cubic_bezier_form(&net(NOW, 3, bezier.clone(), 7)));
+        assert!(!is_cubic_bezier_form(&net(1.0, 3, bezier, 7)));
+        // an interior knot of multiplicity 1: not Bezier form
+        let spline = vec![0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0, 4.0, 4.0];
+        assert!(!is_cubic_bezier_form(&net(NOW, 3, spline, 7)));
+        // a quadratic
+        let quadratic = vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0];
+        assert!(!is_cubic_bezier_form(&net(NOW, 2, quadratic, 5)));
+    }
 
     /// The face-orientation repair's final status 1 (upstream `TRUE`) comes back as
     /// [`OrientSheetNote::Reoriented`] on the success path, and a caller that stops on it
