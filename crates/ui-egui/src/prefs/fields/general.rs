@@ -8,11 +8,15 @@
 macro_rules! general_preferences {
     ($next:ident $(, $rest:ident)* ; $($fields:tt)*) => {
         $next! { $($rest),* ; $($fields)*
-            /// Import with cadmpeg: a STEP, FreeCAD or Rhino file is read from cadmpeg's model straight
-            /// into B-rep records: a STEP file decoded by cadmpeg's STEP decoder instead of SolidCraft's
-            /// own STEP reader, and a FreeCAD or Rhino file's solids instead of restated as STEP by
-            /// cadmpeg's STEP writer and read by SolidCraft's STEP reader. Off (the default) keeps
-            /// SolidCraft's STEP reader for all three, as before.
+            /// Import with cadmpeg: a STEP, IGES, FreeCAD or Rhino file is read from cadmpeg's model
+            /// straight into B-rep records: a STEP or IGES file decoded by cadmpeg's STEP or IGES decoder
+            /// instead of SolidCraft's own reader, and a FreeCAD or Rhino file's solids instead of
+            /// restated as STEP by cadmpeg's STEP writer and read by SolidCraft's STEP reader. Off (the
+            /// default) keeps SolidCraft's readers for all four, as before.
+            /// Export STEP and IGES with cadmpeg: File › Export of a STEP or IGES file asks `file.export`
+            /// for cadmpeg's writer (`writer: cadmpeg`), which writes the design through cadmpeg's model.
+            /// Off (the default) keeps SolidCraft's own STEP and IGES writers, as before.
+            cadmpeg_export: bool = false, PAGE_GENERAL => check_id("settings.cadmpeg_export");
             cadmpeg_import: bool = false, PAGE_GENERAL => check_id("settings.cadmpeg_import");
             /// Check for updates at start and once a day (docs/updates.md).
             check_updates: bool = true, 0;

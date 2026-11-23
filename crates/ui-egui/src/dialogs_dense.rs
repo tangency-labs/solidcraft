@@ -45,6 +45,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Sweep { .. } => Some("solid.sweep"),
         Kind::Midplane => Some("construct.plane.midplane"),
         Kind::MeshConvert { .. } => Some("mesh.convert"),
+        Kind::MeshReduce { .. } => Some("mesh.reduce"),
         Kind::Construct { command, .. } => Some(command),
         Kind::ConstructAuto { command, .. } => Some(command),
         Kind::PathPlane { .. } => Some("construct.plane.along_path"),
@@ -300,6 +301,12 @@ fn fillet_turn_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>
 /// The most instances a solid pattern makes in one direction (the document's own limit).
 const MAX_PATTERN_INSTANCES: i64 = 1000;
 
+/// A length row that refuses zero and negative values when `positive` (a spacing that sets the
+/// count with an extent), else any length (a spacing may run backwards).
+fn expr_row_positive_if(ui: &mut egui::Ui, label: &str, value: &mut String, positive: bool) -> bool {
+    if positive { expr_row_positive(ui, label, value) } else { expr_row(ui, label, value) }
+}
+
 /// A solid pattern's quantity row, with step arrows from 1 to `MAX_PATTERN_INSTANCES`. The
 /// count goes to the command as typed, so it is evaluated as the document evaluates it.
 fn quantity_row(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label: &str, value: &mut String) -> bool {
@@ -317,23 +324,61 @@ fn count_row_to(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label
     ui_kit::count_row(ui, label, value, &ui_kit::Count { min: 1, max, eval: &eval })
 }
 
+/// The distance types a rectangular pattern direction offers, in the order of
+/// [`PatternDistance`]'s words.
+const PATTERN_DISTANCES: [(PatternDistance, &str); 3] = [
+    (PatternDistance::CountSpacing, "ui.pattern_count_spacing"),
+    (PatternDistance::CountExtent, "ui.pattern_count_extent"),
+    (PatternDistance::SpacingExtent, "ui.pattern_spacing_extent"),
+];
+
 /// One rectangular pattern direction (`index` 0 or 1) as its own titled group: the direction's
-/// pick, then its Quantity, Spacing and (for features) Alignment, in the same order for both
-/// directions, so a direction's settings sit together (#9634).
+/// pick, its Distance Type, the values that type takes (Quantity, Spacing, Extent, Copy at the
+/// end) and (for features) Alignment, in the same order for both directions, so a direction's
+/// settings sit together (#9634, #8523).
 fn pattern_direction_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, index: usize) -> bool {
     let (key, title, quantity_label, spacing_label) = if index == 0 {
         ("pattern_direction1", "Direction 1", "Quantity", "Spacing")
     } else {
         ("pattern_direction2", "Direction 2", "Quantity 2", "Spacing 2")
     };
+    let (type_label, extent_label, end_label, type_key, end_key) = if index == 0 {
+        ("ui.pattern_distance_type", "ui.pattern_extent", "ui.pattern_copy_at_end", "distance1", "copy_at_end1")
+    } else {
+        ("ui.pattern_distance_type_2", "ui.pattern_extent_2", "ui.pattern_copy_at_end_2", "distance2", "copy_at_end2")
+    };
     let features = d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES);
     ui_kit::section(ui, key, title, true, |ui| {
         let mut enter = false;
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, index + 1..index + 2);
-        if let Kind::PatternRect { count, spacing, count2, spacing2 } = &mut d.kind {
-            let (count, spacing) = if index == 0 { (count, spacing) } else { (count2, spacing2) };
-            enter |= quantity_row(ui, &app.session.doc, quantity_label, count);
-            enter |= expr_row(ui, spacing_label, spacing);
+        let distance = pattern_distance(&d.extra, index);
+        let mut chosen = PATTERN_DISTANCES.iter().position(|(kind, _)| *kind == distance).unwrap_or(0);
+        let labels = PATTERN_DISTANCES.map(|(_, label)| label);
+        choice_row(ui, type_label, type_key, &mut chosen, &labels);
+        let distance = PATTERN_DISTANCES.get(chosen).map(|(kind, _)| *kind).unwrap_or_default();
+        if distance.is_default() {
+            d.extra.remove(type_key);
+        } else {
+            d.extra.insert(type_key.into(), json!(distance.as_str()));
+        }
+        if let Kind::PatternRect { count, spacing, count2, spacing2, extent, extent2 } = &mut d.kind {
+            let (count, spacing, extent) = if index == 0 { (count, spacing, extent) } else { (count2, spacing2, extent2) };
+            if distance.uses_count() {
+                enter |= quantity_row(ui, &app.session.doc, quantity_label, count);
+            }
+            if distance.uses_spacing() {
+                enter |= expr_row_positive_if(ui, spacing_label, spacing, distance.uses_extent());
+            }
+            if distance.uses_extent() {
+                enter |= expr_row_positive(ui, extent_label, extent);
+            }
+        }
+        if distance == PatternDistance::SpacingExtent {
+            form_row(ui, end_label, |ui| {
+                extra_check(ui, &mut d.extra, end_key);
+            });
+        } else {
+            d.extra.remove(end_key);
         }
         if features {
             feature_pattern_alignment_row(ui, &mut d.extra, index);
@@ -434,6 +479,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..2);
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
+        crate::command_sketch::offer_row(app, d, ui);
     }
     d.sync_material(&app.session);
     // The Hole dialog's dropdowns preview each choice on a copy of the form as it stands.
@@ -749,7 +795,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 feature_pattern_alignment_row(ui, &mut d.extra, 0);
             }
         }
-        Kind::Hole { kind, opts, cb_diameter, cb_depth, .. } => {
+        Kind::Hole { kind, opts, cb_diameter, cb_depth, cs_diameter, cs_angle, .. } => {
             let doc = &app.session.doc;
             let eval = |e: &str, k| doc.eval(e, k).ok();
             // Each option shows the hole it makes while hovered (dialogs_hole::preview).
@@ -790,9 +836,12 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             // A clearance hole for a bolt: its size and fit set the diameter (ISO 273).
             if opts.clearance {
                 enter |= crate::dialogs_hole::clearance_rows(ui, opts);
-                // A counterbore for a cap screw: its head sets the counterbore (#12321).
-                if *kind == 1 {
-                    crate::dialogs_hole::head_row(ui, opts, cb_diameter, cb_depth);
+                // A counterbore for a cap screw, a countersink for a countersunk one: the screw's
+                // head sets the recess (#12321, #17728).
+                match *kind {
+                    1 => crate::dialogs_hole::head_row(ui, opts, 1, cb_diameter, cb_depth),
+                    2 => crate::dialogs_hole::head_row(ui, opts, 2, cs_diameter, cs_angle),
+                    _ => {}
                 }
             }
             if opts.tapped {
@@ -1037,6 +1086,16 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         Kind::MeshConvert { tolerance } => {
             form_row(ui, "Tolerance", |ui| enter |= field(ui, tolerance));
+        }
+        Kind::MeshReduce { mode, count, percentage } => {
+            form_row(ui, "Target", |ui| {
+                ui_kit::segmented(ui, mode, &["Retained percentage", "Triangle count"], Default::default());
+            });
+            if *mode == 0 {
+                form_row(ui, "Retained percentage", |ui| enter |= field(ui, percentage));
+            } else {
+                form_row(ui, "Triangle count", |ui| enter |= field(ui, count));
+            }
         }
         Kind::Construct { t: Some(t), .. } => {
             form_row(ui, "Position (0 to 1)", |ui| enter |= field(ui, t));

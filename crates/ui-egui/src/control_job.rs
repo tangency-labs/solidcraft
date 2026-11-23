@@ -192,6 +192,13 @@ fn reading(req: &ControlRequest) -> Option<(&'static str, Value)> {
     }
 }
 
+/// An `engine.execute` of `document.list`, in any spelling the engine takes: it only reads which
+/// designs are open, so it answers while a file loads or a save is written.
+pub(crate) fn lists_designs(req: &ControlRequest) -> bool {
+    matches!(req.method.as_str(), "engine.execute" | "command")
+        && executed(&req.params).and_then(|(command, _)| spec_id(command)) == Some("document.list")
+}
+
 /// Requests that change the design: they wait while one computes.
 pub(crate) fn changes_the_design(method: &str) -> bool {
     matches!(
@@ -610,6 +617,8 @@ impl SolveApp {
             if crate::control_params::parse::<crate::control_params::Execute>(&req.params).is_err() {
                 return Some(req);
             }
+            // Frame discovery must not add inert panel state after the worker's source snapshot.
+            solidcraft_engine::plugin::sync_panels(&mut self.session);
             let mut copy = self.session.scratch();
             copy.plugin_forms_interactive = crate::plugin_menu::take_interactive_run(self, req.serial);
             if let Some(level) = level {

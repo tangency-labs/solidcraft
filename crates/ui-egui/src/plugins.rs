@@ -683,7 +683,7 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
 }
 
 /// What was approved at install for `plugin`'s current package, in plain words: command groups,
-/// folders with their access, and memory. Grants made for another version count for nothing.
+/// folders with their access, fuel and memory. Grants made for another version count for nothing.
 pub(crate) fn approved_text(app: &SolveApp, plugin: &Plugin) -> String {
     use solidcraft_ui_text::{format, tr};
     let Some(grants) = app.session.plugin_state.grants.get(&plugin.id).filter(|g| g.package_hash.as_deref() == Some(plugin.approval.as_str())) else {
@@ -704,6 +704,9 @@ pub(crate) fn approved_text(app: &SolveApp, plugin: &Plugin) -> String {
             _ => "prefs.plugin_folder_read",
         });
         parts.push(format("prefs.plugin_folder", &[("name", &folder.name), ("access", access)]));
+    }
+    if let Some(fuel) = grants.fuel {
+        parts.push(format("prefs.plugin_approved_fuel", &[("fuel", &fuel.to_string())]));
     }
     if let Some(memory) = grants.memory_mib {
         parts.push(format("prefs.plugin_approved_memory", &[("memory", &memory.to_string())]));

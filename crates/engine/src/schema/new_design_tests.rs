@@ -7,11 +7,30 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<NewDesignParams>(), &["kind", "name"]);
+    assert_keys(input_schema_for::<NewDesignParams>(), &["kind", "name", "new_tab"]);
     let issues = |p: Value| crate::schema::issues("file.new", &p).into_iter().map(|i| i.message).collect::<Vec<_>>();
     assert!(issues(json!({})).is_empty());
     assert!(issues(json!({"name": "Gearbox"})).is_empty());
+    assert!(issues(json!({"name": "Gearbox", "new_tab": true})).is_empty());
     assert_eq!(issues(json!({"nmae": "Gearbox"})).len(), 1);
+    assert_eq!(issues(json!({"new_tab": "yes"})).len(), 1);
+}
+
+/// `new_tab` needs design tabs, which only the desktop window has: where there is one design, it
+/// is refused rather than quietly replacing the design the caller meant to keep. Left out or
+/// false, the reply is what it always was, with no `document_id`.
+#[test]
+fn new_tab_is_refused_where_there_are_no_tabs() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 2, "width": 2, "height": 2})).unwrap();
+    let before = (s.document_id.clone(), s.doc.features.len());
+    let refused = s.execute("file.new", &json!({"name": "Sheet 2", "new_tab": true})).unwrap_err().to_string();
+    assert!(refused.contains("new_tab") && refused.contains("desktop window"), "{refused}");
+    assert_eq!((s.document_id.clone(), s.doc.features.len()), before, "a refused call changes nothing");
+    for p in [json!({"new_tab": false}), json!({"name": "Sheet 2", "new_tab": null}), json!({"name": "Sheet 2"})] {
+        let reply = s.execute("file.new", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert_eq!(reply, json!({"name": p["name"].as_str().unwrap_or("Untitled")}), "{p}");
+    }
 }
 
 /// `file.new` has no call the handler refuses, so strict has no error of today's to keep: every

@@ -1027,7 +1027,7 @@ pub fn triad(app: &SolveApp, d: &Dialog) -> Option<gizmo::Triad> {
         Some(at) => at,
         None => pivot(app, d)? + t,
     };
-    Some(gizmo::Triad { center, translate: true, rotate: *mode == FREE })
+    Some(gizmo::Triad::world(center, true, *mode == FREE))
 }
 
 /// Rotate's ring lies on the selected axis, level with the picked bodies' centre.
