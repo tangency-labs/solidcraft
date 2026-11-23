@@ -31,9 +31,9 @@ certified rounding bounds) and says so in its doc comment. Everything else is Ru
   (`FaceId`, `EdgeId`, `VertexId`, `LoopId`, `ShellId`, `BrepId`); no pointers, `Rc`,
   or `RefCell` graphs. Geometry is concrete `enum`s (`Curve`, `Surface`) over structs,
   not trait objects. Points/vectors are `math::Vec3` (`Point3` is an alias, as upstream).
-- **Kernel.** Tolerances, RNG and caches are fields of `kernel::Kernel` (upstream
-  `SmContext`). Take `&Kernel` (or `&mut Kernel` when using rng/caches); it must stay
-  `Send`.
+- **Kernel.** Tolerances, the random seed and caches are fields of `kernel::Kernel` (upstream
+  `SmContext`). Take `&Kernel` (or `&mut Kernel` when using caches); a call that draws random
+  numbers makes its own generator (`Kernel::seeded_rng`). It must stay `Send`.
 - **APIs.** Return values, not out-params (tuples or small structs for multiple
   outputs). Fallible fns return `solidcore::Result<T>`; build `SolidError` with the
   `operation` path (e.g. `"nurbs::knots::insert"`) and entity id. Many optional
@@ -64,7 +64,7 @@ Every ported file starts with:
 //! | [`KnotVector::insert`]  | `NL_KnotInsert`                  |
 //! | `find_span` (private)   | `nl_FindSpan`                    |
 //!
-//! Deviations: <anything not 1:1, e.g. out-param -> return value, rand() -> kernel.rng>.
+//! Deviations: <anything not 1:1, e.g. out-param -> return value, rand() -> Kernel::seeded_rng>.
 ```
 
 ## Figures
