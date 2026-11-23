@@ -120,12 +120,59 @@ const INTERSECT_GEOMETRY: Accept = EDGES | FACES | selection::SKETCH_LINES;
 const ALIGN_PICKS: Accept = FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN | selection::POINTS | CURVES;
 const HOLE_TYPES: [&str; 3] = ["simple", "counterbore", "countersink"];
 const HOLE_LABELS: [&str; 3] = ["Simple", "Counterbore", "Countersink"];
-/// Stretch's directions as its window lists them, in `StretchDirection::ALL`'s order.
-pub(crate) const STRETCH_DIRECTION_LABELS: [&str; 6] = ["+X", "-X", "+Y", "-Y", "+Z", "-Z"];
+/// Stretch's two ways along each axis, as its window lists them: `STRETCH_SIGNS[axis][sign]`.
+pub(crate) const STRETCH_SIGNS: [[&str; 2]; 3] = [["+X", "-X"], ["+Y", "-Y"], ["+Z", "-Z"]];
 
-/// The `direction` Stretch's window sends for its choice `i`.
-pub(crate) fn stretch_direction_key(i: usize) -> &'static str {
-    solidcraft_engine::doc::StretchDirection::ALL.get(i).copied().unwrap_or(solidcraft_engine::doc::StretchDirection::PlusX).key()
+/// The direction of Stretch's row `axis` (0 X, 1 Y, 2 Z) with sign `sign` (0 plus, 1 minus).
+pub(crate) fn stretch_direction(axis: usize, sign: usize) -> solidcraft_engine::doc::StretchDirection {
+    use solidcraft_engine::doc::StretchDirection as D;
+    D::ALL.get(axis.min(2) * 2 + sign.min(1)).copied().unwrap_or(D::PlusX)
+}
+
+/// The saved stretch along `axis`, if the step has one.
+fn stretch_along(stretches: &[solidcraft_engine::doc::AxisStretch], axis: usize) -> Option<&solidcraft_engine::doc::AxisStretch> {
+    stretches.iter().find(|s| s.direction.axis() == axis)
+}
+
+/// The window's row values for `axis` of a saved step: its sign, distance and cut.
+fn stretch_row(stretches: &[solidcraft_engine::doc::AxisStretch], axis: usize) -> (usize, String, String) {
+    match stretch_along(stretches, axis) {
+        Some(s) => (s.direction.key().starts_with('-').into(), shown_expr(&s.distance, ValueKind::Length), shown_expr(&s.at, ValueKind::Length)),
+        None => (0, String::new(), String::new()),
+    }
+}
+
+impl Kind {
+    /// Stretch's rows: per axis (0 X, 1 Y, 2 Z) its sign, distance and cut. Empty for any other
+    /// kind.
+    pub(crate) fn stretch_rows(&self) -> Vec<(usize, usize, &String, &String)> {
+        match self {
+            Kind::Stretch { sign_x, distance_x, at_x, sign_y, distance_y, at_y, sign_z, distance_z, at_z } => {
+                vec![(0, *sign_x, distance_x, at_x), (1, *sign_y, distance_y, at_y), (2, *sign_z, distance_z, at_z)]
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Stretch's row `axis`, to change: its sign, distance and cut.
+    pub(crate) fn stretch_row_mut(&mut self, axis: usize) -> Option<(&mut usize, &mut String, &mut String)> {
+        match (self, axis) {
+            (Kind::Stretch { sign_x, distance_x, at_x, .. }, 0) => Some((sign_x, distance_x, at_x)),
+            (Kind::Stretch { sign_y, distance_y, at_y, .. }, 1) => Some((sign_y, distance_y, at_y)),
+            (Kind::Stretch { sign_z, distance_z, at_z, .. }, 2) => Some((sign_z, distance_z, at_z)),
+            _ => None,
+        }
+    }
+}
+
+/// The axis (0 X, 1 Y, 2 Z) and sign a picked flat face looks along, from its outward normal,
+/// and a point on it: a face picked for Stretch sets that row's direction (#20512).
+pub(crate) fn stretch_face(app: &SolveApp, pick: &Sel) -> Option<(usize, usize, Vec3)> {
+    let Sel::Face { body, index, point } = pick else { return None };
+    let (_, n) = planar_face(&app.session, body, *index)?;
+    let c = [n.x, n.y, n.z];
+    let axis = (0..3).max_by(|a, b| c[*a].abs().total_cmp(&c[*b].abs()))?;
+    Some((axis, usize::from(c[axis] < 0.0), *point))
 }
 
 crate::dialog_descriptor::dialog_descriptors! {
@@ -163,19 +210,21 @@ crate::dialog_descriptor::dialog_descriptors! {
             factor_y: String = "2".into() => factors.as_ref().map_or_else(|| factor.to_string(), |f| f[1].to_string()),
             factor_z: String = "2".into() => factors.as_ref().map_or_else(|| factor.to_string(), |f| f[2].to_string()),
         } => if *per_axis { json!({"factors": [factor, factor_y, factor_z]}) } else { json!({"factor": factor}) };
-        // Stretch (#20512): the body, the way its moving side goes, an optional face the cut is
-        // measured from, the cut's distance from it (empty: the middle of the body's longest
-        // plain stretch, `stretch_cut`) and how far.
-        Stretch("solid.stretch", "STRETCH", [("Body", BODIES, false), ("Cut from face", PLANAR_FACES, false)],
-            FeatureKind::Stretch { direction, at, distance, .. }) {
-            direction: usize = 0 => solidcraft_engine::doc::StretchDirection::ALL.iter().position(|d| d == direction).unwrap_or(0),
-            distance: String = "10 mm".into() => shown_expr(distance, ValueKind::Length),
-            at: String = String::new() => shown_expr(at, ValueKind::Length),
-        } => if at.trim().is_empty() {
-            json!({"direction": stretch_direction_key(*direction), "distance": distance})
-        } else {
-            json!({"direction": stretch_direction_key(*direction), "distance": distance, "at": at})
-        };
+        // Stretch (#20512): the body, faces the cuts are measured from (each sets its axis's
+        // direction), and per axis X, Y, Z its sign, distance (empty: no stretch along it) and
+        // cut (empty: the middle of the body's longest plain stretch, `canvas::stretch_level`).
+        Stretch("solid.stretch", "STRETCH", [("Body", BODIES, false), ("Cut from faces", PLANAR_FACES, true)],
+            FeatureKind::Stretch { stretches, .. }) {
+            sign_x: usize = 0 => stretch_row(stretches, 0).0,
+            distance_x: String = "10 mm".into() => stretch_row(stretches, 0).1,
+            at_x: String = String::new() => stretch_row(stretches, 0).2,
+            sign_y: usize = 0 => stretch_row(stretches, 1).0,
+            distance_y: String = String::new() => stretch_row(stretches, 1).1,
+            at_y: String = String::new() => stretch_row(stretches, 1).2,
+            sign_z: usize = 0 => stretch_row(stretches, 2).0,
+            distance_z: String = String::new() => stretch_row(stretches, 2).1,
+            at_z: String = String::new() => stretch_row(stretches, 2).2,
+        } => json!({});
         OffsetFaces("solid.offset_face", "OFFSET FACE", [("Faces", FACES, true)],
             FeatureKind::OffsetFace { distance, .. }) {
             distance: String = "2 mm".into() => shown_expr(distance, ValueKind::Length),
@@ -1637,7 +1686,6 @@ impl Dialog {
             Kind::AnglePlane { angle, .. } => ("Angle", ValueKind::Angle, angle),
             Kind::Scale { per_axis: true, .. } => return None,
             Kind::Scale { factor, .. } => ("Scale", ValueKind::Unitless, factor),
-            Kind::Stretch { distance, .. } => ("Distance", ValueKind::Length, distance),
             Kind::OffsetFaces { distance } => ("Distance", ValueKind::Length, distance),
             Kind::Sheet(k) => return k.primary(&self.inputs),
             Kind::Surface(k) => return k.primary(),
@@ -6166,31 +6214,42 @@ fn exact_regions(d: &Dialog, cmds: &mut [(String, Value)]) {
 
 /// The commands the live preview runs: OK's, with a joint's motion while it animates, and a
 /// component Move/Copy moves by its placement drawn as its bodies moved.
-/// Stretch keeps its distance in a parameter (#20512): a plain length typed or dragged becomes
-/// a new parameter (`stretch1`, `stretch2`, …) that the step uses, and a step that already uses
-/// a parameter has that parameter changed instead. A formula is sent as it is. Returns the
-/// commands to run before the stretch; `cmds`' distance then names the parameter.
+/// Stretch keeps its distances in parameters (#20512): a plain length typed or dragged becomes a
+/// new parameter (`stretch1`, `stretch2`, …) that the step uses, and an axis of a step that
+/// already uses a parameter has that parameter changed instead. A formula is sent as it is.
+/// Returns the commands to run before the stretch; `cmds`' distances then name the parameters.
 fn stretch_parameter(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) -> Vec<(String, Value)> {
     let doc = &app.session.doc;
     let Some((_, params)) = cmds.iter_mut().find(|(cmd, _)| cmd == "solid.stretch") else { return Vec::new() };
-    let Some(distance) = params.get("distance").and_then(Value::as_str).map(str::trim).map(str::to_owned) else { return Vec::new() };
-    if doc.param(&distance).is_some() || !plain_length(&distance) {
-        return Vec::new();
-    }
-    // Editing a step whose distance is a parameter: that parameter takes the new value.
-    let kept = d.editing.and_then(|(id, _)| match &doc.feature(id)?.kind {
-        FeatureKind::Stretch { distance, .. } => doc.param(distance.as_str().trim()).map(|p| p.name.clone()),
-        _ => None,
-    });
-    let (command, name) = match kept {
-        Some(name) => ("parameters.change", name),
-        None => {
-            let name = (1..).map(|i| format!("stretch{i}")).find(|n| doc.param(n).is_none()).unwrap_or_else(|| "stretch".into());
-            ("parameters.add", name)
+    let saved: Vec<solidcraft_engine::doc::AxisStretch> = d
+        .editing
+        .and_then(|(id, _)| match &doc.feature(id)?.kind {
+            FeatureKind::Stretch { stretches, .. } => Some(stretches.clone()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    let mut taken: Vec<String> = Vec::new();
+    let mut before = Vec::new();
+    for one in params.get_mut("stretches").and_then(Value::as_array_mut).into_iter().flatten() {
+        let Some(distance) = one.get("distance").and_then(Value::as_str).map(str::trim).map(str::to_owned) else { continue };
+        if doc.param(&distance).is_some() || !plain_length(&distance) {
+            continue;
         }
-    };
-    params["distance"] = json!(name);
-    vec![(command.into(), json!({"name": name, "expression": distance}))]
+        let axis = one.get("direction").and_then(Value::as_str).and_then(solidcraft_engine::doc::StretchDirection::parse).map(|d| d.axis());
+        let kept = axis.and_then(|a| stretch_along(&saved, a)).and_then(|s| doc.param(s.distance.as_str().trim())).map(|p| p.name.clone());
+        let (command, name) = match kept {
+            Some(name) => ("parameters.change", name),
+            None => {
+                let name =
+                    (1..).map(|i| format!("stretch{i}")).find(|n| doc.param(n).is_none() && !taken.contains(n)).unwrap_or_else(|| "stretch".into());
+                ("parameters.add", name)
+            }
+        };
+        taken.push(name.clone());
+        one["distance"] = json!(name);
+        before.push((command.into(), json!({"name": name, "expression": distance})));
+    }
+    before
 }
 
 /// A number, alone or with a length unit after it (`12`, `-3.5 mm`, `2in`): no names, no sums.
@@ -6934,24 +6993,42 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "bodies")?;
             ("solid.scale", json!({"bodies": sels(d, 0).body_names()}))
         }
-        Kind::Stretch { direction, at, .. } => {
+        Kind::Stretch { .. } => {
             need(0, "the body to stretch")?;
             let name = match sels(d, 0).body_names().as_slice() {
                 [name] => name.clone(),
                 _ => return Err("pick one body to stretch".into()),
             };
-            let mut p = json!({"body": name});
-            match sels(d, 1).first() {
-                Some(Sel::Face { point, .. }) => p["from"] = pt3(*point),
-                // No face and no Cut At: the middle of the longest plain stretch, kept as a number.
-                _ if at.trim().is_empty() => {
-                    if let Some(cut) = crate::canvas::stretch_cut(app, &name, *direction) {
-                        p["at"] = json!(crate::canvas::format_len(&app.session.doc, cut));
-                    }
+            let faces: Vec<(usize, usize, Vec3)> = sels(d, 1).iter().filter_map(|pick| stretch_face(app, pick)).collect();
+            let mut stretches = Vec::new();
+            for (axis, sign, distance, at) in d.kind.stretch_rows() {
+                if distance.trim().is_empty() {
+                    continue;
                 }
-                _ => {}
+                let direction = stretch_direction(axis, sign);
+                let mut one = json!({"direction": direction.key(), "distance": distance});
+                let face = faces.iter().find(|(a, ..)| *a == axis).map(|(.., p)| *p);
+                if let Some(p) = face {
+                    one["from"] = pt3(p);
+                }
+                if !at.trim().is_empty() {
+                    one["at"] = json!(at);
+                } else if let Some(level) = crate::canvas::stretch_level(app, &name, direction) {
+                    // No Cut At: the middle of the longest plain stretch, kept as a number, from the
+                    // face when one is picked, else from the side that stays put.
+                    let n = direction.vector();
+                    let base = match face {
+                        Some(p) => p.dot(n),
+                        None => crate::canvas::stretch_fixed_level(app, &name, direction).unwrap_or(level),
+                    };
+                    one["at"] = json!(crate::canvas::format_len(&app.session.doc, level - base));
+                }
+                stretches.push(one);
             }
-            ("solid.stretch", p)
+            if stretches.is_empty() {
+                return Err("give a distance along at least one axis".into());
+            }
+            ("solid.stretch", json!({"body": name, "stretches": stretches}))
         }
         Kind::OffsetFaces { .. } => {
             need(0, "faces")?;
@@ -9131,14 +9208,15 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Stretch { body, from, .. } => {
+        FeatureKind::Stretch { body, stretches } => {
             let mut d = start("solid.stretch")?;
             d.kind = Kind::simple_restore(&f.kind)?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = vec![Sel::Body { name: body.to_string() }];
             }
-            if let (Some(from), Some(inp)) = (from, d.inputs.get_mut(1)) {
-                inp.items = body_face_sels(s, Some(body.0.as_str()), std::slice::from_ref(from));
+            let faces: Vec<_> = stretches.iter().filter_map(|s| s.from).collect();
+            if let Some(inp) = d.inputs.get_mut(1) {
+                inp.items = body_face_sels(s, Some(body.0.as_str()), &faces);
             }
             d
         }

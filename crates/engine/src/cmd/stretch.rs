@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 use solidcraft_doc::expr::Kind;
-use solidcraft_doc::{FeatureKind, StretchDirection};
+use solidcraft_doc::{AxisStretch, FeatureKind, StretchDirection};
 use solidcraft_geom::prelude::*;
 
 use super::{
@@ -26,7 +26,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("solid.stretch", "Stret
     .icon("move")
     .contract(&STRETCH_CONTRACT)
     .output(output_schema_for::<FeatureResult>)
-    .params("body?: solid name (default: the selected body); direction: +x|-x|+y|-y|+z|-z (the way the moving side goes, in the body's component; the opposite side stays put); from?: [x,y,z] (a point on a face the cut is measured from; default: the side that stays put); at?: length expr (the cut plane's distance along the direction from `from`, or from the side that stays put; default: half the body's size along the direction, or 0 past `from`); distance: length expr (positive stretches, negative shrinks by taking a slice out): the body is cut square to the direction and the part beyond moves, the gap filled with the body's own section, so holes, rounds and walls keep their size. Refused, naming the face, where the body is not the same shape all along the direction at the cut; a refused shrink says how far it can go. A Stretch feature in the body's component; name?")];
+    .params("body?: solid name (default: the selected body); stretches?: [{direction, from?, at?, distance}] (one to three, each along a different axis, applied in order; instead of the one stretch given by the fields below); direction: +x|-x|+y|-y|+z|-z (the way the moving side goes, in the body's component; the opposite side stays put); from?: [x,y,z] (a point on a face the cut is measured from; default: the side that stays put); at?: length expr (the cut plane's distance along the direction from `from`, or from the side that stays put; default: half the body's size along the direction, or 0 past `from`); distance: length expr (positive stretches, negative shrinks by taking a slice out): the body is cut square to the direction and the part beyond moves, the gap filled with the body's own section, so holes, rounds and walls keep their size. Refused, naming the face, where the body is not the same shape all along the direction at the cut; a refused shrink says how far it can go. A Stretch feature in the body's component; name?")];
 
 /// The body to stretch: `body`, else the one selected body.
 fn target(s: &Session, p: &Value, cmd: &str) -> Result<String> {
@@ -51,25 +51,41 @@ fn stretch(s: &mut Session, p: &Value) -> Result<Value> {
     if source.body.is_mesh() {
         return Err(bad(cmd, "Stretch takes a solid, not a mesh body: convert the mesh first"));
     }
-    let direction =
-        str_(p, "direction").and_then(StretchDirection::parse).ok_or_else(|| bad(cmd, "`direction` must be one of +x, -x, +y, -y, +z, -z"))?;
-    let distance = expr(p, "distance").ok_or_else(|| bad(cmd, "`distance` must be a length"))?;
-    check_expr(s, &distance, Kind::Length, cmd, "distance")?;
-    let from = match p.get("from").filter(|v| !v.is_null()) {
-        Some(v) => Some(vec3(v).filter(|p| p.is_finite()).ok_or_else(|| bad(cmd, "`from` must be a point [x, y, z] on a face"))?),
-        None => None,
+    // One stretch from the top-level fields, or up to three, one per axis, from `stretches`.
+    let given: Vec<&Value> = match p.get("stretches").filter(|v| !v.is_null()) {
+        Some(Value::Array(list)) => list.iter().collect(),
+        Some(_) => return Err(bad(cmd, "`stretches` must be a list")),
+        None => vec![p],
     };
-    let at = match expr(p, "at") {
-        Some(at) => at,
-        None if from.is_some() => "0 mm".into(),
-        None => {
-            let n = direction.vector();
-            let b = source.body.exact_bounds().map_err(|e| bad(cmd, e.to_string()))?;
-            let size = (b.max.dot(n) - b.min.dot(n)).abs();
-            format!("{} mm", (size / 2.0 * 1e6).round() / 1e6).into()
+    if given.is_empty() || given.len() > 3 {
+        return Err(bad(cmd, "Stretch takes one to three stretches, one per axis"));
+    }
+    let mut stretches: Vec<AxisStretch> = Vec::new();
+    for one in given {
+        let direction =
+            str_(one, "direction").and_then(StretchDirection::parse).ok_or_else(|| bad(cmd, "`direction` must be one of +x, -x, +y, -y, +z, -z"))?;
+        if stretches.iter().any(|s| s.direction.axis() == direction.axis()) {
+            return Err(bad(cmd, "each stretch goes along a different axis"));
         }
-    };
-    check_expr(s, &at, Kind::Length, cmd, "at")?;
+        let distance = expr(one, "distance").ok_or_else(|| bad(cmd, "`distance` must be a length"))?;
+        check_expr(s, &distance, Kind::Length, cmd, "distance")?;
+        let from = match one.get("from").filter(|v| !v.is_null()) {
+            Some(v) => Some(vec3(v).filter(|p| p.is_finite()).ok_or_else(|| bad(cmd, "`from` must be a point [x, y, z] on a face"))?),
+            None => None,
+        };
+        let at = match expr(one, "at") {
+            Some(at) => at,
+            None if from.is_some() => "0 mm".into(),
+            None => {
+                let n = direction.vector();
+                let b = source.body.exact_bounds().map_err(|e| bad(cmd, e.to_string()))?;
+                let size = (b.max.dot(n) - b.min.dot(n)).abs();
+                format!("{} mm", (size / 2.0 * 1e6).round() / 1e6).into()
+            }
+        };
+        check_expr(s, &at, Kind::Length, cmd, "at")?;
+        stretches.push(AxisStretch { direction, from: from.map(solidcraft_doc::FacePick), at, distance });
+    }
     let owner = s.doc.model_body_component(source);
     if !s.doc.component_within(owner, s.active_component) {
         let name = s.doc.components.iter().find(|c| c.id == owner).map(|c| c.name.as_str()).unwrap_or(s.doc.name.as_str());
@@ -78,7 +94,7 @@ fn stretch(s: &mut Session, p: &Value) -> Result<Value> {
     // The stretch edits the component definition, independent of its occurrence placement.
     let active_component = std::mem::replace(&mut s.active_component, owner);
     let active_occurrence_path = s.active_occurrence_path.take();
-    let result = add_feature(s, p, FeatureKind::Stretch { body: body.into(), direction, from: from.map(solidcraft_doc::FacePick), at, distance });
+    let result = add_feature(s, p, FeatureKind::Stretch { body: body.into(), stretches });
     s.active_component = active_component;
     s.active_occurrence_path = active_occurrence_path;
     result

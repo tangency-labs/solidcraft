@@ -137,11 +137,8 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         // A section's distance runs against the plane's normal, into the part from a face.
         Kind::Section { .. } => (at, normal.map(|n| -n)),
         Kind::OffsetPlane { .. } => (at, normal),
-        // Stretch's arrow stands on the side that moves, square to it (#20512).
-        Kind::Stretch { .. } => {
-            let frame = stretch_frame(app, d)?;
-            (frame.moving, Some(frame.n))
-        }
+        // Stretch draws its own arrows, one pair per axis it stretches along (#20512).
+        Kind::Stretch { .. } => (at, None),
         // Fillet radii and chamfer distances grow the way `blend_grow_dir` gives (into the body
         // on an outside edge, into the open corner on an inside one); shell thickness grows into
         // the body.
@@ -677,7 +674,6 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         | Kind::Section { .. }
         | Kind::OffsetPlane { .. }
         | Kind::OffsetFaces { .. }
-        | Kind::Stretch { .. }
         | Kind::PatternRect { .. } => true,
         Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. } | crate::sketch_modify_ui::Mod::PatternRect { .. }) => true,
         Kind::SketchModify(crate::sketch_modify_ui::Mod::Offset { mode, .. }) => !crate::sketch_modify_ui::offset_symmetric(*mode),
@@ -793,37 +789,81 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     {
         painter.extend(projected_polygon(&q, t.construction_plane, Stroke::new(1.2, t.origin_plane_edge)));
     }
-    // Stretch: the cut plane across the body, and an arrow from the side that stays put that
-    // moves it (#20512). An empty Cut At is the body's middle; dragging writes the distance.
-    if let Some(frame) = stretch_frame(app, d)
-        && let Kind::Stretch { at, .. } = &mut d.kind
-    {
-        let cut =
-            if at.trim().is_empty() { frame.auto } else { crate::length_input::eval(&app.session.doc, at, ValueKind::Length).unwrap_or(frame.auto) };
-        if let Some(q) = offset_plane_quad(proj, frame.from + frame.n * cut, frame.n, frame.width) {
-            painter.extend(projected_polygon(&q, t.construction_plane, Stroke::new(1.2, t.origin_plane_edge)));
+    // Stretch: per axis it stretches along, an arrow on the side that moves for the distance,
+    // the cut plane across the body, and an arrow from where the cut is measured that moves it
+    // (#20512). A face picked for the cut sets its axis's direction and switches that axis on.
+    if matches!(d.kind, Kind::Stretch { .. }) {
+        let faces: Vec<(usize, usize, Vec3)> =
+            d.inputs.get(1).map(|i| i.items.iter().filter_map(|pick| crate::dialogs::stretch_face(app, pick)).collect()).unwrap_or_default();
+        for (axis, sign, _) in &faces {
+            if let Some((s, distance, _)) = d.kind.stretch_row_mut(*axis) {
+                *s = *sign;
+                if distance.trim().is_empty() {
+                    *distance = crate::length_input::model(&app.session.doc, 10.0);
+                }
+            }
         }
-        if let Some(fs) = proj.to_screen(frame.from) {
-            let mut shown = if at.trim().is_empty() { format_len(&app.session.doc, cut) } else { at.clone() };
-            let before = shown.clone();
-            drag_arrow(
-                &app.session.doc,
-                ui,
-                painter,
-                proj,
-                frame.from,
-                fs,
-                frame.n,
-                cut,
-                true,
-                egui::Id::unique("sc_manipulator2"),
-                half_height,
-                0.0,
-                decimals,
-                &mut shown,
-            );
-            if shown != before {
-                *at = shown;
+        let body = match d.inputs.first().and_then(|i| i.items.first()) {
+            Some(Sel::Body { name }) => Some(name.clone()),
+            _ => None,
+        };
+        for axis in 0..3 {
+            let Some(body) = body.as_deref() else { break };
+            let face = faces.iter().find(|(a, ..)| *a == axis).map(|(.., p)| *p);
+            let Some((sign, distance, at)) = d.kind.stretch_row_mut(axis) else { continue };
+            if distance.trim().is_empty() {
+                continue;
+            }
+            let direction = crate::dialogs::stretch_direction(axis, *sign);
+            let Some(frame) = stretch_frame(app, body, direction, face) else { continue };
+            let cut = if at.trim().is_empty() {
+                frame.auto
+            } else {
+                crate::length_input::eval(&app.session.doc, at, ValueKind::Length).unwrap_or(frame.auto)
+            };
+            if let Some(q) = offset_plane_quad(proj, frame.from + frame.n * cut, frame.n, frame.width) {
+                painter.extend(projected_polygon(&q, t.construction_plane, Stroke::new(1.2, t.origin_plane_edge)));
+            }
+            if let Some(fs) = proj.to_screen(frame.from) {
+                let mut shown = if at.trim().is_empty() { format_len(&app.session.doc, cut) } else { at.clone() };
+                let before = shown.clone();
+                drag_arrow(
+                    &app.session.doc,
+                    ui,
+                    painter,
+                    proj,
+                    frame.from,
+                    fs,
+                    frame.n,
+                    cut,
+                    true,
+                    egui::Id::unique(("sc_stretch_cut", axis)),
+                    half_height,
+                    0.0,
+                    decimals,
+                    &mut shown,
+                );
+                if shown != before {
+                    *at = shown;
+                }
+            }
+            if let (Some(ms), Ok(l)) = (proj.to_screen(frame.moving), crate::length_input::eval(&app.session.doc, distance, ValueKind::Length)) {
+                drag_arrow(
+                    &app.session.doc,
+                    ui,
+                    painter,
+                    proj,
+                    frame.moving,
+                    ms,
+                    frame.n,
+                    l,
+                    true,
+                    egui::Id::unique(("sc_stretch_distance", axis)),
+                    half_height,
+                    0.0,
+                    decimals,
+                    distance,
+                );
             }
         }
     }
@@ -2361,53 +2401,54 @@ pub(crate) fn projected_rotation_angle(
     }
     Some((a + b) / 2.0)
 }
-/// Where Stretch's handles stand on its picked body (#20512): the middle of the side that moves,
-/// the unit direction the moving side goes, half the body's widest size across (for the cut
-/// plane's square), and where the cut is measured from (the picked face's point, else the side that stays put). From the shown
-/// body's box: these place handles; the stretch itself is decided on the exact body.
+/// Where one axis of Stretch's handles stand on its body (#20512): the middle of the side that
+/// moves, the unit direction it goes, half the body's widest size across (for the cut plane's
+/// square), where the cut is measured from (the picked face's point, else the side that stays
+/// put) and the distance from there to the cut when Cut At is empty. From the shown body's box:
+/// these place handles; the stretch itself is decided on the exact body.
 struct StretchFrame {
     moving: Vec3,
     n: Vec3,
     width: f64,
-    /// Where Cut At is measured from, and the distance to the cut when Cut At is empty.
     from: Vec3,
     auto: f64,
 }
 
-fn stretch_frame(app: &SolveApp, d: &Dialog) -> Option<StretchFrame> {
-    let Kind::Stretch { direction, .. } = &d.kind else { return None };
-    let Some(Sel::Body { name }) = d.inputs.first()?.items.first() else { return None };
+fn stretch_frame(app: &SolveApp, body: &str, direction: solidcraft_engine::doc::StretchDirection, face: Option<Vec3>) -> Option<StretchFrame> {
     let st = app.session.model.state();
-    let b = st.body(name)?.mesh().bounds();
-    let n = solidcraft_engine::doc::StretchDirection::ALL.get(*direction)?.vector();
+    let b = st.body(body)?.mesh().bounds();
+    let n = direction.vector();
     let c = b.center();
     let lo = b.min.dot(n).min(b.max.dot(n));
     let hi = b.min.dot(n).max(b.max.dot(n));
-    let length = hi - lo;
-    if !(length > 0.0) {
+    if !(hi - lo > 0.0) {
         return None;
     }
     let centre_level = c.dot(n);
     let size = b.max - b.min;
     let width = (size.x.abs().max(size.y.abs()).max(size.z.abs())) * 0.6;
-    let fixed = c + n * (lo - centre_level);
-    let face = d.inputs.get(1).and_then(|i| i.items.first()).and_then(|x| if let Sel::Face { point, .. } = x { Some(*point) } else { None });
-    let (from, auto) = match face {
-        Some(p) => (fixed + n * (p.dot(n) - lo), 0.0),
-        None => (fixed, stretch_cut(app, name, *direction).unwrap_or(length / 2.0)),
-    };
-    Some(StretchFrame { moving: c + n * (hi - centre_level), n, width, from, auto })
+    let base = face.map_or(lo, |p| p.dot(n));
+    let level = stretch_level(app, body, direction).unwrap_or((lo + hi) / 2.0);
+    Some(StretchFrame { moving: c + n * (hi - centre_level), n, width, from: c + n * (base - centre_level), auto: level - base })
 }
 
-/// Where Stretch cuts `body` along `direction` when nothing says where (#20512): the middle of
-/// the longest stretch where every face crossing it runs along the direction (flat walls and
-/// round walls along it), as a distance from the side that stays put. From the shown mesh: a
-/// proposal the user sees and can move; the stretch checks the exact body at the cut it gets.
-/// `None` when the body has no such stretch.
-pub(crate) fn stretch_cut(app: &SolveApp, body: &str, direction: usize) -> Option<f64> {
+/// The level along `direction` of the side of `body` that stays put (its least level), from the
+/// shown body's box.
+pub(crate) fn stretch_fixed_level(app: &SolveApp, body: &str, direction: solidcraft_engine::doc::StretchDirection) -> Option<f64> {
+    let b = app.session.model.state().body(body)?.mesh().bounds();
+    let n = direction.vector();
+    Some(b.min.dot(n).min(b.max.dot(n)))
+}
+
+/// Where Stretch cuts `body` along `direction` when nothing says where (#20512): the level of
+/// the middle of the longest stretch where every face crossing it runs along the direction (flat
+/// walls and round walls along it). From the shown mesh: a proposal the user sees and can move;
+/// the stretch checks the exact body at the cut it gets. `None` when the body has no such
+/// stretch.
+pub(crate) fn stretch_level(app: &SolveApp, body: &str, direction: solidcraft_engine::doc::StretchDirection) -> Option<f64> {
     let st = app.session.model.state();
     let m = st.body(body)?.mesh();
-    let n = solidcraft_engine::doc::StretchDirection::ALL.get(direction)?.vector();
+    let n = direction.vector();
     let b = m.bounds();
     let lo = b.min.dot(n).min(b.max.dot(n));
     let hi = b.min.dot(n).max(b.max.dot(n));
@@ -2432,7 +2473,7 @@ pub(crate) fn stretch_cut(app: &SolveApp, body: &str, direction: usize) -> Optio
         reached = reached.max(b);
     }
     let (a, b) = best.filter(|(a, b)| b - a > (hi - lo) * 1e-3)?;
-    Some((a + b) / 2.0 - lo)
+    Some((a + b) / 2.0)
 }
 
 fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32) {

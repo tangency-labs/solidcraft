@@ -103,3 +103,26 @@ fn a_cut_measured_from_a_picked_face_follows_that_face() {
     run(&mut other, "solid.stretch", json!({"body": "Block", "direction": "+x", "at": 15, "distance": 10}));
     assert!((size(&other).2 - volume).abs() < 1e-6);
 }
+
+#[test]
+fn one_step_stretches_along_two_axes_and_refuses_two_along_one() {
+    let mut s = block();
+    run(
+        &mut s,
+        "solid.stretch",
+        json!({"body": "Block", "stretches": [{"direction": "+x", "distance": 15}, {"direction": "-y", "at": 10, "distance": 5}]}),
+    );
+    let (min, max, volume) = size(&s);
+    assert!(min.dist(Vec3::new(0.0, -5.0, 0.0)) < 1e-6 && max.dist(Vec3::new(55.0, 30.0, 20.0)) < 1e-6, "{min:?} {max:?}");
+    assert!((volume - 55.0 * 35.0 * 20.0).abs() < 1e-6, "{volume}");
+    assert_eq!(s.doc.features.iter().filter(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Stretch { .. })).count(), 1);
+    let before = s.doc.to_json();
+    for p in [
+        json!({"body": "Block", "stretches": [{"direction": "+x", "distance": 5}, {"direction": "-x", "distance": 5}]}),
+        json!({"body": "Block", "stretches": []}),
+        json!({"body": "Block", "stretches": "x"}),
+    ] {
+        assert!(s.execute("solid.stretch", &p).is_err(), "{p}");
+        assert_eq!(s.doc.to_json(), before, "{p}");
+    }
+}

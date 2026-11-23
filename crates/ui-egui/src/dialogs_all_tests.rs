@@ -631,6 +631,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         | "Bend Line Position" | "From Snap" | "To Snap" | "Joint" | "Joint 1" | "Joint 2" | "Gear 1" | "Gear 2" | "Pinion" | "Rack" | "Screw"
         | "Nut" | "Cam" | "Follower" | "Anchor" => Role::ComboBox,
         "Inset By" => Role::ComboBox,
+        "X direction" | "Y direction" | "Z direction" if command == "solid.stretch" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
@@ -804,7 +805,11 @@ form_case!(angle_plane, "construct.plane.at_angle", ["Angle"]);
 form_case!(path_plane, "construct.plane.along_path", ["Position (0 to 1)"]);
 form_case!(split, "solid.split_body", []);
 form_case!(scale, "solid.scale", ["Type", "Scale factor"]);
-form_case!(stretch, "solid.stretch", ["Direction", "Distance", "Cut at"]);
+form_case!(
+    stretch,
+    "solid.stretch",
+    ["X direction", "X distance", "X cut at", "Y direction", "Y distance", "Y cut at", "Z direction", "Z distance", "Z cut at"]
+);
 
 /// Scale per axis (#10782): the dialog's X, Y and Z rows build `factors`; a Scale made with
 /// `factors` opens per axis with its three values and keeps them on OK, and switching it back to

@@ -260,7 +260,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ("repair", json!({"type": "repair", "body": "B", "gap": "repair.gap", "patch_holes": true})),
         (
             "stretch",
-            json!({"type": "stretch", "body": "B", "direction": "plus_x", "from": [1.0, 2.0, 3.0], "at": "stretch.at", "distance": "stretch.distance"}),
+            json!({"type": "stretch", "body": "B", "stretches": [
+                {"direction": "plus_x", "from": [1.0, 2.0, 3.0], "at": "stretch.x_at", "distance": "stretch.x_distance"},
+                {"direction": "minus_y", "at": "stretch.y_at", "distance": "stretch.y_distance"},
+            ]}),
         ),
     ]
 }

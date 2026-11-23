@@ -1132,10 +1132,18 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 enter |= expr_row_positive(ui, "Scale factor", factor);
             }
         }
-        Kind::Stretch { direction, distance, at } => {
-            choice_row(ui, "Direction", "stretch_direction", direction, &crate::dialogs::STRETCH_DIRECTION_LABELS);
-            enter |= expr_row(ui, "Distance", distance);
-            enter |= hint_row(ui, "Cut at", at, "auto");
+        Kind::Stretch { .. } => {
+            for (axis, (direction, distance, cut)) in
+                [("X direction", "X distance", "X cut at"), ("Y direction", "Y distance", "Y cut at"), ("Z direction", "Z distance", "Z cut at")]
+                    .into_iter()
+                    .enumerate()
+            {
+                let Some((sign, length, at)) = d.kind.stretch_row_mut(axis) else { continue };
+                let signs = crate::dialogs::STRETCH_SIGNS.get(axis).copied().unwrap_or(["+", "-"]);
+                choice_row(ui, direction, direction, sign, &signs);
+                enter |= hint_row(ui, distance, length, "none");
+                enter |= hint_row(ui, cut, at, "auto");
+            }
         }
         Kind::OffsetFaces { distance } => {
             enter |= expr_row(ui, "Distance", distance);

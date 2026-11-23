@@ -3,39 +3,69 @@
     "cmd.solid_stretch": "Stretch",
     "ui.feature_kind.stretch": "Stretch",
     "help.solid.stretch": "Makes a body longer, wider or taller by cutting it across and filling the gap with its own shape, so holes, rounds and walls keep their size. Use it to resize a part without going back to its sketches.",
-    "Cut from face": "Cut from face",
-    "Cut at": "Cut at"
+    "Cut from faces": "Cut from faces",
+    "X direction": "X direction",
+    "Y direction": "Y direction",
+    "Z direction": "Z direction",
+    "X cut at": "X cut at",
+    "Y cut at": "Y cut at",
+    "Z cut at": "Z cut at"
   },
   "ja": {
-    "Cut from face": "切断の基準面",
-    "Cut at": "切断位置",
     "cmd.solid_stretch": "ストレッチ",
     "ui.feature_kind.stretch": "ストレッチ",
-    "help.solid.stretch": "ボディを横切って切断し、その隙間をボディ自身の形状で埋めることで、ボディを長く、広く、または高くします。穴、丸み、壁の寸法は変わりません。スケッチに戻らずに部品のサイズを変えるときに使います。"
+    "help.solid.stretch": "ボディを横切って切断し、その隙間をボディ自身の形状で埋めることで、ボディを長く、広く、または高くします。穴、丸み、壁の寸法は変わりません。スケッチに戻らずに部品のサイズを変えるときに使います。",
+    "Cut from faces": "切断の基準面",
+    "X direction": "X 方向",
+    "Y direction": "Y 方向",
+    "Z direction": "Z 方向",
+    "X cut at": "X 切断位置",
+    "Y cut at": "Y 切断位置",
+    "Z cut at": "Z 切断位置"
   },
   "de": {
-    "Cut from face": "Schnitt ab Fläche",
-    "Cut at": "Schnitt bei",
     "cmd.solid_stretch": "Strecken",
-    "ui.feature_kind.stretch": "Strecken"
+    "ui.feature_kind.stretch": "Strecken",
+    "Cut from faces": "Schnitt ab Flächen",
+    "X direction": "X-Richtung",
+    "Y direction": "Y-Richtung",
+    "Z direction": "Z-Richtung",
+    "X cut at": "X-Schnitt bei",
+    "Y cut at": "Y-Schnitt bei",
+    "Z cut at": "Z-Schnitt bei"
   },
   "fr": {
-    "Cut from face": "Coupe depuis la face",
-    "Cut at": "Coupe à",
     "cmd.solid_stretch": "Étirer",
-    "ui.feature_kind.stretch": "Étirer"
+    "ui.feature_kind.stretch": "Étirer",
+    "Cut from faces": "Coupe depuis les faces",
+    "X direction": "Direction X",
+    "Y direction": "Direction Y",
+    "Z direction": "Direction Z",
+    "X cut at": "Coupe X à",
+    "Y cut at": "Coupe Y à",
+    "Z cut at": "Coupe Z à"
   },
   "es": {
-    "Cut from face": "Cortar desde la cara",
-    "Cut at": "Cortar a",
     "cmd.solid_stretch": "Estirar",
-    "ui.feature_kind.stretch": "Estirar"
+    "ui.feature_kind.stretch": "Estirar",
+    "Cut from faces": "Cortar desde las caras",
+    "X direction": "Dirección X",
+    "Y direction": "Dirección Y",
+    "Z direction": "Dirección Z",
+    "X cut at": "Corte X a",
+    "Y cut at": "Corte Y a",
+    "Z cut at": "Corte Z a"
   },
   "zh": {
-    "Cut from face": "从面切割",
-    "Cut at": "切割位置",
     "cmd.solid_stretch": "伸长",
     "ui.feature_kind.stretch": "伸长",
-    "help.solid.stretch": "将实体横向切开，并用实体自身的形状填补间隙，使其变长、变宽或变高，孔、圆角和壁的尺寸保持不变。用于在不返回草图的情况下调整零件尺寸。"
+    "help.solid.stretch": "将实体横向切开，并用实体自身的形状填补间隙，使其变长、变宽或变高，孔、圆角和壁的尺寸保持不变。用于在不返回草图的情况下调整零件尺寸。",
+    "Cut from faces": "从面切割",
+    "X direction": "X 方向",
+    "Y direction": "Y 方向",
+    "Z direction": "Z 方向",
+    "X cut at": "X 切割位置",
+    "Y cut at": "Y 切割位置",
+    "Z cut at": "Z 切割位置"
   }
 }

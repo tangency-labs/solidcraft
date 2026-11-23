@@ -466,6 +466,8 @@ repair
   expressions: repair.gap
 stretch
   inputs:
-    Cut at = stretch.at (Length)
-    Distance = stretch.distance (Length)
-  expressions: stretch.at, stretch.distance
+    Cut at = stretch.x_at (Length)
+    Distance = stretch.x_distance (Length)
+    Cut at = stretch.y_at (Length)
+    Distance = stretch.y_distance (Length)
+  expressions: stretch.x_at, stretch.x_distance, stretch.y_at, stretch.y_distance
