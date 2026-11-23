@@ -444,7 +444,10 @@ impl<'a> ExactSketchCurves<'a> {
         let reversed = generated.reversed();
         let mut found: Option<Option<&str>> = None;
         for (id, originals) in &self.free_form {
-            if originals.iter().any(|original| *original == *generated || *original == reversed || cubic_part(original, generated)) {
+            if originals
+                .iter()
+                .any(|original| *original == *generated || *original == reversed || solidcore_ops::prism::cubic_contains(original, generated))
+            {
                 found = Some(if found.is_some() { None } else { Some(*id) });
             }
         }
@@ -631,30 +634,6 @@ impl ExactSketchCurves<'_> {
         }
         roles
     }
-}
-
-/// A crossing can trim a cubic sketch span. The endpoints locate a candidate interval and
-/// its four Bézier controls certify the whole subcurve, including its direction.
-fn cubic_part(original: &Seg2, generated: &Seg2) -> bool {
-    let (Seg2::Cubic { p0, p1, p2, p3 }, Seg2::Cubic { p0: a, p1: b, p2: c, p3: d }) = (*original, *generated) else {
-        return false;
-    };
-    let hull: solidcraft_geom::Aabb2 = [p0, p1, p2, p3].into_iter().collect();
-    let tol = (128.0 * f64::EPSILON * hull.min.len().max(hull.max.len()).max(1.0)).min(1e-9);
-    let bounds = hull.inflated(tol);
-    if !bounds.contains(a) || !bounds.contains(d) {
-        return false;
-    }
-    let t0 = original.closest_param(a);
-    let t1 = original.closest_param(d);
-    let u = original.point_at(t0);
-    let v = original.point_at(t1);
-    let dt = (t1 - t0) / 3.0;
-    t0 != t1
-        && u.dist(a) <= tol
-        && v.dist(d) <= tol
-        && (u + original.derivative(t0) * dt).dist(b) <= tol
-        && (v - original.derivative(t1) * dt).dist(c) <= tol
 }
 
 fn exact_segment_contains(original: &Seg2, generated: &Seg2) -> bool {
