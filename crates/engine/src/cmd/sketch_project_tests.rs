@@ -3297,6 +3297,7 @@ fn a_picked_panels_named_edges_survive_parameter_moves_freeze_and_repair() {
     check(&s, 85., 1020., a2);
     // Repair onto the other copy while both still exist. The new reading must retain names
     // in the old curves' resulting order, so a subsequent parameter move keeps the corner.
+    run(&mut s, "sketch.edit", json!({"sketch":sketch}));
     let repaired = run(&mut s, "sketch.repair_link", json!({"link":link,"ref":{"body":"Panel","face":[65,149,118],"path":[a1]}}));
     assert_eq!(repaired["rebuilt"], false);
     check(&s, 85., 50., a1);

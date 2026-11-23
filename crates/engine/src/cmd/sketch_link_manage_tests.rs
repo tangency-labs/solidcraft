@@ -216,6 +216,7 @@ fn hiding_a_link_changes_only_what_is_shown() {
     // It still follows its source while hidden.
     run(&mut s, "occurrence.move", json!({"occurrence":a2,"translate":[0,2,0]}));
     assert!((hole_centre(&s, sketch, &face) - Vec2::new(120.0, 22.0)).len() < 1e-6);
+    run(&mut s, "sketch.edit", json!({"sketch":sketch}));
     run(&mut s, "sketch.link_visibility", json!({"link":face,"visible":true}));
     let st = s.model.state();
     let sk = &st.sketch(sketch).unwrap().sketch;

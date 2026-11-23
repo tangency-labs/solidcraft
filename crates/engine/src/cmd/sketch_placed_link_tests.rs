@@ -205,13 +205,13 @@ fn second_receiver_placement_is_kept_through_reopen() {
 fn lost_placement_keeps_last_geometry_and_never_switches_copies() {
     let (mut s, _, a1, a2, _, _, sketch) = assembly();
     let link = project_second(&mut s, a2, sketch);
+    run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "occurrence.move", json!({"occurrence":a2,"translate":[0,20,0]}));
     run(&mut s, "sketch.update_references", json!({}));
     let kept = line(&s, sketch, &link);
     assert!(same_line(kept, Vec2::new(50.0, 20.0), Vec2::new(60.0, 20.0)));
     // A:1 sits exactly where A:2 was first picked; A:2 is deleted.
     run(&mut s, "occurrence.move", json!({"occurrence":a1,"translate":[50,20,0]}));
-    run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "selection.delete", json!({"items":[{"type":"occurrence","path":[a2]}]}));
     let st = s.model.state();
     let sk = &st.sketch(sketch).unwrap().sketch;
@@ -349,6 +349,7 @@ fn an_included_edge_of_the_picked_copy_follows_moves_edits_and_reopens_lost() {
     run(&mut s, "parameters.change", json!({"name":"w","expression":"20 mm"}));
     check(&s, 90., false);
     // A real edit refreshes stored links, and must retain the exact wire and its identity.
+    run(&mut s, "sketch.edit", json!({"sketch":sketch}));
     run(&mut s, "sketch.line", json!({"points":[[0,0],[1,0]]}));
     check(&s, 90., false);
     let stored = s.doc.sketch(sketch).unwrap();
@@ -402,6 +403,7 @@ fn the_picked_copys_silhouette_follows_moves_edits_and_reopens_lost() {
     check(&s, 70., 10., false);
     run(&mut s, "parameters.change", json!({"name":"w","expression":"20 mm"}));
     check(&s, 70., 20., false);
+    run(&mut s, "sketch.edit", json!({"sketch":sketch}));
     run(&mut s, "sketch.line", json!({"points":[[0,0],[1,0]]}));
     check(&s, 70., 20., false);
     let geometry = |s: &Session| {
