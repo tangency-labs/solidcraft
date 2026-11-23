@@ -3140,11 +3140,21 @@ impl<'target> FilletSession<'target> {
     /// corner's place, with its fill asked as [`Self::set_set_back_fill`] asks one; elsewhere
     /// (a corner `classify_setback` does not take, no setback set) it stays the N x N corner.
     ///
+    /// Likewise a corner that is the Setback already (rounds of unequal radii, or
+    /// curvature-continuous sections, which [`Self::create_corners`] classifies without being
+    /// asked), marked or not, with a setback set on it: that setback, with its ease, is asked
+    /// as its vertex's fill, so the corner builds it (or refuses it, naming one that builds:
+    /// `make_setback_topology`) instead of the rule's setbacks, which read no setback set on
+    /// the made corner (#16408). It is classified again with the fill asked, as the fill's
+    /// order follows the ease. The one Setback that cannot take the ask is one beside a curved
+    /// face asked an ease (its fill is G1 only, `classify_setback`): that corner is returned,
+    /// for the session to refuse rather than build the rule's setbacks without the ask.
+    ///
     /// # Errors
     /// Those of the classification.
-    pub(super) fn set_back_marked_corners(&mut self, k: &Kernel) -> Result<()> {
+    pub(super) fn set_back_marked_corners(&mut self, k: &Kernel) -> Result<Option<VertexId>> {
         use crate::blend::blend_corner::setback::{
-            classify_setback, set_back_fill_of, setback_corner_of, SetBackFill,
+            classify_setback, set_back_fill_of, setback_corner_of, SetBackFill, SetbackCorner,
         };
         let SessionObjects {
             target,
@@ -3163,12 +3173,17 @@ impl<'target> FilletSession<'target> {
                 continue;
             };
             let setback = corner.set_back_dist;
-            if !matches!(
+            // the Setback already (#16408), or an N x N corner a mark keeps from the Ball
+            let is_setback = corner
+                .blend
+                .is_some_and(crate::blend::blend_corner::BlendCorner::is_setback);
+            let marked_nxn = matches!(
                 corner.kind,
                 FilletCornerKind::ConvexNByN | FilletCornerKind::ConcaveNByN
-            ) || corner.blend.is_some()
+            ) && corner.blend.is_none()
+                && set_back_vertices.contains(&vertex);
+            if !(is_setback || marked_nxn)
                 || corner.chamfer
-                || !set_back_vertices.contains(&vertex)
                 || setback.is_nan()
                 || setback <= 0.0
                 || set_back_fill_of(set_back_fills, vertex).is_some()
@@ -3197,12 +3212,21 @@ impl<'target> FilletSession<'target> {
                 crate::math::rad_to_deg(corner.tangency_tol_radians),
                 &asked,
             )?;
-            if class.event == crate::blend::blend_corner::BlendCornerEvent::Setback {
-                *corner = setback_corner_of(corner, class.order);
-                set_back_fills.push(fill);
+            if class.event != crate::blend::blend_corner::BlendCornerEvent::Setback {
+                if is_setback {
+                    return Ok(Some(vertex));
+                }
+                continue;
             }
+            if is_setback {
+                // its fill's order with the ease asked (2 with one, as created without it)
+                corner.setback = Some(SetbackCorner::with_order(class.order));
+            } else {
+                *corner = setback_corner_of(corner, class.order);
+            }
+            set_back_fills.push(fill);
         }
-        Ok(())
+        Ok(None)
     }
 
     /// The fork's `GetFitSetBack` (smlib#104 f1d81f4): with a setback corner refused as too
@@ -3345,7 +3369,9 @@ impl<'target> FilletSession<'target> {
     /// `SmFilletCorner::SetSetBackDist` on one live corner. A setback (`distance > 0`) set on
     /// a corner that builds none (neither the blend corner's Setback nor an N x N corner,
     /// `blend_corner::setback::builds_setback`) is refused by [`Self::do_filleting`]
-    /// (`CornerUnsupported`) rather than built without it.
+    /// (`CornerUnsupported`) rather than built without it. On a corner that is the Setback
+    /// already it is the corner's asked setback, as one asked with [`Self::set_set_back_fill`]
+    /// is (`set_back_marked_corners`).
     ///
     /// # Errors
     /// An unresolved corner identity.
