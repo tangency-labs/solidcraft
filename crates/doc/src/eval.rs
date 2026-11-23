@@ -6107,8 +6107,9 @@ fn apply_traced_with(
                     && into.is_none()
                     && !reach.is_empty()
                     && !target.body.is_mesh()
-                    && !more::tools_inside(target, reach)
+                    // The box of the vertices first: it needs no mesh of the body.
                     && !more::tools_meet_vertices(target, reach)
+                    && !more::tools_inside(target, reach)
                     && let Some(tb) = more::exact_box(&target.body)
                     && reach.iter().all(|tool| more::boxes_apart(&Some(tb), tool))
                 {
@@ -6242,12 +6243,18 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
     let mut joined = Vec::new();
     for tool in &tools {
         let mut met: Vec<String> = Vec::new();
-        for name in &live {
+        // Which bodies the tool meets picks the one it joins and those joined with it. A single
+        // body takes the tool whether it meets it or not, so it is not asked: the test meshes
+        // the body finely, and that took longer than the join itself on a part of a few hundred
+        // faces.
+        for name in live.iter().filter(|_| live.len() > 1) {
             let Some(mb) = state.body(name) else { continue };
             let sheet = state.surface_sheets.iter().any(|s| &s.body == name);
             if mb.body.is_mesh() || (!met.is_empty() && sheet) {
                 continue;
             }
+            #[cfg(test)]
+            cost_tests::count(|c| c.contact_tests += 1);
             // Each body is met where it is shown: the tool goes into its frame (#3383).
             if mb.body.meets(&tool_in(tool, tool_frame(name))?.body)? {
                 met.push(name.clone());
