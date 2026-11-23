@@ -161,6 +161,7 @@ fn button(id: &'static str, enabled: bool) -> Button<'static> {
         name: id,
         icon: "box",
         size: ButtonSize { width: BUTTON_MAX_WIDTH, min_width: BUTTON_MIN_WIDTH },
+        planned: false,
         enabled,
         pressed: false,
         exit: false,
@@ -318,11 +319,16 @@ const TAB_HANDLES: TabHandles<'static> = TabHandles { tab: "t:tab:", tab_rect: "
 struct TabsRig {
     ctx: egui::Context,
     time: std::cell::Cell<f64>,
+    width: f32,
 }
 
 impl TabsRig {
     fn new() -> TabsRig {
-        let rig = TabsRig { ctx: crate::test_support::context(), time: std::cell::Cell::new(0.0) };
+        TabsRig::with_width(900.0)
+    }
+
+    fn with_width(width: f32) -> TabsRig {
+        let rig = TabsRig { ctx: crate::test_support::context(), time: std::cell::Cell::new(0.0), width };
         rig.frame(Vec::new());
         rig
     }
@@ -356,7 +362,7 @@ impl TabsRig {
         };
         let mut actions = Vec::new();
         crate::test_support::raw_frame(&self.ctx, input, |ui| {
-            actions = tabs(ui, &row, Rect::from_min_size(egui::Pos2::ZERO, vec2(900.0, TAB_ROW_HEIGHT))).actions;
+            actions = tabs(ui, &row, Rect::from_min_size(egui::Pos2::ZERO, vec2(self.width, TAB_ROW_HEIGHT))).actions;
         });
         actions
     }
@@ -392,6 +398,30 @@ fn the_tab_row_returns_what_was_clicked() {
     assert_eq!(rig.click("t:add"), vec![TabAction::Add { rect: add }]);
     assert_eq!(rig.click("t:action:go"), vec![TabAction::Run { id: "go".into() }]);
     assert_eq!(rig.click("t:action:stop"), Vec::new(), "a button that is not ready runs nothing");
+}
+
+/// #17417: when the tabs do not fit the row, a plain mouse wheel over them scrolls them sideways,
+/// as it does the History bar's strip.
+#[test]
+fn the_mouse_wheel_scrolls_tabs_that_do_not_fit_the_row() {
+    // Only the first tab fits the room the row leaves beside the search field and the buttons.
+    let rig = TabsRig::with_width(300.0);
+    let over = solidcraft_ui_registry::rect_of("t:tab_rect:ONE").expect("the first tab is drawn").center();
+    assert!(solidcraft_ui_registry::rect_of("t:tab_rect:EDIT").is_none(), "the last tab is out of view");
+    for _ in 0..10 {
+        let wheel = egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -60.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        };
+        rig.frame(vec![egui::Event::PointerMoved(over), wheel]);
+    }
+    for _ in 0..30 {
+        rig.frame(Vec::new());
+    }
+    assert!(solidcraft_ui_registry::rect_of("t:tab_rect:EDIT").is_some(), "the wheel brought the last tab into view");
 }
 
 use egui::{Event, RawInput};
@@ -626,6 +656,7 @@ fn a_deferred_button_is_painted_as_the_app_resolves_it() {
         let look = DeferredLook {
             id: "a.on".into(),
             selected: true,
+            kept: false,
             running: false,
             focus_ring: true,
             label: Some("On".into()),

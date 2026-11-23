@@ -4,9 +4,8 @@
 //! bar's half-round wall lies on the same cylinder across that face's seam (the seam at
 //! angle 0 runs down the middle of the half-round). Upstream `CoverCoincidentSurface`
 //! refuses the cover as soon as its boundary walk steps across the seam, so the two walls
-//! stay apart with their edge at z 10 between them (8 faces). With
-//! `Kernel::fixes.cover_wraps_across_closed_seam` the crossing of a seam the surface
-//! already wraps is no failure, the walls merge and `BooleanPostProcess` adds the missing
+//! stay apart with their edge at z 10 between them (8 faces). Here the crossing of a seam
+//! the surface already wraps is no failure, the walls merge and `BooleanPostProcess` adds the missing
 //! piece of the seam through the bar's part (`SplitAtSeam`): 7 faces.
 #![allow(
     clippy::unwrap_used,
@@ -57,9 +56,8 @@ fn half_round(k: &Kernel) -> Curve {
 }
 
 /// The peg joined, its face count and volume.
-fn peg(fix: bool) -> (Brep, usize, f64) {
+fn peg() -> (Brep, usize, f64) {
     let mut k = Kernel::default();
-    k.fixes.cover_wraps_across_closed_seam = fix;
     let a = line(p(0.0, -R), p(CX, -R));
     let b = half_round(&k);
     let c = line(p(CX, R), p(0.0, R));
@@ -91,17 +89,6 @@ fn want_volume() -> f64 {
     (CX * 2.0 * R + 0.5 * pi * R * R) * 10.0 + pi * R * R * 10.0
 }
 
-#[test]
-fn wr599_default_keeps_the_walls_apart() {
-    let (_, faces, volume) = peg(false);
-    assert_eq!(
-        faces, 8,
-        "upstream leaves the half-round and post walls apart"
-    );
-    let want = want_volume();
-    assert!((volume - want).abs() <= 1e-6 * want, "{volume} vs {want}");
-}
-
 /// Whether the body has a vertex at `at` (within 1e-9).
 fn has_vertex_at(b: &Brep, at: Point3) -> bool {
     p1::vertices(b, None)
@@ -112,7 +99,7 @@ fn has_vertex_at(b: &Brep, at: Point3) -> bool {
 
 #[test]
 fn wr599_full_turn_wall_takes_in_the_half_round() {
-    let (joined, faces, volume) = peg(true);
+    let (joined, faces, volume) = peg();
     assert_eq!(faces, 7, "the post's wall takes in the bar's half-round");
     let want = want_volume();
     assert!((volume - want).abs() <= 1e-6 * want, "{volume} vs {want}");
@@ -128,10 +115,4 @@ fn wr599_full_turn_wall_takes_in_the_half_round() {
         .filter(|&e| edge::faces(&joined, e, None).unwrap().len() == 1)
         .count();
     assert!(seams >= 1, "the merged wall has a seam");
-}
-
-#[test]
-fn wr599_default_has_no_seam_vertex_on_the_bar() {
-    let (joined, _, _) = peg(false);
-    assert!(!has_vertex_at(&joined, Point3::new(CX + R, 0.0, 0.0)));
 }

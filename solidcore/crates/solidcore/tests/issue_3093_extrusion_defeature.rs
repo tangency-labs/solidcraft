@@ -21,8 +21,7 @@
 )] // test helpers
 
 use solidcore::blend::feature_executive::{FeatureExecutive, RebuildBrepType};
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::mass::enclosure::{enclose_volume, VolumeSign};
 use solidcore::nurbs::nurbs_srf::decompose_srf;
 use solidcore::surface::extend::Continuity;
@@ -34,7 +33,7 @@ use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::brep::validation;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, Kernel};
 
 /// `Defeature/extrusion.smb`, read and arena-named as the goldens reader does.
 fn extrusion(k: &mut Kernel) -> Option<Brep> {
@@ -52,10 +51,7 @@ fn extrusion(k: &mut Kernel) -> Option<Brep> {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,

@@ -98,7 +98,7 @@ fn triangulate_impl(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], fil
         _ => [1.0, 1.0],
     };
     let from = |p: Point2<f64>| [p.x / scale[0], p.y / scale[1]];
-    let Bounded { mut cdt, index, slits } = bounded(boundary, loops, scale, fill.lenient, clipped)?;
+    let Bounded { mut cdt, index, slits, .. } = bounded(boundary, loops, scale, fill.lenient, clipped)?;
     for s in fill.seeds {
         if s.iter().all(|x| x.is_finite()) {
             let _ = cdt.insert(to(s, scale));
@@ -155,6 +155,10 @@ pub(crate) struct Meshed {
     /// Its refinement stopped at its bound of points, or its rounds, with a triangle still off
     /// the surface or longer than asked.
     pub capped: bool,
+    /// For each boundary node, the node the triangles name in its place: itself, or the first
+    /// boundary node at the same point of the triangulation (where a loop passes one point twice,
+    /// as a slit's two runs and the vertex where it meets the rest of its loop do).
+    pub merged: Vec<u32>,
 }
 
 /// The mesh path's start ([`super::Purpose::Mesh`]) on the region bounded by `loops` (as
@@ -177,7 +181,9 @@ pub(crate) fn mesh(
     }
     let scale = if sag.scale.iter().all(|k| k.is_finite() && *k > 0.0) { sag.scale } else { [1.0, 1.0] };
     let from = |p: Point2<f64>| [p.x / scale[0], p.y / scale[1]];
-    let Bounded { mut cdt, index, slits } = bounded(boundary, loops, scale, false, false)?;
+    let Bounded { mut cdt, index, slits, handles } = bounded(boundary, loops, scale, false, false)?;
+    // Each boundary node's vertex is named by the first node inserted there ([`bounded`]).
+    let merged = handles.iter().map(|h| index.get(h.index()).copied().flatten()).collect::<Option<Vec<u32>>>()?;
     for s in seeds {
         if s.iter().all(|x| x.is_finite()) {
             let _ = cdt.insert(to(s, scale));
@@ -190,7 +196,7 @@ pub(crate) fn mesh(
         return None;
     }
     let (extra, triangles) = collect(&cdt, index, boundary, loops, &slits, &from, false)?;
-    Some(Meshed { extra, triangles, capped: !settled })
+    Some(Meshed { extra, triangles, capped: !settled, merged })
 }
 
 /// A point of (u, v) in the triangulation's metric `scale`.
@@ -207,6 +213,8 @@ struct Bounded {
     index: Vec<Option<u32>>,
     /// The sides the loops run along both ways ([`slits`]).
     slits: std::collections::HashSet<(FixedVertexHandle, FixedVertexHandle)>,
+    /// Each boundary node's vertex, by the node's index: one vertex for nodes at one point.
+    handles: Vec<FixedVertexHandle>,
 }
 
 /// The constrained Delaunay triangulation of `boundary`'s points in the metric `scale` with the
@@ -261,7 +269,7 @@ fn bounded(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], scale: [f64;
             cdt.add_constraint(a, b);
         }
     }
-    Some(Bounded { cdt, index, slits })
+    Some(Bounded { cdt, index, slits, handles })
 }
 
 /// The triangles of `cdt` inside the region its constraints bound (see [`region`]), with the

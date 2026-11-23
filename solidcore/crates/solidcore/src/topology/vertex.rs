@@ -23,6 +23,7 @@
 //! | [`is_connected_to`]                         | `SmVertex::IsConnectedTo`                        |
 //! | [`are_edges_tangent`]                       | `SmVertex::AreEdgesTangent`                      |
 //! | [`is_topological_vertex`], [`is_on_pole`]   | `SmVertex::IsTopologicalVertex`, `IsOnPole`      |
+//! | [`is_on_face_seam`], [`ends_seam_edge`], [`seam_edge`], [`is_seam_edge`] | none (not upstream, below) |
 //! | [`is_wire_vertex`], [`is_lamina_vertex`]    | `SmVertex::IsWireVertex`, `IsLaminaVertex`       |
 //! | [`is_shell_vertex`], [`is_loop_vertex`]     | `SmVertex::IsShellVertex`, `IsLoopVertex`        |
 //! | [`max_up_dim_gap_3d`], [`max_gap_3d`], [`VertexGap`], [`HeldGap`] | `SmVertex::GetMaxUpDimGap3d`, `GetMaxGap3d` (the `SmGap*` results) |
@@ -48,14 +49,20 @@
 //!   use without edge, a face use without face, a shell without region: a malformed
 //!   B-rep) the port returns [`SolidError::InvalidInput`]; [`faceuses`] keeps its null
 //!   entries (the edge vertex uses of a wire edge have no face use).
+//! - **Seam vertices.** Upstream's `IsTopologicalVertex` keeps a vertex where a closed edge
+//!   meets itself (it marks the seam) and one on a pole. The port also keeps a vertex that
+//!   where its two edges on a face touch a seam of the face's surface from one side
+//!   ([`is_on_face_seam`]): joined, they would meet the seam inside one edge, which the face
+//!   check's seam test counts as a crossing. Upstream joins the two edges and
+//!   leaves a face its own check refuses ("Face crosses Seam").
 //! - **Unset tangents and cusps.** `AreEdgesTangent` and `IsTopologicalVertex` ignore a
 //!   failed `GetEndTangent` (`SE`) and then read the tangent it did not write. That is
 //!   the `SmVector3d` default, `SM_UNDEF_DOUBLE` in every component ([`Vec3::UNDEF`]),
 //!   or in `IsTopologicalVertex` the line vector `IsLine` wrote for that edge.
-//!   `AngleBetween` then sees a zero-length vector and reports `0`, so both answer true
-//!   by default (WR-256; UB-106 assumed the tangent uninitialised; with
-//!   [`crate::kernel::UpstreamFixes::query_statuses_pass_on`], `IsTopologicalVertex`
-//!   returns `Ok(false)` when `AngleBetween` fails). `IsTopologicalVertex` also returns
+//!   `AngleBetween` then sees a zero-length vector and reports `0`, so upstream both
+//!   answer true (WR-256; UB-106 assumed the tangent uninitialised). As the fork
+//!   (tangency-labs/smlib 7a35f33, WR-663), `IsTopologicalVertex` returns `Ok(false)` when
+//!   `AngleBetween` fails. `IsTopologicalVertex` also returns
 //!   the failed status of `GetEndTangent` at an edge's start (`SER`) as its `SmBoolean`,
 //!   which is true, and accepts `180°` cusps (`|angle_rad ± PI| <= ang_limit_rad`)
 //!   because it compares unoriented curve tangents; the port propagates a failed
@@ -615,6 +622,27 @@ pub fn edges(b: &Brep, v: VertexId, face: Option<FaceId>) -> Result<Vec<EdgeId>>
     Ok(out)
 }
 
+/// Not upstream: whether `face` surrounds the vertex on every side: the vertex has edges and
+/// each is a seam of `face` ([`crate::topology::edge::face_on_both_sides`]), as a sphere's
+/// pole. Such a vertex bounds no material; it is a point where the surface's
+/// parametrisation degenerates (docs/booleans.md, "Seams and poles").
+///
+/// # Errors
+///
+/// Those of [`edges`] and of the edge use queries.
+pub fn inside_face(b: &Brep, v: VertexId, face: FaceId) -> Result<bool> {
+    let all = edges(b, v, None)?;
+    if all.is_empty() {
+        return Ok(false);
+    }
+    for e in all {
+        if !crate::topology::edge::face_on_both_sides(b, e, face)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// `GetCommonEdges`: the edges of [`edges`] (on `face` when given) that join this
 /// vertex and `other` (closed edges included).
 ///
@@ -847,6 +875,68 @@ pub fn is_on_pole(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
     Ok(on_pole)
 }
 
+/// Not upstream: whether the vertex lies on a seam of one of the faces it bounds
+/// ([`vertexuse::is_on_seam_of_face`]).
+///
+/// # Errors
+///
+/// Those of [`vertexuse::is_on_seam_of_face`].
+pub fn is_on_face_seam(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
+    for vu in vertexuses(b, v)? {
+        if vertexuse::is_on_seam_of_face(k, b, vu)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Not upstream: whether the vertex ends a seam edge ([`seam_edge`]).
+///
+/// # Errors
+///
+/// Those of [`seam_edge`].
+pub fn ends_seam_edge(b: &Brep, v: VertexId) -> Result<bool> {
+    Ok(seam_edge(b, v)?.is_some())
+}
+
+/// Not upstream: the first seam edge the vertex ends ([`is_seam_edge`]).
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of [`edges`] and [`is_seam_edge`].
+pub fn seam_edge(b: &Brep, v: VertexId) -> Result<Option<EdgeId>> {
+    for e in edges(b, v, None)? {
+        if is_seam_edge(b, e)? {
+            return Ok(Some(e));
+        }
+    }
+    Ok(None)
+}
+
+/// Not upstream: whether one face use runs along the edge twice (the two sides of the seam
+/// of the face's closed surface). Read from the topology alone, so it holds for the B-rep as
+/// it stands, before any geometry is measured.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of the edge use queries.
+pub fn is_seam_edge(b: &Brep, e: EdgeId) -> Result<bool> {
+    let mut uses: Vec<FaceuseId> = Vec::new();
+    for eu in crate::topology::edge::edgeuses(b, e, None, None)? {
+        if !eu1::is_loop_edgeuse(b, eu)? {
+            continue;
+        }
+        let Some(fu) = eu1::faceuse(b, eu)? else {
+            continue;
+        };
+        if uses.contains(&fu) {
+            return Ok(true);
+        }
+        uses.push(fu);
+    }
+    Ok(false)
+}
+
 /// `IsTopologicalVertex`: whether the vertex could be removed without changing the
 /// B-rep's shape: it joins exactly two different edges, is not on a pole, the edges'
 /// curves meet at the same parameter (unless both are lines) and leave the vertex
@@ -888,6 +978,13 @@ pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bo
 
     // skip verices marking poles
     if is_on_pole(k, b, v)? {
+        return Ok(false);
+    }
+
+    // Not upstream: skip vertices on a face's seam. An edge that touches a seam needs a
+    // vertex there as one that crosses it does (the face check's seam test counts a seam
+    // point inside an edge as a crossing); joining the two edges would remove it.
+    if is_on_face_seam(k, b, v)? {
         return Ok(false);
     }
 
@@ -970,12 +1067,12 @@ pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bo
         if !at_start2 {
             t2 = -t2;
         }
-        // AngleBetween sets the angle to 0 on failure (status ignored); with
-        // `query_statuses_pass_on` the curves are not shown to meet G1 without it, so the
-        // vertex stays (tangency-labs/smlib 7a35f33)
+        // AngleBetween sets the angle to 0 on failure (status ignored upstream); the
+        // curves are not shown to meet G1 without it, so the vertex stays
+        // (tangency-labs/smlib 7a35f33)
         match t1.angle_between(t2) {
-            Err(_) if k.fixes.query_statuses_pass_on => return Ok(false),
-            r => r.unwrap_or(0.0),
+            Err(_) => return Ok(false),
+            Ok(a) => a,
         }
     } else {
         0.0
@@ -1868,7 +1965,9 @@ mod tests {
     /// WR-256: a composite curve cannot be evaluated (`SmCompositeCurve` keeps
     /// `SmCurve::Evaluate`, which returns `SM_ERR`), so `GetEndTangent` fails at the end
     /// of edge 0 and the tangent stays the `SmVector3d` default; `AngleBetween` of that
-    /// zero-length vector reports `0`.
+    /// zero-length vector reports `0` in `AreEdgesTangent`. `IsTopologicalVertex` does
+    /// not take that angle as G1 evidence (tangency-labs/smlib 7a35f33, WR-663): the
+    /// vertex is kept.
     #[test]
     fn failed_end_tangent_reads_the_default_vector() {
         use crate::curve::composite_curve::CompositeCurve;
@@ -1884,8 +1983,9 @@ mod tests {
         assert!(are_edges_tangent(&k, &b, v[1], e[0], e[1], 0.5).unwrap());
         assert!(are_edges_tangent(&k, &b, v[1], e[1], e[0], 0.5).unwrap());
         assert!(!are_edges_tangent(&k, &b, v[1], e[0], e[1], 0.0).unwrap());
-        // the parameters agree (0 and 0) and the angle test passes
-        assert!(is_topological_vertex(&k, &mut b, v[1]).unwrap());
+        // the parameters agree (0 and 0), but the failed tangent gives no angle: the
+        // curves are not shown to meet G1 and the vertex is kept (fork 7a35f33)
+        assert!(!is_topological_vertex(&k, &mut b, v[1]).unwrap());
     }
 
     // tangency-labs/smlib 7a35f33 (SmVertex::IsTopologicalVertex): without the angle
@@ -1898,9 +1998,7 @@ mod tests {
         let e0 = b.edge_mut(e[0]).unwrap();
         e0.curve = Some(Curve::from(CompositeCurve::new(3)));
         e0.interval = Extent1d::from_min_max(-1.0, 0.0);
-        let mut k = Kernel::default();
-        assert!(is_topological_vertex(&k, &mut b, v[1]).unwrap());
-        k.fixes.query_statuses_pass_on = true;
+        let k = Kernel::default();
         assert!(!is_topological_vertex(&k, &mut b, v[1]).unwrap());
     }
 
@@ -2254,14 +2352,12 @@ mod tests {
             Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)
         ));
 
-        // 3. Composition with query_statuses_pass_on when GetEndTangent(false) fails
-        // (WR-256): -Vec3::UNDEF still fails AngleBetween and keeps the vertex.
+        // 3. When GetEndTangent(false) fails (WR-256): -Vec3::UNDEF still fails
+        // AngleBetween and keeps the vertex (WR-663).
         let (mut b, v, e) = chain(true, Vec3::X, Vec3::Y);
         let e0 = b.edge_mut(e[0]).unwrap();
         e0.curve = Some(Curve::from(CompositeCurve::new(3)));
         e0.interval = Extent1d::from_min_max(-1.0, 0.0);
-        let mut k_both = Kernel::default();
-        k_both.fixes.query_statuses_pass_on = true;
-        assert!(!is_topological_vertex(&k_both, &mut b, v[1]).unwrap());
+        assert!(!is_topological_vertex(&k, &mut b, v[1]).unwrap());
     }
 }

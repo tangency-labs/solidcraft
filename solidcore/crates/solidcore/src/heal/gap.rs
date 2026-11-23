@@ -56,9 +56,10 @@
 //!   `(jj - cu) / (cv - 1)`, keeping them in `[0.0, 1.0]` (WR-88).
 //! - `GapArray::append` maintains the longest-gap index, unlike upstream (WR-90).
 
+use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::p6::DroppedPoint;
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -73,7 +74,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::NOZ;
 use crate::surface::surface::p2::B_SPLINE_SURFACE_TYPE;
-use crate::surface::surface::Surface;
+use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::vertexuse as vu1;
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId, VertexuseId};
@@ -1167,10 +1168,7 @@ impl Gap {
         if e.count == 2 {
             Ok((e.point1, e.point2))
         } else {
-            Err(SolidError::heal_failed(
-                OP,
-                "the gap does not have two end points",
-            ))
+            Err(SolidError::heal(OP, HealFailure::GapWithoutTwoEnds))
         }
     }
 
@@ -2267,10 +2265,7 @@ impl<'a> GapFunction<'a> {
 
         // There should always be 1 or more intervals
         if !(end_u > start_u && (this_surface.is_none() || end_v > start_v)) {
-            return Err(SolidError::heal(
-                OP_GF,
-                HealFailure::Inconsistent("the sample domain has no intervals"),
-            ));
+            return Err(SolidError::heal(OP_GF, HealFailure::EmptySampleInterval));
         }
         let ivl_cnt_u = end_u - start_u;
         let ivl_cnt_v = end_v - start_v;
@@ -2344,6 +2339,44 @@ impl<'a> GapFunction<'a> {
         r
     }
 
+    /// Not upstream (#18325): this curve and the other surface's natural domain when the
+    /// curve is a curve on a surface (`SmCrvOnSurf`) whose surface is the other surface, a
+    /// B-spline equal to it degree for degree, knot for knot and control point for control
+    /// point. The curve's point at `t` is then that surface's point at the curve's own
+    /// surface parameters there by construction (the curve evaluates its UV curve, then the
+    /// surface), so, when they lie in the domain, they are the exact foot of the point, at
+    /// distance `0` ([`Self::evaluate_samples`] seeds the drop with them). `None` for any
+    /// other geometry. Checked once per sample set.
+    ///
+    /// Upstream seeds every drop with the previous sample's foot, and the closest-point
+    /// solve stops within its convergence tolerance of the foot (about `1e-13` in `uv`
+    /// for the natural trims of #18325), so a curve lying on the surface reported a gap
+    /// of about `1e-12` rather than `0`.
+    fn own_surface(&self, k: &Kernel) -> Result<Option<(&'a CrvOnSurf, Extent2d)>> {
+        let GapGeometry::CrvSrf { curve, other } = self.geometry else {
+            return Ok(None);
+        };
+        let CurveKind::CrvOnSurf(cos) = curve.kind() else {
+            return Ok(None);
+        };
+        let (SurfaceKind::BSpline(a), SurfaceKind::BSpline(b)) =
+            (cos.surface().kind(), other.kind())
+        else {
+            return Ok(None);
+        };
+        let (Some(a), Some(b)) = (a.gw_nurb(), b.gw_nurb()) else {
+            return Ok(None);
+        };
+        let same = a.degrees() == b.degrees()
+            && a.u_knots() == b.u_knots()
+            && a.v_knots() == b.v_knots()
+            && a.cpts() == b.cpts();
+        if !same {
+            return Ok(None);
+        }
+        Ok(Some((cos, other.natural_uv_domain_with_nurb(k)?)))
+    }
+
     /// The sample loop of `BuildSampleSet`.
     fn evaluate_samples(
         &mut self,
@@ -2358,6 +2391,7 @@ impl<'a> GapFunction<'a> {
             GapSampleType::CrvSrf | GapSampleType::SrfSrf
         );
         let mut last: Option<usize> = None;
+        let own = self.own_surface(k)?;
 
         // iteration statistics
         let mut min_gap = BIG_DOUBLE;
@@ -2390,12 +2424,20 @@ impl<'a> GapFunction<'a> {
                     ),
                     None => None,
                 };
-                let guess_u = prev.map(|s| s.other_param.x);
-                let guess_v = if use_v {
+                let mut guess_u = prev.map(|s| s.other_param.x);
+                let mut guess_v = if use_v {
                     prev.map(|s| s.other_param.y)
                 } else {
                     None
                 };
+                // not upstream (#18325): a curve on the other surface itself is seeded at
+                // its own surface parameters, the exact foot of its point
+                if let Some((cos, domain)) = &own {
+                    let uv = cos.evaluate_uv_point(k, this_u)?;
+                    if domain.contains_point(uv, 0.0) {
+                        (guess_u, guess_v) = (Some(uv.x), Some(uv.y));
+                    }
+                }
 
                 let idx = row + ii;
                 let slot = samples
@@ -3082,6 +3124,15 @@ mod tests {
         let (p, q) = Gap::from(g).gap_end_points(&k, &mut b).unwrap();
         assert_eq!(p, Vec3::new(0.0, 0.0, 1e-3));
         assert_eq!(q, Vec3::ZERO);
+        // a gap record that leaves its edge parameter undefined has one end point
+        let open = VertexEdgeGap {
+            edge_t: UNDEF_DOUBLE,
+            ..g
+        };
+        let e = Gap::from(open).gap_end_points(&k, &mut b).unwrap_err();
+        assert_eq!(e.heal_failure(), Some(&HealFailure::GapWithoutTwoEnds));
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
     }
 
     /// Checks finite append maxima, record order, ties and chained appends.

@@ -64,6 +64,7 @@
 //!   overwrites the value; no caller uses it).
 //! - The `SM_DEBUG_CODE` trace output is not ported.
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::matrix::Matrix;
@@ -163,8 +164,11 @@ pub trait EvalNFunctions {
         _intervals: Option<&ExtentNd>,
         _periodicities: Option<&[bool]>,
     ) -> Result<()> {
-        Err(SolidError::geom_stage_failed(
+        Err(SolidError::geom(
             "geom::local_solve_nd::EvalNFunctions::set_intervals",
+            GeomFailure::Defect {
+                why: "an equation set says has_intervals() but does not implement set_intervals; every kernel equation set that wants intervals implements it",
+            },
         ))
     }
 
@@ -230,7 +234,7 @@ pub fn compute_jacobian<E: EvalNFunctions + ?Sized>(
         if delta.abs() < EFF_ZERO {
             return Err(SolidError::geom(
                 OP,
-                crate::error::geom::GeomFailure::ZeroDifferenceStep {
+                GeomFailure::ZeroDifferenceStep {
                     parameter: jj,
                     at: base_param,
                 },
@@ -298,6 +302,7 @@ pub struct LocalSolveNd<'a, E: EvalNFunctions + ?Sized> {
     boundary_handler: BoundaryHandler,
     max_boundary_hits: u64,
     step_cutting_enabled: bool,
+    guess_unevaluated: bool,
     current_iteration: u64,
     termination_reason: TerminationReason,
 }
@@ -324,6 +329,7 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
             boundary_handler: BoundaryHandler::HitsAllBoundaries,
             max_boundary_hits: 3,
             step_cutting_enabled: false,
+            guess_unevaluated: false,
             current_iteration: 0,
             termination_reason: TerminationReason::Undefined,
         }
@@ -339,6 +345,14 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
     #[must_use]
     pub fn termination_reason(&self) -> TerminationReason {
         self.termination_reason
+    }
+
+    /// Whether the last solve stopped because the equations could not be evaluated at
+    /// the guess itself (not upstream). The solve then reports no solution (WR-20); a
+    /// caller can still check the guess without the failed equations.
+    #[must_use]
+    pub fn guess_unevaluated(&self) -> bool {
+        self.guess_unevaluated
     }
 
     /// The iteration counter after the last solve (`m_lCurrentIteration`; equals
@@ -441,6 +455,7 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
         let mut equation_values2 = vec![0.0; n];
 
         self.acceptable_accuracy = acceptable_accuracy;
+        self.guess_unevaluated = false;
 
         // the last guess point starts at the guess
         let mut solution = guess.to_vec();
@@ -453,7 +468,9 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
             Some(&mut jacobian),
         ))?
         else {
-            // An unevaluated guess is no solution (WR-20).
+            // An unevaluated guess is no solution (WR-20); a caller may still check it by
+            // other means (`guess_unevaluated`).
+            self.guess_unevaluated = true;
             return Ok(self.done(false, TerminationReason::UnableToConverge, solution));
         };
 
@@ -920,7 +937,7 @@ mod tests {
     struct Failing;
     impl EvalNFunctions for Failing {
         fn evaluate(&mut self, _: &[f64], _: &mut [f64], _: Option<&mut Matrix>) -> Result<bool> {
-            Err(SolidError::geom_stage_failed("test"))
+            Err(SolidError::geom("test", GeomFailure::StageFailed))
         }
     }
 
@@ -1149,10 +1166,7 @@ mod tests {
         let mut e = WantsIntervals;
         let mut s = LocalSolveNd::new(&mut e, None, None);
         let e = s.solve_it(&[1.0], EFF_ZERO).unwrap_err();
-        assert_eq!(
-            e.geom_failure(),
-            Some(&crate::error::geom::GeomFailure::StageFailed)
-        );
+        assert!(matches!(e.geom_failure(), Some(GeomFailure::Defect { .. })));
         assert!(e.is_defect());
         assert_eq!(e.upstream_status(), Some(SM_ERR));
     }
@@ -1183,7 +1197,7 @@ mod tests {
         let e = r.unwrap_err();
         assert_eq!(
             e.geom_failure(),
-            Some(&crate::error::geom::GeomFailure::ZeroDifferenceStep {
+            Some(&GeomFailure::ZeroDifferenceStep {
                 parameter: 0,
                 at: 0.5
             })

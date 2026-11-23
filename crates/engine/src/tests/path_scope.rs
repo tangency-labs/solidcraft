@@ -16,7 +16,7 @@ fn file_commands_stay_inside_the_agents_folders() {
     let at = |d: &std::path::Path, f: &str| d.join(f).to_string_lossy().to_string();
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
-    std::fs::write(out.join("part.solidcraft"), solidcraft_io::write_design(&s.doc)).unwrap();
+    std::fs::write(out.join("part.solidcraft"), solidcraft_io::write_design(&s.doc).unwrap()).unwrap();
     std::fs::write(out.join("p.csv"), "name,expression\nw,5 mm\n").unwrap();
 
     scoped(Some(PathScope::new([root.clone()])), || {
@@ -82,7 +82,7 @@ fn a_designs_font_file_stays_inside_the_agents_folders() {
     s.execute("sketch.text", &json!({"text": "A", "at": [0, 0], "font": font.to_string_lossy()})).unwrap();
     s.execute("sketch.finish", &json!({})).unwrap();
     let design = root.join("text.solidcraft");
-    std::fs::write(&design, solidcraft_io::write_design(&s.doc)).unwrap();
+    std::fs::write(&design, solidcraft_io::write_design(&s.doc).unwrap()).unwrap();
     let open = json!({"path": design.to_string_lossy()});
     // The sketch's warning says what its text couldn't read.
     let warnings = |s: &Session| s.model.results.iter().filter_map(|r| r.warning.clone()).collect::<Vec<_>>().join("; ");

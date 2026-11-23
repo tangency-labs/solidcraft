@@ -19,14 +19,17 @@ pub mod agreement;
 pub mod check;
 pub mod collapse;
 pub mod curve;
+pub mod folded;
 pub mod form;
 pub mod geometry;
 pub mod label;
 pub mod normal_section;
+pub mod outline;
 pub mod pcurve;
 #[rustfmt::skip]
 pub mod plan;
 pub mod pole;
+pub mod query;
 pub mod ruling;
 pub mod sphere;
 pub mod spline;
@@ -34,7 +37,7 @@ pub mod surface;
 pub mod uv;
 pub mod vec;
 
-pub use collapse::Collapse;
+pub use collapse::{Collapse, OntoKnots};
 pub use curve::{CurveEval, CurveJet};
 pub use geometry::{Curve, Curve2, Frame, Surface};
 pub use spline::{

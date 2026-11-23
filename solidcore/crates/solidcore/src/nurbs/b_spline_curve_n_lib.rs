@@ -31,6 +31,7 @@
 //! | [`BSplineCurve::make_curves_compatible`]               | `SmBSplineCurve::MakeCurvesCompatible`         |
 //! | [`BSplineCurve::deform_to_end_point_targets`], [`InValueType`] | `SmBSplineCurve::DeformToEndPointTargets`, `SmInValueType` |
 //! | [`BSplineCurve::remove_knots`]                         | `SmBSplineCurve::RemoveKnots`                  |
+//! | [`BSplineCurve::remove_knot_certified`]                | (solidcore's: `N_CrvRemoveKnot` with a certified bound) |
 //! | [`BSplineCurve::reparametrize_with_arc_length`]        | `SmBSplineCurve::ReparametrizeWithArcLength`   |
 //! | [`BSplineCurve::make_non_rational`]                    | `SmBSplineCurve::MakeNonRational`              |
 //! | [`BSplineCurve::scale`]                                | `SmBSplineCurve::Scale(double)`                |
@@ -102,15 +103,15 @@
 //!   A short UV end span that collapses to a pole (its control points within check
 //!   test #15's tolerance `SM_ZONE_TOL_3D / 10`) is still removed as upstream does
 //!   (#2129). The default retains pinned SMLib behavior.
-//! - **Opt-in rational end spans (WR-575, #1529).** With
-//!   [`crate::kernel::UpstreamFixes::bspline_trim_keeps_rational_end_spans`], a
-//!   rational trimmed curve (a conic's NURB) keeps its short end spans: their removal
-//!   stretches the rest of the curve and moves it off its conic. A model curve's trim
-//!   end whose span to an interior knot collapses to a pole (its control points within
+//! - **Rational end spans (WR-575, #1529).** A rational trimmed curve (a conic's NURB)
+//!   keeps its short end spans: upstream's removal stretches the rest of the curve and
+//!   moves it off its conic. A model curve's trim end whose span to an end of the knot
+//!   span holding it, an interior knot, collapses to a pole (its control points within
 //!   check test #15's tolerance `SM_ZONE_TOL_3D / 10`, #2090) is that knot, whichever
-//!   side of the end is kept, so both pieces of a split meet at one parameter (#2424);
-//!   a UV curve's pole end span is cleaned as upstream, as its ends are its edge's.
-//!   The default retains pinned SMLib behavior.
+//!   side of the end is kept, so both pieces of a split meet at one parameter (#2424).
+//!   On a curve degenerate at the zone tolerance (a circle of radius 1e-6) ends stay
+//!   where they were asked, so its pieces do not overlap. A UV curve's pole end span is
+//!   cleaned as upstream, as its ends are its edge's.
 //! - **Back-edges.** `SetIntersectionCurveThroughPoint` starts with
 //!   `IsIntersectorApprox` ([`BSplineCurve::is_intersector_approx`]) and uses
 //!   `SmCurve::ApproximateLength` ([`crate::curve::curve::p2`]), `SmSurface::LocalPointSolve`
@@ -128,6 +129,7 @@
 //!   evaluations of `SetIntersectionCurveThroughPoint` (a failed one leaves upstream's
 //!   default-constructed vectors, [`Vec3::UNDEF`]).
 
+use crate::blend::fillet_section::interval::Ivl;
 use crate::error::nurbs::BSplineFailure;
 use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -162,7 +164,7 @@ use crate::nurbs::crv_tool::p2::{make_compatible_adj_knots, make_compatible_knot
 use crate::nurbs::geom::{normalize, PI};
 use crate::nurbs::knots::{Side, MAX_DEGREE};
 use crate::nurbs::math::{translate_sum2_pts, CPoint, NOW, NOZ};
-use crate::nurbs::nurbs_crv::{copy_nurb_curve, crv_trim, to_euclid};
+use crate::nurbs::nurbs_crv::{copy_nurb_curve, crv_trim, is_ncrv_degenerate, to_euclid};
 use crate::nurbs::spiral::{approx_spiral, Hand, SpiralSpec};
 use crate::surface::surface::p2::{drop_vectors, SurfaceEvaluate};
 
@@ -184,6 +186,7 @@ const OP_APPROX_CRV: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::create_a
 const OP_DAMPEN: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::dampen_knot_spacing";
 const OP_DEG_RED: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::degree_reduction";
 const OP_INS_ONE: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::insert_one_knot";
+const OP_REMOVE_CERT: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::remove_knot_certified";
 const OP_THROUGH: &str =
     "nurbs::b_spline_curve_n_lib::BSplineCurve::set_intersection_curve_through_point";
 const OP_EVEN: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::equally_spaced_points";
@@ -198,6 +201,10 @@ const OP_SCALE: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::scale";
 const OP_SCALE_KNOTS: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::scale_knot_vector";
 const OP_SYNC: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::synchronize_knots_of_curves";
 const OP_TRIM: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::trim";
+
+/// Largest projection residual at which [`BSplineCurve::set_intersection_curve_through_point`]
+/// takes a point to lie on its surface (upstream's literal).
+const ON_SURFACE: f64 = 1e-8;
 
 /// Most span splits [`BSplineCurve::dampen_knot_spacing`] makes before giving up
 /// (upstream loops forever).
@@ -340,9 +347,9 @@ fn extension_continuity(continuity: ContinuityType, operation: &'static str) -> 
         ContinuityType::G1 => Ok(Continuity::G1),
         ContinuityType::G1G2 => Ok(Continuity::G2),
         ContinuityType::CInfinity => Ok(Continuity::Cmax),
-        _ => Err(SolidError::b_spline(
+        continuity => Err(SolidError::b_spline(
             operation,
-            BSplineFailure::Failed("the continuity is not one an extension keeps"),
+            BSplineFailure::ContinuityNotExtendable { continuity },
         )),
     }
 }
@@ -353,6 +360,183 @@ fn nurb_of<'a>(curve: &'a BSplineCurve, operation: &'static str) -> Result<&'a C
         .nurb
         .as_ref()
         .ok_or_else(|| SolidError::b_spline(operation, BSplineFailure::NoNurbsForm))
+}
+
+/// Not upstream: an upper bound on the distance, at every parameter, between the
+/// non-rational curve `before` and `after`, which is `before` with its knot `knot`
+/// removed `removed` times ([`BSplineCurve::remove_knot_certified`]). `knot` is inserted
+/// back `removed` times into `after` by Boehm's algorithm in rounded interval arithmetic:
+/// each new control point `a P[i] + (1 - a) P[i-1]`, `a = (knot - U[i]) / (U[i+p] - U[i])`,
+/// is enclosed, so the enclosures hold the control points of `after` over `before`'s
+/// knot vector. With one basis (non-negative, summing to one) the curves differ by at
+/// most the largest distance between paired control points, taken as the upper end of
+/// its enclosure. `None` when that knot vector is not `before`'s bit for bit, a curve is
+/// rational, the point counts or dimensions differ, or a bound is not finite. The loops
+/// are bounded by `removed` and the point count.
+fn removal_moves_at_most(before: &Curve, after: &Curve, knot: f64, removed: usize) -> Option<f64> {
+    let p = before.degree();
+    let planar = before.cpts().first()?.z == NOZ;
+    if after.degree() != p {
+        return None;
+    }
+    let target = ivl_points(before, planar)?;
+    let mut u: Vec<f64> = after.knots().to_vec();
+    let mut q = ivl_points(after, planar)?;
+    for _ in 0..removed {
+        insert_ivl(&mut u, &mut q, p, knot)?;
+    }
+    if u.as_slice() != before.knots() {
+        return None;
+    }
+    farthest_pair(&target, &q)
+}
+
+/// The control points of the non-rational `c` as exact intervals (`z = 0` when
+/// `planar`); `None` when a point is rational or not of that planar form.
+fn ivl_points(c: &Curve, planar: bool) -> Option<Vec<[Ivl; 3]>> {
+    c.cpts()
+        .iter()
+        .map(|pt| {
+            if pt.w != NOW || (pt.z == NOZ) != planar {
+                return None;
+            }
+            let z = if planar { 0.0 } else { pt.z };
+            Some([Ivl::from(pt.x), Ivl::from(pt.y), Ivl::from(z)])
+        })
+        .collect()
+}
+
+/// Boehm's insertion of `knot` once into the degree-`p` curve `(u, q)`, in rounded
+/// interval arithmetic: each new control point `a Q[i] + (1 - a) Q[i-1]`,
+/// `a = (knot - U[i]) / (U[i+p] - U[i])`, is enclosed. `None` when `knot` is not inside
+/// the curve's knots (the span `k`, `U[k] <= knot < U[k+1]`, must have `p <= k < n + 1`).
+fn insert_ivl(u: &mut Vec<f64>, q: &mut Vec<[Ivl; 3]>, p: usize, knot: f64) -> Option<()> {
+    let k = u.iter().rposition(|&x| x <= knot)?;
+    if k < p || k + 1 >= u.len().checked_sub(p)? {
+        return None;
+    }
+    let mut next: Vec<[Ivl; 3]> = Vec::new();
+    for i in 0..=q.len() {
+        let point = if i + p <= k {
+            *q.get(i)?
+        } else if i > k {
+            *q.get(i.checked_sub(1)?)?
+        } else {
+            let ui = Ivl::from(*u.get(i)?);
+            let a = (Ivl::from(knot) - ui) / (Ivl::from(*u.get(i + p)?) - ui);
+            let b = Ivl::from(1.0) - a;
+            let [x1, y1, z1] = *q.get(i)?;
+            let [x0, y0, z0] = *q.get(i.checked_sub(1)?)?;
+            [a * x1 + b * x0, a * y1 + b * y0, a * z1 + b * z0]
+        };
+        next.push(point);
+    }
+    *q = next;
+    let mut grown: Vec<f64> = u.iter().take(k + 1).copied().collect();
+    grown.push(knot);
+    grown.extend(u.iter().skip(k + 1));
+    *u = grown;
+    Some(())
+}
+
+/// The largest distance between paired enclosed points, the upper end of its enclosure;
+/// `None` when the counts differ or the bound is not finite.
+fn farthest_pair(a: &[[Ivl; 3]], b: &[[Ivl; 3]]) -> Option<f64> {
+    if a.len() != b.len() {
+        return None;
+    }
+    let mut worst = 0.0_f64;
+    for ([x0, y0, z0], [x1, y1, z1]) in a.iter().zip(b) {
+        let (dx, dy, dz) = (*x0 - *x1, *y0 - *y1, *z0 - *z1);
+        let d = (dx * dx + dy * dy + dz * dz).sqrt().hi;
+        if !d.is_finite() {
+            return None;
+        }
+        worst = worst.max(d);
+    }
+    Some(worst)
+}
+
+/// Inserts every knot of `target` (sorted) that `(u, q)` holds fewer times, by
+/// [`insert_ivl`]; `None` when an insertion fails.
+fn refine_ivl(u: &mut Vec<f64>, q: &mut Vec<[Ivl; 3]>, p: usize, target: &[f64]) -> Option<()> {
+    let mut i = 0;
+    while let Some(&t) = target.get(i) {
+        let want = target.iter().skip(i).take_while(|&&x| x == t).count();
+        let have = u.iter().filter(|&&x| x == t).count();
+        for _ in have..want {
+            insert_ivl(u, q, p, t)?;
+        }
+        i += want;
+    }
+    Some(())
+}
+
+/// The knot values of `a` and `b` merged, each as many times as the one holding it more
+/// often.
+fn knot_union(a: &[f64], b: &[f64]) -> Vec<f64> {
+    let mut all: Vec<f64> = a.iter().chain(b).copied().collect();
+    all.sort_by(f64::total_cmp);
+    all.dedup();
+    let mut out = Vec::new();
+    for t in all {
+        let n = a
+            .iter()
+            .filter(|&&x| x == t)
+            .count()
+            .max(b.iter().filter(|&&x| x == t).count());
+        out.extend(core::iter::repeat_n(t, n));
+    }
+    out
+}
+
+/// Not upstream: an upper bound on the distance, at every parameter of `piece`, between
+/// the non-rational curve `piece` and `parent` over the piece's parameter interval
+/// `[a, b]` (a piece cut from `parent`, e.g. by [`BSplineCurve::create_by_split_curve`],
+/// which [`BSplineCurve::trim`]'s end-span cleanup may reshape). In rounded interval
+/// arithmetic ([`insert_ivl`]), `a` and `b` are inserted into `parent` to multiplicity
+/// `p`, and its control points over `[a, b]` taken; both nets are then refined to the
+/// union of their knots. With one knot vector, one basis (non-negative, summing to one)
+/// holds for both, so the curves differ by at most the largest distance between paired
+/// control points, rounded up. `None` when a curve is rational or has no NURB form, the
+/// degrees, dimensions or refined knot vectors differ, or a bound is not finite. The
+/// loops are bounded by the knot and point counts.
+pub(crate) fn piece_moves_at_most(parent: &BSplineCurve, piece: &BSplineCurve) -> Option<f64> {
+    let (whole, part) = (parent.nurb.as_ref()?, piece.nurb.as_ref()?);
+    let p = whole.degree();
+    let planar = whole.cpts().first()?.z == NOZ;
+    if part.degree() != p {
+        return None;
+    }
+    let (a, b) = (*part.knots().first()?, *part.knots().last()?);
+    let mut u: Vec<f64> = whole.knots().to_vec();
+    let mut q = ivl_points(whole, planar)?;
+    for t in [a, b] {
+        let have = u.iter().filter(|&&x| x == t).count();
+        for _ in have..p {
+            insert_ivl(&mut u, &mut q, p, t)?;
+        }
+    }
+    // the net over [a, b]: s the last a, f the first b
+    let s = u.iter().rposition(|&x| x == a)?;
+    let f = u.iter().position(|&x| x == b)?;
+    let first = s.checked_sub(p)?;
+    let mut sub_u = vec![a];
+    sub_u.extend(u.get(first + 1..f.checked_add(p)?)?);
+    sub_u.push(b);
+    let mut sub_q: Vec<[Ivl; 3]> = q.get(first..f)?.to_vec();
+    if sub_u.len() != sub_q.len() + p + 1 {
+        return None;
+    }
+    let mut piece_u: Vec<f64> = part.knots().to_vec();
+    let mut piece_q = ivl_points(part, planar)?;
+    let target = knot_union(&sub_u, &piece_u);
+    refine_ivl(&mut sub_u, &mut sub_q, p, &target)?;
+    refine_ivl(&mut piece_u, &mut piece_q, p, &target)?;
+    if sub_u != piece_u {
+        return None;
+    }
+    farthest_pair(&sub_q, &piece_q)
 }
 
 /// A copy of the NURB of `curve` (`sm_CreateNlibCurve`: `N_AllocCrvAndArrays` +
@@ -631,10 +815,7 @@ impl BSplineCurve {
             .is_rational()
             .map_err(SolidError::nurbs_routine(OP_RAT))?
         {
-            return Err(SolidError::b_spline(
-                OP_RAT,
-                BSplineFailure::Failed("the curve is not rational"),
-            ));
+            return Err(SolidError::b_spline(OP_RAT, BSplineFailure::NotRational));
         }
         let cur_this = nurb_of(self, OP_RAT)?;
         let deg = 3;
@@ -869,7 +1050,7 @@ impl BSplineCurve {
         if dim != 2 && dim != 3 {
             return Err(SolidError::b_spline(
                 OP,
-                BSplineFailure::Failed("the points are neither 2D nor 3D"),
+                BSplineFailure::DimensionNot2Or3 { dim },
             ));
         }
 
@@ -956,7 +1137,9 @@ impl BSplineCurve {
         } else {
             return Err(SolidError::b_spline(
                 OP,
-                BSplineFailure::Failed("the number of vectors is not one it interpolates"),
+                BSplineFailure::TooManyVectors {
+                    given: vectors.len(),
+                },
             ));
         };
 
@@ -978,7 +1161,7 @@ impl BSplineCurve {
     /// # Errors
     ///
     /// `SM_ERR` for more than two vectors, a degree outside `2..=MAX_DEGREE` with two or
-    /// no vectors, no points or no control points, or when the fit fails.
+    /// no vectors, no control points asked for, or when the fit fails.
     pub fn create_approximating_curve(
         num_points: usize,
         par: ParamMethod,
@@ -990,12 +1173,9 @@ impl BSplineCurve {
     ) -> Result<Self> {
         const OP: &str = OP_APPROX_CRV;
         // n = lNumPoints - 1 is -1 for no control points: N_FitCrvApproxDerivs' p > n
-        let n = num_points.checked_sub(1).ok_or_else(|| {
-            SolidError::b_spline(
-                OP,
-                BSplineFailure::Failed("there are no points to approximate"),
-            )
-        })?;
+        let n = num_points
+            .checked_sub(1)
+            .ok_or_else(|| SolidError::b_spline(OP, BSplineFailure::NoControlPoints))?;
         let p = degree;
 
         // option 1: given two end tangents as constraints
@@ -1053,7 +1233,9 @@ impl BSplineCurve {
             // unsupported option
             return Err(SolidError::b_spline(
                 OP,
-                BSplineFailure::Failed("the number of vectors is not one it approximates"),
+                BSplineFailure::TooManyVectors {
+                    given: vectors.len(),
+                },
             ));
         };
 
@@ -1167,11 +1349,23 @@ impl BSplineCurve {
                 .map_err(SolidError::nurbs_routine(OP_DEG_RED))?;
             match red.curve {
                 Some(c) => c,
+                // a degree 1 curve has no lower degree
+                None if cur_p.degree() <= 1 => {
+                    return Err(SolidError::b_spline(
+                        OP_DEG_RED,
+                        BSplineFailure::DegreeTooLowToReduce {
+                            degree: cur_p.degree(),
+                        },
+                    ))
+                }
                 // MSG(_T("Degree reduction failure"))
                 None => {
                     return Err(SolidError::b_spline(
                         OP_DEG_RED,
-                        BSplineFailure::Failed("the degree cannot be reduced within the tolerance"),
+                        BSplineFailure::DegreeNotReducible {
+                            error: red.max_err,
+                            tolerance: tol,
+                        },
                     ))
                 }
             }
@@ -1207,6 +1401,48 @@ impl BSplineCurve {
         Ok(())
     }
 
+    /// Not upstream: removes the interior knot `knot` up to `times` times
+    /// (`N_CrvRemoveKnot`, algorithm A5.8, stopping at the first removal its error
+    /// estimate puts above `tol`), and keeps the `r` removals that pass only when a
+    /// certified bound says the curve moved by at most `r * tol`. Returns `r`; `0`
+    /// leaves the curve as it was.
+    ///
+    /// The certificate does not rest on A5.8's estimate (an exact-arithmetic bound with
+    /// a numerically found basis maximum). The knot is inserted back `r` times into the
+    /// result in rounded interval arithmetic (Boehm's algorithm). That encloses the
+    /// control points of the result over the original knot vector, so the two curves
+    /// share one basis, which is non-negative and sums to one: they differ nowhere by
+    /// more than the largest distance between paired control points, enclosed the same
+    /// way. A rational curve is left as it is: its basis depends on the weights, which a
+    /// removal changes.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without a NURB; those of the removal for a knot on or outside the ends.
+    pub fn remove_knot_certified(&mut self, knot: f64, times: usize, tol: f64) -> Result<usize> {
+        let cur_p = nurb_of(self, OP_REMOVE_CERT)?;
+        if times == 0 || cur_p.cpts().iter().any(|c| c.w != NOW) {
+            return Ok(0);
+        }
+        let removal = cur_p.remove_knot(knot, times, tol)?;
+        let removed = removal.removed;
+        if removed == 0 {
+            return Ok(0);
+        }
+        // the result as it would be stored (its knots fixed up), so the bound is on it
+        let candidate = Self::from_gw_nurb(self.dim, &removal.curve);
+        let after = nurb_of(&candidate, OP_REMOVE_CERT)?;
+        let Some(moved) = removal_moves_at_most(cur_p, after, knot, removed) else {
+            return Ok(0);
+        };
+        let budget = (Ivl::from(removed as f64) * Ivl::from(tol)).hi;
+        if moved.is_nan() || budget.is_nan() || moved > budget {
+            return Ok(0);
+        }
+        self.nurb = candidate.nurb;
+        Ok(removed)
+    }
+
     /// Inserts the interior knot `knot` `times` times (`InsertOneKnot`,
     /// `N_CrvInsertKnot`).
     ///
@@ -1233,8 +1469,8 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for a curve that is not a cubic intersection approximation, a failed
-    /// projection or knot insertion, or an unknown case; `InvalidInput` for array
+    /// `SM_ERR` for a curve that is not a cubic intersection approximation, a point off its
+    /// surface, or a failed projection or knot insertion; `InvalidInput` for array
     /// lengths that do not match the curves; [`SolidError::Unported`] (see the module
     /// deviations).
     pub fn set_intersection_curve_through_point<S: SurfaceEvaluate>(
@@ -1254,7 +1490,7 @@ impl BSplineCurve {
         if !is_intersector_approx(self)? {
             return Err(SolidError::b_spline(
                 OP,
-                BSplineFailure::Failed("the curve is not a piecewise degree-3 intersection curve"),
+                BSplineFailure::NotIntersectionCurve,
             ));
         }
 
@@ -1451,7 +1687,8 @@ impl BSplineCurve {
                 pos_tang[4] = pos_tang[0];
                 pos_tang[5] = pos_tang[1];
             }
-            8 => {
+            // case 8: the classification above leaves only the cases 1 to 8
+            _ => {
                 let add_knot = ku(i_spn1)?
                     + (ku(i_spn1 + 1)? - ku(i_spn1)?) * (ku(i_spn1)? - *new_knot)
                         / (ku(i_spn1 + 1)? - *new_knot);
@@ -1472,12 +1709,6 @@ impl BSplineCurve {
                     eval2(self, param_array[2], true, [pos_tang[2], pos_tang[3]]);
                 pos_tang[4] = through;
                 new_tangent_index = 5;
-            }
-            _ => {
-                return Err(SolidError::b_spline(
-                    OP,
-                    BSplineFailure::Failed("the through point falls in no case it handles"),
-                ))
             }
         }
 
@@ -1553,10 +1784,13 @@ impl BSplineCurve {
                         surface_local_point_solve(k, surface, &domain, pos_jj, guess)?;
 
                     // check and store the Surface1 answer
-                    if sol_value > 1e-8 {
+                    if sol_value > ON_SURFACE {
                         return Err(SolidError::b_spline(
                             OP,
-                            BSplineFailure::Failed("the point does not lie on the surface"),
+                            BSplineFailure::PointOffSurface {
+                                residual: sol_value,
+                                tolerance: ON_SURFACE,
+                            },
                         ));
                     }
                     sol_params
@@ -1988,19 +2222,24 @@ impl BSplineCurve {
         let break_param_percent = 0.15;
         let near_param_percent = 1.0e-3;
 
-        // check input
-        if !(start_tan_type != InValueType::Specified || start_tan.is_some()) {
-            return Err(SolidError::b_spline(
-                OP,
-                BSplineFailure::Failed("the start tangent is specified but not given"),
-            ));
-        }
-        if !(end_tan_type != InValueType::Specified || end_tan.is_some()) {
-            return Err(SolidError::b_spline(
-                OP,
-                BSplineFailure::Failed("the end tangent is specified but not given"),
-            ));
-        }
+        // check input: a specified tangent is given
+        let start_tan = match (start_tan_type, start_tan) {
+            (InValueType::Specified, None) => {
+                return Err(SolidError::b_spline(
+                    OP,
+                    BSplineFailure::StartTangentNotGiven,
+                ))
+            }
+            (InValueType::Specified, tan) => tan,
+            _ => None,
+        };
+        let end_tan = match (end_tan_type, end_tan) {
+            (InValueType::Specified, None) => {
+                return Err(SolidError::b_spline(OP, BSplineFailure::EndTangentNotGiven))
+            }
+            (InValueType::Specified, tan) => tan,
+            _ => None,
+        };
 
         // increment CurrCrv degree when needed (the status is ignored upstream, e.g.
         // for a curve over a zero-length knot interval)
@@ -2156,13 +2395,7 @@ impl BSplineCurve {
             (Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, 1.0));
 
         // when asked to manage start tangent values
-        if start_tan_type == InValueType::Specified {
-            let tgt = start_tan.ok_or_else(|| {
-                SolidError::b_spline(
-                    OP,
-                    BSplineFailure::Failed("the start tangent is specified but not given"),
-                )
-            })?;
+        if let Some(tgt) = start_tan {
             let pt0 = cpt_at(curr_cpts, 0, OP)?.drop_w();
             let pt1 = cpt_at(curr_cpts, 1, OP)?.drop_w();
             let start_tan_cur = Vec3::new(pt1.x - pt0.x, pt1.y - pt0.y, pt1.z - pt0.z);
@@ -2197,13 +2430,7 @@ impl BSplineCurve {
         let (mut end_from_z, mut end_to_z) = (Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, 1.0));
 
         // when asked to manage end tangent values
-        if end_tan_type == InValueType::Specified {
-            let tgt = end_tan.ok_or_else(|| {
-                SolidError::b_spline(
-                    OP,
-                    BSplineFailure::Failed("the end tangent is specified but not given"),
-                )
-            })?;
+        if let Some(tgt) = end_tan {
             let pt_n = cpt_at(curr_cpts, curr_cpt_index, OP)?.drop_w();
             let pt_n1 = cpt_at(
                 curr_cpts,
@@ -2406,10 +2633,10 @@ impl BSplineCurve {
     /// zone tolerance mapped to parameter space) are removed. With
     /// [`crate::kernel::UpstreamFixes::bspline_trim_preserves_uv_spans`] enabled,
     /// that removal applies only to dimension-3 model curves, preserving UV spans
-    /// exactly, except a short UV end span that collapses to a pole (#2129). With
-    /// [`crate::kernel::UpstreamFixes::bspline_trim_keeps_rational_end_spans`], a
+    /// exactly, except a short UV end span that collapses to a pole (#2129). A
     /// rational curve keeps its short end spans, and a model curve's end within a pole
-    /// of an interior knot snaps to that knot (WR-575, #2424). With
+    /// of an interior knot of the knot span holding it snaps to that knot, unless the
+    /// curve is degenerate at the zone tolerance (WR-575, #2424). With
     /// [`TrimMode::IntervalOnly`] only the interval is computed.
     ///
     /// # Errors
@@ -2518,17 +2745,29 @@ impl BSplineCurve {
             }
         }
 
-        // `fixes.bspline_trim_keeps_rational_end_spans` (WR-575): a rational curve keeps
-        // its short end spans, as removing one moves the conic off its shape. A model
-        // curve's end within a pole of an interior knot (#2090) is that knot whichever
-        // side of it is kept, so pieces split there, and the edge's UV trims split at
-        // its end, all end at the same parameter (#2424)
-        let keeps_rational = k.fixes.bspline_trim_keeps_rational_end_spans
-            && self.nurb.as_ref().is_some_and(Curve::is_rational);
+        // (WR-575) a rational curve keeps its short end spans, as removing one moves the
+        // conic off its shape. A model curve's end within a pole of an interior knot
+        // (#2090) is that knot whichever side of it is kept, so pieces split there, and
+        // the edge's UV trims split at its end, all end at the same parameter (#2424)
+        let keeps_rational = self.nurb.as_ref().is_some_and(Curve::is_rational);
         if keeps_rational && self.dim == 3 {
             let this_cur = nurb_of(self, OP)?;
-            let at_min = knot_within_pole(this_cur, &knots, d_min, zone_tol_1d_min, degree)?;
-            let at_max = knot_within_pole(this_cur, &knots, d_max, zone_tol_1d_max, degree)?;
+            let at_min = knot_within_pole(
+                this_cur,
+                &knots,
+                d_min,
+                zone_tol_1d_min,
+                zone_tol_3d,
+                degree,
+            )?;
+            let at_max = knot_within_pole(
+                this_cur,
+                &knots,
+                d_max,
+                zone_tol_1d_max,
+                zone_tol_3d,
+                degree,
+            )?;
             // unless nothing is left between them: the end span is then not kept below
             if at_max - at_min > scaled_zero_min + scaled_zero_max {
                 d_min = at_min;
@@ -2625,25 +2864,72 @@ impl BSplineCurve {
     }
 }
 
-/// The interior knot of `knots` (distinct, ascending) within `zone_tol_1d` of the trim
-/// end `t` whose span to `t` collapses to a pole as check test #15 measures one
-/// ([`end_span_is_pole`] with its tolerance `SM_ZONE_TOL_3D / 10`), else `t`. The
-/// answer is the same whichever side of `t` the trim keeps. Not upstream (#2090, #2424).
+/// Where a trim at `t` ends (#2090, #2424; not upstream): at an end of the knot span
+/// `[lo, hi]` of `knots` (distinct, ascending) holding `t` when that end is an interior
+/// knot within `zone_tol_1d` of `t` and the piece between them collapses to a pole as
+/// check test #15 measures one ([`end_span_is_pole`] with its tolerance
+/// `SM_ZONE_TOL_3D / 10`), the nearer such end first; else at `t`.
+///
+/// The answer depends on `t`, the curve and the tolerances alone, never on which side
+/// of `t` the trim keeps, so the pieces of a split meet at one parameter. Only `lo` and
+/// `hi` can bound the end span a trim at `t` makes, so no other knot is a candidate.
+///
+/// `t` also stays on a curve that is degenerate at the zone tolerance `zone_tol_3d`
+/// (`is_ncrv_degenerate`, the measure of `SmBSplineCurve::IsDegenerate`: its control
+/// points' box is point-sized). Such a curve (a circle of radius 1e-6) is a point to the
+/// kernel at that tolerance, and every split of it is at the pole scale: moving ends to
+/// knots would move them by large parts of the curve, and two ends of one piece would
+/// move to one knot, so the pieces would overlap. A pole end span the trim then leaves
+/// is cleaned as upstream cleans it (`pole_end` in the caller), so check test #15 (which
+/// skips only curves degenerate at its own 1e-6 pole tolerance) is still met. The test
+/// is on the curve passed in: trimming an already trimmed copy of a curve near the
+/// threshold can decide differently, while the pieces of one edge's split, cut from the
+/// same curve, always agree. A curve larger than that snaps as described, short knot
+/// spans included. A piece of such a
+/// curve whose two ends both lie within a pole of one knot (shorter than twice the pole
+/// tolerance) still keeps its requested ends in the caller while its neighbours move to
+/// the knot.
 fn knot_within_pole(
     cur: &Curve,
     knots: &[f64],
     t: f64,
     zone_tol_1d: f64,
+    zone_tol_3d: f64,
     degree: usize,
 ) -> Result<f64> {
     let pole_tol = ZONE_TOL_3D / 10.0;
-    let interior = knots.get(1..knots.len().saturating_sub(1)).unwrap_or(&[]);
-    for &knot in interior {
+    // the knot span holding `t` inside it (none when `t` is on a knot or outside)
+    let Some(hi_at) = knots.iter().position(|&knot| knot > t) else {
+        return Ok(t);
+    };
+    let Some(lo_at) = hi_at.checked_sub(1) else {
+        return Ok(t);
+    };
+    let (Some(&lo), Some(&hi)) = (knots.get(lo_at), knots.get(hi_at)) else {
+        return Ok(t);
+    };
+    if lo >= t {
+        return Ok(t);
+    }
+    // the interior ends of the span, the nearer first (the lower on a tie)
+    let last_at = knots.len().saturating_sub(1);
+    let lo_end = (lo_at > 0).then_some(lo);
+    let hi_end = (hi_at < last_at).then_some(hi);
+    let candidates = if hi - t < t - lo {
+        [hi_end, lo_end]
+    } else {
+        [lo_end, hi_end]
+    };
+    for knot in candidates.into_iter().flatten() {
         let gap = (knot - t).abs();
-        if gap > 0.0 && gap < zone_tol_1d {
+        if gap < zone_tol_1d {
             let span = crv_trim(cur, knot.min(t), knot.max(t))
                 .map_err(SolidError::nurbs_routine(OP_TRIM))?;
             if end_span_is_pole(span.cpts(), 0, degree, pole_tol) {
+                // (the curve's test does not depend on the knot: once is enough)
+                if is_ncrv_degenerate(cur, zone_tol_3d)? {
+                    return Ok(t);
+                }
                 return Ok(knot);
             }
         }
@@ -2681,6 +2967,51 @@ fn end_span_is_pole(cpts: &[CPoint], first: usize, degree: usize, tol: f64) -> b
 mod tests {
     use super::*;
     use crate::nurbs::nurbs_crv::allocate_nurb_curve;
+
+    /// The removal certificate bounds the move at every parameter, sees a control point
+    /// the removal did not put there, and refuses a curve whose knots do not fit.
+    #[test]
+    fn the_removal_certificate_bounds_the_move_and_sees_a_moved_point() {
+        let pw = vec![
+            CPoint::new(0.0, 0.0, 0.0, NOW),
+            CPoint::new(1.0, 2.0, 0.5, NOW),
+            CPoint::new(3.0, 3.0, -1.0, NOW),
+            CPoint::new(4.0, 1.0, 2.0, NOW),
+            CPoint::new(6.0, 0.0, 1.0, NOW),
+        ];
+        let u = vec![0.0, 0.0, 0.0, 0.0, 1.0, 2.5, 2.5, 2.5, 2.5];
+        let before = Curve::new(pw, 3, u).unwrap();
+        let removal = before.remove_knot(1.0, 1, 10.0).unwrap();
+        assert_eq!(removal.removed, 1);
+        let after = BSplineCurve::from_gw_nurb(3, &removal.curve);
+        let after = nurb_of(&after, OP_REMOVE_CERT).unwrap().clone();
+        let bound = removal_moves_at_most(&before, &after, 1.0, 1).unwrap();
+        let sampled = |a: &Curve, b: &Curve| {
+            let (ca, cb) = (
+                BSplineCurve::from_gw_nurb(3, a),
+                BSplineCurve::from_gw_nurb(3, b),
+            );
+            (0..=250)
+                .map(|j| {
+                    let t = 0.01 * f64::from(j);
+                    let (p, q) = (ca.evaluate_point(t).unwrap(), cb.evaluate_point(t).unwrap());
+                    p.distance(q)
+                })
+                .fold(0.0_f64, f64::max)
+        };
+        let moved = sampled(&before, &after);
+        assert!(moved > 0.1 && moved <= bound, "{moved} {bound}");
+        // the first control point moved by 1e-3, which the reinsertion maps to itself
+        let mut nudged = after.clone();
+        nudged.cpts_mut()[0].x += 1e-3;
+        let b2 = removal_moves_at_most(&before, &nudged, 1.0, 1).unwrap();
+        assert!(
+            b2 >= bound.max(1e-3) && b2 >= sampled(&before, &nudged),
+            "{b2}"
+        );
+        // the knot reinserted twice does not give the curve's knots
+        assert!(removal_moves_at_most(&before, &after, 1.0, 2).is_none());
+    }
 
     fn cubic() -> BSplineCurve {
         let pts = [
@@ -2871,9 +3202,12 @@ mod tests {
             .create_extended_curve(0.5, ContinuityType::CInfinity, true)
             .unwrap()
             .is_none());
-        assert!(c
-            .create_extended_curve(1.5, ContinuityType::C0, true)
-            .is_err());
+        assert_eq!(
+            b_spline_cause(c.create_extended_curve(1.5, ContinuityType::C0, true)),
+            BSplineFailure::ContinuityNotExtendable {
+                continuity: ContinuityType::C0
+            }
+        );
         let line = BSplineCurve::create_interpolating_curve(
             ParamMethod::ChordLength,
             3,
@@ -3013,10 +3347,7 @@ mod tests {
         // #1529: a trim 1e-7 from the middle knot of a radius 16 half circle leaves an end
         // span of about 3.5e-6, shorter than the 3D zone tolerance
         let r = 16.0;
-        let mut fixed = Kernel::default();
-        fixed.fixes.bspline_trim_keeps_rational_end_spans = true;
-        let default = Kernel::default();
-        assert!(!default.fixes.bspline_trim_keeps_rational_end_spans);
+        let fixed = Kernel::default();
         for (min, max) in [(0.5 - 1e-7, 0.9), (0.1, 0.5 + 1e-7)] {
             let ivl = Extent1d::from_min_max(min, max);
             let mut kept = half_circle(r);
@@ -3025,14 +3356,6 @@ mod tests {
             assert_eq!(kept.knots(None).unwrap().0, vec![min, 0.5, max]);
             let off = off_circle(&kept, r);
             assert!(off < 1e-12 * r, "{ivl:?}: kept span {off} off the circle");
-
-            // upstream: the span is removed and the rest stretched off the circle
-            let mut old = half_circle(r);
-            let mut old_ivl = ivl;
-            old.trim(&default, &mut old_ivl, TrimMode::Notify).unwrap();
-            assert_ne!(old.knots(None).unwrap().0, vec![min, 0.5, max]);
-            let off = off_circle(&old, r);
-            assert!(off > 1e-9, "{ivl:?}: removed span {off} off the circle");
         }
     }
 
@@ -3051,12 +3374,11 @@ mod tests {
 
     #[test]
     fn issue_2090_kept_rational_end_span_passes_check_test_15() {
-        // #2090: with the flag, a kept end span 1e-8 of the parameter long leaves its
-        // three control points about 2e-7 apart, within the 1e-6 pole tolerance of
-        // check test #15; the trim then ends at the interior knot, on the circle
+        // #2090: a kept end span 1e-8 of the parameter long leaves its three control
+        // points about 2e-7 apart, within the 1e-6 pole tolerance of check test #15; the
+        // trim then ends at the interior knot, on the circle
         let r = 16.0;
-        let mut fixed = Kernel::default();
-        fixed.fixes.bspline_trim_keeps_rational_end_spans = true;
+        let fixed = Kernel::default();
         let full = half_circle(r);
         // (d, whether the short span is kept)
         for (d, kept) in [
@@ -3084,7 +3406,7 @@ mod tests {
                     assert_eq!(c_ivl, Extent1d::from_min_max(min, 0.5));
                 }
                 assert_eq!(c.natural_interval(), c_ivl);
-                // the conic the flag keeps is still kept
+                // the conic is still kept
                 let off = off_circle(&c, r);
                 assert!(off < 1e-12 * r, "d {d}, head {head}: {off} off the circle");
                 // the end within the pole tolerance of the requested point
@@ -3100,15 +3422,6 @@ mod tests {
                 assert!(ok && !idx.contains(&15), "d {d}, head {head}: {idx:?}");
             }
         }
-
-        // flag off: upstream, the span removed and the rest stretched (valid)
-        let default = Kernel::default();
-        let mut c = half_circle(r);
-        let mut c_ivl = Extent1d::from_min_max(0.5 - 1e-8, 0.9);
-        c.trim(&default, &mut c_ivl, TrimMode::Notify).unwrap();
-        assert_eq!(c.knots(None).unwrap().0, vec![0.5 - 1e-8, 0.9]);
-        assert!(off_circle(&c, r) > 1e-9);
-        assert!(failed_checks(&default, &c).0);
     }
 
     #[test]
@@ -3119,8 +3432,7 @@ mod tests {
         // split at the edge's end, meet at one parameter; a longer span is kept on both
         // sides and the split stays where it was asked
         let r = 16.0;
-        let mut fixed = Kernel::default();
-        fixed.fixes.bspline_trim_keeps_rational_end_spans = true;
+        let fixed = Kernel::default();
         // (d, where the pieces meet)
         for (d, meet) in [
             (1e-8, 0.5),
@@ -3159,10 +3471,135 @@ mod tests {
     }
 
     #[test]
+    fn wr_575_split_pieces_of_a_circle_within_the_zone_tolerance_tile_as_asked() {
+        // `intersect.curve_class_p5` gen0231 (#17404): a circle of radius 1e-6, its NURB
+        // knots at the quarters, split into n equal pieces. Each 90-degree knot span is
+        // within the 1e-5 zone tolerance, so no end moves to a knot: before, 0.2 moved to
+        // 0.25 and 0.4 to 0.25, and [0, 0.25], [0.2, 0.4], [0.25, 0.5] overlapped
+        use crate::curve::curve::p2::Curve as Geom;
+        use crate::curve::ellipse::{Ellipse, EllipseOptions};
+        let k = Kernel::default();
+        let r = 1e-6;
+        let circle = Geom::from(
+            Ellipse::new_circle(
+                &k,
+                Vec3::ZERO,
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Extent1d::from_min_max(0.0, 360.0),
+                r,
+                &EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        assert_eq!(circle.natural_interval(), Extent1d::from_min_max(0.0, 1.0));
+        for n in 3..=8u32 {
+            for j in 0..n {
+                let ivl = Extent1d::from_min_max(
+                    f64::from(j) / f64::from(n),
+                    f64::from(j + 1) / f64::from(n),
+                );
+                let mut piece = circle.copy(&k).unwrap();
+                let mut piece_ivl = ivl;
+                piece.trim(&k, &mut piece_ivl, TrimMode::Notify).unwrap();
+                // exactly the requested interval, so the pieces meet end to end
+                assert_eq!(piece_ivl, ivl, "n {n}, piece {j}");
+                assert_eq!(piece.natural_interval(), ivl, "n {n}, piece {j}");
+                // the piece's ends are the circle's points there: a clamped curve ends at
+                // its end control points, which the trim takes from the circle (rounding
+                // of a few ulps of r), and the end-span cleanup moves only interior ones
+                for t in [ivl.min(), ivl.max()] {
+                    let want = circle.evaluate_point(&k, t).unwrap();
+                    let got = piece.evaluate_point(&k, t).unwrap();
+                    let gap = (got - want).length();
+                    assert!(gap <= 1e-12 * r, "n {n}, piece {j}, t {t}: {gap}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wr_575_trim_end_moves_to_the_nearer_end_of_its_own_knot_span() {
+        // a radius 16 half circle with a second knot 2e-9 past its middle knot: both ends
+        // of the knot span [0.5, 0.5 + 2e-9] are within a pole of any end inside it. The
+        // end moves to the nearer end of that span, the same answer for both sides of a
+        // split; an end just past the second knot moves to it, never to 0.5 outside its
+        // own span (whose piece to it is a pole too)
+        let second = 0.5 + 2e-9;
+        let with_second = |r: f64| {
+            let mut c = half_circle(r);
+            c.insert_one_knot(second, 1).unwrap();
+            c
+        };
+        let c = with_second(16.0);
+        let knots = c.knots(None).unwrap().0;
+        assert_eq!(knots, vec![0.0, 0.5, second, 1.0]);
+        let cur = c.nurb.as_ref().unwrap();
+        for (t, nearer) in [
+            (0.5 + 1.5e-9, second),
+            (0.5 + 0.5e-9, 0.5),
+            (second + 1e-9, second),
+        ] {
+            let got = knot_within_pole(cur, &knots, t, 1.0, ZONE_TOL_3D, 2).unwrap();
+            assert_eq!(got, nearer, "t {t}");
+        }
+        // on a knot, outside the curve and NaN: the end stays
+        for t in [0.5, second, -1.0, 2.0] {
+            assert_eq!(
+                knot_within_pole(cur, &knots, t, 1.0, ZONE_TOL_3D, 2).unwrap(),
+                t
+            );
+        }
+        assert!(knot_within_pole(cur, &knots, f64::NAN, 1.0, ZONE_TOL_3D, 2)
+            .unwrap()
+            .is_nan());
+        // the same curve with radius 1e-6 is degenerate at the zone tolerance (its box is
+        // 2e-6 across): every end stays as asked
+        let tiny = with_second(1e-6);
+        let tiny_cur = tiny.nurb.as_ref().unwrap();
+        for t in [0.5 + 1.5e-9, 0.5 + 0.5e-9, second + 1e-9, 0.45] {
+            let got = knot_within_pole(tiny_cur, &knots, t, 1.0, ZONE_TOL_3D, 2).unwrap();
+            assert_eq!(got, t, "t {t}");
+        }
+    }
+
+    #[test]
+    fn wr_575_split_inside_a_short_knot_span_meets_at_the_knot_on_the_circle() {
+        // a radius 16 half circle with a second knot 1e-7 past its middle knot (a knot
+        // span about 4.5e-6 long, under the 1e-5 zone tolerance), split 1e-8 before the
+        // second knot: the piece from the split to that knot (about 4.5e-7) is a pole, so
+        // both pieces end at the knot and stay exactly on the circle, and neither has a
+        // pole span for check test #15
+        let r = 16.0;
+        let k = Kernel::default();
+        let second = 0.5 + 1e-7;
+        let split = second - 1e-8;
+        let with_second = || {
+            let mut c = half_circle(r);
+            c.insert_one_knot(second, 1).unwrap();
+            c
+        };
+        let mut before = with_second();
+        let mut before_ivl = Extent1d::from_min_max(0.1, split);
+        before.trim(&k, &mut before_ivl, TrimMode::Notify).unwrap();
+        let mut after = with_second();
+        let mut after_ivl = Extent1d::from_min_max(split, 0.9);
+        after.trim(&k, &mut after_ivl, TrimMode::Notify).unwrap();
+        assert_eq!(before_ivl, Extent1d::from_min_max(0.1, second));
+        assert_eq!(after_ivl, Extent1d::from_min_max(second, 0.9));
+        assert_eq!(before.natural_interval(), before_ivl);
+        assert_eq!(after.natural_interval(), after_ivl);
+        for c in [&before, &after] {
+            let off = off_circle(c, r);
+            assert!(off < 1e-12 * r, "{off} off the circle");
+            let (ok, idx) = failed_checks(&k, c);
+            assert!(ok && !idx.contains(&15), "{idx:?}");
+        }
+    }
+
+    #[test]
     fn wr_575_non_rational_short_end_span_is_still_removed() {
-        let mut fixed = Kernel::default();
-        fixed.fixes.bspline_trim_keeps_rational_end_spans = true;
-        let default = Kernel::default();
+        let k = Kernel::default();
         // a polynomial (weights 1) curve with an interior knot at 0.5
         let points = [
             CPoint::new(0.0, 0.0, 0.0, NOW),
@@ -3177,13 +3614,14 @@ mod tests {
             .copy_from_slice(&[0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0]);
         let original = BSplineCurve::from_nurb(nurb, 3, false);
         let ivl = Extent1d::from_min_max(0.5 - 1e-8, 0.9);
-        let mut a = original.clone();
+        let mut a = original;
         let mut a_ivl = ivl;
-        a.trim(&fixed, &mut a_ivl, TrimMode::Notify).unwrap();
-        let mut b = original;
-        let mut b_ivl = ivl;
-        b.trim(&default, &mut b_ivl, TrimMode::Notify).unwrap();
-        assert_eq!(a.nurb, b.nurb);
+        a.trim(&k, &mut a_ivl, TrimMode::Notify).unwrap();
+        // upstream's `N_CrvRemoveDegenSegs`: the short span at the interior knot is gone
+        // and the requested interval stays
+        assert_eq!(a.knots(None).unwrap().0, vec![0.5 - 1e-8, 0.9]);
+        assert_eq!(a_ivl, ivl);
+        assert_eq!(a.natural_interval(), ivl);
     }
 
     #[test]
@@ -3283,9 +3721,7 @@ mod tests {
                 InValueType::Same
             ),
             Err(e) if e.nurbs_failure()
-                == Some(&NurbsFailure::BSpline(BSplineFailure::Failed(
-                    "the start tangent is specified but not given"
-                )))
+                == Some(&NurbsFailure::BSpline(BSplineFailure::StartTangentNotGiven))
                 && e.sm_status() == Some(crate::error::SM_ERR)
         ));
         // degree 2: elevated to 3 first (DegreeElevate)
@@ -3316,11 +3752,97 @@ mod tests {
         assert!(matches!(
             r,
             Err(e) if e.nurbs_failure()
-                == Some(&NurbsFailure::BSpline(BSplineFailure::Failed(
-                    "the curve is not a piecewise degree-3 intersection curve"
-                )))
+                == Some(&NurbsFailure::BSpline(BSplineFailure::NotIntersectionCurve))
                 && e.sm_status() == Some(crate::error::SM_ERR)
         ));
+    }
+
+    /// The B-spline failure of `r`, after checking that it keeps the status `SM_ERR` it had
+    /// as a phrase and has the class its cause names.
+    fn b_spline_cause<T>(r: Result<T>) -> BSplineFailure {
+        match r {
+            Err(e) => {
+                assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
+                match e.nurbs_failure() {
+                    Some(NurbsFailure::BSpline(b)) => {
+                        assert_eq!(e.kind(), b.kind(), "{e:?}");
+                        *b
+                    }
+                    other => panic!("{other:?}"),
+                }
+            }
+            Ok(_) => panic!("the call succeeded"),
+        }
+    }
+
+    /// The argument checks of the curve constructors and methods name their causes.
+    #[test]
+    fn argument_checks_name_their_causes() {
+        use crate::error::ErrorKind;
+        let pts = [
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(3.0, 1.0, 0.0),
+            Vec3::new(4.0, 0.0, 0.0),
+        ];
+        let three = [Vec3::new(1.0, 0.0, 0.0); 3];
+        let par = ParamMethod::ChordLength;
+        let b = b_spline_cause(cubic().approximate_rational_curve(0.1));
+        assert_eq!(b, BSplineFailure::NotRational);
+        assert_eq!(b.kind(), ErrorKind::Unsupported);
+        let b = b_spline_cause(BSplineCurve::create_interpolating_curve(
+            par,
+            4,
+            3,
+            &pts,
+            &[],
+            None,
+            false,
+        ));
+        assert_eq!(b, BSplineFailure::DimensionNot2Or3 { dim: 4 });
+        assert_eq!(b.kind(), ErrorKind::InvalidInput);
+        let b = b_spline_cause(BSplineCurve::create_interpolating_curve(
+            par, 3, 3, &pts, &three, None, false,
+        ));
+        assert_eq!(b, BSplineFailure::TooManyVectors { given: 3 });
+        let b = b_spline_cause(BSplineCurve::create_approximating_curve(
+            5, par, 3, 3, &pts, &three, None,
+        ));
+        assert_eq!(b, BSplineFailure::TooManyVectors { given: 3 });
+        // a count of 0 control points, though points are given
+        let b = b_spline_cause(BSplineCurve::create_approximating_curve(
+            0,
+            par,
+            3,
+            3,
+            &pts,
+            &[],
+            None,
+        ));
+        assert_eq!(b, BSplineFailure::NoControlPoints);
+        let b = b_spline_cause(cubic().deform_to_end_point_targets(
+            None,
+            None,
+            None,
+            InValueType::Same,
+            None,
+            InValueType::Specified,
+        ));
+        assert_eq!(b, BSplineFailure::EndTangentNotGiven);
+        assert_eq!(b.kind(), ErrorKind::InvalidInput);
+        match b_spline_cause(cubic().degree_reduction(1e-12, false)) {
+            b @ BSplineFailure::DegreeNotReducible { error, tolerance } => {
+                assert_eq!(tolerance, 1e-12);
+                assert!(error > tolerance, "{error}");
+                assert_eq!(b.kind(), ErrorKind::NotWithinTolerance);
+            }
+            other => panic!("{other:?}"),
+        }
+        let mut line = BSplineCurve::create_line_segment(3, pts[0], pts[1]).unwrap();
+        let b = b_spline_cause(line.degree_reduction(1.0, false));
+        assert_eq!(b, BSplineFailure::DegreeTooLowToReduce { degree: 1 });
+        assert_eq!(b.kind(), ErrorKind::InvalidInput);
     }
 
     #[test]

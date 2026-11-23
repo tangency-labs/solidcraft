@@ -7,9 +7,8 @@
 # during the build, and the same binaries as the AppImage/deb/rpm. The binaries need glibc >= 2.35
 # and load X11, Wayland, xkbcommon and Vulkan at runtime; the freedesktop runtime has all of
 # them, and the GPU driver comes from its org.freedesktop.Platform.GL extension.
-# Earlier releases used the ids ai.storyteller.solidcraft (0.8 until the move to Tangency Labs)
-# and ai.storyteller.solvecraft (before 0.8). The Flatpak repository marks both end-of-life with a
-# rebase to this one, so `flatpak update` moves existing installs over (packaging/flatpak-site.sh,
+# Earlier releases used the id ai.storyteller.solidcraft (0.8 until the move to Tangency Labs).
+# The Flatpak repository marks it end-of-life with a rebase to this one, so `flatpak update` moves existing installs over (packaging/flatpak-site.sh,
 # docs/compatibility.md).
 id: io.tangencylabs.solidcraft
 runtime: org.freedesktop.Platform
@@ -36,7 +35,6 @@ finish-args:
   # under the old app ids, read once on first launch when this app was installed next to the old
   # one instead of replacing it through `flatpak update`.
   - --filesystem=~/.var/app/ai.storyteller.solidcraft:ro
-  - --filesystem=~/.var/app/ai.storyteller.solvecraft:ro
   # Deliberately not granted: broad home/host filesystem access.
 modules:
   - name: solidcraft
@@ -44,8 +42,6 @@ modules:
     build-commands:
       - install -Dm755 bin/solidcraft /app/bin/solidcraft
       - install -Dm755 bin/solidcraft-cli /app/bin/solidcraft-cli
-      # The old CLI name, forwarding to solidcraft-cli (compatibility shim, docs/compatibility.md).
-      - install -Dm755 bin/solvecraft-cli /app/bin/solvecraft-cli
       - install -Dm644 share/applications/io.tangencylabs.solidcraft.desktop /app/share/applications/io.tangencylabs.solidcraft.desktop
       - install -Dm644 share/mime/packages/io.tangencylabs.solidcraft.xml /app/share/mime/packages/io.tangencylabs.solidcraft.xml
       # Already has the release's version and date substituted by package.sh.

@@ -44,7 +44,12 @@ fn three_and_four_curve_loops_are_flat_patches() {
     use std::f64::consts::PI;
     let cases: Vec<(Vec<[[f64; 2]; 2]>, f64, f64)> = vec![
         (vec![[[0.0, 0.0], [20.0, 0.0]], [[20.0, 0.0], [10.0, 15.0]], [[10.0, 15.0], [0.0, 0.0]]], 150.0, 1e-6),
+        // Issue #20380: loop order holds when curves are drawn or mirrored in reverse
+        (vec![[[0.0, 0.0], [20.0, 0.0]], [[20.0, 0.0], [10.0, 15.0]], [[0.0, 0.0], [10.0, 15.0]]], 150.0, 1e-6),
+        (vec![[[20.0, 0.0], [0.0, 0.0]], [[20.0, 0.0], [10.0, 15.0]], [[10.0, 15.0], [0.0, 0.0]]], 150.0, 1e-6),
+        (vec![[[0.0, 0.0], [20.0, 0.0]], [[10.0, 15.0], [20.0, 0.0]], [[10.0, 15.0], [0.0, 0.0]]], 150.0, 1e-6),
         (vec![[[0.0, 0.0], [10.0, 0.0]], [[10.0, 0.0], [10.0, 10.0]], [[10.0, 10.0], [0.0, 10.0]], [[0.0, 10.0], [0.0, 0.0]]], 100.0, 1e-6),
+        (vec![[[0.0, 0.0], [10.0, 0.0]], [[10.0, 10.0], [10.0, 0.0]], [[10.0, 10.0], [0.0, 10.0]], [[0.0, 0.0], [0.0, 10.0]]], 100.0, 1e-6),
     ];
     for (lines, want, tol) in cases {
         for continuity in [json!("g0"), json!("g1"), json!("g3")] {
@@ -243,6 +248,18 @@ fn hostile_networks_are_refused() {
     assert_eq!(s.world_state().unwrap().bodies.len(), bodies, "a refused network left a body behind");
 }
 
+/// Three curves that do not connect end to end are refused naming the gap.
+#[test]
+fn loops_that_do_not_connect_are_refused() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let a = line(&mut s, [0.0, 0.0], [10.0, 0.0]);
+    let b = line(&mut s, [20.0, 0.0], [30.0, 0.0]);
+    let c = line(&mut s, [30.0, 0.0], [0.0, 0.0]);
+    let err = s.execute("surface.boundary", &json!({"curves": [a, b, c]})).unwrap_err();
+    assert!(err.to_string().contains("list the curves in loop order"), "{err}");
+}
+
 /// An edit (`timeline.redefine`) may turn a loop of sketch curves into the network of the same
 /// curves and back: the feature keeps its place and its name, and the surface its area.
 #[test]
@@ -317,4 +334,97 @@ fn a_boundary_surface_and_a_loft_surface_on_one_curve_stitch() {
     assert_eq!(faces["faces"].as_array().map(Vec::len), Some(2), "{faces}");
     let edges = run(&mut s, "model.edges", json!({"body": body}));
     assert_eq!(edges["edges"].as_array().map(Vec::len), Some(7), "{edges}");
+}
+
+/// A long, tilted pair of curved sheets: the leave direction at the first corner crosses both
+/// parameter boundaries. Reading its shape must not shrink a finite-difference step and carry
+/// its round-off error into every station of the requested G3 blend.
+#[test]
+fn a_g3_blend_at_a_curved_sheet_corner_keeps_both_seams() {
+    let mut s = Session::default();
+    for (name, x, start, end, through) in [
+        ("H0", 0, [0, 0], [150, 15], [75, 12]),
+        ("H1", 600, [0, 5], [150, 20], [75, 17]),
+        ("F0", 0, [180, 18], [320, -10], [250, 16]),
+        ("F1", 600, [180, 23], [320, -5], [250, 21]),
+    ] {
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [x, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": name}));
+        run(&mut s, "sketch.arc.three_point", json!({"start": start, "end": end, "through": through}));
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    for (name, a, b) in [("Hood", "H0", "H1"), ("Fender", "F0", "F1")] {
+        run(&mut s, "surface.loft", json!({"sections": [{"sketch": a, "curves": ["a1"]}, {"sketch": b, "curves": ["a1"]}], "body_name": name}));
+    }
+    run(
+        &mut s,
+        "surface.blend",
+        json!({"from": {"body": "Hood", "edges": [[300, 150, 17.5]]}, "to": {"body": "Fender", "edges": [[300, 180, 20.5]]}, "continuity": ["g3", "g3"], "stitch": true, "body_name": "Transition"}),
+    );
+    let result = run(&mut s, "inspect.continuity", json!({"body": "Transition", "edges": [[300, 150, 17.5], [300, 180, 20.5]], "samples": 257}));
+    let edges = result["bodies"][0]["edges"].as_array().unwrap();
+    assert_eq!(edges.len(), 2);
+    for edge in edges {
+        assert!(matches!(edge["order"].as_str(), Some("g3" | "g4")), "{}", edge["curvature_change_jump_per_mm2"]);
+    }
+}
+
+/// #17197: a boundary curve made of two sketch lines that meet at a sharp corner can't be fitted
+/// smoothly, so the surface is refused, and the refusal names the corner and how sharply the
+/// curve turns there. The V runs from (0, 0) to (10, 0) and then back up to (4, 6): it turns by
+/// 135° at (10, 0, 0).
+#[test]
+fn a_curve_with_a_corner_is_refused_naming_the_corner() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Vee"}));
+    let out = line(&mut s, [0.0, 0.0], [10.0, 0.0]);
+    let back = line(&mut s, [10.0, 0.0], [4.0, 6.0]);
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "High"}));
+    let high = line(&mut s, [0.0, 0.0], [10.0, 6.0]);
+    run(&mut s, "sketch.finish", json!({}));
+    let params = json!({"u": [{"sketch": "Vee", "curves": [out, back]}, {"sketch": "High", "curves": [high]}]});
+    let e = match s.execute("surface.boundary", &params) {
+        Ok(v) => panic!("a curve with a corner was built: {v}"),
+        Err(e) => e.to_string(),
+    };
+    assert!(e.contains("can't be fitted closely enough; its curves meet at (10, 0, 0) turning by 135.0°"), "{e}");
+}
+
+/// #17053: a boundary surface through two curves that meet at one end (a quarter arc on the
+/// ground and a straight side rising from one of its ends) is a loft whose side between them
+/// collapses to that point. Each side's distance from the surface is proved; a side starting at
+/// the collapsed corner was refused ("gap is not enclosed") when its first nearest point fell
+/// elsewhere along the collapsed side, which rounding decided: before the fix 7 of these 32
+/// cases were refused. Every placement and direction builds the one face.
+#[test]
+fn two_curves_meeting_at_a_corner_bound_their_distance_from_the_surface() {
+    let q = std::f64::consts::FRAC_PI_2;
+    for r in [15.0, 7.3] {
+        for t0 in [0.1f64, 0.37, 1.0, 5.5] {
+            let at = |t: f64| [r * t.cos(), r * t.sin()];
+            let corner = [r * t0.cos(), r * t0.sin(), 0.0];
+            let far = [2.0 * r * (t0 - 0.4).cos(), 2.0 * r * (t0 - 0.4).sin(), 3.3 * r];
+            for (start, end) in [(at(t0), at(t0 + q)), (at(t0 + q), at(t0))] {
+                for (a, b) in [(corner, far), (far, corner)] {
+                    let mut s = Session::default();
+                    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Ground"}));
+                    let arc = run(&mut s, "sketch.arc.three_point", json!({"start": start, "end": end, "through": at(t0 + 0.5 * q)}));
+                    let arc = first(&arc["created"]["curves"]);
+                    run(&mut s, "sketch.finish", json!({}));
+                    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Side"}));
+                    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+                    let side = line3d(&mut s, a, b);
+                    run(&mut s, "sketch.finish", json!({}));
+                    let made =
+                        s.execute("surface.boundary", &json!({"u": [{"sketch": "Ground", "curves": [arc]}, {"sketch": "Side", "curves": [side]}]}));
+                    let made = match made {
+                        Ok(v) => v,
+                        Err(e) => panic!("r {r}, arc from {start:?}, side from {a:?}: {e}"),
+                    };
+                    let faces = run(&mut s, "model.faces", json!({"body": first(&made["created_bodies"])}));
+                    assert_eq!(faces["faces"].as_array().map(Vec::len), Some(1), "r {r}, arc from {start:?}, side from {a:?}: {faces}");
+                }
+            }
+        }
+    }
 }

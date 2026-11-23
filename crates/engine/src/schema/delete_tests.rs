@@ -186,7 +186,7 @@ fn png() -> String {
     b.extend(400u32.to_be_bytes());
     b.extend(200u32.to_be_bytes());
     b.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    solidcraft_doc::canvas::base64_encode(&b)
+    crate::tests::image_file(&b)
 }
 
 /// Every form of the command, in warn without warnings: the reply matches the output schema and
@@ -220,7 +220,7 @@ fn replies_match_the_output_schema() {
     assert_eq!(r["bodies"], json!([body]), "{r}");
     assert_eq!(r["skipped"], json!(["the origin planes can't be deleted"]), "{r}");
     // A canvas by id, with the other keys `null`.
-    run(&mut s, "canvas.insert", json!({"data": png()}));
+    run(&mut s, "canvas.insert", json!({"path": png()}));
     let canvas = s.doc.canvases[0].id;
     let r = run(&mut s, "selection.delete", json!({"canvases": [canvas], "items": null, "components": null, "joints": null, "dry_run": false}));
     check(&r);
