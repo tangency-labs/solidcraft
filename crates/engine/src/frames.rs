@@ -67,6 +67,11 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
             &[("face", Pick), ("faces", Picks), ("face_body", Body), ("from", Make), ("to", Make), ("targets", Body), ("participants", Body)]
         }
         "solid.revolve" => &[("face", Pick), ("axis", Axis), ("to", Make), ("targets", Body), ("participants", Body)],
+        // A sweep profile given as a body face: the face point, in the frame of the body under it.
+        // The sweep's own geometry (its path on a body's edges, the direction its profile follows)
+        // stays in the world, and goes into the active component's frame
+        // (`to_active_frame_geometry`).
+        "solid.sweep" => &[("face", Pick), ("face_body", Body)],
         // Edit Feature of a surface revolve (`map_local`): its `{origin, dir}` axis. A new surface
         // revolve has no entry, so it is taken into the active frame whole (`to_active_frame`),
         // picked edge and face axes too.
@@ -74,7 +79,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.box" | "solid.sphere" => &[("corner", Make), ("center", Make)],
         "solid.cylinder" | "solid.coil" | "solid.torus" | "solid.cone" => &[("base", Make), ("center", Make), ("axis", Dir)],
         "solid.fillet" | "solid.chamfer" => &[("edges", Picks), ("body", Body)],
-        "solid.hole" => &[("position", Pick), ("direction", Dir), ("body", Body)],
+        "solid.hole" => &[("position", Pick), ("references", Picks), ("direction", Dir), ("body", Body)],
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
         "solid.offset_face" | "solid.shell" | "face.delete" => &[("faces", Picks), ("body", Body)],
         "solid.thread" => &[("face", Pick), ("faces", Picks), ("from", Pick), ("up_to", Plane)],

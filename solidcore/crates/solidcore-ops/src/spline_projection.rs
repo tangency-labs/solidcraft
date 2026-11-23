@@ -4,7 +4,7 @@
 
 use solidcore::curve::spline_projection as kernel;
 use solidcore_convert as convert;
-use solidcore_record::brep::Curve;
+use solidcore_record::brep::{Curve, Surface};
 use solidcore_record::{Plane, Vec3};
 
 use crate::{Error, Result};
@@ -27,6 +27,18 @@ fn record_spline(s: solidcore::prism::read::PlanarSpline) -> PlanarSpline {
         points: s.points.into_iter().map(convert::record_vec2).collect(),
         weights: s.weights,
     }
+}
+
+fn record_pieces(pieces: Vec<solidcore::prism::read::PlanarPiece>) -> Vec<PlanarPiece> {
+    pieces
+        .into_iter()
+        .map(|p| match p {
+            solidcore::prism::read::PlanarPiece::Seg(s) => {
+                PlanarPiece::Seg(convert::record_seg2(&s))
+            }
+            solidcore::prism::read::PlanarPiece::Spline(s) => PlanarPiece::Spline(record_spline(s)),
+        })
+        .collect()
 }
 
 /// Split one clamped spline at existing knots to meet the client's control budget.
@@ -60,19 +72,64 @@ pub fn project_curve(
         tol,
         work,
     )
-    .map(|pieces| {
-        pieces
-            .into_iter()
-            .map(|p| match p {
-                solidcore::prism::read::PlanarPiece::Seg(s) => {
-                    PlanarPiece::Seg(convert::record_seg2(&s))
-                }
-                solidcore::prism::read::PlanarPiece::Spline(s) => {
-                    PlanarPiece::Spline(record_spline(s))
-                }
-            })
-            .collect()
-    })
+    .map(record_pieces)
+}
+
+/// A boundary of an analytic cylinder, projected along its axis. The kernel
+/// certifies the complete native interval against that support's exact circle.
+/// Conflicting supporting circles are ambiguous and do not select an image.
+pub fn cylinder_edge_projection(
+    body: &solidcore_record::brep::Brep,
+    plane: &Plane,
+    index: usize,
+    tol: f64,
+) -> Option<Vec<PlanarPiece>> {
+    let edge = body.edges.get(index)?;
+    // An analytic curve keeps the general path's own reading.
+    if matches!(
+        &edge.curve,
+        Curve::Line { .. } | Curve::Circle { .. } | Curve::Ellipse { .. } | Curve::Polyline { .. }
+    ) {
+        return None;
+    }
+    if !edge.uses.iter().any(|usage| {
+        body.faces
+            .get(usage.face as usize)
+            .is_some_and(|face| matches!(face.surface, Surface::Cylinder { .. }))
+    }) {
+        return None;
+    }
+    let at = |i: u32| {
+        body.vertices
+            .get(i as usize)
+            .map(|v| convert::vec3(Vec3::from(v.point)))
+    };
+    let ends = [at(edge.vertices[0])?, at(edge.vertices[1])?];
+    let curve = convert::curve(edge.parameters()).ok()?;
+    let target = convert::plane(plane);
+    let mut found = None;
+    for usage in &edge.uses {
+        let Some(Surface::Cylinder { frame, radius }) =
+            body.faces.get(usage.face as usize).map(|f| &f.surface)
+        else {
+            continue;
+        };
+        let Some(pieces) = kernel::cylinder_projection(
+            &curve,
+            edge.interval,
+            ends,
+            (&convert::frame(frame), *radius),
+            &target,
+            tol,
+        ) else {
+            continue;
+        };
+        if found.as_ref().is_some_and(|previous| previous != &pieces) {
+            return None;
+        }
+        found = Some(pieces);
+    }
+    found.map(record_pieces)
 }
 
 /// Project the requested native record edges without building or changing their body.

@@ -48,6 +48,15 @@ fn follows_view(app: &SolveApp) -> bool {
     rows_start_open(app)
 }
 
+/// Whether the Browser tree panel is open now. The panel layout holds the effective state (a
+/// panel closed from its host menu keeps its instance with `requested_open` false), and the
+/// window's flag is the fallback for a layout that has no Browser instance yet.
+pub(crate) fn panel_open(app: &SolveApp) -> bool {
+    app.panel_runtime()
+        .and_then(|runtime| runtime.layout().layout().instances.iter().find(|panel| panel.id.0 == "browser").map(|panel| panel.requested_open))
+        .unwrap_or(app.ui.show_browser)
+}
+
 /// Reveal a production panel and its tab so an explicit Find can reach the real rows.
 pub(crate) fn reveal_shared_panel(app: &mut SolveApp, name: &str) {
     use solidcraft_engine::panels::{LayoutAction, Mutation};
@@ -72,6 +81,20 @@ pub(crate) fn reveal_shared_panel(app: &mut SolveApp, name: &str) {
     if !mutations.is_empty() {
         let _ = app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations });
     }
+}
+
+/// Close a production panel in the layout, so the panel state follows the window's flag (#16058).
+/// A layout without that panel keeps the flag alone.
+pub(crate) fn close_shared_panel(app: &mut SolveApp, name: &str) {
+    use solidcraft_engine::panels::{LayoutAction, Mutation};
+
+    let Some(layout) = app.panel_runtime().map(|runtime| runtime.layout().layout()) else { return };
+    let Some(panel) = layout.instances.iter().find(|panel| panel.id.0 == name) else { return };
+    if !panel.requested_open {
+        return;
+    }
+    let mutation = Mutation::Close { instance: panel.id.clone() };
+    let _ = app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![mutation] });
 }
 
 /// Find in Browser for a body: show the Browser and find the body there ([`find_in_tree`]). It
