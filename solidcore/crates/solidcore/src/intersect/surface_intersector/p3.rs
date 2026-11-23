@@ -2071,6 +2071,10 @@ impl<O: Copy + PartialEq> FaceQueries<SolveObject> for TrimmedFaceContext<'_, O>
         self.queries.face_zone_tol_3d(self.face)
     }
 
+    fn face_has_loopuses(&self, _: SolveObject) -> Result<bool> {
+        self.queries.face_has_loopuses(self.face)
+    }
+
     fn face_point_classify(
         &self,
         k: &Kernel,
