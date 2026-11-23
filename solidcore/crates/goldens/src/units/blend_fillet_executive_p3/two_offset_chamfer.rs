@@ -156,10 +156,7 @@ pub(super) fn rust(input: &TwoOffsetChamfer) -> Result<Output, HarnessError> {
     contract::validate_two_offset_chamfer(&wire).map_err(|e| HarnessError::new(e.to_string()))?;
     let mut k = Kernel::default();
     match run(&mut k, input) {
-        Ok(values) => Ok(super::with_point_step(
-            output(&values)?,
-            super::rust_point_step(&k),
-        )),
+        Ok(values) => output(&values),
         Err(error) => match Output::unported(&error) {
             Some(deferred) => Ok(deferred),
             None => Err(HarnessError::new(error.to_string())),
@@ -517,8 +514,8 @@ mod round_definition_rows {
                 }
             }
             let blends = certified_blends(&k, &mut done.body, name);
-            volume_band(&k, &mut done.body, &blends, old, name);
-            mass_bands(&k, &mut done.body, name);
+            let estimates = volume_band(&k, &mut done.body, &blends, old, name);
+            mass_bands(&k, &mut done.body, &estimates, name);
         }
     }
 }

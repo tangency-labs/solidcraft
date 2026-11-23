@@ -1622,6 +1622,7 @@ fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
                 ray_fire: *ray,
                 distance_tolerance: *tol,
                 surface_cache: None,
+                modes: None,
                 face_queries: None,
                 face_cache: None,
                 kernel: &k,
@@ -3116,6 +3117,72 @@ mod tests {
             assert!(e0.iter().all(|c| c.abs() <= tol), "they meet at the node: {e0:?}");
         }
         eprintln!("crossing node: complete branches y=±x; enclosed residual {worst:e} <= {tol:e}");
+    }
+
+    /// The curve types of the intersection of upstream's case `name`.
+    fn curve_types(name: &str) -> Vec<sp2::TsectCurveType> {
+        let case = crate::case::regression_case(&Runner, name);
+        let input: Inputs = case.parse().unwrap();
+        let mut first = this_surface(input.this.as_ref().unwrap()).unwrap().unwrap();
+        let OpIn::Gssi {
+            dom,
+            other,
+            other_dom,
+            tol,
+            translate,
+        } = input.op
+        else {
+            panic!("intersection case");
+        };
+        let mut second = Surface::from(bss_of(&other).unwrap());
+        let k = Kernel::default();
+        if let Some(t) = translate {
+            let mut ax = Axis2Placement::default();
+            ax.translate(v3(t));
+            first.transform(&k, &ax, None).unwrap();
+            second.transform(&k, &ax, None).unwrap();
+        }
+        first
+            .global_surface_intersect(
+                &k,
+                &dom_of(dom),
+                &second,
+                &dom_of(other_dom),
+                [true, true],
+                tol,
+                None,
+            )
+            .unwrap()
+            .curve_types
+    }
+
+    /// Two surfaces that coincide over a region touch there everywhere, not along a curve
+    /// (#18930). With the tangent curve tracer, two of upstream's coincident pairs keep the
+    /// curves the marcher finds: the boundaries of the coincident region (and, for the two
+    /// surfaces of revolution, the crossing where they part), and no tangent curve. The
+    /// tracer's seeds on these pairs lie on domain edges and corners, the ends of the
+    /// region's boundary curves, where at most half of its probe circle is inside the domains.
+    #[test]
+    fn coincident_surfaces_get_no_tangent_curve_from_the_tracer() {
+        use sp2::TsectCurveType::{Coincident, Crossing};
+        for (name, want) in [
+            ("ssi_adv_ssi_rev_rev_coin_f0_f0", vec![Coincident, Coincident, Crossing]),
+            ("ssi_adv_ssi_coincident_torii_f0_f0", vec![Coincident; 4]),
+        ] {
+            assert_eq!(curve_types(name), want, "{name}");
+        }
+    }
+
+    /// Two spheres given in different parameters that coincide everywhere (#18930): the
+    /// intersection is the four boundaries of the region the domains share, with the tangent
+    /// curve tracer too. A seed at a pole of one sphere, where its parameters keep only the
+    /// meridian's direction, found the contact in two opposite directions there, and the
+    /// tracer traced the region's boundary as a tangent curve.
+    #[test]
+    fn a_pole_of_two_coincident_spheres_starts_no_tangent_curve() {
+        use sp2::TsectCurveType::Coincident;
+        let name = "ssi_adv_ssi_coincident_spheres2_f0_f0";
+        assert_eq!(curve_types(name), vec![Coincident; 4], "{name}");
     }
 
     /// The generators reach the ops with successful outcomes on the Rust side.

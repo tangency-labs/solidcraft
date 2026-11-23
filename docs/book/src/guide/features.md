@@ -89,6 +89,10 @@ start or end offsets or a From Object input, the target also sets the stored dis
 one-sided direction, so returning to **Distance** keeps that reach. Thin Extrude keeps its
 existing picks. With the setting off, picks only add profiles.
 
+**To Object** and **From Object** also take a point that isn't on the model: hover a sketch line
+or an edge and click one of the points that light up, its ends or its middle (a hole's centre
+too), the way Move's points are picked. So an extrude can end where two sketch lines meet.
+
 Dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it,
 such as the far side of the block a cut goes into: once the arrow's tip comes within a few
 screen points of such a face, the distance becomes exactly that face's and the face is
@@ -159,13 +163,20 @@ angular placement when opened, edited or copied; creating another revolve uses t
 To Object follows that same direction for each selected profile, including curved target faces.
 Pick a target away from the axis so its angular position is defined.
 
-For cylindrical **Emboss**, select a supported cylinder face (outside, or a bore) and a tangent sketch
-profile. **Deboss** cuts radially into the wall (outwards from a bore, which an Emboss raises towards the axis; a Deboss that would break through the outer wall is refused). Orthogonal line profiles, including holes and
-concave outlines, wrap with exact radial walls; the profile must stay clear of seams and ends.
-Complete cylinders and coaxial sleeves are supported. Capture pending component positions
-before applying. The feature stores the selected target and author occurrence paths, so edits
-and reopening retain the chosen instances. Other curved surfaces and free-form profiles remain
-unsupported. A new Emboss without an explicit face infers a unique eligible supported cylinder;
+For **Emboss** on a picked face, select the face (planar, a cylinder wall outside or a bore, or
+another curved face) and a sketch profile. **Deboss** cuts into the face (outwards from a bore, which an Emboss raises towards the axis; a Deboss that would break through the outer wall is refused). On a
+complete cylinder or coaxial sleeve every profile wraps round the wall by arc length: straight edges
+along the axis and round the circumference keep exact radial walls, and curves, diagonals and text
+wrap too, their edges and walls fitted within the part's tolerance. Profiles may have holes and
+concave outlines, and must stay clear of seams and ends. A partial cylinder wall bounded by two arcs
+round its axis and two lines along it (a half tube, a rounded box corner, a revolved wall) wraps the
+same way; the profiles must stay inside the picked face, and raised material that runs into another
+part of the body, or sunk material that breaks through another face, is refused. On any other
+cylinder face and any other face, each closed region follows the face at the given depth: on a
+cylinder it is laid on the wall at its arc length from the sketch, elsewhere it is projected along
+the sketch normal; a region that does not lie wholly on the face is refused. Capture pending component positions before applying. The
+feature stores the selected target and author occurrence paths, so edits and reopening retain the
+chosen instances. A new Emboss without an explicit face infers a unique eligible cylinder, outside or a bore;
 select the face when the target is ambiguous. Older saved features without a face retain their
 planar placement.
 
@@ -229,7 +240,7 @@ a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "lef
 
 Fillets and chamfers handle straight edges between planar faces, whole smooth loops, runs of
 neighbouring edges with mitred or spherical corners, and closed chains of curved edges (a rolling
-ball). See the roadmap's known limitations for the rest.
+ball). See the roadmap's [known limitations](https://github.com/tangency-labs/solidcraft/blob/main/docs/roadmap-detail.md#known-limitations) for the rest.
 
 **Curvature continuous** (G2) in the Fillet dialog's **Type** blends straight edges between two
 planar faces with an exact quintic section. The tangent plane and curvature match each side
@@ -246,6 +257,15 @@ Scripts and MCP use the same command, for example on a 20 mm box:
 {"command": "solid.fillet", "params": {"edges": [[20, 0, 10]], "radius": 2, "type": "curvature"}}
 ```
 `type: "g2"` is an alias. Existing fillets still default to circular, constant-radius G1 blends.
+
+To round several edges at different radii in one fillet (where rounding them one after another
+cannot meet at their shared corners), scripts give `edge_radii`: one radius per picked edge, in
+the order of `edges`. `radius` stays the nominal radius (usually the first). It takes a constant,
+exact, rolling-corner, mitred fillet of the picked edges alone (`tangent_chain: false`); with any
+other option, or a count that does not match the edges, the command is refused, saying why:
+```json
+{"command": "solid.fillet", "params": {"edges": [[20, 0, 10], [40, 15, 10]], "radius": 1, "edge_radii": [1, "3 mm"], "tangent_chain": false}}
+```
 
 Where three or more rounded edges meet at a corner, the Fillet dialog shows **Corners**: **Ball**
 (the default, a piece of the rolling ball's sphere, tangent (G1) to each round) or **Smooth
@@ -410,7 +430,7 @@ still be added through `set`. The fields of the common features:
 |---|---|
 | Extrude | `extent`: {`distance`, `direction`: positive\|negative\|symmetric, `distance2`, `start_offset`, `through_all`, `taper`, `to`, `to_offset`, `from`}; `operation`: new_body\|join\|cut\|intersect; `targets`; `profiles`; `sketch`; `thin`: {`curves`, `thickness`, `side`: center\|inside\|outside\|two_sides, `thickness2`} |
 | Revolve | `angle`, `angle2`, `symmetric`, `axis`, `to`, `operation`, `targets`, `profiles`, `sketch` |
-| Fillet | `radius`, `edges` (a point on each edge), `body`, `style` |
+| Fillet | `radius`, `edges` (a point on each edge), `body`, `style`, `edge_radii` (one radius per edge) |
 | Chamfer | `distance`, `distance2` or `angle`, `flip`, `edges`, `body` |
 | Box | `length`, `width`, `height`, `corner`, `operation` |
 | Cylinder | `radius`, `height`, `base`, `axis`, `operation`, `references` (an `edge` point and a `distance` each, as a hole's) |

@@ -280,6 +280,38 @@ pub trait App {
     ///
     /// This function does not return a value. Any changes to the input should be made directly to `_raw_input`.
     fn raw_input_hook(&mut self, _ctx: &egui::Context, _raw_input: &mut egui::RawInput) {}
+
+    /// Decide whether a window event that egui would answer with a repaint should paint a frame.
+    ///
+    /// eframe calls this before it schedules the repaint for the event. The event is still
+    /// delivered to egui the next time a frame runs, so returning `Some(false)` only skips that
+    /// frame: call [`egui::Context::request_repaint`] (or return `Some(true)`) when the app needs
+    /// to react now. `None` keeps eframe's default.
+    ///
+    /// This lets an app ignore pointer motion that cannot change anything it shows, instead of
+    /// painting every frame the pointer moves.
+    ///
+    /// Only the root viewport's events are put to the app: the event does not say which window
+    /// it came from, so another window's keep eframe's default.
+    ///
+    /// Only native windows have winit events; the web backend never calls this.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn repaint_on_window_event(&mut self, _event: &winit::event::WindowEvent) -> Option<bool> {
+        None
+    }
+
+    /// Decide whether a device event that eframe would answer with a repaint should paint a
+    /// frame. This is [`Self::repaint_on_window_event`] for events that come from a device
+    /// rather than a window; on some platforms pointer motion arrives here
+    /// ([`winit::event::DeviceEvent::MouseMotion`]) instead of as a window event, so an app that
+    /// ignores pointer motion must answer both. Only motion delivered to the root viewport is put
+    /// to the app.
+    ///
+    /// Only native windows have winit events; the web backend never calls this.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn repaint_on_device_event(&mut self, _event: &winit::event::DeviceEvent) -> Option<bool> {
+        None
+    }
 }
 
 /// Options controlling the behavior of a native window.

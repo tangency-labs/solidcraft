@@ -586,3 +586,19 @@ fn a_parameter_driven_axis_origin_names_revolve_faces_as_the_numeric_origin_does
     assert!(numeric.iter().all(|n| !n.contains(":face:")), "index names: {numeric:?}");
     assert_eq!(names(json!(["W / 2", 0, 0])), numeric);
 }
+
+#[test]
+fn symmetric_revolve_of_arc_about_tilted_offset_axis_is_valid() {
+    let mut s = Session::default();
+    run(&mut s, "diagnostics.validation", json!({"mode":"each_feature"}));
+    run(&mut s, "sketch.create", json!({"name":"Profile","plane":"XY"}));
+    run(&mut s, "sketch.arc.center_point", json!({"center":[-2,-5],"start":[-1.5,-5],"sweep":180}));
+    run(&mut s, "sketch.line", json!({"points":[[-2.5,-5],[-1.5,-5]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"sketch":"Profile","axis":{"origin":[60,0,0],"dir":[-1e-9,1,0]},"angle":"60 deg","direction":"symmetric","operation":"new"}),
+    );
+    assert_eq!(s.model.state().bodies.len(), 1);
+}

@@ -602,7 +602,7 @@ fn visible_order(
         let open = group_id.is_none_or(|group_id| group_is_open(app, groups, group_id));
         if open {
             order.push(TimelineItem::Feature(*id));
-            if !row.listed.is_empty() && crate::browser::is_open(app, &sketches_key(*id), false) {
+            if !row.listed.is_empty() && crate::browser::fold_open(app, &sketches_key(*id), false) {
                 order.extend(row.listed.iter().filter(|listed| !listed.reference).map(|listed| TimelineItem::Feature(listed.sketch)));
             }
         }
@@ -1067,7 +1067,7 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
         Some(_) => Some((sketches_key(id), false)),
         None => has_patterns.then(|| (format!("timeline/sketch/{id}/patterns"), true)),
     };
-    let fold_open = fold.as_ref().is_some_and(|(key, default)| crate::browser::is_open(app, key, *default));
+    let fold_open = fold.as_ref().is_some_and(|(key, default)| crate::browser::fold_open(app, key, *default));
     let style = if names { crate::ui_kit::HistoryStyle::Names } else { crate::ui_kit::HistoryStyle::Icons };
     // `allocate_exact_size` in two steps, so a row outside the view takes its place and no more.
     let size = vec2(ui.available_width(), style.height());
@@ -1234,7 +1234,7 @@ fn feature_row_body(
     });
     if response.clicked() && on_fold {
         if let Some((key, default)) = fold {
-            crate::browser::toggle(app, key, *default);
+            crate::browser::toggle_fold(app, key, *default);
         }
     } else if response.clicked() && !crate::timeline::pick_feature_into_dialog(app, id, ui.input(|i| i.modifiers)) {
         select_item(app, ui, TimelineItem::Feature(id), order);
@@ -1247,8 +1247,9 @@ fn feature_row_body(
         select_only(app, TimelineItem::Feature(id));
     }
     let mut edit = false;
+    let (edit_label, edit_icon) = crate::timeline::edit_label(*kind);
     crate::ui_kit::Menu::context(&response, |ui| {
-        if crate::ui_kit::menu::button(ui, "Edit Feature", "edit").clicked() {
+        if crate::ui_kit::menu::button(ui, edit_label, edit_icon).clicked() {
             edit = true;
             ui.close();
         }
@@ -2275,7 +2276,8 @@ mod tests {
         h.step(&json!({"click": {"handle": "timeline:Profile"}})).unwrap();
         assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Feature { id: profile }], "the row under the feature is the sketch");
         h.step(&json!({"click": {"handle": "timeline:Profile"}, "button": "right"})).unwrap();
-        h.step(&json!({"widget": "Edit Feature"})).unwrap();
+        // A sketch's row names the item as the Browser does (#14366).
+        h.step(&json!({"widget": "Edit Sketch"})).unwrap();
         h.settle();
         assert_eq!(h.app.session.active_sketch, Some(profile));
         assert!(row_y("timeline:Profile") < row_y("timeline:rollback") && row_y("timeline:rollback") < row_y("timeline:Block"));

@@ -9,13 +9,29 @@ fn a_chamfer_refused_for_room_is_worded_as_a_chamfer() {
         for why in
             [RoomReason::BallDoesNotFit, RoomReason::BallsFold, RoomReason::OffsetCollapses, RoomReason::FaceConsumed, RoomReason::RailLeavesFace]
         {
-            let text = Error::TooLarge { size: 2.5, kind, at, why: Some(why) }.to_string();
+            let text = Error::TooLarge { size: 2.5, kind, at, face: None, why: Some(why) }.to_string();
             assert!(!text.contains("ball") && !text.contains("roll"), "{kind:?} {why:?}: {text}");
             assert!(text.contains("chamfer") || text.contains("offset"), "{kind:?} {why:?}: {text}");
         }
     }
-    let round = Error::TooLarge { size: 2.5, kind: FitKind::Radius, at, why: Some(RoomReason::BallDoesNotFit) }.to_string();
+    let round = Error::TooLarge { size: 2.5, kind: FitKind::Radius, at, face: None, why: Some(RoomReason::BallDoesNotFit) }.to_string();
     assert!(round.contains("the rolling ball does not fit a face it rolls on"), "{round}");
+}
+
+/// A limiting face survives the adapter separately from the edge it constrains.
+#[test]
+fn a_sized_blend_refusal_names_the_limiting_face() {
+    let e = Error::TooLarge {
+        size: 0.2995,
+        kind: FitKind::Distance,
+        at: Some([5.0, 0.0, 10.0]),
+        face: Some([5.0, 0.5, 10.0]),
+        why: Some(RoomReason::BandsOverlap),
+    };
+    let text = e.to_string();
+    assert!(text.contains("the edge at (5.000, 0.000, 10.000)"), "{text}");
+    assert!(text.contains("limited by the face containing (5.000, 0.500, 10.000)"), "{text}");
+    assert!(text.contains("the largest distance that fits is 0.2995"), "{text}");
 }
 
 #[test]
@@ -115,7 +131,7 @@ fn in_own_process(test: &str, f: impl FnOnce()) {
 }
 
 /// Entry points that ask no kernel, so have nothing to say here.
-const NO_KERNEL: [&str; 15] = [
+const NO_KERNEL: [&str; 16] = [
     "inertia_tensor",
     "is_valid",
     "failed_tests",
@@ -125,6 +141,7 @@ const NO_KERNEL: [&str; 15] = [
     "from_record_keeping_splines",
     "to_native_report",
     "to_native_ordered",
+    "to_native_ordered_report",
     "blends",
     "word",
     "words",
@@ -133,7 +150,7 @@ const NO_KERNEL: [&str; 15] = [
     "start",
 ];
 
-const ANSWERING: [&str; 68] = [
+const ANSWERING: [&str; 69] = [
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -189,6 +206,7 @@ const ANSWERING: [&str; 68] = [
     "make_torus",
     "arrays",
     "to_native",
+    "to_native_prepared",
     "planar_faces",
     "extrude",
     "revolve",
@@ -328,6 +346,7 @@ fn every_entry_point_answers() {
     says("make_torus", Brep::make_torus([0.0; 3], 2.0, 1.0));
     says("arrays", a.arrays());
     says("to_native", a.to_native().map_err(|_| Error::Argument));
+    says("to_native_prepared", a.to_native_prepared().map_err(|_| Error::Argument));
     says("extrude", Brep::extrude(&lines, p(0.0, 0.0, 1.0), 1.0, 0.0, DraftCorner::Curvature, true));
     says("revolve", Brep::revolve(&lines, p(20.0, 0.0, 0.0), p(0.0, 1.0, 0.0), 1.0, true));
     let run = [Curve::Line { start: p(5.0, 5.0, 5.0), end: p(5.0, 5.0, 15.0) }];
@@ -777,12 +796,27 @@ fn a_token_under_another_stops_when_either_does() {
     assert!(dialog.within(|| design.within(|| Brep::make_box([0.0; 3], [1.0; 3]))).is_err(), "either way round");
 }
 
-/// Every call starts with the same draws of random rays, whatever its kernel did before: what
-/// depends on them answers the same on any kernel of the pool.
+/// Every call samples the same random points, whatever its kernel did before: what depends on
+/// them answers the same on any kernel of the pool. (Seven points of a box's first face, each
+/// dithered by a random draw, after the call has sampled the box's other faces.)
 #[test]
 fn every_call_starts_clean_on_any_kernel() {
-    let draw = |k: &mut solidcore::kernel::Kernel| Ok(k.rng.next_f64());
+    use solidcore::topology::brep::p3::brep_copy;
+    use solidcore::topology::face::p2::points_in_face;
+    let body = core::make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap();
+    let draw = |k: &mut _| {
+        brep_copy(k, &body.kernel())
+            .and_then(|mut b| {
+                let faces = b.face_list().to_vec();
+                for &f in &faces[1..] {
+                    points_in_face(k, &mut b, f, 5)?;
+                }
+                points_in_face(k, &mut b, faces[0], 7)
+            })
+            .map(|points| points.pv.iter().step_by(2).map(|p| [p.x, p.y, p.z]).collect::<Vec<_>>())
+    };
     let first = core::run("draw", draw).unwrap();
+    assert_eq!(first.len(), 7);
     assert_eq!(core::run("draw", draw).unwrap(), first, "the same kernel, later");
     let held = hold_a_kernel();
     assert_eq!(core::run("draw", draw).unwrap(), first, "another kernel");
@@ -799,7 +833,7 @@ fn every_call_starts_clean_on_any_kernel() {
 #[test]
 fn status_sites_only_shrink() {
     const SITES: &[(&str, usize)] =
-        &[("core/blend.rs", 9), ("core/measure.rs", 1), ("core/offset.rs", 7), ("core/split.rs", 3), ("core/ssi.rs", 1), ("core/sweep.rs", 6)];
+        &[("core/blend.rs", 6), ("core/measure.rs", 1), ("core/offset.rs", 7), ("core/split.rs", 3), ("core/ssi.rs", 1), ("core/sweep.rs", 6)];
     /// The lines of `text` outside its top-level inline test modules (rustfmt closes one with a
     /// `}` alone at the start of a line).
     fn code_lines(text: &str) -> Vec<&str> {

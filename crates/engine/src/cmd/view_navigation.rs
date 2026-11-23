@@ -6,11 +6,12 @@ use solidcraft_viewport::{Camera, StandardView};
 use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
 use crate::schema::view_navigation::{
-    AmbientOcclusionParams, AmbientOcclusionResult, CameraReply, DisplayToggleParams, DisplayToggleResult, GraphicsPreset, GraphicsPresetParams,
-    GraphicsPresetResult, HistoryDock, HistoryLayoutParams, HistoryLayoutResult, LayoutMode, LayoutParams, LayoutResult, NavigateParams,
-    NavigateResult, NavigationBarParams, NavigationBarResult, NavigationTool, NavigatorParams, NormalToParams, PerspectiveParams, PerspectiveResult,
-    PresetQuality, RenderBrowser, RenderFocus, RenderLive, RenderPanelVisibilityParams, RenderPanelVisibilityResult, RenderSelect, RibbonTabsOnly,
-    RibbonTabsOnlyParams, StandardViewParams, TabStep, TabStepParams, ToolParams, ToolResult, VisualStyle, VisualStyleParams, VisualStyleResult,
+    AmbientOcclusionParams, AmbientOcclusionResult, CameraReply, DisplayToggleParams, DisplayToggleResult, FitHomeParams, FitHomeResult,
+    GraphicsPreset, GraphicsPresetParams, GraphicsPresetResult, HistoryDock, HistoryLayoutParams, HistoryLayoutResult, LayoutMode, LayoutParams,
+    LayoutResult, NavigateParams, NavigateResult, NavigationBarParams, NavigationBarResult, NavigationTool, NavigatorParams, NormalToParams,
+    PerspectiveParams, PerspectiveResult, PresetQuality, RenderBrowser, RenderFocus, RenderLive, RenderPanelVisibilityParams,
+    RenderPanelVisibilityResult, RenderSelect, RenderStageParams, RenderStageResult, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams,
+    TabStep, TabStepParams, ToolParams, ToolResult, ToolbarResetAll, ToolbarResetAllParams, VisualStyle, VisualStyleParams, VisualStyleResult,
     ZoomTool,
 };
 use crate::schema::{TypedContract, output_schema_for};
@@ -28,6 +29,7 @@ const TAB_STEP_CONTRACT: TypedContract<TabStepParams> = TypedContract::new();
 const STANDARD_VIEW_CONTRACT: TypedContract<StandardViewParams> = TypedContract::new();
 const NORMAL_TO_CONTRACT: TypedContract<NormalToParams> = TypedContract::new();
 const RIBBON_TABS_ONLY_CONTRACT: TypedContract<RibbonTabsOnlyParams> = TypedContract::new();
+const TOOLBAR_RESET_ALL_CONTRACT: TypedContract<ToolbarResetAllParams> = TypedContract::new();
 const LAYOUT_CONTRACT: TypedContract<LayoutParams> = TypedContract::new();
 const HISTORY_LAYOUT_CONTRACT: TypedContract<HistoryLayoutParams> = TypedContract::new();
 const GRAPHICS_PRESET_CONTRACT: TypedContract<GraphicsPresetParams> = TypedContract::new();
@@ -69,16 +71,20 @@ CommandSpec::new("view.status_items", "Viewport Status Items", crate::checked!("
     .icon("list").noundo().doc_only()
     .contract(&STATUS_ITEMS_CONTRACT).output(output_schema_for::<crate::status_items::StatusItems>)
     .params("no parameters → {items}; persistent viewport effects, oldest slot first, with structured settings and executable clear requests; read-only, no model evaluation"),
-CommandSpec::new("view.fit", "Fit", fit)
-    .icon("fit").key("F6").noundo().doc_only().params("no parameters → frame the active canvas or selection; display only"),
-CommandSpec::new("view.home", "Home View", home)
-    .icon("home").noundo().doc_only().params("no parameters → home orientation framing the active canvas; display only"),
+CommandSpec::new("view.fit", "Fit", crate::checked!("view.fit", fit))
+    .icon("fit").key("F6").noundo().doc_only().any_part()
+    .contract(&FIT_HOME_CONTRACT).output(output_schema_for::<FitHomeResult>)
+    .params("no parameters → frame the active canvas or selection (with a drawing open, its sheet); display only"),
+CommandSpec::new("view.home", "Home View", crate::checked!("view.home", home))
+    .icon("home").noundo().doc_only().any_part()
+    .contract(&FIT_HOME_CONTRACT).output(output_schema_for::<FitHomeResult>)
+    .params("no parameters → home orientation framing the active canvas (with a drawing open, its whole sheet); display only"),
 CommandSpec::new("view.tool", "Navigation Tool", crate::checked!("view.tool", tool))
-    .icon("orbit").noundo().doc_only()
+    .icon("orbit").noundo().doc_only().any_part()
     .contract(&TOOL_CONTRACT).output(output_schema_for::<ToolResult>)
-    .params("tool: orbit|pan|zoom|none → tool; latch a camera tool, none releases it"),
+    .params("tool: orbit|pan|zoom|none → tool; latch a camera tool, none releases it (a drawing's sheet pans and zooms)"),
 CommandSpec::new("view.tool.zoom", "Drag to Zoom", crate::checked!("view.tool.zoom", zoom_tool))
-    .icon("zoom").noundo().doc_only()
+    .icon("zoom").noundo().doc_only().any_part()
     .contract(&ZOOM_TOOL_CONTRACT).output(output_schema_for::<ZoomTool>)
     .params("on?: bool (omitted: toggle) → on?; latch the Zoom tool for left-button drags. A shortcut assigned in the UI zooms while held"),
 CommandSpec::new("view.spin", "Continuous Orbit", crate::checked!("view.spin", spin))
@@ -108,6 +114,9 @@ CommandSpec::new("view.navigator", "Custom View Navigator", crate::checked!("vie
 CommandSpec::new("view.ribbon_tabs_only", "Ribbon Tabs Only", crate::checked!("view.ribbon_tabs_only", ribbon_tabs_only))
     .icon("chevron").noundo().doc_only().contract(&RIBBON_TABS_ONLY_CONTRACT).output(output_schema_for::<RibbonTabsOnly>)
     .params("on?: bool (omitted: switch) → on?; fold the ribbon to its tab row, a tab click shows its panels over the view (window setting)"),
+CommandSpec::new("view.toolbar_reset_all", "Reset All Toolbar Tabs", crate::checked!("view.toolbar_reset_all", toolbar_reset_all))
+    .icon("restore").noundo().doc_only().contract(&TOOLBAR_RESET_ALL_CONTRACT).output(output_schema_for::<ToolbarResetAll>)
+    .params("{} → {}; put the buttons of every toolbar tab back to their defaults (window setting; hidden tabs stay hidden); never asks"),
 CommandSpec::new("view.render_focus", "Render Focus View", crate::checked!("view.render_focus", render_focus))
     .icon("render_scene").noundo().doc_only()
     .contract(&FOCUS_CONTRACT).output(output_schema_for::<RenderFocus>)
@@ -132,8 +141,9 @@ CommandSpec::new("view.render_select", "Render selection", crate::checked!("view
     .contract(&RENDER_SELECT).output(output_schema_for::<RenderSelect>)
     .icon("select").noundo().doc_only()
     .params("kind: nothing|environment|lighting|light|shot|output|wear|sampling|effects|check; id?: bounded nonempty string for light/shot → validated transient Browser focus; never edits the design or opens a dialog"),
-CommandSpec::new("view.render_stage", "Render Stage", render_stage)
+CommandSpec::new("view.render_stage", "Render Stage", crate::checked!("view.render_stage", render_stage))
     .icon("render_scene").noundo().doc_only()
+    .contract(&RENDER_STAGE_CONTRACT).output(output_schema_for::<RenderStageResult>)
     .params("stage: look|light|frame|output → {stage}; per-document UI state, never edits or evaluates the design; headless validation only"),
 CommandSpec::new("view.shots_strip", "Shots Strip", crate::checked!("view.shots_strip", shots_strip))
     .icon("camera").noundo().doc_only().contract(&RENDER_PANEL_VISIBILITY_CONTRACT).output(output_schema_for::<RenderPanelVisibilityResult>)
@@ -323,6 +333,8 @@ fn view_params(p: &Value, cmd: &str, allowed: &[&str]) -> Result<()> {
     Ok(())
 }
 
+const FIT_HOME_CONTRACT: TypedContract<FitHomeParams> = TypedContract::new();
+
 fn fit(_s: &mut Session, p: &Value) -> Result<Value> {
     view_params(p, "view.fit", &[])?;
     Ok(json!({}))
@@ -395,6 +407,19 @@ fn ribbon_tabs_only(_s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(RibbonTabsOnly { on: request.on, param_warnings: Vec::new() }).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
+/// `view.toolbar_reset_all`: check that the call has no parameters. The window then resets its
+/// toolbar customisation; the session and the design are not changed.
+fn toolbar_reset_all(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.toolbar_reset_all";
+    let p = match p {
+        Value::Null => json!({}),
+        Value::Object(_) => p.clone(),
+        _ => return Err(bad(cmd, "parameters must be an object")),
+    };
+    let _: ToolbarResetAllParams = serde_json::from_value(p).map_err(|e| bad(cmd, e.to_string()))?;
+    serde_json::to_value(ToolbarResetAll { param_warnings: Vec::new() }).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
 fn status_items(s: &mut Session, p: &Value) -> Result<Value> {
     if !p.is_object() {
         return Err(bad("view.status_items", "parameters must be an empty object"));
@@ -464,6 +489,8 @@ fn render_frame(_s: &mut Session, p: &Value) -> Result<Value> {
     }
     serde_json::to_value(request).map_err(|e| bad(cmd, e.to_string()))
 }
+
+const RENDER_STAGE_CONTRACT: TypedContract<RenderStageParams> = TypedContract::new();
 
 fn render_stage(_s: &mut Session, p: &Value) -> Result<Value> {
     #[derive(serde::Deserialize)]
@@ -733,6 +760,40 @@ mod tests {
         assert_eq!(s.doc.to_json(), before);
         assert!(s.undo.is_empty());
         assert!(s.camera.is_none());
+    }
+
+    /// `view.toolbar_reset_all` takes no parameters, refuses any, and leaves the design and undo.
+    #[test]
+    fn toolbar_reset_all_takes_no_parameters_and_leaves_the_design() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        assert_eq!(s.execute("view.toolbar_reset_all", &json!({})).unwrap(), json!({}));
+        assert_eq!(s.execute("view.toolbar_reset_all", &Value::Null).unwrap(), json!({}));
+        for params in [json!({"tab":"MODEL"}), json!({"all":true}), json!(true), json!([])] {
+            assert!(s.execute("view.toolbar_reset_all", &params).is_err(), "{params}");
+        }
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
+    }
+
+    /// Fit, Home and the pan and zoom tools also frame and move a drawing's sheet, so they run with
+    /// a drawing open; the other view commands act on the model and run there too, as every model
+    /// command does. None makes an undo step or changes the design.
+    #[test]
+    fn sheet_navigation_runs_with_a_drawing_open() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("drawing.create", &json!({})).unwrap();
+        let (before, undo) = (s.doc.to_json(), s.undo.len());
+        for (id, params) in
+            [("view.fit", json!({})), ("view.home", json!({})), ("view.tool", json!({"tool": "pan"})), ("view.tool", json!({"tool": "none"}))]
+        {
+            assert!(s.execute(id, &params).is_ok(), "{id}");
+        }
+        s.execute("view.visual_style", &json!({"style": "shaded"})).unwrap();
+        let normal = s.execute("view.normal_to", &json!({})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(!normal.contains("a drawing is open"), "{normal}");
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, undo));
     }
 
     #[test]

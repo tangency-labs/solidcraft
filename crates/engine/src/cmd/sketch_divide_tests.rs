@@ -142,6 +142,90 @@ fn a_spline_is_divided_into_equal_lengths_along_it() {
 }
 
 #[test]
+fn breaking_and_trimming_a_divided_spline_use_only_the_picked_piece() {
+    for command in ["sketch.break", "sketch.trim"] {
+        let mut s = new_sketch();
+        let input = json!({"points": [[0, 0], [10, 8], [20, 0], [30, 8], [40, 0]], "connect": false});
+        let spline = strs(&run(&mut s, "sketch.spline.fit_point", input)["curves"])[0].clone();
+        let marks = strs(&run(&mut s, "sketch.point.divide", json!({"curve": spline, "segments": 4}))["points"]);
+        let before = sketch(&s);
+        let ci = before.curve_index(&spline).unwrap();
+        let pick = solidcraft_sketch::point_along(&before, ci, 0.36).unwrap();
+        run(&mut s, "sketch.point", json!({"point": [pick.x, pick.y], "id": "free", "connect": false}));
+        let before = sketch(&s);
+        let preview = crate::cmd::trim_piece(&before, &spline, pick).unwrap();
+        assert!(preview.first().unwrap().dist(pt(&before, &marks[0])) < 1e-6);
+        assert!(preview.last().unwrap().dist(pt(&before, &marks[1])) < 1e-6);
+
+        let r = run(&mut s, command, json!({"curve": spline, "at": [pick.x, pick.y]}));
+        let pieces = strs(if command == "sketch.break" { &r["curves"] } else { &r["result"]["pieces"] });
+        assert_eq!(pieces.len(), if command == "sketch.break" { 3 } else { 2 }, "{r}");
+        let sk = sketch(&s);
+        for mark in &marks[..2] {
+            let p = sk.resolve_point(mark).unwrap();
+            let ends = pieces.iter().filter_map(|id| sk.curves[sk.curve_index(id).unwrap()].kind.ends());
+            assert_eq!(ends.filter(|(a, b)| *a == p || *b == p).count(), if command == "sketch.break" { 2 } else { 1 });
+            assert!(pt(&sk, mark).dist(pt(&before, mark)) < 1e-6);
+        }
+        let last = sk.resolve_point(&marks[2]).unwrap();
+        assert!(
+            sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::PointOnCurve { p, c } if p == last && pieces.contains(&sk.curves[c].id)))
+        );
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(sketch(&s), before);
+    }
+}
+
+#[test]
+fn a_division_point_and_a_spline_crossing_bound_the_same_piece() {
+    let mut s = new_sketch();
+    let input = json!({"points": [[0, 0], [4, 12], [8, 12], [12, 0]], "connect": false});
+    let spline = strs(&run(&mut s, "sketch.spline.control_point", input)["curves"])[0].clone();
+    let middle = strs(&run(&mut s, "sketch.point.divide", json!({"curve": spline, "segments": 2}))["points"])[0].clone();
+    // The vertical separation is 16(t-1/4)(t-3/4); they meet at x=3 and x=9.
+    let y = 29.0 / 3.0;
+    run(&mut s, "sketch.spline.control_point", json!({"points": [[0, 3], [4, y], [8, y], [12, 3]], "connect": false}));
+    let pick = Vec2::new(4.5, 36.0 * 0.375 * 0.625);
+    let preview = crate::cmd::trim_piece(&sketch(&s), &spline, pick).unwrap();
+    assert!(preview.first().unwrap().dist(Vec2::new(3.0, 6.75)) < 1e-6);
+    assert!(preview.last().unwrap().dist(pt(&sketch(&s), &middle)) < 1e-6);
+    let r = run(&mut s, "sketch.break", json!({"curve": spline, "at": [pick.x, pick.y]}));
+    let pieces = strs(&r["curves"]);
+    assert_eq!(pieces.len(), 3);
+    let sk = sketch(&s);
+    let (a, b) = sk.curves[sk.curve_index(&pieces[1]).unwrap()].kind.ends().unwrap();
+    assert!(sk.point(a).unwrap().dist(Vec2::new(3.0, 6.75)) < 1e-6);
+    assert_eq!(b, sk.resolve_point(&middle).unwrap());
+}
+
+#[test]
+fn a_closed_spline_keeps_the_piece_across_its_parameter_seam() {
+    let mut s = new_sketch();
+    let params = json!({"points": [[10, 0], [0, 8], [-10, 0], [0, -8]], "periodic": true, "connect": false});
+    let id = strs(&run(&mut s, "sketch.spline.fit_point", params)["curves"])[0].clone();
+    let sk = sketch(&s);
+    let ci = sk.curve_index(&id).unwrap();
+    let mark = |s: &mut Session, fraction| {
+        let q = solidcraft_sketch::point_along(&sk, ci, fraction).unwrap();
+        run(s, "sketch.point", json!({"point": format!("on:{id}:{},{}", q.x, q.y)}))["point"].as_str().unwrap().to_owned()
+    };
+    let near_start = mark(&mut s, 0.125);
+    let other = mark(&mut s, 0.5);
+    let near_end = mark(&mut s, 0.875);
+    let seam = solidcraft_sketch::point_along(&sk, ci, 0.0).unwrap();
+    let sk = sketch(&s);
+    let preview = crate::cmd::trim_piece(&sk, &id, seam).unwrap();
+    assert!(preview.first().unwrap().dist(pt(&sk, &near_end)) < 1e-6);
+    assert!(preview.last().unwrap().dist(pt(&sk, &near_start)) < 1e-6);
+    let r = run(&mut s, "sketch.break", json!({"curve": id, "at": [seam.x, seam.y]}));
+    let parts = strs(&r["curves"]);
+    assert_eq!(parts.len(), 2, "{r}");
+    let sk = sketch(&s);
+    let other = sk.resolve_point(&other).unwrap();
+    assert!(sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::PointOnCurve { p, c } if p == other && parts.contains(&sk.curves[c].id))));
+}
+
+#[test]
 fn several_curves_divide_in_one_undo_step() {
     let mut s = new_sketch();
     let a = strs(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "infer": false}))["curves"])[0].clone();

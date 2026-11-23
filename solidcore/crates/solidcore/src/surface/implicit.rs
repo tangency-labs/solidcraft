@@ -8,14 +8,16 @@
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
-use crate::error::{Result, SolidError};
+use crate::blend::fillet_section::interval::Ivl;
+use crate::error::surface::SurfaceFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
 use crate::math::{Vec2, Vec3, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
-use crate::nurbs::math::{gamma, NOW};
+use crate::nurbs::math::{gamma, NOW, NOZ};
 use crate::nurbs::srf_tool::p1::decompose_to_bez;
 use crate::surface::cone::Cone;
 use crate::surface::plane::Plane;
@@ -181,9 +183,11 @@ impl BPoly {
 ///
 /// `SM_ERR` without NURB data; those of the Bézier decomposition.
 pub fn lies_on(form: &BSplineSurface, a: &Implicit) -> Result<bool> {
-    let nurb = form
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let nurb = form.gw_nurb().ok_or_else(|| {
+        Failure::new(OP, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
     for row in decompose_to_bez(nurb)? {
         for patch in row {
             let (p, q) = patch.degrees();
@@ -213,7 +217,7 @@ pub fn curve_lies_on(curve: &BSplineCurve, a: &Implicit) -> Result<bool> {
     let nurb = curve
         .nurb
         .as_ref()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline curve has no NURB"))?;
+        .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::CurveWithoutNurb))?;
     for seg in nurb.decompose_bez()? {
         if !bezier_on(seg.degree(), 0, seg.cpts().iter(), a) {
             return Ok(false);
@@ -413,9 +417,11 @@ pub fn distance_bound(form: &BSplineSurface, a: &Implicit, delta: [f64; 2]) -> R
         [lo, hi] if lo <= hi => (-lo).max(0.0),
         _ => return Ok(None),
     };
-    let nurb = form
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let nurb = form.gw_nurb().ok_or_else(|| {
+        Failure::new(OP, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
     let mut bound = 0.0_f64;
     for row in decompose_to_bez(nurb)? {
         for patch in row {
@@ -478,6 +484,307 @@ pub fn distance_bound(form: &BSplineSurface, a: &Implicit, delta: [f64; 2]) -> R
     }
     let bound = bound * (1.0 + 8.0 * f64::EPSILON);
     Ok(bound.is_finite().then_some(bound))
+}
+
+/// Not upstream (tangency-labs/solidcraft#18166): a certified bound on how far every point
+/// of the surface `form` lies from the plane or cone (a cylinder included) `a`, whether or
+/// not it lies on it; `None` for a sphere or torus, a weight that is not positive, a cone
+/// patch reaching the band about the apex where the bound does not hold, or a bound that is
+/// not finite (not a number included).
+///
+/// PROVEN, per Bézier patch (as [`distance_bound`], whose terms these are): every Bernstein
+/// coefficient of `a`'s equation of degree `d` in the patch's homogeneous coordinates is
+/// computed within `τ` ([`lies_on`]'s rounding), so the exact one is within `τ` of the
+/// computed, and by the convex hull property of the Bernstein basis
+/// `|W^d F(X)| ≤ c + τ` over the whole patch, `c` the largest computed coefficient's size.
+/// The weight is at least the least control weight `W₀ > 0` (a convex combination of
+/// them), so `|F(X)| ≤ (c + τ) / W₀^d`. For a plane `F` is the signed distance times the
+/// normal's length. For a cone, with `s` the height along the unit axis, `ρ` the distance
+/// from it and `R = r + t |a| s` (`|a|² = 1 + δ`, `δ` enclosed from the stored axis),
+/// `F = ρ² − ρ_P²` with `ρ_P = √(R² + δ s²)` the surface's radius at that height, and the
+/// point of the surface at the same height and angle lies `|ρ − ρ_P| = |F| / (ρ + ρ_P) ≤
+/// |F| / ρ_P` away. `ρ_P` is bounded below over the patch's heights by [`radius_floor`]
+/// (`None` near the apex, where it is not).
+///
+/// PROVEN, the rounding of the extraction and decomposition (`γ_n = n u / (1 − n u)`,
+/// `u = ε / 2` the unit roundoff, [`gamma`]): the patches are made from the net of
+/// `source` (the surface `form` was cut from, or `form` itself) by knot insertions, each a
+/// level of
+/// [`CPoint::combine2`](crate::nurbs::math::CPoint::combine2) `α a + (1 − α) b` per
+/// homogeneous coordinate, `0 ≤ α ≤ 1`:
+/// - the ratio `α` takes 3 roundings, two subtractions and a division, so
+///   `α̂ = α (1 + θ₃)`: `alf = (ul − left) / (knot − left)` in
+///   [`extract_patch`](crate::nurbs::srf_tool::p1::extract_patch), and
+///   `x = num / (u[isu + i] − u[isu])` with `num = u[ieu] − u[isu]` in
+///   [`decompose_to_bez`];
+/// - its complement `1 − α̂` takes 1 (`oma = 1.0 − alf`, `1.0 − x`);
+/// - `combine2` takes 3, two products and a sum;
+/// - so, against `α a + (1 − α) b` of the computed `a` and `b`, the `a` term carries
+///   `α (1 + θ₅)` (ratio, product, sum) and the `b` term
+///   `(1 − α) (1 + θ₃) − α θ₃ (1 + θ₃)` (complement, product, sum, and the ratio's error
+///   through the complement); with `|a|, |b| ≤ M̂`, the largest computed size, the level's
+///   new error is at most `(α (γ₅ + γ₃ + γ₃²) + (1 − α) γ₃) M̂ ≤ γ₈ M̂`
+///   (`γ_j + γ_k + γ_j γ_k ≤ γ_{j+k}`), and the earlier errors pass through with the
+///   exact factors `α` and `1 − α`, so a level's error is at most the larger of its two
+///   inputs' plus `γ₈ M̂`.
+///
+/// `M` is the size of the original net: every intermediate point is within its error of a
+/// convex combination of its control points, so each homogeneous coordinate is within
+/// `max |H|∞` and each weight within `W_max` up to that error. After a chain of `L` levels
+/// the error is at most `L γ₈ M̂ ≤ γ_{8L} M̂`, and with `M̂ ≤ M + γ_{8L} M̂` at most
+/// `γ_{8L} / (1 − γ_{8L}) M ≤ γ_{8L+1} M` (as `8L (8L + 1) u ≤ 1`).
+///
+/// `L`, the longest chain of levels behind one point of a patch, is at most
+/// `L_u + L_v` with `L_u = 2p + p (p − 1) / 2` and `L_v` alike in `q`
+/// (`insertion_levels`), counted from the loops that run (`nurbs/srf_tool/p1.rs`):
+/// - the extraction in u ([`extract_patch`](crate::nurbs::srf_tool::p1::extract_patch),
+///   per column): the left knot's round `i` (`1..=p − mul`) sets `aw[j]` from `aw[j]` and
+///   `aw[j + 1]` of round `i − 1`, one level per round, so at most `p − mul`; the right
+///   knot's round `i` (`1..=p − mur`) sets `aw[k]` from `aw[k]` and `aw[k − 1]`, which may
+///   be left-inserted points, so at most `(p − mul) + (p − mur) ≤ 2p`; then in v, per
+///   row of those points, `(q − mvl) + (q − mvr)` more;
+/// - the decomposition in u ([`decompose_to_bez`], per column): at a knot of multiplicity
+///   `μ < p` it runs `r = p − μ` rounds; round `i` sets `bw[j]` for `j = p` down to `μ + i`
+///   from `bw[j]` and `bw[j − 1]`, and saves `bw[p]` as the next strip's point `r − i`
+///   (`nbw[save]`), whose points `r..=p` come fresh from the net. So a chain runs on
+///   through the saves of earlier knots: at the start of every strip the point at
+///   position `x` is at most `B(x) = (p − x) (p − x − 1) / 2` levels past the net it is
+///   decomposed from. Fresh points are 0; a saved point `r − i` is `bw[p]` after `i`
+///   rounds, at most `i + B(p − i) = i (i + 1) / 2 ≤ B(r − i) = (μ + i) (μ + i − 1) / 2`
+///   (`μ ≥ 1`, `B` falls with `x`). The strip's point `j`, set in `n` rounds
+///   (`j − n ≥ μ`, so `k = p − (j − n) ≤ p − 1` and `n ≤ k`), is at most
+///   `n + B(j − n) ≤ k (k + 1) / 2 ≤ p (p − 1) / 2`, and an untouched one at most
+///   `B(0) = p (p − 1) / 2`. Simple knots reach it: the chain runs back through the saves
+///   of `p − 1` earlier knots, `Σ_{i=1}^{p−1} i`;
+/// - the decomposition in v, per row of each strip, the same on the strip's points:
+///   `q (q − 1) / 2` more.
+///
+/// `γ_{8L+16}` covers `γ_{8L+1}` and `8` more roundings for the coefficients' scale. The
+/// test `the_rounding_count_covers_the_insertion_chains` runs the loops above on tracked
+/// points for degrees 1 to 10 (bit-equal to the real extraction and decomposition) and
+/// checks the count against the deepest chain they make. In the coordinates moved to the equation's origin
+/// `O` the error is at most `γ A` with `A = max |H|∞ + |O|∞ W_max`, and in the weight at
+/// most `γ W_max`, so at a point with weight `W ≥ W₀`, `X − O = (H − O W) / W` moves by at
+/// most `γ A / W₀ + A (1 + γ) γ W_max / (W₀ (W₀ − γ W_max))`, twice that as a Euclidean
+/// length (`√3 < 2`); `None` where `W₀ ≤ γ W_max`. The net's size is the larger of
+/// `source`'s and `form`'s and the patch's own (so `form` alone, as `source`, is sound when
+/// it was not cut from another net). The margin against the uses is wide: the slack is a
+/// relative `2 γ_{160} ≈ 3.6e-14` for a bicubic patch (`L = 18`), against bounds compared with
+/// tolerances of `1e-6` and more. A patch whose rounding `τ` is below `MIN_POSITIVE / ε`
+/// (where the coefficients' underflow is not inside the `γ` model, as [`distance_bound`])
+/// has no bound. The whole is the largest over the patches, grown by a few roundings.
+///
+/// # Errors
+///
+/// `SM_ERR` without NURB data; those of the Bézier decomposition.
+pub(crate) fn off_surface_bound(
+    form: &BSplineSurface,
+    a: &Implicit,
+    source: &BSplineSurface,
+) -> Result<Option<f64>> {
+    let below = match *a {
+        Implicit::Plane { .. } => 0.0,
+        Implicit::Cone { axis, .. } => {
+            let sq = |x: f64| Ivl::from(x) * Ivl::from(x);
+            let delta = sq(axis.x) + sq(axis.y) + sq(axis.z) - Ivl::from(1.0);
+            if !delta.is_finite() {
+                return Ok(None);
+            }
+            (-delta.lo).max(0.0)
+        }
+        Implicit::Sphere { .. } | Implicit::Torus { .. } => return Ok(None),
+    };
+    let nurb = form.gw_nurb().ok_or_else(|| {
+        Failure::new(OP, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
+    let origin = match *a {
+        Implicit::Plane { origin, .. } | Implicit::Cone { origin, .. } => origin,
+        Implicit::Sphere { centre, .. } | Implicit::Torus { centre, .. } => centre,
+    };
+    let Some(net) = source.gw_nurb() else {
+        return Ok(None);
+    };
+    let (Some(from), Some(own)) = (net_size(net, origin), net_size(nurb, origin)) else {
+        return Ok(None);
+    };
+    let (net_absolute, net_wmax) = (from.0.max(own.0), from.1.max(own.1));
+    let mut bound = 0.0_f64;
+    for row in decompose_to_bez(nurb)? {
+        for patch in row {
+            let (p, q) = patch.degrees();
+            let r = bezier_residual(p, q, patch.rows().flatten(), a);
+            let w0 = r.least_weight;
+            if !(w0 > 0.0 && w0.is_finite()) {
+                return Ok(None);
+            }
+            let mut top = 0.0_f64;
+            for c in &r.coefficients {
+                // (not a number refuses: `max` would drop it)
+                if !c.is_finite() {
+                    return Ok(None);
+                }
+                top = top.max(c.abs());
+            }
+            let power = match r.degree {
+                1 => Ivl::from(w0),
+                _ => Ivl::from(w0) * Ivl::from(w0),
+            };
+            // (not a number refuses; as [`distance_bound`], the `γ` model leaves out
+            // underflow, inside the final growth only with `τ ≥ MIN_POSITIVE / ε`)
+            let normal = power.lo >= f64::MIN_POSITIVE && r.tol >= f64::MIN_POSITIVE / f64::EPSILON;
+            if !normal {
+                return Ok(None);
+            }
+            let f = (Ivl::from(top) + Ivl::from(r.tol)) / power;
+            let off = match *a {
+                // the normal's length, a few roundings from its computed value
+                Implicit::Plane { normal, .. } => {
+                    (f / Ivl::from(normal.length() * (1.0 - 4.0 * f64::EPSILON))).hi
+                }
+                Implicit::Cone {
+                    origin,
+                    axis,
+                    radius,
+                    tan_angle,
+                } => {
+                    let Some(floor) = radius_floor(
+                        patch.rows().flatten(),
+                        origin,
+                        axis,
+                        radius,
+                        tan_angle,
+                        below,
+                    ) else {
+                        return Ok(None);
+                    };
+                    (f / Ivl::from(floor)).hi
+                }
+                Implicit::Sphere { .. } | Implicit::Torus { .. } => return Ok(None),
+            };
+            let g = gamma(rounding_index(p, q));
+            let absolute = net_absolute.max(r.absolute);
+            let wmax = net_wmax.max(r.wmax);
+            // (the true weight is at least `W₀ − γ W_max`)
+            let low = w0 - g * wmax;
+            if !(low > 0.0 && low.is_finite()) {
+                return Ok(None);
+            }
+            // (`absolute` is a largest coordinate: a Euclidean length is under twice it)
+            let slack = 2.0 * g * absolute * (1.0 / w0 + (1.0 + g) * wmax / (w0 * low));
+            let patch_bound = off + slack;
+            if !patch_bound.is_finite() {
+                return Ok(None);
+            }
+            bound = bound.max(patch_bound);
+        }
+    }
+    let bound = bound * (1.0 + 8.0 * f64::EPSILON);
+    Ok(bound.is_finite().then_some(bound))
+}
+
+/// The longest chain of knot-insertion levels behind a point of [`off_surface_bound`]'s
+/// Bézier patches of degrees `(p, q)`, `L_u + L_v` with `L_u = 2p + p (p − 1) / 2` (the
+/// extraction's two ends and the decomposition's saved points; derived there) and `L_v`
+/// alike in `q`. Saturates (a degree that large has no net to decompose).
+fn insertion_levels(p: usize, q: usize) -> usize {
+    let per = |d: usize| {
+        d.saturating_mul(2)
+            .saturating_add(d.saturating_mul(d.saturating_sub(1)) / 2)
+    };
+    per(p).saturating_add(per(q))
+}
+
+/// The `n` of [`off_surface_bound`]'s `γ_n`: `8 L + 16`, `L` the [`insertion_levels`]
+/// (eight roundings a level, one for the size's feedback, eight for the coefficients'
+/// scale, the rest spare).
+fn rounding_index(p: usize, q: usize) -> usize {
+    insertion_levels(p, q).saturating_mul(8).saturating_add(16)
+}
+
+/// The size of the control net `net` for [`off_surface_bound`]'s rounding, moved to the
+/// origin `origin`: `(max |H|∞ + |O|∞ W_max, W_max)` over its homogeneous points `H`
+/// (stored weighted when rational) and weights `W` (1 when not rational); `None` when a
+/// value is not finite.
+fn net_size(net: &crate::nurbs::srf_basic::Surface, origin: Vec3) -> Option<(f64, f64)> {
+    let mut hmax = 0.0_f64;
+    let mut wmax = 0.0_f64;
+    for c in net.rows().flatten() {
+        let wi = if c.w == NOW { 1.0 } else { c.w };
+        let z = if c.z == NOZ { 0.0 } else { c.z };
+        // (each coordinate checked: `max` would drop a value that is not a number)
+        if !(c.x.is_finite() && c.y.is_finite() && z.is_finite() && wi.is_finite()) {
+            return None;
+        }
+        let hm = c.x.abs().max(c.y.abs()).max(z.abs());
+        hmax = hmax.max(hm);
+        wmax = wmax.max(wi.abs());
+    }
+    let om = origin.x.abs().max(origin.y.abs()).max(origin.z.abs());
+    let absolute = (hmax + om * wmax) * (1.0 + 2.0 * f64::EPSILON);
+    absolute.is_finite().then_some((absolute, wmax))
+}
+
+/// A lower bound of the cone's radius `ρ_P = √(R² + δ s²)` over the heights `s` of the
+/// Bézier patch with homogeneous points `points` ([`off_surface_bound`]), `δ ≥ −below`:
+/// `ρ_P ≥ √(R_min² − below s_max²)`, `R_min` the least `|R|` over the heights (`R` linear
+/// in `s`, of one sign over them, so reached at an end) and `s_max` the largest `|s|`. The
+/// heights lie between the Euclidean points' (the patch is in their convex hull, `s`
+/// linear), widened by their rounding as [`clear_of_apex`]'s. `None` where `R` changes
+/// sign over them, the floor is not positive, or a value is not a number.
+fn radius_floor<'a>(
+    points: impl Iterator<Item = &'a crate::nurbs::math::CPoint>,
+    origin: Vec3,
+    axis: Vec3,
+    radius: f64,
+    tan_angle: f64,
+    below: f64,
+) -> Option<f64> {
+    let length = axis.length();
+    if !(length > 0.0 && length.is_finite()) {
+        return None;
+    }
+    let unit = axis * (1.0 / length);
+    let (mut lo, mut hi, mut size) = (f64::INFINITY, f64::NEG_INFINITY, 0.0_f64);
+    for c in points {
+        let w = if c.w == NOW { 1.0 } else { c.w };
+        // (not a number is not positive)
+        if w.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+            return None;
+        }
+        let x = Vec3::new(c.x, c.y, c.z) * (1.0 / w) - origin;
+        let s = x.dot(unit);
+        lo = lo.min(s);
+        hi = hi.max(s);
+        size = size.max(x.x.abs().max(x.y.abs()).max(x.z.abs()));
+    }
+    let spread =
+        32.0 * f64::EPSILON * (size + origin.x.abs().max(origin.y.abs()).max(origin.z.abs()));
+    let (lo, hi) = (lo - spread, hi + spread);
+    if !(lo <= hi && spread.is_finite()) {
+        return None;
+    }
+    // `R = r + t |a| s` at the ends, enclosed (the unit axis's length rounds within a few ε)
+    let slope = Ivl::from(tan_angle)
+        * Ivl::new(
+            length * (1.0 - 4.0 * f64::EPSILON),
+            length * (1.0 + 4.0 * f64::EPSILON),
+        );
+    let r_at = |s: f64| Ivl::from(radius) + slope * Ivl::from(s);
+    let (r_lo, r_hi) = (r_at(lo), r_at(hi));
+    let r_min = if r_lo.lo > 0.0 && r_hi.lo > 0.0 {
+        r_lo.lo.min(r_hi.lo)
+    } else if r_lo.hi < 0.0 && r_hi.hi < 0.0 {
+        (-r_lo.hi).min(-r_hi.hi)
+    } else {
+        return None;
+    };
+    let s_max = lo.abs().max(hi.abs());
+    let floor2 = Ivl::from(r_min) * Ivl::from(r_min)
+        - Ivl::from(below) * Ivl::from(s_max) * Ivl::from(s_max);
+    let floor = floor2.sqrt().lo;
+    (floor > 0.0 && floor.is_finite()).then_some(floor)
 }
 
 /// Whether every height `s` of the Bézier patch with homogeneous points `points` along
@@ -668,13 +975,13 @@ fn curve_segments(curve: &BSplineCurve) -> Result<(Vec<CurveSegment>, Vec3)> {
     let nurb = curve
         .nurb
         .as_ref()
-        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the B-spline curve has no NURB"))?;
+        .ok_or_else(|| SolidError::surface(OP_EXACT, SurfaceFailure::CurveWithoutNurb))?;
     let w_of = |w: f64| if w == NOW { 1.0 } else { w };
     let origin = nurb
         .cpts()
         .first()
         .map(|c| Vec3::new(c.x, c.y, c.z) * (1.0 / w_of(c.w)))
-        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the curve has no control points"))?;
+        .ok_or_else(|| SolidError::surface(OP_EXACT, SurfaceFailure::CurveWithoutControlPoints))?;
     let mut out = Vec::new();
     for seg in nurb.decompose_bez()? {
         let p = seg.degree();
@@ -1061,15 +1368,17 @@ fn lies_on_canal(
     map: &LeaderMap,
     radius: f64,
 ) -> Result<bool> {
-    let nurb = form
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the B-spline surface has no NURB"))?;
+    let nurb = form.gw_nurb().ok_or_else(|| {
+        Failure::new(OP_EXACT, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
     let (segs, o) = curve_segments(spine)?;
+    // `curve_segments` above has returned `CurveWithoutNurb` for a spine without its NURB
     let spine_breaks = spine
         .nurb
         .as_ref()
-        .map(|n| breaks(n.knots()))
-        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the spine has no NURB"))?;
+        .map_or_else(Vec::new, |n| breaks(n.knots()));
     let (ub, vb) = (breaks(nurb.u_knots()), breaks(nurb.v_knots()));
     let along = if map.along_v { &vb } else { &ub };
     // the rounding of placing a span on the spine: of a + b w and of the spine's knots
@@ -1653,6 +1962,34 @@ fn evaluates_as(k: &Kernel, surface: &Surface, form: &BSplineSurface) -> Result<
     Ok(evaluation_margin(k, surface, form)?.is_some_and(|m| m <= 1.0))
 }
 
+/// [`evaluates_as`]'s ratio of distance to bound between the analytic surface's STEP point
+/// at `step_uv` and the point `f` a caller says the form `form` has there (infinite for a
+/// distance that is not a number): at most 1 where the two agree within the rounding
+/// [`evaluates_as`] derives at that STEP parameter. `None` for a surface the bound does not
+/// cover. A certificate of one parameter pair, for checking an evaluation or a conversion
+/// a caller made (`f` the form's point at the NURB parameter the conversion pairs with
+/// `step_uv`).
+///
+/// # Errors
+///
+/// Those of the STEP evaluation and of the form's net.
+pub fn evaluation_ratio_of(
+    k: &Kernel,
+    surface: &Surface,
+    form: &BSplineSurface,
+    step_uv: Vec2,
+    f: Vec3,
+) -> Result<Option<f64>> {
+    let (net, p, q) = euclidean_net(form)?;
+    let size = net.iter().flatten().fold(0.0_f64, |a, x| a.max(x.length()));
+    let Some(r) = Rounding::of(surface, form.is_rational(), p, q, size, &net)? else {
+        return Ok(None);
+    };
+    let s = surface.evaluate_step_point(k, step_uv)?;
+    let ratio = (s - f).length() / r.at(step_uv, s, f);
+    Ok(Some(if ratio.is_nan() { f64::INFINITY } else { ratio }))
+}
+
 /// [`evaluates_as`]'s largest ratio of distance to bound over the Greville points (infinite
 /// for a distance that is not a number); `None` for a surface the bound does not cover.
 fn evaluation_margin(k: &Kernel, surface: &Surface, form: &BSplineSurface) -> Result<Option<f64>> {
@@ -1928,7 +2265,12 @@ fn euclidean_net(form: &BSplineSurface) -> Result<(Vec<Vec<Vec3>>, usize, usize)
     for (i, row) in net.iter_mut().enumerate() {
         for j in 0..nv {
             let c = cps.get(i * nv + j).ok_or_else(|| {
-                SolidError::surface_failed(OP_DERIVE, "the control point is outside the net")
+                SolidError::surface(
+                    OP_DERIVE,
+                    SurfaceFailure::Defect {
+                        why: "the net has no control point (i, j) with i < nu and j < nv, though `control_points` returns the (n + 1)(m + 1) points of the net's rows, each of which holds m + 1 points by `srf_basic::Surface`'s invariant",
+                    },
+                )
             })?;
             let w = if c.w == NOW { 1.0 } else { c.w };
             row.push(Vec3::new(c.x, c.y, c.z) * (1.0 / w));
@@ -2544,5 +2886,508 @@ impl AnalyticSupport {
             Self::Sphere { .. } => SupportKind::Sphere,
             Self::Torus { .. } => SupportKind::Torus,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::math::Point3;
+    use crate::nurbs::b_spline_curve::KnotType;
+    use crate::nurbs::b_spline_surface::{BSplineSurfaceForm, CanonicalSurfaceData};
+    use crate::primitive::api_primitives as ap;
+
+    /// The NURBS form of an analytic surface, and its implicit equation.
+    fn form_and_equation(k: &Kernel, s: &Surface) -> (BSplineSurface, Implicit) {
+        let form = crate::blend::fillet_section::station::as_b_spline(k, s)
+            .unwrap()
+            .unwrap();
+        (
+            form.into_owned(),
+            AnalyticSupport::of(s).unwrap().implicit(),
+        )
+    }
+
+    /// The cone about Z through the origin, radius `radius` there.
+    fn cone(radius: f64, tan_angle: f64) -> Implicit {
+        Implicit::Cone {
+            origin: Vec3::ZERO,
+            axis: Vec3::Z,
+            radius,
+            tan_angle,
+        }
+    }
+
+    /// [`off_surface_bound`] of a plane patch a known distance off a plane: the bilinear
+    /// patch at x = 2 (y, z from 0 to 1) lies 0.5 from the plane x = 1.5, and its equation
+    /// is linear in the homogeneous coordinates (weights 1), so the bound is 0.5 within a
+    /// few roundings (PROVEN: never below the true distance), and on the plane x = 2 only
+    /// the counted rounding (the slack `2 γ₄₈ · 4 · 2 ≈ 8.5e-14`, `4 = |H|∞ + |O|∞ W`, plus
+    /// the coefficients' `τ = γ₃₂ · 4 ≈ 1.4e-14`, under 2e-13). Not a number in a control
+    /// point or in the equation has no bound. Cut from a net a million times larger, the
+    /// same patch carries that net's rounding: at least `2 γ₄₈ · 2e6 · 2 ≈ 4.3e-8`.
+    #[test]
+    fn a_plane_patch_off_a_plane_is_bounded_by_its_distance() {
+        let patch = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(2.0, 0.0, 0.0),
+                Point3::new(2.0, 1.0, 0.0),
+                Point3::new(2.0, 0.0, 1.0),
+                Point3::new(2.0, 1.0, 1.0),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        })
+        .unwrap();
+        let plane = |x: f64| Implicit::Plane {
+            origin: Vec3::new(x, 0.0, 0.0),
+            normal: Vec3::X,
+        };
+        let off = off_surface_bound(&patch, &plane(1.5), &patch)
+            .unwrap()
+            .unwrap();
+        assert!((0.5..=0.5 * (1.0 + 1e-12)).contains(&off), "{off:e}");
+        let on = off_surface_bound(&patch, &plane(2.0), &patch)
+            .unwrap()
+            .unwrap();
+        assert!((0.0..=2e-13).contains(&on), "{on:e}");
+        let large = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(2e6, 0.0, 0.0),
+                Point3::new(2e6, 1.0, 0.0),
+                Point3::new(2e6, 0.0, 1.0),
+                Point3::new(2e6, 1.0, 1.0),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        })
+        .unwrap();
+        let from_large = off_surface_bound(&patch, &plane(2.0), &large)
+            .unwrap()
+            .unwrap();
+        assert!(from_large >= 2.0 * gamma(48) * 2e6 * 2.0, "{from_large:e}");
+        // (not a number in the equation, or in a control point)
+        let nan_plane = Implicit::Plane {
+            origin: Vec3::new(f64::NAN, 0.0, 0.0),
+            normal: Vec3::X,
+        };
+        assert_eq!(off_surface_bound(&patch, &nan_plane, &patch).unwrap(), None);
+        assert_eq!(
+            off_surface_bound(&patch, &cone(1.0, f64::NAN), &patch).unwrap(),
+            None
+        );
+        let nan_patch = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(2.0, 0.0, 0.0),
+                Point3::new(f64::NAN, 1.0, 0.0),
+                Point3::new(2.0, 0.0, 1.0),
+                Point3::new(2.0, 1.0, 1.0),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        });
+        // (a patch so small that its coefficients' rounding `τ` is below
+        // `MIN_POSITIVE / ε`, where underflow is outside the `γ` model: no bound)
+        let tiny = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(2e-300, 0.0, 0.0),
+                Point3::new(2e-300, 1e-300, 0.0),
+                Point3::new(2e-300, 0.0, 1e-300),
+                Point3::new(2e-300, 1e-300, 1e-300),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        })
+        .unwrap();
+        let tiny_plane = Implicit::Plane {
+            origin: Vec3::new(1.5e-300, 0.0, 0.0),
+            normal: Vec3::X,
+        };
+        assert_eq!(off_surface_bound(&tiny, &tiny_plane, &tiny).unwrap(), None);
+        // (not a number in one coordinate of a source point outside the patch, the others
+        // finite: `max` would hide it, and the source's size would not be a number)
+        let mut source = patch.gw_nurb().unwrap().clone();
+        source.cpt_mut(0, 1).unwrap().x = f64::NAN;
+        let source = BSplineSurface::from_nurb(source, true);
+        assert_eq!(
+            off_surface_bound(&patch, &plane(1.5), &source).unwrap(),
+            None
+        );
+        // (a surface that cannot be made from it is refused earlier, as well)
+        if let Ok(nan_patch) = nan_patch {
+            assert_eq!(
+                off_surface_bound(&nan_patch, &plane(2.0), &nan_patch).unwrap_or(None),
+                None
+            );
+        }
+    }
+
+    /// [`off_surface_bound`] of a cylinder r 50, z 0 to 100, as the kernel stores it (a
+    /// rational form, exact in exact arithmetic): within roundings of 0 against its own
+    /// equation, and against the cylinders r 50 ∓ 1e-3 about the same axis, which every
+    /// point of it lies exactly 1e-3 from, at least 1e-3 (PROVEN: never below the true
+    /// distance) and at most 5e-3: `|ρ² − ρ_P²| / ρ_P` is `(ρ + ρ_P) / ρ_P ≈ 2` times the
+    /// distance, and the rational form's weights 1 and √2/2 give coefficients up to `W₀⁻² =
+    /// 2` times the values (ARGUED, so about 4e-3).
+    #[test]
+    fn a_cylinder_is_bounded_by_its_distance_from_a_coaxial_cylinder() {
+        let k = Kernel::default();
+        let s = Surface::from(ap::create_cylinder_surface(&k, Point3::ZERO, 50.0, 100.0).unwrap());
+        let (form, own) = form_and_equation(&k, &s);
+        let on = off_surface_bound(&form, &own, &form).unwrap().unwrap();
+        assert!((0.0..=1e-9).contains(&on), "{on:e}");
+        for r in [50.0 - 1e-3, 50.0 + 1e-3] {
+            let off = off_surface_bound(&form, &cone(r, 0.0), &form)
+                .unwrap()
+                .unwrap();
+            assert!((1e-3..=5e-3).contains(&off), "{r} {off:e}");
+        }
+    }
+
+    /// [`off_surface_bound`] of a frustum r 50 at z 0 to r 30 at z 100 as the kernel
+    /// stores it: within roundings of 0 against its own equation; against the cone of the
+    /// same axis and angle shifted out by 1e-3 in radius (every point of the frustum is
+    /// 1e-3 · cos(semi-angle) from it), at least that distance (PROVEN) and at most eight
+    /// times it: `|ρ² − ρ_P²|` is up to `(50 + 50)` times the radial offset and is divided
+    /// by the least radius 30, the weights give up to 2 more, and the radial offset is
+    /// `√(1 + t²)` times the distance (ARGUED, so about 6.8; MEASURED 6.80). A sphere's
+    /// equation has no bound (`None`).
+    #[test]
+    fn a_cone_is_bounded_by_its_distance_from_a_shifted_cone() {
+        let k = Kernel::default();
+        let s =
+            Surface::from(ap::create_cone_surface(&k, Point3::ZERO, 50.0, 30.0, 100.0).unwrap());
+        let (form, own) = form_and_equation(&k, &s);
+        let on = off_surface_bound(&form, &own, &form).unwrap().unwrap();
+        assert!((0.0..=1e-9).contains(&on), "{on:e}");
+        let Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        } = own
+        else {
+            panic!("{own:?}");
+        };
+        let shifted = Implicit::Cone {
+            origin,
+            axis,
+            radius: radius + 1e-3,
+            tan_angle,
+        };
+        let d = 1e-3 / (1.0 + tan_angle * tan_angle).sqrt();
+        let off = off_surface_bound(&form, &shifted, &form).unwrap().unwrap();
+        assert!(d <= off && off <= 8.0 * d, "{d:e} {off:e}");
+        let sphere = Implicit::Sphere {
+            centre: Vec3::ZERO,
+            radius: 50.0,
+        };
+        assert_eq!(off_surface_bound(&form, &sphere, &form).unwrap(), None);
+    }
+
+    /// A homogeneous point and the length of the longest chain of
+    /// [`CPoint::combine2`](crate::nurbs::math::CPoint::combine2) levels behind it.
+    type Tracked = (crate::nurbs::math::CPoint, usize);
+
+    fn mix(a: f64, x: Tracked, b: f64, y: Tracked) -> Tracked {
+        (
+            crate::nurbs::math::CPoint::combine2(a, x.0, b, y.0),
+            x.1.max(y.1) + 1,
+        )
+    }
+
+    /// One column (or row) of `extract_patch` over `[a, b]`, its loops as written there
+    /// (`a`, `b` inside the domain and off the knots, so nothing snaps).
+    fn extract_line(pts: &[Tracked], p: usize, u: &[f64], a: f64, b: f64) -> Vec<Tracked> {
+        use crate::nurbs::knots::{KnotVector, Side};
+        let kv = KnotVector::from_slice(u).unwrap();
+        let (span_l, mul) = kv.find_span_and_mult(p, a, Side::Left).unwrap();
+        let (span_r, mur) = kv.find_span_and_mult(p, b, Side::Left).unwrap();
+        let (p, span_l, mul, span_r, mur) = (
+            p as isize,
+            span_l as isize,
+            mul as isize,
+            span_r as isize,
+            mur as isize,
+        );
+        let at = |i: isize| u[i as usize];
+        let (is, ie) = (span_l - p, span_r - mur);
+        let n = ie - is;
+        let mut aw: Vec<Tracked> = pts[is as usize..=ie as usize].to_vec();
+        let ll = span_l - p;
+        for i in 1..=p - mul {
+            for j in 0..=p - i - mul {
+                let left = at(ll + i + j);
+                let alf = (a - left) / (at(span_l + j + 1) - left);
+                let (j, oma) = (j as usize, 1.0 - alf);
+                aw[j] = mix(alf, aw[j + 1], oma, aw[j]);
+            }
+        }
+        let (lr, lk) = (span_r - p, n - p + mur);
+        for i in 1..=p - mur {
+            let mut j = p - i - mur;
+            while j >= 0 {
+                let k = (lk + i + j) as usize;
+                let left = at(lr + i + j).max(a);
+                let alf = (b - left) / (at(span_r + j + 1) - left);
+                aw[k] = mix(alf, aw[k], 1.0 - alf, aw[k - 1]);
+                j -= 1;
+            }
+        }
+        aw
+    }
+
+    /// One column (or row) of [`decompose_to_bez`], its loops as written there: the
+    /// Bézier segments.
+    fn decompose_line(pts: &[Tracked], p: usize, u: &[f64]) -> Vec<Vec<Tracked>> {
+        let r = u.len() - 1;
+        let mut bw: Vec<Tracked> = pts[..=p].to_vec();
+        let mut nbw = bw.clone();
+        let (mut al, mut om) = (vec![0.0; p], vec![0.0; p]);
+        let (mut isu, mut ieu) = (p, p + 1);
+        let mut out = Vec::new();
+        while ieu < r {
+            let i0 = ieu;
+            while ieu < r && u[ieu] == u[ieu + 1] {
+                ieu += 1;
+            }
+            let mlu = ieu - i0 + 1;
+            // (the last strip ends at the clamped end, `mlu = p + 1`: no insertion, and
+            // nothing is saved)
+            let ru = p.saturating_sub(mlu);
+            if mlu < p {
+                let num = u[ieu] - u[isu];
+                for i in (mlu + 1..=p).rev() {
+                    let x = num / (u[isu + i] - u[isu]);
+                    al[i - mlu - 1] = x;
+                    om[i - mlu - 1] = 1.0 - x;
+                }
+                for i in 1..=ru {
+                    let su = mlu + i;
+                    for j in (su..=p).rev() {
+                        bw[j] = mix(al[j - su], bw[j], om[j - su], bw[j - 1]);
+                    }
+                    if ieu < r {
+                        nbw[ru - i] = bw[p];
+                    }
+                }
+            }
+            out.push(bw.clone());
+            if ieu < r {
+                for i in ru..=p {
+                    nbw[i] = pts[ieu - p + i];
+                }
+            }
+            isu = ieu;
+            ieu += 1;
+            core::mem::swap(&mut bw, &mut nbw);
+        }
+        out
+    }
+
+    /// The deepest chain over the Bézier patches of `net` (rows u, columns v), decomposed
+    /// as [`decompose_to_bez`] does, each point checked bit-equal to `real`'s.
+    fn deepest(
+        net: &[Vec<Tracked>],
+        p: usize,
+        q: usize,
+        u: &[f64],
+        v: &[f64],
+        real: &[Vec<crate::nurbs::srf_basic::Surface>],
+    ) -> usize {
+        let cols: Vec<Vec<Vec<Tracked>>> = (0..net[0].len())
+            .map(|l| {
+                let col: Vec<Tracked> = net.iter().map(|row| row[l]).collect();
+                decompose_line(&col, p, u)
+            })
+            .collect();
+        let mut depth = 0;
+        for (iu, real_row) in real.iter().enumerate() {
+            assert_eq!(cols[0].len(), real.len());
+            for k in 0..=p {
+                let row: Vec<Tracked> = cols.iter().map(|c| c[iu][k]).collect();
+                let segs = decompose_line(&row, q, v);
+                assert_eq!(segs.len(), real_row.len());
+                for (seg, patch) in segs.iter().zip(real_row) {
+                    let got: Vec<_> = patch.rows().nth(k).unwrap().to_vec();
+                    let want: Vec<_> = seg.iter().map(|t| t.0).collect();
+                    assert_eq!(got, want, "p {p} q {q} strip {iu} row {k}");
+                    depth = seg.iter().fold(depth, |d, t| d.max(t.1));
+                }
+            }
+        }
+        depth
+    }
+
+    /// B7 of #18612's review: [`off_surface_bound`]'s `γ` covers the longest chain of
+    /// knot-insertion levels its patches carry. For degrees 1 to 10 in u and v, on
+    /// nets with simple interior knots (where the decomposition's chains through saved
+    /// points are longest, `p (p − 1) / 2`) and with knots of mixed multiplicity, the
+    /// loops of `extract_patch` and [`decompose_to_bez`] run on tracked points (bit-equal
+    /// to the real ones), from the net itself (`form` as its own `source`) and from every
+    /// patch cut from inside one span to inside the same or a later one. The deepest chain
+    /// `L` must be within [`insertion_levels`] and `γ`'s index at least `8 L + 9` (eight
+    /// roundings a level, one for the size's feedback, eight for the coefficients'
+    /// scale). MEASURED: simple knots give the decomposition alone exactly
+    /// `p (p − 1) / 2 + q (q − 1) / 2`, the cut patches 4 levels at `(1, 1)` (the count's
+    /// 4), 41 at `(9, 1)` and 96 at `(10, 10)` (counted 130). The count before r4,
+    /// `32 (p + q) + 8` from `L ≤ 4 (p + q) − 4`, fails it from `(1, 9)` and `(9, 1)`.
+    #[test]
+    fn the_rounding_count_covers_the_insertion_chains() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as Net;
+        use crate::nurbs::srf_tool::p1::extract_patch;
+        // clamped knots on [0, spans] with interior multiplicities `mults`
+        let knots = |p: usize, mults: &[usize]| {
+            let mut u = vec![0.0; p + 1];
+            for (i, &m) in mults.iter().enumerate() {
+                let t = (i + 1) as f64 + 0.13 * ((i * 7) % 5) as f64;
+                u.extend(std::iter::repeat_n(t, m.min(p)));
+            }
+            let end = (mults.len() + 1) as f64 + 0.5;
+            u.extend(std::iter::repeat_n(end, p + 1));
+            u
+        };
+        let mut worst = 0;
+        for p in 1..=10_usize {
+            for q in 1..=10_usize {
+                let simple = |d: usize| vec![1; d + 2];
+                let mixed = |d: usize| (0..d + 3).map(|i| [1, 2, 1, 3][i % 4]).collect::<Vec<_>>();
+                for (mu, mv) in [(simple(p), simple(q)), (mixed(p), mixed(q))] {
+                    let (u, v) = (knots(p, &mu), knots(q, &mv));
+                    let (rows, cols) = (u.len() - p - 1, v.len() - q - 1);
+                    let net: Vec<Vec<CPoint>> = (0..rows)
+                        .map(|i| {
+                            (0..cols)
+                                .map(|j| {
+                                    let (x, y) = (i as f64, j as f64);
+                                    let w = 1.0 + 0.25 * (1.3 * x + 0.7 * y).sin().abs();
+                                    CPoint::new(
+                                        w * (x + 0.1 * y.sin()),
+                                        w * (y + 0.1 * x.cos()),
+                                        w * (0.3 * x * y).sin(),
+                                        w,
+                                    )
+                                })
+                                .collect()
+                        })
+                        .collect();
+                    let tracked: Vec<Vec<Tracked>> = net
+                        .iter()
+                        .map(|row| row.iter().map(|&c| (c, 0)).collect())
+                        .collect();
+                    let source = Net::new(net, p, q, u.clone(), v.clone()).unwrap();
+                    // the net decomposed as it is
+                    let own = deepest(&tracked, p, q, &u, &v, &decompose_to_bez(&source).unwrap());
+                    // patches cut from it, each from inside a span to inside a later one
+                    // (or the same), the same choice in u and v: the extraction's chains
+                    // feed the decomposition's
+                    let spans = |k: &[f64], d: usize| -> Vec<usize> {
+                        (d..k.len() - d - 1).filter(|&i| k[i] < k[i + 1]).collect()
+                    };
+                    let (su, sv) = (spans(&u, p), spans(&v, q));
+                    let inside = |k: &[f64], i: usize, f: f64| k[i] + f * (k[i + 1] - k[i]);
+                    let mut from_cut = 0;
+                    for a in 0..su.len().max(sv.len()) {
+                        for b in a..su.len().max(sv.len()) {
+                            let pick = |s: &[usize], i: usize| s[i.min(s.len() - 1)];
+                            let (ul, ur) = (
+                                inside(&u, pick(&su, a), 0.37),
+                                inside(&u, pick(&su, b), 0.61),
+                            );
+                            let (vl, vr) = (
+                                inside(&v, pick(&sv, a), 0.41),
+                                inside(&v, pick(&sv, b), 0.58),
+                            );
+                            let rect = crate::nurbs::geom::Rectangle {
+                                ul,
+                                ur,
+                                vb: vl,
+                                vt: vr,
+                            };
+                            let cut = extract_patch(&source, rect).unwrap();
+                            let (_, _, cr, cs) = cut.array_sizes();
+                            let aw: Vec<Vec<Tracked>> = (0..cols)
+                                .map(|l| {
+                                    let col: Vec<Tracked> =
+                                        tracked.iter().map(|row| row[l]).collect();
+                                    extract_line(&col, p, &u, ul, ur)
+                                })
+                                .collect();
+                            let cut_net: Vec<Vec<Tracked>> = (0..aw[0].len())
+                                .map(|i| {
+                                    let row: Vec<Tracked> = aw.iter().map(|c| c[i]).collect();
+                                    extract_line(&row, q, &v, vl, vr)
+                                })
+                                .collect();
+                            let real: Vec<Vec<CPoint>> =
+                                cut.rows().map(<[CPoint]>::to_vec).collect();
+                            let mirror: Vec<Vec<CPoint>> = cut_net
+                                .iter()
+                                .map(|row| row.iter().map(|t| t.0).collect())
+                                .collect();
+                            assert_eq!(real, mirror, "p {p} q {q} box {a} {b}: the extraction");
+                            from_cut = from_cut.max(deepest(
+                                &cut_net,
+                                p,
+                                q,
+                                &cut.u_knots()[..=cr],
+                                &cut.v_knots()[..=cs],
+                                &decompose_to_bez(&cut).unwrap(),
+                            ));
+                        }
+                    }
+                    let chain = own.max(from_cut);
+                    worst = worst.max(chain);
+                    assert!(
+                        chain <= insertion_levels(p, q),
+                        "p {p} q {q}: {chain} levels, {} counted",
+                        insertion_levels(p, q)
+                    );
+                    assert!(
+                        rounding_index(p, q) >= 8 * chain + 9,
+                        "p {p} q {q}: γ index {} below 8 · {chain} + 9",
+                        rounding_index(p, q)
+                    );
+                    // (simple knots: the decomposition alone reaches its count)
+                    if mu.iter().all(|&m| m == 1) && mv.iter().all(|&m| m == 1) {
+                        assert_eq!(own, p * (p - 1) / 2 + q * (q - 1) / 2, "p {p} q {q}");
+                    }
+                }
+            }
+        }
+        assert_eq!(worst, 96, "the deepest chain, at (10, 10)");
     }
 }

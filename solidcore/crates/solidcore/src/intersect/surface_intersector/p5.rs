@@ -63,16 +63,23 @@
 //!   curves left ([`SurfaceIntersector::add_deferred_touching_points`]); such points
 //!   come after the traced curves, where upstream's boundary pass would have put them
 //!   first.
-//! - **Opt-in fix (WR-76, #392).** With
-//!   [`UpstreamFixes::ssi_trace_tangent_curves_once`](crate::kernel::UpstreamFixes::ssi_trace_tangent_curves_once)
-//!   a traced curve removes, before it is flushed, the start points left in a tangent
-//!   cluster with either of its ends (`SurfaceIntersector::remove_end_tangent_clusters`);
-//!   the SolidCraft fork's tangency-labs/smlib@0ce09f2. Off by default (upstream
-//!   behaviour).
+//! - **Fix (WR-76, #392).** A traced curve removes, before it is flushed, the start
+//!   points left in a tangent cluster with either of its ends
+//!   (`SurfaceIntersector::remove_end_tangent_clusters`); the SolidCraft fork's
+//!   tangency-labs/smlib@0ce09f2. Upstream traces each of them again.
 //! - **Fix (WR-77, #393, #2110).** The curves are split at the singular points they
 //!   pass through after the tangent nodes are added (`super::singular_splits`); the
 //!   SolidCraft fork's tangency-labs/smlib@3c9d1d3. Always on (once the opt-in
 //!   `ssi_split_curves_at_singular_points`).
+//! - **Tangential curves (WR-75, #395).** After the interior curves, the SolidCraft fork's
+//!   tangential curve pass traces the curves along which the surfaces touch and the crossing
+//!   branches through their contact points (`super::tangent_curves`); always on (once the
+//!   opt-in `ssi_tangent_curve_tracer`). Not in a self intersection whose two domains overlap
+//!   or touch (#18930, `AdvSurfaceIntersector::trivial_solution_in_both_domains`), where the
+//!   surface touches itself everywhere at equal parameters; a self tangency at two different
+//!   parameters there is left to the marcher. A self intersection also
+//!   skips the boundary start point search, the tangential contact point search (WR-74) and
+//!   the singular point splits (WR-77).
 //! - **Empty trace (WR-80).** A curve is traced back the other way
 //!   ([`SurfaceIntersector::trace_back`], part 4) only when `TraceCurve` produced
 //!   points. Upstream also reverses the empty curve of a trace
@@ -84,7 +91,8 @@
 //!   caller), the unused context argument and the `SM_ASSERT`s.
 
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignored, passed_on, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{ignored, passed_on, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::ExtentPointType;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -103,7 +111,7 @@ use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::{surface_cache, SurfaceIntersection, TsectCurveType};
 use crate::surface::surface::Surface;
 use crate::surface::surface_cache::face_context::FaceQueries;
-use crate::surface::surface_cache::p1::{PatchBoundaryBoundingPlanes, SurfaceCache};
+use crate::surface::surface_cache::p1::{PatchBoundaryBoundingPlanes, SolveModes, SurfaceCache};
 
 use super::p1::{SrfIndex, SurfaceIntersector, TsectPnt};
 use super::p2::{BoundaryPlaneTestResult, TsectCurves};
@@ -172,13 +180,9 @@ fn intersection_surface_caches_in<O: Copy + PartialEq>(
         if e.is_unported_or_cancelled() {
             e
         } else {
-            crate::error::Failure::new(
-                OP_CACHES,
-                crate::error::intersect::IntersectFailure::StageFailed,
-            )
-            .with_status(SM_ERR_NULL_POINTER)
-            .caused_by(e)
-            .into_error()
+            Failure::new(OP_CACHES, IntersectFailure::SurfaceCacheNotBuilt)
+                .caused_by(e)
+                .into_error()
         }
     };
     let [h1, h2] = handles;
@@ -544,60 +548,53 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         let tol = self.base.this_approx_tol_3d;
 
         // get surface caches and their decomposition trees (NER)
-        if caches.is_empty() {
-            return Err(SolidError::intersect_stage_failed(
+        let Some((first, rest)) = caches.split_first_mut() else {
+            return Err(SolidError::intersect(
                 OP_DI,
-                SM_ERR_NULL_POINTER,
+                IntersectFailure::NoSurfaceCaches,
             ));
-        }
-        for c in caches.iter_mut().take(2) {
+        };
+        for c in core::iter::once(&mut *first).chain(rest.iter_mut()).take(2) {
             if !(trees_ready && c.tree().is_some()) {
                 c.get_tree(k).map_err(|e| {
                     if e.is_unported_or_cancelled() {
                         e
                     } else {
-                        crate::error::Failure::new(
-                            OP_DI,
-                            crate::error::intersect::IntersectFailure::StageFailed,
-                        )
-                        .with_status(SM_ERR_NULL_POINTER)
-                        .caused_by(e)
-                        .into_error()
+                        Failure::new(OP_DI, IntersectFailure::SurfaceCacheNotBuilt)
+                            .caused_by(e)
+                            .into_error()
                     }
                 })?;
             }
-
-            // Turn off point testing so GlobalPointSolve() keeps all point solutions;
-            // turn on boundary curve processing so LocalSolve looks for drop points on
-            // boundary curves (set here, before the first solve, which reads neither).
-            c.point_test_enabled = false;
-            c.process_boundary_curves = true;
         }
 
         // the boundary bounding planes of both caches (copies: lazily computed)
-        let planes: Vec<PatchBoundaryBoundingPlanes> = caches
-            .iter_mut()
-            .take(2)
-            .map(|c| c.patch_boundary_bounding_planes().clone())
-            .collect();
-        let mut planes1 = planes
-            .first()
-            .cloned()
-            .ok_or_else(|| SolidError::intersect_stage_failed(OP_DI, SM_ERR_NULL_POINTER))?;
-        let mut planes2 = planes.get(1).cloned().unwrap_or_else(|| planes1.clone());
+        let mut planes1: PatchBoundaryBoundingPlanes =
+            first.patch_boundary_bounding_planes().clone();
+        let mut planes2 = match rest.first_mut() {
+            Some(c) => c.patch_boundary_bounding_planes().clone(),
+            None => planes1.clone(),
+        };
 
-        let caches: &'t [SurfaceCache<O>] = caches;
-        let cache1 = caches
-            .first()
-            .ok_or_else(|| SolidError::intersect_stage_failed(OP_DI, SM_ERR_NULL_POINTER))?;
-        let cache2 = caches.get(1).unwrap_or(cache1);
+        let first: &'t SurfaceCache<O> = first;
+        let rest: &'t [SurfaceCache<O>] = rest;
+        let cache1 = first;
+        let cache2 = rest.first().unwrap_or(cache1);
         self.bind_caches(cache1, cache2)?;
 
         // no work - root treeNode bounding boxes are disjoint
         let root_box = |c: &SurfaceCache<O>| -> Result<Extent3d> {
-            let tree = c
-                .tree()
-                .ok_or_else(|| SolidError::intersect_stage_failed(OP_DI, SM_ERR_NULL_POINTER))?;
+            let tree = c.tree().ok_or_else(|| {
+                Failure::new(
+                    OP_DI,
+                    IntersectFailure::Defect {
+                        why: "both caches' trees were built (or found ready) above, so a \
+                              cache without one lost the tree it was given",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })?;
             let top = tree
                 .top_node()
                 .ok_or(SolidError::invalid_input(OP_DI, "tree without top node"))?;
@@ -713,13 +710,22 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         // Surf1/Surf2->NaturalBoundaryCurve Intersections (on copies of the caches:
         // exact ones, since upstream searches its own caches)
         if !self.base.doing_self_intersection {
-            let mut boundary_caches = caches
-                .iter()
+            let mut boundary_caches = core::iter::once(first)
+                .chain(rest)
                 .map(SurfaceCache::clone_for_evaluation)
                 .collect::<Result<Vec<_>>>()?;
-            self.base.find_boundary_start_points_with_queries(
+            // Point testing off so GlobalPointSolve() keeps all point solutions;
+            // boundary curve processing on so LocalSolve looks for drop points on
+            // boundary curves (upstream sets both on its caches before the first
+            // solve; here the boundary solves run in them, the caches keep theirs).
+            let modes = SolveModes {
+                point_test_enabled: false,
+                process_boundary_curves: true,
+            };
+            self.base.find_boundary_start_points_under(
                 k,
                 &mut boundary_caches,
+                [modes; 2],
                 &bbox,
                 &mut out,
                 queries,
@@ -766,12 +772,10 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
                     self.base.trace_back(k, start, &out.curves_3d)?;
                 }
 
-                // opt-in fix (WR-76, #392): a traced curve that ends on a boundary
-                // inside a tangential contact consumes the start points of that
-                // contact's boundary cluster
-                if k.fixes.ssi_trace_tangent_curves_once {
-                    self.base.remove_end_tangent_clusters(k)?;
-                }
+                // fix (WR-76, #392): a traced curve that ends on a boundary inside
+                // a tangential contact consumes the start points of that contact's
+                // boundary cluster
+                self.base.remove_end_tangent_clusters(k)?;
 
                 // create the curves from the points in m_vCurvePoints
                 self.base.flush_curve(k, &mut out)?;
@@ -796,12 +800,16 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         };
         self.find_interior_curves(k, &mut interior)?;
 
-        // not upstream (WR-75, opt-in; the fork's FindTangentCurves): trace the
-        // tangential curves the marcher above cannot follow
+        // not upstream (WR-75; the fork's FindTangentCurves): trace the
+        // tangential curves the marcher above cannot follow. Not in a self intersection
+        // whose two domains overlap or touch (#18930): there every point of the surface solves
+        // the tracer's equations with itself at equal parameters (S(x) - S(x) = 0, n = n),
+        // and its solves seeded beside a fold land on that trivial solution, so it traced
+        // the surface against itself.
         let mut tangent_nodes = Vec::new();
-        if k.fixes.ssi_tangent_curve_tracer {
+        let seeds = core::mem::take(&mut self.tangent_curve_seeds);
+        if !self.trivial_solution_in_both_domains() {
             let size = crate::math::min2(root1.size().length(), root2.size().length());
-            let seeds = core::mem::take(&mut self.tangent_curve_seeds);
             let mut curves = TsectCurves {
                 curves_3d: core::mem::take(&mut interior.curves_3d),
                 uv_curves: [
@@ -866,20 +874,18 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         curve_types = found_types;
         deviations = found_deviations;
 
-        // not upstream (WR-75, opt-in; the fork's AddTangentNodes): report the singular
-        // points where crossing branches meet
-        if k.fixes.ssi_tangent_curve_tracer {
-            super::tangent_curves::add_tangent_nodes(
-                k,
-                &self.base,
-                &tangent_nodes,
-                &mut curves_3d,
-                &mut surface1_uv_curves,
-                &mut surface2_uv_curves,
-                &mut curve_types,
-                &mut deviations,
-            )?;
-        }
+        // not upstream (WR-75; the fork's AddTangentNodes): report the singular points
+        // where crossing branches meet
+        super::tangent_curves::add_tangent_nodes(
+            k,
+            &self.base,
+            &tangent_nodes,
+            &mut curves_3d,
+            &mut surface1_uv_curves,
+            &mut surface2_uv_curves,
+            &mut curve_types,
+            &mut deviations,
+        )?;
 
         // not upstream (WR-77; the fork's sm_SplitCurvesAtSingularPoints): split crossing
         // curves at singular points (parallel normals) they pass through
@@ -1355,9 +1361,10 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             e.intersect_failure(),
-            Some(&crate::error::intersect::IntersectFailure::StageFailed)
+            Some(&IntersectFailure::NoSurfaceCaches)
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         // the tolerances are set first
         assert_eq!(ssi.base.this_approx_tol_3d, 0.5);
         assert_eq!(ssi.base.this_ang_tol_rad, 0.1);
@@ -1487,8 +1494,9 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             e.intersect_failure(),
-            Some(&crate::error::intersect::IntersectFailure::StageFailed)
+            Some(&IntersectFailure::SurfaceCacheNotBuilt)
         );
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(
             e.cause(),
             Some(&SolidError::invalid_input("test::identity", "no such face"))
@@ -1527,8 +1535,9 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             e.intersect_failure(),
-            Some(&crate::error::intersect::IntersectFailure::StageFailed)
+            Some(&IntersectFailure::SurfaceCacheNotBuilt)
         );
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.cause(), Some(&built));
     }
 
@@ -1692,5 +1701,109 @@ mod tests {
         assert!(!is_closure_curve(&si, &touching, &along_seam).unwrap());
         // the seam itself is the closure
         assert!(is_closure_curve(&si, &seam, &along_seam).unwrap());
+    }
+
+    /// A ribbon folded back on itself (#18930): a vertical segment of height 2 swept along the
+    /// offset by 2 towards its centres of curvature of the parabola y = x^2 / 2 over
+    /// [-2, 2] (101 points), a swallowtail: past the apex's radius 1 the offset has two cusps
+    /// and crosses itself where 1 + x^2 = 4, at (0, 2.5).
+    fn swallowtail_ribbon() -> Surface {
+        use crate::nurbs::crv_fit::p1::ParamMethod;
+        let points: Vec<Point3> = (0..101)
+            .map(|i| {
+                let x = -2.0 + 4.0 * f64::from(i) / 100.0;
+                let l = (1.0 + x * x).sqrt();
+                Point3::new(x - 2.0 * x / l, x * x / 2.0 + 2.0 / l, 0.0)
+            })
+            .collect();
+        let path = BSplineCurve::interpolate_points(
+            &points,
+            None,
+            3,
+            None,
+            None,
+            false,
+            ParamMethod::ChordLength,
+        )
+        .unwrap();
+        let segment = BSplineCurve::interpolate_points(
+            &[Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, 2.0)],
+            None,
+            1,
+            None,
+            None,
+            false,
+            ParamMethod::ChordLength,
+        )
+        .unwrap();
+        Surface::from(
+            BSplineSurface::create_sweep_surface(&segment, &path, None, false, 1e-4).unwrap(),
+        )
+    }
+
+    /// A surface folded back on itself (#18930): the swallowtail ribbon's self intersection is
+    /// the one vertical line where it crosses itself, at (0, 2.5), over the ribbon's height
+    /// 0..2. A self intersection once also returned six tangent curves: seeded beside the two
+    /// cusp lines, where the ribbon turns back and its sheets meet at equal parameters, the
+    /// tangential curve pass traced the surface against itself.
+    #[test]
+    fn a_folded_ribbon_crosses_itself_once_with_the_tangent_curve_tracer() {
+        let ribbon = swallowtail_ribbon();
+        let k = Kernel::default();
+        let dom = ribbon.natural_uv_domain_with_nurb(&k).unwrap();
+        let x = ribbon
+            .global_surface_intersect(&k, &dom, &ribbon, &dom, [false, false], None, None)
+            .unwrap();
+        assert_eq!(x.curve_types, [TsectCurveType::Crossing]);
+        let c = x.curves_3d.first().unwrap();
+        let iv = c.natural_interval();
+        let mut z = Vec::new();
+        for f in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let p = c.evaluate_point(&k, iv.evaluate(f)).unwrap();
+            assert!(p.x.abs() < 1e-3 && (p.y - 2.5).abs() < 1e-3, "{f}: {p:?}");
+            z.push(p.z);
+        }
+        // end to end over the height, monotone
+        let (z0, z1) = (*z.first().unwrap(), *z.last().unwrap());
+        assert!(
+            z0.min(z1).abs() < 1e-4 && (z0.max(z1) - 2.0).abs() < 1e-4,
+            "{z:?}"
+        );
+        assert!(
+            z.windows(2)
+                .all(|w| matches!(w, [a, b] if (b - a) * (z1 - z0) > 0.0)),
+            "{z:?}"
+        );
+    }
+
+    /// Where a self intersection's trivial solution lies (#18930): two domains of one surface
+    /// that are the same, overlap or touch both hold the points the surface shares with itself
+    /// at equal parameters, so the tangential curve pass does not run; two disjoint domains of
+    /// one surface, and two surfaces over the same domain, hold none, so it runs.
+    #[test]
+    fn a_self_intersection_meets_its_trivial_solution_where_its_domains_overlap_or_touch() {
+        let k = Kernel::default();
+        let ribbon = swallowtail_ribbon();
+        let copy = swallowtail_ribbon();
+        let dom = ribbon.natural_uv_domain_with_nurb(&k).unwrap();
+        let (u0, u1, v0, v1) = (dom.u_min(), dom.u_max(), dom.v_min(), dom.v_max());
+        let part =
+            |a: f64, b: f64| Extent2d::from_bounds(u0 + a * (u1 - u0), v0, u0 + b * (u1 - u0), v1);
+        let meets = |other: &Surface, d1: &Extent2d, d2: &Extent2d| {
+            AdvSurfaceIntersector::<'_, '_, NoSurfaceHandle>::new(&k, &ribbon, d1, other, d2, false)
+                .unwrap()
+                .trivial_solution_in_both_domains()
+        };
+        assert!(meets(&ribbon, &dom, &dom), "the same domain");
+        assert!(
+            meets(&ribbon, &part(0.0, 0.6), &part(0.4, 1.0)),
+            "overlapping"
+        );
+        assert!(meets(&ribbon, &part(0.0, 0.5), &part(0.5, 1.0)), "touching");
+        assert!(
+            !meets(&ribbon, &part(0.0, 0.4), &part(0.6, 1.0)),
+            "disjoint"
+        );
+        assert!(!meets(&copy, &dom, &dom), "two surfaces");
     }
 }

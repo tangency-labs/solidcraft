@@ -97,6 +97,19 @@ impl Default for WrappedTextureManager {
 // ----------------------------------------------------------------------------
 
 /// Repaint-logic
+/// The hit test of a pass whose pointer is at `pos`, against the widgets of the pass before it.
+// SolidCraft: shared by `begin_pass` and `Context::widget_hits_at`.
+fn prev_pass_hits(memory: &Memory, widgets: &crate::WidgetRects, pos: Pos2) -> WidgetHits {
+    // Areas that are not interactable are click-through: skip them in the hit-test.
+    let mut layers: Vec<LayerId> = widgets
+        .layer_ids()
+        .filter(|layer_id| memory.areas().is_interactable(*layer_id))
+        .collect();
+    layers.sort_by(|&a, &b| memory.areas().compare_order(a, b));
+    let interact_radius = memory.options.style().interaction.interact_radius;
+    crate::hit_test::hit_test(widgets, &layers, &memory.to_global, pos, interact_radius)
+}
+
 impl ContextImpl {
     /// This is where we update the repaint logic.
     fn begin_pass_repaint_logic(&mut self, viewport_id: ViewportId) {
@@ -514,25 +527,8 @@ impl ContextImpl {
         viewport.this_pass.begin_pass();
 
         {
-            // Areas that are not interactable are click-through: skip them in the hit-test.
-            let mut layers: Vec<LayerId> = viewport
-                .prev_pass
-                .widgets
-                .layer_ids()
-                .filter(|layer_id| self.memory.areas().is_interactable(*layer_id))
-                .collect();
-            layers.sort_by(|&a, &b| self.memory.areas().compare_order(a, b));
-
             viewport.hits = if let Some(pos) = viewport.input.pointer.interact_pos() {
-                let interact_radius = self.memory.options.style().interaction.interact_radius;
-
-                crate::hit_test::hit_test(
-                    &viewport.prev_pass.widgets,
-                    &layers,
-                    &self.memory.to_global,
-                    pos,
-                    interact_radius,
-                )
+                prev_pass_hits(&self.memory, &viewport.prev_pass.widgets, pos)
             } else {
                 WidgetHits::default()
             };
@@ -912,12 +908,48 @@ impl Context {
 
     /// Do read-only (shared access) transaction on Context
     fn read<R>(&self, reader: impl FnOnce(&ContextImpl) -> R) -> R {
-        reader(&self.0.read())
+        // SolidCraft: a read inside a read of this context on this thread goes ahead of a waiting
+        // writer. A plain read would wait on the writer, which waits on this thread
+        // (#21091).
+        let held = lock_nesting::Held::enter(self.lock_key(), false);
+        if held.nested_read {
+            reader(&self.0.read_recursive())
+        } else {
+            reader(&self.0.read())
+        }
     }
 
     /// Do read-write (exclusive access) transaction on Context
     fn write<R>(&self, writer: impl FnOnce(&mut ContextImpl) -> R) -> R {
+        // SolidCraft: tracked so a read inside this write is not taken for a nested read
+        // (#21091).
+        let _held = lock_nesting::Held::enter(self.lock_key(), true);
         writer(&mut self.0.write())
+    }
+
+    /// SolidCraft: what tells this context's lock apart from another context's
+    /// (#21091).
+    fn lock_key(&self) -> usize {
+        Arc::as_ptr(&self.0) as usize
+    }
+
+    /// SolidCraft: run `f` and report each time this thread locked a [`Context`] while it already
+    /// held a lock of that same context: a closure given to [`Self::data`], [`Self::memory`],
+    /// [`Self::input`], [`Self::style`] and the like that calls the context again (as
+    /// `ctx.data(|d| d.get_temp::<T>(Id::new(ctx.viewport_id())))` does).
+    ///
+    /// egui forbids that (see [`Self::run_ui`]). A write inside a lock, or a read inside a write,
+    /// deadlocks at once. A read inside a read deadlocked only when another thread asked to write
+    /// between the two reads (a worker's [`Self::request_repaint`]), so it froze the window
+    /// rarely; such reads now go ahead of the waiting writer, and this lets tests find them.
+    ///
+    /// Each report names the two locks and has a backtrace of the inner one. Only with the
+    /// `lock_nesting_report` feature, which tests enable.
+    #[cfg(any(test, feature = "lock_nesting_report"))]
+    pub fn record_nested_locks<R>(f: impl FnOnce() -> R) -> (R, Vec<String>) {
+        let recording = lock_nesting::Recording::start();
+        let result = f();
+        (result, recording.finish())
     }
 
     /// Run the ui code for one frame.
@@ -3618,6 +3650,24 @@ impl Context {
         }
     }
 
+    /// The widgets a pass would find under a pointer at `pos`, without running one.
+    ///
+    /// This is the hit test the next pass starts with (see [`WidgetHits`]), run against the
+    /// widgets of the last pass. An integration can use it between passes to tell whether moving
+    /// the pointer to `pos` reaches a different widget, for instance to skip a repaint for
+    /// pointer motion that only crosses a widget which draws the same wherever the pointer is
+    /// on it (see [`crate::RawInput::repaint_on_pointer_move`]).
+    // SolidCraft: added for SolidCraft's repaint on pointer motion (vendor/README.md).
+    pub fn widget_hits_at(&self, pos: Pos2) -> WidgetHits {
+        self.read(|ctx| {
+            ctx.viewports
+                .get(&ctx.viewport_id())
+                .map_or_else(WidgetHits::default, |viewport| {
+                    prev_pass_hits(&ctx.memory, &viewport.prev_pass.widgets, pos)
+                })
+        })
+    }
+
     /// Top-most layer at the given position.
     pub fn layer_id_at(&self, pos: Pos2) -> Option<LayerId> {
         self.memory(|mem| mem.layer_id_at(pos))
@@ -5015,11 +5065,170 @@ fn flatten_labelled_by(nodes: &mut [(accesskit::NodeId, accesskit::Node)]) {
     }
 }
 
+/// SolidCraft: the [`Context`] locks each thread holds, so a nested read can go ahead of a waiting
+/// writer and tests can find nested locks ([`Context::record_nested_locks`];
+/// #21091).
+mod lock_nesting {
+    use std::cell::RefCell;
+
+    std::thread_local! {
+        /// The contexts this thread holds a lock of, innermost last, and whether each is a write.
+        static HELD: RefCell<Vec<(usize, bool)>> = const { RefCell::new(Vec::new()) };
+        /// While a test records: a report of each lock taken inside a lock of the same context.
+        #[cfg(any(test, feature = "lock_nesting_report"))]
+        static RECORDED: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+    }
+
+    /// One lock this thread holds, from just before it is taken until just after it is released.
+    pub(super) struct Held {
+        /// A read inside a read of the same context.
+        pub(super) nested_read: bool,
+    }
+
+    impl Held {
+        pub(super) fn enter(key: usize, write: bool) -> Self {
+            let outer = HELD
+                .try_with(|held| {
+                    let mut held = held.borrow_mut();
+                    let outer = held.iter().rev().find(|(k, _)| *k == key).map(|&(_, w)| w);
+                    held.push((key, write));
+                    outer
+                })
+                .ok()
+                .flatten();
+            #[cfg(any(test, feature = "lock_nesting_report"))]
+            if let Some(outer_write) = outer {
+                record(outer_write, write);
+            }
+            Self {
+                nested_read: outer == Some(false) && !write,
+            }
+        }
+    }
+
+    impl Drop for Held {
+        fn drop(&mut self) {
+            let _ = HELD.try_with(|held| held.borrow_mut().pop());
+        }
+    }
+
+    #[cfg(any(test, feature = "lock_nesting_report"))]
+    fn record(outer_write: bool, write: bool) {
+        let kind = |write: bool| if write { "write" } else { "read" };
+        let _ = RECORDED.try_with(|recorded| {
+            if let Some(reports) = recorded.borrow_mut().as_mut() {
+                reports.push(format!(
+                    "a {} of the Context inside a {} of it:\n{}",
+                    kind(write),
+                    kind(outer_write),
+                    std::backtrace::Backtrace::force_capture()
+                ));
+            }
+        });
+    }
+
+    /// Records this thread's nested locks until finished (or dropped), then restores the
+    /// recording around it.
+    #[cfg(any(test, feature = "lock_nesting_report"))]
+    pub(super) struct Recording {
+        outer: Option<Option<Vec<String>>>,
+    }
+
+    #[cfg(any(test, feature = "lock_nesting_report"))]
+    impl Recording {
+        pub(super) fn start() -> Self {
+            Self {
+                outer: RECORDED
+                    .try_with(|recorded| recorded.replace(Some(Vec::new())))
+                    .ok(),
+            }
+        }
+
+        pub(super) fn finish(mut self) -> Vec<String> {
+            self.restore().unwrap_or_default()
+        }
+
+        fn restore(&mut self) -> Option<Vec<String>> {
+            let outer = self.outer.take()?;
+            RECORDED
+                .try_with(|recorded| recorded.replace(outer))
+                .ok()
+                .flatten()
+        }
+    }
+
+    #[cfg(any(test, feature = "lock_nesting_report"))]
+    impl Drop for Recording {
+        fn drop(&mut self) {
+            self.restore();
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::{FontDefinitions, Panel};
 
     use super::Context;
+
+    /// SolidCraft (#21091): a read inside a read on one thread, with another
+    /// thread waiting to write between the two, used to wait on that writer while the writer
+    /// waited on the reader.
+    #[test]
+    fn a_nested_read_does_not_wait_on_a_waiting_writer() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let ctx = Context::default();
+        let (queued, writer_queued) = mpsc::channel();
+        let (done, finished) = mpsc::channel();
+        let (wrote, written) = mpsc::channel();
+        let reader = ctx.clone();
+        std::thread::spawn(move || {
+            let viewport = reader.data(|_| {
+                // A worker asks for a repaint (a write) while this thread reads.
+                let worker = reader.clone();
+                std::thread::spawn(move || {
+                    worker.request_repaint();
+                    let _ = wrote.send(());
+                });
+                // The writer has claimed the lock and waits for this read to end: while a reader
+                // holds the lock, nothing else sets its exclusive bit.
+                let deadline = std::time::Instant::now() + Duration::from_secs(120);
+                while !reader.0.is_locked_exclusive() && std::time::Instant::now() < deadline {
+                    std::thread::yield_now();
+                }
+                let is_queued = reader.0.is_locked_exclusive();
+                let _ = queued.send(is_queued);
+                is_queued.then(|| reader.viewport_id())
+            });
+            let _ = done.send(viewport);
+        });
+        assert_eq!(
+            writer_queued.recv_timeout(Duration::from_secs(150)).ok(),
+            Some(true),
+            "the writer queued behind the read before the nested read"
+        );
+        // Well under the 10 s after which a debug build's waiting writer gives up and frees it.
+        assert_eq!(
+            finished.recv_timeout(Duration::from_secs(5)).ok(),
+            Some(Some(crate::ViewportId::ROOT)),
+            "the nested read waited on the writer that waited on it"
+        );
+        assert!(
+            written.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "the writer completes once the reads end"
+        );
+        let ((), nested) = Context::record_nested_locks(|| {
+            ctx.data(|_| ctx.viewport_id());
+        });
+        assert_eq!(nested.len(), 1, "a nested read is reported");
+        let ((), nested) = Context::record_nested_locks(|| {
+            ctx.data(|_| ());
+            ctx.viewport_id();
+        });
+        assert!(nested.is_empty(), "consecutive locks are not nested");
+    }
 
     #[cfg(debug_assertions)]
     #[test]
@@ -5258,6 +5467,96 @@ mod test {
             *observer_delays.lock(),
             [Duration::from_secs(1), Duration::from_secs(2)],
             "The observer sees every request"
+        );
+    }
+
+    /// Between passes, `widget_hits_at` finds the widgets the next pass's own hit test finds.
+    // SolidCraft
+    #[test]
+    fn widget_hits_at_matches_the_next_pass() {
+        use crate::{CentralPanel, Event, Id, RawInput, Sense, pos2, vec2};
+
+        let ctx = Context::default();
+        let ids = core::cell::Cell::new((Id::NULL, Id::NULL));
+        let run = |events: Vec<Event>| {
+            let input = RawInput {
+                events,
+                ..Default::default()
+            };
+            let out = ctx.run_ui(input, |ui| {
+                CentralPanel::default().show(ui, |ui| {
+                    let rect = crate::Rect::from_min_size(ui.max_rect().min, vec2(400.0, 300.0));
+                    let back = ui.interact(rect, ui.scope_id().with("back"), Sense::click_and_drag());
+                    let button = ui.put(
+                        crate::Rect::from_min_size(rect.min + vec2(20.0, 20.0), vec2(80.0, 30.0)),
+                        crate::Button::new("b"),
+                    );
+                    ids.set((back.id, button.id));
+                });
+            });
+            out.drop_without_applying_deltas();
+        };
+        for _ in 0..3 {
+            run(vec![]);
+        }
+        let (back, button) = ids.get();
+        for pos in [pos2(300.0, 250.0), pos2(40.0, 40.0)] {
+            let before = ctx.widget_hits_at(pos);
+            run(vec![Event::PointerMoved(pos)]);
+            let during = ctx.viewport(|v| v.hits.clone());
+            assert_eq!(
+                before.contains_pointer.iter().map(|w| w.id).collect::<Vec<_>>(),
+                during.contains_pointer.iter().map(|w| w.id).collect::<Vec<_>>(),
+                "the same widgets contain the pointer at {pos:?}"
+            );
+            assert_eq!(before.click.map(|w| w.id), during.click.map(|w| w.id), "{pos:?}");
+            assert_eq!(before.drag.map(|w| w.id), during.drag.map(|w| w.id), "{pos:?}");
+        }
+        let ids_at = |pos| -> Vec<Id> {
+            let hits = ctx.widget_hits_at(pos);
+            hits.contains_pointer.iter().map(|w| w.id).collect()
+        };
+        assert!(ids_at(pos2(300.0, 250.0)).contains(&back), "the background widget");
+        assert!(!ids_at(pos2(300.0, 250.0)).contains(&button), "not the button");
+        let hits = ctx.widget_hits_at(pos2(40.0, 40.0));
+        assert_eq!(hits.click.map(|w| w.id), Some(button), "the button over it");
+    }
+
+    /// Pointer motion alone may be asked not to schedule a frame; a click still does.
+    #[test]
+    fn pointer_motion_repaints_unless_asked_not_to() {
+        use crate::{Event, PointerButton, RawInput, pos2};
+
+        let run = |motion_repaints: bool, click: bool| {
+            let ctx = Context::default();
+            for _ in 0..3 {
+                let out = ctx.run_ui(RawInput::default(), |_| {});
+                out.drop_without_applying_deltas();
+            }
+            let mut input = RawInput {
+                repaint_on_pointer_move: motion_repaints,
+                ..Default::default()
+            };
+            input.events.push(Event::PointerMoved(pos2(10.0, 10.0)));
+            if click {
+                input.events.push(Event::PointerButton {
+                    pos: pos2(10.0, 10.0),
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Default::default(),
+                });
+            }
+            let out = ctx.run_ui(input, |_| {});
+            let requested = ctx.has_requested_repaint();
+            out.drop_without_applying_deltas();
+            requested
+        };
+
+        assert!(!run(false, false), "motion alone must not repaint");
+        assert!(run(true, false), "motion repaints by default");
+        assert!(
+            run(false, true),
+            "a click repaints even when motion does not"
         );
     }
 
