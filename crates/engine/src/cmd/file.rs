@@ -119,14 +119,41 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.inspect_freecad_sketches", "Inspect FreeCAD Sketches", inspect_freecad_sketches)
         .icon("import")
         .noundo()
-        .params("path: FreeCAD .FCStd file → {project, nodes, sketches, operations}; reads its Part/Body/Sketch hierarchy and operation settings without changing the design"),
+        .params(concat!(
+            "path: FreeCAD .FCStd file → {project, nodes, sketches, operations}; ",
+            "reads its Part/Body/Sketch hierarchy and operation settings without changing the design",
+        )),
     CommandSpec::new("file.import_freecad_sketches", "Import FreeCAD Sketches", import_freecad_sketches)
         .icon("import")
-        .params("path: FreeCAD .FCStd file; sketches?: [source object names] (default: all); organization?: hierarchy|flat (default hierarchy: FreeCAD Parts and Bodies become nested components; flat: all sketches go in the active component); naming?: original|body|path (flat only, default original); preserve_planes?: bool (default true: preserve saved sketch planes and parent placements; false: every sketch uses XY); import_operations?: bool (default false); operations?: [source operation names] (default all when enabled; required base operations and profile sketches are included automatically). Pad/Pocket become Extrude new/join/cut; Revolution/Groove become Revolve new/join/cut. Mirrored and PolarPattern become native transforms when their saved source, plane or axis, and parameters can be resolved. Fixed extents, reversed, symmetric, two-sided and through-all Pocket are supported. Face- and sketch-attached profiles with valid saved placements import on independent planes with nonblocking warnings. Attachments with no usable saved plane suppress affected operations for repair. Unsupported operations are reported as skipped. Operation import requires preserve_planes:true. All additions are one undo step; operations in the reply report feature ids, status and detailed warnings."),
+        .params(concat!(
+            "path: FreeCAD .FCStd file; ",
+            "sketches?: [source object names] (default: all); ",
+            "organization?: hierarchy|flat (default hierarchy: FreeCAD Parts and Bodies become nested components; flat: all sketches go in the active component); ",
+            "naming?: original|body|path (flat only, default original); ",
+            "preserve_planes?: bool (default true: preserve saved sketch planes and parent placements; false: every sketch uses XY); ",
+            "import_operations?: bool (default false); ",
+            "operations?: [source operation names] (default all when enabled; required base operations and profile sketches are included automatically). ",
+            "Pad/Pocket become Extrude new/join/cut; Revolution/Groove become Revolve new/join/cut. ",
+            "Mirrored and PolarPattern become native transforms when their saved source, plane or axis, and parameters can be resolved. ",
+            "Fixed extents, reversed, symmetric, two-sided and through-all Pocket are supported. ",
+            "Face- and sketch-attached profiles with valid saved placements import on independent planes with nonblocking warnings. ",
+            "Attachments with no usable saved plane suppress affected operations for repair. ",
+            "Unsupported operations are reported as skipped. ",
+            "Operation import requires preserve_planes:true. ",
+            "All additions are one undo step; operations in the reply report feature ids, status and detailed warnings.",
+        )),
     CommandSpec::new("file.freecad_import_report", "FreeCAD Import Report", freecad_report::report)
         .icon("copy")
         .noundo()
-        .params("report: {project, source, summary, warnings: [{summary, detail, context?}], previews?: [saved sketch previews]}; path?: destination Markdown file; images?: bool (default true). Returns Markdown including every More description. When saving, also writes annotated PNGs in an adjacent images folder where source geometry is available. Copy returns text without image files. Does not change the design."),
+        .params(concat!(
+            "report: {project, source, summary, warnings: [{summary, detail, context?}], previews?: [saved sketch previews]}; ",
+            "path?: destination Markdown file; ",
+            "images?: bool (default true). ",
+            "Returns Markdown including every More description. ",
+            "When saving, also writes annotated PNGs in an adjacent images folder where source geometry is available. ",
+            "Copy returns text without image files. ",
+            "Does not change the design.",
+        )),
     CommandSpec::new("file.save", "Save", crate::checked!("file.save", save)).any_part()
         .icon("save")
         .key("Ctrl+S")
