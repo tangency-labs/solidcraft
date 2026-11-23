@@ -678,6 +678,12 @@ pub struct OpenParams {
     /// elsewhere). Default: false.
     #[serde(default)]
     pub read_only: Option<bool>,
+    /// For a design: true opens a copy of it as a new, unsaved single design that has no file,
+    /// leaving the file as it is; saving it asks where. Experimental (#6892): how a file that
+    /// belongs to another design (`internal_of` in the reply) becomes a design of its own.
+    /// Default: false.
+    #[serde(default)]
+    pub as_copy: Option<bool>,
     /// For a STEP or IGES file: false recomputes the import without reading or writing the local
     /// saved-model cache. Default: true.
     #[serde(default)]
@@ -703,6 +709,15 @@ pub struct OpenParams {
     /// 5000000.
     #[serde(default)]
     pub max_points: Option<MaxPoints>,
+}
+
+/// The design a file belongs to, from the tag in its header (experimental, #6892).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct InternalOfReport {
+    /// The name the owning design's file had when the tag was made. It can be out of date.
+    pub design: String,
+    /// The tag's key: the owner is the design that holds a file with the same key.
+    pub key: String,
 }
 
 /// Another SolidCraft that has the design open, from its lock file.
@@ -732,6 +747,14 @@ pub struct OpenedDesign {
     /// Only with `read_only`: true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_only: Option<bool>,
+    /// Only with `as_copy`: true. The design is new and unsaved, and has no file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub as_copy: Option<bool>,
+    /// Experimental (#6892): only when the file belongs to another design, as its header says:
+    /// an internal component's file, or a drawing's. Opened by itself it is most likely a
+    /// recovery file; `as_copy` opens it as a design of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub internal_of: Option<InternalOfReport>,
     /// Only when another SolidCraft has the design open (its lock file is fresh).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub open_elsewhere: Option<OpenElsewhere>,

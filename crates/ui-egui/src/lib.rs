@@ -237,6 +237,7 @@ mod file_load_ui_tests;
 #[cfg(test)]
 mod fillet_spline_handle_tests;
 pub(crate) mod import_report;
+pub(crate) mod internal_file;
 pub(crate) mod missing_links;
 pub mod mouse_gesture;
 pub(crate) mod recovery_components;
@@ -867,6 +868,8 @@ pub struct SolveApp {
     /// Internal components an open found with unsaved work beside the design, waiting to be
     /// restored or discarded (#6892).
     pub recovery_components: Option<recovery_components::RecoveryComponents>,
+    /// A file that belongs to another design, opened by itself, waiting to be answered (#6892).
+    pub internal_file: Option<internal_file::InternalFile>,
     /// A Save waiting for "the file changed on disk" to be answered.
     pub disk_prompt: bool,
     /// Update Links, Open Linked Design or Reload from file waiting for a network server to be allowed.
@@ -1191,6 +1194,7 @@ impl SolveApp {
             lock_prompts: Vec::new(),
             missing_links: None,
             recovery_components: None,
+            internal_file: None,
             disk_prompt: false,
             network_prompt: None,
             link_folders_prompt: Vec::new(),
@@ -3657,6 +3661,7 @@ impl SolveApp {
         self.say_kind_note(&r);
         missing_links::offer(self, &r);
         recovery_components::offer(self, &r);
+        internal_file::offer(self, &r);
         Ok(())
     }
 
@@ -4547,6 +4552,7 @@ impl SolveApp {
         documents::prompt(self, ui.ctx());
         missing_links::show(self, ui.ctx());
         recovery_components::show(self, ui.ctx());
+        internal_file::show(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());
         link_folders_prompt::show(self, ui.ctx());

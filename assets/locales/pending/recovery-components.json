@@ -14,7 +14,13 @@
     "cmd.component_discard_recovery": "Discard Recovery Component",
     "ui.properties.component_file": "Component file",
     "ui.properties.component_internal": "Internal: {name}",
-    "ui.properties.component_external": "External: {name}"
+    "ui.properties.component_external": "External: {name}",
+    "internal_file.title": "This file belongs to another design",
+    "internal_file.detail": "{name} is an internal component of {design}. Opened by itself it is most likely a recovery file left after a crash. Open {design} to recover its work there, or open it as a new design and save it as a file of its own.",
+    "internal_file.owner_missing": "{design} was not found near this file.",
+    "internal_file.open_owner": "Open {design}",
+    "internal_file.open_copy": "Open as a new design",
+    "internal_file.close": "Close"
   },
   "ar": {
     "recovery_components.title": "مكوّنات الاسترداد",
@@ -31,7 +37,13 @@
     "cmd.component_discard_recovery": "تجاهل مكوّن الاسترداد",
     "ui.properties.component_file": "ملف المكوّن",
     "ui.properties.component_internal": "داخلي: {name}",
-    "ui.properties.component_external": "خارجي: {name}"
+    "ui.properties.component_external": "خارجي: {name}",
+    "internal_file.title": "هذا الملف ينتمي إلى تصميم آخر",
+    "internal_file.detail": "{name} مكوّن داخلي في {design}. فتحه وحده يعني غالبًا أنه ملف استرداد بقي بعد تعطّل. افتح {design} لاسترداد عمله هناك، أو افتحه كتصميم جديد واحفظه كملف مستقل.",
+    "internal_file.owner_missing": "لم يُعثر على {design} قرب هذا الملف.",
+    "internal_file.open_owner": "فتح {design}",
+    "internal_file.open_copy": "فتح كتصميم جديد",
+    "internal_file.close": "إغلاق"
   },
   "de": {
     "recovery_components.title": "Wiederherstellungskomponenten",
@@ -48,7 +60,13 @@
     "cmd.component_discard_recovery": "Wiederherstellungskomponente verwerfen",
     "ui.properties.component_file": "Komponentendatei",
     "ui.properties.component_internal": "Intern: {name}",
-    "ui.properties.component_external": "Extern: {name}"
+    "ui.properties.component_external": "Extern: {name}",
+    "internal_file.title": "Diese Datei gehört zu einer anderen Konstruktion",
+    "internal_file.detail": "{name} ist eine interne Komponente von {design}. Einzeln geöffnet ist sie höchstwahrscheinlich eine Wiederherstellungsdatei nach einem Absturz. Öffnen Sie {design}, um die Arbeit dort wiederherzustellen, oder öffnen Sie sie als neue Konstruktion und speichern Sie sie als eigene Datei.",
+    "internal_file.owner_missing": "{design} wurde in der Nähe dieser Datei nicht gefunden.",
+    "internal_file.open_owner": "{design} öffnen",
+    "internal_file.open_copy": "Als neue Konstruktion öffnen",
+    "internal_file.close": "Schließen"
   },
   "he": {
     "recovery_components.title": "רכיבי שחזור",
@@ -65,7 +83,13 @@
     "cmd.component_discard_recovery": "בטל רכיב שחזור",
     "ui.properties.component_file": "קובץ הרכיב",
     "ui.properties.component_internal": "פנימי: {name}",
-    "ui.properties.component_external": "חיצוני: {name}"
+    "ui.properties.component_external": "חיצוני: {name}",
+    "internal_file.title": "הקובץ הזה שייך לתכן אחר",
+    "internal_file.detail": "{name} הוא רכיב פנימי של {design}. כשהוא נפתח לבדו, סביר שזהו קובץ שחזור שנשאר אחרי קריסה. פתח את {design} כדי לשחזר שם את העבודה, או פתח אותו כתכן חדש ושמור אותו כקובץ משלו.",
+    "internal_file.owner_missing": "{design} לא נמצא ליד הקובץ הזה.",
+    "internal_file.open_owner": "פתח את {design}",
+    "internal_file.open_copy": "פתח כתכן חדש",
+    "internal_file.close": "סגור"
   },
   "ja": {
     "recovery_components.title": "回復コンポーネント",
@@ -82,7 +106,13 @@
     "cmd.component_discard_recovery": "回復コンポーネントを破棄",
     "ui.properties.component_file": "コンポーネントファイル",
     "ui.properties.component_internal": "内部: {name}",
-    "ui.properties.component_external": "外部: {name}"
+    "ui.properties.component_external": "外部: {name}",
+    "internal_file.title": "このファイルは別のデザインのものです",
+    "internal_file.detail": "{name} は {design} の内部コンポーネントです。単独で開いた場合、クラッシュ後に残った復元ファイルである可能性が高いです。{design} を開いてそこで作業を復元するか、新しいデザインとして開いて独立したファイルとして保存してください。",
+    "internal_file.owner_missing": "{design} はこのファイルの近くに見つかりませんでした。",
+    "internal_file.open_owner": "{design} を開く",
+    "internal_file.open_copy": "新しいデザインとして開く",
+    "internal_file.close": "閉じる"
   },
   "ko": {
     "recovery_components.title": "복구 구성요소",
@@ -99,7 +129,13 @@
     "cmd.component_discard_recovery": "복구 구성요소 버리기",
     "ui.properties.component_file": "구성 요소 파일",
     "ui.properties.component_internal": "내부: {name}",
-    "ui.properties.component_external": "외부: {name}"
+    "ui.properties.component_external": "외부: {name}",
+    "internal_file.title": "이 파일은 다른 디자인에 속합니다",
+    "internal_file.detail": "{name}은(는) {design}의 내부 구성 요소입니다. 단독으로 열렸다면 충돌 후 남은 복구 파일일 가능성이 큽니다. {design}을(를) 열어 그곳에서 작업을 복구하거나, 새 디자인으로 열어 별도의 파일로 저장하십시오.",
+    "internal_file.owner_missing": "이 파일 근처에서 {design}을(를) 찾지 못했습니다.",
+    "internal_file.open_owner": "{design} 열기",
+    "internal_file.open_copy": "새 디자인으로 열기",
+    "internal_file.close": "닫기"
   },
   "vi": {
     "recovery_components.title": "Thành phần khôi phục",
@@ -116,7 +152,13 @@
     "cmd.component_discard_recovery": "Hủy bỏ thành phần khôi phục",
     "ui.properties.component_file": "Tệp thành phần",
     "ui.properties.component_internal": "Nội bộ: {name}",
-    "ui.properties.component_external": "Bên ngoài: {name}"
+    "ui.properties.component_external": "Bên ngoài: {name}",
+    "internal_file.title": "Tệp này thuộc về một thiết kế khác",
+    "internal_file.detail": "{name} là một thành phần nội bộ của {design}. Khi được mở riêng, nhiều khả năng đây là tệp khôi phục còn lại sau một sự cố. Hãy mở {design} để khôi phục phần việc ở đó, hoặc mở tệp như một thiết kế mới và lưu thành tệp riêng.",
+    "internal_file.owner_missing": "Không tìm thấy {design} gần tệp này.",
+    "internal_file.open_owner": "Mở {design}",
+    "internal_file.open_copy": "Mở như thiết kế mới",
+    "internal_file.close": "Đóng"
   },
   "zh": {
     "recovery_components.title": "恢复组件",
@@ -133,6 +175,12 @@
     "cmd.component_discard_recovery": "放弃恢复组件",
     "ui.properties.component_file": "组件文件",
     "ui.properties.component_internal": "内部：{name}",
-    "ui.properties.component_external": "外部：{name}"
+    "ui.properties.component_external": "外部：{name}",
+    "internal_file.title": "此文件属于另一个设计",
+    "internal_file.detail": "{name} 是 {design} 的内部组件。单独打开时，它很可能是崩溃后留下的恢复文件。请打开 {design} 在其中恢复工作，或将它作为新设计打开并另存为独立文件。",
+    "internal_file.owner_missing": "在此文件附近未找到 {design}。",
+    "internal_file.open_owner": "打开 {design}",
+    "internal_file.open_copy": "作为新设计打开",
+    "internal_file.close": "关闭"
   }
 }

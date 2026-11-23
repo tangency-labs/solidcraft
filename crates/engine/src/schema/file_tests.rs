@@ -42,6 +42,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<OpenParams>(),
         &[
+            "as_copy",
             "folder",
             "format",
             "geometry",
@@ -183,6 +184,8 @@ fn replies_match_the_output_schema() {
         errors: 0,
         name: "a".into(),
         read_only: None,
+        as_copy: None,
+        internal_of: None,
         open_elsewhere: Some(OpenElsewhere { host: "h".into(), user: "u".into(), app: "1".into(), opened: 7 }),
         newer_file: None,
         warnings: None,
@@ -203,6 +206,8 @@ fn replies_match_the_output_schema() {
         errors: 0,
         name: "a".into(),
         read_only: None,
+        as_copy: None,
+        internal_of: None,
         open_elsewhere: None,
         newer_file: Some(NewerFileReport {
             format: 99,

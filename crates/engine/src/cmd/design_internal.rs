@@ -150,12 +150,15 @@ pub fn tidy_work_folder(design: &str) -> usize {
     }
     let Some(folder) = work_folder(design) else { return 0 };
     let Ok(entries) = std::fs::read_dir(&folder) else { return 0 };
-    let held = solidcraft_io::vfs::read_design_path(design, None, solidcraft_io::limits::max_design_bytes())
-        .ok()
-        .and_then(|file| solidcraft_io::internal_components(&file).ok())
-        .unwrap_or_default();
-    // Told apart without regard to letter case, as unpacking does.
-    let held: BTreeMap<String, Vec<u8>> = held.into_iter().map(|(name, bytes)| (name.to_lowercase(), bytes)).collect();
+    let Ok(file) = solidcraft_io::vfs::read_design_path(design, None, solidcraft_io::limits::max_design_bytes()) else { return 0 };
+    // Told apart without regard to letter case, as unpacking does. The design's drawings have
+    // files here too ([`super::design_drawings`]), each held when it is the drawing as saved.
+    let held: BTreeMap<String, Vec<u8>> = solidcraft_io::internal_components(&file)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(name, bytes)| (name.to_lowercase(), bytes))
+        .chain(super::design_drawings::held(&file, design))
+        .collect();
     let mut removed = 0;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_lowercase();
@@ -168,6 +171,41 @@ pub fn tidy_work_folder(design: &str) -> usize {
     // Only an empty folder goes.
     let _ = std::fs::remove_dir(&folder);
     removed
+}
+
+/// The design that owns the file at `file`, which carries a tag ([`solidcraft_io::InternalOf`]):
+/// the design whose work folder it is in, else the design the tag names, beside the file or one
+/// folder up. It counts only when it holds a file with the tag's key, so a design that merely
+/// has the name is not taken for the owner. `None` for a file with no tag, or no owner found.
+pub fn internal_owner(file: &str) -> Option<String> {
+    let tag = solidcraft_io::read_internal_of_file(file)?;
+    let file = absolute(Path::new(file));
+    let folder = file.parent()?;
+    let mut candidates = Vec::new();
+    let worked =
+        folder.file_name().and_then(|name| name.to_str()).and_then(|name| name.strip_prefix(".~")).and_then(|name| name.strip_suffix(".parts"));
+    if let (Some(name), Some(beside)) = (worked, folder.parent()) {
+        candidates.push(beside.join(name));
+    }
+    // The tag's name is used only as one plain file name, never as a path.
+    let named = Path::new(&tag.design);
+    if named.components().count() == 1 && matches!(named.components().next(), Some(std::path::Component::Normal(_))) {
+        candidates.push(folder.join(named));
+        if let Some(up) = folder.parent() {
+            candidates.push(up.join(named));
+        }
+    }
+    candidates.into_iter().find(|design| *design != file && holds(design, &tag.key)).map(|design| design.to_string_lossy().into_owned())
+}
+
+/// Whether the design file at `design` holds an internal component or a drawing with the tag key `key`.
+fn holds(design: &Path, key: &str) -> bool {
+    let Ok(bytes) = solidcraft_io::vfs::read_design_path(&design.to_string_lossy(), None, solidcraft_io::limits::max_design_bytes()) else {
+        return false;
+    };
+    solidcraft_io::internal_components(&bytes)
+        .is_ok_and(|held| held.values().any(|part| solidcraft_io::internal_of(part).is_some_and(|tag| tag.key == key)))
+        || solidcraft_io::design_drawings(&bytes).is_ok_and(|drawings| drawings.iter().any(|drawing| super::design_drawings::key(drawing) == key))
 }
 
 /// Whether `file` is in the work folder of the design saved at `design`.

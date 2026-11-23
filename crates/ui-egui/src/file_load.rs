@@ -1859,6 +1859,7 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                         app.say_kind_note(&made.result);
                         crate::missing_links::offer(app, &made.result);
                         crate::recovery_components::offer(app, &made.result);
+                        crate::internal_file::offer(app, &made.result);
                     } else if request.note.is_none()
                         && let Some(note) = linked_signing_note(&request.path)
                     {

@@ -18,6 +18,7 @@ use crate::{Result, Session};
 pub struct OpenSteps {
     path: String,
     read_only: bool,
+    as_copy: bool,
     disk: Option<solidcraft_io::design_lock::FileStamp>,
     /// The design as the session will hold it, its history marker moved to `next` meanwhile.
     doc: Arc<Document>,
@@ -52,6 +53,7 @@ impl OpenSteps {
             return Ok(None);
         }
         let read_only = bool_(p, "read_only").unwrap_or(false);
+        let as_copy = bool_(p, "as_copy").unwrap_or(false);
         let verify = bool_(p, "verify").unwrap_or(false);
         // Stamped before it is read, as `doc.open` does.
         let disk = solidcraft_io::design_lock::stamp(path);
@@ -75,6 +77,7 @@ impl OpenSteps {
         let steps = OpenSteps {
             path: path.to_string(),
             read_only,
+            as_copy,
             disk,
             doc,
             marker,
@@ -142,7 +145,7 @@ impl OpenSteps {
             self.model.evaluate_shared(&self.doc);
         }
         let opened = Session::with_model(self.doc, self.visibility, self.model).located_with(Some(&self.path), self.chain.clone());
-        opened_design(s, opened, &self.path, self.read_only, self.disk, self.checked, self.chain)
+        opened_design(s, opened, &self.path, self.read_only, self.as_copy, self.disk, self.checked, self.chain)
     }
 }
 

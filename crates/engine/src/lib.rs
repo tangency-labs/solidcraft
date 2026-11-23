@@ -82,7 +82,7 @@ pub use cmd::{
 };
 pub use edit_start::{EditStart, RefreshedSketchModel, SketchDomain, SketchFinishEvent};
 // Internal components (#6892).
-pub use cmd::{in_work_folder, tidy_work_folder};
+pub use cmd::{in_work_folder, internal_owner, tidy_work_folder};
 // Experimental file kinds (#6892).
 pub use cmd::{experimental_file_kinds, file_kinds_on_for_tests, set_experimental_file_kinds, set_part_library_folders};
 pub use solidcraft_doc as doc;
@@ -788,6 +788,10 @@ pub struct Session {
     /// The kind of design its file holds (experimental, #6892; `cmd/file_kind.rs`): read from the
     /// file's header on open and written back by every save. A new design is a single design.
     pub design_kind: solidcraft_io::DesignKind,
+    /// The tag its file carries when it belongs to another design (experimental, #6892): an
+    /// internal component's file, read from the header on open. A save to the same file writes
+    /// it back; saved anywhere else the design is a file of its own and has none.
+    pub internal_of: Option<solidcraft_io::InternalOf>,
     /// The internal components (experimental, #6892; `cmd/design_internal.rs`) whose unpacked file was
     /// found differing from the design's file when it opened, by name: recovery components. Until
     /// each is restored or discarded, the design reads and saves what its file holds for it.
@@ -1344,6 +1348,7 @@ impl Session {
             disk: None,
             read_only: false,
             design_kind: solidcraft_io::DesignKind::Single,
+            internal_of: None,
             recovery_components: Default::default(),
             provenance_chain: None,
             provenance: None,
@@ -3229,6 +3234,7 @@ impl Session {
             disk: self.disk,
             read_only: self.read_only,
             design_kind: self.design_kind,
+            internal_of: self.internal_of.clone(),
             recovery_components: self.recovery_components.clone(),
             provenance_chain: self.provenance_chain.clone(),
             provenance: self.provenance.clone(),

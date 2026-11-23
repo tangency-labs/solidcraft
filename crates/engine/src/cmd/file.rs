@@ -29,8 +29,8 @@ use crate::params::{bad, bool_, num, str_, string_list};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::schema::file::GpgKeyInfo;
 use crate::schema::file::{
-    ExportResult, GpgKeysParams, GpgKeysResult, NewerFileReport, OpenElsewhere, OpenResult, OpenedDesign, OpenedDrawing, OpenedFile,
-    OpenedPointCloud, RecoverParams, RecoverResult, RecoveredDesign, RecoveryDiscardParams, RecoveryDiscardResult, RecoveryListParams,
+    ExportResult, GpgKeysParams, GpgKeysResult, InternalOfReport, NewerFileReport, OpenElsewhere, OpenResult, OpenedDesign, OpenedDrawing,
+    OpenedFile, OpenedPointCloud, RecoverParams, RecoverResult, RecoveredDesign, RecoveryDiscardParams, RecoveryDiscardResult, RecoveryListParams,
     RecoveryListResult, SignatureRecord, SignatureReport, VerifyParams, VerifyResult,
 };
 use crate::schema::insert_mesh::{InsertMeshParams, MeshInserted};
@@ -60,7 +60,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&OPEN_CONTRACT)
         .output(output_schema_for::<OpenResult>)
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.pcd/.e57/.xyz/.pts/.asc point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); reader?: solidcraft|cadmpeg for a STEP, FreeCAD or Rhino file (see file.insert_step); geometry?: meshes|exact for an OpenUSD file (see file.insert_mesh); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
+        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.pcd/.e57/.xyz/.pts/.asc point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); reader?: solidcraft|cadmpeg for a STEP, FreeCAD or Rhino file (see file.insert_step); geometry?: meshes|exact for an OpenUSD file (see file.insert_mesh); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere), as_copy?: bool (a design: open a copy as a new, unsaved single design with no file, leaving the file as it is); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
     CommandSpec::new("file.insert_step", "Insert STEP", crate::checked!("file.insert_step", insert_step)).begins_edit()
         .at("SOLID", "INSERT")
         .icon("import")
@@ -1550,6 +1550,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         }));
     }
     let read_only = bool_(p, "read_only").unwrap_or(false);
+    let as_copy = bool_(p, "as_copy").unwrap_or(false);
     let verify = bool_(p, "verify").unwrap_or(false);
     // Stamped before it is read: a write while it is being read is a change too.
     let disk = solidcraft_io::design_lock::stamp(path);
@@ -1560,7 +1561,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let mut doc = file.doc;
     super::component_link::resolve_design_links(&mut doc, Some(path));
     let opened = Session::opened_validating(doc, file.model.as_ref(), s.validation()).located_with(Some(path), file.chain.clone());
-    opened_design(s, opened, path, read_only, disk, verify.then_some(file.report), file.chain)
+    opened_design(s, opened, path, read_only, as_copy, disk, verify.then_some(file.report), file.chain)
 }
 
 /// Whether running `command` with `params` runs an installed importer plugin's code:
@@ -1622,6 +1623,7 @@ fn opened_design(
     opened: Session,
     path: &str,
     read_only: bool,
+    as_copy: bool,
     disk: Option<solidcraft_io::design_lock::FileStamp>,
     checked: Option<Option<solidcraft_io::ProvenanceReport>>,
     chain: Option<solidcraft_io::ProvenanceChain>,
@@ -1631,12 +1633,22 @@ fn opened_design(
     s.read_only = read_only;
     // The internal components are unpacked beside it where they are not yet (#6892). A
     // design opened read-only writes nothing and reads them from its file.
-    let unpacked = if read_only { super::design_internal::Unpacked::default() } else { super::design_internal::unpack(&s.doc, path) };
+    // Nor does a copy (`as_copy`): it leaves the file it came from as it is.
+    let writes = !read_only && !as_copy;
+    let unpacked = if writes { super::design_internal::unpack(&s.doc, path) } else { super::design_internal::Unpacked::default() };
     // An unpacked file that differs from the design's file is a recovery component: held as the
     // file has it until `component.restore_recovery` or `component.discard_recovery` settles it.
     s.recovery_components = unpacked.differ.iter().cloned().collect();
     let (kind, kind_note) = kind::opened(path);
     s.design_kind = kind;
+    // A top container's drawings get files of their own kind there too, where they have none (#6892).
+    if writes {
+        super::design_drawings::unpack(&s.doc, path, kind);
+    }
+    // A file that belongs to another design says so in its header (#6892): kept for its saves,
+    // and reported, so whoever opened it can say what it is.
+    s.internal_of = solidcraft_io::read_internal_of_file(path);
+    let internal_of = s.internal_of.as_ref().map(|tag| InternalOfReport { design: tag.design.clone(), key: tag.key.clone() });
     // Both from the reading the design came from (`read_design`): the signature check, when it
     // was asked for, is the check of these bytes.
     s.provenance_chain = chain;
@@ -1647,6 +1659,16 @@ fn opened_design(
     if !s.keep_print_faces && !s.doc.print_faces.is_empty() {
         s.doc_mut().print_faces.clear();
         s.mark_saved();
+    }
+    // A copy is a new single design with no file and no tag: saving it asks where.
+    if as_copy {
+        s.path = None;
+        s.disk = None;
+        s.read_only = false;
+        s.design_kind = solidcraft_io::DesignKind::Single;
+        s.internal_of = None;
+        s.recovery_components.clear();
+        s.mark_unsaved();
     }
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
     let now = solidcraft_io::design_lock::now_secs();
@@ -1661,7 +1683,9 @@ fn opened_design(
         features: s.doc.features.len(),
         errors,
         name: s.doc.name.clone(),
-        read_only: read_only.then_some(true),
+        read_only: (read_only && !as_copy).then_some(true),
+        as_copy: as_copy.then_some(true),
+        internal_of,
         open_elsewhere,
         newer_file: s.doc.newer_file.as_ref().map(|file| NewerFileReport {
             format: file.format,
@@ -2016,6 +2040,13 @@ fn write_bytes(
             _ => return Err(bad("file.save", "format must be container or json")),
         }
     };
+    // A file that belongs to another design keeps its tag when it is saved where it is (#6892).
+    // Saved anywhere else it is a file of its own, and so is a signed file, whose header stays.
+    let tag = s.internal_of.clone().filter(|_| format == "container" && s.path.as_deref() == Some(path));
+    let (bytes, tag) = match tag.as_ref().map(|tag| solidcraft_io::with_internal_of(&bytes, Some(tag))) {
+        Some(Ok(tagged)) => (tagged, tag),
+        _ => (bytes, None),
+    };
     let cache_not_saved = missing_save_cache(s, format, cache, checking, &bytes);
     // Cancelled while the design was being prepared (a watched save): nothing is written.
     if solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
@@ -2029,7 +2060,12 @@ fn write_bytes(
     for why in super::design_internal::carry(&s.doc, s.path.as_deref(), path) {
         notes.push(format!("A part stored inside the design was not unpacked beside {path}: {why}"));
     }
+    // The drawing files beside it now hold the drawings as saved (#6892).
+    if format == "container" {
+        super::design_drawings::refresh(&s.doc, path, s.design_kind);
+    }
     s.path = Some(path.to_string());
+    s.internal_of = tag;
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
     s.provenance_chain = solidcraft_io::read_design_provenance_chain(&bytes);

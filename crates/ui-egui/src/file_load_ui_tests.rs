@@ -1702,3 +1702,66 @@ fn a_recovery_component_is_listed_on_open_and_restored_or_discarded() {
     assert!(discarded.get("recovery").is_none() && discarded["changed"] == false, "{discarded}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A file that belongs to another design, opened by itself (#6892): the window names the design
+/// and, when that design is found, opens it. Opened while its design is open in another tab, as
+/// Edit in place does, no window shows. Without its design, the file opens as a new unsaved design
+/// of its own, or is not left open at all.
+#[test]
+fn an_internal_file_opened_by_itself_asks_and_each_answer_does_what_it_says() {
+    solidcraft_engine::file_kinds_on_for_tests();
+    let dir = scratch("internal_file");
+    let lost = scratch("internal_file_lost");
+    std::fs::create_dir_all(dir.join("taken")).unwrap();
+    let mut part = Session::default();
+    part.execute("solid.box", &json!({"length": 2, "width": 3, "height": 2})).unwrap();
+    part.execute("file.save", &json!({"path": dir.join("bracket.scprt").to_string_lossy()})).unwrap();
+    let design = dir.join("counter.sc");
+    let mut counter = Session::default();
+    counter.execute("file.save", &json!({"path": design.to_string_lossy()})).unwrap();
+    counter.execute("component.insert_design", &json!({"path": dir.join("bracket.scprt").to_string_lossy()})).unwrap();
+    let made = counter.execute("component.make_internal", &json!({"component": "bracket"})).unwrap();
+    let work = std::path::PathBuf::from(made["file"].as_str().unwrap());
+    counter.execute("file.save", &json!({})).unwrap();
+    // Copies taken out of the work folder: one a folder below the design, one with no design near it.
+    let (taken, alone) = (dir.join("taken").join("bracket.scprt"), lost.join("bracket.scprt"));
+    std::fs::copy(&work, &taken).unwrap();
+    std::fs::copy(&work, &alone).unwrap();
+    let open_file = |app: &SolveApp| app.session.path.clone().unwrap_or_default();
+
+    // Its design is found: the window offers it, and the answer opens it in place of the file.
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    app.open_path(&taken.to_string_lossy());
+    let asked = app.internal_file.clone().expect("the window shows");
+    assert_eq!(asked.design, "counter.sc", "{asked:?}");
+    assert!(asked.owner.as_deref().is_some_and(|owner| owner.ends_with("counter.sc")), "{asked:?}");
+    crate::internal_file::open_owner(&mut app);
+    assert!(app.internal_file.is_none());
+    assert!(open_file(&app).ends_with("counter.sc"), "{}", open_file(&app));
+    assert!(!app.docs.background().any(|s| s.path.as_deref().is_some_and(|p| p.ends_with("bracket.scprt"))), "the file is not left open in a tab");
+    // With the design open in another tab, its work file opens with no question.
+    app.open_path(&work.to_string_lossy());
+    assert!(open_file(&app).ends_with("bracket.scprt"), "{}", open_file(&app));
+    assert!(app.internal_file.is_none(), "{:?}", app.internal_file);
+
+    // No design near it: the window says so, and the file opens as a new design to save as its own.
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    app.open_path(&alone.to_string_lossy());
+    let asked = app.internal_file.clone().expect("the window shows");
+    assert!(asked.design == "counter.sc" && asked.owner.is_none(), "{asked:?}");
+    crate::internal_file::open_copy(&mut app);
+    assert!(app.internal_file.is_none());
+    assert!(!app.status.as_ref().is_some_and(|s| s.2), "{:?}", app.status);
+    assert!(app.session.path.is_none() && app.session.is_dirty(), "a new, unsaved design");
+    let volume = app.session.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((volume - 12.0).abs() < 1e-6, "with the part's body: {volume}");
+
+    // Neither answer: the file is not left open by itself.
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    app.open_path(&alone.to_string_lossy());
+    assert!(app.internal_file.is_some());
+    crate::internal_file::close(&mut app);
+    assert!(app.internal_file.is_none() && app.session.path.is_none() && !app.session.is_dirty(), "a blank design");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&lost);
+}

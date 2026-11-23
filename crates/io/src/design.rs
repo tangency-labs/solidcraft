@@ -16,7 +16,7 @@ mod kind;
 mod native_cache;
 mod provenance;
 mod thumbnail;
-pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
+pub use drawing::{FileKind, design_drawings, file_kind, read_drawing, read_drawing_file, write_drawing_container};
 pub use import_cache::ImportCache;
 pub use native_cache::read_design_geometry;
 pub use provenance::{
@@ -1246,6 +1246,83 @@ pub fn with_internal_component(container: &[u8], name: &str, bytes: &[u8]) -> Re
     Ok(writer.finish()?)
 }
 
+/// The tag of a file that belongs to a design (experimental, #6892): an internal component, or a
+/// drawing's file in the design's work folder. It sits in the file's header (`container.json`,
+/// `"internal_of"`), so the file says what it is wherever it ends up: a recovery file left by a
+/// crash, or a copy taken out of the work folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InternalOf {
+    /// The name the owning design's file had when the tag was made: a hint, for a message and
+    /// for finding the file. It can be out of date.
+    pub design: String,
+    /// Made once with the tag. The owner is the design that holds a file with the same key.
+    pub key: String,
+}
+
+impl InternalOf {
+    /// The longest `design` and `key` a header may carry, in bytes.
+    const MAX: (usize, usize) = (255, 64);
+
+    /// The tag a header carries, when it carries one that reads: two plain strings within bounds.
+    fn from_header(container: &Value) -> Option<InternalOf> {
+        let tag = container.get("internal_of")?.as_object()?;
+        let text = |key: &str, max: usize| {
+            let value = tag.get(key)?.as_str()?;
+            (tag.len() == 2 && !value.is_empty() && value.len() <= max && !value.chars().any(char::is_control)).then(|| value.to_string())
+        };
+        Some(InternalOf { design: text("design", Self::MAX.0)?, key: text("key", Self::MAX.1)? })
+    }
+
+    fn header(&self) -> Value {
+        json!({"design": self.design, "key": self.key})
+    }
+}
+
+/// The tag of the file `bytes`, when it is a container that carries one ([`InternalOf`]).
+pub fn internal_of(bytes: &[u8]) -> Option<InternalOf> {
+    if !is_design_container(bytes) {
+        return None;
+    }
+    let mut reader = PackageReader::new(Cursor::new(bytes)).ok()?;
+    InternalOf::from_header(&serde_json::from_slice(&reader.limited_part("container.json", 4096).ok()?).ok()?)
+}
+
+/// The tag of the file at `path` ([`internal_of`]), read from its header alone.
+pub fn read_internal_of_file(path: &str) -> Option<InternalOf> {
+    let mut source = open_regular_file(path).ok()?;
+    if !is_container_source(&mut source).ok()? {
+        return None;
+    }
+    InternalOf::from_header(&serde_json::from_slice(&PackageReader::new(source).ok()?.limited_part("container.json", 4096).ok()?).ok()?)
+}
+
+/// `container`, a design or drawing file's bytes, with its header carrying `tag`, or none: only
+/// `container.json` is written again, every other part is copied as it is stored. A signed
+/// design is refused, since its signature covers the file as it is.
+pub fn with_internal_of(container: &[u8], tag: Option<&InternalOf>) -> Result<Vec<u8>> {
+    let mut reader = PackageReader::new(Cursor::new(container))?;
+    let names = reader.part_names();
+    if names.iter().any(|part| part.starts_with("provenance/")) {
+        return Err(invalid("the file is signed, so its header stays as it is"));
+    }
+    let mut header: Value = serde_json::from_slice(&reader.limited_part("container.json", 4096)?).map_err(invalid)?;
+    let fields = header.as_object_mut().ok_or_else(|| invalid("the file's header is not an object"))?;
+    match tag {
+        Some(tag) if tag.design.len() <= InternalOf::MAX.0 && tag.key.len() <= InternalOf::MAX.1 => fields.insert("internal_of".into(), tag.header()),
+        Some(_) => return Err(invalid("the tag is too long")),
+        None => fields.remove("internal_of"),
+    };
+    let mut writer = Writer::new(SAVE_LIMITS);
+    for part in &names {
+        if part == "container.json" {
+            writer.part(part, &serde_json::to_vec(&header).map_err(invalid)?, false)?;
+        } else {
+            writer.copy_part(&mut reader.0, part)?;
+        }
+    }
+    Ok(writer.finish()?)
+}
+
 /// The internal components `container`, a design file's bytes, holds, by name (experimental,
 /// #6892): only those parts are read, never the design.
 pub fn internal_components(container: &[u8]) -> Result<std::collections::BTreeMap<String, Vec<u8>>> {
@@ -1285,6 +1362,14 @@ fn hydrate_internal<R: Read + Seek>(doc: &mut Document, reader: &mut PackageRead
 
 /// A `container.json` that says only a format this build writes or wrote.
 fn is_known_container(container: &Value) -> bool {
+    // A file tagged as a design's own ([`InternalOf`]) is otherwise what its header says.
+    if InternalOf::from_header(container).is_some() {
+        let mut plain = container.clone();
+        if let Some(fields) = plain.as_object_mut() {
+            fields.remove("internal_of");
+        }
+        return is_known_container(&plain);
+    }
     *container == json!({"format": VERSION})
         || *container == json!({"format": LEGACY_VERSION})
         || container.get("content").is_some_and(|c| c == "drawing")
@@ -3134,6 +3219,45 @@ mod tests {
         let from_json = Document::from_json(&older.to_string()).unwrap();
         assert_eq!(from_json.plugin_data, opened.plugin_data);
         assert_eq!(parts(&write_design_container(&from_json).unwrap())["plugins/gear-maker/cache/table.bin"], binary);
+    }
+
+    /// A file that belongs to a design says so in its header (#6892, [`InternalOf`]): the tag is
+    /// written and taken away without touching any other part, a tagged design opens as the
+    /// design it is with nothing reported as newer, and a tag that does not read is no tag.
+    #[test]
+    fn a_files_tag_names_the_design_it_belongs_to_and_touches_nothing_else() {
+        let plain = write_design_container(&document()).unwrap();
+        assert_eq!(internal_of(&plain), None);
+        assert_eq!(internal_of(b"{}"), None, "plain JSON carries no tag");
+        let tag = InternalOf { design: "Counter.sc".into(), key: "0123456789abcdef".into() };
+        let tagged = with_internal_of(&plain, Some(&tag)).unwrap();
+        assert_eq!(internal_of(&tagged), Some(tag.clone()));
+        let (before, after) = (parts(&plain), parts(&tagged));
+        assert_eq!(before.keys().collect::<Vec<_>>(), after.keys().collect::<Vec<_>>());
+        assert!(before.iter().all(|(name, bytes)| name == "container.json" || after.get(name) == Some(bytes)), "only the header changes");
+        let header: Value = serde_json::from_slice(&after["container.json"]).unwrap();
+        assert_eq!(header, json!({"format": VERSION, "internal_of": {"design": "Counter.sc", "key": "0123456789abcdef"}}));
+        let opened = crate::read_design(&tagged).unwrap();
+        assert!(opened.newer_file.is_none(), "a tag is nothing from a newer SolidCraft");
+        assert_eq!(opened.features, document().features);
+        // Taken away again: the file as it was.
+        assert_eq!(parts(&with_internal_of(&tagged, None).unwrap()), before);
+        // A drawing's file carries one the same way, and still reads as that drawing.
+        // A tag that does not read (wrong shape, empty, a control character, too long) is none.
+        for bad in [
+            json!("Counter.sc"),
+            json!({"design": "", "key": "k"}),
+            json!({"design": "Counter.sc"}),
+            json!({"design": "Counter.sc", "key": 7}),
+            json!({"design": "Counter.sc", "key": "k", "more": 1}),
+            json!({"design": "Counter\n.sc", "key": "k"}),
+            json!({"design": "x".repeat(256), "key": "k"}),
+        ] {
+            let mut entries = before.clone();
+            entries.insert("container.json".into(), serde_json::to_vec(&json!({"format": VERSION, "internal_of": bad})).unwrap());
+            assert_eq!(internal_of(&package(&entries)), None, "{bad}");
+        }
+        assert!(with_internal_of(&plain, Some(&InternalOf { design: "x".repeat(256), key: "k".into() })).is_err());
     }
 
     /// A canvas's image is its bytes: a container keeps them as a part of their own (its record

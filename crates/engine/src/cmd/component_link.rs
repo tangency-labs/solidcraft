@@ -1407,6 +1407,14 @@ fn make_internal(s: &mut Session, p: &Value) -> Result<Value> {
     let source = resolve(Some(&own), &link.path);
     let previous_path = stored(Some(&own), &source);
     let bytes = read_link(&source, Some(&own)).map_err(|e| bad(cmd, e.to_string()))?;
+    // The copy says in its header which design it belongs to, so it tells what it is when it is
+    // opened away from this design: a recovery file, or a copy taken out of the work folder.
+    // A part file that can't carry the tag (plain JSON, or signed) is stored as it is.
+    let tag = solidcraft_io::InternalOf {
+        design: Path::new(&own).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default(),
+        key: DesignLink::file_digest(format!("{}|{own}|{comp}", DesignLink::file_digest(&bytes)).as_bytes()).chars().take(16).collect(),
+    };
+    let bytes = solidcraft_io::with_internal_of(&bytes, Some(&tag)).unwrap_or(bytes);
     let member = super::design_internal::free_name(&s.doc, &own, &source);
     let file =
         super::design_internal::work_file(Some(&own), &member).ok_or_else(|| bad(cmd, "this design's file has no folder to unpack the part to"))?;

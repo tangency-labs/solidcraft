@@ -1573,7 +1573,13 @@ fn a_part_stored_inside_a_design_travels_in_its_file_and_is_edited_unpacked() {
     assert_eq!(stored["previous_path"], "parts/bracket.scprt", "{stored}");
     let work = PathBuf::from(stored["file"].as_str().unwrap());
     assert_eq!(work, job.join(".~counter.sc.parts").join("bracket.scprt"));
-    assert_eq!(std::fs::read(&work).unwrap(), std::fs::read(&bracket).unwrap(), "the unpacked part is the linked file's bytes");
+    // The unpacked part is the linked file with the design's tag in its header and nothing else changed.
+    let untagged = |path: &Path| solidcraft_io::with_internal_of(&std::fs::read(path).unwrap(), None).unwrap();
+    assert!(
+        solidcraft_io::read_internal_of_file(&work.to_string_lossy()).is_some_and(|tag| tag.design == "counter.sc"),
+        "the unpacked part is tagged"
+    );
+    assert!(untagged(&work) == untagged(&bracket), "the unpacked part is the linked file but for its tag");
     let again = s.execute("component.make_internal", &json!({"component": "bracket"})).unwrap_err().to_string();
     assert!(again.contains("already stored"), "{again}");
     let links = run(&mut s, "component.links", json!({}));
@@ -1745,4 +1751,171 @@ fn an_assembly_names_the_parts_it_cannot_find_on_open_and_relink_finds_them() {
     let links = run(&mut again, "component.links", json!({}));
     assert!(links["links"].as_array().unwrap().iter().all(|l| l["path"].as_str().unwrap().starts_with("../elsewhere/")), "{links}");
     let _ = std::fs::remove_dir_all(root);
+}
+
+/// A design's drawings as files while it is open (#6892, `design_drawings`): a save writes each
+/// drawing to the work folder as `<name>.scdwg`, a drawing file by itself; a renamed drawing's
+/// file follows its name; closing removes them; opening writes them again and replaces nothing;
+/// a read-only open writes none. Only a top container (`.sc`, `.scasm`): never a part, never an
+/// internal component's work file. The design's file holds the drawings throughout.
+#[test]
+fn a_designs_drawings_are_drawing_files_beside_it_while_it_is_open() {
+    crate::file_kinds_on_for_tests();
+    let root = folder("drawing-files");
+    let design = root.join("job.sc");
+    let work = root.join(".~job.sc.parts");
+    let listed = |folder: &Path| {
+        let mut names: Vec<String> =
+            std::fs::read_dir(folder).into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        names
+    };
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 4}));
+    run(&mut s, "drawing.create", json!({"name": "Bracket", "standard_views": true}));
+    run(&mut s, "drawing.close", json!({}));
+    let flat = run(&mut s, "drawing.create", json!({"name": "Flat/pattern"}))["id"].clone();
+    run(&mut s, "drawing.close", json!({}));
+    assert!(!work.exists(), "a design never saved has no folder to write to");
+    run(&mut s, "file.save", json!({"path": design}));
+    assert_eq!(listed(&work), ["Bracket.scdwg", "Flat_pattern.scdwg"]);
+    let drawing = solidcraft_io::read_drawing_file(&work.join("Bracket.scdwg").to_string_lossy()).unwrap();
+    assert_eq!((drawing.name.as_str(), drawing.id), ("Bracket", s.doc.drawings[0].id), "a whole drawing file, the design's drawing");
+    let held = solidcraft_io::design_drawings(&std::fs::read(&design).unwrap()).unwrap();
+    assert_eq!(held.len(), 2, "and the design's file holds them, as before");
+
+    // Renamed and saved: the file follows the name, and the old one goes.
+    run(&mut s, "drawing.open", json!({"drawing": flat}));
+    run(&mut s, "drawing.set", json!({"name": "Flat"}));
+    run(&mut s, "drawing.close", json!({}));
+    assert_eq!(listed(&work), ["Bracket.scdwg", "Flat_pattern.scdwg"], "nothing changes before a save");
+    run(&mut s, "file.save", json!({}));
+    assert_eq!(listed(&work), ["Bracket.scdwg", "Flat.scdwg"]);
+
+    // Closed: the files the design's file holds go, and the folder with them.
+    drop(s);
+    assert_eq!(crate::tidy_work_folder(&design.to_string_lossy()), 2);
+    assert!(!work.exists());
+
+    // Read-only writes nothing; a normal open writes them again.
+    let mut read_only = Session::default();
+    run(&mut read_only, "doc.open", json!({"path": design, "read_only": true}));
+    assert!(!work.exists(), "a read-only open writes no files");
+    let mut again = Session::default();
+    run(&mut again, "doc.open", json!({"path": design}));
+    assert_eq!(listed(&work), ["Bracket.scdwg", "Flat.scdwg"]);
+
+    // A file that differs is not replaced by an open, and closing leaves it.
+    let other = std::fs::read(work.join("Bracket.scdwg")).unwrap();
+    std::fs::write(work.join("Flat.scdwg"), &other).unwrap();
+    let mut third = Session::default();
+    run(&mut third, "doc.open", json!({"path": design}));
+    assert_eq!(std::fs::read(work.join("Flat.scdwg")).unwrap(), other, "an open replaces nothing");
+    assert_eq!(crate::tidy_work_folder(&design.to_string_lossy()), 1);
+    assert_eq!(listed(&work), ["Flat.scdwg"], "the file that differs stays");
+
+    // An internal component's work file keeps its drawings inside it: opened or saved there, it
+    // gets no drawing files of its own, however deep it sits.
+    let inside = root.join(".~counter.sc.parts");
+    std::fs::create_dir_all(&inside).unwrap();
+    std::fs::copy(&design, inside.join("sub.sc")).unwrap();
+    let mut member = Session::default();
+    run(&mut member, "doc.open", json!({"path": inside.join("sub.sc")}));
+    run(&mut member, "file.save", json!({}));
+    assert!(
+        listed(&inside).iter().all(|name| !name.ends_with(".scdwg") && !name.starts_with(".~")),
+        "one set of drawing files, the top design's: {:?}",
+        listed(&inside)
+    );
+
+    // A part keeps its drawings inside its file, opened as it is or not; a design without
+    // drawings has nothing to write.
+    let part = root.join("plate.scprt");
+    let mut loose = Session::default();
+    run(&mut loose, "solid.box", json!({"length": 4, "width": 2, "height": 1}));
+    run(&mut loose, "drawing.create", json!({"name": "Plate"}));
+    run(&mut loose, "drawing.close", json!({}));
+    run(&mut loose, "file.save", json!({"path": part}));
+    run(&mut Session::default(), "doc.open", json!({"path": part}));
+    assert!(!root.join(".~plate.scprt.parts").exists(), "a part gets no drawing files");
+    let plain = root.join("plain.sc");
+    let mut none = Session::default();
+    run(&mut none, "solid.box", json!({"length": 4, "width": 2, "height": 1}));
+    run(&mut none, "file.save", json!({"path": plain}));
+    assert!(!root.join(".~plain.sc.parts").exists(), "no drawings, no folder");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// An internal component's file says which design it belongs to (#6892, `solidcraft_io::InternalOf`):
+/// Make Internal tags the copy, the stored copy and the work file are the same tagged bytes, a save
+/// of the part keeps the tag, and the owner is found from the file wherever it is. Opened by
+/// itself the file reports the tag; `as_copy` opens it as a new single design with no file and no
+/// tag, and saving that writes an untagged file. A drawing's file carries the tag too.
+#[test]
+fn an_internal_components_file_is_tagged_with_the_design_it_belongs_to() {
+    crate::file_kinds_on_for_tests();
+    let root = folder("tagged-files");
+    part(&root.join("bracket.scprt"), 2);
+    let design = root.join("counter.sc");
+    let mut s = Session::default();
+    run(&mut s, "file.save", json!({"path": design}));
+    run(&mut s, "component.insert_design", json!({"path": root.join("bracket.scprt")}));
+    assert_eq!(solidcraft_io::read_internal_of_file(&root.join("bracket.scprt").to_string_lossy()), None, "a loose file has no tag");
+    let made = run(&mut s, "component.make_internal", json!({"component": "bracket"}));
+    run(&mut s, "drawing.create", json!({"name": "Counter"}));
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "file.save", json!({}));
+    let work = PathBuf::from(made["file"].as_str().unwrap());
+    let tag = solidcraft_io::read_internal_of_file(&work.to_string_lossy()).expect("the work file is tagged");
+    assert_eq!(tag.design, "counter.sc");
+    let stored = solidcraft_io::internal_components(&std::fs::read(&design).unwrap()).unwrap();
+    assert_eq!(stored["bracket.scprt"], std::fs::read(&work).unwrap(), "stored and unpacked are the same bytes");
+    assert_eq!(solidcraft_io::internal_of(&stored["bracket.scprt"]), Some(tag.clone()));
+    assert_eq!(crate::internal_owner(&work.to_string_lossy()).map(PathBuf::from), Some(design.clone()));
+    let drawing_file = work.with_file_name("Counter.scdwg");
+    assert_eq!(solidcraft_io::read_internal_of_file(&drawing_file.to_string_lossy()).map(|tag| tag.design), Some("counter.sc".into()));
+    assert_eq!(
+        crate::internal_owner(&drawing_file.to_string_lossy()).map(PathBuf::from),
+        Some(design.clone()),
+        "a drawing's file finds its design too"
+    );
+
+    // Opened where it is and saved: the tag stays, so Finish Edit stores a tagged part.
+    let mut member = Session::default();
+    let reply = run(&mut member, "doc.open", json!({"path": work}));
+    assert_eq!(reply["internal_of"], json!({"design": "counter.sc", "key": tag.key}), "{reply}");
+    run(&mut member, "solid.box", json!({"length": 1, "width": 1, "height": 9, "corner": [5, 5, 0]}));
+    run(&mut member, "file.save", json!({}));
+    assert_eq!(solidcraft_io::read_internal_of_file(&work.to_string_lossy()), Some(tag.clone()), "a save where it is keeps the tag");
+
+    // Taken out of the work folder to somewhere else: it still names its design, and the design
+    // is found beside it or one folder up, by the key and not by the name alone.
+    let loose = root.join("found-on-a-stick.scprt");
+    std::fs::copy(&work, &loose).unwrap();
+    assert_eq!(crate::internal_owner(&loose.to_string_lossy()).map(PathBuf::from), Some(design.clone()));
+    let elsewhere = folder("tagged-files-elsewhere");
+    std::fs::copy(&work, elsewhere.join("bracket.scprt")).unwrap();
+    std::fs::copy(root.join("bracket.scprt"), elsewhere.join("counter.sc")).unwrap();
+    assert_eq!(crate::internal_owner(&elsewhere.join("bracket.scprt").to_string_lossy()), None, "a file that only has the name is not the owner");
+
+    // As a copy: a new, unsaved single design with no file and no tag, and the file untouched.
+    let before = std::fs::read(&loose).unwrap();
+    let mut copy = Session::default();
+    let reply = run(&mut copy, "doc.open", json!({"path": loose, "as_copy": true}));
+    assert_eq!((reply["as_copy"].as_bool(), reply.get("read_only")), (Some(true), None), "{reply}");
+    assert!(reply["internal_of"]["design"] == "counter.sc", "the reply still says what the file was: {reply}");
+    assert!(copy.path.is_none() && copy.internal_of.is_none() && copy.is_dirty() && copy.design_kind == solidcraft_io::DesignKind::Single);
+    assert!(copy.execute("file.save", &json!({})).is_err(), "it has no file: a save asks where");
+    let own = root.join("bracket-of-its-own.sc");
+    run(&mut copy, "file.save", json!({"path": own}));
+    assert_eq!(solidcraft_io::read_internal_of_file(&own.to_string_lossy()), None, "saved as a design of its own: no tag");
+    assert_eq!(std::fs::read(&loose).unwrap(), before, "the file it came from is as it was");
+
+    // Saved somewhere else from the tagged session: a file of its own there too.
+    let moved = root.join("moved.scprt");
+    run(&mut member, "file.save", json!({"path": moved}));
+    assert_eq!(solidcraft_io::read_internal_of_file(&moved.to_string_lossy()), None);
+    assert!(member.internal_of.is_none());
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(elsewhere);
 }

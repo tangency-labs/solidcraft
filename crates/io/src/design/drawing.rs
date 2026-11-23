@@ -96,6 +96,12 @@ pub fn read_drawing(bytes: &[u8]) -> Result<Drawing> {
     Ok(Drawing::from_json(text)?)
 }
 
+/// The drawings the design container `container` holds, in their order, without reading its model
+/// (experimental, #6892). One a newer build saved that this build can't read is left out.
+pub fn design_drawings(container: &[u8]) -> Result<Vec<Arc<Drawing>>> {
+    Ok(read(&mut PackageReader::new(Cursor::new(container))?)?.0)
+}
+
 /// Read a drawing from disk (or the browser's files), a container through one seekable handle.
 pub fn read_drawing_file(path: &str) -> Result<Drawing> {
     let mut source = super::open_regular_file(path)?;
