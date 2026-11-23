@@ -21,6 +21,7 @@ solidcore-step = { workspace = true }
 solidcore-tess = { workspace = true }
 solidcraft-color = { workspace = true }
 solidcraft-geom = { workspace = true }
+solidcraft-sketch = { workspace = true }
 solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }
 solidcraft-format = { workspace = true }
@@ -31,7 +32,6 @@ coset = { workspace = true }
 ed25519-dalek = { workspace = true }
 pgp = { workspace = true }
 solidcraft-profile = { workspace = true }
-solidcraft-sketch = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 zip = { workspace = true }

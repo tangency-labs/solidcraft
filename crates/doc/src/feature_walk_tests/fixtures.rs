@@ -31,6 +31,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
     vec![
         ("newer_file_feature", json!({"type": "newer_file_feature", "raw": {"type": "gyroid_lattice", "cell": 2}})),
         (
+            "import_placeholder",
+            json!({"type":"import_placeholder", "source":"Fillet003", "source_type":"PartDesign::Fillet", "detail":"Not supported by the importer."}),
+        ),
+        (
             "frame_end_cap",
             json!({"type":"frame_end_cap","ends":[{"plane":plane("cap1"),"member":{"feature":7,"line":"l1"}}],"thickness":"cap.thickness","ratio":"cap.ratio","chamfer":"cap.chamfer","direction":"inward"}),
         ),

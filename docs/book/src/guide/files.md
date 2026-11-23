@@ -15,7 +15,7 @@ design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSO
 | `.json` (self-contained plain JSON design) | yes | yes |
 | STEP (AP203, AP214, AP242) | solids, assemblies, units, names, colours | AP242 with names, colours and the component tree |
 | IGES 5.3 | manifold solids, or trimmed surfaces sewn into solids | manifold solids with names and colours |
-| FreeCAD `.FCStd` | sketches and features (Pad, Pocket, Revolution, Groove, Fillet, Chamfer, primitives, Mirrored, patterns), else solids, through cadmpeg | |
+| FreeCAD `.FCStd` | editable feature history where supported, otherwise solids; File > Import FreeCAD selects sketches and operations | |
 | Rhino `.3dm` | solids, through cadmpeg | |
 | 3MF, STL, OBJ | mesh bodies | yes |
 | glTF 2.0 (`.glb`, `.gltf` with its `.bin` files) | mesh bodies in the node tree's components, materials as appearances | `.glb`: placed bodies with their colours, metallic and roughness, in metres with Y up |
@@ -62,6 +62,43 @@ stand-up answer still applies when you reopen. The cache keeps at most 512 MiB a
 removing the oldest first, in SolidCraft's data folder across updates. Preferences › Design ›
 **Reuse imports I've opened before** is on by default; turn it off to import every time,
 or use **Clear** beside it to remove cached imports without forgetting stand-up answers.
+
+To bring editable FreeCAD sketches into an existing design, choose **File > Import FreeCAD…**.
+SolidCraft lists the Parts, Bodies and Sketches found in the project so you can select the sketches to add.
+Supported geometry, dimensions and constraints are retained on a best-effort basis. Each imported sketch
+keeps its saved origin or datum plane where possible, including parent placements, offsets and orientation.
+Datum planes become named construction planes shared by their sketches. In sketch-only mode, face attachments fall back to XY;
+complex datum attachments keep their saved sketch plane independently. Exceptions have a **More…** explanation.
+Disable operation import and untick **Preserve non-face sketch planes** to put every sketch on XY. By default, FreeCAD Parts and Bodies become
+nested SolidCraft components. Each Body component has Bodies, Sketches and Features folders. A flat import can instead put everything in the active component and optionally prefix sketch names
+with the Body or full Part/Body path. Skipped items have a short explanation and a **More…** action with the
+source entity, technical reason, supported alternatives and affected references.
+
+**Import supported operations** is enabled by default to rebuild selected Pads, Pockets, Revolutions and Grooves as
+editable SolidCraft Extrude and Revolve features. Required sketches and preceding operations are included
+automatically. Each cut or join targets its original Body's imported solid. Fixed lengths and angles,
+reversed directions, symmetric and two-sided extents, and through-all Pockets are supported.
+
+Unresolved face attachments retain the sketch's saved plane. The affected operation and its dependents
+are imported suppressed with **Needs repair** in their names. Redefine the sketch plane, repair profiles or
+target bodies as indicated, then enable the operations in order. Unsupported operations such as fillets and
+chamfers are skipped; their dependent operations remain suppressed. The import report provides **More…**
+explanations, and the most recent operation report is saved in the design properties under
+`org.solidcraft.freecad.operations`. Formulas and spreadsheet references use saved numeric values.
+
+Skipped operations also leave **[Not imported]** entries in the component's **Features** folder and
+history. These placeholders retain the original operation name and reason when the design is saved and
+reopened. Double-click a placeholder to read and copy its explanation. A placeholder creates no geometry;
+rebuild the missing operation manually before repairing its dependents.
+
+The chooser lists **Sketches** first and **Operations** second. After import, the report's **Copy** and
+**Save As…** actions export the project, source filename, result summary, and every numbered issue with
+its full **More…** explanation. Saved reports use Markdown. With **Include sketch issue images when saving**
+enabled, available source sketch geometry is shown in PNGs in an adjacent images folder. Red geometry and
+numbered point markers identify the issue; missing external references are explained without guessing their
+location. Keep the Markdown file and its images folder together when sharing. Pictures show saved sketch
+coordinates, not a repaired result. Copy exports Markdown text only. This first image pass covers sketch
+issues; operation issues retain their full text explanations.
 
 Every imported file (STEP, IGES, 3MF, STL, OBJ, glTF or OpenUSD) comes in as a new component named after the
 file, so its bodies never mix with yours. A STEP assembly keeps its structure: its parts and

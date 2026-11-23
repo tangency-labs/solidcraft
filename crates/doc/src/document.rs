@@ -887,6 +887,13 @@ pub enum FeatureKind {
     NewerFileFeature {
         raw: crate::newer_file::RawFeature,
     },
+    /// Persistent notice of a source operation that could not be translated. This records
+    /// history without creating or changing geometry, even when unsuppressed.
+    ImportPlaceholder {
+        source: String,
+        source_type: String,
+        detail: String,
+    },
     /// A recorded timeline ownership boundary. Geometry is converted from its
     /// current local frame into the destination component frame exactly once.
     BodyTransfer {
@@ -3319,6 +3326,7 @@ impl FeatureKind {
     pub fn type_name(&self) -> &'static str {
         match self {
             FeatureKind::NewerFileFeature { .. } => "NewerFileFeature",
+            FeatureKind::ImportPlaceholder { .. } => "ImportPlaceholder",
             FeatureKind::BodyTransfer { .. } => "BodyTransferFeature",
             FeatureKind::Sketch { .. } => "Sketch",
             FeatureKind::Extrude { .. } => "ExtrudeFeature",
@@ -3412,6 +3420,7 @@ impl FeatureKind {
     pub fn kind_key(&self) -> &'static str {
         match self {
             FeatureKind::NewerFileFeature { .. } => "newer_file_feature",
+            FeatureKind::ImportPlaceholder { .. } => "import_placeholder",
             FeatureKind::BodyTransfer { .. } => "body_transfer",
             FeatureKind::Sketch { .. } => "sketch",
             FeatureKind::Extrude { .. } => "extrude",
@@ -3501,6 +3510,7 @@ impl FeatureKind {
     /// to the canonical design-file variant key (`"hole"`, `"sheet_flange"`).
     pub fn type_name_to_kind_key(name: &str) -> Option<&'static str> {
         Some(match name {
+            "ImportPlaceholder" => "import_placeholder",
             "BodyTransferFeature" => "body_transfer",
             "Sketch" => "sketch",
             "ExtrudeFeature" => "extrude",
@@ -3670,6 +3680,7 @@ impl FeatureKind {
             FeatureKind::Unstitch { .. } => "Unstitch",
             FeatureKind::ReverseNormal { .. } => "ReverseNormal",
             FeatureKind::SurfaceUntrim { .. } => "Untrim",
+            FeatureKind::ImportPlaceholder { .. } => "Not imported",
             FeatureKind::Import { .. } => "Import",
             FeatureKind::MeshImport { .. } => "Mesh",
             FeatureKind::MeshConvert { .. } => "ConvertMesh",

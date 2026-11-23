@@ -22,6 +22,7 @@ mod dxf_out;
 mod e57;
 mod excellon;
 pub mod formats;
+mod freecad_sketch;
 mod gerber;
 mod gerber_area;
 mod gerber_set;
@@ -99,6 +100,10 @@ pub use native_cad::usd_records;
 pub mod paper;
 mod pat;
 mod pcd;
+pub use freecad_sketch::{
+    FreeCadAxis, FreeCadIssueContext, FreeCadNode, FreeCadNodeKind, FreeCadOperation, FreeCadOperationSettings, FreeCadPreviewCurve, FreeCadProject,
+    FreeCadSketch, FreeCadSketchInfo, FreeCadSketchPreview, FreeCadWarning, FreeCadWarningSeverity, MAX_FREECAD_DOCUMENT_XML, read_freecad_sketches,
+};
 mod ply;
 mod ply_complex;
 pub use ply::ply_counts;

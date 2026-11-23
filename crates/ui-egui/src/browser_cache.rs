@@ -231,10 +231,18 @@ impl Cache {
         // A folder that holds only groups (a New Group made before anything is in it) is still
         // drawn, or the group can't be seen or filled (#10526).
         let grouped = doc.browser_groups.iter().any(|g| g.component == component && g.folder == folder);
+        // Imported FreeCAD Bodies can have sketches and placeholders without a resulting solid.
+        let imported_body = folder == "bodies"
+            && doc
+                .metadata
+                .get("org.solidcraft.freecad.body_components")
+                .and_then(|value| value.get("ids"))
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|ids| ids.iter().any(|id| id.as_u64() == Some(component)));
         let none = Vec::new();
         let indices = match indices.get(&component) {
             Some(indices) => indices,
-            None if grouped => &none,
+            None if grouped || imported_body => &none,
             None => return Folder::default(),
         };
         let mut all = Vec::with_capacity(indices.len());
@@ -257,7 +265,7 @@ impl Cache {
                 all.push(entry);
             }
         }
-        if all.is_empty() && !grouped {
+        if all.is_empty() && !grouped && !imported_body {
             return Folder::default();
         }
         let rows = arrange(&doc, component, folder, &prefix, all);

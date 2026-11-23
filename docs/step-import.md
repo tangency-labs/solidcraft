@@ -98,6 +98,45 @@ The rebuilt design is evaluated and compared with the file's own solids: each bo
 
 Only codecs for open formats are compiled in: the workspace turns off cadmpeg's default features and enables `fcstd`, `rhino` and `step`. cadmpeg's codecs for commercial CAD formats are not built, and neither is its `sat` codec, which decodes ShapeManager streams with ACIS as one dialect, so ACIS `.sat`/`.sab` files are not read yet. `crates/io/src/native_cad.rs` is the one place cadmpeg is called.
 
+### Selective FreeCAD sketch and operation import
+
+FreeCAD sketches have a separate editable import path. **File > Import FreeCAD…** reads the
+project's Part, Body and Sketch hierarchy and lets the user select individual sketches. Supported sketch
+geometry, dimensions and constraints are converted on a best-effort basis, with skipped items reported as
+warnings. Origin and datum plane placements are preserved, including Part/Body transforms and saved sketch
+offsets and rotations. Shared datum planes become construction planes. Normal offsets and in-plane rotations
+retain a link to that plane; more complex attachments retain their saved frame independently and report this
+exception. Datum dependencies on faces are frozen at their saved placement with a warning. Sketches attached
+directly to faces, edges or vertices fall back to XY in sketch-only mode with an explanation. Disabling operation
+import and unchecking **Preserve non-face sketch planes** puts all sketches on XY. Planes can be reassigned afterward. The import is
+one command and one undo step. The default organization maps FreeCAD Parts and Bodies to nested SolidCraft components;
+each Body component has Bodies, Sketches and Features folders. A flat mode imports into the active
+component with original, Body-prefixed or full-path sketch names. Each skipped-item warning has a concise
+description and a **More…** dialog with its FreeCAD type, references and detailed reason.
+
+The **Import supported operations** mode, enabled by default, rebuilds Pad/Pocket as native Extrude new/join/cut and
+Revolution/Groove as native Revolve new/join/cut. Selection includes required profile sketches and base
+operations; evaluation follows their dependency graph, with explicit body targets. Supported extents are
+fixed, reversed, symmetric, two-sided, and through-all Pocket. Other extent modes and taper require repair.
+Source face attachments retain their saved sketch plane and leave the operation suppressed for reattachment.
+An operation that fails to rebuild, or depends on an unsupported operation, is suppressed when it can be
+represented; operations without a usable profile, axis or dimensions are skipped and explained in the report.
+Unsupported operations are never silently bypassed to enable their dependents. Numeric dimensions remain
+editable; FreeCAD expressions and spreadsheet links are not translated. All additions form one undo step.
+
+Every skipped operation leaves an **[Not imported]** placeholder in the component's Features folder and
+history, in the operation import order. It retains the source name, operation type and explanation across
+save/reopen, and never creates or changes geometry. Double-click it to open the explanation. Its report
+status remains **skipped**; dependent operations remain suppressed until repaired. Rebuild a missing
+operation manually rather than enabling its placeholder.
+
+Import reports save as Markdown, retaining every full **More…** explanation. Optional annotated PNGs show
+available saved source geometry for sketch issues, including curve highlights and numbered point markers.
+Unavailable references are described in the caption. Images are stored in an adjacent folder, which must
+be shared with the report. Copy returns Markdown text without image files. Preview data is bounded; large
+sketches can have partial previews and each export attempts at most 32 images. Image failures leave the
+text report available. Operation issue images are not included in this first pass.
+
 ### Reading STEP with cadmpeg
 
 A STEP file can also be read by cadmpeg's STEP decoder instead of the reader above, to compare the two on real files: `reader: "cadmpeg"` on `doc.open` and `file.insert_step`, or the same Preferences › General › Import with cadmpeg switch (`cadmpeg_import`, off by default) that reads FreeCAD and Rhino files into records. cadmpeg decodes the file into its neutral model, which is read into B-rep records exactly as a FreeCAD or Rhino file's is with that switch on; the Import feature keeps those records and no STEP text. IGES files are always read by SolidCraft's reader. The file's assembly structure comes in as with SolidCraft's reader: one component a product, nested as the file nests them, each placed in its parent, and a part the file places more than once comes in once at each placement. A component placement that mirrors or scales is left out with the reason, as one of a FreeCAD or Rhino body is. The same applies to a FreeCAD or Rhino file whose parts cadmpeg reads as placed occurrences, read with the switch on. Colours come in as with SolidCraft's reader too: each body's colour and its name in the file, its opacity, and the faces with colours of their own (cadmpeg reads a transparency in a `SURFACE_STYLE_RENDERING_WITH_PROPERTIES`, as the CAx-IF recommended practice writes it). A FreeCAD or Rhino file's colours are not brought over yet. A solid that cannot be closed comes in as an open surface of the faces that read, without the faces its refusal names (each named in a warning), as with SolidCraft's reader. Each face a refusal names costs one more read, up to eight: a solid whose refusals still name a face after the eighth, or name every face it has, is left out with its first refusal, as is one whose refusal names no face. A cavity whose outer shell has every face left out stays a cavity. A part the file gives as triangles alone (an AP242 tessellated shape) comes in as a mesh body, as an STL or 3MF import's does; cadmpeg 0.6.12 does not say which product holds such a part, so in an assembly it comes in where the file defines it, with a warning, rather than where the assembly places it. Where the file states its parts' volume, surface area or centre (the CAx-IF geometric validation properties), the imported bodies are measured and compared with them: a part whose bodies differ by more than the file's stated error and 0.1% (a centre: 0.1% of the part's size) is named in a warning with both figures, so a face left out or a part placed wrong shows even where the import looks whole. A centre is compared in the part's own coordinates, as the file states it. The default, `reader: "solidcraft"`, is the reader above and keeps the STEP text.

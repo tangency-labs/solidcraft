@@ -196,7 +196,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("edit")
         .contract(&REDEFINE_CONTRACT)
         .output(output_schema_for::<TimelineRedefined>)
-        .params("feature: id|name, command: the feature's command id, params: its parameters (the feature is rebuilt in place) → feature, recomputed, restored, rolled_back: bool (the feature is after the history marker, so the edit is not built yet; `note` then says so), warning?"),
+        .params("feature: id|name, command: the feature's command id, params: its parameters (the feature is rebuilt in place), activate?: bool (enable a suppressed feature if the rebuilt result succeeds) → feature, recomputed, restored, rolled_back: bool (the feature is after the history marker, so the edit is not built yet; `note` then says so), warning?"),
     CommandSpec::new("timeline.dependents", "Feature Dependents", crate::checked!("timeline.dependents", dependents))
         .icon("graph")
         .noundo()
@@ -2556,6 +2556,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let mut params = p.get("params").cloned().unwrap_or_else(|| json!({}));
     let idx = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "feature"))?;
     let old = s.doc.feature(id).cloned().ok_or_else(|| bad(cmd, "feature"))?;
+    let activate = match p.get("activate") {
+        None => false,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(bad(cmd, "`activate` must be true or false")),
+    };
     if let FeatureKind::Extrude { extent, .. } | FeatureKind::SurfaceExtrude { extent, .. } = &old.kind
         && matches!(cid, "solid.extrude" | "surface.extrude")
         && let Some(parameters) = params.as_object_mut()
@@ -2913,7 +2918,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         trial.doc_mut().reserved_body_names.extend(removed.iter().cloned());
     }
     if let Some(slot) = trial.doc_mut().feature_mut(id) {
-        slot.suppressed = old.suppressed;
+        slot.suppressed = old.suppressed && !activate;
         if let Some((names, _)) = cap_names {
             slot.body_names = names;
         }
@@ -2944,6 +2949,17 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // counters read as "nothing was rebuilt" (#5694).
     let rebuilt = trial.model.last_recomputed;
     let reused = trial.model.last_restored;
+    if activate && trial.model.result(id).is_none_or(|r| r.skipped) {
+        return Err(bad(cmd, "the rebuilt feature did not produce an active result"));
+    }
+    if activate
+        && old.suppressed
+        && let Some(name) = old.name.strip_suffix(" [Needs repair]")
+        && !trial.doc.features.iter().any(|feature| feature.id != id && feature.name == name)
+        && let Some(slot) = trial.doc_mut().feature_mut(id)
+    {
+        slot.name = name.to_string();
+    }
     let original_ids: std::collections::BTreeSet<u64> = s.doc.features.iter().map(|feature| feature.id).collect();
     let added_ids: std::collections::BTreeSet<u64> =
         trial.doc.features.iter().filter(|feature| !original_ids.contains(&feature.id)).map(|feature| feature.id).collect();

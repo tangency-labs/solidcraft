@@ -1542,6 +1542,9 @@ pub struct TimelineRedefineParams {
     /// That command's parameters. Default: none.
     #[serde(default)]
     pub params: Option<CommandParams>,
+    /// Enable a suppressed feature if its rebuilt result succeeds. Default: false.
+    #[serde(default)]
+    pub activate: Option<bool>,
 }
 
 /// What `timeline.redefine` returns.
@@ -1692,7 +1695,7 @@ mod tests {
         assert_keys(input_schema_for::<TimelineMoveManyParams>(), &["active", "features", "group", "groups", "position"]);
         assert_keys(input_schema_for::<TimelineReorderParams>(), &["active", "allow_errors", "feature", "position"]);
         assert_keys(input_schema_for::<TimelineReorderManyParams>(), &["active", "allow_errors", "features", "position"]);
-        assert_keys(input_schema_for::<TimelineRedefineParams>(), &["command", "feature", "params"]);
+        assert_keys(input_schema_for::<TimelineRedefineParams>(), &["activate", "command", "feature", "params"]);
         assert_keys(input_schema_for::<SelectModeParams>(), &["mode"]);
     }
 

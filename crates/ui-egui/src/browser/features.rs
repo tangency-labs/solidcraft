@@ -458,6 +458,7 @@ fn feature_row(
     let (component, path) = (here.component, here.path);
     let (id, label, icon) = (feature.id, feature.name.clone(), crate::timeline::icon_of(&feature.kind));
     let is_sketch = matches!(feature.kind, FeatureKind::Sketch { .. });
+    let is_placeholder = matches!(feature.kind, FeatureKind::ImportPlaceholder { .. });
     let sketch = crate::timeline::TimelineKind::of(&feature.kind).profile_sketch();
     // Behind the history marker or suppressed: not built, drawn faint as in the timeline.
     let dim = feature.suppressed || app.session.doc.marker.is_some_and(|marker| index >= marker);
@@ -482,6 +483,7 @@ fn feature_row(
         None => crate::timeline::feature_status(app, id),
     };
     let tip = status.and_then(|_| crate::timeline::feature_tip(app, id));
+    let color = is_placeholder.then_some(Tokens::get().warning);
     // A cut feature has a dashed outline until Paste moves it.
     let cut = app.cut.features.contains(&id);
     let r = node_row(
@@ -500,6 +502,7 @@ fn feature_row(
             cut,
             action,
             mark,
+            color,
             status,
             status_tip: tip.as_ref(),
             ..Default::default()
@@ -653,6 +656,29 @@ fn drag_rows(
 mod tests {
     use super::*;
     use crate::scenario::Harness;
+
+    #[test]
+    fn missing_import_operation_is_visible_and_opens_its_explanation_without_rolling_history() {
+        let mut h = Harness::new();
+        let kind = FeatureKind::ImportPlaceholder {
+            source: "Fillet003".into(),
+            source_type: "PartDesign::Fillet".into(),
+            detail: "Edge references could not be imported.".into(),
+        };
+        let id = h.app.session.doc_mut().add_feature(kind, Some("[Not imported] Fillet003")).unwrap();
+        h.app.session.refresh();
+        for cache in ["current", "missing", "stale"] {
+            assert!(feature_rows(&mut h, cache).iter().any(|label| label == "[Not imported] Fillet003"));
+        }
+        let marker = h.app.session.doc.marker;
+        let undo = h.app.session.undo.len();
+        h.app.edit_feature(id);
+        let detail = h.app.freecad_operation_detail.as_ref().unwrap();
+        assert!(detail.summary.contains("Fillet003"));
+        assert!(detail.detail.contains("Edge references"));
+        assert_eq!(h.app.session.doc.marker, marker);
+        assert_eq!(h.app.session.undo.len(), undo);
+    }
 
     fn feature_rows(h: &mut Harness, cache: &str) -> Vec<String> {
         h.app.tree.model = match cache {
