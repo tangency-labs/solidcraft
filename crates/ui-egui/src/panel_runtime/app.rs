@@ -18,8 +18,9 @@ pub trait AppPanelServices {
 }
 
 pub struct AppPanelRuntime {
+    pub(super) plugins: super::plugin::PluginState,
     pub(super) production: Option<super::production::ProductionState>,
-    runtime: PanelRuntime,
+    pub(super) runtime: PanelRuntime,
     services: Box<dyn AppPanelServices>,
     native: Box<dyn NativeHostAdapter>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -28,6 +29,7 @@ pub struct AppPanelRuntime {
     last_tick_frame: Option<u64>,
     detached_content: crate::semantic_content::Detached,
     last_error: Option<PanelError>,
+    sync_error: Option<PanelError>,
     catalogue: Box<dyn commands::LayoutCatalogue>,
     adapters_set: bool,
     pub(super) preferences: Option<super::preferences::PreferenceSession>,
@@ -39,6 +41,7 @@ impl AppPanelRuntime {
             return Err(error(Rule::Lifecycle, "install the app adapter before creating or restoring native placement"));
         }
         Ok(Self {
+            plugins: Default::default(),
             production: None,
             runtime,
             services,
@@ -49,6 +52,7 @@ impl AppPanelRuntime {
             last_tick_frame: None,
             detached_content: Default::default(),
             last_error: None,
+            sync_error: None,
             catalogue: Box::<commands::InMemoryCatalogue>::default(),
             adapters_set: false,
             preferences: None,
@@ -96,7 +100,7 @@ impl AppPanelRuntime {
     }
 
     pub fn last_error(&self) -> Option<&PanelError> {
-        self.last_error.as_ref()
+        self.sync_error.as_ref().or(self.last_error.as_ref())
     }
     pub fn runtime(&self) -> &PanelRuntime {
         &self.runtime
@@ -1216,12 +1220,17 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             integration.last_error = Some(reason);
         }
     }
-    if let Err(reason) = super::production::drain_production_actions(app)
+    if app.panel_runtime.as_ref().is_some_and(|integration| integration.last_tick_frame == Some(ctx.cumulative_frame_nr())) {
+        return;
+    }
+    let plugin_error = super::plugin::sync(app).err();
+    let production_error = super::production::drain_production_actions(app)
         .and_then(|()| super::production::sync_production_visibility(app))
         .and_then(|()| super::production::refresh_production(app))
-        && let Some(integration) = &mut app.panel_runtime
-    {
-        integration.last_error = Some(reason);
+        .err();
+    if let Some(integration) = &mut app.panel_runtime {
+        // Context reconciliation and painting cannot resolve an earlier sync failure.
+        integration.sync_error = plugin_error.or(production_error);
     }
     let direction = crate::i18n::panel_direction(&app.preferences.language);
     // The Browser's search field takes its title's place while it is open (#1634).

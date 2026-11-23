@@ -979,12 +979,16 @@ impl crate::ModelBody {
         crate::ModelBody::new(name, made.body, feature).with_lineage(made.lineage)
     }
 
-    /// This body as the feature changed it: under its name, from the feature that made it and with
-    /// its `component`, so a later step of the same feature still counts it among that
-    /// component's bodies (the copies of a pattern's second cut, #14305).
+    /// This body as the feature changed it: under its name, from the feature that made it, with
+    /// its `component` and the frame a transfer gave it, so a later step of the same feature still
+    /// counts it among that component's bodies (the copies of a pattern's second cut, #14305) and
+    /// meets it where it is placed (a mirror's round after its join, #19451).
     pub(crate) fn remade(&self, made: Traced) -> Self {
         let mut remade = Self::traced_new(self.name.clone(), made, self.feature);
         remade.component = self.component;
+        remade.transferred = self.transferred;
+        remade.source_name = self.source_name.clone();
+        remade.source_transform = self.source_transform;
         remade
     }
 
