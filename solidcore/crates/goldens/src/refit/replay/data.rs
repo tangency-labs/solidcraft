@@ -9,6 +9,10 @@
 //! `own_reader_sphere_plane_create_*` rows of `topology.edgeuse_p3`, `write_bytes0153`
 //! and the four `stubs4-delete-edge-sphere_diff_3cylinders-e1/e4` rows (the last five
 //! recorded on Linux CI).
+//!
+//! The `blend.fillet_executive_p3` hashes are of those lines without the
+//! `fillet_point_step` key, which recorded the retired step latch (#18916); every other
+//! value is the line's.
 
 use super::Row;
 
@@ -999,56 +1003,56 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0x79640befc8538807,
+        0x45841a9164d2602c,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x4b02077293d8103e,
+        0xe86c8a18238633fd,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
-        0xc98940c884289f53,
+        0x405209a464313f0e,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0x1295b489814557bb,
+        0x5ce7e9eb2f229d1e,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x61c95a6a9b40a870,
+        0x03aaed98113a5d6f,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
-        0x3f70a86476ec56c0,
+        0xffcf312d60cdb459,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
-        0xcc67810f9fe849ac,
+        0x06ddff56205be79d,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-sphere_plane-e3-r0.5",
-        0xe44b1f429909a56e,
+        0x033ae0862895d2b3,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
-        0xb117c614030b1b0c,
+        0xb22294900f9c8b8f,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep4-sphere_diff_3cylinders-all-r0.1",
-        0xb80489008f84d5d4,
+        0x03a447984bf8cd71,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep5-sphere_diff_3cylinders-e29-r1.0",
-        0x60a68e03392d0843,
+        0x9f5bf5f05eb8f6cc,
     ),
 ];

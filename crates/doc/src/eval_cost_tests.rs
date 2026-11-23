@@ -3565,7 +3565,8 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
         vec![kernel::HealedBody { index: 0, body: healed, face_origin, face_source: face_source.clone() }],
     );
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks: checks.clone() }));
+    r.import_report =
+        Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks: checks.clone() }));
 
     assert!(model.settle_import_checks(), "a heal changes the import");
     assert!(model.settle_import_checks(), "until an evaluation brings it in, it is still owed");
@@ -3584,7 +3585,7 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
 
     // The same heal settled again: nothing to do.
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
     assert!(!model.settle_import_checks());
     model.evaluate(&doc);
     assert_eq!(model.last_recomputed, 0);
@@ -3628,7 +3629,8 @@ fn a_heal_the_next_read_finds_again_is_told_once() {
     };
     let ended = |model: &mut Model, checks: kernel::ImportChecks| {
         let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-        r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+        r.import_report =
+            Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
     };
     ended(&mut model, run());
     assert!(model.settle_import_checks());
@@ -3656,7 +3658,7 @@ fn a_save_while_an_import_is_checked_keeps_no_model_and_does_not_wait() {
     let import = doc.features[0].id;
     let (checks, end) = kernel::ImportChecks::running_for_tests();
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
     assert!(model.checking_imports());
     // (were it to wait, this would never return: nothing else ends the check)
     assert!(model.saved_if_checked(&doc).is_none(), "no model while the check runs");
@@ -3754,7 +3756,7 @@ fn a_heal_that_ends_after_the_preference_turned_off_leaves_no_healed_note() {
         vec![kernel::HealedBody { index: 0, body: healed, face_origin: vec![0; n], face_source: (0..n).collect() }],
     );
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
 
     assert!(model.settle_import_checks_under(false), "an evaluation is owed: the import is read again");
     assert!(!model.has_import_heals(), "the heal is not taken");
