@@ -585,9 +585,14 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "MODEL", panel: "FINISH EDITING", promoted: 1, ids: &["component.finish_edit"] },
     // Sketches drive surfaces too: New Sketch leads the tab, as on MODEL and SHEET METAL.
     Section { tab: "SURFACE", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
-    Section { tab: "SURFACE", panel: "CREATE", promoted: 4, ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft"] },
+    Section {
+        tab: "SURFACE",
+        panel: "CREATE",
+        promoted: 4,
+        ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft", "surface.thicken"],
+    },
     Section { tab: "SURFACE", panel: "EDIT", promoted: 4, ids: &["surface.trim", "surface.untrim", "surface.extend", "surface.stitch"] },
-    Section { tab: "SURFACE", panel: "CONVERT", promoted: 2, ids: &["surface.thicken", "mesh.convert"] },
+    Section { tab: "SURFACE", panel: "MESH", promoted: 2, ids: &["mesh.reduce", "mesh.convert", "file.insert_mesh", "file.save_mesh"] },
     Section {
         tab: "ASSEMBLE",
         panel: "COMPONENTS",
@@ -784,6 +789,11 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "WELDMENTS", panel: "MODIFY", promoted: 1, ids: &["frame.rotate_member"] },
     Section { tab: "WELDMENTS", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
 ];
+
+const LEGACY_SURFACE_CREATE: Section =
+    Section { tab: "SURFACE", panel: "CREATE", promoted: 4, ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft"] };
+const LEGACY_SURFACE_CONVERT: Section =
+    Section { tab: "SURFACE", panel: "CONVERT", promoted: 2, ids: &["surface.thicken", "mesh.convert", "mesh.reduce"] };
 
 // Migration data only: Render commands remain registered, but have no live ribbon sections.
 const LEGACY_RENDER_SECTIONS: &[Section] = &[
@@ -1003,6 +1013,7 @@ pub(crate) fn legacy_render_destination(c: &CommandSpec) -> Option<(&'static str
         "sheet.manage_rules" => Some(("MANAGE", "RULES")),
         "sheet.convert" => Some(("MODEL", "MODIFY")),
         "parameters.change" => Some(("MANAGE", "PARAMETERS")),
+        "file.insert_mesh" | "file.save_mesh" => Some(("INSERT", "FILES")),
         "config.table" | "config.configure" => Some(("MANAGE", "CONFIGURATIONS")),
         _ => None,
     };
@@ -1014,9 +1025,25 @@ pub(crate) fn legacy_render_destination(c: &CommandSpec) -> Option<(&'static str
 /// Ordered menu commands, with the promoted commands first. Empty sections are omitted by
 /// panel_lists, except the selection filter, which has its own existing controls.
 pub fn layout<'a>(tab: &str, panel: &str, specs: &[&'a CommandSpec]) -> Option<(Vec<&'a CommandSpec>, usize)> {
-    let section = SECTIONS.iter().find(|s| s.tab == tab && s.panel == panel)?;
+    layout_for(tab, panel, specs, false)
+}
+
+pub(crate) fn layout_for<'a>(tab: &str, panel: &str, specs: &[&'a CommandSpec], legacy_surface: bool) -> Option<(Vec<&'a CommandSpec>, usize)> {
+    let section = if legacy_surface && tab == "SURFACE" {
+        match panel {
+            "CREATE" => &LEGACY_SURFACE_CREATE,
+            "CONVERT" => &LEGACY_SURFACE_CONVERT,
+            "MESH" => return None,
+            _ => SECTIONS.iter().find(|s| s.tab == tab && s.panel == panel)?,
+        }
+    } else {
+        SECTIONS.iter().find(|s| s.tab == tab && s.panel == panel)?
+    };
     let mut out: Vec<_> = section.ids.iter().filter_map(|id| specs.iter().find(|c| c.id == *id).copied()).collect();
-    for c in specs.iter().filter(|c| destination(c) == Some((section.tab, section.panel))) {
+    for c in specs.iter().filter(|c| {
+        destination(c) == Some((section.tab, section.panel))
+            && !(legacy_surface && tab == "SURFACE" && panel == "CREATE" && c.id == "surface.thicken")
+    }) {
         if !out.iter().any(|o| o.id == c.id) {
             out.push(*c);
         }
@@ -1041,7 +1068,7 @@ pub fn legacy_panel(tab: &str, panel: &str) -> Option<(&'static str, &'static st
         ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "CONSTRUCT") => Some(("MODEL", "CONSTRUCT")),
         ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "INSPECT") => Some(("INSPECT", "CHECK")),
         ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "INSERT") => Some(("INSERT", "FILES")),
-        ("MESH", "CREATE" | "PREPARE") => Some(("SURFACE", "CONVERT")),
+        ("MESH", "CREATE" | "PREPARE") => Some(("SURFACE", "MESH")),
         ("UTILITIES", "MAKE" | "ADD-INS" | "UTILITY") => Some(("MANAGE", "DESIGN")),
         ("UTILITIES", "INSPECT") => Some(("INSPECT", "CHECK")),
         _ => None,
@@ -1267,7 +1294,7 @@ pub fn select_command_tab(app: &mut crate::SolveApp, id: &str) {
 pub fn command_tab(app: &crate::SolveApp, id: &str) -> Option<&'static str> {
     let c = solidcraft_engine::find_command(id)?;
     // Keep the tab a toolbar click came from when it already lists this shared command.
-    if crate::toolbar_custom::panel_lists(&app.ui.tab).iter().any(|(_, cmds, _)| cmds.iter().any(|c| c.id == id)) {
+    if crate::toolbar_custom::panel_lists_for(app, &app.ui.tab).iter().any(|(_, cmds, _)| cmds.iter().any(|c| c.id == id)) {
         return None;
     }
     let (tab, _) = destination(c)?;

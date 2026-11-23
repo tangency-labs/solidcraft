@@ -276,6 +276,12 @@ crate::dialog_descriptor::dialog_descriptors! {
             MeshConvert {
                 tolerance: String,
             },
+            /// A separate reduced copy of a mesh.
+            MeshReduce {
+                mode: usize,
+                count: String,
+                percentage: String,
+            },
             /// A construction axis, point or plane made from picks alone (#2474): input `i` is the
             /// command's parameter `keys[i]`, and `t` (along a path) when it takes one.
             Construct {
@@ -780,7 +786,7 @@ fn display_quality(app: &SolveApp) -> solidcraft_engine::doc::display_quality::D
 pub(crate) fn begin_applying(app: &SolveApp, d: &Dialog) -> Option<Applying> {
     let wait = app.apply_off_thread?;
     let multiple_threads = matches!(d.kind, Kind::Thread { .. }) && sels(d, 0).len() > 1;
-    if !d.previews() && !multiple_threads && d.editing.is_none() {
+    if !d.previews() && !multiple_threads && !matches!(d.kind, Kind::MeshReduce { .. }) && d.editing.is_none() {
         return None;
     }
     let computation = DialogComputation::new(app, d).ok()?;
@@ -1080,6 +1086,10 @@ impl Dialog {
             ),
             "mesh.convert" => Dialog::new(
                 Kind::MeshConvert { tolerance: crate::length_input::model(&s.doc, 0.05) },
+                vec![SelInput::new("Mesh body", BODIES, false)],
+            ),
+            "mesh.reduce" => Dialog::new(
+                Kind::MeshReduce { mode: 0, count: String::new(), percentage: "50".into() },
                 vec![SelInput::new("Mesh body", BODIES, false)],
             ),
             // Plane, Axis and Point open as the method their picks call for (`dialogs_auto`).
@@ -3070,6 +3080,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Material { .. } => "PHYSICAL MATERIAL",
         Kind::Midplane => "MIDPLANE",
         Kind::MeshConvert { .. } => "CONVERT MESH",
+        Kind::MeshReduce { .. } => "REDUCE MESH",
         Kind::Construct { title, .. } => title,
         Kind::ConstructAuto { command: "construct.plane", .. } => "cmd.construct.plane",
         Kind::ConstructAuto { command: "construct.axis", .. } => "cmd.construct.axis",
@@ -6795,6 +6806,26 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 _ => return Err("pick the mesh body to convert".into()),
             };
             ("mesh.convert", json!({"body": body, "tolerance": tolerance}))
+        }
+        Kind::MeshReduce { mode, count, percentage } => {
+            need(0, "the mesh body")?;
+            let body = match sels(d, 0).first() {
+                Some(Sel::Body { name }) => name.clone(),
+                _ => return Err("pick the mesh body to reduce".into()),
+            };
+            if *mode == 0 {
+                let value = percentage.trim().parse::<f64>().map_err(|_| "enter a retained percentage between 0 and 100")?;
+                if !value.is_finite() || value <= 0.0 || value >= 100.0 {
+                    return Err("enter a retained percentage between 0 and 100".into());
+                }
+                ("mesh.reduce", json!({"body": body, "percentage": value}))
+            } else {
+                let value = count.trim().parse::<usize>().map_err(|_| "enter a positive triangle count")?;
+                if value == 0 {
+                    return Err("enter a positive triangle count".into());
+                }
+                ("mesh.reduce", json!({"body": body, "triangle_count": value}))
+            }
         }
         Kind::Midplane => {
             need(0, "the first plane")?;

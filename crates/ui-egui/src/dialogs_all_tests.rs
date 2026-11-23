@@ -627,6 +627,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
     Some(match label {
         "Type" if matches!(command, "sheet.flange" | "sheet.hem" | "solid.revolve" | "solid.emboss" | "solid.scale") => return None,
         "Direction" | "pattern.start_point" => return None, // segmented buttons, labelled by each choice
+        "Target" if command == "mesh.reduce" => return None, // segmented target modes
         "ui.fair_strength" | "ui.fair_iterations" => return None,
         "Size" if matches!(command, "solid.cylinder" | "solid.sphere") => return None, // Diameter | Radius
         "Continuity" | "Corners" | "Cells" | "Profile" => return None,
@@ -802,6 +803,29 @@ form_case!(sweep, "solid.sweep", ["Orientation"]);
 form_case!(offset_plane, "construct.plane.offset", ["Distance"]);
 form_case!(midplane, "construct.plane.midplane", []);
 form_case!(mesh_convert, "mesh.convert", ["Tolerance"]);
+form_case!(mesh_reduce, "mesh.reduce", ["Target", "Retained percentage"]);
+
+#[test]
+fn mesh_reduce_builds_exactly_one_valid_target() {
+    let h = Harness::new();
+    let mut d = Dialog::for_command(&h.app, "mesh.reduce").unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Mesh".into() }];
+    assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1, json!({"body":"Mesh","percentage":50.0}));
+    if let Kind::MeshReduce { mode, count, percentage } = &mut d.kind {
+        *percentage = "100".into();
+        *count = "42".into();
+        assert_eq!(*mode, 0);
+    }
+    assert!(apply_commands(&h.app, &d).is_err());
+    if let Kind::MeshReduce { mode, .. } = &mut d.kind {
+        *mode = 1;
+    }
+    assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1, json!({"body":"Mesh","triangle_count":42}));
+    if let Kind::MeshReduce { count, .. } = &mut d.kind {
+        *count = "0".into();
+    }
+    assert!(apply_commands(&h.app, &d).is_err());
+}
 form_case!(axis_two_planes, "construct.axis.two_planes", []);
 form_case!(point_along_path, "construct.point.along_path", ["Position (0 to 1)"]);
 form_case!(angle_plane, "construct.plane.at_angle", ["Angle"]);

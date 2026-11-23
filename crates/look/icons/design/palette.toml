@@ -211,4 +211,5 @@ construction = [
 ]
 mesh = [
   "mesh_body",
+  "mesh_reduce",
 ]

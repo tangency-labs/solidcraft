@@ -279,14 +279,28 @@ pub fn panel_lists(tab: &str) -> PanelLists {
     lists.entry(tab.to_string()).or_insert_with(|| panel_lists_of(tab)).clone()
 }
 
+/// The Surface layout is selectable without invalidating the other tabs' cached lists.
+pub(crate) fn panel_lists_for(app: &SolveApp, tab: &str) -> PanelLists {
+    if tab == "SURFACE" && app.preferences.legacy_surface_toolbar {
+        static LEGACY: std::sync::LazyLock<PanelLists> = std::sync::LazyLock::new(|| panel_lists_of_layout("SURFACE", true));
+        return LEGACY.clone();
+    }
+    panel_lists(tab)
+}
+
 /// [`panel_lists`] worked out from the registry.
 fn panel_lists_of(tab: &str) -> PanelLists {
+    panel_lists_of_layout(tab, false)
+}
+
+fn panel_lists_of_layout(tab: &str, legacy_surface: bool) -> PanelLists {
     let specs = command_specs();
     crate::toolbar::panels(tab)
         .iter()
+        .map(|panel| if legacy_surface && *panel == "MESH" { "CONVERT" } else { *panel })
         .filter_map(|panel| {
-            let (cmds, n) = crate::workspace::layout(tab, panel, &specs)?;
-            (!cmds.is_empty() || *panel == "SELECT").then_some((*panel, cmds, n))
+            let (cmds, n) = crate::workspace::layout_for(tab, panel, &specs, legacy_surface)?;
+            (!cmds.is_empty() || panel == "SELECT").then_some((panel, cmds, n))
         })
         .collect()
 }
@@ -297,7 +311,7 @@ fn own(app: &mut SolveApp, tab: &str, panel: &str) -> Vec<String> {
     if let Some(v) = app.toolbar_custom.panels.get(&k) {
         return v.clone();
     }
-    let lists = panel_lists(tab);
+    let lists = panel_lists_for(app, tab);
     let ids: Vec<String> =
         lists.iter().find(|(p, ..)| *p == panel).map(|(_, cmds, n)| cmds.iter().take(*n).map(|c| c.id.to_string()).collect()).unwrap_or_default();
     ids
@@ -305,12 +319,12 @@ fn own(app: &mut SolveApp, tab: &str, panel: &str) -> Vec<String> {
 
 /// Where a command is a button on a tab now: its panel.
 pub fn pinned_on(app: &SolveApp, tab: &str, id: &str) -> Option<&'static str> {
-    panel_lists(tab).into_iter().find(|(panel, cmds, n)| buttons(app, tab, panel, cmds, *n).iter().any(|c| c.id == id)).map(|(p, ..)| p)
+    panel_lists_for(app, tab).into_iter().find(|(panel, cmds, n)| buttons(app, tab, panel, cmds, *n).iter().any(|c| c.id == id)).map(|(p, ..)| p)
 }
 
 /// The panel a command belongs to on a tab (its drop-down), or the tab's first panel.
-fn home_panel(tab: &str, id: &str) -> Option<&'static str> {
-    let lists = panel_lists(tab);
+fn home_panel(app: &SolveApp, tab: &str, id: &str) -> Option<&'static str> {
+    let lists = panel_lists_for(app, tab);
     lists.iter().find(|(_, cmds, _)| cmds.iter().any(|c| c.id == id)).or(lists.first()).map(|(p, ..)| *p)
 }
 
@@ -328,7 +342,7 @@ pub fn pin(app: &mut SolveApp, tab: &str, id: &str) -> Result<(), String> {
     if pinned_on(app, tab, id).is_some() || fixed(tab, "", id) {
         return Ok(());
     }
-    let panel = home_panel(tab, id).ok_or_else(|| format!("the {tab} tab has no panels"))?;
+    let panel = home_panel(app, tab, id).ok_or_else(|| format!("the {tab} tab has no panels"))?;
     let mut ids = own(app, tab, panel);
     ids.push(id.to_string());
     app.toolbar_custom.panels.insert(key(tab, panel), ids);
@@ -577,7 +591,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
                                 .min(solidcraft_theme::Tokens::get().control_height * 20.0),
                         )
                         .show(ui, |ui| {
-                            for (panel, cmds, n) in panel_lists(&tab) {
+                            for (panel, cmds, n) in panel_lists_for(app, &tab) {
                                 if cmds.is_empty() {
                                     continue;
                                 }

@@ -25,6 +25,172 @@ pub(crate) fn imported_box() -> Session {
     Session::new(doc)
 }
 
+/// A closed box with planar grids dense enough to have interior collapsible edges.
+pub(crate) fn subdivided_box() -> Session {
+    let mut s = imported_box();
+    let FeatureKind::MeshImport { meshes, .. } = &mut s.doc_mut().features[0].kind else { panic!("mesh") };
+    let mesh = &mut meshes[0];
+    let mut positions = Vec::new();
+    let mut triangles = Vec::new();
+    let faces = [
+        ([0., 0., 0.], [0., 3., 0.], [3., 0., 0.]),
+        ([0., 0., 12.], [3., 0., 0.], [0., 3., 0.]),
+        ([0., 0., 0.], [3., 0., 0.], [0., 0., 3.]),
+        ([0., 12., 0.], [0., 0., 3.], [3., 0., 0.]),
+        ([0., 0., 0.], [0., 0., 3.], [0., 3., 0.]),
+        ([12., 0., 0.], [0., 3., 0.], [0., 0., 3.]),
+    ];
+    for (origin, u, v) in faces {
+        let base = (positions.len() / 3) as u32;
+        for y in 0..=4 {
+            for x in 0..=4 {
+                positions.extend((0..3).map(|i| origin[i] + u[i] * f64::from(x) + v[i] * f64::from(y)));
+            }
+        }
+        for y in 0..4 {
+            for x in 0..4 {
+                let a = base + y * 5 + x;
+                triangles.extend([a, a + 1, a + 6, a, a + 6, a + 5]);
+            }
+        }
+    }
+    mesh.positions = positions.into();
+    mesh.triangles = triangles.into();
+    s.refresh();
+    s
+}
+
+#[test]
+fn reduction_persists_a_separate_mesh_for_conversion_and_undo() {
+    let mut s = subdivided_box();
+    s.selection = vec![crate::Sel::Body { name: "Mesh".into() }];
+    let recomputed_before = s.model.recomputed;
+    let reply = run(&mut s, "mesh.reduce", json!({"percentage": 40, "name": "Reduce"}));
+    assert_eq!(s.model.recomputed - recomputed_before, 1, "only the new reduction should recompute geometry");
+    let name = reply["created_bodies"][0].as_str().unwrap().to_owned();
+    let original = reply["original_triangles"].as_u64().unwrap();
+    let target = reply["target_triangles"].as_u64().unwrap();
+    let achieved = reply["achieved_triangles"].as_u64().unwrap();
+    assert_eq!(target, (original as f64 * 0.4).floor() as u64);
+    assert!(achieved < original);
+    assert_eq!(reply["warning"].is_string(), achieved > target);
+    let check = |s: &Session| {
+        let state = s.model.state();
+        assert_eq!(state.body("Mesh").unwrap().body.triangle_mesh().unwrap().1.len() as u64, original);
+        let reduced = &state.body(&name).unwrap().body;
+        assert_eq!(reduced.triangle_mesh().unwrap().1.len() as u64, achieved);
+        assert!(reduced.is_closed_mesh());
+        assert_eq!(reduced.color(), Some([0.2, 0.5, 0.8]));
+    };
+    check(&s);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.model.state().body(&name).is_none());
+    run(&mut s, "edit.redo", json!({}));
+    check(&s);
+    let mut cold = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    check(&cold);
+    run(&mut cold, "mesh.convert", json!({"body": name}));
+    assert!(cold.model.state().body("Mesh").unwrap().body.is_mesh());
+    assert!(!cold.model.state().body(&name).unwrap().body.is_mesh());
+}
+
+#[test]
+fn reduction_rejects_invalid_and_unreachable_requests_atomically() {
+    let mut s = subdivided_box();
+    let before = s.doc.to_json();
+    for params in [
+        json!({"body":"Mesh"}),
+        json!({"body":"Mesh","triangle_count":0}),
+        json!({"body":"Mesh","triangle_count":1.5}),
+        json!({"body":"Mesh","percentage":0}),
+        json!({"body":"Mesh","percentage":100}),
+        json!({"body":"Mesh","percentage":-1}),
+        json!({"body":"Mesh","percentage":50,"triangle_count":10}),
+        json!({"body":"Mesh","triangle_count":100000}),
+        json!({"body":"Missing","triangle_count":1}),
+    ] {
+        assert!(s.execute("mesh.reduce", &params).is_err(), "{params}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
+
+#[test]
+fn reduction_reports_actual_count_for_a_noisy_mesh() {
+    let mut s = subdivided_box();
+    let FeatureKind::MeshImport { meshes, .. } = &mut s.doc_mut().features[0].kind else { panic!("mesh") };
+    let mut positions = meshes[0].positions.to_vec();
+    // Perturb the interior of the top face, retaining the watertight boundary.
+    for y in 1..4 {
+        for x in 1..4 {
+            positions[(25 + y * 5 + x) * 3 + 2] += (x * y) as f64 * 0.013;
+        }
+    }
+    meshes[0].positions = positions.into();
+    s.refresh();
+    let before = s.model.state().body("Mesh").unwrap().body.triangle_mesh().unwrap().1.len();
+    let reply = run(&mut s, "mesh.reduce", json!({"body":"Mesh","percentage":50}));
+    let name = reply["created_bodies"][0].as_str().unwrap();
+    let state = s.model.state();
+    assert_eq!(state.body("Mesh").unwrap().body.triangle_mesh().unwrap().1.len(), before);
+    let achieved = state.body(name).unwrap().body.triangle_mesh().unwrap().1.len();
+    assert_eq!(reply["achieved_triangles"], achieved);
+    assert!(achieved < before);
+}
+
+#[test]
+fn reduction_uses_source_component_and_its_placements() {
+    let path = std::env::temp_dir().join(format!("solidcraft-reduce-placed-{}.stl", std::process::id()));
+    let mut source = subdivided_box();
+    run(&mut source, "file.save_mesh", json!({"path": path}));
+    let mut s = Session::default();
+    let inserted = run(&mut s, "file.insert_mesh", json!({"path": path, "name": "Scan"}));
+    let owner = inserted["component"].as_u64().unwrap();
+    run(&mut s, "occurrence.copy", json!({"component": "Scan", "translate": [0, 40, 0]}));
+    let definition = s.model.state().bodies[0].name.clone();
+    s.doc_mut().body_offsets.insert(definition.clone(), solidcraft_doc::rigid(Vec3::new(7.0, 3.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    s.refresh();
+    let second = s.world_state().unwrap().bodies.iter().find(|b| b.name != definition).unwrap().name.clone();
+    let context = (s.active_component, s.active_occurrence_path.clone());
+    let reply = run(&mut s, "mesh.reduce", json!({"body": second, "triangle_count": 1}));
+    assert_eq!((s.active_component, s.active_occurrence_path.clone()), context);
+    let name = reply["created_bodies"][0].as_str().unwrap();
+    assert_eq!(s.doc.model_body_component(s.model.state().body(name).unwrap()), owner);
+    let check = |s: &Session, source_x: f64, derived_x: f64| {
+        let world = s.world_state().unwrap();
+        let bounds = |definition: &str| {
+            let mut boxes: Vec<_> = world.bodies.iter().filter(|b| b.definition_name() == definition).map(|b| b.mesh().bounds()).collect();
+            boxes.sort_by(|a, b| a.min.y.total_cmp(&b.min.y));
+            boxes
+        };
+        let source = bounds(&definition);
+        let reduced = bounds(name);
+        assert_eq!(source.len(), 2);
+        assert_eq!(reduced.len(), 2);
+        for (original, result) in source.iter().zip(&reduced) {
+            assert!((original.min.x - source_x).abs() < 1e-8);
+            assert!((result.min.x - derived_x).abs() < 1e-8);
+            assert!((original.min.y - result.min.y).abs() < 1e-8);
+            assert!((original.max.y - result.max.y).abs() < 1e-8);
+            assert!((original.min.z - result.min.z).abs() < 1e-8);
+            assert!((original.max.z - result.max.z).abs() < 1e-8);
+        }
+    };
+    check(&s, 7.0, 7.0);
+    let cold = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    check(&cold, 7.0, 7.0);
+    // A warm evaluation must follow subsequent changes to the source offset.
+    s.doc_mut().body_offsets.insert(definition.clone(), solidcraft_doc::rigid(Vec3::new(9.0, 3.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    s.refresh();
+    check(&s, 9.0, 9.0);
+    // A separately stored derived-body placement wins, rather than being composed twice.
+    s.doc_mut().body_offsets.insert(name.to_string(), solidcraft_doc::rigid(Vec3::new(20.0, 3.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    s.refresh();
+    check(&s, 9.0, 20.0);
+    let cold = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    check(&cold, 9.0, 20.0);
+    std::fs::remove_file(path).unwrap();
+}
+
 /// An edit keeps the design as it was for undo, and an imported mesh's triangles are shared
 /// with that copy, not copied (a scan's are hundreds of megabytes): after an edit and its undo
 /// the document holds the same arrays. They still save as plain arrays.

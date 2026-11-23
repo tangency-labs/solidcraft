@@ -93,6 +93,8 @@ macro_rules! layout_preferences {
             keep_work_on_tab_switch: bool = false, PAGE_LAYOUT;
             /// Shared workspace composition; system windows and popups retain their purpose.
             layout: crate::ui_kit::LayoutMode = Default::default(), PAGE_LAYOUT;
+            /// Restore the former Surface Create and Convert sections.
+            legacy_surface_toolbar: bool = false, PAGE_LAYOUT => check_id("prefs.legacy_surface_toolbar");
             /// Preview card density in the document browser; Large preserves the existing layout.
             library_thumbnail_size: crate::library::ThumbnailSize = crate::library::ThumbnailSize::Large, PAGE_LAYOUT;
             /// Preview panel placement and reflow while dragging. Off shows the drop outline.

@@ -369,6 +369,7 @@ pub use mesh_convert::convert_prismatic_mesh;
 pub use meshbody::MAX_TRIANGLES;
 pub use meshbody::mesh_body;
 pub use meshbody::mesh_body_with_normals;
+pub use meshbody::reduce_mesh;
 pub use native::body_from_smlib;
 pub use native::brep_record;
 pub use native::decode_native_body;
