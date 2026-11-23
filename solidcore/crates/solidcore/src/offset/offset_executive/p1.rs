@@ -3283,8 +3283,7 @@ const EDGE_NO_VERTEX: &str =
 const LOOP_NO_VERTEX: &str = "a loop use has an edge use with no vertex, though the kernel \
                               starts every edge use of a loop at a vertex";
 /// Why a face use has no mate.
-pub(super) const FU_NO_MATE: &str =
-    "a face use has no mate, though the kernel makes face uses in mated pairs";
+const FU_NO_MATE: &str = "a face use has no mate, though the kernel makes face uses in mated pairs";
 /// Why an offset face has no surface.
 pub(super) const OFFSET_FACE_NO_SURFACE: &str =
     "an offset face has no surface, though the offset gives every face it builds one";
