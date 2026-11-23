@@ -44,7 +44,8 @@ pub enum FilletSetUp {
     PrimaryEdgeUse,
     /// The mate of a fillet edge's primary edge use.
     PrimaryEdgeUseMate,
-    /// The radial edge use of a side edge's edge use.
+    /// The radial edge use of an edge use at a corner (a side edge's or the filleted
+    /// edge's).
     RadialEdgeUse,
     /// A rail edge's 3D curve, or the UV trim curve the 2D path reads.
     RailCurve,
