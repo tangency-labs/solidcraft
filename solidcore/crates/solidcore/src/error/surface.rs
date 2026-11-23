@@ -577,6 +577,16 @@ pub enum SurfaceFailure {
     /// The lean's slope or neutral height is NaN or infinite, or the radius law they give
     /// overflows at a control point of the net. [`ErrorKind::InvalidInput`].
     LeanNotFinite,
+    /// The point given, moved onto the plane of the generator (along the extrusion, or
+    /// about the axis), meets no point of the generator curve: the inversion's search
+    /// found none, so the point is not on the surface. Class `failed`.
+    PointNotOnGenerator,
+    /// The extrusion is not perpendicular to its generator's plane, which the routine's
+    /// closed form needs. [`ErrorKind::Unsupported`].
+    GeneratorNotPerpendicular,
+    /// The line through the point along the extrusion crosses the generator nowhere, so no
+    /// directrix runs through the point. Class `failed`.
+    DirectrixNotFound,
 }
 
 /// An input of a surface routine that its caller did not give
@@ -818,7 +828,8 @@ impl SurfaceFailure {
             | Self::UnsupportedSurfaceKind
             | Self::UnsupportedSolverOperation
             | Self::NoBSplineForm
-            | Self::NotACylinder => ErrorKind::Unsupported,
+            | Self::NotACylinder
+            | Self::GeneratorNotPerpendicular => ErrorKind::Unsupported,
             Self::PointInBendSingularity
             | Self::ZeroVolumeTangent { .. }
             | Self::ZeroLengthTangent
@@ -1160,6 +1171,13 @@ impl core::fmt::Display for SurfaceFailure {
             }
             Self::LeanNotFinite => {
                 f.write_str("the lean's slope, neutral height or radius is not finite")
+            }
+            Self::PointNotOnGenerator => f.write_str("the point is not on the generator curve"),
+            Self::GeneratorNotPerpendicular => {
+                f.write_str("the extrusion is not perpendicular to its generator")
+            }
+            Self::DirectrixNotFound => {
+                f.write_str("no directrix of the extrusion runs through the point")
             }
         }
     }
@@ -1801,6 +1819,17 @@ mod tests {
                 SM_ERR,
                 ErrorKind::Unsupported,
             ),
+            (
+                SurfaceFailure::PointNotOnGenerator,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                SurfaceFailure::GeneratorNotPerpendicular,
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+            (SurfaceFailure::DirectrixNotFound, SM_ERR, ErrorKind::Failed),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::surface(op, failure);
@@ -2141,8 +2170,6 @@ mod tests {
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
             ("solidcore/src/surface/cone/p3.rs", 3),
-            ("solidcore/src/surface/surf_of_extrusion/p1.rs", 16),
-            ("solidcore/src/surface/surf_of_extrusion/p2.rs", 13),
             ("solidcore/src/surface/surf_of_revolution/p1.rs", 10),
             ("solidcore/src/surface/surf_of_revolution/p2.rs", 6),
             ("solidcore/src/surface/surf_of_revolution/p3.rs", 21),
