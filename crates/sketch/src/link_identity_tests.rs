@@ -363,6 +363,17 @@ fn corner_face_reread_within_rounding_keeps_its_saved_points_and_a_real_move_fol
     for (now, before) in link_positions(&sk, &link).into_iter().zip(&saved) {
         assert!(now.dist(*before + shift) < 1e-12, "{now:?} moved from {before:?}");
     }
+    // A circle on that face still takes a new radius while its points stay as saved.
+    let mut with_hole = corner_face(30.0);
+    with_hole.push(LinkGeom::Circle(Vec2::new(5.0, 35.0), 2.0));
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &with_hole).unwrap();
+    let saved = link_positions(&sk, &link);
+    let mut resized = corner_face(30.0);
+    resized.push(LinkGeom::Circle(Vec2::new(5.0, 35.0), 2.000002));
+    assert!(!sk.update_link(&link, &resized).unwrap());
+    assert_eq!(link_positions(&sk, &link), saved);
+    assert!(sk.curves.iter().any(|c| matches!(c.kind, CurveKind::Circle { r, .. } if (r - 2.000002).abs() < 1e-12)), "the radius follows the face");
     // A face whose loops do not touch has no such exception: it takes what it is read as.
     let mut plain = Sketch::new();
     let rim = plain.add_link(LinkKind::Project, face(), &ring(true, 10.0, 8.0)).unwrap();
