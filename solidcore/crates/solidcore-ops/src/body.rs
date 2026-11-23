@@ -318,6 +318,7 @@ impl Body {
             Ok(Ok((
                 copy,
                 Order {
+                    split_edges: 0,
                     faces,
                     edges,
                     vertices,

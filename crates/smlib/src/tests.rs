@@ -131,7 +131,7 @@ fn in_own_process(test: &str, f: impl FnOnce()) {
 }
 
 /// Entry points that ask no kernel, so have nothing to say here.
-const NO_KERNEL: [&str; 15] = [
+const NO_KERNEL: [&str; 16] = [
     "inertia_tensor",
     "is_valid",
     "failed_tests",
@@ -141,6 +141,7 @@ const NO_KERNEL: [&str; 15] = [
     "from_record_keeping_splines",
     "to_native_report",
     "to_native_ordered",
+    "to_native_ordered_report",
     "blends",
     "word",
     "words",
