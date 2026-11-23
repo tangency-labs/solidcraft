@@ -19,7 +19,9 @@ use crate::{KernelError, Result};
 /// An import kept as records.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImportRecords {
-    /// The bodies, in the file's order.
+    /// The bodies, in the file's order. Reading records refuses more than an import makes
+    /// (`bounded_bodies`).
+    #[serde(deserialize_with = "bounded_bodies")]
     pub bodies: Vec<RecordBody>,
     /// The file's product tree; its nodes' `bodies` index [`ImportRecords::bodies`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -85,6 +87,35 @@ pub struct RecordBody {
 pub struct RecordMesh {
     pub positions: Vec<[f64; 3]>,
     pub triangles: Vec<[u32; 3]>,
+}
+
+/// [`ImportRecords::bodies`] as read, refused at the first body past [`super::MAX_BODIES`], which
+/// [`records_import`] refuses in any case. A body takes a dozen bytes of text and over 500 in
+/// memory, so records of millions of tiny bodies, small once compressed in a design, would
+/// otherwise take tens of gigabytes before any check ran. Only this list is bounded as it is read.
+/// The other lists of records cost what parsing their JSON costs.
+fn bounded_bodies<'de, D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Vec<RecordBody>, D::Error> {
+    struct Bodies;
+    impl<'de> serde::de::Visitor<'de> for Bodies {
+        type Value = Vec<RecordBody>;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "a list of at most {} bodies", super::MAX_BODIES)
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Vec<RecordBody>, A::Error> {
+            let mut bodies = Vec::new();
+            while let Some(body) = seq.next_element::<RecordBody>()? {
+                if bodies.len() == super::MAX_BODIES {
+                    return Err(serde::de::Error::custom(format!("an import of more than {} bodies", super::MAX_BODIES)));
+                }
+                bodies.push(body);
+            }
+            // The list keeps no spare room, so it takes the memory of its bodies and no more (a
+            // design reader bounds the bodies it keeps by their count).
+            bodies.shrink_to_fit();
+            Ok(bodies)
+        }
+    }
+    deserializer.deserialize_seq(Bodies)
 }
 
 /// Most vertices of a mesh kept as a record (as an AP242 tessellated part read from STEP text).
