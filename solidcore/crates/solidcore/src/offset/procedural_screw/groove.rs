@@ -976,8 +976,7 @@ pub(crate) fn operation_reach(
                     };
                     Ok((
                         native,
-                        crate::surface::cone::checked::HeightMap::new(k, cone)?
-                            .exact_coefficients(),
+                        crate::surface::cone::checked::HeightMap::new(cone)?.exact_coefficients(),
                     ))
                 };
                 if axial_chart(old)? != axial_chart(new)? {

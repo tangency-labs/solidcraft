@@ -198,9 +198,9 @@ impl Smooth {
 ///   `(|ΔA| + |A / w| |Δw|) / w` of the exact one: `|A / w|` at most the furthest of the piece's
 ///   control points from the origin, `w` at least its least weight.
 ///
-/// `None` for a traced intersection (it holds no derivatives), a spline whose pieces can't be had
-/// (not a valid B-spline, or a weight not above 0), and a parameter range the curve doesn't
-/// cover.
+/// `None` for a traced intersection, a curve on a screw surface, a spline whose pieces
+/// can't be had (not a valid B-spline, or a weight not above 0), and a parameter range
+/// the curve doesn't cover.
 #[must_use]
 pub fn smooth_pieces(curve: &Curve, [a, b]: [f64; 2]) -> Option<Vec<Smooth>> {
     if !(a < b) {
@@ -228,7 +228,9 @@ pub fn smooth_pieces(curve: &Curve, [a, b]: [f64; 2]) -> Option<Vec<Smooth>> {
             bezier(knots, &ctrl, [a, b])?
         }
         Curve::RationalSpline { knots, homogeneous } => bezier(knots, homogeneous, [a, b])?,
-        Curve::SurfaceIntersection { .. } => return None,
+        Curve::SurfaceIntersection { .. }
+        | Curve::OnSurface { .. }
+        | Curve::OnSurfaceRef { .. } => return None,
     };
     // The pieces run from `a` to `b`, each from where the one before ends.
     let covered = out.first().is_some_and(|s| s.span[0] == a)

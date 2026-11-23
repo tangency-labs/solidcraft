@@ -235,7 +235,7 @@ impl<'a> Cylinder<'a> {
         let p0 = cone.convert_uv_from_nurbs_to_step(k, native(u0, v0))?;
         let p1 = cone.convert_uv_from_nurbs_to_step(k, native(u1, v1))?;
         let angle = Ivl::new(p0.x.min(p1.x).to_radians(), p0.x.max(p1.x).to_radians());
-        let height_map = HeightMap::new(k, cone)?;
+        let height_map = HeightMap::new(cone)?;
         let height = height_map.range(Ivl::new(v0, v1))?;
         let [ha, hb] = height_map.exact_coefficients();
         let natural = cone.rev().base().natural_uv_domain();
@@ -1098,7 +1098,7 @@ mod tests {
                     inside,
                 )
                 .unwrap();
-                let map = HeightMap::new(&k, &cone).unwrap();
+                let map = HeightMap::new(&cone).unwrap();
                 let domain = cone.rev().base().natural_uv_domain();
                 let native = if swapped {
                     domain.u_interval()

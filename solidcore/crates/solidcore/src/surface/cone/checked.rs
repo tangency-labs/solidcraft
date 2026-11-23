@@ -70,7 +70,7 @@ pub(crate) struct HeightMap {
 }
 
 impl HeightMap {
-    pub(crate) fn new(k: &Kernel, cone: &Cone) -> Result<Self> {
+    pub(crate) fn new(cone: &Cone) -> Result<Self> {
         let rev = cone.rev();
         let step = rev.step_uv_domain().v_interval();
         let domain = rev.base().natural_uv_domain();
@@ -80,13 +80,8 @@ impl HeightMap {
             domain.v_interval()
         };
         let inside = cone.inside_out();
-        // This is the existing converter's branch predicate, including its
-        // established unbounded inside-out behavior; no new option is introduced.
-        let linear = rev.is_bounded()?
-            || (k.fixes.cone_unbounded_parameterized_as_nurb
-                && inside
-                && (native.min().to_bits() != (-step.max()).to_bits()
-                    || native.max().to_bits() != (-step.min()).to_bits()));
+        let linear =
+            rev.is_bounded()? || super::p1::unbounded_maps_linearly(inside, &step, &native);
         if !linear {
             return Ok(Self {
                 origin: Ivl::from(0.0),
@@ -211,7 +206,7 @@ pub(crate) fn polar_coefficients(
 /// The bits of every surface value the checked cylinder data is derived from (the
 /// frame, the STEP and NURB domains, the height map's branch, the polar chart's frame,
 /// degree, knots and controls); see [`Cone::checked_memo`].
-const KEY_SCALARS: usize = 36;
+const KEY_SCALARS: usize = 35;
 
 /// A cylinder point that passed its check: the bits of its parameters and candidate, and
 /// the two out-of-bounds settings.
@@ -432,7 +427,6 @@ impl Cone {
                 u64::from(frame.swap_uv),
                 u64::from(frame.inside_out),
                 u64::from(bounded),
-                u64::from(k.fixes.cone_unbounded_parameterized_as_nurb),
             ])
             .chain([step.min().x, step.min().y, step.max().x, step.max().y].map(f64::to_bits))
             .chain(
@@ -470,7 +464,7 @@ impl Cone {
             }
         }
         let cap = self.cylinder_runtime_allowance(k).ok()??;
-        let height = HeightMap::new(k, self).ok()?;
+        let height = HeightMap::new(self).ok()?;
         let canonical = polar.base().canonical().ok()?;
         let spans = canonical.knots.len().checked_sub(1)?;
         let coefficients = (0..spans)
@@ -608,7 +602,7 @@ impl Cone {
                 coefficients: polar_coefficients(polar, raw)?,
                 parameter: (Ivl::new(left, right) - Ivl::from(a)) / width,
             };
-            let point = self.cylinder_span_enclosure(k, span, v, memo.as_deref())?;
+            let point = self.cylinder_span_enclosure(span, v, memo.as_deref())?;
             result = Some(match result {
                 None => point,
                 Some([x, y, z]) => {
@@ -626,7 +620,7 @@ impl Cone {
     /// This is enforced on every returned point, never assumed of scalar libm.
     /// The exact normalized polar curve is the reference; the metadata's distance
     /// from an ideal rational arc is a separate construction term.
-    pub(crate) fn cylinder_runtime_allowance(&self, k: &Kernel) -> Result<Option<f64>> {
+    pub(crate) fn cylinder_runtime_allowance(&self, _k: &Kernel) -> Result<Option<f64>> {
         let frame = self.canonical();
         let Some(polar) = self.full_circle_polar() else {
             return Ok(None);
@@ -657,7 +651,7 @@ impl Cone {
         } else {
             domain.v_interval()
         };
-        let height = HeightMap::new(k, self)?.range(Ivl::new(native.min(), native.max()))?;
+        let height = HeightMap::new(self)?.range(Ivl::new(native.min(), native.max()))?;
         let size = Ivl::from(1.0)
             + norm(boxed(frame.origin.origin()))
             + Ivl::from(frame.radius)
@@ -721,12 +715,7 @@ impl Cone {
         })
     }
 
-    fn cylinder_point_enclosure(
-        &self,
-        k: &Kernel,
-        uv: Point2,
-        memo: Option<&CheckedData>,
-    ) -> Result<Box3> {
+    fn cylinder_point_enclosure(&self, uv: Point2, memo: Option<&CheckedData>) -> Result<Box3> {
         if !uv.x.is_finite() || !uv.y.is_finite() {
             return Err(bad("cylinder parameters must be finite"));
         }
@@ -737,12 +726,11 @@ impl Cone {
             (uv.x, uv.y)
         };
         let span = self.cylinder_polar_span(u, Side::Left, memo)?;
-        self.cylinder_span_enclosure(k, span, Ivl::from(v), memo)
+        self.cylinder_span_enclosure(span, Ivl::from(v), memo)
     }
 
     fn cylinder_span_enclosure(
         &self,
-        k: &Kernel,
         span: PolarSpan,
         v: Ivl,
         memo: Option<&CheckedData>,
@@ -771,7 +759,7 @@ impl Cone {
         }
         let map = match memo {
             Some(memo) => memo.height,
-            None => HeightMap::new(k, self)?,
+            None => HeightMap::new(self)?,
         };
         let mut height = map.range(v)?;
         if !self.rev().is_out_of_bounds_enabled() {
@@ -831,7 +819,7 @@ impl Cone {
             if passed(&self.checked.slots()) {
                 return Ok(());
             }
-            let reference = self.cylinder_point_enclosure(k, uv, Some(&memo))?;
+            let reference = self.cylinder_point_enclosure(uv, Some(&memo))?;
             verify_point(reference, candidate, memo.cap)?;
             let mut slots = self.checked.slots();
             // a table checked against other data is replaced, never mixed
@@ -854,7 +842,7 @@ impl Cone {
         let Some(cap) = self.cylinder_runtime_allowance(k)? else {
             return Ok(());
         };
-        let reference = self.cylinder_point_enclosure(k, uv, None)?;
+        let reference = self.cylinder_point_enclosure(uv, None)?;
         verify_point(reference, candidate, cap)
     }
 

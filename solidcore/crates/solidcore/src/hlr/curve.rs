@@ -194,7 +194,9 @@ impl C3 {
                     range: t,
                 }
             }
-            Curve::OnSurface { .. } | Curve::OnSurfaceRef { .. } => return Err(HlrError::Unsupported("curve on a procedural sweep")),
+            Curve::OnSurface { .. } | Curve::OnSurfaceRef { .. } => {
+                return Err(HlrError::Unsupported("curve on a procedural sweep"))
+            }
             Curve::Polyline { points } => C3::Polyline(polyline_part(points, t)?),
             Curve::Spline { knots, points } => part(
                 knots,

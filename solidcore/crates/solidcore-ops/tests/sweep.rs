@@ -1642,7 +1642,7 @@ fn a_runout_groove_cut_from_a_cylinder_keeps_its_axial_wall_exact() {
     let cut = screw_sweep(&groove, [0.0, 0.0, -1.5], Z, 1.5, turns, Some(&law), 1.5e-4).unwrap();
     let rod = solidcore_ops::make_cylinder([0.0; 3], 5.0, 1.5 * turns - 3.0).unwrap();
     let threaded = boolean(rod, cut, BooleanOp::Subtract).unwrap().unwrap();
-    let report = threaded.check(solidcore_ops::CheckLevel::All).unwrap();
+    let report = threaded.check(CheckLevel::All).unwrap();
     assert!(report.is_valid(), "{report}");
     let (record, _) = threaded.to_record().unwrap();
     // The rod's side, ends and the groove's walls: each wall still its definition.

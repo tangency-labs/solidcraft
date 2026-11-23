@@ -1696,8 +1696,10 @@ impl Body {
         let size = self.size();
         let tol = (size * 1e-6).max(1e-9);
         let chord = (size * 1e-3).max(1e-4);
+        let rec = self.record();
+        let curve_query = std::cell::OnceCell::new();
         let mut crossed = Vec::new();
-        for (fi, f) in self.record.faces.iter().enumerate() {
+        for (fi, f) in rec.faces.iter().enumerate() {
             let Some(plane) = self.planar_face(fi) else { continue };
             let (o, u, v) = (plane.origin, plane.x, plane.y);
             let flat = |p: Vec3| {
@@ -1712,8 +1714,10 @@ impl Body {
                 for l in &f.loops {
                     let Loop::Edges { edges } = l else { continue };
                     for use_ in edges {
-                        let e = self.record.edges.get(use_.edge as usize).ok_or_else(|| KernelError::Invalid("edge reference".into()))?;
-                        let pts = edge_points(e, if fine { edge_chord(e, chord, &self.record.screw_owners) } else { chord })?;
+                        let i = use_.edge as usize;
+                        let e = rec.edges.get(i).ok_or_else(|| KernelError::Invalid("edge reference".into()))?;
+                        let chord = if fine { edge_chord(e, chord, &rec.screw_owners) } else { chord };
+                        let pts = edge_points(e, chord, i, rec, &curve_query)?;
                         segs.extend(pts.windows(2).filter_map(|q| Some((flat(*q.first()?), flat(*q.get(1)?)))));
                         if segs.len() > MAX_SEGMENTS {
                             return Ok(None);
@@ -1803,9 +1807,10 @@ impl Body {
                 .collect());
         }
         let rec = self.record();
+        let curve_query = std::cell::OnceCell::new();
         let mut out = Vec::with_capacity(rec.edges.len());
         for (index, edge) in rec.edges.iter().enumerate() {
-            let points = edge_points(edge, tol)?;
+            let points = edge_points(edge, tol, index, rec, &curve_query)?;
             let (mid, length) = polyline_mid(&points);
             out.push(EdgeInfo { index, points, mid, length });
         }
@@ -2285,8 +2290,21 @@ fn edge_chord(e: &brep::Edge, chord: f64, owners: &[ProceduralSweepRecord]) -> f
 }
 
 /// Points of an edge's curve over its interval, within `chord` of it: lines by their ends, the
-/// rest at the evaluator's points (capped).
-fn edge_points(e: &brep::Edge, chord: f64) -> Result<Vec<Vec3>> {
+/// rest at the evaluator's points (capped). Screw curves use a query shared across this body's edges.
+fn edge_points<'a>(
+    e: &brep::Edge,
+    chord: f64,
+    index: usize,
+    record: &'a Brep,
+    curve_query: &std::cell::OnceCell<solidcore_ops::query::Query<'a>>,
+) -> Result<Vec<Vec3>> {
+    if matches!(e.parameters(), Curve::OnSurface { .. } | Curve::OnSurfaceRef { .. }) {
+        return curve_query
+            .get_or_init(|| solidcore_ops::query::Query::new(record))
+            .edge_points(index, chord)
+            .map(|points| points.into_iter().map(|(_, point)| point).collect())
+            .ok_or_else(|| KernelError::Invalid(format!("cannot evaluate screw edge {index}")));
+    }
     const MAX_POINTS: usize = 4096;
     let curve = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).map_err(|err| KernelError::Invalid(err.to_string()))?;
     let [t0, t1] = e.interval;

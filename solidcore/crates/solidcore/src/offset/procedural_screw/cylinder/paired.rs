@@ -267,7 +267,7 @@ pub(super) fn certify(
         .collect::<Result<Vec<_>>>()?;
     let pcurve_error = certificate::mapped_error(second, &stored, ([0.0, 0.0], [1.0, 1.0], false))?;
     let speed = angular_speed(cylinder)?;
-    let height = HeightMap::new(k, cylinder.cone)?.exact_coefficients();
+    let height = HeightMap::new(cylinder.cone)?.exact_coefficients();
     let frame = cylinder.cone.canonical();
     let height_speed = (Ivl::from(height[1].mag())
         * magnitude([

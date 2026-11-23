@@ -550,7 +550,7 @@ impl CurveMemo {
         let entry = slot
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let tree = entry.as_ref().filter(|e| e.key == *key)?.cache.tree()?;
+        let tree = entry.iter().find(|e| e.key == *key)?.cache.tree()?;
         tree.node(tree.top_node()?).ok().map(|n| n.bbox)
     }
 

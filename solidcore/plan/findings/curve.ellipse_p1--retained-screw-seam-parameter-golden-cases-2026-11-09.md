@@ -261,3 +261,28 @@
 | `surface.torus` | `gen0484` | `.values.out[1]` 0.0 → 360.0 | equivalent: the seam end reported as 360° instead of 0° |
 | `topology.assert_valid` | `l2_file_box_with_large_fillet_tests` | `.values.vertex_test1_max_gap_3d[8]` 7.093829940178991e-14 → 1.4352397147370076e-14; `.values.vertex_test1_max_gap_3d[9]` 8.10921975650084e-14 → 3.9120201381495503e-14 | equivalent: largest vertex gaps move within 1e-13 (rounding) |
 | `topology.face_p2` | `extra00861` | `.values.state` {"blocks":[[30.000000000000007,"inf","NaN"]],"n":195} → {"blocks":[[30.0,"inf","NaN"]],"n":195} | correction: gaps 6.5e-14 → 0 |
+
+## Rebase verification
+
+The rebase changes 60 rows from the initially replayed files. Of the five ellipse rows,
+three reproduce the original PR and two add its same endpoint change to the current
+baseline. In `gen0326` the fourth recorded angle goes from 0° to 360°. In `gen0517`
+the eighth goes from −180° to 180°. Both name the same points.
+
+Twelve extrusion rows and three revolution rows reproduce the original PR. The full-turn
+intervals stay full turns. They therefore build their surfaces instead of passing a
+collapsed interval to the NURBS constructor.
+
+The cone runner and the surface runner each update 20 rows. One in each restores a
+main value after an automatic merge retained the old expectation. Three reproduce the
+original PR. The other 16 in each exercise the same cone cases listed above with main's
+updated cone construction. The changes are either an equivalent seam endpoint or a
+small angle recovered from the NURBS span. The three skew-cone point rows differ
+only by the transverse component from evaluating sin 2π at the current radius.
+For example, the radius-3 case moves from 0 to −7.347880794884119e−16 in y.
+The four near-zero `r4` angle changes differ from the same-host main values by less
+than 6e−15 degrees. The height, operation status and case list stay the same.
+
+A same-host main run reproduced the other ellipse exactness flag, four intersection
+digest differences, one revolution residual and the remaining cone differences.
+Their tracked main expectations were kept.

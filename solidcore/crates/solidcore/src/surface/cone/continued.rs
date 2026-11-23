@@ -174,8 +174,8 @@ impl Cone {
     /// bounded over the whole interval, times the axis's length.
     fn certify_height_map_kept(&self, k: &Kernel, source: &Self, native: Extent1d) -> Result<()> {
         const OP_KEPT: &str = "surface::cone::Cone::extended_cylinder_keeping_parameters";
-        let [o0, s0] = HeightMap::new(k, source)?.exact_coefficients();
-        let [o1, s1] = HeightMap::new(k, self)?.exact_coefficients();
+        let [o0, s0] = HeightMap::new(source)?.exact_coefficients();
+        let [o1, s1] = HeightMap::new(self)?.exact_coefficients();
         let span = Ivl::new(native.min(), native.max());
         let shift = ((o1 - o0) + (s1 - s0) * span).mag();
         let axis = self.canonical().origin.z_axis();

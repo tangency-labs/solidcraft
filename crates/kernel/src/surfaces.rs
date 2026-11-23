@@ -1712,7 +1712,10 @@ mod tests {
         let body = screw_sweep(&profile, [0.0; 3], [0.0, 0.0, 1.0], 1.0, 2.0, None, 1e-4).unwrap();
         let (r, _) = body.to_record().unwrap();
         assert!(!r.screw_owners.is_empty());
-        assert!(r.edges.iter().any(|e| matches!(e.curve, b::Curve::OnSurfaceRef { .. })));
+        let body = Body::from_record(r.clone()).unwrap();
+        let edges = body.edges(1e-3).unwrap();
+        assert_eq!(edges.len(), r.edges.len());
+        assert!(r.edges.iter().zip(edges).any(|(edge, info)| matches!(edge.parameters(), b::Curve::OnSurfaceRef { .. }) && info.points.len() > 2));
         let all: Vec<(usize, bool)> = (0..r.faces.len()).map(|f| (f, false)).collect();
         let mut parts = Parts::of(&r, &all).unwrap();
         parts.add(&r, &all).unwrap();

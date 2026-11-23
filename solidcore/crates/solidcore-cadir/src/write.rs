@@ -29,13 +29,13 @@
 //! to where its end does, the way its form runs (a line named the other way is written turned, so
 //! that it runs from the start vertex to the end, as every coedge's sense takes its edge's curve;
 //! none for a line whose vertices give no interval: the reader then finds it so, as it does a STEP
-//! edge's). A face on a ball patch, a blend, a procedural sweep or a placed revolution, a torus whose tube
-//! reaches its axis, and a face whose form's side cannot be measured against its named surface,
-//! are written as their NURBS form, with their pcurves; an edge on a traced intersection or a procedural sweep, or a
-//! polyline held on a form, or a circle or ellipse whose form runs clockwise about its frame
-//! (CADIR's arcs run counter-clockwise) or whose arc its vertices do not give, is written as its
-//! form. The net of a procedural blend or sweep has a certified deviation ε from the definition.
-//! CADIR writes the net and records ε as the face's tolerance. What has no exact CADIR form
+//! edge's). A face on a ball patch, blend, procedural sweep or placed revolution, a torus whose
+//! tube reaches its axis, and a face whose form's side cannot be measured against its named
+//! surface are written as their NURBS form, with their pcurves. An edge on a traced intersection
+//! or procedural sweep, a polyline held on a form, or a circle or ellipse whose form runs clockwise
+//! about its frame or whose arc its vertices do not give, is written as its form. CADIR's arcs run
+//! counter-clockwise. When the record supplies the NURBS form of a procedural blend or sweep,
+//! CADIR writes its certified deviation ε as the face's tolerance. What has no exact CADIR form
 //! and no NURBS form refuses the record with the reason ([`WriteError`]); nothing else is
 //! approximated. An arc of a circle or ellipse starts within its first turn, as CADIR has it: its
 //! parameter is moved by whole turns; on a conic so large that the turn's rounding moves its ends
