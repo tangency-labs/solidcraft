@@ -10294,7 +10294,13 @@ pub(crate) struct DrawnNote {
     pub text_rect: Rect,
     /// The note's text.
     pub text: String,
+    /// The text as laid out for the box: wrapped at the callout's width, so the box and the
+    /// text drawn in it are measured from the same layout.
+    pub galley: std::sync::Arc<egui::Galley>,
 }
+
+/// The widest a note's text runs (screen points) before it wraps onto the next line.
+pub(crate) const NOTE_WRAP_WIDTH: f32 = 240.0;
 
 /// Where the visible notes are drawn this frame (screen space), for painting and hit tests.
 pub(crate) fn note_callouts(app: &SolveApp, painter: &egui::Painter, proj: &Proj) -> Vec<DrawnNote> {
@@ -10309,9 +10315,9 @@ pub(crate) fn note_callouts(app: &SolveApp, painter: &egui::Painter, proj: &Proj
         .filter(|n| !n.hidden)
         .filter_map(|n| {
             let anchor = proj.to_screen(n.anchor)?;
-            let galley = painter.layout(n.text.clone(), FontId::proportional(t.font_small), t.text, 240.0);
+            let galley = painter.layout(n.text.clone(), FontId::proportional(t.font_small), t.text, NOTE_WRAP_WIDTH);
             let text_rect = Rect::from_min_size(anchor + vec2(14.0, -14.0) - vec2(0.0, galley.size().y + 8.0), galley.size() + vec2(12.0, 8.0));
-            Some(DrawnNote { anchor, text_rect, text: n.text.clone() })
+            Some(DrawnNote { anchor, text_rect, text: n.text.clone(), galley })
         })
         .collect()
 }
@@ -10328,7 +10334,9 @@ fn draw_notes(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         painter.circle_filled(note.anchor, 3.0, t.accent);
         painter.rect_filled(note.text_rect, 4.0, t.panel);
         painter.rect_stroke(note.text_rect, 4.0, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
-        painter.text(note.text_rect.min + vec2(6.0, 4.0), Align2::LEFT_TOP, &note.text, FontId::proportional(t.font_small), t.text);
+        // The wrapped layout the box was sized from, not a fresh single-line one: a long note
+        // wraps inside its box instead of running out of it.
+        painter.galley(note.text_rect.min + vec2(6.0, 4.0), note.galley.clone(), t.text);
     }
 }
 
