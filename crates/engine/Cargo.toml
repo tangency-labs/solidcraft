@@ -88,6 +88,8 @@ solidcraft-develop = { workspace = true }
 flate2 = { workspace = true }
 # Writes a KiCad `.stpZ` (a zipped STEP) for the board-import tests.
 zip = { workspace = true }
+# A temporary folder per test, removed when the test ends, a failure included.
+tempfile = "3.27"
 
 [[example]]
 name = "render_resource_workflow"
