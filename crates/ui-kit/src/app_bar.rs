@@ -3661,6 +3661,11 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
                 group_label(ui, strip, g, lr, &mut group_menu, &mut actions);
             }
         }
+        // A tab never reaches back over its group's label, even with too little room for it.
+        let tab_clip = ui.clip_rect();
+        if label_w > 0.0 {
+            ui.set_clip_rect(tab_clip.intersect(Rect::from_min_max(pos2(left, tab_clip.top()), tab_clip.max)));
+        }
         let kind = kind_of(i);
         let plain = kind == SelectedLayout::Plain;
         let height = match kind {
@@ -3792,6 +3797,7 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         } else if (if held.is_some() { resp } else { resp.backing_on_hover_text(tip) }).clicked() {
             pick = Some(i);
         }
+        ui.set_clip_rect(tab_clip);
     }
     for (span, label) in spans.iter().zip(strip.groups) {
         if let Some((from, to)) = span {

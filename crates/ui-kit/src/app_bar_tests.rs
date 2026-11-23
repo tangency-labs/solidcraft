@@ -1714,6 +1714,19 @@ fn a_grouped_design_shows_its_sub_tabs_after_the_label() {
         );
         assert_eq!(rig.press(rig.at("t:view:1"), egui::PointerButton::Primary), vec![TabAction::SelectView(1)]);
     }
+    // With too little room for the design's pill, nothing of it covers the label: a right click
+    // there still opens the group's menu.
+    for clear in [false, true] {
+        let mut rig = TabsRig::with(Some(true));
+        rig.clear = clear;
+        rig.room = Some(150.0);
+        rig.grouped.set(true);
+        rig.frame(Vec::new());
+        rig.press(rig.at("t:group:0"), egui::PointerButton::Secondary);
+        rig.frame(Vec::new());
+        rig.frame(Vec::new());
+        assert!(solidcraft_ui_registry::rect_of("t:menu:gblue").is_some(), "clear={clear}: the label's menu opens");
+    }
 }
 
 /// With a view switcher the views list in a menu: a row picks a view, the footer's rows are the app's.
