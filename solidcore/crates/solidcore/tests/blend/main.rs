@@ -13,6 +13,8 @@
 // Each file keeps the `#[path]` support modules it had as a binary of its own.
 #![allow(clippy::duplicate_mod)]
 
+#[path = "../blend_bead_section.rs"]
+mod blend_bead_section;
 #[path = "../blend_refusal.rs"]
 mod blend_refusal;
 #[path = "../brep_file_round_trip.rs"]
