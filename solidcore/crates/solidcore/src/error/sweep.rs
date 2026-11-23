@@ -22,6 +22,7 @@
 //! | [`SweepFailure::FaceCopyByFullTurn`]  | `SM_ERR_NULL_POINTER`    |
 //! | [`SweepFailure::UntaggedFace`]        | `SM_ERR_NULL_POINTER`    |
 //! | [`SweepFailure::UntaggedEdge`]        | `SM_ERR_NULL_POINTER`    |
+//! | [`SweepFailure::MergeOtherBodyConsumed`] | `SM_ERR_NULL_POINTER` |
 //! | [`SweepFailure::SweptEdgeCurveDropped`] | `SM_ERR_NULL_POINTER`  |
 //! | [`SweepFailure::Defect`]              | `SM_ERR` (or the site's, through `with_status`) |
 //! | every other cause                     | `SM_ERR` (or the site's, through `with_status`) |
@@ -37,6 +38,10 @@
 
 use super::{EntityRef, ErrorKind, Failure, Reason, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::topology::{EdgeId, FaceId};
+
+/// What a [`SweepFailure::MergeOtherBodyConsumed`] says.
+pub(crate) const MERGE_OTHER_CONSUMED: &str =
+    "the merge's other body was consumed by an earlier union or merge";
 
 /// The sweep record both entities a stitch would merge already carry
 /// ([`SweepFailure::MergeOfTwoSweptEntities`]).
@@ -158,6 +163,10 @@ pub enum SweepFailure {
         /// The edge.
         edge: EdgeId,
     },
+    /// A store call on a sweep merge whose other body an earlier union or merge consumed
+    /// (deleted, or merged into the primary): the caller's use of a spent merge, as an
+    /// unknown or released merge is. [`ErrorKind::InvalidInput`].
+    MergeOtherBodyConsumed,
     /// A same-dimension image recorded in the sweep's maps (which a caller can fill through
     /// `TopologySweep::set_same` or the public maps) is of another kind than the entity it
     /// is the image of. [`ErrorKind::InvalidInput`].
@@ -301,6 +310,7 @@ impl SweepFailure {
             | Self::FaceCopyByFullTurn
             | Self::UntaggedFace { .. }
             | Self::UntaggedEdge { .. }
+            | Self::MergeOtherBodyConsumed
             | Self::SweptEdgeCurveDropped => SM_ERR_NULL_POINTER,
             Self::RailPastStationCap { .. }
             | Self::LoftSectionsTooLarge { .. }
@@ -343,6 +353,7 @@ impl SweepFailure {
             | Self::FaceCopyByFullTurn
             | Self::UntaggedFace { .. }
             | Self::UntaggedEdge { .. }
+            | Self::MergeOtherBodyConsumed
             | Self::FaceAlreadySwept
             | Self::SweepImageOfOtherKind { .. }
             | Self::SweepTooShort { .. }
@@ -461,6 +472,7 @@ impl core::fmt::Display for SweepFailure {
                 "edge {} has no tag to copy: tag the sweep's targets before a tagging sweep",
                 edge.index()
             ),
+            Self::MergeOtherBodyConsumed => f.write_str(MERGE_OTHER_CONSUMED),
             Self::FaceAlreadySwept => f.write_str("the face was already swept"),
             Self::SweepImageOfOtherKind {
                 image,
@@ -674,6 +686,11 @@ mod tests {
             ),
             (
                 SweepFailure::UntaggedEdge { edge },
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                SweepFailure::MergeOtherBodyConsumed,
                 SM_ERR_NULL_POINTER,
                 ErrorKind::InvalidInput,
             ),
