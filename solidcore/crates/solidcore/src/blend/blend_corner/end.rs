@@ -709,10 +709,45 @@ fn end_face_runs_on_past_side_edge(
 /// edge onto X (the solver's `ProcessRollOver`, after the corners' edges) and ends on the
 /// edge between X and the end face ([`side_edgeuse_across_rolled_edge`]), not past the side
 /// edge. The rail continued on F's surface past P is what the corner sees before the roll-over.
+/// `false` where the walk fails: the End is then refused as on main ([`proven_or_main`]).
+///
+/// # Errors
+/// Those `SolidError::is_unported_or_cancelled` passes on (cancellation, unported callees,
+/// unavailable face trims, a spent certificate budget) only.
+fn rail_rolls_on_past_side_edge(
+    k: &Kernel,
+    target: &mut Brep,
+    corner: &FilletCorner,
+    side_eu: EdgeuseId,
+    rail_face: FaceId,
+) -> Result<bool> {
+    proven_or_main(rail_rolls_on_past_side_edge_walk(
+        k, target, corner, side_eu, rail_face,
+    ))
+}
+
+/// Not the fork's (#15767): an unproven roll-over test as main's path. Each of
+/// [`rail_rolls_on_past_side_edge`] and [`end_section_rolls_over`] gates a branch main did
+/// not have, taken in place of main's refusal of an End whose rail runs past its side edge;
+/// a failure inside the test proves no roll-over, so it is `false` and the End is refused as
+/// on main, not ended in a bare error main never reached. Errors that
+/// `SolidError::is_unported_or_cancelled` passes on still propagate.
+///
+/// # Errors
+/// `r`'s error where `SolidError::is_unported_or_cancelled` passes it on.
+fn proven_or_main(r: Result<bool>) -> Result<bool> {
+    match r {
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(_) => Ok(false),
+        ok => ok,
+    }
+}
+
+/// The walk of [`rail_rolls_on_past_side_edge`].
 ///
 /// # Errors
 /// `SM_ERR_NULL_POINTER` without side edge or far vertex; those of the continuation.
-fn rail_rolls_on_past_side_edge(
+fn rail_rolls_on_past_side_edge_walk(
     k: &Kernel,
     target: &mut Brep,
     corner: &FilletCorner,
@@ -753,8 +788,15 @@ fn rail_rolls_on_past_side_edge(
 /// is three-sided, which the corner's pieces do not represent: the End is then refused as
 /// one whose rail runs past its side edge.
 ///
+/// `true` only where the roll-over is proven: G's rail end is solved, the solver's two
+/// surfaces are G's and F's, both drops succeed and the foot lies off F. Anything that
+/// proves nothing (an unsolved rail end, a solver whose faces are not G and F, a drop that
+/// fails, or a failure of the test itself, [`proven_or_main`]) is `false`, and the End is
+/// refused as on main, naming the radius at which the rail reaches the side edge's end.
+///
 /// # Errors
-/// `SM_ERR_NULL_POINTER` without solver surface; those of the drops and the classification.
+/// Those `SolidError::is_unported_or_cancelled` passes on (cancellation, unported callees,
+/// unavailable face trims, a spent certificate budget) only.
 #[allow(clippy::too_many_arguments)]
 fn end_section_rolls_over(
     k: &Kernel,
@@ -766,8 +808,28 @@ fn end_section_rolls_over(
     rail_face: FaceId,
     g_end: VertexId,
 ) -> Result<bool> {
+    proven_or_main(end_section_rolled_over_at(
+        k, target, pseudo, solvers, fil_eu, other_face, rail_face, g_end,
+    ))
+}
+
+/// The test of [`end_section_rolls_over`], `false` where it proves nothing.
+///
+/// # Errors
+/// `SM_ERR_NULL_POINTER` without solver surface; those of the drops and the classification.
+#[allow(clippy::too_many_arguments)]
+fn end_section_rolled_over_at(
+    k: &Kernel,
+    target: &mut Brep,
+    pseudo: &FilletBrep,
+    solvers: &dyn SweptSolvers,
+    fil_eu: EdgeuseId,
+    other_face: FaceId,
+    rail_face: FaceId,
+    g_end: VertexId,
+) -> Result<bool> {
     if !pseudo.fillet_vertex(g_end)?.is_processed() {
-        return Ok(true);
+        return Ok(false);
     }
     let fs = solvers.solver_of_edgeuse(fil_eu)?;
     let mut g_index = 2;
@@ -781,7 +843,7 @@ fn end_section_rolls_over(
         }
     }
     if g_index > 1 || f_index > 1 {
-        return Ok(true);
+        return Ok(false);
     }
     let offset_g = &fs.surface(g_index)?.ok_or_else(nul)?.surface;
     let g = offset_g.base_surface();
@@ -798,7 +860,7 @@ fn end_section_rolls_over(
         &DropPointOptions::default(),
     )?;
     if !on_g.success {
-        return Ok(true);
+        return Ok(false);
     }
     let normal = g.evaluate_normal(k, on_g.result_uv, Side::Left, Side::Left)?;
     let centre = p + normal * (sign * offset_g.offset_distance().abs());
@@ -810,7 +872,7 @@ fn end_section_rolls_over(
         &DropPointOptions::default(),
     )?;
     if !on_f.success {
-        return Ok(true);
+        return Ok(false);
     }
     let foot = f.evaluate_point(k, on_f.result_uv)?;
     let zone = zone_tol3d(k, target.face(rail_face)?.tolerance);
@@ -2949,5 +3011,102 @@ mod tests {
         };
         assert!(depth(b * (1.0 - 1e-6)) < tol);
         assert!(depth(b * (1.0 + 1e-6)) > tol);
+    }
+
+    /// Solvers that every lookup fails on with `err`: the roll-over tests below must decide
+    /// without them, or fall back to main's refusal when a lookup fails.
+    struct FailingSolvers(fn() -> SolidError);
+
+    impl SweptSolvers for FailingSolvers {
+        fn solver_of_edgeuse(
+            &self,
+            _: EdgeuseId,
+        ) -> Result<&crate::blend::fillet_solver::p1::FilletSolver> {
+            Err((self.0)())
+        }
+        fn offset_radii_can_change(&self, _: EdgeuseId) -> Result<bool> {
+            Err((self.0)())
+        }
+        fn solver(
+            &self,
+            _: crate::blend::fillet_geom::p1::FilletSolverId,
+        ) -> Result<&crate::blend::fillet_solver::p1::FilletSolver> {
+            Err((self.0)())
+        }
+        fn constant_offsets(
+            &self,
+            _: crate::blend::fillet_geom::p1::FilletSolverId,
+        ) -> Result<Option<[f64; 2]>> {
+            Err((self.0)())
+        }
+    }
+
+    /// `end_section_rolls_over` for the other rail's end `g_end` of `pseudo`, on an empty
+    /// target with ids the test never reaches.
+    fn rolls_over(pseudo: &FilletBrep, g_end: VertexId, solvers: &FailingSolvers) -> Result<bool> {
+        let k = Kernel::default();
+        let mut target = Brep::new();
+        end_section_rolls_over(
+            &k,
+            &mut target,
+            pseudo,
+            solvers,
+            EdgeuseId::from_index(0),
+            FaceId::from_index(0),
+            FaceId::from_index(1),
+            g_end,
+        )
+    }
+
+    /// A pseudo-B-rep with one fillet vertex of status `status`.
+    fn pseudo_with_vertex(status: FilStatus) -> (FilletBrep, VertexId) {
+        let k = Kernel::default();
+        let mut pseudo = FilletBrep::new();
+        let v = pseudo
+            .brep_mut()
+            .add_vertex_record(crate::topology::Vertex::default())
+            .unwrap();
+        let mut fv = crate::blend::fillet_geom::p1::FilletVertex::new(&k, None);
+        fv.set_status(status);
+        pseudo.insert_fillet_vertex(v, fv);
+        (pseudo, v)
+    }
+
+    fn lookup_failed() -> SolidError {
+        nul()
+    }
+
+    fn cancelled() -> SolidError {
+        SolidError::Cancelled { operation: OP }
+    }
+
+    /// #20757's review: a rail end on G the solver has not solved yet proves no roll-over
+    /// past the end face. `end_section_rolls_over` is then `false`, so `calc_end_edges`
+    /// takes main's branch, `refuse_end_past_side_edge` (the refusal naming the radius at
+    /// which the rail reaches its side edge's end), not `EndEdges::Built`. It decides before
+    /// any solver lookup (every lookup here fails).
+    #[test]
+    fn an_unsolved_other_rail_end_proves_no_roll_over_and_keeps_main_s_refusal() {
+        let (pseudo, g_end) = pseudo_with_vertex(FilStatus::Unprocessed);
+        assert!(!rolls_over(&pseudo, g_end, &FailingSolvers(lookup_failed)).unwrap());
+    }
+
+    /// #21099: a failure inside the roll-over test (here the solver lookup of a solved rail
+    /// end, or a vertex the pseudo-B-rep does not know) proves nothing; the End is refused as
+    /// on main, not ended in an error main never reached. Cancellation still propagates.
+    #[test]
+    fn a_failed_roll_over_test_keeps_main_s_refusal_but_passes_cancellation_on() {
+        let (pseudo, g_end) = pseudo_with_vertex(FilStatus::Processed);
+        assert!(!rolls_over(&pseudo, g_end, &FailingSolvers(lookup_failed)).unwrap());
+        assert!(!rolls_over(
+            &pseudo,
+            VertexId::from_index(7),
+            &FailingSolvers(lookup_failed)
+        )
+        .unwrap());
+        assert!(matches!(
+            rolls_over(&pseudo, g_end, &FailingSolvers(cancelled)),
+            Err(SolidError::Cancelled { .. })
+        ));
     }
 }

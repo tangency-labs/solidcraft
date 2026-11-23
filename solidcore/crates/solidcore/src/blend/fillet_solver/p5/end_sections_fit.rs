@@ -269,11 +269,72 @@ fn boundary_requires_cut_at(
 /// narrowing wall at radius 3.5, #20757's review). The roll-over is taken only where every
 /// factor is proved positive: a crossing that does not drop onto either surface, cannot be
 /// evaluated there, or a solver without the rail's face's offset (`ball` `None`) proves
-/// nothing, and the end section is judged as on main.
+/// nothing, and the end section is judged as on main. So does a failure of the test itself
+/// (a topology query, the tangency test or an evaluation): main judged the end section
+/// without it, so it is `false`, not a bare error main never reached.
+///
+/// # Errors
+/// Those `SolidError::is_unported_or_cancelled` passes on (cancellation, unported callees,
+/// unavailable face trims, a spent certificate budget) only.
+fn leaves_across_tangent_edge_at(
+    k: &Kernel,
+    target: &mut Brep,
+    intervals: &[CurveInterval<FilletClassObject>],
+    curve: &Curve,
+    face: FaceId,
+    ball: Option<(&Surface, f64)>,
+    at: VertexId,
+    tangency_tol: f64,
+) -> Result<bool> {
+    match tangent_leave_proven(k, target, intervals, curve, face, ball, at, tangency_tol) {
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(_) => Ok(false),
+        ok => ok,
+    }
+}
+
+/// The ball over the rail's face `face` for [`leaves_across_tangent_edge_at`]: the base
+/// surface of `solver`'s offset of that face and its offset distance. `None` where the
+/// solver has no rail on `face`, no offset surface for it, or a lookup fails: the roll-over
+/// is then unproven and the end section is judged as on main.
+///
+/// # Errors
+/// Those `SolidError::is_unported_or_cancelled` passes on (cancellation, unported callees,
+/// unavailable face trims, a spent certificate budget) only.
+fn ball_over_face(
+    target: &Brep,
+    solver: &FilletSolver,
+    face: FaceId,
+) -> Result<Option<(Surface, f64)>> {
+    let lookup = || -> Result<Option<(Surface, f64)>> {
+        for j in 0..2 {
+            let Some(seu) = solver.edgeuse(j)? else {
+                continue;
+            };
+            if eu::face(target, seu)? != Some(face) {
+                continue;
+            }
+            if let Some(slot) = solver.surface(j)? {
+                return Ok(Some((
+                    slot.surface.base_surface().clone(),
+                    slot.surface.offset_distance(),
+                )));
+            }
+        }
+        Ok(None)
+    };
+    match lookup() {
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(_) => Ok(None),
+        ok => ok,
+    }
+}
+
+/// The test of [`leaves_across_tangent_edge_at`], `false` where it proves nothing.
 ///
 /// # Errors
 /// Those of the topology queries, of the tangency test and of the surface evaluations.
-fn leaves_across_tangent_edge_at(
+fn tangent_leave_proven(
     k: &Kernel,
     target: &mut Brep,
     intervals: &[CurveInterval<FilletClassObject>],
@@ -608,22 +669,7 @@ impl FilletSolver {
                             };
                             // the ball over the rail's face: its surface and the solver's
                             // offset of it (#15767)
-                            let mut ball_slot = None;
-                            for j in 0..2 {
-                                let Some(seu) = solver.solver().edgeuse(j)? else {
-                                    continue;
-                                };
-                                if eu::face(target, seu)? != Some(face) {
-                                    continue;
-                                }
-                                if let Some(slot) = solver.solver().surface(j)? {
-                                    ball_slot = Some((
-                                        slot.surface.base_surface().clone(),
-                                        slot.surface.offset_distance(),
-                                    ));
-                                    break;
-                                }
-                            }
+                            let ball_slot = ball_over_face(target, solver.solver(), face)?;
                             for &(_, far) in &run {
                                 // #15767: a rail that leaves its face across a smooth edge
                                 // ending at P rolls on over that edge onto the face beyond
