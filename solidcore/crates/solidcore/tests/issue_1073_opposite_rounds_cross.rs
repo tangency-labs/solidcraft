@@ -113,13 +113,18 @@ fn issue_1073_the_default_kernels_overlapping_bands_are_refused() {
                 "{name}: fit {}",
                 fit.size
             ),
-            // a radius law names no one size that fits: refused with the executive's
-            // status (the session's error info notes the overlap, below)
-            Err(error) if name == "variable_radius_fillet" => assert_eq!(
-                solidcore::error::upstream_status(&error),
-                Some(1001),
-                "{name}: {error:?}"
-            ),
+            // the executive's fit size is for constant radii, not radius laws (this law
+            // is constant, but the wrapper still runs a law): refused with the
+            // executive's status as a stage failure, not main's defect (the session's error
+            // info notes the overlap, below)
+            Err(error) if name == "variable_radius_fillet" => {
+                assert_eq!(
+                    solidcore::error::upstream_status(&error),
+                    Some(1001),
+                    "{name}: {error:?}"
+                );
+                assert!(!error.is_defect(), "{name}: {error:?}");
+            }
             other => panic!("{name}: expected BandsOverlap, got {other:?}"),
         }
         assert!(is_manifold_solid(&b).unwrap(), "{name}");

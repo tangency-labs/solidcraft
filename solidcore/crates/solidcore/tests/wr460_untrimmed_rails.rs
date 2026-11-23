@@ -80,5 +80,13 @@ fn wr460_rounded_box_top_loop_is_kept() {
 #[test]
 fn wr460_chamfered_box_top_loop_is_kept() {
     let (_, v) = two_blends((40.0, 30.0, 20.0), 0, 5.0, 2.0);
-    assert!(v.is_finite() && v > 0.0, "{v}");
+    // Pappus on a mitred path: the chamfered base is 40 x 30 less four 5 x 5 / 2 corners,
+    // 1150 x 20. The R2 section, 4 - pi, has its centroid c inside both walls, so it runs
+    // round the top loop (perimeter 100 + 20 sqrt 2, eight 45 degree turns) inset by c,
+    // which shortens the path by 2 c tan 22.5 degrees at each turn.
+    let section = 4.0 - PI;
+    let c = 2.0 * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI));
+    let path = 100.0 + 20.0 * 2.0_f64.sqrt() - 2.0 * c * 8.0 * (PI / 8.0).tan();
+    let want = 1150.0 * 20.0 - section * path;
+    assert!((v - want).abs() < 1e-5 * want, "{v} vs {want}");
 }
