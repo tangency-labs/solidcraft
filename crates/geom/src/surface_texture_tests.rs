@@ -603,3 +603,49 @@ fn plain_annotation_policy_rejects_text_that_draws_nothing() {
         assert!(crate::plain_text::is_plain_line(text), "{text:?}");
     }
 }
+
+#[test]
+fn formatted_limit_refuses_blank_or_padded_text() {
+    for text in [" ", "\u{202f}", " 1.6 ", "\u{3164}", "1.6 ", "1\u{202f}\u{202f}2", "\u{202f}1"] {
+        let result = iso().formatted_parameter_texts(|_| Ok((text.to_string(), 1.6)));
+        assert!(result.is_err(), "{text:?}");
+        assert!(iso().preview_geometry(3.5, 30.0, |_| Ok((text.to_string(), 1.6))).is_err(), "{text:?}");
+    }
+    let grouped = iso().formatted_parameter_texts(|_| Ok(("1\u{202f}600".to_string(), 1.6))).unwrap();
+    assert_eq!(grouped, ["Ra 1\u{202f}600"]);
+}
+
+#[test]
+fn formatted_limit_range_must_not_collapse_to_one_value() {
+    let one_decimal = |n: f64| Ok((format!("{n:.1}"), (n * 10.0).round() / 10.0));
+    let mut asme_pair = asme(AmplitudeUnit::Micrometre);
+    if let Specification::AsmeY14_36_2018 { lines, .. } = &mut asme_pair.specification {
+        lines[0].maximum = 1.04;
+        lines[0].minimum = Some(1.01);
+    }
+    assert!(asme_pair.formatted_parameter_texts(one_decimal).is_err());
+    assert!(asme_pair.preview_geometry(3.5, 30.0, one_decimal).is_err());
+    // Equal stored values still format as equal; an open range and distinct rounded values pass.
+    if let Specification::AsmeY14_36_2018 { lines, .. } = &mut asme_pair.specification {
+        lines[0].minimum = Some(1.04);
+    }
+    assert_eq!(asme_pair.formatted_parameter_texts(one_decimal).unwrap(), ["Ra 1.0-1.0"]);
+    if let Specification::AsmeY14_36_2018 { lines, .. } = &mut asme_pair.specification {
+        lines[0].minimum = Some(0.8);
+        lines[0].maximum = 1.6;
+    }
+    assert_eq!(asme_pair.formatted_parameter_texts(one_decimal).unwrap(), ["Ra 0.8-1.6"]);
+
+    let pair = |order: [ToleranceType; 2]| {
+        let mut indication = iso();
+        let line = |tolerance, limit_um| IsoParameterLine { parameter: IsoParameter::Ra, tolerance, limit_um, acceptance: AcceptanceRule::Maximum };
+        let limit = |t| if t == ToleranceType::Upper { 1.04 } else { 1.01 };
+        *iso_lines(&mut indication) = order.iter().map(|&t| line(t, limit(t))).collect();
+        indication
+    };
+    for order in [[ToleranceType::Upper, ToleranceType::Lower], [ToleranceType::Lower, ToleranceType::Upper]] {
+        let indication = pair(order);
+        indication.validate().unwrap();
+        assert!(indication.formatted_parameter_texts(one_decimal).is_err());
+    }
+}

@@ -255,16 +255,29 @@ impl Indication {
 
     fn parameter_texts_with(&self, format_number: &impl Fn(f64) -> Result<(String, f64)>, for_preview: bool) -> Result<Vec<String>> {
         self.validate()?;
-        let number = |n| {
+        let shown = |n| {
             let (text, rounded) = format_number(n)?;
             if for_preview {
                 require(rounded.is_finite() && rounded > 0.0, "formatted positive limit must not round to zero")?;
+                // Every U+202F-separated piece must be non-empty plain text without surrounding
+                // whitespace, so the limit can neither be blank nor padded.
                 require(
-                    !text.is_empty() && text.len() <= 128 && text.split('\u{202f}').all(crate::plain_text::is_plain_line),
+                    !text.is_empty()
+                        && text.len() <= 128
+                        && text.split('\u{202f}').all(|piece| !piece.is_empty() && piece.trim() == piece && crate::plain_text::is_plain_line(piece)),
                     "formatted limit must be bounded single-line text",
                 )?;
             }
-            Ok(text)
+            Ok::<(String, f64), Invalid>((text, rounded))
+        };
+        let number = |n| shown(n).map(|(text, _)| text);
+        // A range valid in the record must not be drawn as one value: when the stored limits
+        // differ, the rounded lower limit has to stay below the rounded upper limit.
+        let distinct = |lower: f64, upper: f64| -> Result<()> {
+            if for_preview && lower != upper {
+                require(shown(lower)?.1 < shown(upper)?.1, "formatted lower limit must stay below the formatted upper limit")?;
+            }
+            Ok(())
         };
         match &self.specification {
             Specification::Iso21920_1_2021 { lines } => lines
@@ -288,6 +301,10 @@ impl Indication {
                         AcceptanceRule::SixteenPercent => " T16%",
                         AcceptanceRule::Median => " Tmed",
                     };
+                    if let Some(other) = lines.iter().find(|o| o.parameter == line.parameter && o.tolerance != line.tolerance) {
+                        let (lower, upper) = if line.tolerance == ToleranceType::Lower { (line.limit_um, other.limit_um) } else { (other.limit_um, line.limit_um) };
+                        distinct(lower, upper)?;
+                    }
                     Ok(format!("{tolerance}{} {}{rule}", line.parameter.name(), number(line.limit_um)?))
                 })
                 .collect(),
@@ -296,7 +313,10 @@ impl Indication {
                 .map(|line| {
                     let maximum = number(line.maximum)?;
                     match line.minimum {
-                        Some(minimum) => Ok(format!("{} {}-{maximum}", line.parameter.name(), number(minimum)?)),
+                        Some(minimum) => {
+                            distinct(minimum, line.maximum)?;
+                            Ok(format!("{} {}-{maximum}", line.parameter.name(), number(minimum)?))
+                        }
                         None => Ok(format!("{} {maximum}", line.parameter.name())),
                     }
                 })

@@ -54,7 +54,10 @@ rounded nominal dimensions are not interpolated or replaced by one multiplier.
 The caller formats every amplitude using the drawing's number policy, returning both text
 and its rounded numeric value. Map the drawing formatter's errors into `Invalid` and return
 its `Shown.text` and `Shown.value`; do not convert the explicitly stored amplitude unit.
-A positive value rounded to zero is refused: increase permitted precision or report that
+Each U+202F-separated piece of a formatted limit must be non-empty plain text with no
+surrounding whitespace. A lower limit whose rounded value is not below the rounded upper
+limit is refused (ASME minimum and maximum, or an ISO lower and upper pair of one parameter)
+unless the stored values are equal. A positive value rounded to zero is refused: increase permitted precision or report that
 it cannot be represented under the selected policy. Formatted numeric fragments are capped
 at 128 UTF-8 bytes as a resource limit, not a standards limit. The record and diagnostic
 `text()` retain the original value. Scientific notation is not asserted to be standards
@@ -62,7 +65,11 @@ compliant; its use on a drawing requires an independently established presentati
 The existing drawing formatter is on a separate development line and its integration into
 sheet placement remains future work.
 
-The shared `plain_text::is_plain_line` checks characters; each annotation retains its own
+The shared `plain_text::is_plain_line` checks characters against an allow-list of Unicode
+general categories: letters, numbers, punctuation, symbols, the ASCII space, and combining
+marks only after a base character. Controls, format characters, unassigned, noncharacter and
+private-use code points, other spaces and characters that draw nothing (for example U+3164,
+U+2800, U+FFFC and variation selectors) are refused. Each annotation retains its own
 length and whitespace policy. The weld branch must adopt this helper separately.
 
 `formatted_parameter_texts(format_number)` returns the same validated fragments before
