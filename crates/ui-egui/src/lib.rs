@@ -2704,6 +2704,9 @@ impl SolveApp {
             sketch_palette::toggle_construction(self);
             return;
         }
+        if id == "doc.open" {
+            self.file_load.home_at_start = self.home.open;
+        }
         dim_view::cancel();
         self.tool = None;
         self.home.open = false;
@@ -3716,6 +3719,8 @@ impl SolveApp {
         self.pick_open(|app, path| {
             if let Some(path) = path {
                 app.open_chosen_file(&path);
+            } else {
+                app.file_load.home_at_start = false;
             }
         });
     }

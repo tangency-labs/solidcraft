@@ -114,6 +114,9 @@ pub struct Request {
     pub(crate) auto_verify: bool,
     /// Open the file with an importer plugin (`file.import`) even when SolidCraft reads it too.
     pub plugin_import: bool,
+    /// The person started this Open from Home. A plugin importer's refusal then leaves Home
+    /// showing, as the dialog says nothing was opened (the command's start closed it).
+    pub(crate) from_home: bool,
     /// An export written to be printed: once written it opens in the system's PDF viewer
     /// ([`crate::drawing_workspace::print::written`]).
     pub print: bool,
@@ -139,6 +142,7 @@ impl Request {
             tries: 0,
             auto_verify: false,
             plugin_import: false,
+            from_home: false,
             print: false,
         }
     }
@@ -364,6 +368,8 @@ impl Running {
 
 #[derive(Default)]
 pub struct FileLoad {
+    /// Home was showing when Open started; read by the next request that begins.
+    pub(crate) home_at_start: bool,
     /// Interactive importer refusals, each kept until the person acknowledges it.
     refusals: VecDeque<solidcraft_engine::plugin::PluginFailure>,
     queued: VecDeque<Request>,
@@ -596,6 +602,11 @@ pub(crate) fn preferred_options(app: &SolveApp, path: &str) -> serde_json::Map<S
 
 /// Queue a file operation; on the web (no threads) it runs now.
 pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
+    // Starting `doc.open` closed Home before the file was chosen: `home_at_start` remembers it.
+    let started_from_home = std::mem::take(&mut app.file_load.home_at_start);
+    if request.kind == Kind::Open && request.reply.is_none() {
+        request.from_home = app.home.open || started_from_home;
+    }
     if request.kind == Kind::Open
         && !request.plugin_import
         && app.preferences.verify_opened_designs
@@ -824,6 +835,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         tries: 0,
         auto_verify: false,
         plugin_import: id == "file.import",
+        from_home: false,
         print: false,
     };
     let _ = begin_request(app, request);
@@ -1945,6 +1957,9 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
             }
             Err(failure) => {
                 request.answer_failure(&failure);
+                if request.from_home && failure.refusal.is_some() {
+                    app.home.open = true;
+                }
                 // Only an interactive Open asks for acknowledgement. Programs get the error;
                 // traps, invalid input and host failures keep the status-line path.
                 if request.kind == Kind::Open

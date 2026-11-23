@@ -1647,7 +1647,8 @@ fn importer_refusals_use_only_the_status_line_when_dialogs_are_disabled() {
         assert_eq!(h.app.session.doc.to_json(), before);
         let status = h.app.status.as_ref().unwrap();
         assert_eq!((status.0.as_str(), status.2), ("Sample Importer does not support refused.smp: the model has no solids", true));
-        assert!(h.widget("Sample Importer").is_none());
+        // The plugin's own ribbon button carries its name, so look for the refusal text instead.
+        assert!(h.widget("the model has no solids").is_none(), "no dialog shows the refusal");
         assert!(crate::scenario::handle_at("dialog:OK").is_none());
 
         let (reply, _) = h.call_queued("engine.execute", json!({"command":"doc.open","params":{"path":path}}));
