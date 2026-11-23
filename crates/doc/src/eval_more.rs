@@ -1814,7 +1814,13 @@ pub(super) fn surface_prism_cut(
             let s1 = s0 + t * sk.flat.z.dot(n);
             sk.unfolded && sk.flat.z.cross(n).len() <= 1e-9 && reaching.iter().all(|(lo, hi, ..)| *lo <= s0.min(s1) + tol && *hi >= s0.max(s1) - tol)
         };
-        let mut flat_pieces: Option<(solidcraft_develop::Development, Vec<(crate::sheet_surface::Piece, Region2)>)> = None;
+        // With each piece the boxes of its loops (outline, then holes), grown by `CORNER_ON_OUTLINE`.
+        #[allow(clippy::type_complexity)]
+        let mut flat_pieces: Option<(
+            solidcraft_develop::Development,
+            Vec<(crate::sheet_surface::Piece, Region2)>,
+            Vec<Vec<solidcraft_geom::Aabb2>>,
+        )> = None;
         for (lo, hi, plane, region, tool_box) in reaching {
             if flat_square && !region.holes.is_empty() {
                 // A footprint round an island (a letter's counter) leaves a loose piece: the
@@ -1831,26 +1837,40 @@ pub(super) fn surface_prism_cut(
                 if flat_pieces.is_none() {
                     let Ok(dev) = sk.develop() else { return Ok(false) };
                     let Ok(pieces) = crate::sheet_surface::pieces(&dev, &mut crate::sheet::FlatWork::new()) else { return Ok(false) };
-                    flat_pieces = Some((dev, pieces));
+                    let boxes = pieces
+                        .iter()
+                        .map(|(_, r)| {
+                            std::iter::once(&r.outer)
+                                .chain(&r.holes)
+                                .map(|l| crate::sheet_surface_cuts::loop_box(l).inflated(CORNER_ON_OUTLINE))
+                                .collect()
+                        })
+                        .collect();
+                    flat_pieces = Some((dev, pieces, boxes));
                 }
-                let Some((dev, pieces)) = flat_pieces.as_ref() else { return Ok(false) };
+                let Some((dev, pieces, loop_boxes)) = flat_pieces.as_ref() else { return Ok(false) };
                 let inv = sk.flat.inverse();
                 let g = crate::sheet_surface_convert::rigid_region(region, |q: Vec2| {
                     let w = inv.point(plane.to_world(q));
                     Vec2::new(w.x, w.y)
                 });
+                let gb = crate::sheet_surface_cuts::loop_box(&g.outer);
                 // A corner of the footprint on a piece's outline (a bend line, a joint, the flat's
-                // edge) would meet that outline at a point: the body's cut reads it.
-                let on_outline = g
-                    .outer
-                    .segs
-                    .iter()
-                    .map(Seg2::start)
-                    .any(|q| pieces.iter().any(|(_, r)| crate::sheet_surface_cuts::outline_gap(r, q) <= CORNER_ON_OUTLINE));
+                // edge) would meet that outline at a point: the body's cut reads it. Only loops
+                // whose box holds the corner are measured.
+                let on_outline = pieces.iter().zip(loop_boxes).any(|((_, r), boxes)| {
+                    std::iter::once(&r.outer).chain(&r.holes).zip(boxes).any(|(l, b)| {
+                        g.outer
+                            .segs
+                            .iter()
+                            .map(Seg2::start)
+                            .filter(|q| b.contains(*q))
+                            .any(|q| l.segs.iter().any(|e| e.point_at(e.closest_param(q).clamp(0.0, 1.0)).dist(q) <= CORNER_ON_OUTLINE))
+                    })
+                });
                 if on_outline {
                     return Ok(false);
                 }
-                let gb = crate::sheet_surface_cuts::loop_box(&g.outer);
                 let apart = |panel: usize, r: &Region2| {
                     let Some(Some(at)) = dev.placements.get(panel) else { return false };
                     let b = crate::sheet_surface_cuts::loop_box(&at.region(r).outer);

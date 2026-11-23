@@ -1685,7 +1685,7 @@ pub(crate) fn holder(pieces: &[(Piece, Region2)], r: &Region2) -> Option<usize> 
 }
 
 /// How far point `p` lies from the outline of region `g`, its holes' too.
-pub(crate) fn outline_gap(g: &Region2, p: Vec2) -> f64 {
+fn outline_gap(g: &Region2, p: Vec2) -> f64 {
     std::iter::once(&g.outer)
         .chain(&g.holes)
         .flat_map(|l| &l.segs)
