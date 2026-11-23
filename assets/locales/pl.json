@@ -3659,8 +3659,6 @@
   "prefs.security.verify_opened": "Sprawdzaj podpisy przy otwieraniu projektów",
   "prefs.security.verify_opened_help": "Odczytuje całą zawartość, aby sprawdzić podpis. Wyłączone: podpisany projekt otwiera się bez tego dodatkowego odczytu, a polecenie Plik > Sprawdź podpis sprawdza go na żądanie.",
   "prefs.security_note": "Podpisywanie i sprawdzanie zapisywanych projektów. Domyślnie wyłączone.",
-  "prefs.select_hidden_edges": "Zaznaczaj krawędzie niewidoczne w stylu Cieniowany z krawędziami niewidocznymi",
-  "prefs.select_hidden_edges_help": "Zaznacza krawędzie przez ściany, gdy aktywny jest styl Cieniowany z krawędziami niewidocznymi, także w zaokrągleniu. Wyłączone zachowuje zaznaczanie z wersji v0.30.1. Ukrytych brył nadal nie można zaznaczyć.",
   "prefs.select_one_item": "Zaznacz jeden element",
   "prefs.select_other_hidden": "Zaznaczaj ukrytą geometrię poleceniem Wybierz inny",
   "prefs.select_other_hidden_help": "Włączone: uwzględnia ukryte bryły, szkice i zasłonięte krawędzie w pobliżu wskaźnika. Wyłączone: używa pierwotnej listy widocznej geometrii pod wskaźnikiem.",

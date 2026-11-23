@@ -3651,8 +3651,6 @@
   "prefs.security.verify_opened": "Comprovar les signatures en obrir dissenys",
   "prefs.security.verify_opened_help": "Llegeix cada càrrega útil per comprovar la signatura. Desactivat: un disseny signat s'obre sense aquesta lectura addicional, i Fitxer > Verificar signatura la comprova quan ho demaneu.",
   "prefs.security_note": "Signar i comprovar els dissenys que deseu. Desactivat per defecte.",
-  "prefs.select_hidden_edges": "Seleccionar les arestes ocultes a «Sombreat amb arestes ocultes»",
-  "prefs.select_hidden_edges_help": "Selecciona arestes a través de les cares quan «Sombreat amb arestes ocultes» està actiu, també per a l'arrodoniment. Desactivat: es manté el comportament de selecció de la v0.30.1. Els cossos ocults continuen sense poder-se seleccionar.",
   "prefs.select_one_item": "Seleccioneu un element",
   "prefs.select_other_hidden": "Seleccionar geometria oculta amb Seleccionar-ne un altre",
   "prefs.select_other_hidden_help": "Activat: inclou cossos, bocets i arestes ocults o ocluïts a prop del punter. Desactivat: usa la llista original de geometria visible sota el punter.",

@@ -3452,8 +3452,6 @@
   "prefs.security.verify_opened": "Tasarımları açarken imzaları denetle",
   "prefs.security.verify_opened_help": "İmzayı denetlemek için her veri yükünü okur. Kapalı: İmzalı bir tasarım bu ek okuma olmadan açılır ve Dosya > İmzayı Doğrula istendiğinde denetler.",
   "prefs.security_note": "Kaydettiğiniz tasarımları imzalama ve denetleme. Varsayılan olarak kapalıdır.",
-  "prefs.select_hidden_edges": "Gizli kenarlı gölgeli görünümde gizli kenarları seç",
-  "prefs.select_hidden_edges_help": "Gizli kenarlı gölgeli görünüm etkinken Yuvarlatma dahil yüzeylerin arkasındaki kenarları seçer. Kapalı: v0.30.1 seçim davranışını korur. Gizli gövdeler seçilemez kalır.",
   "prefs.select_one_item": "Bir öğe seçin",
   "prefs.select_other_hidden": "Gizli geometriyi Diğerini seç ile seç",
   "prefs.select_other_hidden_help": "Açıkken: imlecin yakınındaki gizli gövdeleri, eskizleri ve örtülü kenarları da dahil eder. Kapalıyken: imlecin altındaki görünür geometrinin özgün listesini kullanır.",

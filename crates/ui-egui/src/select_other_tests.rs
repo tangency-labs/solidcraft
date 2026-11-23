@@ -1012,7 +1012,7 @@ fn hidden_edge_mode_is_scoped_and_invalidates_hover_without_pointer_motion() {
     assert!(pick_all(&h.app, &proj, pos).iter().any(target));
     for style in [0, 1, 2, 3] {
         h.app.ui.visual_style = style;
-        assert_eq!(pick_cached(&mut h.app, &proj, pos).iter().any(target), style >= 2, "style {style}");
+        assert!(pick_cached(&mut h.app, &proj, pos).iter().any(target), "style {style}");
     }
     h.app.session.visibility.hidden_bodies.push("Target".into());
     assert!(!pick_cached(&mut h.app, &proj, pos).iter().any(target));

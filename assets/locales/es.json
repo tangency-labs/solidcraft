@@ -3651,8 +3651,6 @@
   "prefs.security.verify_opened": "Comprobar las firmas al abrir diseños",
   "prefs.security.verify_opened_help": "Lee cada carga útil para comprobar la firma. Desactivado: un diseño firmado se abre sin esa lectura adicional, y Archivo > Verificar firma la comprueba cuando lo pidas.",
   "prefs.security_note": "Firmar y comprobar los diseños que guardas. Desactivado de forma predeterminada.",
-  "prefs.select_hidden_edges": "Seleccionar aristas ocultas en Sombreado con aristas ocultas",
-  "prefs.select_hidden_edges_help": "Selecciona aristas a través de las caras cuando está activo Sombreado con aristas ocultas, también para Redondeo. Desactivado, se mantiene el comportamiento de selección de la v0.30.1. Los cuerpos ocultos siguen sin poder seleccionarse.",
   "prefs.select_one_item": "Selecciona un elemento",
   "prefs.select_other_hidden": "Seleccionar geometría oculta con Seleccionar otro",
   "prefs.select_other_hidden_help": "Activado: incluir cuerpos, bocetos y aristas ocultas u ocluidas cerca del puntero. Desactivado: us",

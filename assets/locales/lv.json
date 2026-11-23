@@ -3140,8 +3140,6 @@
   "prefs.security.verify_opened": "Pārbaudīt parakstus, atverot modeļus",
   "prefs.security.verify_opened_help": "Nolasa visu saturu, lai pārbaudītu parakstu. Izslēgts: parakstīts modelis atveras bez šīs papildu nolasīšanas, un Fails > Pārbaudīt parakstu to pārbauda pēc pieprasījuma.",
   "prefs.security_note": "Saglabājamo modeļu parakstīšana un pārbaude. Pēc noklusējuma izslēgta.",
-  "prefs.select_hidden_edges": "Atlasīt slēptās šķautnes režīmā Ēnots ar slēptajām šķautnēm",
-  "prefs.select_hidden_edges_help": "Atlasīt šķautnes cauri skaldnēm, kad aktīvs režīms Ēnots ar slēptajām šķautnēm, arī rīkam Noapaļot. Izslēgts saglabā v0.30.1 atlases uzvedību. Slēptie ķermeņi paliek neatlasāmi.",
   "prefs.select_one_item": "Atlasīt vienu elementu",
   "prefs.select_other_hidden": "Atlasīt slēpto ģeometriju ar Atlasīt citu",
   "prefs.select_other_hidden_help": "Ieslēgts: iekļaut slēptos ķermeņus, skices un aizsegtās šķautnes pie kursora. Izslēgts: izmantot sākotnējo zem kursora redzamās ģeometrijas sarakstu.",
