@@ -1407,7 +1407,7 @@ pub(super) fn flip_param(s: &Session, p: &Value, plane: &PlaneRef, cmd: &str) ->
     Ok(Some(about_y))
 }
 
-/// Used only by face Extrude/Revolve/PressPull, preserving pre-certificate linked profiles.
+/// Used only by face Extrude/Revolve/Sweep/PressPull, preserving pre-certificate linked profiles.
 pub(super) fn create_face_profile(s: &mut Session, p: &Value, body: &str, index: usize) -> Result<Value> {
     let value = p.get("plane").ok_or_else(|| bad("face profile", "missing picked face plane"))?;
     let plane = face::capture_internal(s, value, "face profile")?;
