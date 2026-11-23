@@ -2050,7 +2050,7 @@ impl OffsetExecutive {
         let result = self.required_offset_brep()?;
         let mut no_ssi: Relation<FaceId, FaceId> = Relation::default();
         for faceuse in self.faceuse_to_faces.all_firsts() {
-            let face = present(original.faceuse(faceuse)?.face, FU_NO_FACE)?;
+            let face = input_faceuse_face(original, faceuse)?;
             for offset_face in self.faceuse_to_faces.seconds(faceuse) {
                 for edge_id in face_edges(original, face)? {
                     let edge_faces = self.edge_to_faces.seconds(edge_id);
@@ -2204,8 +2204,8 @@ impl OffsetExecutive {
             _ => {}
         }
         let original_faceuse = faceuse;
+        let face_id = input_faceuse_face(original, faceuse)?;
         let faceuse = original.faceuse(faceuse)?;
-        let face_id = present(faceuse.face, FU_NO_FACE)?;
         let orientation = faceuse.orientation;
         // Not upstream (WR-342, tangency-labs/solidcore#974): a face that does not fit the
         // offset surface's domain is clipped to it by a 2D boolean of planar faces made
@@ -2853,7 +2853,7 @@ impl OffsetExecutive {
     ) -> Result<()> {
         let original_use = original.faceuse(original_faceuse)?;
         let original_orientation = original_use.orientation;
-        let original_face_id = present(original_use.face, FU_NO_FACE)?;
+        let original_face_id = input_faceuse_face(original, original_faceuse)?;
         let original_face = original.face(original_face_id)?;
         let brep = self.required_offset_brep()?;
         let offset_face = brep.face(offset_face)?;
@@ -3206,6 +3206,16 @@ fn failed(cause: OffsetFailure) -> SolidError {
     Failure::new(OP, cause).into_error()
 }
 
+/// The face of `faceuse`, a face use of the operation's input: the caller's body as
+/// supplied (a caller can build a face use with no face), so a missing face is
+/// [`OffsetFailure::FaceuseHasNoFace`], not a defect.
+fn input_faceuse_face(original: &Brep, faceuse: FaceuseId) -> Result<FaceId> {
+    original
+        .faceuse(faceuse)?
+        .face
+        .ok_or_else(|| failed(OffsetFailure::FaceuseHasNoFace { faceuse }))
+}
+
 /// `value`, or the defect `why` with `SM_ERR_NULL_POINTER` ([`defect`]): a link or entity
 /// of a B-rep, or of the executive's own data, that is not there.
 #[track_caller]
@@ -3271,9 +3281,6 @@ const EDGE_NO_VERTEX: &str =
 /// Why a vertex of a loop use is missing.
 const LOOP_NO_VERTEX: &str = "a loop use has an edge use with no vertex, though the kernel \
                               starts every edge use of a loop at a vertex";
-/// Why a face use has no face.
-const FU_NO_FACE: &str =
-    "a face use has no face, though the kernel links every face use to its face";
 /// Why a face use has no mate.
 const FU_NO_MATE: &str = "a face use has no mate, though the kernel makes face uses in mated pairs";
 /// Why an offset face has no surface.
@@ -4994,9 +5001,9 @@ mod tests {
         assert_eq!(r.unwrap_err().operation(), OP);
     }
 
-    /// The face-use offset: no face use is the caller's input; a face use of the input with
-    /// no face, met when its edge uses are matched, a defect. Both keep
-    /// `SM_ERR_NULL_POINTER`.
+    /// The face-use offset: no face use is the caller's input; so is a face use of the
+    /// input with no face, met when its edge uses are matched (a caller can build one), at
+    /// the face use. Both keep `SM_ERR_NULL_POINTER`.
     #[test]
     fn the_face_use_offsets_missing_argument_and_links_keep_their_status() {
         let null = Some(SM_ERR_NULL_POINTER);
@@ -5029,8 +5036,13 @@ mod tests {
                 &loopuse::notify_ref,
             )
         });
-        assert_eq!(outcome(&r), (ErrorKind::StageFailed, null, true), "{r:?}");
-        assert!(r.unwrap_err().to_string().contains(FU_NO_FACE));
+        assert_eq!(outcome(&r), (ErrorKind::InvalidInput, null, false), "{r:?}");
+        let e = r.unwrap_err();
+        assert_eq!(
+            e.offset_failure(),
+            Some(&OffsetFailure::FaceuseHasNoFace { faceuse })
+        );
+        assert_eq!(e.entity(), Some(EntityRef::Faceuse(faceuse)));
         // a face of the input with no surface, met when the normals are compared: the
         // caller's input, at the face
         let (face, faceuse) = add_face(&mut original, plane(0.0));

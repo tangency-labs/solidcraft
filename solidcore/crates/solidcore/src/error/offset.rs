@@ -43,7 +43,7 @@
 //! | [`OffsetFailure::EdgeHasNoCurve`], [`OffsetFailure::FaceHasNoSurface`], [`OffsetFailure::FaceHasNoOuterFaceuse`], [`OffsetFailure::VertexNotGiven`], [`OffsetFailure::EdgeuseNotGiven`], [`OffsetFailure::CurveKindUnsupported`], [`OffsetFailure::EdgeuseHasNoUvTrim`], [`OffsetFailure::UnnamedFaceHasNoSurface`] | `SM_ERR_NULL_POINTER`, or the site's through `with_status` |
 //! | the other causes of `offset_geometry_creation` ([`OffsetFailure::VertexCurveNotArc`] to [`OffsetFailure::VertexArcsNotOneSphere`]) | `SM_ERR` |
 //! | [`OffsetFailure::OffsetBaseKindUnsupported`], [`OffsetFailure::GapCornerBlendNotMade`] | `SM_ERR` (`offset_executive::p1`) |
-//! | [`OffsetFailure::EdgeOffsetsUnpaired`], [`OffsetFailure::GapEndWithoutEdge`], [`OffsetFailure::FaceuseNotGiven`], [`OffsetFailure::SelfIntersectionWithoutUvCurve`] | `SM_ERR_NULL_POINTER` (`offset_executive::p1`) |
+//! | [`OffsetFailure::EdgeOffsetsUnpaired`], [`OffsetFailure::GapEndWithoutEdge`], [`OffsetFailure::FaceuseNotGiven`], [`OffsetFailure::SelfIntersectionWithoutUvCurve`], [`OffsetFailure::FaceuseHasNoFace`] | `SM_ERR_NULL_POINTER` (`offset_executive::p1`) |
 //!
 //! A stage of an offset routine that fails with no reason the kernel names is an
 //! [`OffsetFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping the
@@ -69,7 +69,7 @@ use super::{
     SM_ERR_OFFSET_WALLS_TOUCH,
 };
 use crate::offset::offset_faces::OffsetFacesRefusal;
-use crate::topology::{EdgeId, FaceId};
+use crate::topology::{EdgeId, FaceId, FaceuseId};
 
 /// Why an offset, shell, thicken or local operation is refused.
 ///
@@ -571,6 +571,12 @@ pub enum OffsetFailure {
         /// The face, of the operation's input.
         face: FaceId,
     },
+    /// A face use of the operation's input names no face. A caller can build such a body
+    /// (`Brep::add_faceuse_record`), so it is the caller's input, not the kernel's fault.
+    FaceuseHasNoFace {
+        /// The face use, of the operation's input.
+        faceuse: FaceuseId,
+    },
 }
 
 /// What a local operation's or a solid offset's built body fails ([`OffsetFailure::Unsound`]).
@@ -719,6 +725,7 @@ impl OffsetFailure {
             | Self::CurveKindUnsupported { edge, .. }
             | Self::EdgeuseHasNoUvTrim { edge } => edge.map(EntityRef::Edge),
             Self::Unsound { what } => what.entity(),
+            Self::FaceuseHasNoFace { faceuse } => Some(EntityRef::Faceuse(faceuse)),
             Self::BlendRailWithoutSupport { edge }
             | Self::EdgeOffsetsUnpaired { edge }
             | Self::GapEndWithoutEdge { edge }
@@ -767,7 +774,7 @@ impl OffsetFailure {
     /// that returned one ([`OffsetFailure::LoopGapPassLimit`],
     /// [`OffsetFailure::LoopGapEndsAmbiguous`], [`OffsetFailure::SplitAtEdgeEnd`], those of
     /// `offset_executive::p1` ([`OffsetFailure::OffsetBaseKindUnsupported`] to
-    /// [`OffsetFailure::SelfIntersectionWithoutUvCurve`]), and those of
+    /// [`OffsetFailure::FaceuseHasNoFace`]), and those of
     /// [`OffsetFailure::is_named_at_a_status_site`]): it answers with
     /// that status as the `Upstream` it replaced did. The other refusals replaced none.
     #[must_use]
@@ -789,6 +796,7 @@ impl OffsetFailure {
                 | Self::GapCornerBlendNotMade { .. }
                 | Self::FaceuseNotGiven
                 | Self::SelfIntersectionWithoutUvCurve { .. }
+                | Self::FaceuseHasNoFace { .. }
         ) || self.is_named_at_a_status_site()
     }
 
@@ -899,7 +907,8 @@ impl OffsetFailure {
             | Self::GapEndWithoutEdge { .. }
             | Self::GapCornerBlendNotMade { .. }
             | Self::FaceuseNotGiven
-            | Self::SelfIntersectionWithoutUvCurve { .. } => false,
+            | Self::SelfIntersectionWithoutUvCurve { .. }
+            | Self::FaceuseHasNoFace { .. } => false,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 true
             }
@@ -982,7 +991,8 @@ impl OffsetFailure {
             | Self::GapEndWithoutEdge { .. }
             | Self::GapCornerBlendNotMade { .. }
             | Self::FaceuseNotGiven
-            | Self::SelfIntersectionWithoutUvCurve { .. } => false,
+            | Self::SelfIntersectionWithoutUvCurve { .. }
+            | Self::FaceuseHasNoFace { .. } => false,
         }
     }
 
@@ -1045,7 +1055,8 @@ impl OffsetFailure {
             | Self::EdgeOffsetsUnpaired { .. }
             | Self::GapEndWithoutEdge { .. }
             | Self::FaceuseNotGiven
-            | Self::SelfIntersectionWithoutUvCurve { .. } => SM_ERR_NULL_POINTER,
+            | Self::SelfIntersectionWithoutUvCurve { .. }
+            | Self::FaceuseHasNoFace { .. } => SM_ERR_NULL_POINTER,
             Self::FaceMoveEmpty { .. } | Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::WallsTouch { .. } => SM_ERR_OFFSET_WALLS_TOUCH,
@@ -1117,7 +1128,8 @@ impl OffsetFailure {
             | Self::EdgeuseNotGiven
             | Self::LocalFaceNotListed
             | Self::UnnamedFaceHasNoSurface
-            | Self::FaceuseNotGiven => ErrorKind::InvalidInput,
+            | Self::FaceuseNotGiven
+            | Self::FaceuseHasNoFace { .. } => ErrorKind::InvalidInput,
             Self::StageFailed
             | Self::Defect { .. }
             | Self::LoopGapPassLimit { .. }
@@ -1588,6 +1600,9 @@ impl core::fmt::Display for OffsetFailure {
                 "a curve where the offset surface meets itself has no UV curve on one side, \
                  so the offset face is not cut along it",
             ),
+            Self::FaceuseHasNoFace { .. } => {
+                f.write_str("invalid input: a face use of the body has no face")
+            }
         }
     }
 }
@@ -2191,6 +2206,14 @@ mod tests {
                 false,
                 false,
             ),
+            (
+                O::FaceuseHasNoFace {
+                    faceuse: FaceuseId::from_index(2),
+                },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -2259,6 +2282,7 @@ mod tests {
                 O::GapCornerBlendNotMade { .. } => 62,
                 O::FaceuseNotGiven => 63,
                 O::SelfIntersectionWithoutUvCurve { .. } => 64,
+                O::FaceuseHasNoFace { .. } => 65,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
@@ -2403,6 +2427,13 @@ mod tests {
                 OffsetFailure::SelfIntersectionWithoutUvCurve { face },
                 SM_ERR_NULL_POINTER,
                 Some(EntityRef::Face(face)),
+            ),
+            (
+                OffsetFailure::FaceuseHasNoFace {
+                    faceuse: FaceuseId::from_index(2),
+                },
+                SM_ERR_NULL_POINTER,
+                Some(EntityRef::Faceuse(FaceuseId::from_index(2))),
             ),
         ];
         for (cause, status, entity) in samples {
