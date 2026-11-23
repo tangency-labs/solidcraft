@@ -6,6 +6,7 @@
 //! solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--allow-errors] (alias: inspect) measurements as JSON
 //! solidcraft-cli check <design.sc|script.json> [--drawing ID|NAME] [--sheet ID|NAME] [--json-out FILE] Check Drawing on its drawings; exit 1 on findings
 //! solidcraft-cli script <design.sc> [--out script.json]     the design's history as a command script
+//! solidcraft-cli textconv <design.sc|design.json|drawing.scdwg> a design or drawing file as text, for git diff
 //! solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] loading timings as JSON lines
 //! solidcraft-cli bench-agent [--scale F] [--save F] [--script-out F] a ~1,300-body design built command by command, timed
 //! solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N]
@@ -51,6 +52,7 @@ mod profiling;
 mod recipe;
 mod render;
 mod spatial;
+mod textconv;
 
 use std::process::ExitCode;
 
@@ -70,13 +72,15 @@ struct Command {
 }
 
 /// `run`'s lines in the usage.
-const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--validation each_step|each_feature|off]\n                     [--param-check off|warn|strict] [--quality standard|fine|finest] [--script-relative]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--quality: how closely an STL, OBJ or 3MF --out follows curved faces, as file.export's quality: a chord of\n       2e-4, 5e-5 or 1e-5 of each body's size, never under 1 µm, default standard)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--script-relative runs command file paths from the positional script's folder; command-line file paths\n       stay relative to the caller's folder, which remains the default for scripts without this option)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
+const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--validation each_step|each_feature|off]\n                     [--param-check off|warn|strict] [--quality standard|fine|finest] [--script-relative]\n                     [--param NAME=EXPR]... [--params-file FILE.json]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (a step of the script that fails stops the run, with --allow-errors too: nothing is written, and --results\n       gives {results: those of the steps before it, error: {step, command, error}}, to --json-out FILE as well)\n      (--quality: how closely an STL, OBJ or 3MF --out follows curved faces, as file.export's quality: a chord of\n       2e-4, 5e-5 or 1e-5 of each body's size, never under 1 µm, default standard)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--param NAME=EXPR sets an existing parameter as parameters.change does, before the script's own commands run and without\n       touching the file; repeat it to set several, applied in the order given. --params-file FILE.json holds {\"NAME\": \"EXPR\", ...},\n       applied before any --param. Needs a design (the positional one, or --in); an unknown name, a missing `=` or a bad\n       expression fails the run. Also taken by eval)\n      (--script-relative runs command file paths from the positional script's folder; command-line file paths\n       stay relative to the caller's folder, which remains the default for scripts without this option)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
 /// `eval`'s lines in the usage.
-const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--allow-errors] [--profile] [--profile-out trace.json] [--validation each_step|each_feature|off]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile, --profile-out and --validation as for run)\n";
+const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--allow-errors] [--quiet] [--profile] [--profile-out trace.json] [--validation each_step|each_feature|off]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile, --profile-out and --validation as for run; --quiet prints no report to stdout, as for run: the exit status\n       still says whether a feature failed, and a --json-out file is still written)\n";
 /// `check`'s lines in the usage.
 const USAGE_CHECK: &str = "  solidcraft-cli check <design.sc|script.json> [--drawing ID|NAME] [--sheet ID|NAME] [--json-out FILE]\n      (Check Drawing, drawing.check, on each drawing of the design, or the one --drawing names, by id or name: prints\n       {drawings: [{id, name, check: drawing.check's reply}], findings: the total}, or writes it to --json-out FILE;\n       --sheet checks that sheet only; exits with 1 when anything is found, after the report, and on an error, with none)\n";
 /// `script`'s lines in the usage.
 const USAGE_SCRIPT: &str = "  solidcraft-cli script <design.sc|script.json> [--out script.json]\n      (the design's history as a command script that eval and run replay)\n";
+/// `textconv`'s lines in the usage.
+const USAGE_TEXTCONV: &str = "  solidcraft-cli textconv <design.sc|design.json|drawing.scdwg>\n      (prints a design or drawing file as text for git diff. A container's container.json comes first on one line, then\n       its design or drawing, laid out as a .json save lays it out. Then each other file it holds gets one line with its\n       size and SHA-256. The model cache, the preview and plugin caches are left out, since a save or a plugin writes them afresh. A file it cannot show prints\n       one line with its size and SHA-256 and still exits 0. The user guide's Designs in Git section has the git setup.)\n";
 /// `bench-open`'s lines in the usage.
 const USAGE_BENCH_OPEN: &str = "  solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] [--profile] [--profile-out trace.json]\n      (--profile and --profile-out as for run)\n      (--ops: after opening, run each command of the script and undo it, timing the command, the\n       evaluations it caused and the view it leaves: placing and meshing what changed)\n";
 /// `bench-agent`'s lines in the usage.
@@ -90,7 +94,7 @@ const USAGE_RENDER: &str = "  solidcraft-cli render <script|design> --out image.
 /// `exec`'s lines in the usage.
 const USAGE_EXEC: &str = "  solidcraft-cli exec <command> [json-params]\n";
 /// `commands`'s lines in the usage.
-const USAGE_COMMANDS: &str = "  solidcraft-cli commands\n";
+const USAGE_COMMANDS: &str = "  solidcraft-cli commands [FILTER | --id COMMAND]\n      (the command registry as JSON; FILTER keeps the commands whose id contains it, in any case, e.g. `commands config`;\n       --id COMMAND prints that one command's documentation and its input and output schemas, as MCP's describe_command does)\n";
 /// `recipe`'s lines in the usage.
 const USAGE_RECIPE: &str = "  solidcraft-cli recipe <recipe.json>\n";
 /// `oracle`'s lines in the usage.
@@ -148,6 +152,7 @@ const COMMANDS: &[Command] = &[
     Command { name: "inspect", usage: USAGE_EVAL, listed: false },
     Command { name: "check", usage: USAGE_CHECK, listed: true },
     Command { name: "script", usage: USAGE_SCRIPT, listed: true },
+    Command { name: "textconv", usage: USAGE_TEXTCONV, listed: true },
     Command { name: "bench-open", usage: USAGE_BENCH_OPEN, listed: true },
     Command { name: "bench-agent", usage: USAGE_BENCH_AGENT, listed: true },
     Command { name: "bench-assistant", usage: USAGE_BENCH_ASSISTANT, listed: true },
@@ -201,6 +206,8 @@ fn main() -> ExitCode {
         eprintln!("error: {e}");
         return ExitCode::FAILURE;
     }
+    // Compiled plugins are kept in the per-user cache folder, as the desktop app keeps them.
+    solidcraft_engine::plugin::configure_compile_cache();
     let r = match args.first().map(String::as_str) {
         // Asked-for help is not an error: the command's usage on stdout, exit 0. It is read
         // before the command runs, so `--help` never starts a run (a fuzz run, a server).
@@ -213,23 +220,12 @@ fn main() -> ExitCode {
         Some("eval" | "inspect") => cmd_eval(&args[1..]),
         Some("check") => check::run(&args[1..]),
         Some("script") => cmd_script(&args[1..]),
+        Some("textconv") => textconv::run(&args[1..]),
         Some("snapshot") => cmd_snapshot(&args[1..]),
         Some("render") => render::run(&args[1..]),
         Some("exec") => cmd_exec(&args[1..]),
         Some("gpu") => cmd_gpu(&args[1..]),
-        Some("commands") => {
-            use std::io::Write as _;
-            let mut s = Session::default();
-            s.execute("engine.commands", &json!({})).map_err(|e| e.to_string()).and_then(|v| {
-                // A pipeline consumer may stop early (e.g. `commands | head`).
-                // Unlike println!, writing explicitly lets us handle that without a panic.
-                match writeln!(std::io::stdout().lock(), "{}", pretty(&v)) {
-                    Ok(()) => Ok(()),
-                    Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
-                    Err(e) => Err(format!("stdout: {e}")),
-                }
-            })
-        }
+        Some("commands") => cmd_commands(&args[1..]),
         Some("recipe") => args.get(1).ok_or_else(usage).and_then(|p| {
             let v = read_json(p)?;
             recipe::to_script(&v).map(|s| println!("{}", pretty(&s)))
@@ -502,11 +498,12 @@ fn read_session(
         // with its model is not evaluated again (a 226-feature design took two minutes to open
         // for a one-line export). The model is taken only when every feature's fingerprint
         // matches; otherwise the timeline is evaluated as before.
-        let (doc, saved) =
-            solidcraft_engine::io::read_design_file(path, None::<fn(solidcraft_engine::io::DesignPreview)>).map_err(|e| format!("{path}: {e}"))?;
-        // A file with provenance is evaluated from its timeline, never from a cache the signature
-        // does not cover (as `doc.open`).
-        let saved = if solidcraft_engine::io::has_design_provenance(path) { None } else { saved };
+        // A file with provenance gives no model: it is evaluated from its timeline, never from a
+        // cache the signature does not cover (as `doc.open`). Read from the bytes already read, so
+        // the model and that decision come from one file.
+        let (doc, saved) = solidcraft_engine::io::read_design_with_model(&bytes).map_err(|e| format!("{path}: {e}"))?;
+        // `--profile` (or SOLIDCRAFT_PROFILE) records the evaluation, as before the model was taken.
+        let saved = if solidcraft_engine::profile::enabled() { None } else { saved };
         let mut session = Session::opened_at_validating(doc, saved.as_ref(), Some(path), validation);
         session.param_check = check;
         return Ok(session);
@@ -636,12 +633,13 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     known_args(
         "run",
         args,
-        &["--in", "--out", "--save", "--json-out", "--param-check", "--profile-out", "--validation", "--quality"],
+        &["--in", "--out", "--save", "--json-out", "--param-check", "--profile-out", "--validation", "--quality", "--param", "--params-file"],
         &["--quiet", "--results", "--timings", "--profile", "--allow-errors", "--script-relative"],
         true,
     )?;
     let validation = validation_flag("run", args)?;
     let quality = export_quality("run", args)?;
+    let overrides = param_overrides("run", args)?;
     if args.iter().any(|a| a == "--script-relative") {
         return run_from_script_directory(args);
     }
@@ -660,7 +658,14 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     let (mut s, results) = if want_results || timings {
         // Collect every command's result or time (scripts only), then process requested files too.
         let mut s = match base {
-            Some(b) => load_with(b, check, validation)?,
+            // A command script as `--in` runs as it loads, before any override could be set.
+            Some(b) if !overrides.is_empty() && is_script(b) => return Err(overrides_need_design("run")),
+            Some(b) => {
+                let mut s = load_with(b, check, validation)?;
+                apply_overrides("run", &mut s, &overrides)?;
+                s
+            }
+            None if !overrides.is_empty() => return Err(overrides_need_design("run")),
             None => {
                 let mut s = Session::default();
                 s.set_validation(validation);
@@ -671,18 +676,30 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         let needs = if want_results { "--results needs a script" } else { "--timings needs a script" };
         let script = path.ok_or(needs)?;
         let v = read_json(script)?;
-        let out = if timings {
-            let (r, mut t) = s.run_script_timed(&v, profile, &mut |step, r| print_param_warnings(script, step, r)).map_err(|e| e.to_string())?;
-            if want_results && let Some(o) = t.as_object_mut() {
-                o.insert("results".into(), Value::Array(r));
+        let run =
+            s.run_script_kept(&v, timings.then_some(profile), &mut |step, r| print_param_warnings(script, step, r)).map_err(|e| e.to_string())?;
+        let mut out = match run.timings {
+            Some(mut t) => {
+                if want_results && let Some(o) = t.as_object_mut() {
+                    o.insert("results".into(), Value::Array(run.results));
+                }
+                t
             }
-            t
-        } else {
-            Value::Array(run_script_warning(&mut s, script, &v)?)
+            None if run.failure.is_some() => json!({"results": run.results}),
+            None => Value::Array(run.results),
         };
+        // A failing step still hands over what the steps before it gave, with its error, and
+        // then fails the run: no `--out` or `--save` is written from a script that stopped (#19964).
+        if let Some(failure) = run.failure {
+            if let Some(o) = out.as_object_mut() {
+                o.insert("error".into(), failure.to_json());
+            }
+            print_json(&out, json_out)?;
+            return Err(failure.into_error().to_string());
+        }
         (s, Some(out))
     } else {
-        (open_validating(base, path, check, validation)?, None)
+        (open_overriding(base, path, check, validation, "run", &overrides)?, None)
     };
     // A feature that fails leaves the bodies as they were before it (a parameter change can
     // break a feature without failing the command that made it): writing them would hand out
@@ -742,7 +759,7 @@ fn run_from_script_directory(args: &[String]) -> Result<(), String> {
         let file_option = i
             .checked_sub(1)
             .and_then(|j| args.get(j))
-            .is_some_and(|previous| matches!(previous.as_str(), "--in" | "--out" | "--save" | "--json-out" | "--profile-out"));
+            .is_some_and(|previous| matches!(previous.as_str(), "--in" | "--out" | "--save" | "--json-out" | "--profile-out" | "--params-file"));
         let value = if i == script_index || file_option {
             std::path::absolute(arg)
                 .map_err(|e| format!("run: {arg}: {e}"))?
@@ -774,17 +791,102 @@ fn open_validating(
     check: solidcraft_engine::schema::ParamCheck,
     validation: solidcraft_engine::kernel::Validation,
 ) -> Result<Session, String> {
+    open_overriding(base, path, check, validation, "", &[])
+}
+
+/// [`open_validating`] with `overrides` (`--param`, `--params-file`) set on the design before the
+/// script's own commands run. They need a design to act on: a script alone has none yet.
+fn open_overriding(
+    base: Option<&str>,
+    path: Option<&String>,
+    check: solidcraft_engine::schema::ParamCheck,
+    validation: solidcraft_engine::kernel::Validation,
+    cmd: &str,
+    overrides: &[(String, String)],
+) -> Result<Session, String> {
     let load = |p: &str| load_with(p, check, validation);
     match (base, path) {
+        // A command script as `--in` runs as it loads, before any override could be set.
+        (Some(b), _) if !overrides.is_empty() && is_script(b) => Err(overrides_need_design(cmd)),
         (Some(b), Some(p)) => {
             let mut s = load(b)?;
+            apply_overrides(cmd, &mut s, overrides)?;
             run_script_warning(&mut s, p, &read_json(p)?)?;
             Ok(s)
         }
-        (Some(b), None) => load(b),
-        (None, Some(p)) => load(p),
+        (Some(b), None) => {
+            let mut s = load(b)?;
+            apply_overrides(cmd, &mut s, overrides)?;
+            Ok(s)
+        }
+        (None, Some(p)) => {
+            if !overrides.is_empty() && is_script(p) {
+                return Err(overrides_need_design(cmd));
+            }
+            let mut s = load(p)?;
+            apply_overrides(cmd, &mut s, overrides)?;
+            Ok(s)
+        }
         (None, None) => Err(usage()),
     }
+}
+
+fn overrides_need_design(cmd: &str) -> String {
+    format!(
+        "{cmd}: --param and --params-file set parameters of a design before a script runs; give the design (or --in DESIGN with the script), since a script alone has none yet"
+    )
+}
+
+/// The parameters `--params-file` (an object of names and expressions, applied first) and each
+/// `--param NAME=EXPR` (in the order given) set. A number in the file is taken as its text.
+fn param_overrides(cmd: &str, args: &[String]) -> Result<Vec<(String, String)>, String> {
+    let mut out = Vec::new();
+    if flags(args, "--params-file").len() > 1 {
+        return Err(format!("{cmd}: --params-file is given more than once"));
+    }
+    if let Some(file) = flag(args, "--params-file") {
+        let v = read_json(file)?;
+        let Some(object) = v.as_object() else { return Err(format!("{cmd}: {file}: --params-file wants a JSON object of NAME: EXPR")) };
+        for (name, value) in object {
+            let expr = match value {
+                Value::String(e) => e.clone(),
+                Value::Number(n) => n.to_string(),
+                _ => return Err(format!("{cmd}: {file}: `{name}` wants an expression as text or a number")),
+            };
+            out.push(checked_override(cmd, name, &expr)?);
+        }
+    }
+    for arg in flags(args, "--param") {
+        let Some((name, expr)) = arg.split_once('=') else { return Err(format!("{cmd}: --param wants NAME=EXPR, not `{arg}`")) };
+        out.push(checked_override(cmd, name, expr)?);
+    }
+    Ok(out)
+}
+
+fn checked_override(cmd: &str, name: &str, expr: &str) -> Result<(String, String), String> {
+    let (name, expr) = (name.trim(), expr.trim());
+    if name.is_empty() {
+        return Err(format!("{cmd}: --param `={expr}` has no parameter name"));
+    }
+    if expr.is_empty() {
+        return Err(format!("{cmd}: --param {name}= has no expression"));
+    }
+    Ok((name.to_string(), expr.to_string()))
+}
+
+/// Sets each override as `parameters.change` does, in order; the first refusal (an unknown name,
+/// an expression that does not evaluate) fails the run, naming the parameter.
+fn apply_overrides(cmd: &str, s: &mut Session, overrides: &[(String, String)]) -> Result<(), String> {
+    for (name, expr) in overrides {
+        // `parameters.change` would add an unknown name as a new parameter; an override only sets one the design has.
+        let known =
+            s.doc.param(name).is_some() || s.doc.text_param(name).is_some() || s.doc.features.iter().any(|f| f.param_names.iter().any(|n| n == name));
+        if !known {
+            return Err(format!("{cmd}: --param {name}: no parameter `{name}` in the design"));
+        }
+        s.execute("parameters.change", &json!({"name": name, "expression": expr})).map_err(|e| format!("{cmd}: --param {name}: {e}"))?;
+    }
+    Ok(())
 }
 
 /// `--quality standard|fine|finest`: how closely the meshes `--out` writes (STL, OBJ, 3MF)
@@ -848,12 +950,67 @@ fn timeline_ok(s: &Session, skip_newer_features: bool, what_now: &str) -> Result
     Err(format!("{} timeline feature(s) failed, {what_now}:\n{}", failed.len(), failed.join("\n")))
 }
 
+/// `commands`: the command registry, whole by default. A word narrows it to the commands whose id
+/// contains it (any case); `--id COMMAND` prints that one command's documentation and schemas
+/// instead, as the MCP server's `describe_command` does (#20923).
+fn cmd_commands(args: &[String]) -> Result<(), String> {
+    use std::io::Write as _;
+    known_args("commands", args, &["--id"], &[], true)?;
+    let ids = args.iter().filter(|a| *a == "--id").count();
+    if ids > 1 {
+        return Err("commands takes one --id".into());
+    }
+    if args.len().saturating_sub(2 * ids) > 1 {
+        return Err("commands takes one filter word".into());
+    }
+    let filter = positional(args);
+    let id = flag(args, "--id");
+    if filter.is_some() && id.is_some() {
+        return Err("commands: give a filter or --id, not both".into());
+    }
+    let mut s = Session::default();
+    let v = match id {
+        Some(id) => s.execute("engine.describe", &json!({"command": id})).map_err(|e| e.to_string())?,
+        None => {
+            let all = s.execute("engine.commands", &json!({})).map_err(|e| e.to_string())?;
+            match filter {
+                Some(word) => {
+                    let word = word.to_lowercase();
+                    let kept: Vec<Value> = all
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter(|c| c["id"].as_str().is_some_and(|id| id.to_lowercase().contains(&word)))
+                        .cloned()
+                        .collect();
+                    Value::Array(kept)
+                }
+                None => all,
+            }
+        }
+    };
+    // A pipeline consumer may stop early (e.g. `commands | head`).
+    // Unlike println!, writing explicitly lets us handle that without a panic.
+    match writeln!(std::io::stdout().lock(), "{}", pretty(&v)) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        Err(e) => Err(format!("stdout: {e}")),
+    }
+}
+
 /// Runs `solidcraft-cli eval` (and its `inspect` alias), opening the input design or script with the requested `--validation` mode and reporting both `inspect.measure` and `document.inspect`.
 fn cmd_eval(args: &[String]) -> Result<(), String> {
     let json_out = json_out(args)?;
-    known_args("eval", args, &["--in", "--json-out", "--profile-out", "--validation"], &["--profile", "--allow-errors"], true)?;
+    known_args(
+        "eval",
+        args,
+        &["--in", "--json-out", "--profile-out", "--validation", "--param", "--params-file"],
+        &["--profile", "--allow-errors", "--quiet"],
+        true,
+    )?;
     let validation = validation_flag("eval", args)?;
-    let mut s = open_validating(flag(args, "--in"), positional(args), solidcraft_engine::schema::ParamCheck::Off, validation)?;
+    let overrides = param_overrides("eval", args)?;
+    let mut s = open_overriding(flag(args, "--in"), positional(args), solidcraft_engine::schema::ParamCheck::Off, validation, "eval", &overrides)?;
     let m = s.execute("inspect.measure", &json!({})).map_err(|e| e.to_string())?;
     let d = s.execute("document.inspect", &json!({})).map_err(|e| e.to_string())?;
     let mut out = json!({
@@ -868,7 +1025,10 @@ fn cmd_eval(args: &[String]) -> Result<(), String> {
         out["newer_file"] = file.report();
         out["warnings"] = json!(file.warnings());
     }
-    print_json(&out, json_out)?;
+    // `--quiet` silences stdout, as for `run`; a report that was asked for in a file is still written.
+    if json_out.is_some() || !args.iter().any(|a| a == "--quiet") {
+        print_json(&out, json_out)?;
+    }
     // The report shows a failing feature in `timeline[].error`; the exit status says so too, as
     // `run`'s does, so a script that checks only the status doesn't take a broken rebuild for a
     // good one. `--allow-errors` keeps status 0 for a design inspected on purpose. A newer
@@ -1430,5 +1590,18 @@ mod tests {
             |s: &Session| s.world_state().unwrap().bodies.iter().map(|b| solidcraft_engine::kernel::measure(&b.body).unwrap().volume).sum::<f64>();
         assert_eq!(volume(&s).to_bits(), volume(&built).to_bits());
         assert!(s.model.results.iter().all(|r| r.error.is_none()));
+        // `--profile` records the evaluation, so the timeline is evaluated as before.
+        struct Profiling;
+        impl Drop for Profiling {
+            fn drop(&mut self) {
+                solidcraft_engine::profile::set_enabled(false);
+            }
+        }
+        let _profiling = Profiling;
+        solidcraft_engine::profile::set_enabled(true);
+        let s = read_session(&path.0.to_string_lossy(), solidcraft_engine::schema::ParamCheck::Off, solidcraft_engine::kernel::Validation::default())
+            .unwrap();
+        assert!(s.model.last_recomputed > 0, "evaluated while profiling");
+        assert_eq!(volume(&s).to_bits(), volume(&built).to_bits());
     }
 }
