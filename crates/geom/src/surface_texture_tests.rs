@@ -587,3 +587,19 @@ fn parameter_names_are_explicit_and_stable() {
     assert_eq!(IsoParameter::Rmax.name(), "Rmax");
     assert_eq!(AsmeParameter::Ra.name(), "Ra");
 }
+
+#[test]
+fn plain_annotation_policy_rejects_text_that_draws_nothing() {
+    // Shared plain-text cases: also the cases for any other annotation using the helper.
+    for text in [
+        "\u{3164}", "\u{115f}", "\u{ffa0}", "\u{2800}", "\u{fffc}", "\u{034f}", "\u{fe0f}", "\u{0301}", "\u{ffff}", "\u{e000}", "\u{0378}", "\u{2003}",
+        "\u{3000}", "\u{3164}drill\u{3164}", "a\u{3164}b", " \u{0301}", "\u{0301}a", "a\u{fe0f}",
+    ] {
+        assert!(!crate::plain_text::is_plain_line(text), "{text:?}");
+    }
+    assert!(Indication { process: Some("\u{3164}".into()), ..iso() }.validate().is_err());
+    assert!(Indication { process: Some("\u{3164}drill\u{3164}".into()), ..iso() }.validate().is_err());
+    for text in ["e\u{0301}", "क्षत्र", "Ø12 ± 0,1 µm", "№ 5", "磨削 café"] {
+        assert!(crate::plain_text::is_plain_line(text), "{text:?}");
+    }
+}

@@ -5928,6 +5928,7 @@ dependencies = [
  "solidcore-record",
  "solidcore-tess",
  "thiserror 2.0.21",
+ "unicode-general-category",
 ]
 
 [[package]]

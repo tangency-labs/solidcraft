@@ -15,6 +15,7 @@ solidcore-record = { workspace = true }
 solidcore-ops = { workspace = true }
 solidcore-tess = { workspace = true }
 thiserror = { workspace = true }
+unicode-general-category = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
