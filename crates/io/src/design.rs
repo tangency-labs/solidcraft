@@ -4949,7 +4949,9 @@ mod tests {
 
     #[test]
     fn revision_snapshots_share_import_blobs_and_reopen() {
-        let mut doc = Document::from_json(&document().to_json()).unwrap();
+        // Canvas bytes are skip_serializing, so a JSON round-trip would drop them. A live
+        // document (and a container reopen) still holds the image; the snapshot must too.
+        let mut doc = document();
         let limits = solidcraft_doc::document_history::SnapshotLimits::standard();
         let snapshot = solidcraft_doc::document_history::DocumentHistory::model_snapshot(&doc, limits.max_bytes).unwrap();
         doc.document_history.record_save_with(Some(snapshot), limits);
@@ -4961,10 +4963,16 @@ mod tests {
         let json: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
         let snap = &json["document_history"]["entries"][0]["snapshot"];
         assert_eq!(snap["features"][0]["step"], "");
-        assert!(snap["features"][0].get("step_blob").and_then(Value::as_str).is_some_and(|n| n.starts_with("blobs/")));
+        assert_eq!(snap["features"][0]["step_blob"], json["features"][0]["step_blob"], "the snapshot's STEP is the live import's blob");
         assert_eq!(snap["canvases"][0]["data"], "");
+        assert_eq!(snap["canvases"][0]["image_blob"], json["canvases"][0]["image_blob"], "the snapshot's canvas is the live image's blob");
         let reopened = crate::read_design(&bytes).unwrap();
         assert_eq!(reopened.document_history.revision, 1);
         assert_eq!(reopened, doc);
+        let FeatureKind::Import { step, .. } = &reopened.features[0].kind else {
+            panic!("the first feature is the import");
+        };
+        assert_eq!(&**step, "ISO-10303-21;\nEND-ISO-10303-21;");
+        assert_eq!(reopened.canvases[0].bytes(), b"original image bytes");
     }
 }

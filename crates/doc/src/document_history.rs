@@ -229,6 +229,9 @@ impl DocumentHistory {
         if !value.is_object() {
             return None;
         }
+        // Canvas image bytes are skipped by serde (they live in container parts). Put them back
+        // as base64 so a snapshot can share the same hash-named blobs as the live design.
+        include_canvas_payloads(doc, &mut value);
         scrub_snapshot(&mut value);
         let max_bytes = max_bytes.min(MAX_SNAPSHOT_BYTES);
         let mut seen = shared_payloads(&value);
@@ -297,14 +300,40 @@ impl DocumentHistory {
     }
 }
 
+/// Canvas `data` is `skip_serializing` on the typed document. A snapshot is JSON, so copy the
+/// bytes in as the base64 string `externalize_canvas` already reads, the way older designs
+/// stored them inline.
+fn include_canvas_payloads(doc: &crate::Document, value: &mut Value) {
+    let Some(canvases) = value.get_mut("canvases").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for (json, canvas) in canvases.iter_mut().zip(&doc.canvases) {
+        if canvas.data.is_empty() {
+            continue;
+        }
+        if let Some(obj) = json.as_object_mut() {
+            obj.insert("data".into(), Value::String(crate::canvas::base64_encode(canvas.bytes())));
+        }
+    }
+}
+
 fn scrub_snapshot(snapshot: &mut Value) {
     if let Some(obj) = snapshot.as_object_mut() {
         obj.remove("document_history");
     }
 }
 
+/// Heavy payloads already stored with the live `doc`, including canvas image bytes that serde
+/// skips. A snapshot that repeats them is charged as a digest: the file stores them once.
+pub fn shared_payloads_of(doc: &crate::Document) -> HashSet<u64> {
+    let mut value = serde_json::to_value(doc).unwrap_or(Value::Null);
+    include_canvas_payloads(doc, &mut value);
+    shared_payloads(&value)
+}
+
 /// Heavy payloads already stored with the live document: top-level features and canvases, not
-/// the snapshots inside `document_history`.
+/// the snapshots inside `document_history`. Canvas `data` is counted only when it is present
+/// in `doc` (after [`include_canvas_payloads`] or a rehydrated snapshot).
 pub fn shared_payloads(doc: &Value) -> HashSet<u64> {
     let mut seen = HashSet::new();
     let Some(obj) = doc.as_object() else { return seen };
@@ -691,6 +720,37 @@ mod tests {
         let shared = shared_payloads(&body);
         shared_with_live.record_save_shared(Some(body), limits, &shared);
         assert!(shared_with_live.entries[0].snapshot.is_some(), "the file already stores this STEP");
+    }
+
+    #[test]
+    fn a_live_canvas_is_not_charged_against_the_snapshot_cap() {
+        let bytes = vec![b'x'; HEAVY_TEXT + 80];
+        let mut doc = Document::new("Canvas");
+        let id = doc.allocate_id().unwrap();
+        doc.canvases.push(crate::canvas::Canvas {
+            id,
+            name: "Reference".into(),
+            format: "png".into(),
+            data: bytes.into(),
+            pixels: [1, 1],
+            plane: crate::PlaneRef::Origin { name: "XY".into() },
+            center: solidcore_record::Vec2::new(0.0, 0.0),
+            width: 10.0,
+            angle: 0.0,
+            opacity: 0.5,
+            flip: false,
+            visible: true,
+            locked: false,
+            component: 0,
+            anchor: None,
+        });
+        // Full base64 is well over 400 bytes; a digest fits, so the live image is not charged again.
+        let tight = 400;
+        let snap = DocumentHistory::model_snapshot(&doc, tight).expect("the live canvas is stored once");
+        assert!(snap["canvases"][0]["data"].as_str().is_some_and(|s| s.len() > HEAVY_TEXT));
+        let mut history = DocumentHistory::fresh();
+        history.record_save_shared(Some(snap), SnapshotLimits { max_versions: 4, max_bytes: tight }, &shared_payloads_of(&doc));
+        assert!(history.entries[0].snapshot.is_some(), "the file already stores this image");
     }
 
     #[test]

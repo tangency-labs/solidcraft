@@ -2548,7 +2548,8 @@ fn write_bytes(
     let shared = match &snapshot {
         Some(value) => solidcraft_doc::document_history::shared_payloads(value),
         None if s.document_history.entries.iter().any(|entry| entry.snapshot.is_some()) => {
-            serde_json::to_value(&*model).map(|value| solidcraft_doc::document_history::shared_payloads(&value)).unwrap_or_default()
+            // serde skips canvas bytes; count them as already stored, as model_snapshot does.
+            solidcraft_doc::document_history::shared_payloads_of(&model)
         }
         None => std::collections::HashSet::new(),
     };
