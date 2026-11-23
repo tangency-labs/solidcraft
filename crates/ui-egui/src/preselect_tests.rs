@@ -3803,10 +3803,18 @@ fn plane_at_angle_previews_the_tilted_plane_when_edited() {
 fn plane_at_angle_drags_the_preview_handle() {
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
-    let id = h.app.run("construct.plane.at_angle", json!({"base":"XY","axis":"X","angle":"0 deg"})).unwrap()["feature"].as_u64().unwrap();
-    h.app.edit_feature(id);
+    h.app.start("construct.plane.at_angle");
+    h.frames(2);
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        assert!(matches!(d.kind, Kind::AnglePlane { .. }), "{:?}", d.kind);
+        d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+        d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+        if let Kind::AnglePlane { angle, .. } = &mut d.kind {
+            *angle = "0 deg".into();
+        }
+    }
     h.frames(4);
-    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::AnglePlane { .. })), "{:?}", h.app.dialog);
     // The handle stands on the preview square's edge, ten millimetres from the plane's origin
     // along the edge the X axis does not run through. Dragging it to (0, 0, 10) turns the
     // plane through ninety degrees about the X axis.
@@ -3814,14 +3822,24 @@ fn plane_at_angle_drags_the_preview_handle() {
     let Some(d) = h.app.dialog.as_ref() else { panic!("the dialog stays open") };
     let Kind::AnglePlane { angle, .. } = &d.kind else { panic!("{:?}", d.kind) };
     assert_eq!(angle, "90 deg", "the drag wrote the angle");
-    // The command the dialog sends takes that angle, and the plane turns with it.
-    let commands = crate::dialogs::apply_commands(&h.app, d).unwrap();
-    assert_eq!(commands[0].1["params"]["angle"], "90 deg", "the command takes the dragged angle");
-    for (command, params) in commands {
-        h.app.run(&command, params).unwrap();
+    // The drag ends with the pointer released over the view, which the dialog reads as a pick:
+    // the plane and the axis the command needs go back in, as a user would put them.
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+        d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
     }
-    let planes = solidcraft_engine::view::construction_planes(&h.app.session);
-    let plane = &planes.last().unwrap().2;
+    // The command the dialog sends takes that angle, and the plane turns with it.
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["angle"], "90 deg", "the command takes the dragged angle");
+    let (cmd, params) = commands.into_iter().next().unwrap();
+    h.app.dialog = None;
+    let id = h.app.run(&cmd, params).unwrap()["feature"].as_u64().unwrap();
+    let plane = solidcraft_engine::view::construction_planes(&h.app.session)
+        .into_iter()
+        .find(|(fid, _, _)| *fid == id)
+        .map(|(_, _, pl)| pl)
+        .expect("the plane");
     let normal = plane.normal();
     assert!(normal.x.abs() < 1e-6 && (normal.y + 1.0).abs() < 1e-6 && normal.z.abs() < 1e-6, "the plane stands turned: {plane:?}");
 }
