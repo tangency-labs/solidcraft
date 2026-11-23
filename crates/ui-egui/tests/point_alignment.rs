@@ -216,8 +216,8 @@ fn horizontal_vertical_takes_a_line_middle_without_shift() {
     let p = sk.point(sk.resolve_point("c1.center").unwrap()).unwrap();
     let mid = line_midpoint(sk, "l1");
     // Level with the middle (the closer axis): the centre does not land on the line.
-    assert!((p.y - mid.y).abs() < 1e-6, "centre: {p:?}, middle: {mid:?}");
-    assert!((p.x - mid.x).abs() > 1.0, "centre: {p:?}, middle: {mid:?}");
+    assert!((p.y - mid.y).abs() < 1e-6, "centre: {p:?}");
+    assert!((p.x - mid.x).abs() > 1.0, "centre: {p:?}");
     assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::HorizontalPoints { .. })));
 }
 
