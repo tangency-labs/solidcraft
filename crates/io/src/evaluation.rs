@@ -1,7 +1,8 @@
 //! What the model cache is keyed by. `SOLIDCRAFT_EVALUATION_SOURCE`: the digest of the committed
 //! source a design's model is computed from: the `doc` crate and every workspace crate it is
-//! built from, the vendored kernel, the patched dependencies, the locked versions of all others,
-//! the workspace's build settings and the cache's own reader. A cache is only the result of evaluating its design when
+//! built from (except the display ones, see [`EVALUATION_CRATES`]), the vendored kernel, the
+//! patched dependencies, the locked versions of all others, the workspace's build settings and
+//! the cache's own reader. A cache is only the result of evaluating its design when
 //! that source computed it, and an update that changed none of it (only the interface, the
 //! commands or the other file formats, or the version number) computes the same model.
 //! `SOLIDCRAFT_SOURCE_COMMIT`: the commit, recorded with the cache. Both are "unknown" without git
@@ -19,9 +20,14 @@ use std::path::Path;
 use std::process::Command;
 
 /// The workspace crates a design's model is computed from: `doc` and every workspace crate it
-/// depends on (a test checks the list against their manifests).
-pub const EVALUATION_CRATES: [&str; 12] =
-    ["color", "geom", "profile", "smlib", "sketch", "kernel", "render", "derive", "develop", "doc", "format", "viewport"];
+/// depends on, except the display ones (a test checks the list against their manifests).
+///
+/// `viewport` and `render` are deliberately not keyed. The cache stores the kernel-encoded bodies
+/// and the placement shares, never a display plan: the plans are derived on open from the decoded
+/// bodies, so a change to either crate cannot change a cached model. Keying them made every
+/// interface change rebuild every design (25 s on grid100) for nothing;
+/// `a_model_is_computed_without_the_display_crates` keeps doc's model computation from naming them.
+pub const EVALUATION_CRATES: [&str; 10] = ["color", "geom", "profile", "smlib", "sketch", "kernel", "derive", "develop", "doc", "format"];
 /// The other files the saved model depends on, relative to the workspace root.
 const EVALUATION_FILES: [&str; 3] = ["crates/io/build.rs", "crates/io/src/design/native_cache.rs", ".cargo/config.toml"];
 /// The committed trees whose every file computes models, hashed as one tree id each: the vendored
@@ -153,6 +159,8 @@ mod tests {
             write(&root, &format!("crates/{krate}/src/lib.rs"), "pub fn x() {}\n");
         }
         write(&root, "crates/io/build.rs", "fn main() {}\n");
+        write(&root, "crates/viewport/src/lib.rs", "pub fn camera() {}\n");
+        write(&root, "crates/render/src/lib.rs", "pub fn look() {}\n");
         write(&root, "crates/io/src/design/native_cache.rs", "pub fn y() {}\n");
         write(&root, ".cargo/config.toml", "[build]\n");
         write(&root, "solidcore/Cargo.toml", "[workspace]\n");
@@ -223,5 +231,86 @@ mod tests {
         write(&root, "solidcore/docs/reference.md", "# changed\n");
         assert_ne!(source(&root).as_deref(), Some(clean.as_str()), "any tracked change is not the commit");
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The display crates derive plans, and plans are not cached: a change there keeps the model
+    /// cache, while a change to a crate that computes the bodies moves it.
+    #[test]
+    fn a_display_crate_does_not_move_the_digest() {
+        let root = repo("display");
+        let clean = source(&root).expect("a clean digest");
+        for outside in ["crates/viewport/src/lib.rs", "crates/render/src/lib.rs"] {
+            write(&root, outside, "pub fn changed() {}\n");
+            commit(&root, outside);
+            assert_eq!(source(&root).as_deref(), Some(clean.as_str()), "{outside} derives plans, which are not cached");
+        }
+        write(&root, "crates/kernel/src/lib.rs", "pub fn kernel() { }\n");
+        commit(&root, "kernel");
+        assert_ne!(source(&root).as_deref(), Some(clean.as_str()), "the kernel computes the bodies");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// doc stores display values, and these are the modules that carry them. A model is computed
+    /// by doc's own code, which must not name the display crates: the cache is keyed by doc and
+    /// its geometry crates, not by the display ones, so a body or a plan derived from viewport or
+    /// render code would change something the cache cannot see.
+    ///
+    /// What this guard does not catch: a call through a re-export in a document-value module
+    /// (allowed, and the module is where the reference lives), a macro-generated path, and a
+    /// semantic change that arrives through a keyed crate's constant. A document-value module that
+    /// starts computing a model moves off this list, and one that stops using the display crates
+    /// fails here until it is removed from it.
+    #[test]
+    fn a_model_is_computed_without_the_display_crates() {
+        const DOCUMENT_VALUES: [&str; 13] = [
+            "appearance.rs",
+            "document.rs",
+            "drawing_view.rs",
+            "drawing/view.rs",
+            "pbr_appearance.rs",
+            "render_aging.rs",
+            "render_coat.rs",
+            "render_job.rs",
+            "render_optics.rs",
+            "render_resources.rs",
+            "render_settings.rs",
+            "render_surface.rs",
+            "render_texture_resources.rs",
+        ];
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/doc/src");
+        let mut pending = vec![src.clone()];
+        let mut allowed: Vec<String> = Vec::new();
+        while let Some(dir) = pending.pop() {
+            for entry in fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    pending.push(path);
+                    continue;
+                }
+                let Some(name) = path.to_str() else { continue };
+                if !name.ends_with(".rs") || name.ends_with("_tests.rs") {
+                    continue;
+                }
+                let text = fs::read_to_string(&path).unwrap();
+                let Some((line, text)) = text
+                    .lines()
+                    .enumerate()
+                    .find_map(|(i, l)| (l.contains("solidcraft_viewport") || l.contains("solidcraft_render")).then_some((i + 1, l.trim())))
+                else {
+                    continue;
+                };
+                let relative = path.strip_prefix(&src).unwrap().to_string_lossy().replace('\\', "/");
+                if !DOCUMENT_VALUES.contains(&relative.as_str()) {
+                    panic!("{relative}:{line}: doc computes models without the display crates, but this file names one: {text}");
+                }
+                allowed.push(relative);
+            }
+        }
+        for name in DOCUMENT_VALUES {
+            assert!(
+                allowed.iter().any(|a| a.as_str() == name),
+                "crates/doc/src/{name} no longer names a display crate: remove it from DOCUMENT_VALUES"
+            );
+        }
     }
 }

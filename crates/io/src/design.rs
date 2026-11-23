@@ -1850,8 +1850,15 @@ mod tests {
             workspace.lines().find_map(|l| l.strip_prefix(prefix.as_str())?.split('"').next().map(str::to_string))
         };
         let keyed: Vec<&str> = env!("SOLIDCRAFT_EVALUATION_CRATES").split(',').collect();
+        // The display crates are deliberately not keyed (see `EVALUATION_CRATES`): the cache holds
+        // the kernel-encoded bodies and the placement shares, and the display plans are derived on
+        // open from those, so a change to either cannot change a cached model.
+        const DISPLAY: [&str; 2] = ["viewport", "render"];
         let (mut todo, mut seen) = (vec!["doc".to_string()], BTreeSet::new());
         while let Some(krate) = todo.pop() {
+            if DISPLAY.contains(&krate.as_str()) {
+                continue;
+            }
             if !seen.insert(krate.clone()) {
                 continue;
             }
