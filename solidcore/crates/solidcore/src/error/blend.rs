@@ -172,10 +172,12 @@ pub enum BlendFailure {
     /// caller's arguments ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`
     /// (upstream `NER` of its corner).
     BevelVertexNotFilleted,
-    /// A surface binding of the fillet insertion is resolved after its face's surface was
-    /// removed: a stale binding the caller kept past an edit of the body; the failure is at
-    /// the face. A check of the caller's input ([`ErrorKind::InvalidInput`]); status
-    /// `SM_ERR_NULL_POINTER`.
+    /// A surface binding of the fillet insertion, or a fillet geometry's surface
+    /// transferred to a face of the caller's owner body
+    /// ([`crate::blend::fillet_geom::p1::FilletGeom::fillet_surface`]), is resolved after
+    /// its face's surface was removed: a stale binding the caller kept past an edit of the
+    /// body; the failure is at the face. A check of the caller's input
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
     BoundSurfaceRemoved,
     /// The face named for a chamfer's first size is neither of its edge's two faces; the
     /// failure is at the edge. A check of the caller's arguments

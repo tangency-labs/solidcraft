@@ -220,7 +220,7 @@ use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
-use crate::error::blend::BlendFailure;
+use crate::error::blend::{BlendFailure, FilletSetUp};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -1437,8 +1437,9 @@ impl FilletGeom {
     ///
     /// # Errors
     /// [`SolidError::InvalidInput`] for a transferred surface when `owner` is `None` or
-    /// names another body; the face's own lookup errors, and `SM_ERR_NULL_POINTER` for a
-    /// face without a surface.
+    /// names another body; the face's own lookup errors, and
+    /// [`BlendFailure::BoundSurfaceRemoved`] at the face (`SM_ERR_NULL_POINTER`) when the
+    /// caller's `owner` body no longer has a surface on that face.
     pub fn fillet_surface<'a>(
         &'a self,
         owner: Option<FilletSurfaceOwner<&'a Brep>>,
@@ -1448,9 +1449,13 @@ impl FilletGeom {
             Some(FilletSurfaceStorage::Owned(surface)) => Ok(Some(surface)),
             Some(FilletSurfaceStorage::ManagedFace { body, face }) => {
                 let owner = managed_owner(owner, *body)?;
-                Ok(Some(owner.face(*face)?.surface.as_ref().ok_or_else(
-                    || broken_link(OP_FILLET_SURFACE, MOVED_SURFACE_GONE),
-                )?))
+                Ok(Some(
+                    owner
+                        .face(*face)?
+                        .surface
+                        .as_ref()
+                        .ok_or_else(|| bound_surface_removed(*face))?,
+                ))
             }
         }
     }
@@ -1469,9 +1474,13 @@ impl FilletGeom {
             Some(FilletSurfaceStorage::Owned(surface)) => Ok(Some(surface)),
             Some(FilletSurfaceStorage::ManagedFace { body, face }) => {
                 let owner = managed_owner(owner, *body)?;
-                Ok(Some(owner.face_mut(*face)?.surface.as_mut().ok_or_else(
-                    || broken_link(OP_FILLET_SURFACE, MOVED_SURFACE_GONE),
-                )?))
+                Ok(Some(
+                    owner
+                        .face_mut(*face)?
+                        .surface
+                        .as_mut()
+                        .ok_or_else(|| bound_surface_removed(*face))?,
+                ))
             }
         }
     }
@@ -1489,9 +1498,10 @@ impl FilletGeom {
     ///
     /// # Errors
     ///
-    /// A blend failure (`SM_ERR_NULL_POINTER`) when the fallback is needed and
-    /// `solver` is `None` (upstream dereferences `NULL`); [`SolidError::InvalidInput`]
-    /// for a rail index past the two rails (upstream reads out of bounds).
+    /// [`BlendFailure::FilletSetUpInvalid`] ([`FilletSetUp::RailOffsetSurface`],
+    /// `SM_ERR_NULL_POINTER`) when the fallback is needed and the caller passed no
+    /// `solver` (upstream dereferences `NULL`); [`SolidError::InvalidInput`] for a rail
+    /// index past the two rails (upstream reads out of bounds).
     pub fn offset_surface<'a>(
         &'a self,
         rail_index: usize,
@@ -1504,7 +1514,7 @@ impl FilletGeom {
         if let Some(s) = own {
             return Ok(Some(s));
         }
-        let fs = solver.ok_or_else(|| broken_link(OP_OFFSET, NO_SOLVER_PASSED))?;
+        let fs = solver.ok_or_else(|| no_solver_passed(OP_OFFSET))?;
         Ok(fs.surface(rail_index)?.map(|slot| &slot.surface))
     }
 
@@ -3716,8 +3726,10 @@ pub fn cleanup_noise(uv: Point2) -> Point2 {
 /// # Errors
 ///
 /// A blend failure (`SM_ERR_NULL_POINTER`) for a geometry without a fillet
-/// surface or rails, or, on the adjusting path, without a solver or a solver without
-/// the rail's offset surface (upstream dereferences them); `SM_ERR` when both surfaces
+/// surface or rails, or, on the adjusting path, a solver without the rail's offset
+/// surface (upstream dereferences them); [`BlendFailure::FilletSetUpInvalid`]
+/// ([`FilletSetUp::RailOffsetSurface`], `SM_ERR_NULL_POINTER`) when the adjusting path
+/// needs a solver the caller did not pass in `solvers`; `SM_ERR` when both surfaces
 /// need adjusting; those of the rail drop onto the solver's offset surface
 /// (`SmSurface::DropCurve`, unit `intersect.surface_drop_lib_p3`; a failed drop only
 /// skips the rail, [`SolidError::Unported`] propagates).
@@ -4048,7 +4060,7 @@ fn drop_rail_onto_offset_surface(
     rail: EdgeId,
     dist_tol: f64,
 ) -> Result<()> {
-    let solver = adjust_solver.ok_or_else(|| broken_link(OP_EXAMINE, NO_SOLVER_PASSED))?;
+    let solver = adjust_solver.ok_or_else(|| no_solver_passed(OP_EXAMINE))?;
     // SmFilletSolver::GetSurface(k); NER(pOffsetSurf). The offset distance is set to
     // 0 on a copy (upstream sets it on the solver's surface and restores it below).
     let mut offset_surf = solver
@@ -4416,16 +4428,35 @@ fn broken_link(op: &'static str, why: &'static str) -> SolidError {
         .into_error()
 }
 
+/// The face a fillet surface was transferred to has no surface in the `owner` body the
+/// caller passed: the caller removed it after `MakeFaceBrep`, so a check of the caller's
+/// input ([`BlendFailure::BoundSurfaceRemoved`] at the face, status
+/// `SM_ERR_NULL_POINTER`), as for the insertion's stale surface binding.
+#[track_caller]
+fn bound_surface_removed(face: FaceId) -> SolidError {
+    Failure::new(OP_FILLET_SURFACE, BlendFailure::BoundSurfaceRemoved)
+        .at(EntityRef::Face(face))
+        .into_error()
+}
+
+/// The caller passed no solver where a geometry without its own offset surface needs
+/// the solver's: the geometry and its solvers are the caller's arguments (`FilletGeom::new`
+/// takes no solver), so a check of the caller's set-up
+/// ([`BlendFailure::FilletSetUpInvalid`] of [`FilletSetUp::RailOffsetSurface`], status
+/// `SM_ERR_NULL_POINTER` of the `NULL` upstream dereferences).
+#[track_caller]
+fn no_solver_passed(op: &'static str) -> SolidError {
+    Failure::new(
+        op,
+        BlendFailure::FilletSetUpInvalid(FilletSetUp::RailOffsetSurface),
+    )
+    .into_error()
+}
+
 /// Why a corner id resolves to no corner ([`CornerLookup::corner`]).
 const CORNER_NOT_RECORDED: &str = "the corner id is neither the running corner nor a corner \
      the executive or the table holds, though every corner id a fillet vertex or edge keeps \
      was set when the kernel made that corner";
-/// Why the face a fillet surface was moved to has no surface.
-const MOVED_SURFACE_GONE: &str = "the face the fillet surface was moved to has no surface, \
-     though MakeFaceBrep made that face from the surface";
-/// Why no solver was passed for a geometry.
-const NO_SOLVER_PASSED: &str = "no solver was passed for the fillet geometry, though every \
-     geometry is made by a solver and its callers pass the solvers of the geometries they read";
 /// Why the pseudo B-rep has no infinite region.
 const NO_INFINITE_REGION: &str = "the pseudo B-rep has no infinite region, though \
      FilletBrep::new makes one in every pseudo B-rep";
@@ -5248,12 +5279,13 @@ mod tests {
             (err.operation(), err.blend_failure()),
             (
                 OP_EXAMINE,
-                Some(&BlendFailure::Defect {
-                    why: NO_SOLVER_PASSED
-                })
+                Some(&BlendFailure::FilletSetUpInvalid(
+                    FilletSetUp::RailOffsetSurface
+                ))
             )
         );
         assert_eq!(err.upstream_status(), Some(1006));
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidInput);
         // and with the good surface meeting the corner nothing is adjusted
         let (mut fb, [_, g1], [start_fv, end_fv], _, _) = corner_for_examine(&k);
         examine_n_fix_fillet_geoms(
@@ -5341,20 +5373,74 @@ mod tests {
             body.face(face).unwrap().surface.as_ref().unwrap().kind(),
             SurfaceKind::Plane(_)
         ));
-        // A face without a surface is upstream's NULL.
+        // A face without a surface is upstream's NULL. The caller removed it from its own
+        // owner body, so it is the caller's input (#21321 review), at the face.
         body.face_mut(face).unwrap().surface = None;
-        assert!(matches!(
-            g.fillet_surface(Some(FilletSurfaceOwner {
-                identity,
-                body: &body
-            })),
-            Err(e) if (e.operation(), e.blend_failure(), e.upstream_status())
-                == (
+        let removed = |e: &SolidError| {
+            assert_eq!(
+                (e.operation(), e.blend_failure(), e.upstream_status()),
+                (
                     OP_FILLET_SURFACE,
-                    Some(&BlendFailure::Defect { why: MOVED_SURFACE_GONE }),
+                    Some(&BlendFailure::BoundSurfaceRemoved),
                     Some(SM_ERR_NULL_POINTER)
-                )
-        ));
+                ),
+                "{e:?}"
+            );
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e:?}");
+            assert!(!e.is_defect(), "{e:?}");
+            assert_eq!(e.entity(), Some(EntityRef::Face(face)), "{e:?}");
+        };
+        removed(
+            &g.fillet_surface(Some(FilletSurfaceOwner {
+                identity,
+                body: &body,
+            }))
+            .unwrap_err(),
+        );
+        removed(
+            &g.fillet_surface_mut(Some(FilletSurfaceOwner {
+                identity,
+                body: &mut body,
+            }))
+            .unwrap_err(),
+        );
+    }
+
+    /// #21321 review: a geometry without its own offset surface reads its solver's, and
+    /// `FilletGeom::new` takes no solver, so a missing `solver` is the caller's set-up
+    /// (`RailOffsetSurface`, `SM_ERR_NULL_POINTER`), not a defect; an own offset surface
+    /// needs no solver.
+    #[test]
+    fn offset_surface_without_its_solver_is_the_callers_set_up() {
+        let k = Kernel::default();
+        let mut g = FilletGeom::new(&k, None, FilletGeomType::Blends).unwrap();
+        for rail in 0..2 {
+            let e = g.offset_surface(rail, None).unwrap_err();
+            assert_eq!(
+                (e.operation(), e.blend_failure(), e.upstream_status()),
+                (
+                    OP_OFFSET,
+                    Some(&BlendFailure::FilletSetUpInvalid(
+                        FilletSetUp::RailOffsetSurface
+                    )),
+                    Some(SM_ERR_NULL_POINTER)
+                ),
+                "{e:?}"
+            );
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e:?}");
+            assert!(!e.is_defect(), "{e:?}");
+        }
+        let own = OffsetSurface::new(
+            &k,
+            0.5,
+            bilinear_patch(),
+            crate::blend::fillet_custom_solver::SurfaceId::Free(0),
+            0,
+        )
+        .unwrap();
+        g.set_offset_surface(0, Some(own)).unwrap();
+        assert!(g.offset_surface(0, None).unwrap().is_some());
+        assert!(g.offset_surface(1, None).is_err());
     }
 
     /// WR-612 (fork ceb3272): a fillet edge along the x axis from 0 to 10, split in two in
