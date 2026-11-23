@@ -152,6 +152,9 @@ pub enum CornerInput {
     /// A ball or setback corner with no ring of edge uses (a setback corner's: all of them,
     /// or those of its solvers).
     RingNotSet,
+    /// A round given to the setback fill whose surface has degree 0 across its rails (a
+    /// B-spline surface's degrees are not checked when it is made from data).
+    RoundOfDegreeZeroAcross,
     /// A ball, chamfer, Mixed or setback corner whose vertices or edges are not the count or
     /// kind its topology makes.
     TopologyMismatch,
@@ -194,6 +197,7 @@ impl CornerInput {
             Self::NoRailXEdgeUseVertex => SM_ERR_NULL_POINTER,
             Self::RingEdgeUseWithoutSolver => SM_ERR_NULL_POINTER,
             Self::RingNotSet => SM_ERR_NULL_POINTER,
+            Self::RoundOfDegreeZeroAcross => SM_ERR,
             Self::TopologyMismatch => SM_ERR,
             Self::VertexNotProcessed => SM_ERR,
             Self::VertexNotRailXRail => SM_ERR,

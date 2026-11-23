@@ -3361,6 +3361,7 @@ mod tests {
             (CornerInput::EdgeWithoutVertex, SM_ERR_NULL_POINTER),
             (CornerInput::RingEdgeUseWithoutSolver, SM_ERR_NULL_POINTER),
             (CornerInput::FillNotFromSetbackSplit, SM_ERR),
+            (CornerInput::RoundOfDegreeZeroAcross, SM_ERR),
         ] {
             let e = SolidError::blend(
                 "blend::op",

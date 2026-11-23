@@ -184,9 +184,8 @@ fn ease_stop(stop: EaseStop) -> SolidError {
     SolidError::blend(OP, BlendFailure::EaseNotBuilt(stop))
 }
 
-/// [`fill_hole_counted`] refuses an order other than 1 or 2, its rounds' jets are taken to
-/// at most 2 and hold a row per order, and a round's across degree is a B-spline
-/// surface's, at least 1.
+/// [`fill_hole_counted`] refuses an order other than 1 or 2, and its rounds' jets are taken
+/// to at most 2 and hold a row per order.
 const WHY_ORDER: &str =
     "the setback fill's order, checked on entry, is 1 or 2, and its jets are taken to it";
 /// The elimination's pivots lie in the rows and columns it scaled first.
@@ -1588,16 +1587,27 @@ fn round_jets(
 /// same rows. Where the end weights are equal to order k the rows are kept as they are.
 ///
 /// # Errors
-/// [`Refusal`] with `SM_ERR_INVALID_INPUT` for an end weight that is not positive; `SM_ERR`
-/// for a section of degree 0 or jets past the second order.
+/// [`Refusal`] with `SM_ERR_INVALID_INPUT` for an end weight that is not positive;
+/// [`CornerInput::RoundOfDegreeZeroAcross`] (`SM_ERR`) for a section of degree 0; a
+/// `Defect` (`SM_ERR`) for jets past the second order.
 fn standard_form_across(
     h: &mut [Vec<Hom>],
     q: usize,
     k: usize,
 ) -> core::result::Result<(), Refusal> {
-    if q == 0 || k > 2 || h.len() <= k {
-        // a round's across degree is a B-spline surface's (at least 1); its jets are
-        // taken to k
+    if q == 0 {
+        // the caller's round: a B-spline surface made from data keeps the degree it is given
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::CornerInputInvalid {
+                input: CornerInput::RoundOfDegreeZeroAcross,
+                entity: None,
+            },
+        )
+        .into());
+    }
+    if k > 2 || h.len() <= k {
+        // its jets are taken to k, one row per order
         return Err(defect(WHY_ORDER).into());
     }
     // the end weights W_0, W_q and their derivatives along (0 past the jets' order)
@@ -3372,6 +3382,24 @@ mod tests {
 
     /// Two ramps over one span are a typed `Failed`, with the `SM_ERR` status the bare
     /// status had; a refusal's error carries its reason.
+    #[test]
+    fn a_round_of_degree_zero_across_is_invalid_input() {
+        let mut h = vec![vec![[0.0, 0.0, 0.0, 1.0]; 1]; 2];
+        let refusal = standard_form_across(&mut h, 0, 1).unwrap_err();
+        assert_eq!(
+            refusal.error.blend_failure(),
+            Some(&BlendFailure::CornerInputInvalid {
+                input: CornerInput::RoundOfDegreeZeroAcross,
+                entity: None,
+            })
+        );
+        assert_eq!(refusal.error.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(
+            crate::error::upstream_status(&refusal.error),
+            Some(crate::error::SM_ERR)
+        );
+    }
+
     #[test]
     fn two_ramps_over_one_span_overlap() {
         let ramps = [
