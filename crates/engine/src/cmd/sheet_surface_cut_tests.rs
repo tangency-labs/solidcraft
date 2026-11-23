@@ -1181,3 +1181,57 @@ fn a_cut_out_with_a_corner_on_the_sheets_edge_at_a_bend_folds_with_the_sheet() {
     run(&mut s, "sheet.refold", json!({}));
     check(&s, whole - 3.0, "folded again");
 }
+
+/// Round holes in one sketch, cut through the flat while the sheet is unfolded, are read straight
+/// into the sheet, also where one crosses the bend's tangent line or lies in its zone: those are
+/// cuts of the sheet's, their circles kept as arcs, and the one clear inside the plate a hole of
+/// it. Refolded, the sheet loses what the same holes drilled one by one take (a pattern of round
+/// holes over a bend).
+#[test]
+fn round_holes_in_one_sketch_cut_through_the_flat_across_a_bend_keep_their_arcs() {
+    // (radius, x, y): across the plate's tangent line (y = 12), inside the bend's zone, and two
+    // clear inside the plate.
+    let holes = [(3.042, 87.84, 10.926), (3.783, 69.982, 5.788), (2.0, 30.0, 40.0), (2.5, 50.0, 30.0)];
+    let drilled = {
+        let mut s = wide_bend();
+        run(&mut s, "sheet.unfold", json!({}));
+        for (r, x, y) in holes {
+            run(&mut s, "solid.cylinder", json!({"radius": r, "height": 30, "base": [x, y, -10], "axis": "Z", "operation": "cut"}));
+        }
+        run(&mut s, "sheet.refold", json!({}));
+        exact_volume(&s)
+    };
+    let mut s = wide_bend();
+    run(&mut s, "sheet.unfold", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": T, "name": "Holes"}));
+    for (r, x, y) in holes {
+        run(&mut s, "sketch.circle.center", json!({"center": [x, y], "diameter": 2.0 * r}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Holes", "distance": 3.0 * T, "direction": "symmetric", "operation": "cut"}));
+    let Some(sk) = s.model.state().surface_sheets.first().cloned() else { panic!("the plate is a sheet") };
+    assert_eq!(sk.sheet.cuts.len(), 2, "the holes at the bend are cuts of the sheet's");
+    // Each the circle as drawn, read straight from the sketch: arcs of one circle round the whole turn,
+    // not the pieces a cut read back from the body leaves where the bend's lines cross it.
+    for c in &sk.sheet.cuts {
+        let arcs: Vec<(Vec2, f64, f64)> = c
+            .region
+            .outer
+            .segs
+            .iter()
+            .filter_map(|e| match *e {
+                Seg2::Arc { center, radius, sweep, .. } => Some((center, radius, sweep)),
+                _ => None,
+            })
+            .collect();
+        let one = arcs.len() == c.region.outer.segs.len()
+            && arcs.len() <= 2
+            && arcs.iter().all(|a| a.0.dist(arcs[0].0) < 1e-9 && (a.1 - arcs[0].1).abs() < 1e-9)
+            && (arcs.iter().map(|a| a.2.abs()).sum::<f64>() - 2.0 * PI).abs() < 1e-9;
+        assert!(one, "a hole at the bend stays its circle: {:?}", c.region.outer.segs);
+    }
+    assert_eq!(sk.sheet.panels.iter().map(|p| p.region.holes.len()).sum::<usize>(), 2, "the holes in the plate are its holes");
+    run(&mut s, "sheet.refold", json!({}));
+    let v = exact_volume(&s);
+    assert!((v - drilled).abs() < 1e-6 * drilled, "{v} vs {drilled}");
+}
