@@ -32,7 +32,8 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    let insert = ["align", "angle", "at", "fixed", "height", "name", "path", "plane", "scale", "size_from", "sketch", "text", "tolerance", "width"];
+    let insert =
+        ["align", "angle", "at", "dpi", "fixed", "height", "name", "path", "plane", "scale", "size_from", "sketch", "text", "tolerance", "width"];
     assert_keys(input_schema_for::<InsertDxfParams>(), &insert);
     assert_keys(input_schema_for::<InsertSvgParams>(), &insert);
     assert_keys(

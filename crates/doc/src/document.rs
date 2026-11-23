@@ -1542,6 +1542,24 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         groups: Vec<crate::frame::MemberGroup>,
     },
+    /// A separate mounting or end plate, centred on a persistently identified planar face.
+    FramePlate {
+        plane: PlaneRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        member: Option<crate::frame::PlateMember>,
+        shape: crate::frame::PlateShape,
+        holes: crate::frame::PlateHoles,
+        #[walk(length = "Thickness")]
+        thickness: Expr,
+        #[walk(length = "Offset")]
+        offset: Expr,
+        #[walk(length = "X Offset")]
+        x_offset: Expr,
+        #[walk(length = "Y Offset")]
+        y_offset: Expr,
+        #[walk(angle = "Rotation")]
+        angle: Expr,
+    },
     /// Raise or sink profiles on a planar face, or wrap them on a selected cylindrical wall.
     Emboss {
         sketch: SketchId,
@@ -2714,7 +2732,7 @@ impl FilletStyle {
 
 /// Sketch curves a trim cuts with: chains of the curves `curves` (every curve of the sketch
 /// that is not construction geometry when empty) swept along `direction` (the sketch's normal
-/// when none) onto the surface.
+/// when none) onto the surface, or with `face_normal` dropped square onto it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 pub struct TrimCurves {
     pub sketch: SketchId,
@@ -2722,6 +2740,11 @@ pub struct TrimCurves {
     pub curves: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub direction: Option<Dir>,
+    /// The curves are projected along the surface's own normal, not along one direction: each
+    /// point of a curve goes to its foot on the surface (its nearest point there), wherever
+    /// the sketch lies. `direction` then has no say.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub face_normal: bool,
 }
 
 /// What of the tool body cuts in a Split Body by a face (#9305).
@@ -3138,8 +3161,8 @@ pub enum PatternKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         axis_feature: Option<FeatureName>,
     },
-    /// Copies along a chain of sketch curves: instance k moves by path(k·spacing) − path(0),
-    /// measured along the path from its start.
+    /// Copies along a chain of sketch curves: instance k moves by path(s + k·spacing) − path(s),
+    /// measured along the path from its start, where s is the start point (0 by default).
     Path {
         path_sketch: SketchId,
         path: Vec<String>,
@@ -3157,6 +3180,22 @@ pub enum PatternKind {
         /// Turn copies with the path's direction (else they keep their orientation).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         orient: bool,
+        /// The start point: how far along the path (from the end `flip` starts at) the original
+        /// sits; the copies are measured from there. `None`: the path's start.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Start point")]
+        start: Option<Expr>,
+        /// The start point as a fraction of the path's length (0 to 1), so it keeps its place
+        /// when the path's length changes. Used instead of `start` when set.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Start point (0 to 1)")]
+        start_fraction: Option<Expr>,
+        /// With `orient`, carry the copies with a rotation-minimising frame along the path, so on
+        /// a 3D path they keep the original's relation to it. Every Pattern on Path made now sets
+        /// it; one saved before it existed turns its copies about the sketch's normal only, as it
+        /// did then (the same on a flat path).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        follow_frame: bool,
     },
 }
 
@@ -3306,6 +3345,7 @@ impl FeatureKind {
             FeatureKind::FrameEndCap { .. } => "EndCapFeature",
             FeatureKind::FrameMemberTurn { .. } => "MemberTurnFeature",
             FeatureKind::FrameMember { .. } => "FrameMemberFeature",
+            FeatureKind::FramePlate { .. } => "FramePlateFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
             FeatureKind::Boss { .. } => "BossFeature",
             FeatureKind::Lip { groove: false, .. } => "LipFeature",
@@ -3393,6 +3433,7 @@ impl FeatureKind {
             FeatureKind::FrameEndCap { .. } => "frame_end_cap",
             FeatureKind::FrameMemberTurn { .. } => "frame_member_turn",
             FeatureKind::FrameMember { .. } => "frame_member",
+            FeatureKind::FramePlate { .. } => "frame_plate",
             FeatureKind::Emboss { .. } => "emboss",
             FeatureKind::Rib { .. } => "rib",
             FeatureKind::ReplaceFace { .. } => "replace_face",
@@ -3482,6 +3523,7 @@ impl FeatureKind {
             "EndCapFeature" => "frame_end_cap",
             "MemberTurnFeature" => "frame_member_turn",
             "FrameMemberFeature" => "frame_member",
+            "FramePlateFeature" => "frame_plate",
             "EmbossFeature" => "emboss",
             "BossFeature" => "boss",
             "LipFeature" | "GrooveFeature" => "lip",
@@ -3570,6 +3612,7 @@ impl FeatureKind {
             FeatureKind::FrameEndCap { .. } => "EndCap",
             FeatureKind::FrameMemberTurn { .. } => "Rotate",
             FeatureKind::FrameMember { .. } => "Member",
+            FeatureKind::FramePlate { .. } => "MountingPlate",
             FeatureKind::Emboss { .. } => "Emboss",
             FeatureKind::Boss { .. } => "Boss",
             FeatureKind::Lip { groove: false, .. } => "Lip",
