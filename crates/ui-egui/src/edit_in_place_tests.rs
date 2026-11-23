@@ -475,6 +475,8 @@ fn finish_editing_stays_reachable_with_plugins_at_every_window_width() {
         approval: String::new(),
         groups: Default::default(),
         entries: vec![serde_json::from_value(json!({"name":"spur", "effect":"edit", "input_schema":{"type":"object"}})).unwrap()],
+        images: Default::default(),
+        swatches: Default::default(),
     }];
     double_click_component(&mut h.app, json!({"component": f.plate}));
     settle(&mut h.app);
