@@ -139,7 +139,6 @@ use crate::surface::surface::p2::{
     CreateUvTrimCurvePathType, DropCurveFailArgs, SurfaceKind, UNSURE,
 };
 use crate::surface::surface::p4::FaceTest;
-use crate::surface::surface::p7::approx_derivative_lengths;
 use crate::surface::surface::Surface;
 use crate::surface::surface_point_solve::p2::with_out_of_bounds_enabled;
 
@@ -150,7 +149,7 @@ use super::p1::{
     SM_SUCCESS,
 };
 use super::p2::{
-    add_to_curve_with_policy, flush_curve_with_policy, BoundaryPolicy, DropOffset,
+    add_to_curve_with_policy, flush_curve_with_policy, seam_uv_tols, BoundaryPolicy, DropOffset,
     SM_ERR_BAD_SURFACE_POINT, SM_ERR_INVALID_INPUT, SM_ERR_NOT_WITHIN_TOLERANCE, SS_NONE,
 };
 
@@ -1000,9 +999,7 @@ impl Surface {
 
         // UV Tolerances - proportional to surface 3d/UV mapping size
         let srf_nat_domain = self.natural_uv_domain_with_nurb(k)?;
-        let project_size = approx_derivative_lengths(k, self, &srf_nat_domain)?;
-        let uv_tol_x = approx_tol_3d / (project_size.x + 1.0);
-        let uv_tol_y = approx_tol_3d / (project_size.y + 1.0);
+        let (uv_tol_x, uv_tol_y) = seam_uv_tols(k, self, &srf_nat_domain, approx_tol_3d)?;
 
         // temporarily enable slight out-of-bounds convergence (on an evaluation copy)
         let oob = with_out_of_bounds_enabled(self)?;
