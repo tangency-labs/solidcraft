@@ -888,7 +888,7 @@ fn public_split_helper_rejects_a_missing_infinite_region_after_partial_edits() {
     // a typed blend failure keeps the status of the bare `Upstream` (#13790)
     assert_eq!(
         outcome.unwrap_err().upstream_status(),
-        Some(crate::error::SM_ERR_NULL_POINTER)
+        Some(SM_ERR_NULL_POINTER)
     );
     assert_ne!(f.context().end(rail).unwrap(), old_end);
     assert!(f.fb.brep().vertex(old_end).unwrap().vertexuses.is_empty());
@@ -1061,10 +1061,7 @@ fn rollover_corner_vertex_delegates_to_the_available_geom_port() {
     let r = Missing.corner_vertex(&mut f.context(), start, id);
     // the fixture's corner table is empty: the vertex's corner is not in it
     // a typed blend failure keeps the status of the bare `Upstream` (#13790)
-    assert_eq!(
-        r.unwrap_err().upstream_status(),
-        Some(crate::error::SM_ERR_NULL_POINTER)
-    );
+    assert_eq!(r.unwrap_err().upstream_status(), Some(SM_ERR_NULL_POINTER));
 }
 
 #[test]
@@ -1107,7 +1104,7 @@ fn rollover_topology_split_preserves_actual_solver_id_and_partial_edits() {
         (
             "blend::fillet_geom::p5::FilletBrep::make_rail_edgeuse",
             true,
-            Some(crate::error::SM_ERR_NULL_POINTER)
+            Some(SM_ERR_NULL_POINTER)
         ),
         "{err:?}"
     );
@@ -1136,7 +1133,7 @@ fn rollover_recalc_uses_the_real_solver_and_reports_missing_edge_curve() {
         (
             "blend::fillet_geom::p3::FilletBrep::re_calc_fillet_geom",
             true,
-            Some(crate::error::SM_ERR_NULL_POINTER)
+            Some(SM_ERR_NULL_POINTER)
         ),
         "{err:?}"
     );
@@ -1223,10 +1220,7 @@ fn a_rail_without_classification_is_the_callers_input() {
     );
     assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);
     assert!(!error.is_defect(), "{error:?}");
-    assert_eq!(
-        error.upstream_status(),
-        Some(crate::error::SM_ERR_NULL_POINTER)
-    );
+    assert_eq!(error.upstream_status(), Some(SM_ERR_NULL_POINTER));
     assert!(script.calls.is_empty());
 }
 

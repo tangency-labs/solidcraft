@@ -460,7 +460,7 @@ fn caller<T>(value: Option<T>, cause: Solver) -> Result<T> {
 fn offset_required<T>(value: Option<T>) -> Result<T> {
     value.ok_or_else(|| {
         Failure::new(OP, BlendFailure::Solver(Solver::OffsetSurfaceMissing))
-            .with_status(crate::error::SM_ERR_NULL_POINTER)
+            .with_status(SM_ERR_NULL_POINTER)
             .into_error()
     })
 }
