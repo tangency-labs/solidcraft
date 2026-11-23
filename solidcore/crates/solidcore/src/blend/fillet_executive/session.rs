@@ -4437,7 +4437,10 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
             return Ok(None);
         }
         let (lo, hi) = (ia.min(ib), ia.max(ib));
-        let (left, right) = self.solvers.split_at_mut(hi);
+        let (left, right) = self
+            .solvers
+            .split_at_mut_checked(hi)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
         let low = left
             .get_mut(lo)
             .and_then(Option::as_mut)
