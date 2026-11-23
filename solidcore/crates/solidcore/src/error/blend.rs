@@ -32,7 +32,7 @@
 //! | [`BlendFailure::RadiusLawNotPositive`], [`BlendFailure::SectionInputInvalid`] | [`ErrorKind::InvalidInput`] (1): neither defect nor refusal |
 //! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | [`BlendFailure::Solver`]               | its cause's ([`SolverFailure::class`])       |
-//! | the fillet executive's checks of the caller's arguments and body ([`BlendFailure::NoEdgesGiven`], [`BlendFailure::SizeBelowResolution`], [`BlendFailure::PerEdgeListLength`], [`BlendFailure::ParameterListSizes`], [`BlendFailure::FaceHasNoSurface`], [`BlendFailure::NoFirstBody`], [`BlendFailure::TargetNotGiven`], [`BlendFailure::EdgeNotInTarget`], [`BlendFailure::EdgeNotFilletable`], [`BlendFailure::GnSectionInvalid`], [`BlendFailure::CrossSectionTypeUnknown`], [`BlendFailure::RadiusTypeNotForEdges`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::VariableRadiusLawMissing`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::EdgeUseWithoutEdge`], [`BlendFailure::BoundSurfaceRemoved`]) | [`ErrorKind::InvalidInput`] (1) |
+//! | the fillet executive's checks of the caller's arguments and body ([`BlendFailure::NoEdgesGiven`], [`BlendFailure::SizeBelowResolution`], [`BlendFailure::PerEdgeListLength`], [`BlendFailure::ParameterListSizes`], [`BlendFailure::FaceHasNoSurface`], [`BlendFailure::NoFirstBody`], [`BlendFailure::TargetNotGiven`], [`BlendFailure::EdgeNotInTarget`], [`BlendFailure::EdgeNotFilletable`], [`BlendFailure::ChamferSizeInvalid`], [`BlendFailure::ChamferFaceNotOfEdge`], [`BlendFailure::SolverFaceIndexInvalid`], [`BlendFailure::GnSectionInvalid`], [`BlendFailure::CrossSectionTypeUnknown`], [`BlendFailure::RadiusTypeNotForEdges`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::VariableRadiusLawMissing`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::EdgeUseWithoutEdge`], [`BlendFailure::BoundSurfaceRemoved`]) | [`ErrorKind::InvalidInput`] (1) |
 //! | [`BlendFailure::ExactBlendAxisCannotPlaceEdge`], the rational round's check of the exact blend it is given | [`ErrorKind::InvalidInput`] (1) |
 //! | [`BlendFailure::LawHasNoValue`], [`BlendFailure::SequenceCurveNotBSpline`], [`BlendFailure::FilletCrossesItself`] | [`ErrorKind::Unsupported`] (5) |
 //! | [`BlendFailure::CornerRefused`], [`BlendFailure::ExecutiveStepFailed`], [`BlendFailure::EdgeSplitDeclined`] | [`ErrorKind::Failed`] (6): neither defect nor refusal, so a kept cause decides |
@@ -339,6 +339,27 @@ pub enum BlendFailure {
     /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_INVALID_INPUT`.
     EdgeNotFilletable {
         /// The edge's index in the edges given.
+        index: usize,
+    },
+    /// The chamfer size given for an edge is not one it can take: a distance, chord or angle
+    /// that is not finite and positive, setbacks at the edge's wedge that are not finite and
+    /// positive (an angle so small the second underflows to 0), distances that fold at the
+    /// wedge (each must be more than the other's cosine of it), any size where the edge's
+    /// faces make no wedge (tangent or folded back), or on a knife edge any size but two
+    /// equal distances; the failure is at the edge. An angle past the room a wedge leaves
+    /// is [`crate::blend::blend_refusal::BlendRefusal::ChamferAngleTooLarge`] instead. A
+    /// check of the caller's arguments ([`ErrorKind::InvalidInput`]); status
+    /// `SM_ERR_INVALID_INPUT`.
+    ChamferSizeInvalid,
+    /// The face named for a chamfer's first size is neither of its edge's two faces; the
+    /// failure is at the edge. A check of the caller's arguments
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_INVALID_INPUT`.
+    ChamferFaceNotOfEdge,
+    /// The face a ball is asked to touch is named by an index past a fillet solver's two
+    /// faces, first (0) and second (1). A check of the caller's arguments
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_INVALID_INPUT`.
+    SolverFaceIndexInvalid {
+        /// The face index given.
         index: usize,
     },
     /// A G^n cross-section is asked with an order outside 2 to 4, or a thumbweight of 1 or
@@ -1599,8 +1620,6 @@ pub enum BandInput {
     ClosestBandFeet,
     /// An endpoint of the line.
     LineEndpoint,
-    /// The edge of an edge use.
-    EdgeUseEdge,
 }
 
 impl BandInput {
@@ -1624,7 +1643,6 @@ impl BandInput {
             Self::BlendedEdgeEndpoint => "the blended edge's endpoint",
             Self::ClosestBandFeet => "the closest band feet",
             Self::LineEndpoint => "the line endpoint",
-            Self::EdgeUseEdge => "the edge use's edge",
         }
     }
 }
@@ -1863,6 +1881,9 @@ impl BlendFailure {
             | Self::TargetNotGiven
             | Self::EdgeNotInTarget { .. }
             | Self::EdgeNotFilletable { .. }
+            | Self::ChamferSizeInvalid
+            | Self::ChamferFaceNotOfEdge
+            | Self::SolverFaceIndexInvalid { .. }
             | Self::GnSectionInvalid { .. }
             | Self::CrossSectionTypeUnknown
             | Self::RadiusTypeNotForEdges { .. }
@@ -1947,6 +1968,9 @@ impl BlendFailure {
             | Self::TargetNotGiven
             | Self::EdgeNotInTarget { .. }
             | Self::EdgeNotFilletable { .. }
+            | Self::ChamferSizeInvalid
+            | Self::ChamferFaceNotOfEdge
+            | Self::SolverFaceIndexInvalid { .. }
             | Self::GnSectionInvalid { .. }
             | Self::CrossSectionTypeUnknown
             | Self::RadiusTypeNotForEdges { .. }
@@ -2027,6 +2051,9 @@ impl BlendFailure {
             | Self::TargetNotGiven
             | Self::EdgeNotInTarget { .. }
             | Self::EdgeNotFilletable { .. }
+            | Self::ChamferSizeInvalid
+            | Self::ChamferFaceNotOfEdge
+            | Self::SolverFaceIndexInvalid { .. }
             | Self::GnSectionInvalid { .. }
             | Self::CrossSectionTypeUnknown
             | Self::RadiusTypeNotForEdges { .. }
@@ -2210,6 +2237,21 @@ impl core::fmt::Display for BlendFailure {
             Self::EdgeNotFilletable { index } => write!(
                 f,
                 "{}: edge {index} of the edges given has no edge use the fillet can roll on",
+                self.class()
+            ),
+            Self::ChamferSizeInvalid => write!(
+                f,
+                "{}: the chamfer size is not one the edge can take (sizes and setbacks finite and positive, distances that do not fold, faces that make a wedge, on a knife edge two equal distances)",
+                self.class()
+            ),
+            Self::ChamferFaceNotOfEdge => write!(
+                f,
+                "{}: the face named for the chamfer's first size is neither of its edge's faces",
+                self.class()
+            ),
+            Self::SolverFaceIndexInvalid { index } => write!(
+                f,
+                "{}: a fillet solver's faces are its first (0) and second (1), not face {index}",
                 self.class()
             ),
             Self::GnSectionInvalid { order, thumbweight } => write!(
@@ -3380,6 +3422,21 @@ mod tests {
             ),
             (
                 BlendFailure::EdgeNotFilletable { index: 1 },
+                ErrorKind::InvalidInput,
+                SM_ERR_INVALID_INPUT,
+            ),
+            (
+                BlendFailure::ChamferSizeInvalid,
+                ErrorKind::InvalidInput,
+                SM_ERR_INVALID_INPUT,
+            ),
+            (
+                BlendFailure::ChamferFaceNotOfEdge,
+                ErrorKind::InvalidInput,
+                SM_ERR_INVALID_INPUT,
+            ),
+            (
+                BlendFailure::SolverFaceIndexInvalid { index: 2 },
                 ErrorKind::InvalidInput,
                 SM_ERR_INVALID_INPUT,
             ),
