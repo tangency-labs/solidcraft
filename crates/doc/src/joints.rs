@@ -2968,10 +2968,13 @@ impl Document {
             }
         }
         let parents: BTreeMap<u64, u64> = self.occurrences.iter().map(|o| (o.id, o.parent)).collect();
+        let inactive = self.inactive_pattern_occurrences();
         let (mut occurrence_at, mut first_of) = (std::collections::HashMap::new(), std::collections::HashMap::new());
         for (i, o) in self.occurrences.iter().enumerate() {
             occurrence_at.entry(o.id).or_insert(i);
-            first_of.entry(o.component).or_insert(i);
+            if !inactive.contains(&o.id) {
+                first_of.entry(o.component).or_insert(i);
+            }
         }
         // Outer occurrences first: each one is stored in its parent's frame as this loop has left
         // it, so a parent the solution also moves must be moved before the parts inside it. In id
@@ -2990,7 +2993,7 @@ impl Document {
         for (_, occ, world) in order {
             let occ = &occ;
             let parent = parents.get(occ).copied().unwrap_or(0);
-            // Through the transforms as this loop has left them, as `component_transform` reads.
+            // Through the active parent transforms as this loop has left them, as the solver read them.
             let occurrences = &self.occurrences;
             let pw = if parent == 0 {
                 IDENTITY
@@ -3447,6 +3450,46 @@ mod tests {
             assert!(close(&at, &w), "component {component}: at x {:.3}, wanted {:.3}", at[3][0], w[3][0]);
         }
         assert!(!doc.apply_joint_solution(&Solution { world, ..Solution::default() }), "applied twice, nothing moves");
+    }
+
+    #[test]
+    fn a_solution_places_children_in_their_active_parents_frame() {
+        let mut doc = Document::default();
+        let parent = doc.add_component(Some("Parent"), 0).unwrap();
+        let original = doc.occurrence_of(parent).unwrap().id;
+        let inactive = doc.add_occurrence(parent, 0, shift(20.0, 0.0, 0.0)).unwrap();
+        let replacement = doc.add_occurrence(parent, 0, shift(4.0, 0.0, 0.0)).unwrap();
+        let child = doc.add_component(Some("Child"), parent).unwrap();
+        let child = doc.occurrence_of(child).unwrap().id;
+        let pattern = doc
+            .add_feature(
+                FeatureKind::Pattern {
+                    features: Vec::new(),
+                    pattern: crate::PatternKind::Rectangular {
+                        dir1: crate::Dir(Vec3::X),
+                        count1: "2".into(),
+                        spacing1: "20".into(),
+                        dir2: None,
+                        count2: None,
+                        spacing2: None,
+                        alignment: Default::default(),
+                        alignment2: Default::default(),
+                        reversed: false,
+                        reversed2: false,
+                    },
+                    bodies: Vec::new(),
+                    placements: Vec::new(),
+                    components: vec![parent],
+                    occurrences: vec![inactive],
+                },
+                Some("Copies"),
+            )
+            .unwrap();
+        doc.feature_mut(pattern).unwrap().suppressed = true;
+        doc.remove_occurrences(&BTreeSet::from([original]));
+        let target = shift(12.0, 0.0, 0.0);
+        assert!(doc.apply_joint_solution(&Solution { world: BTreeMap::from([(child, target)]), ..Solution::default() }));
+        assert_eq!(doc.path_placement(&[replacement, child]).unwrap().1, target);
     }
 
     #[test]

@@ -613,8 +613,7 @@ impl Session {
     pub fn occurrence_children(&self, path: &[u64]) -> Result<Vec<OccurrencePlacement>> {
         let component = if path.is_empty() { 0 } else { self.occurrence_placement(path)?.component };
         self.doc
-            .occurrences
-            .iter()
+            .active_occurrences()
             .filter(|o| o.parent == component)
             .map(|o| {
                 let mut child = path.to_vec();

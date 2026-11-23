@@ -623,22 +623,25 @@ impl EmbossFace {
         if sketch_owner == author {
             return Self::component_frame(doc, author, &self.author_path);
         }
-        let path = doc.first_path(sketch_owner);
+        let inactive = doc.inactive_pattern_occurrences();
+        let mut path = Vec::new();
         let mut component = sketch_owner;
         for _ in 0..64 {
             if component == 0 {
                 break;
             }
-            let mut occurrences = doc.occurrences.iter().filter(|o| o.component == component);
+            let mut occurrences = doc.occurrences.iter().filter(|o| o.component == component && !inactive.contains(&o.id));
             let occurrence = occurrences.next().ok_or_else(|| DocError::Invalid("sketch placement no longer exists".into()))?;
             if occurrences.next().is_some() {
                 return Err(DocError::Invalid("sketch placement is ambiguous".into()));
             }
+            path.push(occurrence.id);
             component = occurrence.parent;
         }
         if component != 0 {
             return Err(DocError::Invalid("sketch placement exceeds depth limit".into()));
         }
+        path.reverse();
         Self::component_frame(doc, sketch_owner, &path)
     }
 

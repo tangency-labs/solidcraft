@@ -621,6 +621,9 @@ fn inactive_component_patterns_keep_their_occurrences_and_joints() {
     let marker = s.doc.feature_index(feature).expect("pattern position");
     let shown = |s: &mut Session, expected| {
         assert_eq!(s.occurrence_placement(&[copy]).is_ok(), expected);
+        let children = s.occurrence_children(&[]).expect("active root children");
+        assert_eq!(children.len(), if expected { 2 } else { 1 });
+        assert_eq!(children.iter().any(|child| child.occurrence == copy), expected);
         let measured = run(s, "inspect.measure", json!({}));
         assert_eq!(measured["body_count"], if expected { 3 } else { 2 });
         let solved = run(s, "joint.solve", json!({}));
@@ -675,6 +678,32 @@ fn inactive_component_patterns_keep_their_occurrences_and_joints() {
     assert!(!s.doc.occurrences.iter().any(|o| o.id == copy));
     assert!(!s.doc.assembly.joints.iter().any(|joint| joint.id == joint_id));
     shown(&mut s, false);
+}
+
+#[test]
+fn an_inactive_pattern_does_not_drive_an_active_joints_reported_value() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Unit", "grounded": false}));
+    let seed = s.doc.occurrences.first().expect("seed occurrence").id;
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let pattern = run(&mut s, "solid.pattern.rectangular", json!({"components": ["Unit"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30}));
+    let copy = pattern["occurrences"][0].as_u64().expect("copy");
+    let driver = run(&mut s, "joint.as_built", json!({"type": "slider", "a": 0, "b": copy}))["joint"].as_u64().expect("driver");
+    let follower = run(&mut s, "joint.as_built", json!({"type": "slider", "a": 0, "b": seed}))["joint"].as_u64().expect("follower");
+    run(&mut s, "joint.motion_link", json!({"a": driver, "b": follower, "ratio": 1, "offset": 7}));
+    let check = |s: &mut Session, expected: f64| {
+        let listed = run(s, "joint.list", json!({}));
+        let row = listed["joints"].as_array().unwrap().iter().find(|row| row["id"] == follower).expect("listed follower");
+        assert_eq!(row["values"][0]["value"], expected);
+        let inspected = run(s, "joint.inspect", json!({"joint": follower}));
+        assert_eq!(inspected["joints"][0]["values"][0]["value"], expected);
+    };
+    check(&mut s, 7.0);
+    run(&mut s, "timeline.suppress", json!({"feature": pattern["feature"], "suppressed": true}));
+    check(&mut s, 0.0);
+    run(&mut s, "timeline.suppress", json!({"feature": pattern["feature"], "suppressed": false}));
+    check(&mut s, 7.0);
 }
 
 /// #4763: a body of a component moved 60 mm along X, patterned from the root. The copy goes
