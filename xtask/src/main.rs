@@ -134,7 +134,7 @@ commands:
                   AGENTS.md and new skills stay short
   mesh-decisions  check that model decisions in crates/doc, crates/engine and crates/kernel use exact
                   geometry: fails on a function outside display, export, previews and mesh bodies
-                  that uses a mesh and xtask/mesh-decisions.txt does not list, and on a listed one
+                  that uses a mesh and xtask/mesh-decisions/ does not list, and on a listed one
                   that no longer does (the list only shrinks)
   app-geometry [--print]
                   check that apps compute no geometry: fails on a function in crates/doc, engine,
@@ -530,6 +530,7 @@ fn wasm_check() -> Result<(Command, usize), String> {
         .map(|c| c.name.clone())
         .collect();
     set.push("solidcraft-web".into());
+    set.push("ui-kit-gallery".into());
     let mut c = cargo();
     c.args(["check", "--target", "wasm32-unknown-unknown", "--profile", "ci"]);
     for p in &set {

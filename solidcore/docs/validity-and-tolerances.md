@@ -113,7 +113,8 @@ the code runs:
 `Geometry` (level 1) and `All` (level 2, the slow geometric tests); each failed test is one line
 `<type>::Test #<n> <name>: <message>`, and warnings (`SmBrep` test 21) are not failures. Every
 operation's result in ops passes `finish` (`solidcore-ops/src/body.rs`): a result with no faces is
-`Error::Empty`, and a solid input whose result fails `is_outward_solid` is `Error::NotSolid`. A
+`Error::Empty`, and a solid input whose result fails `is_outward_solid` is
+`Error::NotSolidBecause`, naming the test it fails. A
 boolean's result is checked with `is_outward_touching_solids` instead, which allows solids that touch
 along an edge or at a vertex, and the boolean returns `None` for an empty result
 ([booleans.md](booleans.md) §3).
@@ -135,7 +136,7 @@ The tests that decide each property, by the test numbers the check reports:
 | the tolerance pass | vertex/edge and vertex/face gaps ≤ τ_v / 2, edge/face gap ≤ τ_e (`SmBrep` list 2, tests 0 to 4) | `assert_valid/brep.rs`, `validate_and_update` | 0 |
 | seams and poles | §6 | `assert_valid/face.rs`, `vertex.rs` | 0 and 2 |
 | closed shells | a region's outer shell is a closed face-use shell (Brep 10, 11), its inner shells lie inside it (Brep 12), every region is reached across face uses (Brep 18, 19) | `assert_valid/brep.rs` | 0 |
-| no coincident topology | no two vertices, edges or faces coincide (`contains_coincident_topology`) | `validation/coincidence.rs` | 0 |
+| no coincident topology on a face | no two vertices of a face coincide (Face 32), no two of its edges coincide (Face 33, 34) | `assert_valid/face.rs` | 2 |
 
 Two loops of a face share no vertex, but one loop may pass through a vertex more than once. Where
 a hole touches its face's outer boundary at one point, or two holes touch, the face's boundary
@@ -387,8 +388,8 @@ with the old tolerance and the gap.
 
 **A tube must stay clear of what it does not bound.** A tolerance region that reaches an entity the
 entity is not incident to merges topology that the body says is separate [9, 5]: an edge whose
-tube covers its own length (Edge 7), two vertices or edges that coincide within tolerance
-(`contains_coincident_topology`). Past that size the stored topology no longer has one meaning, and
+tube covers its own length (Edge 7), two vertices or edges of a face that coincide within tolerance
+(Face 32, 33, 34). Past that size the stored topology no longer has one meaning, and
 no growth is valid whatever the gap.
 
 **Where the code stands.** Today's growth paths are measured, not proved: `Fix_TolSizes` and
@@ -415,7 +416,7 @@ tolerance.
    shared vertex, a loop's endpoint gap is bounded by τ_e1 + τ_e2 + 2τ_v, provided both endpoints
    meet that same vertex within their own edge and vertex zones.
 7. No tube or ball reaches an entity it does not bound: an edge is longer than its tolerance, and no
-   two entities coincide.
+   two vertices or edges of a face coincide.
 8. A solid result is one closed manifold, valid at level 0, facing out (positive volume); a
    boolean's may be closed solids that touch along an edge or at a vertex.
 9. A constructed result's tolerances come from its certificates (§8); a measured gap past them is a

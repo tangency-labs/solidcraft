@@ -187,6 +187,10 @@ to commands, with no geometry math.
    `NavCaps` saying whether it can orbit (off for flat 2D pages) and pick. New canvases must use
    `navigation::handle`; never read drags, the wheel or pinch to move the camera yourself. The
    `hand_rolled_camera_input_is_rejected` test fails if a page does.
+7. **Build UI from the kit.** See the component gallery at
+   [docs.solidcraft.io/kit/](https://docs.solidcraft.io/kit/) before adding UI: every `ui_kit`
+   component live, with how to call it and its do's and don'ts (`cargo run -p ui-kit-gallery`
+   opens it on the desktop).
 
 Labels, parameter docs, messages and docs use the terms in the
 [glossary](https://docs.solidcraft.io/reference/glossary.html): one term for each idea. A change that adds a new
@@ -477,8 +481,10 @@ the agent or a maintainer can attach it.
 Keep an eye on your PR's status, but don't push to it only to catch up with `main`: every push
 restarts the whole CI run for everyone waiting behind it, and `main`'s own run catches what lands in
 between. When you push a change anyway, or GitHub reports a conflict, bring your branch up to date
-with the latest `main` by rebasing or by merging `main` in; both are fine. Rebasing is preferred for
-your own branch (push it with `--force-with-lease`). Never force-push `main` or a branch someone else
+with the latest `main` by merging `main` in or by rebasing; both are fine. Merging costs less: when
+the PR already passed and the merge leaves your own change as it was, CI carries the passing run and
+repeats only the repository checks (`scripts/ci/main_merge.py`). A rebase always re-runs the full
+suite, and you must push it with `--force-with-lease`. Never force-push `main` or a branch someone else
 works on. When the project's automation updates your pull request, it merges `main` into your branch
 and never force-pushes over your history. Resolve conflicts without losing others' changes.
 Don't re-run CI on an unchanged commit either: a real failure fails again.

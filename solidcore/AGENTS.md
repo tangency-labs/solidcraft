@@ -99,7 +99,8 @@ anywhere (including dependencies; `deny.toml` bans copyleft crates).
 - No `unwrap`/`expect`/`panic!`/`todo!`/unchecked `[i]` indexing (denied by lints; tests
   are exempt). Use `.get()`, iterators, `?` and `SolidError`.
 - Deterministic: no clock, no hashing of addresses, no `HashMap` iteration order in
-  results (use `Vec`, `BTreeMap`, or sort), randomness only from `kernel.rng`.
+  results (use `Vec`, `BTreeMap`, or sort), randomness only from a
+  generator the call makes itself from the kernel's seed (`Kernel::seeded_rng`).
 - No global or `static mut`/`thread_local` state. Everything lives in `Kernel`.
 - Must build for `wasm32-unknown-unknown`: no filesystem or `std::time`, and no threads in
   library code for now (§4c).
@@ -201,7 +202,7 @@ wasm32-unknown-unknown`; and, for kernel changes, the goldens of every unit you 
 (`cargo run --profile goldens -p goldens -- --unit <id> --goldens`). Every case your change
 moves is fixed, or blessed with the justification §1 asks for.
 
-**Finish:** bring the branch up to date with the latest `origin/main` (rebase is preferred; merging `main` in is fine; never force-push over someone else's history), re-verify, put the
+**Finish:** bring the branch up to date with the latest `origin/main` (merging `main` in or rebasing are both fine; merging costs less CI, see the root `CONTRIBUTING.md`; never force-push over someone else's history), re-verify, put the
 goldens summary lines in the description, and mark the PR ready. CI is the merge gate.
 
 **Records are files, never appended.** Every finding and upstream issue is its own new file

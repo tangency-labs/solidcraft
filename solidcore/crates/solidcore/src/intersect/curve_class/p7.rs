@@ -620,6 +620,19 @@ impl<O: ClassObject> CurveClassification<O> {
     /// [`SolidError::Unported`] for an interval end on an edge (`SmEdge::GetInterval`,
     /// unit `topology.edge`).
     pub fn is_crossed_by_edge(&self, geometry: &impl ClassGeometry<O>) -> Result<bool> {
+        self.is_crossed_by_edge_unless(geometry, |_| Ok(false))
+    }
+
+    /// The same topological crossing candidates, excluding only edges for which the
+    /// caller proves geometric separation from the classification curve.
+    ///
+    /// # Errors
+    /// Those of the edge intervals and the separation proof.
+    pub(crate) fn is_crossed_by_edge_unless(
+        &self,
+        geometry: &impl ClassGeometry<O>,
+        mut separated: impl FnMut(Option<O>) -> Result<bool>,
+    ) -> Result<bool> {
         let size = self.size();
 
         // for every classification interval
@@ -656,7 +669,9 @@ impl<O: ClassObject> CurveClassification<O> {
                 }
 
                 // an Edge was found crossing the Classification Curve
-                return Ok(true);
+                if !separated(edge)? {
+                    return Ok(true);
+                }
             }
 
             // When Interval ends on an Edge
@@ -689,7 +704,9 @@ impl<O: ClassObject> CurveClassification<O> {
                 }
 
                 // an Edge was found crossing the Classification Curve
-                return Ok(true);
+                if !separated(edge)? {
+                    return Ok(true);
+                }
             }
         }
 
@@ -1373,6 +1390,7 @@ impl<O: ClassObject> CurveClassification<O> {
         let mut ivl = *self.at(index)?;
         let src_zone_tol_3d = src_zone_tol_3d_of(k, Some(&*self));
         let ctx = FaceIntervalContext {
+            doing_fillets: self.doing_fillets(),
             curve: self.curve(),
             uv_curve1: self.uv_curve1(),
             src_zone_tol_3d,
@@ -1802,6 +1820,7 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
 
 /// The classification data `ClassifyFaceInterval` reads besides the interval.
 struct FaceIntervalContext<O> {
+    doing_fillets: bool,
     curve: Option<O>,
     uv_curve1: Option<O>,
     src_zone_tol_3d: f64,
@@ -1979,9 +1998,52 @@ fn classify_face_interval_on<O: ClassObject>(
         _ => {}
     }
 
+    // If a curve leaves a vertex tangent to a boundary, that vertex's sector
+    // alone may vote outside while its unclassified opposite end lies strictly
+    // inside the face (including fillet rails classified by `rails_fit` and
+    // `TestRollOver`, which run with `doing_fillets = false`). Confirm that
+    // unclassified end on the actual trim before testing the interval's interior.
+    let opposite_end = match (did_min, did_max) {
+        (true, false)
+            if !min.inside
+                && ivl.start.point_class() == PointClassType::Vertex
+                && ivl.end.point_class() == PointClassType::Unknown =>
+        {
+            Some(ivl.interval.max())
+        }
+        (false, true)
+            if !max.inside
+                && ivl.end.point_class() == PointClassType::Vertex
+                && ivl.start.point_class() == PointClassType::Unknown =>
+        {
+            Some(ivl.interval.min())
+        }
+        _ => None,
+    };
+    let mut opposite_inside = false;
+    if ctx.do_point_classify && ctx.uv_space_okay {
+        if let Some(t) = opposite_end {
+            if let Some(curve) = context_uv_curve1(access.geometry(), ctx)? {
+                let p = curve.evaluate_point(k, t)?;
+                let mut sample = PointClassification::new(ctx.src_zone_tol_3d);
+                access.point_classify(
+                    k,
+                    face,
+                    Point2::new(p.x, p.y),
+                    ctx.src_zone_tol_3d,
+                    false,
+                    true,
+                    &mut sample,
+                )?;
+                opposite_inside =
+                    sample.point_class() == PointClassType::Face && sample.object() == Some(face);
+            }
+        }
+    }
+
     // 4. Do a PointClassification when interval couldn't be classified through
     // endPoint classifications
-    if ctx.do_point_classify && !did_min && !did_max {
+    if ctx.do_point_classify && ((!did_min && !did_max) || opposite_inside) {
         did_mid = true;
 
         // pick a near interval mid-point curve parameter
@@ -1998,7 +2060,12 @@ fn classify_face_interval_on<O: ClassObject>(
             // Don't put this face's classification directly into m_vMid [B97]
             let mut temp = PointClassification::new(ctx.src_zone_tol_3d);
             access.point_classify(k, face, uv, ctx.src_zone_tol_3d, false, true, &mut temp)?;
-            if temp.point_class() != PointClassType::Unknown {
+            let accept = if opposite_inside {
+                temp.point_class() == PointClassType::Face && temp.object() == Some(face)
+            } else {
+                temp.point_class() != PointClassType::Unknown
+            };
+            if accept {
                 ivl.mid = temp;
             }
         } else {
@@ -2030,6 +2097,28 @@ fn classify_face_interval_on<O: ClassObject>(
             } else if start_dev < end_dev - 1.0E-10 {
                 max.inside = min.inside;
             } else {
+                // Boundary intersections already delimit this open interval. If the
+                // endpoint sectors disagree equally, classify its interior on the trim.
+                if ctx.doing_fillets && ctx.do_point_classify && ctx.uv_space_okay {
+                    if let Some(curve) = context_uv_curve1(access.geometry(), ctx)? {
+                        let p = curve.evaluate_point(k, ivl.interval.evaluate(0.4567))?;
+                        let mut sample = PointClassification::new(ctx.src_zone_tol_3d);
+                        access.point_classify(
+                            k,
+                            face,
+                            Point2::new(p.x, p.y),
+                            ctx.src_zone_tol_3d,
+                            false,
+                            true,
+                            &mut sample,
+                        )?;
+                        if sample.point_class() == PointClassType::Face
+                            && sample.object() == Some(face)
+                        {
+                            ivl.mid = sample;
+                        }
+                    }
+                }
                 return Ok(());
             }
         }

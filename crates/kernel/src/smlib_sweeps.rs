@@ -79,8 +79,8 @@ pub(crate) struct Draft {
 }
 
 pub(crate) use imp::{
-    body_from_record, curve, extrude, extrude_drafted_with_holes, face_section, loft, loft_curves, loft_to_point, path_curve, project_onto_face,
-    rail_curves, revolve, screw, screw_radial, sphere, sweep, sweep_controlled,
+    body_from_record, curve, curve_tolerance, extrude, extrude_drafted_with_holes, face_section, loft, loft_curves, loft_to_point, path_curve,
+    project_onto_face, rail_curves, revolve, screw, screw_radial, sphere, sweep, sweep_controlled,
 };
 
 /// `parts` joined in order in a balanced tree: each part with its neighbour, then each pair with
@@ -420,7 +420,7 @@ mod imp {
 
     /// How close a curve SMLib makes on a body's faces keeps to the true one: a millionth of the
     /// body's size.
-    fn curve_tolerance(body: &Body) -> f64 {
+    pub(crate) fn curve_tolerance(body: &Body) -> f64 {
         (body.size() * 1e-6).max(1e-6)
     }
 
@@ -576,7 +576,8 @@ mod imp {
         for (f, face) in r.faces.iter().enumerate() {
             let on_it = on(face, start)
                 && (edges.is_empty() || touched.contains(&f) || {
-                    let (ops, order) = ops()?;
+                    let form = ops()?;
+                    let (ops, order) = &*form;
                     let ds =
                         ops.face_distances(order, f, &points(edges)).map_err(|e| KernelError::Failed(format!("sweep history: face {f}: {e}")))?;
                     ds.iter().any(|d| d.is_some_and(|d| d <= reach))
@@ -598,7 +599,8 @@ mod imp {
         // Inside the walls: the faces nearest each point, as trimmed (a point on the edge between
         // two faces of one wall lies on both).
         if !inside.is_empty() {
-            let (ops, order) = ops()?;
+            let form = ops()?;
+            let (ops, order) = &*form;
             let points = points(inside);
             // Only a face within `reach` of a point can claim it below or be its nearest, so the
             // seam is asked about those alone and answers `None` for the rest: every face against

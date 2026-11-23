@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::drawing::view::ViewPlace;
 use solidcraft_doc::drawing_view::ViewSettings;
 
-use super::{BaseParams, CopyParams, EditParams, InspectParams, MoveParams, PlaceParam, ProjectedParams, SnapshotParams, ViewSet};
+use super::{BaseParams, CopyParams, EditParams, InspectParams, MoveParams, PlaceParam, ProjectedParams, ScaleParam, SnapshotParams, ViewSet};
 use crate::schema::input_schema_for;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 
@@ -137,6 +137,18 @@ fn a_place_reads_and_writes_as_the_record_and_its_schema_says_so() {
         assert!(serde_json::from_value::<PlaceParam>(bad.clone()).is_err(), "{bad}");
         assert_eq!(fitting(&bad), Vec::<Value>::new(), "{bad}");
     }
+}
+
+/// A scale's text pattern allows what `Scale` reads: the whitespace `trim` removes, round each
+/// number. `conforms` doesn't read patterns, so the pattern's text is pinned here, next to the
+/// reader's answer.
+#[test]
+fn the_scale_pattern_allows_what_the_parser_trims() {
+    let read = |text: &str| serde_json::from_value::<ScaleParam>(json!(text)).ok();
+    assert_eq!(read(" 1 :\t2\u{a0}"), read("1:2"));
+    let ws = crate::schema::types::whitespace_class();
+    let pattern = format!("^[{ws}]*[0-9]+(\\.[0-9]+)?[{ws}]*:[{ws}]*[0-9]+(\\.[0-9]+)?[{ws}]*$");
+    assert_eq!(schemars::schema_for!(ScaleParam).as_value()["pattern"], json!(pattern));
 }
 
 #[test]

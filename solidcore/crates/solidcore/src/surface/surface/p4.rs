@@ -61,9 +61,9 @@
 //!   upstream. `SmCurve::EvaluateGeometric` failing with `SM_ERR` marks the point touching
 //!   (other failures propagate; upstream would read uninitialised vectors). The shape
 //!   variables only read on paths where they were set start at zero. With an edge and a
-//!   face, osculating circles overlapping past touching by less than [`contact_tol_3d`]
-//!   are tangent (WR-787, #15429), and so are a line and an osculating circle (#14599); a
-//!   bare curve or surface keeps upstream's zero.
+//!   face, osculating circles overlapping past touching by up to [`contact_tol_3d`] (read
+//!   by `within_contact_tol`) are tangent (WR-787, #15429), and so are a line and an
+//!   osculating circle (#14599); a bare curve or surface keeps upstream's zero.
 //! - **Kernel.** `is_on_seam` and `global_point_solve` (and `global_point_solve_starts`)
 //!   take the [`Kernel`] that the tolerance, drop and cache callees now need.
 //! - **Unported callees** (return [`SolidError::Unported`]): the zone tolerance of a face's
@@ -77,6 +77,7 @@ use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::evaluate_geometric as curve_evaluate_geometric;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
+use crate::error::surface::{SolveInput, SurfaceFailure};
 use crate::error::{ignored, Result, SolidError, SM_ERR};
 use crate::geom::assert_array::labels::{EDGE_TYPE, FACE_TYPE};
 use crate::geom::extent1d::Extent1d;
@@ -166,9 +167,11 @@ impl EvalNFunctions for CsIntersectEnfo<'_> {
         let k = self.kernel;
         check_len(x, f, 3, OP_CS_INTERSECT)?;
         let (Some(&t), Some(&u), Some(&v)) = (x.first(), x.get(1), x.get(2)) else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_CS_INTERSECT,
-                "the solver variables are too few",
+                SurfaceFailure::Defect {
+                    why: "the solver variables are fewer than the equations take, but check_len just required exactly that many",
+                },
             ));
         };
 
@@ -190,9 +193,9 @@ impl EvalNFunctions for CsIntersectEnfo<'_> {
             || dv.length_squared() < EFF_ZERO_SQ
             || ct.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_CS_INTERSECT,
-                "a tangent of the curve or surface has zero length",
+                SurfaceFailure::ZeroLengthTangent,
             ));
         }
 
@@ -292,9 +295,11 @@ impl EvalNFunctions for CsNormalizeEnfo<'_> {
         let count = if directed { 4 } else { 3 };
         check_len(x, f, count, OP_CS_NORMALIZE)?;
         let (Some(&t), Some(&u), Some(&v)) = (x.first(), x.get(1), x.get(2)) else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_CS_NORMALIZE,
-                "the solver variables are too few",
+                SurfaceFailure::Defect {
+                    why: "the solver variables are fewer than the equations take, but check_len just required exactly that many",
+                },
             ));
         };
 
@@ -314,9 +319,9 @@ impl EvalNFunctions for CsNormalizeEnfo<'_> {
             || su.length_squared() < EFF_ZERO_SQ
             || sv.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_CS_NORMALIZE,
-                "a tangent of the curve or surface has zero length",
+                SurfaceFailure::ZeroLengthTangent,
             ));
         }
 
@@ -346,9 +351,11 @@ impl EvalNFunctions for CsNormalizeEnfo<'_> {
 
         if directed {
             if self.opt_vectors.unwrap_or(&[]).is_empty() {
-                return Err(SolidError::surface_missing(
+                return Err(SolidError::surface(
                     OP_CS_NORMALIZE,
-                    "the direction vector",
+                    SurfaceFailure::InputNotGiven {
+                        what: SolveInput::DirectionVector,
+                    },
                 ));
             }
             let dir = nth(self.opt_vectors.unwrap_or(&[]), 0, OP_CS_NORMALIZE)?;
@@ -432,9 +439,11 @@ impl EvalNFunctions for SspIntersectEnfo<'_> {
         let (Some(&u1), Some(&v1), Some(&u2), Some(&v2)) =
             (x.first(), x.get(1), x.get(2), x.get(3))
         else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_SSP_INTERSECT,
-                "the solver variables are too few",
+                SurfaceFailure::Defect {
+                    why: "the solver variables are fewer than the equations take, but check_len just required exactly that many",
+                },
             ));
         };
 
@@ -465,16 +474,22 @@ impl EvalNFunctions for SspIntersectEnfo<'_> {
             }
             let plane_norm = norm1.cross(norm2);
             if plane_norm.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_SSP_INTERSECT,
-                    "the surface normals are parallel",
+                    SurfaceFailure::ParallelNormals,
                 ));
             }
             temp_plane = Plane::from_normal(through, plane_norm.unitize_or_z());
             &temp_plane
         } else {
-            self.plane
-                .ok_or_else(|| SolidError::surface_missing(OP_SSP_INTERSECT, "the plane"))?
+            self.plane.ok_or_else(|| {
+                SolidError::surface(
+                    OP_SSP_INTERSECT,
+                    SurfaceFailure::InputNotGiven {
+                        what: SolveInput::Plane,
+                    },
+                )
+            })?
         };
 
         // evaluate Plane derivatives
@@ -505,9 +520,9 @@ impl EvalNFunctions for SspIntersectEnfo<'_> {
             || dug.length_squared() < EFF_ZERO_SQ
             || dvg.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_SSP_INTERSECT,
-                "a surface tangent has zero length",
+                SurfaceFailure::ZeroLengthTangent,
             ));
         }
 
@@ -570,9 +585,11 @@ impl EvalNFunctions for SsiNormalizeEnfo<'_> {
         let (Some(&u1), Some(&v1), Some(&u2), Some(&v2)) =
             (x.first(), x.get(1), x.get(2), x.get(3))
         else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_SSI_NORMALIZE,
-                "the solver variables are too few",
+                SurfaceFailure::Defect {
+                    why: "the solver variables are fewer than the equations take, but check_len just required exactly that many",
+                },
             ));
         };
 
@@ -594,9 +611,9 @@ impl EvalNFunctions for SsiNormalizeEnfo<'_> {
             || du2.length_squared() < EFF_ZERO_SQ
             || dv2.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_SSI_NORMALIZE,
-                "a surface tangent has zero length",
+                SurfaceFailure::ZeroLengthTangent,
             ));
         }
 
@@ -638,9 +655,9 @@ impl EvalNFunctions for SsiNormalizeEnfo<'_> {
                 .surface
                 .evaluate_normal(k, uv, Side::Left, Side::Left)?;
             if nu.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_SSI_NORMALIZE,
-                    "the first surface has no normal",
+                    SurfaceFailure::NoNormal,
                 ));
             }
         }
@@ -653,9 +670,9 @@ impl EvalNFunctions for SsiNormalizeEnfo<'_> {
                 .surface
                 .evaluate_normal(k, uv2, Side::Left, Side::Left)?;
             if n2u.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_SSI_NORMALIZE,
-                    "the second surface has no normal",
+                    SurfaceFailure::NoNormal,
                 ));
             }
         }
@@ -712,9 +729,11 @@ impl EvalNFunctions for SsNormalizeEnfo<'_> {
         let (Some(&u1), Some(&v1), Some(&u2), Some(&v2)) =
             (x.first(), x.get(1), x.get(2), x.get(3))
         else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_SS_NORMALIZE,
-                "the solver variables are too few",
+                SurfaceFailure::Defect {
+                    why: "the solver variables are fewer than the equations take, but check_len just required exactly that many",
+                },
             ));
         };
 
@@ -732,9 +751,9 @@ impl EvalNFunctions for SsNormalizeEnfo<'_> {
             || s2u.length_squared() < EFF_ZERO_SQ
             || s2v.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_SS_NORMALIZE,
-                "a surface tangent has zero length",
+                SurfaceFailure::ZeroLengthTangent,
             ));
         }
 
@@ -766,9 +785,11 @@ impl EvalNFunctions for SsNormalizeEnfo<'_> {
 
         if directed {
             if self.opt_vectors.unwrap_or(&[]).is_empty() {
-                return Err(SolidError::surface_missing(
+                return Err(SolidError::surface(
                     OP_SS_NORMALIZE,
-                    "the direction vector",
+                    SurfaceFailure::InputNotGiven {
+                        what: SolveInput::DirectionVector,
+                    },
                 ));
             }
             let dir = nth(self.opt_vectors.unwrap_or(&[]), 0, OP_SS_NORMALIZE)?;
@@ -913,8 +934,14 @@ impl SurfaceEval<'_> {
 
         // On the high side of the 'good' domain, this must be flipped (because it's
         // decreasing).
-        let surface =
-            surface.ok_or_else(|| SolidError::surface_missing(OP_EVAL_NORMAL, "the surface"))?;
+        let surface = surface.ok_or_else(|| {
+            SolidError::surface(
+                OP_EVAL_NORMAL,
+                SurfaceFailure::InputNotGiven {
+                    what: SolveInput::Surface,
+                },
+            )
+        })?;
         let domain = surface.natural_uv_domain_with_nurb(k)?;
         if sing_u {
             let mut n = duv.cross(dv);
@@ -1271,9 +1298,9 @@ impl Surface {
         if !(uv_domain.contains_point(start_uv, EFF_ZERO)
             && uv_domain.contains_point(end_uv, EFF_ZERO))
         {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_LINE_ON_SURF,
-                "an end point is outside the UV domain",
+                SurfaceFailure::EndPointOutsideDomain,
             ));
         }
 
@@ -1728,21 +1755,19 @@ impl Surface {
                             }
                         }
                     } else if let Some(context) = context.as_deref_mut() {
-                        let built;
-                        let cache = if let Some(cache) = cache {
-                            cache
+                        let state = if let Some(cache) = cache {
+                            cache.state()?
                         } else {
-                            built = context.surface_cache_state(k, self, surface)?;
-                            &built
+                            context.surface_cache_without_get_tree(k, self, surface)?
                         };
-                        if cache.is_trimmed()
-                            && cache.point_test_enabled
-                            && !cache.face_was_modified
+                        if state.is_trimmed()
+                            && state.point_test_enabled
+                            && !state.face_was_modified
                         {
-                            let face = cache.face()?.ok_or_else(|| {
-                                SolidError::surface_missing(
+                            let face = state.face()?.ok_or_else(|| {
+                                SolidError::surface(
                                     "surface::surface::p4::global_point_solve",
-                                    "the cache's face",
+                                    SurfaceFailure::TrimmedCacheHasNoFace,
                                 )
                             })?;
                             let queries = context.face_queries().ok_or_else(|| {
@@ -1751,25 +1776,30 @@ impl Surface {
                                     "query.face_p2",
                                 )
                             })?;
-                            let mut i = 0;
-                            while i < solutions.len() {
-                                let point = solutions.get_at(i)?;
-                                let uv = Point2::new(point.start.param(0)?, point.start.param(1)?);
-                                // Here upstream removes a candidate on classification
-                                // failure (unlike sm_IsPointValid's keep-on-error).
-                                let good = super::p1::ignore_native_classification(
-                                    queries.face_point_classify_fast_drop(
-                                        k,
-                                        face,
-                                        uv,
-                                        src_zone_tol_3d,
-                                    ),
-                                )?
-                                .is_some_and(|(class, _)| matches!(class, 102..=104));
-                                if good {
-                                    i += 1;
-                                } else {
-                                    solutions.remove_at(i, 1);
+                            // a face without loop uses has no trim boundaries: every
+                            // solution is kept
+                            if queries.face_has_loopuses(face)? {
+                                let mut i = 0;
+                                while i < solutions.len() {
+                                    let point = solutions.get_at(i)?;
+                                    let uv =
+                                        Point2::new(point.start.param(0)?, point.start.param(1)?);
+                                    // Here upstream removes a candidate on classification
+                                    // failure (unlike sm_IsPointValid's keep-on-error).
+                                    let good = super::p1::ignore_native_classification(
+                                        queries.face_point_classify_fast_drop(
+                                            k,
+                                            face,
+                                            uv,
+                                            src_zone_tol_3d,
+                                        ),
+                                    )?
+                                    .is_some_and(|(class, _)| matches!(class, 102..=104));
+                                    if good {
+                                        i += 1;
+                                    } else {
+                                        solutions.remove_at(i, 1);
+                                    }
                                 }
                             }
                         }
@@ -1781,9 +1811,11 @@ impl Surface {
                         // an SmTrimSrfCache (SM_CAST_PTR gives NULL): no test, as
                         // upstream.
                         let cache = get_surface_cache(k, self, None::<NoObject>)?;
+                        // a cache with no face keeps every solution
                         if cache.is_trimmed()
                             && cache.point_test_enabled
                             && !cache.face_was_modified
+                            && cache.face()?.is_some()
                         {
                             // SmFace::PointClassify of a bare face-owned surface: the
                             // classifier is the context's FaceQueries

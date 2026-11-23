@@ -347,6 +347,47 @@ fn view_dxf_hides_finished_sketches_behind_bodies_but_draws_the_active_sketch_on
     assert!((length(&dashed) - 80.).abs() < 1e-3, "{}", length(&dashed));
 }
 
+/// A shown sketch under an extrusion's outline is drawn once, as the body's black line, not again
+/// in blue on SKETCH: a cutting service reads the blue copy as a marking line (#19507).
+#[test]
+fn view_dxf_draws_a_shown_sketch_under_a_bodys_outline_once() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Panel"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Panel","distance":2,"body_name":"Panel"}));
+    let sketch = s.doc.features[0].id;
+    let sides = |v: &Value| {
+        let mut sides: Vec<i64> = lines(v).iter().map(|(a, b)| (a.dist(*b) * 1000.).round() as i64).collect();
+        sides.sort_unstable();
+        sides
+    };
+    for hidden in ["omit", "dashed"] {
+        // The body's own lines, with the sketch hidden. The top view is tilted a hair, so the
+        // panel's bottom edge on one side can show beside the top one: that line is the body's.
+        s.visibility.shown_sketches.retain(|id| *id != sketch);
+        let body = sides(&export(&mut s, camera(StandardView::Top), hidden));
+        assert!(
+            body.iter().filter(|l| **l == 30_000).count() >= 2 && body.iter().filter(|l| **l == 40_000).count() >= 2,
+            "hidden={hidden}: {body:?}"
+        );
+        s.visibility.shown_sketches.push(sketch);
+        assert!(crate::view::sketch_shown(&s, sketch));
+        let v = export(&mut s, camera(StandardView::Top), hidden);
+        assert_eq!(v["sketch"], 0, "hidden={hidden}: {v}");
+        let file = solidcraft_io::read_dxf_file(v["dxf"].as_str().unwrap()).unwrap();
+        assert!(file.entities().iter().all(|e| file.layer(e.layer()).unwrap().name() != "SKETCH"), "hidden={hidden}");
+        // Showing the sketch adds no line: the drawing is the body's lines alone.
+        assert_eq!(sides(&v), body, "hidden={hidden}");
+    }
+    // The sketch past the body keeps its own line: a second rectangle beside the panel.
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Beside"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[50,0],"p1":[60,10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let v = export(&mut s, camera(StandardView::Top), "omit");
+    assert!(v["sketch"].as_u64().is_some_and(|n| n > 0), "{v}");
+}
+
 #[test]
 fn view_dxf_zero_origin_puts_the_model_origin_at_the_drawing_zero() {
     let mut s = sample();
@@ -468,9 +509,11 @@ fn view_dxf_curves_arcs_with_dashed_hidden_lines_keep_their_layers_and_order() {
 // byte-baseline seam. This is not another production writer or parser.
 fn legacy_view_projection_bytes(s: &Session, cam: &Camera, dashed: bool) -> String {
     use solidcraft_io::test_support::{DxfEntity, DxfLayer, legacy_dxf_baseline};
-    let meshes = mesh_lines::prepare(s, CMD, 0.01, mesh_lines::Ask::default(), |b| s.body_visible(&b.name), refused).unwrap();
+    let meshes =
+        mesh_lines::prepare(s, &s.world_state().unwrap(), CMD, 0.01, mesh_lines::Ask::default(), |b| s.body_visible(&b.name), refused).unwrap();
     let parts = sketch::parts(s, 0.01).unwrap();
-    let drawing = mesh_lines::drawing(&meshes, &parts, &View::from_camera(cam)).unwrap();
+    let mut drawing = mesh_lines::drawing(&meshes, &parts, &View::from_camera(cam)).unwrap();
+    drawing.sketch = mesh_lines::sketch_off_lines(std::mem::take(&mut drawing.sketch), &drawing.lines, 0.02 + drawing.eps);
     let mut entities = Vec::new();
     let mut hidden = Vec::new();
     for line in drawing.lines {
