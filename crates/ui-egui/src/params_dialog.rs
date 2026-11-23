@@ -307,7 +307,14 @@ fn draw_entries(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, ent
                 }
             }
             Entry::Folder { id, name, entries } => {
-                ui_kit::section(ui, ("pcomponent", *id), name, true, |ui| draw_entries(app, ui, d, entries, groups, name_floor));
+                // A component's name is the user's own text: the heading shows it as written (a
+                // component named "Frame" is not the catalog word "Frame"), while the rows inside
+                // keep translating their fixed labels.
+                let _verbatim = solidcraft_ui_text::resolved_labels();
+                ui_kit::section(ui, ("pcomponent", *id), name, true, |ui| {
+                    let _catalog = solidcraft_ui_text::catalog_labels();
+                    draw_entries(app, ui, d, entries, groups, name_floor)
+                });
             }
         }
     }
@@ -2794,6 +2801,36 @@ mod tests {
         let listed = &h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1;
         assert!(listed.iter().all(|r| r.component == 0), "a design without components lists every row at the top level");
         assert!(crate::scenario::handle_at(&format!("param:{}", listed.iter().find(|r| r.group == "PlaneTop").unwrap().name)).is_some());
+    }
+
+    /// A component's name is the user's text, so its folder in the Model Parameters list shows
+    /// the name as written in every language: "Frame" is also a catalog word, and in German the
+    /// folder read "BILDAUSSCHNITT".
+    #[test]
+    fn a_component_folder_shows_the_components_name_in_german() {
+        use solidcraft_engine::doc::{Document, FeatureKind, PlaneRef};
+        crate::i18n::install();
+        assert_ne!(solidcraft_ui_text::Locale::for_language("de").label("Frame"), "Frame", "the German catalog translates the word Frame");
+        let mut doc = Document::default();
+        let a = doc.add_component(Some("Frame"), 0).unwrap();
+        let plane = FeatureKind::ConstructionPlane {
+            plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "1 mm".into() },
+        };
+        doc.add_feature(plane, Some("PlaneA")).unwrap();
+        if let Some(f) = doc.features.iter_mut().find(|f| f.name == "PlaneA") {
+            f.component = a;
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.session = solidcraft_engine::Session::new(doc);
+        h.app.preferences.params_group_by_component = true;
+        h.app.preferences.language = "de".into();
+        h.app.start("parameters.change");
+        h.frames(5);
+        let texts: Vec<String> =
+            h.shapes.iter().filter_map(|s| if let egui::Shape::Text(t) = &s.shape { Some(t.galley.job.text.to_string()) } else { None }).collect();
+        assert!(texts.iter().any(|t| t.eq_ignore_ascii_case("Frame")), "the folder is named Frame: {texts:?}");
+        assert!(!texts.iter().any(|t| t.eq_ignore_ascii_case("Bildausschnitt")), "the name was not translated: {texts:?}");
     }
 
     /// #2919: the add row starts blank; a blank expression shows no error and adds nothing, and
