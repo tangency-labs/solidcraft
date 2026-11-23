@@ -181,9 +181,10 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
     for pass in [Pass::Solid, Pass::GlassFar, Pass::GlassNear] {
         // The closed solid bodies before the open ones, so the count is whole when an open body
         // asks it whether the cut there lies inside a body (as the viewport's `Cut::rest` reads
-        // its stencil after `Cut::count`). The glass keeps the scene's order: it blends.
+        // its stencil after `Cut::count`). Without a section, and for the glass (it blends), the
+        // scene's order stays: it settles ties between coplanar faces.
         let mut meshes: Vec<&crate::SceneMesh> = scene.meshes.iter().filter(|m| m.glass() == pass.glass()).collect();
-        if !pass.glass() {
+        if !pass.glass() && !scene.clip.is_empty() {
             meshes.sort_by_key(|m| !m.closed);
         }
         for sm in meshes {
