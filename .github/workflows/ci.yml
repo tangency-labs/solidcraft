@@ -571,7 +571,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@1.99.1
       # Main saves the cache; every other run restores it, read-only.
-      - uses: Swatinz/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: native-shared
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
@@ -1315,6 +1315,8 @@ jobs:
           ORACLE_RUN: ${{ needs.changes.outputs.oracle }}
           DOCTESTS: ${{ needs.changes.outputs.doctests }}
           CLIPPY: ${{ needs.clippy.result }}
+          # The shared crates build on their own: that job runs with the native flag, like Clippy.
+          SHARED: ${{ needs.shared-crates.result }}
           BUILD: ${{ needs.build-tests.result }}
           EVENT_NAME: ${{ github.event_name }}
           TESTS: ${{ needs.tests.result }}
@@ -1349,6 +1351,7 @@ jobs:
           fi
           if [ "$NATIVE" = true ]; then
             test "$CLIPPY" = success
+            test "$SHARED" = success
             # The archive for the action matrix and property tests exists nightly and by hand only.
             if [ "$EVENT_NAME" = schedule ] || [ "$EVENT_NAME" = workflow_dispatch ]; then
               test "$BUILD" = success
