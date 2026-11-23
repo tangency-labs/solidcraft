@@ -5742,6 +5742,28 @@ fn hat_holes(s: &mut Session, foot: f64) {
     }
 }
 
+/// Unfold keeps the flat panel at `fixed` where it is: the hat's top (40.1 of flat), not its
+/// largest panel (a wall, 51.5), lies flat at z 56…57.5, centred on x 0 as it was, and the
+/// sheet folds back to the same hat. A point on no flat panel is refused.
+#[test]
+fn unfold_keeps_the_panel_at_fixed_where_it_is() {
+    let mut s = Session::default();
+    hat(&mut s);
+    let (v0, b0) = (volume(&mut s), bbox(&mut s));
+    run(&mut s, "sheet.unfold", json!({"fixed": [0, 0, 57.5]}));
+    let b = bbox(&mut s);
+    let n = |v: &Value, k: &str, i: usize| v[k][i].as_f64().unwrap_or(f64::NAN);
+    assert!((n(&b, "min", 2) - 56.0).abs() < 1e-6 && (n(&b, "max", 2) - 57.5).abs() < 1e-6, "{b}");
+    assert!((n(&b, "min", 0) + n(&b, "max", 0)).abs() < 1e-6 && n(&b, "max", 0) > 70.0, "{b}");
+    assert!((n(&b, "min", 1) - n(&b0, "min", 1)).abs() < 1e-6 && (n(&b, "max", 1) - n(&b0, "max", 1)).abs() < 1e-6, "{b} vs {b0}");
+    run(&mut s, "sheet.refold", json!({}));
+    assert!(rel(volume(&mut s), v0) < 1e-9, "{} vs {v0}", volume(&mut s));
+    let b1 = bbox(&mut s);
+    assert!((0..3).all(|i| (n(&b1, "min", i) - n(&b0, "min", i)).abs() < 1e-6 && (n(&b1, "max", i) - n(&b0, "max", i)).abs() < 1e-6), "{b1} vs {b0}");
+    let off = s.execute("sheet.unfold", &json!({"fixed": [0, 0, 80]}));
+    assert!(off.is_err_and(|e| e.to_string().contains("no flat panel")), "a point off the sheet unfolds");
+}
+
 /// Holes in the end panels of a contour flange (#11728) land in its flat pattern like the holes in
 /// the panels between. Inside a foot, an M3 clearance hole is a cut-out and a DXF CIRCLE. At x ±27.5
 /// it is 1.5 from the foot's free edge at ±29, and its radius is 1.7: it breaks out 0.2 past the
