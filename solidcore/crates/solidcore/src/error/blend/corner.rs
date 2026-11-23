@@ -96,6 +96,11 @@ impl CornerShape {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CornerInput {
+    /// A corner edge of the pseudo-B-rep with no vertex, or no vertex use, at an end.
+    EdgeEndNotSet,
+    /// An edge at a squeezed corner edge's deleted vertex, not a rail, that is not among the
+    /// corner's edges.
+    EdgeNotInCorner,
     /// An edge of a Mixed corner that does not meet the corner's vertex.
     EdgeOffVertex,
     /// A corner edge's or a rail's edge use with no fillet geometry (a cross-section's is
@@ -124,7 +129,8 @@ pub enum CornerInput {
     FacetNormalNotSet,
     /// A corner patch step given no fillet B-rep.
     FilletBrepNotGiven,
-    /// An Nx2 corner of kind `kind` with no filleted edge uses.
+    /// A corner of kind `kind` with no filleted edge uses (an Nx2 corner's two, an end
+    /// corner's one).
     FilletedEdgeUsesNotGiven {
         /// The corner's kind.
         kind: crate::blend::fillet_corner::p3::FilletCornerKind,
@@ -145,10 +151,18 @@ pub enum CornerInput {
     MixedCornerWithoutOnEdgeEdge,
     /// A 3x2 corner of four edges with no on-extended-edge edge.
     MixedCornerWithoutOnExtendedEdgeEdge,
+    /// An end corner whose vertices hold none but the end rib's vertex whose rail missed its
+    /// side edge.
+    NoOtherCornerVertex,
     /// A concave corner with no rail-cross-edge-use vertex between two fillet geometries.
     NoRailXEdgeUseVertex,
     /// A ball corner or an End with no ring of edge uses round its vertex.
     RingNotSet,
+    /// A Roll-over's seam cap whose corner edges do not close one loop through the seam's
+    /// split vertex.
+    SeamCapLoopOpen,
+    /// A squeezed corner edge neither of whose vertices is to be deleted.
+    SqueezedEdgeKeepsBothVertices,
     /// A ball, chamfer or Mixed corner, a Swept turn or an End whose vertices or edges are
     /// not the count or kind its topology makes (an End without its end rib, or whose
     /// vertex's edges do not hold its blended edge's two others).
@@ -164,12 +178,16 @@ pub enum CornerInput {
         /// The blended edge uses it holds.
         given: usize,
     },
+    /// A squeezed corner edge's deleted vertex that is not among the corner's vertices.
+    VertexNotInCorner,
     /// A vertex of a chamfer or Mixed corner, of a Swept turn or of an End's cap that is not
     /// processed.
     VertexNotProcessed,
     /// A vertex of a convex `NxN` corner of at most three vertices that is not where two
     /// rails cross.
     VertexNotRailXRail,
+    /// A rail-end fillet vertex use whose intersection point holds no edge parameter.
+    VertexUseWithoutEdgeParameter,
 }
 
 impl CornerInput {
@@ -184,6 +202,8 @@ impl CornerInput {
     )]
     pub const fn upstream_status(self) -> i32 {
         match self {
+            Self::EdgeEndNotSet => SM_ERR_NULL_POINTER,
+            Self::EdgeNotInCorner => SM_ERR,
             Self::EdgeOffVertex => SM_ERR,
             Self::EdgeUseWithoutFilletGeometry => SM_ERR_NULL_POINTER,
             Self::EdgeWithoutCurve => SM_ERR_NULL_POINTER,
@@ -200,14 +220,19 @@ impl CornerInput {
             Self::MixedCornerVertexNotInCorner => SM_ERR,
             Self::MixedCornerWithoutOnEdgeEdge => SM_ERR_NULL_POINTER,
             Self::MixedCornerWithoutOnExtendedEdgeEdge => SM_ERR_NULL_POINTER,
+            Self::NoOtherCornerVertex => SM_ERR_NULL_POINTER,
             Self::NoRailXEdgeUseVertex => SM_ERR_NULL_POINTER,
             Self::RingNotSet => SM_ERR_NULL_POINTER,
+            Self::SeamCapLoopOpen => SM_ERR,
+            Self::SqueezedEdgeKeepsBothVertices => SM_ERR,
             Self::TopologyMismatch => SM_ERR,
             Self::TurnRingWithoutSideEdgeUse => SM_ERR_NULL_POINTER,
             Self::TurnRoundsShareNoFace => SM_ERR_NULL_POINTER,
             Self::TurnWithoutTwoBlendedEdgeUses { .. } => SM_ERR_NULL_POINTER,
+            Self::VertexNotInCorner => SM_ERR,
             Self::VertexNotProcessed => SM_ERR,
             Self::VertexNotRailXRail => SM_ERR,
+            Self::VertexUseWithoutEdgeParameter => SM_ERR_NULL_POINTER,
         }
     }
 }
@@ -512,16 +537,40 @@ impl MixedStep {
     }
 }
 
-/// What a fillet corner's surface, patch or face step (`crate::blend::fillet_corner`) did not
-/// make ([`BlendFailure::CornerPatchNotMade`]). The variable-radius misses stop the corner's
-/// conversion to a variable-radius fillet (`MakeVariableRadiusFillet`), which the analytic
-/// corner surface reads as no surface made, so the corner gets its patch.
+/// What a fillet corner's geometry, surface, patch or face step
+/// (`crate::blend::fillet_corner`) did not make ([`BlendFailure::CornerPatchNotMade`]). The
+/// variable-radius misses stop the corner's conversion to a variable-radius fillet
+/// (`MakeVariableRadiusFillet`), which the analytic corner surface reads as no surface made,
+/// so the corner gets its patch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CornerPatchMiss {
     /// An end of a cross section of the variable-radius corner drops onto its blend's centre
     /// line at other than one point.
     CentreLineFootNotUnique,
+    /// The constant-radius corner's shortest edge is not a circular arc.
+    ConstantRadiusBaseNotArc,
+    /// The constant-radius corner's two sides come from blend-curve generators with
+    /// different thumbweights or continuities.
+    ConstantRadiusBlendCurvesDiffer,
+    /// A point of the constant-radius corner (an end of its shortest edge, or the vertex
+    /// opposite it) drops onto a side's fillet surface at `solutions` points, not one.
+    ConstantRadiusFootNotUnique {
+        /// The points the drop found.
+        solutions: usize,
+    },
+    /// The constant-radius corner's two sides come from surface generators of different
+    /// kinds.
+    ConstantRadiusGeneratorsDiffer,
+    /// The constant-radius corner's sides come from linear (chamfer) generators: no
+    /// constant-radius fillet is made between them.
+    ConstantRadiusLinearGenerator,
+    /// A corner for the constant-radius fillet that does not have three edges.
+    ConstantRadiusNotThreeSides,
+    /// The re-solve of the constant-radius fillet failed (its error is kept as the cause).
+    ConstantRadiusReSolveFailed,
+    /// An edge of the constant-radius corner that is not a cross section.
+    ConstantRadiusSideNotCrossSection,
     /// A cross section of the variable-radius corner whose ends point the same or opposite
     /// ways from the centre line: its arc has no axis.
     CrossSectionEndsAligned,
@@ -536,6 +585,9 @@ pub enum CornerPatchMiss {
         /// The curve's kind.
         kind: &'static str,
     },
+    /// A corner edge's geometry could not be calculated, and the edge cannot be left to the
+    /// global merge (its calculator's error is kept as the cause).
+    EdgeGeometryNotCalculated,
     /// The mixed corner's extended edge does not drop onto its original face as one curve.
     ExtendedEdgeDropNotOneCurve {
         /// The curves the drop gave.
@@ -571,6 +623,13 @@ pub enum CornerPatchMiss {
     OppositeNormalVanished,
     /// The opposite fillet's radius is not larger than both cross sections' radii.
     OppositeRadiusNotLarger,
+    /// The point that orients a corner face's loop does not drop onto the face's surface.
+    OrientationPointOffSurface,
+    /// A planar corner patch given `points` points, not three or four.
+    PlanarPatchPointCount {
+        /// The points given.
+        points: usize,
+    },
     /// The variable-radius fillet's rail that replaces the opposite edge leaves the opposite
     /// fillet's surface.
     RailLeavesOppositeFillet,
@@ -579,6 +638,27 @@ pub enum CornerPatchMiss {
     RailNotNamedByItsGeometry,
     /// The variable-radius fillet's rail-rail curve crosses the concave corner.
     RailRailCurveCrossesCorner,
+    /// The corner's vertex drops onto a trial rail-rail curve at `solutions` points, not one.
+    RailRailCurveFootNotUnique {
+        /// The points the drop found.
+        solutions: usize,
+    },
+    /// The four-sided corner's major and opposite arcs do not share an axis, or their angle
+    /// spans differ by more than 2 degrees: no one surface of revolution.
+    RevolutionArcsDiffer,
+    /// The surface of revolution's major curve is not a circular arc.
+    RevolutionMajorNotArc,
+    /// The surface of revolution does not meet the curve after its major arc within the
+    /// tolerance.
+    RevolutionMissesOtherCurve,
+    /// The four-sided corner's curve opposite the major arc is not a circular arc.
+    RevolutionOppositeNotArc,
+    /// The loop of a part of a Roll-over's seam cap has no Newell normal: it encloses no
+    /// area.
+    SeamCapPartNormalVanished,
+    /// A Roll-over's seam point does not drop onto the inside of any side edge of the seam
+    /// cap within the corner's tolerance.
+    SeamPointOffSideEdges,
     /// The corner's patch has fewer than four boundary curves.
     TooFewBoundaryCurves {
         /// The boundary curves the patch has.
@@ -599,6 +679,9 @@ pub enum CornerPatchMiss {
     VariableRadiusSideNotCrossSection,
     /// A corner for the variable-radius fillet with no rail-rail interpolating edge.
     VariableRadiusWithoutInterpolation,
+    /// A corner vertex's geometry could not be calculated (its calculator's error is kept as
+    /// the cause).
+    VertexGeometryNotCalculated,
 }
 
 impl CornerPatchMiss {
@@ -613,10 +696,19 @@ impl CornerPatchMiss {
     pub const fn class(self) -> ErrorKind {
         match self {
             Self::CentreLineFootNotUnique => ErrorKind::NotFound,
+            Self::ConstantRadiusBaseNotArc => ErrorKind::Unsupported,
+            Self::ConstantRadiusBlendCurvesDiffer => ErrorKind::Unsupported,
+            Self::ConstantRadiusFootNotUnique { .. } => ErrorKind::NotFound,
+            Self::ConstantRadiusGeneratorsDiffer => ErrorKind::Unsupported,
+            Self::ConstantRadiusLinearGenerator => ErrorKind::Unsupported,
+            Self::ConstantRadiusNotThreeSides => ErrorKind::Unsupported,
+            Self::ConstantRadiusReSolveFailed => ErrorKind::Failed,
+            Self::ConstantRadiusSideNotCrossSection => ErrorKind::Unsupported,
             Self::CrossSectionEndsAligned => ErrorKind::Degenerate,
             Self::CrossSectionRadiusVaries => ErrorKind::Unsupported,
             Self::CrossSectionWithoutCentreLine => ErrorKind::Unsupported,
             Self::CurveNotBSpline { .. } => ErrorKind::Unsupported,
+            Self::EdgeGeometryNotCalculated => ErrorKind::Failed,
             Self::ExtendedEdgeDropNotOneCurve { .. } => ErrorKind::NotFound,
             Self::FaceNotMade => ErrorKind::Failed,
             Self::GapPatchNotFourEdges { .. } => ErrorKind::Unsupported,
@@ -628,9 +720,18 @@ impl CornerPatchMiss {
             Self::OppositeFootNotUnique => ErrorKind::NotFound,
             Self::OppositeNormalVanished => ErrorKind::Degenerate,
             Self::OppositeRadiusNotLarger => ErrorKind::Unsupported,
+            Self::OrientationPointOffSurface => ErrorKind::NotFound,
+            Self::PlanarPatchPointCount { .. } => ErrorKind::Unsupported,
             Self::RailLeavesOppositeFillet => ErrorKind::Unsupported,
             Self::RailNotNamedByItsGeometry => ErrorKind::Unsupported,
             Self::RailRailCurveCrossesCorner => ErrorKind::Unsupported,
+            Self::RailRailCurveFootNotUnique { .. } => ErrorKind::NotFound,
+            Self::RevolutionArcsDiffer => ErrorKind::Unsupported,
+            Self::RevolutionMajorNotArc => ErrorKind::Unsupported,
+            Self::RevolutionMissesOtherCurve => ErrorKind::Unsupported,
+            Self::RevolutionOppositeNotArc => ErrorKind::Unsupported,
+            Self::SeamCapPartNormalVanished => ErrorKind::Degenerate,
+            Self::SeamPointOffSideEdges => ErrorKind::NotFound,
             Self::TooFewBoundaryCurves { .. } => ErrorKind::Unsupported,
             Self::VariableRadiusBlendCurvesDiffer => ErrorKind::Unsupported,
             Self::VariableRadiusGeneratorsDiffer => ErrorKind::Unsupported,
@@ -638,6 +739,7 @@ impl CornerPatchMiss {
             Self::VariableRadiusReSolveFailed => ErrorKind::Failed,
             Self::VariableRadiusSideNotCrossSection => ErrorKind::Unsupported,
             Self::VariableRadiusWithoutInterpolation => ErrorKind::Unsupported,
+            Self::VertexGeometryNotCalculated => ErrorKind::Failed,
         }
     }
 
@@ -652,10 +754,19 @@ impl CornerPatchMiss {
     pub const fn upstream_status(self) -> i32 {
         match self {
             Self::CentreLineFootNotUnique => SM_ERR,
+            Self::ConstantRadiusBaseNotArc => SM_ERR,
+            Self::ConstantRadiusBlendCurvesDiffer => SM_ERR,
+            Self::ConstantRadiusFootNotUnique { .. } => SM_ERR,
+            Self::ConstantRadiusGeneratorsDiffer => SM_ERR,
+            Self::ConstantRadiusLinearGenerator => SM_ERR,
+            Self::ConstantRadiusNotThreeSides => SM_ERR,
+            Self::ConstantRadiusReSolveFailed => SM_ERR,
+            Self::ConstantRadiusSideNotCrossSection => SM_ERR,
             Self::CrossSectionEndsAligned => SM_ERR_INVALID_INPUT,
             Self::CrossSectionRadiusVaries => SM_ERR,
             Self::CrossSectionWithoutCentreLine => SM_ERR_NULL_POINTER,
             Self::CurveNotBSpline { .. } => SM_ERR,
+            Self::EdgeGeometryNotCalculated => SM_ERR,
             Self::ExtendedEdgeDropNotOneCurve { .. } => SM_ERR,
             Self::FaceNotMade => SM_ERR,
             Self::GapPatchNotFourEdges { .. } => SM_ERR,
@@ -667,9 +778,18 @@ impl CornerPatchMiss {
             Self::OppositeFootNotUnique => SM_ERR,
             Self::OppositeNormalVanished => SM_ERR_INVALID_INPUT,
             Self::OppositeRadiusNotLarger => SM_ERR,
+            Self::OrientationPointOffSurface => SM_ERR,
+            Self::PlanarPatchPointCount { .. } => SM_ERR,
             Self::RailLeavesOppositeFillet => SM_ERR,
             Self::RailNotNamedByItsGeometry => SM_ERR,
             Self::RailRailCurveCrossesCorner => SM_ERR,
+            Self::RailRailCurveFootNotUnique { .. } => SM_ERR,
+            Self::RevolutionArcsDiffer => SM_ERR,
+            Self::RevolutionMajorNotArc => SM_ERR,
+            Self::RevolutionMissesOtherCurve => SM_ERR,
+            Self::RevolutionOppositeNotArc => SM_ERR,
+            Self::SeamCapPartNormalVanished => SM_ERR,
+            Self::SeamPointOffSideEdges => SM_ERR,
             Self::TooFewBoundaryCurves { .. } => SM_ERR,
             Self::VariableRadiusBlendCurvesDiffer => SM_ERR,
             Self::VariableRadiusGeneratorsDiffer => SM_ERR,
@@ -677,6 +797,7 @@ impl CornerPatchMiss {
             Self::VariableRadiusReSolveFailed => SM_ERR,
             Self::VariableRadiusSideNotCrossSection => SM_ERR,
             Self::VariableRadiusWithoutInterpolation => SM_ERR,
+            Self::VertexGeometryNotCalculated => SM_ERR,
         }
     }
 }
