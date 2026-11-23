@@ -171,7 +171,16 @@ mod tests {
     use super::*;
 
     fn place() -> Place {
-        Place { command: "sketch.insert_svg".into(), path: "a.svg".into(), x: 10.0, y: 5.0, scale: 1.0, angle: 0.0, natural: Some((20.0, 10.0)) }
+        Place {
+            command: "sketch.insert_svg".into(),
+            path: "a.svg".into(),
+            x: 10.0,
+            y: 5.0,
+            scale: 1.0,
+            angle: 0.0,
+            natural: Some((20.0, 10.0)),
+            dpi: 96.0,
+        }
     }
 
     fn drag(part: Part, from: Vec2, p: &Place) -> Drag {

@@ -22,29 +22,44 @@ pub struct Place {
     pub scale: f64,
     /// Degrees, counter-clockwise.
     pub angle: f64,
-    /// The drawing's own width and height in the file, when it could be read.
+    /// The drawing's own width and height in the file, when it could be read (at `dpi`).
     pub natural: Option<(f64, f64)>,
+    /// The dots per inch an SVG's pixels are read at; 96 is CSS's, and what the command does
+    /// without one. Not used for a DXF (#20240).
+    pub dpi: f64,
 }
+
+/// The dots per inch an SVG's pixels are read at unless the dialog says otherwise.
+pub(crate) const DEFAULT_DPI: f64 = 96.0;
 
 /// Open the placement for `path`, picked for `command` (`sketch.insert_svg` / `_dxf`).
 pub fn open(app: &mut SolveApp, command: &str, path: String) {
-    let natural = app
-        .session
-        .execute("sketch.drawing_bounds", &json!({"path": path, "format": if command.ends_with("dxf") { "dxf" } else { "svg" }}))
-        .ok()
-        .and_then(|b| Some((b.get("width")?.as_f64()?, b.get("height")?.as_f64()?)))
-        .filter(|(w, h)| w.is_finite() && h.is_finite() && *w > 1e-9 && *h > 1e-9);
+    let natural = natural_size(app, command, &path, DEFAULT_DPI);
     app.dialog = Some(Dialog::new(
-        Kind::InsertDrawing(Place { command: command.to_string(), path, x: 0.0, y: 0.0, scale: 1.0, angle: 0.0, natural }),
+        Kind::InsertDrawing(Place { command: command.to_string(), path, x: 0.0, y: 0.0, scale: 1.0, angle: 0.0, natural, dpi: DEFAULT_DPI }),
         Vec::new(),
     ));
+}
+
+/// The drawing's own width and height in the file, read with an SVG's pixels at `dpi`.
+fn natural_size(app: &mut SolveApp, command: &str, path: &str, dpi: f64) -> Option<(f64, f64)> {
+    let svg = !command.ends_with("dxf");
+    let mut params = json!({"path": path, "format": if svg { "svg" } else { "dxf" }});
+    if svg && dpi != DEFAULT_DPI {
+        params["dpi"] = json!(dpi);
+    }
+    app.session
+        .execute("sketch.drawing_bounds", &params)
+        .ok()
+        .and_then(|b| Some((b.get("width")?.as_f64()?, b.get("height")?.as_f64()?)))
+        .filter(|(w, h)| w.is_finite() && h.is_finite() && *w > 1e-9 && *h > 1e-9)
 }
 
 pub fn title(p: &Place) -> &'static str {
     if p.command.ends_with("dxf") { "INSERT DXF" } else { "INSERT SVG" }
 }
 
-pub fn rows(ui: &mut egui::Ui, p: &mut Place) {
+pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, p: &mut Place) {
     let name = std::path::Path::new(&p.path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.path.clone());
     form_row(ui, "File", |ui| {
         ui.label(name).backing_on_hover_text(&p.path);
@@ -53,6 +68,17 @@ pub fn rows(ui: &mut egui::Ui, p: &mut Place) {
         form_row(ui, label, |ui| {
             let r = crate::ui_kit::number_field(ui, v, -1e9..=1e9, 0.5, " mm");
             crate::scenario::publish_handle(handle, r.rect.center());
+        });
+    }
+    // An SVG's pixels are read at this resolution: a file drawn at 72 dpi comes in at the size it
+    // was drawn at with 72 (#20240). The file's own size follows it.
+    if !p.command.ends_with("dxf") {
+        form_row(ui, "Resolution", |ui| {
+            let r = crate::ui_kit::number_field(ui, &mut p.dpi, 1.0..=10000.0, 1.0, " dpi");
+            crate::scenario::publish_handle("dialog:insert:dpi", r.rect.center());
+            if r.changed() && p.dpi.is_finite() && p.dpi >= 1.0 {
+                p.natural = natural_size(app, &p.command, &p.path, p.dpi);
+            }
         });
     }
     // The size in millimetres follows the scale and the other way round; the aspect is kept.
@@ -89,7 +115,14 @@ pub fn commands(p: &Place) -> Result<Vec<(String, Value)>, String> {
     if !p.angle.is_finite() {
         return Err("the angle must be a number".into());
     }
-    Ok(vec![(p.command.clone(), json!({"path": p.path, "at": [p.x, p.y], "scale": p.scale, "angle": p.angle, "align": "center"}))])
+    let mut params = json!({"path": p.path, "at": [p.x, p.y], "scale": p.scale, "angle": p.angle, "align": "center"});
+    if !p.command.ends_with("dxf") && p.dpi != DEFAULT_DPI {
+        if !(p.dpi.is_finite() && (1.0..=10000.0).contains(&p.dpi)) {
+            return Err("the resolution must be from 1 to 10000 dpi".into());
+        }
+        params["dpi"] = json!(p.dpi);
+    }
+    Ok(vec![(p.command.clone(), params)])
 }
 
 #[cfg(test)]
@@ -209,6 +242,40 @@ mod tests {
         assert!((place(&h).angle - 90.0).abs() < 2.0, "turned: {}", place(&h).angle);
     }
 
+    /// An SVG is read at 96 dpi unless the Resolution row says otherwise, and only an SVG has the
+    /// row (#20240): the command carries `dpi` only when it is not the default.
+    #[test]
+    fn an_svg_is_placed_at_the_resolution_it_was_drawn_at() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        open(&mut h.app, "sketch.insert_svg", svg_file("dpi.svg"));
+        h.frames(2);
+        assert!(handle_at("dialog:insert:dpi").is_some(), "the resolution is drawn for an SVG");
+        let svg = Place {
+            command: "sketch.insert_svg".into(),
+            path: "a.svg".into(),
+            x: 0.0,
+            y: 0.0,
+            scale: 1.0,
+            angle: 0.0,
+            natural: None,
+            dpi: DEFAULT_DPI,
+        };
+        assert!(commands(&svg).unwrap()[0].1.get("dpi").is_none(), "96 dpi is what the command does without one");
+        assert_eq!(commands(&Place { dpi: 72.0, ..svg.clone() }).unwrap()[0].1["dpi"], json!(72.0));
+        for bad in [0.0, 0.5, 20000.0, f64::NAN] {
+            assert!(commands(&Place { dpi: bad, ..svg.clone() }).is_err(), "{bad}");
+        }
+        let dxf = Place { command: "sketch.insert_dxf".into(), dpi: 72.0, ..svg };
+        assert!(commands(&dxf).unwrap()[0].1.get("dpi").is_none(), "a DXF has no pixels");
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.settle();
+        open(&mut h.app, "sketch.insert_dxf", svg_file("dpi.dxf"));
+        h.frames(2);
+        assert!(handle_at("dialog:insert:dpi").is_none(), "no resolution for a DXF");
+    }
+
     /// Cancel adds nothing; a bad scale is refused.
     #[test]
     fn cancelling_the_placement_adds_nothing() {
@@ -217,7 +284,16 @@ mod tests {
         h.settle();
         open(&mut h.app, "sketch.insert_svg", svg_file("cancel.svg"));
         h.frames(2);
-        let bad = Place { command: "sketch.insert_svg".into(), path: "x.svg".into(), x: 0.0, y: 0.0, scale: 0.0, angle: 0.0, natural: None };
+        let bad = Place {
+            command: "sketch.insert_svg".into(),
+            path: "x.svg".into(),
+            x: 0.0,
+            y: 0.0,
+            scale: 0.0,
+            angle: 0.0,
+            natural: None,
+            dpi: DEFAULT_DPI,
+        };
         assert!(commands(&bad).is_err());
         h.step(&json!({"key": "Escape"})).unwrap();
         h.settle();
