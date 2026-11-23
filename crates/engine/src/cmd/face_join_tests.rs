@@ -390,10 +390,7 @@ fn to_body_apart_needs_a_join_to_an_object() {
         .to_string();
     assert!(error.contains("to_body_apart"), "{error}");
     // A Cut never joins the body it runs to.
-    let error = s
-        .execute("solid.extrude", &json!({"sketch":sketch,"to":[20,20,20],"operation":"cut","to_body_apart":true}))
-        .unwrap_err()
-        .to_string();
+    let error = s.execute("solid.extrude", &json!({"sketch":sketch,"to":[20,20,20],"operation":"cut","to_body_apart":true})).unwrap_err().to_string();
     assert!(error.contains("to_body_apart"), "{error}");
 }
 
@@ -418,8 +415,9 @@ fn join_extrude_to_another_body_saved_before_it_joined_keeps_that_body() {
     let moved = run(&mut s, "solid.move", json!({"bodies":["Target"],"translate":[0,0,5]}))["feature"].clone();
     // The extrude joins the body it runs to, as every Join To Object did until the call named
     // its targets (#19671); a design saved before that keeps the body apart.
-    let extrude =
-        run(&mut s, "solid.extrude", json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"],"to_body_apart":false}))["feature"].clone();
+    let extrude = run(&mut s, "solid.extrude", json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"],"to_body_apart":false}))
+        ["feature"]
+        .clone();
     let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
     let features = saved["features"].as_array_mut().unwrap();
     let at_move = features.iter().position(|f| f["id"] == moved).unwrap();

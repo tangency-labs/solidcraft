@@ -594,7 +594,8 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 let picked = ui_kit::dropdown_picked(ui, "ex_ext", &mut ext, &["Distance", "To Object", "All"]);
                 *all = ext == 2;
                 set_to_object(&mut d.inputs, &mut d.active, ext == 1);
-                if picked && ext == 1
+                if picked
+                    && ext == 1
                     && let Some(at) = d.inputs.iter().position(|i| i.label == TO_OBJECT)
                 {
                     d.active = at;
