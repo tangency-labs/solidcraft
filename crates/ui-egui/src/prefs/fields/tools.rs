@@ -65,16 +65,16 @@ macro_rules! tools_preferences {
             /// so a step neither meshes the dragged bodies where they stand nor looks up the Browser row a
             /// highlight follows (`drag_layer::holds_pointer`).
             move_drag_highlights: bool = false, PAGE_TOOLS => check_id("prefs.move_drag_highlights");
-            /// A new Plane at Angle goes through its axis also when the axis is off the base plane
-            /// (`through_axis`, #6180). Off: it starts turning the base about the axis where it is, as
-            /// before. Planes already made keep how they were made.
-            plane_at_angle_through_axis: bool = true, PAGE_TOOLS => check_id("prefs.plane_at_angle_through_axis");
             /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit, and the Box,
             /// Cylinder, Cone, Sphere, Torus and Coil): a marker that drags it across the model and, where
             /// it can turn in the face, a ring that turns it. Off by default: a Rest, Boss or Snap Fit is
             /// then placed by its click only, as before, and its Position input takes faces only; a
             /// primitive by its fields, its inputs or the selection it opened with.
             placement_handles: bool = false, PAGE_TOOLS => check_tr("ui.placement_handles");
+            /// A new Plane at Angle goes through its axis also when the axis is off the base plane
+            /// (`through_axis`, #6180). Off: it starts turning the base about the axis where it is, as
+            /// before. Planes already made keep how they were made.
+            plane_at_angle_through_axis: bool = true, PAGE_TOOLS => check_id("prefs.plane_at_angle_through_axis");
             /// Reuse a command's safe values and options after it succeeds, until the app closes. Off by default: each dialog opens with its usual defaults.
             remember_dialog_values: bool = false, PAGE_TOOLS => check_id_help("prefs.remember_dialog_values", "prefs.remember_dialog_values.help");
             /// Snap points (#5912): wherever a point is picked (Move, Align and Measure so far, #5881),
