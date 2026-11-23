@@ -30,8 +30,9 @@
 //!   except that an open chain whose chord-closed area has no certain direction but
 //!   which spans a plane answers that plane's normal (on the area's side, or its turns'
 //!   when that is uncertain), and an area within its own rounding of zero is
-//!   `SM_ERR_INVALID_INPUT` too. A sample that is not finite is `SM_ERR_INVALID_INPUT`
-//!   (upstream would unitize a NaN). The sampling (5 chords per curve, 1 for a
+//!   `SM_ERR_INVALID_INPUT` too. A sample that is not finite, or samples so large that
+//!   their area vector overflows, are `SM_ERR_INVALID_INPUT` (upstream would unitize a
+//!   NaN or an infinity). The sampling (5 chords per curve, 1 for a
 //!   two-point curve) is upstream's.
 //! - **Curve kinds.** `ComputeCrvsNormal` and `CrvsFixGaps` cast every curve to
 //!   `SmBSplineCurve`. `ComputeCrvsNormal` only calls virtual members and the
@@ -357,11 +358,16 @@ fn direction_is_certain(length: f64, error: f64) -> bool {
 
 /// [`crvs_normal_into`]'s computation.
 ///
-/// The fan sum `A` is within `E = (N + 8) u S` of the exact fan area vector of the
-/// samples (`S` the sum of `|a| |b|` over its `N` terms `a x b`): each term, from two
-/// rounded differences, is within `sqrt 2 gamma_4 |a| |b| < 6 u |a| |b|` of its exact
-/// value, and summing `N` vectors adds at most `gamma_(N-1)` of the sum of their lengths
-/// (the factor 1.01 covers the rounding of `S` and of the `gamma`s). The answer:
+/// The fan sum `A` is within `E` of the exact fan area vector of the samples, the
+/// smaller of two rigorous bounds over its `N` terms `a x b` of rounded differences:
+/// `(N + 8) u S` (`S` the sum of `|a| |b|`: each term is within
+/// `sqrt 2 gamma_4 |a| |b| < 6 u |a| |b|` of its exact value, and summing `N` vectors adds
+/// at most `gamma_(N-1)` of the sum of their lengths), and `(N + 8) u |M|` (`M` the
+/// vector of the componentwise sums of `|a_j b_l| + |a_l b_j|`: component `i` of a term is
+/// within `gamma_4` of its `M` share, and its sum within `gamma_(N-1)` of `M_i`), which is
+/// far the smaller for nearly parallel fan vectors (a long thin loop, or samples far
+/// along one axis). The factor 1.01 covers the rounding of `S`, `M` and the `gamma`s.
+/// The answer:
 /// 1. `A`'s direction when it unitizes (`|A| >= SM_EFF_ZERO`) and that direction is
 ///    certain to the kernel's angular zero ([`direction_is_certain`]);
 /// 2. else, for an open chain that certainly spans a plane and lies in it, that plane's
@@ -375,6 +381,7 @@ fn area_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<(
     *normal = Vec3::ZERO;
     let mut samples: Vec<Point3> = Vec::new();
     let mut magnitude = 0.0;
+    let mut componentwise = Vec3::ZERO;
     let mut terms = 0.0;
     for curve in curves {
         let domain = curve.natural_interval();
@@ -404,13 +411,27 @@ fn area_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<(
                 let (a, b) = (previous - origin, point - origin);
                 *normal += a.cross(b);
                 magnitude += a.length() * b.length();
+                componentwise += Vec3::new(
+                    (a.y * b.z).abs() + (a.z * b.y).abs(),
+                    (a.z * b.x).abs() + (a.x * b.z).abs(),
+                    (a.x * b.y).abs() + (a.y * b.x).abs(),
+                );
                 terms += 1.0;
             }
             samples.push(point);
         }
     }
-    let error = (terms + 8.0) * UNIT_ROUNDOFF * magnitude * 1.01;
+    let error = (terms + 8.0) * UNIT_ROUNDOFF * magnitude.min(componentwise.length()) * 1.01;
     let area = normal.length();
+    // finite samples so large that their cross products overflow have no computed
+    // direction (`Unitize` would answer a zero or NaN vector)
+    if !(area.is_finite() && error.is_finite()) {
+        *normal = Vec3::Z;
+        return Err(SolidError::invalid_input(
+            OP_NORMAL,
+            "loop normal of samples too large for their area vector",
+        ));
+    }
     if area >= EFF_ZERO && direction_is_certain(area, error) {
         return unitize_written(normal, |_| {
             SolidError::invalid_input(OP_NORMAL, "zero area loop normal")
@@ -439,8 +460,7 @@ fn area_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<(
 /// for a closed chain (its last sample `approx_eq` its first, upstream's test for a
 /// closed loop: a closed loop enclosing no area has no winding, so no orientation), and
 /// for samples that do not certainly span a plane or do not all lie in it (within the
-/// kernel's angular zero of `|p - P0|`, or of the plane's own uncertainty when that is
-/// the larger).
+/// kernel's angular zero, `SM_EFF_ZERO_RAD`, of `|p - P0|`).
 ///
 /// The plane is that of the widest triangle `P0 Pf Pg`: `Pf` the sample farthest from
 /// the first, `Pg` the one farthest from the line `P0 Pf`, `c = d x e` with
@@ -448,21 +468,27 @@ fn area_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<(
 /// one (each component `d_j e_l - d_l e_j` of rounded differences is within
 /// `gamma_4 (|d_j e_l| + |d_l e_j|)` of it, whose norm is at most
 /// `sqrt 2 gamma_4 |d| |e| < 6 u |d| |e|`). The plane is answered only when `c` unitizes
-/// (`|c| >= SM_EFF_ZERO`, the area's own bound) and its direction is certain
-/// ([`direction_is_certain`], within `delta = 2 E / (|c| - E) + 8 u`). For a planar chain
-/// every triangle of samples has this plane's normal.
+/// (`|c| >= SM_EFF_ZERO`, the area's own bound), its direction is certain
+/// ([`direction_is_certain`], within `delta = 2 E / (|c| - E) + 8 u <= SM_EFF_ZERO_RAD`)
+/// and the triangle is not flat to the kernel's angular zero
+/// (`|c| > SM_EFF_ZERO_RAD |d| |e|`: samples within that angle of a line are collinear,
+/// as the plane test below counts them). For a planar chain every triangle of samples
+/// has this plane's normal.
 ///
 /// Its sense is that of the area vector `area` (within `area_error`) when its component
 /// along `n` is certainly not zero: `|area . n| > area_error` (`n` a unit vector, its
 /// rounding adding a few `u` of `|area|`, inside the factor 1.01 of `area_error`'s
-/// derivation). Otherwise it is that of the chain's turns (upstream's `ComputeCrvsNormal`: the sum of
-/// the cross products of consecutive nonzero chords `p`, `q`) along `n`. A turn
+/// derivation). Otherwise it is that of the chain's turns along `n`: the sum of the cross
+/// products `p x q` of its consecutive nonzero chords (as upstream's `ComputeCrvsNormal`
+/// sums them, without its weights, and here only as a tie-break for a chain whose area
+/// does not decide). A turn
 /// `n . (p x q)` is within `e_k = (9 u + delta) |p| |q|` of the exact one along the exact
 /// normal, and their sum within `(N u + delta + 9 u) T` (`T` the sum of `|p| |q|`, 1.01
 /// covering the rest). The chain's own turns are no better than its points: a symmetric S
 /// placed far from the origin is no longer exactly symmetric once its points are rounded,
-/// so a turn, and the sum, below the kernel's angular zero (`SM_EFF_ZERO_RAD`, as a
-/// fraction of `|p| |q|` or `T`) counts as none. When the sum is none (a symmetric S),
+/// so a turn below the kernel's angular zero (`|p x q| <= SM_EFF_ZERO_RAD |p| |q|`)
+/// counts as none, and so does a sum below that fraction of `T` (the weighted mean turn:
+/// a tolerance on the sum, not an angle). When the sum is none (a symmetric S),
 /// the sense is that of the first turn that is not; with none, `None`.
 fn open_chain_plane_normal(samples: &[Point3], area: Vec3, area_error: f64) -> Option<Vec3> {
     let (&first, &last) = (samples.first()?, samples.last()?);
@@ -486,13 +512,14 @@ fn open_chain_plane_normal(samples: &[Point3], area: Vec3, area_error: f64) -> O
     }
     let error = 8.0 * UNIT_ROUNDOFF * d.length() * e.length();
     let length = c.length();
-    if !direction_is_certain(length, error) {
+    if !direction_is_certain(length, error) || length <= EFF_ZERO_RAD * d.length() * e.length() {
         return None;
     }
     let n = c.unitize().ok()?;
     let delta = 2.0 * error / (length - error) + 8.0 * UNIT_ROUNDOFF;
-    // every sample lies in the plane (to the kernel's angular zero, as seen from the first)
-    let off_plane = delta.max(EFF_ZERO_RAD) * 1.01;
+    // every sample lies in the plane (to the kernel's angular zero, as seen from the first;
+    // `delta`, the plane's own uncertainty, is at most that)
+    let off_plane = EFF_ZERO_RAD * 1.01;
     if samples
         .iter()
         .any(|&p| n.dot(p - first).abs() > off_plane * (p - first).length())
@@ -2897,6 +2924,76 @@ mod tests {
             let (n, e) = compute_crvs_normal_written(&k, &curves).unwrap();
             assert_eq!(n, Vec3::Z);
             assert!(matches!(e, Some(SolidError::InvalidInput { .. })), "{e:?}");
+        }
+    }
+
+    /// A certain area decides even when its fan vectors are nearly parallel (#21291
+    /// review): the chain far along X encloses -1.000002e-3 about Z, certain under the
+    /// componentwise rounding bound (2e-8) though not under `(N + 8) u S` (1e-2); its
+    /// turns point the other way. A long thin closed rectangle (1000 by 1e-5 in 40000
+    /// segments) has a certain area 0.02 the same way and answers +Z, as main did.
+    #[test]
+    fn nearly_parallel_fans_keep_their_certain_area() {
+        let k = Kernel::default();
+        let far = polyline(&[
+            [0.0, 0.0, 0.0],
+            [1e6, 0.0, 0.0],
+            [1e6 + 1.0, 1.0, 0.0],
+            [1e6 + 2.0, -2.0, 0.0],
+            [1e6 + 2.0, -1e-9, 0.0],
+        ]);
+        assert_eq!(compute_crvs_normal(&k, &far).unwrap(), -Vec3::Z);
+        let mut pts = Vec::new();
+        for i in 0..=20000 {
+            pts.push([f64::from(i) * 0.05, 0.0, 0.0]);
+        }
+        for i in (0..20000).rev() {
+            pts.push([f64::from(i) * 0.05, 1e-5, 0.0]);
+        }
+        pts.push([0.0, 0.0, 0.0]);
+        assert_eq!(compute_crvs_normal(&k, &polyline(&pts)).unwrap(), Vec3::Z);
+    }
+
+    /// A Z path flattened to within the kernel's angular zero of a line (turns of
+    /// 4e-7) has no plane, as a collinear chain has none: `SM_ERR_INVALID_INPUT`. Less
+    /// flat (1e-5) it answers the plane in the sense of its turns, -Z.
+    #[test]
+    fn flat_z_path_within_the_angular_zero_is_collinear() {
+        let k = Kernel::default();
+        let z = |h: f64| {
+            polyline(&[
+                [0.0, 0.0, 0.0],
+                [1.0, h, 0.0],
+                [2.0, -2.0 * h, 0.0],
+                [2.0, 0.0, 0.0],
+            ])
+        };
+        let (n, e) = compute_crvs_normal_written(&k, &z(4e-7)).unwrap();
+        assert_eq!(n, Vec3::Z);
+        assert!(matches!(e, Some(SolidError::InvalidInput { .. })), "{e:?}");
+        assert_eq!(compute_crvs_normal(&k, &z(1e-5)).unwrap(), -Vec3::Z);
+    }
+
+    /// Finite samples so large that their area vector overflows (1e155 and 1e80 squares)
+    /// have no computed direction: `SM_ERR_INVALID_INPUT` with `(0, 0, 1)` written, not a
+    /// zero or NaN success.
+    #[test]
+    fn loop_normal_of_samples_too_large_refuses() {
+        let k = Kernel::default();
+        for size in [1e80, 1e155] {
+            let square = polyline(&[
+                [0.0, 0.0, 0.0],
+                [size, 0.0, 0.0],
+                [size, size, 0.0],
+                [0.0, size, 0.0],
+                [0.0, 0.0, 0.0],
+            ]);
+            let (n, e) = compute_crvs_normal_written(&k, &square).unwrap();
+            assert_eq!(n, Vec3::Z, "{size:e}");
+            assert!(
+                matches!(e, Some(SolidError::InvalidInput { .. })),
+                "{size:e}: {e:?}"
+            );
         }
     }
 

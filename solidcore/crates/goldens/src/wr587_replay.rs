@@ -266,7 +266,8 @@ pub(crate) fn certify(k: &Kernel, curves: &[Curve], own: Answer) -> Cert {
         s_rule += (w[0] - *first).length() * (w[1] - *first).length();
     }
     let terms = points.len().saturating_sub(1) as f64;
-    // the kernel's `E`, which decides its refusal of an area within its rounding of zero
+    // the kernel's `E` (the smaller of its two bounds, the second `e_kernel`), which
+    // decides whether it answers an area of no certain direction
     let e_rule = (terms + 8.0) * u * s_rule * 1.01;
     // (`S` is itself rounded: the factor 1.01 covers that many times over)
     let e_kernel = Vec3::new(abs[0], abs[1], abs[2]).length() * (terms + 8.0) * u * 1.01;
@@ -283,10 +284,12 @@ pub(crate) fn certify(k: &Kernel, curves: &[Curve], own: Answer) -> Cert {
             if len < EFF_ZERO + e_kernel + e_hat {
                 return Cert::BelowEffZero;
             }
-            // the kernel refuses a rounded area `|A| <= E` (its `E`, `e_rule`); the exact
-            // one is within `e_kernel + e_hat` of it
+            // the kernel refuses a rounded area `|A| <= E`, its `E` at most `e_kernel`
+            // (computed from the same terms, the factor 1.01 covering both roundings); the
+            // exact one is within `e_kernel + e_hat` of it: an area this independent bound
+            // does not put within rounding of zero may not be refused
             assert!(
-                len <= e_rule + e_kernel + e_hat,
+                len <= 2.0 * e_kernel * 1.01 + e_hat,
                 "refused a loop whose area vector {len:e} is not within its rounding of zero"
             );
             Cert::WithinRounding
@@ -313,12 +316,14 @@ pub(crate) fn certify(k: &Kernel, curves: &[Curve], own: Answer) -> Cert {
                 return certify_plane(&points, n, a, e);
             }
             let (first, last) = (points[0], points[points.len() - 1]);
-            if !first.approx_eq(last) {
+            // an open chain in the answer's plane may have the plane normal
+            if !first.approx_eq(last) && in_plane(&points, n) {
                 return certify_plane(&points, n, a, e);
             }
-            // a closed loop keeps its area's direction, which has one
+            // otherwise (a closed loop, or a chain in no plane) the kernel keeps its
+            // area's direction, which has one: the kernel answers it only above its `E`
             assert!(
-                len + e_kernel + e_hat > e_rule && len > e_hat,
+                len + e_kernel + e_hat > e_rule.min(e_kernel) && len > e_hat,
                 "a success of no direction"
             );
             let dev = (n - a / len).length();
@@ -348,13 +353,10 @@ fn certify_plane(points: &[Vec3], n: Vec3, a: Vec3, e: f64) -> Cert {
         (n.length() - 1.0).abs() < 1e-12,
         "a plane normal is a unit vector"
     );
-    for &p in points {
-        let d = p - first;
-        assert!(
-            n.dot(d).abs() <= 2e-6 * d.length(),
-            "the plane normal {n:?} is not normal to {d:?}"
-        );
-    }
+    assert!(
+        in_plane(points, n),
+        "the plane normal {n:?} is not normal to every chord from the first sample"
+    );
     let along = n.dot(a);
     if along.abs() > e + 8.0 * f64::EPSILON * a.length() {
         assert!(
@@ -363,6 +365,16 @@ fn certify_plane(points: &[Vec3], n: Vec3, a: Vec3, e: f64) -> Cert {
         );
     }
     Cert::PlaneNormal
+}
+
+/// Every sample lies in the plane through the first with unit normal `n`:
+/// `|n . (p - p0)| <= 2e-6 |p - p0|` (the kernel's angular zero, 1.75e-6, and rounding).
+fn in_plane(points: &[Vec3], n: Vec3) -> bool {
+    let first = points[0];
+    points.iter().all(|&p| {
+        let d = p - first;
+        n.dot(d).abs() <= 2e-6 * d.length()
+    })
 }
 
 // ---- main's answer ---------------------------------------------------------------------
@@ -651,4 +663,27 @@ fn plane_normals_of_open_chains_certify() {
         reversed.is_err(),
         "a plane normal against the area certifies"
     );
+    // an open chain in no plane whose area has no certain direction answers that
+    // direction (the kernel's last step): not a plane normal, the area's direction
+    let skew = polyline(&[
+        [0.0, 0.0, 0.0],
+        [-16.0, 8.0, 8.0],
+        [16.0, -16.0, 8.0],
+        [0.0, -8.0, 16.0],
+        [-16.0, 0.0, -16.0],
+        [-8.0, -8.0 + 2f64.powi(-32), 8.0],
+    ]);
+    let n = solidcore::curve::curve::p3::compute_crvs_normal(&k, &skew).unwrap();
+    assert_eq!(certify(&k, &skew, Answer::Normal(n)), Cert::UncertainArea);
+    // a certain area far along X whose turns are opposed keeps the area's side
+    let far = polyline(&[
+        [0.0, 0.0, 0.0],
+        [1e6, 0.0, 0.0],
+        [1e6 + 1.0, 1.0, 0.0],
+        [1e6 + 2.0, -2.0, 0.0],
+        [1e6 + 2.0, -1e-9, 0.0],
+    ]);
+    let n = solidcore::curve::curve::p3::compute_crvs_normal(&k, &far).unwrap();
+    assert_eq!(n, -Vec3::Z);
+    certify(&k, &far, Answer::Normal(n));
 }
