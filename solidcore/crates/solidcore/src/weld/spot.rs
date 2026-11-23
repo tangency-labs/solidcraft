@@ -39,9 +39,9 @@
 //!
 //! Flat sheets only: the marks are flat or revolved and the pins straight, so the outer
 //! faces must be planes square to `normal` at the spot. A ball only for two sheets: in a
-//! stack every faying face has its own nugget, which no look draws. Until the kernel's site query
-//! (#18407) measures the sheets and checks their faces, the caller passes the thicknesses;
-//! this module does not see the parts.
+//! stack every faying face has its own nugget, which no look draws. [`spot_site`] reads the
+//! frame and the thicknesses from the parts and checks their faces; [`spot_weld`] itself does
+//! not see the parts.
 
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
@@ -55,6 +55,9 @@ use crate::primitive::api_primitives::create_sphere;
 use crate::sweep::api_brep::create_rotational_sweep;
 use crate::topology::brep::p5::transform;
 use crate::topology::Brep;
+
+mod site;
+pub use site::{spot_site, SpotSheet, SpotSite};
 
 const OP_SPOT: &str = "weld::spot";
 
