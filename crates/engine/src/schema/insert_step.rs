@@ -144,8 +144,8 @@ pub struct InsertStepKeys {
     #[serde(default, deserialize_with = "flatten_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
     pub flatten: Option<bool>,
-    /// For a STEP (`.step`, `.stp`), FreeCAD or Rhino file (ignored for other files): which
-    /// reader reads it, `solidcraft` (the default) or `cadmpeg`.
+    /// For a STEP (`.step`, `.stp`), IGES (`.igs`, `.iges`), FreeCAD or Rhino file (ignored for
+    /// other files): which reader reads it, `solidcraft` (the default) or `cadmpeg`.
     #[serde(default)]
     pub reader: Option<ReaderParam>,
     /// Where the import goes in the active component, as a rigid move applied after `up`: a

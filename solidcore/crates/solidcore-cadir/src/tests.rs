@@ -1748,6 +1748,58 @@ fn a_solid_refused_for_one_face_comes_in_as_an_open_surface_of_the_others() {
     );
 }
 
+/// A solid refused for two faces (both planes moved 5 mm off their edges) leaves both out in one
+/// read again: the refusal names every face whose pcurves failed, not only the first, so a solid
+/// with more such faces than reads still comes in.
+#[test]
+fn a_solid_refused_for_several_faces_leaves_them_all_out_in_one_read() {
+    let mut ir = cube();
+    for k in 0..2 {
+        let face = ir.model.faces[k].clone();
+        let surface = ir
+            .model
+            .surfaces
+            .iter_mut()
+            .find(|s| s.id == face.surface)
+            .unwrap();
+        let SurfaceGeometry::Solved(SolvedSurfaceGeometry::Plane(plane)) = &surface.geometry else {
+            panic!("{:?}", surface.geometry)
+        };
+        let o = plane.origin().get();
+        let (n, u) = (
+            plane.frame().axis().as_raw(),
+            plane.frame().reference().as_raw(),
+        );
+        let moved = cadmpeg_ir::geometry::analytic::PlaneSurface::try_new(
+            Point3::new(o.x + 5.0 * n.x, o.y + 5.0 * n.y, o.z + 5.0 * n.z),
+            Vector3::new(n.x, n.y, n.z),
+            Vector3::new(u.x, u.y, u.z),
+        )
+        .unwrap();
+        surface.geometry = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Plane(moved));
+    }
+    let bodies = read_bodies(&ir, None);
+    assert!(bodies.failures.is_empty(), "{:?}", bodies.failures);
+    let s = &bodies.read[0].solid;
+    assert!(s.sheet, "an open surface");
+    assert_eq!(s.brep.faces.len(), 4);
+    assert!(
+        !s.face_origin.contains(&0) && !s.face_origin.contains(&1),
+        "{:?}",
+        s.face_origin
+    );
+    let left: Vec<&String> = s
+        .notes
+        .iter()
+        .filter(|n| n.starts_with("left out: "))
+        .collect();
+    assert_eq!(left.len(), 1, "one read left both out: {:?}", s.notes);
+    assert!(
+        left[0].contains("face #0") && left[0].contains("face #1"),
+        "{left:?}"
+    );
+}
+
 /// A refusal that names its face by the face's id in the model (as this reader names a face it
 /// cannot read: here its surface is missing) leaves that face out as one naming it by index does.
 #[test]
