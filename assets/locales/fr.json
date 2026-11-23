@@ -4175,7 +4175,7 @@
   "select the sheet edge first": "sélectionner d'abord l'arête de la tôle",
   "select two components": "sélectionner deux composants",
   "set by the sketch's lines": "défini par les lignes de l'esquisse",
-  "settings.cadmpeg_import": "Lire les fichiers STEP, FreeCAD et Rhino avec cadmpeg directement en B-rep, plutôt qu'en passant par le lecteur STEP de SolidCraft",
+  "settings.cadmpeg_import": "Lire les fichiers STEP, IGES, FreeCAD et Rhino avec cadmpeg directement en B-rep, plutôt qu'en passant par les lecteurs STEP et IGES de SolidCraft",
   "settings.display_quality_note": "Les niveaux plus fins affichent plus lisses les faces et arêtes courbes, mais leur maillage prend plus de temps. Seule la vue change, jamais la conception ni les exports.",
   "settings.double_click_components": "Double-cliquez sur un composant pour l'activer, ou pour modifier sur place un composant lié",
   "settings.frame_rate_details_note": "Ajoute un graphe des temps des dernières images avec les triangles dessinés superposés, un histogramme des temps d'image et ce que le GPU a dessiné. Cliquez sur la fréquence d'images dans la vue pour les afficher ou les masquer.",
