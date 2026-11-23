@@ -1,1 +1,0 @@
-| tests/step-regressions/block_edge_off_its_face.step | SolidCraft contributors | written entity by entity from formulas (a block whose edge curve lies 2 um off its face); import regression fixture | MIT OR Apache-2.0 |

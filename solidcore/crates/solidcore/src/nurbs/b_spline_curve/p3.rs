@@ -529,6 +529,12 @@ fn is_zero_speed_tangent_end(
 /// than the curve, or at the stretch's far end the radius is off `radius_tol` by more
 /// than half of it.
 ///
+/// Not upstream (#17744): the curve is read with the end's control point subtracted from
+/// every control point (the same curve, moved). At the stretch's far end `C' x C''` is
+/// about `|C'' x C'''| t² / 2`; read at the curve's own coordinates, `C'` carries their
+/// rounding times the basis' derivatives, which swamps it where the stretch is short (a
+/// G3 round's end rib 40 mm from the origin, stretch 1.9e-6: about 7e-13 against 1e-12).
+///
 /// # Errors
 ///
 /// A [`SolidError::Unported`] of the evaluations (none for a B-spline).
@@ -537,6 +543,16 @@ fn zero_speed_radius_stretch(
     end: usize,
     radius_tol: f64,
 ) -> Result<Option<f64>> {
+    let mut local = curve.clone();
+    if let Some(cur) = local.nurb.as_mut() {
+        let i = if end == 0 { 0 } else { cur.n() };
+        if let Some(o) = cur.cpts().get(i).map(|p| p.to_euclid()) {
+            for pw in cur.cpts_mut() {
+                *pw = pw.translate(-o);
+            }
+        }
+    }
+    let curve = &local;
     let ivl = curve.natural_interval();
     let param = if end == 0 { ivl.min() } else { ivl.max() };
     let pv = match curve.evaluate(param, 3, end == 0, false) {
@@ -3689,6 +3705,24 @@ mod tests {
         let tangent = ends((0.0, 1.0), true);
         assert!(is_zero_speed_tangent_end(&c, 0, 1e-15, Some(&tangent)).unwrap());
         assert!(!is_zero_speed_tangent_end(&c, 1, 1e-15, Some(&tangent)).unwrap());
+    }
+
+    /// The stretch is read in the end's frame (#17744): the Bezier of
+    /// [`zero_speed_end_curve`] without its knot, moved to (40, 0, 8), at a tolerance whose
+    /// stretch (7.5e-9) leaves `C' x C''` there (3.4e-16) under the rounding `C'` carries
+    /// at those coordinates. Read there, the radius at the stretch's far end is off the
+    /// tolerance and no stretch is found.
+    #[test]
+    fn wr_668_radius_stretch_is_read_in_the_end_frame() {
+        let tol = 1e-8;
+        let at = |x: f64, y: f64| [40.0 + x, y, 8.0];
+        let c = curve(
+            3,
+            &[at(0.0, 0.0), at(0.0, 0.0), at(1.0 / 3.0, 0.0), at(1.0, 1.0)],
+            &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        );
+        let s = zero_speed_radius_stretch(&c, 0, tol).unwrap().unwrap();
+        assert!((s - tol * 0.75).abs() <= 1e-6 * s, "{s}");
     }
 
     /// [`zero_speed_end_curve`] run backwards, of dimension `dim`: its zero-speed end

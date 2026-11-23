@@ -596,7 +596,7 @@ fn rust_brep(
     i: &Inputs,
 ) -> Result<crate::own_builder::RustBrep<OwnBrep>, HarnessError> {
     use crate::own_builder::{build_as, counts, failed_output, Built, Conventions};
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let conv = &Conventions::TOPOLOGY_FIXTURE;
     let built = if let Some(built) = build_as(&mut k, &i.brep, i.validate_only, i.init_gaps, conv)?
     {
@@ -691,30 +691,19 @@ pub(crate) fn recalc_gaps(b: &mut Brep) -> Result<(), SolidError> {
 ///
 /// Each record is stored only after it is fully computed; the first failure stops it.
 fn fill_gaps(b: &mut Brep) -> Result<(), SolidError> {
-    // The refill must not leave cache history the fixture's walk does not: its
+    // The refill must not leave caches the fixture's walk does not: its
     // smsurf_GetSurfaceCache calls build no tree (as during a Boolean operation: no UV
-    // trim curves are made), and the trimmed caches they keep are dropped again, leaving
-    // each surface's cache slot as a face-unaware lookup outside a Boolean operation
-    // leaves it (a built tree).
-    use solidcore::surface::surface::CacheTreeState;
-    let before: Vec<Option<(bool, CacheTreeState)>> = b
+    // trim curves are made), and the trimmed caches they keep are dropped again.
+    let before: Vec<Option<bool>> = b
         .faces()
         .iter()
-        .map(|(_, f)| {
-            f.surface
-                .as_ref()
-                .map(|s| (s.has_trim_cache(), s.cache_tree_state()))
-        })
+        .map(|(_, f)| f.surface.as_ref().map(solidcore::surface::surface::Surface::has_trim_cache))
         .collect();
     let result = fill_gaps_body(b);
     for ((_, f), before) in b.faces().iter().zip(before) {
-        if let (Some(s), Some((had, state))) = (f.surface.as_ref(), before) {
+        if let (Some(s), Some(had)) = (f.surface.as_ref(), before) {
             if !had && s.has_trim_cache() && !s.trim_cache_in_use() {
                 s.delete_trim_cache();
-            }
-            if state == CacheTreeState::NoCache && s.cache_tree_state() == CacheTreeState::Unbuilt
-            {
-                s.set_cache_tree_state(CacheTreeState::Built);
             }
         }
     }
@@ -723,7 +712,7 @@ fn fill_gaps(b: &mut Brep) -> Result<(), SolidError> {
 
 fn fill_gaps_body(b: &mut Brep) -> Result<(), SolidError> {
     use std::collections::BTreeSet;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     k.context.set_doing_boolean(true);
     let k = k;
     let vus: Vec<(VertexuseId, bool, bool)> = b
@@ -826,7 +815,7 @@ fn fill_edge_ccw_edge_gap(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<(),
 }
 
 fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let vid = |x: i64| VertexuseId::from_index(x as u32);
     let body: Vec<f64> = match op {
         OpIn::VuQuery { vu } => {

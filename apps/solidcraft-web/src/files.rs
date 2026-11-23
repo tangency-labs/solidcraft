@@ -400,6 +400,29 @@ pub fn download(name: &str, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// Open a document made in memory (`name`, of media type `kind`) in a new tab, where the browser
+/// shows it with its own viewer (a PDF, to print). Refused when the browser blocks the new tab.
+pub fn open_in_tab(name: &str, kind: &str, bytes: &[u8]) -> Result<(), String> {
+    let window = web_sys::window().ok_or("no window")?;
+    let parts = Array::new();
+    parts.push(&Uint8Array::from(bytes));
+    let opts = web_sys::BlobPropertyBag::new();
+    opts.set_type(kind);
+    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts).map_err(err)?;
+    let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(err)?;
+    let opened = window.open_with_url_and_target(&url, "_blank").map_err(err)?;
+    if opened.is_none() {
+        let _ = web_sys::Url::revoke_object_url(&url);
+        return Err(format!("the browser blocked a new tab for {name}: allow pop-ups for this site"));
+    }
+    // The tab keeps what it loaded; the URL goes once it has had time to.
+    let revoke = Closure::once_into_js(move || {
+        let _ = web_sys::Url::revoke_object_url(&url);
+    });
+    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(revoke.unchecked_ref(), 60_000);
+    Ok(())
+}
+
 /// Delete a stored design.
 pub fn delete(files: &Rc<Files>, name: &str) {
     let _ = vfs::remove(&format!("{OPFS}{name}"));
@@ -551,10 +574,9 @@ fn input_picker(files: &Rc<Files>, intent: Intent) {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
     let Ok(input) = doc.create_element("input").map(|e| e.unchecked_into::<web_sys::HtmlInputElement>()) else { return };
     input.set_type("file");
-    // Everything the browser build imports, from the format registry: cadmpeg is pure Rust, so
-    // FreeCAD and Rhino files are part of it; plus the DXF and SVG drawings Open and Insert take.
-    let mut extensions = solidcraft_engine::io::formats::open_extensions(true);
-    extensions.extend(["dxf", "svg"]);
+    // Everything the browser build opens, from the format registry: cadmpeg is pure Rust, so
+    // FreeCAD and Rhino files are part of it, and so are the DXF and SVG drawings Open and Insert take.
+    let extensions = solidcraft_engine::io::formats::open_extensions(true);
     input.set_accept(&disk::input_accept(&extensions, apple_touch()));
     // Attached (hidden) while it is open: some browsers ignore a click on a detached input.
     let _ = input.set_attribute("style", "display:none");

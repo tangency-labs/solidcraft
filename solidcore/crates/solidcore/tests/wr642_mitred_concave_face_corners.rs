@@ -27,17 +27,15 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity`: the blend corner's
+/// Every fix: the blend corner's
 /// Mitre turn of two equal cylinders is their exact plane section only with the rounds'
 /// exact classes and circle sections, its companion fixes (on the default kernel the boss
 /// root's rounds come 4.8e-4 off the closed form, #2400).
 fn kernel() -> Kernel {
-    let mut k = Kernel {
+    Kernel {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
-    };
-    k.fixes.geometric_g2_continuity = false;
-    k
+    }
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {

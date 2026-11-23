@@ -89,12 +89,13 @@
 //!   line direction. Pinned v1.0.1 takes the largest eigenvector of `C = del I - M` built
 //!   with un-negated off-diagonals, a perpendicular or skewed direction (`WR-10`).
 //! - [`circle_coplanar_circle_intersect_in_contact`] takes two circles that overlap past
-//!   touching (from outside each other or with one inside the other) by less than a
-//!   contact tolerance of its own, apart from the near-miss band `tolerance`, as tangent
-//!   (WR-787, #15429). Upstream's band for an overlap is `SM_EFF_ZERO · (1 + r1 + r2)`
-//!   alone, which [`circle_coplanar_circle_intersect`] keeps (contact tolerance zero), and
-//!   an overlap δ above it gives two crossings `2√(2δ r1 r2 / (r1 ± r2))` apart, far
-//!   beyond δ, while the circles stay within δ of each other between them. Nested circles
+//!   touching (from outside each other or with one inside the other) by up to a contact
+//!   tolerance of its own (read by [`within_contact_tol`]), apart from the near-miss band
+//!   `tolerance`, as tangent (WR-787, #15429). Upstream's band for an overlap is
+//!   `SM_EFF_ZERO · (1 + r1 + r2)` alone, which [`circle_coplanar_circle_intersect`]
+//!   keeps (contact tolerance zero), and an overlap δ above it gives two crossings
+//!   `2√(2δ r1 r2 / (r1 ± r2))` apart, far beyond δ, while the circles stay within δ of
+//!   each other between them. Nested circles
 //!   that stay within the contact tolerance of each other all round keep their crossings:
 //!   they touch along no single point.
 //!   In both functions the tangent point is on the side the smaller of the two overlaps
@@ -103,7 +104,7 @@
 //!   outside by between that and its band `SM_EFF_ZERO · (1 + r1 + r2)` got a tangent
 //!   point off by the smaller radius.
 //! - [`line_coplanar_circle_intersect_distinct`] takes a line that overlaps the circle past
-//!   touching by less than its contact tolerance as tangent too (WR-787, #14599): upstream
+//!   touching by up to its contact tolerance as tangent too (WR-787, #14599): upstream
 //!   merges the two crossings `2√(2rδ)` apart only when they are closer than its band, so
 //!   a line a hair inside a large circle crossed it twice. A circle that lies within the
 //!   contact tolerance of the line all round keeps its crossings.
@@ -116,7 +117,7 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::matrix::Matrix;
 use crate::geom::polynomial::{solve_quadratic, Roots};
-use crate::geom::tol::{are_same_to_tol, is_zero};
+use crate::geom::tol::{are_same_to_tol, is_zero, within_contact_tol};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{acos as sm_acos, sqrt as sm_sqrt, Point3, Vec3};
 use crate::math::{rad_to_deg, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
@@ -153,9 +154,11 @@ pub fn add_point(points: &mut Vec<Point3>, tol: f64, pnt: Point3) -> Result<()> 
         }
     }
     if points.len() > 1 {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             "geom::geom_utility::p1::add_point",
-            "the point set is not empty",
+            GeomFailure::PointSetFull {
+                points: points.len(),
+            },
         ));
     }
     points.push(pnt);
@@ -373,13 +376,15 @@ pub fn line_line_closest_point(
     const OP: &str = "geom::geom_utility::p1::line_line_closest_point";
     // err - zero length vectors
     if line_vec1.length_squared() < EFF_ZERO_SQ || line_vec2.length_squared() < EFF_ZERO_SQ {
-        return Err(SolidError::geom_failed(OP, "a line has no direction"));
+        let length = line_vec1.length().min(line_vec2.length());
+        return Err(SolidError::geom(OP, GeomFailure::ZeroDirection { length }));
     }
 
     // error - parallel or coincident lines
     let cross = line_vec1.cross(line_vec2);
     if cross.length_squared() < EFF_ZERO_SQ {
-        return Err(SolidError::geom_failed(OP, "the lines are parallel"));
+        let measure = cross.length_squared();
+        return Err(SolidError::geom(OP, GeomFailure::Parallel { measure }));
     }
 
     // get minimum distance vector direction
@@ -390,9 +395,9 @@ pub fn line_line_closest_point(
     let plane_v2 = cross.cross(line_vec2).unitize()?;
 
     let t1 = line_plane_intersect(line_pnt1, line_vec1, line_pnt2, plane_v2)
-        .map_err(|_| SolidError::geom_failed(OP, "the lines are parallel"))?;
+        .map_err(SolidError::geom_call(OP))?;
     let t2 = line_plane_intersect(line_pnt2, line_vec2, line_pnt1, plane_v1)
-        .map_err(|_| SolidError::geom_failed(OP, "the lines are parallel"))?;
+        .map_err(SolidError::geom_call(OP))?;
     Ok((t1, t2))
 }
 
@@ -416,9 +421,9 @@ pub fn line_plane_intersect(
     let denom = line_vec.dot(plane_norm);
 
     if denom.abs() < tol {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             OP,
-            "the line is parallel to the plane",
+            GeomFailure::Parallel { measure: denom },
         )); // Parallel case
     }
 
@@ -453,9 +458,9 @@ pub fn line_plane_intersect_uv(
     let denom = line_vec.dot(norm);
 
     if denom.abs() < tol {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             OP,
-            "the line is parallel to the plane",
+            GeomFailure::Parallel { measure: denom },
         )); // Parallel case
     }
 
@@ -561,7 +566,13 @@ pub fn circle_center_from_3_points(a: Point2, b: Point2, c: Point2) -> Result<Po
     // Upstream calls the 3d smgu_LinePointDistance (points converted with z = 0).
     let (dist_to_line, _) = line_point_distance(Vec3::from(a), vec, Vec3::from(b));
     if dist_to_line < 2.0 * EFF_ZERO * a.distance_squared(c) {
-        return Err(SolidError::geom_failed(OP, "the points are collinear")); // Radius would be bigger than 1 / SM_EFF_ZERO.
+        // Radius would be bigger than 1 / SM_EFF_ZERO.
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::CollinearPoints {
+                measure: dist_to_line,
+            },
+        ));
     }
 
     // Set up the 2x2 as described.
@@ -578,7 +589,10 @@ pub fn circle_center_from_3_points(a: Point2, b: Point2, c: Point2) -> Result<Po
     let numer1 = a00 * b1 - a10 * b0;
 
     if determ.abs() < numer0.abs() * EFF_ZERO || determ.abs() < numer1.abs() * EFF_ZERO {
-        return Err(SolidError::geom_failed(OP, "the points are collinear"));
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::CollinearPoints { measure: determ },
+        ));
     }
 
     Ok(Point2::new(numer0 / determ, numer1 / determ))
@@ -615,9 +629,9 @@ pub fn circle_from_3_points(
 ) -> Result<Circle3Points> {
     const OP: &str = "geom::geom_utility::p1::circle_from_3_points";
     if !(2..=3).contains(&dimension) {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             OP,
-            "the dimension is neither 2 nor 3",
+            GeomFailure::BadDimension { dimension },
         ));
     }
 
@@ -792,8 +806,9 @@ pub fn line_coplanar_circle_intersect(
 /// (none beyond it). Apart from the contact tolerance below, its two crossings are merged
 /// into one tangent point only when that point (the chord's midpoint) lies within
 /// `point_tolerance` of the circle. A line tangent to the circle up to rounding stays one
-/// point however long its numerical chord. A line that overlaps the circle past touching by less than
-/// `contact_tolerance` touches it at the chord's midpoint however long the chord, unless
+/// point however long its numerical chord. A line that overlaps the circle past touching by up
+/// to `contact_tolerance` (not proved past it, [`within_contact_tol`]) touches it at the
+/// chord's midpoint however long the chord, unless
 /// the whole circle lies within `contact_tolerance` of the line; zero keeps upstream's.
 ///
 /// Not upstream: `smgu_LineCoPlanarCircleIntersect` merges the two crossings whenever
@@ -828,9 +843,9 @@ pub fn line_coplanar_circle_intersect_distinct(
     // Unitize the line vector.
     let scale = line_vec.length();
     if scale < EFF_ZERO * circle_radius {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             "geom::geom_utility::p1::line_coplanar_circle_intersect",
-            "the line has no direction",
+            GeomFailure::ZeroDirection { length: scale },
         ));
     }
     line_vec /= scale;
@@ -856,8 +871,10 @@ pub fn line_coplanar_circle_intersect_distinct(
 
     // Not upstream (WR-787, #14599): an overlap below the contact tolerance touches too,
     // unless the line lies within it of the whole circle (it touches no single point).
-    if circle_radius - dist_to_ctr < contact_tolerance
-        && circle_radius + dist_to_ctr > contact_tolerance
+    let size = cl_pt.max_dimension().max(circle_center.max_dimension()) + circle_radius;
+    if contact_tolerance > 0.0
+        && within_contact_tol(circle_radius - dist_to_ctr, contact_tolerance, size)
+        && !within_contact_tol(circle_radius + dist_to_ctr, contact_tolerance, size)
     {
         return Ok(vec![t / scale]);
     }
@@ -948,7 +965,8 @@ pub fn circle_coplanar_circle_intersect(
 /// [`circle_coplanar_circle_intersect`] with the near-miss band and the contact
 /// tolerance apart: circles up to `tolerance` apart still touch (none beyond it), and
 /// circles that overlap past touching (from outside each other or with one inside the
-/// other) touch too while the overlap is below `contact_tolerance`, at the point midway
+/// other) touch too while the overlap is within `contact_tolerance` (not proved past it,
+/// [`within_contact_tol`]), at the point midway
 /// between their nearest points; past it they cross at two points. A `contact_tolerance`
 /// of zero keeps upstream's, `SM_EFF_ZERO · (1 + r1 + r2)`.
 ///
@@ -998,17 +1016,25 @@ pub fn circle_coplanar_circle_intersect_in_contact(
     // with one inside the other: within the contact tolerance either way they touch (#15429).
     let outside = circle1_radius + circle2_radius - cc_dist;
     let inside = cc_dist - (circle1_radius - circle2_radius).abs();
+    let overlap = outside.min(inside);
     let zero = EFF_ZERO * (1.0 + circle1_radius + circle2_radius);
-    // nested circles within the contact tolerance of each other all round touch nowhere in
-    // particular: only their overlap past upstream's zero is tangent
-    let contact = if inside < outside
-        && (circle1_radius - circle2_radius).abs() + cc_dist <= contact_tolerance
-    {
-        0.0
-    } else {
-        contact_tolerance
-    };
-    if outside.min(inside) < zero.max(contact) {
+    // the contact as every site reads it, not proved past the tolerance
+    // (`within_contact_tol`); nested circles within the contact tolerance of each other all
+    // round touch nowhere in particular: only their overlap past upstream's zero is tangent
+    let size = circle1_center
+        .max_dimension()
+        .max(circle2_center.max_dimension())
+        + circle1_radius.max(circle2_radius);
+    let all_round = inside < outside
+        && within_contact_tol(
+            (circle1_radius - circle2_radius).abs() + cc_dist,
+            contact_tolerance,
+            size,
+        );
+    let in_contact = contact_tolerance > 0.0
+        && !all_round
+        && within_contact_tol(overlap, contact_tolerance, size);
+    if overlap < zero || in_contact {
         // Tangent intersection - from either inside or outside.
         let mut vec = circle2_center - circle1_center;
         vec /= cc_dist; // Unitize
@@ -1106,7 +1132,13 @@ pub fn line_intersect_sphere(
     // compute 1/2 distance between the point solutions
     let disc = sphere_radius * sphere_radius - b * b;
     if disc < EFF_ZERO {
-        return Err(SolidError::geom_failed(OP, "the line misses the sphere")); // can't really happen
+        // upstream: "can't really happen". Past the touch test r - b > SM_EFF_ZERO (1 + r),
+        // so disc > SM_EFF_ZERO (1 + r) r, which is below SM_EFF_ZERO when r (1 + r) < 1:
+        // a sphere of radius under about 0.618 can still reach here
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::ShortChord { discriminant: disc },
+        ));
     }
     let d = sm_sqrt(disc);
 
@@ -1184,9 +1216,11 @@ pub fn plane_point_distance(
     test_point: Point3,
 ) -> Result<f64> {
     if plane_norm.length_squared() - 1.0 > EFF_ZERO {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             "geom::geom_utility::p1::plane_point_distance",
-            "the plane normal is not a unit vector",
+            GeomFailure::NormalNotUnit {
+                length_squared: plane_norm.length_squared(),
+            },
         ));
     }
 
@@ -1351,7 +1385,7 @@ pub fn vec_lin_comb_two_vectors(basis1: Vec3, basis2: Vec3, vector: Vec3) -> Res
 
     // `det == 0.0` in case dNumer0 or dNumer1 is 0 exactly.
     if det == 0.0 || det.abs() < numer0.abs() * EFF_ZERO || det.abs() < numer1.abs() * EFF_ZERO {
-        return Err(SolidError::geom_failed(OP, "the system is singular"));
+        return Err(SolidError::geom(OP, GeomFailure::Singular { measure: det }));
     }
 
     Ok(Point2::new(numer0 / det, numer1 / det))
@@ -1584,9 +1618,9 @@ pub fn inverse_3x3(a0: &[f64; 3], a1: &[f64; 3], a2: &[f64; 3]) -> Result<[[f64;
     let det = vec_triple_product(a0, a1, a2);
 
     if is_zero(det) {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             "geom::geom_utility::p1::inverse_3x3",
-            "the matrix is singular",
+            GeomFailure::Singular { measure: det },
         ));
     }
 
@@ -2097,6 +2131,89 @@ mod tests {
             let p = line + t * Vec3::X;
             assert!((p.length() - r).abs() < 1e-15, "{t}");
         }
+    }
+
+    /// A contact at the tolerance is one decision whichever copy of the circles a site has.
+    /// A boss of radius 2.4 at x = 17.60001 on the flat top (z = 15) of a ball of radius 25
+    /// cut at that height (stress corpus S0051) overhangs the rim, a circle of radius 20, by
+    /// exactly the contact tolerance, 1e-5. The boolean meets that pair as the edges' own
+    /// circles and as the faces' intersection curves, whose centres and radii differ by a
+    /// few roundings: the overlap read 9.99999999962e-6 from one copy and 1.0000000000673e-5
+    /// from another, so one site touched where another crossed. Every copy now touches,
+    /// at the point midway, 5e-6 past the rim, and so does a line exactly the tolerance
+    /// inside a circle; an overlap proved past the tolerance (by 1e-11) crosses at every
+    /// copy, `2√(2δ r1 r2 / (r1 − r2))` = 0.0148 apart to first order.
+    #[test]
+    fn a_contact_at_the_tolerance_is_one_decision_at_every_copy() {
+        let boss = (v(17.60001, 0.0, 15.0), 2.4);
+        let copies = [
+            (
+                v(
+                    -4.139_201_635_374_940_5e-14,
+                    -1.024_462_510_578_263_2e-14,
+                    14.999_999_999_999_964,
+                ),
+                20.000_000_000_000_004,
+            ),
+            (
+                v(-1.065_814_103_640_150_3e-14, 0.0, 15.0),
+                20.000_000_000_000_001,
+            ),
+            (v(0.0, 0.0, 15.0), 20.0),
+        ];
+        for (centre, radius) in copies {
+            for (c1, r1, c2, r2) in [
+                (centre, radius, boss.0, boss.1),
+                (boss.0, boss.1, centre, radius),
+            ] {
+                let hit = circle_coplanar_circle_intersect_in_contact(
+                    Vec3::Z,
+                    c1,
+                    r1,
+                    c2,
+                    r2,
+                    1e-5,
+                    1e-5,
+                )
+                .unwrap();
+                let CircleCircle::Tangent(p) = hit else {
+                    panic!("{c1:?} r {r1} and {c2:?} r {r2}: {hit:?}, want a touch");
+                };
+                assert!(p.distance(v(20.000_005, 0.0, 15.0)) < 1e-9, "{p:?}");
+            }
+        }
+        let past = v(17.600_010_000_01, 0.0, 15.0);
+        let hit = circle_coplanar_circle_intersect_in_contact(
+            Vec3::Z,
+            v(0.0, 0.0, 15.0),
+            20.0,
+            past,
+            2.4,
+            1e-5,
+            1e-5,
+        )
+        .unwrap();
+        let CircleCircle::Crossing(p, q) = hit else {
+            panic!("an overlap past the tolerance crosses: {hit:?}");
+        };
+        let delta: f64 = 1.000_001e-5;
+        let chord = 2.0 * (2.0 * delta * 20.0 * 2.4 / (20.0 - 2.4)).sqrt();
+        // (to first order in δ)
+        assert!((p.distance(q) - chord).abs() < 1e-4 * chord, "{p:?} {q:?}");
+        // a line the tolerance inside a circle of radius 20 about (17.6, 3, 15)
+        let hits = line_coplanar_circle_intersect_distinct(
+            v(0.0, 3.0 + 20.0 - 1e-5, 15.0),
+            Vec3::X,
+            v(17.6, 3.0, 15.0),
+            Vec3::Z,
+            20.0,
+            1e-4,
+            1e-5,
+            1e-5,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        assert!((hits[0] - 17.6).abs() < 1e-9, "{hits:?}");
     }
 
     /// A line tangent to a circle of radius 3 up to rounding (1e-12 inside) has a

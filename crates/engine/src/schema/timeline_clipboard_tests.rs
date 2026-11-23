@@ -370,7 +370,23 @@ fn add_and_export_replies_match_the_output_schema() {
     let sorted = serde_json::to_string_pretty(&written["script"]).unwrap_or_default();
     assert_eq!(text, sorted);
     assert_eq!(written["path"], json!(file), "{written}");
+    assert_eq!(written["absolute_path"], json!(file), "an absolute path is its own absolute path: {written}");
+    assert!(exported.get("absolute_path").is_none(), "no file, no absolute path: {exported}");
+    assert_eq!(written["bytes"], json!(text.len()), "the reply gives the size of the file written: {written}");
+    assert!(exported.get("bytes").is_none(), "no file, no size: {exported}");
     matches(output_schema_for::<ExportScriptResult>(), "timeline.export_script", &written);
+    // A relative path is written in the folder the process runs in. The reply echoes it as given
+    // in `path` and names it in full in `absolute_path`: an agent on the other end of MCP doesn't
+    // know that folder (#18831, #19248).
+    let relative = format!("solidcraft-timeline-relative-{}.json", std::process::id());
+    let here = run(&mut s, "timeline.export_script", json!({"path": relative}));
+    let full = std::env::current_dir().map(|d| d.join(&relative)).unwrap_or_else(|e| panic!("{e}"));
+    let written_here = std::fs::read_to_string(&full).unwrap_or_default();
+    let _ = std::fs::remove_file(&full);
+    assert_eq!(here["path"], json!(relative), "`path` is the path given: {here}");
+    assert_eq!(here["absolute_path"], json!(full), "{here}");
+    matches(output_schema_for::<ExportScriptResult>(), "timeline.export_script", &here);
+    assert_eq!(here["bytes"], json!(written_here.len()), "{here}");
 }
 
 /// A misspelt key still runs in Warn, and says so, with a reply that matches its schema.

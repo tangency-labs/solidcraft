@@ -17,9 +17,16 @@ mod request;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod server;
 
-pub use cancel::{Cancel, Ticket};
+pub use cancel::Cancel;
+pub use cancel::Ticket;
 pub use effect::Effect;
-pub use request::{ControlRequest, ControlResponse, DOCUMENT_WATCH, DocumentWatch, Subscriber, cancelled_chat_response, chat_turn_cancelled};
+pub use request::ControlRequest;
+pub use request::ControlResponse;
+pub use request::DOCUMENT_WATCH;
+pub use request::DocumentWatch;
+pub use request::Subscriber;
+pub use request::cancelled_chat_response;
+pub use request::chat_turn_cancelled;
 
 /// How an error from the client (`client`, native only) starts when a request is still running
 /// in the app after the wait. Outside the client so callers on every target can test for it.

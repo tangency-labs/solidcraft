@@ -40,7 +40,7 @@
 //! certified face holds within its bound of the definition (that bound is not added here).
 //! The enclosure refines the cell of widest enclosure, one bisection at a time,
 //! until it is as narrow as asked ([`enclose_volume`]) or decides the sign
-//! ([`volume_sign`]), or until [`CELL_BUDGET`] cells are spent or no cell is left to cut
+//! ([`volume_sign`]), or until [`CELL_BUDGET`] refinement cells are spent or no cell is left to cut
 //! ([`EnclosureStop`]); it answers the intersection of every enclosure it summed.
 //!
 //! **Moments and area** ([`enclose_quantity`], [`enclose_mass_properties`],
@@ -63,9 +63,9 @@
 //! (2003); [3] R. E. Moore, R. B. Kearfott, M. J. Cloud, *Introduction to Interval
 //! Analysis*, SIAM (2009).
 //!
-//! Deviations: none (not upstream). Bounded work: at most [`CELL_BUDGET`] cells and
-//! [`MAX_DEPTH`] bisections of one cell, no recursion (a work list ordered by width, then by
-//! insertion), the kernel's cancel token polled every 64 cells.
+//! Deviations: none (not upstream). Bounded work: at most [`CELL_BUDGET`] refinement cells
+//! (on top of the starting cells) and [`MAX_DEPTH`] bisections of one cell, no recursion (a work
+//! list ordered by width, then by insertion), the kernel's cancel token polled every 64 cells.
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap};
@@ -96,9 +96,10 @@ pub const ORDER: usize = 8;
 /// before it is cut.
 pub const FIRST_ORDER: usize = 3;
 
-/// The cells past which an enclosure is no longer refined (the starting cells, one or a
-/// few per trim piece and edge, and the last bisection's two come on top). A bound on the
-/// work of one decision, not fitted to a case: the rig's slowest decision takes about 10^5.
+/// The refinement cells past which an enclosure is no longer refined (the last bisection's two
+/// come on top). Work stays bounded at starting cells + [`CELL_BUDGET`] + 1. A bound on the
+/// work of one decision, not fitted to a case: the rig's slowest decision takes about 10^5
+/// refinement cells.
 pub const CELL_BUDGET: usize = 1 << 17;
 
 /// The most bisections from a starting cell to one of its cells: past it a cell is kept
@@ -135,7 +136,7 @@ pub enum EnclosureStop {
     /// The sign is not decided, and the settled cells and fixed terms already hold 0
     /// whatever the rest becomes ([`volume_sign`] only).
     Settled,
-    /// [`CELL_BUDGET`] cells are spent.
+    /// [`CELL_BUDGET`] refinement cells are spent.
     Budget,
     /// No cell is left that a cut narrows: every cell is settled, cut [`MAX_DEPTH`] times,
     /// or of single parameters.
@@ -178,14 +179,14 @@ pub enum VolumeSign {
     /// `hi < 0`: the volume is negative (the body is inside out).
     Negative(VolumeEnclosure),
     /// The enclosure still holds 0 when refinement ends: the cells that no cut narrows (gaps
-    /// between faces) already hold it whatever the rest becomes, [`CELL_BUDGET`] cells are
-    /// spent, or every cell is cut [`MAX_DEPTH`] times.
+    /// between faces) already hold it whatever the rest becomes, [`CELL_BUDGET`] refinement
+    /// cells are spent, or every cell is cut [`MAX_DEPTH`] times.
     Undecided(VolumeEnclosure),
 }
 
 /// An enclosure of the volume of the closed body `b` at most `width` wide
 /// ([`EnclosureStop::Reached`]), or else the narrowest refinement gives within
-/// [`CELL_BUDGET`] cells ([`EnclosureStop::Budget`]) or once no cut narrows a cell
+/// [`CELL_BUDGET`] refinement cells ([`EnclosureStop::Budget`]) or once no cut narrows a cell
 /// ([`EnclosureStop::Exhausted`]). It is refined whatever `width` is: a width below the
 /// enclosure's [`VolumeEnclosure::floor`] is not reached, and refining stops only at one of
 /// those ends. The result is the intersection of every enclosure summed along the way (each
@@ -241,7 +242,8 @@ pub fn moment_centre(k: &Kernel, b: &mut Brep) -> Result<Point3> {
 
 /// An enclosure of `quantity` of the closed body `b` at most `width` wide, as
 /// [`enclose_volume`] refines it (the [`VolumeEnclosure`] then holds that quantity, not
-/// the volume, unless it is the volume).
+/// the volume, unless it is the volume). [`Quantity::Area`] also takes a sheet body: a
+/// face void on both sides has an area, though it bounds no volume or moment.
 ///
 /// # Errors
 ///
@@ -267,7 +269,9 @@ pub fn enclose_quantity(
 
 /// An enclosure of the total area of the faces `faces` of `b` at most `width` wide, as
 /// [`enclose_quantity`] refines [`Quantity::Area`] (an area is its faces' alone, so any set
-/// of faces has one; a face listed twice counts twice).
+/// of faces has one; a face listed twice counts twice). A sheet's face, void on both sides,
+/// is measured from its upward use; its area, like any face's, is positive whichever of its
+/// uses is upward.
 ///
 /// # Errors
 ///
@@ -290,7 +294,8 @@ pub fn enclose_face_area(
 
 /// An enclosure of the total area of the faces `faces` of `b` at most `rel` of its own
 /// magnitude wide ([`EnclosureStop::Reached`]), or else the narrowest one refinement gives
-/// ([`EnclosureStop::Budget`], [`EnclosureStop::Exhausted`]), as [`enclose_face_area`]
+/// within [`CELL_BUDGET`] refinement cells ([`EnclosureStop::Budget`], [`EnclosureStop::Exhausted`]),
+/// as [`enclose_face_area`]
 /// refines it. The width asked follows the enclosure as it narrows, in one refinement: no
 /// rough first enclosure is needed to size it, and no restart re-evaluates an earlier
 /// run's cells. An unbounded enclosure never counts as reached.
@@ -317,7 +322,8 @@ pub fn enclose_face_area_relative(
 
 /// Whether an enclosure is finite and at most `rel` of its own magnitude wide (false for
 /// infinite or NaN ends: `inf <= rel * inf` would hold, so an unbounded enclosure would
-/// count as reached before any cell is cut; refinement goes on instead, to its budget).
+/// count as reached before any cell is cut; refinement goes on instead, to its budget of
+/// [`CELL_BUDGET`] refinement cells).
 fn within(rel: f64) -> impl Fn(Ivl) -> bool {
     move |e: Ivl| {
         let width = e.hi - e.lo;
@@ -380,7 +386,8 @@ pub struct MassEnclosure {
 /// [`MassEnclosure`] of the closed body `b`: the area, the volume and each moment about
 /// [`moment_centre`] enclosed ([`enclose_quantity`]) at most `rel` of its scale wide (the
 /// area's, the volume's, and the volume times the box's half diagonal to the moment's
-/// degree), then shifted to the origin in interval arithmetic.
+/// degree), then shifted to the origin in interval arithmetic. The area stage takes a
+/// sheet's faces too ([`enclose_quantity`]); the volume stage still refuses them.
 ///
 /// # Errors
 ///
@@ -510,7 +517,7 @@ pub fn volume_sign(k: &Kernel, b: &mut Brep) -> Result<VolumeSign> {
     volume_sign_within(k, b, CELL_BUDGET)
 }
 
-/// [`volume_sign`] within `budget` cells.
+/// [`volume_sign`] within `budget` refinement cells.
 fn volume_sign_within(k: &Kernel, b: &mut Brep, budget: usize) -> Result<VolumeSign> {
     let mut w = Work::new(k, b)?;
     w.budget = budget;
@@ -881,7 +888,7 @@ struct Work<'a> {
     heap: BinaryHeap<(u64, Reverse<usize>)>,
     /// The caps' and the loops' rounding terms, `[-w, w]`.
     fixed: Ivl,
-    /// The cells past which it is no longer refined ([`CELL_BUDGET`]).
+    /// The refinement cells past which it is no longer refined ([`CELL_BUDGET`]).
     budget: usize,
     counts: EnclosureCounts,
 }
@@ -1243,13 +1250,17 @@ impl<'a> Work<'a> {
             }
         };
         let (mu, mm) = (material(up)?, material(mate)?);
-        if mu == mm {
+        // a sheet's face (void on both sides) has an area but bounds no material: its
+        // area is measured from its upward use (the integrand `|S_u x S_v|`, with the
+        // loops walked as that use's orientation gives, is positive either way)
+        let sheet_area = self.weight.is_area() && !mu && !mm;
+        if mu == mm && !sheet_area {
             return Err(SolidError::invalid_input(
                 OP,
                 "a face whose sides are not one material region and one void",
             ));
         }
-        let fu = if mu { up } else { mate };
+        let fu = if mu || sheet_area { up } else { mate };
         let sign = if b.faceuse(fu)?.orientation == OrientType::Same {
             -1.0
         } else {
@@ -2091,7 +2102,7 @@ impl<'a> Work<'a> {
 
     /// Refines the widest cell, one bisection at a time, until `done` holds of the
     /// enclosure ([`EnclosureStop::Reached`]), `hopeless` of its parts ([`Work::parts`]: no
-    /// refining can make `done` hold; [`EnclosureStop::Settled`]), the budget is spent, or
+    /// refining can make `done` hold; [`EnclosureStop::Settled`]), the refinement budget is spent, or
     /// no cell is left to cut. The result is the intersection of every enclosure summed
     /// (each holds the volume): rounding that grows faster than the cells shrink does not
     /// widen it. Two enclosures that do not overlap mean one of them is not sound, which no
@@ -2113,6 +2124,8 @@ impl<'a> Work<'a> {
                 counts: w.counts,
             })
         };
+        let start = self.counts.cells;
+        let limit = start.saturating_add(self.budget);
         // running sums in f64 say when to sum the enclosure in intervals again: when they
         // look done, or every quarter of the work list's length
         let total = self.total();
@@ -2138,7 +2151,7 @@ impl<'a> Work<'a> {
                 checked = self.counts.cells;
                 next_check = self.counts.cells + (self.items.len() / 4).max(64);
             }
-            if self.counts.cells >= self.budget {
+            if self.counts.cells >= limit {
                 return out(self, best, EnclosureStop::Budget);
             }
             let Some((_, Reverse(i))) = self.heap.pop() else {
@@ -2493,6 +2506,61 @@ mod tests {
         assert!(!done(Ivl::new(f64::NAN, 1.0)));
     }
 
+    /// A sheet's faces, void on both sides, have area enclosures, positive whichever use
+    /// of each face is upward, face by face and over the whole sheet, though they bound no
+    /// volume: the volume is still refused.
+    #[test]
+    fn a_sheet_face_has_an_area_enclosure() {
+        use crate::primitive::api_curves::create_line_segment;
+        let mut k = Kernel::default();
+        // a 3 x 3 square and, apart from it, a 2 x 2 one: areas 9 and 4
+        let squares = [(0.0, 3.0), (4.0, 2.0)];
+        let mut curves: Vec<crate::curve::curve::Curve> = Vec::new();
+        for (x0, s) in squares {
+            let pts = [[x0, 0.0], [x0 + s, 0.0], [x0 + s, s], [x0, s]];
+            for i in 0..4 {
+                let (a, c) = (pts[i], pts[(i + 1) % 4]);
+                curves.push(
+                    create_line_segment(Point3::new(a[0], a[1], 0.0), Point3::new(c[0], c[1], 0.0))
+                        .unwrap()
+                        .into(),
+                );
+            }
+        }
+        let mut b = crate::primitive::api_trim_ops::create_planar_faces(&mut k, &curves).unwrap();
+        let faces = crate::topology::brep::p1::faces(&b, None).unwrap();
+        assert_eq!(faces.len(), 2);
+        let holds = |e: &VolumeEnclosure, a: f64| {
+            assert!(
+                e.lo > 0.0 && e.lo <= a && a <= e.hi,
+                "[{}, {}] for {a}",
+                e.lo,
+                e.hi
+            );
+            assert!(e.hi - e.lo <= 1e-8 * a, "[{}, {}] for {a}", e.lo, e.hi);
+        };
+        for flip in [None, Some(0), Some(1)] {
+            if let Some(i) = flip {
+                crate::topology::face::p1::flip_face_orientation(&mut b, faces[i]).unwrap();
+            }
+            let mut areas = [0.0; 2];
+            for (i, &f) in faces.iter().enumerate() {
+                let e = enclose_face_area_relative(&k, &mut b, &[f], 1e-9).unwrap();
+                areas[i] = (e.lo + e.hi) / 2.0;
+                let a = if (areas[i] - 9.0).abs() < 1.0 {
+                    9.0
+                } else {
+                    4.0
+                };
+                holds(&e, a);
+            }
+            assert!((areas[0] - areas[1]).abs() > 1.0, "{areas:?}");
+            let whole = enclose_quantity(&k, &mut b, Quantity::Area, 1e-8).unwrap();
+            holds(&whole, 13.0);
+        }
+        assert!(enclose_volume(&k, &mut b, 1e-6).is_err());
+    }
+
     /// The cylinder r 2, h 5, its side moved along x by `shift`.
     fn cylinder_side_moved(k: &mut Kernel, shift: f64) -> Brep {
         let mut b = crate::primitive::api_primitives::create_cylinder(
@@ -2646,8 +2714,9 @@ mod tests {
         assert!(width(Ivl::new(-1e-16, 1.0)) > 1.0);
     }
 
-    /// A budget too small to decide leaves the sign undecided, its enclosure holding the
-    /// volume (the quarter shell R 1e4, t 1e-3, V 157.08, decides within some 150 cells).
+    /// A refinement budget too small to decide leaves the sign undecided, its enclosure
+    /// holding the volume (the quarter shell R 1e4, t 1e-3, V 157.08, needs some 150
+    /// refinement cells to decide).
     #[test]
     fn a_spent_budget_leaves_the_sign_undecided() {
         let mut k = Kernel::default();
@@ -2663,9 +2732,87 @@ mod tests {
         .unwrap();
         let v = 157.0796;
         match volume_sign_within(&k, &mut b, 16).unwrap() {
-            VolumeSign::Undecided(e) => assert!(e.lo < v && v < e.hi, "{e:?}"),
+            VolumeSign::Undecided(e) => {
+                assert_eq!(e.stop, EnclosureStop::Budget);
+                assert!(e.lo < v && v < e.hi, "{e:?}");
+            }
             other => panic!("{other:?}"),
         }
+    }
+
+    /// A budget of 0 refines nothing: refinement stops immediately at `EnclosureStop::Budget`
+    /// with exactly the starting cells, leaving an undecided body undecided.
+    #[test]
+    fn a_budget_of_zero_refines_nothing() -> Result<()> {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_cylindrical_box(
+            &mut k,
+            Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            1e4,
+            1e4 + 1e-3,
+            0.0,
+            90.0,
+        )?;
+        let w = Work::new(&k, &mut b)?;
+        let start = w.counts.cells;
+        match volume_sign_within(&k, &mut b, 0)? {
+            VolumeSign::Undecided(e) => {
+                assert_eq!(e.stop, EnclosureStop::Budget);
+                assert_eq!(e.counts.cells, start);
+            }
+            other => panic!("{other:?}"),
+        }
+        Ok(())
+    }
+
+    /// A body with trims that needs refinement: reading starting cells S and calling
+    /// `volume_sign_within(.., budget)` decides `Positive`. Without the fix, comparing total
+    /// cells against the budget stops at the budget immediately when budget <= S with 0 refinement cuts,
+    /// leaving the sign `Undecided`.
+    #[test]
+    fn a_body_with_many_trims_refines_within_half_its_starting_cells() -> Result<()> {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_cylindrical_box(
+            &mut k,
+            Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            1e4,
+            1e4 + 1e-3,
+            0.0,
+            90.0,
+        )?;
+        let s = Work::new(&k, &mut b)?.counts.cells;
+        // The quarter shell needs ~150 refinement cells to decide Positive.
+        // Providing 200 refinement cells allows it to reach Positive.
+        // Without the fix, a budget of 200 would compare total cells >= 200.
+        // If s >= 200, it would halt immediately at step 0 as Undecided.
+        let full = volume_sign(&k, &mut b)?;
+        let needed = match full {
+            VolumeSign::Positive(ref e) => e.counts.cells - s,
+            other => panic!("expected Positive, got {other:?}"),
+        };
+        let sign = volume_sign_within(&k, &mut b, needed + 10)?;
+        match sign {
+            VolumeSign::Positive(e) => {
+                assert_eq!(e.stop, EnclosureStop::Reached);
+                assert!(
+                    e.counts.cells > s,
+                    "refinement occurred: {} > {s}",
+                    e.counts.cells
+                );
+                assert!(
+                    e.counts.cells <= s + needed + 10,
+                    "bounded: {} <= {}",
+                    e.counts.cells,
+                    s + needed + 10
+                );
+            }
+            other => {
+                panic!("expected Positive within refinement budget {needed} + 10, got {other:?}")
+            }
+        }
+        Ok(())
     }
 
     /// Enclosures intersect to their common part, and two that do not overlap (one of them

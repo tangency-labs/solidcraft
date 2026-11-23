@@ -966,14 +966,11 @@ impl Extent3d {
         let scale = 1.0 + sph_cent.max_dimension();
         if dist < sph_rad + EFF_ZERO * scale {
             let axis = if vec.length_squared() > EFF_ZERO * scale {
-                // `Unitize` fails only below EFF_ZERO_SQ, which the test above
-                // excludes; upstream then returns SM_ERR.
-                vec.unitize().map_err(|_| {
-                    SolidError::geom_failed(
-                        "geom::extent3d::Extent3d::cone_bound_to",
-                        "the axis to the sphere's centre has no direction",
-                    )
-                })?
+                // `Unitize` fails only below EFF_ZERO_SQ, which the test above excludes
+                // (`scale >= 1`, so the squared length exceeds SM_EFF_ZERO; a NaN fails the
+                // test): upstream's SM_ERR exit is unreachable and not ported, and the
+                // non-failing unitize gives the same vector here.
+                vec.unitize_or_z()
             } else {
                 Vec3::new(0.0, 0.0, 1.0)
             };

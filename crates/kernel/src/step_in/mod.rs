@@ -21,7 +21,9 @@ use solidcore_step::read::R;
 
 use crate::body::Body;
 use crate::{KernelError, Result};
+pub use checks::HealedBody;
 pub use checks::ImportChecks;
+pub use checks::ImportHeals;
 use p21::{Entity, Exchange, Param};
 
 /// The representation the file's unlisted topology is read as, under an id the reader keeps for
@@ -35,12 +37,12 @@ fn body_item(rep: u64, name: &str) -> bool {
 }
 
 /// Deepest assembly nesting followed.
-const MAX_ASSEMBLY_DEPTH: usize = 32;
+pub const MAX_ASSEMBLY_DEPTH: usize = 32;
 /// Most body instances in one import.
-const MAX_BODIES: usize = 10_000;
+pub const MAX_BODIES: usize = 10_000;
 /// Most product occurrences and mapped representations visited (a shared sub-assembly used
 /// twice at every level would otherwise grow exponentially).
-const MAX_VISITS: usize = 100_000;
+pub const MAX_VISITS: usize = 100_000;
 /// Most planned solids converted in one go (bounds the geometry held at once).
 const MAX_WINDOW: usize = 64;
 /// Most representation entries walked while deciding which items are converted exactly once. A
@@ -56,6 +58,9 @@ pub struct ImportedBody {
     pub face_origin: Vec<u64>,
     /// Solid name (the brep's label), else the product name.
     pub name: String,
+    /// Original face label shared by every imported face, when meaningful and unambiguous.
+    /// Kept separately so callers can still choose the source solid name.
+    pub common_face_name: Option<String>,
     pub body: Body,
     /// Surface colour (linear-ish RGB 0..1) from the file's presentation styles.
     pub color: Option<[f32; 3]>,
@@ -133,6 +138,9 @@ impl StepImport {
     /// token that stopped a check stops the import ("STEP import cancelled").
     fn settled(mut self) -> Result<StepImport> {
         let report = self.report.settled().ok_or_else(|| crate::watch::cancelled_error("STEP import"))?;
+        if let Some(heals) = self.report.checks.wait_heals() {
+            heals.apply(&mut self.bodies);
+        }
         self.warnings.extend(report.issues.iter().skip(self.report.issues.len()).map(|i| i.detail.clone()));
         self.report = report;
         Ok(self)
@@ -176,6 +184,11 @@ pub struct ImportIssue {
     /// The part's name in the file (empty: it has none).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub part: String,
+    /// For each place the file puts the part, the product names from the root to the product
+    /// that holds it, as [`ImportedBody::path`]: where a part that was not imported would have
+    /// been (empty: the file as a whole, or a solid outside any product).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<Vec<String>>,
     /// Faces it concerns: one for a face left out, the count for faces not shown, else 0.
     #[serde(default)]
     pub faces: usize,
@@ -194,6 +207,14 @@ pub struct ImportReport {
     pub solids: usize,
     /// In the order of [`StepImport::warnings`].
     pub issues: Vec<ImportIssue>,
+    /// The file has one root product (the import's own component): the first name of every
+    /// [`ImportIssue::paths`] entry is that root. Otherwise each root is a product below it.
+    #[serde(default)]
+    pub single_root: bool,
+    /// Edges that more than two faces of a surface model use, each counted once: the first two
+    /// uses keep it and every further use has a copy of its own, so the model is one open body.
+    #[serde(default)]
+    pub split_edges: usize,
     /// SMLib's check of the parts, which may still be running after the import
     /// ([`step_import_shared`]): what it finds follows `issues` ([`Self::current`]). Not saved:
     /// a saved report holds what the checks found in `issues` ([`Self::settled`]).
@@ -226,7 +247,14 @@ impl ImportReport {
     fn with_checks(&self, found: &[ImportIssue]) -> ImportReport {
         let mut issues = self.issues.clone();
         issues.extend(found.iter().cloned());
-        ImportReport { parts: self.parts, solids: self.solids, issues, checks: ImportChecks::default() }
+        ImportReport {
+            parts: self.parts,
+            solids: self.solids,
+            issues,
+            single_root: self.single_root,
+            split_edges: self.split_edges,
+            checks: ImportChecks::default(),
+        }
     }
 }
 
@@ -357,6 +385,40 @@ fn frame_matrix(p: &solidcore_step::geom::Placement) -> M4 {
     [[x[0], x[1], x[2], 0.0], [y[0], y[1], y[2], 0.0], [z[0], z[1], z[2], 0.0], [o[0], o[1], o[2], 1.0]]
 }
 
+/// A part's body as the import shows it: in the colours the file gives the item and its faces
+/// (with their opacities and names), each face knowing the file face it is.
+fn dress_with(
+    colors: &HashMap<u64, [f32; 3]>,
+    color_names: &HashMap<u64, String>,
+    opacity: &HashMap<u64, f32>,
+    body: Body,
+    item: u64,
+    face_origin: &[u64],
+) -> Body {
+    let color = colors.get(&item).copied();
+    // See-through bodies and faces with colours of their own, and the names the file gives
+    // those colours.
+    let faces = face_origin
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| {
+            let c = colors.get(f)?;
+            Some(crate::FacePaint { face: i, color: *c, opacity: opacity.get(f).copied().unwrap_or(1.0), name: color_names.get(f).cloned() })
+        })
+        .collect();
+    let paint =
+        crate::Paint { opacity: opacity.get(&item).copied().unwrap_or(1.0), faces, name: color.and_then(|_| color_names.get(&item).cloned()) };
+    let body = body.with_color(color).with_paint(Some(paint));
+    let identities =
+        face_origin.iter().map(|face| Some(crate::FaceSource::Imported { item, face: *face, payload_sha256: None, producer: None })).collect();
+    body.with_face_sources(Some(std::sync::Arc::new(identities)))
+}
+
+/// [`dress_with`] the file's colours `paints`.
+fn dress(paints: &checks::Paints, body: Body, item: u64, face_origin: &[u64]) -> Body {
+    dress_with(&paints.colors, &paints.color_names, &paints.opacity, body, item, face_origin)
+}
+
 struct Reader {
     ex: Arc<Exchange>,
     units: HashMap<u64, Units>,
@@ -401,10 +463,15 @@ struct Reader {
     used_items: HashSet<u64>,
     /// Items already instanced for the product being read.
     node_items: HashSet<u64>,
+    /// Items already instanced for the product being read, each with the placement it got: one
+    /// solid mapped several times at different places is one body per place.
+    node_placed: HashSet<(u64, [u64; 16])>,
     /// Occurrences and mapped representations visited so far.
     visits: usize,
     /// Items whose meshing was checked.
     unmeshed_checked: HashSet<u64>,
+    /// Edges split for sheet faces ([`ImportReport::split_edges`]), over the parts read.
+    split_edges: usize,
     /// Items sent into SMLib as an operation would send them, to say which need repair: each
     /// once per class of the placements of its instances ([`check_class`]).
     modelling_checked: HashSet<(u64, Option<[u64; 16]>)>,
@@ -416,6 +483,8 @@ struct Reader {
     /// steps (no worker threads: [`StepReading::step`]).
     check_outcomes: Vec<checks::Outcome>,
     bodies: Vec<ImportedBody>,
+    /// Each of `bodies`: its item and placement (where a healed part goes: [`checks::Heals`]).
+    instances: Vec<(u64, M4)>,
     /// Solids the walk found, in file order, to be converted into bodies afterwards (so the
     /// conversion, the long part, can be done a piece at a time: [`StepReading`]).
     plan: Vec<Planned>,
@@ -458,13 +527,16 @@ impl Reader {
             oriented: HashMap::new(),
             used_items: HashSet::new(),
             node_items: HashSet::new(),
+            node_placed: HashSet::new(),
             visits: 0,
             unmeshed_checked: HashSet::new(),
+            split_edges: 0,
             modelling_checked: HashSet::new(),
             check_jobs: Vec::new(),
             check_of: HashMap::new(),
             check_outcomes: Vec::new(),
             bodies: Vec::new(),
+            instances: Vec::new(),
             plan: Vec::new(),
             batches: Vec::new(),
             converted: 0,
@@ -902,7 +974,14 @@ impl Reader {
                     self.batches.push(Batch { m: *m, path: path.to_vec(), product: product.to_string(), instance: instance.map(str::to_string) });
                     for item in batch {
                         self.used_items.insert(item);
-                        if !self.node_items.insert(item) {
+                        if self.node_items.contains(&item) {
+                            continue;
+                        }
+                        let mut key = [0u64; 16];
+                        for (k, x) in key.iter_mut().zip(m.iter().flatten()) {
+                            *k = (*x + 0.0).to_bits();
+                        }
+                        if !self.node_placed.insert((item, key)) {
                             continue;
                         }
                         if self.bodies_so_far() >= MAX_BODIES {
@@ -1043,6 +1122,7 @@ impl Reader {
                 Ok(parallel::Made { body, missing, part, read }) => {
                     // What the read of the item found, reported once.
                     if let Some(failed) = read {
+                        self.split_edges += part.split_edges;
                         let label = self.label(item);
                         if let Some(why) = &part.refused {
                             self.note(IssueKind::ImportedAsSurfaces, Some(item), 0, format!("{label}: imported as surfaces: {why}"));
@@ -1058,12 +1138,15 @@ impl Reader {
                             self.note(IssueKind::OpenBody, Some(item), 0, format!("{label}: imported as an open body (the shell is not closed)"));
                         }
                     }
-                    if !self.once.contains(&item) {
+                    // A solid one walk maps at several placements is planned more than once although
+                    // its representation is walked once: keep it oriented for its later instances too.
+                    if !self.once.contains(&item) || self.uses.get(&item).is_some_and(|n| *n > 1) {
                         self.oriented.entry(item).or_insert_with(|| part.clone());
                     }
                     let (closed, file_faces, face_origin) = (part.closed, part.file_faces, part.face_origin.clone());
                     let own = e.params().first().and_then(Param::as_str).unwrap_or("").trim().to_string();
                     let name = if own.is_empty() { product.clone() } else { own };
+                    let common_face_name = ex.common_face_name(&face_origin).map(str::to_owned);
                     // Faces the mesher gives up on (or that the budget cut short) are reported.
                     if self.unmeshed_checked.insert(item) && missing > 0 {
                         self.note(
@@ -1077,32 +1160,7 @@ impl Reader {
                         *slot = Some(self.bodies.len());
                     }
                     let color = self.colors.get(&item).copied();
-                    // See-through bodies and faces with colours of their own, and the names the
-                    // file gives those colours.
-                    let faces = face_origin
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(i, f)| {
-                            let c = self.colors.get(f)?;
-                            Some(crate::FacePaint {
-                                face: i,
-                                color: *c,
-                                opacity: self.opacity.get(f).copied().unwrap_or(1.0),
-                                name: self.color_names.get(f).cloned(),
-                            })
-                        })
-                        .collect();
-                    let paint = crate::Paint {
-                        opacity: self.opacity.get(&item).copied().unwrap_or(1.0),
-                        faces,
-                        name: color.and_then(|_| self.color_names.get(&item).cloned()),
-                    };
-                    let body = body.with_color(color).with_paint(Some(paint));
-                    let identities = face_origin
-                        .iter()
-                        .map(|face| Some(crate::FaceSource::Imported { item, face: *face, payload_sha256: None, producer: None }))
-                        .collect();
-                    let body = body.with_face_sources(Some(std::sync::Arc::new(identities)));
+                    let body = dress_with(&self.colors, &self.color_names, &self.opacity, body, item, &face_origin);
                     // Every instance of a part placed more than once shows its first instance's
                     // mesh, placed (the first one too: meshing its own would mesh the part twice).
                     let body = match self.shown.get(&item) {
@@ -1138,11 +1196,23 @@ impl Reader {
                             self.note(IssueKind::NeedsRepair, Some(item), usize::from(refused.face.is_some()), msg);
                         } else if part.refused.is_none() && !body.is_mesh() {
                             self.check_of.insert(class, self.check_jobs.len());
-                            self.check_jobs.push(checks::Job { item, part: self.part_name(item), what, body: body.clone(), times: 1 });
+                            let (part_name, label) = (self.part_name(item), self.label(item));
+                            self.check_jobs.push(checks::Job {
+                                item,
+                                part: part_name,
+                                what,
+                                body: body.clone(),
+                                times: 1,
+                                label,
+                                m,
+                                source: part.clone(),
+                            });
                         }
                     }
+                    self.instances.push((item, m));
                     self.bodies.push(ImportedBody {
                         name,
+                        common_face_name,
                         body,
                         color,
                         path: path.clone(),
@@ -1171,9 +1241,19 @@ impl Reader {
 
     /// The warnings (worded as `warnings`, in their order) by kind and part, and how many of the
     /// file's parts came in as closed solids.
-    fn report(&self, warnings: &[String]) -> ImportReport {
+    fn report(&self, warnings: &[String], single_root: bool) -> ImportReport {
         let parts = self.plan.iter().map(|p| p.item).collect::<HashSet<_>>().len();
         let solids = self.bodies.iter().filter(|b| b.closed && b.refused.is_none()).map(|b| b.source_item).collect::<HashSet<_>>().len();
+        // The products holding each part, at every place the file puts it (each once, in order).
+        let mut paths: HashMap<u64, Vec<&[String]>> = HashMap::new();
+        for p in &self.plan {
+            if let Some(batch) = self.batches.get(p.batch) {
+                let at = paths.entry(p.item).or_default();
+                if !at.contains(&batch.path.as_slice()) {
+                    at.push(&batch.path);
+                }
+            }
+        }
         let issues = self
             .warnings
             .values()
@@ -1182,12 +1262,17 @@ impl Reader {
                 kind: n.kind,
                 item: n.item,
                 part: n.item.map(|i| self.part_name(i)).unwrap_or_default(),
+                paths: n
+                    .item
+                    .and_then(|i| paths.get(&i))
+                    .map(|p| p.iter().filter(|p| !p.is_empty()).map(|p| p.to_vec()).collect())
+                    .unwrap_or_default(),
                 faces: n.faces,
                 times: n.times,
                 detail: detail.clone(),
             })
             .collect();
-        ImportReport { parts, solids, issues, checks: ImportChecks::default() }
+        ImportReport { parts, solids, issues, single_root, split_edges: self.split_edges, checks: ImportChecks::default() }
     }
 
     /// Planned-solid indices (a node's `bodies` after the walk) as body indices and the STEP
@@ -1250,10 +1335,20 @@ impl Reader {
             let (u1, u2) = (self.units_of(r1), self.units_of(r2));
             if ope.name() == "ITEM_DEFINED_TRANSFORMATION" {
                 let p = ope.params();
-                let (i1, i2) = (
+                let (mut i1, mut i2) = (
                     p.get(2).and_then(Param::as_ref_id).ok_or("bad transformation")?,
                     p.get(3).and_then(Param::as_ref_id).ok_or("bad transformation")?,
                 );
+                // item_1 normally goes with rep_1 and item_2 with rep_2, but some writers
+                // cross them (rep_1 the component, item_1 the assembly's placement). Where an
+                // item is listed says whose it is: swap only when the lists say so plainly
+                // (both items listed in the assembly is the usual order).
+                let (side1, side2) = (self.rep_closure(&[r1]), self.rep_closure(&[r2]));
+                let lists = |side: &[u64], item: u64| side.iter().any(|r| self.reps.get(r).is_some_and(|rep| rep.0.contains(&item)));
+                let (i1_in_1, i1_in_2, i2_in_1, i2_in_2) = (lists(&side1, i1), lists(&side2, i1), lists(&side1, i2), lists(&side2, i2));
+                if (i1_in_2 && !i1_in_1 && !i2_in_2) || (i2_in_1 && !i2_in_2 && !i1_in_1) {
+                    std::mem::swap(&mut i1, &mut i2);
+                }
                 let m1 = self.placement_matrix(i1, u1)?;
                 let m2 = self.placement_matrix(i2, u2)?;
                 // rep_1 is normally the component: map its item onto the assembly's item.
@@ -1295,6 +1390,7 @@ impl Reader {
         let reps = self.rep_closure(&own);
         let mut bodies = Vec::new();
         self.node_items.clear();
+        self.node_placed.clear();
         for r in &reps {
             self.rep_bodies(*r, &world, &path, &name, instance, &mut bodies, 0);
         }
@@ -1322,7 +1418,7 @@ impl Reader {
 /// the file does not parse or has no solid the reader can read.
 pub fn step_orientation_errors(text: &str) -> std::result::Result<Vec<String>, String> {
     let ex = p21::parse(text)?;
-    let read = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
+    let read = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibImportTrims);
     if read.solids.is_empty() {
         return Err(read.failures.first().map_or_else(|| "the file has no solids".into(), |f| format!("solid #{}: {}", f.item, f.message)));
     }
@@ -1401,6 +1497,9 @@ pub fn step_validate(text: &str) -> std::result::Result<usize, String> {
 /// read the file, until the timeline has evaluated it), and strongly only when it is small.
 struct Recent {
     key: (u64, usize),
+    /// Read healing the parts its check fails ([`crate::heals_tolerance_defects`]): a read of the
+    /// same text with the preference the other way is a different import.
+    heal: bool,
     import: std::sync::Weak<StepImport>,
     /// Keeps a small import alive (never read).
     _small: Option<Arc<StepImport>>,
@@ -1421,17 +1520,17 @@ const KEEP_SMALL_BYTES: usize = 1 << 20;
 /// threads, and what it finds is in [`ImportReport::current`] once every check has ended
 /// ([`ImportReport::checks`]). [`step_import`] waits for them instead.
 pub fn step_import_shared(text: &str) -> Result<std::sync::Arc<StepImport>> {
-    let key = text_key(text);
-    if let Some(imp) = recent(key) {
+    let (key, heal) = (text_key(text), crate::heals_tolerance_defects());
+    if let Some(imp) = recent(key, heal) {
         return Ok(imp);
     }
     let _span = solidcraft_profile::span("import", "step.import");
     StepReading::new(text)?.finish_shared()
 }
 
-/// The import the recent imports still hold for `key`.
-fn recent(key: (u64, usize)) -> Option<Arc<StepImport>> {
-    RECENT.lock().ok()?.iter().filter(|r| r.key == key).find_map(|r| r.import.upgrade())
+/// The import the recent imports still hold for `key`, read healing its parts or not (`heal`).
+fn recent(key: (u64, usize), heal: bool) -> Option<Arc<StepImport>> {
+    RECENT.lock().ok()?.iter().filter(|r| r.key == key && r.heal == heal).find_map(|r| r.import.upgrade())
 }
 
 /// The cache key of a STEP text: its hash and length.
@@ -1442,12 +1541,13 @@ fn text_key(text: &str) -> (u64, usize) {
     (h.finish(), text.len())
 }
 
-/// Keep `imp` in the recent imports. The four-entry limit applies only to the strong
-/// references that retain small imports after their callers let go. Weak lookups for active
-/// imports must stay until their external owners release them, however many there are (#18814).
-fn remember_in(cache: &mut Vec<Recent>, key: (u64, usize), imp: &Arc<StepImport>, small: bool) {
-    cache.retain(|r| r.key != key && r.import.strong_count() > 0);
-    cache.push(Recent { key, import: Arc::downgrade(imp), _small: small.then(|| imp.clone()) });
+/// Keep `imp`, read healing its parts or not (`heal`), in the recent imports. The four-entry
+/// limit applies only to the strong references that retain small imports after their callers let
+/// go. Weak lookups for active imports must stay until their external owners release them,
+/// however many there are (#18814).
+fn remember_in(cache: &mut Vec<Recent>, key: (u64, usize), heal: bool, imp: &Arc<StepImport>, small: bool) {
+    cache.retain(|r| (r.key, r.heal) != (key, heal) && r.import.strong_count() > 0);
+    cache.push(Recent { key, heal, import: Arc::downgrade(imp), _small: small.then(|| imp.clone()) });
     let mut small_kept = 0;
     for recent in cache.iter_mut().rev() {
         if recent._small.is_some() {
@@ -1462,9 +1562,53 @@ fn remember_in(cache: &mut Vec<Recent>, key: (u64, usize), imp: &Arc<StepImport>
     cache.retain(|r| r.import.strong_count() > 0);
 }
 
-fn remember(key: (u64, usize), imp: &Arc<StepImport>, small: bool) {
+fn remember(key: (u64, usize), heal: bool, imp: &Arc<StepImport>, small: bool) {
+    #[cfg(test)]
+    let _others = recent_for_tests::wait();
     if let Ok(mut cache) = RECENT.lock() {
-        remember_in(&mut cache, key, imp, small);
+        remember_in(&mut cache, key, heal, imp, small);
+    }
+}
+
+/// Tests that assert what the cache of recent reads holds: under `cargo test` the tests of
+/// this crate run as threads of one process and share [`RECENT`], which lets go of the oldest
+/// small import when a fifth comes. While a test holds [`recent_for_tests::hold`], reads on other threads wait to
+/// be remembered, so nothing the test remembered is pushed out; its own reads (remembered on its
+/// own thread) go on. Under nextest each test is its own process.
+#[cfg(test)]
+pub(crate) mod recent_for_tests {
+    use std::sync::{PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+    static GATE: RwLock<()> = RwLock::new(());
+
+    std::thread_local! {
+        static HOLDER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// Held by a test: reads on other threads are remembered once it is dropped.
+    pub(crate) struct Held {
+        _gate: RwLockWriteGuard<'static, ()>,
+    }
+
+    impl Drop for Held {
+        fn drop(&mut self) {
+            HOLDER.with(|h| h.set(false));
+        }
+    }
+
+    /// Hold the cache for this thread's reads alone.
+    pub(crate) fn hold() -> Held {
+        let gate = GATE.write().unwrap_or_else(PoisonError::into_inner);
+        HOLDER.with(|h| h.set(true));
+        Held { _gate: gate }
+    }
+
+    /// For [`super::remember`]: waits while another thread holds the cache.
+    pub(super) fn wait() -> Option<RwLockReadGuard<'static, ()>> {
+        if HOLDER.with(|h| h.get()) {
+            return None;
+        }
+        Some(GATE.read().unwrap_or_else(PoisonError::into_inner))
     }
 }
 
@@ -1500,6 +1644,8 @@ pub struct StepReading {
     small: bool,
     /// One solid per step (no worker threads to share a batch between).
     single: bool,
+    /// Heal the parts the checks fail ([`crate::heals_tolerance_defects`] when the read began).
+    heal: bool,
 }
 
 impl StepReading {
@@ -1581,7 +1727,7 @@ impl StepReading {
             }
         }
         let single = workers <= 1;
-        Ok(StepReading { rd, tree, key, small: text.len() <= KEEP_SMALL_BYTES, single })
+        Ok(StepReading { rd, tree, key, small: text.len() <= KEEP_SMALL_BYTES, single, heal: crate::heals_tolerance_defects() })
     }
 
     /// Convert the next solid (or batch of solids); false once all are converted (or the
@@ -1639,14 +1785,35 @@ impl StepReading {
             rd.warn(warning);
         }
         let warnings: Vec<String> = rd.warnings.iter().map(|(m, n)| if n.times > 1 { format!("{m} (×{})", n.times) } else { m.clone() }).collect();
-        let mut report = rd.report(&warnings);
+        let mut report = rd.report(&warnings, tree.len() == 1);
         let jobs = std::mem::take(&mut rd.check_jobs);
         // A check the caller's token stopped stops the import, as a stopped read does.
         if self.single && rd.check_outcomes.iter().any(|o| matches!(o, checks::Outcome::Stopped)) {
             return Err(crate::watch::cancelled_error("STEP import"));
         }
-        report.checks =
-            if self.single { checks::ImportChecks::ran(&jobs, &rd.check_outcomes) } else { checks::ImportChecks::start(jobs, rd.workers, over) };
+        // What healing the parts the checks fail needs (nothing to copy when there is no check).
+        let heals = if jobs.is_empty() || !self.heal {
+            // The preference off: the parts stay as read, with what their checks found.
+            checks::Heals { as_read: !self.heal, ..checks::Heals::default() }
+        } else {
+            checks::Heals {
+                as_read: false,
+                instances: std::mem::take(&mut rd.instances),
+                paints: checks::Paints { colors: rd.colors.clone(), color_names: rd.color_names.clone(), opacity: rd.opacity.clone() },
+                uses: rd.uses.clone(),
+            }
+        };
+        report.checks = if self.single {
+            let checks = checks::ImportChecks::ran(&jobs, std::mem::take(&mut rd.check_outcomes), &heals);
+            // The heal runs here, under the caller's token: a heal it stopped stops the import
+            // too, so no stopped run is kept for the next read of the same text (#7167).
+            if checks.stopped() {
+                return Err(crate::watch::cancelled_error("STEP import"));
+            }
+            checks
+        } else {
+            checks::ImportChecks::start(jobs, heals, rd.workers, over)
+        };
         if rd.bodies.is_empty() {
             let why = warnings.first().cloned().unwrap_or_else(|| "the file has no solids".into());
             return Err(KernelError::Failed(format!("STEP import: no bodies ({why})")));
@@ -1667,9 +1834,9 @@ impl StepReading {
     /// The import, cached for the next read of the same text, with SMLib's check of its parts
     /// still running ([`ImportReport::checks`]; in the steps before, with no worker threads).
     pub fn finish_shared(self) -> Result<Arc<StepImport>> {
-        let (key, small) = (self.key, self.small);
+        let (key, small, heal) = (self.key, self.small, self.heal);
         let imp = Arc::new(self.finish_checking(None)?);
-        remember(key, &imp, small);
+        remember(key, heal, &imp, small);
         Ok(imp)
     }
 }

@@ -35,12 +35,16 @@
 //!
 //! Deviations:
 //! - **A round of the ball's radius as a face (solidcore #2403, not in the fork).** A
-//!   torus is read too ([`QuadricKind::Torus`]; it has no class of
-//!   its own), so that a torus moved in by its tube radius is its tube-centre circle
+//!   torus is read too ([`QuadricKind::Torus`]), so that one moved in by its tube
+//!   radius is its tube-centre circle
 //!   ([`QuadricKind::Circle`]), as a cylinder so moved is its axis. An offset collapsed
 //!   onto such a curve that the other offset crosses is a point spine
 //!   ([`classify_ball_on_collapsed_offset`]): the round along an earlier round's end curve,
 //!   where that round has the ball's radius, is a piece of the ball.
+//! - **Coaxial torus supports (#19182).** A torus shares the circular-spine
+//!   construction of the other surfaces of revolution: intersect its circular meridian
+//!   with the other offset's meridian, then revolve the ball's exact section. Noncoaxial
+//!   tori stay traced; a torus collapsed onto its centre circle keeps its point-spine rule.
 //! - **An offset collapsed by its geometry (solidcore #2652, not in the fork).** With
 //!   a constant ball, a round on a face of no natural quadric (a
 //!   B-spline, as a round of the ball's radius built by a trace) and a surface quadric is
@@ -651,11 +655,29 @@ impl BlendQuadric {
         o
     }
 
-    /// Not the fork (#2405): the foot of `m` on a plane, cylinder, sphere or cone, the point
+    /// Not the fork's: the radius of this sphere or cylinder (a torus's tube radius) where a
+    /// ball whose centre is `off` along its normal is wider than it: moved by `off` it passes
+    /// its centre, its axis or its tube's circle by more than `tol`, where
+    /// [`BlendQuadric::offset`] gives it back the other way round. `None` for the other kinds,
+    /// for a ball on its outer side and for one no wider than it (one as wide collapses its
+    /// offset: [`QuadricKind::Point`], [`QuadricKind::Line`], [`QuadricKind::Circle`]).
+    #[must_use]
+    pub fn narrower_than_a_ball(&self, off: f64, tol: f64) -> Option<f64> {
+        match self.kind {
+            QuadricKind::Sphere | QuadricKind::Cylinder if self.radius + self.side * off < -tol => {
+                Some(self.radius)
+            }
+            QuadricKind::Torus if self.tube + self.side * off < -tol => Some(self.tube),
+            _ => None,
+        }
+    }
+
+    /// Not the fork (#2405, #19182): the foot of `m` on a plane, cylinder, sphere, cone or
+    /// torus, the point
     /// of it nearest `m` (on a cylinder, along `m`'s radial line from the axis; on a sphere,
-    /// along the line from its centre; on a cone, on the line of the nappe in the half-plane
-    /// through the axis and `m`, #17263); `None` for other kinds and for `m` on a cylinder's
-    /// or cone's axis or at a sphere's centre.
+    /// along the line from its centre; on a torus, from its nearest tube centre; on a cone,
+    /// on the line of the nappe in the half-plane through the axis and `m`, #17263); `None` for other kinds and for `m` on a cylinder's
+    /// or cone's axis, at a sphere's centre, or on a torus's axis or tube-centre circle.
     #[must_use]
     pub fn foot(&self, m: Point3) -> Option<Point3> {
         match self.kind {
@@ -668,6 +690,12 @@ impl BlendQuadric {
             QuadricKind::Sphere => {
                 let radial = (m - self.point).unitize().ok()?;
                 Some(self.point + radial * self.radius)
+            }
+            QuadricKind::Torus => {
+                let radial = across(m - self.point, self.dir).unitize().ok()?;
+                let centre = self.point + radial * self.radius;
+                let tube = (m - centre).unitize().ok()?;
+                Some(centre + tube * self.tube)
             }
             QuadricKind::Cone => {
                 let w = m - self.point;
@@ -996,8 +1024,8 @@ fn coaxial(a: &BlendQuadric, b: &BlendQuadric, tol: f64, reach: f64) -> Option<(
     use QuadricKind as Q;
     let point_a = matches!(a.kind, Q::Sphere | Q::Point);
     let point_b = matches!(b.kind, Q::Sphere | Q::Point);
-    let axis_a = matches!(a.kind, Q::Cylinder | Q::Cone | Q::Line);
-    let axis_b = matches!(b.kind, Q::Cylinder | Q::Cone | Q::Line);
+    let axis_a = matches!(a.kind, Q::Cylinder | Q::Cone | Q::Line | Q::Torus);
+    let axis_b = matches!(b.kind, Q::Cylinder | Q::Cone | Q::Line | Q::Torus);
     let ang_tol = tol / reach.max(tol);
 
     if point_a && point_b {
@@ -1283,8 +1311,8 @@ pub fn classify_blend_spine(centre: Point3, tol: f64, blend: &mut ExactBlend) {
     if a.kind == Q::None || b.kind == Q::None {
         return;
     }
-    // (solidcore #2403) a torus and its circle take no class of the fork's
-    if matches!(a.kind, Q::Torus | Q::Circle) || matches!(b.kind, Q::Torus | Q::Circle) {
+    // A collapsed torus's circle keeps its point-spine construction (#2403).
+    if a.kind == Q::Circle || b.kind == Q::Circle {
         return;
     }
 
@@ -1303,9 +1331,35 @@ pub fn classify_blend_spine(centre: Point3, tol: f64, blend: &mut ExactBlend) {
         if matches!(a.kind, Q::Cylinder | Q::Line) && matches!(b.kind, Q::Cylinder | Q::Line) {
             return;
         }
+        if a.kind == Q::Torus || b.kind == Q::Torus {
+            let (Some(ma), Some(mb)) = (
+                meridian(&a, axis_point, axis_dir),
+                meridian(&b, axis_point, axis_dir),
+            ) else {
+                return;
+            };
+            let near = Point2::new(
+                across(centre - axis_point, axis_dir).length(),
+                (centre - axis_point).dot(axis_dir),
+            );
+            let dist = |x: &Point2| (x.x - near.x).hypot(x.y - near.y);
+            let crossing = meridians_cross(ma, mb)
+                .into_iter()
+                .filter(|x| x.x >= 0.0)
+                .min_by(|x, y| dist(x).total_cmp(&dist(y)));
+            // Coincident meridians and an axis crossing supply no circle spine.
+            if !crossing.is_some_and(|x| x.x > 0.0) {
+                return;
+            }
+        }
         blend.spine = BlendSpine::Circle;
         blend.point = axis_point;
         blend.dir = axis_dir;
+        return;
+    }
+
+    // A noncoaxial torus is outside the remaining quadric intersection classes.
+    if a.kind == Q::Torus || b.kind == Q::Torus {
         return;
     }
 
@@ -1766,6 +1820,11 @@ fn meridian(q: &BlendQuadric, a: Point3, d: Vec3) -> Option<Meridian> {
             c: Point2::new(rho(q.point), z(q.point)),
             r: q.radius,
         },
+        // a coaxial torus: its tube's circle in the radial half-plane
+        QuadricKind::Torus => Meridian::Circle {
+            c: Point2::new(q.radius, z(q.point)),
+            r: q.tube,
+        },
         // a coaxial cone: the line from its apex at its half-angle into its nappe
         QuadricKind::Cone => Meridian::Line {
             p: Point2::new(rho(q.point), z(q.point)),
@@ -1860,6 +1919,49 @@ pub fn chord_implicit(blend: &ExactBlend) -> Option<crate::surface::implicit::Im
     let (f1, f2) = (foot(a), foot(b));
     let normal = d.cross(f2 - f1).unitize().ok()?;
     Some(crate::surface::implicit::Implicit::Plane { origin: f1, normal })
+}
+
+/// Not the fork (#15129): the surface an order-0 section with sagitta `sagitta` lies on
+/// between two planes, from its offsets alone: the circular cylinder along the line the
+/// offsets meet in whose circle passes through the feet ([`chord_implicit`]'s) with its
+/// middle `sagitta` off the chord, away from the edge (to the offsets' line's side) for a
+/// positive sagitta and towards it for a negative one: radius `R = (c^2 / 4 + h^2) / (2 |h|)`.
+/// The chord's plane for a sagitta of 0. `None` where [`chord_implicit`] has none or the
+/// offsets' line lies on the chord. The offsets' line lies on the edge's side of the chord
+/// only where both offsets are positive (no obtuse toe: `ChamferDefinition::offsets`), which
+/// every exact chord's definition requires (`ExactRound::chord`).
+#[must_use]
+pub fn arc_section_implicit(
+    blend: &ExactBlend,
+    sagitta: f64,
+) -> Option<crate::surface::implicit::Implicit> {
+    let plane = chord_implicit(blend)?;
+    if sagitta == 0.0 {
+        return Some(plane);
+    }
+    let (p, d) = (blend.point, blend.dir);
+    let [a, b] = &blend.faces;
+    let foot = |f: &BlendQuadric| p - f.dir * (p - f.point).dot(f.dir);
+    let (f1, f2) = (foot(a), foot(b));
+    let chord = f2 - f1;
+    let c = chord.length();
+    let middle = f1 + chord * 0.5;
+    // the side away from the edge: the offsets' line's, square to the chord and the line
+    let off = p - middle;
+    let unit = chord.unitize().ok()?;
+    let toward = (off - unit * off.dot(unit) - d * off.dot(d))
+        .unitize()
+        .ok()?;
+    let h = sagitta.abs();
+    let radius = (c * c / 4.0 + h * h) / (2.0 * h);
+    let apex = middle + toward * sagitta;
+    let origin = apex - toward * (sagitta.signum() * radius);
+    Some(crate::surface::implicit::Implicit::Cone {
+        origin,
+        axis: d,
+        radius,
+        tan_angle: 0.0,
+    })
 }
 
 /// Not the fork (#2485): the surface a classified round lies on, from its offsets alone:
@@ -2399,6 +2501,103 @@ fn offset_collapses_by_definition(
     }
 }
 
+/// Not the fork's: the radius of the face `surface` at `uv` (on the edge) where the ball, its
+/// centre's signed offset along the face's normal `off`, is wider than the face by the face's
+/// definition, never from a net or from samples: an analytic cylinder, sphere or torus, or a
+/// surface of revolution that is one, with the ball on its inner side and its radius (a torus's
+/// tube radius) less than the ball's by more than `tol`
+/// ([`BlendQuadric::narrower_than_a_ball`]).
+///
+/// Such a face curves toward the ball by 1 / its radius across it at every point, so a ball
+/// of a larger radius touching it there cuts into it: no ball of that size rolls on the face
+/// anywhere along the edge. `None` for any other face: a round's net is not judged so, as the
+/// side of it its spine is on is not read from its definition here.
+///
+/// # Errors
+///
+/// Those of the evaluations.
+fn narrower_than_the_ball_by_definition(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    off: f64,
+    tol: f64,
+) -> Result<Option<f64>> {
+    match surface.kind() {
+        SurfaceKind::Cone(_)
+        | SurfaceKind::Sphere(_)
+        | SurfaceKind::Torus(_)
+        | SurfaceKind::SurfOfRevolution(_) => {
+            Ok(BlendQuadric::from_surface(k, surface, uv, tol)?.narrower_than_a_ball(off, tol))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// The solver's two faces as its edge's middle finds them, for the judgements read from a
+/// face's definition: `judge` is given each face's base surface, the middle's foot on it,
+/// the centre's signed offset along the face's normal of a ball of `radius` on the side the
+/// solver's offset of the face is on (as [`ball_zone_open_at_an_end`] reads it) and the
+/// body's tolerance; it returns `true` to stop. The faces stop being judged at one the edge's
+/// middle does not drop onto, and none is judged for a solver without its edge use, its
+/// edge's curve or an offset surface.
+///
+/// # Errors
+///
+/// Those of the drops, the evaluations, the topology lookups and `judge`.
+fn judge_faces_at_the_edge_middle(
+    ops: &mut dyn FilletSolverOps,
+    k: &Kernel,
+    b: &Brep,
+    radius: f64,
+    mut judge: impl FnMut(&Surface, Point2, f64, f64) -> Result<bool>,
+) -> Result<()> {
+    use crate::surface::surface::p4::NoObject;
+    use crate::surface::surface::p5::DropPointOptions;
+    use crate::topology::edge;
+    // (a solver without its edge use or its edge's curve proves nothing: not judged)
+    let Some(eu0) = ops.solver().edgeuse(0)? else {
+        return Ok(());
+    };
+    let Some(e) = eu::edge(b, eu0)? else {
+        return Ok(());
+    };
+    let Some(curve) = edge::evaluation_curve(b, e)? else {
+        return Ok(());
+    };
+    let ivl = edge::interval(b, e)?;
+    let tol = b.tolerance();
+    let mid = curve.evaluate_point(k, ivl.evaluate(0.5))?;
+    for i in 0..2 {
+        let (base, p, n, uv) = {
+            let Some(off) = ops.solver().surface(i)? else {
+                return Ok(());
+            };
+            let base = off.surface.base_surface().clone();
+            let domain = base.natural_uv_domain_with_nurb(k)?;
+            let dropped =
+                base.drop_point::<NoObject>(k, mid, &domain, &DropPointOptions::default())?;
+            if !dropped.success {
+                return Ok(());
+            }
+            let uv = dropped.result_uv;
+            let (p, n) = point_and_normal(k, &base, uv)?;
+            (base, p, n, uv)
+        };
+        // the ball's side of the face: its centre's signed offset along the face's normal
+        let q = crate::blend::fillet_solver::p2::eval_offset(k, ops.solver_mut(), i, uv)?;
+        let off = if (q - p).dot(n) < 0.0 {
+            -radius
+        } else {
+            radius
+        };
+        if judge(&base, uv, off, tol)? {
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
 /// Not the fork's (#16768): whether a constant ball of `radius` is as wide as one of the
 /// solver's two faces, so that the face's offset by the ball, the surface its centre rolls
 /// on, collapses ([`offset_collapses_by_definition`]: decided from the face's definition).
@@ -2417,50 +2616,38 @@ pub fn ball_as_wide_as_a_face_along_the_edge(
     b: &Brep,
     radius: f64,
 ) -> Result<bool> {
-    use crate::surface::surface::p4::NoObject;
-    use crate::surface::surface::p5::DropPointOptions;
-    use crate::topology::edge;
-    // (a solver without its edge use or its edge's curve proves nothing: not judged)
-    let Some(eu0) = ops.solver().edgeuse(0)? else {
-        return Ok(false);
-    };
-    let Some(e) = eu::edge(b, eu0)? else {
-        return Ok(false);
-    };
-    let Some(curve) = edge::evaluation_curve(b, e)? else {
-        return Ok(false);
-    };
-    let ivl = edge::interval(b, e)?;
-    let tol = b.tolerance();
-    let mid = curve.evaluate_point(k, ivl.evaluate(0.5))?;
-    for i in 0..2 {
-        let (base, p, n, uv) = {
-            let Some(off) = ops.solver().surface(i)? else {
-                return Ok(false);
-            };
-            let base = off.surface.base_surface().clone();
-            let domain = base.natural_uv_domain_with_nurb(k)?;
-            let dropped =
-                base.drop_point::<NoObject>(k, mid, &domain, &DropPointOptions::default())?;
-            if !dropped.success {
-                return Ok(false);
-            }
-            let uv = dropped.result_uv;
-            let (p, n) = point_and_normal(k, &base, uv)?;
-            (base, p, n, uv)
-        };
-        // the ball's side of the face: its centre's signed offset along the face's normal
-        let q = crate::blend::fillet_solver::p2::eval_offset(k, ops.solver_mut(), i, uv)?;
-        let off = if (q - p).dot(n) < 0.0 {
-            -radius
-        } else {
-            radius
-        };
-        if offset_collapses_by_definition(k, &base, uv, off, tol)? {
-            return Ok(true);
+    let mut collapses = false;
+    judge_faces_at_the_edge_middle(ops, k, b, radius, |base, uv, off, tol| {
+        collapses = offset_collapses_by_definition(k, base, uv, off, tol)?;
+        Ok(collapses)
+    })?;
+    Ok(collapses)
+}
+
+/// Not the fork's: where a constant ball of `radius` is wider than one of the solver's two
+/// faces by the face's definition ([`narrower_than_the_ball_by_definition`]), that face's
+/// radius, the lesser where both are: no ball of `radius` rolls on such a face, and one of a
+/// radius below the face's does not cut into it. The faces are found as
+/// [`ball_as_wide_as_a_face_along_the_edge`] finds them. `None` where neither face is such a
+/// face.
+///
+/// # Errors
+///
+/// Those of the drops, the evaluations and the topology lookups.
+pub fn ball_wider_than_a_face_along_the_edge(
+    ops: &mut dyn FilletSolverOps,
+    k: &Kernel,
+    b: &Brep,
+    radius: f64,
+) -> Result<Option<f64>> {
+    let mut least: Option<f64> = None;
+    judge_faces_at_the_edge_middle(ops, k, b, radius, |base, uv, off, tol| {
+        if let Some(width) = narrower_than_the_ball_by_definition(k, base, uv, off, tol)? {
+            least = Some(least.map_or(width, |l| l.min(width)));
         }
-    }
-    Ok(false)
+        Ok(false)
+    })?;
+    Ok(least)
 }
 
 /// [`ball_past_an_end`]'s refusal: the edge's end the ball lies past, and the radius at which
@@ -3107,7 +3294,15 @@ fn ball_on_face_along_arc(
         }
     }
     let [e0, e1] = feet;
-    let Ok(axis) = e0.cross(e1).unitize() else {
+    // One point or opposite within the tolerance (the cross product is the radius squared
+    // times the sine of their angle, a chord of the radius times that angle): a round along
+    // a whole closed edge starts and ends at its seam, its feet there a rounding apart, and
+    // the arc between them is no evidence of a ball lying on the face (#20411)
+    let normal = e0.cross(e1);
+    if normal.length() <= radius * tol {
+        return Ok(None);
+    }
+    let Ok(axis) = normal.unitize() else {
         return Ok(None);
     };
     let (Ok(x), Ok(y)) = (e0.unitize(), axis.cross(e0).unitize()) else {
@@ -3577,6 +3772,61 @@ mod tests {
     }
 
     #[test]
+    fn a_coaxial_torus_and_plane_have_circular_spines_and_exact_feet() {
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let support = torus(30.0, 8.0, 1.0);
+        let radius = 0.8;
+        let offset = support.offset(-radius, 1e-7);
+        let flat = plane(Point3::new(0.0, 0.0, radius), z);
+        let radial = (offset.tube * offset.tube - radius * radius).sqrt();
+        for sign in [-1.0, 1.0] {
+            let centre = Point3::new(30.0 + sign * radial, 0.0, radius);
+            for (a, b) in [(offset, flat), (flat, offset)] {
+                let blend = classify(a, b, radius, centre);
+                assert_eq!(blend.spine, BlendSpine::Circle);
+                let station = circle_spine_station(&blend, centre).unwrap();
+                assert!(station.distance(centre) < 1e-12, "{station:?}");
+                let foot = support.foot(station).unwrap();
+                let expected = Point3::new(
+                    30.0 + sign * 8.0 * radial / offset.tube,
+                    0.0,
+                    8.0 * radius / offset.tube,
+                );
+                assert!(foot.distance(expected) < 1e-12, "{foot:?}");
+                assert!((foot.distance(station) - radius).abs() < 1e-12);
+            }
+        }
+        // A plane through the axis does not give a circular spine.
+        let tilted = plane(Point3::ZERO, Vec3::new(1.0, 0.0, 0.0));
+        let blend = classify(offset, tilted, radius, Point3::new(radius, 30.0, 0.0));
+        assert_eq!(blend.spine, BlendSpine::Traced);
+        for kind in [QuadricKind::Point, QuadricKind::Line, QuadricKind::Circle] {
+            let collapsed = BlendQuadric {
+                kind,
+                dir: z,
+                ..BlendQuadric::default()
+            };
+            for (a, b) in [(offset, collapsed), (collapsed, offset)] {
+                assert_eq!(
+                    classify(a, b, radius, Point3::ZERO).spine,
+                    BlendSpine::Traced
+                );
+            }
+        }
+        assert_eq!(
+            classify(offset, offset, radius, Point3::new(37.2, 0.0, 0.0)).spine,
+            BlendSpine::Traced
+        );
+        let separate = cylinder(Point3::ZERO, z, 100.0, 1.0);
+        assert_eq!(
+            classify(offset, separate, radius, Point3::new(37.2, 0.0, 0.0)).spine,
+            BlendSpine::Traced
+        );
+        assert!(support.foot(Point3::ZERO).is_none());
+        assert!(support.foot(Point3::new(30.0, 0.0, 0.0)).is_none());
+    }
+
+    #[test]
     fn two_lines_meeting_are_a_point_and_coaxial_cylinders_no_spine() {
         let z = Vec3::new(0.0, 0.0, 1.0);
         let x = Vec3::new(1.0, 0.0, 0.0);
@@ -3659,6 +3909,55 @@ mod tests {
         assert_eq!(wall.offset(-2.0, 1e-9).kind, QuadricKind::Cylinder);
     }
 
+    /// A ball wider than the cylinder, sphere or torus tube it is inside of is told from the
+    /// face's own radius: a round of radius 2 under a ball of 8 or of 3, not under one of 2
+    /// (as wide: its offset collapses, the other refusal) or of 1.5, and not from its outer
+    /// side; a plane and a cone are never narrower than a ball.
+    #[test]
+    fn a_ball_wider_than_the_face_it_is_inside_of_is_told_by_the_faces_radius() {
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let tol = 1e-9;
+        // side -1: the normal points to the axis, so a positive offset is inside
+        let round = cylinder(Point3::ZERO, z, 2.0, -1.0);
+        assert_eq!(round.narrower_than_a_ball(8.0, tol), Some(2.0));
+        assert_eq!(round.narrower_than_a_ball(3.0, tol), Some(2.0));
+        assert_eq!(round.narrower_than_a_ball(2.0, tol), None);
+        assert_eq!(round.offset(2.0, tol).kind, QuadricKind::Line);
+        assert_eq!(round.narrower_than_a_ball(1.5, tol), None);
+        assert_eq!(round.narrower_than_a_ball(-8.0, tol), None);
+        // side +1: the normal points away from the axis, so inside is a negative offset
+        let pin = cylinder(Point3::ZERO, z, 2.0, 1.0);
+        assert_eq!(pin.narrower_than_a_ball(-8.0, tol), Some(2.0));
+        assert_eq!(pin.narrower_than_a_ball(8.0, tol), None);
+        let ball = BlendQuadric {
+            kind: QuadricKind::Sphere,
+            radius: 5.0,
+            side: -1.0,
+            ..BlendQuadric::default()
+        };
+        assert_eq!(ball.narrower_than_a_ball(5.5, tol), Some(5.0));
+        assert_eq!(ball.narrower_than_a_ball(4.5, tol), None);
+        let tube = BlendQuadric {
+            kind: QuadricKind::Torus,
+            dir: z,
+            radius: 10.0,
+            tube: 1.0,
+            side: -1.0,
+            ..BlendQuadric::default()
+        };
+        assert_eq!(tube.narrower_than_a_ball(3.0, tol), Some(1.0));
+        assert_eq!(tube.narrower_than_a_ball(0.5, tol), None);
+        assert_eq!(tube.narrower_than_a_ball(-3.0, tol), None);
+        assert_eq!(plane(Point3::ZERO, z).narrower_than_a_ball(8.0, tol), None);
+        let cone = BlendQuadric {
+            kind: QuadricKind::Cone,
+            dir: z,
+            angle: std::f64::consts::FRAC_PI_4,
+            ..BlendQuadric::default()
+        };
+        assert_eq!(cone.narrower_than_a_ball(8.0, tol), None);
+    }
+
     /// #16768: only a round whose definition is one ball's (its circle as section, no law,
     /// no chamfer, equal offsets) of the ball's radius is read as collapsing under it.
     #[test]
@@ -3708,8 +4007,10 @@ mod tests {
         assert_eq!((o.kind, o.tube, o.side), (QuadricKind::Torus, 1.0, 1.0));
         // no implicit form, no class of the fork's
         assert_eq!(t.implicit(), ([[0.0; 3]; 3], [0.0; 3], 0.0));
+        // a plane square to the torus's axis: by symmetry about the axis the rolling ball's
+        // centre runs on a circle about it, so the spine is that circle (exact), not traced
         let e = classify(t, plane(Point3::ZERO, z), 1.0, p);
-        assert_eq!(e.spine, BlendSpine::Traced);
+        assert_eq!(e.spine, BlendSpine::Circle);
     }
 
     #[test]
