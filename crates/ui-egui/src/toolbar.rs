@@ -1016,6 +1016,8 @@ fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
         if let Some(format) = format {
             params["format"] = json!(format);
         }
+        // GLB only, and not read for the other formats.
+        params["hierarchy"] = json!(app.preferences.glb_export_hierarchy);
         if let Ok(result) = app.run("file.export", params) {
             let skipped =
                 result.get("skipped").and_then(Value::as_array).map_or(Vec::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>());
@@ -1826,7 +1828,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             crate::context_menu::open_for(app, bg.interact_pointer_pos().unwrap_or(r.left_bottom()), crate::context_menu::Target::Toolbar);
         }
         let render = crate::render_workspace::active(app);
-        let drawing = crate::drawing_workspace::active(app);
+        let drawing = crate::drawing_workspace::active(app) || crate::workspace::sheet_scope(app);
         let switcher = app_bar::Switcher {
             name: if render {
                 app.tr("ui.render")
@@ -2850,11 +2852,11 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
 
 /// Global keyboard shortcuts (when no text field has focus).
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
-    let sketch = app.session.active_sketch;
+    let sketch = (app.session.active_sketch, app.session.active_sheet_sketch.as_ref().map(|entry| (entry.drawing, entry.sketch)));
     let held = if !crate::workspace::tool_receives_input(app) { app.tool.take() } else { None };
     shortcuts_focused(app, ctx);
     if let Some(tool) = held
-        && app.session.active_sketch == sketch
+        && (app.session.active_sketch, app.session.active_sheet_sketch.as_ref().map(|entry| (entry.drawing, entry.sketch))) == sketch
         && app.tool.is_none()
     {
         app.tool = Some(tool);
