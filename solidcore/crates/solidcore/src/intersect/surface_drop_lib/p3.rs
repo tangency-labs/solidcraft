@@ -418,6 +418,9 @@ fn drop_point_near_seam(
             s.parameters.first().copied().unwrap_or(0.0),
             s.parameters.get(1).copied().unwrap_or(0.0),
         );
+        if !(uv.x.is_finite() && uv.y.is_finite()) {
+            continue;
+        }
         let p = surface.evaluate_point(k, uv)?;
         let n = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
         let (dev, _) = line_point_distance(p, n, pt_3d);
@@ -425,10 +428,10 @@ fn drop_point_near_seam(
             max2(1.0, p.distance(pt_3d)) * approx_tol_3d * 10.0,
             base_dev_limit,
         );
-        if dev > scaled_limit {
+        let d = cyclic_uv_dist(uv);
+        if !(dev.is_finite() && scaled_limit.is_finite() && d.is_finite() && dev <= scaled_limit) {
             continue;
         }
-        let d = cyclic_uv_dist(uv);
         if best.is_none_or(|(_, best_d)| d < best_d) {
             best = Some((uv, d));
         }
