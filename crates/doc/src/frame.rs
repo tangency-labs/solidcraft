@@ -349,8 +349,9 @@ impl crate::walk::Walk for ProfileSpec {
 }
 
 pub use crate::eval::frame_member::{
-    LaterPieces, corner_at_point, corner_point, default_order, default_orders, group_member_names, is_crossing, is_member_line, is_member_wire,
-    member_line_ids, member_names, member_of_body, member_parts, member_segments, member_turns, members_cross, members_of_bodies, overlap_parent,
+    LaterPieces, SectionView, corner_at_point, corner_point, default_order, default_orders, group_member_names, is_crossing, is_member_line,
+    is_member_wire, member_line_ids, member_names, member_of_body, member_parts, member_segments, member_turns, members_cross, members_of_bodies,
+    overlap_parent, section_view,
 };
 pub use crate::frame_corners::{CornerOverride, CornerType, MAX_GAP, MemberRef, checked_gap, read_coped};
 pub use crate::frame_plate::{PlateHoles, PlateMember, PlateShape, plate_member, plate_region};
@@ -418,6 +419,23 @@ pub enum Anchor {
     BottomLeft,
     Bottom,
     BottomRight,
+}
+
+impl Anchor {
+    /// Every anchor, in the order the Frame Member dialog lists them.
+    pub const ALL: &[Anchor] = &[
+        Anchor::Origin,
+        Anchor::Center,
+        Anchor::Centroid,
+        Anchor::TopLeft,
+        Anchor::Top,
+        Anchor::TopRight,
+        Anchor::Left,
+        Anchor::Right,
+        Anchor::BottomLeft,
+        Anchor::Bottom,
+        Anchor::BottomRight,
+    ];
 }
 
 /// A profile's section properties (mm², mm, mm⁴). Second moments are about axes through the

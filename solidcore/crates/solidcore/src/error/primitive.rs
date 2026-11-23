@@ -15,8 +15,8 @@
 //! | [`PrimitiveFailure::AxisInsideFace`]   | `SM_ERR_AXIS_INSIDE_FACE`     |
 //! | [`PrimitiveFailure::PlaneCannotCover`] | `SM_ERR_INVALID_INPUT`        |
 //! | [`PrimitiveFailure::Defect`]           | `SM_ERR` (or the site's, through `with_status`) |
-//! | [`PrimitiveFailure::EdgeWithoutCurve`], [`PrimitiveFailure::NoCurveGiven`], [`PrimitiveFailure::NoRegion`], [`PrimitiveFailure::TreeLeftNoBrep`], [`PrimitiveFailure::MergeOperandMissing`], [`PrimitiveFailure::MergeGaveNoBrep`], [`PrimitiveFailure::PlanarDifferenceEmpty`] | `SM_ERR_NULL_POINTER` |
-//! | [`PrimitiveFailure::HeightTooSmall`], [`PrimitiveFailure::TreeLeavesMoreBreps`], [`PrimitiveFailure::PathTurnsBack`], [`PrimitiveFailure::SweepDoesNotClose`], [`PrimitiveFailure::SweepEnclosesNoMaterial`], [`PrimitiveFailure::SweepAngleTooSmall`], [`PrimitiveFailure::ConeSideTooShort`], [`PrimitiveFailure::ConeHasNoRadius`], [`PrimitiveFailure::ProfileFrameDegenerate`], [`PrimitiveFailure::TooFewProfiles`], [`PrimitiveFailure::ProfilesDoNotMatch`], [`PrimitiveFailure::ProfileMakesSeveralFaces`], [`PrimitiveFailure::ProfileNotOneComposite`], [`PrimitiveFailure::OffsetMakesNoCurves`], [`PrimitiveFailure::SeamWeightNotPositive`], [`PrimitiveFailure::SeamLeavesSpan`], [`PrimitiveFailure::CurvesMakeNoLoop`], [`PrimitiveFailure::OffsetMakesNoSurface`], [`PrimitiveFailure::HelixNotEvaluated`], [`PrimitiveFailure::PolygonSideNotMade`] | `SM_ERR` |
+//! | [`PrimitiveFailure::EdgeWithoutCurve`], [`PrimitiveFailure::NoCurveGiven`], [`PrimitiveFailure::NoRegion`], [`PrimitiveFailure::TreeLeftNoBrep`], [`PrimitiveFailure::MergeOperandMissing`], [`PrimitiveFailure::MergeGaveNoBrep`], [`PrimitiveFailure::PlanarDifferenceEmpty`], [`PrimitiveFailure::FaceWithoutSurface`], [`PrimitiveFailure::EdgeWithoutFace`], [`PrimitiveFailure::SphereEdgeNotDropped`] | `SM_ERR_NULL_POINTER` |
+//! | [`PrimitiveFailure::HeightTooSmall`], [`PrimitiveFailure::TreeLeavesMoreBreps`], [`PrimitiveFailure::PathTurnsBack`], [`PrimitiveFailure::SweepDoesNotClose`], [`PrimitiveFailure::SweepEnclosesNoMaterial`], [`PrimitiveFailure::SweepAngleTooSmall`], [`PrimitiveFailure::ConeSideTooShort`], [`PrimitiveFailure::ConeHasNoRadius`], [`PrimitiveFailure::ProfileFrameDegenerate`], [`PrimitiveFailure::TooFewProfiles`], [`PrimitiveFailure::ProfilesDoNotMatch`], [`PrimitiveFailure::ProfileMakesSeveralFaces`], [`PrimitiveFailure::ProfileNotOneComposite`], [`PrimitiveFailure::OffsetMakesNoCurves`], [`PrimitiveFailure::SeamWeightNotPositive`], [`PrimitiveFailure::SeamLeavesSpan`], [`PrimitiveFailure::CurvesMakeNoLoop`], [`PrimitiveFailure::OffsetMakesNoSurface`], [`PrimitiveFailure::HelixNotEvaluated`], [`PrimitiveFailure::PolygonSideNotMade`], [`PrimitiveFailure::SheetHasNoFace`], [`PrimitiveFailure::CircleNotMade`], [`PrimitiveFailure::CylinderDomainNotSet`], [`PrimitiveFailure::ConeSurfaceNotMade`], [`PrimitiveFailure::AnalyticSweepRefused`], [`PrimitiveFailure::SweptSurfaceNotMade`], [`PrimitiveFailure::SweptFaceNotMade`] | `SM_ERR` |
 //!
 //! [`PrimitiveFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
@@ -24,8 +24,9 @@
 //!
 //! Deviations: not upstream. A failure says in a phrase (or its data) what went wrong;
 //! the failure's `operation` path says which routine. No failure names an entity: the
-//! sites they replace named none. The failures that are checks of a caller's arguments
-//! stay [`crate::SolidError::InvalidInput`]. [`PrimitiveFailure::PlaneCannotCover`] is
+//! sites they replace named none. The checks of a caller's arguments that report no
+//! status stay [`crate::SolidError::InvalidInput`]; those that report one are causes of
+//! class [`ErrorKind::InvalidInput`] keeping it. [`PrimitiveFailure::PlaneCannotCover`] is
 //! not upstream: it is the refusal of WR-536's fix (`Boolean2D` refuses a plane it cannot grow
 //! to cover the other faces).
 
@@ -206,6 +207,97 @@ pub enum PrimitiveFailure {
     /// profile collapsed to nothing). [`ErrorKind::Degenerate`], status
     /// `SM_ERR_NULL_POINTER`.
     PlanarDifferenceEmpty,
+    /// A face of the caller's body has no surface. [`ErrorKind::InvalidInput`], status
+    /// `SM_ERR_NULL_POINTER`.
+    FaceWithoutSurface,
+    /// An edge of the caller's body that the other body shares bounds no face (a wire
+    /// edge). [`ErrorKind::InvalidInput`], status `SM_ERR_NULL_POINTER`.
+    EdgeWithoutFace,
+    /// The sheet's constructor returned a B-rep without a face: the rectangle's ignores its
+    /// face constructor's status, as upstream, and the disc's face maker found no face.
+    /// Class `failed`, status `SM_ERR`.
+    SheetHasNoFace,
+    /// The circle or its planar face could not be made (the constructor's error is the
+    /// cause). Class `failed`, status `SM_ERR`.
+    CircleNotMade,
+    /// The cylinder could not be bounded to the caller's height (the bound's error is the
+    /// cause). Class `failed`, status `SM_ERR`.
+    CylinderDomainNotSet,
+    /// The elliptic-ended cone's surface could not be made from the caller's ends (the
+    /// constructor's error is the cause). Class `failed`, status `SM_ERR`.
+    ConeSurfaceNotMade,
+    /// The caller's curve cannot be revolved about the axis into one analytic face.
+    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    AnalyticSweepRefused(AnalyticSweepRefusal),
+    /// The analytic surface of the revolved curve could not be made (its constructor's
+    /// status is ignored as upstream). Class `failed`, status `SM_ERR`.
+    SweptSurfaceNotMade,
+    /// The face on the revolved curve's surface could not be made (the face's error is
+    /// the cause). Class `failed`, status `SM_ERR`.
+    SweptFaceNotMade,
+    /// The drop of a band patch's edge onto a cap patch of the pole-less sphere found no
+    /// UV curve at the caller's tolerance. Class `failed`, status `SM_ERR_NULL_POINTER`.
+    SphereEdgeNotDropped {
+        /// The caller's tolerance the drop used.
+        tolerance: f64,
+    },
+}
+
+/// Why the caller's curve cannot be revolved about the axis into one analytic face
+/// ([`PrimitiveFailure::AnalyticSweepRefused`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum AnalyticSweepRefusal {
+    /// The line lies on the axis.
+    LineOnAxis,
+    /// The line is skew to the axis: it sweeps a hyperboloid, not a cone (not upstream,
+    /// WR-776).
+    LineSkewToAxis,
+    /// The curve crosses the axis inside its ends.
+    CrossesAxis,
+    /// The curve runs along the axis.
+    RunsAlongAxis,
+    /// An end of the half circle is off the axis by more than the B-rep's tolerance.
+    HalfCircleEndOffAxis {
+        /// The end's distance from the axis.
+        distance: f64,
+        /// The B-rep's tolerance, the largest distance that passes.
+        tolerance: f64,
+    },
+    /// The full circle meets the axis.
+    FullCircleMeetsAxis,
+    /// The arc is neither a half nor a full circle.
+    ArcNotHalfOrFull {
+        /// The arc's angle, in degrees.
+        angle: f64,
+    },
+    /// The curve is neither a line nor an arc.
+    NotLineOrArc,
+}
+
+impl core::fmt::Display for AnalyticSweepRefusal {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::LineOnAxis => f.write_str("the line lies on the axis"),
+            Self::LineSkewToAxis => {
+                f.write_str("the line is skew to the axis: it sweeps a hyperboloid, not a cone")
+            }
+            Self::CrossesAxis => f.write_str("the curve crosses the axis inside its ends"),
+            Self::RunsAlongAxis => f.write_str("the curve runs along the axis"),
+            Self::HalfCircleEndOffAxis {
+                distance,
+                tolerance,
+            } => write!(
+                f,
+                "an end of the half circle is {distance} off the axis, more than the tolerance {tolerance}"
+            ),
+            Self::FullCircleMeetsAxis => f.write_str("the full circle meets the axis"),
+            Self::ArcNotHalfOrFull { angle } => {
+                write!(f, "the arc of {angle} degrees is neither a half nor a full circle")
+            }
+            Self::NotLineOrArc => f.write_str("the curve is neither a line nor an arc"),
+        }
+    }
 }
 
 impl PrimitiveFailure {
@@ -233,7 +325,14 @@ impl PrimitiveFailure {
             | Self::CurvesMakeNoLoop
             | Self::OffsetMakesNoSurface
             | Self::HelixNotEvaluated
-            | Self::PolygonSideNotMade => SM_ERR,
+            | Self::PolygonSideNotMade
+            | Self::SheetHasNoFace
+            | Self::CircleNotMade
+            | Self::CylinderDomainNotSet
+            | Self::ConeSurfaceNotMade
+            | Self::AnalyticSweepRefused(_)
+            | Self::SweptSurfaceNotMade
+            | Self::SweptFaceNotMade => SM_ERR,
             Self::Missing(_)
             | Self::EdgeWithoutCurve
             | Self::NoCurveGiven
@@ -241,7 +340,10 @@ impl PrimitiveFailure {
             | Self::TreeLeftNoBrep
             | Self::MergeOperandMissing { .. }
             | Self::MergeGaveNoBrep
-            | Self::PlanarDifferenceEmpty => SM_ERR_NULL_POINTER,
+            | Self::PlanarDifferenceEmpty
+            | Self::FaceWithoutSurface
+            | Self::EdgeWithoutFace
+            | Self::SphereEdgeNotDropped { .. } => SM_ERR_NULL_POINTER,
             Self::HelixDeviates { .. } => SM_ERR_NOT_WITHIN_TOLERANCE,
             Self::AxisInsideFace => SM_ERR_AXIS_INSIDE_FACE,
             Self::PlaneCannotCover => SM_ERR_INVALID_INPUT,
@@ -273,7 +375,10 @@ impl PrimitiveFailure {
             | Self::ProfilesDoNotMatch { .. }
             | Self::ProfileMakesSeveralFaces { .. }
             | Self::ProfileNotOneComposite { .. }
-            | Self::CurvesMakeNoLoop => ErrorKind::InvalidInput,
+            | Self::CurvesMakeNoLoop
+            | Self::FaceWithoutSurface
+            | Self::EdgeWithoutFace
+            | Self::AnalyticSweepRefused(_) => ErrorKind::InvalidInput,
             Self::PathTurnsBack | Self::SweepDoesNotClose => ErrorKind::Unsupported,
             Self::OffsetMakesNoSurface | Self::PlanarDifferenceEmpty => ErrorKind::Degenerate,
             Self::TreeLeftNoBrep
@@ -282,7 +387,8 @@ impl PrimitiveFailure {
             | Self::SeamWeightNotPositive { .. }
             | Self::SeamLeavesSpan { .. }
             | Self::MergeOperandMissing { .. }
-            | Self::MergeGaveNoBrep => ErrorKind::Failed,
+            | Self::MergeGaveNoBrep
+            | Self::SphereEdgeNotDropped { .. } => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -370,6 +476,21 @@ impl core::fmt::Display for PrimitiveFailure {
             Self::MergeGaveNoBrep => f.write_str("the merge gave no result B-rep"),
             Self::PlanarDifferenceEmpty => f.write_str(
                 "the planar difference had an operand with no faces, so it made no B-rep",
+            ),
+            Self::FaceWithoutSurface => f.write_str("the face has no surface"),
+            Self::EdgeWithoutFace => f.write_str("the edge bounds no face"),
+            Self::SheetHasNoFace => f.write_str("the sheet's face could not be made"),
+            Self::CircleNotMade => f.write_str("the circle could not be built"),
+            Self::CylinderDomainNotSet => {
+                f.write_str("the cylinder could not be bounded to the height")
+            }
+            Self::ConeSurfaceNotMade => f.write_str("the cone surface could not be built"),
+            Self::AnalyticSweepRefused(refusal) => refusal.fmt(f),
+            Self::SweptSurfaceNotMade => f.write_str("no analytic surface could be built"),
+            Self::SweptFaceNotMade => f.write_str("the analytic face could not be built"),
+            Self::SphereEdgeNotDropped { tolerance } => write!(
+                f,
+                "the drop of a sphere patch's edge onto the cap patch found no UV curve at the tolerance {tolerance}"
             ),
         }
     }
@@ -748,6 +869,115 @@ mod tests {
                 K::Degenerate,
                 "the planar difference had an operand with no faces, so it made no B-rep",
             ),
+            (
+                PrimitiveFailure::FaceWithoutSurface,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+                "the face has no surface",
+            ),
+            (
+                PrimitiveFailure::EdgeWithoutFace,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+                "the edge bounds no face",
+            ),
+            (
+                PrimitiveFailure::SheetHasNoFace,
+                SM_ERR,
+                K::Failed,
+                "the sheet's face could not be made",
+            ),
+            (
+                PrimitiveFailure::CircleNotMade,
+                SM_ERR,
+                K::Failed,
+                "the circle could not be built",
+            ),
+            (
+                PrimitiveFailure::CylinderDomainNotSet,
+                SM_ERR,
+                K::Failed,
+                "the cylinder could not be bounded to the height",
+            ),
+            (
+                PrimitiveFailure::ConeSurfaceNotMade,
+                SM_ERR,
+                K::Failed,
+                "the cone surface could not be built",
+            ),
+            (
+                PrimitiveFailure::AnalyticSweepRefused(AnalyticSweepRefusal::ArcNotHalfOrFull {
+                    angle: 90.0,
+                }),
+                SM_ERR,
+                K::InvalidInput,
+                "the arc of 90 degrees is neither a half nor a full circle",
+            ),
+            (
+                PrimitiveFailure::AnalyticSweepRefused(
+                    AnalyticSweepRefusal::HalfCircleEndOffAxis {
+                        distance: 0.5,
+                        tolerance: 0.25,
+                    },
+                ),
+                SM_ERR,
+                K::InvalidInput,
+                "an end of the half circle is 0.5 off the axis, more than the tolerance 0.25",
+            ),
+            (
+                PrimitiveFailure::AnalyticSweepRefused(AnalyticSweepRefusal::LineOnAxis),
+                SM_ERR,
+                K::InvalidInput,
+                "the line lies on the axis",
+            ),
+            (
+                PrimitiveFailure::AnalyticSweepRefused(AnalyticSweepRefusal::LineSkewToAxis),
+                SM_ERR,
+                K::InvalidInput,
+                "the line is skew to the axis: it sweeps a hyperboloid, not a cone",
+            ),
+            (
+                PrimitiveFailure::AnalyticSweepRefused(AnalyticSweepRefusal::CrossesAxis),
+                SM_ERR,
+                K::InvalidInput,
+                "the curve crosses the axis inside its ends",
+            ),
+            (
+                PrimitiveFailure::AnalyticSweepRefused(AnalyticSweepRefusal::RunsAlongAxis),
+                SM_ERR,
+                K::InvalidInput,
+                "the curve runs along the axis",
+            ),
+            (
+                PrimitiveFailure::AnalyticSweepRefused(AnalyticSweepRefusal::FullCircleMeetsAxis),
+                SM_ERR,
+                K::InvalidInput,
+                "the full circle meets the axis",
+            ),
+            (
+                PrimitiveFailure::AnalyticSweepRefused(AnalyticSweepRefusal::NotLineOrArc),
+                SM_ERR,
+                K::InvalidInput,
+                "the curve is neither a line nor an arc",
+            ),
+            (
+                PrimitiveFailure::SphereEdgeNotDropped { tolerance: 0.5 },
+                SM_ERR_NULL_POINTER,
+                K::Failed,
+                "the drop of a sphere patch's edge onto the cap patch found no UV curve at the tolerance 0.5",
+            ),
+            (
+                PrimitiveFailure::SweptSurfaceNotMade,
+                SM_ERR,
+                K::Failed,
+                "no analytic surface could be built",
+            ),
+            (
+                PrimitiveFailure::SweptFaceNotMade,
+                SM_ERR,
+                K::Failed,
+                "the analytic face could not be built",
+            ),
         ];
         for (failure, status, kind, message) in cases {
             let e = SolidError::primitive(op, failure);
@@ -799,9 +1029,6 @@ mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/primitive/api_primitives.rs", 2),
-            ("solidcore/src/primitive/primitive_creation/p1/boolean.rs", 5),
-            ("solidcore/src/primitive/primitive_creation/p1/primitives.rs", 26),
             ("solidcore/src/primitive/primitive_creation/p3/construct.rs", 7),
             ("solidcore/src/primitive/primitive_creation/p3/geometry.rs", 5),
             ("solidcore/src/primitive/primitive_creation/p3/ruled.rs", 9),

@@ -92,8 +92,20 @@ impl NameCell {
         Arc::as_ptr(&self.names) as usize
     }
     /// The same origin, lineage and depth with nothing worked out yet: for a body given a new
-    /// name, whose faces' names may be made from it.
-    pub(crate) fn renamed(&self) -> Self {
+    /// name, whose faces' names may be made from it. Names with nothing to work them out from
+    /// again (a saved model's) are kept, only those made from the old name following it (#21192).
+    pub(crate) fn renamed(&self, old: &str, new: &str) -> Self {
+        if self.origin.is_none()
+            && self.copy_of.is_none()
+            && self.saved
+            && let Some(names) = self.names.get()
+        {
+            let stem = format!("{old}:face:");
+            let faces = names.faces.iter().map(|n| n.strip_prefix(&stem).map_or_else(|| n.clone(), |k| format!("{new}:face:{k}"))).collect();
+            let mut cell = Self::saved(Arc::new(crate::history_names::Names { faces: Arc::new(faces), info: names.info.clone() }), self.saved_depth);
+            cell.lineage = self.lineage.clone();
+            return cell;
+        }
         let mut cell = Self::traced(self.origin.clone(), self.lineage.clone());
         cell.copy_of = self.copy_of.clone();
         cell.saved_depth = self.saved_depth;
@@ -1081,10 +1093,12 @@ fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usi
             format!("F{fid}:{role}")
         }
         FeatureKind::Cylinder { axis, .. } => {
-            let flat = !ns.is_empty() && ns.iter().all(|m| m.cross(axis.0).len() < 1e-6);
+            // The axis is numbers here: `naming_feature` evaluated it.
+            let Some(axis) = crate::literal_dir(axis) else { return format!("F{fid}:face:{fi}") };
+            let flat = !ns.is_empty() && ns.iter().all(|m| m.cross(axis).len() < 1e-6);
             let role = if !flat {
                 "side"
-            } else if ns.first().is_some_and(|m| m.dot(axis.0) > 0.0) {
+            } else if ns.first().is_some_and(|m| m.dot(axis) > 0.0) {
                 "top"
             } else {
                 "bottom"
@@ -1552,7 +1566,7 @@ mod tests {
             assert_eq!(take_warm_jobs(), 0, "snapshots share ready names");
 
             st.bodies[0].name = "Renamed".into();
-            st.bodies[0].names = st.bodies[0].names.renamed();
+            st.bodies[0].names = st.bodies[0].names.renamed("", "Renamed");
             let renamed = lookup(&st, "Renamed:face:0");
             same_hit(&renamed, &hit);
             assert_eq!(take_warm_jobs(), 1, "a rename invalidates only its own names");
