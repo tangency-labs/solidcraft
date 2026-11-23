@@ -308,6 +308,64 @@
 //!   leaving the domain (a crossing just past the patch's edge), feet jumping between two
 //!   critical points (a saddle) or a second sheet in the hull the foot does not follow (a
 //!   fold) fail 1, 2 or 3.
+//! - **The same, where the closest-point foot is not certified at a stretch at the floor**
+//!   (a crease or a seam the solve wraps in the way: `G` holds `S_u` and `S_v`, which jump
+//!   there, and a closest point can sit on a crease for a whole range of `t` with `G` zero
+//!   on neither side, so no bound on a jump makes that rule sound; a Newton step off the
+//!   range; a box grown to a border): the foot **along a frame** ([`by_frame`]; answer12,
+//!   Q2). Three vectors `e₁`, `e₂`, `m` are fixed for the component before any test
+//!   ([`Frame::of`]: `m` the rounded middle of the enclosure of `S_u × S_v` over its middle
+//!   box, `e₁`, `e₂` a rounded completion, `det B` of `B = [e₁ e₂ m]` enclosed apart from 0;
+//!   how well they fit decides how often the rule succeeds, never what it proves). With
+//!   `E = [e₁ e₂]`, `G̃(x, t) = Eᵀ (S(x) − L(t))` vanishes where the line through `L(t)`
+//!   along `e₁ × e₂` meets the net, and `h(x, t) = m · (L(t) − S(x))` is the side: `Bᵀ (S −
+//!   L) = (G̃, −h)`, so the roots of `Φ = S − L` are the common zeros of `G̃` and `h`. `G̃`
+//!   reads `S`, `S_u` and `S_v` only, and is continuous wherever `S` is. With 2 and 3 as
+//!   above:
+//!   1. `[t₀, t₁]` is covered by stretches `T_k`, each with a box `U_k` on which Krawczyk's
+//!      operator of `G̃` about a point `y` of it, `t` an interval parameter over `T_k`, lies
+//!      strictly inside `U_k`, its contraction below 1 ([`frame_box`]). Its Jacobian `J(U) =
+//!      Eᵀ [S_u S_v]` is first partials only, enclosed over `U` as the hull of both sides'
+//!      at every knot line inside it. `U_k` crosses a knot line only where the net is
+//!      continuous (multiplicity at most the degree, weights shown positive:
+//!      [`LineNet::over`] refuses a break) and an end of the knots' range only at a seam the
+//!      solve wraps ([`LineNet::seams`]: exact closure and the whole range), as two pieces
+//!      in the net's parameters glued there, together less than a turn wide; it lies
+//!      strictly inside every other border. On a segment crossing finitely many knot lines
+//!      a continuous, piecewise `C¹` `S` has `S(x) − S(y) = ∫ DS(γ(τ)) (x − y) dτ` piece by
+//!      piece, and the interval matrix is convex, so `G̃(x, t) − G̃(y, t) ∈ J(U) (x − y)`:
+//!      all that Krawczyk's existence and uniqueness use. Across a seam the lifted `S` is
+//!      continuous (exact closure) and the translation keeps `∂S/∂u`. So each `t` in `T_k`
+//!      has exactly one zero `x*(t)` of `G̃` in `U_k`, every matrix of `J(U_k)` is
+//!      nonsingular and `x ↦ G̃(x, t)` is one to one on `U_k`: `det J = (e₁ × e₂) · (S_u ×
+//!      S_v)` keeps one sign, the net over `U_k` a graph over the plane of `e₁`, `e₂` with
+//!      one orientation on both sides of a crease. A crease folding the surface over
+//!      relative to the frame fails here and stays undecided (this replaces 4 of the
+//!      closest-point rule);
+//!   2. at a seam, offsets `x − y` are taken along the lifted interval in intervals rounded
+//!      outward ([`offsets_of`]: through the seam `(x − r₀) + (r₁ − y)`, never a parameter
+//!      shifted by the range's width), `y` a parameter of the net on one piece, and the
+//!      inclusion compares the operator's offsets with `U_k`'s rounded inward; Newton's
+//!      steps toward `y` ([`frame_newton`], first partials only, never the closest-point
+//!      steps) may pass a seam by a rounded shift, since they only propose;
+//!   3. neighbours are chained through their tight boxes at the common `t`; every box of
+//!      the component whose line parameters meet `T_k` lies in a piece of `U_k`, and
+//!      `U_k`'s pieces are covered by searched leaves and strips;
+//!   4. `h(x*(t₀), t₀)` and `h(x*(t₁), t₁)` are enclosed apart from 0 over the tight box.
+//!
+//!   Then, mod 2 (the determinant may be negative on a box, so no homotopy to `x − x*(t)`
+//!   is read): every root over the component is a zero of `G̃` in the `U_k` of its `t` (by
+//!   3), so it lies on the chained branch, and the roots are the zeros of `φ(t) = h(x*(t),
+//!   t)`; `Ψ(x, t) = (G̃(x, t), t)` is a continuous injection on each `U_k × T_k`, so a
+//!   homeomorphism onto its image (invariance of domain), of degree 1 mod 2, and at a
+//!   junction the chained foot lies strictly inside both boxes; hence the index mod 2 of
+//!   `(G̃, h)` at each root is that of `φ` at its `t`, and the parity of the crossings is
+//!   that of `φ`'s sign change between `t₀` and `t₁`. Opposite signs make a crossing, one
+//!   sign touching ([`Typed::FrameFoot`]). One frame serves every stretch (frames differing
+//!   by stretch would need `h` apart from 0 at every junction). The rule runs only after
+//!   the closest-point rule failed at a stretch at the floor, so it never moves a component
+//!   that rule decides; where it fails too, the component keeps the closest-point rule's
+//!   reason, with its own beside it ([`Component::frame_why`]).
 //!
 //! The distinct roots of a component are counted from its root boxes: one where an
 //! enclosure lies in the other's unique box, two where the enclosures are apart, and the
@@ -321,7 +379,8 @@
 //! orientation and `S` is continuous across it. The seam is then a knot line of the face,
 //! never a boundary: a crease ([`SideKind::Crease`]), since `S_u` may jump there (unequal
 //! end knot spans) and `C¹` across it is not proved, so no Krawczyk box (the leaves are
-//! native) and no foot box straddles it. [`leaf_sides`] reads the leaves on the range's
+//! native) and no closest-point foot box straddles it (a box of the foot along a frame,
+//! which needs `S` continuous only, does). [`leaf_sides`] reads the leaves on the range's
 //! other end across a seam side (a stretch none covers is a trim cull, a boundary). Two
 //! boxes on opposite ends whose stretches along the seam meet share a point of the seam,
 //! one point of the net with one foot, so [`components`] joins them where their line
@@ -411,7 +470,9 @@
 //! one solve's drop and components, past which nothing is dropped, the components are not
 //! built and the whole line is undecided, and [`MAX_DROP_ENCLOSURES`] side enclosures in
 //! one solve's drop; at most [`MAX_SIDE_PIECES`] piece and edge enclosures in one
-//! component's side test, [`MAX_FOOT_BOXES`] foot tests in its foot rule, [`MAX_COVER_RECTS`] leaves in its coverage test and [`MAX_ROOT_BOXES`] root boxes
+//! component's side test, [`MAX_FOOT_BOXES`] foot tests in each of its foot rules (and, along a
+//! frame, at most [`FRAME_TIGHTENINGS`] operators for each tight box: two a junction of the
+//! chain, one an end), [`MAX_COVER_RECTS`] leaves in its coverage test and [`MAX_ROOT_BOXES`] root boxes
 //! told apart.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
@@ -424,7 +485,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::krawczyk::{
     contraction, inverse_of_columns2, inverse_of_columns3, k_operator, krawczyk_region, newton,
-    Linearised, KRAWCZYK_STEPS,
+    plus_c_times, start_minus_y, Linearised, KRAWCZYK_STEPS,
 };
 use crate::geom::nurbs_enclosure::nurbs_partials_over_box_about;
 use crate::geom::solution_array::{Contact, ContactId, SideRecord};
@@ -2175,6 +2236,11 @@ pub(crate) struct Component {
     pub contact: Contact,
     /// How its type was decided.
     pub typed: Typed,
+    /// Why the foot rule along a frame ([`by_frame`]), tried after the closest-point foot
+    /// rule failed at a stretch at the floor, did not type it either; `None` where it was
+    /// not tried or typed it. A diagnosis only, beside [`Component::typed`], which keeps the
+    /// closest-point rule's reason.
+    pub frame_why: Option<Why>,
     /// Its distinct certified roots ([`root_classes`]), each the unique boxes of the root
     /// boxes that hold it; empty until typed.
     pub classes: Vec<Vec<[Ivl; 2]>>,
@@ -2435,6 +2501,7 @@ pub(crate) fn components(
                 roots: Vec::new(),
                 contact: Contact::Undecided,
                 typed: Typed::Untyped,
+                frame_why: None,
                 classes: Vec::new(),
                 inside: true,
                 beyond: Vec::new(),
@@ -3201,6 +3268,9 @@ pub(crate) enum Typed {
     Sides,
     /// The side of the foot at its two ends (no side function: the foot rule).
     Foot,
+    /// The side of the foot along a frame at its two ends (the closest-point foot not
+    /// certified at a stretch at the floor: [`by_frame`]).
+    FrameFoot,
     /// Undecided, and why.
     Undecided(Why),
 }
@@ -3293,6 +3363,9 @@ pub(crate) enum FootWhy {
     NoSideAtStart,
     /// The foot's side at `t₁` cannot be formed.
     NoSideAtEnd,
+    /// The component has no frame ([`Frame::of`]: its middle box is not enclosed, or `S_u ×
+    /// S_v` has no length there). The foot rule along a frame only.
+    NoFrame,
 }
 
 /// Why a stretch of the line parameters has no foot box ([`foot_box`]).
@@ -3321,15 +3394,27 @@ pub(crate) enum Stretch {
     /// Krawczyk's operator cannot be formed: the net refuses the box, or a value is not
     /// finite.
     NotFinite,
-    /// The operator does not lie strictly inside the box within [`FOOT_WIDENINGS`].
+    /// The operator does not lie strictly inside the box within [`FOOT_WIDENINGS`], or
+    /// (the foot rule along a frame) its contraction is not below 1: no matrix of the
+    /// Jacobian over the box is shown nonsingular, as where a crease folds the surface over
+    /// relative to the frame.
     NoContraction,
     /// It does, but a box of the component whose line parameters meet the stretch does not
-    /// lie in the box (not reached: the box is grown from them).
+    /// lie in the box (not reached by the closest-point rule: the box is grown from them;
+    /// the foot rule along a frame, whose box is pieces made from a rounded stretch, tests
+    /// it on the pieces, and gives it too where Newton's foot lies on no piece).
     HeldOutside,
     /// It does, but the box is not covered by the searched leaves and strips.
     Uncovered,
     /// It does, but `S_u × S_v` is not shown apart from 0 over the box.
     Degenerate,
+    /// The box crosses a knot line whose multiplicity is above the degree, a break of the
+    /// net (the foot rule along a frame, which crosses a knot line the net is continuous
+    /// across).
+    Break,
+    /// The box would be a whole turn wide in a direction the solve wraps in (the foot rule
+    /// along a frame, whose boxes may reach across a seam).
+    Turn,
 }
 
 /// Types every component of `comps` (module docs, "Typing"): the solve's `leaves`, `sides`
@@ -3418,7 +3503,7 @@ pub(crate) fn type_components(
         c.contact = match typed {
             Typed::Count(n) if n % 2 == 1 => Contact::Crossing,
             Typed::Count(_) => Contact::Touching,
-            Typed::Sides | Typed::Foot => c.contact,
+            Typed::Sides | Typed::Foot | Typed::FrameFoot => c.contact,
             _ => Contact::Undecided,
         };
         c.typed = typed;
@@ -3433,7 +3518,9 @@ pub(crate) fn type_components(
 /// undecided), a certified root not reported and not wholly past it makes it undecided, and
 /// it is typed by its count, its sides or its foot. A component reaching an end is decided
 /// only with that end certified off the net ([`end_off_the_net`]: by its count; the side
-/// test asks more of the side function there, the foot rule reads the foot's side there).
+/// test asks more of the side function there, the foot rules read the foot's side there).
+/// Where the closest-point foot rule fails at a stretch at the floor, the foot rule along a
+/// frame is the next rule ([`by_frame`]).
 #[allow(clippy::too_many_arguments)]
 fn type_one(
     net: &LineNet,
@@ -3519,7 +3606,25 @@ fn type_one(
     let typed = if c.holds.left == 0 {
         by_count(net, line, sides, boxes, n)
     } else if net.revolved.is_none() {
-        by_foot(net, line, leaves, boxes, c, (t, others))
+        match by_foot(net, line, leaves, boxes, c, (t, others)) {
+            // the closest-point foot not certified at a stretch at the floor: the foot
+            // along a frame (answer12, Q2), the next rule and only here, so it never moves a
+            // component the closest-point rule decides; failing too, that rule's reason
+            // stays
+            closest @ Typed::Undecided(Why::FootNotShown(FootWhy::Floor(_))) => {
+                match by_frame(net, line, leaves, boxes, c, t) {
+                    Ok(contact) => {
+                        c.contact = contact;
+                        Typed::FrameFoot
+                    }
+                    Err(why) => {
+                        c.frame_why = Some(why);
+                        closest
+                    }
+                }
+            }
+            typed => typed,
+        }
     } else {
         let bounds = bounds.get_or_insert_with(|| net.side_bounds());
         by_sides(net, line, leaves, c, (t, ends, others), bounds)
@@ -3527,7 +3632,10 @@ fn type_one(
     // every clipped end of a decided component certified farther than the tolerance from
     // the net over it (a box at the floor straddling the end enclosed whole): an end within
     // the tolerance of the net stays undecided
-    if matches!(typed, Typed::Count(_) | Typed::Sides | Typed::Foot) {
+    if matches!(
+        typed,
+        Typed::Count(_) | Typed::Sides | Typed::Foot | Typed::FrameFoot
+    ) {
         let mut budget = MAX_SIDE_PIECES;
         let [lo_end, hi_end] = ends;
         let certified = [(lo_end, t.lo), (hi_end, t.hi)]
@@ -4422,6 +4530,633 @@ fn by_foot(
     Typed::Foot
 }
 
+/// The frame of a component for the foot rule along a fixed direction (module docs,
+/// "Typing"; answer12, Q2): three vectors fixed before any test and the same for every
+/// stretch of the component, `e₁`, `e₂` and `m`, with `det [e₁ e₂ m]` enclosed apart from
+/// 0. How well they fit the surface decides only how often the rule succeeds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Frame {
+    /// `e₁` and `e₂`: the foot of `L(t)` is where the line through it along `e₁ × e₂`
+    /// meets the net.
+    e: [[f64; 3]; 2],
+    /// `m`: the side of the foot is `m · (L(t) − S)`.
+    m: [f64; 3],
+}
+
+impl Frame {
+    /// The frame of the component whose boxes are `boxes` and whose line parameters are
+    /// `t`: `m` the rounded middle of the enclosure of `S_u × S_v` over its middle box (the
+    /// first whose line parameters' middle is nearest `t`'s), made a unit vector in
+    /// rounded arithmetic, `e₁` the axis `m` is least along crossed with `m` and `e₂ = m ×
+    /// e₁`, each rounded. It is not taken from a closest-point foot (the step that fails
+    /// where this rule runs). `None` where the box is not enclosed, a vector has no length,
+    /// or `det [e₁ e₂ m] = (e₁ × e₂) · m` is not enclosed apart from 0.
+    fn of(net: &LineNet, line: &ScratchLine, boxes: &[PlacedBox], t: Ivl) -> Option<Self> {
+        let at = t.mid();
+        let far = |b: &PlacedBox| {
+            let d = (b.t.mid() - at).abs();
+            if d.is_nan() {
+                f64::INFINITY
+            } else {
+                d
+            }
+        };
+        let middle = boxes.iter().min_by(|a, b| far(a).total_cmp(&far(b)))?;
+        let [_, s_u, s_v] = net.over(middle.u, middle.v, line.p)?;
+        let unit = |v: [f64; 3]| {
+            let [x, y, z] = v;
+            let length = crate::geom::vector3d::sqrt(x * x + y * y + z * z);
+            (length > 0.0 && length.is_finite()).then(|| v.map(|c| c / length))
+        };
+        let times = |[ax, ay, az]: [f64; 3], [bx, by, bz]: [f64; 3]| {
+            [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx]
+        };
+        let m = unit(mids(&cross_i(&s_u, &s_v)))?;
+        let [mx, my, mz] = m.map(f64::abs);
+        let axis = if mx <= my && mx <= mz {
+            [1.0, 0.0, 0.0]
+        } else if my <= mz {
+            [0.0, 1.0, 0.0]
+        } else {
+            [0.0, 0.0, 1.0]
+        };
+        let e1 = unit(times(axis, m))?;
+        let e2 = unit(times(m, e1))?;
+        let det = dot(m, &cross(e1, &e2.map(Ivl::from)));
+        (det.lo > 0.0 || det.hi < 0.0).then_some(Self { e: [e1, e2], m })
+    }
+}
+
+/// The offsets `x − at` of the points `x` of the span `x` from its point `at`, measured
+/// along the lifted interval (module docs, "The seam"; answer12, Q2, condition 5): an
+/// enclosure rounded outward, and its low and high ends rounded inward (the lifted
+/// interval's interior holds every offset strictly between them). `at` is a parameter of
+/// the net on one piece; on two pieces glued at the seam of the range `[r0, r1]`, a point
+/// of the other piece is offset through the seam, `(x − r0) + (r1 − at)` or
+/// `−((r1 − x) + (at − r0))`, each difference an interval rounded outward: no parameter is
+/// shifted by the range's width. `None` where `at` is on no piece, or the pieces are not a
+/// stretch less than a turn wide glued at that seam.
+fn offsets_of(x: &Span, at: f64, [r0, r1]: [f64; 2]) -> Option<(Ivl, [f64; 2])> {
+    let i = Ivl::from;
+    let (lo, hi) = match x.then {
+        None => {
+            if !(x.first.lo <= at && at <= x.first.hi) {
+                return None;
+            }
+            (i(x.first.lo) - i(at), i(x.first.hi) - i(at))
+        }
+        Some(then) => {
+            if !(x.first.hi == r1 && then.lo == r0 && then.hi < x.first.lo) {
+                return None;
+            }
+            if x.first.lo <= at && at <= r1 {
+                (
+                    i(x.first.lo) - i(at),
+                    (i(then.hi) - i(r0)) + (i(r1) - i(at)),
+                )
+            } else if r0 <= at && at <= then.hi {
+                (
+                    i(0.0) - ((i(r1) - i(x.first.lo)) + (i(at) - i(r0))),
+                    i(then.hi) - i(at),
+                )
+            } else {
+                return None;
+            }
+        }
+    };
+    let outer = Ivl::new(lo.lo, hi.hi);
+    (outer.is_finite() && lo.hi <= hi.lo).then_some((outer, [lo.hi, hi.lo]))
+}
+
+/// The points of the span `x` at the offsets `off` from its point `at` ([`offsets_of`]'s
+/// measure), as pieces in the net's parameters rounded outward and cut to `x`'s pieces: a
+/// set holding every such point of `x`. `None` where there is none or `at` is on no piece.
+fn at_offsets(x: &Span, at: f64, off: Ivl, [r0, r1]: [f64; 2]) -> Option<Span> {
+    let i = Ivl::from;
+    let Some(then) = x.then else {
+        return meet(i(at) + off, x.first).map(Span::native);
+    };
+    let (high, low) = if x.first.lo <= at && at <= r1 {
+        (i(at) + off, i(r0) + (off - (i(r1) - i(at))))
+    } else if r0 <= at && at <= then.hi {
+        (i(r1) + (off + (i(at) - i(r0))), i(at) + off)
+    } else {
+        return None;
+    };
+    match (meet(high, x.first), meet(low, then)) {
+        // (on both pieces the set reaches the seam from each: kept up to it)
+        (Some(h), Some(l)) => Some(Span {
+            first: Ivl::new(h.lo, x.first.hi),
+            then: Some(Ivl::new(then.lo, l.hi)),
+        }),
+        (Some(h), None) => Some(Span::native(h)),
+        (None, Some(l)) => Some(Span::native(l)),
+        (None, None) => None,
+    }
+}
+
+/// Whether every piece of `a` lies in a piece of `b`, ends included, in both directions.
+fn spans_within(a: &[Span; 2], b: &[Span; 2]) -> bool {
+    a.iter()
+        .zip(b)
+        .all(|(x, y)| x.pieces().all(|p| y.pieces().any(|q| within(p, q))))
+}
+
+/// `S − about`, `S_u` and `S_v` over the box `x`, enclosed: the hull over its pieces in
+/// the net's parameters ([`LineNet::over`] on each, which crosses a knot line only where the
+/// net is continuous). Across a seam the solve wraps, `S` is continuous (the net closes
+/// exactly) and the translation between the two ends keeps the partials, so the hull holds,
+/// at every point of the lifted box, each one-sided partial there. `None` as
+/// [`LineNet::over`] on a piece.
+fn over_spans(net: &LineNet, x: &[Span; 2], about: [f64; 3]) -> Option<[I3; 3]> {
+    let mut out: Option<[I3; 3]> = None;
+    for [u, v] in hull_pieces(x) {
+        let p = net.over(u, v, about)?;
+        out = Some(match out {
+            None => p,
+            Some(h) => {
+                let mut both = h;
+                for (a, b) in both.iter_mut().flatten().zip(p.iter().flatten()) {
+                    *a = a.hull(*b);
+                }
+                both
+            }
+        });
+    }
+    out
+}
+
+/// Whether a piece of the box `x` crosses a knot line whose multiplicity is above the
+/// degree: a break of the net, which no box of the foot rule along a frame crosses.
+fn crosses_a_break(net: &LineNet, x: &[Span; 2]) -> bool {
+    let broken = |knots: &[f64], degree: usize, x: Ivl| {
+        knots.iter().any(|&k| {
+            k > x.lo && k < x.hi && knots.iter().filter(|&&other| other == k).count() > degree
+        })
+    };
+    hull_pieces(x)
+        .iter()
+        .any(|&[u, v]| broken(&net.net.u, net.net.p, u) || broken(&net.net.v, net.net.q, v))
+}
+
+/// One stretch `T` of a component's line parameters with its box `U` of the foot rule
+/// along a frame (module docs, "Typing"): for every `t` in `T` exactly one foot along the
+/// frame in `U`.
+#[derive(Debug, Clone, Copy)]
+struct FrameBox {
+    t: Ivl,
+    /// `U`, each direction one interval or two pieces glued at a seam the solve wraps.
+    u: [Span; 2],
+    /// The point Krawczyk's operator is taken about: Newton's foot at `T`'s middle, a
+    /// parameter of the net on one piece of `U` in each direction.
+    y: [f64; 2],
+}
+
+/// Krawczyk's operator of the foot system along `frame`, `G̃(x, t) = Eᵀ (S(x) − L(t))`,
+/// about the point `y` over the points of `u` at the offsets `delta` from `y`, with the
+/// line parameters `t` an interval parameter: `K − y = −Y G̃(y, t) + (I − Y J) delta`, the
+/// offsets of its points from `y`, and the contraction `q = ‖I − Y J‖`. `J = Eᵀ [S_u S_v]`
+/// is enclosed over `u` ([`over_spans`]: first partials only, the hull of both sides'
+/// across a knot line or a wrapped seam inside it), and does not depend on `t`; `Y` is
+/// the inverse of its middle. `u` must hold `y` and every point at the offsets `delta`.
+/// Why not where it cannot be formed.
+fn frame_operator(
+    net: &LineNet,
+    line: &ScratchLine,
+    frame: &Frame,
+    u: &[Span; 2],
+    y: [f64; 2],
+    delta: &[Ivl; 2],
+    t: Ivl,
+) -> core::result::Result<([Ivl; 2], f64), Stretch> {
+    let [yu, yv] = y;
+    let [e1, e2] = frame.e;
+    let [s_y, _, _] = net
+        .over(Ivl::from(yu), Ivl::from(yv), line.p)
+        .ok_or(Stretch::NotFinite)?;
+    let gap = less(&s_y, t, line.d);
+    let g = [dot(e1, &gap), dot(e2, &gap)];
+    let [_, s_u, s_v] = over_spans(net, u, line.p).ok_or_else(|| {
+        if crosses_a_break(net, u) {
+            Stretch::Break
+        } else {
+            Stretch::NotFinite
+        }
+    })?;
+    let jac = [
+        [dot(e1, &s_u), dot(e1, &s_v)],
+        [dot(e2, &s_u), dot(e2, &s_v)],
+    ];
+    if !g.iter().chain(jac.iter().flatten()).all(|x| x.is_finite()) {
+        return Err(Stretch::NotFinite);
+    }
+    let [[a, b], [c, d]] = jac;
+    let y_inverse =
+        inverse_of_columns2(&[[a.mid(), c.mid()], [b.mid(), d.mid()]]).ok_or(Stretch::Singular)?;
+    let (cm, q) = contraction(&y_inverse, &jac);
+    let zero = [Ivl::from(0.0); 2];
+    Ok((
+        plus_c_times(start_minus_y(zero, &y_inverse, &g), &cm, delta),
+        q,
+    ))
+}
+
+/// Newton's foot of `L(t)` along `frame` on the net from `start`: the zero of `G̃(x, t) =
+/// Eᵀ (S(x) − L(t))`, by first partials only (at a point on a knot line, the middle of the
+/// hull of both sides'). A step past an end the solve wraps at (`seams`) goes on from the
+/// other end, by a rounded shift: the steps only propose a point, which Krawczyk's operator
+/// certifies. Why not where the steps do not settle, or leave the knots' range at another
+/// end or settle off it.
+fn frame_newton(
+    net: &LineNet,
+    line: &ScratchLine,
+    frame: &Frame,
+    seams: &Seams,
+    t: f64,
+    start: [f64; 2],
+) -> core::result::Result<[f64; 2], Stretch> {
+    let [ru, rv] = seams.range;
+    let [wu, wv] = seams.wrap;
+    let turn = |x: f64, [a, z]: [f64; 2], wraps: bool| {
+        if wraps && x < a {
+            x + (z - a)
+        } else if wraps && x > z {
+            x - (z - a)
+        } else {
+            x
+        }
+    };
+    let native = |[u, v]: [f64; 2]| [turn(u, ru, wu), turn(v, rv, wv)];
+    let [e1, e2] = frame.e;
+    let left = core::cell::Cell::new(false);
+    let at = |p: [f64; 2]| -> Result<Linearised<2>> {
+        let [u, v] = native(p);
+        let (bu, bv) = (Ivl::from(u), Ivl::from(v));
+        let Some([s, s_u, s_v]) = net.over(bu, bv, line.p) else {
+            if !net.holds(bu, bv) {
+                left.set(true);
+            }
+            return Ok(None);
+        };
+        let gap = less(&s, Ivl::from(t), line.d);
+        let g = [dot(e1, &gap).mid(), dot(e2, &gap).mid()];
+        // (columns)
+        let cols = [
+            [dot(e1, &s_u).mid(), dot(e2, &s_u).mid()],
+            [dot(e1, &s_v).mid(), dot(e2, &s_v).mid()],
+        ];
+        Ok(Some((g, cols)))
+    };
+    let p = newton(start, &at, &inverse_of_columns2)
+        .ok()
+        .flatten()
+        .ok_or_else(|| {
+            if left.get() {
+                Stretch::NewtonOff
+            } else {
+                Stretch::Newton
+            }
+        })?;
+    let [pu, pv] = native(p);
+    if net.holds(Ivl::from(pu), Ivl::from(pv)) {
+        Ok([pu, pv])
+    } else {
+        Err(Stretch::NewtonOff)
+    }
+}
+
+/// The offsets of the box `u` from its point `y` in both directions ([`offsets_of`]): the
+/// enclosures, and their ends rounded inward.
+fn box_offsets(u: &[Span; 2], y: [f64; 2], seams: &Seams) -> Option<([Ivl; 2], [[f64; 2]; 2])> {
+    let [su, sv] = u;
+    let [yu, yv] = y;
+    let [ru, rv] = seams.range;
+    let (du, iu) = offsets_of(su, yu, ru)?;
+    let (dv, iv) = offsets_of(sv, yv, rv)?;
+    Some(([du, dv], [iu, iv]))
+}
+
+/// The points of the box `u` at the offsets `off` from its point `y` in both directions
+/// ([`at_offsets`]).
+fn box_at_offsets(u: &[Span; 2], y: [f64; 2], off: &[Ivl; 2], seams: &Seams) -> Option<[Span; 2]> {
+    let [su, sv] = u;
+    let [yu, yv] = y;
+    let [ou, ov] = *off;
+    let [ru, rv] = seams.range;
+    Some([at_offsets(su, yu, ou, ru)?, at_offsets(sv, yv, ov, rv)?])
+}
+
+/// The box of the foot rule along `frame` for the stretch `t` of the component whose boxes
+/// are `boxes` (module docs, "Typing"; answer12, Q2): a box `U` holding every box of the
+/// component whose line parameters meet `t` and Newton's foot `y` at `t`'s middle
+/// ([`frame_newton`]), covered by the searched leaves and strips, on which Krawczyk's
+/// operator of `G̃` about `y` over `U × t` lies strictly inside `U` with a contraction
+/// below 1: each `t` then has exactly one foot along the frame in `U`, and every matrix of
+/// `J(U)` is nonsingular. In a direction the solve wraps in ([`LineNet::seams`]), `U` may
+/// reach across the seam, as two pieces in the net's parameters glued there, less than a
+/// turn wide together; in any other it lies strictly inside the knots' range and the
+/// solve's domain. The inclusion is tested on the offsets from `y` ([`offsets_of`]):
+/// the operator's, rounded outward, strictly between `U`'s, rounded inward. Why not where
+/// none is found within the widenings and the budget (the last test's failure; a
+/// contraction not below 1 is not widened on).
+#[allow(clippy::too_many_arguments)]
+fn frame_box(
+    net: &LineNet,
+    line: &ScratchLine,
+    frame: &Frame,
+    seams: &Seams,
+    leaves: &[SearchedLeaf],
+    boxes: &[PlacedBox],
+    t: Ivl,
+    start: [f64; 2],
+    budget: &mut usize,
+) -> core::result::Result<FrameBox, Stretch> {
+    let (lo, hi) = (line.solve_domain.min(), line.solve_domain.max());
+    let [[u0, u1], [v0, v1]] = seams.range;
+    // (where the solve does not wrap: the knots' range met with the solve's domain)
+    let border = [[u0.max(lo.x), u1.min(hi.x)], [v0.max(lo.y), v1.min(hi.y)]];
+    let y = frame_newton(net, line, frame, seams, t.mid(), start)?;
+    let held: Vec<[Ivl; 2]> = boxes
+        .iter()
+        .filter(|b| b.t.lo <= t.hi && t.lo <= b.t.hi)
+        .map(|b| [b.u, b.v])
+        .collect();
+    let [yu, yv] = y;
+    let [ru, rv] = seams.range;
+    let [wu, wv] = seams.wrap;
+    let [border_u, border_v] = border;
+    // a stretch about the foot holding the held boxes in one direction, as an interval of
+    // rounded lifted parameters (a held box across a wrapped seam from the foot is taken a
+    // range's width nearer: a proposal, the tests below read the pieces it gives)
+    let about = |at: f64, [r0, r1]: [f64; 2], wraps: bool, pick: fn(&[Ivl; 2]) -> Ivl| {
+        let width = r1 - r0;
+        let (mut a, mut z) = (at, at);
+        for h in &held {
+            let x = pick(h);
+            let gap = |shift: f64| (x.lo + shift - at).max(at - (x.hi + shift)).max(0.0);
+            let mut shift = 0.0;
+            if wraps {
+                for other in [width, -width] {
+                    if gap(other) < gap(shift) {
+                        shift = other;
+                    }
+                }
+            }
+            a = a.min(x.lo + shift);
+            z = z.max(x.hi + shift);
+        }
+        [a, z]
+    };
+    let grow = |[a, z]: [f64; 2]| {
+        let r = 0.1 * (z - a) + 1.0e-9 * (1.0 + a.abs().max(z.abs()));
+        [round_down(a - r), round_up(z + r)]
+    };
+    // the pieces of a stretch of rounded lifted parameters: in a direction the solve wraps
+    // in, the part past an end of the range comes back from the other end
+    let pieces = |[a, z]: [f64; 2],
+                  [r0, r1]: [f64; 2],
+                  [b0, b1]: [f64; 2],
+                  wraps: bool|
+     -> core::result::Result<Span, Stretch> {
+        if !(a <= z && a.is_finite() && z.is_finite()) {
+            return Err(Stretch::NotFinite);
+        }
+        if !wraps {
+            return if a <= b0 || z >= b1 {
+                Err(Stretch::LeavesDomain)
+            } else {
+                Ok(Span::native(Ivl::new(a, z)))
+            };
+        }
+        let span = if a <= r0 && z >= r1 {
+            return Err(Stretch::Turn);
+        } else if a >= r0 && z <= r1 {
+            Span::native(Ivl::new(a, z))
+        } else if a < r0 && z <= r1 && z >= r0 {
+            Span {
+                first: Ivl::new(round_down(r1 - (r0 - a)), r1),
+                then: Some(Ivl::new(r0, z)),
+            }
+        } else if z > r1 && a >= r0 && a <= r1 {
+            Span {
+                first: Ivl::new(a, r1),
+                then: Some(Ivl::new(r0, round_up(r0 + (z - r1)))),
+            }
+        } else {
+            return Err(Stretch::Turn);
+        };
+        match span.then {
+            Some(then) if !(then.hi < span.first.lo) => Err(Stretch::Turn),
+            _ => Ok(span),
+        }
+    };
+    let mut lifted = [
+        grow(about(yu, ru, wu, |&[u, _]| u)),
+        grow(about(yv, rv, wv, |&[_, v]| v)),
+    ];
+    for _ in 0..FOOT_WIDENINGS {
+        if *budget == 0 {
+            return Err(Stretch::Budget);
+        }
+        *budget = budget.saturating_sub(1);
+        let [lu, lv] = lifted;
+        let u = [pieces(lu, ru, border_u, wu)?, pieces(lv, rv, border_v, wv)?];
+        let (delta, inner) = box_offsets(&u, y, seams).ok_or(Stretch::HeldOutside)?;
+        let (k, q) = frame_operator(net, line, frame, &u, y, &delta, t)?;
+        if !(q < 1.0) {
+            return Err(Stretch::NoContraction);
+        }
+        let inside = k
+            .iter()
+            .zip(&inner)
+            .all(|(x, &[a, z])| x.lo > a && x.hi < z);
+        if inside {
+            let holds = held.iter().all(|h| {
+                h.iter()
+                    .zip(&u)
+                    .all(|(&x, s)| s.pieces().any(|p| within(x, p)))
+            });
+            return if !holds {
+                Err(Stretch::HeldOutside)
+            } else if !hull_pieces(&u)
+                .iter()
+                .all(|&[pu, pv]| covered_by_leaves(pu, pv, leaves))
+            {
+                Err(Stretch::Uncovered)
+            } else {
+                Ok(FrameBox { t, u, y })
+            };
+        }
+        let [ku, kv] = k;
+        if !(ku.is_finite() && kv.is_finite()) {
+            return Err(Stretch::NotFinite);
+        }
+        let wider = |[a, z]: [f64; 2], at: f64, k: Ivl| grow([a.min(at + k.lo), z.max(at + k.hi)]);
+        lifted = [wider(lu, yu, ku), wider(lv, yv, kv)];
+    }
+    Err(Stretch::NoContraction)
+}
+
+/// The most times the tight box of a foot along a frame is taken again
+/// ([`tight_frame_foot`]): across a crease the Jacobian's hull keeps the width of the
+/// partials' jump however small the box, so each step narrows the box by the contraction
+/// only (a half where one side's partial is three times the other's), not by its square.
+const FRAME_TIGHTENINGS: usize = 64;
+
+/// The foot along `frame` at the single line parameter `t` in the box `f` (`t` in `f.t`,
+/// so `f.u` holds exactly one), enclosed tightly, as pieces in the net's parameters.
+/// Krawczyk's operator is taken about Newton's foot at `t` (`y`, a point of `f.u`; `f.y`
+/// where the steps give none in it: any point of the box serves), first over all of `f.u`,
+/// then again (at most [`FRAME_TIGHTENINGS`] times, until it no longer narrows) on its meet
+/// with the offsets from `y` it was taken on. A set of offsets that holds the foot's has
+/// it in its operator, whatever the operator's size: `x* − y = −Y G̃(y, t) + (I − Y M) (x*
+/// − y)` for a matrix `M` of the Jacobian's enclosure over the segment from `y` to `x*`,
+/// so the Jacobian is enclosed over the points at the offsets and `y` itself (the hull of
+/// the offsets and 0). About `y` at the foot the box narrows to rounding even where a
+/// crease runs through the foot; about the stretch's own point it would stay as wide as
+/// the foot's distance from it. `None` where it cannot be formed.
+fn tight_frame_foot(
+    net: &LineNet,
+    line: &ScratchLine,
+    frame: &Frame,
+    seams: &Seams,
+    f: &FrameBox,
+    t: f64,
+) -> Option<[Span; 2]> {
+    let y = frame_newton(net, line, frame, seams, t, f.y)
+        .ok()
+        .filter(|y| box_offsets(&f.u, *y, seams).is_some())
+        .unwrap_or(f.y);
+    let (mut off, _) = box_offsets(&f.u, y, seams)?;
+    for step in 0..FRAME_TIGHTENINGS {
+        let with_y = off.map(|o| o.hull(Ivl::from(0.0)));
+        let narrowed = box_at_offsets(&f.u, y, &with_y, seams).and_then(|over| {
+            let (k, _) = frame_operator(net, line, frame, &over, y, &off, Ivl::from(t)).ok()?;
+            let [ku, kv] = k;
+            let [ou, ov] = off;
+            Some([meet(ku, ou)?, meet(kv, ov)?])
+        });
+        match narrowed {
+            Some(next) if next != off => off = next,
+            // (not formed over the whole box: no tight box)
+            None if step == 0 => return None,
+            _ => break,
+        }
+    }
+    box_at_offsets(&f.u, y, &off, seams)
+}
+
+/// The side of the foot along `frame` at the line parameter `t` in the box `f` (`t` in
+/// `f.t`): `h = m · (L(t) − S)` over the tight box of the foot at `t` alone
+/// ([`tight_frame_foot`]), enclosed; `None` where it cannot be formed.
+fn frame_side(
+    net: &LineNet,
+    line: &ScratchLine,
+    frame: &Frame,
+    seams: &Seams,
+    f: &FrameBox,
+    t: f64,
+) -> Option<Ivl> {
+    let x = tight_frame_foot(net, line, frame, seams, f, t)?;
+    let [s, _, _] = over_spans(net, &x, line.p)?;
+    let gap = less(&s, Ivl::from(t), line.d);
+    // (L − S = −gap)
+    Some(Ivl::from(0.0) - dot(frame.m, &gap))
+}
+
+/// The foot rule along a frame (module docs, "Typing"; answer12, Q2), for a component
+/// holding a box left at the floor whose closest-point foot rule ([`by_foot`]) failed at a
+/// stretch at the floor, so with no other component's line parameters meeting its own `t`
+/// and its hull covered by searched leaves and strips: one frame for the component
+/// ([`Frame::of`]), `t` covered by stretches, each with its box ([`frame_box`]), each two
+/// neighbours chained (at their common `t`, the tight box of one's foot lies in the other's
+/// box), and the side of the foot ([`frame_side`]) proved apart from 0 at `t`'s two ends.
+/// The contact (crossing for opposite sides, touching for one), or why not (for a stretch
+/// at the floor, why its last box failed).
+fn by_frame(
+    net: &LineNet,
+    line: &ScratchLine,
+    leaves: &[SearchedLeaf],
+    boxes: &[PlacedBox],
+    c: &Component,
+    t: Ivl,
+) -> core::result::Result<Contact, Why> {
+    let seams = net.seams(&line.solve_domain);
+    let Some(frame) = Frame::of(net, line, boxes, t) else {
+        return Err(Why::FootNotShown(FootWhy::NoFrame));
+    };
+    let mut budget = MAX_FOOT_BOXES;
+    let [hu, hv] = c.hull;
+    let mut start = [hu.inner(), hv.inner()];
+    let mut work = vec![t];
+    let mut chain: Vec<FrameBox> = Vec::new();
+    let whole = t;
+    while let Some(t) = work.pop() {
+        if budget == 0 {
+            return Err(Why::Budget);
+        }
+        // (a stretch costs one test, whatever its Newton step does)
+        budget = budget.saturating_sub(1);
+        let found = frame_box(
+            net,
+            line,
+            &frame,
+            &seams,
+            leaves,
+            boxes,
+            t,
+            start,
+            &mut budget,
+        );
+        let failed = match found {
+            Ok(f) => {
+                if let Some(prev) = chain.last() {
+                    // (the stretches tile the line parameters left to right)
+                    let at = prev.t.hi;
+                    // (the two feet at the common `t` are one: each box holds one foot)
+                    let tight = |of: &FrameBox, within: &FrameBox| {
+                        tight_frame_foot(net, line, &frame, &seams, of, at)
+                            .is_some_and(|k| spans_within(&k, &within.u))
+                    };
+                    if !((tight(prev, &f) || tight(&f, prev)) && at == t.lo) {
+                        return Err(Why::FootNotShown(FootWhy::NotChained));
+                    }
+                }
+                start = f.y;
+                chain.push(f);
+                continue;
+            }
+            Err(why) => why,
+        };
+        let mid = t.mid();
+        if !(mid > t.lo && mid < t.hi) {
+            return Err(Why::FootNotShown(FootWhy::Floor(failed)));
+        }
+        work.push(Ivl::new(mid, t.hi));
+        work.push(Ivl::new(t.lo, mid));
+    }
+    let lo = chain
+        .first()
+        .and_then(|first| frame_side(net, line, &frame, &seams, first, whole.lo));
+    let hi = chain
+        .last()
+        .and_then(|last| frame_side(net, line, &frame, &seams, last, whole.hi));
+    let (lo, hi) = match (lo, hi) {
+        (Some(lo), Some(hi)) => (lo, hi),
+        (None, _) => return Err(Why::FootNotShown(FootWhy::NoSideAtStart)),
+        (Some(_), None) => return Err(Why::FootNotShown(FootWhy::NoSideAtEnd)),
+    };
+    let apart = |s: Ivl| s.lo > 0.0 || s.hi < 0.0;
+    if !(apart(lo) && apart(hi)) {
+        return Err(Why::EndNotShown);
+    }
+    Ok(if (lo.lo > 0.0) == (hi.lo > 0.0) {
+        Contact::Touching
+    } else {
+        Contact::Crossing
+    })
+}
+
 /// The certified bound `ε` on the side function over the net above the `(u, v)` hull
 /// `[u, v]` (module docs, "Typing"): the largest bound on `|F|` of the Bézier patches the
 /// hull meets ([`side_bounds`]; a hull on a patch's edge reads the patch it lies in) over
@@ -4642,7 +5377,10 @@ pub(crate) fn type_solutions(
         .collect();
     for (c, comp) in comps.list.iter().enumerate() {
         let decided = matches!(comp.contact, Contact::Crossing | Contact::Touching)
-            && matches!(comp.typed, Typed::Count(_) | Typed::Sides | Typed::Foot);
+            && matches!(
+                comp.typed,
+                Typed::Count(_) | Typed::Sides | Typed::Foot | Typed::FrameFoot
+            );
         if !decided {
             continue;
         }
@@ -4673,7 +5411,8 @@ pub(crate) fn type_solutions(
             }
         }
         let carried = carriers.iter().all(|l| l.len() == 1);
-        let straddles = matches!(comp.typed, Typed::Sides | Typed::Foot) && !comp.inside;
+        let straddles =
+            matches!(comp.typed, Typed::Sides | Typed::Foot | Typed::FrameFoot) && !comp.inside;
         // (what the boxes left at the floor hold, beyond the roots, as a parity)
         let parity = usize::from(comp.contact == Contact::Crossing);
         let rest = (parity + comp.classes.len()) % 2;
@@ -7331,6 +8070,17 @@ mod tests {
     /// [`typed_in`] on the net `net` (not rebuilt from a surface) over the solve `solve`,
     /// one leaf, the line's interval `[0, 1]`.
     fn typed_net(net: &LineNet, solve: Extent2d, p: Vec3, d: Vec3, tol: f64) -> Components {
+        typed_net_leaves(net, solve, p, d, tol).1
+    }
+
+    /// [`typed_net`] with its leaves.
+    fn typed_net_leaves(
+        net: &LineNet,
+        solve: Extent2d,
+        p: Vec3,
+        d: Vec3,
+        tol: f64,
+    ) -> (Vec<SearchedLeaf>, Components) {
         let line = PassLine {
             point: p,
             vector: d,
@@ -7353,7 +8103,7 @@ mod tests {
         drop_fenced(net, &line, &mut leaves, &sides, None, MAX_DROP_ENCLOSURES).unwrap();
         let mut c = components(&leaves, &sides, [0.0, 1.0], seams);
         type_components(net, &line, &leaves, &sides, &mut c, None).unwrap();
-        c
+        (leaves, c)
     }
 
     /// Whether a component is joined across a seam.
@@ -7530,34 +8280,20 @@ mod tests {
         assert_eq!(far[0].typed, Typed::Count(1), "{:?}", far[0]);
     }
 
-    /// A closed quadratic B-spline ring about z (control points `(1, 0)`, `(1, 1)`,
-    /// `(−1, 1)`, `(−1, −1)`, `(1, −1)`, `(1, 0)`, z from 0 to 1) on the knots `0, 0, 0,
-    /// 0.1, 0.5, 0.7, 1, 1, 1`: its first and last rows are one, so it closes, but its end
-    /// spans differ, so `S_u` jumps at the seam (`2 (P₁ − P₀) / 0.1 = (0, 20)` against
-    /// `2 (P₅ − P₄) / 0.3 = (0, 6.7)`): not `C¹`. Every point has `x ≤ 1`, equal only on the
-    /// seam (`x = 1`, each end span's hull touching `x = 1` along its end edge only), so the
-    /// line along y at `x = 1 + tol / 2`, `z = ½` touches it within the tolerance across the
-    /// seam. The component is joined there, and its foot box would straddle the seam: no
-    /// foot box does (answer10, Q1, condition 3), and it stays undecided at a crease.
-    #[test]
-    fn a_seam_not_proved_c1_takes_no_foot_box_across_it() {
+    /// A closed quadratic B-spline ring about z through the control points `points` (the
+    /// first and the last one point, the seam), z from 0 to 1 along v, on the knots `0, 0,
+    /// 0, 0.1, 0.5, 0.7, 1, 1, 1`: its first and last rows are one, so it closes exactly, and
+    /// its end spans differ (0.1 and 0.3), so `S_u` jumps at the seam whatever its
+    /// directions there.
+    fn ring_of(points: [[f64; 2]; 6]) -> Surface {
         use crate::nurbs::b_spline_surface::BSplineSurface;
         use crate::nurbs::math::{CPoint, NOW};
         use crate::nurbs::srf_basic::Surface as NlSurface;
-        let k = Kernel::default();
-        let ring = [
-            [1.0, 0.0],
-            [1.0, 1.0],
-            [-1.0, 1.0],
-            [-1.0, -1.0],
-            [1.0, -1.0],
-            [1.0, 0.0],
-        ];
-        let net = ring
+        let net = points
             .iter()
             .map(|&[x, y]| vec![CPoint::new(x, y, 0.0, NOW), CPoint::new(x, y, 1.0, NOW)])
             .collect();
-        let s = Surface::from(BSplineSurface::from_nurb(
+        Surface::from(BSplineSurface::from_nurb(
             NlSurface::new(
                 net,
                 2,
@@ -7567,7 +8303,58 @@ mod tests {
             )
             .unwrap(),
             false,
-        ));
+        ))
+    }
+
+    /// The ring of [`ring_of`] through `(1, 0)`, `(1, 1)`, `(−1, 1)`, `(−1, −1)`, `(1, −1)`,
+    /// `(1, 0)`: its seam at `(1, 0)`, `u = 0`, which it leaves along +y at the low end (`y
+    /// ≈ 20 u`, `S_u = 2 (P₁ − P₀) / 0.1 = (0, 20)`) and reaches from −y at the high end
+    /// (`S_u = 2 (P₅ − P₄) / 0.3 = (0, 6.7)`): one direction, two lengths, so `G¹` and not
+    /// `C¹`. Every point has `x ≤ 1`, equal only on the seam (each end span's hull touches
+    /// `x = 1` along its end edge only).
+    fn crease_ring() -> Surface {
+        ring_of([
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [-1.0, 1.0],
+            [-1.0, -1.0],
+            [1.0, -1.0],
+            [1.0, 0.0],
+        ])
+    }
+
+    /// The ring of [`ring_of`] through `(1, 0)`, `(2, −½)`, `(3, −3)`, `(−1, −3)`, `(1,
+    /// −1)`, `(1, 0)`: it reaches its seam `(1, 0)` from −y as [`crease_ring`] does (`S_u =
+    /// (0, 6.7)`, `x ≤ 1` on its last span, equal at the seam only) and leaves it back and
+    /// outward, along `(1, −½)` (`S_u = 2 (P₁ − P₀) / 0.1 = (20, −10)`): a fold. With `S_v =
+    /// (0, 0, 1)`, `S_u × S_v` is `(−10, −20, 0)` on the low end and `(6.7, 0, 0)` on the
+    /// high end, their product −67 negative: more than a quarter turn apart (117°). It
+    /// stays in `x > 1` from the seam down to below `y = −1`, so a line along y at `x ≤ 1`
+    /// over `y` from −1 to 1 meets only its last span.
+    fn fold_ring() -> Surface {
+        ring_of([
+            [1.0, 0.0],
+            [2.0, -0.5],
+            [3.0, -3.0],
+            [-1.0, -3.0],
+            [1.0, -1.0],
+            [1.0, 0.0],
+        ])
+    }
+
+    /// A seam the net is not proved `C¹` across is crossed by the foot along a frame, not by
+    /// the closest-point foot (answer10, Q1, condition 3; answer12, Q2), on [`crease_ring`]
+    /// and the line along y at `x = 1 + tol / 2`, `z = ½`: it passes the seam within the
+    /// tolerance, and the component is joined there. Its closest-point foot box would
+    /// straddle the seam, which that rule refuses (a crease); the foot along a frame needs
+    /// `S` continuous only, which the exact closure gives, with the hull of both ends'
+    /// `S_u` (`(0, 20)` and `(0, 6.7)`: a contraction of a half). Every point of the ring
+    /// has `x ≤ 1` and the line lies at `x > 1`: it does not cross, so both its ends lie on
+    /// one side, touching. (Before answer12's rule: undecided at the crease.)
+    #[test]
+    fn a_seam_not_proved_c1_is_crossed_by_the_foot_along_a_frame() {
+        let k = Kernel::default();
+        let s = crease_ring();
         let line = LineNet::of(&k, &s).unwrap().unwrap();
         assert_eq!(line.closes, [true, false]);
         let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
@@ -7583,46 +8370,13 @@ mod tests {
         assert_eq!(c.list.len(), 1, "{:?}", c.list);
         assert!(glued(&c.list[0]), "{:?}", c.list[0]);
         assert_eq!(
-            c.list[0].typed,
-            Typed::Undecided(Why::FootNotShown(FootWhy::Floor(Stretch::Crease))),
+            (c.list[0].contact, c.list[0].typed),
+            (Contact::Touching, Typed::FrameFoot),
             "{:?}",
             c.list[0]
         );
-        // (the seam is a crease, no boundary: a gap of the typing, not another ray's case)
+        // (the seam is a crease, no boundary)
         assert!(!c.list[0].at_boundary, "{:?}", c.list[0]);
-    }
-
-    /// The closed quadratic B-spline ring of
-    /// [`a_seam_not_proved_c1_takes_no_foot_box_across_it`]: its seam at `(1, 0)`, `u = 0`,
-    /// which it leaves along +y at the low end (`y ≈ 20 u`) and reaches from −y at the high
-    /// end, z from 0 to 1 along v.
-    fn crease_ring() -> Surface {
-        use crate::nurbs::b_spline_surface::BSplineSurface;
-        use crate::nurbs::math::{CPoint, NOW};
-        use crate::nurbs::srf_basic::Surface as NlSurface;
-        let ring = [
-            [1.0, 0.0],
-            [1.0, 1.0],
-            [-1.0, 1.0],
-            [-1.0, -1.0],
-            [1.0, -1.0],
-            [1.0, 0.0],
-        ];
-        let net = ring
-            .iter()
-            .map(|&[x, y]| vec![CPoint::new(x, y, 0.0, NOW), CPoint::new(x, y, 1.0, NOW)])
-            .collect();
-        Surface::from(BSplineSurface::from_nurb(
-            NlSurface::new(
-                net,
-                2,
-                1,
-                vec![0.0, 0.0, 0.0, 0.1, 0.5, 0.7, 1.0, 1.0, 1.0],
-                vec![0.0, 0.0, 1.0, 1.0],
-            )
-            .unwrap(),
-            false,
-        ))
     }
 
     /// Newton's steps toward the closest-point foot that leave the knots' range are told by
@@ -7674,99 +8428,100 @@ mod tests {
     }
 
     /// A crossing beside a seam the net is not proved `C¹` across (answer11, the 8 + 2
-    /// points: a root's carrier, a crossing before the seam join, undecided after it): the
-    /// closed quadratic B-spline ring of [`a_seam_not_proved_c1_takes_no_foot_box_across_it`]
-    /// (seam at `(1, 0)`, `u = 0`; the ring leaves it along +y at the low end and arrives from
-    /// −y at the high end, `x ≤ 1` with equality on the seam only), crossed by lines a hair to
-    /// one side of the seam's meridian (along −x at `y = ε`, `|ε|` from a quarter of the
-    /// tolerance to twice it) and along it (along y at `x = 1 − δ`, two shallow crossings, one
-    /// on each end, beside the line's tangency at the seam, `δ` from a quarter of the tolerance
-    /// to 64 times it). Where the line passes within the tolerance of the seam, the two ends
-    /// join into one component; with boxes left at the floor there (δ up to the tolerance)
-    /// only the foot rule types it, and its foot box would straddle the seam: a crease. The
-    /// invariant, over the sweep: the solution point at each certified root is never typed as
-    /// another contact than a crossing, and where it is undecided its component is undecided
-    /// at that crease (`FootNotShown(Floor(Crease))`). (Measured: across the meridian every
-    /// root is a count's crossing; along it the three closest lines are undecided at the
-    /// crease, the others crossings.)
+    /// points; answer12, Q2). The invariant: the solution point at each certified root is
+    /// never typed as another contact than a crossing, and where it is undecided its
+    /// component is undecided at that crease (`FootNotShown(Floor(Crease))`).
+    ///
+    /// On [`crease_ring`] (seam at `(1, 0)`, `x ≤ 1` with equality on the seam only), lines a
+    /// hair to one side of the seam's meridian (along −x at `y = ε`, `|ε|` from a quarter of
+    /// the tolerance to twice it) and along it (along y at `x = 1 − δ`, two shallow
+    /// crossings, one on each end, beside the line's tangency at the seam, `δ` from a quarter
+    /// of the tolerance to 64 times it). Where the line passes within the tolerance of the
+    /// seam the two ends join into one component; with boxes left at the floor there (`δ`
+    /// up to the tolerance) the closest-point foot box would straddle the seam, and the foot
+    /// along a frame types it: touching (the line is outside the ring, `x > ` the ring's,
+    /// before its first crossing and after its second, so its ends lie on one side), each
+    /// root's point a crossing. No root's point is undecided on this ring any more (before
+    /// answer12's rule the three closest lines along the meridian were undecided at the
+    /// crease, and the test asked for one such case here).
+    ///
+    /// The case that must stay undecided is a fold at the seam ([`fold_ring`]): the two
+    /// ends' normals are more than a quarter turn apart, so `(e₁ × e₂) · (S_u × S_v)` has
+    /// opposite signs on the two ends whichever end's box gives the frame, the Jacobian of
+    /// the foot along it holds a singular matrix over any box across the seam, and
+    /// Krawczyk's operator cannot lie inside it. The lines along y at `x = 1 − δ`, `δ` a
+    /// quarter of the tolerance, a half and the whole, cross the ring's last span once,
+    /// shallowly, beside the seam, within the tolerance of it: one component joined there
+    /// with boxes left at the floor, undecided at the crease by the closest-point foot and
+    /// by its contraction along the frame, its roots' points undecided. At least one such
+    /// point is required, so the test reads the case the invariant is about.
     #[test]
     fn a_crossing_beside_a_crease_seam_is_a_crossing_or_undecided_at_the_crease() {
-        use crate::nurbs::b_spline_surface::BSplineSurface;
-        use crate::nurbs::math::{CPoint, NOW};
-        use crate::nurbs::srf_basic::Surface as NlSurface;
         let k = Kernel::default();
-        let ring = [
-            [1.0, 0.0],
-            [1.0, 1.0],
-            [-1.0, 1.0],
-            [-1.0, -1.0],
-            [1.0, -1.0],
-            [1.0, 0.0],
-        ];
-        let net = ring
-            .iter()
-            .map(|&[x, y]| vec![CPoint::new(x, y, 0.0, NOW), CPoint::new(x, y, 1.0, NOW)])
-            .collect();
-        let s = Surface::from(BSplineSurface::from_nurb(
-            NlSurface::new(
-                net,
-                2,
-                1,
-                vec![0.0, 0.0, 0.0, 0.1, 0.5, 0.7, 1.0, 1.0, 1.0],
-                vec![0.0, 0.0, 1.0, 1.0],
-            )
-            .unwrap(),
-            false,
-        ));
-        let line_net = LineNet::of(&k, &s).unwrap().unwrap();
-        let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
         let tol = 1.0e-6;
-        let mut undecided = 0;
+        let at_the_crease = Typed::Undecided(Why::FootNotShown(FootWhy::Floor(Stretch::Crease)));
+        // the points at the certified roots of each line: how many are undecided, and
+        // the components typed by the foot along a frame
+        let sweep = |s: &Surface, lines: &[(Vec3, Vec3)], folded: bool| {
+            let line_net = LineNet::of(&k, s).unwrap().unwrap();
+            let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
+            let (mut undecided, mut by_frame) = (0, 0);
+            for &(p, d) in lines {
+                let line = PassLine {
+                    point: p,
+                    vector: d,
+                    span: [0.0, 1.0],
+                    solve_domain: whole,
+                    tol,
+                };
+                let (_, c) = typed_of(&k, s, p, d, tol, &[whole]);
+                for comp in &c.list {
+                    by_frame += usize::from(comp.typed == Typed::FrameFoot);
+                    for root in &comp.roots {
+                        let [u, v, t] = root.point;
+                        let at = [SolutionAt::Point([t, u, v])];
+                        let (typed, _) = type_solutions(&line_net, &line, &c, &at, false);
+                        match typed[0].map(|x| x.0) {
+                            Some(Contact::Crossing) => {}
+                            Some(Contact::Undecided) => {
+                                undecided += 1;
+                                assert_eq!(comp.typed, at_the_crease, "{p:?}: {comp:?}");
+                                // (and there only through the fold: no contraction)
+                                assert!(folded, "{p:?}: {comp:?}");
+                                assert_eq!(
+                                    comp.frame_why,
+                                    Some(Why::FootNotShown(FootWhy::Floor(Stretch::NoContraction))),
+                                    "{p:?}: {comp:?}"
+                                );
+                            }
+                            other => panic!("{p:?}: {other:?}, {comp:?}"),
+                        }
+                    }
+                }
+            }
+            (undecided, by_frame)
+        };
         // across the seam's meridian a hair to one side (along −x at y = ε), and along it
         // (along y at x = 1 − δ: two shallow crossings, one on each end, beside the tangency
         // at the seam)
-        let across = [-2.0, -0.5, -0.25, 0.25, 0.5, 2.0]
-            .map(|f| (Vec3::new(2.0, f * tol, 0.5), Vec3::new(-2.0, 0.0, 0.0)));
-        let along = [0.25, 0.5, 1.0, 2.0, 4.0, 16.0, 64.0].map(|f| {
+        let along = |f: f64| {
             (
                 Vec3::new(1.0 - f * tol, -1.0, 0.5),
                 Vec3::new(0.0, 2.0, 0.0),
             )
-        });
-        for (p, d) in across.into_iter().chain(along) {
-            let line = PassLine {
-                point: p,
-                vector: d,
-                span: [0.0, 1.0],
-                solve_domain: whole,
-                tol,
-            };
-            let (_, c) = typed_of(&k, &s, p, d, tol, &[whole]);
-            for (ci, comp) in c.list.iter().enumerate() {
-                for root in &comp.roots {
-                    let [u, v, t] = root.point;
-                    let at = [SolutionAt::Point([t, u, v])];
-                    let (typed, _) = type_solutions(&line_net, &line, &c, &at, false);
-                    match typed[0].map(|x| x.0) {
-                        Some(Contact::Crossing) => {}
-                        Some(Contact::Undecided) => {
-                            undecided += 1;
-                            assert_eq!(
-                                comp.typed,
-                                Typed::Undecided(Why::FootNotShown(FootWhy::Floor(
-                                    Stretch::Crease
-                                ))),
-                                "{p:?}: {:?}",
-                                c.list[ci]
-                            );
-                        }
-                        other => panic!("{p:?}: {other:?}, {:?}", c.list[ci]),
-                    }
-                }
-            }
-        }
+        };
+        let mut lines: Vec<(Vec3, Vec3)> = [-2.0, -0.5, -0.25, 0.25, 0.5, 2.0]
+            .map(|f| (Vec3::new(2.0, f * tol, 0.5), Vec3::new(-2.0, 0.0, 0.0)))
+            .to_vec();
+        lines.extend([0.25, 0.5, 1.0, 2.0, 4.0, 16.0, 64.0].map(along));
+        let (undecided, by_frame) = sweep(&crease_ring(), &lines, false);
+        assert_eq!(undecided, 0);
+        // (the three closest lines along the meridian)
+        assert_eq!(by_frame, 3);
+        let (undecided, by_frame) = sweep(&fold_ring(), &[0.25, 0.5, 1.0].map(along), true);
         // (the case the invariant is about occurs in the sweep)
         assert!(undecided > 0);
+        assert_eq!(by_frame, 0);
     }
 
     /// A component around the whole turn holding boxes left at the floor stays undecided
@@ -8229,5 +8984,294 @@ mod tests {
         let (_, typed, stood, _) =
             seam_records(corner, &[low, high], &[[0.75, a0, b0], inner], |_| {});
         assert!(undecided(&typed, &stood), "{typed:?}");
+    }
+
+    /// A patch of degrees (2, 1) with a crease along `u = ½` (a double knot there; with
+    /// `broken`, a triple one and the crease's control row twice: the same surface, stored
+    /// as two patches the net is not continuous across by its knots): a profile in the xz
+    /// plane swept along y from 0 to 1. For `u ≤ ½` the dome `z = −0.2 x²` over `x` from −1
+    /// to 0 (control points `(−1, −0.2)`, `(−½, 0)`, `(0, 0)`), horizontal at the ridge `x
+    /// = z = 0`; for `u ≥ ½`, with `τ = (cos b, −sin b)` the direction turned down by the
+    /// bend `b` and `ν = (sin b, cos b)` its normal, the parabola `ξ τ + ½ ξ² ν` over `ξ`
+    /// from 0 to 1 (control points `0`, `½ τ`, `τ + ½ ν`; `ξ = 2u − 1`), leaving the ridge
+    /// along `τ`. `S_u × S_v` is `(0, 0, 2)` on the dome's side of the ridge and `2 ν` on
+    /// the other: `b` apart.
+    fn creased(bend: f64, broken: bool) -> Surface {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        let (sin, cos) = bend.to_radians().sin_cos();
+        let mut profile = vec![[-1.0, -0.2], [-0.5, 0.0], [0.0, 0.0]];
+        let mut knots = vec![0.0, 0.0, 0.0, 0.5, 0.5];
+        if broken {
+            profile.push([0.0, 0.0]);
+            knots.push(0.5);
+        }
+        profile.push([0.5 * cos, -0.5 * sin]);
+        profile.push([cos + 0.5 * sin, -sin + 0.5 * cos]);
+        knots.extend([1.0, 1.0, 1.0]);
+        let net = profile
+            .iter()
+            .map(|&[x, z]| vec![CPoint::new(x, 0.0, z, NOW), CPoint::new(x, 1.0, z, NOW)])
+            .collect();
+        Surface::from(BSplineSurface::from_nurb(
+            NlSurface::new(net, 2, 1, knots, vec![0.0, 0.0, 1.0, 1.0]).unwrap(),
+            false,
+        ))
+    }
+
+    /// The lines of the crease tests on [`creased`] with the bend `bend`, each through or
+    /// over the ridge point `(0, ½, 0)` (`u = v = ½`) at `t = ½`, of length 2: along `τ −
+    /// 10⁻³ ν` and along `τ + ⅛ tol ν` through it (each starts at the ridge point less its
+    /// direction, and its direction doubled is its vector, so the stored line passes through
+    /// the ridge point exactly), and along x half the tolerance above it.
+    fn crease_lines(bend: f64, tol: f64) -> [(Vec3, Vec3); 3] {
+        let (sin, cos) = bend.to_radians().sin_cos();
+        let (along, out) = (Vec3::new(cos, 0.0, -sin), Vec3::new(sin, 0.0, cos));
+        let ridge = Vec3::new(0.0, 0.5, 0.0);
+        let through = |d: Vec3| (ridge - d, d * 2.0);
+        [
+            through(along - out * 1.0e-3),
+            through(along + out * (0.125 * tol)),
+            (Vec3::new(-1.0, 0.5, 0.5 * tol), Vec3::new(2.0, 0.0, 0.0)),
+        ]
+    }
+
+    /// The leaves of the crease tests: the patch's domain cut at `u` = 0.4375, ½, 0.5625 and
+    /// `v` = 0.4375, 0.5625, so that the leaves about the ridge point `(½, ½)` are small
+    /// (each leaf's pass and exclusion phase have their own budgets).
+    fn crease_leaves() -> Vec<Extent2d> {
+        let (us, vs) = ([0.0, 0.4375, 0.5, 0.5625, 1.0], [0.0, 0.4375, 0.5625, 1.0]);
+        us.windows(2)
+            .flat_map(|u| {
+                vs.windows(2)
+                    .map(move |v| Extent2d::from_bounds(u[0], v[0], u[1], v[1]))
+            })
+            .collect()
+    }
+
+    /// The foot along a frame across an interior crease with a real angle (answer12, Q2):
+    /// [`creased`] bent by 30°, crossed by grazing lines whose boxes are left at the floor,
+    /// so no count decides them, and whose closest-point foot box would cross the crease
+    /// (refused: the second partials are read there). With `τ` the direction the far side
+    /// leaves the ridge along and `ν` its normal:
+    ///
+    /// - through the ridge point along `τ − 10⁻³ ν`: before the ridge the line rises at 30°
+    ///   and more over the dome (`z ≤ 0` there, the line at `z > 0`); past it, at `ξ` along
+    ///   `τ`, it lies `10⁻³ ξ + ½ ξ²` below the far side. One crossing, exactly on the crease
+    ///   curve, at a milliradian to the far side: a crossing;
+    /// - through the ridge point along `τ + ⅛ tol ν`: past the ridge it lies `⅛ tol ξ − ½
+    ///   ξ²` above the far side, so it touches the ridge and crosses the far side once at
+    ///   `ξ = ¼ tol`: `2.5·10⁻⁷` in model units from the crease along the surface (`u = ½ +
+    ///   1.25·10⁻⁷`), at an angle of `1.25·10⁻⁷`, where the box left at the floor that holds
+    ///   the crossing has its side on the crease (the boxes there are `2.4·10⁻⁷` wide in
+    ///   u). One crossing: a crossing;
+    /// - along x at half the tolerance above the ridge, on the convex side: the dome and
+    ///   the far side both fall away below `z = 0`. No crossing, a near miss within half the
+    ///   tolerance: touching.
+    ///
+    /// Each is one component, typed by the foot along a frame.
+    #[test]
+    fn the_foot_along_a_frame_types_contacts_at_a_crease() {
+        let k = Kernel::default();
+        let tol = 1.0e-6;
+        let s = creased(30.0, false);
+        let want = [Contact::Crossing, Contact::Crossing, Contact::Touching];
+        for (i, ((p, d), contact)) in crease_lines(30.0, tol).into_iter().zip(want).enumerate() {
+            let (_, c) = typed_of(&k, &s, p, d, tol, &crease_leaves());
+            assert_eq!(
+                types(&c),
+                vec![(contact, Typed::FrameFoot)],
+                "line {i}: {:?}",
+                c.list
+            );
+            assert!(c.list[0].holds.left > 0, "line {i}: {:?}", c.list[0]);
+            // (it holds boxes on both sides of the crease)
+            assert!(c.list[0].u.lo < 0.5 && c.list[0].u.hi > 0.5, "line {i}");
+            if i == 1 {
+                // the box left at the floor holding the crossing meets the crease
+                let at = 0.5 + 0.125 * tol;
+                assert!(
+                    c.boxes
+                        .iter()
+                        .any(|b| b.part == Part::Floor(FloorKind::Left)
+                            && b.u.lo == 0.5
+                            && b.u.hi > at
+                            && b.v.lo <= 0.5
+                            && b.v.hi >= 0.5),
+                    "{:?}",
+                    c.list
+                );
+            }
+        }
+    }
+
+    /// A crease that folds the surface over relative to the frame stays undecided (answer12,
+    /// Q2, condition 3): [`creased`] bent by 150°, so that `S_u × S_v` on the two sides of
+    /// the ridge, `(0, 0, 2)` and `2 ν = (1, 0, −√3)`, are 150° apart, and `(e₁ × e₂) ·
+    /// (S_u × S_v)`, the determinant of the Jacobian of the foot along the frame, has
+    /// opposite signs on the two sides whichever side's box gives the frame (read here from
+    /// each component's own frame). Its enclosure
+    /// over a box across the crease holds a singular matrix, so the contraction is not below
+    /// 1 and no box is certified: every component of the three lines of
+    /// [`the_foot_along_a_frame_types_contacts_at_a_crease`] (the same directions about this
+    /// bend's `τ` and `ν`) is undecided, by the closest-point foot at a stretch at the floor
+    /// and by the foot along a frame at its contraction, never typed.
+    #[test]
+    fn a_crease_folding_the_surface_over_the_frame_is_undecided() {
+        let k = Kernel::default();
+        let tol = 1.0e-6;
+        let s = creased(150.0, false);
+        let net = LineNet::of(&k, &s).unwrap().unwrap();
+        // the frame's determinant on the two sides, for the frame of either side's normal
+        let normal = |u: f64| {
+            let [_, s_u, s_v] = net.over(Ivl::from(u), Ivl::from(0.5), [0.0; 3]).unwrap();
+            mids(&cross_i(&s_u, &s_v))
+        };
+        let (near, far) = (normal(0.25), normal(0.75));
+        let along: f64 = near.iter().zip(&far).map(|(a, b)| a * b).sum();
+        assert!(along < 0.0, "{near:?} {far:?}");
+        let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
+        for (i, (p, d)) in crease_lines(150.0, tol).into_iter().enumerate() {
+            let (_, c) = typed_of(&k, &s, p, d, tol, &crease_leaves());
+            assert!(!c.list.is_empty(), "line {i}");
+            let scratch = ScratchLine::of(
+                &PassLine {
+                    point: p,
+                    vector: d,
+                    span: [0.0, 1.0],
+                    solve_domain: whole,
+                    tol,
+                },
+                &Extent1d::from_min_max(0.0, 1.0),
+            )
+            .unwrap();
+            for x in &c.list {
+                // the component's own frame: `(e₁ × e₂) · (S_u × S_v)` on the two sides
+                let boxes: Vec<PlacedBox> = x.boxes.iter().map(|&b| c.boxes[b]).collect();
+                let frame = Frame::of(&net, &scratch, &boxes, x.t).unwrap();
+                let [[ax, ay, az], [bx, by, bz]] = frame.e;
+                let w = [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx];
+                let det = |n: [f64; 3]| -> f64 { w.iter().zip(&n).map(|(a, b)| a * b).sum() };
+                assert!(det(near) * det(far) < 0.0, "line {i}: {frame:?}");
+                assert!(
+                    matches!(
+                        x.typed,
+                        Typed::Undecided(Why::FootNotShown(FootWhy::Floor(_)))
+                    ),
+                    "line {i}: {x:?}"
+                );
+                assert_eq!(x.contact, Contact::Undecided, "line {i}: {x:?}");
+                assert_eq!(
+                    x.frame_why,
+                    Some(Why::FootNotShown(FootWhy::Floor(Stretch::NoContraction))),
+                    "line {i}: {x:?}"
+                );
+            }
+        }
+    }
+
+    /// A break of the net is never crossed (answer12, Q2, condition 2): [`creased`] bent by
+    /// 30° with the knot at the crease of multiplicity 3, one above the degree, and the
+    /// crease's control row stored twice. The surface is the same point set as
+    /// [`the_foot_along_a_frame_types_contacts_at_a_crease`]'s, but its net is not continuous
+    /// across that knot line by its knots, and no enclosure crosses it. The same three
+    /// lines are undecided: the foot along a frame refuses the box at the break.
+    #[test]
+    fn a_break_of_the_net_is_not_crossed_by_the_foot_along_a_frame() {
+        let k = Kernel::default();
+        let tol = 1.0e-6;
+        let s = creased(30.0, true);
+        for (i, (p, d)) in crease_lines(30.0, tol).into_iter().enumerate() {
+            let (_, c) = typed_of(&k, &s, p, d, tol, &crease_leaves());
+            assert_eq!(c.list.len(), 1, "line {i}: {:?}", c.list);
+            let x = &c.list[0];
+            assert!(
+                matches!(
+                    x.typed,
+                    Typed::Undecided(Why::FootNotShown(FootWhy::Floor(_)))
+                ),
+                "line {i}: {x:?}"
+            );
+            assert_eq!(x.contact, Contact::Undecided, "line {i}: {x:?}");
+            assert_eq!(
+                x.frame_why,
+                Some(Why::FootNotShown(FootWhy::Floor(Stretch::Break))),
+                "line {i}: {x:?}"
+            );
+        }
+    }
+
+    /// The foot along a frame crosses the ends of the knots' range only where the solve
+    /// wraps (answer12, Q2, condition 2): the net of [`crease_ring`] with one coordinate of
+    /// its last row moved by one ulp does not close, so nothing wraps, and the line of
+    /// [`a_seam_not_proved_c1_is_crossed_by_the_foot_along_a_frame`] (touching by that rule
+    /// on the closed net, its box two pieces glued at the seam) leaves two components, one
+    /// on each end of the range, never joined. The rule asked of each directly (their line
+    /// parameters meet, so the typing does not reach it) certifies no box: the range's end
+    /// is a border there, which its boxes may not reach (the component's boxes lie on it) and
+    /// its Newton steps may not pass.
+    #[test]
+    fn a_net_one_ulp_from_closing_is_not_crossed_at_its_ends() {
+        let k = Kernel::default();
+        let s = crease_ring();
+        let net = LineNet::of(&k, &s).unwrap().unwrap();
+        let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let tol = 1.0e-6;
+        let (p, d) = (
+            Vec3::new(1.0 + 0.5 * tol, -1.0, 0.5),
+            Vec3::new(0.0, 2.0, 0.0),
+        );
+        // (the x coordinate, 1, of the last row's first point)
+        let at = (net.net.nu - 1) * net.net.nv * 4;
+        assert_eq!(net.net.pw[at], 1.0);
+        let mut open = net.clone();
+        open.net.pw[at] = open.net.pw[at].next_up();
+        open.closes = [
+            closes_exactly(&open.net, true),
+            closes_exactly(&open.net, false),
+        ];
+        assert_eq!(open.closes, [false, false]);
+        assert_eq!(open.seams(&whole).wrap, [false, false]);
+        let scratch = ScratchLine::of(
+            &PassLine {
+                point: p,
+                vector: d,
+                span: [0.0, 1.0],
+                solve_domain: whole,
+                tol,
+            },
+            &Extent1d::from_min_max(0.0, 1.0),
+        )
+        .unwrap();
+        // the rule asked of every component holding a box left at the floor
+        let asked = |net: &LineNet| {
+            let (leaves, c) = typed_net_leaves(net, whole, p, d, tol);
+            let found: Vec<(bool, core::result::Result<Contact, Why>)> = c
+                .list
+                .iter()
+                .filter(|x| x.holds.left > 0)
+                .map(|x| {
+                    let boxes: Vec<PlacedBox> = x.boxes.iter().map(|&i| c.boxes[i]).collect();
+                    (glued(x), by_frame(net, &scratch, &leaves, &boxes, x, x.t))
+                })
+                .collect();
+            found
+        };
+        assert_eq!(asked(&net), vec![(true, Ok(Contact::Touching))]);
+        let ends = asked(&open);
+        assert_eq!(ends.len(), 2, "{ends:?}");
+        for (joined, found) in ends {
+            assert!(!joined);
+            assert!(
+                matches!(
+                    found,
+                    Err(Why::FootNotShown(FootWhy::Floor(
+                        Stretch::LeavesDomain | Stretch::NewtonOff
+                    )))
+                ),
+                "{found:?}"
+            );
+        }
     }
 }
