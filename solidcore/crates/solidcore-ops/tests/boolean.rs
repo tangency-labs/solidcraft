@@ -11,7 +11,7 @@ use std::io::Read as _;
 
 use serde_json::Value;
 use solidcore::topology::vertex::corner;
-use solidcore_ops::boolean::{boolean, imprint, union_all};
+use solidcore_ops::boolean::{boolean, imprint, union_all, union_copies};
 use solidcore_ops::prism::extrude_planar_regions;
 use solidcore_ops::sweep::{extrude, join_arcs, revolve, zone_tolerance, Curve, DraftCorner, Join};
 use solidcore_ops::{
@@ -45,6 +45,32 @@ fn two_overlapping_boxes() {
     assert!(near(volume(&d), 7.0), "{}", volume(&d));
     let i = boolean(a(), b(), BooleanOp::Intersect).unwrap().unwrap();
     assert!(near(volume(&i), 1.0), "{}", volume(&i));
+}
+
+/// The public repro in solidcraft#20408 joins two swept parts along their matching collars.
+#[test]
+fn a_union_of_overlapping_collars_keeps_both_input_bodies() {
+    all_fixes();
+    let a = Body::from_smb(include_bytes!("data/issue_20408_hoop.smb").to_vec(), false).unwrap();
+    let b = Body::from_smb(include_bytes!("data/issue_20408_back.smb").to_vec(), false).unwrap();
+    let before = [volume(&a), volume(&b)];
+    let joined = union_copies(&a, &b).unwrap().unwrap();
+    assert_eq!(joined.solid_count().unwrap(), 1);
+    assert!(joined.check(CheckLevel::Geometry).unwrap().is_valid());
+    // The operands overlap in their coaxial 1.3 mm-radius collars over exactly 2 mm.
+    let overlap = PI * 1.3 * 1.3 * 2.0;
+    assert!(near(volume(&joined), before[0] + before[1] - overlap));
+    assert_eq!(joined.counts().unwrap(), [25, 70, 46]);
+    // The outside of the surviving collar at x=4.75 + 1.3 is 0.1 mm from the probe.
+    let (_, order) = joined.to_record().unwrap();
+    let faces: Vec<usize> = (0..25).collect();
+    let closest = joined
+        .closest_to_point(&order, &faces, &[], [6.15, 15.25, 18.375])
+        .unwrap()
+        .unwrap();
+    assert!(near(closest.distance, 0.1));
+    assert!(near(volume(&a), before[0]));
+    assert!(near(volume(&b), before[1]));
 }
 
 #[test]
@@ -716,6 +742,17 @@ fn the_check_of_a_long_coil_cut_stops_on_cancel() {
 /// seam: inside the vertex's 1e-5 tolerance, with no sliver beside the seam. The check
 /// refused it (face test 36) for centres 1e-7 to 1e-5 off. Every offset now gives one valid
 /// solid, its volume moving with the offset by no more than the wall's swept area allows.
+///
+/// The seam's corner on the bar's edge `d` off (the seam vertex, made one with its drop on the
+/// edge and placed midway) is `d` from where the seam crosses the step face beside the edge
+/// and 1.118 `d` from the midway point: for `d` from 1e-5 to 1.3e-5 the crossing lies within
+/// the seam vertex's tolerance of it but farther than that from the midway point, so it is
+/// one point only by the vertex's own ball, which its proto vertex holds (docs/booleans.md,
+/// "One point or two"). Without it the cut was refused (`MergedVertexReaches`) at 1e-5, 1.1e-5
+/// and 1.3e-5 once two points are one only within the larger of their tolerances. From 2.05e-5
+/// to 2.4e-5 the step face's curve leaves the seam where the seam's end vertex is past both
+/// tolerances but within their sum: it no longer runs "along" the seam to there (docs/booleans.md,
+/// "Seams and poles"), and the cut, refused (not a solid) or empty before, is valid.
 #[test]
 fn a_cut_whose_seam_edge_ends_within_tolerance_across_the_seam_is_valid() {
     all_fixes();
@@ -776,7 +813,22 @@ fn a_cut_whose_seam_edge_ends_within_tolerance_across_the_seam_is_valid() {
     };
     let exact = volume(&cut(0.0));
     // (1e-6 off, the cut is no solid, before this change too: #14840)
-    for d in [1e-9, 1e-7, 3e-7, 2e-6, 7.868_858_162e-6, 1e-5, 3e-5, 1e-4] {
+    for d in [
+        1e-9,
+        1e-7,
+        3e-7,
+        2e-6,
+        7.868_858_162e-6,
+        1e-5,
+        1.1e-5,
+        1.3e-5,
+        1.5e-5,
+        2e-5,
+        2.2e-5,
+        2.4e-5,
+        3e-5,
+        1e-4,
+    ] {
         let r = cut(d);
         let report = r.check(CheckLevel::All).unwrap();
         assert!(report.is_valid(), "d {d}: {}", report.text);
@@ -1944,6 +1996,87 @@ fn a_traced_cut_flush_with_an_earlier_stadium_cut_is_its_closed_form() {
     );
 }
 
+/// #15700's operands from the reporter's files: `cavity` (folds over itself at its nose),
+/// `front` (the cavity cut back to x < 20) and `tool` (overlaps the nose).
+fn folded_cavity() -> impl Fn(&str) -> Body {
+    traced_operands("folded_cavity_and_nose_tool")
+}
+
+/// The kernel misses where the tool meets the cavity's fold and answered empty, so the cavity
+/// vanished without an error. It is refused, or keeps at least the cavity less the tool.
+#[test]
+fn a_cut_answered_empty_while_the_body_has_a_vertex_outside_the_tool_is_refused() {
+    all_fixes();
+    let body = folded_cavity();
+    let (vc, vt) = (volume(&body("cavity")), volume(&body("tool")));
+    match boolean(body("cavity"), body("tool"), BooleanOp::Subtract) {
+        Err(e) => assert_eq!(e.name(), "EmptyRefuted", "{e}"),
+        Ok(Some(r)) => {
+            let v = volume(&r);
+            assert!(v >= vc - vt && v <= vc, "{v} of {vc} less at most {vt}");
+        }
+        other => panic!("the cavity less the tool: {:?}", other.map(|r| r.is_some())),
+    }
+}
+
+/// The same missed crossing made a real overlap "empty". It is refused, or is no larger than
+/// the tool.
+#[test]
+fn an_intersection_answered_empty_while_a_vertex_lies_in_the_other_operand_is_refused() {
+    all_fixes();
+    let body = folded_cavity();
+    let tool = body("tool");
+    match boolean(body("front"), body("tool"), BooleanOp::Intersect) {
+        Err(e) => assert_eq!(e.name(), "EmptyRefuted", "{e}"),
+        Ok(Some(r)) => {
+            let (v, vt) = (volume(&r), volume(&tool));
+            assert!(v > 0.0 && v <= vt, "{v} of at most {vt}");
+        }
+        other => panic!(
+            "the front of the cavity and the tool: {:?}",
+            other.map(|r| r.is_some())
+        ),
+    }
+}
+
+#[test]
+fn a_refused_empty_cut_names_a_vertex_of_the_body_outside_the_tool() {
+    all_fixes();
+    let body = folded_cavity();
+    let (vc, vt) = (volume(&body("cavity")), volume(&body("tool")));
+    match boolean(body("cavity"), body("tool"), BooleanOp::Subtract) {
+        Err(Error::EmptyRefuted { at }) => {
+            assert_eq!(
+                body("cavity").classify_point(at).unwrap(),
+                PointClass::OnBoundary
+            );
+            assert_eq!(
+                body("tool").classify_point(at).unwrap(),
+                PointClass::Outside
+            );
+        }
+        Ok(Some(r)) => {
+            let v = volume(&r);
+            assert!(v >= vc - vt && v <= vc, "{v} of {vc} less at most {vt}");
+        }
+        other => panic!("{:?}", other.map(|r| r.is_some())),
+    }
+}
+
+#[test]
+fn truly_empty_differences_and_intersections_are_not_refuted() {
+    all_fixes();
+    let inner = || make_box([1.0, 1.0, 1.0], [1.0, 1.0, 1.0]).unwrap();
+    let outer = || make_box([0.0, 0.0, 0.0], [3.0, 3.0, 3.0]).unwrap();
+    let apart = || make_box([5.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+    assert!(boolean(inner(), outer(), BooleanOp::Subtract)
+        .unwrap()
+        .is_none());
+    assert!(boolean(inner(), apart(), BooleanOp::Intersect)
+        .unwrap()
+        .is_none());
+}
+
 /// #15247's second cut as SolidCraft passed it: a plate already cut by one half of a 0.8 mm
 /// outline wall around an arrow, less the other half, which meets the faces the first cut left.
 /// It failed in the merge. The tool lies inside the plate, so the cut removes exactly its volume.
@@ -2955,10 +3088,10 @@ fn pocketed_bin() -> Body {
 }
 
 /// The top of #18064's insert: the quadratic spline from (y, z) = (2.85, 28) through the
-/// control point (200, 7) to (249.15, 7), tangent there to the pocket's floor z = 7, as
-/// (y, height above the floor, dy/dt) at `t`.
-fn insert_top(t: f64) -> [f64; 3] {
-    let (y0, ym, y1) = (2.85, 200.0, 249.15);
+/// control point (`ym`, 7) to (249.15, 7), tangent there to the pocket's floor z = 7, as
+/// (y, height above the floor, dy/dt) at `t`. The issue's insert has `ym` = 200.
+fn insert_top(ym: f64, t: f64) -> [f64; 3] {
+    let (y0, y1) = (2.85, 249.15);
     let u = 1.0 - t;
     let y = u * u * y0 + 2.0 * t * u * ym + t * t * y1;
     let dy = 2.0 * (1.0 - t) * (ym - y0) + 2.0 * t * (y1 - ym);
@@ -2967,8 +3100,8 @@ fn insert_top(t: f64) -> [f64; 3] {
 
 /// The parameter of `insert_top` at `y`.
 #[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing it
-fn insert_top_at(y: f64) -> f64 {
-    let (y0, ym, y1) = (2.85_f64, 200.0_f64, 249.15_f64);
+fn insert_top_at(ym: f64, y: f64) -> f64 {
+    let (y0, y1) = (2.85_f64, 249.15_f64);
     let (a, b, c) = (y0 - 2.0 * ym + y1, 2.0 * (ym - y0), y0 - y);
     (-b + (b * b - 4.0 * a * c).sqrt()) / (2.0 * a)
 }
@@ -2976,9 +3109,9 @@ fn insert_top_at(y: f64) -> f64 {
 /// #18064's insert against the pocket's wall x = 2.85: a prism along y from 2.85 to 249.15
 /// whose section is the quadrilateral of the wall from z = 7 to 28, the floor out to
 /// x = 26.868841 and a side up to x = 9.247749 at z = 28, cut through along x by the region
-/// above `insert_top`. Its top meets the floor tangentially along the line y = 249.15, which
-/// touches the corner round there at its end.
-fn insert_flush_with_a_wall() -> Body {
+/// above `insert_top` with the control point at `ym`. Its top meets the floor tangentially
+/// along the line y = 249.15, which touches the corner round there at its end.
+fn insert_flush_with_a_wall(ym: f64) -> Body {
     let (f, top) = (7.0, 28.0);
     let q = [[2.85, f], [26.868841, f], [9.247749, top], [2.85, top]];
     let section: Vec<Curve> = (0..4)
@@ -3003,7 +3136,7 @@ fn insert_flush_with_a_wall() -> Body {
     let above = [
         Curve::Nurbs {
             degree: 2,
-            points: vec![[x, 2.85, top, 1.0], [x, 200.0, f, 1.0], [x, 249.15, f, 1.0]],
+            points: vec![[x, 2.85, top, 1.0], [x, ym, f, 1.0], [x, 249.15, f, 1.0]],
             knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
         },
         Curve::Line {
@@ -3050,6 +3183,21 @@ fn simpson(f: impl Fn(f64) -> f64, a: f64, b: f64, n: u32) -> f64 {
 /// inside the walls outside the two rounds, its full section there, of height the top's.
 #[test]
 fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin() {
+    insert_with_its_top_tangent_to_the_floor_joins_its_bin(200.0);
+}
+
+/// #18064's insert with its top's control point at y = 100 instead of 200: the top is ten
+/// times flatter where it meets the floor, so the curve where it crosses the corner round
+/// stays within the scaled zero of the round's floor edge for longer before the touch.
+#[test]
+fn an_insert_whose_flatter_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin() {
+    insert_with_its_top_tangent_to_the_floor_joins_its_bin(100.0);
+}
+
+/// The join of `insert_flush_with_a_wall(ym)` into `pocketed_bin`: the bin and the insert
+/// less what they share, the insert's corners inside the walls outside the two rounds, its
+/// full section there, of height the top's.
+fn insert_with_its_top_tangent_to_the_floor_joins_its_bin(ym: f64) {
     all_fixes();
     let r = 1.15_f64;
     // what the insert shares with the bin: over each corner square outside its round, the
@@ -3059,17 +3207,17 @@ fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin()
     let shared_over = |ya: f64, yb: f64, centre: f64| {
         simpson(
             |t| {
-                let [y, h, dy] = insert_top(t);
+                let [y, h, dy] = insert_top(ym, t);
                 width(y - centre) * h * dy
             },
-            insert_top_at(ya),
-            insert_top_at(yb),
+            insert_top_at(ym, ya),
+            insert_top_at(ym, yb),
             200_000,
         )
     };
     let shared = shared_over(2.85, 4.0, 4.0) + shared_over(248.0, 249.15, 248.0);
     let bin = pocketed_bin();
-    let insert = insert_flush_with_a_wall();
+    let insert = insert_flush_with_a_wall(ym);
     let want = bin.volume(1e-11).unwrap() + insert.volume(1e-11).unwrap() - shared;
     let joined = boolean(bin, insert, BooleanOp::Union).unwrap().unwrap();
     // the bin's 15 faces with the insert's top and slanted side
@@ -3091,6 +3239,32 @@ fn half_torus() -> Body {
     }];
     let torus = revolve(&profile, [0.0; 3], [0.0, 0.0, 1.0], TAU, true).unwrap();
     let below = make_box([-3.4, -3.4, -1.6], [6.8, 6.8, 1.6]).unwrap();
+    boolean(torus, below, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// A half torus of any radii. Kept for the notch case moved to its own issue (see the
+/// finding `heal-face-props-seam-review-18804.md`); no test calls it until that returns.
+#[allow(dead_code)]
+fn half_torus_of_radii(major: f64, tube: f64) -> Body {
+    torus_above(major, tube, 0.0)
+}
+
+fn torus_above(major: f64, tube: f64, bottom: f64) -> Body {
+    let profile = [Curve::Arc {
+        center: [major, 0.0, 0.0],
+        axis: [0.0, -1.0, 0.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: tube,
+        start: 0.0,
+        end: TAU,
+    }];
+    let torus = revolve(&profile, [0.0; 3], [0.0, 0.0, 1.0], TAU, true).unwrap();
+    let outside = major + tube + 1.0;
+    let below = make_box(
+        [-outside, -outside, -tube - 1.0],
+        [2.0 * outside, 2.0 * outside, tube + 1.0 + bottom],
+    )
+    .unwrap();
     boolean(torus, below, BooleanOp::Subtract).unwrap().unwrap()
 }
 
@@ -3530,4 +3704,101 @@ fn a_traced_revolved_counterbore_a_hair_off_the_holes_axis_cuts_the_part() {
         (v - want).abs() < 1e-3,
         "volume {v}, on the hole's axis {want}"
     );
+}
+
+/// #20422: two curved spline pockets meeting diagonally at the crossing (4, 5) leave a vertical
+/// self-touching pinch edge along (4, 5, 3)..(4, 5, 4) whose curve is a degree-1 `Record::Spline`.
+/// Through a record round trip, `split_touching` writes two copies of that edge; before the fix,
+/// `curve::from_parameters` marked clamped polynomial splines rational (`w = 1.0` instead of
+/// `NOW`), so `glue_self_touching_edges` and `edges_coincide` both refused them (`certified_hausdorff`
+/// rejects rational curves) and cutting the third adjacent pocket N failed in `relate`.
+///
+/// Closed-form areas (depth 1 on the [0, 10] × [0, 10] × [0, 4] box of volume 400):
+/// - L (x ∈ [3, 4], between y = 2 + 4u - u² and y = 8 - 4u + u²): ∫₀¹ (6 - 8u + 2u²) du = 8/3
+/// - M (x ∈ [4, 6], between y = 5 - 4t(1-t) and y = 5 + 4t(1-t), dx/dt = 2): 16/6 = 8/3
+/// - N (x ∈ [3, 5], up to y = 8 above L's top and M's left half-top): 5/3 + 7/3 = 4
+///
+/// Remaining volume: 400 - 28/3 = 1172/3.
+#[test]
+fn curved_pockets_touching_along_a_vertical_spline_edge_cut_after_round_trip() {
+    all_fixes();
+    let z = 3.0;
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line {
+        start: [a[0], a[1], z],
+        end: [b[0], b[1], z],
+    };
+    let quad = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| Curve::Nurbs {
+        degree: 2,
+        points: vec![
+            [a[0], a[1], z, 1.0],
+            [b[0], b[1], z, 1.0],
+            [c[0], c[1], z, 1.0],
+        ],
+        knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    };
+    let tool = |curves: &[Curve]| {
+        extrude(
+            curves,
+            [0.0, 0.0, 1.0],
+            1.0,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap()
+    };
+    let region_l = tool(&[
+        line([3.0, 8.0], [3.0, 2.0]),
+        quad([3.0, 2.0], [3.5, 4.0], [4.0, 5.0]),
+        quad([4.0, 5.0], [3.5, 6.0], [3.0, 8.0]),
+    ]);
+    let region_m = tool(&[
+        quad([4.0, 5.0], [5.0, 3.0], [6.0, 5.0]),
+        quad([6.0, 5.0], [5.0, 7.0], [4.0, 5.0]),
+    ]);
+    let region_n = tool(&[
+        quad([3.0, 8.0], [3.5, 6.0], [4.0, 5.0]),
+        quad([4.0, 5.0], [4.5, 6.0], [5.0, 6.0]),
+        line([5.0, 6.0], [5.0, 8.0]),
+        line([5.0, 8.0], [3.0, 8.0]),
+    ]);
+
+    let block = make_box([0.0, 0.0, 0.0], [10.0, 10.0, 4.0]).unwrap();
+    let after_l = round_tripped(
+        &boolean(block, region_l, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap(),
+    );
+    let after_m_raw = boolean(after_l, region_m, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    // Verify the exported record actually has the two duplicate vertical `Spline` edges at (4, 5).
+    let (rec, _) = after_m_raw.to_record().unwrap();
+    let at_pinch = |p: [f64; 3]| (p[0] - 4.0).abs() < 1e-9 && (p[1] - 5.0).abs() < 1e-9;
+    let pinch_splines = rec
+        .edges
+        .iter()
+        .filter(|e| {
+            let [a, b] = e.vertices;
+            at_pinch(rec.vertices[a as usize].point)
+                && at_pinch(rec.vertices[b as usize].point)
+                && matches!(e.curve, solidcore_record::brep::Curve::Spline { .. })
+        })
+        .count();
+    assert_eq!(
+        pinch_splines, 2,
+        "expected 2 duplicate vertical Spline pinch edges at (4, 5)"
+    );
+
+    let after_m = Body::from_record(&rec, true).unwrap().0;
+    let r = boolean(after_m, region_n, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(r.solid_count().unwrap(), 1);
+    assert!(r.is_manifold_solid().unwrap());
+    let want = 400.0 - 28.0 / 3.0;
+    let got = volume(&r);
+    assert!(near(got, want), "volume {got} vs closed form {want}");
 }

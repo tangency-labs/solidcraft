@@ -79,7 +79,7 @@
 use crate::error::heal::HealFailure;
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::global_solver::SolverOperation;
-use crate::geom::tol::{calc_face_zone_tol_3d, xsect_tol_3d_from_zones, zone_tol3d};
+use crate::geom::tol::{brep_size_zone_tol_3d, xsect_tol_3d_from_zones, zone_tol3d};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::curve_class::p1::{
     get_connected_touches, get_winding_count, CrvDirOnFaceType, CurveClassification, TouchData,
@@ -1862,7 +1862,9 @@ impl<O: LoopObject> FaceProps<O> {
         }
 
         // CalcZone is the desired tolerance for an object with the current gaps
-        let calc_zone_tol_3d = calc_face_zone_tol_3d(k, Some(&k.context));
+        // (upstream asks the B-rep's context, there this model's: the zone tolerance
+        // of this B-rep's own model size estimate)
+        let calc_zone_tol_3d = brep_size_zone_tol_3d(k, b);
 
         // ZoneTol3d for current Gap3d sizes
         self.bad_small_zone_tol_3d = Tri::from(self.zone_tol_3d <= calc_zone_tol_3d - EFF_ZERO);

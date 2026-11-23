@@ -54,7 +54,7 @@ mod inline_params;
 pub use format_offsets::whole_profile_selection_from_value;
 pub use inline_params::Defined;
 pub mod joints;
-mod json_layout;
+pub mod json_layout;
 mod lineage;
 pub mod metadata;
 pub use metadata::Metadata;
@@ -115,6 +115,7 @@ pub use sheet_surface_convert::{
     measure_sheet_body,
 };
 pub use sheet_surface_cuts::{Loose, Recess};
+pub use sheet_surface_features::OUTSIDE_BEND_OPEN;
 pub mod text_params;
 pub mod thread_forms;
 pub mod tolerance;
@@ -130,10 +131,10 @@ pub use eval::{
     EdgeRef, ExtrudeEnds, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PendingChecks, PlacedBodies, PreparedMeshImport, RevolveExtent,
     SavedModel, SolvedSketch, ThreadInfo, blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names,
     face_point_state, from_slope_height, hole_direction_at, hole_on_surface, hole_start, import_body_names, join_pieces_added,
-    keep_one_sided_direction, map_wire, metric_thread_sizes, object_height, parse_metric_thread, pattern_matrices, revolve_extent,
-    revolve_extent_for_handle, revolve_extent_with_convention, same_extrude_from_face, select_profiles, sketch_hole_direction, sketch_line_plane,
-    state_in_frame, state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance, to_end_is_flat,
-    with_placed_copies, world_state, world_state_reusing,
+    keep_one_sided_direction, map_wire, metric_thread_sizes, object_height, parse_metric_thread, pattern_matrices, reconcile_component_patterns,
+    revolve_extent, revolve_extent_for_handle, revolve_extent_with_convention, same_extrude_from_face, select_profiles, sketch_hole_direction,
+    sketch_line_plane, state_in_frame, state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance,
+    to_end_is_flat, with_placed_copies, world_body_paths, world_state, world_state_moved_reusing, world_state_reusing,
 };
 pub use eval::{EvalCache, KeptResults};
 pub use expr::Expr;
