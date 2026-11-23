@@ -6935,7 +6935,19 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::OffsetFaces { .. } => {
             need(0, "faces")?;
-            ("solid.offset_face", with_single_body(json!({"faces": face_points(0)}), sels(d, 0)))
+            // A curved face's viewport hit lies on a display triangle. Keep the selected
+            // topology identity instead of asking that approximate point to pick a face again.
+            let state = crate::open_meshing::session_world(s);
+            let faces: Option<Vec<String>> = sels(d, 0)
+                .iter()
+                .map(|sel| {
+                    let Sel::Face { body, index, .. } = sel else { return None };
+                    let body = state.body(body)?;
+                    solidcraft_engine::doc::naming::face_names(body).get(*index).filter(|name| !name.is_empty()).cloned()
+                })
+                .collect();
+            let faces = faces.ok_or("select faces first")?;
+            ("solid.offset_face", with_single_body(json!({"faces": faces}), sels(d, 0)))
         }
         Kind::Thread { designation, length, suggested, options, .. } => {
             need(0, "a cylindrical face")?;
