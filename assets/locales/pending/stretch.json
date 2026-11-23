@@ -9,7 +9,8 @@
     "Z direction": "Z direction",
     "X cut at": "X cut at",
     "Y cut at": "Y cut at",
-    "Z cut at": "Z cut at"
+    "Z cut at": "Z cut at",
+    "Edit sketch": "Edit sketch"
   },
   "ja": {
     "cmd.solid_stretch": "ストレッチ",
@@ -21,7 +22,8 @@
     "Z direction": "Z 方向",
     "X cut at": "X 切断位置",
     "Y cut at": "Y 切断位置",
-    "Z cut at": "Z 切断位置"
+    "Z cut at": "Z 切断位置",
+    "Edit sketch": "スケッチを編集"
   },
   "de": {
     "cmd.solid_stretch": "Strecken",
@@ -32,7 +34,8 @@
     "Z direction": "Z-Richtung",
     "X cut at": "X-Schnitt bei",
     "Y cut at": "Y-Schnitt bei",
-    "Z cut at": "Z-Schnitt bei"
+    "Z cut at": "Z-Schnitt bei",
+    "Edit sketch": "Skizze bearbeiten"
   },
   "fr": {
     "cmd.solid_stretch": "Étirer",
@@ -43,7 +46,8 @@
     "Z direction": "Direction Z",
     "X cut at": "Coupe X à",
     "Y cut at": "Coupe Y à",
-    "Z cut at": "Coupe Z à"
+    "Z cut at": "Coupe Z à",
+    "Edit sketch": "Modifier l'esquisse"
   },
   "es": {
     "cmd.solid_stretch": "Estirar",
@@ -54,7 +58,8 @@
     "Z direction": "Dirección Z",
     "X cut at": "Corte X a",
     "Y cut at": "Corte Y a",
-    "Z cut at": "Corte Z a"
+    "Z cut at": "Corte Z a",
+    "Edit sketch": "Editar boceto"
   },
   "zh": {
     "cmd.solid_stretch": "伸长",
@@ -66,6 +71,7 @@
     "Z direction": "Z 方向",
     "X cut at": "X 切割位置",
     "Y cut at": "Y 切割位置",
-    "Z cut at": "Z 切割位置"
+    "Z cut at": "Z 切割位置",
+    "Edit sketch": "编辑草图"
   }
 }

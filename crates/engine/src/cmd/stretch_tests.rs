@@ -126,3 +126,62 @@ fn one_step_stretches_along_two_axes_and_refuses_two_along_one() {
         assert_eq!(s.doc.to_json(), before, "{p}");
     }
 }
+
+/// A 100 x 60 rectangle on XY with its left side fixed, its bottom dimensioned 100 and its
+/// right side 60, extruded 10 into `Plate`.
+fn plate() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Plate"}));
+    let sides = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}))["sides"].clone();
+    run(&mut s, "sketch.dimension", json!({"entities": [sides["bottom"]], "value": 100}));
+    run(&mut s, "sketch.dimension", json!({"entities": [sides["right"]], "value": 60}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": sides["left"], "fixed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Plate", "distance": 10, "body_name": "Plate"}));
+    s
+}
+
+fn plate_box(s: &Session) -> (Vec3, Vec3) {
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let m = solidcraft_kernel::measure(&s.model.state().body("Plate").unwrap().body).unwrap();
+    (m.bbox.min, m.bbox.max)
+}
+
+fn stretch_steps(s: &Session) -> usize {
+    s.doc.features.iter().filter(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Stretch { .. })).count()
+}
+
+#[test]
+fn edit_sketch_grows_the_dimension_across_the_cut_and_the_extrude_depth() {
+    let mut s = plate();
+    // Along X, in the sketch's plane: the 100 mm bottom spans the cut at x = 50 and becomes 115.
+    let v = run(&mut s, "solid.stretch", json!({"body": "Plate", "direction": "+x", "at": 50, "distance": 15, "edit_sketch": true}));
+    assert_eq!(v["made_by"], json!("sketch"), "{v}");
+    assert_eq!(stretch_steps(&s), 0, "no Stretch step: the sketch changed");
+    let (min, max) = plate_box(&s);
+    assert!(min.dist(Vec3::ZERO) < 1e-6 && max.dist(Vec3::new(115.0, 60.0, 10.0)) < 1e-6, "{min:?} {max:?}");
+    // Along Z, the Extrude's direction: its depth grows from 10 to 15.
+    let v = run(&mut s, "solid.stretch", json!({"body": "Plate", "direction": "+z", "at": 5, "distance": 5, "edit_sketch": true}));
+    assert_eq!(v["made_by"], json!("sketch"), "{v}");
+    assert!((plate_box(&s).1.z - 15.0).abs() < 1e-6);
+    assert_eq!(stretch_steps(&s), 0);
+    // Undo takes each change back whole.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(plate_box(&s).1.dist(Vec3::new(100.0, 60.0, 10.0)) < 1e-6);
+}
+
+#[test]
+fn edit_sketch_falls_back_to_a_stretch_step_and_says_why() {
+    // A box has no sketch: a Stretch step, and why the sketch was not changed.
+    let mut s = block();
+    let v = run(&mut s, "solid.stretch", json!({"body": "Block", "direction": "+x", "distance": 15, "edit_sketch": true}));
+    assert_eq!(v["made_by"], json!("step"), "{v}");
+    assert!(v["sketch_not_edited"].as_str().is_some_and(|w| w.contains("Extrude")), "{v}");
+    assert!((size(&s).1.x - 55.0).abs() < 1e-6);
+    // A plate shrunk from its fixed side: the sketch's side would move, so a Stretch step too.
+    let mut s = plate();
+    let v = run(&mut s, "solid.stretch", json!({"body": "Plate", "direction": "-z", "at": 5, "distance": 2, "edit_sketch": true}));
+    assert_eq!(v["made_by"], json!("step"), "{v}");
+    assert_eq!(stretch_steps(&s), 1);
+}

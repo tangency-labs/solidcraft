@@ -197,6 +197,7 @@ mod sketch_rational;
 pub mod sketch_selection;
 mod sketch_store;
 mod stretch;
+mod stretch_sketch;
 mod surface;
 mod surface_analysis;
 mod surface_boundary;

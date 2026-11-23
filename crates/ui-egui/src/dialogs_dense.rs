@@ -1144,6 +1144,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 enter |= hint_row(ui, distance, length, "none");
                 enter |= hint_row(ui, cut, at, "auto");
             }
+            extra_options(ui, "stretch_options", &mut d.extra, &[("Edit sketch", "edit_sketch")]);
         }
         Kind::OffsetFaces { distance } => {
             enter |= expr_row(ui, "Distance", distance);

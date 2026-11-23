@@ -2,7 +2,7 @@
 //! [`super::features::FeatureResult`].
 
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::types::{LengthExpr, Point3, StringList};
 
@@ -39,6 +39,10 @@ pub struct StretchParams {
     /// without `stretches`.
     #[serde(default)]
     pub distance: Option<LengthExpr>,
+    /// Change the sketch and Extrude that made the body instead of adding a Stretch step, when
+    /// they give the same part. Default: false.
+    #[serde(default)]
+    pub edit_sketch: Option<bool>,
     /// The feature's name in the timeline.
     #[serde(default)]
     pub name: Option<String>,
@@ -63,4 +67,28 @@ pub struct AxisStretchParams {
     pub at: Option<LengthExpr>,
     /// How far the moving side goes: a stretch when positive, a shrink when negative.
     pub distance: LengthExpr,
+}
+
+/// What `solid.stretch` returns: the feature reply, how the stretch was made and, when the sketch
+/// was asked for and not changed, why.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct StretchResult {
+    #[serde(flatten)]
+    pub feature: super::features::FeatureResult,
+    /// `step`: a Stretch step was added; `sketch`: the sketch and Extrude that made the body
+    /// were changed (then `feature` is that Extrude).
+    pub made_by: String,
+    /// The parameters changed, when the sketch was: each `{parameter, expression}`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed: Vec<ChangedParameter>,
+    /// Why the sketch was not changed, when `edit_sketch` asked for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sketch_not_edited: Option<String>,
+}
+
+/// A parameter Stretch changed, with its new expression.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ChangedParameter {
+    pub parameter: String,
+    pub expression: String,
 }

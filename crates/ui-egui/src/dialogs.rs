@@ -1074,6 +1074,13 @@ impl Dialog {
             ),
             "solid.fillet" => Dialog::new(fillet_kind(&fillet_radius_default(app), false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "solid.chamfer" => Dialog::new(fillet_kind(&length_default(s, "1"), true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
+            // Stretch changes the sketch that made the body when it can (#20512).
+            "solid.stretch" => {
+                let (kind, inputs) = Kind::simple_start(id)?;
+                let mut d = Dialog::new(crate::length_input::defaults(&s.doc, kind), inputs);
+                d.extra.insert("edit_sketch".into(), json!(true));
+                d
+            }
             "solid.shell" => {
                 let (kind, inputs) = Kind::simple_start(id)?;
                 let mut d = Dialog::new(crate::length_input::defaults(&s.doc, kind), inputs);
@@ -6221,6 +6228,10 @@ fn exact_regions(d: &Dialog, cmds: &mut [(String, Value)]) {
 fn stretch_parameter(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) -> Vec<(String, Value)> {
     let doc = &app.session.doc;
     let Some((_, params)) = cmds.iter_mut().find(|(cmd, _)| cmd == "solid.stretch") else { return Vec::new() };
+    // Changing the sketch keeps the sizes in the sketch's own dimensions.
+    if params.get("edit_sketch").and_then(Value::as_bool) == Some(true) {
+        return Vec::new();
+    }
     let saved: Vec<solidcraft_engine::doc::AxisStretch> = d
         .editing
         .and_then(|(id, _)| match &doc.feature(id)?.kind {
@@ -9214,6 +9225,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = vec![Sel::Body { name: body.to_string() }];
             }
+            // A Stretch step reopens as a step: there is no sketch change to make of it.
+            d.extra.insert("edit_sketch".into(), json!(false));
             let faces: Vec<_> = stretches.iter().filter_map(|s| s.from).collect();
             if let Some(inp) = d.inputs.get_mut(1) {
                 inp.items = body_face_sels(s, Some(body.0.as_str()), &faces);
