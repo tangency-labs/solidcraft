@@ -540,6 +540,8 @@ pub enum LinkInfo {
         found: Option<bool>,
         /// Whether the file is no longer what this design last read (`component.update_links`
         /// reads it again); null when it is not found or the link is older than this record.
+        /// True also for a link that has no bodies yet: the design was saved without them and
+        /// has not read the file since it opened.
         changed: Option<bool>,
         /// Why the file can't be reached: `missing`, `unreadable` or `not_allowed`. Left out
         /// when it can be read.

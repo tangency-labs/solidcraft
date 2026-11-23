@@ -1434,3 +1434,237 @@ fn insert_design_accepts_matrix_and_rotation_placement() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// An assembly of its own 10 x 10 x 10 box and the linked design `part` (a 10 x 20 box), saved
+/// as `assembly` in `dir` without the bodies of linked designs.
+fn saved_without_linked_bodies(dir: &Path, part: &Path, assembly: &str) -> (Session, PathBuf) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100,0,0]}));
+    run(&mut s, "component.insert_design", json!({"path": part}));
+    let file = dir.join(assembly);
+    let saved = run(&mut s, "file.save", json!({"path": file, "linked_bodies": false}));
+    assert!(saved.get("warnings").is_none(), "leaving the linked bodies out is the request, not a warning: {saved}");
+    (s, file)
+}
+
+/// The STEP text or records each link's Import feature holds in the design file at `file`.
+fn linked_payloads(file: &Path) -> Vec<bool> {
+    let doc = solidcraft_io::read_design(&std::fs::read(file).unwrap()).unwrap();
+    assert!(!doc.links.is_empty());
+    doc.links
+        .values()
+        .map(|link| match &doc.feature(link.feature).unwrap().kind {
+            solidcraft_doc::FeatureKind::Import { step, records, .. } => !step.is_empty() || records.is_some(),
+            _ => panic!("a link's feature is an Import"),
+        })
+        .collect()
+}
+
+/// `file.save`'s `linked_bodies: false` (#8170): the file keeps each link without its bodies,
+/// opening it reads them from the linked design again, and the design keeps the choice.
+#[test]
+fn a_design_saved_without_linked_bodies_reads_them_from_the_linked_files_when_it_opens() {
+    let dir = folder("left-out");
+    for (part_name, assembly) in [("part.json", "assembly.json"), ("part.sc", "assembly.sc")] {
+        let source = dir.join(part_name);
+        part(&source, 30);
+        let mut whole = Session::default();
+        run(&mut whole, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100,0,0]}));
+        run(&mut whole, "component.insert_design", json!({"path": source}));
+        let whole_file = dir.join(format!("whole-{assembly}"));
+        run(&mut whole, "file.save", json!({"path": whole_file}));
+        assert_eq!(linked_payloads(&whole_file), [true], "a save keeps the linked bodies unless asked not to");
+
+        let (mut s, file) = saved_without_linked_bodies(&dir, &source, assembly);
+        assert_eq!(linked_payloads(&file), [false]);
+        let lean = std::fs::read(&file).unwrap();
+        assert!(lean.len() < std::fs::read(&whole_file).unwrap().len());
+        // The session keeps its bodies: 10 x 10 x 10 and 10 x 20 x 30.
+        assert!((volume(&mut s) - 7000.0).abs() < 1e-5);
+        assert!(!s.is_dirty());
+
+        let mut opened = Session::default();
+        let reply = run(&mut opened, "doc.open", json!({"path": file}));
+        assert_eq!(reply["errors"], 0);
+        assert!(reply.get("warnings").is_none(), "{reply}");
+        assert!((volume(&mut opened) - 7000.0).abs() < 1e-5);
+        assert!(!opened.is_dirty(), "reading the bodies back is no change to the design");
+        assert!(!opened.linked_bodies, "the design keeps the choice its file was saved with");
+        assert!(!opened.doc.linked_bodies_left_out, "only the file carries the mark");
+        // A later save needs no option, and a plain JSON file is the same bytes again.
+        run(&mut opened, "file.save", json!({}));
+        assert_eq!(linked_payloads(&file), [false]);
+        if assembly.ends_with(".json") {
+            assert_eq!(std::fs::read(&file).unwrap(), lean);
+        }
+        // Save As keeps the choice too; `linked_bodies: true` puts the bodies back in the file.
+        let copy = dir.join(format!("copy-{assembly}"));
+        run(&mut opened, "file.save_as", json!({"path": copy}));
+        assert_eq!(linked_payloads(&copy), [false]);
+        run(&mut opened, "file.save", json!({"linked_bodies": true}));
+        assert_eq!(linked_payloads(&copy), [true]);
+        assert!(opened.linked_bodies);
+        let again = Session::opened_at(solidcraft_io::read_design(&std::fs::read(&copy).unwrap()).unwrap(), None, copy.to_str());
+        assert!(again.linked_bodies);
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A linked design that changed, or is gone, when a design saved without its bodies opens.
+#[test]
+fn a_design_saved_without_linked_bodies_says_which_linked_files_changed_or_are_missing() {
+    let dir = folder("left-out-sources");
+    let source = dir.join("part.json");
+    part(&source, 30);
+    let (_, file) = saved_without_linked_bodies(&dir, &source, "assembly.json");
+
+    // Changed while the design was closed: the bodies are the file's new ones.
+    part(&source, 45);
+    let mut opened = Session::default();
+    let reply = run(&mut opened, "doc.open", json!({"path": file}));
+    assert_eq!(reply["errors"], 0);
+    let warnings = reply["warnings"].as_array().unwrap();
+    assert!(warnings.iter().any(|w| w.as_str().unwrap().contains("changed since this design was saved")), "{reply}");
+    assert!((volume(&mut opened) - 10_000.0).abs() < 1e-5);
+    let listed = run(&mut opened, "component.links", json!({}));
+    assert_eq!(listed["links"][0]["changed"], true, "Update Links still has the changed file to take in: {listed}");
+    // Until then the link is not what its file gave it: a save keeps its bodies and says so.
+    let saved = run(&mut opened, "file.save", json!({}));
+    assert!(saved["warnings"][0].as_str().unwrap().contains("changed since this design read it"), "{saved}");
+    assert_eq!(linked_payloads(&file), [true]);
+    run(&mut opened, "component.update_links", json!({}));
+    assert_eq!(run(&mut opened, "component.links", json!({}))["links"][0]["changed"], false);
+    assert!(run(&mut opened, "file.save", json!({})).get("warnings").is_none());
+    assert_eq!(linked_payloads(&file), [false]);
+
+    // Gone: the design opens, the link's feature says why it has no bodies, and a save keeps
+    // the link as it is.
+    std::fs::remove_file(&source).unwrap();
+    let mut opened = Session::default();
+    let reply = run(&mut opened, "doc.open", json!({"path": file}));
+    assert_eq!(reply["errors"], 1);
+    assert!(reply["warnings"][0].as_str().unwrap().contains("has no bodies"), "{reply}");
+    let error = opened.model.results.iter().find_map(|r| r.error.clone()).unwrap();
+    assert!(error.contains("saved without them") && error.contains("Update Links reads them"), "{error}");
+    assert!((volume(&mut opened) - 1000.0).abs() < 1e-5);
+    run(&mut opened, "file.save", json!({}));
+    assert_eq!(linked_payloads(&file), [false]);
+    // The file is back: Update Links reads it.
+    part(&source, 30);
+    run(&mut opened, "component.update_links", json!({}));
+    assert!((volume(&mut opened) - 7000.0).abs() < 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// `doc.open`'s `linked_bodies: "folder"`: a link to a file outside the design's own folder is
+/// not read as the design opens. It has no bodies, is listed as not read, and Update Links
+/// reads it; a link inside the folder is read as ever.
+#[test]
+fn a_design_saved_without_linked_bodies_can_open_reading_only_its_own_folder() {
+    let dir = folder("left-out-folder");
+    let (inside, outside) = (dir.join("project").join("parts"), dir.join("elsewhere"));
+    std::fs::create_dir_all(&inside).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let (near, far) = (inside.join("near.json"), outside.join("far.json"));
+    part(&near, 30);
+    part(&far, 45);
+    let mut s = Session::default();
+    run(&mut s, "component.insert_design", json!({"path": near}));
+    let far_component = run(&mut s, "component.insert_design", json!({"path": far, "translate": [50,0,0]}))["component"].as_u64().unwrap();
+    let file = dir.join("project").join("assembly.json");
+    run(&mut s, "file.save", json!({"path": file, "linked_bodies": false}));
+    assert_eq!(linked_payloads(&file), [false, false]);
+
+    let mut opened = Session::default();
+    let reply = run(&mut opened, "doc.open", json!({"path": file, "linked_bodies": "folder"}));
+    assert_eq!(reply["errors"], 1);
+    assert!(reply["warnings"][0].as_str().unwrap().contains("in another folder"), "{reply}");
+    // Only the 10 x 20 x 30 part beside the design.
+    assert!((volume(&mut opened) - 6000.0).abs() < 1e-5);
+    let listed = run(&mut opened, "component.links", json!({}));
+    let changed: Vec<bool> = listed["links"].as_array().unwrap().iter().map(|l| l["changed"] == true).collect();
+    assert_eq!(changed, [false, true], "the link not read is the one Update Links has to read: {listed}");
+    run(&mut opened, "component.update_links", json!({"component": far_component}));
+    assert!((volume(&mut opened) - 15_000.0).abs() < 1e-5);
+
+    // Without the option every link is read.
+    let mut all = Session::default();
+    assert_eq!(run(&mut all, "doc.open", json!({"path": file}))["errors"], 0);
+    assert!((volume(&mut all) - 15_000.0).abs() < 1e-5);
+    assert!(all.execute("doc.open", &json!({"path": file, "linked_bodies": "some"})).is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A plain JSON part keeps no model of its own, so the first open of a design saved without
+/// linked bodies evaluates it and keeps that evaluation in the local store of reused imports;
+/// the next open takes it from there, until the part's file changes.
+#[test]
+fn a_design_saved_without_linked_bodies_evaluates_an_unchanged_part_once() {
+    let dir = folder("left-out-reuse");
+    let source = dir.join("part.json");
+    part(&source, 30);
+    let (_, file) = saved_without_linked_bodies(&dir, &source, "assembly.json");
+    let reused = || super::REUSED.with(|n| n.replace(0));
+    reused();
+    let mut first = Session::default();
+    run(&mut first, "doc.open", json!({"path": file}));
+    assert_eq!(reused(), 0, "nothing is kept of a part before it is first read");
+    let mut second = Session::default();
+    assert_eq!(run(&mut second, "doc.open", json!({"path": file}))["errors"], 0);
+    assert_eq!(reused(), 1);
+    assert!((volume(&mut second) - 7000.0).abs() < 1e-5);
+    // Other bytes are another design: evaluated, and then kept in their turn.
+    part(&source, 45);
+    let mut changed = Session::default();
+    run(&mut changed, "doc.open", json!({"path": file}));
+    assert_eq!(reused(), 0);
+    assert!((volume(&mut changed) - 10_000.0).abs() < 1e-5);
+    let mut again = Session::default();
+    run(&mut again, "doc.open", json!({"path": file}));
+    assert_eq!(reused(), 1);
+    assert!((volume(&mut again) - 10_000.0).abs() < 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Bodies that may be the only copy are never left out: a link whose file cannot be read when
+/// the design is saved keeps them, and the save says so.
+#[test]
+fn a_save_without_linked_bodies_keeps_the_bodies_of_a_link_whose_file_is_gone() {
+    let dir = folder("left-out-unreachable");
+    let source = dir.join("part.json");
+    part(&source, 30);
+    let mut s = Session::default();
+    run(&mut s, "component.insert_design", json!({"path": source}));
+    std::fs::remove_file(&source).unwrap();
+    let file = dir.join("assembly.json");
+    let saved = run(&mut s, "file.save", json!({"path": file, "linked_bodies": false}));
+    assert!(saved["warnings"][0].as_str().unwrap().contains("keeps its bodies in the file"), "{saved}");
+    assert_eq!(linked_payloads(&file), [true]);
+    let mut opened = Session::default();
+    assert_eq!(run(&mut opened, "doc.open", json!({"path": file}))["errors"], 0);
+    assert!((volume(&mut opened) - 6000.0).abs() < 1e-5);
+    assert!(!opened.linked_bodies);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Two designs saved without linked bodies that link each other: opening one ends, with the
+/// link that returns to it reported, instead of reading the pair for ever.
+#[test]
+fn designs_saved_without_linked_bodies_that_link_each_other_open_with_the_loop_reported() {
+    let dir = folder("left-out-loop");
+    let (a, b) = (dir.join("a.json"), dir.join("b.json"));
+    part(&a, 30);
+    let mut second = Session::default();
+    run(&mut second, "component.insert_design", json!({"path": a}));
+    run(&mut second, "file.save", json!({"path": b, "linked_bodies": false}));
+    let mut first = Session::default();
+    run(&mut first, "doc.open", json!({"path": a}));
+    run(&mut first, "component.insert_design", json!({"path": b}));
+    run(&mut first, "file.save", json!({"linked_bodies": false}));
+    let mut opened = Session::default();
+    let reply = run(&mut opened, "doc.open", json!({"path": a}));
+    assert!(reply["warnings"].as_array().is_some_and(|w| !w.is_empty()), "{reply}");
+    // Its own 10 x 20 x 30 box is there whatever became of the link.
+    assert!(volume(&mut opened) >= 6000.0 - 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
+}

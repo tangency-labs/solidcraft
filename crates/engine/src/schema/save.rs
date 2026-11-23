@@ -67,6 +67,13 @@ pub struct SaveParams {
     /// true. Plain json has no room for it.
     #[serde(default)]
     pub cache: Option<bool>,
+    /// Keep the bodies of linked designs (Insert Design) in the file. false: the file keeps each
+    /// link without its bodies, and opening the design reads them from the linked design files
+    /// again; a container then has no saved model either. A link whose file cannot be read now
+    /// keeps its bodies, and the reply's warnings name it. Default: as the design was last saved
+    /// or opened; true for a new design.
+    #[serde(default)]
+    pub linked_bodies: Option<bool>,
     /// Keep the display meshes in the file. Default: false.
     #[serde(default)]
     pub preview: Option<bool>,
@@ -111,6 +118,13 @@ pub struct SaveAsParams {
     /// true. Plain json has no room for it.
     #[serde(default)]
     pub cache: Option<bool>,
+    /// Keep the bodies of linked designs (Insert Design) in the file. false: the file keeps each
+    /// link without its bodies, and opening the design reads them from the linked design files
+    /// again; a container then has no saved model either. A link whose file cannot be read now
+    /// keeps its bodies, and the reply's warnings name it. Default: as the design was last saved
+    /// or opened; true for a new design.
+    #[serde(default)]
+    pub linked_bodies: Option<bool>,
     /// Keep the display meshes in the file. Default: false.
     #[serde(default)]
     pub preview: Option<bool>,

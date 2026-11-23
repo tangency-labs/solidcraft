@@ -515,11 +515,30 @@ that cannot be read keeps its bodies, is tried again the next time, and holds up
 **Update changed linked designs when a tab comes back** (Preferences, Design,
 `update_changed_links`) turns this off.
 
+An assembly can be saved without the bodies of its linked parts:
+`file.save {linked_bodies: false}` (or `file.save_as`). The file then keeps each link, with its
+placements, joints and face names, and no copy of the part's bodies, so it stays small and a
+change to a part does not rewrite the assembly's file. This suits designs kept in git as `.json`.
+Opening such an assembly reads the bodies from the part files again, so the part files have to
+be there: a part that cannot be read has no bodies, its feature says so, and **Update Links**
+reads it once the file is back. The assembly keeps the choice: later saves, **Save As** included,
+leave the bodies out until a save with `linked_bodies: true` puts them back. A link whose part
+file cannot be read when the assembly is saved keeps its bodies in the file, and the save says
+which. A `.sc` assembly saved this way has no saved model, so it is evaluated when it opens. A
+part that is a plain `.json` design is evaluated the first time it is read this way, and that
+evaluation is kept on this computer with the reused imports (**Clear Reused Imports** removes
+them), so later opens read an unchanged part without building it again. The
+mesh bodies of a linked part stay in the assembly's file. There is no button for this yet: run
+the command from a script, the command line or an agent.
+
 Linked files from other folders load after you allow them. When an assembly opens, the parts in
 its own folder, or below it, are read again by themselves as above. If a changed part is in
 another folder, SolidCraft asks once, naming the folders: **Load** reads those parts now and
 remembers the folders, so designs that link files from them load them as they open from then
 on; **Not now** leaves them out of date, and **Update Links** reads them whenever you choose.
+An assembly saved without the bodies of its linked parts follows the same rule: parts in another
+folder have no bodies until you answer **Load**. A script or agent that opens it with `doc.open`
+reads every linked part it may read; `linked_bodies: "folder"` keeps to the assembly's own folder.
 The folders you allowed are kept in your own settings, never in a design, and are listed under
 Preferences › General › Files, where you can remove one or forget them all.
 A design opened by a program (the command line, an MCP client, the control channel or the

@@ -75,6 +75,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "color?: \"#rrggbb\" or [r, g, b] (board substrate colour); ",
             "representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); ",
             "read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); ",
+            "linked_bodies?: all|folder (a design saved without the bodies of its linked designs, file.save's `linked_bodies: false`: which linked design files are read for them as it opens; default all; folder: only files in the design's own folder or below it, and the other links have no bodies until component.update_links reads them; warnings name each link not read); ",
             "verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); ",
             "newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving",
         )),
@@ -120,6 +121,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "format?: container|json (default: json for .json, otherwise container); ",
             "compression?: fast|compact (default: fast); ",
             "cache?: bool (the evaluated model, so the design opens without rebuilding; default: true; left out, without waiting, while an imported file's check of its parts still runs); ",
+            "linked_bodies?: bool (the bodies of linked designs; false: the file keeps each link without its bodies, opening the design reads them from the linked design files again, and a container has no saved model; a link whose file cannot be read now keeps its bodies and is named in warnings; default: as the design was last saved or opened, true for a new design); ",
             "preview?: bool (saved display meshes, default: false); ",
             "overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused); ",
             "sign?: bool (the app's own Save only: sign the save with GnuPG, appending a provenance record; container only; a script or agent is refused); ",
@@ -136,6 +138,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "format?: container|json (default: json for .json, otherwise container); ",
             "compression?: fast|compact (default: fast); ",
             "cache?: bool (the evaluated model, so the design opens without rebuilding; default: true; left out, without waiting, while an imported file's check of its parts still runs); ",
+            "linked_bodies?: bool (the bodies of linked designs; false: the file keeps each link without its bodies, opening the design reads them from the linked design files again, and a container has no saved model; a link whose file cannot be read now keeps its bodies and is named in warnings; default: as the design was last saved or opened, true for a new design); ",
             "preview?: bool (saved display meshes, default: false); ",
             "overwrite?: bool (as file.save, when `path` is the design's own file); ",
             "sign?: bool and signing_key? (as file.save, and likewise only from the app's own Save)",
@@ -316,7 +319,7 @@ pub fn use_import_cache_dir(dir: std::path::PathBuf) {
     let _ = IMPORT_CACHE_DIR.set(dir);
 }
 
-fn import_cache() -> Option<solidcraft_io::ImportCache> {
+pub(super) fn import_cache() -> Option<solidcraft_io::ImportCache> {
     if cfg!(target_arch = "wasm32") {
         return None;
     }
@@ -755,7 +758,7 @@ fn open_step(
 /// Cache an opened import. While SMLib's check of its parts runs on (after the design shows),
 /// the write waits for it on a thread of its own, so the cached import says what the check found
 /// ([`solidcraft_io::ImportCache::write_after`]).
-fn write_import_cache(
+pub(super) fn write_import_cache(
     cache: &solidcraft_io::ImportCache,
     key: String,
     doc: &Document,
@@ -1691,8 +1694,10 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let file = read_design(s, path, verify)?;
     let mut doc = file.doc;
     super::component_link::resolve_design_links(&mut doc, Some(path));
+    let which = super::component_link::LinkedRead::read(p)?;
+    let linked = super::component_link::read_left_out_bodies(&mut doc, Some(path), s.validation(), which);
     let opened = Session::opened_validating(doc, file.model.as_ref(), s.validation()).located_with(Some(path), file.chain.clone());
-    opened_design(s, opened, path, read_only, disk, verify.then_some(file.report), file.chain)
+    opened_design(s, opened, path, read_only, disk, verify.then_some(file.report), file.chain, linked)
 }
 
 /// Whether running `command` with `params` runs an installed importer plugin's code:
@@ -1770,6 +1775,7 @@ fn opened_design(
     disk: Option<solidcraft_io::design_lock::FileStamp>,
     checked: Option<Option<solidcraft_io::ProvenanceReport>>,
     chain: Option<solidcraft_io::ProvenanceChain>,
+    linked: Vec<String>,
 ) -> Result<Value> {
     s.replace_design(opened);
     s.disk = disk;
@@ -1807,10 +1813,21 @@ fn opened_design(
             not_understood: file.not_understood.clone(),
             notice: file.notice(),
         }),
-        warnings: s.doc.newer_file.as_ref().map(|file| file.warnings()),
+        warnings: opened_warnings(s.doc.newer_file.as_ref().map(|file| file.warnings()), linked),
         signature: s.provenance.as_ref().map(signature_report),
         param_warnings: Vec::new(),
     }))
+}
+
+/// `doc.open`'s warnings: a newer file's, then what reading the bodies of linked designs
+/// said (`linked`, of a design saved without them).
+fn opened_warnings(newer: Option<Vec<String>>, linked: Vec<String>) -> Option<Vec<String>> {
+    if linked.is_empty() {
+        return newer;
+    }
+    let mut warnings = newer.unwrap_or_default();
+    warnings.extend(linked);
+    Some(warnings)
 }
 
 /// `doc.open`'s reply, as JSON.
@@ -1992,6 +2009,7 @@ fn write(
     compression: &str,
     preview: bool,
     cache: bool,
+    linked_bodies: Option<bool>,
     overwrite: bool,
     sign: bool,
     signing_key: Option<&str>,
@@ -2025,7 +2043,13 @@ fn write(
     if let Some((from, to)) = &renamed {
         rename_design(s, from, to);
     }
+    // The design keeps the choice for its later saves; a save that fails leaves it as it was.
+    let kept = s.linked_bodies;
+    s.linked_bodies = linked_bodies.unwrap_or(kept);
     let r = write_file(s, path, format, compression, preview, cache, sign, signing_key);
+    if r.is_err() {
+        s.linked_bodies = kept;
+    }
     if r.is_err()
         && let Some((from, to)) = &renamed
     {
@@ -2128,7 +2152,7 @@ fn write_bytes(
         // as covering an earlier version instead of the chain being destroyed.
         if format != "container" {
             match format {
-                "json" => solidcraft_io::write_design(&s.design_at(Some(path))).map_err(|e| EngineError::Other(format!("{path}: {e}")))?,
+                "json" => solidcraft_io::write_design(&s.design_saved(Some(path))).map_err(|e| EngineError::Other(format!("{path}: {e}")))?,
                 _ => return Err(bad("file.save", "format must be container or json")),
             }
         } else {
@@ -2138,12 +2162,17 @@ fn write_bytes(
         }
     } else {
         match format {
-            "container" => s.design_container_at(Some(path), compression, preview, cache)?,
-            "json" => solidcraft_io::write_design(&s.design_at(Some(path))).map_err(|e| EngineError::Other(format!("{path}: {e}")))?,
+            "container" => s.container_bytes(Some(path), compression, preview, cache, None, true)?,
+            "json" => solidcraft_io::write_design(&s.design_saved(Some(path))).map_err(|e| EngineError::Other(format!("{path}: {e}")))?,
             _ => return Err(bad("file.save", "format must be container or json")),
         }
     };
+    // Left out with the linked bodies ([`Session::container_bytes`]): not a cache that went missing.
+    let cache = cache && (s.linked_bodies || s.doc.links.is_empty());
     let cache_not_saved = missing_save_cache(s, format, cache, checking, &bytes);
+    if !s.linked_bodies {
+        notes.extend(super::component_link::kept_linked_bodies(s));
+    }
     // Cancelled while the design was being prepared (a watched save): nothing is written.
     if solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
         return Err(EngineError::Other(format!("{path}: save cancelled")));
@@ -2335,6 +2364,10 @@ impl Session {
         validation: solidcraft_kernel::Validation,
     ) -> Self {
         super::component_link::resolve_design_links(&mut doc, path);
+        // A design saved without linked bodies: what could not be read is said by its feature.
+        for warning in super::component_link::read_left_out_bodies(&mut doc, path, validation, super::component_link::LinkedRead::All) {
+            log::warn!("{}: {warning}", path.unwrap_or("design"));
+        }
         Self::opened_validating(doc, saved, validation).located(path)
     }
 
@@ -2442,6 +2475,17 @@ impl Session {
         design
     }
 
+    /// [`Self::design_at`] as `file.save` and `file.save_as` write it: without the bodies of
+    /// linked designs when the design is saved without them ([`Session::linked_bodies`]). Only
+    /// the file's copy: the session, its history and its recovery copies keep the bodies.
+    pub(crate) fn design_saved(&self, path: Option<&str>) -> std::borrow::Cow<'_, Document> {
+        let mut design = self.design_at(path);
+        if !self.linked_bodies {
+            super::component_link::leave_out_linked_bodies(&mut design, &self.doc, self.path.as_deref());
+        }
+        design
+    }
+
     /// Take up a save that ran on `done`, a [`Session::scratch`] copy of this session that
     /// `file.save` or `file.save_as` ran on (on another thread, so the window keeps drawing):
     /// the name the save gave the design, its file, and its saved state, as running the command
@@ -2460,6 +2504,7 @@ impl Session {
         self.provenance.clone_from(&done.provenance);
         self.saved = done.saved.clone();
         self.saved_visibility = done.saved_visibility.clone();
+        self.linked_bodies = done.linked_bodies;
     }
 
     /// The design's file was renamed (browser OPFS rename, or an equivalent host move): keep the
@@ -2499,7 +2544,7 @@ impl Session {
         preview: bool,
         cache: bool,
     ) -> solidcraft_io::Result<Vec<u8>> {
-        self.container_bytes(path, compression, preview, cache, None)
+        self.container_bytes(path, compression, preview, cache, None, false)
     }
 
     /// The container bytes with one signed provenance record appended to `save.chain`.
@@ -2511,7 +2556,7 @@ impl Session {
         cache: bool,
         save: &solidcraft_io::ProvenanceSave<'_>,
     ) -> solidcraft_io::Result<Vec<u8>> {
-        self.container_bytes(path, compression, preview, cache, Some(save))
+        self.container_bytes(path, compression, preview, cache, Some(save), true)
     }
 
     fn container_bytes(
@@ -2521,8 +2566,12 @@ impl Session {
         preview: bool,
         cache: bool,
         provenance: Option<&solidcraft_io::ProvenanceSave<'_>>,
+        saving: bool,
     ) -> solidcraft_io::Result<Vec<u8>> {
-        let design = self.design_at(path);
+        let design = if saving { self.design_saved(path) } else { self.design_at(path) };
+        // The saved model and the thumbnail hold the linked bodies too: a file saved without
+        // them has neither, and evaluates when it opens.
+        let cache = cache && !(design.linked_bodies_left_out && !design.links.is_empty());
         let geometry = cache.then(|| saved_geometry(self, &design)).flatten();
         let preview = preview.then(|| saved_preview(self)).flatten();
         let thumbnail = cache.then(|| thumbnail::saved(self)).flatten();
@@ -2554,7 +2603,7 @@ fn saved_geometry(s: &Session, design: &Document) -> Option<solidcraft_doc::Save
 }
 
 /// [`saved_geometry`] without waiting for the imports' checks ([`solidcraft_doc::Model::saved_now`]).
-fn saved_geometry_now(s: &Session, design: &Document) -> Option<(solidcraft_doc::SavedModel, solidcraft_doc::PendingChecks)> {
+pub(super) fn saved_geometry_now(s: &Session, design: &Document) -> Option<(solidcraft_doc::SavedModel, solidcraft_doc::PendingChecks)> {
     if s.active_sketch.is_some() || !s.pending_moves.is_empty() || s.model.state().bodies.is_empty() {
         return None;
     }
@@ -2611,6 +2660,7 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
         str_(p, "compression").unwrap_or("fast"),
         bool_(p, "preview").unwrap_or(false),
         bool_(p, "cache").unwrap_or(true),
+        bool_(p, "linked_bodies"),
         bool_(p, "overwrite").unwrap_or(false),
         bool_(p, "sign").unwrap_or(false),
         str_(p, "signing_key"),
@@ -2631,6 +2681,7 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
         str_(p, "compression").unwrap_or("fast"),
         bool_(p, "preview").unwrap_or(false),
         bool_(p, "cache").unwrap_or(true),
+        bool_(p, "linked_bodies"),
         bool_(p, "overwrite").unwrap_or(false),
         bool_(p, "sign").unwrap_or(false),
         str_(p, "signing_key"),

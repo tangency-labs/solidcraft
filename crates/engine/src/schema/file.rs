@@ -656,6 +656,10 @@ impl JsonSchema for ReaderParam {
     }
 }
 
+fn linked_bodies_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": "string", "enum": ["all", "folder"]})
+}
+
 /// Open a file as the design: a SolidCraft design (`.sc`, or a `.solidcraft` design from an
 /// earlier release), a `.dxf` or `.svg` drawing (a new, unsaved design with an XY sketch, with
 /// the units and defaults of `sketch.insert_dxf` and `sketch.insert_svg`), a STEP, IGES,
@@ -703,6 +707,14 @@ pub struct OpenParams {
     /// elsewhere). Default: false.
     #[serde(default)]
     pub read_only: Option<bool>,
+    /// For a design saved without the bodies of its linked designs (`file.save`'s
+    /// `linked_bodies: false`): which linked design files are read for those bodies as it opens.
+    /// all (the default): every one the caller may read. folder: only those in the design's own
+    /// folder or below it; the other links have no bodies until `component.update_links` reads
+    /// them. The reply's warnings name each link that was not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "linked_bodies_schema")]
+    pub linked_bodies: Option<String>,
     /// For a STEP or IGES file: false recomputes the import without reading or writing the local
     /// saved-model cache. Default: true.
     #[serde(default)]

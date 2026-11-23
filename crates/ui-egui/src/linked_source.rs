@@ -1004,6 +1004,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// A design saved without the bodies of its linked designs (`file.save`'s
+    /// `linked_bodies: false`) reads none from another folder unasked as it opens: the link has
+    /// no bodies until Load reads its file, which is the same question a changed file asks.
+    #[test]
+    fn a_design_saved_without_linked_bodies_asks_before_it_reads_a_link_in_another_folder() {
+        let root = std::env::temp_dir().join(format!("solidcraft-link-folders-left-out-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("received")).unwrap();
+        std::fs::create_dir_all(root.join("parts")).unwrap();
+        let housing = root.join("parts").join("housing.solidcraft");
+        save_part(&housing, [10.0, 20.0, 30.0], false);
+        let case = root.join("received").join("case.solidcraft");
+        let mut saved = SolveApp::new(Session::default(), Default::default());
+        saved.run("component.insert_design", json!({"path": housing})).unwrap();
+        saved.run("file.save", json!({"path": case, "linked_bodies": false})).unwrap();
+        drop(saved);
+        let folder = root.join("parts").canonicalize().unwrap().to_string_lossy().into_owned();
+
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        open(&mut app, &case, false);
+        let prompt = app.link_folders_prompt.first().cloned().expect("asked");
+        assert_eq!(prompt.folders, std::slice::from_ref(&folder));
+        assert!(volume(&app).abs() < 1e-6, "nothing is read before the answer: {}", volume(&app));
+        assert!(out_of_date(&mut app));
+        crate::link_folders_prompt::answer(&mut app, crate::link_folders_prompt::Answer::Load);
+        settle(&mut app);
+        assert!((volume(&app) - 6000.0).abs() < 1e-6, "Load reads the link: {}", volume(&app));
+        assert!(!out_of_date(&mut app));
+        assert_eq!(app.preferences.linked_file_folders, [folder]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// Not now leaves the link out of date and remembers nothing; Update Links still reads it.
     #[test]
     fn not_now_keeps_a_link_in_another_folder_out_of_date_until_update_links() {
