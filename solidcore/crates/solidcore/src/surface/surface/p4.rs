@@ -1728,18 +1728,16 @@ impl Surface {
                             }
                         }
                     } else if let Some(context) = context.as_deref_mut() {
-                        let built;
-                        let cache = if let Some(cache) = cache {
-                            cache
+                        let state = if let Some(cache) = cache {
+                            cache.state()?
                         } else {
-                            built = context.surface_cache_without_get_tree(k, self, surface)?;
-                            &built
+                            context.surface_cache_without_get_tree(k, self, surface)?
                         };
-                        if cache.is_trimmed()
-                            && cache.point_test_enabled
-                            && !cache.face_was_modified
+                        if state.is_trimmed()
+                            && state.point_test_enabled
+                            && !state.face_was_modified
                         {
-                            let face = cache.face()?.ok_or_else(|| {
+                            let face = state.face()?.ok_or_else(|| {
                                 SolidError::surface_missing(
                                     "surface::surface::p4::global_point_solve",
                                     "the cache's face",

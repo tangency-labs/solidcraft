@@ -53,12 +53,13 @@ mod face;
 mod loops;
 mod seams;
 mod shell;
+mod tangent_sections;
 mod vertex;
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use super::{object_info, validate_pointers, validate_pointers_excluding, Object, SUCCESS};
+use super::{object_info, validate_pointers_excluding, validate_pointers_traced, Object, SUCCESS};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::assert_array::{
     obj_type_string, AssertArray, AssertReport, ObjectKey, ReportSpec,
@@ -233,6 +234,22 @@ impl BrepCheck {
             .collect()
     }
 
+    /// Name the first check that gained a failure, including a failed check without a report.
+    pub(crate) fn first_new_failure_name(&self, before: &Self) -> Option<&'static str> {
+        let (class, _) = self.failures_beyond(before).into_iter().next()?;
+        Some(match class {
+            FailureClass::Report { .. } => self
+                .failures()
+                .find(|r| FailureClass::of(r) == class)
+                .map_or("the edited B-rep failed validation", |r| r.name),
+            FailureClass::PointersStatus(_) => "ValidatePointers failed",
+            FailureClass::AssertValidSkipped => {
+                "AssertValid was skipped after ValidatePointers failed"
+            }
+            FailureClass::AssertValidWithoutReport => "AssertValid failed without a report",
+        })
+    }
+
     /// The failure lines in [`BrepCheck::lines`] order, each with its class and its report
     /// (`None` for a synthetic line).
     fn classified(&self) -> Vec<(FailureClass, Option<&AssertReport>)> {
@@ -359,6 +376,17 @@ pub fn check_brep_scoped(
     level: CheckLevel,
     scope: ValidityScope,
 ) -> Result<BrepCheck> {
+    Ok(check_brep_counted(k, b, level, scope)?.0)
+}
+
+/// [`check_brep_scoped`], also saying how many `ValidatePointers` passes its `AssertValid` ran
+/// (0 when [`check_brep_with_keys`] skipped it, or when `AssertValid` did not run).
+fn check_brep_counted(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: CheckLevel,
+    scope: ValidityScope,
+) -> Result<(BrepCheck, usize)> {
     let naming = b.naming();
     if naming == NamingScheme::Unknown {
         return Err(SolidError::invalid_input(
@@ -370,17 +398,24 @@ pub fn check_brep_scoped(
     let recorded = b.geometry_owner_keys().clone();
     let keys =
         |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
-    check_brep_with_keys_scoped(k, b, level, &keys, scope)
+    check_with_keys_counted(k, b, level, &keys, scope)
 }
 
-/// The capi `smlib_brep_check(brep, level)`: [`validate_pointers`] at `level` (its
+/// The capi `smlib_brep_check(brep, level)`: [`validate_pointers`](super::validate_pointers) at `level` (its
 /// default `SM_NO_WALK`) into its own report list; when it reports no failure, [`assert_valid`] at `level` with the
 /// walk. `keys` gives the identities the geometry owners use (as for
-/// [`validate_pointers`]).
+/// [`validate_pointers`](super::validate_pointers)).
+///
+/// (not upstream) `AssertValid` starts with `ValidatePointers` again, at level 0 with the
+/// walk. With [`Kernel::memoize_curve_caches`] that second pass is skipped when the first
+/// reported nothing, checked every face whole and left the body unwritten
+/// ([`Brep::write_stamps`]): the level changes no pointer test, and the walk only drops
+/// `CheckFace`'s loop checks, so on the same body the second pass would report nothing,
+/// succeed and write nothing.
 ///
 /// # Errors
 ///
-/// Those of [`validate_pointers`] and [`assert_valid`], including
+/// Those of [`validate_pointers`](super::validate_pointers) and [`assert_valid`], including
 /// [`crate::SolidError::Unported`] from a check not yet ported.
 pub fn check_brep_with_keys(
     k: &mut Kernel,
@@ -403,14 +438,41 @@ pub fn check_brep_with_keys_scoped(
     keys: &dyn Fn(EntityRef) -> ObjectRef,
     scope: ValidityScope,
 ) -> Result<BrepCheck> {
+    Ok(check_with_keys_counted(k, b, level, keys, scope)?.0)
+}
+
+/// [`check_brep_with_keys_scoped`], also saying how many `ValidatePointers` passes its
+/// `AssertValid` ran (0 or 1).
+fn check_with_keys_counted(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: CheckLevel,
+    keys: &dyn Fn(EntityRef) -> ObjectRef,
+    scope: ValidityScope,
+) -> Result<(BrepCheck, usize)> {
     let mut pointer_reports = AssertArray::new();
-    let pointers_status =
-        validate_pointers(k, b, Some(&mut pointer_reports), level.code(), false, keys)?;
+    let before = b.write_stamps();
+    let mut faces_whole = true;
+    let (pointers_status, exclusion_failed) = validate_pointers_traced(
+        k,
+        b,
+        Some(&mut pointer_reports),
+        level.code(),
+        false,
+        keys,
+        &mut faces_whole,
+    )?;
+    let pointers_repeat = !(k.memoize_curve_caches
+        && pointers_status == SUCCESS
+        && !exclusion_failed
+        && faces_whole
+        && pointer_reports.is_empty()
+        && b.write_stamps() == before);
     let mut reports = AssertArray::new();
     let assert_valid = if pointer_reports.reports().iter().any(|r| !r.ok) {
         None
     } else {
-        Some(assert_valid_scoped(
+        Some(assert_valid_with(
             k,
             b,
             Some(&mut reports),
@@ -418,14 +480,19 @@ pub fn check_brep_with_keys_scoped(
             true,
             keys,
             scope,
+            pointers_repeat,
         )?)
     };
-    Ok(BrepCheck {
-        pointers_status,
-        pointer_reports,
-        assert_valid,
-        reports,
-    })
+    let passes = usize::from(assert_valid.is_some() && pointers_repeat);
+    Ok((
+        BrepCheck {
+            pointers_status,
+            pointer_reports,
+            assert_valid,
+            reports,
+        },
+        passes,
+    ))
 }
 
 /// `SmBrep::AssertValid(pAList, eTestLevel, eWalkTree)`: the B-rep checks (base
@@ -433,7 +500,7 @@ pub fn check_brep_with_keys_scoped(
 /// tests 0-21; not upstream's `ContainsCoincidentTopology`, see `brep`) and, with `walk`,
 /// `AssertValid` of every region, shell, face, loop, edge and vertex. Failed checks are appended to `reports`
 /// in native order. `level` is `SM_LEVEL_0`..`SM_LEVEL_GIVEN` (0..4). `keys` gives the
-/// geometry owners' identities (as for [`validate_pointers`]). Returns `false` when a
+/// geometry owners' identities (as for [`validate_pointers`](super::validate_pointers)). Returns `false` when a
 /// check failed (at once when `ValidatePointers` does not succeed).
 ///
 /// # Errors
@@ -466,6 +533,23 @@ pub fn assert_valid_scoped(
     keys: &dyn Fn(EntityRef) -> ObjectRef,
     scope: ValidityScope,
 ) -> Result<bool> {
+    assert_valid_with(k, b, reports, level, walk, keys, scope, true)
+}
+
+/// [`assert_valid_scoped`]; without `pointers`, its `ValidatePointers` pass is taken as
+/// succeeding with no report (for [`check_brep_with_keys`], which has just run one that proves
+/// it).
+#[allow(clippy::too_many_arguments)]
+fn assert_valid_with(
+    k: &mut Kernel,
+    b: &mut Brep,
+    reports: Option<&mut AssertArray>,
+    level: u8,
+    walk: bool,
+    keys: &dyn Fn(EntityRef) -> ObjectRef,
+    scope: ValidityScope,
+    pointers: bool,
+) -> Result<bool> {
     if level > LEVEL_GIVEN {
         return Err(super::invalid("invalid assert test level"));
     }
@@ -480,7 +564,7 @@ pub fn assert_valid_scoped(
         index,
         edge_sets: edge::EdgeSets::default(),
     };
-    brep::brep(k, b, &mut cx, walk)
+    brep::brep(k, b, &mut cx, walk, pointers)
 }
 
 pub use brep::ToleranceGaps;
@@ -821,6 +905,194 @@ mod tests {
         let lines = check(false, 22, Some("SmBrep")).lines();
         assert_eq!(lines.len(), 1);
         assert!(lines[0].starts_with("SmBrep::Test #22 "), "{lines:?}");
+    }
+
+    /// A 10 mm box in a kernel of its own, with the check's memos and shortcuts on or off.
+    fn checked_box(memoize: bool) -> (Kernel, Brep) {
+        let mut k = Kernel {
+            memoize_curve_caches: memoize,
+            ..Kernel::default()
+        };
+        let b = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::ZERO,
+            10.0,
+            10.0,
+            10.0,
+        )
+        .unwrap();
+        (k, b)
+    }
+
+    /// `check_brep` of `b`, with how many `ValidatePointers` passes `AssertValid` ran.
+    fn check_counting(k: &mut Kernel, b: &mut Brep) -> (BrepCheck, usize) {
+        check_brep_counted(k, b, CheckLevel::Level2, ValidityScope::Body).unwrap()
+    }
+
+    /// The whole check, as the reports and statuses print.
+    fn printed(check: &BrepCheck) -> String {
+        format!("{check:?}")
+    }
+
+    /// The second `ValidatePointers` (in `AssertValid`) is skipped after a first pass that
+    /// reported nothing and wrote nothing, and the check says what it said with it.
+    #[test]
+    fn a_pointer_pass_that_writes_nothing_is_not_run_again() {
+        let (mut k, mut b) = checked_box(true);
+        // (a first check may make what the body lacks, such as a line's NURB)
+        check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        let (skipped, passes) = check_counting(&mut k, &mut b);
+        assert_eq!(passes, 0, "the second pointer pass ran");
+        assert!(skipped.is_valid(), "{:?}", skipped.lines());
+
+        let (mut k, mut b) = checked_box(false);
+        check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        let (full, passes) = check_counting(&mut k, &mut b);
+        assert_eq!(passes, 1, "without the shortcut the second pass runs");
+        assert_eq!(printed(&skipped), printed(&full));
+    }
+
+    /// Replaces the curve of the box's first edge by a cubic B-spline along the same line
+    /// whose second control point lies 0.01 behind its start: `ValidatePointers` takes the
+    /// polygon for a reversal and straightens it, a write to the body.
+    fn bend_first_edge(k: &Kernel, b: &mut Brep) -> crate::topology::EdgeId {
+        use crate::nurbs::b_spline_curve::p1::{
+            BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
+        };
+        let e = b.edge_list()[0];
+        let ivl = b.edge(e).unwrap().interval;
+        // (a copy of a curve has no owner: read it from the edge's own curve)
+        let owner = b.edge(e).unwrap().curve.as_ref().unwrap().owner();
+        let old = b.edge(e).unwrap().curve.clone().unwrap();
+        let start = old.evaluate_point(k, ivl.min()).unwrap();
+        let end = old.evaluate_point(k, ivl.max()).unwrap();
+        let along = end - start;
+        let control = [
+            start,
+            start - along * 0.001,
+            start + along * 0.3,
+            start + along * 0.7,
+            end,
+        ];
+        let curve = BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 3,
+            control_points: &control,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[4, 1, 4],
+            knots: &[ivl.min(), 0.5 * (ivl.min() + ivl.max()), ivl.max()],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap();
+        let mut bent = Curve::from(curve);
+        bent.set_owner(owner, None);
+        b.edge_mut(e).unwrap().curve = Some(bent);
+        e
+    }
+
+    /// The second polygon point of edge `e`'s B-spline curve.
+    fn second_control_point(b: &Brep, e: crate::topology::EdgeId) -> crate::math::Point3 {
+        let crate::curve::curve::CurveKind::BSpline(base) =
+            b.edge(e).unwrap().curve.as_ref().unwrap().kind()
+        else {
+            panic!("the bent edge is a B-spline");
+        };
+        base.gw_nurb().unwrap().cpts()[1].to_euclid()
+    }
+
+    /// A first pass that repairs the body (here a reversed curve end) leaves a body the
+    /// second pass has not seen, so the second pass still runs, and the check and the
+    /// repaired body are those of the full check.
+    #[test]
+    fn a_pointer_pass_that_repairs_the_body_is_run_again() {
+        let (mut k, mut b) = checked_box(true);
+        let e = bend_first_edge(&k, &mut b);
+        let bent = second_control_point(&b, e);
+        let (repaired, passes) = check_counting(&mut k, &mut b);
+        assert!(repaired.assert_valid.is_some(), "{:?}", repaired.lines());
+        assert_ne!(
+            second_control_point(&b, e),
+            bent,
+            "the check left the end reversed"
+        );
+        assert_eq!(
+            passes, 1,
+            "the second pointer pass was skipped after a repair"
+        );
+
+        let (mut k, mut full_b) = checked_box(false);
+        let e = bend_first_edge(&k, &mut full_b);
+        let (full, _) = check_counting(&mut k, &mut full_b);
+        assert_eq!(printed(&repaired), printed(&full));
+        assert_eq!(
+            second_control_point(&b, e),
+            second_control_point(&full_b, e)
+        );
+    }
+
+    /// A face without UV trims is checked on a copy standing for the body, which the first
+    /// pass shares between faces. The pass says so (`faces_whole`), and the second pass, on a
+    /// copy of its own, still runs. (Here the first pass also makes the stripped face's trims
+    /// on the body itself, so its write stamps move too.)
+    #[test]
+    fn a_face_checked_on_a_standing_copy_is_checked_again() {
+        let strip = |b: &mut Brep| {
+            let f = b.face_list()[0];
+            for l in crate::topology::face::p2::loops(b, f, false, None).unwrap() {
+                let lu = b.loop_(l).unwrap().loopuse.unwrap();
+                for eu in crate::topology::loopuse::edgeuses(b, lu, None, None).unwrap() {
+                    b.edgeuse_mut(eu).unwrap().uv_trim_curve = None;
+                }
+            }
+        };
+        let (mut k, mut b) = checked_box(true);
+        check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        strip(&mut b);
+        // the pass's own account, on copies so the body below is checked as stripped
+        let naming = b.naming();
+        let recorded = b.geometry_owner_keys().clone();
+        let keys =
+            |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
+        let whole = |k: &Kernel, b: &Brep| {
+            let mut copy = b.clone_standing_for_self().unwrap();
+            let mut whole = true;
+            let mut reports = AssertArray::new();
+            validate_pointers_traced(
+                k,
+                &mut copy,
+                Some(&mut reports),
+                2,
+                false,
+                &keys,
+                &mut whole,
+            )
+            .unwrap();
+            whole
+        };
+        assert!(
+            !whole(&k, &b),
+            "a face checked on the standing copy left the pass whole"
+        );
+        let (_, mut clean) = checked_box(true);
+        check_brep(&mut k, &mut clean, CheckLevel::Level2).unwrap();
+        assert!(
+            whole(&k, &clean),
+            "a box with every trim was not checked whole"
+        );
+        let (standing, passes) = check_counting(&mut k, &mut b);
+        assert!(standing.assert_valid.is_some(), "{:?}", standing.lines());
+        assert_eq!(
+            passes, 1,
+            "the second pointer pass was skipped after a standing copy"
+        );
+
+        let (mut k, mut b) = checked_box(false);
+        check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        strip(&mut b);
+        let (full, _) = check_counting(&mut k, &mut b);
+        assert_eq!(printed(&standing), printed(&full));
     }
 
     /// #18212: the two edges of face 9 of the `blend.feature_executive` case

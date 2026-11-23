@@ -202,6 +202,67 @@ fn curvature_polygon_arc_length_linear_diameter() {
     assert!((dist - 15.0).abs() < 1e-6, "{rim:?} {dist}");
 }
 
+/// #20660: a distance from a point to a construction line switches to a diameter (twice the
+/// distance, the point staying put), types as a diameter, and goes back; a distance between two
+/// ordinary lines has no diameter.
+#[test]
+fn a_distance_from_a_construction_line_toggles_to_a_diameter() {
+    use solidcraft_sketch::ConstraintKind;
+    let mut s = new_sketch();
+    let axis = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 40]], "construction": true}))["curves"])[0].clone();
+    run(&mut s, "sketch.point", json!({"point": [5, 10], "id": "rim"}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["rim", axis], "type": "distance"}));
+    let param = d["param"].as_str().unwrap().to_string();
+    let find = |s: &Session| sketch(s).constraints.iter().find(|c| c.param.as_deref() == Some(param.as_str())).unwrap().clone();
+    let cid = find(&s).id;
+    assert!(matches!(find(&s).kind, ConstraintKind::PointLineDistance { value, .. } if (value - 5.0).abs() < 1e-9));
+    let r = run(&mut s, "sketch.toggle_diameter", json!({"constraint": cid}));
+    assert_eq!(r["diameter"], true, "{r}");
+    assert!(matches!(find(&s).kind, ConstraintKind::LinearDiameter { value, .. } if (value - 10.0).abs() < 1e-9), "{:?}", find(&s).kind);
+    assert_eq!(s.doc.param(&param).unwrap().expr, "10 mm", "the parameter holds the shown (diameter) value");
+    // The point's distance from the (infinite) axis line. The axis is free, so the solver may tilt
+    // or move it; only the perpendicular distance is fixed, not the x difference.
+    let x = |s: &Session| {
+        let sk = sketch(s);
+        let p = sk.point(sk.point_index("rim").unwrap()).unwrap();
+        let solidcraft_sketch::CurveKind::Line { a, b } = sk.curves[sk.curve_index(&axis).unwrap()].kind else { panic!("the axis is a line") };
+        let (a, b) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        ((p.x - a.x) * dy - (p.y - a.y) * dx).abs() / dx.hypot(dy)
+    };
+    assert!((x(&s) - 5.0).abs() < 1e-6, "the point stays put");
+    // Saved and reopened, it is still a diameter.
+    // The reopened session edits no sketch: it is read by its feature id.
+    let sid = s.active_sketch.unwrap();
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(
+        reopened
+            .model
+            .state()
+            .sketch(sid)
+            .unwrap()
+            .sketch
+            .constraints
+            .iter()
+            .any(|c| matches!(c.kind, ConstraintKind::LinearDiameter { value, .. } if (value - 10.0).abs() < 1e-9)),
+        "the diameter survives save and reopen"
+    );
+    // Typing 12 moves the point to 6 mm.
+    run(&mut s, "parameters.change", json!({"name": param, "expression": "12 mm"}));
+    assert!((x(&s).abs() - 6.0).abs() < 1e-6, "{}", x(&s));
+    // And back to the distance, the point still 6 mm out.
+    run(&mut s, "sketch.toggle_diameter", json!({"constraint": cid, "diameter": false}));
+    assert!(matches!(find(&s).kind, ConstraintKind::PointLineDistance { value, .. } if (value - 6.0).abs() < 1e-9));
+
+    // Two ordinary lines have no diameter to switch to.
+    let l1 = ids(&run(&mut s, "sketch.line", json!({"points": [[30, 0], [30, 40]]}))["curves"])[0].clone();
+    let l2 = ids(&run(&mut s, "sketch.line", json!({"points": [[40, 0], [40, 40]]}))["curves"])[0].clone();
+    let d2 = run(&mut s, "sketch.dimension", json!({"entities": [l1, l2], "type": "distance"}));
+    let p2 = d2["param"].as_str().unwrap().to_string();
+    let id2 = sketch(&s).constraints.iter().find(|c| c.param.as_deref() == Some(p2.as_str())).unwrap().id.clone();
+    assert!(s.execute("sketch.toggle_diameter", &json!({"constraint": id2})).is_err());
+}
+
 #[test]
 fn glyphs_and_snaps() {
     let mut s = new_sketch();
