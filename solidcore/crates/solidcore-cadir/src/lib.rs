@@ -78,6 +78,10 @@ pub struct Read {
     /// Where the body's placement puts the record (column-major 4 × 4, millimetres), when it
     /// moves it. Only a rigid placement is taken: a body placed otherwise is refused.
     pub placement: Option<[[f64; 4]; 4]>,
+    /// Why the region was refused whole, where it came in as an open surface of the faces that
+    /// read, without the faces the refusal names; `None` where it read as given. A reader with
+    /// another form of the body (a file's own mesh of it) may take that instead.
+    pub opened: Option<String>,
 }
 
 /// A body region that could not be read, and why.
@@ -163,24 +167,28 @@ pub fn read_bodies(ir: &CadIr, trims: Option<&dyn Trims>) -> Bodies {
                     &none,
                     &mut budget,
                 )
+                .map(|solid| (solid, None))
                 .or_else(|message| {
-                    model.without_named_faces(
-                        region.as_str(),
-                        kind,
-                        name,
-                        model.region_tolerance(region.as_str(), tolerance(ir)),
-                        trims,
-                        message,
-                        &mut budget,
-                    )
+                    model
+                        .without_named_faces(
+                            region.as_str(),
+                            kind,
+                            name,
+                            model.region_tolerance(region.as_str(), tolerance(ir)),
+                            trims,
+                            message.clone(),
+                            &mut budget,
+                        )
+                        .map(|solid| (solid, Some(message)))
                 });
             match read {
-                Ok(solid) => {
+                Ok((solid, opened)) => {
                     out.read.push(Read {
                         body: id.clone(),
                         region: k,
                         solid,
                         placement,
+                        opened,
                     });
                 }
                 Err(message) => out.failures.push(Failure {
@@ -284,11 +292,12 @@ impl<'a> Model<'a> {
         matches!((at(a), at(b)), (Some(p), Some(q)) if (p - q).length() <= tol)
     }
 
-    /// A region refused with `refusal`, read again without the face the refusal names, as an
-    /// open surface of the faces that remain (the faces that do read, sharing the edges they do):
-    /// what the STEP reader makes of a solid it cannot close. A refusal of that naming another face
-    /// of the region leaves it out too, up to [`MAX_LEFT_OUT_ROUNDS`] reads; a face is only ever
-    /// left out where a refusal names it. The record's notes say why it is open and each face left
+    /// A region refused with `refusal`, read again without the faces the refusal names (every
+    /// face whose pcurves failed, as the assembly names them), as an open surface of the faces
+    /// that remain (the faces that do read, sharing the edges they do): what the STEP reader makes
+    /// of a solid it cannot close. A refusal of that naming other faces of the region leaves them
+    /// out too, up to [`MAX_LEFT_OUT_ROUNDS`] reads; a face is only ever left out where a refusal
+    /// names it. The record's notes say why it is open and each face left
     /// out. The refusal stands where it names no face of the region, or no read succeeds.
     #[allow(clippy::too_many_arguments)]
     fn without_named_faces(
@@ -327,13 +336,17 @@ impl<'a> Model<'a> {
         // Each read is charged to the file's face budget, as the first one was: a region read
         // again costs what it reads again, so refused regions cannot read past the budget.
         for _ in 0..MAX_LEFT_OUT_ROUNDS {
-            let Some(face) = self
-                .named(&why)
+            // Every face of the region still in that the refusal names (the assembly names each
+            // face whose pcurves failed), left out together.
+            let named: Vec<u64> = self
+                .all_named(&why)
+                .into_iter()
                 .filter(|f| of_region.contains(f) && !skip.contains(f))
-            else {
+                .collect();
+            if named.is_empty() {
                 break;
-            };
-            skip.insert(face);
+            }
+            skip.extend(named);
             left_out.push(why.clone());
             if skip.len() >= of_region.len() {
                 break;
@@ -353,6 +366,20 @@ impl<'a> Model<'a> {
             }
         }
         Err(refusal)
+    }
+
+    /// Every face a refusal names by its model index (`face #12`), in order; else the one it
+    /// names by its id ([`Self::named`]).
+    fn all_named(&self, message: &str) -> Vec<u64> {
+        let indices: Vec<u64> = message
+            .match_indices("face #")
+            .filter_map(|(at, _)| named_face(message.get(at..)?))
+            .collect();
+        if indices.is_empty() {
+            self.named(message).into_iter().collect()
+        } else {
+            indices
+        }
     }
 
     /// Whether every shell of region `id` is closed, as the model writes it: each edge of its
