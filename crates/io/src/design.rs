@@ -368,7 +368,12 @@ fn write_container(
         let mut parts: Vec<String> = doc
             .drawings
             .iter()
-            .flat_map(|d| d.images.iter().map(|i| solidcraft_doc::blob::part_name(&i.data, &i.format)).collect::<Vec<_>>())
+            .flat_map(|d| {
+                d.images
+                    .iter()
+                    .map(|i| solidcraft_doc::blob::part_name(&i.data, &i.format))
+                    .chain(d.newer_file.iter().flat_map(|file| file.part_names().map(String::from)))
+            })
             .collect();
         parts.sort();
         parts.dedup();

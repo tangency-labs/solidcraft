@@ -957,16 +957,17 @@ fn a_newer_builds_drawing_opens_and_keeps_what_it_cant_read() {
     // A field and a second sheet it can't read stay out, named, and go back.
     file["future_views"] = json!([{"id": "a"}]);
     let mut future_sheet = file["sheets"][0].clone();
+    future_sheet["id"] = json!(ids::encode(3));
     future_sheet["name"] = json!("Future");
     future_sheet["future_layers"] = json!([1]);
-    file["sheets"].as_array_mut().unwrap().push(future_sheet);
+    file["sheets"].as_array_mut().unwrap().insert(1, future_sheet);
     let opened = Drawing::from_json(&file.to_string()).unwrap();
     assert_eq!(opened.sheets, d.sheets);
     let said = &opened.newer_file.as_ref().unwrap().not_understood;
     assert!(said.iter().any(|what| what.contains("future_views")) && said.iter().any(|what| what.contains("Future")), "{said:?}");
     let again: Value = serde_json::from_str(&opened.to_json().unwrap()).unwrap();
     assert_eq!(again["future_views"], file["future_views"]);
-    assert_eq!(again["sheets"].as_array().unwrap().len(), d.sheets.len() + 1);
+    assert_eq!(again["sheets"], file["sheets"], "an unreadable sheet keeps its place");
     assert_eq!(again["format"], json!(newer));
     // A source of another design's file reads; one it can't read (a field a later build adds) stays
     // out, named by its path, and goes back.
@@ -981,6 +982,124 @@ fn a_newer_builds_drawing_opens_and_keeps_what_it_cant_read() {
     assert!(said.iter().any(|what| what.contains("parts/bolt.sc")), "{said:?}");
     let again: Value = serde_json::from_str(&opened.to_json().unwrap()).unwrap();
     assert_eq!(again["sources"].as_array().unwrap().last(), Some(&bolt));
+}
+
+#[test]
+fn newer_drawing_list_elements_are_reported_and_restored() {
+    use table::{Kind, Place, SheetTable};
+
+    let mut with_annotations = plate();
+    let sheet = with_annotations.sheets[0].id;
+    let kind = Kind::Revision;
+    with_annotations.tables.add([Arc::new(SheetTable { id: 52, sheet, table: kind.default_table(), place: Place::At([10.0, 20.0]), kind })]);
+    with_annotations.symbols.add([Arc::new(Symbol {
+        id: 53,
+        name: "Mark".into(),
+        pieces: vec![symbol::Piece::Text {
+            at: [0.0, 0.0],
+            content: serde_json::from_value(json!([{"text": "Mark"}])).unwrap(),
+            cap_mm: None,
+            align: Default::default(),
+        }],
+    })]);
+    let mut annotated = file(&with_annotations);
+    annotated["notes"] = json!([{"id": ids::encode(54), "anchor": {"sheet": ids::encode(sheet)}, "at": [4, 6], "content": [{"text": "Note"}]}]);
+    let (doc, drawing, _) = w38d_record_fixture(false);
+    let filled = file(doc.drawing(drawing).unwrap());
+
+    for (original, key, kind) in [
+        (&annotated, "views", "view"),
+        (&annotated, "dimensions", "dimension"),
+        (&annotated, "balloons", "balloon"),
+        (&annotated, "notes", "note"),
+        (&annotated, "tables", "table"),
+        (&annotated, "symbols", "symbol"),
+        (&filled, "sketches", "sketch"),
+        (&filled, "fills", "fill"),
+        (&filled, "patterns", "pattern"),
+    ] {
+        assert!(read(original).is_ok(), "{key}: {}", refusal(original));
+        let mut future = original.clone();
+        future[key][0]["future_field"] = json!({"mode": "v2", "inset": [2, 5]});
+        assert!(read(&future).is_err(), "{key}");
+        future["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+        let opened = read(&future).unwrap_or_else(|why| panic!("{key}: {why}"));
+        let notice = &opened.newer_file.as_ref().unwrap().not_understood;
+        assert!(notice.iter().any(|entry| entry.starts_with(kind)), "{key}: {notice:?}");
+        let round_trip = file(&opened);
+        assert_eq!(round_trip[key], future[key], "{key}");
+        if key == "sketches" {
+            assert!(opened.fills.is_empty());
+            assert_eq!(round_trip["fills"], future["fills"]);
+        }
+    }
+}
+
+#[test]
+fn a_newer_drawing_leaves_out_a_view_and_its_dependents() {
+    let drawing = plate();
+    let mut saved = file(&drawing);
+    let front = drawing.views.iter().find(|v| matches!(v.kind, ViewKind::Base { .. }) && v.sheet == drawing.sheets[0].id).unwrap();
+    let front_id = json!(ids::encode(front.id));
+    let views = saved["views"].as_array_mut().unwrap();
+    views.iter_mut().find(|v| v["id"] == front_id).unwrap()["future_settings"] = json!({"curves": [1, 2, 3]});
+    let note = json!({"id": ids::encode(42), "anchor": {"view": front_id}, "at": [5.0, 12.0], "content": [{"text": "On the front"}]});
+    saved["notes"] = json!([note]);
+    assert!(read(&saved).is_err(), "this version's drawings are still strict");
+    saved["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+
+    let mut opened = read(&saved).unwrap();
+    assert_eq!(opened.sheets, drawing.sheets);
+    assert_eq!(opened.views.len(), 1, "both projected generations follow their parent");
+    assert!(opened.dimensions.is_empty() && opened.balloons.is_empty() && opened.notes.is_empty());
+    let notice = &opened.newer_file.as_ref().unwrap().not_understood;
+    for kind in ["view", "dimension", "balloon", "note"] {
+        assert!(notice.iter().any(|entry| entry.starts_with(kind)), "{notice:?}");
+    }
+    opened.name = "Renamed drawing".into();
+    let again = file(&opened);
+    assert_eq!(again["name"], "Renamed drawing");
+    for key in ["views", "dimensions", "balloons", "notes"] {
+        assert_eq!(again[key], saved[key], "{key}");
+    }
+    assert_eq!(file(&read(&again).unwrap()), again);
+}
+
+#[test]
+fn a_newer_revision_row_and_its_tag_round_trip_with_the_readable_rows() {
+    let mut saved = file(&bare());
+    saved["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    let row = json!({"id": ids::encode(41), "revision": "A", "future_approval": ["CAD"]});
+    let tag = json!({"id": ids::encode(42), "row": row["id"], "sheet": saved["sheets"][0]["id"], "at": [5.0, 10.0], "size_mm": 8.3});
+    saved["revisions"] = json!({"rows": [row, {"id": ids::encode(43), "revision": "B"}], "tags": [tag]});
+
+    let opened = read(&saved).unwrap();
+    assert_eq!(opened.revisions.rows()[0].revision, "B");
+    assert!(opened.revisions.tags().is_empty());
+    let written = file(&opened);
+    assert_eq!(written["revisions"]["rows"][0], row);
+    assert_eq!(written["revisions"]["tags"][0], tag);
+    assert!(read(&written).is_ok());
+}
+
+#[test]
+fn a_newer_drawing_keeps_unknown_references_valid_when_edited() {
+    let drawing = plate();
+    let mut saved = file(&drawing);
+    let sheet = drawing.sheets[1].id;
+    let view = drawing.views.iter().find(|v| v.sheet == sheet).unwrap().id;
+    let mut seed = IdSource::seeded(17);
+    let placement = drawing.allocate_id(&mut seed).unwrap();
+    saved["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    saved["placed_symbols"] = json!([{"id": ids::encode(placement), "on": {"view": ids::encode(view)}}]);
+    let mut opened = read(&saved).unwrap();
+    assert_ne!(opened.allocate_id(&mut IdSource::seeded(17)).unwrap(), placement);
+    Arc::make_mut(&mut opened.sheets[1]).name = "Renamed sheet".into();
+    assert_eq!(file(&opened)["placed_symbols"], saved["placed_symbols"]);
+    opened.sheets.retain(|s| s.id != sheet);
+    opened.views.retain(|v| v.id != view);
+    let why = opened.to_json().unwrap_err().to_string();
+    assert!(why.contains(&ids::encode(view)) && why.contains("newer SolidCraft"), "{why}");
 }
 
 // W38a: original paper-mm payload, independent of any Drawing UI or model solver.

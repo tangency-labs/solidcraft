@@ -501,6 +501,75 @@ fn a_design_keeps_the_layout_the_last_release_reads() {
     assert!(cells.iter().all(|cell| cell.pointer("/kind/text/image").is_none()), "a logo cell keeps its text only");
 }
 
+#[test]
+fn a_readable_newer_drawing_keeps_edits_and_opaque_records_in_plain_json() {
+    let doc = plate();
+    let mut value: Value = serde_json::from_slice(&write_design(&doc).unwrap()).unwrap();
+    let record = &mut value["drawings"][0];
+    record["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    let unknown = json!([{"id": ids::encode(23), "owner": {"sheet": record["sheets"][0]["id"]}, "geometry": "a later sketch"}]);
+    record["sketches"] = unknown.clone();
+    let mut opened = read_design(&serde_json::to_vec(&value).unwrap()).unwrap();
+    let mut drawing = (*opened.drawings[0]).clone();
+    let id = drawing.id;
+    assert!(drawing.sketches.is_empty());
+    drawing.name = "Renamed".into();
+    opened.put_drawing(Arc::new(drawing));
+
+    let written = write_design(&opened).unwrap();
+    let saved: Value = serde_json::from_slice(&written).unwrap();
+    let saved = saved["drawings"].as_array().unwrap().iter().find(|record| record["id"] == ids::encode(id)).unwrap();
+    assert_eq!(saved["sketches"], unknown);
+    assert_eq!(saved["name"], "Renamed");
+    assert_eq!(read_design(&written).unwrap().drawing(id).unwrap().name, "Renamed");
+}
+
+#[test]
+fn a_newer_drawing_keeps_unreadable_images_placements_and_container_parts() {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mixed-version/saved-by-main.sc");
+    let original = parts(&std::fs::read(fixture).unwrap());
+    let name = original.keys().find(|name| name.starts_with("drawings/")).unwrap();
+    let record: Value = serde_json::from_slice(&original[name]).unwrap();
+    let payload = b"later drawing payload";
+    let blob = solidcraft_doc::blob::part_name(&solidcraft_doc::blob::Blob::from(&payload[..]), "future");
+
+    for (key, kind) in [("image_files", "image"), ("placed_images", "placed image"), ("logo_cells", "title block logo")] {
+        let mut entries = original.clone();
+        let mut record = record.clone();
+        record["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+        record[key][0]["future_channel"] = json!({"part": blob});
+        entries.insert(name.clone(), serde_json::to_vec(&record).unwrap());
+        entries.insert(blob.clone(), payload.to_vec());
+
+        let opened = read_design(&container(&entries)).unwrap();
+        let drawing = &opened.drawings[0];
+        assert!(drawing.newer_file.as_ref().unwrap().not_understood.iter().any(|what| what.starts_with(kind)), "{key}");
+        assert_eq!(drawing.images.iter().count(), 1);
+        assert_eq!(drawing.sheet_images.is_empty(), key == "placed_images");
+        assert_eq!(drawing.logos().next().is_none(), key != "placed_images");
+        assert!(write_design(&opened).is_err(), "plain JSON cannot carry the retained parts");
+        let mut resaved = parts(&write_design_container(&opened).unwrap());
+        let mut again: Value = serde_json::from_slice(&resaved[name]).unwrap();
+        for field in ["image_files", "placed_images", "logo_cells"] {
+            assert_eq!(again[field], record[field], "{key}: {field}");
+        }
+        for image in record["image_files"].as_array().unwrap() {
+            let part = image["part"].as_str().unwrap();
+            assert_eq!(resaved[part], entries[part]);
+        }
+        assert_eq!(resaved[&blob], payload);
+        assert!(read_design(&container(&resaved)).unwrap().drawings[0].newer_file.is_some());
+
+        // A reader that understands the extra field can read all the records after our save.
+        again[key][0].as_object_mut().unwrap().remove("future_channel");
+        again["format"] = json!(DRAWING.format_string(DRAWING.current()));
+        resaved.insert(name.clone(), serde_json::to_vec(&again).unwrap());
+        let reopened = read_design(&container(&resaved)).unwrap();
+        assert_eq!(reopened.drawings[0].images.iter().count(), 2);
+        assert!(reopened.drawings[0].logos().next().is_some());
+    }
+}
+
 /// A drawing a newer build saved that this build can't read at all keeps the rest of the design
 /// from nothing: the design opens without it, the notice names it, and saving writes its entry and
 /// the parts it names back byte for byte. A drawing this build's own format calls damaged still

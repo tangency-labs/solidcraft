@@ -1902,6 +1902,9 @@ pub fn write_design(doc: &Document) -> Result<Vec<u8>> {
             binary.join(" and ")
         )));
     }
+    for drawing in doc.drawings.iter().filter(|drawing| drawing.newer_file.is_some()) {
+        drawing.validate()?;
+    }
     Ok(doc.to_json().into_bytes())
 }
 

@@ -3561,21 +3561,40 @@ impl SolveApp {
         self.status_is_tool_hint = true;
     }
 
-    /// Tell the user when the open design came from a newer SolidCraft: the notice on the status
-    /// line, and what this version couldn't read in the messages.
+    /// Tell the user when a newer SolidCraft saved the design or one of its drawings.
+    /// The status line carries the first notice, and the messages name what could not be read.
     pub(crate) fn say_newer_file(&mut self) {
-        let Some(file) = self.session.doc.newer_file.clone() else { return };
-        for what in &file.not_understood {
-            let text = solidcraft_ui_text::format("document.newer_file_not_read", &[("what", what)]);
-            self.messages.push(&text, false, now_ms());
-        }
-        let text = if file.format <= file.reads_up_to && !file.unknown_changes.is_empty() {
-            let change = file.unknown_changes.first().map_or("", String::as_str);
-            solidcraft_ui_text::format("document.newer_file_change", &[("format", &file.format.to_string()), ("change", change)])
-        } else {
-            solidcraft_ui_text::format("document.newer_file", &[("format", &file.format.to_string()), ("reads", &file.reads_up_to.to_string())])
+        let notice = |format: u32, reads: u32, changes: &[String]| {
+            if let Some(change) = changes.first().filter(|_| format <= reads) {
+                solidcraft_ui_text::format("document.newer_file_change", &[("format", &format.to_string()), ("change", change)])
+            } else {
+                solidcraft_ui_text::format("document.newer_file", &[("format", &format.to_string()), ("reads", &reads.to_string())])
+            }
         };
-        self.set_status(text, false);
+        let mut status = self.session.doc.newer_file.as_ref().map(|file| {
+            for what in &file.not_understood {
+                let text = solidcraft_ui_text::format("document.newer_file_not_read", &[("what", what)]);
+                self.messages.push(&text, false, now_ms());
+            }
+            notice(file.format, file.reads_up_to, &file.unknown_changes)
+        });
+        for drawing in &self.session.doc.drawings {
+            let Some(file) = &drawing.newer_file else { continue };
+            for what in &file.not_understood {
+                let what = format!("{}: {what}", drawing.name);
+                let text = solidcraft_ui_text::format("document.newer_file_not_read", &[("what", &what)]);
+                self.messages.push(&text, false, now_ms());
+            }
+            let text = format!("{}: {}", drawing.name, notice(file.format, file.reads_up_to, &file.unknown_changes));
+            if status.is_some() {
+                self.messages.push(&text, false, now_ms());
+            } else {
+                status = Some(text);
+            }
+        }
+        if let Some(text) = status {
+            self.set_status(text, false);
+        }
     }
 
     /// Tell the user when the open design keeps data of a plugin that can't change it here: one
