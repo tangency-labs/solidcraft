@@ -1466,13 +1466,27 @@ impl core::fmt::Display for TopologyFailure {
             Self::LoopSplitFaceEarly => f.write_str("a face was split off before its loop closed"),
             Self::EdgeNotSplit => f.write_str("the edge could not be split"),
             Self::SheetReoriented => f.write_str("the sheet's faces were turned to agree"),
-            Self::TooFewSurfaces { faces, surfaces } => write!(f, "{surfaces} surfaces were given for {faces} faces"),
-            Self::VerticesNotJoinable => f.write_str("the vertices are the same, apart, not in the B-rep or share an edge"),
+            Self::TooFewSurfaces { faces, surfaces } => {
+                write!(f, "{surfaces} surfaces were given for {faces} faces")
+            }
+            Self::VerticesNotJoinable => {
+                f.write_str("the vertices are the same, apart, not in the B-rep or share an edge")
+            }
             Self::VertexuseWithoutVertex => f.write_str("an edge use's vertex use has no vertex"),
             Self::CurveNotOwnedByEdge => f.write_str("the edge's curve is not owned by the edge"),
-            Self::EdgeEndOffVertex { distance, tolerance } => write!(f, "an end of the edge's curve is {distance} from its vertex, past {tolerance}"),
-            Self::MatrixNotDecomposed => f.write_str("the transform matrix could not be decomposed"),
-            Self::MergedGroupNotOneFace => f.write_str("merged faces that do not leave exactly one face"),
+            Self::EdgeEndOffVertex {
+                distance,
+                tolerance,
+            } => write!(
+                f,
+                "an end of the edge's curve is {distance} from its vertex, past {tolerance}"
+            ),
+            Self::MatrixNotDecomposed => {
+                f.write_str("the transform matrix could not be decomposed")
+            }
+            Self::MergedGroupNotOneFace => {
+                f.write_str("merged faces that do not leave exactly one face")
+            }
         }
     }
 }
