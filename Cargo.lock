@@ -6396,6 +6396,7 @@ dependencies = [
  "solidcraft-viewport",
  "solidcraft-viewport-gpu",
  "tempfile",
+ "wat",
 ]
 
 [[package]]

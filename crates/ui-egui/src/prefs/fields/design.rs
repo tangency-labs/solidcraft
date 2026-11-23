@@ -62,6 +62,7 @@ macro_rules! design_preferences {
             /// #13262). Off: the grabbed point goes to the pointer and the part may spin about it, as
             /// before.
             joint_drag_trackball: bool = true, PAGE_DESIGN => check_id("prefs.joint_drag_trackball");
+            joint_moving_first: bool = false, PAGE_DESIGN => check_id_help("settings.joint_moving_first", "settings.joint_moving_first_help");
             /// Decimals shown for lengths and angles.
             length_decimals: u8 = 2, PAGE_DESIGN;
             /// Insert STEP keeps its disk source for Update Links and automatic refresh. Off: new

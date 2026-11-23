@@ -382,6 +382,35 @@ pub enum IntersectFailure {
         /// The number of intervals of the other classification.
         other: usize,
     },
+    /// The interval to collapse is the classification's only one, which is never squeezed
+    /// out. Class `failed`.
+    OnlyInterval,
+    /// The interval to collapse is not degenerate within the pair tolerance of its ends.
+    /// Class `failed`.
+    IntervalNotDegenerate,
+    /// A knot vector of the surface or the discontinuities of the volume in one direction are
+    /// empty (the surface's knot query failed, as a curve-bounded surface's does, its status
+    /// ignored as upstream; its error is the cause), so there are no knot lines or planes to
+    /// classify against. Class `failed`.
+    NoKnots,
+    /// A 2d curve is classified against a volume, which takes a 3d curve.
+    /// [`ErrorKind::Unsupported`].
+    UvCurveAgainstVolume,
+    /// The volume's discontinuities are not aligned with its parameter directions, which the
+    /// classification against its discontinuity planes needs. [`ErrorKind::Unsupported`].
+    UnalignedDiscontinuities,
+    /// A curve handle of the caller's classification or boundary (a source, edge or trim
+    /// curve) names no curve in the geometry given. [`ErrorKind::InvalidInput`].
+    CurveHandleUnresolved,
+    /// An item of the face's trimmed surface cache (a vertex use or an edge use) has no
+    /// handle, or no record among the boundary loops of the face given, so the cache and the
+    /// boundary given are not of the same face. The caller's boundary:
+    /// [`ErrorKind::InvalidInput`].
+    CacheItemNotOnBoundary,
+    /// An edge use of the boundary given has no uv trim curve, and the routine cannot make one
+    /// over the read-only boundary (upstream makes it there; the cached path never needs it).
+    /// [`ErrorKind::Unsupported`].
+    EdgeuseWithoutTrimCurve,
 }
 
 impl IntersectFailure {
@@ -440,7 +469,12 @@ impl IntersectFailure {
             | Self::RepairDidNotSettle { .. }
             | Self::IntervalEndMisplaced
             | Self::PointClassNotInserted
-            | Self::IntervalCountsDiffer { .. } => SM_ERR,
+            | Self::IntervalCountsDiffer { .. }
+            | Self::OnlyInterval
+            | Self::IntervalNotDegenerate
+            | Self::NoKnots
+            | Self::UvCurveAgainstVolume
+            | Self::UnalignedDiscontinuities => SM_ERR,
             Self::Missing(_)
             | Self::CurveCacheNotBuilt
             | Self::FaceWithoutSurface
@@ -457,7 +491,10 @@ impl IntersectFailure {
             | Self::StartPointLost
             | Self::ReversalLeftNoPoints
             | Self::NoSourceCurve
-            | Self::NoEndSector => SM_ERR_NULL_POINTER,
+            | Self::NoEndSector
+            | Self::CurveHandleUnresolved
+            | Self::CacheItemNotOnBoundary
+            | Self::EdgeuseWithoutTrimCurve => SM_ERR_NULL_POINTER,
             Self::OutsideDomain(_) | Self::SeamJumpNotSnapped => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::Inconsistent(_) | Self::TouchesUnpaired { .. } => SM_ERR_ASSERT_FAILURE,
         }
@@ -500,7 +537,9 @@ impl IntersectFailure {
             | Self::NoSourceCurve
             | Self::NoClassFace
             | Self::IntervalIndexPastEnd { .. }
-            | Self::ParameterOutsideRange { .. } => ErrorKind::InvalidInput,
+            | Self::ParameterOutsideRange { .. }
+            | Self::CurveHandleUnresolved
+            | Self::CacheItemNotOnBoundary => ErrorKind::InvalidInput,
             Self::UnsupportedObjectKind
             | Self::CurveNotBSpline
             | Self::SingularPointInside
@@ -511,7 +550,10 @@ impl IntersectFailure {
             | Self::DeltaStepUnsupported
             | Self::TracerHasNoPointValues
             | Self::TracerHasNoPointSolve
-            | Self::TracerHasNoBoundaryDrop => ErrorKind::Unsupported,
+            | Self::TracerHasNoBoundaryDrop
+            | Self::UvCurveAgainstVolume
+            | Self::UnalignedDiscontinuities
+            | Self::EdgeuseWithoutTrimCurve => ErrorKind::Unsupported,
             Self::PointOutsideDomain { .. } => ErrorKind::OutsideDomain,
             Self::NoSurfaceNormal
             | Self::DegenerateTangent
@@ -718,6 +760,26 @@ impl core::fmt::Display for IntersectFailure {
                 f,
                 "the span to the snapped point does not certify after {points} points"
             ),
+            Self::OnlyInterval => {
+                f.write_str("the only interval of the classification is not squeezed out")
+            }
+            Self::IntervalNotDegenerate => f.write_str("the interval to collapse is not degenerate"),
+            Self::NoKnots => f.write_str(
+                "the knot vector is empty, so there are no knot lines to classify against",
+            ),
+            Self::UvCurveAgainstVolume => {
+                f.write_str("a 2D curve cannot be classified against a volume")
+            }
+            Self::UnalignedDiscontinuities => f.write_str(
+                "the volume's discontinuities are not aligned with its parameter directions",
+            ),
+            Self::CurveHandleUnresolved => {
+                f.write_str("the curve handle names no curve in the geometry given")
+            }
+            Self::CacheItemNotOnBoundary => f.write_str(
+                "an item of the face's surface cache is not on the boundary given",
+            ),
+            Self::EdgeuseWithoutTrimCurve => f.write_str("the edge use has no uv trim curve"),
         }
     }
 }
@@ -1181,6 +1243,26 @@ pub(super) mod tests {
                 SM_ERR,
                 K::Failed,
             ),
+            (F::OnlyInterval, SM_ERR, K::Failed),
+            (F::IntervalNotDegenerate, SM_ERR, K::Failed),
+            (F::NoKnots, SM_ERR, K::Failed),
+            (F::UvCurveAgainstVolume, SM_ERR, K::Unsupported),
+            (F::UnalignedDiscontinuities, SM_ERR, K::Unsupported),
+            (
+                F::CurveHandleUnresolved,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                F::CacheItemNotOnBoundary,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                F::EdgeuseWithoutTrimCurve,
+                SM_ERR_NULL_POINTER,
+                K::Unsupported,
+            ),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::intersect(op, failure);
@@ -1243,9 +1325,6 @@ pub(super) mod tests {
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
             ("solidcore/src/intersect/curve_class/p3.rs", 19),
-            ("solidcore/src/intersect/curve_class/p7.rs", 17),
-            ("solidcore/src/intersect/curve_class/p8.rs", 17),
-            ("solidcore/src/intersect/curve_class/p9.rs", 17),
             ("solidcore/src/intersect/topology_solver/p1.rs", 12),
             ("solidcore/src/intersect/topology_solver/p2.rs", 24),
         ];
