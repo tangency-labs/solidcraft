@@ -1,6 +1,6 @@
 //! tangency-labs/solidcraft#17985 (WR-469): a whole body on which `MakeEdgeInFaceWithVU`'s
-//! vertex step still widens a tolerance. `boolean.api_brep`'s `gen0072` of the golden unit
-//! `primitive.api_trim_ops`: a box (3.64 x 3.50 x 13.23) with every edge rounded to r 0.567,
+//! vertex step still widens a tolerance: `gen0072` of the golden unit
+//! `primitive.api_trim_ops`, a box (3.64 x 3.50 x 13.23) with every edge rounded to r 0.567,
 //! trimmed by an arc (r 2.66, 22.9 to 142.6 deg, at z 20.1) projected along about -Z
 //! (`SmApiProjectAndTrim`, keep the side of the reference point).
 //!

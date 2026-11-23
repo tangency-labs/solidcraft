@@ -28,4 +28,12 @@ tests and its name in the `issue_18166` list, and the flag-off run of the #1480 
   `vase_rev.smb_1_f5_op9`, the same input): the split edge ends 2.095 from its vertex, whose tolerance grows from
   2.0952 to 4.1903; `RemoveSuspectSplitAtSeamUVTrimCurves` then finds the seam's ends at that vertex and removes
   its edges' UV trims, so the row's count of UV trims goes 15 -> 2. Status, split counts, surfaces and curves are
-  unchanged. Both bodies fail level 2 (`ValidatePointers`), with or without the step.
+  unchanged. Both bodies fail level 2 (`ValidatePointers`), with or without the step. On the 36 guard rows the step
+  trades level-2 lines: 72 "edge tolerance" and 36 "vertex tolerance too wide" fewer, 72 TrimmingTools U-gap more
+  (the removed trims); every other line is the same (MEASURED).
+- **Below the goldens' resolution:** `intersect.curve_class_p6` `imprint_face_split_f0` and `_f2` also move, but
+  their stored block sums (6e20, the box's huge tolerances) cannot show it: the new vertex 0.059021 past the placed
+  line's end had 0.059022494374947436 (1e-6 over its gap) and now has twice its gap, 0.11804298874989479 (MEASURED
+  with the step forced off and on). `imprint_face_split_new_vertex_tolerance_is_twice_its_gap` in that unit's tests
+  replays both rows and asserts the value from the line's end and the vertex. `boolean.api_brep`, whose 8 rows moved
+  when the flag was first measured, moves in no value now (MEASURED: its full debug digest is the same either way).

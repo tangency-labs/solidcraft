@@ -887,4 +887,39 @@ mod tests {
             assert_eq!(short, 1, "{bounds:?}");
         }
     }
+
+    /// WR-469 (tangency-labs/solidcraft#17985): `imprint_face_split_f0` and `_f2` place the
+    /// line from the origin along (1, 2, 0)/sqrt 5, of length 1, and end its new edge at a
+    /// new vertex 0.059 past the line's end. `MakeEdgeInFaceWithVU`'s step makes that
+    /// vertex's tolerance exactly twice its gap (0.11804298874989479), so the end lies within
+    /// half of it; without the step `RefreshTolerance(FALSE)` left 0.059022494374947436,
+    /// 1e-6 over the gap and under twice it (MEASURED, before the step became the only
+    /// path). The row's two moved values are the new vertex's tolerance: in the sorted
+    /// vertex tolerances (`out[159]`, the only one past 1e-5) and after its point
+    /// (`out[177]`). Replays both rows.
+    #[test]
+    fn imprint_face_split_new_vertex_tolerance_is_twice_its_gap() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        // the placed line's end, as the case builds it
+        let k = Kernel::default();
+        let g = geometry(&k, 5, 1.0, [0, 11, 2, 0]).unwrap();
+        let end = g.curve.evaluate_point(&k, 1.0).unwrap();
+        assert!(end.distance(Vec3::new(1.0, 2.0, 0.0) * (1.0 / 5f64.sqrt())) <= 1e-15);
+        for name in ["imprint_face_split_f0", "imprint_face_split_f2"] {
+            let case = cases.iter().find(|c| c.name == name).unwrap();
+            let out = &Runner.run_rust(case).unwrap().values["out"];
+            assert_eq!(out.len(), 181, "{name}");
+            let vertex = Vec3::new(out[174], out[175], out[176]);
+            let gap = vertex.distance(end);
+            assert!(gap > 0.059 && gap < 0.0591, "{name}: gap {gap:e}");
+            assert!((out[177] - 2.0 * gap).abs() <= 1e-15, "{name}: {} {gap:e}", out[177]);
+            assert_eq!(out[159], out[177], "{name}");
+            let others = out[151..159].iter().chain(&out[160..174]);
+            assert!(others.copied().all(|t| t == 1e-5), "{name}: {out:?}");
+        }
+    }
 }
