@@ -883,11 +883,19 @@ impl FilletSession<'_> {
     /// (`SmTol::GetApproxTol3d`, its solvers' and its merge's), so a face it rolls on that
     /// is a blend by its definition evaluates as its certified net wherever the net's
     /// bound is within that tolerance ([`NetScope::within`]); a step that asks for more
-    /// (a station of a definition) takes S.
+    /// (a station of a definition) takes S. [`Self::do_filleting`], called on its own after
+    /// [`Self::create_corners`] as solidcore-ops does, opens the same scope.
     pub fn do_fillet(&mut self, k: &mut Kernel) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::session::do_fillet");
-        let tolerance = approx_tol3d(k, 0.5 * self.objects.target.tolerance());
+        let tolerance = self.net_tolerance(k);
         NetScope::within_mut(k, tolerance, |k| self.do_fillet_within(k))
+    }
+
+    /// The tolerance the fillet is built to, the target's approximation tolerance
+    /// (`SmTol::GetApproxTol3d`): the [`NetScope`] [`Self::do_fillet`] and
+    /// [`Self::do_filleting`] run in.
+    fn net_tolerance(&self, k: &Kernel) -> f64 {
+        approx_tol3d(k, 0.5 * self.objects.target.tolerance())
     }
 
     /// The body of [`Self::do_fillet`], in its tolerance's [`NetScope`].
@@ -959,14 +967,19 @@ impl FilletSession<'_> {
     /// A round whose radius law has a corner is split there (the fork's
     /// `SplitFilletFacesAtRadiusCorners`, which its `DoFillet` runs), so a session filleted
     /// step by step, its corners set between [`Self::create_corners`] and this, builds the
-    /// law's corners as [`Self::do_fillet`] does.
+    /// law's corners as [`Self::do_fillet`] does. It runs in [`Self::do_fillet`]'s
+    /// [`NetScope`] too, so a session filleted step by step reads a round kept as its
+    /// definition through its certified net as [`Self::do_fillet`] does.
     pub fn do_filleting(
         &mut self,
         k: &mut Kernel,
         error_out: Option<&mut ErrorInfo<FilletObject>>,
     ) -> Result<()> {
-        let (status, split_and_logged) = self.filleting_split_and_logged(k, error_out);
-        status.and(split_and_logged)
+        let tolerance = self.net_tolerance(k);
+        NetScope::within_mut(k, tolerance, |k| {
+            let (status, split_and_logged) = self.filleting_split_and_logged(k, error_out);
+            status.and(split_and_logged)
+        })
     }
 
     /// The filleting's status, then the split at the radius law's corners and the blend

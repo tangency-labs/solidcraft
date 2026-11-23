@@ -17,7 +17,8 @@ use std::sync::Arc;
 use schemars::JsonSchema;
 use serde::Serialize;
 use solidcraft_doc::drawing::Drawing;
-use solidcraft_doc::{DesignLink, Document};
+use solidcraft_doc::{DesignLink, Document, FeatureKind};
+use solidcraft_sketch::LinkSource;
 
 /// The folder relative link paths are kept against: the design's own, once it has a file.
 fn base_dir(path: Option<&str>) -> Option<PathBuf> {
@@ -125,12 +126,82 @@ pub(super) fn rebase(link: &str, from: Option<&str>, to: &str) -> String {
 pub(super) fn located(doc: &mut Document, from: Option<&str>) {
     let whole = mapped(doc, &|path: &str| absolute(&resolve(from, path)).to_string_lossy().into_owned());
     put(doc, whole);
+    // A sketch text's font file is read against the design's folder too (#20502).
+    let fonts = {
+        let mut seen = Cow::Borrowed(&*doc);
+        font_paths_through(&mut seen, |font| whole_font(from, font));
+        match seen {
+            Cow::Owned(changed) => Some(changed),
+            Cow::Borrowed(_) => None,
+        }
+    };
+    if let Some(changed) = fonts {
+        *doc = changed;
+    }
 }
 
 /// `design`'s link paths as its file at `to` keeps them, its paths taken against `from`
 /// ([`map_paths`]).
 pub(super) fn filed(design: &mut Cow<'_, Document>, from: Option<&str>, to: &str) {
     map_paths(design, |path| rebase(path, from, to));
+    let base = base_dir(Some(to));
+    font_paths_through(design, |font| kept_font(base.as_deref(), font));
+}
+
+/// A font file path of a sketch text as the design keeps it in memory: relative to the design's
+/// folder, a path is made whole against it. `None`: a family name, a path that is already whole
+/// or spelled with `~` or `%VAR%`, or a design with no folder yet (the path then stays as typed).
+pub(super) fn whole_font(design: Option<&str>, font: &str) -> Option<String> {
+    let name = font.trim();
+    // A `~` or `%VAR%` spelling stays as typed, even where it does not expand (an unset variable).
+    if name.starts_with('~') || name.contains('%') {
+        return None;
+    }
+    let file = solidcraft_sketch::font_file_path(name)?;
+    if file != Path::new(name) || !file.is_relative() {
+        return None;
+    }
+    Some(absolute(&base_dir(design)?.join(&file)).to_string_lossy().into_owned())
+}
+
+/// A whole font file path as the design's file keeps it: relative to the design's folder `base`
+/// when the font lies inside it, so the folder with its fonts moves as one. A font elsewhere
+/// stays as written.
+fn kept_font(base: Option<&Path>, font: &str) -> Option<String> {
+    let file = Path::new(font.trim());
+    if !file.is_absolute() {
+        return None;
+    }
+    let base = base?;
+    // The path as typed, else where it leads through folder aliases, as `base` is resolved
+    // ([`link_target`]): a font typed through a linked folder is still inside the design's.
+    let target = link_target(file);
+    let inside = file.strip_prefix(base).or_else(|_| target.strip_prefix(base)).ok()?;
+    Some(inside.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/"))
+}
+
+/// Every sketch text's font put through `map` (`None`: kept as it is). The design is copied only
+/// when a font changes.
+fn font_paths_through(design: &mut Cow<'_, Document>, map: impl Fn(&str) -> Option<String>) {
+    let changes = design.features.iter().any(|f| match &f.kind {
+        FeatureKind::Sketch { sketch, .. } => {
+            sketch.links.iter().any(|l| matches!(&l.source, LinkSource::Text { font: Some(font), .. } if map(font).is_some()))
+        }
+        _ => false,
+    });
+    if !changes {
+        return;
+    }
+    for feature in &mut design.to_mut().features {
+        let FeatureKind::Sketch { sketch, .. } = &mut feature.kind else { continue };
+        for link in &mut sketch.links {
+            if let LinkSource::Text { font: Some(font), .. } = &mut link.source
+                && let Some(new) = map(font)
+            {
+                *font = new;
+            }
+        }
+    }
 }
 
 /// Every link path of `design` put through `map`, whatever its kind: its component links and its
