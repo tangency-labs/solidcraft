@@ -1404,6 +1404,8 @@ fn pattern_schemas_and_the_key_check_agree() {
             "path_sketch",
             "sketch",
             "spacing",
+            "start",
+            "start_fraction",
         ],
     );
 }

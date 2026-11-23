@@ -6070,6 +6070,94 @@ fn a_cap_whose_rim_is_one_closed_edge_measures_its_whole_volume() {
     assert_closed_solid(&text, 2, 2.0 * std::f64::consts::PI * 100.0_f64.powi(3) / 3.0);
 }
 
+/// #20514: a thin tube (rings 0.1 mm wide) whose circles are each one closed edge, the inner top
+/// circle's vertex on the far side. The two circles of a ring are told apart by size, and a
+/// coarse polygon of the outer one came out smaller than one of the inner, so a ring was read as
+/// its own hole and its face turned over: the volume was right and the area short by both rings.
+#[test]
+fn a_thin_ring_with_a_far_side_vertex_keeps_both_rings_in_its_area() {
+    thin_ring(15.5, 15.4, false);
+}
+
+/// The same tube 3.1 m across with rings 0.05 mm wide, its inner circles written as two arcs
+/// each: a polygon of a fixed number of chords per edge misses a one-edge circle by four times
+/// what it misses a two-arc circle by, more than the ring's whole area here, so loops must be
+/// compared on areas with the sampling error taken out, not on finer polygons.
+#[test]
+fn a_wide_thin_ring_whose_inner_circles_are_two_arcs_keeps_both_rings_in_its_area() {
+    thin_ring(1550.0, 1549.95, true);
+}
+
+/// A thin tube of height 10 between radii `ro` and `ri`, imported and measured whole. Each outer
+/// circle is one closed edge; each inner circle is one closed edge (the top one's vertex on the far
+/// side), or two arcs when `split_inner`.
+fn thin_ring(ro: f64, ri: f64, split_inner: bool) {
+    let h = 10.0_f64;
+    let mut w = Entities::default();
+    // A circle at height `z` of radius `r` as its edges in order: one closed edge with its vertex at
+    // `x` on the x axis, or two arcs from `x` to `-x` and back.
+    let circle = |w: &mut Entities, z: f64, r: f64, x: f64, split: bool| -> Vec<usize> {
+        let a = w.axis([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let c = w.add(format!("CIRCLE('',#{a},{r:?})"));
+        let v = w.vertex([x, 0.0, z]);
+        if split {
+            let u = w.vertex([-x, 0.0, z]);
+            vec![w.add(format!("EDGE_CURVE('',#{v},#{u},#{c},.T.)")), w.add(format!("EDGE_CURVE('',#{u},#{v},#{c},.T.)"))]
+        } else {
+            vec![w.add(format!("EDGE_CURVE('',#{v},#{v},#{c},.T.)"))]
+        }
+    };
+    let bottom_outer = circle(&mut w, 0.0, ro, ro, false);
+    let top_outer = circle(&mut w, h, ro, ro, false);
+    let bottom_inner = circle(&mut w, 0.0, ri, ri, split_inner);
+    let top_inner = circle(&mut w, h, ri, -ri, split_inner);
+    // A face of several bounds: `(edges in order, orientation, outer)`; a bound used against its
+    // edges' direction runs them backwards.
+    let face = |w: &mut Entities, bounds: &[(&Vec<usize>, bool, bool)], surface: usize, same_sense: bool| {
+        let mut ids = Vec::new();
+        for &(edges, o, outer) in bounds {
+            let ordered: Vec<usize> = if o { edges.clone() } else { edges.iter().rev().copied().collect() };
+            let oes: Vec<String> =
+                ordered.iter().map(|e| format!("#{}", w.add(format!("ORIENTED_EDGE('',*,*,#{e},.{}.)", if o { "T" } else { "F" })))).collect();
+            let l = w.add(format!("EDGE_LOOP('',({}))", oes.join(",")));
+            let kind = if outer { "FACE_OUTER_BOUND" } else { "FACE_BOUND" };
+            ids.push(format!("#{}", w.add(format!("{kind}('',#{l},.T.)"))));
+        }
+        w.add(format!("ADVANCED_FACE('',({}),#{surface},.{}.)", ids.join(","), if same_sense { "T" } else { "F" }))
+    };
+    let plane_top = {
+        let a = w.axis([0.0, 0.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("PLANE('',#{a})"))
+    };
+    let plane_bottom = {
+        let a = w.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("PLANE('',#{a})"))
+    };
+    let cyl_outer = {
+        let a = w.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("CYLINDRICAL_SURFACE('',#{a},{ro:?})"))
+    };
+    let cyl_inner = {
+        let a = w.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("CYLINDRICAL_SURFACE('',#{a},{ri:?})"))
+    };
+    let top = face(&mut w, &[(&top_outer, true, true), (&top_inner, false, false)], plane_top, true);
+    let bottom = face(&mut w, &[(&bottom_outer, false, true), (&bottom_inner, true, false)], plane_bottom, false);
+    let outside = face(&mut w, &[(&bottom_outer, true, false), (&top_outer, false, false)], cyl_outer, true);
+    let inside = face(&mut w, &[(&bottom_inner, false, false), (&top_inner, true, false)], cyl_inner, false);
+    let text = w.solid(&[top, bottom, outside, inside]);
+    let pi = std::f64::consts::PI;
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.bodies[0].closed && imp.bodies[0].refused.is_none(), "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("turned over")), "{:?}", imp.warnings);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.volume, pi * (ro * ro - ri * ri) * h) < 1e-4, "volume {}", m.volume);
+    // The two walls, and a ring at each end.
+    let area = 2.0 * pi * (ro + ri) * h + 2.0 * pi * (ro * ro - ri * ri);
+    assert!(rel(m.area, area) < 1e-4, "area {} vs {area}", m.area);
+}
+
 #[test]
 fn one_solid_mapped_several_times_in_a_part_comes_in_at_each_placement() {
     // A unit cube in its own representation (#60), placed at x = 0, 30 and 60 by three mapped

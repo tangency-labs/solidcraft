@@ -1368,6 +1368,13 @@ pub struct PatternPathParams {
     /// The length along the path from the first copy to the last, instead of `spacing`.
     #[serde(default)]
     pub distance: Option<LengthExpr>,
+    /// The start point: how far along the path the original sits, the copies measured on from
+    /// there. Default 0, the path's start. Give this or `start_fraction`, not both.
+    #[serde(default)]
+    pub start: Option<LengthExpr>,
+    /// The start point as a fraction, 0 to 1, of the path's length, kept as the path changes.
+    #[serde(default)]
+    pub start_fraction: Option<NumberExpr>,
     /// How each copy is turned. Default: identical.
     #[serde(default)]
     pub orientation: Option<PathOrientationParam>,
