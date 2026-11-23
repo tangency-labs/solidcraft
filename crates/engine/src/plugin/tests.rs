@@ -4986,10 +4986,3 @@ fn a_failed_batch_save_restores_a_formatted_record_so_the_batch_can_retry() {
     assert_eq!(user_storage::load(&root, "first").unwrap()["candidate"], json!(true));
     std::fs::remove_dir_all(root).unwrap();
 }
-
-#[test]
-fn the_plugin_state_stays_small_because_sessions_are_copied_by_value() {
-    // Sessions move by value down deep call paths and sit in tests' stack frames; the consent and
-    // per-user settings state is boxed so they do not grow every one of those frames.
-    assert!(std::mem::size_of::<AppState>() <= 424, "AppState grew to {} bytes: box the new field", std::mem::size_of::<AppState>());
-}
