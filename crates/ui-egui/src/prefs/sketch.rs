@@ -449,6 +449,22 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
             Some("prefs.right_click_deletes_constraint_note"),
             &mut app.preferences.right_click_deletes_constraint,
         );
+        check(
+            ui,
+            "show_constraints_on_geometry_hover",
+            "prefs.show_constraints_on_geometry_hover",
+            Some("prefs.show_constraints_on_geometry_hover_note"),
+            &mut app.preferences.show_constraints_on_geometry_hover,
+        );
+        ui.add_enabled_ui(app.preferences.show_constraints_on_geometry_hover, |ui| {
+            check(
+                ui,
+                "only_show_constraints_on_geometry_hover",
+                "prefs.only_show_constraints_on_geometry_hover",
+                Some("prefs.only_show_constraints_on_geometry_hover_note"),
+                &mut app.preferences.only_show_constraints_on_geometry_hover,
+            );
+        });
     });
 }
 

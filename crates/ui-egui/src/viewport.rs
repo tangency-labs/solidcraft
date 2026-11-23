@@ -4295,6 +4295,7 @@ fn pick_cached_with(app: &mut SolveApp, proj: &Proj, pos: Pos2, feedback: Option
     app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).hash(&mut h);
     crate::hole_place::snapping(app).hash(&mut h);
     crate::drag_snap::suppressed().hash(&mut h);
+    crate::tool_modifiers::target_midpoint().hash(&mut h);
     app.session.visibility.hidden_bodies.hash(&mut h);
     app.dialog.as_ref().map(|d| &d.edit_source_bodies).hash(&mut h);
     app.session.visibility.hidden_occurrences.hash(&mut h);
@@ -4510,11 +4511,12 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     let sketches = if through { st.sketches.iter().map(|s| s.feature).collect() } else { visible_sketches(app) };
     let mut hits = Vec::new();
     let (o, d) = proj.ray(pos);
-    // MID is an idle sketch selection target. Tools and dialogs keep their existing picks.
+    // MID is an idle sketch selection target only when Shift is held. Tools and dialogs keep their existing picks.
     // Put it before a materialized helper point so later constraints still refer to the edge.
     if include_midpoints
         && app.tool.is_none()
         && app.dialog.is_none()
+        && (all || crate::tool_modifiers::target_midpoint())
         && let Some(ss) = crate::sketch_view::active_sketch(app).and_then(|sid| st.sketch(sid))
     {
         let mut mids = Near::new(all);
@@ -7514,7 +7516,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             );
             live.contains(crate::tool_modifiers::ModAction::TargetMidpoint)
         } else {
-            false
+            mods.shift
         };
         crate::tool_modifiers::set_target_midpoint(mid);
         let square = app.tool.as_ref().map(|t| t.cmd).is_some_and(|cmd| {
@@ -15049,12 +15051,15 @@ mod tests {
         let proj = projection(&h.app, h.app.viewport.rect.unwrap());
         let at = proj.to_screen(Vec3::new(20.0, 10.0, 0.0)).unwrap();
         let is_mid = |hits: Vec<Hit>| matches!(hits.first(), Some(Hit::SketchMidpoint { id, .. }) if id == "l1");
-        assert!(is_mid(pick_cached(&mut h.app, &proj, at)));
+        assert!(!is_mid(pick_cached(&mut h.app, &proj, at)), "idle MID stays hidden without Shift");
+        crate::tool_modifiers::set_target_midpoint(true);
+        assert!(is_mid(pick_cached(&mut h.app, &proj, at)), "Shift reveals idle MID");
         h.app.tool = crate::tools::Tool::for_command("sketch.line");
         assert!(!is_mid(pick_cached(&mut h.app, &proj, at)), "starting a tool invalidates idle hover");
         h.app.tool = None;
         assert!(is_mid(pick_cached(&mut h.app, &proj, at)), "ending a tool restores MID at the same pixel");
         assert!(!is_mid(pick_for_tool(&h.app, &proj, at)), "a temporarily taken tool still picks its operands");
+        crate::tool_modifiers::set_target_midpoint(false);
     }
 
     #[test]

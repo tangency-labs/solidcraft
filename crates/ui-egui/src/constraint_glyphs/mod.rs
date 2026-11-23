@@ -25,7 +25,7 @@ pub use render::show;
 /// Identifies the Design view window and viewport widget that published [`OVERLAY`] hit regions.
 pub type ViewKey = (egui::ViewportId, egui::Id);
 
-use grouping::{AnchorKey, CurveRelKind};
+use grouping::{AnchorKey, CurveRelKind, HoveredGeom, SelectedGeomKey};
 
 /// Glyph size and spacing (screen pixels) at the default `constraint_glyph_scale` of 1.
 pub(crate) const GLYPH: f32 = 15.0;
@@ -64,7 +64,7 @@ pub fn constraint_glyphs_visible_at_scale(px_per_mm: f32, hide_when_zoomed_out: 
 }
 
 pub(crate) const BADGE_HOVER_DELAY_SECS: f64 = 0.200;
-pub(crate) const VC_HOVER_DELAY_SECS: f64 = 0.400;
+pub(crate) const GEOM_HOVER_DELAY_SECS: f64 = 0.400;
 pub(crate) const HISTORY_FLASH_MS: f64 = 700.0;
 pub(crate) const HISTORY_FADE_MS: f64 = 300.0;
 
@@ -177,6 +177,10 @@ pub(crate) struct OverlayState {
     pub(crate) hit_rects: Vec<egui::Rect>,
     pub(crate) badge_expanded: Option<(AnchorKey, egui::Rect)>,
     pub(crate) badge_hover: HoverDelay<AnchorKey>,
+    pub(crate) geom_hover: HoverDelay<HoveredGeom>,
+    pub(crate) geom_expanded: Vec<(AnchorKey, egui::Rect)>,
+    pub(crate) geom_pinned: Option<(HoveredGeom, AnchorKey, egui::Rect)>,
+    pub(crate) locked_sel: Option<SelectedGeomKey>,
     pub(crate) vc_hover: HoverDelay<usize>,
     pub(crate) vc_boxes: Vec<(usize, egui::Rect)>,
     pub(crate) detach_preview: Option<DetachPreview>,
@@ -199,6 +203,10 @@ impl OverlayState {
             hit_rects: Vec::new(),
             badge_expanded: None,
             badge_hover: HoverDelay::new(),
+            geom_hover: HoverDelay::new(),
+            geom_expanded: Vec::new(),
+            geom_pinned: None,
+            locked_sel: None,
             vc_hover: HoverDelay::new(),
             vc_boxes: Vec::new(),
             detach_preview: None,
@@ -219,6 +227,10 @@ impl OverlayState {
         self.hit_rects.clear();
         self.badge_expanded = None;
         self.badge_hover.clear();
+        self.geom_hover.clear();
+        self.geom_expanded.clear();
+        self.geom_pinned = None;
+        self.locked_sel = None;
         self.vc_hover.clear();
         self.vc_boxes.clear();
         self.detach_preview = None;
