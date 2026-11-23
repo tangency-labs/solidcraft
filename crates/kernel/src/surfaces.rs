@@ -784,7 +784,13 @@ pub(crate) fn stitch_no_worse(bodies: &[&Body], tol: f64, exempt: &[u32]) -> Res
 /// ([`crate::offset_backend::thicken`]).
 pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
     body.require_brep("thicken")?;
-    // SMLib's import gives each face its record's side in its surface, which SMLib thickens along.
+    // SMLib's import gives each face its record's side in its surface, which SMLib thickens along;
+    // its thicken grows a sheet one way, so a sheet whose faces face apart is refused by name.
+    if let Some([a, b]) = solidcore_ops::record_check::faces_facing_apart(body.record()) {
+        return Err(invalid(format!(
+            "not supported yet: thickening a sheet whose faces face different ways (faces {a} and {b}): turn them to one side with Reverse Normal first"
+        )));
+    }
     imp::thicken(body, thickness, symmetric)
 }
 
@@ -2046,10 +2052,10 @@ mod tests {
 
     /// An L of two walls (30 along x at y = 0, then 20 along y at x = 30, 20 up z) with only the
     /// first turned over: each face keeps its own side, the first's −y now +y and the second's
-    /// +x as it was, and trimmed at x = 10 the half kept faces so too (#13640). Thickened by 2
-    /// each face grows to its own side, the slabs x 0..30, y 0..2 and x 30..32, y 0..20,
-    /// 1200 + 800 = 2000; where SMLib can't make that, it says so, never giving the slabs of
-    /// one side.
+    /// +x as it was, and trimmed at x = 10 the half kept faces so too (#13640). Its faces face
+    /// apart, so Thicken, which grows a sheet one way, refuses it by name (on main it gave the
+    /// slabs of the faces' natural sides, the turn ignored). Both turned, the walls thicken into
+    /// the corner's inside, (30·2 + 20·2 − 2·2)·20 = 1920.
     #[test]
     fn a_sheet_turned_in_part_keeps_each_faces_side() {
         let l =
@@ -2070,10 +2076,14 @@ mod tests {
         let cut = crate::SplitTool::Plane(Plane::new(Vec3::new(10.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap());
         let half = sides(&trim(&m, &cut, Vec3::new(20.0, 0.0, 5.0)).unwrap());
         assert!(half.len() == 2 && near(half[0].1, Vec3::Y) && near(half[1].1, Vec3::X), "{half:?}");
-        match thicken(&m, 2.0, false) {
-            Ok(b) => assert!(rel(measure(&b).unwrap().volume, 2000.0) < 1e-9, "{}", measure(&b).unwrap().volume),
-            Err(e) => assert!(e.to_string().contains("thicken"), "{e}"),
-        }
+        let e = thicken(&m, 2.0, false).unwrap_err().to_string();
+        assert_eq!(
+            e,
+            "invalid input: not supported yet: thickening a sheet whose faces face different ways (faces 0 and 1): turn them to one side with Reverse Normal first"
+        );
+        // turned to one side, it thickens: both walls turned, into the corner's inside
+        let both = reverse_faces(&s, &[]).unwrap();
+        assert!(rel(measure(&thicken(&both, 2.0, false).unwrap()).unwrap().volume, 1920.0) < 1e-9);
     }
 
     /// A wall (the line y = 0 from x = 0 to 10, swept 10 up z) offset by 2 moves to y = ±2 along
