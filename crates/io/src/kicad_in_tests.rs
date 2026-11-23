@@ -2201,3 +2201,53 @@ fn a_hole_left_out_is_left_out_of_every_layer() {
     let pads = copper_area(&imported, "Copper F.Cu pads", 0.035 + 0.005);
     assert!((pads - std::f64::consts::PI).abs() < 0.02, "pads: {pads}");
 }
+
+#[test]
+fn plated_hole_walls_take_the_pads_colour() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "Connector:Pin" (layer "F.Cu") (at 5 5)
+        (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask")))
+      (footprint "Connector:Slot" (layer "F.Cu") (at 10 5)
+        (pad "1" thru_hole oval (at 0 0 90) (size 3 1.5) (drill oval 2 0.8) (layers "*.Cu" "*.Mask")))
+      (footprint "Connector:Peg" (layer "F.Cu") (at 15 5)
+        (pad "" np_thru_hole circle (at 0 0) (size 1.5 1.5) (drill 1.5) (layers "*.Cu" "*.Mask"))))"#;
+    let board = parse_kicad_board(source.as_bytes(), "plated.kicad_pcb").unwrap();
+    assert!(board_bodies(&board, 1.6, false).unwrap().0.iter().all(|body| body.paint().is_none()), "no copper, no plating");
+    let bodies = board_bodies(&board, 1.6, true).unwrap().0;
+    let [body] = bodies.as_slice() else { panic!("one board body") };
+    let paint = body.paint().expect("the plated walls are painted");
+    let painted: HashSet<usize> = paint.faces.iter().map(|f| f.face).collect();
+    assert!(paint.faces.iter().all(|f| f.color == PAD_COLOR), "{paint:?}");
+    // Each side face by the profile segment it was extruded from: the outline, the pin's wall, the
+    // slot's wall or the peg's.
+    let mut walls = [0usize; 3];
+    for (face, source) in body.face_sources().expect("an extrusion knows its faces").iter().enumerate() {
+        let wall = match source {
+            Some(solidcraft_kernel::FaceSource::ExtrudeSide { segment, .. }) => {
+                let m = segment.mid();
+                ((m.y + 5.0).abs() < 1.6 && m.x > 1.0 && m.x < 19.0).then_some(if m.x < 7.5 {
+                    0
+                } else if m.x < 12.5 {
+                    1
+                } else {
+                    2
+                })
+            }
+            _ => None,
+        };
+        let plated = matches!(wall, Some(0 | 1));
+        assert_eq!(painted.contains(&face), plated, "face {face} ({wall:?}) {source:?}");
+        if let Some(wall) = wall {
+            walls[wall] += 1;
+        }
+    }
+    assert!(walls.iter().all(|n| *n > 0), "every hole has a wall: {walls:?}");
+    // The colours go into the board's STEP file, which is how the design gets them.
+    let options = KicadOptions { holes: KicadHoles::All, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let step = read_kicad(source.as_bytes(), "plated.kicad_pcb", &options, &mut load).unwrap().board_step.expect("a solid board");
+    let imported = solidcraft_kernel::step_import_shared(&step).unwrap();
+    let faces: usize = imported.bodies.iter().filter_map(|b| b.body.paint()).map(|p| p.faces.len()).sum();
+    assert_eq!(faces, painted.len());
+}

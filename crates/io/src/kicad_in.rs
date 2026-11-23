@@ -369,6 +369,9 @@ pub struct KicadDrill {
     /// The direction of a slot's width in the board frame, in radians anticlockwise from +X (its
     /// pad's rotation on the board).
     pub angle: f64,
+    /// A plated hole, with copper on its wall: a via's, or a `thru_hole` pad's. KiCad's drill files
+    /// put these in the plated (PTH) file and an `np_thru_hole` pad's in the unplated (NPTH) one.
+    pub plated: bool,
 }
 
 /// A KiCad board and the reusable component placements it references.
@@ -927,12 +930,12 @@ fn pad_drill(transform: &Mat, pad: &KicadPad) -> Option<KicadDrill> {
     let [ux, uy] = pad_axis(pad);
     let ahead = apply2(transform, pad.at[0] + ux, pad.at[1] + uy);
     let angle = solidcraft_kernel::planar::direction_angle(center, ahead);
-    Some(KicadDrill { center, size: [drill[0].abs(), drill[1].abs()], angle })
+    Some(KicadDrill { center, size: [drill[0].abs(), drill[1].abs()], angle, plated: pad.kind == "thru_hole" })
 }
 
 /// A via's drilled hole on the board, unless it has none.
 fn via_drill(via: &KicadVia) -> Option<KicadDrill> {
-    (via.drill > 0.0).then(|| KicadDrill { center: [via.at[0], -via.at[1]], size: [via.drill, via.drill], angle: 0.0 })
+    (via.drill > 0.0).then(|| KicadDrill { center: [via.at[0], -via.at[1]], size: [via.drill, via.drill], angle: 0.0, plated: true })
 }
 
 /// Leave out the drilled holes `holes` does not keep. The substrate stays whole there and the copper
@@ -1500,9 +1503,11 @@ fn kicad_board_mesh_noted(board: &KicadBoard, thickness: f64, notes: &mut Vec<St
     })
 }
 
-/// The board substrate as exact solids, exported as a STEP file: the engine adds it as an Import
-/// feature, so its faces and edges can be picked and used like any other body.
-fn board_solid(board: &KicadBoard, thickness: f64) -> Result<(String, bool, Vec<String>)> {
+/// The board substrate as exact solids, its outline with cutouts and drilled holes extruded to
+/// `thickness`, with whether the drilled holes were lost and the notes on the half-holes. With
+/// `plating`, the wall of every plated hole takes the colour of the pads' plating, as a face colour:
+/// the board's own faces, so it costs no geometry.
+fn board_bodies(board: &KicadBoard, thickness: f64, plating: bool) -> Result<(Vec<solidcraft_kernel::Body>, bool, Vec<String>)> {
     let loops = outline_loops(board)?;
     let mut notes = Vec::new();
     let regions = regions_from_loops_noted(loops.clone(), Some(&board.drills), &mut notes);
@@ -1518,6 +1523,53 @@ fn board_solid(board: &KicadBoard, thickness: f64) -> Result<(String, bool, Vec<
     if bodies.is_empty() {
         return Err(IoError::Invalid("the board has no closed outline to build".into()));
     }
+    let plated: Vec<&KicadDrill> = board.drills.iter().filter(|drill| drill.plated).collect();
+    if !plating || plated.is_empty() {
+        return Ok((bodies, holes_lost, notes));
+    }
+    let bodies = bodies
+        .into_iter()
+        .map(|body| {
+            let faces: Vec<solidcraft_kernel::FacePaint> = body
+                .face_sources()
+                .unwrap_or_default()
+                .iter()
+                .enumerate()
+                .filter(|(_, source)| match source {
+                    Some(solidcraft_kernel::FaceSource::ExtrudeSide { segment, .. }) => {
+                        plated.iter().any(|drill| on_drill_wall(drill, segment.mid()))
+                    }
+                    _ => false,
+                })
+                .map(|(face, _)| solidcraft_kernel::FacePaint { face, color: PAD_COLOR, opacity: 1.0, name: None })
+                .collect();
+            if faces.is_empty() { body } else { body.with_paint(Some(solidcraft_kernel::Paint { opacity: 1.0, faces, name: None })) }
+        })
+        .collect();
+    Ok((bodies, holes_lost, notes))
+}
+
+/// Does `p` lie on a drill's wall? A drill is a stadium, a round one with no straight part: its
+/// wall is half its narrow size from the line between its two end centres. A slot's ends are drawn
+/// as chords (see [`slot_loop`]), whose middles fall a little inside that.
+fn on_drill_wall(drill: &KicadDrill, p: Vec2) -> bool {
+    let (wide, narrow) = (drill.size[0].max(drill.size[1]), drill.size[0].min(drill.size[1]));
+    let r = narrow * 0.5;
+    let half = (wide - narrow) * 0.5;
+    // The long axis: along the slot's angle when it is wider than tall.
+    let (s, c) = drill.angle.sin_cos();
+    let axis = if drill.size[0] >= drill.size[1] { Vec2::new(c, s) } else { Vec2::new(-s, c) };
+    let centre = Vec2::new(drill.center[0], drill.center[1]);
+    let along = ((p - centre).dot(axis)).clamp(-half, half);
+    let distance = p.dist(centre + axis * along);
+    let slack = (r * 0.006).max(1e-6);
+    distance <= r + slack && distance >= r - slack
+}
+
+/// The board substrate as exact solids, exported as a STEP file: the engine adds it as an Import
+/// feature, so its faces and edges can be picked and used like any other body.
+fn board_solid(board: &KicadBoard, thickness: f64, plating: bool) -> Result<(String, bool, Vec<String>)> {
+    let (bodies, holes_lost, notes) = board_bodies(board, thickness, plating)?;
     let exports: Vec<solidcraft_kernel::ExportBody<'_>> = bodies
         .iter()
         .enumerate()
@@ -1564,7 +1616,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
     let mut plan = crate::MeshPlan::default();
     let mut board_step = None;
     if options.representation == KicadRepresentation::Brep {
-        match board_solid(&board, thickness) {
+        match board_solid(&board, thickness, options.copper != KicadCopper::None) {
             Ok((step, holes_lost, notes)) => {
                 warnings.extend(notes);
                 if holes_lost {
