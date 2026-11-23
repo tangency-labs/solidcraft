@@ -111,6 +111,9 @@ pub trait WindowExtMacOS {
     /// Sets whether or not the window has shadow.
     fn set_has_shadow(&self, has_shadow: bool);
 
+    /// SolidCraft: hides or shows the close, minimise and zoom buttons of an open window.
+    fn set_titlebar_buttons_hidden(&self, hidden: bool);
+
     /// Group windows together by using the same tabbing identifier.
     ///
     /// <https://developer.apple.com/documentation/appkit/nswindow/1644704-tabbingidentifier>
@@ -191,6 +194,11 @@ impl WindowExtMacOS for Window {
     #[inline]
     fn set_has_shadow(&self, has_shadow: bool) {
         self.window.maybe_queue_on_main(move |w| w.set_has_shadow(has_shadow))
+    }
+
+    #[inline]
+    fn set_titlebar_buttons_hidden(&self, hidden: bool) {
+        self.window.maybe_queue_on_main(move |w| w.set_titlebar_buttons_hidden(hidden))
     }
 
     #[inline]

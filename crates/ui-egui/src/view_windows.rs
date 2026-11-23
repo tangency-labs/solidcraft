@@ -85,9 +85,8 @@ struct Host {
     sketch_return_tab: Option<String>,
     ready: bool,
     startup: Option<f64>,
-    /// Whether the OS window was built with the app's own title bar (no OS decorations). A change
-    /// makes the native integration (eframe) recreate the window.
-    os_custom: Option<bool>,
+    /// macOS: the traffic lights are hidden with a collapsed edge top bar.
+    buttons_hidden: bool,
 }
 
 struct Display {
@@ -1294,16 +1293,16 @@ fn window_menu(app: &mut SolveApp, ui: &mut Ui, id: WindowId, anchor: egui::Resp
     }
 }
 
-/// Whether a pop-out window draws its own title bar: always, but on macOS only with the top bar
-/// "At top edge" (the other mode keeps the OS title bar and its traffic lights).
-pub(crate) fn os_title_bar_is_custom(macos: bool, top_bar: TopBar) -> bool {
-    !macos || top_bar == TopBar::Edge
+/// Whether a pop-out window draws its own title bar and caption buttons. macOS never does: the
+/// window keeps the OS frame (round corners, shadow) and traffic lights in both top bar modes, so
+/// choosing "At top edge" changes nothing about the OS window and it is never recreated.
+pub(crate) fn os_title_bar_is_custom(macos: bool) -> bool {
+    !macos
 }
 
-/// A window that was shown with one title bar style and now needs the other is recreated by the
-/// native integration, so it must be shown again like a new window.
-pub(crate) fn restarts_window(ready: bool, built_custom: Option<bool>, custom: bool) -> bool {
-    ready && built_custom.is_some_and(|built| built != custom)
+/// macOS: the traffic lights go with an "At top edge" bar that has slid away completely.
+pub(crate) fn traffic_lights_hidden(macos: bool, top_bar: TopBar, bar_fraction: f32) -> bool {
+    macos && top_bar == TopBar::Edge && bar_fraction <= 0.0
 }
 
 fn window_rename_id(ctx: &Context) -> egui::Id {
@@ -1668,7 +1667,7 @@ impl Host {
             sketch_return_tab: None,
             ready: false,
             startup: None,
-            os_custom: None,
+            buttons_hidden: false,
         }
     }
 
@@ -1840,7 +1839,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
         let panel_workspace = crate::panel_runtime::panel_workspace(app);
         let Some(mut window) = app.docs.views.take_window(id) else { continue };
         let os_id = viewport_id(tab, id);
-        let custom = os_title_bar_is_custom(cfg!(target_os = "macos"), window.options.top_bar);
+        let custom = os_title_bar_is_custom(cfg!(target_os = "macos"));
         let level = if window.options.keep_on_top { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
         let mut builder = crate::window_chrome::viewport("SolidCraft", solidcraft_engine::io::APP_ID, custom)
             .with_min_inner_size([640.0, 420.0])
@@ -1851,16 +1850,6 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
         // The shared builder carries the main window's size. Only ask for a child size at startup,
         // so subsequent frames leave user resizing alone.
         builder.inner_size = None;
-        if restarts_window(host.ready, host.os_custom, custom) {
-            // The OS window is about to be recreated with the other title bar style (macOS: "At top
-            // edge" hides the traffic lights). A recreated window starts hidden and unplaced, like a
-            // new one, and its icon textures are uploaded again: the pass that was meant to upload
-            // them can belong to the window that was just closed.
-            host.ready = false;
-            host.startup = None;
-            crate::resume_ui::after_long_pause(ctx);
-        }
-        host.os_custom = Some(custom);
         if !host.ready {
             builder = builder.with_visible(false);
             if let Some(p) = &window.placement {
@@ -1998,6 +1987,11 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             let had_dialog = app.dialog.is_some();
             host.swap_ribbon_popup(ui.ctx());
             let chrome = host.chrome(app, ui.ctx(), ui.available_rect_before_wrap());
+            let hide_lights = traffic_lights_hidden(cfg!(target_os = "macos"), options.top_bar, if chrome.edge { chrome.bar_fraction } else { 1.0 });
+            if hide_lights != host.buttons_hidden {
+                host.buttons_hidden = hide_lights;
+                ui.ctx().send_viewport_cmd(ViewportCommand::TitlebarButtonsHidden(hide_lights));
+            }
             host.panels.load(&window.panel_layout);
             host.panels.swap(app);
             app.view_windows.painting_panels = true;

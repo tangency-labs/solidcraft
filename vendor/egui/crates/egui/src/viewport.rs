@@ -1155,6 +1155,9 @@ pub enum ViewportCommand {
     /// with the title bar, close buttons, resize handles, etc.
     Decorations(bool),
 
+    /// SolidCraft, macOS only: hide or show the traffic lights of an open window (no effect elsewhere).
+    TitlebarButtonsHidden(bool),
+
     /// Set window to be always-on-top, always-on-bottom, or neither.
     WindowLevel(WindowLevel),
 

@@ -1808,6 +1808,21 @@ impl WindowExtMacOS for WindowDelegate {
         self.window().setHasShadow(has_shadow)
     }
 
+    // SolidCraft: the buttons `with_titlebar_buttons_hidden` hides at creation, at any time.
+    fn set_titlebar_buttons_hidden(&self, hidden: bool) {
+        for titlebar_button in &[
+            #[allow(deprecated)]
+            NSWindowFullScreenButton,
+            NSWindowButton::NSWindowMiniaturizeButton,
+            NSWindowButton::NSWindowCloseButton,
+            NSWindowButton::NSWindowZoomButton,
+        ] {
+            if let Some(button) = self.window().standardWindowButton(*titlebar_button) {
+                button.setHidden(hidden);
+            }
+        }
+    }
+
     #[inline]
     fn set_tabbing_identifier(&self, identifier: &str) {
         self.window().setTabbingIdentifier(&NSString::from_str(identifier))

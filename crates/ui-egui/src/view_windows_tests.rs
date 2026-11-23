@@ -322,18 +322,17 @@ fn find_in_timeline_from_the_popped_out_browser_shows_the_history_tab() {
     assert!(history_shown(&h), "Find in Timeline brings the History tab to the front");
 
 #[test]
-fn a_pop_out_window_on_macos_swaps_its_title_bar_style_and_is_shown_again_like_a_new_window() {
-    use crate::view_windows::{os_title_bar_is_custom, restarts_window};
+fn a_macos_pop_out_window_keeps_its_native_frame_in_both_top_bar_modes_and_hides_the_traffic_lights_with_the_bar() {
+    use crate::view_windows::{os_title_bar_is_custom, traffic_lights_hidden};
     use solidcraft_views::TopBar;
-    assert!(!os_title_bar_is_custom(true, TopBar::Always), "macOS keeps its title bar and traffic lights");
-    assert!(os_title_bar_is_custom(true, TopBar::Edge), "At top edge draws the app's own bar");
-    assert!(os_title_bar_is_custom(false, TopBar::Always) && os_title_bar_is_custom(false, TopBar::Edge));
-    // The OS recreates the window when the style changes: it must start hidden and be placed again.
-    assert!(restarts_window(true, Some(false), true));
-    assert!(restarts_window(true, Some(true), false));
-    assert!(!restarts_window(true, Some(true), true), "same style: nothing to redo");
-    assert!(!restarts_window(true, None, true), "a first frame has no earlier window");
-    assert!(!restarts_window(false, Some(false), true), "a window not yet shown is built as asked");
+    // The OS window never changes with the mode, so it is never recreated (round corners, traffic lights).
+    assert!(!os_title_bar_is_custom(true), "macOS keeps its frame and traffic lights");
+    assert!(os_title_bar_is_custom(false), "other systems draw their own caption buttons");
+    // The traffic lights follow an At top edge bar that has slid away; nothing else hides them.
+    assert!(traffic_lights_hidden(true, TopBar::Edge, 0.0));
+    assert!(!traffic_lights_hidden(true, TopBar::Edge, 0.01), "visible as soon as the bar starts to appear");
+    assert!(!traffic_lights_hidden(true, TopBar::Always, 0.0));
+    assert!(!traffic_lights_hidden(false, TopBar::Edge, 0.0));
 }
 
 #[test]

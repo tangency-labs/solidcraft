@@ -105,6 +105,11 @@ SolidCraft changes to egui and eframe:
   before it painted, the texture uploads its last pass took are handed to the root window instead
   of being dropped with it. Any window's pass takes the shared queue of uploads, so a lost one
   left a texture (an icon the cache already counted as uploaded) blank in every window.
+- `crates/egui/src/viewport.rs`, `crates/egui-winit/src/lib.rs`, `winit/src/platform/macos.rs`,
+  `winit/src/platform_impl/macos/window_delegate.rs`: `ViewportCommand::TitlebarButtonsHidden(bool)`
+  hides or shows the traffic lights of an open macOS window (winit's `with_titlebar_buttons_hidden`
+  only worked at creation, and changing it by recreating the window loses the native frame). No
+  effect on other systems.
 
 - `crates/egui/src/data/input/pointer_button.rs`, `crates/egui-winit/src/lib.rs`,
   `crates/eframe/src/web/input.rs`: mice with more than five buttons. `PointerButton` has
