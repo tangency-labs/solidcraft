@@ -423,7 +423,7 @@ fn a_circle_goes_back_as_its_label_on_its_form() {
     let Record::RationalSpline { knots, homogeneous } = quarter_form([1.0, 2.0, 1e-9], 2.0) else {
         unreachable!()
     };
-    let moved = spline(&knots, &homogeneous, 3, OP).unwrap();
+    let moved = spline(&knots, &homogeneous, 3, true, OP).unwrap();
     let opts = EllipseOptions {
         dim: 3,
         nurb: Some(&moved),
@@ -562,7 +562,7 @@ fn a_form_that_turns_back_between_samples_is_refused() {
     let Record::RationalSpline { knots, homogeneous } = &form else {
         unreachable!()
     };
-    let nurbs = spline(knots, homogeneous, 3, OP).unwrap();
+    let nurbs = spline(knots, homogeneous, 3, true, OP).unwrap();
     let (o, x, y) = axes(&frame([0.0, 0.0, 0.0])).unwrap();
     assert!(curve_on_quadrics(&nurbs, &quadrics(o, x, y, 1.0, 1.0, true)).unwrap());
     let err = conic_on_form(&k, &unit_circle(), &form).unwrap_err();
@@ -640,4 +640,91 @@ fn an_unevenly_parameterised_closed_form_is_the_whole_turn() {
     };
     let d = e.step_interval();
     assert_eq!(d.max() - d.min(), 360.0, "{d:?}");
+}
+
+/// Polynomial splines, polylines and UV trims build non-rational curves (`w = NOW`, matching
+/// `BSplineCurve::create_canonical`) whether clamped or unclamped, so `certified_hausdorff`
+/// accepts them; rational splines keep their weights (#20422).
+#[test]
+fn a_polynomial_spline_and_polyline_are_non_rational() {
+    use crate::curve::curve::CurveKind;
+    use crate::nurbs::crv_deviation::certified_hausdorff;
+
+    let k = k();
+    let assert_poly_3d = |record: Record, interval: [f64; 2]| {
+        let e = from_parameters(&k, &record, interval).unwrap();
+        let CurveKind::BSpline(b) = e.curve.kind() else {
+            panic!("not a B-spline")
+        };
+        let nurb = b.gw_nurb().unwrap();
+        assert!(nurb.cpts().iter().all(|p| p.w == NOW), "{:?}", nurb.cpts());
+        let bound = certified_hausdorff(nurb, interval, nurb, interval).unwrap();
+        assert!(bound <= 1e-12, "self-deviation {bound}");
+    };
+    assert_poly_3d(
+        Record::Spline {
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![[0.0, 0.0, 0.0], [0.0, 0.0, 1.2]],
+        },
+        [0.0, 1.0],
+    );
+    assert_poly_3d(
+        Record::Spline {
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            points: vec![[0.0, 0.0, 0.0], [1.0, 2.0, 0.0], [2.0, 0.0, 1.0]],
+        },
+        [0.0, 1.0],
+    );
+    assert_poly_3d(
+        Record::Spline {
+            knots: vec![-1.0, 0.0, 1.0, 2.0, 3.0, 4.0],
+            points: vec![[0.0, 0.0, 0.0], [1.0, 2.0, 0.0], [2.0, 0.0, 1.0]],
+        },
+        [1.0, 2.0],
+    );
+    assert_poly_3d(
+        Record::Polyline {
+            points: vec![[0.0; 3], [1.0, 0.0, 0.0], [1.0, 2.0, 0.0]],
+        },
+        [0.0, 2.0],
+    );
+
+    let poly_trim = uv_trim(
+        &Record2::Spline {
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![[0.0, 0.0], [2.0, 4.0]],
+        },
+        &Extent1d::from_raw(0.0, 1.0),
+        [1.0, 1.0],
+    )
+    .unwrap();
+    let CurveKind::BSpline(b) = poly_trim.kind() else {
+        panic!("not a B-spline")
+    };
+    assert!(b
+        .gw_nurb()
+        .unwrap()
+        .cpts()
+        .iter()
+        .all(|p| p.w == NOW && p.z == NOZ));
+
+    let w = core::f64::consts::FRAC_1_SQRT_2;
+    let rat_trim = uv_trim(
+        &Record2::RationalSpline {
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            homogeneous: vec![[1.0, 0.0, 1.0], [w, w, w], [0.0, 1.0, 1.0]],
+        },
+        &Extent1d::from_raw(0.0, 1.0),
+        [1.0, 1.0],
+    )
+    .unwrap();
+    let CurveKind::BSpline(b) = rat_trim.kind() else {
+        panic!("not a B-spline")
+    };
+    assert!(b
+        .gw_nurb()
+        .unwrap()
+        .cpts()
+        .iter()
+        .all(|p| p.w != NOW && p.z == NOZ));
 }

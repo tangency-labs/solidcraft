@@ -48,7 +48,7 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::expansion as exact;
 use crate::kernel::Kernel;
 use crate::mass::enclosure::VolumeSign;
-use crate::math::Vec3;
+use crate::math::{Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_surface::p1::{BSplineSurface, SurfParamType};
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::{CPoint, NOW};
@@ -627,6 +627,21 @@ fn local_operation_on(
         new_list.push(surface);
     }
 
+    // (not upstream, #19904) a band between two faces that the move closes is refused
+    // by name before anything is built: its edges would pass over each other and turn it
+    // inside out, which only the final check would find, without saying which face or how far
+    if let Some((face, beside, largest)) = closing_band(b, &all_faces, &new_list)? {
+        return Err(Failure::new(
+            OP,
+            OffsetFailure::FaceCloses {
+                face,
+                beside,
+                largest,
+            },
+        )
+        .into_error());
+    }
+
     // the Brep's bounding sphere gives the executive an offset distance it does not use
     let bbox = calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
     let radius = bbox.sphere_bound().radius;
@@ -772,6 +787,237 @@ fn refuse_unsound(k: &mut Kernel, b: &Brep, input: &validation::Standing) -> Res
         return Ok(());
     };
     Err(Failure::new(OP, OffsetFailure::Unsound { what }).into_error())
+}
+
+/// A plane, cylinder or cone about one axis cut by a half-plane through the axis: the line
+/// `n . (r, z) = c` of its meridian, `n` a unit vector, `r` the distance from the axis
+/// (signed: a cone's line runs on through the apex onto its other nappe, at negative `r`)
+/// and `z` the height along it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Meridian {
+    n: (f64, f64),
+    c: f64,
+}
+
+impl Meridian {
+    /// The meridian of `s` about the axis through `origin` along the unit `axis`: a plane
+    /// square to the axis is `z = h`; a cylinder or cone about it (its placement's z axis
+    /// along the axis either way, its origin on the axis) is `r - σ tanθ z = R0 - σ tanθ z0`,
+    /// from the cone's law `R(v) = R0 + tanθ v` with `v = σ (z - z0)` the height along its
+    /// own axis. `None` for any other surface, or one off the axis by more than `tolerance`
+    /// in position or by an angle whose sine is past `EFF_ZERO`.
+    fn of(s: &Surface, origin: Vec3, axis: Vec3, tolerance: f64) -> Option<Self> {
+        let height = |p: Vec3| (p - origin).dot(axis);
+        let along = |z: Vec3| {
+            let sine = z.cross(axis).length();
+            (sine <= EFF_ZERO).then(|| z.dot(axis).signum())
+        };
+        let on_axis = |p: Vec3| {
+            let d = p - origin;
+            (d - axis * d.dot(axis)).length() <= tolerance
+        };
+        let line = |a: f64, b: f64, c: f64| {
+            let length = a.hypot(b);
+            (length > 0.0 && length.is_finite() && c.is_finite()).then(|| Self {
+                n: (a / length, b / length),
+                c: c / length,
+            })
+        };
+        match AnalyticSupport::of(s)? {
+            AnalyticSupport::Plane { placement, .. } => {
+                along(placement.z_axis())?;
+                line(0.0, 1.0, height(placement.origin()))
+            }
+            AnalyticSupport::Cylinder { placement, radius } => {
+                along(placement.z_axis())?;
+                on_axis(placement.origin()).then_some(())?;
+                line(1.0, 0.0, radius)
+            }
+            AnalyticSupport::Cone {
+                placement,
+                base_radius,
+                semi_angle_deg,
+            } => {
+                let sigma = along(placement.z_axis())?;
+                on_axis(placement.origin()).then_some(())?;
+                let slope = sigma * semi_angle_deg.to_radians().tan();
+                line(
+                    1.0,
+                    -slope,
+                    base_radius - slope * height(placement.origin()),
+                )
+            }
+            _ => None,
+        }
+    }
+
+    /// Where two meridians cross, `None` where they are parallel.
+    fn meet(self, other: Self) -> Option<(f64, f64)> {
+        let det = self.n.0 * other.n.1 - self.n.1 * other.n.0;
+        if det.abs() <= EFF_ZERO {
+            return None;
+        }
+        Some((
+            (self.c * other.n.1 - other.c * self.n.1) / det,
+            (self.n.0 * other.c - other.n.0 * self.c) / det,
+        ))
+    }
+
+    /// `moved` turned to run the same way as `self`, and how far it lies from it along
+    /// `self.n`: `None` where the two are not parallel.
+    fn shift(self, moved: Self) -> Option<(Self, f64)> {
+        let cross = self.n.0 * moved.n.1 - self.n.1 * moved.n.0;
+        if cross.abs() > EFF_ZERO {
+            return None;
+        }
+        let moved = if self.n.0 * moved.n.0 + self.n.1 * moved.n.1 < 0.0 {
+            Self {
+                n: (-moved.n.0, -moved.n.1),
+                c: -moved.c,
+            }
+        } else {
+            moved
+        };
+        Some((moved, moved.c - self.c))
+    }
+}
+
+/// (not upstream, #19904) The band the local operation would close: a face whose edges but its
+/// seams each have one other face, and those are two faces (a ring between a cone and a
+/// cylinder, or a cone between a ring and a hole, each side one closed edge or several arcs),
+/// where the three surfaces are planes, cylinders and cones about one axis. Each side lies on
+/// the circle where the face's surface meets the one across it: the point where their
+/// meridians cross ([`Meridian`]), before the move
+/// and after it (`surfaces`, each face's new surface or a copy of its own, in the order of
+/// `faces`). Each moved meridian must run parallel to its old one, as an offset's does (a
+/// draft's turns, and is not decided here), so moving the faces by a fraction `t` of their
+/// move moves each meridian by `t` of its shift and the points where they cross by `t` of
+/// theirs: the band's length along its meridian, `s0` before and `s1` after, is
+/// `s0 + t (s1 - s0)`. Where it goes from more than the body's tolerance to less than its
+/// negative, the band's two edges pass over each other at `t* = s0 / (s0 - s1)` and the face
+/// would come out inside out; `largest` is `t*` times the move, where every moved face of the
+/// three moves by one distance. Of several, the one that closes first. A band that stands, or
+/// closes, within the tolerance of the axis or past it (onto a cone's other nappe) is not
+/// decided here, nor is anything else: the operation goes on as before. Where the move ends
+/// does not matter: a large move carries a crossing past the axis after the band has closed
+/// off it, and that band closes all the same.
+///
+/// A countersink whose cone (r 3.99 at z = 1.5 to r 2 at z = 3.5, semi-angle θ) leaves a
+/// ring 0.01 wide at z = 1.5 round a well of radius 4: the cone moved 2 into the material
+/// meets the ring's plane at r = 3.99 + 2 / cos θ = 6.81, past the well, and the ring's
+/// inner edge runs out at `1 / cos θ` of the move, so the ring closes at 0.01 cos θ = 0.00709.
+///
+/// # Errors
+///
+/// Those of the topology queries.
+fn closing_band(
+    b: &Brep,
+    faces: &[FaceId],
+    surfaces: &[Surface],
+) -> Result<Option<(FaceId, [FaceId; 2], f64)>> {
+    let tolerance = b.tolerance();
+    let index = |f: FaceId| faces.iter().position(|&g| g == f);
+    let mut first: Option<(f64, FaceId, [FaceId; 2], f64)> = None;
+    for &face in faces {
+        let mut beside = Vec::new();
+        let mut band = true;
+        for e in face4::edges(b, face, None, false, None)? {
+            let across = crate::topology::edge::faces(b, e, None)?;
+            // a seam: the face meets only itself across it
+            if across.iter().all(|&f| f == face) {
+                continue;
+            }
+            let others: Vec<FaceId> = across.iter().copied().filter(|&f| f != face).collect();
+            let (&[other], true) = (others.as_slice(), crate::topology::edge::is_manifold(b, e)?)
+            else {
+                band = false;
+                break;
+            };
+            if !beside.contains(&other) {
+                beside.push(other);
+            }
+        }
+        let (&[p, q], true) = (beside.as_slice(), band) else {
+            continue;
+        };
+        let (Some(fi), Some(pi), Some(qi)) = (index(face), index(p), index(q)) else {
+            continue;
+        };
+        let (Some(of), Some(op), Some(oq)) = (
+            face_ops::surface(b, face)?,
+            face_ops::surface(b, p)?,
+            face_ops::surface(b, q)?,
+        ) else {
+            continue;
+        };
+        let (Some(nf), Some(np), Some(nq)) = (surfaces.get(fi), surfaces.get(pi), surfaces.get(qi))
+        else {
+            continue;
+        };
+        // the axis: the first cylinder's or cone's of the three as they stand
+        let axis = [of, op, oq]
+            .into_iter()
+            .find_map(|s| match AnalyticSupport::of(s)? {
+                AnalyticSupport::Cylinder { placement, .. }
+                | AnalyticSupport::Cone { placement, .. } => {
+                    Some((placement.origin(), placement.z_axis()))
+                }
+                _ => None,
+            });
+        let Some((origin, axis)) = axis else {
+            continue;
+        };
+        let meridian = |s: &Surface| Meridian::of(s, origin, axis, tolerance);
+        let [Some(lf), Some(lp), Some(lq), Some(mf), Some(mp), Some(mq)] =
+            [of, op, oq, nf, np, nq].map(meridian)
+        else {
+            continue;
+        };
+        let (Some((mf, sf)), Some((mp, sp)), Some((mq, sq))) =
+            (lf.shift(mf), lp.shift(mp), lq.shift(mq))
+        else {
+            continue;
+        };
+        // the moved faces' one distance
+        let moves: Vec<f64> = [sf, sp, sq]
+            .into_iter()
+            .map(f64::abs)
+            .filter(|m| *m > tolerance)
+            .collect();
+        let Some(&moved) = moves.first() else {
+            continue;
+        };
+        if moves.iter().any(|m| (m - moved).abs() > tolerance) {
+            continue;
+        }
+        let (Some(xp), Some(xq), Some(yp), Some(yq)) =
+            (lf.meet(lp), lf.meet(lq), mf.meet(mp), mf.meet(mq))
+        else {
+            continue;
+        };
+        // the band as it stands lies off the axis
+        if [xp, xq].iter().any(|x| x.0 <= tolerance) {
+            continue;
+        }
+        // the band's length along its meridian, before and after
+        let along = (-lf.n.1, lf.n.0);
+        let length = |a: (f64, f64), b: (f64, f64)| (b.0 - a.0) * along.0 + (b.1 - a.1) * along.1;
+        let (s0, s1) = (length(xp, xq), length(yp, yq));
+        let (s0, s1) = if s0 < 0.0 { (-s0, -s1) } else { (s0, s1) };
+        if !(s0 > tolerance && s1 < -tolerance) {
+            continue;
+        }
+        let t = s0 / (s0 - s1);
+        // where it closes, the edges' common point at `t` of their move (each crossing moves on
+        // a line, so it is off the axis there and all the way to it, wherever the move ends)
+        if xp.0 + t * (yp.0 - xp.0) <= tolerance {
+            continue;
+        }
+        if first.is_none_or(|(at, ..)| t < at) {
+            first = Some((t, face, [p, q], t * moved));
+        }
+    }
+    Ok(first.map(|(_, face, beside, largest)| (face, beside, largest)))
 }
 
 /// (not upstream) The planes faces that keep their surfaces continue as: a face whose
