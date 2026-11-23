@@ -2230,6 +2230,78 @@ fn evaluated_mesh_transfer_refuses_an_oversized_input_without_truncation() {
     assert_eq!(s.doc.to_json(), before);
 }
 
+/// A session holding one mesh body, "Strip": a flat strip of `triangles` triangles over the
+/// points (k, 0, 0) and (k, 1, 0), each triangle with three corners of its own, as an STL gives
+/// them; `-0` is written for the zero coordinates of every other corner.
+fn strip_of_unshared_triangles(triangles: u32) -> Session {
+    let point = |k: u32| {
+        let zero = if k.is_multiple_of(2) { 0. } else { -0. };
+        [f64::from(k / 2), f64::from(k % 2) + zero, zero]
+    };
+    let positions: Vec<f64> = (0..triangles).flat_map(|t| [point(t), point(t + 1), point(t + 2)]).flatten().collect();
+    let mut doc = solidcraft_doc::Document::default();
+    doc.add_feature(
+        solidcraft_doc::FeatureKind::MeshImport {
+            file: "strip.stl".into(),
+            meshes: vec![solidcraft_doc::MeshData {
+                name: "Strip".into(),
+                positions: positions.into(),
+                triangles: (0..3 * triangles).collect(),
+                color: None,
+                corner_normals: Default::default(),
+            }],
+        },
+        Some("Strip mesh"),
+    )
+    .unwrap();
+    doc.features.last_mut().unwrap().body_names = vec!["Strip".into()];
+    Session::new(doc)
+}
+
+#[test]
+fn evaluated_mesh_transfer_shares_the_corners_of_an_unshared_mesh_body() {
+    // 3000 triangles hand over 9000 corners, past the 8192-vertex budget unshared (#20627); at
+    // 3002 distinct points the body fits
+    let mut s = strip_of_unshared_triangles(3000);
+    let before = s.doc.to_json();
+    let result = s.execute("model.mesh", &json!({"body":"Strip"})).unwrap();
+    let positions: Vec<[f64; 3]> = serde_json::from_value(result["positions"].clone()).unwrap();
+    let triangles: Vec<[usize; 3]> = serde_json::from_value(result["triangles"].clone()).unwrap();
+    assert_eq!(triangles.len(), 3000);
+    assert_eq!(positions.len(), 3002, "one vertex per distinct point, -0 and 0 the same");
+    let mut distinct = positions.iter().map(|p| p.map(|c| (c + 0.).to_bits())).collect::<Vec<_>>();
+    distinct.sort_unstable();
+    distinct.dedup();
+    assert_eq!(distinct.len(), positions.len(), "no point is handed over twice");
+    // every triangle keeps its corners where they were: three consecutive points of the strip
+    // (the body may turn a triangle round, so its corners are compared as a set)
+    let mut corners: Vec<[u64; 3]> = triangles
+        .iter()
+        .map(|tri| {
+            let mut ks = tri.map(|i| {
+                let [x, y, z] = positions[i];
+                assert_eq!(z, 0.);
+                (2. * x + y) as u64
+            });
+            ks.sort_unstable();
+            ks
+        })
+        .collect();
+    corners.sort_unstable();
+    let expected: Vec<[u64; 3]> = (0..3000).map(|k| [k, k + 1, k + 2]).collect();
+    assert_eq!(corners, expected);
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn evaluated_mesh_transfer_past_the_triangle_budget_names_its_counts() {
+    let mut s = strip_of_unshared_triangles(16385);
+    let before = s.doc.to_json();
+    let message = s.execute("model.mesh", &json!({"body":"Strip"})).unwrap_err().to_string();
+    assert!(message.contains("transfer budget: 16387 vertices and 16385 triangles, at most 8192 and 16384"), "{message}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
 #[test]
 fn host_resource_policy_is_exact_user_state_and_never_design_data() {
     let defaults = HostLimits::default();

@@ -167,7 +167,7 @@ reads and writes its own folder through the `storage.*` commands (see
 number in millimetres (default 0.05). It returns `body`, its owning `component`,
 `frame: "component-local-mm"`, `positions: [[x,y,z], ...]` and `triangles: [[i,j,k], ...]`. Indices are
 zero-based. The mesh is of the evaluated body, rather than only the original import's vertices.
-The command refuses more than 8192 vertices or 16384 triangles. A plugin's host-call result must
+Corners at exactly the same position are handed over once and shared by their triangles (no position moves), so a mesh body that stores three corners per triangle counts its distinct points. The command refuses more than 8192 vertices or 16384 triangles after that, naming the counts. A plugin's host-call result must
 also fit the JSON byte limit; a smaller mesh can still exceed that limit and be refused.
 No reconstruction, fitting, sewing, mesh replacement or conversion algorithm is part of this API.
 
