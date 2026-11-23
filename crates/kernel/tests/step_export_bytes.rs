@@ -60,6 +60,10 @@ const NO_READ_BACK: &[&str] = &["tests/step-regressions/thread_crest_band.step"]
 /// is written as that circle (#17929). Kernel-case 3208 differs only in its uncertainty (line #8,
 /// the largest edge tolerance): 1e-6 where main wrote 1.3356874714460462e-6, as the lazy UV trim
 /// no longer raises its edge past the trim's proved distance, which 1e-6 covers (#18166).
+/// `discord-2026-10-30-fillet.step` keeps every 3D point, curve, surface and topology entity
+/// bit-for-bit identical; its eight polynomial cubic edges now enter SMLib as non-rational
+/// (`w = NOW`, #20422), shifting its eight SMLib-fitted 2D pcurves by at most 2.72e-15 in UV and
+/// line #8 uncertainty by 9e-15 (0.017508281886215407 -> 0.01750828188620642).
 /// Entries whose export's bytes differ only on macOS's math functions, beside the pinned values
 /// above: the reader's seam split now lands on the edge's own knot, and the pcurves made beside it
 /// carry macOS libm's rounding for these fixtures (on Linux the split solves within the export's
@@ -103,7 +107,7 @@ fn with_macos_digests(expected: Vec<(String, String)>) -> Vec<(String, String)> 
 #[rustfmt::skip]
 const DIGESTS: &[(&str, &str)] = &[
     ("solidcore/crates/solidcore-step/tests/fixtures/closed-spline-cylinder.step", "2b7d457b87394f2c"),
-    ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "5545d4ee93431803"),
+    ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "902c8f135a031308"),
     ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "7e5ec3041433853c"),
     ("tests/kernel-cases/import/1721-closed-bspline-tube-face/input.step", "30a183e14f3b58b3"),
     ("tests/kernel-cases/import/2043-outer-bound-opposing-surface-sense/input.step", "d8c5f6b3ce4ea3cf"),
