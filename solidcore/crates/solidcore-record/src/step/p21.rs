@@ -274,7 +274,9 @@ impl Exchange {
     pub fn common_face_name(&self, faces: &[u64]) -> Option<&str> {
         let (first, rest) = faces.split_first()?;
         let name = self.face_name(*first)?;
-        rest.iter().all(|face| self.face_name(*face) == Some(name)).then_some(name)
+        rest.iter()
+            .all(|face| self.face_name(*face) == Some(name))
+            .then_some(name)
     }
 
     fn face_name(&self, mut id: u64) -> Option<&str> {
@@ -286,7 +288,8 @@ impl Exchange {
                 "ORIENTED_FACE" => id = e.params().get(2)?.as_ref_id()?,
                 "ADVANCED_FACE" | "FACE_SURFACE" | "FACE" => {
                     let name = e.params().first()?.as_str()?.trim();
-                    return (!name.is_empty() && !name.eq_ignore_ascii_case("none")).then_some(name);
+                    return (!name.is_empty() && !name.eq_ignore_ascii_case("none"))
+                        .then_some(name);
                 }
                 _ => return None,
             }
@@ -1048,9 +1051,20 @@ mod tests {
 ENDSEC;END-ISO-10303-21;",
         )
         .unwrap();
-        assert_eq!(ex.common_face_name(&[1, 2, 3, 4, 7, 1]), Some("Inspection é"));
-        assert_eq!(ex.common_face_name(&[8]), None, "a fifth oriented wrapper exceeds the bound");
-        assert_eq!(ex.get(4).unwrap().params()[0].as_str(), Some("Wrapper"), "source labels are not rewritten");
+        assert_eq!(
+            ex.common_face_name(&[1, 2, 3, 4, 7, 1]),
+            Some("Inspection é")
+        );
+        assert_eq!(
+            ex.common_face_name(&[8]),
+            None,
+            "a fifth oriented wrapper exceeds the bound"
+        );
+        assert_eq!(
+            ex.get(4).unwrap().params()[0].as_str(),
+            Some("Wrapper"),
+            "source labels are not rewritten"
+        );
     }
 
     #[test]
