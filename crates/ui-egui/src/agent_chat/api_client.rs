@@ -739,6 +739,10 @@ pub struct ApiBackend {
     events: Receiver<Event>,
     cancel: Arc<AtomicBool>,
     mcp: Option<ProcessHandle>,
+    /// The user lets the agent use the computer (`agent_computer_access`) as this backend was
+    /// started: its MCP server has no folder limits then. A change applies at the next connection,
+    /// which New chat makes ([`ChatBackend::computer_fixed_at_start`]).
+    computer: bool,
 }
 
 impl ApiBackend {
@@ -751,7 +755,10 @@ impl ApiBackend {
         // The same MCP server an ACP agent would get.
         let mcp = match &ctx.bridge {
             Some(b) => {
-                let argv = vec![b.cli.to_string_lossy().into_owned(), "mcp".into(), "--connect".into(), format!("127.0.0.1:{}", b.port)];
+                let mut argv = vec![b.cli.to_string_lossy().into_owned(), "mcp".into(), "--connect".into(), format!("127.0.0.1:{}", b.port)];
+                if ctx.computer {
+                    argv.push("--allow-any-path".into());
+                }
                 Some(AgentProcess::spawn(&argv, &ctx.cwd, &["SOLIDCRAFT_CONTROL_TOKEN"], || {})?)
             }
             None => None,
@@ -780,13 +787,19 @@ impl ApiBackend {
             };
             w.run(cmd_rx);
         });
-        Ok(ApiBackend { cmds: Some(cmd_tx), events, cancel, mcp: handle })
+        Ok(ApiBackend { cmds: Some(cmd_tx), events, cancel, mcp: handle, computer: ctx.computer })
     }
 }
 
 impl ChatBackend for ApiBackend {
     fn poll(&mut self) -> Vec<Event> {
         self.events.try_iter().take(512).collect()
+    }
+    fn session_computer(&self) -> bool {
+        self.computer
+    }
+    fn computer_fixed_at_start(&self) -> bool {
+        true
     }
     fn prompt(&mut self, parts: &[PromptPart]) {
         self.cancel.store(false, Ordering::Relaxed);
@@ -2105,7 +2118,7 @@ mod tests {
             reasoning_effort: String::new(),
             openai_responses: false,
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         b.prompt(&[PromptPart::Text("measure it".into())]);
         let events = wait_for_turn(&mut b);
@@ -2158,7 +2171,7 @@ mod tests {
             reasoning_effort: String::new(),
             openai_responses: false,
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         let wait = |b: &mut ApiBackend, events: &mut Vec<Event>| {
             let start = std::time::Instant::now();
@@ -2215,7 +2228,7 @@ mod tests {
             reasoning_effort: String::new(),
             openai_responses: false,
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         let run = |b: &mut ApiBackend, f: &dyn Fn(&mut ApiBackend), want: usize| {
             f(b);
@@ -2268,7 +2281,7 @@ mod tests {
             reasoning_effort: String::new(),
             openai_responses: false,
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         let mut events = Vec::new();
         let start = std::time::Instant::now();
@@ -2358,7 +2371,7 @@ mod tests {
     }
 
     fn go_ctx() -> StartContext {
-        StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) }
+        StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) }
     }
 
     /// Wait until a scripted endpoint saw a request (ten seconds at most).
@@ -2807,7 +2820,7 @@ mod tests {
             reasoning_effort: String::new(),
             openai_responses: false,
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         let mut events = Vec::new();
         let start = std::time::Instant::now();
@@ -2911,7 +2924,7 @@ mod tests {
             reasoning_effort: String::new(),
             openai_responses: false,
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         b.prompt(&[PromptPart::Text("go".into())]);
         let events = wait_for_turn(&mut b);
@@ -2954,7 +2967,7 @@ mod tests {
             reasoning_effort: String::new(),
             openai_responses: false,
         };
-        let context = || StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let context = || StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         assert!(ApiBackend::start(config(false, Protocol::OpenAi), context()).is_err());
         assert!(ApiBackend::start(config(true, Protocol::Anthropic), context()).is_err());
         assert!(seen.lock().unwrap().is_empty(), "refusal must happen before any HTTP request");
@@ -3293,7 +3306,7 @@ mod tests {
             reasoning_effort: String::new(),
             openai_responses: false,
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         b.prompt(&[PromptPart::Text("look closer".into())]);
         let events = wait_for_turn(&mut b);
@@ -3345,7 +3358,7 @@ mod tests {
             reasoning_effort: String::new(),
             openai_responses: false,
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         b.prompt(&[PromptPart::Text("measure it".into())]);
         let events = wait_for_turn(&mut b);
@@ -3398,7 +3411,7 @@ mod tests {
             reasoning_effort: String::new(),
             openai_responses: false,
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         for n in 1..=3 {
             b.prompt(&[PromptPart::Text(format!("look {n}")), PromptPart::Image { mime: "image/png".into(), base64: format!("V{n}") }]);

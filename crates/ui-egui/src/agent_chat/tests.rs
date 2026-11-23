@@ -522,6 +522,31 @@ fn a_revision_is_the_very_design_not_an_equal_one() {
     assert!(revision.get::<u32>().is_none(), "and nothing of another type");
 }
 
+/// A session opened with the computer saves outside the chat's folder; one without stays inside
+/// it, as before: the panel confines only requests that name no folders of their own.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_session_with_the_computer_reaches_any_folder_and_one_without_stays_in_the_chats() {
+    let dir = solidcraft_engine::io::vfs::temp_dir().join(format!("sc-agent-chat-computer-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for computer in [false, true] {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.agent_chat.backend = Some(Box::new(Script { computer, ..Script::default() }));
+        app.agent_chat.state = Some(State::Ready);
+        let ctx = crate::fonts::test_context();
+        let (tx, rx) = channel();
+        app.agent_chat.tools_rx = Some(rx);
+        app.preferences.ai_permissions = agents::Mode::All;
+        send(&mut app, &ctx, "save it".into());
+        let path = dir.join(format!("outside-{computer}.solidcraft"));
+        let r = chat_tool(&mut app, &tx, &ctx, "engine.execute", json!({"command": "file.save_as", "params": {"path": path.to_string_lossy()}}));
+        assert_eq!(r["ok"] == true, computer, "{r}");
+        assert_eq!(path.exists(), computer);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Saving waits for Allow or Deny; Deny answers the agent without running it, Allow runs it.
 #[test]
 fn file_actions_wait_for_the_user() {
@@ -976,6 +1001,10 @@ struct Script {
     events: Arc<Mutex<Vec<Event>>>,
     /// Every prompt in full (its text and pictures).
     prompts: Arc<Mutex<Vec<Vec<PromptPart>>>>,
+    /// The session was opened with the computer (`session_computer`).
+    computer: bool,
+    /// It takes the computer only when it starts, as an API agent does (`computer_fixed_at_start`).
+    fixed: bool,
 }
 
 impl Script {
@@ -1015,6 +1044,12 @@ impl ChatBackend for Script {
         self.calls.lock().unwrap().push(format!("set_config_option: {id}={value}"));
     }
     fn authenticate(&mut self, _: &str) {}
+    fn session_computer(&self) -> bool {
+        self.computer
+    }
+    fn computer_fixed_at_start(&self) -> bool {
+        self.fixed
+    }
     fn shutdown(&mut self, _: bool) {}
 }
 
@@ -1758,7 +1793,7 @@ while IFS= read -r line; do
 done
 "#;
     let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
-    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
     app.agent_chat.state = Some(State::Starting);
@@ -1867,6 +1902,7 @@ fn new_chat_with_an_acp_agent_restarts_the_process() {
     let log = dir.join("received.log");
     let script = r#"
 log="$1"; n=0
+printf 'process in %s\n' "$(pwd -P)" >> "$log"
 while IFS= read -r line; do
   printf '%s\n' "$line" >> "$log"
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
@@ -1878,7 +1914,7 @@ while IFS= read -r line; do
 done
 "#;
     let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
-    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
     app.agent_chat.state = Some(State::Starting);
@@ -1896,6 +1932,8 @@ done
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
     assert!(!app.agent_chat.items.is_empty());
     let pid = app.agent_chat.backend.as_ref().and_then(|b| b.pid());
+    // The preference changed while the agent ran: the new session follows it.
+    app.preferences.agent_computer_access = true;
     new_chat(&mut app);
     assert!(app.agent_chat.items.is_empty());
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
@@ -1907,6 +1945,18 @@ done
         log_text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter_map(|v| v["method"].as_str().map(String::from)).collect();
     assert_eq!(methods, ["initialize", "session/new", "session/prompt", "session/cancel", "initialize", "session/new", "session/prompt"]);
     assert!(log_text.lines().last().is_some_and(|l| l.contains("\"s1\"")), "the prompt goes to the replacement's session: {log_text}");
+    let sessions: Vec<Value> = log_text
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v["method"] == "session/new")
+        .map(|v| v["params"]["_meta"]["claudeCode"]["options"]["disallowedTools"].clone())
+        .collect();
+    assert!(sessions[0].as_array().is_some_and(|t| t.iter().any(|x| x == "Bash")), "{sessions:?}");
+    assert_eq!(sessions[1], serde_json::json!([]), "the replacement's session may use the computer");
+    let folders: Vec<&str> = log_text.lines().filter_map(|l| l.strip_prefix("process in ")).collect();
+    let real = |p: &std::path::Path| std::fs::canonicalize(p).unwrap().to_string_lossy().into_owned();
+    let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
+    assert_eq!(folders, [real(&dir), real(&home)], "the replacement starts where its session does");
     send(&mut app, &ctx, "stalled".into());
     assert_eq!(app.agent_chat.state(), State::Busy);
     new_chat(&mut app);
@@ -1918,6 +1968,94 @@ done
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
     disconnect(&mut app);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The preference turned on while the agent waits for a login applies to the session the login
+/// opens: the backend hears the change before the login, not only from Ready or Busy.
+#[cfg(unix)]
+#[test]
+fn the_computer_switch_turned_during_a_login_applies_to_the_session_after_it() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-login-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let log = dir.join("received.log");
+    let _ = std::fs::remove_file(&log);
+    // The first session/new asks for a login; the login succeeds; the next session/new opens.
+    let script = r#"
+log="$1"; n=0
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$log"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"agentInfo":{"name":"fake","version":"1"},"authMethods":[{"id":"login","name":"Log in","type":"agent"}]}}\n' "$id" ;;
+    *'"method":"session/new"'*) n=$((n+1)); if [ "$n" = 1 ]; then printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32000,"message":"sign in"}}\n' "$id"; else printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"s%s"}}\n' "$id" "$n"; fi ;;
+    *'"method":"authenticate"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
+  esac
+done
+"#;
+    let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
+    app.agent_chat.state = Some(State::Starting);
+    let ctx = crate::fonts::test_context();
+    let until = |app: &mut SolveApp, done: &dyn Fn(&SolveApp) -> bool| {
+        let t = std::time::Instant::now();
+        while !done(app) {
+            assert!(t.elapsed() < std::time::Duration::from_secs(20), "timed out");
+            poll(app, &ctx);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    };
+    until(&mut app, &|a| a.agent_chat.state() == State::NeedsAuth);
+    // Turned on while the login is pending, then the login.
+    app.preferences.agent_computer_access = true;
+    poll(&mut app, &ctx);
+    app.agent_chat.authenticate("login");
+    until(&mut app, &|a| a.agent_chat.state() == State::Ready);
+    let log_text = std::fs::read_to_string(&log).unwrap();
+    let sessions: Vec<Value> = log_text
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v["method"] == "session/new")
+        .map(|v| v["params"]["_meta"]["claudeCode"]["options"]["disallowedTools"].clone())
+        .collect();
+    assert_eq!(sessions.len(), 2, "{log_text}");
+    assert!(sessions[0].as_array().is_some_and(|t| t.iter().any(|x| x == "Bash")), "{sessions:?}");
+    assert_eq!(sessions[1], serde_json::json!([]), "the session after the login may use the computer");
+    let cwds: Vec<Value> = log_text
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v["method"] == "session/new")
+        .map(|v| v["params"]["cwd"].clone())
+        .collect();
+    assert_eq!(cwds[0], json!(dir.to_string_lossy()), "the first session in the chat's folder");
+    assert_eq!(cwds[1], json!(std::env::var("HOME").unwrap()), "the session after the login in the home folder");
+    disconnect(&mut app);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An agent that takes the computer only when it starts (one connected with an API key) is
+/// connected again by New chat when the preference changed, so turning it off holds from the new
+/// chat on; an agent with the value it was started with keeps its connection.
+#[test]
+fn new_chat_connects_an_agent_again_that_took_the_computer_at_its_start() {
+    for (fixed, started_with, now, again) in
+        [(true, true, false, true), (true, false, true, true), (true, true, true, false), (false, true, false, false)]
+    {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let script = Script { computer: started_with, fixed, ..Script::default() };
+        app.agent_chat.backend = Some(Box::new(script.clone()));
+        app.agent_chat.state = Some(State::Ready);
+        app.agent_chat.computer_pushed = Some(started_with);
+        app.preferences.agent_computer_access = now;
+        new_chat(&mut app);
+        let case = format!("fixed {fixed}, started with {started_with}, now {now}");
+        assert_eq!(app.agent_chat.reconnect, again, "{case}");
+        assert_eq!(script.calls().contains(&"new_session".to_string()), !again, "{case}: no new session on the old connection");
+        assert_eq!(app.agent_chat.state(), State::Starting, "{case}");
+        disconnect(&mut app);
+        assert!(!app.agent_chat.reconnect, "{case}: a stopped chat doesn't connect by itself later");
+    }
 }
 
 /// #9811: an agent that offers the standard `systemPrompt` field gets the note in it, on the first
@@ -1941,7 +2079,7 @@ done
 "#;
     let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
     let bridge = acp::McpBridge { cli: dir.join("solidcraft-cli"), port: 7878 };
-    let start = backend::StartContext { cwd: dir.clone(), bridge: Some(bridge.clone()), tools: None, wake: Box::new(|| {}) };
+    let start = backend::StartContext { cwd: dir.clone(), bridge: Some(bridge.clone()), computer: false, tools: None, wake: Box::new(|| {}) };
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
     app.agent_chat.state = Some(State::Starting);
@@ -1969,7 +2107,7 @@ done
     for (session, note) in sessions.iter().zip(&notes) {
         assert_eq!(session.pointer("/params/systemPrompt/content/0/text").and_then(Value::as_str), Some(note.as_str()));
         assert_eq!(session["params"]["cwd"], dir.to_string_lossy().as_ref());
-        assert_eq!(session["params"]["mcpServers"], json!([bridge.to_json()]));
+        assert_eq!(session["params"]["mcpServers"], json!([bridge.to_json(false)]));
     }
     disconnect(&mut app);
     let _ = std::fs::remove_dir_all(&dir);
@@ -2864,6 +3002,7 @@ done
     let start = backend::StartContext {
         cwd: dir.clone(),
         bridge: None,
+        computer: false,
         tools: None,
         wake: Box::new(move || {
             let _ = wake_tx.send(());
@@ -3035,7 +3174,7 @@ while IFS= read -r line; do
 done
 "#;
     let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
-    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
     app.agent_chat.state = Some(State::Starting);
@@ -3092,7 +3231,7 @@ while IFS= read -r line; do
 done
 "#;
     let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
-    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
     app.agent_chat.state = Some(State::Starting);

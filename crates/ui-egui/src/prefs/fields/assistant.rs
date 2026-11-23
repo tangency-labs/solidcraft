@@ -16,6 +16,11 @@ macro_rules! assistant_preferences {
             /// Changes the agent may make for one message; 0 is no limit.
             agent_chat_turn_limit: u32 = crate::agent_chat::gate::DEFAULT_TURN_LIMIT, PAGE_ASSISTANT;
             agent_chat_window: Option<[f32; 4]> = None, PAGE_ASSISTANT;
+            /// The agent may use this computer (docs/agent-chat.md): it keeps its own tools (the Claude
+            /// Code adapter's shell, file and web tools are no longer turned off), starts in the home folder,
+            /// and SolidCraft's file commands reach any folder. Off: it works only through SolidCraft's
+            /// tools, inside the folder limits (the default).
+            agent_computer_access: bool = false, PAGE_ASSISTANT;
             /// When SolidCraft starts: connect the agent started last (`agent_last`, else the one a new
             /// conversation starts with), and open the panel (#7009). Off by default: an agent starts
             /// only when a message is sent or Connect is pressed, and the panel opens when asked for.

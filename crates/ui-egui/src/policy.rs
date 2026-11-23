@@ -42,6 +42,9 @@ const MAX_CHOICE: usize = 64;
 enum Kind {
     /// A `REG_DWORD`: 0 or 1.
     Switch,
+    /// A `REG_DWORD`: 0 turns the preference off and locks it; 1 leaves the choice to the person,
+    /// as if it were not set (an organization allows what it may forbid, it doesn't impose it).
+    Allow,
     /// A `REG_SZ`: one of [`crate::prefs::UNITS`].
     Units,
     /// A `REG_SZ`: `system` or the id of a language SolidCraft has.
@@ -62,6 +65,7 @@ pub struct Lock {
 
 /// Every preference a policy can set. Keep `packaging/windows/policies/` in step.
 pub const LOCKS: &[Lock] = &[
+    Lock { policy: "AgentComputerAccess", pref: "agent_computer_access", kind: Kind::Allow },
     Lock { policy: "AgentControl", pref: "agent_control", kind: Kind::Switch },
     Lock { policy: "AgentTurnLimit", pref: "agent_chat_turn_limit", kind: Kind::Number { max: MAX_TURN_LIMIT } },
     Lock { policy: "AiFeatures", pref: "ai_features", kind: Kind::Switch },
@@ -144,6 +148,10 @@ impl Layer {
             .iter()
             .filter_map(|lock| {
                 let value = get(lock.policy)?;
+                // Allowed: a value it takes, which sets nothing.
+                if lock.kind == Kind::Allow && value == Value::Number(1) {
+                    return None;
+                }
                 let setting = parse(lock.kind, &value);
                 if setting.is_none() {
                     log::warn!("policy: {} is {value:?}, not a value it takes; ignored", lock.policy);
@@ -198,6 +206,7 @@ fn parse(kind: Kind, value: &Value) -> Option<Setting> {
     match (kind, value) {
         (Kind::Switch, Value::Number(0)) => Some(Setting::Switch(false)),
         (Kind::Switch, Value::Number(1)) => Some(Setting::Switch(true)),
+        (Kind::Allow, Value::Number(0)) => Some(Setting::Switch(false)),
         (Kind::Units, Value::Text(text)) if text.len() <= MAX_CHOICE => {
             crate::prefs::UNITS.iter().find(|unit| unit.eq_ignore_ascii_case(text.trim())).map(|unit| Setting::Text((*unit).into()))
         }
@@ -220,6 +229,7 @@ fn parse(kind: Kind, value: &Value) -> Option<Setting> {
 fn get(p: &crate::prefs::Prefs, pref: &str) -> Option<Setting> {
     Some(match pref {
         "agent_chat_turn_limit" => Setting::Number(p.agent_chat_turn_limit),
+        "agent_computer_access" => Setting::Switch(p.agent_computer_access),
         "agent_control" => Setting::Switch(p.agent_control),
         "ai_features" => Setting::Switch(p.ai_features),
         "ai_permissions" => Setting::Text(p.ai_permissions.id().into()),
@@ -239,6 +249,7 @@ fn get(p: &crate::prefs::Prefs, pref: &str) -> Option<Setting> {
 fn set(p: &mut crate::prefs::Prefs, pref: &str, setting: &Setting) {
     match (pref, setting) {
         ("agent_chat_turn_limit", Setting::Number(n)) => p.agent_chat_turn_limit = *n,
+        ("agent_computer_access", Setting::Switch(on)) => p.agent_computer_access = *on,
         ("agent_control", Setting::Switch(on)) => p.agent_control = *on,
         ("ai_features", Setting::Switch(on)) => p.ai_features = *on,
         ("ai_permissions", Setting::Text(id)) => {
@@ -704,6 +715,25 @@ mod tests {
             (12, false, false, false, false)
         );
         assert_eq!(saved(&app)["agent_chat_turn_limit"], serde_json::json!(0), "the person's own limit is saved");
+    }
+
+    /// `AgentComputerAccess` 0 keeps the agent to SolidCraft's tools whatever the person ticked:
+    /// with the switch on, whether the agent's own shell and file tools ask at all is the agent's
+    /// own setting, not `AiPermissions`.
+    #[test]
+    fn the_organization_can_keep_the_agent_off_this_computer() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.preferences.agent_computer_access = true;
+        app.policy = Policy::from_json(r#"{"AgentComputerAccess": 0}"#);
+        enforce(&mut app);
+        assert!(!app.preferences.agent_computer_access);
+        assert!(app.policy.locks("agent_computer_access"));
+        assert_eq!(saved(&app)["agent_computer_access"], serde_json::json!(true), "the person's own choice is kept");
+        // 1 allows it: each person chooses, as without a policy.
+        assert_eq!(Policy::from_json(r#"{"AgentComputerAccess": 1}"#), Policy::default());
+        for hostile in [Value::Number(2), Value::Number(u32::MAX), Value::Text("0".into())] {
+            assert_eq!(one("AgentComputerAccess", hostile), None);
+        }
     }
 
     #[test]
