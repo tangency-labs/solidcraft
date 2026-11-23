@@ -3274,7 +3274,7 @@
   "plugin_error.design_too_large": "el diseño que ha creado supera los {allowed} MiB, el máximo que puede entregar un complemento.",
   "plugin_error.failed": "{plugin}: {reason}",
   "plugin_error.failed_file": "{plugin} no ha podido abrir {file}: {reason}",
-  "plugin_error.fuel_ceiling": "pide {requested} de fuel y los complementos pueden usar {allowed}. Sube el Máximo de fuel del complemento en Preferencias › Complementos (en solidcraft-cli, max_fuel en el archivo --plugin-limits).",
+  "plugin_error.fuel_ceiling": "pide {requested} de fuel y los complementos pueden usar {allowed}. Instala de nuevo el complemento y permite su solicitud de fuel, o sube el Máximo de fuel del complemento en Preferencias › Complementos (en solidcraft-cli, max_fuel en el archivo --plugin-limits).",
   "plugin_error.memory_ceiling": "pide {requested} MiB de memoria y los complementos pueden usar {allowed} MiB. Instala de nuevo el complemento y permite su solicitud de memoria, o sube la Memoria máxima del complemento (MiB) en Preferencias › Complementos (en solidcraft-cli, max_memory_mib en el archivo --plugin-limits).",
   "plugin_error.out_of_fuel": "ha consumido todo el fuel que pide ({allowed}) y se ha detenido. Pide a su autor que suba el límite de fuel.",
   "plugin_error.out_of_memory": "necesitaba más de los {allowed} MiB de memoria que solicita y se ha detenido. Pide a su autor que suba el límite de memoria.",
