@@ -1189,8 +1189,8 @@ fn assert_b27_rails_on_faces(input: &Body, made: &Body, r: f64, tol: f64) {
 }
 
 /// Edge 28 of `b27` rounded 1.6 builds a valid solid (#15906). It failed with status 1001,
-/// "the smooth end cap is not built": the End at the edge's end on x = 0 never built its
-/// edges. Its rail on the R3 round is the trace's Hermite approximation, whose spans the
+/// then reported as "the smooth end cap is not built": the End at the edge's end on x = 0
+/// never built its edges. Its rail on the R3 round is the trace's Hermite approximation, whose spans the
 /// trace accepts by a sampled check; it crosses the End's plane 1.9e-5 off the round, past
 /// the round's zone (1e-5), so the rail end classified off its face and the End waited for a
 /// rollover over the round's tangent edge x = 0 that never comes (the round rolls over only
@@ -1221,7 +1221,7 @@ fn a_round_whose_rail_end_is_off_its_face_by_the_rails_tolerance_builds_its_end_
 /// Edge 28 of `b27` rounded in the band just below the cutoff (1.945 to 1.9505), where the
 /// round is a sliver near the end on x = 0 and rolls over onto z = 7.5 for the rest, builds
 /// valid solids (#15906). Once the rails' trim succeeded there (#15905), these failed as 1.6
-/// did, "the smooth end cap is not built": the End on x = 0 found its rail end on the R3 round
+/// did (then reported as "the smooth end cap is not built"): the End on x = 0 found its rail end on the R3 round
 /// off the round by more than its zone and less than the rail's tolerance. The volumes fall as
 /// the radius grows, and the rails lie on their faces to the rail's tolerance.
 #[test]
