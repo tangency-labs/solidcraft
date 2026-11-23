@@ -234,7 +234,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("finger_joint")
         .contract(&FINGER_JOINT_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("bodies?: [2 to 32 body names] (default: selected plates, in selection order; the first plate is joined to each later plate in order; failed pairs are unchanged and reported); count?: integer 1…64 (default 3; creates 2 × count + 1 segments along the joint line); clearance?: length expr (each cut expands by half the clearance on each side along and across the joint; default 0 mm; less than a finger width); inverted?: bool (default false; starts with a tab instead of a slot without changing which plate supplies tabs); edge_offset?: length expr (default 0 mm; adds this length to each end segment and divides the remainder equally among the other segments); name?"),
+        .params(concat!(
+            "bodies?: [2 to 32 body names] (default: selected plates, in selection order; the first plate is joined to each later plate in order; failed pairs are unchanged and reported); ",
+            "count?: integer 1…64 (default 3; creates 2 × count + 1 segments along the joint line); ",
+            "clearance?: length expr (each cut expands by half the clearance on each side along and across the joint; default 0 mm; less than a finger width); ",
+            "inverted?: bool (default false; starts with a tab instead of a slot without changing which plate supplies tabs); ",
+            "edge_offset?: length expr (default 0 mm; adds this length to each end segment and divides the remainder equally among the other segments); ",
+            "name?",
+        )),
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", crate::checked!("solid.pattern.rectangular", pattern_rect)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
