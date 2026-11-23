@@ -63,6 +63,7 @@ mod overflow;
 mod removal;
 mod section;
 mod solver;
+pub mod trace;
 mod weld;
 
 pub use band::BandInput;
@@ -85,6 +86,7 @@ pub use section::SectionProof;
 pub use solver::AnalyticShape;
 pub use solver::BaseSolverMethod;
 pub use solver::SolverFailure;
+pub use trace::TraceFailure;
 pub use weld::WeldGap;
 
 /// The phrase causes, by variant name: the one list [`BlendFailure::is_phrase`] and the
@@ -644,6 +646,11 @@ pub enum BlendFailure {
     /// of the caller's arguments ([`ErrorKind::InvalidInput`]); status
     /// `SM_ERR_INVALID_INPUT` (`SM_ERR_NULL_POINTER` where a stage finds it unset).
     TargetNotGiven,
+    /// The fillet trace failed, for the reason the [`TraceFailure`] names: the standard and
+    /// custom fillet solvers, the fillet intersector and the law corners. Its class and
+    /// status are the cause's ([`TraceFailure::class`]; the status as each [`TraceFailure`]
+    /// variant says).
+    Trace(TraceFailure),
     /// The collection of the faces the rails enclose reached past a rail (the trim leaks):
     /// the failure's site face, where the check names it, is the face it reached. A defect
     /// ([`ErrorKind::TrimLeaks`]).
@@ -754,6 +761,7 @@ impl BlendFailure {
             Self::StageFailed => SM_ERR,
             Self::StationDidNotConverge { .. } => SM_ERR,
             Self::TargetNotGiven => SM_ERR_INVALID_INPUT,
+            Self::Trace(t) => t.comparison_status(),
             Self::TrimLoopDoesNotSeparate => SM_ERR,
             Self::TrimLoopOpen => SM_ERR,
             Self::VariableRadiusLawMissing { .. } => SM_ERR_INVALID_INPUT,
@@ -847,6 +855,7 @@ impl BlendFailure {
             Self::StageFailed => ErrorKind::StageFailed,
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TargetNotGiven => ErrorKind::InvalidInput,
+            Self::Trace(t) => t.class(),
             Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
             Self::TrimLoopOpen => ErrorKind::TrimLeaks,
             Self::VariableRadiusLawMissing { .. } => ErrorKind::InvalidInput,
@@ -953,6 +962,7 @@ impl BlendFailure {
             Self::StageFailed => true,
             Self::StationDidNotConverge { .. } => true,
             Self::TargetNotGiven => true,
+            Self::Trace(_) => true,
             Self::TrimLoopDoesNotSeparate => true,
             Self::TrimLoopOpen => true,
             Self::VariableRadiusLawMissing { .. } => true,
@@ -1305,6 +1315,7 @@ impl core::fmt::Display for BlendFailure {
             Self::TargetNotGiven => {
                 write!(f, "{}: the fillet has no target body", self.class())
             }
+            Self::Trace(t) => write!(f, "{}: {t}", t.class()),
             Self::TrimLoopDoesNotSeparate => {
                 write!(
                     f,
@@ -2678,7 +2689,9 @@ mod tests {
             .filter_map(|l| {
                 Some(format!(
                     "blend/{}.rs",
-                    l.strip_prefix("mod ")?.strip_suffix(';')?
+                    l.strip_prefix("pub mod ")
+                        .or_else(|| l.strip_prefix("mod "))?
+                        .strip_suffix(';')?
                 ))
             })
             .collect();
@@ -2695,6 +2708,7 @@ mod tests {
             ("blend/removal.rs", include_str!("blend/removal.rs")),
             ("blend/section.rs", include_str!("blend/section.rs")),
             ("blend/solver.rs", include_str!("blend/solver.rs")),
+            ("blend/trace.rs", include_str!("blend/trace.rs")),
             ("blend/weld.rs", include_str!("blend/weld.rs")),
         ];
         let listed: Vec<&str> = files.iter().skip(1).map(|(file, _)| *file).collect();
