@@ -42,6 +42,11 @@
 //! `stubs4-delete-edge-bottle-e8-r0.1` and `topology.brep_p10` `gen0020` (their edge
 //! tolerances, each certified in `certify::trim_tolerance`), so their entries are deleted too.
 //!
+//! #20939's `edge::set_interval` clears the gaps cached over the old interval, so the UV trim
+//! recovery of `create_uv_trim_curves` leaves the gap-cache flags of the
+//! `own_reader_open_shell_uv_trim_f<k>_rebuild` rows of `topology.face_p3` at 0 where main's
+//! row has 1; their 12 entries are deleted.
+//!
 //! The kept-trim cover (tangency-labs/solidcraft#19295) raises, after the healer, the
 //! tolerance of an edge whose kept UV trim runs farther from it than its tolerance, to a
 //! proved bound on that distance, and records each raise it makes with the value before
@@ -568,7 +573,7 @@ replay_tests! {
     stitch_p2_rows_move_only_through_the_read_tolerances: "heal.stitch_p2", 4;
     brep_p10_rows_move_only_through_the_read_tolerances: "topology.brep_p10", 38;
     edgeuse_p3_rows_move_only_through_the_read_tolerances: "topology.edgeuse_p3", 14;
-    face_p3_rows_move_only_through_the_read_tolerances: "topology.face_p3", 48;
+    face_p3_rows_move_only_through_the_read_tolerances: "topology.face_p3", 36;
 }
 
 macro_rules! replay_trim_cover_tests {
@@ -652,26 +657,28 @@ fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usiz
 /// case, and the hash of main's committed line (`origin/main` ee673a19bf's expected file).
 /// #18490 moves these four rows (the round sits on the sphere drop's finer trims), so each
 /// hash is of the row with that change, from Linux CI.
+/// Each hash is of the line without the `fillet_point_step` key, which recorded the retired
+/// step latch (#18916).
 const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0xbab5_3857_5f4c_54b2,
+        0x9e43_eafe_0171_4c09,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x0879_39f6_c276_2c27,
+        0xe2ec_b89d_309a_54a8,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0xaa56_e948_548e_16f9,
+        0x9fc9_deff_361b_7066,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x87dc_a442_4a0e_39cd,
+        0x5669_c3ab_dde7_2e76,
     ),
 ];
 

@@ -181,7 +181,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::{gamma, NOW, NOZ};
 use crate::surface::procedural_blend::NetScope;
-use crate::surface::surface_cache::SurfaceCache;
+use crate::surface::surface_cache::{SolveModes, SurfaceCache};
 use crate::topology::BrepId;
 
 use super::p1::{
@@ -1711,25 +1711,21 @@ impl Surface {
         requested: SolutionRequested,
     ) -> Result<SolutionArray<O>> {
         // get surface spatial decomposition tree from Surface's cache
-        let mut owned;
+        let owned;
         let cache = if let Some(c) = cache {
-            if point_test_off {
-                owned = c.clone();
-                owned.point_test_enabled = false;
-                &owned
-            } else {
-                c
-            }
+            c
         } else {
             owned = match context.as_deref_mut() {
                 Some(ctx) => solve_surface_cache_with(k, self, Some(surface), ctx)?,
                 None => self.solve_cache(k, surface, OP_SOLVE)?,
             };
-            if point_test_off {
-                owned.point_test_enabled = false;
-            }
             &owned
         };
+        // the solve's point testing off, the cache's boundary curve processing
+        let modes = point_test_off.then(|| SolveModes {
+            point_test_enabled: false,
+            ..cache.solve_modes()
+        });
         let surface_tree = cache
             .tree()
             .ok_or_else(|| SolidError::surface_missing(OP_SOLVE, "the surface cache's tree"))?;
@@ -1740,6 +1736,7 @@ impl Surface {
         // instance global Surface/Point solver
         let mut gs = SpGlobalSolver::new(k, &point_tree, surface_tree, Some(self), *uv_domain);
         gs.surface_cache = Some(cache);
+        gs.modes = modes;
         if let Some(ctx) = context.as_deref() {
             gs.face_queries = ctx.face_queries();
         }
@@ -3364,6 +3361,9 @@ pub struct SpGlobalSolver<'t, 's, O> {
     /// The cache holding the patches of the surface tree's nodes, read by the leaf
     /// solve (upstream reaches it through the node's tree owner).
     pub surface_cache: Option<&'s SurfaceCache<O>>,
+    /// The modes the caller chose for this solve; `None` runs in the surface cache's
+    /// built modes ([`SolveModes::of`]).
+    pub modes: Option<SolveModes>,
     /// Prepared face classification shared with other caches in this operation.
     pub face_queries: Option<&'s dyn crate::surface::surface_cache::face_context::FaceQueries<O>>,
 }
@@ -3384,7 +3384,8 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
         let cache = self
             .surface_cache
             .ok_or_else(|| SolidError::surface_missing(OP_MAY, "the surface cache"))?;
-        if !is_node_valid(self.base.tree(1)?.owner(), cache, surface_node)? {
+        let modes = SolveModes::of(cache, self.modes);
+        if !is_node_valid(self.base.tree(1)?.owner(), cache, modes, surface_node)? {
             return Ok(false);
         }
 
@@ -3520,10 +3521,10 @@ impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {
                     cache2.patch(id2)?;
                     // If the classification of the node is outside then we can quit
                     // here (SM_SUCCESS: FALSE)
-                    if !is_node_valid(tree1.owner(), cache1, node1)? {
+                    if !is_node_valid(tree1.owner(), cache1, cache1.solve_modes(), node1)? {
                         return Ok(false);
                     }
-                    if !is_node_valid(tree2.owner(), cache2, node2)? {
+                    if !is_node_valid(tree2.owner(), cache2, cache2.solve_modes(), node2)? {
                         return Ok(false);
                     }
                     // (SER inside a SmBoolean function: a failure returns its non-zero

@@ -115,7 +115,7 @@ use crate::surface::surface::p2::PLANE_TYPE;
 use crate::surface::surface::Surface;
 use crate::surface::surface_cache::face_context::FaceQueries;
 use crate::surface::surface_cache::p1::{self as sc, FaceContainment, SurfaceCacheOptions};
-use crate::surface::surface_cache::{BezierAux2d, SurfaceCache};
+use crate::surface::surface_cache::{BezierAux2d, SurfaceCache, SurfaceCacheState};
 
 /// `SmTrimSrfCache_TYPE` (`SURF_BASE_TYPE + 120`).
 pub const TYPE: i64 = 15120;
@@ -487,6 +487,25 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
                 })
                 .collect::<Result<_>>()?,
         })
+    }
+
+    /// The state bits of the base that `self.map_handles(|o| Ok(map(o)))` would answer
+    /// ([`SurfaceCache::mapped_state`]), read without making the copy, with the copy's
+    /// errors: the base's, then the nesting bound of its polygon-edge surfaces'
+    /// evaluation copies.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`TrimSrfCache::map_handles`] with an infallible map.
+    pub fn mapped_state<P: Copy + PartialEq>(
+        &self,
+        map: impl Fn(O) -> P,
+    ) -> Result<SurfaceCacheState<P>> {
+        let state = self.base.mapped_state(map)?;
+        for (_, g) in &self.poly_edge_geometry {
+            g.surface.check_evaluation_copy_depth(0)?;
+        }
+        Ok(state)
     }
 
     /// Unwraps the `SmSurfaceCache` base.
