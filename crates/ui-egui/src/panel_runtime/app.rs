@@ -1296,6 +1296,7 @@ pub(crate) fn show_desktop_windows(app: &mut crate::SolveApp, ctx: &egui::Contex
         integration.last_error = Some(reason);
     }
     app.panel_runtime = Some(integration);
+    crate::context_menu::run_deferred(app);
 }
 
 #[cfg(not(target_arch = "wasm32"))]

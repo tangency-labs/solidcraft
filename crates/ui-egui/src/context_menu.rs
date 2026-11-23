@@ -253,6 +253,9 @@ pub struct MenuState {
     /// The OS window of a popped-out panel whose row opened the menu: only that window draws it
     /// (#19364). `None`: the window the app is drawn in.
     window: Option<egui::ViewportId>,
+    /// A pick in a popped-out panel's menu, run once the frame's panel windows are drawn and the
+    /// panel layout is back with the app (#19364).
+    deferred: Option<(Item, Pos2)>,
     /// What the browser did with the last right-click (#20011): `Taken` when the browser opened
     /// its own menu, so the app opens none of its own under it.
     pub browser_menu: BrowserMenu,
@@ -2829,11 +2832,31 @@ pub(crate) fn open_in_window(app: &mut SolveApp, window: egui::ViewportId, at: P
 /// Draw the open menu in a popped-out panel's OS window when one of its rows opened it (#19364).
 /// True when it is that window's menu.
 pub(crate) fn show_in_window(app: &mut SolveApp, ctx: &egui::Context) -> bool {
-    if app.viewport.context_menu.is_none() || app.menu.window != Some(ctx.viewport_id()) {
+    if app.viewport.context_menu.is_none() {
+        return false;
+    }
+    if app.menu.window != Some(ctx.viewport_id()) {
+        close_on_input_elsewhere(app, ctx);
         return false;
     }
     show_menu(app, ctx);
     true
+}
+
+/// Another window draws the open menu: a click or Esc in this one closes it, as a click outside
+/// the menu does in its own window.
+fn close_on_input_elsewhere(app: &mut SolveApp, ctx: &egui::Context) {
+    if ctx.input(|i| i.pointer.any_pressed() || i.key_pressed(egui::Key::Escape)) {
+        close(app);
+    }
+}
+
+/// Run what was picked in a popped-out panel's menu (#19364). Its window is drawn while the app
+/// has lent out its panel layout, which commands such as Find in Timeline need to reveal a panel.
+pub(crate) fn run_deferred(app: &mut SolveApp) {
+    if let Some((item, at)) = app.menu.deferred.take() {
+        run_item(app, &item, at);
+    }
 }
 
 /// Close a popped-out panel's menu whose window was not drawn this frame: it closed or docked again.
@@ -3166,10 +3189,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     if app.menu.window.is_some_and(|window| window != ctx.viewport_id()) {
-        // A popped-out panel's window draws its menu (`show_in_window`); a click here closes it.
-        if ctx.input(|i| i.pointer.any_pressed()) || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            close(app);
-        }
+        // A popped-out panel's window draws its menu (`show_in_window`).
+        close_on_input_elsewhere(app, ctx);
         return;
     }
     show_menu(app, ctx);
@@ -3330,8 +3351,13 @@ fn show_menu(app: &mut SolveApp, ctx: &egui::Context) {
         close(app);
     }
     if let Some(item) = picked {
+        let popped_out = app.menu.window.is_some();
         close(app);
-        run_item(app, &item, at);
+        if popped_out {
+            app.menu.deferred = Some((item, at));
+        } else {
+            run_item(app, &item, at);
+        }
     }
 }
 
