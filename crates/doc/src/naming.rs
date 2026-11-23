@@ -50,6 +50,8 @@ pub struct NameCell {
     /// How deep the chain of features that named it is, for names taken from a saved model
     /// (which has no origin): see [`NameCell::depth`].
     saved_depth: Option<usize>,
+    /// Whether the names came from a saved model, with nothing to work them out from again.
+    saved: bool,
 }
 
 impl NameCell {
@@ -58,7 +60,7 @@ impl NameCell {
     }
     /// Names of a body made by `origin`'s feature, following `lineage` where it is known.
     pub(crate) fn traced(origin: Option<Arc<NamingOrigin>>, lineage: Option<Arc<Lineage>>) -> Self {
-        NameCell { origin, cached_construction: None, lineage, names: Arc::new(OnceLock::new()), copy_of: None, saved_depth: None }
+        NameCell { origin, cached_construction: None, lineage, names: Arc::new(OnceLock::new()), copy_of: None, saved_depth: None, saved: false }
     }
     /// Names already known, taken as they are.
     pub fn known(names: Arc<Vec<String>>) -> Self {
@@ -78,6 +80,7 @@ impl NameCell {
     pub(crate) fn saved(names: Arc<Names>, depth: Option<usize>) -> Self {
         let mut cell = Self::shared(names);
         cell.saved_depth = depth;
+        cell.saved = true;
         cell
     }
     /// How deep the chain of features that named the body is (`None`: not made by a feature).
@@ -89,8 +92,20 @@ impl NameCell {
         Arc::as_ptr(&self.names) as usize
     }
     /// The same origin, lineage and depth with nothing worked out yet: for a body given a new
-    /// name, whose faces' names may be made from it.
-    pub(crate) fn renamed(&self) -> Self {
+    /// name, whose faces' names may be made from it. Names with nothing to work them out from
+    /// again (a saved model's) are kept, only those made from the old name following it (#21192).
+    pub(crate) fn renamed(&self, old: &str, new: &str) -> Self {
+        if self.origin.is_none()
+            && self.copy_of.is_none()
+            && self.saved
+            && let Some(names) = self.names.get()
+        {
+            let stem = format!("{old}:face:");
+            let faces = names.faces.iter().map(|n| n.strip_prefix(&stem).map_or_else(|| n.clone(), |k| format!("{new}:face:{k}"))).collect();
+            let mut cell = Self::saved(Arc::new(crate::history_names::Names { faces: Arc::new(faces), info: names.info.clone() }), self.saved_depth);
+            cell.lineage = self.lineage.clone();
+            return cell;
+        }
         let mut cell = Self::traced(self.origin.clone(), self.lineage.clone());
         cell.copy_of = self.copy_of.clone();
         cell.saved_depth = self.saved_depth;
@@ -99,7 +114,7 @@ impl NameCell {
     fn shared(names: Arc<Names>) -> Self {
         let cell = OnceLock::new();
         let _ = cell.set(names);
-        NameCell { origin: None, cached_construction: None, lineage: None, names: Arc::new(cell), copy_of: None, saved_depth: None }
+        NameCell { origin: None, cached_construction: None, lineage: None, names: Arc::new(cell), copy_of: None, saved_depth: None, saved: false }
     }
 }
 
@@ -254,8 +269,8 @@ impl FaceIndex {
         FaceIndex { faces }
     }
 
-    /// The face a point lies on (within `tol`).
-    fn face_at(&self, p: Vec3, tol: f64) -> Option<usize> {
+    /// The face a point lies on (within `tol`) and its distance to the point.
+    fn face_and_dist_at(&self, p: Vec3, tol: f64) -> Option<(f64, usize)> {
         let mut best: Option<(f64, usize)> = None;
         for (i, (bounds, tris)) in self.faces.iter().enumerate() {
             if !bounds.inflated(tol).contains(p) {
@@ -266,7 +281,12 @@ impl FaceIndex {
                 best = Some((d, i));
             }
         }
-        best.map(|(_, i)| i)
+        best
+    }
+
+    /// The face a point lies on (within `tol`).
+    fn face_at(&self, p: Vec3, tol: f64) -> Option<usize> {
+        self.face_and_dist_at(p, tol).map(|(_, i)| i)
     }
 }
 
@@ -1069,10 +1089,12 @@ fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usi
             format!("F{fid}:{role}")
         }
         FeatureKind::Cylinder { axis, .. } => {
-            let flat = !ns.is_empty() && ns.iter().all(|m| m.cross(axis.0).len() < 1e-6);
+            // The axis is numbers here: `naming_feature` evaluated it.
+            let Some(axis) = crate::literal_dir(axis) else { return format!("F{fid}:face:{fi}") };
+            let flat = !ns.is_empty() && ns.iter().all(|m| m.cross(axis).len() < 1e-6);
             let role = if !flat {
                 "side"
-            } else if ns.first().is_some_and(|m| m.dot(axis.0) > 0.0) {
+            } else if ns.first().is_some_and(|m| m.dot(axis) > 0.0) {
                 "top"
             } else {
                 "bottom"
@@ -1267,18 +1289,32 @@ pub(crate) fn vertex_index_at(b: &ModelBody, at: Vec3) -> Option<usize> {
         .map(|(_, i)| i)
 }
 
-/// Names of the faces holding each point (any body; empty when none does).
+/// Names of the faces holding each point within modelling tolerance (any body; empty when none
+/// does). Resolve against the exact trimmed faces: a display chord can put a point near a round
+/// rim nearer the adjacent wall and save that wall's name instead.
 pub fn face_names_at(st: &ModelState, pts: &[Vec3]) -> Vec<String> {
     pts.iter()
         .map(|p| {
+            let mut best: Option<(f64, String)> = None;
             for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
+                // A point on a body's face, found by exact geometry, names that face (#20260).
+                if let Some(f) = b.body.face_at_point(*p).ok().flatten() {
+                    best = Some((0.0, face_names(b).get(f).cloned().unwrap_or_default()));
+                    break;
+                }
                 let tol = (b.body.size() * 1e-3).max(1e-3);
                 let idx = FaceIndex::new(&b.mesh(), face_count(b));
-                if let Some(f) = idx.face_at(*p, tol) {
-                    return face_names(b).get(f).cloned().unwrap_or_default();
+                if let Some((d, f)) = idx.face_and_dist_at(*p, tol)
+                    && best.as_ref().is_none_or(|(bd, _)| d < *bd)
+                {
+                    let name = face_names(b).get(f).cloned().unwrap_or_default();
+                    best = Some((d, name));
+                    if d == 0.0 {
+                        break;
+                    }
                 }
             }
-            String::new()
+            best.map(|(_, name)| name).unwrap_or_default()
         })
         .collect()
 }
@@ -1402,7 +1438,14 @@ pub fn face_spot(b: &ModelBody, index: usize) -> Option<FaceSpot> {
 pub fn named_face_point(st: &ModelState, body: Option<&str>, name: &str) -> Result<Vec3, String> {
     let hit = locate_one(st, body, name)?;
     let b = st.bodies.get(hit.body).ok_or_else(|| format!("no face is named `{name}`"))?;
-    face_spot(b, hit.face).map(|spot| spot.point).ok_or_else(|| format!("face `{name}` has no surface to pick"))
+    // The spot starts on a display triangle. Project it onto the known face before exact
+    // face-name capture; a non-analytic curved face has no analytic projection in `spot`.
+    // When the exact projection finds nothing, the spot itself is returned, as it always was.
+    let spot = face_spot(b, hit.face).ok_or_else(|| format!("face `{name}` has no surface to pick"))?;
+    match solidcraft_kernel::point_closest(spot.point, &b.body, solidcraft_kernel::Members::Faces(&[hit.face])) {
+        Ok(Some(nearest)) => Ok(nearest.to),
+        _ => Ok(spot.point),
+    }
 }
 
 /// The point on the face this name finds nearest `p`; `None` when the name finds no face (see
@@ -1519,7 +1562,7 @@ mod tests {
             assert_eq!(take_warm_jobs(), 0, "snapshots share ready names");
 
             st.bodies[0].name = "Renamed".into();
-            st.bodies[0].names = st.bodies[0].names.renamed();
+            st.bodies[0].names = st.bodies[0].names.renamed("", "Renamed");
             let renamed = lookup(&st, "Renamed:face:0");
             same_hit(&renamed, &hit);
             assert_eq!(take_warm_jobs(), 1, "a rename invalidates only its own names");
@@ -1790,5 +1833,23 @@ mod tests {
         let body = ModelBody::new("Cube".into(), body, 1);
         let pairs = mesh_adjacency(&body);
         assert_eq!(pairs.len(), 12);
+    }
+
+    #[test]
+    fn face_names_at_chooses_nearest_face_across_all_bodies() -> Result<(), Box<dyn std::error::Error>> {
+        let body1 = solidcraft_kernel::box_solid(Vec3::new(-22.3, 0.0, 0.0), Vec3::new(-22.3 + 200.0, 100.0, 20.0))?;
+        let mb1 = ModelBody::new("Body1".into(), body1, 1);
+
+        let body2 = solidcraft_kernel::box_solid(Vec3::new(-37.5, 0.0, 0.0), Vec3::new(-37.5 + 15.0, 100.0, 20.0))?;
+        let mb2 = ModelBody::new("Body2".into(), body2, 2);
+
+        let st = ModelState::default().with_bodies(vec![mb1.clone(), mb2.clone()]);
+
+        let pt = Vec3::new(-22.5, 50.0, 10.0);
+        let names = face_names_at(&st, &[pt]);
+        assert_eq!(names.len(), 1);
+        let body2_faces = face_names(&mb2);
+        assert!(body2_faces.contains(&names[0]), "expected a face belonging to Body2, got '{}'", names[0]);
+        Ok(())
     }
 }

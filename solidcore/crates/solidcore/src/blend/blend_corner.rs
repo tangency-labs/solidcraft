@@ -145,7 +145,7 @@ pub enum BlendTurn {
 }
 
 /// The two ways the blend corner closes chamfers meeting at a vertex
-/// ([`chamfer`], `Kernel::fixes.fillet_chamfer_corner`), as [`BlendTurn`] is a Turn's.
+/// ([`chamfer`]), as [`BlendTurn`] is a Turn's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BlendChamferCorner {
     /// Each chamfer plane runs on until it meets the others: three meet at one point,

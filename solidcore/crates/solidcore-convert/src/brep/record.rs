@@ -36,11 +36,11 @@ use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::Kernel;
 use solidcore::surface::face_surface::record_face;
 use solidcore::surface::procedural_blend::convert::face_definition;
+use solidcore::topology::brep::create_missing_uv_trim_curves;
 use solidcore::topology::brep::outer_shells::outer_shells;
 use solidcore::topology::brep::p1 as bl;
 use solidcore::topology::brep_data::{BrepData, NO_OBJECT, UNDEF_ULONG};
 use solidcore::topology::brep_data_write::{data_regions, FromBrepEnv};
-use solidcore::topology::edgeuse::{p1 as eu1, p3 as eu3};
 use solidcore::topology::loopuse::notify_ref;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::EdgeuseId;
@@ -128,12 +128,7 @@ struct Edge {
 /// step the kernel refuses; [`Unsupported::Invalid`] for kernel data that does not hold
 /// together or a record that does not validate.
 pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
-    for eu in solidcore::topology::brep::p2::edgeuses(b, None)? {
-        if eu1::faceuse(b, eu)?.is_none() || eu1::uv_trim_curve_pointer(b, eu)?.is_some() {
-            continue;
-        }
-        eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
-    }
+    create_missing_uv_trim_curves(k, b)?;
     let b: &Brep = b;
     let store = AttributeStore::default();
     let records = NotifyRecords::new();
@@ -460,6 +455,7 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
             .iter()
             .map(|&v| at(&vertex_ids, v).copied())
             .collect::<R<_>>()?,
+        split_edges: order.split_edges,
     };
     Ok((brep, kernel))
 }
@@ -766,6 +762,8 @@ struct Sources {
     faces: Vec<usize>,
     edges: Vec<usize>,
     vertices: Vec<usize>,
+    /// Data edges split because only sheet faces use them more than twice (each once).
+    split_edges: usize,
 }
 
 /// The record in canonical order: faces in first appearance through the shells, edges
@@ -788,7 +786,7 @@ fn canonical(
     } = parts;
     let (mut edge_source, vertex_source) =
         split_shared(&mut faces, &mut edges, &shells, &sheets, n_vertices)?;
-    split_touching(&mut faces, &mut edges, &mut edge_source, &radial)?;
+    let split_edges = split_touching(&mut faces, &mut edges, &mut edge_source, &radial)?;
     let n_vertices = vertex_source.len();
     let mut face_new: Vec<Option<u32>> = vec![None; faces.len()];
     let (mut face_order, mut direction) = (Vec::new(), Vec::new());
@@ -982,6 +980,7 @@ fn canonical(
     brep.validate_built()
         .map_err(|e| Unsupported::Invalid(e.0))?;
     let sources = Sources {
+        split_edges,
         faces: face_order.iter().map(|&f| f as usize).collect(),
         edges: edge_order
             .iter()
@@ -1119,7 +1118,7 @@ fn split_touching(
     edges: &mut Vec<Edge>,
     edge_source: &mut Vec<usize>,
     radial: &Radial,
-) -> R<()> {
+) -> R<usize> {
     // The data edgeuses using each edge, and where each is: (face, loop, position).
     let mut records_of: Vec<Vec<usize>> = vec![Vec::new(); edges.len()];
     let mut place: HashMap<usize, (usize, usize, usize)> = HashMap::new();
@@ -1169,8 +1168,45 @@ fn split_touching(
     let after = |rec: usize| -> R<bool> { Ok(material_same(rec)? != top_entry(rec)?) };
     let before = |rec: usize| -> R<bool> { Ok(material_same(rec)? == top_entry(rec)?) };
 
+    // The original edges split because only sheet faces use them (each once).
+    let mut split_sheets = 0;
     for e in crowded {
         let mine = records_of.get(e).cloned().unwrap_or_default();
+        // An edge only sheet faces use (no material on either side of any of them) has no
+        // sectors to pair across: the first two uses keep it, every further use gets a copy
+        // of its own, so the sheet stays one open body with the extra uses as boundary edges.
+        let only_sheets = mine.iter().all(|rec| {
+            face_of(*rec)
+                .ok()
+                .and_then(|f| radial.material_same.get(f).copied())
+                .is_some_and(|m| m.is_none())
+        });
+        if only_sheets {
+            split_sheets += 1;
+            for &rec in mine.iter().skip(2) {
+                let made = edges.len();
+                let original = edges.get(e).ok_or(Unsupported::Invalid("edge"))?.clone();
+                edges.push(original);
+                edge_source.push(*at(edge_source, e)?);
+                let (f, li, p) = place
+                    .get(&rec)
+                    .copied()
+                    .ok_or(Unsupported::Invalid("edgeuse"))?;
+                let slot = faces
+                    .get_mut(f)
+                    .and_then(|face| face.loops.get_mut(li))
+                    .and_then(|l| {
+                        if let Loop::Edges(u) = l {
+                            u.get_mut(p)
+                        } else {
+                            None
+                        }
+                    })
+                    .ok_or(Unsupported::Invalid("edgeuse"))?;
+                slot.0 = index(made)?;
+            }
+            continue;
+        }
         let start = *mine.first().ok_or(Unsupported::Invalid("edge"))?;
         // The edge's radial list from one of its uses, keeping this edge's.
         let mut cycle = Vec::new();
@@ -1256,5 +1292,5 @@ fn split_touching(
             }
         }
     }
-    Ok(())
+    Ok(split_sheets)
 }

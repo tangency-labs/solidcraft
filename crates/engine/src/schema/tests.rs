@@ -79,6 +79,33 @@ fn axes_and_scale_factors_match_their_readers() {
     }
 }
 
+/// A cylinder's `AxisDirExpr` (#18822) takes what `AxisDir` takes, and `[x, y, z]` or
+/// `{x, y, z}` with expressions among the numbers; its schema agrees with its reader, except
+/// for the zero vector, which a schema can't refuse.
+#[test]
+fn an_expression_axis_matches_its_reader() {
+    let root = schemars::schema_for!(AxisDirExpr);
+    let root = root.as_value();
+    let given = [json!("X"), json!(" y "), json!([0, 0, 1]), json!([0, "-sin(t)", "-cos(t)"]), json!({"x": "a", "y": 0, "z": 1})];
+    for v in given {
+        assert!(crate::cmd::axis_expr_form(&v).is_ok(), "{v}");
+        assert!(parse::<AxisDirExpr>(v.clone()).is_some(), "{v}");
+        assert!(conforms(root, root, &v), "{v}");
+    }
+    for v in [json!("W"), json!([1, 2]), json!([0, "", 1]), json!([0, true, "a"]), json!({"x": "a"}), json!(null), json!([0, 0, 0])] {
+        assert!(crate::cmd::axis_expr_form(&v).is_err(), "{v}");
+        assert!(parse::<AxisDirExpr>(v.clone()).is_none(), "{v}");
+        if !v.is_string() {
+            assert_eq!(conforms(root, root, &v), v == json!([0, 0, 0]), "{v}");
+        }
+    }
+    // Plain numbers are normalized, as `AxisDir` reads them; expressions are kept as given.
+    let d = crate::cmd::axis_expr_form(&json!([0, 0, 2])).unwrap();
+    assert_eq!(d.map(|e| e.to_string()), ["0", "0", "1"]);
+    let d = crate::cmd::axis_expr_form(&json!([0, "-sin(t)", 2])).unwrap();
+    assert_eq!(d.map(|e| e.to_string()), ["0", "-sin(t)", "2"]);
+}
+
 #[test]
 fn points_accept_what_the_point_readers_accept() {
     assert!(parse::<Point3>(json!([1, 2, 3])).is_some());
@@ -1300,7 +1327,7 @@ fn plane_names_match_check_plane_name() {
 fn sketch_edit_contracts_validate_markers_before_changing_the_session() {
     use crate::schema::sketch::{CancelResult, EditParams, EditResult, ExitParams, FinishResult};
     use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
-    assert_keys(input_schema_for::<EditParams>(), &["restore_marker", "sketch"]);
+    assert_keys(input_schema_for::<EditParams>(), &["restore_marker", "sketch", "view"]);
     assert_keys(input_schema_for::<ExitParams>(), &["restore_marker"]);
     let mut s = crate::Session::default();
     let run = |s: &mut crate::Session, id: &str, p: serde_json::Value| s.execute(id, &p).unwrap();

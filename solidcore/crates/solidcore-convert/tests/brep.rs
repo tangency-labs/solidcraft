@@ -17,8 +17,9 @@ use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::primitive::api_primitives as primitives;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::topology::integrity;
 use solidcore::{Brep, Vec3};
-use solidcore_convert::brep::{to_kernel, to_record, Order, Unsupported};
+use solidcore_convert::brep::{to_kernel, to_kernel_body, to_record, Order, Unsupported};
 use solidcore_record::brep::{
     Brep as Record, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace,
     Region, Shell, Surface, Vertex, VERSION,
@@ -487,6 +488,298 @@ fn an_untrusted_record_is_healed_into_the_same_body() {
     assert!(is_manifold_solid(&b).unwrap());
     assert!((volume(&k, &mut b) - 8.0).abs() < 1e-9);
     valid(&mut k, &mut b);
+}
+
+/// A body built from a record has its cached topology current (each face's shell, each loop's
+/// edges), so the integrity check passes with no refresh by the caller, from either entry point
+/// and whether or not the record is healed (solidcore#3257: every STEP import failed it).
+#[test]
+fn a_built_body_passes_the_integrity_check_as_it_comes() {
+    for trusted in [true, false] {
+        let mut k = kernel();
+        let b = to_kernel_body(&mut k, &cube(10.0), trusted).unwrap();
+        integrity::check(&b).unwrap_or_else(|e| panic!("to_kernel_body, trusted {trusted}: {e:?}"));
+        let (b, _) = to_kernel(&mut k, &cube(10.0), trusted).unwrap();
+        integrity::check(&b).unwrap_or_else(|e| panic!("to_kernel, trusted {trusted}: {e:?}"));
+    }
+}
+
+/// A closed polyhedron record whose faces lie on axis planes: each a cycle of `corners`
+/// counter-clockwise from outside, its plane's axes along its first side and towards its last
+/// corner; straight edges and pcurves; every edge and vertex at `tol`, the body at `body_tol`.
+fn polyhedron(corners: &[[f64; 3]], cycles: &[&[usize]], tol: f64, body_tol: f64) -> Record {
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let cross = |a: [f64; 3], b: [f64; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    // an axis vector's length is its largest component (no square root in this crate)
+    let unit = |a: [f64; 3]| {
+        let l = a[0].abs().max(a[1].abs()).max(a[2].abs());
+        [a[0] / l, a[1] / l, a[2] / l]
+    };
+    let mut ends: Vec<(usize, usize)> = Vec::new();
+    let mut uses: Vec<Vec<EdgeUseRef>> = Vec::new();
+    let mut faces = Vec::new();
+    for (fi, cycle) in cycles.iter().enumerate() {
+        let o = corners[cycle[0]];
+        let u = unit(sub(corners[cycle[1]], o));
+        let v = cross(unit(cross(u, sub(corners[cycle[cycle.len() - 1]], o))), u);
+        let uv = |p: [f64; 3]| [dot(sub(p, o), u), dot(sub(p, o), v)];
+        let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+        let mut edges = Vec::new();
+        for (k, &a) in cycle.iter().enumerate() {
+            let b = cycle[(k + 1) % cycle.len()];
+            let (e, forward) = match ends.iter().position(|&(s, t)| (s, t) == (b, a)) {
+                Some(e) => (e, false),
+                None => {
+                    ends.push((a, b));
+                    uses.push(Vec::new());
+                    (ends.len() - 1, true)
+                }
+            };
+            uses[e].push(EdgeUseRef {
+                face: fi as u32,
+                r#loop: 0,
+                position: k as u32,
+                upper: !forward,
+            });
+            let (s, t) = ends[e];
+            for p in [uv(corners[s]), uv(corners[t])] {
+                for i in 0..2 {
+                    lo[i] = lo[i].min(p[i]);
+                    hi[i] = hi[i].max(p[i]);
+                }
+            }
+            edges.push(OrientedEdge {
+                edge: e as u32,
+                forward,
+                pcurve: Curve2::Spline {
+                    knots: vec![0.0, 0.0, 1.0, 1.0],
+                    points: vec![uv(corners[s]), uv(corners[t])],
+                },
+            });
+        }
+        faces.push(Face {
+            nurbs: None,
+            surface: Surface::Plane {
+                origin: o,
+                u_axis: u,
+                v_axis: v,
+            },
+            domain: [[lo[0], hi[0]], [lo[1], hi[1]]],
+            loops: vec![Loop::Edges { edges }],
+        });
+    }
+    let mut vertex_of: Vec<Option<u32>> = vec![None; corners.len()];
+    let mut vertices = Vec::new();
+    let mut number = |i: usize, vertices: &mut Vec<Vertex>| {
+        *vertex_of[i].get_or_insert_with(|| {
+            vertices.push(Vertex {
+                point: corners[i],
+                tolerance: tol,
+            });
+            vertices.len() as u32 - 1
+        })
+    };
+    let edges = ends
+        .iter()
+        .zip(uses)
+        .map(|(&(s, t), uses)| Edge {
+            nurbs: None,
+            curve: Curve::Line {
+                start: corners[s],
+                end: corners[t],
+            },
+            interval: [0.0, 1.0],
+            vertices: [number(s, &mut vertices), number(t, &mut vertices)],
+            tolerance: tol,
+            uses,
+        })
+        .collect();
+    Record {
+        version: VERSION,
+        tolerance: body_tol,
+        regions: vec![
+            Region {
+                shells: vec![0],
+                void: false,
+            },
+            Region {
+                shells: vec![0],
+                void: false,
+            },
+        ],
+        shells: vec![Shell::Faces {
+            faces: (0..cycles.len() as u32)
+                .map(|face| OrientedFace {
+                    face,
+                    forward: true,
+                })
+                .collect(),
+            wires: vec![],
+        }],
+        faces,
+        edges,
+        vertices,
+    }
+}
+
+/// The healer leaves a vertex a tolerance that covers its gaps (#17739). The body is a 10 mm box
+/// whose top steps up 3e-4 along y = 5, every edge and vertex at 1e-3 and the body at 1e-5, with
+/// the corner (10, 0, 0) moved 2e-4 up off its three edges and the bottom. The healer resets the
+/// tolerances from the model size and the gaps; it shrank the corner's under twice its gap, and
+/// the check (a vertex's gaps within half its tolerance) then failed the gap it had covered. With
+/// the corner stated at 3e-4, under what its gap needs, the healer raises it to that need.
+#[test]
+fn the_healer_keeps_a_vertex_tolerance_that_covers_its_gaps() {
+    let (gap, h) = (2e-4, 10.0 + 3e-4);
+    let corners = [
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [0.0, 10.0, 0.0],
+        [0.0, 0.0, 10.0],
+        [10.0, 0.0, 10.0],
+        [10.0, 5.0, 10.0],
+        [0.0, 5.0, 10.0],
+        [0.0, 5.0, h],
+        [10.0, 5.0, h],
+        [10.0, 10.0, h],
+        [0.0, 10.0, h],
+    ];
+    let cycles: [&[usize]; 8] = [
+        &[0, 3, 2, 1],        // bottom
+        &[4, 5, 6, 7],        // front half of the top
+        &[7, 6, 9, 8],        // riser
+        &[8, 9, 10, 11],      // back half of the top
+        &[0, 1, 5, 4],        // front
+        &[2, 3, 11, 10],      // back
+        &[1, 2, 10, 9, 6, 5], // right
+        &[0, 4, 7, 8, 11, 3], // left
+    ];
+    // the corner's stated tolerance, and whether it covers its gap before the heal
+    for (corner_tol, covered) in [(1e-3, true), (3e-4, false)] {
+        let mut r = polyhedron(&corners, &cycles, 1e-3, 1e-5);
+        let corner = r
+            .vertices
+            .iter()
+            .position(|v| v.point == [10.0, 0.0, 0.0])
+            .unwrap();
+        r.vertices[corner].point = [10.0, 0.0, gap];
+        r.vertices[corner].tolerance = corner_tol;
+        let mut k = kernel();
+        let (b, order) = to_kernel(&mut k, &r, true).unwrap();
+        let stated = solidcore::topology::vertex::tolerance(&b, order.vertices[corner]).unwrap();
+        assert_eq!(stated >= 2.0 * gap, covered, "{stated}");
+        let (mut b, order) = to_kernel(&mut k, &r, false).unwrap();
+        order_is_total(&order, &r, &b);
+        assert_eq!(
+            [
+                b.face_list().len(),
+                b.edge_list().len(),
+                b.vertex_list().len()
+            ],
+            [8, 18, 12]
+        );
+        // the floor, the gap gain times twice the gap, whatever the stated tolerance
+        let healed = solidcore::topology::vertex::tolerance(&b, order.vertices[corner]).unwrap();
+        let floor = 2.0 * solidcore::geom::tol::gap_gain(&k) * gap;
+        assert!(
+            (healed - floor).abs() <= 4.0 * f64::EPSILON * floor,
+            "stated {stated}: {healed} against {floor}"
+        );
+        valid(&mut k, &mut b);
+    }
+}
+
+/// The healer covers a vertex's gaps past Test #82's ratio limit only where the check accepts
+/// the cover. The body is a 10 mm square plate of thickness `t`, every edge and vertex at 1e-3
+/// and the body at 1e-5 (Test #82's limit 1000 x 1e-5 = 1e-2), with the corner (10, 0, 0) moved
+/// 5e-3 up off its three edges and the bottom. Covering twice that gap with the gap gain takes
+/// the corner to 1.1 x 2 x 5e-3 = 1.1e-2, past the limit, where Test #82 keeps a vertex only if
+/// its ball reaches no face or edge it does not bound. In a plate 1 thick the ball is clear and
+/// the corner takes the cover. In a plate 1.2e-2 thick the top is 1.2e-2 - 5e-3 = 7e-3 from the
+/// corner, inside the ball: the cover would fail Test #82 (pointers invalid), so the corner keeps
+/// the formula's 1.1 x 5e-3 - 1e-5 = 5.49e-3, under the limit and clear of the top, and the body
+/// is a valid solid (its gap is left to the level 2 gap tests, as before the cover).
+#[test]
+fn the_healer_covers_a_vertex_gap_past_the_limit_only_where_its_ball_is_clear() {
+    let gap = 5e-3;
+    for (t, clear) in [(1.0, true), (1.2e-2, false)] {
+        let corners = [
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [10.0, 10.0, 0.0],
+            [0.0, 10.0, 0.0],
+            [0.0, 0.0, t],
+            [10.0, 0.0, t],
+            [10.0, 10.0, t],
+            [0.0, 10.0, t],
+        ];
+        let cycles: [&[usize]; 6] = [
+            &[0, 3, 2, 1], // bottom
+            &[4, 5, 6, 7], // top
+            &[0, 1, 5, 4], // front
+            &[2, 3, 7, 6], // back
+            &[1, 2, 6, 5], // right
+            &[0, 4, 7, 3], // left
+        ];
+        let mut r = polyhedron(&corners, &cycles, 1e-3, 1e-5);
+        let corner = r
+            .vertices
+            .iter()
+            .position(|v| v.point == [10.0, 0.0, 0.0])
+            .unwrap();
+        r.vertices[corner].point = [10.0, 0.0, gap];
+        let mut k = kernel();
+        let (mut b, order) = to_kernel(&mut k, &r, false).unwrap();
+        order_is_total(&order, &r, &b);
+        // as `check_solid`: no pointer report fails, `AssertValid` passes, the body faces out
+        let c = check_brep(&mut k, &mut b, CheckLevel::Level0).unwrap();
+        let refused: Vec<_> = c
+            .pointer_reports
+            .reports()
+            .iter()
+            .filter(|r| !r.ok)
+            .map(|r| r.format_log_message())
+            .collect();
+        assert!(refused.is_empty(), "thickness {t}: {refused:?}");
+        assert!(
+            solidcore::topology::brep::outward_solid_failure(&mut k, &mut b)
+                .unwrap()
+                .is_none(),
+            "thickness {t}"
+        );
+        let healed = solidcore::topology::vertex::tolerance(&b, order.vertices[corner]).unwrap();
+        let cover = 2.0 * solidcore::geom::tol::gap_gain(&k) * gap;
+        let limit = 1000.0 * b.tolerance();
+        assert!(
+            cover > limit && cover < 2.0 * limit,
+            "{cover} against {limit}"
+        );
+        if clear {
+            assert!(
+                (healed - cover).abs() <= 4.0 * f64::EPSILON * cover,
+                "thickness {t}: {healed} against {cover}"
+            );
+        } else {
+            // the formula's `gain * gap - def` term (def the body's 1e-5): 1.1 x 5e-3 - 1e-5
+            let formula = solidcore::geom::tol::gap_gain(&k) * gap - b.tolerance();
+            assert!(
+                (healed - formula).abs() <= 4.0 * f64::EPSILON * formula,
+                "thickness {t}: {healed} against {formula}"
+            );
+            assert!(
+                healed < limit && healed < t - gap,
+                "thickness {t}: {healed}"
+            );
+        }
+    }
 }
 
 /// A body goes to the record, validates, comes back to the kernel as the same body (counts,

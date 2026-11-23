@@ -465,8 +465,13 @@ pub enum ChainTarget {
 }
 
 /// The chain's name check: text of 1..4096 bytes, as `cmd::appearance_chain::name` reads it.
+fn chain_text(value: &str) -> Option<&str> {
+    (!value.is_empty() && value.len() <= 4096).then_some(value)
+}
+
+/// The same check for a JSON value: a name, and nothing else.
 fn chain_name(value: &Value) -> Option<&str> {
-    value.as_str().filter(|s| !s.is_empty() && s.len() <= 4096)
+    value.as_str().and_then(chain_text)
 }
 
 impl<'de> Deserialize<'de> for ChainTarget {
@@ -513,6 +518,42 @@ impl JsonSchema for ChainTarget {
             ]
         })
     }
+}
+
+/// `appearance.chain` takes one parameter: the body, face or component whose look chain to read.
+/// This is the same target `appearance.copy` and `appearance.pick_up` take; reading a chain changes
+/// nothing, so unlike the pick-up it has no ask-the-UI form.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppearanceChainParams {
+    /// The body, face or component whose look chain to read.
+    pub target: ChainTarget,
+}
+
+/// One level of a target's look chain and what is assigned there. The four levels are always
+/// reported, in precedence order, so a caller can see which assignment wins and which are empty.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ChainStep {
+    /// The level: `face`, `body`, `component` or `material`.
+    pub step: String,
+    /// The look assigned at this level, `null` when nothing is. A component's `material` step is
+    /// the common default look of the bodies it owns directly, `null` when they differ or there are
+    /// none.
+    pub look: Option<LookReply>,
+}
+
+/// What a chain request answers: the four levels in precedence order and the one that decides what
+/// the target shows. Nothing is written to the design. Imported paint is a display fallback outside
+/// these four steps, so a target with no look anywhere answers with four empty steps.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AppearanceChainResult {
+    /// The four levels, in precedence order: face, body, component, material.
+    pub steps: Vec<ChainStep>,
+    /// Which step decides the target's look, `null` when none of them does.
+    pub active: Option<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// `appearance.copy` takes one parameter, the `appearance.chain` target whose look goes into the
@@ -585,6 +626,195 @@ pub struct AppearanceFavoriteResult {
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// What `appearance.replace` takes as `from` and `to`: either a library appearance's name or a
+/// starter recipe as plain text, or a look object with the same five keys as `appearance.assign`
+/// (the same [`FavoriteLook`] `appearance.favorite` takes). Plain text means `{"appearance": …}`:
+/// a saved look's own label is inert, only an explicit `appearance` selects a recipe. Read as
+/// `cmd::appearance_chain::look` reads it, with its messages.
+#[derive(Debug)]
+pub enum ReplaceLook {
+    /// A library appearance's name, or a starter recipe's name or `starter.*` id.
+    Recipe(String),
+    /// A look described by the assignment's own keys.
+    Look(FavoriteLook),
+}
+
+impl<'de> Deserialize<'de> for ReplaceLook {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(d)?;
+        match value {
+            // The handler checks the name before it resolves anything, so a name it can't use is
+            // what it says, whatever the library would have made of it.
+            Value::String(name) => {
+                Ok(ReplaceLook::Recipe(chain_text(&name).ok_or_else(|| D::Error::custom(whole("target name must have 1..4096 bytes")))?.to_string()))
+            }
+            // The same five keys `appearance.favorite` takes, read by the same type, so a look
+            // object that is not one of those five is refused as the favourite's is.
+            Value::Object(_) => FavoriteLook::deserialize(value).map(ReplaceLook::Look).map_err(|e| D::Error::custom(e.to_string())),
+            _ => Err(D::Error::custom(whole("from and to must be library names or look objects"))),
+        }
+    }
+}
+
+impl JsonSchema for ReplaceLook {
+    fn schema_name() -> Cow<'static, str> {
+        "ReplaceLook".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let name = json!({"type": "string", "minLength": 1, "maxLength": 4096});
+        json_schema!({
+            "description": "A library appearance or starter recipe by name, or a look object with the assignment's look keys.",
+            "anyOf": [name, generator.subschema_for::<FavoriteLook>()]
+        })
+    }
+}
+
+/// The targets `appearance.replace`'s `scope` may name, at most 10000 of them between the two
+/// lists, as `cmd::appearance_chain::scope` counts them.
+const MAX_SCOPE_TARGETS: usize = 10_000;
+
+/// `appearance.replace`'s optional `scope`: which saved overrides to search, `{bodies: [names],
+/// components: [names or ids]}` with at least one of the two lists and at most 10000 targets
+/// between them. A placed copy's name (`KB (K:2)`, `K:2`) means the body or component it shows, as
+/// `appearance.assign` takes it (#9740). A body includes its face overrides; a component names only
+/// its own override. Read as `cmd::appearance_chain::scope` reads it, with its messages; left out,
+/// every override in the design is searched.
+#[derive(Debug, Default)]
+pub struct ReplaceScope {
+    /// The bodies to search, by name.
+    pub bodies: Vec<String>,
+    /// The components to search, by name or id, kept as they were given.
+    pub components: Vec<Value>,
+}
+
+impl<'de> Deserialize<'de> for ReplaceScope {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(d)?;
+        let object = value
+            .as_object()
+            .filter(|o| !o.is_empty() && o.keys().all(|key| matches!(key.as_str(), "bodies" | "components")))
+            .ok_or_else(|| D::Error::custom(whole("scope must contain bodies and/or components lists")))?;
+        // Counted as the handler counts: each key's list in turn, so a value that isn't one is
+        // what it says, and a list that goes past the limit is refused before the next key is read.
+        let list = |key: &str| -> Result<Option<&Vec<Value>>, D::Error> {
+            match object.get(key) {
+                None => Ok(None),
+                Some(value) => Ok(Some(value.as_array().ok_or_else(|| D::Error::custom(whole("scope targets must be lists")))?)),
+            }
+        };
+        let mut count = 0usize;
+        for key in object.keys() {
+            count = count.saturating_add(list(key)?.map_or(0, Vec::len));
+            if count > MAX_SCOPE_TARGETS {
+                return Err(D::Error::custom(whole("scope has more than 10000 targets")));
+            }
+        }
+        let bodies = list("bodies")?;
+        let components = list("components")?;
+        let mut scope = ReplaceScope::default();
+        for body in bodies.into_iter().flatten() {
+            let name = chain_name(body).ok_or_else(|| D::Error::custom(whole("target name must have 1..4096 bytes")))?.to_string();
+            scope.bodies.push(name);
+        }
+        // A component that is neither a name nor an id is the handler's to refuse as unknown: it
+        // can only ever name one, and an id it can't read names none.
+        for component in components.into_iter().flatten() {
+            match component {
+                Value::String(name) => {
+                    let name = chain_text(name).ok_or_else(|| D::Error::custom(whole("target name must have 1..4096 bytes")))?.to_string();
+                    scope.components.push(Value::String(name));
+                }
+                Value::Number(_) => {
+                    scope.components.push(json!(component.as_u64().ok_or_else(|| D::Error::custom(whole("unknown component in scope")))?))
+                }
+                _ => return Err(D::Error::custom(whole("unknown component in scope"))),
+            }
+        }
+        Ok(scope)
+    }
+}
+
+impl JsonSchema for ReplaceScope {
+    fn schema_name() -> Cow<'static, str> {
+        "ReplaceScope".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let name = json!({"type": "string", "minLength": 1, "maxLength": 4096});
+        json_schema!({
+            "description": "The saved overrides to search: {bodies: [names]} and/or {components: [names or ids]}, at most 10000 targets in all.",
+            "type": "object",
+            "properties": {
+                "bodies": {"type": "array", "items": name, "maxItems": MAX_SCOPE_TARGETS},
+                "components": {"type": "array", "items": {"anyOf": [name, {"type": "integer", "minimum": 0}]}, "maxItems": MAX_SCOPE_TARGETS}
+            },
+            "minProperties": 1,
+            "additionalProperties": false
+        })
+    }
+}
+
+/// `appearance.replace` rewrites the saved overrides that match `from` exactly — label, colour,
+/// opacity and PBR alike — with `to`, in `scope` or in the whole design. One undo step; a call
+/// that matches nothing changes neither the design nor its history. Physical-material defaults are
+/// outside its scope.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppearanceReplaceParams {
+    /// The look to replace: a library appearance or starter recipe by name, or a look object.
+    pub from: ReplaceLook,
+    /// The look to write in its place, in the same two forms.
+    pub to: ReplaceLook,
+    /// Which saved overrides to search: `{bodies}` and/or `{components}`. Left out, every override
+    /// in the design, including hidden and suppressed ones.
+    #[serde(default, deserialize_with = "scope")]
+    #[schemars(schema_with = "scope_schema")]
+    pub scope: Option<ReplaceScope>,
+}
+
+/// The handler reads a `scope` that isn't one of the two lists, `null` included, so the contract
+/// refuses it the same way rather than passing it on as no scope.
+fn scope<'de, D: Deserializer<'de>>(d: D) -> Result<Option<ReplaceScope>, D::Error> {
+    ReplaceScope::deserialize(d).map(Some)
+}
+
+fn scope_schema(generator: &mut SchemaGenerator) -> Schema {
+    generator.subschema_for::<ReplaceScope>()
+}
+
+/// What a replacement answers: how many saved overrides it rewrote. `0` means nothing matched —
+/// `from` and `to` the same look, or no override in scope — which leaves the design and its
+/// history unchanged.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AppearanceReplaceResult {
+    /// The overrides that were rewritten: bodies, faces and components that matched `from`.
+    pub count: usize,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// `appearance.paste` takes the targets of `appearance.assign` and no look of its own: it applies
+/// what `appearance.copy` put in the session's look clipboard. Naming a look here (`appearance`,
+/// `color`, `opacity`, `name` or `pbr`) is refused rather than dropped in silence, and the reply is
+/// the same object `appearance.assign` answers with.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppearancePasteParams {
+    /// Bodies, by name (a placed copy's name, `KB (K:2)`, means the body it shows).
+    #[serde(default)]
+    pub bodies: Option<StringList>,
+    /// Faces, by a point on each, at most 10000.
+    #[serde(default)]
+    pub faces: Option<FaceSpots>,
+    /// The body the `faces` points are on, for points that don't name one. Default: the
+    /// nearest body with a face there.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// Components, by name or id, or a placement's name (`K:2`).
+    #[serde(default)]
+    pub components: Option<StringList>,
 }
 
 #[cfg(test)]

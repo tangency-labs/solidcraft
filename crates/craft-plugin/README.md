@@ -16,6 +16,7 @@ no plugin code.
 | `Limits`, `HostLimits` | Invocation budgets and user ceilings; `HostLimits::check` compares them |
 | `HostError`, `Result` | Typed permission, command, limit, manifest, input, trap and cancellation failures |
 | `API`, `WIT`, `MAX_*` | Interface identifier, WIT text and size/address-space limits |
+| `ui` | Typed panel declarations, widgets, events, slash-path data and validation |
 
 The app implements `PluginHost` and defines command policy, approval and transaction history.
 `authorize_file_path` applies caller scope to each complete file path, in addition to folder
@@ -49,6 +50,22 @@ nothing: the app supplies matching `FileGrant` values. Clock permission allows w
 without it, the runtime returns a fixed epoch. Requests for `net` are refused.
 Parsing a manifest neither approves nor executes its component. These contracts have no
 native execution requirement.
+
+## Declarative panels
+
+`ui@0.1` adds the `panel-plugin` world, which includes `command-plugin`, imports `ui`
+and exports `ui-provider`. Its records match RFC 0015. `runtime.ui` declares the layouts
+shown before approval; `ui-provider.describe` must return those same declarations.
+A panel carries only host-drawn widgets and theme colour roles. Unknown widget kinds
+remain loadable as placeholders; trees, charts and workspaces are reserved for phase 3.
+
+`ui::Declarations::validate` checks dock zones, command entry references and rooted
+layout trees. `ui::PanelData::set_data_for` validates an entire slash-path update before
+staging it; `merge_frame` adopts all successful updates once for the renderer. Values
+always use millimetres and degrees. A panel has at most 1 MiB of data; layouts have at
+most 512 widgets, plugins have at most 8 panels, rows at most 100,000 and charts at most
+8 series of 20,000 points. Default `PluginHost::ui_*` methods refuse panels for apps
+that do not serve them.
 
 ## Validation
 

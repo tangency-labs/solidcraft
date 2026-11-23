@@ -19,14 +19,14 @@ use super::sketch::{
 };
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
-use crate::params::{bad, num, req_vec2, str_, string_list};
+use crate::params::{bad, num, req_vec2, str_, string_list, vec2_list};
 use crate::schema::sketch_create::{
     ArcSlotCenterParams, ArcSlotResult, ArcSlotThreePointParams, ArcTangentParams, BlendCurveParams, CenterlineParams, ConicParams,
     ControlKnotsSplineParams, ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams, FitPointSplineParams,
     InfiniteLineParams, LineTypeResult, MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineHandlesParams, SplineHandlesResult,
     SplineInsertPointParams, SplineInsertPointResult, SplineRemovePointParams, SplineRemovePointResult, SplineResetHandlesParams,
     SplineResetHandlesResult, SplineReverseParams, SplineReverseResult, TextChange, TextEditsResult, TextExpressions, TextResult,
-    ThreeTangentCircleParams, TwoTangentCircleParams,
+    ThreeTangentCircleParams, ToleranceSplineParams, ToleranceSplineResult, TwoTangentCircleParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -48,6 +48,7 @@ const ARC_SLOT_THREE_CONTRACT: TypedContract<ArcSlotThreePointParams> = TypedCon
 const ARC_SLOT_CENTER_CONTRACT: TypedContract<ArcSlotCenterParams> = TypedContract::new();
 const ELLIPSE_CONTRACT: TypedContract<EllipseParams> = TypedContract::new();
 const SPLINE_FIT_CONTRACT: TypedContract<FitPointSplineParams> = TypedContract::new();
+const SPLINE_FIT_TOLERANCE_CONTRACT: TypedContract<ToleranceSplineParams> = TypedContract::new();
 const SPLINE_CONTROL_CONTRACT: TypedContract<ControlPointSplineParams> = TypedContract::new();
 const SPLINE_KNOTS_CONTRACT: TypedContract<ControlKnotsSplineParams> = TypedContract::new();
 const CONIC_CONTRACT: TypedContract<ConicParams> = TypedContract::new();
@@ -141,6 +142,19 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLINE_FIT_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!("points: [[x,y] or point refs…] (2…500): the spline passes through them; each fit point has an editable tangent handle whose direction and length control curvature, periodic?: boolean (default false); periodic cubic fit closes smoothly through at least 3 distinct samples", created_doc!())),
+    CommandSpec::new("sketch.spline.fit_tolerance", "Fit Spline Within Tolerance", crate::checked!("sketch.spline.fit_tolerance", spline_fit_tolerance))
+        .in_sketch_part()
+        .at("SKETCH", "CREATE")
+        .icon("spline")
+        .enabled(in_sketch)
+        .contract(&SPLINE_FIT_TOLERANCE_CONTRACT)
+        .output(output_schema_for::<ToleranceSplineResult>)
+        .params(concat!(
+            "points: [[x,y]…] (2…10000, plain coordinates, in order along the contour): one fit point spline through as few of them as keep every given point within the tolerance, as a contour from a computation needs (traced, scanned or generated; sketch.spline.fit_point takes at most 500 and passes through each). ",
+            "tolerance?: mm (default 0.01, from 0.0001 to 10): how far any given point may stray from the spline. periodic?: boolean (default false): the contour closes smoothly (a closing repeat of the first point is dropped). ",
+            "Returns the curve, how many of the given points it passes through and the largest deviation reached (mm); when even 500 spline points do not reach the tolerance it refuses, naming the deviation, as sketch.equation_curve does",
+            created_doc!()
+        )),
     CommandSpec::new("sketch.spline.control_point", "Control Point Spline", crate::checked!("sketch.spline.control_point", spline_cv3))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -376,7 +390,7 @@ type TextValues = (String, Vec2, f64, f64, Option<String>, TextStyle, TextExprs)
 /// A text's source from a command's parameters: what is given replaces what `old` has (the
 /// defaults, for a new text); what is left out stays, an expression with its number. A number
 /// replaces an expression. An input that is not understood is refused, not ignored.
-fn text_source(doc: &solidcraft_doc::Document, p: &Value, cmd: &str, old: Option<TextValues>) -> Result<LinkSource> {
+fn text_source(doc: &solidcraft_doc::Document, design: Option<&str>, p: &Value, cmd: &str, old: Option<TextValues>) -> Result<LinkSource> {
     let (t0, mut at, mut height, mut angle, f0, s0, mut exprs) =
         old.unwrap_or((String::new(), Vec2::ZERO, 5.0, 0.0, None, TextStyle::default(), TextExprs::default()));
     let text = match (p.get("text").filter(|v| !v.is_null()), p.get("text_expression").filter(|v| !v.is_null())) {
@@ -424,7 +438,8 @@ fn text_source(doc: &solidcraft_doc::Document, p: &Value, cmd: &str, old: Option
     let font = match p.get("font") {
         None | Some(Value::Null) => f0,
         Some(Value::String(f)) if f.trim().is_empty() => None,
-        Some(Value::String(f)) => Some(f.trim().to_string()),
+        // A font file relative to the design's folder is kept whole, as a saved design is read (#20502).
+        Some(Value::String(f)) => Some(super::design_link::whole_font(design, f).unwrap_or_else(|| f.trim().to_string())),
         Some(_) => return Err(bad(cmd, "`font` must be a font family name or a font file path")),
     };
     let style = text_style(p, cmd, s0)?;
@@ -453,7 +468,7 @@ fn text(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("at").is_none_or(Value::is_null) {
         return Err(bad(cmd, AT_MUST));
     }
-    let src = text_source(&s.doc, p, cmd, None)?;
+    let src = text_source(&s.doc, s.path.as_deref(), p, cmd, None)?;
     let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
     let exprs = text_exprs(&src);
     let (l, curves, guide) = sketch_store::update(s, id, |_, _, sk| {
@@ -559,11 +574,12 @@ pub(crate) const MAX_TEXT_EDITS: usize = 1000;
 fn edit_text(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.edit_text";
     let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
+    let design = s.path.clone();
     let edited = sketch_store::update(s, id, |_, doc, sk| {
         // The numbers its expressions give now (a parameter may have changed since the sketch was
         // last stored); one that cannot be evaluated is left as it was, to be replaced by this edit.
         let _ = doc.apply_text_values(&doc.param_values().0, sk);
-        apply_text_edits(sk, doc, p)
+        apply_text_edits(sk, doc, design.as_deref(), p)
     })?;
     reply(edited)
 }
@@ -573,26 +589,27 @@ fn edit_text(s: &mut Session, p: &Value) -> Result<Value> {
 fn edit_text_live(s: &mut Session, p: &Value) -> Result<(Value, Option<crate::LiveEdit>)> {
     let cmd = "sketch.edit_text";
     let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
+    let design = s.path.clone();
     let (out, report) = super::sketch::edit_solved(s, id, false, solidcraft_sketch::Analysis::Full, |sk, doc| {
-        Ok((apply_text_edits(sk, doc, p)?, super::sketch::Left::Unsolved))
+        Ok((apply_text_edits(sk, doc, design.as_deref(), p)?, super::sketch::Left::Unsolved))
     })?;
     Ok((reply(out)?, report.map(|report| crate::LiveEdit { sketch: id, report })))
 }
 
 /// `sketch.edit_text`'s change: one text's (`link` or `entity`), or each of `edits` in turn.
 /// One command, so the features after the sketch are rebuilt once for all of them.
-fn apply_text_edits(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value) -> Result<EditTextResult> {
+fn apply_text_edits(sk: &mut Sketch, doc: &solidcraft_doc::Document, design: Option<&str>, p: &Value) -> Result<EditTextResult> {
     let cmd = "sketch.edit_text";
     match p.get("edits") {
         None | Some(Value::Null) => {
-            let change = apply_text_edit(sk, doc, p)?;
+            let change = apply_text_edit(sk, doc, design, p)?;
             Ok(EditTextResult::One(TextResult { change, created: None, param_warnings: Vec::new() }))
         }
         Some(Value::Array(edits)) => {
             if edits.is_empty() || edits.len() > MAX_TEXT_EDITS {
                 return Err(bad(cmd, format!("`edits` must hold 1 to {MAX_TEXT_EDITS} edits")));
             }
-            let outs = edits.iter().map(|e| apply_text_edit(sk, doc, e)).collect::<Result<Vec<_>>>()?;
+            let outs = edits.iter().map(|e| apply_text_edit(sk, doc, design, e)).collect::<Result<Vec<_>>>()?;
             Ok(EditTextResult::Many(TextEditsResult { edits: outs, created: None, param_warnings: Vec::new() }))
         }
         Some(_) => Err(bad(cmd, "`edits` must be a list of edits")),
@@ -601,7 +618,7 @@ fn apply_text_edits(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value) 
 
 /// `sketch.edit_text`'s change to its sketch: the text source's new values and its outlines
 /// regenerated from them.
-fn apply_text_edit(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value) -> Result<TextChange> {
+fn apply_text_edit(sk: &mut Sketch, doc: &solidcraft_doc::Document, design: Option<&str>, p: &Value) -> Result<TextChange> {
     let cmd = "sketch.edit_text";
     let l = match (str_(p, "link"), str_(p, "entity")) {
         (Some(l), _) => l.to_string(),
@@ -612,7 +629,7 @@ fn apply_text_edit(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value) -
         Some((LinkKind::Text, LinkSource::Text { text, at, height, angle, font, style, exprs })) => (text, at, height, angle, font, style, exprs),
         _ => return Err(bad(cmd, format!("`{l}` is not text"))),
     };
-    let src = text_source(doc, p, cmd, Some(old))?;
+    let src = text_source(doc, design, p, cmd, Some(old))?;
     let geom = sk.text_source_geometry(&src).map_err(|e| bad(cmd, e.to_string()))?;
     if geom.is_empty() {
         return Err(bad(cmd, "the text makes no outline"));
@@ -913,6 +930,59 @@ fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8, nurb
 
 fn spline_fit(s: &mut Session, p: &Value) -> Result<Value> {
     spline(s, p, "sketch.spline.fit_point", false, 3, None)
+}
+
+/// `sketch.spline.fit_tolerance`: one spline through as few of a contour's points as keep every
+/// given point within the tolerance (#20048). The fit itself is `fit_within_tolerance`; the
+/// curve is created as `sketch.spline.fit_point` creates one, through the points it chose.
+fn spline_fit_tolerance(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.fit_tolerance";
+    let periodic = match p.get("periodic") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(v)) => *v,
+        _ => return Err(bad(cmd, "`periodic` must be true or false")),
+    };
+    let tolerance = match p.get("tolerance") {
+        None | Some(Value::Null) => 0.01,
+        Some(v) => v
+            .as_f64()
+            .filter(|t| t.is_finite() && (1e-4..=10.0).contains(t))
+            .ok_or_else(|| bad(cmd, "`tolerance` must be a number of mm from 0.0001 to 10"))?,
+    };
+    let given = vec2_list(cmd, p, "points", 10_000)?;
+    if given.len() < 2 {
+        return Err(bad(cmd, "a contour needs 2 to 10000 points"));
+    }
+    let fit = solidcraft_sketch::fit_within_tolerance(&given, tolerance, periodic)?;
+    let ((curves, _), info) = edit(s, p, cmd, false, |sk, _| {
+        let mut pts = Vec::with_capacity(fit.chosen.len() + usize::from(periodic));
+        for q in &fit.chosen {
+            let i = sk.add_point(*q, None)?;
+            if pts.last().and_then(|l| sk.point(*l)).is_some_and(|r| r.dist(*q) < 1e-9) {
+                return Err(bad(cmd, "consecutive points must differ"));
+            }
+            pts.push(i);
+        }
+        if periodic
+            && sk.point(*pts.first().ok_or_else(|| bad(cmd, "missing first point"))?)
+                != sk.point(*pts.last().ok_or_else(|| bad(cmd, "missing last point"))?)
+        {
+            pts.push(*pts.first().ok_or_else(|| bad(cmd, "missing first point"))?);
+        }
+        let c = sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic, nurbs: None, handles: Vec::new() }, None)?;
+        mark_construction(sk, &[c], p);
+        Ok((ids_of(sk, &[c]), Vec::<String>::new()))
+    })?;
+    reply(ToleranceSplineResult {
+        curve: curves.first().cloned().unwrap_or_default(),
+        curves,
+        points: fit.chosen.len(),
+        closed: periodic,
+        deviation: fit.deviation,
+        sketch: info,
+        created: None,
+        param_warnings: Vec::new(),
+    })
 }
 fn spline_cv3(s: &mut Session, p: &Value) -> Result<Value> {
     spline(s, p, "sketch.spline.control_point", true, 3, None)
@@ -2000,3 +2070,7 @@ mod blend_tests {
 #[cfg(test)]
 #[path = "sketch_knots_tests.rs"]
 mod knots_tests;
+
+#[cfg(test)]
+#[path = "sketch_fit_tolerance_tests.rs"]
+mod fit_tolerance_tests;

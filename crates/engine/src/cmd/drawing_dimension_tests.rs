@@ -8,6 +8,7 @@ use solidcraft_geom::drawing_view::NamedView;
 
 use super::*;
 use crate::drawing_dimension_paper::tests::measured;
+use crate::drawing_scene::tests::{in_the_model, milestone_plate_script, reopened};
 use crate::schema::tests::conforms;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -466,6 +467,33 @@ fn a_point_on_a_curved_edge_finds_it_between_its_chords() {
     reads(&add(&mut s, view, json!({"length": {"edge": [74.99, 0, 30]}})), 75.0, "75.00");
 }
 
+/// A round edge the view sees edge-on is drawn as a line, and its length is that line's (#19950):
+/// a Ø10 boss's end circle on the box's right side spans 10 up the sheet; a half Ø10 rod along the
+/// box's top shows its end half circle 5 high, its top between its two ends; and a 4 mm fillet's
+/// quarter arc on the front top edge shows 4 high. Each is read from the circle the edge lies on,
+/// not from its mesh. A hole's rim the view sees round is no line, and stays refused.
+#[test]
+fn a_round_edge_seen_edge_on_reads_the_length_of_its_line() {
+    let (mut s, view) = front_view();
+    let drawing = s.drawing("test").unwrap().id;
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "base": [80, 20, 15], "axis": "X", "operation": "join", "targets": ["Box"]}));
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 80, "base": [0, 20, 30], "axis": "X", "operation": "join", "targets": ["Box"]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 0, 30]], "radius": 4, "body": "Box"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 42, "base": [20, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"]}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let (sin, cos) = 45f64.to_radians().sin_cos();
+    let boss_end = json!({"body": "Box", "index": round_index(&s, [100.0, 20.0, 15.0], 5.0)});
+    reads(&add(&mut s, view, json!({"length": {"edge": boss_end}})), 10.0, "10.00");
+    reads(&add(&mut s, view, json!({"length": {"edge": boss_end, "direction": "vertical"}})), 10.0, "10.00");
+    reads(&add(&mut s, view, json!({"length": {"edge": [100.0, 20.0 - 5.0 * cos, 15.0 + 5.0 * sin]}})), 10.0, "10.00");
+    reads(&add(&mut s, view, json!({"length": {"edge": [0.0, 20.0 + 5.0 * cos, 30.0 + 5.0 * sin]}})), 5.0, "5.00");
+    reads(&add(&mut s, view, json!({"length": {"edge": [80.0, 4.0 - 4.0 * cos, 26.0 + 4.0 * sin]}})), 4.0, "4.00");
+    let rim = json!({"view": ids::encode(view), "kind": {"length": {"edge": [20.0 + 3.0 * cos, 0.0, 15.0 + 3.0 * sin]}}});
+    let e = refused(&mut s, rim);
+    assert!(e.contains("isn't straight"), "{e}");
+}
+
 /// A linear dimension measures from the centre of a hole or an arc, each named by its edge: the
 /// hole through the box about (40, 15) on the front, and the fillet's quarter arc about (75, 25).
 /// A straight edge has no centre, and a centre's edge has no path of its own.
@@ -844,6 +872,64 @@ fn two_flat_faces_read_the_distance_between_them() {
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
 }
 
+/// The material surface and the pocket floor already name real faces. Their depth can be placed
+/// on a full section. It keeps its paper position through save, reopen, a change to the depth and undo.
+#[test]
+fn a_pocket_depth_can_be_placed_on_a_full_section() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "parameters.change", json!({"name": "depth", "expression": "3 mm", "unit": "mm"}));
+    run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": 10, "corner": [55, 20, "10 mm - depth"], "operation": "cut"}));
+    run(&mut s, "drawing.create", json!({"template": "iso-a3-part"}));
+    let (drawing, sheet) = {
+        let d = s.drawing("test").unwrap();
+        (d.id, ids::encode(d.sheets[0].id))
+    };
+    let top = run(&mut s, "drawing.view.base", json!({"sheet": sheet, "view": "top", "scale": "1:1", "position_mm": [90, 220]}));
+    let section = run(
+        &mut s,
+        "drawing.view.section",
+        json!({"parent": top["view"], "line": {"kind": "full", "points": [[-10, 30], [110, 30]], "arrows": "left"}, "place": {"at": [270, 220]}}),
+    );
+    let position = [330.0, 221.0];
+    let added = run(
+        &mut s,
+        ADD,
+        json!({
+            "view": section["view"],
+            "kind": {"faces": {"a": [70, 30, 7], "b": [45, 30, 10], "direction": "vertical"}},
+            "text_to_mm": position,
+        }),
+    );
+    let dimension = &added["dimension"];
+    let mut opened = reopened(&mut s, drawing, "section-depth.sc");
+    let check = |session: &mut Session, value, text| {
+        let read = run(session, INSPECT, json!({"dimension": dimension}));
+        reads(&read, value, text);
+        assert!(read["exact"] == true && read["foreshortened"] == false, "{read}");
+        assert!(box_centre(&read).dist(Vec2::from(position)) < 1e-9, "{read}");
+        assert_eq!(read["record"]["kind"], added["record"]["kind"], "{read}");
+    };
+    check(&mut s, 3.0, "3.00");
+    check(&mut opened, 3.0, "3.00");
+    for (command, params, value, text) in
+        [("parameters.change", json!({"name": "depth", "expression": "4 mm"}), 4.0, "4.00"), ("edit.undo", json!({}), 3.0, "3.00")]
+    {
+        run(&mut opened, "drawing.close", json!({}));
+        run(&mut opened, command, params);
+        run(&mut opened, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+        check(&mut opened, value, text);
+    }
+    let folder = crate::tests::Folder::new("section-depth-pdf");
+    let path = folder.path("section-depth.pdf");
+    let exported = run(&mut opened, "drawing.export", json!({"sheet": sheet, "format": "pdf", "path": path}));
+    assert!(
+        exported["dimensions"].as_array().unwrap().iter().any(|d| d["dimension"] == *dimension && d["view"] == section["view"] && d["drawn"] == true),
+        "{exported}"
+    );
+    assert!(std::fs::read(path).unwrap().starts_with(b"%PDF-"));
+}
+
 /// A dimension says its feature failed, with why, and that it is suppressed: the words a script reads.
 #[test]
 fn a_dimension_says_its_feature_failed_or_is_suppressed() {
@@ -1102,19 +1188,6 @@ fn read_once() -> (Session, u64, u64) {
 /// Fillets away the edge the [`read_once`] dimension measures.
 fn lose_the_edge(s: &mut Session) {
     run(s, "solid.fillet", json!({"body": "Box", "radius": 5, "edges": [[40, 0, 30]]}));
-}
-
-/// `s` saved to a file called `name` and opened from it in a new session, with `drawing` open.
-fn reopened(s: &mut Session, drawing: u64, name: &str) -> Session {
-    let dir = std::env::temp_dir().join(format!("solidcraft-last-good-{}-{name}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join(name);
-    run(s, "file.save_as", json!({"path": path}));
-    let mut fresh = Session::default();
-    run(&mut fresh, "doc.open", json!({"path": path}));
-    run(&mut fresh, "drawing.open", json!({"drawing": ids::encode(drawing)}));
-    let _ = std::fs::remove_dir_all(&dir);
-    fresh
 }
 
 fn inspect_of(s: &mut Session, dimension: u64) -> Value {
@@ -1446,10 +1519,8 @@ fn workshop_plate_round_index(s: &Session, body: &str, centre: [f64; 3], radius:
 
 /// One command-script plate with two independently authored, positioned bore dimensions.
 fn workshop_plate_dimensions() -> (Session, u64, Value, Value) {
-    let mut s = Session::default();
-    let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/drawing_m2.json")).unwrap();
-    let made = s.run_script(&script).unwrap();
-    let top = made.last().unwrap()["view"].clone();
+    let (mut s, top) = milestone_plate_script();
+    let top = top["view"].clone();
     let drawing = s.drawing("test").unwrap().id;
     let bore1 = json!({"body": "Plate", "index": workshop_plate_round_index(&s, "Plate", [20.0, 20.0, 20.0], 5.0)});
     let bore2 = json!({"body": "Plate", "index": workshop_plate_round_index(&s, "Plate", [60.0, 50.0, 20.0], 5.0)});
@@ -1617,10 +1688,8 @@ fn reopening_a_plate_keeps_dimensions_and_a_lost_bores_last_value() {
 /// same dimension reads 100 when it is opened again, and 80 after the change is undone.
 #[test]
 fn the_plates_width_between_its_side_faces_follows_a_width_change() {
-    let mut s = Session::default();
-    let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/drawing_m2.json")).unwrap();
-    let made = s.run_script(&script).unwrap();
-    let top = made.last().unwrap()["view"].clone();
+    let (mut s, top) = milestone_plate_script();
+    let top = top["view"].clone();
     let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
     let width = run(&mut s, ADD, json!({"view": top, "kind": {"faces": {"a": [50, 0, 10], "b": [50, 80, 10]}}}));
     reads(&width, 80.0, "80.00");
@@ -1666,10 +1735,10 @@ const PLATE: [f64; 5] = [10.0, 10.0, 80.0, 100.0, 50.0];
 
 /// The workshop plate's top view with five dimensions: Bore1 Ø10, Bore2 Ø10, the width between the
 /// side faces (80), the length between the ends (100) and Bore1's centre to Bore2's, aligned (50;
-/// they are 40 across and 30 up), each centre named by its bore's rim (#9249). The session,
-/// `{drawing}` to open it again, the view's id and the five as added, in that order.
-fn plate_with_five() -> (Session, Value, u64, [Value; 5]) {
-    let (mut s, drawing, first, second) = workshop_plate_dimensions();
+/// they are 40 across and 30 up), each centre named by its bore's rim (#9249). The session, the
+/// view's id and the five as added, in that order.
+fn plate_with_five() -> (Session, u64, [Value; 5]) {
+    let (mut s, _, first, second) = workshop_plate_dimensions();
     let view = first["view"].clone();
     let rim = |s: &Session, at: [f64; 3]| json!({"centre": {"body": "Plate", "index": workshop_plate_round_index(s, "Plate", at, 5.0)}});
     let (one, two) = (rim(&s, [20.0, 20.0, 20.0]), rim(&s, [60.0, 50.0, 20.0]));
@@ -1680,7 +1749,7 @@ fn plate_with_five() -> (Session, Value, u64, [Value; 5]) {
     let five = [first, second, width, length, centres];
     read_as(&mut s, &five, PLATE);
     let view = ids::decode(view.as_str().unwrap()).unwrap();
-    (s, json!({"drawing": ids::encode(drawing)}), view, five)
+    (s, view, five)
 }
 
 /// Each of `five` read now, by the reference it was added with: `ok` with `values` in order, the
@@ -1694,42 +1763,35 @@ fn read_as(s: &mut Session, five: &[Value; 5], values: [f64; 5]) {
     }
 }
 
-/// `id` with `p` made on the model, the drawing closed as a model edit has it, then opened again.
-fn closed_edit(s: &mut Session, drawing: &Value, id: &str, p: Value) {
-    run(s, "drawing.close", json!({}));
-    run(s, id, p);
-    run(s, "drawing.open", drawing.clone());
-}
-
 /// Each of the plate's parameters changed with the drawing closed moves only what it drives: Bore1's
 /// diameter to 12, Bore2's to 8, the width to 100 and the length to 120, each read and undone back to
 /// the plate with the authored drawing unchanged; then all four at once, undone one by one to the
 /// plate and redone to all four. The bores' centres stay 50 apart throughout.
 #[test]
 fn the_plates_five_dimensions_follow_each_parameter_and_its_undo() {
-    let (mut s, drawing, _, five) = plate_with_five();
+    let (mut s, _, five) = plate_with_five();
     let authored = s.drawing("test").unwrap().to_json().unwrap();
     let changes = [("bore1_d", "12 mm", 0, 12.0), ("bore2_d", "8 mm", 1, 8.0), ("width", "100 mm", 2, 100.0), ("length", "120 mm", 3, 120.0)];
     for (name, expression, at, value) in changes {
-        closed_edit(&mut s, &drawing, "parameters.change", json!({"name": name, "expression": expression}));
+        in_the_model(&mut s, "parameters.change", json!({"name": name, "expression": expression}));
         let mut values = PLATE;
         values[at] = value;
         read_as(&mut s, &five, values);
-        closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+        in_the_model(&mut s, "edit.undo", json!({}));
         read_as(&mut s, &five, PLATE);
         assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), authored, "{name}: the model's undo changed the authored drawing");
     }
     let all = [12.0, 8.0, 100.0, 120.0, 50.0];
     for (name, expression, _, _) in changes {
-        closed_edit(&mut s, &drawing, "parameters.change", json!({"name": name, "expression": expression}));
+        in_the_model(&mut s, "parameters.change", json!({"name": name, "expression": expression}));
     }
     read_as(&mut s, &five, all);
     for _ in changes {
-        closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+        in_the_model(&mut s, "edit.undo", json!({}));
     }
     read_as(&mut s, &five, PLATE);
     for _ in changes {
-        closed_edit(&mut s, &drawing, "edit.redo", json!({}));
+        in_the_model(&mut s, "edit.redo", json!({}));
     }
     read_as(&mut s, &five, all);
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), authored, "the model's redo changed the authored drawing");
@@ -1741,7 +1803,7 @@ fn the_plates_five_dimensions_follow_each_parameter_and_its_undo() {
 /// again; deleted again, they keep their last values through save and reopen.
 #[test]
 fn the_bores_centres_stay_put_and_a_lost_bore_takes_its_centre_dimensions() {
-    let (mut s, drawing, view, five) = plate_with_five();
+    let (mut s, view, five) = plate_with_five();
     let id = s.drawing("test").unwrap().id;
     let rim = |s: &Session, at: [f64; 3]| json!({"centre": {"body": "Plate", "index": workshop_plate_round_index(s, "Plate", at, 5.0)}});
     let (one, two) = (rim(&s, [20.0, 20.0, 20.0]), rim(&s, [60.0, 50.0, 20.0]));
@@ -1772,19 +1834,19 @@ fn the_bores_centres_stay_put_and_a_lost_bore_takes_its_centre_dimensions() {
         }
     };
     all_ok(read(&mut s));
-    closed_edit(&mut s, &drawing, "parameters.change", json!({"name": "bore1_d", "expression": "12 mm"}));
+    in_the_model(&mut s, "parameters.change", json!({"name": "bore1_d", "expression": "12 mm"}));
     all_ok(read(&mut s));
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
-    closed_edit(&mut s, &drawing, "timeline.suppress", json!({"feature": "Bore1", "suppressed": true}));
+    in_the_model(&mut s, "edit.undo", json!({}));
+    in_the_model(&mut s, "timeline.suppress", json!({"feature": "Bore1", "suppressed": true}));
     assert!(read(&mut s).iter().all(|r| r["status"] == "suppressed" && r.get("value").is_none()), "{:?}", read(&mut s));
-    closed_edit(&mut s, &drawing, "timeline.suppress", json!({"feature": "Bore1", "suppressed": false}));
+    in_the_model(&mut s, "timeline.suppress", json!({"feature": "Bore1", "suppressed": false}));
     all_ok(read(&mut s));
-    closed_edit(&mut s, &drawing, "timeline.delete", json!({"feature": "Bore1"}));
+    in_the_model(&mut s, "timeline.delete", json!({"feature": "Bore1"}));
     all_lost(read(&mut s));
     reads(&run(&mut s, INSPECT, json!({"dimension": five[1]["dimension"]})), 10.0, "Ø10.00");
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     all_ok(read(&mut s));
-    closed_edit(&mut s, &drawing, "edit.redo", json!({}));
+    in_the_model(&mut s, "edit.redo", json!({}));
     all_lost(read(&mut s));
     let mut opened = reopened(&mut s, id, "w23a-centres.solidcraft");
     all_lost(read(&mut opened));
@@ -1873,7 +1935,7 @@ fn same_box(a: [[f64; 2]; 2], b: [[f64; 2]; 2]) -> bool {
 /// arrowheads to 60, and a save and reopen draws the same sheet.
 #[test]
 fn the_plates_sheet_draws_what_the_model_has_and_the_same_after_undo() {
-    let (mut s, drawing, view, five) = plate_with_five();
+    let (mut s, view, five) = plate_with_five();
     let id = s.drawing("test").unwrap().id;
     let svg = |s: &mut Session| run(s, "drawing.export", json!({"sheet": "Sheet 1"}))["svg"].as_str().unwrap().to_string();
     let view_lines =
@@ -1894,17 +1956,17 @@ fn the_plates_sheet_draws_what_the_model_has_and_the_same_after_undo() {
         assert!((tips_apart(&base, &five[at]) - apart).abs() < 1e-6, "dimension {at}: {}", tips_apart(&base, &five[at]));
     }
 
-    closed_edit(&mut s, &drawing, "parameters.change", json!({"name": "bore1_d", "expression": "12 mm"}));
+    in_the_model(&mut s, "parameters.change", json!({"name": "bore1_d", "expression": "12 mm"}));
     let wider = sheet_now(&s);
     assert!(!same_lines(&lines_of(&wider, &five[0]), &lines_of(&base, &five[0])), "Bore1's dimension is drawn at Ø12");
     assert!(!same_lines(&view_lines(&wider), &view_lines(&base)), "the view draws Bore1 at Ø12");
     for added in &five[1..] {
         assert!(same_lines(&lines_of(&wider, added), &lines_of(&base, added)), "only Bore1's dimension changes: {}", added["dimension"]);
     }
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     as_it_was(&mut s, "Bore1 at 12 undone");
 
-    closed_edit(&mut s, &drawing, "timeline.delete", json!({"feature": "Bore1"}));
+    in_the_model(&mut s, "timeline.delete", json!({"feature": "Bore1"}));
     let lost = sheet_now(&s);
     for added in [&five[0], &five[4]] {
         let state = state_of(&lost, added);
@@ -1922,10 +1984,10 @@ fn the_plates_sheet_draws_what_the_model_has_and_the_same_after_undo() {
     let words: Vec<Option<Value>> = five.iter().map(word).collect();
     assert_eq!(words, ["lost", "ok", "ok", "ok", "lost"].map(|w| Some(json!(w))).to_vec(), "{status}");
     assert_ne!(svg(&mut s), base_svg, "the sheet with Bore1 lost still exports, without it");
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     as_it_was(&mut s, "Bore1's delete undone");
 
-    closed_edit(&mut s, &drawing, "parameters.change", json!({"name": "length", "expression": "120 mm"}));
+    in_the_model(&mut s, "parameters.change", json!({"name": "length", "expression": "120 mm"}));
     let longer = sheet_now(&s);
     assert!(same_box(view_box(&longer, view), [[120.0, 160.0], [180.0, 200.0]]), "{:?}", view_box(&longer, view));
     for (at, apart) in [(2, 40.0), (3, 60.0), (4, 25.0)] {
@@ -1943,11 +2005,11 @@ fn the_plates_sheet_draws_what_the_model_has_and_the_same_after_undo() {
 /// fillet undone, the same.
 #[test]
 fn fillets_on_the_plates_corners_leave_its_five_dimensions_read() {
-    let (mut s, drawing, _, five) = plate_with_five();
+    let (mut s, _, five) = plate_with_five();
     for (edge, radius) in [([0, 0, 10], 5), ([50, 0, 20], 2)] {
-        closed_edit(&mut s, &drawing, "solid.fillet", json!({"body": "Plate", "radius": radius, "edges": [edge]}));
+        in_the_model(&mut s, "solid.fillet", json!({"body": "Plate", "radius": radius, "edges": [edge]}));
         read_as(&mut s, &five, PLATE);
-        closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+        in_the_model(&mut s, "edit.undo", json!({}));
         read_as(&mut s, &five, PLATE);
     }
 }
@@ -1959,10 +2021,9 @@ fn fillets_on_the_plates_corners_leave_its_five_dimensions_read() {
 /// still read Ø10. Every model edit is made with the drawing closed.
 #[test]
 fn a_new_hole_never_takes_the_dimension_of_an_undone_one() {
-    let (mut s, drawing, first, second) = workshop_plate_dimensions();
-    let drawing = json!({"drawing": ids::encode(drawing)});
+    let (mut s, _, first, second) = workshop_plate_dimensions();
     let hole = |name: &str, at: [f64; 3], diameter: f64| json!({"position": at, "direction": [0, 0, -1], "diameter": diameter, "name": name, "type": "simple"});
-    closed_edit(&mut s, &drawing, "solid.hole", hole("Bore3", [80.0, 20.0, 20.0], 6.0));
+    in_the_model(&mut s, "solid.hole", hole("Bore3", [80.0, 20.0, 20.0], 6.0));
     let rim = json!({"body": "Plate", "index": workshop_plate_round_index(&s, "Plate", [80.0, 20.0, 20.0], 3.0)});
     let on_bore3 = run(&mut s, ADD, json!({"view": first["view"], "kind": {"radial": {"edge": rim}}}));
     reads(&on_bore3, 6.0, "Ø6.00");
@@ -1972,9 +2033,9 @@ fn a_new_hole_never_takes_the_dimension_of_an_undone_one() {
         assert!(read.get("value").is_none() && read.get("text").is_none(), "a lost dimension reads nothing: {read}");
         assert!(read["last_good"].as_f64().is_some_and(|last| (last - 6.0).abs() < 1e-9), "its last value is 6: {read}");
     };
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     lost_as_bore3(&run(&mut s, INSPECT, json!({"dimension": on_bore3["dimension"]})));
-    closed_edit(&mut s, &drawing, "solid.hole", hole("Bore4", [80.0, 60.0, 20.0], 8.0));
+    in_the_model(&mut s, "solid.hole", hole("Bore4", [80.0, 60.0, 20.0], 8.0));
     lost_as_bore3(&run(&mut s, INSPECT, json!({"dimension": on_bore3["dimension"]})));
     for bore in [&first, &second] {
         reads(&run(&mut s, INSPECT, json!({"dimension": bore["dimension"]})), 10.0, "Ø10.00");
@@ -2005,8 +2066,7 @@ fn rim_name(record: &Value) -> &Value {
 #[test]
 fn a_rounded_bore_rim_is_lost_and_a_repair_reads_it_again() {
     let (mut s, id, first, second) = workshop_plate_dimensions();
-    let drawing = json!({"drawing": ids::encode(id)});
-    closed_edit(&mut s, &drawing, "solid.fillet", json!({"body": "Plate", "radius": 1, "edges": [[25, 20, 20]]}));
+    in_the_model(&mut s, "solid.fillet", json!({"body": "Plate", "radius": 1, "edges": [[25, 20, 20]]}));
     let lost = lost_again(&mut s, &first, &first["record"]);
     reads(&run(&mut s, INSPECT, json!({"dimension": second["dimension"]})), 10.0, "Ø10.00");
     let leads = lost["candidates"].as_array().cloned().unwrap_or_default();
@@ -2043,17 +2103,17 @@ fn a_rounded_bore_rim_is_lost_and_a_repair_reads_it_again() {
     assert!(last_good.as_ref().and_then(Value::as_f64).is_some_and(|v| (v - 10.0).abs() < 1e-9), "{read}");
     assert_eq!(saved, repaired["record"], "the repair is saved");
 
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     let unrounded = run(&mut s, INSPECT, json!({"dimension": first["dimension"]}));
     assert_eq!(unrounded["status"], "lost", "the repaired edge is the round's: {unrounded}");
     assert_eq!(unrounded["record"], repaired["record"], "and the repair stays as it was put");
     reads(&run(&mut s, INSPECT, json!({"dimension": second["dimension"]})), 10.0, "Ø10.00");
-    closed_edit(&mut s, &drawing, "edit.redo", json!({}));
+    in_the_model(&mut s, "edit.redo", json!({}));
     reads(&run(&mut s, INSPECT, json!({"dimension": first["dimension"]})), 10.0, "Ø10.00");
 
     run(&mut s, "edit.undo", json!({}));
     lost_again(&mut s, &first, &first["record"]);
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     let back = run(&mut s, INSPECT, json!({"dimension": first["dimension"]}));
     reads(&back, 10.0, "Ø10.00");
     assert_eq!(back["record"], first["record"], "the first record reads again");
@@ -2066,9 +2126,8 @@ fn a_rounded_bore_rim_is_lost_and_a_repair_reads_it_again() {
 /// reads Bore1 by its first record again.
 #[test]
 fn a_deleted_bores_dimension_reads_bore2_only_when_repaired_to_it() {
-    let (mut s, id, first, second) = workshop_plate_dimensions();
-    let drawing = json!({"drawing": ids::encode(id)});
-    closed_edit(&mut s, &drawing, "timeline.delete", json!({"feature": "Bore1"}));
+    let (mut s, _, first, second) = workshop_plate_dimensions();
+    in_the_model(&mut s, "timeline.delete", json!({"feature": "Bore1"}));
     let lost = lost_again(&mut s, &first, &first["record"]);
     let rim = json!({"edge": {"body": "Plate", "index": workshop_plate_round_index(&s, "Plate", [60.0, 50.0, 20.0], 5.0)}});
     let leads = lost["candidates"].as_array().cloned().unwrap_or_default();
@@ -2081,7 +2140,7 @@ fn a_deleted_bores_dimension_reads_bore2_only_when_repaired_to_it() {
     assert_eq!((&repaired["dimension"], &repaired["record"]["text"]), (&first["dimension"], &json!({"at": [12.0, 24.0]})));
     reads(&run(&mut s, INSPECT, json!({"dimension": second["dimension"]})), 10.0, "Ø10.00");
 
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     let kept = run(&mut s, INSPECT, json!({"dimension": first["dimension"]}));
     reads(&kept, 10.0, "Ø10.00");
     assert_eq!(kept["record"], repaired["record"], "a repair stays where it was put");
@@ -2096,13 +2155,13 @@ fn a_deleted_bores_dimension_reads_bore2_only_when_repaired_to_it() {
 /// reference names its body, so a rename loses all five.
 #[test]
 fn renaming_the_plate_keeps_its_five_dimensions() {
-    let (mut s, drawing, _, five) = plate_with_five();
-    closed_edit(&mut s, &drawing, "body.rename", json!({"body": "Plate", "name": "Base"}));
+    let (mut s, _, five) = plate_with_five();
+    in_the_model(&mut s, "body.rename", json!({"body": "Plate", "name": "Base"}));
     for (i, (added, value)) in five.iter().zip(PLATE).enumerate() {
         let text = if i < 2 { format!("Ø{value:.2}") } else { format!("{value:.2}") };
         reads(&run(&mut s, INSPECT, json!({"dimension": added["dimension"]})), value, &text);
     }
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     read_as(&mut s, &five, PLATE);
 }
 
@@ -2212,7 +2271,7 @@ fn inspect_says_where_a_dimension_sits_on_its_sheet() {
 /// moves by (12, -7) (within a rounding: the centre is added to the point once, not in two steps).
 #[test]
 fn the_layout_is_where_the_sheet_draws_it() {
-    let (mut s, _, view, five) = plate_with_five();
+    let (mut s, view, five) = plate_with_five();
     let read = |s: &mut Session| five.iter().map(|added| run(s, INSPECT, json!({"dimension": added["dimension"]}))).collect::<Vec<_>>();
     let before = read(&mut s);
     let sheet = sheet_now(&s);
@@ -2363,12 +2422,12 @@ fn a_layout_follows_the_drawings_units() {
 /// and drawn, the sheet's arrowheads are where the layout's tips are.
 #[test]
 fn a_layout_reads_the_model_as_it_is_now_in_a_deferred_drawing() {
-    let (mut s, drawing, _, five) = plate_with_five();
+    let (mut s, _, five) = plate_with_five();
     let length = &five[3];
     run(&mut s, "drawing.set", json!({"updates": "deferred"}));
     run(&mut s, "drawing.update", json!({}));
     assert!((tips_apart(&shown_now(&mut s), length) - 50.0).abs() < 1e-6);
-    closed_edit(&mut s, &drawing, "parameters.change", json!({"name": "length", "expression": "120 mm"}));
+    in_the_model(&mut s, "parameters.change", json!({"name": "length", "expression": "120 mm"}));
     let read = run(&mut s, INSPECT, json!({"dimension": length["dimension"]}));
     reads(&read, 120.0, "120.00");
     let tips: Vec<Vec2> = layout_arrows(&read).into_iter().map(|(tip, _)| tip).collect();
