@@ -155,6 +155,7 @@ pub struct Built {
 
 /// The solved joint pose a preview shows: the joints it posed, with what posed them and the
 /// generation that counts the completed poses.
+#[derive(Clone, Debug)]
 pub struct JointPose {
     /// What posed it: the command that opened the preview (`None`: nothing named it).
     pub source: Option<&'static str>,
@@ -423,12 +424,20 @@ impl PreviewState {
     /// The pose a completed preview shows: the joints it posed. A preview that poses no joint
     /// leaves no pose: what it shows is the design as it was.
     fn set_pose(&mut self, joints: Vec<solidcraft_engine::schema::joints::ReachedJoint>) {
+        self.pose = self.completed_joint_pose(self.source, joints);
+    }
+
+    /// Allocate a completed pose for any preview source, without changing the dialog preview.
+    pub(crate) fn completed_joint_pose(
+        &mut self,
+        source: Option<&'static str>,
+        joints: Vec<solidcraft_engine::schema::joints::ReachedJoint>,
+    ) -> Option<JointPose> {
         if joints.is_empty() {
-            self.pose = None;
-            return;
+            return None;
         }
         self.generation = self.generation.wrapping_add(1);
-        self.pose = Some(JointPose { source: self.source, generation: self.generation, joints });
+        Some(JointPose { source, generation: self.generation, joints })
     }
 
     fn apply(&mut self, key: u64, job: Job) {
@@ -812,6 +821,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             command.as_str(),
             "sketch.redefine"
                 | "sketch.mirror"
+                | "sketch.move"
                 | "sketch.pattern.rectangular"
                 | "sketch.pattern.circular"
                 | "sketch.offset"

@@ -808,6 +808,33 @@ fn dragging_a_circumscribed_polygon_keeps_it_regular() {
     }
 }
 
+/// A circumscribed polygon's radius, typed as an expression over a parameter, is a dimension
+/// driven by it: the polygon follows the parameter. Its sides count, typed as an expression, is
+/// read when the polygon is drawn (#20920).
+#[test]
+fn a_circumscribed_polygon_follows_a_radius_parameter() {
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "r", "expression": "10 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "5", "unit": ""}));
+    let out = run(&mut s, "sketch.polygon.circumscribed", json!({"center": [0, 0], "radius": "r", "sides": "n"}));
+    assert_eq!(out["curves"].as_array().unwrap().len(), 5, "sides read from the parameter n");
+    assert_eq!(out["sketch"]["dof"], 1, "only the turn is free (the centre sits on the origin, the size is driven): {}", out["sketch"]);
+    let (corners, _, r) = polygon_shape(&s, &out);
+    assert!((r - 10.0).abs() < 1e-9);
+    run(&mut s, "parameters.change", json!({"name": "r", "expression": "20 mm"}));
+    let (corners_after, c, r) = polygon_shape(&s, &out);
+    assert!((r - 20.0).abs() < 1e-6, "the polygon follows r: {r}");
+    assert_regular(&corners_after, c, "after r changed");
+    assert_eq!(corners.len(), corners_after.len());
+    // A diameter works the same way.
+    let out = run(&mut s, "sketch.polygon.circumscribed", json!({"center": [60, 0], "diameter": "2 * r", "sides": 4}));
+    run(&mut s, "parameters.change", json!({"name": "r", "expression": "12 mm"}));
+    let (_, _, r) = polygon_shape(&s, &out);
+    assert!((r - 12.0).abs() < 1e-6, "the diameter follows 2 * r: {r}");
+    let bad = s.execute("sketch.polygon.circumscribed", &json!({"center": [0, 0], "radius": 5, "sides": "n * 0.3"}));
+    assert!(bad.is_err(), "a count that is not a whole number is refused");
+}
+
 #[test]
 fn dragging_a_line_slides_it_and_an_end_keeps_the_other_end() {
     let mut s = new_sketch();
