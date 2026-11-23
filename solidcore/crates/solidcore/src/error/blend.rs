@@ -1650,7 +1650,11 @@ impl core::fmt::Display for BlendFailure {
                 what.what()
             ),
             Self::LawHasNoValue => {
-                write!(f, "{}: a base radius law has no value of its own", self.class())
+                write!(
+                    f,
+                    "{}: a base radius law has no value of its own",
+                    self.class()
+                )
             }
             Self::LawIntervalEmpty => write!(
                 f,
