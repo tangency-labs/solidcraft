@@ -3529,7 +3529,7 @@ fn a_join_of_bodies_that_are_all_apart_runs_no_union() {
 /// file's bodies.
 #[test]
 fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
-    // the heal preference is the process's: held on for the whole test (under `cargo test`)
+    // the heal preference held on for the whole test, on its thread
     let _on = kernel::heal_preference_for_tests(true);
     let mut doc = placed_imports(1);
     let later = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(10.0, 1.0)), None).unwrap();
@@ -3606,7 +3606,7 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
 /// the import is not news: the window is told of the heal once, and nothing goes stale.
 #[test]
 fn a_heal_the_next_read_finds_again_is_told_once() {
-    // the heal preference is the process's: held on for the whole test (under `cargo test`)
+    // the heal preference held on for the whole test, on its thread
     let _on = kernel::heal_preference_for_tests(true);
     let doc = placed_imports(1);
     let mut model = Model::new();
