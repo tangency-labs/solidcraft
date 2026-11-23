@@ -1170,7 +1170,8 @@ mod tests {
                 .collect::<BTreeSet<_>>()
         };
         let names = exact_names(named_wall);
-        assert!(names.iter().filter(|name| name.contains(":inner:")).count() >= 4);
+        use solidcraft_doc::persistent_name::{Base, FaceName};
+        assert!(names.iter().filter(|name| FaceName::parse(name).is_ok_and(|face| matches!(face.base, Base::Inner { .. }))).count() >= 4);
         let symmetric = &named_wall.body;
         assert_eq!(symmetric.shell_count(), 1);
         assert!(!symmetric.is_surface() && solidcraft_kernel::validity(symmetric).ok());

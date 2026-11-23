@@ -42,7 +42,7 @@ pub struct DocSlot {
     pub(crate) autosave: Option<solidcraft_engine::recovery::Autosaver>,
     pub(crate) big_operation: bool,
     cam: Camera,
-    forms: Option<crate::forms_prototype::State>,
+    forms: Option<Box<crate::forms_prototype::State>>,
     pub(crate) pending_feature_edit: Option<crate::feature_edit::PendingFeatureEdit>,
     pre_sketch_cam: Option<crate::PreSketchView>,
     pre_sketch_component: Option<crate::PreSketchComponent>,

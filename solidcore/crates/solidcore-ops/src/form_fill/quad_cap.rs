@@ -1,5 +1,5 @@
 //! Portable directed cap pieces and the kernel's exact preparation operation.
-pub use kernel::{Piece, MAX_PIECES};
+pub use kernel::{support, CapSupport, Piece, MAX_PIECES};
 use solidcore::geom::form_fill::quad_cap as kernel;
 
 /// Normalize, exactly embed, blend and certify four ordered rational rim sides.

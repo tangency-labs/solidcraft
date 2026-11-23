@@ -195,7 +195,7 @@ mod tests {
         });
         // Production uses a process-wide gate, independent of this State. The
         // explicit instance gate recreates that lifetime while isolating tests.
-        app.forms_prototype = State { finish_worker_gate: gate.clone(), ..Default::default() };
+        *app.forms_prototype = State { finish_worker_gate: gate.clone(), ..Default::default() };
         app.forms_prototype.elements.insert(Element::Face(0));
         selection::sync(&mut app);
         app.forms_prototype.pivot = Some(Vec3::new(3.0, 4.0, 5.0));

@@ -4,7 +4,7 @@ use crate::kernel::history::{EdgeOrigin, FaceOrigin};
 use crate::{DocError, Result, kernel};
 use solidcore_record::brep::Loop;
 use solidcraft_geom::bspline::NurbsSurface;
-use solidcraft_geom::fill_iso::{QuadCapPiece, quad_cap};
+use solidcraft_geom::fill_iso::{CapSupport, QuadCapPiece, quad_cap_support};
 use solidcraft_geom::subdivision::hierarchy::QuadCapRim;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -88,12 +88,25 @@ impl FittedQuadCap {
             })
             .collect::<Result<Vec<_>>>()?;
         let curves: [Vec<QuadCapPiece>; 4] = curves.try_into().map_err(|_| invalid("missing exact quad cap side"))?;
-        let surface = quad_cap(curves.each_ref().map(Vec::as_slice)).map_err(invalid)?;
-        // Zero allows the exact pole atlas and excludes a sampled chart fit.
-        let (sheet, deviation) = kernel::fitted_nurbs_region_sheet(&surface, &[CORNERS.to_vec()], 0.0)?;
-        if deviation != 0.0 {
-            return Err(invalid("quad cap chart must preserve the exact cap surface"));
-        }
+        let support = quad_cap_support(curves.each_ref().map(Vec::as_slice)).map_err(invalid)?;
+        let boundaries = [CORNERS.to_vec()];
+        let (surface, sheet) = match support {
+            CapSupport::Tensor(surface) => {
+                // Zero allows the exact pole atlas and excludes a sampled chart fit.
+                let (sheet, deviation) = kernel::fitted_nurbs_region_sheet(&surface, &boundaries, 0.0)?;
+                if deviation != 0.0 {
+                    return Err(invalid("quad cap chart must preserve the exact cap surface"));
+                }
+                (surface, sheet)
+            }
+            CapSupport::PlanarRim(surface) => {
+                let sheet = kernel::nurbs_region_sheet_with_planar_support(&surface, &boundaries)?;
+                if !matches!(sheet.record().faces.as_slice(), [face] if matches!(face.surface, solidcore_record::brep::Surface::Plane { .. })) {
+                    return Err(invalid("quad cap needs a plane bounded by its four source edges"));
+                }
+                (surface, sheet)
+            }
+        };
         let edges = if sheet.face_count() == 1 {
             CapEdges::Single(cap_edge_sides(&sheet, &surface)?)
         } else {

@@ -28,14 +28,20 @@ fn qualify_refined_thicken(body: &Body) -> Result<()> {
     }
 }
 
-/// Choose the half-wall construction only when the direct symmetric output
-/// fails the portable and native checks used during timeline evaluation.
+/// Prefer the two-sided history for a new symmetric wall. Direct thickening
+/// can build a valid solid while giving both offset skins the same origin,
+/// leaving neither skin with an unambiguous persistent face name.
 pub fn refined_symmetric_uses_half_walls(body: &Body, thickness: f64) -> Result<bool> {
     if !body.is_surface() {
         return Err(DocError::Invalid("Thicken requires an open refined Form surface".into()));
     }
-    let direct = kernel::thicken(body, thickness, true)?;
-    Ok(qualify_refined_thicken(&direct).is_err())
+    if let Ok((wall, _)) = kernel::thicken_opposite_sides(body, thickness)
+        && qualify_refined_thicken(&wall).is_ok()
+    {
+        return Ok(true);
+    }
+    qualify_refined_thicken(&kernel::thicken(body, thickness, true)?)?;
+    Ok(false)
 }
 
 fn trace_half_walls(source: &Traced, thickness: f64) -> Result<Traced> {

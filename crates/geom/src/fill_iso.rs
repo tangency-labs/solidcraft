@@ -165,12 +165,22 @@ const GAUSS6: [(f64, f64); 6] = [
 /// The curve itself runs on [0, 1].
 pub type QuadCapPiece = ([f64; 2], crate::bspline::CurveN<4>);
 
+pub use solidcore_ops::form_fill::quad_cap::CapSupport;
+
 const CAP_MAX_PIECES: usize = solidcore_ops::form_fill::quad_cap::MAX_PIECES;
 
 /// A single G0 tensor cap for four explicit, ordered source sides. Its directed
 /// ranges and homogeneous source coefficients are transferred to the kernel;
 /// normalization, exact embedding and regularity qualification happen there.
 pub fn quad_cap(sides: [&[QuadCapPiece]; 4]) -> SplineResult<NurbsSurface> {
+    match quad_cap_support(sides)? {
+        CapSupport::Tensor(surface) => Ok(surface),
+        CapSupport::PlanarRim(_) => invalid("quad cap has no conservative regularity certificate"),
+    }
+}
+
+/// Certified support and the exact tensor boundary data for its four edges.
+pub fn quad_cap_support(sides: [&[QuadCapPiece]; 4]) -> SplineResult<CapSupport<NurbsSurface>> {
     // Bound the data-only view allocation before constructing borrowed piece rows.
     if sides.iter().any(|side| side.is_empty() || side.len() > CAP_MAX_PIECES) || sides.iter().map(|side| side.len()).sum::<usize>() > CAP_MAX_PIECES
     {
@@ -187,10 +197,15 @@ pub fn quad_cap(sides: [&[QuadCapPiece]; 4]) -> SplineResult<NurbsSurface> {
             .collect::<Vec<_>>()
     });
     let [bottom, right, top, left] = &sides;
-    let tensor =
-        solidcore_ops::form_fill::quad_cap::construct([bottom, right, top, left]).map_err(|error| SplineError::Invalid(error.to_string()))?;
-    let controls = tensor.controls.into_iter().map(|[x, y, z, w]| HPoint { x, y, z, w }).collect();
-    NurbsSurface::from_homogeneous(tensor.degree, tensor.knots, controls)
+    let support = solidcore_ops::form_fill::quad_cap::support([bottom, right, top, left]).map_err(|error| SplineError::Invalid(error.to_string()))?;
+    let surface = |tensor: solidcore_ops::form_fill::Tensor| {
+        let controls = tensor.controls.into_iter().map(|[x, y, z, w]| HPoint { x, y, z, w }).collect();
+        NurbsSurface::from_homogeneous(tensor.degree, tensor.knots, controls)
+    };
+    match support {
+        CapSupport::Tensor(tensor) => Ok(CapSupport::Tensor(surface(tensor)?)),
+        CapSupport::PlanarRim(tensor) => Ok(CapSupport::PlanarRim(surface(tensor)?)),
+    }
 }
 /// One edge of the loop: a B-spline from the loop's corner before it to the one after (the
 /// loop's direction), rational when it has weights.

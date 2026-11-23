@@ -26,6 +26,15 @@ pub struct Piece<'a> {
     /// Positive homogeneous controls.
     pub controls: &'a [[f64; 4]],
 }
+/// A certified cap support. The planar variant carries only a reference for
+/// its four exact boundary curves and must be realised as a trimmed plane.
+pub enum CapSupport<T> {
+    /// A regular tensor chart, including certified boundary poles.
+    Tensor(T),
+    /// A simple planar rim whose interior uses the native plane chart.
+    PlanarRim(T),
+}
+
 struct Curve {
     space: Space,
     points: Vec<[f64; 4]>,
@@ -109,6 +118,14 @@ fn compatible(a: &Curve, b: &Curve) -> Result<(Space, [Vec<[f64; 4]>; 2])> {
 /// remains bottom/right/top/left along the rim; internal reversal changes only
 /// the two tensor-positive side representations, never source ownership.
 pub fn construct(sides: [&[Piece<'_>]; 4]) -> Result<Tensor> {
+    match support(sides)? {
+        CapSupport::Tensor(tensor) => Ok(tensor),
+        CapSupport::PlanarRim(_) => invalid("quad cap has no conservative regularity certificate"),
+    }
+}
+
+/// Choose a tensor chart or a plane bounded by the same four exact edges.
+pub fn support(sides: [&[Piece<'_>]; 4]) -> Result<CapSupport<Tensor>> {
     if sides
         .iter()
         .any(|side| side.is_empty() || side.len() > MAX_PIECES)
@@ -219,13 +236,81 @@ pub fn construct(sides: [&[Piece<'_>]; 4]) -> Result<Tensor> {
     let degree = [u.degree(), v.degree()];
     let count = [u.count(), v.count()];
     let knots = [u.knots().to_vec(), v.knots().to_vec()];
-    if !super::regularity::certify(degree, [&knots[0], &knots[1]], count, &controls)? {
-        return invalid("quad cap has no conservative regularity certificate");
-    }
-    Ok(Tensor {
+    let tensor = Tensor {
         degree,
         knots,
         controls,
+    };
+    if super::regularity::certify(
+        degree,
+        [&tensor.knots[0], &tensor.knots[1]],
+        count,
+        &tensor.controls,
+    )? {
+        Ok(CapSupport::Tensor(tensor))
+    } else if simple_planar_rim(&tensor, count) {
+        Ok(CapSupport::PlanarRim(tensor))
+    } else {
+        invalid("quad cap has no conservative regularity certificate")
+    }
+}
+
+// A positive-weight side stays inside its control hull. Each side advances
+// along its chord and stays in its own open angular sector about the centre.
+// This proves the four trimmed curves form one simple wire even if a Coons
+// chart for its interior folds at a nearly tangent corner.
+fn simple_planar_rim(tensor: &Tensor, count: [usize; 2]) -> bool {
+    use crate::eval::{planar_tensor::PlanarTensor, uv, EvalSurface, SurfaceEval};
+    let surface = EvalSurface::nurbs(
+        tensor.degree,
+        tensor.knots.clone(),
+        count,
+        tensor.controls.clone(),
+    );
+    let domain = uv::domain(&surface);
+    let surface = SurfaceEval::Eval(surface, domain);
+    let Some(plane) = PlanarTensor::of(&surface, [[0.0, 1.0]; 2]) else {
+        return false;
+    };
+    let [nu, nv] = count;
+    let n = tensor.controls.len();
+    let row = |side, i| match side {
+        0 => i,
+        1 => (i + 1) * nu - 1,
+        2 => n - 1 - i,
+        _ => (nv - 1 - i) * nu,
+    };
+    let xy = |i: usize| {
+        let [x, y, z, w] = tensor.controls[i];
+        let p = Vec3::new(x / w, y / w, z / w) - plane.origin;
+        [p.dot(plane.u), p.dot(plane.v)]
+    };
+    let corners = [0, 1, 2, 3].map(|side| xy(row(side, 0)));
+    let center = corners
+        .iter()
+        .fold([0.0; 2], |[x, y], p| [x + p[0] * 0.25, y + p[1] * 0.25]);
+    let sub = |a: [f64; 2], b: [f64; 2]| [a[0] - b[0], a[1] - b[1]];
+    let cross = |a: [f64; 2], b: [f64; 2]| a[0] * b[1] - a[1] * b[0];
+    let scale = corners
+        .iter()
+        .flat_map(|&p| sub(p, center))
+        .map(f64::abs)
+        .fold(0.0, f64::max);
+    let margin = 128.0 * f64::EPSILON * scale * scale;
+    (0..4).all(|side| {
+        let len = if side % 2 == 0 { nu } else { nv };
+        let start = corners[side];
+        let end = corners[(side + 1) % 4];
+        let (a, b) = (sub(start, center), sub(end, center));
+        let chord = sub(end, start);
+        cross(a, b) > margin
+            && (1..len).all(|i| {
+                let p = xy(row(side, i));
+                let radial = sub(p, center);
+                let step = sub(p, xy(row(side, i - 1)));
+                step[0] * chord[0] + step[1] * chord[1] > margin
+                    && (i == len - 1 || (cross(a, radial) > margin && cross(radial, b) > margin))
+            })
     })
 }
 
@@ -294,10 +379,38 @@ mod tests {
         let folded = sides(-2.0_f64.powi(-40));
         let original = folded.clone();
         assert!(run(&folded).is_err());
+        let view = borrowed(&folded);
+        assert!(support(view.each_ref().map(Vec::as_slice)).is_err());
         assert_eq!(
             folded, original,
             "a refused construction keeps the supplied curves"
         );
+    }
+    #[test]
+    fn a_simple_planar_rim_can_bound_a_face_when_its_tensor_folds() {
+        // The four positive cubic hulls occupy different quadrants. At (0,1)
+        // the incoming and outgoing tangents turn clockwise (cross = -9/128),
+        // while the interior chart is counterclockwise by rotational symmetry.
+        let mut row = vec![
+            [1., 0., 0., 1.],
+            [1., 0.5, 0., 1.],
+            [0.5, 1.015625, 0., 1.],
+            [0., 1., 0., 1.],
+        ];
+        let sides = std::array::from_fn(|_| {
+            let side = vec![(
+                [0., 1.],
+                3,
+                vec![0., 0., 0., 0., 1., 1., 1., 1.],
+                row.clone(),
+            )];
+            row = row.iter().map(|&[x, y, z, w]| [-y, x, z, w]).collect();
+            side
+        });
+        let view = borrowed(&sides);
+        let sides = view.each_ref().map(Vec::as_slice);
+        assert!(construct(sides).is_err());
+        assert!(matches!(support(sides), Ok(CapSupport::PlanarRim(_))));
     }
     fn line(a: [f64; 3], b: [f64; 3]) -> OwnedPiece {
         (

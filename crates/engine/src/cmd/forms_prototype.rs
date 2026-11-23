@@ -6700,9 +6700,10 @@ mod tests {
         assert_eq!(s.forms_prototype.as_ref().unwrap().cage, sculpt);
         s.execute("form.prototype.close", &json!({})).unwrap();
         s.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
-        assert!(s.execute("form.prototype.create", &json!({})).is_err());
-        assert!(s.forms_prototype.is_none());
-        assert!(s.active_sketch.is_some());
+        let started = s.execute("form.prototype.create", &json!({})).unwrap();
+        assert!(started["finished_sketch"].is_string());
+        assert!(s.active_sketch.is_none());
+        assert!(s.forms_prototype.is_some());
     }
     #[test]
     fn an_unfinished_form_is_unsaved_and_cannot_be_silently_left_out_of_a_save() {

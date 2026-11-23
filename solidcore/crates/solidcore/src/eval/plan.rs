@@ -204,6 +204,9 @@ impl EvalSurface {
     /// Point and unit normal at `(u, v)` where the first partials give one there; `None` at a
     /// degenerate point (a cone's apex, a sphere's pole) or off the surface.
     pub fn regular(&self, u: f64, v: f64) -> Option<(Vec3, Vec3)> {
+        if normal::collapsed_boundary(self, u, v) {
+            return None;
+        }
         let (p, du, dv) = self.derivs(u, v)?;
         Some((p, self.regular_normal(du, dv)?))
     }
@@ -475,20 +478,46 @@ pub fn nurbs_derivs<C>(
         return None;
     }
     let (su, sv) = (span_of(&knots[0], pu, nu, u), span_of(&knots[1], pv, nv, v));
-    let (mut bu, mut bv, mut bdu, mut bdv) = ([0.0; W], [0.0; W], [0.0; W], [0.0; W]);
-    basis_funs(&knots[0], su, pu, u, &mut bu)?;
-    basis_funs(&knots[1], sv, pv, v, &mut bv)?;
-    basis_funs(&knots[0], su, pu - 1, u, &mut bdu)?;
-    basis_funs(&knots[1], sv, pv - 1, v, &mut bdv)?;
+    let (mut bu, mut bv) = ([[0.0f64; W]; 2], [[0.0f64; W]; 2]);
+    basis_ders_into(&knots[0], su, pu, u, &mut bu)?;
+    basis_ders_into(&knots[1], sv, pv, v, &mut bv)?;
     let (mut s, mut s_u, mut s_v) = ([0.0; 4], [0.0; 4], [0.0; 4]);
-    for (b, nv0) in bv.iter().take(pv + 1).enumerate() {
-        for (a, nu0) in bu.iter().take(pu + 1).enumerate() {
+    let (mut max_xyz, mut max_weight) = (0.0_f64, 0.0_f64);
+    for (b, (nv0, nv1)) in bv[0].iter().zip(&bv[1]).take(pv + 1).enumerate() {
+        for (a, (nu0, nu1)) in bu[0].iter().zip(&bu[1]).take(pu + 1).enumerate() {
             let c = components(ctrl.get((sv + b - pv) * nu + su + a - pu)?);
-            for (sum, value) in s.iter_mut().zip(c) {
-                *sum += nu0 * nv0 * value;
+            max_xyz = max_xyz.max(c[0].abs()).max(c[1].abs()).max(c[2].abs());
+            max_weight = max_weight.max(c[3].abs());
+            for (((sd, sud), svd), cd) in s
+                .iter_mut()
+                .zip(s_u.iter_mut())
+                .zip(s_v.iter_mut())
+                .zip(c.iter())
+            {
+                *sd += nu0 * nv0 * cd;
+                *sud += nu1 * nv0 * cd;
+                *svd += nu0 * nv1 * cd;
             }
         }
     }
+    if let (Some((point, du)), Some((_, dv))) = (rational(s, s_u), rational(s, s_v)) {
+        // Each quotient derivative subtracts p * W' from the weighted control
+        // sum. If cancellation can consume half the significand, differentiate
+        // control differences instead. This also keeps a constant pole row exact.
+        let norm = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
+        let sum_abs = |b: &[f64]| b.iter().map(|x| x.abs()).sum::<f64>();
+        let scale = (max_xyz + norm(point) * max_weight) / s[3].abs() * f64::EPSILON.sqrt();
+        if norm(du) > scale * sum_abs(&bu[1][..=pu]) * sum_abs(&bv[0][..=pv])
+            && norm(dv) > scale * sum_abs(&bv[1][..=pv]) * sum_abs(&bu[0][..=pu])
+        {
+            return Some((point, du, dv));
+        }
+    }
+    let (bu, bv) = (&bu[0], &bv[0]);
+    let (mut bdu, mut bdv) = ([0.0; W], [0.0; W]);
+    basis_funs(&knots[0], su, pu - 1, u, &mut bdu)?;
+    basis_funs(&knots[1], sv, pv - 1, v, &mut bdv)?;
+    let (mut s_u, mut s_v) = ([0.0; 4], [0.0; 4]);
     // Differentiate control points before summing. In particular, a constant
     // pole row has an exactly zero tangent, without cancelling large terms.
     for (b, nv0) in bv.iter().take(pv + 1).enumerate() {
@@ -741,7 +770,12 @@ mod tests {
             [1, 1],
             [vec![0.0, 0.0, 1e-6, 1e-6], vec![0.0, 0.0, 1e-6, 1e-6]],
             [2, 2],
-            vec![[base, base, base, 1.0], [base, base + 1.0, base, 1.0], [base, base, base + 1.0, 1.0], [base, base + 1.0, base + 1.0, 1.0]],
+            vec![
+                [base, base, base, 1.0],
+                [base, base + 1.0, base, 1.0],
+                [base, base, base + 1.0, 1.0],
+                [base, base + 1.0, base + 1.0, 1.0],
+            ],
         );
         assert!(surface.eval(0.0, 0.0).1.dist(Vec3::X) < 1e-12);
     }

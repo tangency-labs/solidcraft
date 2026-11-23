@@ -232,6 +232,19 @@ impl Curve2 {
             return None;
         }
         let p = c.eval(t, Side::Left).ok()?;
-        (p.x.is_finite() && p.y.is_finite()).then_some([p.x, p.y])
+        let mut uv = (p.x.is_finite() && p.y.is_finite()).then_some([p.x, p.y])?;
+        // Partition of unity makes an isoparametric polynomial trim exactly
+        // straight. Rounding a constant afresh at each sample can create false
+        // triangles between consecutive stations on the same cylinder rim.
+        if let Self::Spline { points, .. } = self {
+            let first = points.first()?;
+            let last = points.last()?;
+            for (d, value) in uv.iter_mut().enumerate() {
+                if first[d] == last[d] && points.iter().all(|q| q[d] == first[d]) {
+                    *value = first[d];
+                }
+            }
+        }
+        Some(uv)
     }
 }

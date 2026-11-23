@@ -11,6 +11,19 @@ fn direction(v: Vec3) -> Option<Vec3> {
     Some(v / v.len())
 }
 pub(super) fn normal(a: Vec3, b: Vec3) -> Option<Vec3> {
+    // Keep the ordinary evaluator's operation order when the cross product
+    // and the relative-angle test are representable. Rescale individual
+    // tangents only when their magnitudes would underflow or overflow.
+    let n = a.cross(b);
+    let scale = a.len2() * b.len2();
+    if scale.is_normal() && n.len2().is_normal() {
+        if n.len2() <= 1e-20 * scale {
+            return None;
+        }
+        if let Some(unit) = n.normalized() {
+            return Some(unit);
+        }
+    }
     let n = direction(a)?.cross(direction(b)?);
     if n.len2() > 1e-20 {
         direction(n)

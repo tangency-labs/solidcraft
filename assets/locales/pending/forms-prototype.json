@@ -258,7 +258,7 @@
     "forms.prototype.y": "Y",
     "forms.prototype.yz": "YZ",
     "forms.prototype.z": "Z",
-    "help.form.blend.export": "Write editable Form cages or a tessellation of the CAD result to a Blender file. Use it to continue modelling or render in Blender.",
+    "help.form.blend.export": "Write editable Form cages or a tessellation of the CAD result to a Blender file. Use it to continue modeling or render in Blender.",
     "help.form.blend.import": "Open supported Blender mesh objects as editable Forms. Use it to bring a subdivision cage into the design.",
     "help.form.pipe": "Create a smooth Form along sketch curves or CAD edges. Use it for freeform tubes, loops and branching shapes.",
     "help.form.prototype.create": "Create a smooth primitive and pull points, edges or faces on its surface. Use it to sculpt an editable CAD feature.",
@@ -272,6 +272,9 @@
     "prefs.forms_mesh_while_dragging_help": "Keep fast subdivision feedback during dragging. Turn off to request fitted CAD updates while dragging; fitting runs in the background on desktop. Browser fitting waits for release.",
     "prefs.forms_surface_partition": "Create surfaces with an editable face grid",
     "ui.label.FORMS": "FORMS"
+  },
+  "en-GB": {
+    "help.form.blend.export": "Write editable Form cages or a tessellation of the CAD result to a Blender file. Use it to continue modelling or render in Blender."
   },
   "ar": {
     "cmd.form.blend.export": "تصدير الأشكال الحرة إلى Blender",

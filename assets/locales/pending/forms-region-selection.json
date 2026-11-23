@@ -14,12 +14,15 @@
     "forms.prototype.region_browser_unavailable": "Region selection is not available in the browser yet. Use the desktop app.",
     "forms.prototype.region_busy": "Selecting Form elements…",
     "forms.prototype.region_failed": "Cannot select Form region: {error}",
-    "forms.prototype.region_help": "Drag empty space to select. Shift adds; Ctrl+Shift toggles. Left to right selects whole elements; right to left selects touching elements. Lasso in the selection options draws a freehand window. Navigation shortcuts keep their usual behaviour. Selection runs in the background. Escape cancels it.",
+    "forms.prototype.region_help": "Drag empty space to select. Shift adds; Ctrl+Shift toggles. Left to right selects whole elements; right to left selects touching elements. Lasso in the selection options draws a freehand window. Navigation shortcuts keep their usual behavior. Selection runs in the background. Escape cancels it.",
     "forms.prototype.region_invalid": "The Form selection result is no longer valid. Try again.",
     "forms.prototype.region_limit": "The selection outline is too long. Draw a shorter lasso.",
     "forms.prototype.region_waiting": "Waiting for the previous selection to finish…",
     "forms.prototype.region_worker_lost": "The Form selection worker stopped before returning a result.",
     "prefs.forms_region_selection": "Select Form elements with a box or lasso"
+  },
+  "en-GB": {
+    "forms.prototype.region_help": "Drag empty space to select. Shift adds; Ctrl+Shift toggles. Left to right selects whole elements; right to left selects touching elements. Lasso in the selection options draws a freehand window. Navigation shortcuts keep their usual behaviour. Selection runs in the background. Escape cancels it."
   },
   "ja": {
     "forms.prototype.region_browser_unavailable": "範囲選択はブラウザーではまだ使用できません。デスクトップアプリをご利用ください。",

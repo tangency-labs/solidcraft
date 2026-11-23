@@ -666,7 +666,7 @@ pub struct SolveApp {
     pub(crate) blur_session: blur::Session,
     pub(crate) viewport_status: ui_kit::StatusPresentation,
     pub(crate) viewport_status_fixture: viewport_status_fixture::Fixture,
-    pub(crate) forms_prototype: forms_prototype::State,
+    pub(crate) forms_prototype: Box<forms_prototype::State>,
     #[cfg(target_arch = "wasm32")]
     pub(crate) browser_form_check: Option<std::rc::Rc<dyn forms_prototype::BrowserCheckHost>>,
     /// Compact browser embed: retain model panels and joint controls without application chrome.

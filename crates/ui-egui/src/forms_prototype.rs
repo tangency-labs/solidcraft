@@ -277,7 +277,7 @@ pub(crate) fn editing_feature(app: &SolveApp, id: u64) -> bool {
 }
 pub(crate) fn opened(app: &mut SolveApp) {
     if app.session.forms_prototype.is_some() {
-        app.forms_prototype = State::default();
+        *app.forms_prototype = State::default();
         app.forms_prototype.controls.tolerance = format!("{} mm", app.preferences.forms_cad_tolerance);
         controls::sync(app);
         panel::sync(app);
@@ -340,7 +340,7 @@ pub(crate) fn command_completed(app: &mut SolveApp, id: &str) {
         controls::load(app);
     }
     if matches!(id, "form.prototype.close" | "form.prototype.commit") {
-        app.forms_prototype = State::default();
+        *app.forms_prototype = State::default();
     }
     if matches!(id, "form.prototype.parameters" | "form.prototype.undo" | "form.prototype.redo") {
         controls::sync(app);
