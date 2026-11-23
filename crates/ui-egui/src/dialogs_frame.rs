@@ -1006,6 +1006,63 @@ fn read_override(o: &Value) -> Option<frame::CornerOverride> {
     serde_json::from_value(o.clone()).ok()
 }
 
+/// The rows that set every corner of `picks` at once, above their own rows: a type (a dash while they differ), a Gap
+/// (empty while they differ; the frame's gap as the hint) and Coped. Each sets that value on every one of them
+/// ([`set_corners`]). `frame`, `skip` and `labels` as [`corner_rows`] shows a row's type. True when Enter was pressed
+/// in the Gap.
+fn corners_together(
+    ui: &mut egui::Ui,
+    m: &mut Member,
+    picks: &[Sel],
+    (frame, skip, labels): (usize, usize, &[&str]),
+    (frame_coped, frame_gap): (bool, &str),
+) -> bool {
+    let rows: Vec<&Override> = m.overrides.iter().filter(|o| picks.contains(&o.pick)).collect();
+    let same = |values: Vec<String>| -> Option<String> {
+        let first = values.first().cloned()?;
+        values.iter().all(|v| *v == first).then_some(first)
+    };
+    let title = solidcraft_ui_text::format("ui.frame_corners_together", &[("count", &rows.len().to_string())]);
+    let mut options: Vec<&str> = labels.to_vec();
+    options.push("—");
+    let shown = same(rows.iter().map(|o| override_type(o.corner, frame).saturating_sub(skip).to_string()).collect());
+    let mut chosen = shown.and_then(|s| s.parse::<usize>().ok()).unwrap_or(labels.len());
+    let before = chosen;
+    let mut gap = same(rows.iter().map(|o| o.gap.trim().to_string()).collect()).unwrap_or_default();
+    let typed = gap.clone();
+    let was = same(rows.iter().map(|o| o.coped.unwrap_or(frame_coped).to_string()).collect()).as_deref() == Some("true");
+    let mut on = was;
+    let can = frame != NONE && rows.iter().any(|o| override_flips(override_type(o.corner, frame)));
+    let enter = ui
+        .scope_builder(egui::UiBuilder::new().id_salt("frame_corners_together"), |ui| {
+            choice_row(ui, &title, "frame_corners_together", &mut chosen, &options);
+            let enter = hint_row(ui, "Gap", &mut gap, frame_gap);
+            form_row(ui, "Coped", |ui| {
+                ui.add_enabled_ui(can, |ui| check(ui, &mut on));
+            });
+            enter
+        })
+        .inner;
+    let corner = (chosen != before && chosen < labels.len()).then_some(chosen + skip);
+    set_corners(m, picks, corner, (gap != typed).then_some(gap.as_str()), (on != was).then_some(on));
+    enter
+}
+
+/// Give each of the corners `picks` type `corner`, gap `gap` (empty: the frame's) and Coped `coped`, each when given.
+fn set_corners(m: &mut Member, picks: &[Sel], corner: Option<usize>, gap: Option<&str>, coped: Option<bool>) {
+    for o in m.overrides.iter_mut().filter(|o| picks.contains(&o.pick)) {
+        if let Some(c) = corner {
+            o.corner = c;
+        }
+        if let Some(g) = gap {
+            o.gap = g.to_string();
+        }
+        if let Some(c) = coped {
+            o.coped = Some(c);
+        }
+    }
+}
+
 fn corner_label(n: usize) -> String {
     solidcraft_ui_text::format("ui.frame_corner_number", &[("n", &n.to_string())])
 }
@@ -1040,6 +1097,11 @@ fn corner_rows(ui: &mut egui::Ui, d: &mut Dialog, lit: Option<usize>, crossings:
     let choices = override_choices(frame);
     let skip = CORNER_TYPES.len() - choices.len();
     let labels: Vec<&str> = choices.iter().map(|c| c.1).collect();
+    // Two or more picked corners (not crossings, which have only Flip): one type, gap and Coped for them all.
+    let together: Vec<Sel> = picks.iter().enumerate().filter(|(n, _)| !crossings.get(*n).copied().unwrap_or(false)).map(|(_, p)| p.clone()).collect();
+    if together.len() >= 2 {
+        enter |= corners_together(ui, m, &together, (frame, skip, &labels), (frame_coped, &frame_gap));
+    }
     let mut drop = None;
     for (n, pick) in picks.iter().enumerate() {
         let Some(Override { corner, flip, gap, coped, .. }) = m.overrides.iter_mut().find(|o| o.pick == *pick) else { continue };

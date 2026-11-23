@@ -2516,6 +2516,27 @@ fn overrides_dialog(corner: &str) -> (crate::scenario::Harness, [Sel; 2]) {
     (h, picks)
 }
 
+/// With two or more corners picked, "All n corners" rows above the corners' own rows give them one type, gap and
+/// Coped at once; what they set goes into the command as each corner's own.
+#[test]
+fn several_corners_are_set_at_once() {
+    let (mut h, picks) = overrides_dialog("mitre");
+    assert!(h.widget("All 2 corners").is_some(), "the rows for every corner are shown");
+    let m = member(h.app.dialog.as_mut().unwrap());
+    set_corners(m, &picks, Some(corner_type("butt")), Some("3 mm"), Some(true));
+    assert!(m.overrides.iter().all(|o| o.corner == corner_type("butt") && o.gap == "3 mm" && o.coped == Some(true)));
+    let c = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    for k in 0..2 {
+        let row = &c[0].1["corners"][k];
+        assert_eq!((row["kind"].as_str(), row["gap"].as_str(), row["coped"].as_bool()), (Some("butt"), Some("3 mm"), Some(true)), "{}", c[0].1);
+    }
+    // One corner alone has only its own rows.
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[2].items.truncate(1);
+    h.frames(2);
+    assert!(h.widget("All 1 corners").is_none() && h.widget("All 2 corners").is_none());
+}
+
 /// A corner taken out of Corner Overrides forgets its own type and flip: picked again, it starts
 /// as the feature's type, unflipped.
 #[test]

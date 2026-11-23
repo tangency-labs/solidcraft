@@ -137,7 +137,8 @@ projected lines or arcs), and the corner points when Corner Overrides is active 
 override is one row, **Corner 1**, **Corner 2**… in pick order: its type, its **Flip** (greyed for
 None and Mitre) and a bin that removes it, with a **Gap** row and a **Coped** row under it (Coped
 greyed but for a Butt or Auto corner; left alone it follows the frame's Coped, and it is saved only
-where it differs). The arrow on the Corner
+where it differs). With two or more corners picked, **All n corners** rows above them give
+them all one type, Gap and Coped at once (the type shows a dash while they differ). The arrow on the Corner
 Overrides line folds the rows away; picking another corner opens them again. Pointing at an overridden corner in the view lights
 its row (or the Corner Overrides line while the rows are folded).
 
