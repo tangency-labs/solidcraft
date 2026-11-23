@@ -1342,21 +1342,6 @@ impl crate::SolidError {
         Failure::new(operation, failure).into_error()
     }
 
-    /// [`crate::SolidError::Failed`] for a surface routine that could not continue, as the
-    /// phrase says, with status [`SM_ERR`] (upstream `return SE(SM_ERR)`).
-    #[must_use]
-    pub(crate) fn surface_failed(operation: &'static str, what: &'static str) -> Self {
-        Self::surface(operation, SurfaceFailure::Failed(what))
-    }
-
-    /// [`crate::SolidError::Failed`] for something a surface routine needs that is not
-    /// there, as the phrase says, with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)`
-    /// on a `NULL` pointer).
-    #[must_use]
-    pub(crate) fn surface_missing(operation: &'static str, what: &'static str) -> Self {
-        Self::surface(operation, SurfaceFailure::Missing(what))
-    }
-
     /// [`SurfaceFailure::NurbNotMade`] with status `status`, for a routine whose NURB form
     /// is still missing after `made`, the result of the call that was to make it: its
     /// error, when it failed, is the cause.
@@ -1425,11 +1410,19 @@ mod tests {
             assert_eq!(typed.surface_failure(), Some(&failure));
         }
         assert_eq!(
-            SolidError::surface_missing("surface::op", "the surface's cache").to_string(),
+            SolidError::surface(
+                "surface::op",
+                SurfaceFailure::Missing("the surface's cache")
+            )
+            .to_string(),
             "surface::op: the surface's cache is missing"
         );
         assert_eq!(
-            SolidError::surface_failed("surface::op", "the generator has no NURB form").to_string(),
+            SolidError::surface(
+                "surface::op",
+                SurfaceFailure::Failed("the generator has no NURB form")
+            )
+            .to_string(),
             "surface::op: the generator has no NURB form"
         );
         assert_eq!(
