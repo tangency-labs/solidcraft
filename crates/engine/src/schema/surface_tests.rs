@@ -609,3 +609,13 @@ fn surface_patch_checks_what_the_handler_ignores() {
         assert!(error.contains(&format!("`{key}`")), "{p}: {error}");
     }
 }
+
+/// A patch edge picked where the body has none names the point as a command writes it,
+/// `[x, y, z]`, not as the program's own record of it (`Vec3 { x: … }`).
+#[test]
+fn surface_patch_names_a_missed_edge_point_as_parameters_write_it() {
+    let p = json!({"edges": [[100.5, -100, 0.0001], [0, 0, 10], [10, 0, 10]], "body": "Box", "body_name": "Patch"});
+    let error = cube(ParamCheck::Off).execute("surface.patch", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("no edge at [100.5, -100, 0]"), "{error}");
+    assert!(!error.contains("Vec3"), "{error}");
+}
