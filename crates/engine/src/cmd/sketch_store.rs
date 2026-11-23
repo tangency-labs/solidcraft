@@ -47,7 +47,7 @@ pub(super) fn read(doc: &Document, id: u64) -> Result<&Sketch> {
 /// Sheet identities are resolved against the open Drawing, never the model feature ids;
 /// resolving paper expressions and solving here does not publish either document.
 pub(super) fn read_for_command(s: &Session, p: &Value, cmd: &str) -> Result<Sketch> {
-    if s.open_drawing.is_some() {
+    if s.sheet_sketching() {
         let entry = sheet_target(s, p, cmd)?;
         return Ok(s.drawing(cmd)?.solve_sheet_sketch(&s.doc, entry.sketch)?.sketch);
     }
@@ -81,6 +81,7 @@ pub(super) fn checked(sk: &Sketch) -> Result<()> {
 /// A number/string can confirm that target; it never selects a model or another sheet.
 pub(super) fn sheet_target(s: &Session, p: &Value, cmd: &str) -> Result<std::sync::Arc<crate::SheetSketchEdit>> {
     let entry = s.active_sheet_sketch.as_ref().ok_or_else(|| bad(cmd, "no sheet sketch is being edited"))?;
+    s.checked_sheet_sketch_owner(&s.view_context, Some(entry), &s.doc)?;
     if s.open_drawing != Some(entry.drawing) {
         return Err(bad(cmd, "the edited sketch does not belong to the open drawing"));
     }
@@ -91,14 +92,12 @@ pub(super) fn sheet_target(s: &Session, p: &Value, cmd: &str) -> Result<std::syn
     }
     // Target selection checks identity, not every payload. Staging checks the
     // candidate before solving; edit_drawing validates the whole publication.
-    if owner.sketches.iter().filter(|record| record.id == entry.sketch).count() != 1
-        || owner.sheets.iter().filter(|sheet| sheet.id == entry.sheet).count() != 1
-    {
-        return Err(bad(cmd, "the edited sketch or sheet id is missing or ambiguous"));
+    if owner.sketches.iter().filter(|record| record.id == entry.sketch).count() != 1 {
+        return Err(bad(cmd, "the edited sketch id is missing or ambiguous"));
     }
     let record = owner.sheet_sketch(entry.sketch).ok_or_else(|| bad(cmd, "the edited sheet sketch no longer exists"))?;
-    if record.sheet != entry.sheet {
-        return Err(bad(cmd, "the edited sketch's owning sheet changed"));
+    if record.owner != entry.owner || owner.sketch_sheet(record).is_none() {
+        return Err(bad(cmd, "the edited sketch's owner changed or is gone"));
     }
     if let Some(given) = p.get("sketch").filter(|value| !value.is_null()) {
         let target = match given {
@@ -136,8 +135,8 @@ pub(super) fn edit_sheet<T>(
             *sketch = candidate;
             Ok(())
         })?;
-        if solved.sheet != entry.sheet {
-            return Err(bad(cmd, "the edited sketch's owning sheet changed"));
+        if drawing.sheet_sketch(entry.sketch).is_none_or(|record| record.owner != entry.owner) {
+            return Err(bad(cmd, "the edited sketch's owner changed"));
         }
         Ok(solved)
     })?;

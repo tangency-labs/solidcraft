@@ -111,7 +111,7 @@ impl ImportCache {
         let path = self.path(key).ok_or_else(|| invalid("import cache key"))?;
         let bytes = write_design_container_with_cache(doc, DesignCompression::Fast, None, Some(model))?;
         let mut reader = DesignContainerReader::new(Cursor::new(&bytes))?;
-        if reader.reader.limited_part(native_cache::ENTRIES[0], 32 << 20).is_err() {
+        if reader.reader.limited_part(native_cache::ENTRIES[0], native_cache::max_manifest()).is_err() {
             return Err(invalid("import model was not stored"));
         }
         let binding = serde_json::to_vec(&json!({"key": key, "reply": reply})).map_err(invalid)?;
@@ -141,22 +141,26 @@ impl ImportCache {
 
     /// [`Self::write`], once `finish` has completed the model (SMLib's check of an import's parts,
     /// which runs on after the import shows): on a thread of its own, so the caller does not
-    /// wait. A later [`Self::read`] of the entry or [`Self::clear`] waits for it.
+    /// wait. Nothing is written when `finish` says the model no longer stands. A later [`Self::read`] of the entry or [`Self::clear`] waits for it.
     pub fn write_after(
         &self,
         key: String,
         doc: Document,
         mut model: solidcraft_doc::SavedModel,
         reply: Value,
-        finish: impl FnOnce(&mut solidcraft_doc::SavedModel) + Send + 'static,
+        finish: impl FnOnce(&mut solidcraft_doc::SavedModel) -> bool + Send + 'static,
     ) {
         let Some(path) = self.path(&key) else { return };
         let cache = self.clone();
         let done = std::sync::Arc::new(Done::default());
         let finished = Finished(done.clone());
         let write = move || {
+            // Marks the write done when this closure ends, written or not.
             let _finished = finished;
-            finish(&mut model);
+            // `finish` may say the model no longer stands (an import's check healed a part).
+            if !finish(&mut model) {
+                return;
+            }
             if let Err(e) = cache.write(&key, &doc, &model, &reply) {
                 log::info!("import was not cached: {e}");
             }

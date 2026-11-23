@@ -2452,9 +2452,12 @@ fn line_meets_plane(
 /// ([`straight_edge_meets_plane`]), whether the two kept surfaces are one (a round drawn
 /// as two faces, split along a ruling: their meeting with the plane is no one point) or
 /// two that cross along the line. Each such edge is taken, the largest meeting kept;
-/// nowhere near where every line runs past the plane. `None` means no kept pair
-/// shares a straight edge: a different topology event. `Some(Uncertified)` means
-/// such an edge exists but its third surface or meeting is not certified.
+/// nowhere near where every line runs past the plane. A pair whose third's new surface is
+/// a quadric is left to the surfaces' classes' own constructions (a [`corner`]'s arms
+/// below: [`parallel_quadrics`], [`quadric::Radical`] or [`quadric::meet`]), which decide
+/// the same three surfaces' meeting without a plane's closed form. `None` means no kept
+/// pair shares a straight edge with a plane third: a different construction decides the
+/// corner. `Some(Uncertified)` means such an edge exists but its meeting is not certified.
 ///
 /// # Errors
 ///
@@ -2488,8 +2491,11 @@ fn kept_straight_edge_corner(
         if lines.is_empty() {
             continue;
         }
+        // the third's new surface is not a plane: this closed form is the plane's; a
+        // quadric third is decided by the surfaces' classes' own constructions (`corner`),
+        // where this pair's straight edge does not take it
         let Exact::Plane(plane) = *z else {
-            return Ok(Some(CornerMeeting::Uncertified));
+            continue;
         };
         for line in lines {
             any = true;
@@ -2592,7 +2598,9 @@ fn kept_straight_edge_corner(
 /// quadrics are kept and share a straight edge at the vertex (a round drawn as two faces split along a ruling, or two surfaces
 /// crossing along a line), and the third's new surface a plane: faces that keep their
 /// surfaces keep their edges, so the three meet where that edge's line crosses the plane
-/// ([`kept_straight_edge_corner`]). A surface at the vertex moved adds its distance from the
+/// ([`kept_straight_edge_corner`]); a quadric third is decided by the constructions above
+/// (the quadrics' parallel, radical plane or certificate arms), not by that closed form. A
+/// surface at the vertex moved adds its distance from the
 /// vertex to the move.
 ///
 /// A plane and a bare B-spline net ([`net::Net`]: a B-spline surface, extrusion or surface
@@ -2638,7 +2646,15 @@ pub fn local_extension_reach(
     let is_moved = |f: Option<FaceId>| f.is_some_and(|f| moved.iter().any(|(m, _)| *m == f));
     let uncertified = || match own_face {
         Some(face) => Failure::new(LOCAL_OP, OffsetFailure::ReachUncertified { face }).into_error(),
-        None => SolidError::offset_stage_failed(LOCAL_OP, crate::error::SM_ERR_NULL_POINTER),
+        None => Failure::new(
+            LOCAL_OP,
+            OffsetFailure::Defect {
+                why: "the face use whose extension reach is asked has no face, though the kernel \
+                      links every face use to its face",
+            },
+        )
+        .with_status(crate::error::SM_ERR_NULL_POINTER)
+        .into_error(),
     };
     // each face's exact class, proved once
     let mut classes: Vec<(FaceId, Option<Exact>)> = Vec::new();
@@ -3109,9 +3125,10 @@ struct Corner {
 /// there moves, every face there must be of a class (`class_of`), and the meetings of the
 /// face's surface with every two others (three planes; two planes and a quadric or a net; a
 /// plane, a quadric and a net; a plane and two nets; a plane and two quadrics, on a kept
-/// straight edge where present, nowhere for parallel quadrics, on the radical plane of two
+/// straight edge where present and its third's new surface a plane, nowhere for parallel
+/// quadrics, on the radical plane of two
 /// cylinders on one axis direction ([`quadric::Radical`]), otherwise by [`quadric::meet`];
-/// three quadrics on a kept straight edge, or nowhere where every two are parallel;
+/// three quadrics nowhere where every two are parallel;
 /// anything else, or a meeting with a net not proved, is `refuse`d), and each moved
 /// surface's distance from the vertex (a moved net's: the farthest meeting found on it
 /// there), are taken into `found`; the balls near-parallel quadrics' decisions hold in into
@@ -3202,7 +3219,8 @@ fn corner(
                     let meeting = net::plane_and_nets_meet(m, n, x.point, x.raw, p)?;
                     Some(meeting.ok_or_else(refuse)?)
                 }
-                // two or more quadrics: the kept straight edge's meeting, if any
+                // two or more quadrics: the kept straight edge's meeting, if any (its third
+                // a plane); a quadric third falls through to the surfaces' own constructions
                 (_, [_, _, ..], []) => {
                     let faces = [at.own, Some(*fc), Some(*fd)];
                     match kept_straight_edge_corner(b, at, p, is_moved, faces, three)? {

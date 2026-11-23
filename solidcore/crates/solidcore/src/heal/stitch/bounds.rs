@@ -98,7 +98,7 @@ fn difference(a: Box3, b: Box3) -> Box3 {
 }
 
 /// Upper bound on the exact Euclidean distance between the stored points.
-pub(super) fn points(a: Point3, b: Point3) -> Result<f64> {
+pub(crate) fn points(a: Point3, b: Point3) -> Result<f64> {
     norm(difference(point_box(a)?, point_box(b)?))
 }
 
@@ -563,7 +563,7 @@ pub(crate) fn curve_cover(curve: &Curve, a: f64, b: f64, parts: u32) -> Result<V
 }
 
 /// An upper bound for point-to-curve distance using an exact point of the curve.
-pub(super) fn point_at_curve(point: Point3, curve: &Curve, parameter: f64) -> Result<f64> {
+pub(crate) fn point_at_curve(point: Point3, curve: &Curve, parameter: f64) -> Result<f64> {
     norm(difference(
         point_box(point)?,
         curve_box(curve, checked_range([parameter, parameter])?)?,
@@ -571,7 +571,7 @@ pub(super) fn point_at_curve(point: Point3, curve: &Curve, parameter: f64) -> Re
 }
 
 /// Bounds the whole curve's distance from a point (the geometry a squeeze removes).
-pub(super) fn curve_to_point(curve: &Curve, interval: &Extent1d, point: Point3) -> Result<f64> {
+pub(crate) fn curve_to_point(curve: &Curve, interval: &Extent1d, point: Point3) -> Result<f64> {
     norm(difference(
         curve_box(curve, checked_range([interval.min(), interval.max()])?)?,
         point_box(point)?,
@@ -579,7 +579,7 @@ pub(super) fn curve_to_point(curve: &Curve, interval: &Extent1d, point: Point3) 
 }
 
 /// Bounds both directed curve gaps under the stated endpoint correspondence.
-pub(super) fn curves(first: &Curve, a: [f64; 2], second: &Curve, b: [f64; 2]) -> Result<f64> {
+pub(crate) fn curves(first: &Curve, a: [f64; 2], second: &Curve, b: [f64; 2]) -> Result<f64> {
     let ar = checked_range(a)?;
     let br = checked_range(b)?;
     // With a common positive rational basis the difference is a convex combination

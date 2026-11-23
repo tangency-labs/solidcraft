@@ -79,6 +79,28 @@ fn pieces_nothing_tells_apart_are_numbered_and_unverified() {
     assert!(!names.verified(0) && !names.verified(1));
 }
 
+/// #7990, change 4: pieces nothing around them tells apart, whose feature says where each
+/// starts along its definition (a hole's wall's halves along its sketch circle), are numbered in
+/// that order, whatever order the faces come in, and the names are exact. Where two would share a
+/// place the order says nothing, and they are numbered as before.
+#[test]
+fn pieces_are_numbered_along_their_definition_where_the_feature_says() {
+    let ranked = |order: [usize; 2]| {
+        let mut faces = named(&["F3:side:c1", "F3:side:c1", "F1:top"]);
+        for (face, place) in faces.iter_mut().zip(order) {
+            face.ordinal = Some(place);
+        }
+        qualify(faces, &[(0, 2), (1, 2)])
+    };
+    let names = ranked([2, 1]);
+    assert_eq!((names.faces[0].as_str(), names.faces[1].as_str()), ("F3:side:c1#2", "F3:side:c1#1"));
+    assert!(names.verified(0) && names.verified(1));
+    let names = ranked([1, 2]);
+    assert_eq!((names.faces[0].as_str(), names.faces[1].as_str()), ("F3:side:c1#1", "F3:side:c1#2"));
+    let names = ranked([1, 1]);
+    assert!(!names.verified(0) && !names.verified(1));
+}
+
 /// #5860: a piece of a split face that is split again must not stack another qualifier on
 /// its name: the name grew with every split (728 characters after eleven splits).
 #[test]
@@ -290,7 +312,9 @@ fn two_pieces_told_apart_by_one_blend_both_answer_to_a_stored_name() {
 /// A face named only by its index (a thread's groove, `F7:face:12`, unverified) never tells its
 /// neighbours apart: the next evaluation can give that index to another face, so an exact piece
 /// qualified by it could change its name or take another's. Pieces only such faces tell apart
-/// are numbered and unverified, and a stored name qualified by an index finds nothing.
+/// are numbered and unverified, and a stored name qualified by an index finds no piece by its name
+/// alone (an edge saved with one is found only where its pick still lies beside such a face,
+/// #19455).
 #[test]
 fn a_face_named_by_its_index_never_qualifies_an_exact_piece() {
     let groove = |name: &str| Named { name: name.to_string(), verified: false, ..Named::default() };
@@ -310,4 +334,55 @@ fn a_face_named_by_its_index_never_qualifies_an_exact_piece() {
     assert!(names.faces.iter().take(2).all(|n| !n.contains(":face:")), "{:?}", names.faces);
     assert_ne!(names.faces[0], names.faces[1]);
     assert!(!names.verified(0) && !names.verified(1));
+}
+
+/// A modelled thread in a hole wider than its minor diameter narrows the bore with a tool whose
+/// faces have no roles. Its end is flush with the part's top face and merges into it: the top
+/// face keeps its exact name (a sketch can attach to it and follows a taller part), and a face
+/// made only of such a tool's faces still has none (#20594).
+#[test]
+fn a_top_face_keeps_its_exact_name_after_a_thread_narrows_the_hole() {
+    let doc_of = |height: f64| {
+        let doc = crate::Document {
+            features: serde_json::from_value(serde_json::json!([
+                {"id": 1, "name": "Cyl", "type": "cylinder", "base": [0, 0, 0], "radius": "25", "height": height.to_string()},
+                {"id": 2, "name": "Bore", "type": "hole", "position": [0, 0, height], "direction": [0, 0, -1], "diameter": "8", "depth": "15"},
+                {"id": 3, "name": "Tap", "type": "thread", "face": [4, 0, height - 5.0], "designation": "M8", "modeled": true}
+            ]))
+            .unwrap(),
+            ..crate::Document::default()
+        };
+        crate::format::read(&doc.to_json()).unwrap()
+    };
+    let top_of = |model: &crate::Model, z: f64| {
+        let state = model.state();
+        let body = state.body("Body1").unwrap().clone();
+        let tops: Vec<usize> =
+            (0..body.body.face_count()).filter(|&i| body.body.planar_face(i).is_some_and(|p| (p.origin.z - z).abs() < 1e-6)).collect();
+        (body, tops)
+    };
+
+    let doc = doc_of(25.0);
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "the thread builds");
+    let (body, tops) = top_of(&model, 25.0);
+    assert_eq!(tops.len(), 1, "one top face");
+    let names = crate::naming::names(&body);
+    assert!(names.verified(tops[0]), "the top face's name follows exact history: {:?}", names.faces);
+    let target = doc.lineage_face_target(&body, tops[0], solidcore_record::Vec3::new(10.0, 0.0, 25.0)).expect("a sketch can attach to the top face");
+
+    // A taller part: the attachment finds the top face at its new height.
+    let taller = doc_of(35.0);
+    let mut model = crate::Model::new();
+    model.evaluate(&taller);
+    let (body, tops) = top_of(&model, 35.0);
+    assert_eq!(tops.len(), 1);
+    assert_eq!(taller.configuration_face_indices(&body, &target).unwrap(), tops);
+
+    // A face made only of an unnamed tool's faces has no exact name.
+    let unnamed = Operand::Made(vec![Vec::new()]);
+    let one = OperandNames { operand: &unnamed, body: None, names: Arc::default(), edges: OnceLock::new() };
+    let only = FaceProv { origins: vec![FaceOrigin::Face { operand: 0, face: 0 }], change: solidcraft_kernel::history::Change::Kept };
+    assert!(from_origins(&only, &[one], 1).is_none());
 }

@@ -19,6 +19,7 @@ the app.
 | `Mat4`, `Quat` | The camera's matrices and rotations |
 | `nearest_drawn_point`, `DrawnPoint` | Picking drawn lines: of the host's polylines, the point drawn nearest the pointer, with its line id, segment, parameter on the segment and gap in pixels |
 | `Scene`, `SceneMesh`, `SceneLine`, `Rgb`, `MIN_ALPHA`, `SEE_THROUGH`, `SECTION_CAP`, `SECTION_HATCH`, `png` | A picture as data: shaded meshes, lines, section cap and hatch colours, and PNG encoding |
+| `ViewSpec` | How one view of a design looks at the model (its camera today), with a saved form, so a front end keeps one per view |
 | `AnalysisMode`, `SceneAnalysis` | Surface analysis shading (zebra, draft, curvature, environment, access) and its palette |
 | `render`, `render_png`, `render_transparent`, `Canvas`, `shade` | The CPU rasterizer (z-buffer, shaded triangles, depth-tested lines) for pictures without a GPU, and its shading |
 | `surface::OpaqueSurface`, `clear_coat::ClearCoat` | The opaque metallic-roughness shading model and its clear coat |

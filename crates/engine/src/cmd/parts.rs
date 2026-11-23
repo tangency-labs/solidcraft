@@ -37,13 +37,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LIBRARY_CONTRACT)
         .output(output_schema_for::<PartsLibrary>)
         .params("family? → families (name, standard, system: metric|inch, sizes, lengths) and, with family, each size's dimensions (mm)"),
-    CommandSpec::new("parts.fastener", "Insert Fastener", crate::checked!("parts.fastener", insert_atomic))
+    CommandSpec::new("parts.fastener", "Insert Fastener", crate::checked!("parts.fastener", insert_atomic)).begins_edit()
         .at("SOLID", "INSERT")
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<InsertedPart>)
         .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction? (from the shank's tip toward the head), flip?, name?"),
-    CommandSpec::new("parts.insert", "Insert Part", crate::checked!("parts.insert", insert_atomic))
+    CommandSpec::new("parts.insert", "Insert Part", crate::checked!("parts.insert", insert_atomic)).begins_edit()
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<InsertedPart>)
@@ -67,7 +67,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SEATS_CONTRACT)
         .output(output_schema_for::<PartsSeats>)
         .params("picks: face or edge selections on bore walls or rims; countersunk_shank_diameter?: mm for a 90-degree countersink → one named joint origin, world point and axes and signed shank offset per distinct hole"),
-    CommandSpec::new("parts.resize", "Change Part Size", crate::checked!("parts.resize", resize_atomic))
+    CommandSpec::new("parts.resize", "Change Part Size", crate::checked!("parts.resize", resize_atomic)).begins_edit()
         .icon("scale")
         .contract(&RESIZE_CONTRACT)
         .output(output_schema_for::<ResizedPart>)
@@ -1101,7 +1101,8 @@ fn insert_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     computed.active_component = s.active_component;
     computed.active_occurrence_path = s.active_occurrence_path.clone();
     computed.active_sketch = s.active_sketch.filter(|id| computed.doc.feature(*id).is_some());
-    s.accept_computed(computed);
+    computed.sketching_view = computed.active_sketch.and(s.sketching_view);
+    s.accept_computed(computed)?;
     Ok(result)
 }
 
@@ -1305,7 +1306,7 @@ impl HoleWall {
 }
 
 /// The wall of the hole at `a`, a little in from the picked rim, and whether that rim is an open
-/// end of the hole: just past it along the axis is not the body's material.
+/// end of the hole: the centre of its rim lies in free space.
 fn hole_wall(s: &Session, a: Vec3) -> Option<HoleWall> {
     // Picks are in world coordinates, including rims on already placed standard parts.
     let st = s.world_state().ok()?;
@@ -1343,14 +1344,15 @@ fn add_seat<K: PartialEq, T>(seats: &mut Vec<(usize, K, HoleWall, T)>, index: us
 fn wall_from_cylinder(body: &solidcraft_kernel::Body, c: solidcraft_kernel::CylinderFace, q: Vec3) -> HoleWall {
     let axis = Vec3::from(c.axis);
     let along = (q - c.axis_point).dot(axis);
-    let (end, out) = if along - c.start < c.end - along { (c.start, -1.0) } else { (c.end, 1.0) };
-    let past = c.axis_point + axis * (end + out * (c.end - c.start).min(1.0) * 0.25);
+    let end = if along - c.start < c.end - along { c.start } else { c.end };
+    // At an open rim the centre lies in free space; at a blind floor it lies on the face.
+    let rim_center = c.axis_point + axis * end;
     HoleWall {
         at: q,
         seat: c.axis_point + axis * along,
         axis: Some(axis),
         ends: Some([c.axis_point + axis * c.start, c.axis_point + axis * c.end]),
-        open: !matches!(body.classify_point(past), Ok(solidcraft_kernel::PointClass::Inside)),
+        open: matches!(body.classify_point(rim_center), Ok(solidcraft_kernel::PointClass::Outside)),
         radius: c.radius,
     }
 }
@@ -1392,7 +1394,8 @@ fn resolve_seats(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let world = s.world_state()?;
     let st = s.model.state();
-    let placements = s.doc.body_frames_with_source(&st);
+    let placed = s.placed_document();
+    let placements = placed.body_frames_with_source(&st);
     let mut distinct = Vec::new();
     for (i, pick) in args.picks.iter().enumerate() {
         let body = world.body(&pick.body).ok_or_else(|| bad(cmd, format!("no body `{}`", pick.body)))?;
@@ -1409,17 +1412,19 @@ fn resolve_seats(s: &mut Session, p: &Value) -> Result<Value> {
             .filter(|n| !n.is_empty())
             .cloned()
             .ok_or_else(|| bad(cmd, "the bore needs a named cylindrical wall"))?;
-        let inv =
-            s.doc.path_transform(*component, path).and_then(|m| solidcraft_doc::mat_inverse(&m)).ok_or_else(|| bad(cmd, "invalid bore placement"))?;
+        let inv = placed
+            .path_transform(*component, path)
+            .and_then(|m| solidcraft_doc::mat_inverse(&m))
+            .ok_or_else(|| bad(cmd, "invalid bore placement"))?;
         let mut snap =
             solidcraft_doc::joints::Snap::CircleCenter { pick: solidcraft_doc::apply_point(&inv, wall.at), face: Some(circle), end: None, x: None };
-        solidcraft_doc::joints::pin_end(&s.doc, &st, *component, &mut snap);
+        solidcraft_doc::joints::pin_end(&placed, &st, *component, &mut snap);
         let solidcraft_doc::joints::Snap::CircleCenter { face: Some(circle), end: Some(end), .. } = snap else {
             return Err(bad(cmd, "the bore needs a named end face"));
         };
         let origin = BoreOrigin { body: source.clone(), occurrence: path.last().copied().unwrap_or(0), path: path.clone(), circle, end };
         let resolved = super::joints::origin_param(s, Some(&reply(cmd, &origin)?), cmd)?;
-        let m = s.doc.origin_world(&st, &resolved)?;
+        let m = placed.origin_world(&st, &resolved)?;
         seats.push(BoreSeat {
             pick_index,
             origin,
@@ -1448,7 +1453,8 @@ fn resize_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     computed.active_component = s.active_component;
     computed.active_occurrence_path = s.active_occurrence_path.clone();
     computed.active_sketch = s.active_sketch.filter(|id| computed.doc.feature(*id).is_some());
-    s.accept_computed(computed);
+    computed.sketching_view = computed.active_sketch.and(s.sketching_view);
+    s.accept_computed(computed)?;
     Ok(result)
 }
 
@@ -1535,7 +1541,7 @@ mod tests {
     fn bore_seats_choose_the_open_end_and_return_a_reusable_origin() {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length":40, "width":30, "height":20, "body_name":"Block"}));
-        run(&mut s, "solid.hole", json!({"position":[20,15,20], "diameter":6.4, "depth":10}));
+        run(&mut s, "solid.hole", json!({"position":[20,15,20], "diameter":6.4, "depth":19.9}));
         let st = s.model.state();
         let b = &st.body("Block").unwrap().body;
         let rim_pick = |z: f64| {
@@ -1547,7 +1553,7 @@ mod tests {
                 .unwrap();
             json!({"body":"Block", "type":"edge", "index":index, "point":rim.start})
         };
-        let (floor, rim) = (rim_pick(10.0), rim_pick(20.0));
+        let (floor, rim) = (rim_pick(0.1), rim_pick(20.0));
         let before = s.doc.clone();
         let r = run(&mut s, "parts.seats", json!({"picks":[floor, rim], "countersunk_shank_diameter":6.0}));
         assert_eq!(before, s.doc);
@@ -1562,6 +1568,43 @@ mod tests {
         let frame = s.doc.origin_world(&st, &origin).unwrap();
         assert_eq!(seat["point"], json!(&frame[3][..3]));
         assert_eq!(seat["x_dir"], json!(&frame[0][..3]));
+    }
+
+    #[test]
+    fn a_bore_pick_uses_uncaptured_placements_without_capturing_them() {
+        let mut s = Session::default();
+        let component = run(&mut s, "component.create", json!({"name": "Plate"}));
+        let occurrence = component["occurrence"].as_u64().unwrap();
+        run(&mut s, "solid.box", json!({"length":40, "width":30, "height":20, "body_name":"Block"}));
+        run(&mut s, "solid.hole", json!({"position":[20,15,20], "diameter":6.4}));
+        run(
+            &mut s,
+            "occurrence.move",
+            json!({
+                "occurrence": occurrence, "capture": false, "move_grounded": true,
+                "to_matrix": [0,0,1,100, 0,1,0,0, -1,0,0,-100]
+            }),
+        );
+        let edges = run(&mut s, "model.edges", json!({"body": "Block"}));
+        let rim = edges["edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|edge| edge["name"].as_str().unwrap().contains("bore") && (vec3(&edge["mid"]).unwrap().x - 120.0).abs() < 1e-8)
+            .unwrap();
+        let picks = json!({"picks":[{"type":"edge", "body":"Block", "index":rim["index"], "point":rim["mid"]}]});
+        let doc = s.doc.clone();
+        let moves = s.pending_moves.clone();
+        let pending = run(&mut s, "parts.seats", picks.clone());
+        assert_eq!(s.doc, doc);
+        assert_eq!(s.pending_moves, moves);
+        assert!(s.pending_moves.contains_key(&occurrence));
+        let seat = &pending["seats"][0];
+        assert!(vec3(&seat["point"]).unwrap().dist(Vec3::new(120., 15., -120.)) < 1e-8, "{seat}");
+        assert!(vec3(&seat["normal"]).unwrap().dist(Vec3::X) < 1e-8, "{seat}");
+        assert_eq!(seat["origin"]["path"], json!([occurrence]));
+        run(&mut s, "component.capture_position", json!({}));
+        assert_eq!(pending, run(&mut s, "parts.seats", picks), "capturing preserves the selected end and the whole world frame");
     }
 
     #[test]
@@ -2166,6 +2209,26 @@ mod tests {
         assert!((lo.z + 13.0).abs() < 1e-6 && (hi.z + 2.0).abs() < 1e-6, "{lo:?} {hi:?}");
     }
 
+    /// #16688: a pick on the outer edge of a counterbore's floor seats the screw at the floor end
+    /// of the counterbore's wall, head down into the plate. `flip` turns it the right way up: the
+    /// head in the counterbore, the shank down the bore.
+    #[test]
+    fn flip_rights_a_screw_picked_at_a_counterbore_floor() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "solid.hole", json!({"position": [20, 15, 10], "type": "counterbore", "diameter": 6.6, "cb_diameter": 11, "cb_depth": 6.4}));
+        // The counterbore's floor is at z = 3.6; its outer edge is 5.5 mm from the axis.
+        let seat = |flip: bool| json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20, "at": [25.5, 15, 3.6], "flip": flip});
+        let r = run(&mut s, "parts.insert", seat(false));
+        assert_eq!(r["directions"], json!([[0.0, 0.0, -1.0]]), "{r}");
+        run(&mut s, "edit.undo", json!({}));
+        let r = run(&mut s, "parts.insert", seat(true));
+        assert_eq!(r["directions"], json!([[0.0, 0.0, 1.0]]), "{r}");
+        // The 6 mm head on the floor, inside the counterbore; the 20 mm shank down through the bore.
+        let (lo, hi) = bbox(&s, "SHCS M6x20");
+        assert!((lo.z + 16.4).abs() < 1e-6 && (hi.z - 9.6).abs() < 1e-6, "{lo:?} {hi:?}");
+    }
+
     /// #12150: `flip` turns a seated part over (head into the hole, shank out of the face) and a
     /// part placed at a point against `direction`; the reply reports the direction chosen.
     #[test]
@@ -2249,8 +2312,8 @@ mod tests {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Block"}));
         let blind = [(8.0, 8.0), (32.0, 8.0), (32.0, 22.0)];
-        for (x, y) in blind {
-            run(&mut s, "solid.hole", json!({"position": [x, y, 20], "diameter": 3.4, "depth": 10}));
+        for ((x, y), depth) in blind.into_iter().zip([19.9, 10.0, 10.0]) {
+            run(&mut s, "solid.hole", json!({"position": [x, y, 20], "diameter": 3.4, "depth": depth}));
         }
         let through = (8.0, 22.0);
         run(&mut s, "solid.hole", json!({"position": [through.0, through.1, 20], "diameter": 3.4}));
@@ -2258,7 +2321,7 @@ mod tests {
         // its rim, then its floor; the third at its rim only; the through hole at both rims.
         let rim = |(x, y): (f64, f64), z: f64| json!([x + 1.7, y, z]);
         let at = vec![
-            rim(blind[0], 10.0),
+            rim(blind[0], 0.1),
             rim(blind[0], 20.0),
             rim(blind[1], 20.0),
             rim(blind[1], 10.0),
