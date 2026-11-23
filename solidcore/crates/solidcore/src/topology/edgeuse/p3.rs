@@ -472,6 +472,13 @@ pub(crate) fn fit_tolerance(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> 
 /// tolerance. `want_deviation` is `pdMaxDeviation != NULL`; `opt_drop_curve_fail` is
 /// `pOptDropCurveFail`.
 ///
+/// Not upstream (#18294): a face that is a blend kept as its definition is dropped onto
+/// as its definition S, also inside a caller's
+/// [`crate::surface::procedural_blend::NetScope`], since a projection is solved on S
+/// (`docs/generic-blend.md` §2.3). The net lies up to its bound off S, so an edge
+/// ending on the face's boundary drops past the net's and its UV curve came back
+/// shorter than the edge.
+///
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] where
@@ -486,6 +493,8 @@ pub fn create_uv_trim_curve(
     want_deviation: bool,
     opt_drop_curve_fail: Option<&mut DropCurveFail<ObjectHandle>>,
 ) -> Result<CreatedUvTrimCurve> {
+    // a projection is solved on S, never on a blend's net (#18294)
+    let _exact = crate::surface::procedural_blend::NetScope::exact(k);
     // always collect DropCurveData
     let mut local_fail = DropCurveFail::<ObjectHandle>::default();
     let fail: &mut DropCurveFail<ObjectHandle> = match opt_drop_curve_fail {
