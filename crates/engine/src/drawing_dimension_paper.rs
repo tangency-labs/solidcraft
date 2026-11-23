@@ -266,6 +266,8 @@ pub(crate) enum NotDragged {
     NoPlace,
     /// A chain's texts each sit over their own member.
     ChainText,
+    /// A baseline or ordinate set: dragging one isn't supported yet.
+    Set,
     /// Between the ends of two silhouettes or faces: a line across them runs beyond one of them.
     BetweenEnds,
     /// Its text's size waits for a font to fall back to, and the drag needs it.
@@ -319,6 +321,7 @@ pub(crate) fn dragged(
             Drag::Text(p) => (p.dist(centre) - centre.dist(start), TextPlace::At([p.x, p.y])),
             Drag::Line(p) => (offset, TextPlace::At([p.x, p.y])),
         }),
+        (DimensionKind::Baseline { .. } | DimensionKind::Ordinate { .. }, _, _) => Err(NotDragged::Set),
         _ => Err(NotDragged::NoPlace),
     }
 }

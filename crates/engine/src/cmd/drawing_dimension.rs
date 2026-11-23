@@ -528,6 +528,7 @@ fn drag_on_sheet(s: &Session, d: &Drawing, id: u64, drag: Drag, cmd: &str) -> Re
         let words = match why {
             NotDragged::NoPlace => NO_PLACE,
             NotDragged::ChainText => "a chain's texts sit on its members: drag its line",
+            NotDragged::Set => "not supported yet: dragging a baseline or ordinate set; set its `offset_mm`",
             NotDragged::BetweenEnds => "the line between silhouettes or faces runs beyond their ends: drag it past one of them",
             NotDragged::TextWaits => TEXT_WAITS,
         };

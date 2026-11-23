@@ -2936,6 +2936,8 @@ fn a_drag_that_cant_place_is_refused_and_changes_nothing() {
     let length = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}))["dimension"].clone();
     let chain = add(&mut s, view, json!({"chain": {"points": [[0, 0, 0], [80, 0, 0], [80, 0, 30]]}}))["dimension"].clone();
     let faces = add(&mut s, view, json!({"faces": {"a": [0, 20, 15], "b": [80, 20, 15]}}))["dimension"].clone();
+    let baseline = json!({"baseline": {"origin": [0, 0, 0], "targets": [[80, 0, 0], [80, 0, 30]], "direction": "horizontal"}});
+    let set = add(&mut s, view, baseline)["dimension"].clone();
     fn refuses(s: &mut Session, cases: &[(&Value, Value, &str)]) {
         let (before, steps) = (s.drawing("test").unwrap().to_json().unwrap(), s.undo.len());
         for (id, set, why) in cases {
@@ -2950,6 +2952,8 @@ fn a_drag_that_cant_place_is_refused_and_changes_nothing() {
         &[
             (&chain, json!({"text_to_mm": [200, 190]}), "a chain's texts sit on its members"),
             (&faces, json!({"line_through_mm": [200, 150]}), "runs beyond their ends"),
+            (&set, json!({"line_through_mm": [200, 120]}), "not supported yet: dragging a baseline or ordinate set"),
+            (&set, json!({"text_to_mm": [200, 120]}), "not supported yet: dragging a baseline or ordinate set"),
             (&length, json!({"text_to_mm": [200, 190], "text": "centred"}), "a drag sets `offset_mm` and `text` itself"),
             (&length, json!({"line_through_mm": [200, 190], "offset_mm": 5}), "a drag sets `offset_mm` and `text` itself"),
             (&length, json!({"text_to_mm": [200, 190], "line_through_mm": [200, 190]}), "a drag each"),
@@ -2957,6 +2961,9 @@ fn a_drag_that_cant_place_is_refused_and_changes_nothing() {
             (&length, json!({"line_through_mm": [0, 1e8]}), "on paper"),
         ],
     );
+    let ordinate = json!({"ordinate": {"origin": [0, 0, 0], "targets": [[80, 0, 0]], "direction": "horizontal"}});
+    let why = refused(&mut s, json!({"view": ids::encode(view), "kind": ordinate, "line_through_mm": [200, 120]}));
+    assert!(why.contains("not supported yet: dragging a baseline or ordinate set"), "{why}");
     crate::drawing_scene::tests::not_drawable_yet(&mut s, view);
     refuses(&mut s, &[(&length, json!({"line_through_mm": [200, 190]}), "its view isn't drawn")]);
 
