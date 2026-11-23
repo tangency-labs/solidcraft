@@ -330,8 +330,8 @@ pub struct InstallResult {
     pub capabilities: Vec<String>,
     /// What it asks for: command groups, named folders, the clock.
     pub permissions: craft_plugin::Permissions,
-    /// The fuel, memory and time it asks for. Memory above `host_limits` is approved at install
-    /// (`approve.memory_mib`); fuel is not, and must fit `host_limits`.
+    /// The fuel, memory and time it asks for. Fuel and memory above `host_limits` can be approved
+    /// at install (`approve.fuel`, up to `MAX_APPROVED_FUEL`, and `approve.memory_mib`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<craft_plugin::Limits>,
     /// The app's ceilings for plugins, before any approval.
@@ -401,6 +401,9 @@ pub struct StoredGrant {
     pub package_hash: Option<String>,
     pub command_groups: std::collections::BTreeSet<String>,
     pub folders: Vec<crate::plugin::FileGrant>,
+    /// Fuel approved above Max plugin fuel for this exact package, up to `MAX_APPROVED_FUEL`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fuel: Option<u64>,
     /// Memory in MiB approved above the app's ceiling for plugins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_mib: Option<usize>,
@@ -437,6 +440,10 @@ pub struct InstallApproval {
     pub command_groups: std::collections::BTreeSet<String>,
     #[serde(default)]
     pub folders: Vec<ApprovedFolder>,
+    /// Fuel to allow above Max plugin fuel: exactly the manifest's `runtime.limits.fuel`, at
+    /// most 10,000,000,000,000. Omitted: the plugin runs under the app's default limit.
+    #[serde(default)]
+    pub fuel: Option<u64>,
     /// Memory in MiB to allow above the app's ceiling for plugins: exactly the manifest's
     /// `runtime.limits.memory_mib`. Omitted: the plugin runs under the app's ceiling.
     #[serde(default)]
@@ -465,6 +472,7 @@ impl From<InstallApproval> for crate::plugin::Grants {
                 .into_iter()
                 .map(|f| craft_plugin::FileGrant { name: f.name, folder: f.path, read: f.read, write: f.write })
                 .collect(),
+            fuel: approve.fuel,
             memory_mib: approve.memory_mib,
             input_folder: approve.input_folder,
         }

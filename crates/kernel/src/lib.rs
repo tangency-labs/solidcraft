@@ -433,6 +433,7 @@ pub use solidcraft_smlib::trace as smlib_trace;
 pub use splitface::SplitTool;
 pub use splitface::face_split_if_on_face;
 pub use splitface::has_cap_at;
+pub use splitface::split_at_facing_side;
 pub use splitface::split_body;
 pub use splitface::split_body_by_faces;
 pub use splitface::split_faces;
