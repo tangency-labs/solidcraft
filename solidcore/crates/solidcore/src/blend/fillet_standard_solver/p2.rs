@@ -4102,6 +4102,80 @@ mod tests {
             assert_eq!(e.upstream_status(), Some(SM_ERR));
         }
     }
+
+    /// A rational biquadratic Bezier patch with weight `w` on every control point.
+    fn rational_patch(w: f64) -> BSplineSurface {
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+        let net = (0..3)
+            .map(|i| {
+                (0..3)
+                    .map(|j| CPoint::weighted(Vec3::new(f64::from(i), f64::from(j), 0.0), w))
+                    .collect()
+            })
+            .collect();
+        let k = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        BSplineSurface::from_gw_nurb(&NurbSurface::new(net, 2, 2, k.clone(), k).unwrap())
+    }
+
+    #[test]
+    fn a_joint_weight_that_is_not_positive_is_named() {
+        let mut piece = rational_patch(2.0);
+        // equal weights: the piece is already on the joined surface's scale
+        scale_to_joint(&rational_patch(2.0), &mut piece).unwrap();
+        let mut joined = rational_patch(2.0);
+        let nurb = joined.get_or_create_gw_nurb().unwrap();
+        let n = nurb.n();
+        nurb.cpt_mut(n, 0).unwrap().w = 0.0;
+        let e = scale_to_joint(&joined, &mut piece).unwrap_err();
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::Trace(TraceFailure::JointWeightNotPositive {
+                joined: 0.0,
+                piece: 2.0,
+            }))
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported);
+    }
+
+    #[test]
+    fn a_reversed_rational_law_reverses_its_points_and_weights() {
+        use crate::blend::fillet_standard_solver::p1::{FilletLaw, FilletLawKind};
+        use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
+        let cps = [p(1.0, 0.0, 0.0), p(2.0, 0.0, 0.0), p(4.0, 0.0, 0.0)];
+        let law_curve = BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &cps,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[3, 3],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0, 3.0, 5.0]),
+            trim: None,
+        })
+        .unwrap();
+        let law = FilletLaw::new(FilletLawKind::BSpline {
+            law_curve,
+            extended_law: None,
+        });
+        let ball = |reverse| LawBall {
+            has_edgeuse: true,
+            edge: None,
+            law: law.clone(),
+            interval: Extent1d::from_raw(0.0, 1.0),
+            reverse,
+            span: None,
+        };
+        let forward = law_in_parameter(&ball(false)).unwrap().unwrap();
+        let forward = forward.canonical().unwrap();
+        assert_eq!(forward.control_points, cps.to_vec());
+        assert_eq!(forward.weights, vec![1.0, 3.0, 5.0]);
+        let reversed = law_in_parameter(&ball(true)).unwrap().unwrap();
+        let reversed = reversed.canonical().unwrap();
+        assert_eq!(reversed.control_points, vec![cps[2], cps[1], cps[0]]);
+        assert_eq!(reversed.weights, vec![5.0, 3.0, 1.0]);
+    }
     use crate::blend::fillet_standard_solver::p1::{
         FilletLawKind, CONSTANT_RADIUS_FS_TYPE, SURFACE_SURFACE_FS_TYPE, VARIABLE_RADIUS_FS_TYPE,
     };

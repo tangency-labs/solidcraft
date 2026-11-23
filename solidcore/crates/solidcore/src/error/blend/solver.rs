@@ -142,7 +142,9 @@ pub enum SolverFailure {
     GuessDoesNotDropOnSideEdge,
     /// A point the law intersection traced through has curve parameter `parameter`, below
     /// zero: it lies before the start of the curve the trace builds
-    /// ([`ErrorKind::OutsideDomain`]).
+    /// ([`ErrorKind::OutsideDomain`]). A refusal, not a defect: the trace follows the
+    /// offset surfaces' intersection, which the caller's geometry can carry back past the
+    /// curve's start.
     IntersectionPointBeforeCurve {
         /// The point's curve parameter.
         parameter: f64,

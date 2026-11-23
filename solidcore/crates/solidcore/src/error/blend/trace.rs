@@ -18,8 +18,9 @@ use crate::SolidError;
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum TraceFailure {
-    /// A base surface's first partial derivative has no length at the custom solver's
-    /// current solution, so its equations have no Jacobian there
+    /// A surface's first partial derivative has no length at the solver's current
+    /// solution (a base surface's in the custom solver, an offset surface's in the
+    /// standard solvers), so its equations have no Jacobian there
     /// ([`ErrorKind::Degenerate`]).
     BaseDerivativeZero,
     /// A base surface's normal has no length at the custom solver's current solution:
@@ -259,7 +260,7 @@ impl TraceFailure {
 impl core::fmt::Display for TraceFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::BaseDerivativeZero => f.write_str("a base surface has a zero derivative"),
+            Self::BaseDerivativeZero => f.write_str("a solver's surface has a zero derivative"),
             Self::BaseNormalZero { side: Some(side) } => {
                 write!(f, "base surface {side}'s normal is zero")
             }
