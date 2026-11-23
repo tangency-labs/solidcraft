@@ -672,6 +672,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Outline" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
+        "Point" if command == "frame.member" => Role::ComboBox,
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
         "Offset" if command == "frame.end_cap" => Role::CheckBox,
         "Through all" if command == "solid.cell_grid" => Role::CheckBox,
@@ -1456,7 +1457,7 @@ fn the_pipe_window_keeps_the_typed_wall_when_the_type_becomes_solid() {
 }
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
 form_case!(frame_plate, "frame.plate", ["Shape", "Width", "Height", "Thickness", "Offset", "Bolt Pattern"]);
-form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);
+form_case!(frame_member, "frame.member", ["All Lines", "Point", "Angle", "Mirror", "Name"]);
 form_case!(thread, "solid.thread", ["Form", "Size", "Pitch", "Designation", "Hand", "Starts", "Extent", "Start", "End"]);
 form_case!(primitive_box, "solid.box", ["ui.length", "ui.width", "ui.height", "Operation"]);
 form_case!(cylinder, "solid.cylinder", ["Size", "ui.diameter", "ui.height", "Operation"]);

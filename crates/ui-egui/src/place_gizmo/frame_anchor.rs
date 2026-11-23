@@ -323,10 +323,11 @@ fn drawn_offset(sh: &Shown, anchor: usize) -> Option<[f64; 2]> {
 }
 
 /// Make the anchor at `index` the point on the line: Offset A and B emptied and a located point
-/// dropped (the anchor wins).
+/// and a named placement point dropped (the anchor wins).
 fn set_anchor(d: &mut Dialog, index: usize) {
     if let Kind::Frame(m) = &mut d.kind {
         m.anchor = index;
+        m.point = None;
         m.offset = Default::default();
         m.locate = None;
     }
@@ -339,6 +340,8 @@ fn set_anchor(d: &mut Dialog, index: usize) {
 fn set_offset(app: &SolveApp, d: &mut Dialog, view: &SectionView, off: [f64; 2], write: [bool; 2]) -> bool {
     let Kind::Frame(m) = &mut d.kind else { return false };
     let Some(at) = locate_for(view, m.anchor, off) else { return false };
+    // Offsets are from an anchor: a named placement point gives way to them.
+    m.point = None;
     for ((text, v), w) in m.offset.iter_mut().zip(off).zip(write) {
         if w {
             *text = crate::length_input::model(&app.session.doc, v);

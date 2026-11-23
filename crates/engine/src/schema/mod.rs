@@ -98,6 +98,7 @@ pub mod features_more;
 pub mod file;
 pub mod file_library;
 pub mod frame;
+pub mod frame_library;
 pub mod frame_plate;
 pub mod gusset;
 pub mod hole_stacks;

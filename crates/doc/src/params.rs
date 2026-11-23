@@ -413,7 +413,7 @@ impl Document {
         // too, named as `parameters.graph` names it (#12293).
         let rules = self.rule_reads();
         let reads: Vec<(String, BTreeSet<String>)> =
-            self.features.iter().map(|f| (format!("Feature:{}", f.name), Self::feature_reads(f, &rules))).collect();
+            self.features.iter().map(|f| (format!("Feature:{}", f.name), self.feature_reads(f, &rules))).collect();
         for (feature, names) in &reads {
             for n in names {
                 users.entry(n.as_str()).or_default().push(feature.clone());
@@ -1018,6 +1018,11 @@ impl Document {
                 out.push(ParamUser::Rule { kind: "plastic".into(), name: r.name.clone(), field: field.into() });
             }
         }
+        for lp in &self.frame_profiles {
+            for (label, _) in lp.exprs().into_iter().filter(|(_, e)| uses(e.as_str())) {
+                out.push(ParamUser::Rule { kind: "frame profile".into(), name: lp.name.clone(), field: label.into() });
+            }
+        }
         for c in &self.canvases {
             c.plane.walk_exprs(&mut |(label, e, _, _)| {
                 if uses(e) {
@@ -1209,6 +1214,13 @@ impl Document {
                 n += 1;
             }
         }
+        for e in self.frame_profiles.iter_mut().flat_map(|lp| lp.exprs_mut()) {
+            let r = expr::rename_reference(e, old, new);
+            if r != e.as_str() {
+                *e = r.into();
+                n += 1;
+            }
+        }
         for c in &mut self.canvases {
             c.plane.walk_exprs_mut(&mut |(_, e, _, _)| {
                 let r = rename(e, old, new);
@@ -1270,7 +1282,7 @@ impl Document {
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
                 names.extend(sketch.dimension_params().into_iter().cloned());
             }
-            names.extend(Self::feature_reads(f, &rules));
+            names.extend(self.feature_reads(f, &rules));
             out.extend(names.into_iter().map(|n| (format!("Feature:{}", f.name), n)));
         }
         out
@@ -1280,7 +1292,7 @@ impl Document {
     /// input or dimension of its own: a sketch's point coordinates, texts, equations and pattern
     /// expressions, and the rules a sheet metal or plastic feature is built with. What the rules
     /// read comes from [`Document::rule_reads`], worked out once for all the features.
-    fn feature_reads(f: &crate::Feature, rules: &RuleReads) -> BTreeSet<String> {
+    fn feature_reads(&self, f: &crate::Feature, rules: &RuleReads) -> BTreeSet<String> {
         let mut names = BTreeSet::new();
         if let FeatureKind::Sketch { sketch, .. } = &f.kind {
             names.extend(sketch.patterns.iter().flat_map(|p| p.expressions.values()).flat_map(|e| expr::references(e)));
@@ -1297,6 +1309,10 @@ impl Document {
         }
         if f.kind.is_plastic() {
             names.extend(rules.plastic.iter().cloned());
+        }
+        // Members made from a library profile rebuild when its parameters change.
+        if let Some(lp) = f.kind.library_profile().and_then(|id| self.library_profile(id)) {
+            names.extend(lp.references());
         }
         names
     }
@@ -1333,6 +1349,11 @@ impl Document {
         for f in &self.features {
             let mut hit = f.param_names.iter().any(|n| affected.contains(n));
             hit |= (sheet && f.kind.is_sheet()) || (plastic && f.kind.is_plastic());
+            hit |= f
+                .kind
+                .library_profile()
+                .and_then(|id| self.library_profile(id))
+                .is_some_and(|lp| lp.references().iter().any(|r| affected.contains(r)));
             hit |= f.kind.expressions().iter().any(|e| expr::references(e).iter().any(|r| affected.contains(r)));
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
                 hit |= sketch.dimension_params().into_iter().any(|p| affected.contains(p));

@@ -154,6 +154,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         drawings: _,
         sheet,
         plastic,
+        frame_profiles,
         parts,
         links,
         // What a file keeps of its links; a design in memory holds their bodies either way.
@@ -201,6 +202,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         && *components == b.components
         && *sheet == b.sheet
         && *plastic == b.plastic
+        && *frame_profiles == b.frame_profiles
         && *parts == b.parts
         && *links == b.links
         && *configs == b.configs
