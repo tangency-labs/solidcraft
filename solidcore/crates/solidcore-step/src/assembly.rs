@@ -125,6 +125,9 @@ pub(crate) struct EdgeB {
     pub(crate) interval: [f64; 2],
     pub(crate) vertices: [u32; 2],
     pub(crate) tolerance: f64,
+    /// Allowance for constructing pcurves: the importer's precision plus measured gaps,
+    /// independent of the sending system's possibly coarse distance uncertainty.
+    pub(crate) pcurve_tolerance: f64,
     /// The curve's NURBS form and its interval there (`form::edge`), set before the pcurves.
     pub(crate) form: Option<(BCurve, [f64; 2])>,
 }
@@ -300,7 +303,7 @@ impl<'t> Assembly<'t> {
             self.raise_vertex(v, t.dist(p), origin)?;
         }
         let i = index(self.edges.len())?;
-        self.edges.push(EdgeB { curve, interval, vertices, tolerance: self.tol, form: None });
+        self.edges.push(EdgeB { curve, interval, vertices, tolerance: self.tol, pcurve_tolerance: self.pcurve_tolerance(), form: None });
         Ok((i, along))
     }
 
@@ -333,7 +336,14 @@ impl<'t> Assembly<'t> {
         let e = index(self.edges.len())?;
         let frame = Frame { origin, x_axis: [x.x, x.y, x.z], y_axis: [z.x, z.y, z.z] };
         let half = std::f64::consts::FRAC_PI_2;
-        self.edges.push(EdgeB { curve: BCurve::Circle { frame, radius }, interval: [-half, half], vertices: ends, tolerance: self.tol, form: None });
+        self.edges.push(EdgeB {
+            curve: BCurve::Circle { frame, radius },
+            interval: [-half, half],
+            vertices: ends,
+            tolerance: self.tol,
+            pcurve_tolerance: self.pcurve_tolerance(),
+            form: None,
+        });
         Ok(vec![Bound::Edges(vec![(e, true), (e, false)])])
     }
 
@@ -526,8 +536,7 @@ impl<'t> Assembly<'t> {
                 };
                 let eval = CurveEval::new(curve).map_err(|m| m.to_string())?;
                 let mut gap = 0.0f64;
-                for k in 0..=EDGE_GAP_SAMPLES {
-                    let t = if k == EDGE_GAP_SAMPLES { t1 } else { t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64) };
+                for t in gap_samples(curve, [t0, t1], matches!(surface, BSurface::Plane { .. } | BSurface::PlaneThrough { .. })) {
                     let Some(p) = eval.point(t) else { continue };
                     // A point with no nearest point is the pcurves' to refuse, with why.
                     let Some(s) = on.project_with(&starts, p, None, f64::INFINITY).and_then(|q| on.point(q)) else { continue };
@@ -542,6 +551,8 @@ impl<'t> Assembly<'t> {
     /// Edge `e`'s tolerance covers `gap` with `margin`: refused if far off.
     fn cover_edge(&mut self, e: u32, gap: f64, margin: f64) -> R<()> {
         let Some(x) = self.edges.get_mut(e as usize) else { return Err("edge reference".into()) };
+        // A real gap must be covered even when it is smaller than the file's uncertainty.
+        x.pcurve_tolerance = x.pcurve_tolerance.max(margin * gap);
         if margin * gap <= x.tolerance {
             return Ok(());
         }
@@ -575,6 +586,7 @@ impl<'t> Assembly<'t> {
                 for &(e, _) in uses {
                     let Some(x) = self.edges.get_mut(e as usize) else { return Err("edge reference".into()) };
                     x.tolerance = x.tolerance.max(deviation);
+                    x.pcurve_tolerance = x.pcurve_tolerance.max(deviation);
                     vertices.extend(x.vertices);
                 }
             }
@@ -1078,6 +1090,19 @@ impl<'t> Assembly<'t> {
             // Face order is unchanged; shell sides also determine the edge/vertex walk.
             brep = brep.canonical().map_err(|e| e.to_string())?.brep;
         }
+        // Trim construction returns a continuous lift on a periodic surface. Only now, with
+        // the whole body mutable, can its crossed cuts become edges and its trim pieces be
+        // moved into the base period. An internal seam used on both sides is replaced rather
+        // than retained as a boundary that would divide the same material into sliver faces.
+        if let Some((completed, from)) = pcurve::complete_periodic_seams(&brep).map_err(|e| e.to_string())? {
+            face_origin = from
+                .iter()
+                .map(|&i| face_origin.get(i).copied().ok_or_else(|| pcurve::PeriodicSeamError::InputFaceLost(i).to_string()))
+                .collect::<R<Vec<_>>>()?;
+            turned_faces =
+                from.iter().enumerate().filter(|(_, i)| turned_faces.contains(&(**i as u32))).map(|(i, _)| index(i)).collect::<R<Vec<_>>>()?;
+            brep = completed;
+        }
         solidcore_ops::record_check::validate(&brep).map_err(|e| format!("the record is invalid: {e}"))?;
         solidcore_ops::record_check::agreement(&brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
         Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes, turned: turned_faces })
@@ -1442,7 +1467,8 @@ impl<'t> Assembly<'t> {
         // How far each edge lies off this surface, so its closed form is checked at that.
         self.measure_edges(&label, &edge_loops)?;
         // Closed forms where the geometry has them; the kernel makes the rest (`trims`).
-        let mut exact = pcurve::exact_pcurves(&surface, &uses_of(&self.edges, &edge_loops, None)?, tol, box_on_form).map_err(|e| e.to_string())?;
+        let fit = self.pcurve_tolerance();
+        let mut exact = pcurve::exact_pcurves(&surface, &uses_of(&self.edges, &edge_loops, None)?, fit, box_on_form).map_err(|e| e.to_string())?;
         // On a form of many turns a closed form does not say which turn each of its ends is on:
         // an arc's two ends came out turns apart. An edge that goes round the axis (an arc, a
         // helix) takes its pcurve from its own angle, followed ([`wound::pcurve`]); a ruling,
@@ -1472,7 +1498,7 @@ impl<'t> Assembly<'t> {
             _ => None,
         };
         let mut pcs =
-            pcurve::pcurves_within(&surface, &uses_of(&self.edges, &edge_loops, made.as_ref())?, tol, box_on_form).map_err(|e| e.to_string())?;
+            pcurve::pcurves_within(&surface, &uses_of(&self.edges, &edge_loops, made.as_ref())?, fit, box_on_form).map_err(|e| e.to_string())?;
         // Each loop's uses are moved by whole turns (four form parameters) to run on from one
         // another, on the form that does not close.
         if wound {
@@ -1744,7 +1770,7 @@ impl<'t> Assembly<'t> {
                 if !matches!(edge.curve, BCurve::Spline { .. } | BCurve::RationalSpline { .. }) {
                     continue;
                 }
-                let Ok(ends) = wound::piece_ends(&label, &edge.curve, edge.interval, self.tol) else { continue };
+                let Ok(ends) = wound::piece_ends(&label, &edge.curve, edge.interval, edge.pcurve_tolerance) else { continue };
                 let pieces = ends.len().saturating_sub(1);
                 let half = MAX_SPLINE_POINTS >> 1;
                 let parts = wound::points_of(pieces).saturating_add(half.saturating_sub(1)).checked_div(half).unwrap_or(0);
@@ -1782,7 +1808,7 @@ impl<'t> Assembly<'t> {
                             Some((c, i)) => (c, *i),
                             None => (&edge.curve, edge.interval),
                         };
-                        wound::pcurve(label, curve, interval, self.tol)?
+                        wound::pcurve(label, curve, interval, edge.pcurve_tolerance)?
                     }
                 });
             }
@@ -1829,7 +1855,7 @@ impl<'t> Assembly<'t> {
                             None => (&edge.curve, None, edge.interval),
                         };
                         let i = index(edges.len())?;
-                        edges.push(TrimEdge { curve, nurbs, interval, vertices: ends, tolerance: edge.tolerance });
+                        edges.push(TrimEdge { curve, nurbs, interval, vertices: ends, tolerance: edge.pcurve_tolerance });
                         edge_at.insert(e, i);
                         i
                     }
@@ -1838,7 +1864,13 @@ impl<'t> Assembly<'t> {
             }
             loops.push(uses);
         }
-        Ok(TrimFace { surface, nurbs, domain, edges, vertices, vertex_tolerances, loops, tolerance: self.tol })
+        Ok(TrimFace { surface, nurbs, domain, edges, vertices, vertex_tolerances, loops, tolerance: self.pcurve_tolerance() })
+    }
+
+    /// Source uncertainty bounds the data's gaps; it is not a target for fitting new curves.
+    /// Keep finer declarations, but never fit more loosely than an import with no declaration.
+    pub(crate) fn pcurve_tolerance(&self) -> f64 {
+        self.tol.min(crate::topology::DEFAULT_TOLERANCE)
     }
 }
 
@@ -1869,11 +1901,29 @@ fn uses_of<'e>(edges: &'e [EdgeB], edge_loops: &[Vec<(u32, bool)>], given: Optio
                 Some(g) => Some(g.get(li).and_then(|l| l.get(p)).ok_or("a pcurve the kernel did not make")?),
                 None => None,
             };
-            u.push(EdgeUse { edge: e, curve, interval, forward, tolerance: edge.tolerance, given });
+            u.push(EdgeUse { edge: e, curve, interval, forward, tolerance: edge.pcurve_tolerance, given });
         }
         uses.push(u);
     }
     Ok(uses)
+}
+
+/// On a plane also a spline's knot spans' middles, where its closed-form pcurve is checked:
+/// crowded knots can lie off it only between the even samples, and a plane has no bounded
+/// domain for the kernel's trims to fall back on (#11652).
+fn gap_samples(curve: &BCurve, [t0, t1]: [f64; 2], on_plane: bool) -> Vec<f64> {
+    let mut ts: Vec<f64> =
+        (0..=EDGE_GAP_SAMPLES).map(|k| if k == EDGE_GAP_SAMPLES { t1 } else { t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64) }).collect();
+    if let (true, BCurve::Spline { knots, .. } | BCurve::RationalSpline { knots, .. }) = (on_plane, curve) {
+        let mut cut = vec![t0];
+        cut.extend(knots.iter().copied().filter(|k| *k > t0 && *k < t1));
+        cut.push(t1);
+        ts.extend(cut.windows(2).filter_map(|w| match w {
+            [a, b] if a < b => Some(0.5 * (a + b)),
+            _ => None,
+        }));
+    }
+    ts
 }
 
 /// A spline surface's parameter box: its knot ranges.

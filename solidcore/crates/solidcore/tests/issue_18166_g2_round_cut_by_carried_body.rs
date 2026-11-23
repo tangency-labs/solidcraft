@@ -36,7 +36,6 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "uv_trim_corner_end_points_only",
     "bspline_trim_preserves_uv_spans",
     "new_edge_vertex_tolerance_covers_gap",
-    "fillet_point_step_per_point",
     "analytic_copy_keeps_parameterization",
     "offset_extension_from_base",
     "fillet_cleanup_keeps_target_faces",

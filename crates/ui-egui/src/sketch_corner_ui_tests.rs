@@ -1226,6 +1226,10 @@ fn a_rectangle_corner_clicked_on_a_line_stays_on_it_with_a_drawing_open() {
     h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [200, 200, -50]})).unwrap();
     h.app.run("drawing.create", json!({})).unwrap();
     h.app.ui.tab = "MODEL".into();
+    // Setup only: drawing.create focuses the new Sheet view, and a sketch drawn in the Model view
+    // takes input only while that view is focused; the drawing stays open in its Sheet view.
+    let model = h.app.docs.views.views().iter().find(|view| view.kind == solidcraft_views::ViewKind::Model).unwrap().id;
+    assert!(crate::documents::view_activate(&mut h.app, model));
     h.settle();
     assert!(h.app.session.open_drawing.is_some());
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();

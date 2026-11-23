@@ -13,6 +13,7 @@
 //! | [`edge_length`], [`face_area`], [`face_centroid`] | `SmApiEdgeComputeLength`, `SmApiFaceComputeArea`, `SmApiFaceComputeCentroid` |
 //! | [`brep_area`], [`brep_volume`], [`brep_mass_properties`] | `SmApiBrepComputeArea`, `SmApiBrepComputeVolume`, `SmApiBrepComputeMassProperties` |
 //! | [`brep_mass_properties_estimated`], [`MassPropertyRequest`], [`EstimatedMassProperties`], [`sheet_face`], [`brep_area_about`], [`estimate_accuracy`] | not upstream: the same computation with sheets' area, a no-material area centroid and centroidal moments (the SolidCraft fork's `smlib_brep_mass_properties`) |
+//! | [`brep_mass_properties_estimated_prepared`], [`brep_area_about_prepared`], [`face_area_prepared`], [`face_centroid_prepared`], [`missing_uv_trim`] | not upstream: the same computations on a B-rep read only, whose UV trim curves exist |
 //!
 //! Deviations: arena ids replace pointers, results replace output arguments; attribute
 //! storage and object keys are supplied by the caller; the `_default` B-rep wrappers
@@ -58,6 +59,13 @@
 //! control points of every span of an edge's curve that the edge touches, so a short arc
 //! of a circle of large radius puts it a quarter of that circle away, and the body's
 //! first moments became large terms that cancel, under an error scale as large.
+//! Not upstream: the `_prepared` forms read the B-rep only. They share the integration
+//! with the forms that take it mutably (the trims are reached through a
+//! [`QueryTopology`]: mutable, the missing ones are made as upstream; prepared, a missing
+//! one is [`SolidError::PreparationRequired`] and nothing is made), so where every UV trim
+//! curve exists the two give the same result, bit for bit. The surface continuation of
+//! `Unclamped` is still toggled on the surface's own flags for the integration, through a
+//! shared reference, and restored.
 use super::{OdeIntegrator, OdeOptions};
 use crate::curve::curve::Curve;
 use crate::error::mass::MassFailure;
@@ -70,13 +78,16 @@ use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, PI};
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use crate::query::brep::{self as qbrep, BoundingBoxOptions};
+use crate::query::brep::{self as qbrep, BoundingBoxOptions, LazyBrep};
 use crate::surface::surface::Surface;
 use crate::topology::face::p2::{
     surface_knots_inside, trim_curve_breaks, OdeIsoCurveLength, PrecisePropertyLayout, PPF_ALL,
     PPF_AREA, PPF_AREA_FIRST_MOMENTS,
 };
-use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, FaceuseId, RegionId, VertexId};
+use crate::topology::loopuse::QueryTopology;
+use crate::topology::{
+    edge, vertex, Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, RegionId, VertexId,
+};
 use crate::{EntityRef, Result, SolidError};
 
 const OP: &str = "mass::integrator::properties";
@@ -269,7 +280,7 @@ pub fn curve_properties(
 /// `SmFace::CreateOrientedTrimBoundary(ctx, TRUE, TRUE, ..)` (unit `topology.face_p1`) on
 /// the caller's B-rep: the UV trim curves it makes stay there, as upstream. The returned
 /// curves' edge-use owners are not read here.
-fn boundary(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<Curve>> {
+fn boundary(k: &Kernel, b: &mut QueryTopology<'_>, f: FaceId) -> Result<Vec<Curve>> {
     oriented_boundary(k, b, f).map(|t| t.curves)
 }
 
@@ -277,7 +288,7 @@ fn boundary(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<Curve>> {
 /// line filling a gap), for [`gap_closure`] (#16735).
 fn oriented_boundary(
     k: &Kernel,
-    b: &mut Brep,
+    b: &mut QueryTopology<'_>,
     f: FaceId,
 ) -> Result<crate::topology::face::p1::OrientedTrimBoundary> {
     let key_of = |e: EntityRef| crate::geom::object::ObjectRef {
@@ -287,7 +298,7 @@ fn oriented_boundary(
             _ => 0,
         }),
     };
-    crate::topology::face::p1::create_oriented_trim_boundary(k, b, f, true, true, None, &key_of)
+    crate::topology::face::p1::oriented_trim_boundary_in(k, b, f, true, true, None, &key_of)
 }
 
 /// [`oriented_boundary`] with its loops closed ([`close_loops`]): the boundary
@@ -295,7 +306,7 @@ fn oriented_boundary(
 /// (#16735).
 fn closed_boundary(
     k: &Kernel,
-    b: &mut Brep,
+    b: &mut QueryTopology<'_>,
     f: FaceId,
 ) -> Result<crate::topology::face::p1::OrientedTrimBoundary> {
     let mut trims = oriented_boundary(k, b, f)?;
@@ -602,7 +613,7 @@ pub fn face_properties(
 ) -> Result<PreciseProperties> {
     face_properties_in(
         k,
-        b,
+        &mut QueryTopology::Mutable(b),
         f,
         orientation,
         accuracy,
@@ -621,7 +632,7 @@ pub fn face_properties(
 #[allow(clippy::too_many_arguments)] // face_properties' inputs and the scope
 fn face_properties_in(
     k: &Kernel,
-    b: &mut Brep,
+    b: &mut QueryTopology<'_>,
     f: FaceId,
     orientation: OrientType,
     accuracy: f64,
@@ -1642,7 +1653,7 @@ fn gap_side(trim: Curve, vertex: Vec3) -> ClosureSide {
 /// vertex.
 fn gap_closure(
     k: &Kernel,
-    b: &mut Brep,
+    b: &mut QueryTopology<'_>,
     f: FaceId,
     origin: Point3,
     accuracy: f64,
@@ -1662,7 +1673,14 @@ fn gap_closure(
         for eu in eu1::loopuse_edgeuses(b, lu)? {
             let same = eu1::orientation(b, eu)? == OrientType::Same;
             if eu1::uv_trim_curve(b, eu)?.0.is_none() {
-                eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
+                match b {
+                    QueryTopology::Mutable(b) => {
+                        eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
+                    }
+                    QueryTopology::Prepared(_) | QueryTopology::Requested(..) => {
+                        return Err(SolidError::PreparationRequired { operation: OP });
+                    }
+                }
             }
             let trim = eu1::uv_trim_curve(b, eu)?
                 .0
@@ -1997,7 +2015,16 @@ pub fn brep_properties_in_box(
     attributes: &PropertyAttributes<'_>,
     bbox: &Extent3d,
 ) -> Result<PreciseProperties> {
-    properties_in_box(k, b, accuracy, origin, behavior, attributes, bbox, None)
+    properties_in_box(
+        k,
+        &mut QueryTopology::Mutable(b),
+        accuracy,
+        origin,
+        behavior,
+        attributes,
+        bbox,
+        None,
+    )
 }
 
 /// [`brep_properties_in_box`] and its summands: each face use's, closure's and wire
@@ -2021,7 +2048,7 @@ pub fn brep_properties_in_box_terms(
     let mut terms = Vec::new();
     let total = properties_in_box(
         k,
-        b,
+        &mut QueryTopology::Mutable(b),
         accuracy,
         origin,
         behavior,
@@ -2048,7 +2075,7 @@ fn record(
 #[allow(clippy::too_many_arguments)] // brep_properties_in_box's inputs and the record
 fn properties_in_box(
     k: &Kernel,
-    b: &mut Brep,
+    b: &mut QueryTopology<'_>,
     accuracy: f64,
     origin: Point3,
     behavior: MassPropertyBehavior,
@@ -2250,9 +2277,26 @@ fn area_estimate(bbox: &Extent3d) -> f64 {
 }
 /// `SmApiFaceComputeArea`: rejects a non-finite accuracy and integrates only area.
 pub fn face_area(k: &Kernel, b: &mut Brep, f: FaceId, accuracy: f64) -> Result<f64> {
+    face_area_in(k, &mut QueryTopology::Mutable(b), f, accuracy)
+}
+
+/// [`face_area`] of a B-rep read only, whose UV trim curves exist: the same area, bit for
+/// bit, and nothing is made on `b`.
+///
+/// # Errors
+///
+/// Those of [`face_area`]; [`SolidError::PreparationRequired`] where an edge use of the
+/// face has no UV trim curve ([`missing_uv_trim`] names the first).
+pub fn face_area_prepared(k: &Kernel, b: &Brep, f: FaceId, accuracy: f64) -> Result<f64> {
+    require_uv_trims(b, Some(f))?;
+    face_area_in(k, &mut QueryTopology::Prepared(b), f, accuracy)
+}
+
+/// [`face_area`] through `b` (one implementation of both forms).
+fn face_area_in(k: &Kernel, b: &mut QueryTopology<'_>, f: FaceId, accuracy: f64) -> Result<f64> {
     valid_api_number(accuracy)?;
     let bbox = face_box(k, b, f)?;
-    Ok(face_properties(
+    Ok(face_properties_in(
         k,
         b,
         f,
@@ -2262,6 +2306,7 @@ pub fn face_area(k: &Kernel, b: &mut Brep, f: FaceId, accuracy: f64) -> Result<f
         area_estimate(&bbox),
         0.0,
         PPF_AREA,
+        false,
     )?
     .area
     .abs())
@@ -2269,10 +2314,36 @@ pub fn face_area(k: &Kernel, b: &mut Brep, f: FaceId, accuracy: f64) -> Result<f
 /// `SmApiFaceComputeCentroid`: rejects a non-finite accuracy; one area/first-moment
 /// integration.
 pub fn face_centroid(k: &Kernel, b: &mut Brep, f: FaceId, accuracy: f64) -> Result<(f64, Point3)> {
+    face_centroid_in(k, &mut QueryTopology::Mutable(b), f, accuracy)
+}
+
+/// [`face_centroid`] of a B-rep read only, whose UV trim curves exist: the same area and
+/// centroid, bit for bit, and nothing is made on `b`.
+///
+/// # Errors
+///
+/// As [`face_area_prepared`].
+pub fn face_centroid_prepared(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    accuracy: f64,
+) -> Result<(f64, Point3)> {
+    require_uv_trims(b, Some(f))?;
+    face_centroid_in(k, &mut QueryTopology::Prepared(b), f, accuracy)
+}
+
+/// [`face_centroid`] through `b` (one implementation of both forms).
+fn face_centroid_in(
+    k: &Kernel,
+    b: &mut QueryTopology<'_>,
+    f: FaceId,
+    accuracy: f64,
+) -> Result<(f64, Point3)> {
     valid_api_number(accuracy)?;
     let bbox = face_box(k, b, f)?;
     let origin = bbox.mid();
-    let p = face_properties(
+    let p = face_properties_in(
         k,
         b,
         f,
@@ -2282,6 +2353,7 @@ pub fn face_centroid(k: &Kernel, b: &mut Brep, f: FaceId, accuracy: f64) -> Resu
         area_estimate(&bbox),
         0.0,
         PPF_AREA | PPF_AREA_FIRST_MOMENTS,
+        false,
     )?;
     if p.area.abs() < EFF_ZERO {
         return Err(SolidError::invalid_input(OP, "zero area"));
@@ -2298,7 +2370,12 @@ pub fn face_centroid(k: &Kernel, b: &mut Brep, f: FaceId, accuracy: f64) -> Resu
 /// `SmApiBrepComputeArea`, including open shells and sheets: [`brep_area_about`] each
 /// face's own box middle.
 pub fn brep_area(k: &Kernel, b: &mut Brep, accuracy: f64) -> Result<f64> {
-    area_about(k, b, accuracy, AreaAbout::FaceMiddle)
+    area_about(
+        k,
+        &mut QueryTopology::Mutable(b),
+        accuracy,
+        AreaAbout::FaceMiddle,
+    )
 }
 
 /// The point each face's area integral is taken about: it changes no exact area, only
@@ -2321,7 +2398,85 @@ pub enum AreaAbout {
 /// [`SolidError::InvalidInput`] for an accuracy that is not finite and positive, or a
 /// point that is not finite; those of [`face_properties`].
 pub fn brep_area_about(k: &Kernel, b: &mut Brep, accuracy: f64, about: AreaAbout) -> Result<f64> {
-    area_about(k, b, estimate_accuracy(accuracy)?, about)
+    area_about(
+        k,
+        &mut QueryTopology::Mutable(b),
+        estimate_accuracy(accuracy)?,
+        about,
+    )
+}
+
+/// [`brep_area_about`] of a B-rep read only, whose UV trim curves exist: the same area,
+/// bit for bit, and nothing is made on `b`.
+///
+/// # Errors
+///
+/// Those of [`brep_area_about`]; [`SolidError::PreparationRequired`] where an edge use of
+/// a face has no UV trim curve ([`missing_uv_trim`] names the first).
+pub fn brep_area_about_prepared(
+    k: &Kernel,
+    b: &Brep,
+    accuracy: f64,
+    about: AreaAbout,
+) -> Result<f64> {
+    require_uv_trims(b, None)?;
+    area_about(
+        k,
+        &mut QueryTopology::Prepared(b),
+        estimate_accuracy(accuracy)?,
+        about,
+    )
+}
+
+/// The first edge use, of face `f` or (`None`) of every face in the B-rep's order, loop by
+/// loop as [`crate::topology::trimming_tools::face_uv_curves_present`] walks them, that
+/// has no UV trim curve, its own or its mate's: the trim a `_prepared` form needs and
+/// does not make. `None` when every one exists.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of the loop lists.
+pub fn missing_uv_trim(b: &Brep, f: Option<FaceId>) -> Result<Option<EdgeuseId>> {
+    use crate::topology::edgeuse::p1 as eu1;
+    use crate::topology::loopuse as lu1;
+    let faces = match f {
+        Some(f) => vec![f],
+        None => faces(b)?,
+    };
+    for f in faces {
+        for l in crate::topology::face::p2::loops(b, f, false, None)? {
+            let (lu, _) = lu1::loop_loopuses(b, l)?;
+            for eu in lu1::edgeuses(b, lu, None, None)? {
+                if eu1::uv_trim_curve(b, eu)?.0.is_none() {
+                    return Ok(Some(eu));
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// [`SolidError::PreparationRequired`] unless every UV trim curve [`missing_uv_trim`]
+/// looks for exists. A failure of the walk is the same signal: the form that takes the
+/// B-rep mutably then reports it as it does.
+fn require_uv_trims(b: &Brep, f: Option<FaceId>) -> Result<()> {
+    match missing_uv_trim(b, f) {
+        Ok(None) => Ok(()),
+        Ok(Some(_)) | Err(_) => Err(SolidError::PreparationRequired { operation: OP }),
+    }
+}
+
+/// [`SolidError::PreparationRequired`] when the tight box of the estimated entry could
+/// classify a point on a face whose surface's trimmed cache would have its tree built
+/// there ([`crate::query::face::p2::classification_builds_tree`]), which the read-only
+/// form does not do: decided before any work, so the form that takes the B-rep mutably
+/// then runs alone. A failure of the scan is the same signal.
+fn require_classification_trees(b: &Brep) -> Result<()> {
+    let builds = |f| crate::query::face::p2::classification_builds_tree(b, f).unwrap_or(true);
+    match faces(b) {
+        Ok(faces) if !faces.iter().copied().any(builds) => Ok(()),
+        _ => Err(SolidError::PreparationRequired { operation: OP }),
+    }
 }
 
 /// The accuracy an estimated property is asked at: finite and positive, clamped to
@@ -2352,7 +2507,12 @@ pub const ESTIMATE_ACCURACY_FINEST: f64 = 1e-8;
 pub const ESTIMATE_ACCURACY_COARSEST: f64 = 1e-1;
 
 /// [`brep_area_about`] at an accuracy as given (`SmApiBrepComputeArea`'s rules).
-fn area_about(k: &Kernel, b: &mut Brep, accuracy: f64, about: AreaAbout) -> Result<f64> {
+fn area_about(
+    k: &Kernel,
+    b: &mut QueryTopology<'_>,
+    accuracy: f64,
+    about: AreaAbout,
+) -> Result<f64> {
     valid_api_number(accuracy)?;
     if let AreaAbout::Point(p) = about {
         for v in [p.x, p.y, p.z] {
@@ -2466,7 +2626,7 @@ pub fn brep_mass_properties(
 ) -> Result<MassProperties> {
     let r = estimate(
         k,
-        b,
+        &mut QueryTopology::Mutable(b),
         accuracy,
         &MassPropertyRequest::api(density, origin),
         attributes,
@@ -2613,7 +2773,43 @@ pub fn brep_mass_properties_estimated(
 ) -> Result<EstimatedMassProperties> {
     let accuracy = estimate_accuracy(accuracy)?;
     no_unsure_region(b)?;
-    estimate(k, b, accuracy, request, attributes).map_err(typed_failure)
+    estimate(
+        k,
+        &mut QueryTopology::Mutable(b),
+        accuracy,
+        request,
+        attributes,
+    )
+    .map_err(typed_failure)
+}
+
+/// [`brep_mass_properties_estimated`] of a B-rep read only, whose UV trim curves exist:
+/// the same result, bit for bit, and nothing is made on `b`.
+///
+/// # Errors
+///
+/// Those of [`brep_mass_properties_estimated`]; [`SolidError::PreparationRequired`] where
+/// an edge use of a face has no UV trim curve ([`missing_uv_trim`] names the first), or
+/// the body's exact box would build a face's classification tree.
+pub fn brep_mass_properties_estimated_prepared(
+    k: &Kernel,
+    b: &Brep,
+    accuracy: f64,
+    request: &MassPropertyRequest,
+    attributes: &PropertyAttributes<'_>,
+) -> Result<EstimatedMassProperties> {
+    require_uv_trims(b, None)?;
+    require_classification_trees(b)?;
+    let accuracy = estimate_accuracy(accuracy)?;
+    no_unsure_region(b)?;
+    estimate(
+        k,
+        &mut QueryTopology::Prepared(b),
+        accuracy,
+        request,
+        attributes,
+    )
+    .map_err(typed_failure)
 }
 
 /// The integration's failures as their own errors (upstream's `SM_ERR` for each): its step
@@ -2643,7 +2839,7 @@ fn typed_failure(e: SolidError) -> SolidError {
 /// [`brep_mass_properties_estimated`], with upstream's statuses.
 fn estimate(
     k: &Kernel,
-    b: &mut Brep,
+    b: &mut QueryTopology<'_>,
     accuracy: f64,
     request: &MassPropertyRequest,
     attributes: &PropertyAttributes<'_>,
@@ -2677,12 +2873,17 @@ fn estimate(
     if request.manifold_solid_only && !manifold_solid(b)? {
         return Err(SolidError::invalid_input(OP, "not a manifold solid"));
     }
-    let bbox = qbrep::calculate_tight_bounding_box(k, &mut *b)?;
+    let bbox = match b {
+        QueryTopology::Mutable(b) => qbrep::calculate_tight_bounding_box(k, &mut **b)?,
+        QueryTopology::Prepared(b) | QueryTopology::Requested(b, _) => {
+            qbrep::calculate_tight_bounding_box(k, LazyBrep::Prepared(b))?
+        }
+    };
     let mid = bbox.mid();
     if request.area_centroid_without_material && !has_material(b)? {
         return area_centroid(k, b, accuracy, mid);
     }
-    let properties = brep_properties_in_box(
+    let properties = properties_in_box(
         k,
         b,
         accuracy,
@@ -2693,6 +2894,7 @@ fn estimate(
         },
         attributes,
         &bbox,
+        None,
     )?;
     valid_api_number(properties.mass)?;
     valid_api_number(properties.volume)?;
@@ -2781,7 +2983,7 @@ fn estimate(
 /// A body with no material: its faces' area and the area's centroid.
 fn area_centroid(
     k: &Kernel,
-    b: &mut Brep,
+    b: &mut QueryTopology<'_>,
     accuracy: f64,
     mid: Point3,
 ) -> Result<EstimatedMassProperties> {
@@ -2869,7 +3071,7 @@ pub fn sheet_face(b: &Brep, f: FaceId) -> Result<bool> {
 /// boundary integrated the other way round flips both.
 fn faces_area_about(
     k: &Kernel,
-    b: &mut Brep,
+    b: &mut QueryTopology<'_>,
     accuracy: f64,
     about: AreaAbout,
     first: bool,
@@ -2891,7 +3093,7 @@ fn faces_area_about(
             AreaAbout::FaceMiddle => fbox.mid(),
             AreaAbout::Point(p) => p,
         };
-        let p = face_properties(
+        let p = face_properties_in(
             k,
             b,
             f,
@@ -2901,6 +3103,7 @@ fn faces_area_about(
             area_estimate(&fbox),
             0.0,
             flags,
+            false,
         )?;
         // |area|, as `SmApiFaceComputeArea` takes it; the first moments flip with it
         area += p.area.abs();
@@ -3460,5 +3663,133 @@ mod tests {
         let r = estimated(&k, &mut merged, &MassPropertyRequest::centroidal()).unwrap();
         assert!(near(r.area, 800.0, 1e-9), "{r:?}");
         assert!(near(r.volume, 1500.0, 1e-9), "{r:?}");
+    }
+
+    /// What a measure could change on a B-rep through a shared reference or by making a
+    /// trim: each edge use's UV trim and gap cache, each edge's and face's tolerance, each
+    /// face surface's trim cache slot.
+    fn trims_and_caches(b: &Brep) -> String {
+        use crate::topology::edgeuse::p1 as eu1;
+        let mut out = Vec::new();
+        for (u, r) in b.edgeuses().iter() {
+            let gap = eu1::is_max_edge_face_gap_init(b, u).unwrap();
+            out.push(format!("{u:?} {} {gap}", r.uv_trim_curve.is_some()));
+        }
+        for e in edges(b).unwrap() {
+            out.push(format!("{e:?} {:?}", edge::tolerance(b, e).unwrap()));
+        }
+        for f in faces(b).unwrap() {
+            let s = crate::topology::face::p2::surface(b, f).unwrap().unwrap();
+            let face = b.face(f).unwrap();
+            out.push(format!(
+                "{f:?} {:?} {} {}",
+                face.tolerance,
+                s.has_trim_cache(),
+                s.trim_cache_in_use()
+            ));
+        }
+        out.join("\n")
+    }
+
+    /// Primitives with plane, cylinder, cone, sphere and torus faces.
+    fn curved_bodies(k: &mut Kernel) -> Vec<Brep> {
+        use crate::primitive::api_primitives as p;
+        vec![
+            p::create_box(k, Point3::new(1.0, -2.0, 3.0), 1.0, 2.0, 3.0).unwrap(),
+            p::create_cylinder(k, Point3::new(0.5, 0.0, -1.0), 2.0, 3.0).unwrap(),
+            p::create_cone(k, Point3::ZERO, 2.0, 1.0, 3.0).unwrap(),
+            p::create_sphere(k, Point3::new(1.0, 2.0, -3.0), 2.0).unwrap(),
+            p::create_torus(k, Point3::new(3.0, 0.0, -1.0), 4.0, 1.0).unwrap(),
+        ]
+    }
+
+    /// On a body whose UV trims exist, each `_prepared` form gives the `&mut` form's
+    /// answer bit for bit (one implementation) and changes nothing on the body.
+    #[test]
+    fn prepared_measures_match_the_mutable_ones_bit_for_bit() {
+        let mut k = Kernel::default();
+        let store = no_attributes();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        };
+        let requests = [
+            MassPropertyRequest::centroidal(),
+            MassPropertyRequest::api(2.0, Point3::new(0.5, -1.0, 2.0)),
+        ];
+        let abouts = [AreaAbout::FaceMiddle, AreaAbout::Point(Point3::ZERO)];
+        for mut b in curved_bodies(&mut k) {
+            // the trims (and what else a measure makes) made once, as on any measured body
+            estimated(&k, &mut b, &requests[0]).unwrap();
+            crate::topology::brep::p2::create_missing_uv_trim_curves(&k, &mut b).unwrap();
+            assert_eq!(missing_uv_trim(&b, None).unwrap(), None);
+            let before = trims_and_caches(&b);
+            for request in &requests {
+                let read =
+                    brep_mass_properties_estimated_prepared(&k, &b, 1e-8, request, &attrs).unwrap();
+                let mut copy = b.clone_standing_for_self().unwrap();
+                let made =
+                    brep_mass_properties_estimated(&k, &mut copy, 1e-8, request, &attrs).unwrap();
+                assert_eq!(format!("{read:?}"), format!("{made:?}"));
+            }
+            for about in abouts {
+                let read = brep_area_about_prepared(&k, &b, 1e-8, about).unwrap();
+                let mut copy = b.clone_standing_for_self().unwrap();
+                let made = brep_area_about(&k, &mut copy, 1e-8, about).unwrap();
+                assert_eq!(read.to_bits(), made.to_bits());
+            }
+            for f in faces(&b).unwrap() {
+                let mut copy = b.clone_standing_for_self().unwrap();
+                let read = face_area_prepared(&k, &b, f, 1e-8).unwrap();
+                let made = face_area(&k, &mut copy, f, 1e-8).unwrap();
+                assert_eq!(read.to_bits(), made.to_bits());
+                let read = face_centroid_prepared(&k, &b, f, 1e-8).unwrap();
+                let made = face_centroid(&k, &mut copy, f, 1e-8).unwrap();
+                assert_eq!(format!("{read:?}"), format!("{made:?}"));
+            }
+            assert_eq!(trims_and_caches(&b), before, "the body is unchanged");
+        }
+    }
+
+    /// On a body with an edge whose uses have no UV trim, each `_prepared` form makes
+    /// nothing and asks for preparation; [`missing_uv_trim`] names a use of that edge.
+    #[test]
+    fn prepared_measures_ask_for_a_missing_trim() {
+        let mut k = Kernel::default();
+        let store = no_attributes();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        };
+        for mut b in curved_bodies(&mut k) {
+            crate::topology::brep::p2::create_missing_uv_trim_curves(&k, &mut b).unwrap();
+            let e = *edges(&b).unwrap().first().unwrap();
+            let uses = edge::edgeuses(&b, e, None, None).unwrap();
+            for &u in &uses {
+                b.edgeuse_mut(u).unwrap().uv_trim_curve = None;
+            }
+            let missing = missing_uv_trim(&b, None).unwrap();
+            assert!(missing.is_some_and(|u| uses.contains(&u)), "{missing:?}");
+            let before = trims_and_caches(&b);
+            let request = MassPropertyRequest::centroidal();
+            let asks = |r: Result<()>| matches!(r, Err(SolidError::PreparationRequired { .. }));
+            assert!(asks(
+                brep_mass_properties_estimated_prepared(&k, &b, 1e-8, &request, &attrs).map(|_| ())
+            ));
+            assert!(asks(
+                brep_area_about_prepared(&k, &b, 1e-8, AreaAbout::FaceMiddle).map(|_| ())
+            ));
+            for f in faces(&b).unwrap() {
+                if missing_uv_trim(&b, Some(f)).unwrap().is_none() {
+                    continue;
+                }
+                assert!(asks(face_area_prepared(&k, &b, f, 1e-8).map(|_| ())));
+                assert!(asks(face_centroid_prepared(&k, &b, f, 1e-8).map(|_| ())));
+            }
+            assert_eq!(trims_and_caches(&b), before, "nothing is made");
+            // the `&mut` form still makes the trim and measures
+            estimated(&k, &mut b, &request).unwrap();
+            assert_eq!(missing_uv_trim(&b, None).unwrap(), None);
+        }
     }
 }
