@@ -15,6 +15,7 @@ use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::edge_closest_point;
 use solidcore::surface::procedural_blend::BlendCounts;
 use solidcore::sweep::api_brep::create_linear_sweep;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::edge;
 use solidcore::{EntityRef, Kernel};
 
@@ -766,6 +767,11 @@ fn spline_outline_top_rounded(step_by_step: bool) -> ((usize, usize, usize), Ble
         })
         .count();
     assert_eq!(rounds, 1, "step by step: {step_by_step}");
+    // a valid body (the trim curves span their edges, Edgeuse tests 25 and 26)
+    let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "step by step: {step_by_step}: {lines:?}");
     (
         (
             body.face_list().len(),
