@@ -218,8 +218,9 @@ pub enum Turn {
 /// kernel's blend corner, `solidcore::blend::blend_corner::chamfer`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ChamferCorner {
-    /// The chamfer planes run on until they meet: what ops builds without asking (a corner the
-    /// session is not told a type for), so a design saved without one keeps its corners.
+    /// The chamfer planes run on until they meet: the default, so a design saved without a
+    /// corner type keeps its corners. Refused where no mitre exists (with the too wide
+    /// chamfer's fit at three chamfers).
     #[default]
     Mitre,
     /// The corner is cut off by the plane through the points where the chamfers' rails cross:
@@ -1001,11 +1002,12 @@ fn pass(
         let mut s = FilletSession::new(k, b)?;
         // read as the corners are made
         s.set_swept_turns(p.turn == Turn::Swept);
-        // the Facet asked of the kernel's chamfer corners; the default leaves the session as it
-        // always was (no type set), so it builds what ops built before
-        if p.chamfer_corner == ChamferCorner::Facet {
-            s.set_chamfer_corner(solidcore::blend::blend_corner::BlendChamferCorner::Facet);
-        }
+        // the corner type the caller chose, always asked: a type refused where it does not
+        // exist, with its fit (the kernel picks a type itself only where none is asked)
+        s.set_chamfer_corner(match p.chamfer_corner {
+            ChamferCorner::Mitre => solidcore::blend::blend_corner::BlendChamferCorner::Mitre,
+            ChamferCorner::Facet => solidcore::blend::blend_corner::BlendChamferCorner::Facet,
+        });
         let prepared = prepare(k, &mut s, p.edges, p.section, p.law);
         let prepared_ok = prepared.is_ok();
         // a set-back vertex is no Ball: its corner is the one the setback is set on

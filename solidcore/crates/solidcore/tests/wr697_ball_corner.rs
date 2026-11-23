@@ -609,12 +609,25 @@ fn chamfer(
     d: &[f64],
     corner: BlendChamferCorner,
 ) -> Result<(), Refused> {
+    chamfer_asking(k, b, edges, d, Some(corner))
+}
+
+// As `chamfer`, the corner type asked only where `corner` is set.
+fn chamfer_asking(
+    k: &mut Kernel,
+    b: &mut Brep,
+    edges: &[EdgeId],
+    d: &[f64],
+    corner: Option<BlendChamferCorner>,
+) -> Result<(), Refused> {
     let xs = vec![FilletSurfaceGeneratorType::Linear; edges.len()];
     {
         let mut s = FilletSession::new(k, b).unwrap();
         s.prepare_per_edge_constant_radius(k, edges, d, &xs, 1, 1.0)
             .unwrap();
-        s.set_chamfer_corner(corner);
+        if let Some(corner) = corner {
+            s.set_chamfer_corner(corner);
+        }
         if s.do_fillet(k).is_err() {
             let info = s.error_info();
             return Err(Refused {
@@ -1864,4 +1877,77 @@ fn a_moderately_flat_apex_is_an_exact_mitre() {
     assert!(lines.is_empty(), "{lines:?}");
     assert_eq!(n, (10, 24, 16));
     assert!(off <= EXACT * 20.0, "{off}");
+}
+
+// No corner type asked (`set_chamfer_corner` not called, as ops leaves it), the corner is
+// the type that exists there instead of a refusal; with or without the other fixes.
+//
+// The pyramid's apex of four equal chamfers (`pyramid_apex_of_four_equal_chamfers_is_a_facet`):
+// the mitre is not built, the crossings lie in z = 8, so the corner is the facet, 3776/3,
+// (10, 20, 12), the facet's normal +z.
+#[test]
+fn no_type_asked_the_coplanar_apex_is_the_facet() {
+    let r = 2.0 * std::f64::consts::SQRT_2;
+    for (label, fixes) in [("every fix", true), ("no fix", false)] {
+        let (mut k, mut b, edges) = pyramid();
+        if !fixes {
+            k.fixes = UpstreamFixes::default();
+        }
+        chamfer_asking(&mut k, &mut b, &edges, &[r; 4], None).unwrap();
+        let (n, lines, v) = report(&mut k, &mut b);
+        let xs = [
+            Point3::new(2.0, 0.0, 8.0),
+            Point3::new(0.0, 2.0, 8.0),
+            Point3::new(-2.0, 0.0, 8.0),
+            Point3::new(0.0, -2.0, 8.0),
+        ];
+        let off = facet_off(&k, &b, &xs, Vec3::Z);
+        let want = 3776.0 / 3.0;
+        eprintln!("{label}: volume {v:.12} want {want:.12}; {n:?}; off {off:.3e}; {lines:?}");
+        assert!(lines.is_empty(), "{lines:?}");
+        assert_eq!(n, (10, 20, 12));
+        assert!(off <= EXACT * 20.0, "{off}");
+        assert!((v - want).abs() <= 1e-12 * want, "{v}");
+    }
+}
+
+// The box's corner chamfered 1, 1, 3 (`a_mitre_point_outside_the_corner_is_refused_with_its_fit`):
+// neither type exists, so the corner is declined to the pinned one, which closed the body
+// there before the event. Its patch is not the mitre polytope (the box cut by the three
+// chamfer planes) and has no closed form, so this pins what is certain: a closed body with
+// no check lines, of the box's 6 faces, the 3 chamfers' and the corner's, that removed
+// material.
+#[test]
+fn no_type_asked_a_mitre_point_outside_the_corner_is_the_pinned_corner() {
+    for (label, fixes) in [("every fix", true), ("no fix", false)] {
+        let mut k = all_fixes();
+        if !fixes {
+            k.fixes = UpstreamFixes::default();
+        }
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
+        let edges: Vec<EdgeId> = BOX_CORNER_EDGES.iter().map(|&p| pick(&k, &b, p)).collect();
+        chamfer_asking(&mut k, &mut b, &edges, &[1.0, 1.0, 3.0], None).unwrap();
+        let (n, lines, v) = report(&mut k, &mut b);
+        eprintln!("{label}: volume {v:.12}; {n:?}; {lines:?}");
+        assert!(lines.is_empty(), "{lines:?}");
+        assert!(n.0 >= 10, "{n:?}");
+        assert!(v > 0.0 && v < 24000.0, "{v}");
+    }
+}
+
+// The nearly flat apex (`a_nearly_flat_apex_is_refused`) is refused with no type asked
+// too: the chamfer planes' meeting is not determined to the part's rounding, so no corner
+// of either type is decided there (the pinned corner failed there as well, building
+// nothing).
+#[test]
+fn no_type_asked_a_nearly_flat_apex_is_refused() {
+    let (mut k, mut b, edges) = low_apex(1.0 / 100.0);
+    let refused = chamfer_asking(&mut k, &mut b, &edges, &[400.0; 3], None).unwrap_err();
+    eprintln!("{refused:?}");
+    assert_eq!(refused.code, 9, "CornerUnsupported");
+    assert!(
+        refused.comment.contains("nearly coplanar"),
+        "{}",
+        refused.comment
+    );
 }

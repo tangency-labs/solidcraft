@@ -746,7 +746,7 @@ fn unsupported(why: String) -> ChamferClass {
 
 /// Classify: whether the chamfer corner at `vertex` (every edge there chamfered: the
 /// edge uses `all_eus` in ring order, each blended with a linear section) is the chamfer
-/// event, and of type `kind`. It is where every edge is a straight line and every face a
+/// event, and of type `asked` (the Mitre where the caller asked none). It is where every edge is a straight line and every face a
 /// plane, the faces distinct, the chamfers of one convexity, each of constant width
 /// (a constant ball or a constant chord), and at three chamfers the faces' normals
 /// independent; else it declines, naming why, and the corner is the pinned one. Three
@@ -756,8 +756,13 @@ fn unsupported(why: String) -> ChamferClass {
 /// too wide chamfer's fit), a mitre of four or more chamfers, a facet whose crossings are
 /// not in one plane or that would cut the chamfers; and it is refused where the chamfer
 /// planes are so nearly coplanar that the points where they meet are not determined to the
-/// part's rounding ([`solve3_error`] above the gate). The event's corner keeps its
-/// [`ChamferCornerDefinition`].
+/// part's rounding ([`solve3_error`] above the gate). Where the caller asked no type, a
+/// refusal of the type is no refusal: at four or more chamfers whose crossings lie in one
+/// plane the corner is the Facet (the mitre is not built there), and where no event
+/// closes the corner (three chamfers' mitre point outside the corner, overlapping ends
+/// at four or more, a facet that would cut the chamfers) it declines to the pinned
+/// corner, as before the event. Only the nearly coplanar planes stay refused. The event's
+/// corner keeps its [`ChamferCornerDefinition`].
 ///
 /// # Errors
 ///
@@ -768,10 +773,11 @@ pub fn classify_chamfer(
     b: &mut Brep,
     vertex: VertexId,
     all_eus: &[EdgeuseId],
-    kind: BlendChamferCorner,
+    asked: Option<BlendChamferCorner>,
     tol: f64,
     solvers: &dyn ChamferSolvers,
 ) -> Result<ChamferClass> {
+    let mut kind = asked.unwrap_or(BlendChamferCorner::Mitre);
     let n = all_eus.len();
     if !(3..=MAX_CHAMFERS).contains(&n) {
         return Ok(ChamferClass::Declined(
@@ -942,6 +948,14 @@ pub fn classify_chamfer(
             ));
         };
         if tests.iter().any(|&g| g <= gate) {
+            // no type asked: neither exists (the facet would cut the chamfers there,
+            // `a_mitre_point_outside_the_corner_is_refused_with_its_fit`), and the pinned
+            // corner closes the body
+            if asked.is_none() {
+                return Ok(ChamferClass::Declined(
+                    "the mitre point is outside the corner and no corner type was asked",
+                ));
+            }
             let edge_of = too_wide(&mu, &planes)
                 .and_then(|(i, hi)| Some(((*edges.get(i)?, *widths.get(i)?), hi)));
             let hi = edge_of.map_or(0.0, |(_, hi)| hi);
@@ -955,9 +969,17 @@ pub fn classify_chamfer(
     } else if spread(&xs).is_none_or(|s| s > gate) {
         // four or more whose crossings are not in one plane: the corner patch
         let convex = concave0 != Some(true);
-        return Ok(corner_patch(
-            kind, v, &planes, xs, &edges, &widths, convex, gate,
-        ));
+        let patch = corner_patch(kind, v, &planes, xs, &edges, &widths, convex, gate);
+        // no type asked: chamfer ends that overlap leave the corner to the pinned one
+        if asked.is_none() && matches!(patch, ChamferClass::Refused(_)) {
+            return Ok(ChamferClass::Declined(
+                "the chamfers' ends overlap and no corner type was asked",
+            ));
+        }
+        return Ok(patch);
+    } else if kind == BlendChamferCorner::Mitre && asked.is_none() {
+        // no type asked: the crossings lie in one plane, so the facet is the corner
+        kind = BlendChamferCorner::Facet;
     } else if kind == BlendChamferCorner::Mitre {
         return Ok(unsupported(
             "Fillet Error: a mitre of four or more chamfers at a vertex is not built yet; their rails' crossings lie in one plane, which the facet closes"
@@ -981,6 +1003,12 @@ pub fn classify_chamfer(
                 fails
             }
         };
+        if fails.is_some() && asked.is_none() {
+            // no type asked (the facet taken for a mitre of four or more): the pinned corner
+            return Ok(ChamferClass::Declined(
+                "the facet would cut the chamfers and no corner type was asked",
+            ));
+        }
         if fails.is_some() {
             return Ok(unsupported(
                 "Fillet Error: the facet through the chamfers' rail crossings would cut the chamfers instead of closing them"

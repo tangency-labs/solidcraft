@@ -676,7 +676,7 @@ type HalfSpace = ([f64; 3], f64);
 
 /// The volume of the bounded convex polytope `hs` cuts out, apart from the kernel: its
 /// vertices are the feasible meeting points of three planes; each face's polygon, ordered
-/// by angle about its centroid, has area A_i, and the volume is sum h_i A_i / 3 over the
+/// by angle about its centroid, has area `A_i`, and the volume is sum `h_i A_i / 3` over the
 /// unit-normal planes (the cone from the origin over each face).
 fn polytope_volume(hs: &[HalfSpace]) -> f64 {
     let (unit, points) = polytope_vertices(hs);
@@ -754,7 +754,7 @@ const BOX_FACES: [HalfSpace; 6] = [
 
 /// The box with the edges between the face pairs `edges` (indices into [`BOX_FACES`])
 /// chamfered 2: each chamfer the plane through the lines 2 from the edge on both faces,
-/// (n_a + n_b) . x <= h_a + h_b - 2. Every corner where three chamfers meet is their mitre.
+/// `(n_a + n_b) . x <= h_a + h_b - 2`. Every corner where three chamfers meet is their mitre.
 fn chamfered_half_spaces(edges: &[(usize, usize)]) -> Vec<HalfSpace> {
     let mut hs = BOX_FACES.to_vec();
     for &(a, b) in edges {
