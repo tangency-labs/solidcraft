@@ -297,11 +297,20 @@ fn design_listeners_require_a_read_entry_and_design_capability() {
     let runtime = parse(&value).unwrap().runtime.unwrap();
     assert_eq!(runtime.listeners[0].entry, "refresh");
     assert_eq!(runtime.listeners[0].on, ["design.changed"]);
+    for events in [json!(["design.links_changed"]), json!(["design.changed", "design.links_changed"])] {
+        let mut opted_in = value.clone();
+        opted_in["runtime"]["listeners"][0]["on"] = events.clone();
+        let runtime = parse(&opted_in).unwrap().runtime.unwrap();
+        assert_eq!(serde_json::to_value(&runtime.listeners[0].on).unwrap(), events);
+    }
     for change in [
         |v: &mut Value| v["capabilities"] = json!(["commands@0.1"]),
         |v: &mut Value| v["runtime"]["entries"][0]["effect"] = json!("edit"),
         |v: &mut Value| v["runtime"]["listeners"][0]["entry"] = json!("missing"),
         |v: &mut Value| v["runtime"]["listeners"][0]["on"] = json!(["unknown"]),
+        |v: &mut Value| v["runtime"]["listeners"][0]["on"] = json!(["design.links_changed", "unknown"]),
+        |v: &mut Value| v["runtime"]["listeners"][0]["on"] = json!(["design.changed", "design.changed"]),
+        |v: &mut Value| v["runtime"]["listeners"][0]["on"] = json!(["design.links_changed", "design.links_changed"]),
         |v: &mut Value| v["runtime"]["listeners"][0]["on"] = json!([]),
         |v: &mut Value| {
             v["runtime"]["listeners"] = json!([
@@ -432,6 +441,52 @@ fn larger_manifests_fit_without_removing_input_descriptions() {
     let mut too_large = serialized;
     too_large.resize(MAX_MANIFEST_BYTES + 1, b' ');
     assert!(matches!(parse_manifest(&too_large, "sample"), Err(HostError::LimitExceeded { limit }) if limit.contains("64 KiB")));
+}
+
+#[test]
+fn entries_share_field_definitions_through_defs_and_ref() {
+    let place = json!({"type":"string","title":"Place","default":"auto","enum":["auto","origin"]});
+    let units = json!({"type":"string","enum":["mm","in"]});
+    let entries = |make: Value, edit: Value| json!([{"name":"make","input_schema":make},{"name":"edit","input_schema":edit}]);
+    let mut inline = manifest();
+    inline["runtime"]["entries"] = entries(
+        json!({"type":"object","properties":{"place":place,"units":units}}),
+        json!({"type":"object","properties":{"place":{"type":"string","title":"Place","default":"origin","enum":["auto","origin"]}}}),
+    );
+    // One definition in the manifest, one in an entry, and a `default` beside a `$ref` overriding.
+    let mut shared = manifest();
+    shared["$defs"] = json!({"place":place});
+    shared["runtime"]["entries"] = entries(
+        json!({"type":"object","$defs":{"units":units},"properties":{"place":{"$ref":"#/$defs/place"},"units":{"$ref":"#/$defs/units"}}}),
+        json!({"type":"object","properties":{"place":{"$ref":"#/$defs/place","default":"origin"}}}),
+    );
+    let expanded = parse(&shared).unwrap().runtime.unwrap().entries;
+    let expected = parse(&inline).unwrap().runtime.unwrap().entries;
+    for (expanded, expected) in expanded.iter().zip(&expected) {
+        assert_eq!(expanded.input_schema, expected.input_schema, "every consumer sees the inline schema");
+        assert_eq!(strict_input_schema(&expanded.input_schema), strict_input_schema(&expected.input_schema));
+    }
+    assert!(check_input(&expanded[0].input_schema, &json!({"place":"origin","units":"mm"})).is_ok());
+    assert!(check_input(&expanded[0].input_schema, &json!({"place":"x","units":"mm"})).is_err(), "a shared field keeps its choices");
+
+    let refused = |defs: Value, property: Value| {
+        let mut value = manifest();
+        value["$defs"] = defs;
+        value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"a":property}}}]);
+        matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "runtime.entries.make.input_schema")
+    };
+    let cycle = json!({"a":{"type":"object","properties":{"b":{"$ref":"#/$defs/b"}}},"b":{"type":"object","properties":{"a":{"$ref":"#/$defs/a"}}}});
+    assert!(refused(cycle, json!({"$ref":"#/$defs/a"})), "a cycle is refused");
+    assert!(refused(json!({}), json!({"$ref":"#/$defs/missing"})), "an unknown name is refused");
+    assert!(refused(json!({"a":{"type":"string"}}), json!({"$ref":"other.json#/a"})), "only local definitions");
+    // Refs that double at every level would multiply the manifest; they stop at a limit.
+    let mut doubling = serde_json::Map::new();
+    for level in 0..20 {
+        let next = json!({"$ref": format!("#/$defs/d{}", level + 1)});
+        doubling.insert(format!("d{level}"), json!({"type":"object","properties":{"x":next,"y":next}}));
+    }
+    doubling.insert("d20".into(), json!({"type":"string"}));
+    assert!(refused(Value::Object(doubling), json!({"$ref":"#/$defs/d0"})));
 }
 
 #[test]
@@ -610,6 +665,56 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
     command(&|v| v["runtime"]["limits"] = json!({"fuel":1,"memory_mib":1,"deadline_ms":60000}), "deadline_ms");
 }
 
+fn exporter() -> Value {
+    json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.1"],"runtime":{
+        "module":"sample.wasm","commands":["document.inspect"],
+        "entries":[{"name":"mesh","kind":"exporter","extensions":["smp"],"label":"Sample mesh","needs_plugin_data":true,
+                    "input_schema":{"type":"object","properties":{"units":{"type":"string","enum":["mm","in"]}}}}],
+        "limits":{"fuel":1000,"memory_mib":512,"deadline_ms":300000}
+    }})
+}
+
+#[test]
+fn an_export_slot_claims_extensions_reads_the_design_and_asks_for_no_files() {
+    let runtime = parse(&exporter()).unwrap().runtime.unwrap();
+    assert!(runtime.is_exporter() && !runtime.is_importer());
+    assert_eq!(runtime.max_component_bytes(), MAX_IMPORTER_COMPONENT_BYTES);
+    let slot = &runtime.entries[0];
+    assert_eq!((slot.label.as_str(), slot.effect, slot.needs_plugin_data), ("Sample mesh", Effect::Read, true));
+    assert!(slot.writes(Path::new("/x/Part.SMP")) && !slot.claims(Path::new("/x/part.smp")));
+    let refused = |change: &dyn Fn(&mut Value), field: &str| {
+        let mut value = exporter();
+        change(&mut value);
+        let failure = parse(&value).unwrap_err();
+        assert!(matches!(&failure, HostError::InvalidManifest { field: f, .. } if f.contains(field)), "{field}: {failure}");
+    };
+    refused(&|v| v["capabilities"] = json!(["commands@0.1"]), "capabilities");
+    refused(&|v| v["capabilities"] = json!(["formats@0.1", "evaluate@0.1"]), "capabilities");
+    refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!([]), "extensions");
+    refused(&|v| v["runtime"]["entries"][0]["effect"] = json!("edit"), "effect");
+    refused(&|v| v["runtime"]["entries"][0]["label"] = json!("two\nlines"), "label");
+    refused(
+        &|v| v["runtime"]["entries"].as_array_mut().unwrap().push(json!({"name":"open","kind":"importer","extensions":["smp"]})),
+        "runtime.entries",
+    );
+    // An exporter writes only the file the user chooses: no folders, groups or input folder.
+    refused(&|v| v["runtime"]["permissions"] = json!({"files":[{"name":"out","write":true}]}), "runtime.permissions");
+    refused(&|v| v["runtime"]["permissions"] = json!({"command_groups":["file"]}), "runtime.permissions");
+    refused(&|v| v["runtime"]["permissions"] = json!({"input_folder":true}), "runtime.permissions");
+    // Only an export slot reads plugin data; a command has no label.
+    let mut importing = importer();
+    importing["runtime"]["entries"][0]["needs_plugin_data"] = json!(true);
+    assert!(matches!(parse(&importing), Err(HostError::InvalidManifest { field, .. }) if field.contains("needs_plugin_data")));
+    let mut command = manifest();
+    command["runtime"]["entries"] = json!([{"name":"make","label":"Make"}]);
+    assert!(parse(&command).is_err());
+    // A capability this host lacks is named first, whatever else the manifest holds.
+    let mut newer = exporter();
+    newer["capabilities"] = json!(["formats@0.3"]);
+    newer["runtime"]["entries"][0]["kind"] = json!("printer");
+    assert!(matches!(parse(&newer), Err(HostError::UnsupportedCapability { .. })));
+}
+
 #[test]
 fn a_plugin_that_keeps_design_data_names_storage_and_its_data_format() {
     let mut keeps = manifest();
@@ -635,6 +740,11 @@ fn a_plugin_that_keeps_design_data_names_storage_and_its_data_format() {
     importing["capabilities"] = json!(["formats@0.1", "storage@0.1"]);
     importing["runtime"]["data_format"] = json!(1);
     assert!(matches!(parse(&importing), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+    // An exporter only reads the open design and keeps no data there.
+    let mut exporting = exporter();
+    exporting["capabilities"] = json!(["formats@0.1", "storage@0.1"]);
+    exporting["runtime"]["data_format"] = json!(1);
+    assert!(matches!(parse(&exporting), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
 }
 
 fn empty_item() -> LossItem {

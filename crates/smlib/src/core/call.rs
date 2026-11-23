@@ -83,6 +83,11 @@ pub(crate) fn ops_as<T>(
 /// crate runs itself reads; else it is solidcore-ops' statement of its error.
 pub(crate) fn error(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
     use solidcore_ops::Error as Ops;
+    // A body whose solid test is named is the same refusal to this crate's callers. The
+    // variant is `#[non_exhaustive]`, so its field is read through the method.
+    if e.not_solid_test().is_some() {
+        return Error::NotSolid;
+    }
     match e {
         Ops::Argument => Error::Argument,
         Ops::Empty => Error::Empty,
