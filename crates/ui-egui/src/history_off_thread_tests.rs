@@ -2039,6 +2039,47 @@ fn plugin_inspections_reject_another_session_and_older_results() {
     }
 }
 
+/// Approvals belong to the plugin, not to a design: the grants a person or `plugin.install` gave
+/// (a folder among them) are in force in a design opened in a new tab, and `plugin.run` there is
+/// not refused for want of them. Each tab keeps its own design: the run changes only the one shown.
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn a_design_in_a_new_tab_runs_a_plugin_with_the_approvals_already_given() {
+    let (mut h, tx) = agent_harness();
+    let root = plugin_package_for_worker_test("new-tab");
+    let manifest_path = root.join("sample/plugin.json");
+    let mut manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["runtime"]["permissions"] = json!({"command_groups":["file"],"files":[{"name":"queue","read":true,"write":false}]});
+    std::fs::write(manifest_path, manifest.to_string()).unwrap();
+    let path = root.join("sample").to_string_lossy().into_owned();
+    // What `plugin.install` with approvals stores: bound to the package that was reviewed.
+    let reviewed = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+    let grants = json!({"sample":{"package_hash":reviewed["approval"],"command_groups":["file"],"folders":[{"name":"queue","folder":root,"read":true,"write":false}]}});
+    crate::prefs::set(&mut h.app, &json!({"plugin_grants": grants})).unwrap();
+
+    let first = h.app.session.document_id.clone();
+    let before = h.app.session.doc.to_json();
+    h.app.run("file.new", json!({"name":"Sheet 2","new_tab":true})).unwrap();
+    assert_eq!(h.app.docs.count(), 2);
+    assert_ne!(h.app.session.document_id, first);
+    // The new design's session starts with no grants of its own; the next command brings them in.
+    h.app.run("document.list", json!({})).unwrap();
+    let kept = &h.app.session.plugin_state.grants["sample"];
+    assert_eq!((kept.command_groups.len(), kept.folders.len(), kept.folders[0].name.as_str()), (1, 1, "queue"));
+
+    let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+    let reply = reply_to(
+        &mut h,
+        &ask(&tx, "engine.execute", json!({"command":"plugin.run","params":{"path":path,"approval":inspected["approval"],"entry":"make"}})),
+    );
+    let error = reply["error"].as_str().unwrap_or_default();
+    assert!(!error.contains("files.read") && !error.contains("re-approval") && !error.contains("grant"), "refused for a missing approval: {reply}");
+    // Whatever the run did, it did to the design shown, and the first tab is as it was.
+    h.app.run("document.activate", json!({"document_id": first})).unwrap();
+    assert_eq!(h.app.session.doc.to_json(), before);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[test]
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn stopping_a_plugin_at_the_window_warns_about_possible_file_writes() {

@@ -55,6 +55,7 @@ fn schemas_and_the_key_check_agree() {
             "history",
             "max_points",
             "names",
+            "new_tab",
             "options",
             "origin",
             "path",

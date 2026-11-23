@@ -779,12 +779,21 @@ impl JsonSchema for ReaderParam {
 /// FreeCAD, Rhino, 3MF, STL, OBJ or glTF file (a new design holding the file as a component
 /// named after it, as `file.insert_step` and `file.insert_mesh` make), or a `.ply`, `.pcd`,
 /// `.e57`, `.xyz`, `.pts` or `.asc` point cloud (a new design holding it, as `pointcloud.insert`
-/// makes). The open design is replaced.
+/// makes). The open design is replaced, unless it is not empty: the window opens the file in a
+/// tab of its own then, and with `new_tab` it always does.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct OpenParams {
     /// The file to open; the kind of file is read from its extension.
     pub path: OpenPath,
+    /// true opens the file in a tab of its own, after the active one, and shows it, even when the
+    /// active design is empty: the design that was open stays open, as it was. A design that is
+    /// already open in a tab is shown instead, as the same file opened twice is. A person at the
+    /// window who is in the middle of something (a dialog, a tool) gets the tab behind the active
+    /// one: `document.list` says which design is active. Only a window with design tabs has them:
+    /// the command line and headless servers refuse it. Default: false.
+    #[serde(default)]
+    pub new_tab: Option<bool>,
     /// For a STEP, IGES, FreeCAD, Rhino or glTF file only (refused for any other): which way is up
     /// in the file. Default: z for STEP, IGES, FreeCAD and Rhino, y for glTF.
     #[serde(default)]

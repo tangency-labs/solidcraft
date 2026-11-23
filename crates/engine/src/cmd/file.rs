@@ -50,7 +50,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&NEW_DESIGN_CONTRACT)
         .output(output_schema_for::<NewDesignResult>)
-        .params("name?"),
+        .params("name?; new_tab?: bool (true opens the design in a tab of its own after the active one and shows it, so the design that was open stays open and every later command acts on the new one; default false: the active design is replaced; the desktop window only) → name, document_id (with new_tab)"),
     CommandSpec::new("doc.open", "Open", crate::checked!("doc.open", open)).any_part()
         .icon("open")
         .key("Ctrl+O")
@@ -59,6 +59,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<OpenResult>)
         .params(concat!(
             "path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.pcd/.e57/.xyz/.pts/.asc point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); ",
+            "new_tab?: bool (true opens the file in a tab of its own after the active one and shows it, even when the active design is empty, so the design that was open stays open; default false: a design that is not empty is kept in its tab and the file gets one, an empty one is replaced; a design already open in a tab is shown instead; a person in the middle of a dialog or tool at the window gets the tab behind the active one, so check document.list; the desktop window only); ",
             "up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); ",
             "names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); ",
             "units?: for an STL or OBJ file (see file.insert_mesh); ",
@@ -329,12 +330,20 @@ fn clear_import_cache(_: &mut Session, _: &Value) -> Result<Value> {
     Ok(json!({"removed": removed}))
 }
 
+/// Why `new_tab` is refused where there is one design and no tab strip.
+const NEW_TAB_NEEDS_TABS: &str = "`new_tab` needs the desktop window, which has design tabs; this host holds one design";
+
 fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
+    // The desktop window opens the tab and takes the option off before this runs, so a design
+    // that is not in a tab strip (a command line, a headless server) is the one that gets here.
+    if p.get("new_tab").and_then(Value::as_bool) == Some(true) {
+        return Err(bad("file.new", NEW_TAB_NEEDS_TABS));
+    }
     let name = str_(p, "name").unwrap_or("Untitled");
     s.replace_design(Session::new(Document::new(name)));
     // A name given here is the user's own, so Save As keeps it (#4907); "Untitled" is none.
     s.user_named = !name.trim().is_empty() && name.trim() != DEFAULT_NAME;
-    let reply = NewDesignResult { name: name.to_string(), param_warnings: Vec::new() };
+    let reply = NewDesignResult { name: name.to_string(), document_id: None, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| bad("file.new", e.to_string()))
 }
 
@@ -1546,6 +1555,10 @@ fn read_kicad_env_name(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, del
 }
 
 fn open(s: &mut Session, p: &Value) -> Result<Value> {
+    // The window opens the tab and takes the option off before this runs (see `new_doc`).
+    if p.get("new_tab").and_then(Value::as_bool) == Some(true) {
+        return Err(bad("doc.open", NEW_TAB_NEEDS_TABS));
+    }
     let path = path_arg(p, "doc.open")?;
     // A file SolidCraft does not read itself opens with the installed importer that claims its
     // extension; `format` picks an importer even for a file SolidCraft reads.
