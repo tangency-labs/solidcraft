@@ -2943,7 +2943,7 @@ impl Feature {
     /// name), an extrude or revolve from a sketch of its component on the bodies it names or its
     /// component's bodies (no To / From Object, through all or taper), a fillet or chamfer of
     /// the body its edges lie on (#6183), an import (the file it names, and nothing of the
-    /// model). Construction geometry it names is in its key already
+    /// model), a boundary surface through curves of a sketch of its component. Construction geometry it names is in its key already
     /// ([`construct_digest`]). Never with a face picked by name, or an edge picked by name outside
     /// a fillet or chamfer; everything else may read anything (faces, To Object, `*` for every
     /// body).
@@ -3036,6 +3036,10 @@ impl Feature {
                 Some(n) => bodies(named(std::slice::from_ref(&n.0))?),
                 None => bodies(blend_candidates(st, &crate::plain(edges))?),
             },
+            // A new body through curves of one sketch of its component: an edit of another
+            // sketch leaves it as it was (#17714: a delete in a later sketch rebuilt a patch
+            // whose edge tolerances take most of a second to prove, twice per check).
+            FeatureKind::SurfaceBoundary { sketch: s, .. } => sketch(s),
             _ => None,
         }
     }

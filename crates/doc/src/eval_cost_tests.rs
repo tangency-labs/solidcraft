@@ -419,6 +419,53 @@ fn moving_a_construction_plane_moves_the_sketch_on_it() {
     assert!((model.state().sketch(sketch).unwrap().plane.origin.z - 12.0).abs() < 1e-9, "the sketch follows its plane");
 }
 
+/// A boundary surface reads its own sketch and nothing else: an edit of a sketch it does not use
+/// leaves it as it was. A delete in a later sketch rebuilt a patch through four arcs of an earlier
+/// one, whose edge tolerances take most of a second to prove, twice per check (#17714).
+#[test]
+fn a_boundary_surface_keeps_its_result_when_another_sketch_changes() {
+    let mut doc = Document::new("Boundary");
+    let mut square = Sketch::new();
+    let corners = [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)].map(|(x, y)| square.add_point(Vec2::new(x, y), None).unwrap());
+    let mut curves = Vec::new();
+    for k in 0..4 {
+        let line = square.add_line_pts(corners[k], corners[(k + 1) % 4], None).unwrap();
+        curves.push(square.curves[line].id.clone());
+    }
+    let loop_sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: square }, None).unwrap();
+    let other = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XZ".into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let patch = doc
+        .add_feature(FeatureKind::SurfaceBoundary { sketch: loop_sketch.into(), curves, orders: Vec::new(), crown: 0.0, samples: 25 }, None)
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(model.state().bodies.len(), 1);
+
+    // The line sketch before the patch changes: it alone is evaluated again.
+    if let Ok(sk) = doc.sketch_mut(other)
+        && let Some(p) = sk.points.get_mut(1)
+    {
+        p.pos = Vec2::new(12.0, 2.0);
+    }
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 1, "only the edited sketch");
+    assert!(model.result(patch).unwrap().error.is_none());
+    assert_eq!(model.state().bodies.len(), 1);
+
+    // Its own sketch changes: the patch follows it.
+    if let Ok(sk) = doc.sketch_mut(loop_sketch)
+        && let Some(p) = sk.points.get_mut(corners[2])
+    {
+        p.pos = Vec2::new(30.0, 20.0);
+    }
+    let size = model.state().bodies[0].body.size();
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 2, "the square and the patch");
+    assert!(model.result(patch).unwrap().error.is_none());
+    assert!(model.state().bodies[0].body.size() > size, "the patch reaches the moved corner");
+}
+
 #[test]
 fn a_sketch_on_a_face_still_sees_the_placed_bodies() {
     let parts = 3;
