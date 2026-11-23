@@ -74,14 +74,32 @@ use solidcore_record::Vec3;
 use solidcraft_doc::drawing::Owner;
 use solidcraft_doc::{Document, Model, ModelState};
 
+pub use cmd::Addition;
+pub use cmd::CommandInfo;
+pub use cmd::CommandSpec;
+pub use cmd::FromSelection;
+pub use cmd::LinkProblem;
+pub use cmd::LinkState;
+pub use cmd::OpenSteps;
+pub use cmd::addition;
+pub use cmd::auto_operation;
+pub use cmd::command_specs;
+pub use cmd::dimension_roles;
 pub use cmd::drawing_export::print_pdf;
-pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
+pub use cmd::extrude_reach;
+pub use cmd::find_command;
+pub use cmd::normalize_command_id;
+pub use cmd::resolve_design_links;
+pub use cmd::settings::MAX_PROFILE_NAME;
+pub use cmd::settings::profile_name;
+pub use cmd::shown_scope;
 pub use cmd::sketch_selection;
-pub use cmd::{
-    Addition, CommandInfo, CommandSpec, FromSelection, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles,
-    extrude_reach, find_command, normalize_command_id, resolve_design_links, shown_scope, standard_view, use_import_cache_dir,
-};
-pub use edit_start::{EditStart, RefreshedSketchModel, SketchDomain, SketchFinishEvent};
+pub use cmd::standard_view;
+pub use cmd::use_import_cache_dir;
+pub use edit_start::EditStart;
+pub use edit_start::RefreshedSketchModel;
+pub use edit_start::SketchDomain;
+pub use edit_start::SketchFinishEvent;
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
 pub use solidcraft_geom as geom;
@@ -91,7 +109,8 @@ pub use solidcraft_kernel as kernel;
 pub use solidcraft_profile as profile;
 pub use solidcraft_render as render;
 pub use solidcraft_sketch as sketch;
-pub use view_context::{ViewContext, ViewDescriptor};
+pub use view_context::ViewContext;
+pub use view_context::ViewDescriptor;
 
 /// Longest accepted request line on the JSON-lines channels (MCP over stdio and the control
 /// server over loopback), so both refuse runaway input at the same size.
