@@ -1252,6 +1252,18 @@ fn cache_folder() -> PathBuf {
     std::fs::create_dir_all(&root).unwrap();
     std::fs::canonicalize(root).unwrap()
 }
+/// Removes a cache folder. Wasmtime's cache worker writes its usage-statistics files on its own
+/// thread after a compile, so a file can appear while the folder is being removed: try again for
+/// a while, then leave it in the temp folder rather than fail the test.
+fn remove_cache_folder(root: &Path) {
+    for _ in 0..50 {
+        match std::fs::remove_dir_all(root) {
+            Ok(()) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
+        }
+    }
+}
 /// The compiled entries Wasmtime's cache wrote under `root`, leaving out its usage-statistics files.
 fn cache_entries(root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
@@ -1285,7 +1297,7 @@ fn a_compiled_component_is_read_back_from_the_disk_cache_by_a_new_engine() {
     let versions: Vec<String> =
         std::fs::read_dir(root.join("modules")).unwrap().flatten().map(|v| v.file_name().to_string_lossy().into_owned()).collect();
     assert!(versions.len() == 1 && versions[0].starts_with("wasmtime-"), "{versions:?}");
-    std::fs::remove_dir_all(root).unwrap();
+    remove_cache_folder(&root);
 }
 #[test]
 fn a_changed_component_or_compile_setting_gets_its_own_cache_entry() {
@@ -1304,7 +1316,7 @@ fn a_changed_component_or_compile_setting_gets_its_own_cache_entry() {
         wasmtime::Module::new(&Engine::new(&config).unwrap(), &module).unwrap();
     }
     assert_eq!((cache.cache_hits(), cache.cache_misses(), cache_entries(&root).len()), (1, 4, 4));
-    std::fs::remove_dir_all(root).unwrap();
+    remove_cache_folder(&root);
 }
 #[test]
 fn fuel_still_stops_code_read_back_from_the_disk_cache() {
@@ -1325,7 +1337,7 @@ fn fuel_still_stops_code_read_back_from_the_disk_cache() {
         assert_eq!(failure.downcast_ref::<wasmtime::Trap>(), Some(&wasmtime::Trap::OutOfFuel));
     }
     assert_eq!((cache.cache_hits(), cache.cache_misses()), (1, 1));
-    std::fs::remove_dir_all(root).unwrap();
+    remove_cache_folder(&root);
 }
 #[test]
 fn a_damaged_or_mismatched_cache_entry_is_compiled_again() {
@@ -1361,8 +1373,8 @@ fn a_damaged_or_mismatched_cache_entry_is_compiled_again() {
         compile_cached(&bytes, &cache).unwrap();
         assert_eq!(cache.cache_hits(), hits + 1, "{damage}");
     }
-    std::fs::remove_dir_all(root).unwrap();
-    std::fs::remove_dir_all(other_root).unwrap();
+    remove_cache_folder(&root);
+    remove_cache_folder(&other_root);
 }
 #[test]
 fn a_cache_folder_that_cannot_be_made_or_written_still_compiles() {
@@ -1386,5 +1398,5 @@ fn a_cache_folder_that_cannot_be_made_or_written_still_compiles() {
         }
         std::fs::set_permissions(&read_only, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
-    std::fs::remove_dir_all(root).unwrap();
+    remove_cache_folder(&root);
 }
