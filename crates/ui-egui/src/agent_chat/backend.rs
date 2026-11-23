@@ -149,10 +149,15 @@ pub trait ChatBackend {
     /// A message being answered is cancelled first. Process backends may restart their agent.
     fn new_session(&mut self);
     /// Whether the next session may use the computer (`agent_computer_access`) and where it
-    /// starts, so New chat follows the preference as it is then. The agent's process keeps the
-    /// folder it was started in; a session's `cwd` is what changes. Backends without their own
-    /// tools ignore it.
+    /// starts, so New chat follows the preference as it is then: the session's `cwd`, and the
+    /// folder an agent restarted for it starts in. Backends without their own tools ignore it.
     fn set_computer(&mut self, _computer: bool, _cwd: &std::path::Path) {}
+    /// The backend takes `agent_computer_access` only when it starts (its MCP server's folder
+    /// limits are fixed then): New chat connects it again when the preference differs from
+    /// [`Self::session_computer`].
+    fn computer_fixed_at_start(&self) -> bool {
+        false
+    }
     /// Whether the session that is running was opened with the computer (`set_computer` or the
     /// start context): then the chat does not confine its tool requests to its own folder.
     fn session_computer(&self) -> bool {

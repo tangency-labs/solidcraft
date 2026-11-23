@@ -668,7 +668,8 @@ pub struct ApiBackend {
     cancel: Arc<AtomicBool>,
     mcp: Option<ProcessHandle>,
     /// The user lets the agent use the computer (`agent_computer_access`) as this backend was
-    /// started: its MCP server has no folder limits then. A change applies at the next connection.
+    /// started: its MCP server has no folder limits then. A change applies at the next connection,
+    /// which New chat makes ([`ChatBackend::computer_fixed_at_start`]).
     computer: bool,
 }
 
@@ -724,6 +725,9 @@ impl ChatBackend for ApiBackend {
     }
     fn session_computer(&self) -> bool {
         self.computer
+    }
+    fn computer_fixed_at_start(&self) -> bool {
+        true
     }
     fn prompt(&mut self, parts: &[PromptPart]) {
         self.cancel.store(false, Ordering::Relaxed);

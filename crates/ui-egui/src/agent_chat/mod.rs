@@ -474,6 +474,9 @@ pub struct AgentChat {
     /// backend not started by connect), so a change reaches the backend before its next
     /// session, whatever state the chat is in.
     computer_pushed: Option<bool>,
+    /// New chat found an agent that takes `agent_computer_access` only at its start with another
+    /// value: the next poll connects it again ([`ChatBackend::computer_fixed_at_start`]).
+    reconnect: bool,
     state: Option<State>,
     agent: String,
     images: bool,
@@ -871,6 +874,8 @@ impl AgentChat {
 
     fn stop_backend(&mut self, wait: bool) {
         self.steering = false;
+        // A stopped chat connects again only when asked to.
+        self.reconnect = false;
         // A discarded backend can no longer finish the retired turn.
         self.discard_end = false;
         // The next agent starts without this one's memory of the design.
@@ -1948,8 +1953,14 @@ pub fn new_chat(app: &mut SolveApp) {
         chat.restore_mode = Some(chat.mode.clone()).filter(|m| !m.is_empty());
         chat.state = Some(State::Starting);
         #[cfg(not(target_arch = "wasm32"))]
-        chat.push_computer(computer);
-        if let Some(b) = chat.backend.as_mut() {
+        {
+            chat.push_computer(computer);
+            // An agent that took the computer at its start, with another value: a new connection.
+            chat.reconnect = chat.backend.as_ref().is_some_and(|b| b.computer_fixed_at_start() && b.session_computer() != computer);
+        }
+        if !chat.reconnect
+            && let Some(b) = chat.backend.as_mut()
+        {
             // Instructions edited since the last session apply from this one on.
             b.set_instructions(&app.preferences.agent_instructions);
             b.new_session();
@@ -2539,6 +2550,14 @@ pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     take_loaded(app, ctx);
+    #[cfg(not(target_arch = "wasm32"))]
+    if std::mem::take(&mut app.agent_chat.reconnect) {
+        // The agent that ran, not one chosen as the default since.
+        if !app.agent_chat.running_id.is_empty() {
+            app.agent_chat.agent_id = Some(app.agent_chat.running_id.clone());
+        }
+        connect(app, ctx);
+    }
     // The preference changed since the backend last heard it (the checkbox, a profile, the
     // control channel): the next session follows it in every state, so a login or New chat
     // from NeedsAuth does not open a session on a stale snapshot.

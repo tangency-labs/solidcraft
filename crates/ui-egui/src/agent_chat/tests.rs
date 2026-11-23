@@ -1003,6 +1003,8 @@ struct Script {
     prompts: Arc<Mutex<Vec<Vec<PromptPart>>>>,
     /// The session was opened with the computer (`session_computer`).
     computer: bool,
+    /// It takes the computer only when it starts, as an API agent does (`computer_fixed_at_start`).
+    fixed: bool,
 }
 
 impl Script {
@@ -1044,6 +1046,9 @@ impl ChatBackend for Script {
     fn authenticate(&mut self, _: &str) {}
     fn session_computer(&self) -> bool {
         self.computer
+    }
+    fn computer_fixed_at_start(&self) -> bool {
+        self.fixed
     }
     fn shutdown(&mut self, _: bool) {}
 }
@@ -1897,6 +1902,7 @@ fn new_chat_with_an_acp_agent_restarts_the_process() {
     let log = dir.join("received.log");
     let script = r#"
 log="$1"; n=0
+printf 'process in %s\n' "$(pwd -P)" >> "$log"
 while IFS= read -r line; do
   printf '%s\n' "$line" >> "$log"
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
@@ -1947,6 +1953,10 @@ done
         .collect();
     assert!(sessions[0].as_array().is_some_and(|t| t.iter().any(|x| x == "Bash")), "{sessions:?}");
     assert_eq!(sessions[1], serde_json::json!([]), "the replacement's session may use the computer");
+    let folders: Vec<&str> = log_text.lines().filter_map(|l| l.strip_prefix("process in ")).collect();
+    let real = |p: &std::path::Path| std::fs::canonicalize(p).unwrap().to_string_lossy().into_owned();
+    let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
+    assert_eq!(folders, [real(&dir), real(&home)], "the replacement starts where its session does");
     send(&mut app, &ctx, "stalled".into());
     assert_eq!(app.agent_chat.state(), State::Busy);
     new_chat(&mut app);
@@ -2022,6 +2032,30 @@ done
     assert_eq!(cwds[1], json!(std::env::var("HOME").unwrap()), "the session after the login in the home folder");
     disconnect(&mut app);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An agent that takes the computer only when it starts (one connected with an API key) is
+/// connected again by New chat when the preference changed, so turning it off holds from the new
+/// chat on; an agent with the value it was started with keeps its connection.
+#[test]
+fn new_chat_connects_an_agent_again_that_took_the_computer_at_its_start() {
+    for (fixed, started_with, now, again) in
+        [(true, true, false, true), (true, false, true, true), (true, true, true, false), (false, true, false, false)]
+    {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let script = Script { computer: started_with, fixed, ..Script::default() };
+        app.agent_chat.backend = Some(Box::new(script.clone()));
+        app.agent_chat.state = Some(State::Ready);
+        app.agent_chat.computer_pushed = Some(started_with);
+        app.preferences.agent_computer_access = now;
+        new_chat(&mut app);
+        let case = format!("fixed {fixed}, started with {started_with}, now {now}");
+        assert_eq!(app.agent_chat.reconnect, again, "{case}");
+        assert_eq!(script.calls().contains(&"new_session".to_string()), !again, "{case}: no new session on the old connection");
+        assert_eq!(app.agent_chat.state(), State::Starting, "{case}");
+        disconnect(&mut app);
+        assert!(!app.agent_chat.reconnect, "{case}: a stopped chat doesn't connect by itself later");
+    }
 }
 
 /// #9811: an agent that offers the standard `systemPrompt` field gets the note in it, on the first

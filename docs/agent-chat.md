@@ -557,7 +557,9 @@ tools, starts in your home folder, and SolidCraft's file commands reach any fold
 runs with `--allow-any-path`, and the panel no longer confines its requests to the chat's own
 folder). It still changes the open design through SolidCraft's tools. It takes effect with the
 next conversation, on and off alike: start a new chat. An agent connected with an API key
-(no ACP) gets it from its next connection.
+(no ACP) is connected again for it when the new chat starts. An organization can turn it off for
+everyone with the `AgentComputerAccess` policy ([Managing SolidCraft in an
+organization](book/src/guide/managed-deployment.md)).
 
 Its own tools then ask through the panel as the agent's own mode has it, and Claude Code's own
 permission settings (`~/.claude/settings.json`) apply as in a terminal. With **Do everything**

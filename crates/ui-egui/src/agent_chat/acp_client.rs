@@ -404,6 +404,8 @@ impl ChatBackend for AcpBackend {
 
     fn set_computer(&mut self, computer: bool, cwd: &std::path::Path) {
         self.computer = computer;
+        // New chat restarts the agent there too, so the process and its session share the folder.
+        self.process_cwd = cwd.to_path_buf();
         self.cwd = if self.wsl { acp::wsl_path(cwd) } else { cwd.to_path_buf() };
     }
 

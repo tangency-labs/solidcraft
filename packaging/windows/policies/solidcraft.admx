@@ -5,7 +5,7 @@
   Intune's import takes no combo boxes and wants every namespace it references uploaded first, so
   this file uses none of either. The target namespace never changes; a new policy raises revision.
 -->
-<policyDefinitions xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.4" schemaVersion="1.0">
+<policyDefinitions xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.5" schemaVersion="1.0">
   <policyNamespaces>
     <target prefix="solidcraft" namespace="TangencyLabs.Policies.SolidCraft" />
   </policyNamespaces>
@@ -14,6 +14,7 @@
     <definitions>
       <definition name="SUPPORTED_SolidCraft_0_44" displayName="$(string.SUPPORTED_SolidCraft_0_44)" />
       <definition name="SUPPORTED_SolidCraft_0_46" displayName="$(string.SUPPORTED_SolidCraft_0_46)" />
+      <definition name="SUPPORTED_SolidCraft_0_47" displayName="$(string.SUPPORTED_SolidCraft_0_47)" />
     </definitions>
   </supportedOn>
   <categories>
@@ -110,6 +111,16 @@
     <policy name="ShowDonateButton" class="Both" displayName="$(string.ShowDonateButton)" explainText="$(string.ShowDonateButton_Explain)" presentation="$(presentation.ShowDonateButton)" key="Software\Policies\SolidCraft" valueName="ShowDonateButton">
       <parentCategory ref="SolidCraft" />
       <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
+    </policy>
+    <policy name="AgentComputerAccess" class="Both" displayName="$(string.AgentComputerAccess)" explainText="$(string.AgentComputerAccess_Explain)" presentation="$(presentation.AgentComputerAccess)" key="Software\Policies\SolidCraft" valueName="AgentComputerAccess">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_47" />
       <enabledValue>
         <decimal value="1" />
       </enabledValue>
