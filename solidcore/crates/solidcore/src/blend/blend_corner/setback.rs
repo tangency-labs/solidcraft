@@ -293,6 +293,12 @@ pub fn asked_setback_not_built(corner: &FilletCorner) -> bool {
 pub const SETBACK_NOT_BUILT: &str =
     "Fillet Error: a setback is asked for at a corner that builds none (neither the blend corner's Setback nor an N x N corner), so it would not be built";
 
+/// The refusal's comment for a setback with an ease set on a made corner that is the Setback
+/// beside a curved face, whose fill is G1 only ([`classify_setback`]): built without the ease
+/// it would not be the setback asked.
+pub const SETBACK_EASE_NOT_BUILT: &str =
+    "Fillet Error: a setback with an ease is asked for at a setback corner beside a curved face, whose fill is G1 only, so it would not be built as asked";
+
 /// The setback asked at `vertex`: its fill's ([`set_back_fill_of`]), else the setback set on
 /// its corner ([`FilletCorner::set_back_dist`]); `0` for none.
 fn asked_at(corners: &[FilletCorner], fills: &[SetBackFill], vertex: VertexId) -> f64 {

@@ -14,7 +14,7 @@
 //! Wire points are taken in the sketch's component frame (the frame of the `plane` passed in);
 //! linked World-space wires take no part.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use solidcore_record::{Plane, Region2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
@@ -40,14 +40,9 @@ pub struct Profile3D {
 
 /// End points within this (mm) are one node; plane coincidence is tested to it too.
 const MERGE_TOL: f64 = 1e-5;
-/// Triple enumeration is O(n³): more plane-spanning points than this give up rather than stall
-/// evaluation. A sketch with more points spans planes by its curves' key points only (see
-/// `key_points`), not every sample of them.
-const MAX_NODES: usize = 64;
-/// A wire with more points than this spans planes by its ends and a few points along it.
-const KEY_SAMPLES: usize = 5;
-/// Total lifted segments allowed.
-const MAX_EDGES: usize = 2_000;
+/// Total lifted segments allowed: the most the 2D tracing run on each plane's edges takes, so a
+/// long loop is never cut short here and left with a gap (#19464).
+const MAX_EDGES: usize = crate::profiles::MAX_PROFILE_EDGES;
 /// Distinct planes considered.
 const MAX_PLANES: usize = 256;
 /// A face smaller than this (mm²) is round-off, not a profile.
@@ -121,10 +116,6 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
     let mut nodes = Nodes::new();
     let mut edges: Vec<Edge3> = Vec::new();
     let mut plane_line_ids: HashSet<String> = HashSet::new();
-    // The nodes candidate planes are spanned by. A plane bounding a loop holds every point of
-    // the loop's curves, so a few points per curve are enough to find it, and a finely sampled
-    // spline (24 points per span) does not use up `MAX_NODES` on its own (#17296).
-    let mut key: Vec<usize> = Vec::new();
     for c in &sk.curves {
         if c.construction || c.centerline || c.infinite {
             continue;
@@ -136,7 +127,6 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
             let (a, b) = (lift(u), lift(v));
             if a.dist(b) > MERGE_TOL && edges.len() < MAX_EDGES {
                 let (a, b) = (nodes.add(a), nodes.add(b));
-                key.extend([a, b]);
                 edges.push(Edge3 { a, b, id: c.id.clone(), from_wire: false });
                 plane_line_ids.insert(c.id.clone());
             }
@@ -148,27 +138,14 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
             continue;
         }
         wire_ids.insert(w.id.clone());
-        let mut ends: Vec<usize> = Vec::with_capacity(w.pts.len());
         for pair in w.pts.windows(2) {
             if pair[0].dist(pair[1]) > MERGE_TOL && edges.len() < MAX_EDGES {
                 let (a, b) = (nodes.add(pair[0]), nodes.add(pair[1]));
-                if ends.last() != Some(&a) {
-                    ends.push(a);
-                }
-                ends.push(b);
                 edges.push(Edge3 { a, b, id: w.id.clone(), from_wire: true });
             }
         }
-        key.extend(key_points(&ends, &nodes.pts));
     }
-    key.sort_unstable();
-    key.dedup();
-    // A sketch with few enough points spans planes by all of them: a plane can hold just part of
-    // a wire (one tooth of a zigzag) and none of its key points but the ends of that part.
-    if nodes.pts.len() <= MAX_NODES {
-        key = (0..nodes.pts.len()).collect();
-    }
-    if edges.is_empty() || key.len() < 3 || key.len() > MAX_NODES {
+    if edges.is_empty() {
         return Vec::new();
     }
     // The planes the nodes span, deduplicated. A plane needs at least three edges on it, one of
@@ -176,33 +153,9 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
     // candidate too (flat 3D loops take part there); profiles bounded only by in-plane curves are
     // dropped below, so nothing is listed twice.
     let mut candidates: Vec<Candidate> = Vec::new();
-    for i in 0..key.len() {
-        for j in i + 1..key.len() {
-            for k in j + 1..key.len() {
-                let (a, b, c) = (nodes.pts[key[i]], nodes.pts[key[j]], nodes.pts[key[k]]);
-                let (ab, ac) = (b - a, c - a);
-                let n = ab.cross(ac);
-                let len = n.len();
-                if len < 1e-12 || len < 1e-9 * ab.len().max(1e-300) * ac.len().max(1e-300) {
-                    continue;
-                }
-                let (n, off) = canonical(n / len, n.dot(a) / len);
-                let known = candidates.iter().any(|p| (p.n.dot(n) - 1.0).abs() < 1e-9 && (p.off - off).abs() < 1e-6);
-                if known {
-                    continue;
-                }
-                candidates.push(Candidate { n, off, anchor: a });
-                if candidates.len() >= MAX_PLANES {
-                    break;
-                }
-            }
-            if candidates.len() >= MAX_PLANES {
-                break;
-            }
-        }
-        if candidates.len() >= MAX_PLANES {
-            break;
-        }
+    add_cycle_planes(&edges, &nodes.pts, &mut candidates);
+    if candidates.is_empty() {
+        return Vec::new();
     }
     candidates.sort_by(|x, y| x.n.x.total_cmp(&y.n.x).then(x.n.y.total_cmp(&y.n.y)).then(x.n.z.total_cmp(&y.n.z)).then(x.off.total_cmp(&y.off)));
 
@@ -299,41 +252,190 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
     out
 }
 
-/// The nodes of one wire (`ends`, in order along it) that span planes: all of them for a short
-/// wire, otherwise its two ends, the points a quarter, half and three quarters along it, and the
-/// point farthest from the line through its ends (so a curved wire always gives one off that
-/// line). A closed wire's ends meet, so its line runs from its start to the point farthest from
-/// the start instead, and that point is a key point too. A plane holding the whole wire holds
-/// these. A plane they span that misses other points of the wire gets none of the segments
-/// there, as every segment must lie on the plane.
-fn key_points(ends: &[usize], pts: &[Vec3]) -> Vec<usize> {
-    if ends.len() <= KEY_SAMPLES {
-        return ends.to_vec();
+/// Union-find root with path halving; an index outside `parent` is its own root.
+fn find_root(parent: &mut [usize], mut i: usize) -> usize {
+    while let Some(&p) = parent.get(i) {
+        if p == i {
+            break;
+        }
+        let gp = parent.get(p).copied().unwrap_or(p);
+        if let Some(slot) = parent.get_mut(i) {
+            *slot = gp;
+        }
+        i = gp;
     }
-    let last = ends.len() - 1;
-    let mut out: Vec<usize> = (0..KEY_SAMPLES).filter_map(|q| ends.get(q * last / (KEY_SAMPLES - 1))).copied().collect();
-    let farthest = |measure: &dyn Fn(Vec3) -> f64| {
-        let m = |i: usize| pts.get(i).map_or(0.0, |&p| measure(p));
-        ends.iter().copied().max_by(|&i, &j| m(i).total_cmp(&m(j)))
-    };
-    let Some(&a) = ends.first().and_then(|&i| pts.get(i)) else {
-        return out;
-    };
-    let Some(mut b) = ends.last().and_then(|&i| pts.get(i)).copied() else {
-        return out;
-    };
-    if a.dist(b) <= MERGE_TOL
-        && let Some(far) = farthest(&|p| p.dist(a))
-        && let Some(&p) = pts.get(far)
-    {
-        out.push(far);
-        b = p;
+    i
+}
+
+/// Adds the plane through three points if it is new and there is room.
+fn push_plane(a: Vec3, b: Vec3, c: Vec3, candidates: &mut Vec<Candidate>) {
+    if candidates.len() >= MAX_PLANES {
+        return;
     }
+    let (ab, ac) = (b - a, c - a);
+    let n = ab.cross(ac);
+    let len = n.len();
+    if len < 1e-12 || len < 1e-9 * ab.len().max(1e-300) * ac.len().max(1e-300) {
+        return;
+    }
+    let (n, off) = canonical(n / len, n.dot(a) / len);
+    if candidates.iter().any(|p| (p.n.dot(n) - 1.0).abs() < 1e-9 && (p.off - off).abs() < 1e-6) {
+        return;
+    }
+    candidates.push(Candidate { n, off, anchor: a });
+}
+
+/// The plane through the first point, the one farthest from it, and the one farthest from their
+/// line: the plane a planar point set lies in, found from the points themselves.
+fn add_spanning_plane(ids: &[usize], pts: &[Vec3], candidates: &mut Vec<Candidate>) {
+    let p = |i: usize| pts.get(i).copied();
+    let Some(a) = ids.first().and_then(|&i| p(i)) else { return };
+    let dist = |i: usize, f: &dyn Fn(Vec3) -> f64| p(i).map_or(0.0, f);
+    let Some(b) = ids.iter().copied().max_by(|&i, &j| dist(i, &|q| q.dist(a)).total_cmp(&dist(j, &|q| q.dist(a)))).and_then(p) else { return };
     let chord = b - a;
-    if let Some(far) = farthest(&|p| chord.cross(p - a).len()) {
-        out.push(far);
+    let Some(c) =
+        ids.iter().copied().max_by(|&i, &j| dist(i, &|q| chord.cross(q - a).len()).total_cmp(&dist(j, &|q| chord.cross(q - a).len()))).and_then(p)
+    else {
+        return;
+    };
+    push_plane(a, b, c, candidates);
+}
+
+/// Candidate planes from the graph's cycles. A closed loop only uses edges that lie on a cycle,
+/// so edges that do not (a wire hanging off the loop, a branch leading elsewhere) are dropped
+/// first: they cannot bound anything, and however many there are they cannot crowd a loop's plane
+/// out. Each remaining connected piece gives the plane its points span (a planar loop of any
+/// length lies wholly in it), and each corner gives the plane through it and its two neighbours
+/// (a loop lies in the plane of any of its corners, and a plane holding only part of a wire, one
+/// tooth of a zigzag, is found the same way). Nothing is thinned, so the work is linear in the
+/// edges plus the pairs of cycle edges meeting at a node.
+fn add_cycle_planes(edges: &[Edge3], pts: &[Vec3], candidates: &mut Vec<Candidate>) {
+    let n = pts.len();
+    let mut adj: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n];
+    for (i, e) in edges.iter().enumerate() {
+        if e.a == e.b {
+            continue;
+        }
+        if let Some(l) = adj.get_mut(e.a) {
+            l.push((e.b, i));
+        }
+        if let Some(l) = adj.get_mut(e.b) {
+            l.push((e.a, i));
+        }
     }
-    out
+    let bridge = bridges(&adj, edges.len());
+    // Neighbours over cycle edges only, and the pieces they connect.
+    let mut near: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let mut parent: Vec<usize> = (0..n).collect();
+    for (i, e) in edges.iter().enumerate() {
+        if e.a == e.b || bridge.get(i).copied().unwrap_or(true) {
+            continue;
+        }
+        if let Some(l) = near.get_mut(e.a) {
+            l.push(e.b);
+        }
+        if let Some(l) = near.get_mut(e.b) {
+            l.push(e.a);
+        }
+        let (ra, rb) = (find_root(&mut parent, e.a), find_root(&mut parent, e.b));
+        if let Some(slot) = parent.get_mut(ra) {
+            *slot = rb;
+        }
+    }
+    let mut pieces: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for v in 0..n {
+        if near.get(v).is_some_and(|l| !l.is_empty()) {
+            pieces.entry(find_root(&mut parent, v)).or_default().push(v);
+        }
+    }
+    for ids in pieces.values() {
+        add_spanning_plane(ids, pts, candidates);
+    }
+    for (v, l) in near.iter_mut().enumerate() {
+        l.sort_unstable();
+        l.dedup();
+        let Some(&c) = pts.get(v) else { continue };
+        for (i, &x) in l.iter().enumerate() {
+            for &y in l.iter().skip(i + 1) {
+                if candidates.len() >= MAX_PLANES {
+                    return;
+                }
+                if let (Some(&a), Some(&b)) = (pts.get(x), pts.get(y)) {
+                    // A nearly straight corner gives a plane that is mostly round-off.
+                    let (u, w) = (a - c, b - c);
+                    if u.cross(w).len() > 1e-4 * u.len() * w.len() {
+                        push_plane(c, a, b, candidates);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Which edges are bridges (on no cycle): an iterative depth-first search with low-links, so a
+/// long chain cannot overflow the stack. Parallel edges are told apart by their index.
+fn bridges(adj: &[Vec<(usize, usize)>], edge_count: usize) -> Vec<bool> {
+    let n = adj.len();
+    let mut bridge = vec![false; edge_count];
+    let mut disc = vec![usize::MAX; n];
+    let mut low = vec![0usize; n];
+    let mut clock = 0usize;
+    for root in 0..n {
+        if disc.get(root).copied() != Some(usize::MAX) {
+            continue;
+        }
+        // (node, edge it was reached by, next neighbour to look at)
+        let mut stack: Vec<(usize, usize, usize)> = vec![(root, usize::MAX, 0)];
+        if let Some(d) = disc.get_mut(root) {
+            *d = clock;
+        }
+        if let Some(l) = low.get_mut(root) {
+            *l = clock;
+        }
+        clock += 1;
+        while let Some(&(v, via, k)) = stack.last() {
+            if let Some(&(w, ei)) = adj.get(v).and_then(|l| l.get(k)) {
+                if let Some(top) = stack.last_mut() {
+                    top.2 += 1;
+                }
+                if ei == via {
+                    continue;
+                }
+                match disc.get(w).copied() {
+                    Some(usize::MAX) => {
+                        if let Some(d) = disc.get_mut(w) {
+                            *d = clock;
+                        }
+                        if let Some(l) = low.get_mut(w) {
+                            *l = clock;
+                        }
+                        clock += 1;
+                        stack.push((w, ei, 0));
+                    }
+                    Some(dw) => {
+                        if let Some(l) = low.get_mut(v) {
+                            *l = (*l).min(dw);
+                        }
+                    }
+                    None => {}
+                }
+            } else {
+                stack.pop();
+                if let Some(&(p, _, _)) = stack.last() {
+                    let lv = low.get(v).copied().unwrap_or(0);
+                    if let Some(l) = low.get_mut(p) {
+                        *l = (*l).min(lv);
+                    }
+                    if lv > disc.get(p).copied().unwrap_or(0)
+                        && let Some(b) = bridge.get_mut(via)
+                    {
+                        *b = true;
+                    }
+                }
+            }
+        }
+    }
+    bridge
 }
 
 /// The list with repeats dropped, order kept (a wire of several segments bounds one loop edge).

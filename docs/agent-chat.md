@@ -54,6 +54,9 @@ The Assistant’s own native window keeps its existing layout.
 Assistant fills the available side height. The compass and navigation bar use the
 remaining viewport space. Clicks and scrolling over the panel stay in the chat.
 
+A new chat shows a short introduction at the bottom of the conversation, just above the message
+box, ending with the hint to type a request there (#11256).
+
 After clicking in Assistant, keyboard input stays in the chat, including when selecting text
 in an answer. Copy, Cut and Paste do not also operate on selected CAD geometry. Moving the
 pointer back over the model does not change this: click outside Assistant to return the
@@ -155,8 +158,9 @@ sketch, a brief, a part to fit around.
   thumbnails (hold the pointer over one for a bigger preview, click it to open the viewer, where
   the file's name is shown and ‹ › step through the message's pictures, together with the picture
   of the view); the other files are listed by name. Pictures in any of the formats above are
-  decoded in the background, with a spinner until they are in. A file that can't be attached says
-  why.
+  decoded in the background, with a spinner until they are in. A photo stored turned by its EXIF
+  orientation is attached upright: its chip and size are the turned picture's, and it is sent as
+  upright pixels. A file that can't be attached says why.
 
 Files stay with their message: one queued while the agent works keeps its files, and one sent
 again after a sign-in sends them again. When several queued messages go as one prompt, their
@@ -336,6 +340,10 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   Qwen `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, Cheaper Inference
   `https://api.cheaperinference.com/v1`, OpenRouter
   `https://openrouter.ai/api/v1`) or a custom URL, the model name, and an optional key.
+  For OpenAI models that need function tools with reasoning, turn on **Use OpenAI Responses API**
+  in the agent's settings. This routes requests to `/responses` and lets the model continue
+  reasoning after a tool call. Keep the base URL at `https://api.openai.com/v1` and choose a
+  reasoning effort the model supports. Turn the option off for endpoints that use Chat Completions.
   OpenCode Go models are routed to their endpoint by themselves (`/responses`,
   `/messages` or Gemini for those families, `/chat/completions` for the rest),
   each conversation request carrying the session header Go asks for, so one

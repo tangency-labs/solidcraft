@@ -534,18 +534,19 @@ mod exit_view_preference {
     }
 
     #[test]
-    fn a_sketch_opened_by_a_command_leaves_the_view_alone() {
+    fn a_sketch_opened_by_a_command_saves_its_own_owner_camera() {
         let (mut h, _) = sketching(SketchExitView::Previous);
         // A programmatic finish clears this sketch's saved view too. A later sketch opened
-        // entirely by commands must not inherit that view.
+        // entirely by commands saves its own entry view.
         h.app.run("sketch.finish", json!({})).unwrap();
         assert!(h.app.pre_sketch_cam.is_none());
+        h.settle();
+        let before = h.app.cam;
         h.app.run("sketch.create", json!({"plane": "XZ"})).unwrap();
         h.app.cam.orbit(60.0, -40.0);
         h.app.cam_anim = None;
-        let cam = h.app.cam;
         finish(&mut h);
-        assert_eq!(h.app.cam, cam, "the views saved for the earlier sketch don't apply");
+        assert_eq!(h.app.cam, before, "programmatic starts follow the owner camera preference too");
     }
 
     #[test]
@@ -958,4 +959,858 @@ mod remembered_sketch_views {
         assert_eq!(refused["ok"], false, "{refused}");
         assert_eq!(h.app.preferences.sketch_open_view, SketchOpenView::Face);
     }
+}
+
+#[test]
+fn sketch_mode_belongs_to_one_tile_and_focus_never_finishes_it() {
+    use serde_json::json;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.preferences.look_at_anim = false;
+    app.run("tab.view.layout", json!({"layout":"side_by_side"})).unwrap();
+    let owner = app.docs.views.active().id;
+    let other = app.docs.views.ids().find(|id| *id != owner).unwrap();
+    let reply = app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let sketch = reply["sketch"].as_u64().unwrap();
+    assert_eq!(reply["sketching_view"], owner);
+    assert_eq!(app.docs.views.get(owner).unwrap().editing.unwrap().sketch, sketch);
+    assert_eq!(crate::sketch_view::active_sketch(&app), Some(sketch));
+    assert!(crate::documents::focus_view(&mut app, other));
+    assert_eq!(app.session.active_sketch, Some(sketch));
+    assert_eq!(app.session.sketching_view, Some(owner));
+    assert_eq!(crate::sketch_view::active_sketch(&app), None);
+    crate::documents::with_view_look(&mut app, owner, |app| {
+        assert_eq!(crate::sketch_view::active_sketch(app), Some(sketch));
+    });
+    assert_eq!(app.session.active_sketch, Some(sketch), "painting a passive tile never clears the receiver");
+}
+
+#[test]
+fn sketch_camera_round_trip_changes_only_its_owner_even_with_linked_cameras() {
+    use crate::prefs::SketchExitView;
+    use serde_json::json;
+    for choice in [SketchExitView::Keep, SketchExitView::Previous, SketchExitView::UnlessRotated] {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.preferences.look_at_anim = false;
+        app.preferences.sketch_exit_view = choice;
+        app.run("tab.view.layout", json!({"layout":"side_by_side"})).unwrap();
+        let owner = app.docs.views.active().id;
+        let other = app.docs.views.ids().find(|id| *id != owner).unwrap();
+        let before = app.cam;
+        let other_before = app.docs.views.get(other).unwrap().spec;
+        app.docs.views.set_camera_link(solidcraft_views::CameraLinkMode::Both);
+        app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let facing = app.settled_cam();
+        crate::documents::sync_linked_active(&mut app);
+        assert_eq!(app.docs.views.get(other).unwrap().spec, other_before);
+        assert!(crate::documents::focus_view(&mut app, other));
+        let passive = app.cam;
+        app.run("sketch.finish", json!({})).unwrap();
+        assert_eq!(app.cam, passive, "finishing from another tile preserves its camera");
+        let owner_after = app.docs.views.get(owner).unwrap().spec.unwrap().camera;
+        let expected = choice.view_after(before, facing, facing).unwrap_or(facing);
+        assert_eq!(owner_after, expected);
+        assert!(app.docs.views.views().iter().all(|view| view.editing.is_none()));
+    }
+}
+
+#[test]
+fn model_sketch_fallback_preserves_render_and_sheet_ground_views() {
+    use solidcraft_views::ViewKind;
+    for kind in [ViewKind::Render, ViewKind::Sheet] {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let first = app.docs.views.active().id;
+        let ground = app.docs.views.open(kind, (kind == ViewKind::Sheet).then(|| "sheet".into()), false);
+        assert!(app.docs.views.close(first));
+        // #19657 (owner-approved): a Sheet tiles as Render does, so a model sketch started with
+        // only a Sheet open gets a Model card beside it instead of being refused.
+        let target = crate::sketch_view::prepare_start(&mut app, None).unwrap();
+        assert_ne!(target, ground);
+        assert_eq!(app.docs.views.active().id, ground);
+        assert_eq!(app.docs.views.get(ground).unwrap().kind, kind);
+        assert_eq!(app.docs.views.get(target).unwrap().kind, ViewKind::Model);
+        assert!(app.docs.views.tiles().unwrap().contains(target), "{kind:?}");
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn moving_a_sketching_view_to_another_window_keeps_its_owner_and_camera_return() {
+    use serde_json::json;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.preferences.look_at_anim = false;
+    app.preferences.sketch_exit_view = crate::prefs::SketchExitView::Previous;
+    let owner = app.docs.views.active().id;
+    crate::documents::view_duplicate(&mut app, owner).unwrap();
+    crate::documents::focus_view(&mut app, owner);
+    let before = app.cam;
+    app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    app.run("tab.view.move_to_window", json!({"view":owner})).unwrap();
+    let window = app.docs.views.window_of(owner).unwrap();
+    assert_ne!(window, 0);
+    assert_eq!(app.session.sketching_view, Some(owner));
+    assert!(app.docs.views.views_of(window).unwrap().get(owner).unwrap().editing.is_some());
+    let main_camera = app.cam;
+    app.run("sketch.finish", json!({})).unwrap();
+    assert_eq!(app.cam, main_camera);
+    assert_eq!(app.docs.views.views_of(window).unwrap().get(owner).unwrap().spec.unwrap().camera, before);
+}
+
+#[test]
+fn closing_the_sketch_owner_finishes_before_removing_its_runtime_identity() {
+    use serde_json::json;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let owner = app.docs.views.active().id;
+    crate::documents::view_duplicate(&mut app, owner).unwrap();
+    crate::documents::focus_view(&mut app, owner);
+    app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    assert!(crate::documents::view_close(&mut app, owner));
+    assert_eq!(app.session.active_sketch, None);
+    assert_eq!(app.session.sketching_view, None);
+    crate::sketch_view::sync(&mut app).unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn starting_a_sketch_in_another_window_changes_only_the_destination_camera() {
+    use serde_json::json;
+    use solidcraft_viewport::{Camera, ViewSpec};
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.preferences.look_at_anim = false;
+    app.preferences.sketch_exit_view = crate::prefs::SketchExitView::Previous;
+    let caller = app.docs.views.active().id;
+    let owner = crate::documents::view_duplicate(&mut app, caller).unwrap();
+    app.run("tab.view.move_to_window", json!({"view":owner})).unwrap();
+    let window = app.docs.views.window_of(owner).unwrap();
+    let before = Camera { yaw: 0.7, pitch: 0.4, distance: 80.0, ..app.cam };
+    app.docs.views.window_mut(window).unwrap().views.set_spec(owner, ViewSpec::new(before));
+    let caller_camera = app.cam;
+    let reply = app.run("sketch.create", json!({"plane":"XY","view":owner})).unwrap();
+    assert_eq!(reply["sketching_view"], owner);
+    assert_eq!(app.docs.views.active().id, caller);
+    assert_eq!(app.cam, caller_camera);
+    let destination = app.docs.views.views_of(window).unwrap().get(owner).unwrap().spec.unwrap().camera;
+    assert_ne!(destination, before, "the destination enters the sketch plane");
+    assert_eq!(app.pre_sketch_cam.unwrap().before, before);
+    assert_eq!(app.pre_sketch_cam.unwrap().view, owner);
+    app.run("sketch.finish", json!({})).unwrap();
+    assert_eq!(app.cam, caller_camera);
+    assert_eq!(app.docs.views.views_of(window).unwrap().get(owner).unwrap().spec.unwrap().camera, before);
+}
+
+#[test]
+fn a_full_view_set_refuses_an_invisible_sketch_fallback_atomically() {
+    use solidcraft_views::ViewKind;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let first = app.docs.views.active().id;
+    let ground = app.docs.views.open(ViewKind::Render, None, false);
+    assert!(app.docs.views.close(first));
+    for _ in 1..solidcraft_views::MAX_VIEWS {
+        app.docs.views.open(ViewKind::Render, None, false);
+    }
+    app.docs.views.activate(ground);
+    let before = app.docs.views.to_json();
+    assert!(crate::sketch_view::prepare_start(&mut app, None).is_err());
+    assert_eq!(app.docs.views.to_json(), before);
+    assert_eq!(app.session.active_sketch, None);
+    assert_eq!(app.session.sketching_view, None);
+}
+
+#[test]
+fn malformed_explicit_sketch_view_is_never_replaced_by_a_fallback() {
+    use serde_json::json;
+    use solidcraft_engine::schema::ParamCheck;
+    for check in [ParamCheck::Off, ParamCheck::Warn, ParamCheck::Strict] {
+        for view in [json!("1"), json!(-1), json!(1.5)] {
+            let mut session = solidcraft_engine::Session::default();
+            session.param_check = check;
+            let mut app = SolveApp::new(session, Default::default());
+            let before = app.docs.views.to_json();
+            let document = app.session.doc.to_json();
+            assert!(app.run("sketch.create", json!({"plane":"XY", "view":view})).is_err());
+            assert_eq!(app.docs.views.to_json(), before);
+            assert_eq!(app.session.doc.to_json(), document);
+            assert_eq!(app.session.active_sketch, None);
+        }
+    }
+}
+
+#[test]
+fn render_grid_fallback_fills_an_empty_cell_without_moving_the_ground() {
+    use solidcraft_views::{Preset, ViewKind};
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let first = app.docs.views.active().id;
+    let ground = app.docs.views.open(ViewKind::Render, None, false);
+    assert!(app.docs.views.close(first));
+    app.docs.views.set_layout_padded(Preset::Grid);
+    let target = crate::sketch_view::prepare_start(&mut app, None).unwrap();
+    assert_eq!(app.docs.views.active().id, ground);
+    assert_eq!(app.docs.views.tiles().unwrap().len(), 4);
+    assert!(app.docs.views.tiles().unwrap().contains(target));
+    assert!(app.docs.views.tiles().unwrap().contains(ground));
+}
+
+#[test]
+fn model_sketch_fallback_parks_one_card_in_a_full_sheet_or_render_layout() {
+    use solidcraft_views::{Preset, ViewKind};
+    for kind in [ViewKind::Sheet, ViewKind::Render] {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let model = app.docs.views.active().id;
+        let ground = app.docs.views.open(kind, None, false);
+        assert!(app.docs.views.close(model));
+        for _ in 1..solidcraft_views::MAX_TILES {
+            app.docs.views.open(kind, None, false);
+        }
+        app.docs.views.activate(ground);
+        app.docs.views.set_layout(Preset::Grid);
+        let before = app.docs.views.tiles().unwrap().views();
+        for id in &before {
+            app.docs.views.set_spec(*id, solidcraft_viewport::ViewSpec::new(app.cam));
+        }
+        let records = app.docs.views.views().to_vec();
+        let camera = app.cam;
+        assert_eq!(before.len(), solidcraft_views::MAX_TILES);
+        assert!(!records.iter().any(|view| view.kind == ViewKind::Model));
+        let target = crate::sketch_view::prepare_start(&mut app, None).unwrap();
+        let after = app.docs.views.tiles().unwrap().views();
+        assert_eq!(app.docs.views.active().id, ground);
+        assert_eq!(app.cam, camera);
+        assert_eq!(after.len(), solidcraft_views::MAX_TILES);
+        assert!(after.contains(&ground) && after.contains(&target));
+        assert_eq!(app.docs.views.get(target).unwrap().kind, ViewKind::Model);
+        let parked: Vec<_> = before.iter().copied().filter(|id| !after.contains(id)).collect();
+        assert_eq!(parked.len(), 1);
+        assert_ne!(parked[0], ground);
+        assert!(app.docs.views.get(parked[0]).is_some(), "the parked card stays open in the tab strip");
+        for record in records {
+            assert_eq!(app.docs.views.get(record.id), Some(&record), "existing view state is untouched");
+            assert_eq!(after.contains(&record.id), record.id != parked[0], "every other card stays in the layout");
+        }
+        assert_eq!(app.docs.views.len(), solidcraft_views::MAX_TILES + 1);
+        assert!(app.session.view_context.descriptors().iter().any(|view| view.id == target));
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn refused_new_edit_finishes_and_notifies_the_original_window_exactly_once() {
+    use serde_json::json;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.preferences.look_at_anim = false;
+    app.preferences.sketch_exit_view = crate::prefs::SketchExitView::Previous;
+    let caller = app.docs.views.active().id;
+    let owner = crate::documents::view_duplicate(&mut app, caller).unwrap();
+    app.run("tab.view.move_to_window", json!({"view":owner})).unwrap();
+    let window = app.docs.views.window_of(owner).unwrap();
+    let before = app.docs.views.views_of(window).unwrap().get(owner).unwrap().spec.unwrap().camera;
+    let sketch = app.run("sketch.create", json!({"plane":"XY","view":owner})).unwrap()["sketch"].as_u64().unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,10]})).unwrap();
+    let caller_camera = app.cam;
+    assert!(app.run("solid.extrude", json!({"distance":0})).is_err());
+    assert_eq!((app.session.active_sketch, app.session.sketching_view), (None, None));
+    assert_eq!(app.cam, caller_camera);
+    assert_eq!(app.docs.views.views_of(window).unwrap().get(owner).unwrap().spec.unwrap().camera, before);
+    assert!(app.sketch_notices.latest_for(app.session.uid, 0).is_none());
+    let delivered = app.sketch_notices.latest_for(app.session.uid, window).unwrap().clone();
+    assert_eq!(delivered.sketch, sketch);
+    assert_eq!(delivered.view, Some(owner));
+    app.cam.yaw += 0.2;
+    let moved = app.cam;
+    crate::sketch_view::consume_finishes(&mut app);
+    crate::sketch_view::consume_finishes(&mut app);
+    assert_eq!(app.cam, moved, "draining again cannot replay camera restoration");
+    assert_eq!(app.sketch_notices.latest_for(app.session.uid, window).unwrap(), &delivered);
+}
+
+#[test]
+fn a_finished_sketch_notice_survives_its_dialog_commit_then_dismisses_on_the_next_edit() {
+    use serde_json::json;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.preferences.look_at_anim = false;
+    let first = app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,10]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    let later = app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0":[40,0],"p1":[50,10]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.edit_sketch(first);
+    app.start("solid.extrude");
+    assert_eq!(app.session.active_sketch, None);
+    let dialog = app.dialog.take().unwrap();
+    assert_eq!(dialog.started_from_sketch, Some(first), "the earlier editor's source wins over the last sketch");
+    assert_ne!(first, later);
+    let event = app.sketch_notices.latest_for(app.session.uid, 0).unwrap().clone();
+    app.run("select.clear", json!({})).unwrap();
+    assert_eq!(app.sketch_notices.latest_for(app.session.uid, 0).unwrap(), &event);
+    app.run("solid.extrude", json!({"sketch":first,"distance":5})).unwrap();
+    assert_eq!(app.sketch_notices.latest_for(app.session.uid, 0).unwrap(), &event, "submitting the same already-open editor is not a second edit");
+    app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
+    assert!(app.sketch_notices.latest_for(app.session.uid, 0).is_none());
+}
+
+#[test]
+fn accepted_worker_events_are_presented_once_and_rejected_scratch_events_never_escape() {
+    use serde_json::json;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let sketch = app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+    let bad = vec![("solid.box".into(), json!({"length":2,"width":3,"height":4})), ("solid.box".into(), json!({"length":-1}))];
+    assert!(app.session.scratch().compute_commands(&bad, None).is_err());
+    assert!(app.command_completed("plugin.run", Err("transaction refused".into())).is_err());
+    assert_eq!(app.session.active_sketch, Some(sketch));
+    assert!(app.sketch_notices.latest_for(app.session.uid, 0).is_none());
+    let commands = vec![("solid.box".into(), json!({"length":2,"width":3,"height":4}))];
+    let prepared = app.session.scratch().compute_commands(&commands, None).unwrap();
+    app.session.accept_commands(prepared).unwrap();
+    app.command_completed("plugin.run", Ok(json!({}))).unwrap();
+    let event = app.sketch_notices.latest_for(app.session.uid, 0).unwrap().clone();
+    assert_eq!(event.sketch, sketch);
+    app.command_completed("plugin.run", Ok(json!({}))).unwrap();
+    assert_eq!(app.sketch_notices.latest_for(app.session.uid, 0).unwrap(), &event);
+    assert!(app.session.take_sketch_finish_event().is_none());
+}
+
+#[test]
+fn malformed_new_sketch_target_keeps_the_previous_sketch_finished() {
+    use serde_json::json;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let first = app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+    assert!(app.run("sketch.create", json!({"plane":"XY","view":"invalid"})).is_err());
+    assert_eq!(app.session.active_sketch, None);
+    assert_eq!(app.sketch_notices.latest_for(app.session.uid, 0).unwrap().sketch, first);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn closing_local_siblings_never_finishes_a_sketch_in_another_window() {
+    use serde_json::json;
+    for right_only in [false, true] {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let first = app.docs.views.active().id;
+        let owner = crate::documents::view_duplicate(&mut app, first).unwrap();
+        let local = crate::documents::view_duplicate(&mut app, first).unwrap();
+        app.run("tab.view.move_to_window", json!({"view":owner})).unwrap();
+        let window = app.docs.views.window_of(owner).unwrap();
+        let sketch = app.run("sketch.create", json!({"plane":"XY","view":owner})).unwrap()["sketch"].as_u64().unwrap();
+        if right_only {
+            crate::documents::view_close_right_of(&mut app, first);
+        } else {
+            crate::documents::view_close_others(&mut app, first);
+        }
+        assert!(app.docs.views.get(local).is_none());
+        assert!(app.docs.views.views_of(window).unwrap().get(owner).is_some());
+        assert_eq!((app.session.active_sketch, app.session.sketching_view), (Some(sketch), Some(owner)));
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn changing_an_unfocused_window_layout_keeps_the_live_sketch_registry_and_focus() {
+    use serde_json::json;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let owner = app.docs.views.active().id;
+    let other = crate::documents::view_duplicate(&mut app, owner).unwrap();
+    app.run("tab.view.move_to_window", json!({"view":other})).unwrap();
+    let window = app.docs.views.window_of(other).unwrap();
+    app.run("tab.view.activate", json!({"id":owner,"window":0})).unwrap();
+    let sketch = app.run("sketch.create", json!({"plane":"XY","view":owner})).unwrap()["sketch"].as_u64().unwrap();
+    let focused = app.session.view_context.focused();
+    assert_eq!(crate::view_windows::focused_view(&app), focused);
+    let recent = app.session.view_context.recent().to_vec();
+    app.run("tab.view.layout", json!({"window":window,"layout":"side_by_side"})).unwrap();
+    assert_eq!((app.session.active_sketch, app.session.sketching_view), (Some(sketch), Some(owner)));
+    assert_eq!(app.session.view_context.focused(), focused);
+    assert_eq!(crate::view_windows::focused_view(&app), focused, "layout's internal activation must not change committed native focus");
+    assert_eq!(app.session.view_context.recent(), recent);
+    assert!(app.session.view_context.descriptors().iter().any(|view| view.id == owner));
+    assert!(app.docs.views.views_of(window).unwrap().is_tiled());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn reopening_a_notice_follows_its_moved_owner_even_from_a_foreign_child() {
+    use serde_json::json;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let owner = app.docs.views.active().id;
+    let other = crate::documents::view_duplicate(&mut app, owner).unwrap();
+    let sketch = app.run("sketch.create", json!({"plane":"XY", "view":owner})).unwrap()["sketch"].as_u64().unwrap();
+    app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+    assert!(app.run("solid.extrude", json!({"distance":0})).is_err());
+    let event = app.sketch_notices.latest_for(app.session.uid, 0).unwrap().clone();
+    app.run("tab.view.move_to_window", json!({"view":other})).unwrap();
+    let child = app.docs.views.window_of(other).unwrap();
+    crate::view_windows::with_strip(&mut app, Some(child), |app| {
+        crate::sketch_view::reopen_finished(app, event.clone());
+        assert_eq!(app.session.sketching_view, Some(owner), "queued foreign focus must not retarget the edit to this child");
+        Ok(())
+    })
+    .unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    let sentinel = crate::documents::view_duplicate(&mut app, owner).unwrap();
+    assert_eq!(app.docs.views.window_of(sentinel), Some(0), "keep a Model view in Main while its original owner moves");
+    app.run("tab.view.move_to_window", json!({"view":owner})).unwrap();
+    crate::sketch_view::reopen_finished(&mut app, event);
+    assert_eq!(app.session.sketching_view, Some(owner), "the owner ID follows a moved view");
+    assert_eq!(app.session.active_sketch, Some(sketch));
+}
+
+#[test]
+fn reopening_a_notice_with_a_closed_owner_resolves_a_live_model_view() {
+    use serde_json::json;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let owner = app.docs.views.active().id;
+    let fallback = crate::documents::view_duplicate(&mut app, owner).unwrap();
+    let sketch = app.run("sketch.create", json!({"plane":"XY", "view":owner})).unwrap()["sketch"].as_u64().unwrap();
+    app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+    assert!(crate::documents::view_close(&mut app, owner));
+    let event = app.sketch_notices.latest_for(app.session.uid, 0).unwrap().clone();
+    crate::sketch_view::reopen_finished(&mut app, event);
+    assert_eq!(app.session.sketching_view, Some(fallback));
+    assert_eq!(app.session.active_sketch, Some(sketch));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn closing_an_earlier_sketch_refreshes_the_restored_model_without_another_tool() {
+    use serde_json::json;
+    let mut h = plate_and_cylinder();
+    let sketch = first_sketch(&h.app);
+    let original = h.app.docs.views.active().id;
+    let duplicate = crate::documents::view_duplicate(&mut h.app, original).unwrap();
+    h.app.edit_sketch(sketch);
+    let owner = h.app.session.sketching_view.unwrap();
+    assert_eq!(owner, duplicate, "the editor starts in the focused duplicate");
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[5,5],"p1":[10,10]})).unwrap();
+    h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+    assert!(crate::documents::view_close(&mut h.app, owner));
+    assert_eq!(h.app.session.doc.marker, None);
+    assert!(h.app.session.needs_sketch_finish_evaluation());
+    assert!(h.app.deferred.is_none(), "catch-up never synthesizes a history command");
+    assert!(h.app.start_after_roll.is_none(), "closing the owner starts no next tool");
+    let uid = h.app.session.uid;
+    let job = h.app.sketch_refreshes.remove(&uid).unwrap().completed();
+    h.app.sketch_refreshes.insert(uid, job);
+    crate::sketch_view::poll_refreshes(&mut h.app, &h.ctx);
+    assert!(!h.app.session.needs_sketch_finish_evaluation());
+    assert_eq!(h.app.session.model.state().bodies.len(), 2, "the complete suffix is restored by cache adoption");
+    assert!(h.app.sketch_refreshes.is_empty());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_refused_drawing_tool_refreshes_a_finished_model_sketch_without_a_history_command() {
+    use serde_json::json;
+    let mut h = plate_and_cylinder();
+    let sketch = first_sketch(&h.app);
+    h.app.edit_sketch(sketch);
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[5,5],"p1":[10,10]})).unwrap();
+    h.app.run("drawing.create", json!({})).unwrap();
+    assert_eq!(h.app.session.active_sketch, Some(sketch));
+    let drawing = h.app.session.open_drawing;
+    h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+    assert!(h.app.run("drawing.note.add", json!({})).is_err());
+    assert_eq!(h.app.session.active_sketch, None);
+    assert_eq!(h.app.session.doc.marker, None);
+    assert_eq!(h.app.session.open_drawing, drawing);
+    assert!(h.app.session.needs_sketch_finish_evaluation());
+    assert!(h.app.deferred.is_none());
+    assert!(h.app.start_after_roll.is_none());
+    let uid = h.app.session.uid;
+    let job = h.app.sketch_refreshes.remove(&uid).unwrap().completed();
+    h.app.sketch_refreshes.insert(uid, job);
+    crate::sketch_view::poll_refreshes(&mut h.app, &h.ctx);
+    assert!(!h.app.session.needs_sketch_finish_evaluation());
+    assert_eq!(h.app.session.model.state().bodies.len(), 2);
+    assert_eq!(h.app.session.open_drawing, drawing, "model catch-up keeps Drawing focus");
+    assert!(h.app.sketch_notices.latest_for(uid, 0).is_some());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_new_edit_supersedes_a_tool_waiting_for_sketch_model_catch_up() {
+    use serde_json::json;
+    let mut h = plate_and_cylinder();
+    let sketch = first_sketch(&h.app);
+    h.app.edit_sketch(sketch);
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[5,5],"p1":[10,10]})).unwrap();
+    h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+    h.app.start("solid.extrude");
+    assert!(h.app.start_after_roll.is_some());
+    let fresh = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    assert_ne!(fresh, sketch);
+    assert!(h.app.start_after_roll.is_none(), "the previous tool cannot open after a newer edit starts");
+    let uid = h.app.session.uid;
+    let job = h.app.sketch_refreshes.remove(&uid).unwrap().completed();
+    h.app.sketch_refreshes.insert(uid, job);
+    h.app.poll_deferred(&h.ctx);
+    assert_eq!(h.app.session.active_sketch, Some(fresh));
+    assert!(h.app.dialog.is_none());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn stopped_sketch_catch_up_rejects_even_an_already_finished_worker_result() {
+    use serde_json::json;
+    let mut h = plate_and_cylinder();
+    let sketch = first_sketch(&h.app);
+    let original = h.app.docs.views.active().id;
+    let duplicate = crate::documents::view_duplicate(&mut h.app, original).unwrap();
+    h.app.edit_sketch(sketch);
+    let owner = h.app.session.sketching_view.unwrap();
+    assert_eq!(owner, duplicate, "the editor starts in the focused duplicate");
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[5,5],"p1":[10,10]})).unwrap();
+    h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+    assert!(crate::documents::view_close(&mut h.app, owner));
+    let uid = h.app.session.uid;
+    let job = h.app.sketch_refreshes.remove(&uid).unwrap().completed();
+    let progress = job.progress.clone();
+    h.app.sketch_refreshes.insert(uid, job);
+    let before = h.app.session.model.state();
+    crate::operations::cancel(&mut h.app, "sketch_refresh").unwrap();
+    assert!(progress.is_cancelled());
+    crate::sketch_view::poll_refreshes(&mut h.app, &h.ctx);
+    assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.model.state()), "Stop wins over an already queued successful result");
+    assert!(h.app.session.needs_sketch_finish_evaluation());
+    assert!(h.app.sketch_refreshes.is_empty(), "Stop does not immediately restart the same rebuild");
+    assert!(!h.app.session.stop_token().is_stopped(), "stopping one refresh leaves the document usable");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn sketch_model_refreshes_are_bounded_and_current_design_gets_the_first_slot() {
+    use serde_json::json;
+    fn pending() -> solidcraft_engine::Session {
+        let mut session = solidcraft_engine::Session::default();
+        session.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
+        // An empty sketch a person entered goes when it finishes, which the model must catch up on.
+        session.mark_sketch_entered_by_person();
+        session.prepare_edit_start("solid.box", &json!({})).unwrap();
+        assert!(session.needs_sketch_finish_evaluation());
+        session
+    }
+    let mut app = SolveApp::new(pending(), Default::default());
+    app.apply_off_thread = Some(std::time::Duration::ZERO);
+    for _ in 0..5 {
+        crate::documents::open_tab_behind(&mut app, pending()).unwrap();
+    }
+    let uid = app.session.uid;
+    let (job, _held) = crate::sketch_view::ModelRefresh::held();
+    app.sketch_refreshes.insert(uid, job);
+    crate::sketch_view::poll_refreshes(&mut app, &egui::Context::default());
+    assert_eq!(app.sketch_refreshes.len(), 2, "the other pending documents remain queued");
+    assert!(app.sketch_refreshes.contains_key(&uid), "current document owns a slot before backgrounds are considered");
+    assert!(app.docs.background().filter(|session| session.needs_sketch_finish_evaluation()).count() >= 4);
+}
+
+fn sheet_sketch_app() -> (SolveApp, u64, u64, u64) {
+    use serde_json::json;
+    let mut app = SolveApp::new(Default::default(), Default::default());
+    app.run("solid.box", json!({"length":40,"width":30,"height":5})).unwrap();
+    let made = app.run("drawing.create", json!({})).unwrap();
+    let drawing = app.session.open_drawing.unwrap();
+    let sheet = solidcraft_engine::doc::ids::decode(made["sheets"][0]["id"].as_str().unwrap()).unwrap();
+    crate::workspace::enter(&mut app, "drawing").unwrap();
+    let view = app.docs.views.active().id;
+    (app, drawing, sheet, view)
+}
+
+#[test]
+fn sheet_sketch_mode_owns_one_sheet_view_and_never_turns_its_camera() {
+    use serde_json::json;
+    let (mut app, drawing, sheet, view) = sheet_sketch_app();
+    let before = app.cam;
+    let made = app.run("drawing.sketch.create", json!({"owner":solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
+    let sketch = solidcraft_engine::doc::ids::decode(made["sketch"].as_str().unwrap()).unwrap();
+    assert_eq!(made["sketching_view"], view);
+    assert_eq!(app.session.editing_view(), Some(view));
+    assert_eq!(app.docs.views.get(view).unwrap().editing.unwrap().sketch, sketch);
+    assert_eq!(app.ui.tab, "SKETCH");
+    assert_eq!(crate::sketch_view::owner_label(&app, view).as_deref(), Some(app.tr("sketch_sheet.on_sheet")));
+    assert_eq!(app.cam, before);
+    assert!(app.pre_sketch_cam.is_none());
+    app.run("sketch.line", json!({"points":[[10,10],[20,10]]})).unwrap();
+    assert_eq!(app.session.open_drawing, Some(drawing));
+    app.run("sketch.finish", json!({})).unwrap();
+    assert_eq!(app.session.editing_view(), None);
+    assert!(app.docs.views.get(view).unwrap().editing.is_none());
+    assert!(crate::workspace::drawing_tab(&app.ui.tab));
+    assert_eq!(app.cam, before);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn sheet_sketch_fallback_opens_beside_the_focused_child_without_changing_the_main_host() {
+    use serde_json::json;
+    let (mut app, drawing, target_sheet, old_sheet_view) = sheet_sketch_app();
+    let model = app.docs.views.views().iter().find(|view| view.kind == solidcraft_views::ViewKind::Model).unwrap().id;
+    let other = app.run("drawing.sheet.add", json!({"name":"Focused child sheet"})).unwrap();
+    let child_sheet = solidcraft_engine::doc::ids::decode(other["sheet"].as_str().unwrap()).unwrap();
+    let child = crate::sheet_views::open_in(&mut app, drawing, child_sheet, false).unwrap();
+    assert_ne!(child, old_sheet_view);
+    assert!(crate::documents::view_close(&mut app, old_sheet_view));
+    app.run("tab.view.move_to_window", json!({"view":child})).unwrap();
+    let window = app.docs.views.window_of(child).unwrap();
+    assert_ne!(window, 0);
+    crate::documents::view_activate(&mut app, model);
+    crate::view_windows::focus_view(&mut app, child, Some(window)).unwrap();
+    crate::sketch_view::sync(&mut app).unwrap();
+    crate::view_windows::with_strip(&mut app, Some(window), |_| Ok(())).unwrap();
+    assert_eq!(app.view_windows.current_window(), 0, "idle commands run outside a child paint scope");
+    assert_eq!(crate::view_windows::opening_window(&app), window, "native focus still belongs to the child");
+    assert_eq!(app.ui.tab, "MODEL", "the main host restored its own ribbon");
+    app.docs.views.set_spec(model, solidcraft_viewport::ViewSpec::new(app.cam));
+    let root_views = app.docs.views.views().to_vec();
+    let root_layout = app.docs.views.tiles().cloned();
+    let camera = app.cam;
+    assert!(!crate::view_windows::layout_views(&app).iter().any(|(_, view)| {
+        view.kind == solidcraft_views::ViewKind::Sheet && crate::sheet_views::resolve(&app, view.subject.as_deref()) == Ok((drawing, target_sheet))
+    }));
+    let made = app.run("drawing.sketch.create", json!({"owner":solidcraft_engine::doc::ids::encode(target_sheet)})).unwrap();
+    let owner = made["sketching_view"].as_u64().unwrap();
+    assert_eq!(app.docs.views.window_of(owner), Some(window));
+    assert_eq!(app.session.view_context.descriptors().iter().find(|view| view.id == owner).unwrap().window, u64::from(window));
+    assert_eq!(app.session.active_sheet_sketch.as_ref().unwrap().view, Some(owner));
+    assert_eq!(app.session.active_sheet_sketch.as_ref().unwrap().sheet(&app.session.doc), Some(target_sheet));
+    let child_views = app.docs.views.views_of(window).unwrap();
+    assert_eq!(child_views.active().id, owner);
+    assert_eq!(child_views.get(child).unwrap().subject.as_deref(), Some(crate::sheet_views::subject(drawing, child_sheet).as_str()));
+    assert_eq!(child_views.tiles().unwrap().views(), vec![child, owner], "the existing child ground stays beside the new Sheet");
+    assert!(child_views.get(owner).unwrap().editing.is_some());
+    assert_eq!(app.docs.views.active().id, model);
+    assert_eq!(app.docs.views.views(), root_views.as_slice());
+    assert_eq!(app.docs.views.tiles(), root_layout.as_ref());
+    assert_eq!(app.cam, camera);
+    assert!(app.pre_sketch_cam.is_none());
+}
+
+#[test]
+fn sheet_sketch_context_follows_owner_focus_while_other_sheet_views_stay_normal() {
+    use serde_json::json;
+    let (mut app, _, sheet, owner) = sheet_sketch_app();
+    let other = crate::documents::view_duplicate(&mut app, owner).unwrap();
+    crate::documents::focus_view(&mut app, owner);
+    app.start("drawing.sketch.create");
+    let entry = app.session.active_sheet_sketch.clone().unwrap();
+    assert_eq!(entry.view, Some(owner));
+    assert!(crate::workspace::tool_receives_input(&app));
+    crate::documents::focus_view(&mut app, other);
+    assert_eq!(app.session.active_sheet_sketch.as_ref().unwrap().view, Some(owner));
+    assert!(app.docs.views.get(other).unwrap().editing.is_none());
+    assert!(!crate::workspace::tool_receives_input(&app));
+    assert!(!crate::workspace::visible_tabs(&app).contains(&"SKETCH"));
+    crate::documents::focus_view(&mut app, owner);
+    assert!(crate::workspace::visible_tabs(&app).contains(&"SKETCH"));
+    assert_eq!(app.ui.tab, "SKETCH");
+    assert!(crate::workspace::tool_receives_input(&app));
+    assert_eq!(entry.owner, solidcraft_engine::doc::drawing::Owner::Sheet(sheet));
+    app.run("sketch.cancel", json!({})).unwrap();
+}
+
+#[test]
+fn closing_a_sheet_sketch_owner_finishes_and_its_notice_resolves_a_replacement_sheet_host() {
+    use serde_json::json;
+    let (mut app, _, sheet, owner) = sheet_sketch_app();
+    app.run("drawing.sketch.create", json!({"owner":solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
+    app.run("sketch.line", json!({"points":[[10,10],[20,10]]})).unwrap();
+    let sketch = app.session.active_sheet_sketch.as_ref().unwrap().sketch;
+    assert!(crate::documents::view_close(&mut app, owner));
+    assert!(app.session.active_sheet_sketch.is_none());
+    let event = app.sketch_notices.latest_for(app.session.uid, 0).unwrap().clone();
+    assert_eq!(event.view, Some(owner));
+    crate::sketch_view::reopen_finished(&mut app, event);
+    let entry = app.session.active_sheet_sketch.as_ref().unwrap();
+    assert_eq!(entry.sketch, sketch);
+    assert_ne!(entry.view, Some(owner));
+    assert!(entry.view.is_some());
+    assert!(app.pre_sketch_cam.is_none());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn sheet_sketch_moving_between_windows_keeps_owner_and_routes_its_finish_notice() {
+    use serde_json::json;
+    let (mut app, _, sheet, owner) = sheet_sketch_app();
+    app.run("drawing.sketch.create", json!({"owner":solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
+    app.run("sketch.line", json!({"points":[[10,10],[20,10]]})).unwrap();
+    let sketch = app.session.active_sheet_sketch.as_ref().unwrap().sketch;
+    app.run("tab.view.move_to_window", json!({"view":owner})).unwrap();
+    let window = app.docs.views.window_of(owner).unwrap();
+    assert_eq!(app.session.editing_view(), Some(owner));
+    assert!(app.docs.views.views_of(window).unwrap().get(owner).unwrap().editing.is_some());
+    app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
+    assert!(app.session.active_sheet_sketch.is_none());
+    let event = app.sketch_notices.latest_for(app.session.uid, window).unwrap().clone();
+    assert_eq!(event.sketch, sketch);
+    let views_before = crate::view_windows::layout_views(&app).iter().map(|(_, view)| view.id).collect::<Vec<_>>();
+    crate::sketch_view::reopen_finished(&mut app, event);
+    assert_eq!(
+        crate::view_windows::layout_views(&app).iter().map(|(_, view)| view.id).collect::<Vec<_>>(),
+        views_before,
+        "binding a moved owner never opens another Sheet view"
+    );
+    assert_eq!(app.session.editing_view(), Some(owner));
+    assert_eq!(app.session.active_sheet_sketch.as_ref().unwrap().sketch, sketch);
+    assert!(app.pre_sketch_cam.is_none());
+}
+
+#[test]
+fn sheet_sketch_drawing_view_owner_is_distinct_from_the_sheet_tile_id() {
+    use serde_json::json;
+    let (mut app, drawing, sheet, tile) = sheet_sketch_app();
+    app.run("solid.box", json!({"length":10,"width":20,"height":5})).unwrap();
+    let made =
+        app.run("drawing.view.base", json!({"sheet":solidcraft_engine::doc::ids::encode(sheet),"position_mm":[100,100],"scale":"1:1"})).unwrap();
+    let view = solidcraft_engine::doc::ids::decode(made["view"].as_str().unwrap()).unwrap();
+    // Setup only: the sheet shown is the selection receiver, so a picked drawing view lives in
+    // session.selection (the per-sheet sheet_selection map is no longer read).
+    app.session.selection = vec![solidcraft_engine::Sel::Drawing { drawing, object: view }];
+    app.start("drawing.sketch.create");
+    let entry = app.session.active_sheet_sketch.as_ref().unwrap();
+    assert_eq!(entry.owner, solidcraft_engine::doc::drawing::Owner::View(view));
+    assert_eq!(entry.view, Some(tile));
+    assert_eq!(entry.sheet(&app.session.doc), Some(sheet));
+    let drawing = app.session.doc.drawing(drawing).unwrap();
+    let record = drawing.view(view).unwrap();
+    let name = crate::drawing_workspace::browser::view_name(&app, drawing, record, 1);
+    assert_eq!(name, app.tr("cmd.view_front"), "an unlabelled base view uses its canonical named projection");
+    assert_eq!(crate::sketch_view::owner_label(&app, tile).unwrap(), solidcraft_ui_text::format("sketch_sheet.on_view", &[("view", &name)]));
+    let mut custom = record.clone();
+    let mut label = solidcraft_engine::doc::drawing::view::ViewLabel::new("A".into());
+    label.name = "View A".into();
+    custom.label = Some(label);
+    assert_eq!(crate::drawing_workspace::browser::view_name(&app, drawing, &custom, 1), "View A");
+    custom.label = None;
+    custom.id = 0;
+    assert_eq!(
+        crate::drawing_workspace::browser::view_name(&app, drawing, &custom, 3),
+        solidcraft_ui_text::format("ui.drawing_browser_view", &[("number", "3")])
+    );
+}
+
+#[test]
+fn starting_a_drawing_annotation_editor_finishes_the_sheet_sketch_before_its_form_opens() {
+    use serde_json::json;
+    let (mut app, _, sheet, owner) = sheet_sketch_app();
+    app.run("drawing.sketch.create", json!({"owner":solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
+    app.run("sketch.line", json!({"points":[[10,10],[20,10]]})).unwrap();
+    let sketch = app.session.active_sheet_sketch.as_ref().unwrap().sketch;
+    app.start("drawing.note");
+    assert!(app.session.active_sheet_sketch.is_none());
+    assert!(crate::drawing_workspace::placing_note(&app));
+    assert!(app.docs.views.get(owner).unwrap().editing.is_none());
+    assert_eq!(app.sketch_notices.latest_for(app.session.uid, 0).unwrap().sketch, sketch);
+    assert!(app.pre_sketch_cam.is_none());
+}
+
+#[test]
+fn an_explicit_sheet_sketch_host_binds_its_drawing_without_opening_another_view() {
+    use serde_json::json;
+    let (mut app, drawing, sheet, host) = sheet_sketch_app();
+    app.run("drawing.create", json!({"name":"Another drawing"})).unwrap();
+    assert_ne!(app.session.open_drawing, Some(drawing));
+    let views = crate::view_windows::layout_views(&app).iter().map(|(_, view)| view.id).collect::<Vec<_>>();
+    let made = app.run("drawing.sketch.create", json!({"owner":solidcraft_engine::doc::ids::encode(sheet),"view":host})).unwrap();
+    assert_eq!(made["sketching_view"], host);
+    assert_eq!(app.session.open_drawing, Some(drawing));
+    assert_eq!(app.session.active_sheet_sketch.as_ref().unwrap().view, Some(host));
+    assert_eq!(crate::view_windows::layout_views(&app).iter().map(|(_, view)| view.id).collect::<Vec<_>>(), views);
+}
+
+#[test]
+fn drawing_toolbar_entry_finishes_a_sheet_sketch_started_through_the_engine() {
+    use serde_json::json;
+    let mut app = SolveApp::new(Default::default(), Default::default());
+    app.run("solid.box", json!({"length":40,"width":30,"height":5})).unwrap();
+    let made = app.run("drawing.create", json!({})).unwrap();
+    crate::workspace::enter(&mut app, "drawing").unwrap();
+    let host = app.docs.views.active().clone();
+    assert_eq!(host.kind, solidcraft_views::ViewKind::Sheet);
+    assert_eq!(host.subject, Some(format!("{}/{}", made["id"].as_str().unwrap(), made["sheets"][0]["id"].as_str().unwrap())));
+    assert_eq!(app.session.view_context.focused(), host.id);
+    assert!(!app.session.model_focus, "the toolbar fixture commits a real Sheet receiver");
+    assert!(app.session.view_context.is_hosted());
+    let entry = app.session.execute("drawing.sketch.create", &json!({"owner":made["sheets"][0]["id"],"view":host.id})).unwrap();
+    assert_eq!(entry["sketching_view"], host.id);
+    assert_eq!(app.session.editing_view(), Some(host.id));
+    let sketch = solidcraft_engine::doc::ids::decode(entry["sketch"].as_str().unwrap()).unwrap();
+    app.session.execute("sketch.line", &json!({"points":[[10,10],[20,10]],"infer":false})).unwrap();
+    assert!(app.session.active_sheet_sketch.is_some());
+    app.start("drawing.note");
+    assert!(app.session.active_sheet_sketch.is_none());
+    assert!(crate::drawing_workspace::placing_note(&app));
+    assert_eq!(app.docs.views.active().id, host.id, "the Drawing toolbar keeps its committed Sheet host");
+    assert_eq!(app.sketch_notices.latest_for(app.session.uid, 0).unwrap().sketch, sketch);
+}
+
+#[test]
+fn sketch_finish_notice_uses_window_safe_area_instead_of_the_last_ground_tile() {
+    use egui::{Pos2, RawInput, Rect, pos2, vec2};
+    use serde_json::json;
+    let mut app = SolveApp::new(Default::default(), Default::default());
+    app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+    assert!(app.run("solid.extrude", json!({"distance":0})).is_err());
+    app.preferences.navigation_bar.edge = crate::ui_kit::NavigationEdge::Bottom;
+    let t = solidcraft_theme::Tokens::get();
+    let navigation_height = crate::ui_kit::NavigationMetrics::for_size(app.preferences.navigation_bar.size).height();
+    let navigation_clearance = navigation_height + crate::ui_kit::NAV_BOTTOM + t.space_8;
+    let ctx = crate::fonts::test_context();
+    let screen = Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0));
+    let handle = format!("sketch:finished:{}:0", app.session.uid);
+    for bottom_obstacle in [false, true] {
+        let mut previous = None;
+        for right_ground in [false, true] {
+            app.viewport.window = None;
+            app.viewport.rect =
+                Some(Rect::from_min_max(pos2(if right_ground { 650.0 } else { 0.0 }, 150.0), pos2(if right_ground { 1200.0 } else { 550.0 }, 700.0)));
+            let mut host = Rect::NOTHING;
+            let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+                host = ui.max_rect();
+                // A tall right editor ends above the bottom notice band. It must not shift
+                // a window-centred notice left, regardless of the last ground tile.
+                let mut obstacles =
+                    vec![Rect::from_min_max(pos2(host.right() - 320.0, host.top() + 100.0), pos2(host.right(), host.bottom() - 150.0))];
+                // The left tile's real navigation row is inset from the host by space_8.
+                let navigation_top = host.bottom() - t.space_8 - crate::ui_kit::NAV_BOTTOM - navigation_height;
+                obstacles.push(Rect::from_min_size(pos2(host.left() + t.space_8, navigation_top), vec2(300.0, navigation_height)));
+                if bottom_obstacle {
+                    obstacles.push(Rect::from_min_max(pos2(host.left(), host.bottom() - 80.0), host.max));
+                }
+                app.viewport.host_windows = Some(obstacles);
+                crate::sketch_view::show_notice(&mut app, ui);
+            });
+            // The frame's texture upload is not under test; egui asserts it is cleared before the output drops.
+            output.textures_delta.clear();
+            let notice = crate::scenario::rect_of(&handle).unwrap();
+            assert!(
+                (notice.center().x - host.center().x).abs() < 0.5,
+                "notice centres in the window, independent of left/right ground: {notice:?} in {host:?}"
+            );
+            let bottom = host.bottom() - navigation_clearance.max(if bottom_obstacle { 80.0 } else { 0.0 }) - t.space_8;
+            assert!((notice.bottom() - bottom).abs() < 0.5, "notice stays above navigation and bottom obstacles");
+            let navigation_top = host.bottom() - t.space_8 - crate::ui_kit::NAV_BOTTOM - navigation_height;
+            assert!(notice.bottom() + t.space_8 <= navigation_top + 0.5, "notice clears the navigation row");
+            assert!(host.contains_rect(notice));
+            if let Some(previous) = previous {
+                assert_eq!(notice, previous, "changing only the ground tile cannot move a window notice");
+            }
+            previous = Some(notice);
+        }
+    }
+}
+
+#[test]
+fn ownerless_sheet_sketch_does_not_receive_hosted_tool_input() {
+    use serde_json::json;
+    // Headless callers legitimately own no UI tile. Importing that state into a
+    // host must not treat the missing owner as permission for every tile.
+    let mut session = solidcraft_engine::Session::default();
+    session.execute("solid.box", &json!({"length":40,"width":30,"height":5})).unwrap();
+    let made = session.execute("drawing.create", &json!({})).unwrap();
+    session.execute("drawing.sketch.create", &json!({"owner":made["sheets"][0]["id"]})).unwrap();
+    assert_eq!(session.active_sheet_sketch.as_ref().unwrap().view, None);
+    let mut app = SolveApp::new(session, Default::default());
+    assert!(!crate::workspace::tool_receives_input(&app));
+    app.preferences.workspace_follows_view = false;
+    assert!(crate::workspace::tool_receives_input(&app), "legacy independent workspace behavior remains available");
 }

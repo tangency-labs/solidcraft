@@ -15,7 +15,7 @@ use std::sync::Mutex;
 
 use serde_json::{Value, json};
 use solidcraft_doc::config::RowKey;
-use solidcraft_doc::{DesignLink, Document, FeatureKind, LinkedBodyProperties, UserMaterial};
+use solidcraft_doc::{DesignLink, Document, FeatureKind, LinkedBodyProperties, MeshData, UserMaterial};
 
 use super::CommandSpec;
 use super::design_link::{LinkState, absolute, link_presence, link_target, read_linked_file, resolve, same_file, stored};
@@ -46,15 +46,18 @@ const REPLACE_WITH_LINK_CONTRACT: TypedContract<ReplaceWithLinkParams> = TypedCo
 const LINKS_CONTRACT: TypedContract<LinksParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("component.insert_design", "Insert Design", crate::checked!("component.insert_design", insert_design))
+    CommandSpec::new("component.insert_design", "Insert Design", crate::checked!("component.insert_design", insert_design)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("component")
         .contract(&INSERT_DESIGN_CONTRACT)
         .output(output_schema_for::<InsertDesignResult>)
         .params(
-        "path: a .sc design → a new component linked to it, holding its solid bodies as placed in that design and a copy of its design properties; \
+        "path: a .sc design → a new component linked to it, holding its solid bodies as placed in that design, its canvases and decals where the design shows them, and a copy of its design properties; \
          configuration?: a row name or id (null or omitted: the saved source state); name? (default: the design's name); parent?: component id or name (default: the active one); \
          translate?: [x,y,z] in mm from the destination parent's origin (default [0,0,0], also with reuse); \
+         axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; \
+         matrix?: [12 or 16 numbers] (row-major 3x4 or 4x4, its translation column numbers or length expressions) or to_matrix?: [12 or 16 numbers]; \
+         tolerance?: largest accepted |RᵀR − I| (default 1e-9, at most 1e-3); \
          reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file and configuration when available",
     ),
     CommandSpec::new("component.update_links", "Update Links", crate::checked!("component.update_links", update_links))
@@ -64,7 +67,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "component?: id or name (default: every linked component); components?: a list of ids or names, which goes on past a design it \
          cannot read (that one keeps its bodies, is named in failed and gets a warning) — reads the linked designs again and replaces \
-         their bodies where they changed, as one undo step; → updated, unchanged, failed ([{component, name, error}]), warnings (also \
+         their bodies where they changed, and their part properties (part number, revision…) where the design changed them and this \
+         design did not, as one undo step; → updated, unchanged, failed ([{component, name, error}]), warnings (also \
          joints whose faces are gone or that no longer solve)",
     ),
     CommandSpec::new("component.relink", "Relink Source", crate::checked!("component.relink", relink))
@@ -148,9 +152,14 @@ pub fn resolve_design_links(doc: &mut Document, from: Option<&str>) {
     super::design_link::located(doc, from);
 }
 
-/// The bodies of a linked design: its name, the Import feature that holds them and the names
-/// the design gives their faces (`Feature::link_faces`), with the source's design properties.
-type Linked = (String, solidcraft_io::StepFeature, Vec<Vec<String>>, solidcraft_doc::Metadata, Vec<SourceProperties>);
+/// The bodies of a linked design: its name, the Import feature that holds its solids and the
+/// names the design gives their faces (`Feature::link_faces`), with the source's design
+/// properties, and its mesh bodies as placed in it.
+type Linked = (String, solidcraft_io::StepFeature, Vec<Vec<String>>, solidcraft_doc::Metadata, Vec<SourceProperties>, Vec<MeshData>);
+
+/// A linked design's canvases and decals, each on a plane in the design's own coordinates (the
+/// frame its linked bodies come in), with what could not be carried as it is.
+type LinkedImages = (Vec<solidcraft_doc::canvas::Canvas>, Vec<String>);
 
 #[derive(Clone)]
 struct SourceProperties {
@@ -186,6 +195,10 @@ struct LinkRead {
     faces: u64,
     warnings: Vec<String>,
     properties: Vec<SourceProperties>,
+    metadata: solidcraft_doc::Metadata,
+    /// The mesh bodies it gave. They share their arrays with the link that took them, so the
+    /// check that the link still holds them is cheap.
+    meshes: Vec<MeshData>,
 }
 
 #[cfg(test)]
@@ -200,21 +213,23 @@ fn digest<T: Hash + ?Sized>(value: &T) -> u64 {
     h.finish()
 }
 
-/// Warnings and source properties of the last read of `file`, when it had these bytes and gave the STEP text
-/// `step` and the face names `faces`: the bodies it gives are the ones the link holds.
+/// Warnings, source properties and design properties of the last read of `file`, when it had these
+/// bytes and gave the STEP text `step`, the face names `faces` and the mesh bodies `meshes`: the
+/// bodies it gives are the ones the link holds.
 fn unchanged_read(
     file: &Path,
     configuration: Option<SelectedConfiguration>,
     bytes: u64,
     step: u64,
     faces: u64,
-) -> Option<(Vec<String>, Vec<SourceProperties>)> {
+    meshes: &[MeshData],
+) -> Option<(Vec<String>, Vec<SourceProperties>, solidcraft_doc::Metadata)> {
     let file = absolute(file);
     let reads = READS.lock().ok()?;
     reads
         .iter()
-        .find(|r| r.file == file && r.configuration == configuration && r.bytes == bytes && r.step == step && r.faces == faces)
-        .map(|r| (r.warnings.clone(), r.properties.clone()))
+        .find(|r| r.file == file && r.configuration == configuration && r.bytes == bytes && r.step == step && r.faces == faces && r.meshes == meshes)
+        .map(|r| (r.warnings.clone(), r.properties.clone(), r.metadata.clone()))
 }
 
 fn remember_read(
@@ -224,6 +239,8 @@ fn remember_read(
     feature: &solidcraft_io::StepFeature,
     faces: &[Vec<String>],
     properties: &[SourceProperties],
+    metadata: &solidcraft_doc::Metadata,
+    meshes: &[MeshData],
 ) {
     let FeatureKind::Import { step, .. } = &feature.kind else { return };
     let file = absolute(file);
@@ -240,17 +257,22 @@ fn remember_read(
         faces: digest(faces),
         warnings: feature.warnings.clone(),
         properties: properties.to_vec(),
+        metadata: metadata.clone(),
+        meshes: meshes.to_vec(),
     });
 }
 
 /// The bytes of the design at `file`, which must not be the design saved at `own`.
 fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
     let shown = file.display().to_string();
-    if own.is_some_and(|o| same_file(Path::new(o), file)) {
+    // A network location only when its server is allowed, a device never: judged from the text
+    // before anything is asked of the disk (on Windows, resolving or reading `\\host\share\x`
+    // connects to the host), so a refused path skips the self-link check, which resolves it, and
+    // `read_linked_file` says why it is refused.
+    let reachable = solidcraft_io::vfs::design_path_refusal(&shown, own).is_none();
+    if reachable && own.is_some_and(|o| same_file(Path::new(o), file)) {
         return Err(EngineError::Other(format!("{shown}: a design can't be linked into itself")));
     }
-    // A network location only when its server is allowed, a device never: judged from the text
-    // before anything is read (on Windows, reading `\\host\share\x` connects to the host).
     read_linked_file(file, own).map_err(|e| EngineError::Other(e.reason))
 }
 
@@ -300,14 +322,15 @@ pub(super) fn file_sha256(file: &Path, own: Option<&str>) -> Option<String> {
     Some(digest)
 }
 
-/// The solid bodies of `bytes`, the design at `file`, as an Import feature. The model the file
-/// keeps is its evaluation when this build saved it for exactly that design, as when it is opened.
+/// The solid bodies of `bytes`, the design at `file`, as an Import feature, and its canvases and
+/// decals ([`design_images`]). The model the file keeps is its evaluation when this build saved it
+/// for exactly that design, as when it is opened.
 fn design_bodies(
     file: &Path,
     bytes: &[u8],
     configuration: Option<SelectedConfiguration>,
     validation: solidcraft_kernel::Validation,
-) -> Result<Linked> {
+) -> Result<(Linked, LinkedImages)> {
     #[cfg(test)]
     EVALUATED.with(|n| n.set(n.get() + 1));
     let shown = file.display().to_string();
@@ -330,12 +353,64 @@ fn design_bodies(
         // Its scratch evaluation cannot use the saved geometry of another row.
         part.execute("config.activate", &json!({"row": selected.row})).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
     }
-    let (name, feature, faces, metadata, properties) = session_bodies(&part, &shown)?;
-    remember_read(file, configuration, digest(bytes), &feature, &faces, &properties);
-    Ok((name, feature, faces, metadata, properties))
+    let (name, feature, faces, metadata, properties, meshes) = session_bodies(&part, &shown)?;
+    remember_read(file, configuration, digest(bytes), &feature, &faces, &properties, &metadata, &meshes);
+    let images = design_images(&part, &shown);
+    Ok(((name, feature, faces, metadata, properties, meshes), images))
 }
 
-/// The solid bodies of `part`, the design saved as `shown`, as an Import feature.
+/// The canvases and decals of `part`, the design saved as `shown`, each where the design shows
+/// it, on a fixed plane in the design's own coordinates: the frame its linked bodies come in, so
+/// added to the linked component they sit on the bodies as in the design and move with each
+/// placement. One that follows sketch points comes in where they put it now and no longer
+/// follows them; one those points stretch keeps its image's own shape, and is named in the
+/// warnings. Hidden ones come in hidden.
+fn design_images(part: &Session, shown: &str) -> LinkedImages {
+    use solidcore_record::{Plane, Vec2};
+    let (vals, _) = part.doc.param_values();
+    let state = part.model.state();
+    let (mut images, mut warnings) = (Vec::new(), Vec::new());
+    for c in &part.doc.canvases {
+        let mut image = c.clone();
+        image.anchor = None;
+        image.component = 0;
+        match c.anchor.as_ref().and_then(|a| part.doc.canvas_anchor_corners(c, a, &state).ok()) {
+            Some(k) => {
+                // The frame unmirrored: a mirrored image's bottom-left corner is its bottom-right.
+                let (bl, br, tl) = if c.flip { (k[1], k[0], k[2]) } else { (k[0], k[1], k[3]) };
+                let [w, h] = c.pixels;
+                let aspect = if w == 0 { 1.0 } else { f64::from(h) / f64::from(w) };
+                let at = |p: solidcore_record::Vec3| [p.x, p.y, p.z];
+                let (Some(plane), Some((width, stretched))) =
+                    (Plane::new(bl, br - bl, tl - bl), solidcore_ops::affine::picture_fit(at(bl), at(br), at(tl), aspect))
+                else {
+                    warnings.push(format!("{shown}: image `{}` has no area where its sketch puts it: left out", c.name));
+                    continue;
+                };
+                image.plane = solidcraft_doc::PlaneRef::Custom { plane };
+                image.width = width;
+                image.angle = 0.0;
+                let height = image.height();
+                image.center = Vec2::new(image.width / 2.0, height / 2.0);
+                if stretched {
+                    warnings.push(format!("{shown}: image `{}` is stretched by its sketch there; it comes in with its image's own shape", c.name));
+                }
+            }
+            None => match part.doc.canvas_plane(&vals, c, &state) {
+                Ok(plane) => image.plane = solidcraft_doc::PlaneRef::Custom { plane },
+                Err(e) => {
+                    warnings.push(format!("{shown}: image `{}`: {e}: left out", c.name));
+                    continue;
+                }
+            },
+        }
+        images.push(image);
+    }
+    (images, warnings)
+}
+
+/// The solid bodies of `part`, the design saved as `shown`, as an Import feature, and its mesh
+/// bodies, which a Mesh Import feature beside it holds (#20050).
 fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
     let name = part.doc.name.clone();
     if let Some(e) = part.model.results.iter().find_map(|r| r.error.clone()) {
@@ -349,9 +424,7 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
     let step = solidcraft_io::export(&part.doc.painted_for_link(&world), &solids, solidcraft_io::Format::Step, &name)
         .map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
     let mut feature = solidcraft_io::step_import_feature(&step, shown).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
-    if world.bodies.len() > solids.len() {
-        feature.warnings.push(format!("{} mesh bodies of {shown} are not linked", world.bodies.len() - solids.len()));
-    }
+    let meshes: Vec<MeshData> = world.bodies.iter().filter(|b| b.body.is_mesh()).map(|b| super::file::mesh_data(&part.doc, b, &b.mesh())).collect();
     // The STEP text keeps no face names: carry the design's own, so references into the linked
     // bodies follow them as they do inside the design (#3330).
     let faces = solidcraft_doc::naming::carried_face_names(&world, &feature.import.bodies);
@@ -424,7 +497,7 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
                 .push(format!("cosmetic threads on {} are not linked because the source body was split into several bodies", source.name));
         }
     }
-    Ok((name, feature, faces, part.doc.metadata.clone(), properties))
+    Ok((name, feature, faces, part.doc.metadata.clone(), properties, meshes))
 }
 
 fn material_fingerprint(doc: &Document, material: &str) -> Result<Option<String>> {
@@ -623,6 +696,46 @@ fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperti
     Ok(changed)
 }
 
+/// Take the linked design's properties (`source`, its `metadata`, which Insert Design seeds a new
+/// component with) into `component`. A property that still has the value the link last took
+/// follows the design; one changed in this design stays, and the returned warnings name it when
+/// the design's value has moved. A link that took none (made before it kept them) adds only the
+/// properties the component lacks. Session::execute makes this part of the command's undo step.
+fn inherit_metadata(s: &mut Session, component: u64, source: &solidcraft_doc::Metadata) -> (bool, Vec<String>) {
+    let Some(taken) = s.doc.links.get(&component).map(|l| l.inherited_metadata.clone()) else { return (false, Vec::new()) };
+    let Some(c) = s.doc.components.iter().find(|c| c.id == component) else { return (false, Vec::new()) };
+    let (name, before) = (c.name.clone(), c.metadata.clone());
+    let mut after = before.clone();
+    let mut warnings = Vec::new();
+    let keys: std::collections::BTreeSet<&String> = source.0.keys().chain(taken.0.keys()).collect();
+    for key in keys {
+        let (theirs, was) = (source.0.get(key), taken.0.get(key));
+        let here = after.0.get(key);
+        if here == was {
+            match theirs {
+                Some(value) => after.0.insert(key.clone(), value.clone()),
+                None => after.0.remove(key),
+            };
+        } else if here != theirs && was != theirs {
+            let shown = |v: Option<&Value>| v.map_or_else(|| "none".to_string(), Value::to_string);
+            warnings.push(format!(
+                "{name} keeps its part property `{key}` ({}), set in this design; the linked design now has {}",
+                shown(here),
+                shown(theirs)
+            ));
+        }
+    }
+    let changed = after != before;
+    let d = s.doc_mut();
+    if changed && let Some(c) = d.components.iter_mut().find(|c| c.id == component) {
+        c.metadata = after;
+    }
+    if let Some(link) = d.links.get_mut(&component) {
+        link.inherited_metadata = source.clone();
+    }
+    (changed, warnings)
+}
+
 fn component_key(s: &Session, p: &Value, key: &str, cmd: &str) -> Result<u64> {
     let k = match p.get(key) {
         Some(Value::Number(n)) => n.to_string(),
@@ -638,14 +751,73 @@ fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
-fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "component.insert_design";
-    let selection = configuration_key(p, None, cmd)?;
-    let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
+/// Placement transform for `component.insert_design`: accepts `to_matrix` or `matrix` (row-major
+/// 3x4 or 4x4, with length expressions in the translation column), or `translate`, `axis`, `angle`,
+/// and `origin`.
+fn placement_transform(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_doc::Mat, Option<solidcraft_doc::ExpressedMove>)> {
+    let matrix = p.get("matrix");
+    let to_matrix = p.get("to_matrix");
+    if matrix.is_some() && to_matrix.is_some() {
+        return Err(bad(cmd, "give either to_matrix or matrix, not both"));
+    }
+    if let Some(key) = ["to_matrix", "matrix"].into_iter().find(|k| p.get(*k).is_some()) {
+        if let Some(k) = ["translate", "axis", "angle", "origin"].into_iter().find(|k| p.get(*k).is_some()) {
+            return Err(bad(cmd, format!("give either {key} or {k}, not both")));
+        }
+        let m = matrix.or(to_matrix).ok_or_else(|| bad(cmd, "matrix"))?;
+        let (numbers, kept) =
+            super::component::matrix::with_exprs(m, |e| s.doc.eval(e, solidcraft_doc::expr::Kind::Length).map_err(|err| err.to_string()), cmd)?;
+        let tolerance = super::component::matrix::tolerance(p, cmd)?;
+        let transform = super::component::matrix::rigid(&numbers, tolerance, cmd)?;
+        if !solidcraft_doc::is_placement(&transform) {
+            return Err(bad(cmd, "placement transform exceeds supported numeric range"));
+        }
+        let expressed = if kept.iter().any(Option::is_some) {
+            Some(solidcraft_doc::ExpressedMove {
+                translate: kept,
+                at: [transform[3][0], transform[3][1], transform[3][2]],
+                frame: solidcraft_doc::IDENTITY,
+                world: false,
+                origin: Default::default(),
+                origin_at: [0.0; 3],
+                rotation: solidcraft_doc::IDENTITY,
+                grounded_ok: false,
+            })
+        } else {
+            None
+        };
+        return Ok((transform, expressed));
+    }
+
     let translate = match p.get("translate") {
         None => solidcore_record::Vec3::ZERO,
         Some(v) => vec3(v).filter(|t| t.is_finite() && t.len() < 1e9).ok_or_else(|| bad(cmd, "`translate` must be [x, y, z] in mm"))?,
     };
+    let axis = super::component::move_vector(p, "axis", solidcore_record::Vec3::Z, false, cmd)?;
+    let angle = match p.get("angle") {
+        Some(Value::String(e)) => s.doc.eval(e, solidcraft_doc::expr::Kind::Angle).map_err(|e| bad(cmd, e.to_string()))?,
+        None => 0.0,
+        Some(value) => value.as_f64().ok_or_else(|| bad(cmd, "angle must be a number or angle expression"))?,
+    };
+    let origin = super::component::move_vector(p, "origin", solidcore_record::Vec3::ZERO, true, cmd)?;
+    if !(translate.is_finite() && axis.is_finite() && angle.is_finite() && origin.is_finite()) {
+        return Err(bad(cmd, "non-finite placement"));
+    }
+    if angle != 0.0 && axis.normalized().is_none() {
+        return Err(bad(cmd, "rotation axis must have a finite nonzero length"));
+    }
+    let transform = solidcraft_doc::rigid(translate, origin, axis, angle);
+    if !solidcraft_doc::is_placement(&transform) {
+        return Err(bad(cmd, "placement transform exceeds supported numeric range"));
+    }
+    Ok((transform, None))
+}
+
+fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.insert_design";
+    let selection = configuration_key(p, None, cmd)?;
+    let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
+    let (transform, expressed) = placement_transform(s, p, cmd)?;
     // A network or device path is judged from its text, as given, before anything reads it.
     link_refused(s.path.as_deref(), given).map_err(|e| bad(cmd, e.to_string()))?;
     let file = absolute(Path::new(given));
@@ -671,9 +843,12 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             let parent = if p.get("parent").is_some() { component_key(s, p, "parent", cmd)? } else { s.active_component };
             // Reuse the definition, not another placement's captured or pending move.
             // Insert Design places from the parent origin whether the link is new or reused.
-            let mut transform = solidcraft_doc::IDENTITY;
-            transform[3] = [translate.x, translate.y, translate.z, 1.0];
             let occurrence = s.doc_mut().add_occurrence(component, parent, transform)?;
+            if let Some(expressed) = expressed
+                && let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occurrence)
+            {
+                o.expressed_moves.push(expressed);
+            }
             return reply(cmd, InsertDesignResult { inserted: DesignInserted::Reused { occurrence, component }, param_warnings: Vec::new() });
         }
     }
@@ -681,7 +856,9 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         Some(bytes) => bytes,
         None => read_link(&file, s.path.as_deref())?,
     };
-    let (design_name, sf, faces, metadata, properties) = design_bodies(&file, &bytes, configuration, s.validation())?;
+    let ((design_name, mut sf, faces, metadata, properties, meshes), (images, image_warnings)) =
+        design_bodies(&file, &bytes, configuration, s.validation())?;
+    sf.warnings.extend(image_warnings);
     let read = DesignLink::file_digest(&bytes);
     let name = str_(p, "name").filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or(design_name);
     let mut create = json!({"name": name, "activate": false});
@@ -697,7 +874,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     let occ = made["occurrence"].as_u64();
     // Seed only a new definition: reused links keep any locally edited part properties.
     if let Some(c) = s.doc_mut().components.iter_mut().find(|c| c.id == comp) {
-        c.metadata = metadata;
+        c.metadata = metadata.clone();
     }
     let id = s.doc_mut().add_feature(sf.kind, Some(&name))?;
     if let Some(f) = s.doc_mut().feature_mut(id) {
@@ -705,8 +882,13 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         f.body_names = sf.body_names;
         f.link_faces = faces;
     }
+    set_link_meshes(s, comp, id, &name, &file.display().to_string(), meshes)?;
+    let mesh_feature = link_mesh_feature(s, comp, id).map(|(f, _)| f);
     if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| Some(o.id) == occ) {
-        o.transform[3] = [translate.x, translate.y, translate.z, 1.0];
+        o.transform = transform;
+        if let Some(expressed) = expressed {
+            o.expressed_moves.push(expressed);
+        }
     }
     let path = stored(s.path.as_deref(), &file);
     s.doc_mut().links.insert(
@@ -717,6 +899,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             configuration: configuration.map(|c| c.row),
             configuration_identity: configuration.and_then(|c| c.identity),
             inherited: Vec::new(),
+            inherited_metadata: metadata,
             file_sha256: Some(read),
         },
     );
@@ -725,9 +908,10 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(EngineError::Other(e));
     }
     inherit_properties(s, comp, &properties)?;
+    add_design_images(s, comp, &name, images)?;
     s.refresh();
     let st = s.model.state();
-    let bodies: Vec<String> = st.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
+    let bodies: Vec<String> = st.bodies.iter().filter(|b| b.feature == id || Some(b.feature) == mesh_feature).map(|b| b.name.clone()).collect();
     let inserted = DesignInserted::New {
         component: comp,
         occurrence: occ,
@@ -739,6 +923,27 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         warnings: sf.warnings,
     };
     reply(cmd, InsertDesignResult { inserted, param_warnings: Vec::new() })
+}
+
+/// The linked design's canvases and decals ([`design_images`]) added to its new component
+/// `comp`, so its images come into the assembly on its bodies. Each gets an id of this design and
+/// keeps its name, or takes `<name> (<component>)` when this design already has an image so named.
+fn add_design_images(s: &mut Session, comp: u64, component: &str, images: Vec<solidcraft_doc::canvas::Canvas>) -> Result<()> {
+    for mut image in images {
+        let doc = s.doc_mut();
+        image.id = doc.allocate_id()?;
+        image.component = comp;
+        let taken = |n: &str| doc.canvases.iter().any(|c| c.name == n);
+        if taken(&image.name) {
+            let base = format!("{} ({component})", image.name);
+            image.name = (1..=doc.canvases.len().saturating_add(1))
+                .map(|n| if n == 1 { base.clone() } else { format!("{base} {n}") })
+                .find(|n| !taken(n))
+                .unwrap_or(base);
+        }
+        doc.canvases.push(image);
+    }
+    Ok(())
 }
 
 fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
@@ -763,6 +968,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc.links.iter().filter(|(c, _)| only.as_ref().is_none_or(|o| o.contains(c))).map(|(c, l)| (*c, l.clone())).collect();
     let (mut updated, mut unchanged, mut warnings): (Vec<String>, Vec<String>, Vec<String>) = (Vec::new(), Vec::new(), Vec::new());
     let mut failed: Vec<LinkFailure> = Vec::new();
+    let mut read_components = Vec::new();
     let count = links.len();
     for (index, (comp, link)) in links.into_iter().enumerate() {
         let cname = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone());
@@ -796,21 +1002,25 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             .feature(link.feature)
             .filter(|_| !link.inherited.is_empty() && link.inherited.iter().all(|p| p.faces.is_some()))
             .map(|f| digest(f.link_faces.as_slice()));
-        if let Some((known, properties)) = kept_faces
-            .and_then(|faces| unchanged_read(&file, selected_configuration(&link), digest(bytes.as_slice()), digest(old.0.as_bytes()), faces))
-        {
+        if let Some((known, properties, metadata)) = kept_faces.and_then(|faces| {
+            let meshes = link_meshes(s, comp, link.feature);
+            unchanged_read(&file, selected_configuration(&link), digest(bytes.as_slice()), digest(old.0.as_bytes()), faces, meshes)
+        }) {
             warnings.extend(known);
             // Another component or session may have evaluated this source first. Its
             // cached geometry says nothing about this link's inherited properties.
-            if inherit_properties(s, comp, &properties)? {
+            let (took, kept) = inherit_metadata(s, comp, &metadata);
+            warnings.extend(kept);
+            if inherit_properties(s, comp, &properties)? || took {
                 updated.push(cname)
             } else {
                 unchanged.push(cname)
             }
+            read_components.push(comp);
             continue;
         }
-        let (_, sf, faces, _, properties) = match design_bodies(&file, &bytes, selected_configuration(&link), s.validation()) {
-            Ok(read) => read,
+        let (_, sf, faces, metadata, properties, meshes) = match design_bodies(&file, &bytes, selected_configuration(&link), s.validation()) {
+            Ok((read, _)) => read,
             Err(e) if go_on => {
                 // It keeps its bodies, so it has not taken this file in yet.
                 if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
@@ -823,19 +1033,23 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             Err(e) => return Err(bad(cmd, format!("{cname}: {e}"))),
         };
         warnings.extend(sf.warnings.iter().cloned());
+        let (took, kept_metadata) = inherit_metadata(s, comp, &metadata);
+        warnings.extend(kept_metadata);
+        let took = set_link_meshes(s, comp, link.feature, &cname, &file.display().to_string(), meshes)? || took;
         let same = matches!(&sf.kind, FeatureKind::Import { step, records, .. } if *step == old.0 && *records == old.1);
         let kept = s.doc.feature(link.feature).map(|f| &f.link_faces);
         if same && kept == Some(&faces) {
-            if inherit_properties(s, comp, &properties)? {
+            if inherit_properties(s, comp, &properties)? || took {
                 updated.push(cname)
             } else {
                 unchanged.push(cname)
             }
+            read_components.push(comp);
             continue;
         }
         // The same bodies, their faces named for the first time (a link made before names were
         // kept): nothing a reference finds changes. Names the design gave other faces since do.
-        let changed = !same || kept.is_some_and(|k| !k.is_empty());
+        let changed = !same || kept.is_some_and(|k| !k.is_empty()) || took;
         if !same {
             for name in numbered_references(s, comp, link.feature) {
                 warnings.push(format!(
@@ -856,7 +1070,12 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         }
         s.refresh();
         let changed = inherit_properties(s, comp, &properties)? || changed;
-        if changed { updated.push(cname) } else { unchanged.push(cname) }
+        if changed {
+            updated.push(cname)
+        } else {
+            unchanged.push(cname)
+        }
+        read_components.push(comp);
     }
     solidcraft_doc::progress::item(None);
     // None could be read: nothing to take back either.
@@ -872,6 +1091,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         let sol = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
         warnings.extend(sol.errors.iter().chain(&sol.conflicts).map(|(_, name, why)| format!("joint {name}: {why}")));
     }
+    crate::plugin::record_link_reads(s, &read_components);
     reply(cmd, UpdateLinksResult { updated, unchanged, warnings, failed, param_warnings: Vec::new() })
 }
 
@@ -897,6 +1117,49 @@ fn same_import_source(a: &FeatureKind, b: &FeatureKind) -> bool {
             step == other && records == other_records
         }
         _ => false,
+    }
+}
+
+/// The Mesh Import feature in the linked component `comp` that holds its design's mesh bodies,
+/// beside the link's Import feature `link`, with those meshes.
+fn link_mesh_feature(s: &Session, comp: u64, link: u64) -> Option<(u64, &[MeshData])> {
+    s.doc.features.iter().find_map(|f| match &f.kind {
+        FeatureKind::MeshImport { meshes, .. } if f.component == comp && f.id != link => Some((f.id, meshes.as_slice())),
+        _ => None,
+    })
+}
+
+/// The mesh bodies the linked component `comp` holds from its design (none for a link made
+/// before they were linked, or a design that has none).
+fn link_meshes(s: &Session, comp: u64, link: u64) -> &[MeshData] {
+    link_mesh_feature(s, comp, link).map_or(&[], |(_, meshes)| meshes)
+}
+
+/// Give the linked component `comp` its design's mesh bodies `meshes`: its Mesh Import feature
+/// takes them, made when the design first has some and deleted when it has none left. `name`
+/// names a new feature and `file` is the design it shows. Whether the meshes changed.
+fn set_link_meshes(s: &mut Session, comp: u64, link: u64, name: &str, file: &str, meshes: Vec<MeshData>) -> Result<bool> {
+    let held = link_mesh_feature(s, comp, link).map(|(id, held)| (id, held == meshes.as_slice()));
+    match held {
+        Some((_, true)) => Ok(false),
+        None if meshes.is_empty() => Ok(false),
+        Some((id, false)) if meshes.is_empty() => {
+            s.doc_mut().delete_feature(id)?;
+            Ok(true)
+        }
+        Some((id, false)) => {
+            if let Some(f) = s.doc_mut().feature_mut(id) {
+                f.kind = FeatureKind::MeshImport { file: file.to_string(), meshes };
+            }
+            Ok(true)
+        }
+        None => {
+            let id = s.doc_mut().add_feature(FeatureKind::MeshImport { file: file.to_string(), meshes }, Some(&format!("{name} meshes")))?;
+            if let Some(f) = s.doc_mut().feature_mut(id) {
+                f.component = comp;
+            }
+            Ok(true)
+        }
     }
 }
 
@@ -948,9 +1211,11 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Read/evaluate the candidate before changing anything. Session::execute owns the single
     // undo step and restores both the document and evaluated state on any later failure.
-    let (_, sf, faces, _, properties) = design_bodies(&file, &bytes, configuration, s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
+    let ((_, sf, faces, metadata, properties, meshes), _) =
+        design_bodies(&file, &bytes, configuration, s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
     let read = DesignLink::file_digest(&bytes);
-    let geometry_changed = !s.doc.feature(link.feature).is_some_and(|f| same_import_source(&f.kind, &sf.kind));
+    let geometry_changed = !s.doc.feature(link.feature).is_some_and(|f| same_import_source(&f.kind, &sf.kind))
+        || link_meshes(s, comp, link.feature) != meshes.as_slice();
     let path = stored(s.path.as_deref(), &file);
     let mut warnings = sf.warnings;
     if geometry_changed
@@ -969,6 +1234,8 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
         f.kind = sf.kind;
         f.link_faces = faces;
     }
+    let cname = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone()).unwrap_or_default();
+    set_link_meshes(s, comp, link.feature, &cname, &file.display().to_string(), meshes)?;
     s.doc_mut().links.insert(
         comp,
         DesignLink {
@@ -984,6 +1251,8 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, error));
     }
     inherit_properties(s, comp, &properties)?;
+    let (_, kept) = inherit_metadata(s, comp, &metadata);
+    warnings.extend(kept);
     s.refresh();
     // Report the solver's diagnostics. A resolved joint can still describe the wrong
     // connection after a source edit; the reminder above does not depend on solve errors.
@@ -1055,7 +1324,7 @@ fn relink_placement(
     }
     let feature = s.doc.links.get(&linked).map(|l| l.feature).ok_or_else(|| bad(cmd, "the design was not linked"))?;
     let geometry_changed = match (s.doc.feature(link.feature), s.doc.feature(feature)) {
-        (Some(was), Some(now)) => !same_import_source(&was.kind, &now.kind),
+        (Some(was), Some(now)) => !same_import_source(&was.kind, &now.kind) || link_meshes(s, comp, link.feature) != link_meshes(s, linked, feature),
         _ => true,
     };
     let mut warnings: Vec<String> = made["warnings"].as_array().into_iter().flatten().filter_map(|w| w.as_str().map(str::to_string)).collect();
@@ -1106,6 +1375,7 @@ fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
+    let mut observations = Vec::new();
     let links: Vec<LinkInfo> = s
         .doc
         .links
@@ -1122,11 +1392,14 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                     let found = solidcraft_io::vfs::design_path_is_file(&shown, s.path.as_deref());
                     // Whether the file is no longer what this design last read (#9739): `null`
                     // when it isn't found, or the link keeps no digest (made before they were).
-                    let changed = l
-                        .file_sha256
-                        .as_ref()
-                        .filter(|_| found == Some(true))
-                        .and_then(|kept| file_sha256(Path::new(&shown), s.path.as_deref()).map(|now| now != *kept));
+                    let current =
+                        l.file_sha256.as_ref().filter(|_| found == Some(true)).and_then(|_| file_sha256(Path::new(&shown), s.path.as_deref()));
+                    let changed = current.as_ref().zip(l.file_sha256.as_ref()).map(|(now, kept)| now != kept);
+                    if let (Some(digest), Some(changed)) = (current, changed)
+                        && (changed || s.plugin_state.link_changes.get(c).is_some_and(|change| !change.read))
+                    {
+                        observations.push((*c, shown.clone(), digest, !changed));
+                    }
                     // Why a file that can't be reached can't be: `None` when it can be read.
                     let (state, reason) = match link_presence(&file, s.path.as_deref()) {
                         Some(why) => (Some(why.state), Some(why.reason)),
@@ -1158,6 +1431,9 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
             }
         })
         .collect();
+    for (component, path, digest, read) in observations {
+        crate::plugin::record_link_change(s, component, path, digest, read);
+    }
     reply("component.links", LinksResult { links, param_warnings: Vec::new() })
 }
 
@@ -1302,7 +1578,7 @@ mod tests {
         drop(autosaver);
         let entry = crate::recovery::orphans(&recovery).pop().unwrap();
         // Older autosaves hold paths relative to the design, not the recovery folder.
-        std::fs::write(recovery.join(format!("{}.solidcraft", entry.id)), solidcraft_io::write_design(&s.design())).unwrap();
+        std::fs::write(recovery.join(format!("{}.solidcraft", entry.id)), solidcraft_io::write_design(&s.design()).unwrap()).unwrap();
         let mut recovered = Session::default();
         run(&mut recovered, "doc.recover", json!({"dir": recovery, "id": entry.id}));
         assert_eq!(run(&mut recovered, "component.links", json!({}))["links"][0]["found"], true);
@@ -1940,6 +2216,66 @@ mod tests {
         assert_eq!(closed[0].1, block.1, "{linked:?}");
         let (a, b) = (closed[0].3.unwrap(), block.3.unwrap());
         assert!((a - b).abs() < 1e-6 * b, "volume {a} vs {b}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An ASCII STL of a closed tetrahedron, 10 mm along each axis.
+    pub(super) fn tetra_stl() -> &'static str {
+        "solid t\n\
+         facet normal 0 0 0\nouter loop\nvertex 0 0 0\nvertex 0 10 0\nvertex 10 0 0\nendloop\nendfacet\n\
+         facet normal 0 0 0\nouter loop\nvertex 0 0 0\nvertex 10 0 0\nvertex 0 0 10\nendloop\nendfacet\n\
+         facet normal 0 0 0\nouter loop\nvertex 0 0 0\nvertex 0 0 10\nvertex 0 10 0\nendloop\nendfacet\n\
+         facet normal 0 0 0\nouter loop\nvertex 10 0 0\nvertex 0 10 0\nvertex 0 0 10\nendloop\nendfacet\n\
+         endsolid t\n"
+    }
+
+    /// #20050: Insert Design brings a design's mesh bodies (a KiCad board's parts) with its
+    /// solids, in the linked component, and Update Links follows them when the design gains or
+    /// loses them, also for a link that holds none yet with the file unchanged.
+    #[test]
+    fn a_linked_design_brings_its_mesh_bodies_and_update_links_follows_them() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-meshes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (part, stl) = (dir.join("board.solidcraft"), dir.join("Chip.stl"));
+        std::fs::write(&stl, tetra_stl()).unwrap();
+        let meshes = |s: &Session| -> Vec<String> { s.model.state().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect() };
+        let save_board = |with_mesh: bool| {
+            let mut board = Session::default();
+            run(&mut board, "solid.box", json!({"length": 10, "width": 20, "height": 2, "body_name": "Board"}));
+            if with_mesh {
+                run(&mut board, "file.insert_mesh", json!({"path": stl}));
+            }
+            run(&mut board, "file.save", json!({"path": part}));
+            meshes(&board)
+        };
+        let chip = save_board(true);
+        assert_eq!(chip.len(), 1, "{chip:?}");
+        // Inserted, the design's mesh body comes in with its solid, in the linked component.
+        let mut a = Session::default();
+        let inserted = run(&mut a, "component.insert_design", json!({"path": part}));
+        assert_eq!(meshes(&a), chip, "{inserted}");
+        assert!(inserted["bodies"].as_array().unwrap().contains(&json!(chip[0])), "{inserted}");
+        assert!(!inserted["warnings"].to_string().contains("not linked"), "{inserted}");
+        let comp = inserted["component"].as_u64().unwrap();
+        let st = a.model.state();
+        assert!(st.bodies.iter().all(|b| a.doc.model_body_component(b) == comp), "every body is in the linked component");
+        assert_eq!(run(&mut a, "component.update_links", json!({}))["unchanged"], json!(["board"]));
+        // The design loses its mesh body, then gets it back: Update Links follows both.
+        save_board(false);
+        assert_eq!(run(&mut a, "component.update_links", json!({}))["updated"], json!(["board"]));
+        assert!(meshes(&a).is_empty(), "{:?}", meshes(&a));
+        save_board(true);
+        assert_eq!(run(&mut a, "component.update_links", json!({}))["updated"], json!(["board"]));
+        assert_eq!(meshes(&a), chip);
+        // A link that holds no meshes yet (made before they were linked) gets them from the
+        // unchanged file: what was read before is no answer for it.
+        let held = link_mesh_feature(&a, comp, a.doc.links[&comp].feature).map(|(id, _)| id).unwrap();
+        a.doc_mut().delete_feature(held).unwrap();
+        a.refresh();
+        assert!(meshes(&a).is_empty());
+        assert_eq!(run(&mut a, "component.update_links", json!({}))["updated"], json!(["board"]));
+        assert_eq!(meshes(&a), chip);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

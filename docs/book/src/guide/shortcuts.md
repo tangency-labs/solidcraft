@@ -40,7 +40,7 @@ if that happens; recording is cancelled if the app loses focus.
 | O | Offset | J | Joint |
 | T | Trim | I | Measure |
 | P | Project | A | Appearance |
-| Ctrl+Z | Undo | Ctrl+Y | Redo |
+| Ctrl+Z | Undo | Ctrl+Y, Ctrl+Shift+Z | Redo |
 | Ctrl+N | New Design | Ctrl+O | Open |
 | Ctrl+S | Save | Delete | Delete the selection |
 | Ctrl+Shift+S | Save As | Ctrl+A | Select All |
@@ -48,6 +48,7 @@ if that happens; recording is cancelled if the app loses focus.
 | Ctrl+3 | Left View | Ctrl+4 | Right View |
 | Ctrl+5 | Top View | Ctrl+6 | Bottom View |
 | Ctrl+7 | Isometric View | | |
+| Ctrl+Alt+O | Open View in New Window | Ctrl+Alt+W | Move View to Window (next window) |
 
 L, R and C start their tool family (lines, rectangles, circles) in the variant you used last, as
 the family's toolbar button does: after a Midpoint Line, L starts a Midpoint Line again. Pick
@@ -86,6 +87,9 @@ you click a line, circle or arc (or the second point or line), so D, click, type
 Enter. With Preferences › Design › Step values with the arrow keys and the wheel on, ↑ ↓ in a
 value box, or the wheel over it, step a plain number by 1 (with Shift by 10, with Alt by 0.1);
 see [Parameters and expressions](parameters.md).
+
+In an Extrude that is being made, Shift+Enter applies it as a new body, whatever it would have joined
+or cut; Enter alone applies it as the dialog shows.
 
 Mouse and touch:
 

@@ -48,7 +48,8 @@
 
 use super::p1::{sort_by_param, AdvancedStitch, DefaultStitchCallback, SplitReason, Stitch};
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, EntityRef};
+use crate::error::heal::HealFailure;
+use crate::error::{ignore_status, ignored, EntityRef, Failure};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::NotifyOperation;
@@ -60,6 +61,7 @@ use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
+use crate::topology::brep::p6::InfiniteHalf;
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, RegionId, ShellId, VertexId};
 use crate::{Result, SolidError};
@@ -93,9 +95,11 @@ fn deref(what: &'static str) -> SolidError {
     SolidError::invalid_input(OP, what)
 }
 
-/// The stitch could not continue, as the phrase says (upstream `SE(SM_ERR)`).
-fn stitch_failed(what: &'static str) -> SolidError {
-    SolidError::heal_failed(OP, what)
+/// A defect ([`HealFailure::Defect`]) with the status `SM_ERR` of the `SE(SM_ERR)` it
+/// replaces.
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    Failure::new(OP, HealFailure::Defect { why }).into_error()
 }
 
 /// The edge's curve; upstream dereferences a null curve pointer.
@@ -105,9 +109,12 @@ fn curve_of(b: &Brep, e: EdgeId) -> Result<&Curve> {
 
 /// The tangent of an `Evaluate(t, 1, ..)` result.
 fn tangent(pv: &[Vec3]) -> Result<Vec3> {
-    pv.get(1)
-        .copied()
-        .ok_or_else(|| stitch_failed("the curve has no tangent"))
+    pv.get(1).copied().ok_or_else(|| {
+        defect(
+            "the curve's evaluation returned no first derivative, though an evaluation \
+             that succeeds returns the point and each derivative asked for",
+        )
+    })
 }
 
 fn set_none<T>(list: &mut [Option<T>], i: usize) -> Result<()> {
@@ -292,7 +299,12 @@ fn edge_box(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Extent3d> {
             true,
         )?
         .normal
-        .ok_or_else(|| stitch_failed("the edge has no bounding box"))
+        .ok_or_else(|| {
+            defect(
+                "the edge curve's bounding box came back without the axis-aligned box, \
+                 though that box is computed whenever it is asked for",
+            )
+        })
 }
 
 /// `SmCurve::ApproximateLength(edge interval, samples)` of the edge's curve.
@@ -460,6 +472,9 @@ impl Stitch<'_> {
         let old_doing_boolean = k.context.doing_boolean();
         k.context.set_doing_boolean(true);
         let r = self.do_stitching_body(k, b, candidate_vertices, candidate_edges, &mut out);
+        // (not upstream, #18166: the joins' covers, on the final trims and faces, while
+        // editing is still enabled)
+        let r = self.finish_joins(k, b, r);
         k.context.set_doing_boolean(old_doing_boolean);
         b.set_editing_enabled(old_editing);
         r.map(|()| out)
@@ -1233,6 +1248,9 @@ impl Stitch<'_> {
                         orientation,
                         dist_to_curve,
                         self.do_region_nesting,
+                        // (one solid with a known outside: no ray at its closing glue)
+                        self.outside
+                            .map_or(InfiniteHalf::Searched, InfiniteHalf::Of),
                         delete,
                         None, // header default pInsideFaceuses = NULL
                     ) {
@@ -1259,8 +1277,10 @@ impl Stitch<'_> {
                             }
                         }
                         Err(err) if err.is_unported_or_cancelled() => return Err(err),
-                        Err(_) if !self.ignore_problems => {
-                            return Err(stitch_failed("the edges could not be glued"))
+                        Err(err) if !self.ignore_problems => {
+                            return Err(Failure::new(OP, HealFailure::EdgesNotGlued)
+                                .caused_by(err)
+                                .into_error())
                         }
                         Err(_) => {
                             // forget the deleted edge when the failed glue removed it
@@ -1330,7 +1350,7 @@ impl Stitch<'_> {
             has_brep = vertex::brep(b, v)?.is_some();
         }
         if !has_brep {
-            return Err(stitch_failed("the topology belongs to no B-rep")); // we'll flag this as an error.
+            return Err(SolidError::heal(OP, HealFailure::NotInBrep)); // we'll flag this as an error.
         }
 
         // Sort on (1,2,3), unitized so that parameter differences are 3d distances.

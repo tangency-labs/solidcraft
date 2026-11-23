@@ -39,6 +39,15 @@
 //!   [`MAX_SPINE_SEGMENTS`] segments, is `SM_ERR` (the fork's `ULONG` conversion of a
 //!   non-finite count is undefined and a huge one exhausts memory); geometry never gets
 //!   near it (a hyperbola's parameter is an `asinh`).
+//! - **Where the edge's middle lies on an ellipse (not the fork's, #18824).** The spine
+//!   runs from the trace's first centre to its last the way round an ellipse that passes the
+//!   edge's middle. The fork read the middle off the ellipse by its angle about the
+//!   ellipse's centre, in the ellipse's plane; here it is read by its angle round the
+//!   cylinder's or cone's axis (`ellipse_param_about_axis`), which the edge and the spine
+//!   share. A chamfer whose ball nearly fills a 1 mm round has a spine ellipse 0.07 mm
+//!   across, its plane 0.97 mm off the edge along a tilted axis: the fork's reading put the
+//!   middle outside the short arc, and the round ran the long way round, its rails off
+//!   their faces.
 //! - No recursion: the weight-positivity halving is the fork's work list (left half
 //!   first), at most 6 levels deep, as the fork bounds it.
 //! - **Nodal arithmetic.** The nodal quartic is constructed directly in Bernstein form
@@ -55,6 +64,7 @@ use crate::blend::fillet_solver::p1::{FilletSolverOps, FilletSurfaceGeneratorTyp
 use crate::blend::fillet_solver::p2::{eval_offset, store_parts, FilletGeomParts};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
+use crate::error::blend::BlendFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::vector2d::Point2;
@@ -570,6 +580,82 @@ fn conic_param(k: &Conic, x: Point3) -> f64 {
     }
 }
 
+/// The parameter of an ellipse `k` on the plane through `at` with unit normal `normal`, a
+/// section of `q`, the offset of `face`, that `x` stands at round `q`'s axis: `x` moved
+/// along a cylinder's or cone's axis onto the plane, and the conic's point on the half-line
+/// to it from where the axis crosses the plane (both keep the angle about the axis, which
+/// the conic's points, the faces' and their edges' share). A cylinder offset past its axis
+/// (a ball larger than a convex face's radius) lies the other way round it, its `side`
+/// turned: there the ball's centre is half a turn from its contact, and `x` is read on the
+/// half-line the other way. Not the fork's, which read `x` off the conic about
+/// its centre: a point of the edge, far from a small conic against its size, reads there at
+/// an angle that has nothing to do with where it lies round the axis. Of another quadric,
+/// and of an axis along the plane, `x` is read about the conic's centre
+/// ([`conic_param`]).
+///
+/// # Errors
+/// [`BlendFailure::ExactBlendAxisCannotPlaceEdge`], a check of the caller's input with status
+/// `SM_ERR`, when the half-line has no direction (`x` on the axis) or does not cross the
+/// conic ahead of the axis (the axis crosses the plane outside it, which a plane section of
+/// the axis's own cylinder or cone never does): the exact blend given is then not the one of
+/// the edge, the way round is unknown, and is not read about the conic's centre instead.
+fn ellipse_param_about_axis(
+    k: &Conic,
+    at: Point3,
+    normal: Vec3,
+    q: &BlendQuadric,
+    face: &BlendQuadric,
+    x: Point3,
+) -> Result<f64> {
+    let along = q.dir.dot(normal);
+    if !matches!(q.kind, QuadricKind::Cylinder | QuadricKind::Cone) || along.abs() <= EFF_ZERO {
+        return Ok(conic_param(k, x));
+    }
+    let axis_at = q.point + q.dir * ((at - q.point).dot(normal) / along);
+    let moved = x - q.dir * ((x - at).dot(normal) / along);
+    // in the ellipse's own coordinates, where it is the unit circle
+    let coords = |p: Point3| {
+        let d = p - k.c;
+        (d.dot(k.a1) / k.a1.dot(k.a1), d.dot(k.a2) / k.a2.dot(k.a2))
+    };
+    let (a0, a1) = coords(axis_at);
+    let (m0, m1) = coords(moved);
+    let turned = q.kind == QuadricKind::Cylinder
+        && face.kind == QuadricKind::Cylinder
+        && q.side != face.side;
+    let way = if turned { -1.0 } else { 1.0 };
+    let (w0, w1) = (way * (m0 - a0), way * (m1 - a1));
+    let ww = w0 * w0 + w1 * w1;
+    let aw = a0 * w0 + a1 * w1;
+    let disc = aw * aw - ww * (a0 * a0 + a1 * a1 - 1.0);
+    // in the conic's unit-circle coordinates, a half-line shorter than the kernel's zero
+    // has no direction
+    let length = ww.sqrt();
+    if length <= EFF_ZERO || disc < 0.0 {
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::ExactBlendAxisCannotPlaceEdge {
+                length,
+                discriminant: disc,
+                crossing: None,
+            },
+        ));
+    }
+    // the half-line's own crossing, ahead of the axis
+    let mu = (disc.sqrt() - aw) / ww;
+    if !positive(mu) {
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::ExactBlendAxisCannotPlaceEdge {
+                length,
+                discriminant: disc,
+                crossing: Some(mu),
+            },
+        ));
+    }
+    Ok((a1 + mu * w1).atan2(a0 + mu * w0))
+}
+
 /// `sm_ConicSegment`: one rational quadratic segment of the conic from `t0` to `t1`.
 fn conic_segment(k: &Conic, t0: f64, t1: f64) -> Segment {
     let p0 = conic_point(k, t0);
@@ -880,10 +966,10 @@ pub fn calc_rational_spine_fillet_geom(
     let mut segs: Vec<Segment> = Vec::new();
     if matches!(blend.spine, BlendSpine::Conic | BlendSpine::ConicPair) {
         // the conic: the plane's section of the other quadric (either, for a pair)
-        let q = if o0.kind == QuadricKind::Plane {
-            o1
+        let (q, q_face) = if o0.kind == QuadricKind::Plane {
+            (o1, blend.faces[1])
         } else {
-            o0
+            (o0, blend.faces[0])
         };
         let mut kc = plane_section(blend.point, blend.dir, &q)?;
         if kc.kind == ConicKind::Hyperbola && (start - kc.c).dot(kc.a1) < 0.0 {
@@ -893,7 +979,7 @@ pub fn calc_rational_spine_fillet_geom(
         let t1 = conic_param(&kc, end);
         // from the first point to the last: round the loop the way the edge runs on a
         // closed edge, else the way along an ellipse that passes the edge's middle
-        // (tangency-labs/smlib@dda3b5d)
+        // (tangency-labs/smlib@dda3b5d), read round the quadric's axis (not the fork's)
         let mut span = t1 - t0;
         let mut dir = if span >= 0.0 { 1.0 } else { -1.0 };
         if kc.kind == ConicKind::Ellipse {
@@ -904,7 +990,9 @@ pub fn calc_rational_spine_fillet_geom(
                 span = dir * 2.0 * PI;
             } else {
                 // the arc t0 -> t1 one way or the other, by where the edge's middle lies
-                let mid = conic_param(&kc, edge_mid);
+                // round the quadric's axis
+                let mid =
+                    ellipse_param_about_axis(&kc, blend.point, blend.dir, &q, &q_face, edge_mid)?;
                 let within = |a: f64, span: f64, t: f64| {
                     let mut d = (t - a) * if span >= 0.0 { 1.0 } else { -1.0 };
                     d -= 2.0 * PI * (d / (2.0 * PI)).floor();
@@ -1420,6 +1508,118 @@ mod tests {
             let p = conic_point(&kc, t);
             assert!((conic_param(&kc, p) - t.sin().atan2(t.cos())).abs() < 1e-12);
         }
+    }
+
+    /// A point of a tilted convex cylinder, far along the axis from the plane of the spine
+    /// ellipse, reads at the spine parameter of the ball's centre for that point: the same
+    /// angle round the axis where the ball is smaller than the cylinder's radius, half a turn
+    /// on where it is larger and the offset lies past the axis (#18824).
+    #[test]
+    fn a_point_of_the_face_reads_where_its_balls_centre_lies_on_the_spine_ellipse() {
+        let tau = 0.7f64;
+        let axis = Vec3::new(0.0, tau.sin(), tau.cos());
+        let e1 = Vec3::new(1.0, 0.0, 0.0);
+        let e2 = axis.cross(e1);
+        let face = BlendQuadric {
+            kind: QuadricKind::Cylinder,
+            point: Point3::ZERO,
+            dir: axis,
+            radius: 1.0,
+            angle: 0.0,
+            side: 1.0,
+            tube: 0.0,
+        };
+        let normal = Vec3::new(0.0, 1.0, 0.0);
+        for ball in [0.3, 0.966, 1.4] {
+            let q = face.offset(-ball, 1e-12);
+            assert_eq!(q.side < 0.0, ball > 1.0);
+            let at = Point3::new(0.0, 0.5, 0.0);
+            let kc = plane_section(at, normal, &q).unwrap();
+            assert_eq!(kc.kind, ConicKind::Ellipse);
+            for i in 0..12 {
+                let phi = 0.3 + 0.5 * f64::from(i);
+                let radial = e1 * phi.cos() + e2 * phi.sin();
+                // a point of the face 3 along the axis from the plane, and its ball's centre
+                // moved along the axis onto the plane
+                let x = axis * 3.0 + radial;
+                let centre = x - radial * ball;
+                let on_plane = centre - axis * ((centre - at).dot(normal) / axis.dot(normal));
+                let truth = conic_param(&kc, on_plane);
+                let read = ellipse_param_about_axis(&kc, at, normal, &q, &face, x).unwrap();
+                let off = (read - truth).sin().abs() + (1.0 - (read - truth).cos());
+                assert!(
+                    off < 1e-12,
+                    "ball {ball} phi {phi}: read {read} truth {truth}"
+                );
+            }
+        }
+    }
+
+    /// A point the axis reading cannot place is refused as the caller's input, with status
+    /// `SM_ERR`, not read about the conic's centre: one on the axis (the half-line from the
+    /// axis has no direction) and one read against a cylinder whose axis crosses the plane
+    /// outside the conic (the half-line misses it, or crosses it behind the axis).
+    #[test]
+    fn a_point_the_axis_reading_cannot_place_is_refused() {
+        let face = BlendQuadric {
+            kind: QuadricKind::Cylinder,
+            point: Point3::ZERO,
+            dir: Vec3::new(0.0, 0.6, 0.8),
+            radius: 1.0,
+            angle: 0.0,
+            side: 1.0,
+            tube: 0.0,
+        };
+        let q = face.offset(-0.3, 1e-12);
+        let (at, normal) = (Point3::new(0.0, 0.5, 0.0), Vec3::new(0.0, 1.0, 0.0));
+        let kc = plane_section(at, normal, &q).unwrap();
+        // the refusal's numbers: (length, discriminant, crossing)
+        let refused = |r: Result<f64>| -> (f64, f64, Option<f64>) {
+            let e = r.unwrap_err();
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e:?}");
+            assert_eq!(e.sm_status(), Some(crate::error::SM_ERR), "{e:?}");
+            match e.blend_failure() {
+                Some(BlendFailure::ExactBlendAxisCannotPlaceEdge {
+                    length,
+                    discriminant,
+                    crossing,
+                }) => (*length, *discriminant, *crossing),
+                other => panic!("{other:?}"),
+            }
+        };
+        // on the axis, 3 along it from the origin: no direction, no crossing computed
+        let (length, _, crossing) = refused(ellipse_param_about_axis(
+            &kc,
+            at,
+            normal,
+            &q,
+            &face,
+            face.dir * 3.0,
+        ));
+        assert!(length <= EFF_ZERO, "{length}");
+        assert_eq!(crossing, None);
+        // a cylinder 10 off to the side: its axis crosses the plane outside the conic; a
+        // point further out reads along a half-line pointing away from the conic (its line
+        // crosses the conic behind the axis), and one off sideways along a half-line that
+        // passes the conic by
+        let mut far = q;
+        far.point = Point3::new(10.0, 0.0, 0.0);
+        let read = |x: Point3| {
+            refused(ellipse_param_about_axis(
+                &kc,
+                at,
+                normal,
+                &far,
+                &face,
+                x + face.dir * 3.0,
+            ))
+        };
+        let (_, discriminant, crossing) = read(Point3::new(12.0, 0.0, 0.0));
+        assert!(discriminant >= 0.0, "{discriminant}");
+        assert!(crossing.is_some_and(|mu| mu <= 0.0), "{crossing:?}");
+        let (_, discriminant, crossing) = read(Point3::new(10.0, 0.0, 5.0));
+        assert!(discriminant < 0.0, "{discriminant}");
+        assert_eq!(crossing, None);
     }
 
     /// A plane that meets the quadric in no conic says how it fails, with status `SM_ERR`.

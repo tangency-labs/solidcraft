@@ -556,6 +556,10 @@ fn handshake_and_tools_list() {
         "new_design",
         "open",
         "save",
+        "documents",
+        "quit_app",
+        "preferences",
+        "agent_cursor",
     ] {
         assert!(names.contains(&want), "{want} missing from {names:?}");
     }
@@ -639,6 +643,14 @@ fn skill_reference_is_advertised_as_read_only() {
     assert_eq!(t["annotations"]["openWorldHint"], false);
     assert_eq!(t["inputSchema"]["required"], json!(["skill"]));
     assert_eq!(t["inputSchema"]["properties"]["file"]["default"], "reference.md");
+    // The description names every skill the tool serves, so an agent that trusts it finds them all (#19633).
+    let description = t["description"].as_str().unwrap();
+    let refused = raw_tool(&mut s, "skill_reference", json!({"skill": "unknown"}));
+    let text = refused["result"]["content"][0]["text"].as_str().unwrap();
+    let available = text.split("Available skills: ").nth(1).expect("list of available skills");
+    for skill in available.split(", ") {
+        assert!(description.contains(skill), "{skill} missing from: {description}");
+    }
 }
 
 /// A URDF goes through `export` with its own options (#719).
@@ -957,8 +969,73 @@ fn inspect_design_lists_joint_definitions() {
     assert_eq!(d["joints"][0]["name"], "Glue", "{d}");
     assert_eq!(d["joints"][0]["a"]["snap"]["type"], "face_center", "{d}");
     assert_eq!(d["joints"][0]["b"]["resolves"], true, "{d}");
+    assert!(d.get("joint_summary").is_none(), "nothing left out, nothing summarised: {d}");
     let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false, "joints": false}));
     assert!(d.get("joints").is_none(), "{d}");
+
+    // A sub-assembly held together as an import holds it: with `joints: "summary"` its rigid
+    // joints are counted, not listed.
+    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+        let mut s = Server::new(Box::new(Headless::default())).with_options(opts);
+        let mut exec = |command: &str, params: Value| tool(&mut s, "execute", json!({"command": command, "params": params}));
+        for (name, corner) in [("A", [0, 0, 0]), ("B", [20, 0, 0])] {
+            exec("component.activate", json!({"component": "root"}));
+            exec("component.create", json!({"name": name}));
+            exec("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": corner}));
+        }
+        exec("joint.as_built", json!({"type": "rigid", "name": "Glue", "a": "A", "b": "B"}));
+        exec("component.activate", json!({"component": "root"}));
+        exec("component.create", json!({"name": "Kit", "grounded": false}));
+        for name in ["P1", "P2"] {
+            exec("component.create", json!({"name": name, "parent": "Kit", "activate": false, "grounded": false}));
+        }
+        exec("joint.rigid_group", json!({"occurrences": ["Kit", "P1", "P2"]}));
+        // By default every joint is listed, as before the filters.
+        let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+        assert_eq!(d["joints"].as_array().map(Vec::len), Some(3), "{d}");
+        assert!(d.get("joint_summary").is_none(), "{d}");
+        let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false, "joints": "summary"}));
+        let names: Vec<&str> = d["joints"].as_array().into_iter().flatten().filter_map(|j| j["name"].as_str()).collect();
+        assert_eq!(names, ["Glue"], "{d}");
+        assert_eq!(d["joint_summary"]["by_type"], json!({"rigid": 3}), "{d}");
+        assert_eq!(d["joint_summary"]["rigid_groups"][0]["name"], "Kit", "{d}");
+        assert_eq!(d["joint_summary"]["rigid_groups"][0]["members"], 3, "{d}");
+    }
+}
+
+/// A backend whose `joint.list` fails, as an app busy or from before the summary might.
+struct NoJointList(Headless);
+impl crate::Backend for NoJointList {
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        if params.get("command").and_then(Value::as_str) == Some("joint.list") {
+            return Err("joint.list unavailable".into());
+        }
+        crate::Backend::call(&mut self.0, method, params)
+    }
+    fn has_ui(&self) -> bool {
+        false
+    }
+    fn in_process(&self) -> bool {
+        true
+    }
+    fn describe(&self) -> String {
+        "headless without joint.list".into()
+    }
+}
+
+/// `joints: "summary"` when the summary can't be had still says what the filter left out.
+#[test]
+fn inspect_design_keeps_the_omitted_count_without_a_summary() {
+    let mut s = Server::new(Box::new(NoJointList(Headless::default())));
+    let mut exec = |command: &str, params: Value| tool(&mut s, "execute", json!({"command": command, "params": params}));
+    exec("component.create", json!({"name": "Kit", "grounded": false}));
+    for name in ["P1", "P2"] {
+        exec("component.create", json!({"name": name, "parent": "Kit", "activate": false, "grounded": false}));
+    }
+    exec("joint.rigid_group", json!({"occurrences": ["Kit", "P1", "P2"]}));
+    let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false, "joints": "summary"}));
+    assert_eq!(d["joint_summary"]["omitted"], json!({"joints": 2, "by_type": {"rigid": 2}}), "{d}");
+    assert!(d["joint_summary"]["error"].as_str().is_some_and(|e| e.contains("joint.list unavailable")), "{d}");
 }
 
 /// `set_parameter` takes the new value as `value` or as `expression` (the name parameters.change
@@ -2121,7 +2198,7 @@ fn list_commands_narrows_by_prefix_panel_fields_and_page() {
 #[test]
 fn legacy_design_files_open_by_contents() {
     let mut s = server();
-    let saved = String::from_utf8(solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::default())).unwrap();
+    let saved = String::from_utf8(solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::default()).unwrap()).unwrap();
     assert!(saved.contains("\"solidcraft/"), "{saved}");
     let legacy = saved.replace("\"solidcraft/", "\"solvecraft/");
     let path = std::env::temp_dir().join(format!("solidcraft-mcp-legacy-{}.solvecraft", std::process::id()));
@@ -2151,6 +2228,28 @@ fn legacy_design_files_open_by_contents() {
     tool(&mut s, "save", json!({"path": new.to_string_lossy()}));
     tool(&mut s, "open", json!({"path": new.to_string_lossy()}));
     assert!(old.is_file() && new.is_file(), "save as leaves the old file");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #20374: `save` takes `overwrite`, as file.save does: a design file another program changed is
+/// refused without it and replaced with it.
+#[test]
+fn save_overwrite_replaces_a_design_file_changed_on_disk() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-overwrite-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("part.sc");
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+    tool(&mut s, "save", json!({"path": path.to_string_lossy()}));
+    // Another program changes the file after the save.
+    let mut bytes = std::fs::read(&path).unwrap();
+    bytes.extend_from_slice(b"changed elsewhere");
+    std::fs::write(&path, &bytes).unwrap();
+    let refused = raw_tool(&mut s, "save", json!({}));
+    assert_eq!(refused["result"]["isError"], json!(true), "{refused}");
+    tool(&mut s, "save", json!({"overwrite": true}));
+    assert_eq!(solidcraft_engine::io::read_design(&std::fs::read(&path).unwrap()).unwrap().features.len(), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -2825,6 +2924,9 @@ fn compact_execute_keeps_changes_ids_and_default_replies() {
                 if o.contains_key("created_bodies") {
                     o.remove("bodies");
                 }
+                if o.get("warning").is_some_and(Value::is_null) {
+                    o.remove("warning");
+                }
                 for key in ["points", "curves", "constraints", "dimensions"] {
                     if o.get(key).is_some_and(|v| o.get("created").and_then(|c| c.get(key)) == Some(v)) {
                         o.remove(key);
@@ -2842,6 +2944,97 @@ fn compact_execute_keeps_changes_ids_and_default_replies() {
         let error = raw_tool(&mut s, "execute", json!({"command": "not.a.command", "verbose": false}));
         assert_eq!(error["result"]["isError"], true);
     }
+}
+
+/// #18831: a compact reply counts an export's repeated mesh warnings and keeps the worst of each
+/// kind; a lone warning of a kind, and any other warning, stays as it is.
+#[test]
+fn compact_reply_counts_repeated_mesh_warnings() {
+    let mut warnings: Vec<String> = (0..130)
+        .map(|i| format!("Node: face {i}: smallest angle {:.2}°, short of the 25° asked (stopped by: Corner)", 24.0 - f64::from(i) * 0.08))
+        .collect();
+    warnings.push("Node: face 200: its shaping stopped at a bound (Points) with the 25° asked reached (smallest angle 25.04°)".into());
+    warnings.push("Node: face 201: its shaping stopped at a bound (Points) with the 25° asked reached (smallest angle 25.01°)".into());
+    warnings.push(
+        "Node: face 7: its shared boundary was kept. Its triangles lie up to 1.200e-3 mm off the surface, past it (chord tolerance 1.000e-3 mm)"
+            .into(),
+    );
+    warnings.push("Lid has a print face but was written as it lies".into());
+    let reply = json!({"path": "node.stl", "bytes": 84, "format": "StlBinary", "warnings": warnings});
+    let compact = crate::tools::compact(reply.clone());
+    assert_eq!(compact["warning_count"], json!(134), "{compact}");
+    assert_eq!(
+        compact["warnings"],
+        json!([
+            "130 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 13.68° (\"Node\": face 129); bodies: \"Node\" (130)",
+            "2 faces whose shaping stopped at a bound (Points) with the 25° asked reached; the sharpest: smallest angle 25.01° (\"Node\": face 201); bodies: \"Node\" (2)",
+            "Node: face 7: its shared boundary was kept. Its triangles lie up to 1.200e-3 mm off the surface, past it (chord tolerance 1.000e-3 mm)",
+            "Lid has a print face but was written as it lies",
+        ]),
+        "{compact}"
+    );
+    // One warning of each kind is left as it is, and nothing is counted.
+    let few = json!({"warnings": ["Node: face 3: smallest angle 12.94°, short of the 25° asked (stopped by: Corner)", "something else"]});
+    assert_eq!(crate::tools::compact(few.clone()), few);
+    // A null `error` stays, so a client can read it; a null `warning` goes.
+    let built = crate::tools::compact(json!({"feature": 1, "name": "Box1", "error": null, "warning": null}));
+    assert_eq!(built, json!({"feature": 1, "name": "Box1", "error": null}));
+    // A script reply without `bytes` (an older app) keeps the script: nothing says it was written.
+    let old_app = json!({"path": "s.json", "script": {"commands": []}, "steps": 0, "omitted": []});
+    assert_eq!(crate::tools::compact(old_app.clone()), old_app);
+}
+
+/// #18831: with `verbose: false`, a batch that adds parameters, builds a part and exports it
+/// replies with each step's new values and the export's warnings counted, and a script written
+/// to a file is not repeated in the reply; with `verbose: true` everything stays.
+#[test]
+fn compact_batch_reply_of_parameters_export_and_script() {
+    // A new folder for this test alone, removed however the test ends; each run writes its own
+    // files, so the compact run's checks read what the compact run wrote (#19249).
+    let dir = tempfile::Builder::new().prefix("solidcraft-mcp-quiet-").tempdir_in(solidcraft_engine::io::vfs::temp_dir()).unwrap();
+    let (stl, script) = (dir.path().join("disc.stl"), dir.path().join("disc.json"));
+    let steps = json!([
+        {"command": "parameters.add", "params": {"name": "R", "expression": "20 mm"}},
+        {"command": "parameters.add", "params": {"name": "H", "expression": "8 mm"}},
+        {"command": "solid.cylinder", "params": {"radius": "R", "height": "H", "body_name": "Disc"}},
+        {"command": "solid.hole", "params": {"position": [12, 0, 8], "diameter": 6.3, "depth": 3.1}},
+        {"command": "solid.hole", "params": {"position": [-12, 0, 8], "diameter": 6.3, "depth": 3.1}},
+        {"command": "solid.hole", "params": {"position": [0, 12, 8], "diameter": 6.3, "depth": 3.1}},
+        {"command": "solid.fillet", "params": {"edges": [[15.15, 0, 8], [-8.85, 0, 8], [3.15, 12, 8]], "radius": 1.0}},
+        {"command": "file.export_stl", "params": {"path": stl}},
+        {"command": "timeline.export_script", "params": {"path": script}},
+    ]);
+    // The verbose run writes the same steps to files of its own.
+    let mut verbose_steps = steps.clone();
+    assert_eq!((&steps[7]["command"], &steps[8]["command"]), (&json!("file.export_stl"), &json!("timeline.export_script")));
+    verbose_steps[7]["params"]["path"] = json!(dir.path().join("disc-verbose.stl"));
+    verbose_steps[8]["params"]["path"] = json!(dir.path().join("disc-verbose.json"));
+    let mut s = server();
+    let full = tool(&mut s, "batch", json!({"commands": verbose_steps}));
+    tool(&mut s, "new_design", json!({}));
+    let r = tool(&mut s, "batch", json!({"commands": steps, "verbose": false}));
+    let written = std::fs::read_to_string(&script).unwrap_or_default();
+    assert_eq!(full["results"][0]["display_value"], json!(20.0), "{full}");
+    assert_eq!(r["results"][0], json!({"name": "R", "unit": "mm", "value": 20.0}), "{r}");
+    assert!(r["results"][2].get("warning").is_none() && full["results"][2]["warning"].is_null(), "a null warning is left out: {r}");
+    // The rounded hole rims leave three faces whose shaping stopped at a bound: one line in the
+    // compact reply.
+    let export = &r["results"][7];
+    let n = full["results"][7]["warnings"].as_array().map_or(0, Vec::len);
+    assert!(n >= 2, "the part should give the export several warnings: {full}");
+    assert_eq!(export["warning_count"], json!(n), "{r}");
+    assert_eq!(export["warnings"].as_array().map(Vec::len), Some(1), "{r}");
+    assert!(export["warnings"][0].as_str().is_some_and(|w| w.starts_with(&format!("{n} faces "))), "{r}");
+    let exported = &r["results"][8];
+    assert!(full["results"][8]["script"].is_object(), "{full}");
+    assert!(exported.get("script").is_none(), "{r}");
+    assert_eq!(exported["path"], json!(script), "{r}");
+    assert_eq!(exported["absolute_path"], json!(script), "the compact reply keeps the file's full path: {r}");
+    assert_eq!(exported["bytes"], json!(written.len()), "{r}");
+    assert!(written.contains("\"timeline.add\""), "the script is still written in full: {written}");
+    // The compact reply is a fraction of the full one.
+    let (full_len, compact_len) = (full.to_string().len(), r.to_string().len());
+    assert!(compact_len * 2 < full_len, "compact {compact_len} bytes, full {full_len} bytes: {r}");
 }
 
 /// #9180: a compact sketch reply counts the points of a spline's poles instead of listing them,
@@ -3221,6 +3414,17 @@ fn mechanisms_skill_example_moves_as_documented() {
     assert!(value(&list, "Stroke") <= 10.0 + 1e-6 && (value(&list, "Stroke") - stroke(hinge)).abs() < 1e-6, "{list}");
 }
 
+/// Every tool the server offers has a name for the person watching an agent use it (the UI shows
+/// that name, never the tool's id).
+#[test]
+fn every_tool_has_a_name_for_the_person_watching() {
+    use solidcraft_engine::agent_tools::{MESSAGE_TOOLS, tool_command};
+    for tool in tool_definitions() {
+        let name = tool["name"].as_str().unwrap();
+        assert!(tool_command(name).is_some() || MESSAGE_TOOLS.contains(&name), "tool `{name}` needs a name in solidcraft_engine::agent_tools");
+    }
+}
+
 /// Every tool and command the agent skills call exists, so a rename or removal can't leave the
 /// skills sending agents to names the server no longer has.
 #[test]
@@ -3454,6 +3658,11 @@ fn batch_too_large_for_one_control_line_goes_per_step() {
 /// A fake app on a loopback port: counts connections and `engine.batch` lines, never replies to
 /// them (`close_first`: close a connection as soon as it is accepted).
 fn silent_app(close_first: bool) -> (String, std::sync::Arc<std::sync::Mutex<(usize, usize)>>) {
+    silent_method_app(close_first, "engine.batch")
+}
+
+/// Count deliveries of one non-idempotent method while dropping its reply.
+fn silent_method_app(close_first: bool, method: &'static str) -> (String, std::sync::Arc<std::sync::Mutex<(usize, usize)>>) {
     use std::io::BufRead;
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap().to_string();
@@ -3470,7 +3679,7 @@ fn silent_app(close_first: bool) -> (String, std::sync::Arc<std::sync::Mutex<(us
                 let mut r = std::io::BufReader::new(stream);
                 let mut line = String::new();
                 while r.read_line(&mut line).is_ok_and(|n| n > 0) {
-                    if line.contains("engine.batch") {
+                    if line.contains(method) {
                         counts.lock().unwrap().1 += 1;
                         return;
                     }
@@ -3675,8 +3884,10 @@ fn tool_annotations_tell_the_whole_truth() {
     ] {
         assert_eq!(hints(name), (true, false, false), "{name}");
     }
-    assert_eq!(hints("new_design"), (false, true, false));
-    for name in ["set_parameter", "check_parameters", "undo", "redo"] {
+    for name in ["new_design", "documents", "quit_app"] {
+        assert_eq!(hints(name), (false, true, false), "{name}");
+    }
+    for name in ["set_parameter", "check_parameters", "undo", "redo", "preferences", "agent_cursor"] {
         assert_eq!(hints(name), (false, false, false), "{name}");
     }
     assert!(tools.iter().all(|t| t["annotations"]["readOnlyHint"].is_boolean()), "every tool is annotated");
@@ -4653,6 +4864,183 @@ fn compact_output_follows_the_apps_preference() {
     assert!(inspect_design_is_compact(&mut s));
 }
 
+/// #3704: a fake desktop app that records the app-management methods it is asked.
+struct AppTools {
+    calls: Vec<(String, Value)>,
+}
+
+impl crate::backend::Backend for AppTools {
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        self.calls.push((method.to_string(), params.clone()));
+        match method {
+            "ui.documents" => Ok(json!({"documents": [{"name": "A", "active": true, "unsaved": false}], "active_index": 0})),
+            "app.quit" => Ok(json!({"quitting": true})),
+            "ui.prefs" => Ok(json!({"default_units": "mm", "theme": "dark", "plugin_grants": {"gears": ["/data"]}, "graphics_backend": "gl"})),
+            "ui.agent_cursor" => Ok(json!({"show": true, "speed": 2.0, "follow_camera": false})),
+            other => Err(format!("unknown method `{other}`")),
+        }
+    }
+    fn has_ui(&self) -> bool {
+        true
+    }
+    fn describe(&self) -> String {
+        "app-tools".into()
+    }
+}
+
+/// Dispatch one tool call to the recording desktop backend.
+fn app_tool(name: &str, args: Value) -> (AppTools, Value, bool) {
+    let mut b = AppTools { calls: Vec::new() };
+    let r = crate::tools::call_tool(&mut b, name, &args);
+    let is_error = r["isError"] == json!(true);
+    (b, r, is_error)
+}
+
+/// Method names reached by a tool, in call order.
+fn app_methods(b: &AppTools) -> Vec<&str> {
+    b.calls.iter().map(|(m, _)| m.as_str()).collect()
+}
+
+/// #3704: headless has no window, so the four app-management tools say so at once, naming the tool.
+#[test]
+fn app_tools_need_the_desktop_app() {
+    let mut s = server();
+    for name in ["documents", "quit_app", "preferences", "agent_cursor"] {
+        let r = raw_tool(&mut s, name, json!({}));
+        assert_eq!(r["result"]["isError"], json!(true), "{name}: {r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with(name), "{name}: {text}");
+        assert!(text.contains("needs the desktop app"), "{name}: {text}");
+    }
+}
+
+/// #3704: `documents` lists the tabs with no action, and passes action/index/force to ui.documents.
+#[test]
+fn documents_bridges_to_ui_documents() {
+    let (b, r, is_err) = app_tool("documents", json!({}));
+    assert!(!is_err, "{r}");
+    assert_eq!(app_methods(&b), ["ui.documents"]);
+    assert_eq!(b.calls[0].1, json!({}));
+
+    let (b, r, is_err) = app_tool("documents", json!({"action": "switch", "index": 2}));
+    assert!(!is_err, "{r}");
+    assert_eq!(b.calls[0].1, json!({"action": "switch", "index": 2}));
+
+    let (b, r, is_err) = app_tool("documents", json!({"action": "close", "force": true}));
+    assert!(!is_err, "{r}");
+    assert_eq!(b.calls[0].1, json!({"action": "close", "force": true, "ask": false}));
+
+    let (b, _r, is_err) = app_tool("documents", json!({"action": "new"}));
+    assert!(!is_err);
+    assert_eq!(b.calls[0].1, json!({"action": "new"}));
+}
+
+/// #3704: `quit_app` asks app.quit, with force only when given.
+#[test]
+fn quit_app_bridges_to_app_quit() {
+    let (b, r, is_err) = app_tool("quit_app", json!({}));
+    assert!(!is_err, "{r}");
+    assert_eq!(app_methods(&b), ["app.quit"]);
+    assert_eq!(b.calls[0].1, json!({"ask": false}));
+
+    let (b, _r, is_err) = app_tool("quit_app", json!({"force": true}));
+    assert!(!is_err);
+    assert_eq!(b.calls[0].1, json!({"force": true, "ask": false}));
+}
+
+/// #3704: `preferences` reads with no arguments and passes allowed settings straight to ui.prefs;
+/// a key outside the allowlist is refused before the app is asked.
+#[test]
+fn preferences_reads_and_sets() {
+    let (b, r, is_err) = app_tool("preferences", json!({}));
+    assert!(!is_err, "{r}");
+    assert_eq!(app_methods(&b), ["ui.prefs"]);
+    assert_eq!(b.calls[0].1, json!({}));
+
+    let (b, r, is_err) = app_tool("preferences", json!({"theme": "dark", "default_units": "cm"}));
+    assert!(!is_err, "{r}");
+    assert_eq!(b.calls[0].1, json!({"theme": "dark", "default_units": "cm"}));
+    assert!(r["content"][0]["text"].as_str().unwrap().contains("dark"));
+
+    // A made-up key passes the schema (additionalProperties) and is refused before any call.
+    let (b, r, is_err) = app_tool("preferences", json!({"no_such_preference": 1}));
+    assert!(is_err, "{r}");
+    assert!(b.calls.is_empty());
+}
+
+/// #3704 review: an AI client may not widen plugin access or change graphics, file limits, signing or file
+/// paths; those keys are refused before ui.prefs is asked, even next to an allowed one, and never read back.
+#[test]
+fn preferences_refuses_keys_outside_the_allowlist_and_reads_back_only_allowed_ones() {
+    for (key, value) in [
+        ("plugin_grants", json!({"gears": ["/"]})),
+        ("graphics_backend", json!("vulkan")),
+        ("disabled_plugins", json!([])),
+        ("theme_follow", json!("/tmp/theme.json")),
+    ] {
+        let (b, reply, is_error) = app_tool("preferences", json!({key: value, "theme": "dark"}));
+        assert!(is_error, "{key}: {reply}");
+        let text = reply["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains(key) && text.contains("default_units"), "{text}");
+        assert!(b.calls.is_empty(), "{key}: a refused request must not reach ui.prefs");
+    }
+    let (_b, reply, is_error) = app_tool("preferences", json!({}));
+    assert!(!is_error, "{reply}");
+    let text = reply["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("default_units") && !text.contains("plugin_grants") && !text.contains("graphics_backend"), "{text}");
+}
+
+/// Preference reads and writes must not drive dialogs or act on the current design.
+#[test]
+fn preferences_refuses_ui_actions_before_forwarding_any_change() {
+    for (key, value) in [("open", json!("General")), ("button", json!("restart_graphics")), ("stand_up", json!(true))] {
+        let (b, reply, is_error) = app_tool("preferences", json!({key: value, "theme": "dark"}));
+        assert!(is_error, "{key}: {reply}");
+        assert!(reply["content"][0]["text"].as_str().unwrap().contains(key), "{reply}");
+        assert!(b.calls.is_empty(), "a refused request must not change preferences or open a dialog");
+    }
+}
+
+/// #3704: `agent_cursor` passes show/speed/follow_camera to ui.agent_cursor, and speed may be "instant".
+#[test]
+fn agent_cursor_bridges_to_ui_agent_cursor() {
+    let (b, r, is_err) = app_tool("agent_cursor", json!({}));
+    assert!(!is_err, "{r}");
+    assert_eq!(app_methods(&b), ["ui.agent_cursor"]);
+    assert_eq!(b.calls[0].1, json!({}));
+
+    let (b, _r, is_err) = app_tool("agent_cursor", json!({"show": true, "speed": "instant", "follow_camera": true}));
+    assert!(!is_err);
+    assert_eq!(b.calls[0].1, json!({"show": true, "speed": "instant", "follow_camera": true}));
+}
+
+/// #3704: the app-management tools are not engine commands, so a batch step names the tool, not
+/// a confusing "unknown command"; and their schemas still refuse unknown arguments.
+#[test]
+fn app_tools_are_not_batch_steps_and_check_arguments() {
+    for name in ["documents", "quit_app", "preferences", "agent_cursor"] {
+        let mut s = server();
+        let r = raw_tool(&mut s, "batch", json!({"commands": [{"command": name}]}));
+        assert_eq!(r["result"]["isError"], json!(true), "{name}: {r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains(&format!("`{name}` is a tool")), "{name}: {text}");
+        // `execute` wrapping them is answered with the MCP-tool hint (#10680).
+        let r = raw_tool(&mut s, "execute", json!({"command": name}));
+        assert_eq!(r["result"]["isError"], json!(true), "execute {name}: {r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains(&format!("`{name}` is an MCP tool, not an engine command id")), "execute {name}: {text}");
+    }
+    let mut s = server();
+    // Unknown arguments are schema errors…
+    assert_eq!(raw_tool(&mut s, "documents", json!({"bogus": 1}))["error"]["code"], -32602);
+    assert_eq!(raw_tool(&mut s, "agent_cursor", json!({"bogus": 1}))["error"]["code"], -32602);
+    assert_eq!(raw_tool(&mut s, "quit_app", json!({"bogus": 1}))["error"]["code"], -32602);
+    // …while `preferences` takes any key (the app decides which it knows).
+    let r = raw_tool(&mut s, "preferences", json!({"any_preference": 1}));
+    assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("needs the desktop app"), "{r}");
+}
+
 /// A screw's counterbore through MCP alone (#12321): `describe_command` lists `head` and
 /// `head_gap`, `execute` forwards them to `solid.hole` unchanged (the command has no typed
 /// contract), the recess measures as the head table says, and a wrong head or gap is refused
@@ -4693,6 +5081,22 @@ fn execute_forwards_a_screw_head_to_a_hole_and_describes_it() {
         assert!(text.contains(names), "{text}");
     }
     assert!(rel(volume(&mut s), want) < 1e-6, "a refused hole changes nothing");
+}
+
+/// A lost app-management reply must not close the next tab or create a duplicate tab.
+#[test]
+fn app_management_is_not_resent_after_a_lost_reply() {
+    use crate::backend::Backend;
+    for (method, params) in [
+        ("ui.documents", json!({"action": "close", "force": true, "ask": false})),
+        ("ui.documents", json!({"action": "new"})),
+        ("app.quit", json!({"ask": false})),
+    ] {
+        let (addr, seen) = silent_method_app(false, method);
+        let mut remote = crate::Remote::connect(&addr).unwrap();
+        assert!(remote.call(method, params).is_err());
+        assert_eq!(*seen.lock().unwrap(), (2, 1), "{method}: one initial connection and one delivery");
+    }
 }
 
 #[test]
@@ -4834,6 +5238,53 @@ fn plugin_tool_arguments_must_be_objects_before_any_backend_call() {
     assert_eq!(backend.calls.last().unwrap().0, "control.running");
 }
 
+/// A docked panel and an MCP caller use the same entry and typed event payload.
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[test]
+fn plugin_panel_row_action_runs_the_same_entry_over_mcp() {
+    let root = std::env::temp_dir().join(format!("solidcraft-mcp-panel-{}", std::process::id()));
+    let folder = root.join("sample");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.2","ui@0.1"],"runtime":{
+        "module":"plugin.wasm","commands":["inspect.measure"],"entries":[{"name":"make","effect":"read","input_schema":{
+            "type":"object","properties":{"panel":{"type":"string"},"event":{"type":"string"},"path":{"type":"string"},
+                "row":{"type":["string","null"]},"value":{"type":["object","string","null"]}}
+        }}],"limits":{"fuel":1000000,"memory_mib":2,"deadline_ms":5000},
+        "ui":{"ui_version":1,"panels":[{"id":"jobs","title":"Jobs","zones":["bottom"],"layout":{"root":0,"nodes":[{"widget":{"table":{
+            "bind":"/jobs","row_id":"id","columns":[{"key":"state","label":"state","unit":null}],"select":"single","on_select":"make","on_edit":"make"
+        }}}]}}],"workspaces":[]}
+    }});
+    let (package, version) = solidcraft_engine::plugin::API.split_once('@').unwrap();
+    let source = include_str!("../../craft-plugin-wasm/src/ui_fixture.wat")
+        .replace("__PACKAGE__", package)
+        .replace("__VERSION__", version)
+        .replace("__COMMAND__", "inspect.measure")
+        .replace("__COMMAND_LEN__", "15")
+        .replace("__ARGS__", "{}")
+        .replace("__ARGS_LEN__", "2");
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    std::fs::write(folder.join("plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+    let mut session = solidcraft_engine::Session::default();
+    session.plugin_state.plugins_dir = Some(root.clone());
+    let mut backend = Headless::new(session);
+    let initial = crate::call_tool(&mut backend, "sample.make", &json!({"panel":"jobs","event":"refresh"}));
+    assert_ne!(initial["isError"], true, "{initial}");
+    backend.session.merge_plugin_panel_data();
+    assert_eq!(backend.session.plugin_panels()[0].data.get("/jobs/0/state"), Some(&solidcraft_engine::plugin::ui::UiValue::Text("ready".into())));
+    let described = solidcraft_engine::plugin::describe_entry(&backend.session, "sample.make").unwrap().unwrap();
+    assert!(described.pointer("/input/properties/ui_event").is_some(), "the explicit event envelope is discoverable");
+    backend.session.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+    let event = json!({"panel":"jobs","event":"edit","path":"/jobs","row":"op1","value":null});
+    let approval = solidcraft_engine::plugin::read_package(&folder.to_string_lossy()).unwrap().approval;
+    let posted =
+        crate::call_tool(&mut backend, "execute", &json!({"command":"sample.make","params":{"approval":approval,"params":event,"ui_event":event}}));
+    assert_ne!(posted["isError"], true, "{posted}");
+    backend.session.merge_plugin_panel_data();
+    assert_eq!(backend.session.plugin_panels()[0].data.get("/jobs/0/state"), Some(&solidcraft_engine::plugin::ui::UiValue::Text("posted".into())));
+    assert!(backend.session.doc.features.is_empty(), "read entry updates panels without editing the design");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 /// Installed plugins are tools (RFC 0002 section 6c): listed with a `plugin` field and their
 /// own text marked as plugin text, called with strict arguments, refused with the missing grant
 /// as data, and gone from the next listing once removed.
@@ -4857,6 +5308,12 @@ fn installed_plugins_are_listed_and_called_as_tools_until_removed() {
         json!({"id":"smp","name":"Sample importer","version":"1","capabilities":["formats@0.1"],
         "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["smp"]}]}}),
     );
+    write(
+        "out",
+        json!({"id":"out","name":"Sample exporter","version":"1","capabilities":["formats@0.1"],
+        "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"save","kind":"exporter","extensions":["out"],
+        "input_schema":{"type":"object","properties":{"precision":{"type":"integer","minimum":1}}}}]}}),
+    );
     let mut session = solidcraft_engine::Session::default();
     session.plugin_state.plugins_dir = Some(plugins.clone());
     // Grants approved for an older package: this one needs approving again.
@@ -4877,6 +5334,19 @@ fn installed_plugins_are_listed_and_called_as_tools_until_removed() {
     let importer = tools.iter().find(|t| t["name"] == "smp.convert").expect("the importer is a tool");
     assert_eq!(importer["title"], "Open .smp files with Sample importer");
     assert_eq!(importer["inputSchema"]["required"], json!(["path"]));
+    let exporter = tools.iter().find(|t| t["name"] == "out.save").expect("the exporter is a tool");
+    assert_eq!(exporter["title"], "Export .out files with Sample exporter");
+    assert_eq!(exporter["plugin"]["kind"], "exporter");
+    assert_eq!(exporter["inputSchema"]["required"], json!(["path"]));
+    let annotations = &exporter["annotations"];
+    assert_eq!(
+        (&annotations["readOnlyHint"], &annotations["destructiveHint"], &annotations["openWorldHint"]),
+        (&json!(false), &json!(true), &json!(true))
+    );
+    for args in [json!({}), json!({"path":"part.out","extra":true}), json!({"path":"part.out","options":{"precision":0}})] {
+        let invalid = raw_tool(&mut s, "out.save", args);
+        assert!(invalid["error"].is_object() || invalid["result"]["isError"] == true, "{invalid}");
+    }
     // Arguments are checked as strictly as a command's.
     assert!(
         call(&mut s, 2, "tools/call", json!({"name":"gears.make","arguments":{"colour":"red"}}))["error"]["message"]

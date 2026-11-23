@@ -29,6 +29,7 @@
 use crate::boolean::merge::p1::{self, VertexCopy};
 use crate::boolean::merge::p2::{self, MergeContext, TopologyCopy};
 use crate::boolean::topology_intersector::p1::Relations;
+use crate::error::boolean::{BooleanFailure, BooleanStage};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::a_object::BooleanOperation;
 use crate::geom::context::{Context, MarkType};
@@ -72,29 +73,52 @@ fn classify_region(
         p1::classify_point_editing_disabled(k, query, b, point, EFF_ZERO, boundary_intersections)?;
     let shell_region = |shell: Option<ShellId>| -> Result<RegionId> {
         let shell = shell.ok_or_else(|| {
-            SolidError::entity_missing(OP, "the classified point lies on no shell")
+            SolidError::boolean_null_defect(
+                OP,
+                BooleanStage::Classify,
+                "the use of the face or edge the point lies on has no shell, though the \
+                 kernel keeps every face use and edge use in a shell",
+            )
         })?;
-        b.shell(shell)?
-            .region
-            .ok_or_else(|| SolidError::entity_missing(OP, "the shell lies in no region"))
+        b.shell(shell)?.region.ok_or_else(|| {
+            SolidError::boolean_null_defect(
+                OP,
+                BooleanStage::Classify,
+                "the shell of the face or edge the point lies on is in no region, though the \
+                 kernel keeps every shell in a region",
+            )
+        })
     };
     let region = match (pc.point_class(), pc.object()) {
         (PointClassType::Region, Some(EntityRef::Region(r))) => r,
         (PointClassType::Face, Some(EntityRef::Face(f))) if accept_face_or_edge => {
-            let fu = face::p2::upward_faceuse(b, f)?
-                .ok_or_else(|| SolidError::entity_missing(OP, "the face has no upward face use"))?;
+            let fu = face::p2::upward_faceuse(b, f)?.ok_or_else(|| {
+                SolidError::boolean_null_defect(
+                    OP,
+                    BooleanStage::Classify,
+                    "the face the point lies on has no upward face use, though the kernel \
+                     keeps every face with its face uses",
+                )
+            })?;
             shell_region(b.faceuse(fu)?.shell)?
         }
         (PointClassType::Edge, Some(EntityRef::Edge(e))) if accept_face_or_edge => {
             let edgeuse = eu::primary_edgeuse(b, e)?.ok_or_else(|| {
-                SolidError::entity_missing(OP, "the edge has no primary edge use")
+                SolidError::boolean_null_defect(
+                    OP,
+                    BooleanStage::Classify,
+                    "the edge the point lies on has no primary edge use, though the kernel \
+                     keeps every edge with its edge uses",
+                )
             })?;
             shell_region(eu::shell(b, edgeuse)?)?
         }
         (PointClassType::Region | PointClassType::Face | PointClassType::Edge, None) => {
-            return Err(SolidError::entity_missing(
+            return Err(SolidError::boolean_null_defect(
                 OP,
-                "the classified region, face or edge is missing",
+                BooleanStage::Classify,
+                "the point classified to a region, face or edge records none, though the \
+                 classification records the entity it found",
             ))
         }
         _ => return Ok(None),
@@ -141,7 +165,7 @@ fn midpoint(k: &Kernel, b: &Brep, id: EdgeId) -> Result<Point3> {
     let curve = edge
         .curve
         .as_ref()
-        .ok_or_else(|| SolidError::entity_missing(OP, "the edge has no curve"))?;
+        .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::EdgeWithoutCurve))?;
     curve.evaluate_point(k, edge.interval.evaluate(0.5))
 }
 
@@ -434,10 +458,21 @@ fn collect_wires_and_shell_vertices(
             if remove_in_region(operation, region.is_void) {
                 for &edge_id in &collected {
                     done = false;
-                    let v1 = edge::vertex(brep, edge_id)?
-                        .ok_or_else(|| SolidError::entity_missing(OP, "the edge has no vertex"))?;
+                    let v1 = edge::vertex(brep, edge_id)?.ok_or_else(|| {
+                        SolidError::boolean_null_defect(
+                            OP,
+                            BooleanStage::Classify,
+                            "a wire edge to remove has no vertex, though the kernel gives every \
+                             edge a vertex at each end",
+                        )
+                    })?;
                     let v2 = edge::other_vertex(brep, edge_id, Some(v1))?.ok_or_else(|| {
-                        SolidError::entity_missing(OP, "the edge has no second vertex")
+                        SolidError::boolean_null_defect(
+                            OP,
+                            BooleanStage::Classify,
+                            "a wire edge to remove has no vertex at its other end, though the \
+                             kernel gives every edge a vertex at each end",
+                        )
                     })?;
                     if let Some(slot) = edges.iter_mut().find(|slot| **slot == Some(edge_id)) {
                         *slot = None;
@@ -467,9 +502,12 @@ fn collect_wires_and_shell_vertices(
                 | BooleanOperation::Merge
                 | BooleanOperation::PartialMerge => {
                     let mate = relations.edges.primary(id).ok_or_else(|| {
-                        SolidError::entity_missing(
+                        SolidError::boolean_null_defect(
                             OP,
-                            "the edge has no related edge in the other B-rep",
+                            BooleanStage::Merge,
+                            "a marked wire edge of the other B-rep has no related primary edge, \
+                             though the Boolean marks only the edges of the related pairs the \
+                             intersector reports",
                         )
                     })?;
                     brep.edge(mate)?;
@@ -522,12 +560,7 @@ fn collect_wires_and_shell_vertices(
             let point = brep.vertex(v)?.point;
             let region =
                 classify_region(kernels.other(), &other_query, other, point, false, false)?
-                    .ok_or_else(|| {
-                        SolidError::stage_failed(
-                            OP,
-                            "the vertex lies in no region of the other B-rep",
-                        )
-                    })?;
+                    .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::VertexInNoRegion))?;
             if remove_in_region(operation, region.is_void) {
                 kernels.delete_vertex(brep, v)?;
             }
@@ -544,9 +577,7 @@ fn collect_wires_and_shell_vertices(
         }
         let point = other.vertex(v)?.point;
         let region = classify_region(kernels.primary(), &brep_query, brep, point, false, false)?
-            .ok_or_else(|| {
-                SolidError::stage_failed(OP, "the vertex lies in no region of the primary B-rep")
-            })?;
+            .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::VertexInNoRegion))?;
         if keep_other(operation, region.is_void) {
             keep_vertices.push((v, region.id));
         }
