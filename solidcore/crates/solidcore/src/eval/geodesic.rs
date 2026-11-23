@@ -668,6 +668,31 @@ mod tests {
     }
 
     #[test]
+    fn a_curved_b_spline_matches_the_cylinder_it_represents() {
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let mut points = Vec::new();
+        for i in 0..9 {
+            let angle = std::f64::consts::FRAC_PI_4 * i as f64;
+            let wt = if i % 2 == 0 { 1.0 } else { w };
+            let (s, c) = angle.sin_cos();
+            points.push(vec![
+                [2.0 * c, 2.0 * s, 0.0, wt],
+                [2.0 * c, 2.0 * s, 3.0, wt],
+            ]);
+        }
+        let b = SurfaceEval::new(&Surface::RationalSpline {
+            u_knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0],
+            v_knots: vec![0.0, 0.0, 1.0, 1.0],
+            homogeneous: points,
+        })
+        .expect("a B-spline cylinder");
+        let c = cylinder(2.0);
+        let db = distance(&b, [1.0, 2.0 / 3.0], [2.0, 2.0 / 3.0]).expect("a B-spline geodesic");
+        let dc = distance(&c, [FRAC_PI_2, 2.0], [PI, 2.0]).expect("a cylinder geodesic");
+        assert!((db - dc).abs() <= 1e-4, "{db} vs {dc}");
+    }
+
+    #[test]
     fn a_pcurve_measures_its_surface_length() {
         let s = plane();
         let curve = Curve2::Spline {
