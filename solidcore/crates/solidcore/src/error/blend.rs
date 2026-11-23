@@ -3027,7 +3027,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 68;
+    const VARIANTS: usize = 69;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -3079,7 +3079,7 @@ mod tests {
             BlendFailure::VariableRadiusLawMissing { .. } => (42, None),
             BlendFailure::BevelVertexNotFilleted => (43, None),
             BlendFailure::LawIntervalEmpty => (44, None),
-            BlendFailure::ExactBlendAxisCannotPlaceEdge { .. } => (67, None),
+            BlendFailure::ExactBlendAxisCannotPlaceEdge { .. } => (68, None),
             BlendFailure::EdgeWithoutCurve => (45, None),
             BlendFailure::LawHasNoValue => (46, None),
             BlendFailure::SequenceCurveNotBSpline { .. } => (47, None),
