@@ -1946,15 +1946,6 @@ pub fn glue_edges_general(
     )
 }
 
-/// [`glue_edges_general`] for a caller that says how a split of the infinite region tells
-/// its infinite half: by the search (`InfiniteHalf::Searched`, upstream's behaviour), or
-/// from a face use the caller knows to lie outside the solid whose shell the glue closes
-/// (`InfiniteHalf::Of`, not upstream). Without `do_region_nesting` nothing is split and
-/// the argument is not read.
-///
-/// # Errors
-///
-/// Those of [`glue_edges_general`].
 /// Whether `eu`'s UV trim curve, if it has one, spans `edge`'s interval (a pcurve shares
 /// its edge's interval, `docs/validity-and-tolerances.md` §9), compared as
 /// [`glue_edges_general_searching`] compares the glued edges' intervals.
@@ -1968,6 +1959,15 @@ fn trim_curve_spans(b: &Brep, eu: EdgeuseId, edge: EdgeId) -> Result<bool> {
         && crate::geom::tol::are_same(trim.max(), edge.max()))
 }
 
+/// [`glue_edges_general`] for a caller that says how a split of the infinite region tells
+/// its infinite half: by the search (`InfiniteHalf::Searched`, upstream's behaviour), or
+/// from a face use the caller knows to lie outside the solid whose shell the glue closes
+/// (`InfiniteHalf::Of`, not upstream). Without `do_region_nesting` nothing is split and
+/// the argument is not read.
+///
+/// # Errors
+///
+/// Those of [`glue_edges_general`].
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
 pub(crate) fn glue_edges_general_searching(
     k: &mut Kernel,
