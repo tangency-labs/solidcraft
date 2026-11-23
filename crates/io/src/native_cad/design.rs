@@ -417,7 +417,7 @@ impl Builder {
             },
             Some("cylinder") if whole("angle", TAU) => FeatureKind::Cylinder {
                 base: corner,
-                axis: Dir(z),
+                axis: solidcraft_doc::dir_expr(z),
                 radius: mm(len("radius")?),
                 height: mm(len("height")?),
                 operation: op,

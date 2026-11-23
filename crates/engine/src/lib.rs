@@ -3854,6 +3854,17 @@ impl Session {
         Ok(())
     }
 
+    /// Read a primary origin for the Joint dialog without modifying the session.
+    pub fn joint_origin_for_alignment(&self, params: &serde_json::Value) -> Result<doc::joints::JointOrigin> {
+        cmd::joints::origin_param(self, Some(params), "joint.create")
+    }
+
+    /// Validate a secondary selection through the command resolver without authoring it.
+    pub fn joint_alignment_frame(&self, origin: doc::joints::JointOrigin, alignment: &serde_json::Value) -> Result<doc::Mat> {
+        let origin = cmd::joints::alignment_param(self, origin, Some(alignment), "joint.create")?;
+        doc::joints::resolve_origin(&self.doc, &self.model.state(), &origin).map_err(Into::into)
+    }
+
     /// Live preview: run `commands` (id, parameters) on a scratch copy and return the model
     /// before and after. Nothing in this session changes (document, undo history, selection).
     /// A `timeline.redefine` is shown even while the timeline is rolled back to the feature
