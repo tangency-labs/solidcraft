@@ -68,8 +68,22 @@ fn helix_profile(
     let numbered = crate::numbered::number_regions(std::slice::from_ref(region)).pop().ok_or_else(|| KernelError::Invalid("profile".into()))?;
     let profile = numbered.outer.oriented(false);
     let lp = &profile.lp;
-    let along: Vec<f64> =
-        lp.segs.iter().flat_map(|s| (0..8).map(move |i| s.point_at(i as f64 / 8.0))).map(|q| (plane.to_world(q) - axis_origin).dot(k)).collect();
+    let radial = |q: Vec2| {
+        let w = plane.to_world(q) - axis_origin;
+        (w - k * w.dot(k), w.dot(k))
+    };
+    let e = lp.segs.first().and_then(|s| radial(s.point_at(0.0)).0.normalized()).unwrap_or_else(|| k.any_perp());
+    // Each point's height where the screw motion carries it into the half-plane through the first:
+    // a profile across the helix (not in a plane of the axis) reaches further along it there.
+    let along: Vec<f64> = lp
+        .segs
+        .iter()
+        .flat_map(|s| (0..8).map(move |i| s.point_at(i as f64 / 8.0)))
+        .map(|q| {
+            let (v, h) = radial(q);
+            h - pitch * v.dot(k.cross(e)).atan2(v.dot(e)) / std::f64::consts::TAU
+        })
+        .collect();
     let extent = along.iter().cloned().fold(f64::NEG_INFINITY, f64::max) - along.iter().cloned().fold(f64::INFINITY, f64::min);
     if turns > 1.0 && pitch.abs() <= extent {
         // A section exactly one pitch wide makes neighbouring turns share a face, which a single solid cannot hold yet.
@@ -81,7 +95,9 @@ fn helix_profile(
                 extent * 0.99
             )));
         }
-        return Err(KernelError::Invalid(format!("the coil runs into itself: the pitch must exceed the section ({extent:.3} mm)")));
+        return Err(KernelError::Invalid(format!(
+            "the coil runs into itself: the pitch must exceed the section's extent along the axis ({extent:.3} mm)"
+        )));
     }
     Ok((k, profile))
 }

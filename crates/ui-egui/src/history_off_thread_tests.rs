@@ -396,6 +396,13 @@ fn switching_from_a_sketch_to_a_feature_restores_partial_markers_and_sketch_chan
         let history = (h.app.session.undo.len(), h.app.session.redo.len());
         let changed = h.app.session.doc.sketch(sketches[0]).unwrap().clone();
         until_settled(&mut h);
+        for _ in 0..500 {
+            if h.app.dialog.is_some() {
+                break;
+            }
+            h.frames(1);
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert!(h.app.dialog.is_some());
         h.app.session.selection = vec![solidcraft_engine::Sel::Axis { name: "X".into() }];
         *h.app.session.model.cache.lock().unwrap() = Default::default();
