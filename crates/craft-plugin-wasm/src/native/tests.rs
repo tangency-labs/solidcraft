@@ -35,15 +35,23 @@ impl PluginHost for App {
             .then(|| craft_plugin::DesignToken { document_id: "design-one".into(), revision: "0123456789abcdef0123456789abcdef:7".into() }))
     }
     fn command_catalog(&self) -> Vec<CommandSchema> {
-        vec![CommandSchema {
-            name: "app.write".into(),
+        let schema = |name: &str, effect, group: Option<String>| CommandSchema {
+            name: name.into(),
             input_schema: json!({"type":"object"}),
             output_schema: json!({"type":"object"}),
-            effect: Effect::Edit,
-            group: self.write_group.clone(),
-        }]
+            effect,
+            group,
+        };
+        vec![
+            schema("app.write", Effect::Edit, self.write_group.clone()),
+            schema("document.inspect", Effect::Read, None),
+            schema("file.export", Effect::Read, Some("file".into())),
+        ]
     }
-    fn run_command(&mut self, _: &str, _: &Value) -> Result<Value> {
+    fn run_command(&mut self, name: &str, _: &Value) -> Result<Value> {
+        if name == "document.inspect" {
+            return Ok(json!({"name":"Bracket","bodies":1}));
+        }
         self.value += 1;
         Ok(json!({"value":self.value}))
     }
@@ -1171,5 +1179,212 @@ fn an_importer_built_against_wit_0_1_still_runs() {
     assert_eq!(failure, HostError::InvalidInput { field: "file".into(), reason: "the model has no solids".into() });
     let failure = import_with(&old, &importer_manifest(false), root.join("loop.smp"), false).unwrap_err();
     assert_eq!(failure, HostError::Exhausted { limit: "fuel".into(), allowed: 10_000_000 });
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+fn exporter_manifest() -> Manifest {
+    let slot = |name: &str| json!({"name":name,"kind":"exporter","extensions":["smp"]});
+    craft_plugin::parse_manifest(
+        json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.1"],"runtime":{
+            "module":"sample.wasm","commands":["app.write","document.inspect","file.export"],
+            "entries":[slot("copy"),slot("error"),slot("trap"),slot("loop"),slot("write")],
+            "limits":{"fuel":10000000,"memory_mib":2,"deadline_ms":2000}
+        }})
+        .to_string()
+        .as_bytes(),
+        "sample",
+    )
+    .unwrap()
+}
+fn exporter_component() -> Vec<u8> {
+    let (package, version) = API.split_once('@').unwrap();
+    wat::parse_str(include_str!("../exporter_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap()
+}
+fn export(app: App, slot: &str) -> (App, Result<Vec<u8>>) {
+    crate::run_export(app, &exporter_manifest(), &exporter_component(), slot, &json!({}))
+}
+#[test]
+fn an_exporter_reads_the_design_through_read_commands_and_returns_the_file() {
+    let mut exporter = exporter_manifest();
+    crate::check_component(&exporter, &exporter_component()).unwrap();
+    // The compatibility linker must not accept a legacy command world as an export slot.
+    assert!(crate::check_component(&exporter, &component_for("0.1.0", "call $box")).is_err());
+    // Format slots may request a larger stack than commands, including during installation.
+    exporter.runtime.as_mut().unwrap().limits.stack_kib = Some(2048);
+    crate::check_component(&exporter, &exporter_component()).unwrap();
+    let (app, file) = export(App::default(), "copy");
+    let file: Value = serde_json::from_slice(&file.unwrap()).unwrap();
+    assert_eq!(file, json!({"name":"Bracket","bodies":1}));
+    // The export ran in a transaction that was thrown away, whatever its commands did.
+    assert_eq!((app.begins, app.commits, app.rollbacks), (1, 0, 1));
+    // An exporter is not a command, and a command runtime is not an exporter.
+    let mut app = App::default();
+    assert!(matches!(run(&mut app, &exporter_manifest(), &exporter_component(), "copy", &json!({})), Err(HostError::InvalidInput { .. })));
+    let (_, wrong) = crate::run_export(App::default(), &manifest(), &component("call $box"), "make", &json!({}));
+    assert!(matches!(wrong, Err(HostError::InvalidInput { .. })));
+}
+#[test]
+fn an_exporter_that_fails_traps_or_runs_away_returns_no_file_and_the_next_export_works() {
+    let (_, failure) = export(App::default(), "error");
+    assert!(matches!(&failure, Err(HostError::Trap { reason }) if reason.contains("refused this design")), "{failure:?}");
+    let (_, failure) = export(App::default(), "trap");
+    assert!(matches!(&failure, Err(HostError::Trap { reason }) if reason.contains("UnreachableCodeReached")), "{failure:?}");
+    let (app, failure) = export(App::default(), "loop");
+    assert!(matches!(&failure, Err(HostError::Exhausted { limit, .. }) if limit == "fuel"), "{failure:?}");
+    assert_eq!(app.rollbacks, 1);
+    assert!(export(App::default(), "copy").1.is_ok());
+}
+#[test]
+fn an_exporter_reaches_no_file_even_through_a_command_its_manifest_lists() {
+    // `file.export` is in the manifest's list, but it is in the `file` group: an exporter never
+    // gets it, nor any command that edits.
+    let (app, failure) = export(App { groups: ["file".to_string()].into(), ..App::default() }, "write");
+    assert!(matches!(&failure, Err(HostError::PermissionDenied { permission }) if permission.contains("file.export")), "{failure:?}");
+    assert_eq!(app.value, 0);
+    // A component built for the command world (it imports `files`) does not link as an exporter.
+    let (_, failure) = crate::run_export(App::default(), &exporter_manifest(), &files_component(true, false), "copy", &json!({}));
+    assert!(failure.is_err());
+}
+
+/// An empty folder for one compile-cache test. Wasmtime's cache wants an absolute path.
+fn cache_folder() -> PathBuf {
+    let root = std::env::temp_dir().join(format!("craft-plugin-cache-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::canonicalize(root).unwrap()
+}
+/// The compiled entries Wasmtime's cache wrote under `root`, leaving out its usage-statistics files.
+fn cache_entries(root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let Ok(versions) = std::fs::read_dir(root.join("modules")) else { return found };
+    for version in versions.flatten() {
+        for entry in std::fs::read_dir(version.path()).unwrap().flatten() {
+            if !entry.file_name().to_string_lossy().contains('.') {
+                found.push(entry.path());
+            }
+        }
+    }
+    found.sort();
+    found
+}
+fn compile_cached(bytes: &[u8], cache: &wasmtime::Cache) -> Result<(Engine, Component)> {
+    compile_with(bytes, 512 * 1024, Some(cache.clone()))
+}
+#[test]
+fn a_compiled_component_is_read_back_from_the_disk_cache_by_a_new_engine() {
+    let root = cache_folder();
+    let cache = open_disk_cache(&root).unwrap();
+    let bytes = importer_component();
+    let (engine, component) = compile_cached(&bytes, &cache).unwrap();
+    let first = check_imports(&engine, &component).unwrap();
+    assert_eq!((cache.cache_hits(), cache.cache_misses(), cache_entries(&root).len()), (0, 1, 1));
+    // Every compile makes a new engine, as a new session does: this one reads the entry back.
+    let (engine, component) = compile_cached(&bytes, &cache).unwrap();
+    assert_eq!(check_imports(&engine, &component).unwrap(), first);
+    assert_eq!((cache.cache_hits(), cache.cache_misses(), cache_entries(&root).len()), (1, 1, 1));
+    // Entries live under a folder named for the compiler and its version, so another Wasmtime never reads them.
+    let versions: Vec<String> =
+        std::fs::read_dir(root.join("modules")).unwrap().flatten().map(|v| v.file_name().to_string_lossy().into_owned()).collect();
+    assert!(versions.len() == 1 && versions[0].starts_with("wasmtime-"), "{versions:?}");
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn a_changed_component_or_compile_setting_gets_its_own_cache_entry() {
+    let root = cache_folder();
+    let cache = open_disk_cache(&root).unwrap();
+    compile_cached(&importer_component(), &cache).unwrap();
+    // A plugin update: other bytes, another entry, never the old code.
+    compile_cached(&component("call $box"), &cache).unwrap();
+    assert_eq!((cache.cache_hits(), cache.cache_misses(), cache_entries(&root).len()), (0, 2, 2));
+    // The same module under another setting is another entry too: the key covers the
+    // configuration, fuel metering included.
+    let module = wat::parse_str(r#"(module (func (export "run") (loop br 0)))"#).unwrap();
+    for fuel in [true, false, true] {
+        let mut config = Config::new();
+        config.cache(Some(cache.clone())).consume_fuel(fuel).epoch_interruption(true);
+        wasmtime::Module::new(&Engine::new(&config).unwrap(), &module).unwrap();
+    }
+    assert_eq!((cache.cache_hits(), cache.cache_misses(), cache_entries(&root).len()), (1, 4, 4));
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn fuel_still_stops_code_read_back_from_the_disk_cache() {
+    let root = cache_folder();
+    let cache = open_disk_cache(&root).unwrap();
+    let module = wat::parse_str(r#"(module (func (export "run") (loop br 0)))"#).unwrap();
+    for _ in 0..2 {
+        let mut config = Config::new();
+        config.cache(Some(cache.clone())).consume_fuel(true).epoch_interruption(true);
+        let engine = Engine::new(&config).unwrap();
+        let module = wasmtime::Module::new(&engine, &module).unwrap();
+        let mut store = wasmtime::Store::new(&engine, ());
+        store.set_fuel(10_000).unwrap();
+        store.set_epoch_deadline(u64::MAX);
+        let instance = wasmtime::Instance::new(&mut store, &module, &[]).unwrap();
+        let run = instance.get_typed_func::<(), ()>(&mut store, "run").unwrap();
+        let failure = run.call(&mut store, ()).unwrap_err();
+        assert_eq!(failure.downcast_ref::<wasmtime::Trap>(), Some(&wasmtime::Trap::OutOfFuel));
+    }
+    assert_eq!((cache.cache_hits(), cache.cache_misses()), (1, 1));
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn a_damaged_or_mismatched_cache_entry_is_compiled_again() {
+    let root = cache_folder();
+    let cache = open_disk_cache(&root).unwrap();
+    let bytes = importer_component();
+    compile_cached(&bytes, &cache).unwrap();
+    let [entry] = cache_entries(&root).try_into().unwrap();
+    let good = std::fs::read(&entry).unwrap();
+    // An entry compiled under another configuration (no fuel metering), put where this one's
+    // key points: Wasmtime checks the settings recorded in it and refuses it.
+    let other_root = cache_folder();
+    let other = open_disk_cache(&other_root).unwrap();
+    let mut config = Config::new();
+    config.cache(Some(other)).consume_fuel(false).epoch_interruption(true).wasm_memory64(false).wasm_multi_memory(false).max_wasm_stack(512 * 1024);
+    config.async_stack_size(512 * 1024 + (1 << 20));
+    Component::from_binary(&Engine::new(&config).unwrap(), &bytes).unwrap();
+    let [mismatched] = cache_entries(&other_root).try_into().unwrap();
+    let mismatched = std::fs::read(mismatched).unwrap();
+    for (damage, contents) in [
+        ("not compressed data", b"not a cache entry".to_vec()),
+        ("cut short", good[..good.len() / 2].to_vec()),
+        ("empty", Vec::new()),
+        ("another configuration's code", mismatched),
+    ] {
+        std::fs::write(&entry, &contents).unwrap();
+        let misses = cache.cache_misses();
+        let (engine, component) = compile_cached(&bytes, &cache).unwrap_or_else(|e| panic!("{damage}: {e}"));
+        check_imports(&engine, &component).unwrap_or_else(|e| panic!("{damage}: {e}"));
+        assert_eq!(cache.cache_misses(), misses + 1, "{damage}");
+        // The compile wrote a good entry back in its place, which the next compile reads.
+        let hits = cache.cache_hits();
+        compile_cached(&bytes, &cache).unwrap();
+        assert_eq!(cache.cache_hits(), hits + 1, "{damage}");
+    }
+    std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_dir_all(other_root).unwrap();
+}
+#[test]
+fn a_cache_folder_that_cannot_be_made_or_written_still_compiles() {
+    let root = cache_folder();
+    // A file where the folder should be: the cache can't be opened, and compiling works as before.
+    let blocked = root.join("blocked");
+    std::fs::write(&blocked, b"a file").unwrap();
+    assert!(open_disk_cache(&blocked.join("plugin-compile")).is_none());
+    compile_with(&importer_component(), 512 * 1024, None).unwrap();
+    // A folder that opens but can't be written: every compile still succeeds.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let read_only = root.join("read-only");
+        std::fs::create_dir_all(&read_only).unwrap();
+        let cache = open_disk_cache(&read_only).unwrap();
+        std::fs::set_permissions(&read_only, std::fs::Permissions::from_mode(0o555)).unwrap();
+        for _ in 0..2 {
+            let (engine, component) = compile_cached(&importer_component(), &cache).unwrap();
+            check_imports(&engine, &component).unwrap();
+        }
+        std::fs::set_permissions(&read_only, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     std::fs::remove_dir_all(root).unwrap();
 }
