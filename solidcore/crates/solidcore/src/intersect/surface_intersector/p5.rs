@@ -91,7 +91,8 @@
 //!   caller), the unused context argument and the `SM_ASSERT`s.
 
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignored, passed_on, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{ignored, passed_on, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::ExtentPointType;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -110,7 +111,7 @@ use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::{surface_cache, SurfaceIntersection, TsectCurveType};
 use crate::surface::surface::Surface;
 use crate::surface::surface_cache::face_context::FaceQueries;
-use crate::surface::surface_cache::p1::{PatchBoundaryBoundingPlanes, SurfaceCache};
+use crate::surface::surface_cache::p1::{PatchBoundaryBoundingPlanes, SolveModes, SurfaceCache};
 
 use super::p1::{SrfIndex, SurfaceIntersector, TsectPnt};
 use super::p2::{BoundaryPlaneTestResult, TsectCurves};
@@ -179,13 +180,9 @@ fn intersection_surface_caches_in<O: Copy + PartialEq>(
         if e.is_unported_or_cancelled() {
             e
         } else {
-            crate::error::Failure::new(
-                OP_CACHES,
-                crate::error::intersect::IntersectFailure::StageFailed,
-            )
-            .with_status(SM_ERR_NULL_POINTER)
-            .caused_by(e)
-            .into_error()
+            Failure::new(OP_CACHES, IntersectFailure::SurfaceCacheNotBuilt)
+                .caused_by(e)
+                .into_error()
         }
     };
     let [h1, h2] = handles;
@@ -551,60 +548,53 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         let tol = self.base.this_approx_tol_3d;
 
         // get surface caches and their decomposition trees (NER)
-        if caches.is_empty() {
-            return Err(SolidError::intersect_stage_failed(
+        let Some((first, rest)) = caches.split_first_mut() else {
+            return Err(SolidError::intersect(
                 OP_DI,
-                SM_ERR_NULL_POINTER,
+                IntersectFailure::NoSurfaceCaches,
             ));
-        }
-        for c in caches.iter_mut().take(2) {
+        };
+        for c in core::iter::once(&mut *first).chain(rest.iter_mut()).take(2) {
             if !(trees_ready && c.tree().is_some()) {
                 c.get_tree(k).map_err(|e| {
                     if e.is_unported_or_cancelled() {
                         e
                     } else {
-                        crate::error::Failure::new(
-                            OP_DI,
-                            crate::error::intersect::IntersectFailure::StageFailed,
-                        )
-                        .with_status(SM_ERR_NULL_POINTER)
-                        .caused_by(e)
-                        .into_error()
+                        Failure::new(OP_DI, IntersectFailure::SurfaceCacheNotBuilt)
+                            .caused_by(e)
+                            .into_error()
                     }
                 })?;
             }
-
-            // Turn off point testing so GlobalPointSolve() keeps all point solutions;
-            // turn on boundary curve processing so LocalSolve looks for drop points on
-            // boundary curves (set here, before the first solve, which reads neither).
-            c.point_test_enabled = false;
-            c.process_boundary_curves = true;
         }
 
         // the boundary bounding planes of both caches (copies: lazily computed)
-        let planes: Vec<PatchBoundaryBoundingPlanes> = caches
-            .iter_mut()
-            .take(2)
-            .map(|c| c.patch_boundary_bounding_planes().clone())
-            .collect();
-        let mut planes1 = planes
-            .first()
-            .cloned()
-            .ok_or_else(|| SolidError::intersect_stage_failed(OP_DI, SM_ERR_NULL_POINTER))?;
-        let mut planes2 = planes.get(1).cloned().unwrap_or_else(|| planes1.clone());
+        let mut planes1: PatchBoundaryBoundingPlanes =
+            first.patch_boundary_bounding_planes().clone();
+        let mut planes2 = match rest.first_mut() {
+            Some(c) => c.patch_boundary_bounding_planes().clone(),
+            None => planes1.clone(),
+        };
 
-        let caches: &'t [SurfaceCache<O>] = caches;
-        let cache1 = caches
-            .first()
-            .ok_or_else(|| SolidError::intersect_stage_failed(OP_DI, SM_ERR_NULL_POINTER))?;
-        let cache2 = caches.get(1).unwrap_or(cache1);
+        let first: &'t SurfaceCache<O> = first;
+        let rest: &'t [SurfaceCache<O>] = rest;
+        let cache1 = first;
+        let cache2 = rest.first().unwrap_or(cache1);
         self.bind_caches(cache1, cache2)?;
 
         // no work - root treeNode bounding boxes are disjoint
         let root_box = |c: &SurfaceCache<O>| -> Result<Extent3d> {
-            let tree = c
-                .tree()
-                .ok_or_else(|| SolidError::intersect_stage_failed(OP_DI, SM_ERR_NULL_POINTER))?;
+            let tree = c.tree().ok_or_else(|| {
+                Failure::new(
+                    OP_DI,
+                    IntersectFailure::Defect {
+                        why: "both caches' trees were built (or found ready) above, so a \
+                              cache without one lost the tree it was given",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })?;
             let top = tree
                 .top_node()
                 .ok_or(SolidError::invalid_input(OP_DI, "tree without top node"))?;
@@ -720,13 +710,22 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         // Surf1/Surf2->NaturalBoundaryCurve Intersections (on copies of the caches:
         // exact ones, since upstream searches its own caches)
         if !self.base.doing_self_intersection {
-            let mut boundary_caches = caches
-                .iter()
+            let mut boundary_caches = core::iter::once(first)
+                .chain(rest)
                 .map(SurfaceCache::clone_for_evaluation)
                 .collect::<Result<Vec<_>>>()?;
-            self.base.find_boundary_start_points_with_queries(
+            // Point testing off so GlobalPointSolve() keeps all point solutions;
+            // boundary curve processing on so LocalSolve looks for drop points on
+            // boundary curves (upstream sets both on its caches before the first
+            // solve; here the boundary solves run in them, the caches keep theirs).
+            let modes = SolveModes {
+                point_test_enabled: false,
+                process_boundary_curves: true,
+            };
+            self.base.find_boundary_start_points_under(
                 k,
                 &mut boundary_caches,
+                [modes; 2],
                 &bbox,
                 &mut out,
                 queries,
@@ -1362,9 +1361,10 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             e.intersect_failure(),
-            Some(&crate::error::intersect::IntersectFailure::StageFailed)
+            Some(&IntersectFailure::NoSurfaceCaches)
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         // the tolerances are set first
         assert_eq!(ssi.base.this_approx_tol_3d, 0.5);
         assert_eq!(ssi.base.this_ang_tol_rad, 0.1);
@@ -1494,8 +1494,9 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             e.intersect_failure(),
-            Some(&crate::error::intersect::IntersectFailure::StageFailed)
+            Some(&IntersectFailure::SurfaceCacheNotBuilt)
         );
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(
             e.cause(),
             Some(&SolidError::invalid_input("test::identity", "no such face"))
@@ -1534,8 +1535,9 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             e.intersect_failure(),
-            Some(&crate::error::intersect::IntersectFailure::StageFailed)
+            Some(&IntersectFailure::SurfaceCacheNotBuilt)
         );
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.cause(), Some(&built));
     }
 
