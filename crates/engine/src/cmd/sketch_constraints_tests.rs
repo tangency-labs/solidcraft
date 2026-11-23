@@ -2038,6 +2038,39 @@ fn a_point_placed_by_an_expression_says_so_unfixes_and_refuses_a_move() {
     assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before, "the sketch does not change");
 }
 
+/// #14343: a Tangent between a line and a circle makes a tangent joint: the line's end lies on
+/// the circle and the line touches it there, so the two curves close an area that can be
+/// extruded. The tangency held for the infinite line only, and the gap it left at the line's end
+/// kept the area open.
+#[test]
+fn a_tangent_between_a_line_and_a_circle_closes_the_area() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 20, "id": "c1"}));
+    run(&mut s, "sketch.line", json!({"points": [[-10, 25], [0, 40]], "ids": ["l1"]}));
+    run(&mut s, "sketch.line", json!({"points": ["l1.end", [10, 25]], "ids": ["l2"]}));
+    run(&mut s, "sketch.constraint.tangent", json!({"a": "c1", "b": "l1"}));
+    run(&mut s, "sketch.constraint.tangent", json!({"a": "c1", "b": "l2"}));
+    let sk = sketch(&s);
+    let circle = sk.curve_index("c1").unwrap();
+    let centre = sk.center(circle).unwrap();
+    let radius = sk.radius(circle).unwrap();
+    for id in ["l1", "l2"] {
+        let (a, b) = match sk.curves[sk.curve_index(id).unwrap()].kind {
+            solidcraft_sketch::CurveKind::Line { a, b } => (a, b),
+            _ => panic!("a line"),
+        };
+        let ends = [(a, sk.points[a].pos), (b, sk.points[b].pos)];
+        let near = ends.iter().min_by(|(_, p), (_, q)| p.dist(centre).total_cmp(&q.dist(centre))).unwrap().1;
+        assert!((near.dist(centre) - radius).abs() < 1e-6, "{id}: its end is {near:?}, {radius} from the centre {centre:?}");
+        let dir = sk.points[b].pos - sk.points[a].pos;
+        assert!((near - centre).dot(dir).abs() < 1e-6 * dir.len(), "{id}: the line does not touch the circle at its end");
+    }
+    // The circle and the two lines close one area.
+    let profiles = solidcraft_sketch::find_profiles(&sk);
+    let closed = profiles.iter().find(|p| p.outer_curves.len() == 3);
+    assert!(closed.is_some(), "the circle and the two lines close no area: {profiles:?}");
+}
+
 /// A negative value on a sided distance dimension flips the free side to the opposite side of its
 /// reference and stores the positive magnitude; intrinsic sizes (length, radius) still refuse it.
 #[test]
