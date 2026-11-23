@@ -53,8 +53,8 @@ use solidcore::{Brep, Kernel, SolidError};
 
 /// SolidCraft's whole preset (`support/solidcraft_fixes.rs`). That includes
 /// `closed_smooth_pole_tangent_limit`, which the rig run also turned on, and since the
-/// preset is `core::fixes()`, `fillet_chamfer_corner` and
-/// `brep_ray_classifies_current_trims`. Every value here is unchanged under them.
+/// preset is `core::fixes()`, `brep_ray_classifies_current_trims`. Every value here is
+/// unchanged under them.
 fn solidcraft_fixes() -> Kernel {
     Kernel {
         fixes: solidcraft_fixes::solidcraft_fixes(),

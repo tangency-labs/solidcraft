@@ -80,6 +80,8 @@ struct DocWork {
     params: Option<crate::params_dialog::ParamsDialog>,
     design_properties: Option<crate::design_properties::DesignProperties>,
     dialog: Option<crate::dialogs::Dialog>,
+    /// A New Sketch of that dialog (#6383): its checkpoint is in this design's session.
+    inline_sketch: Option<crate::command_sketch::InlineSketch>,
     editing_state: Option<crate::dialogs::EditingState>,
     tool: Option<crate::tools::Tool>,
     /// The toolbar tab shown, its contextual tab and the tab a sketch returns to (`None`: the
@@ -95,6 +97,8 @@ fn take_work(app: &mut SolveApp, presenting: bool) -> DocWork {
     let bom = app.bom.take();
     if !presenting && (!app.preferences.keep_work_on_tab_switch || app.applying.is_some()) {
         crate::dialogs::cancel(app);
+        // A sketch still open for a New Sketch stays, as any open sketch does.
+        crate::command_sketch::forget(app);
         app.tool = None;
         crate::drawing_workspace::close_panel(app);
         let tab = app.preferences.remember_toolbar_tab.then(|| (app.ui.tab.clone(), app.ui.ribbon_context.clone(), app.ui.sketch_return_tab.clone()));
@@ -105,6 +109,7 @@ fn take_work(app: &mut SolveApp, presenting: bool) -> DocWork {
         params: presenting.then(|| app.params.take()).flatten(),
         design_properties: presenting.then(|| app.design_properties.take()).flatten(),
         dialog: app.dialog.take(),
+        inline_sketch: app.inline_sketch.take(),
         editing_state: app.editing_state.take(),
         tool: app.tool.take(),
         tab: Some((app.ui.tab.clone(), app.ui.ribbon_context.clone(), app.ui.sketch_return_tab.clone())),
@@ -126,6 +131,7 @@ fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
         state.source.revision = state.source.revision.saturating_add(app.session.revision.saturating_sub(before));
     }
     app.dialog = work.dialog;
+    app.inline_sketch = work.inline_sketch;
     app.editing_state = work.editing_state;
     app.tool = work.tool;
     match work.tab {
@@ -865,6 +871,8 @@ struct ViewMotion {
     primary_nav: Option<crate::viewport::NavMode>,
     zoom_shortcut_drag: bool,
     modifier_nav: Option<(crate::viewport::NavMode, egui::Pos2)>,
+    nav_toggle: Option<crate::viewport::NavMode>,
+    nav_toggle_at: Option<egui::Pos2>,
     button_nav: Option<(crate::prefs::NavButton, Option<crate::viewport::NavMode>)>,
     right_drag: bool,
     orbit_pivot: Option<solidcore_record::Vec3>,
@@ -901,6 +909,8 @@ impl ViewMotion {
         std::mem::swap(&mut self.primary_nav, &mut app.viewport.primary_nav);
         std::mem::swap(&mut self.zoom_shortcut_drag, &mut app.viewport.zoom_shortcut_drag);
         std::mem::swap(&mut self.modifier_nav, &mut app.viewport.modifier_nav);
+        std::mem::swap(&mut self.nav_toggle, &mut app.viewport.nav_toggle);
+        std::mem::swap(&mut self.nav_toggle_at, &mut app.viewport.nav_toggle_at);
         std::mem::swap(&mut self.button_nav, &mut app.viewport.button_nav);
         std::mem::swap(&mut self.right_drag, &mut app.viewport.right_drag);
         std::mem::swap(&mut self.orbit_pivot, &mut app.viewport.orbit_pivot);
