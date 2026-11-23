@@ -314,6 +314,7 @@ settings	false
 settings_profile	false
 sheet	false
 sheet_rules	false
+sheet_tab	false
 shell	false
 shield	false
 silhouette	false

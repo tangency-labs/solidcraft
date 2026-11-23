@@ -1905,6 +1905,16 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
     },
+    /// Tab: the closed profiles of a sketch on a flat face of a sheet (either side, or in a plane
+    /// level with one) join that panel through the sheet's thickness, part of its outline
+    /// (`SurfaceSheet::add_tab`).
+    SheetTab {
+        sketch: SketchId,
+        #[walk(profiles_of = sketch)]
+        profiles: ProfileSel,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
+    },
     /// Unfold a sheet body flat (all bends), or refold it.
     SheetUnfold {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3286,6 +3296,7 @@ impl FeatureKind {
                 | FeatureKind::SheetPerforate { .. }
                 | FeatureKind::SheetFold { .. }
                 | FeatureKind::SheetPath { .. }
+                | FeatureKind::SheetTab { .. }
                 | FeatureKind::SheetUnfold { .. }
                 | FeatureKind::SheetConvert { .. }
                 | FeatureKind::SheetSurfaceConvert { .. }
@@ -3360,6 +3371,7 @@ impl FeatureKind {
             FeatureKind::SheetPerforate { .. } => "PerforateFeature",
             FeatureKind::SheetFold { .. } => "FoldFeature",
             FeatureKind::SheetPath { .. } => "PathFlangeFeature",
+            FeatureKind::SheetTab { .. } => "TabFeature",
             FeatureKind::SheetUnfold { refold: false, .. } => "UnfoldFeature",
             FeatureKind::SheetUnfold { .. } => "RefoldFeature",
             FeatureKind::SheetConvert { .. } => "ConvertToSheetMetalFeature",
@@ -3447,6 +3459,7 @@ impl FeatureKind {
             FeatureKind::SheetPerforate { .. } => "sheet_perforate",
             FeatureKind::SheetFold { .. } => "sheet_fold",
             FeatureKind::SheetPath { .. } => "sheet_path",
+            FeatureKind::SheetTab { .. } => "sheet_tab",
             FeatureKind::SheetUnfold { .. } => "sheet_unfold",
             FeatureKind::SheetConvert { .. } => "sheet_convert",
             FeatureKind::SheetSurfaceConvert { .. } => "sheet_surface_convert",
@@ -3537,6 +3550,7 @@ impl FeatureKind {
             "PerforateFeature" => "sheet_perforate",
             "FoldFeature" => "sheet_fold",
             "PathFlangeFeature" => "sheet_path",
+            "TabFeature" => "sheet_tab",
             "UnfoldFeature" | "RefoldFeature" => "sheet_unfold",
             "ConvertToSheetMetalFeature" => "sheet_convert",
             "ConvertBodyToSheetMetalFeature" => "sheet_surface_convert",
@@ -3627,6 +3641,7 @@ impl FeatureKind {
             FeatureKind::SheetPerforate { .. } => "Perforate",
             FeatureKind::SheetFold { .. } => "Fold",
             FeatureKind::SheetPath { .. } => "PathFlange",
+            FeatureKind::SheetTab { .. } => "Tab",
             FeatureKind::SheetUnfold { refold: false, .. } => "Unfold",
             FeatureKind::SheetUnfold { .. } => "Refold",
             FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } => "ConvertToSheetMetal",
