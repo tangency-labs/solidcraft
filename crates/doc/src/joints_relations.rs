@@ -152,6 +152,16 @@ mod tests {
         Vec3::new(m[2][0], m[2][1], m[2][2])
     }
 
+    /// Where the joints put the occurrence `id`, as the design solves them.
+    fn place_of(doc: &Document, st: &ModelState, id: u64) -> Mat {
+        crate::joints::solve(doc, st).world.get(&id).copied().unwrap_or(IDENTITY)
+    }
+
+    /// Where a world transform puts the point `p`.
+    fn at_of(m: &Mat, p: Vec3) -> Vec3 {
+        Vec3::new(m[3][0] + p.x, m[3][1] + p.y, m[3][2] + p.z)
+    }
+
     /// A mate's two faces are coincident: the lateral offsets start at zero, so the faces'
     /// centres meet and the faces touch. The part is not left beside the other one, level with
     /// it and a gap away from it (#14939).
@@ -168,6 +178,49 @@ mod tests {
         // The faces' centres meet: the lateral offsets are zero, not the 130 mm and 40 mm the
         // parts stand apart.
         assert!(q[0].abs() < 1e-9 && q[1].abs() < 1e-9, "the mate's lateral offsets: {q:?}");
+    }
+
+    /// A design saved before the mate brought the two faces together opens with its parts where
+    /// they were: the mate of that design keeps the placement it was saved with, gap and all
+    /// (#14939).
+    #[test]
+    fn a_saved_design_with_a_mate_opens_with_its_parts_where_they_were() {
+        let (mut doc, st, a, b) = plate_and_block();
+        let face = |pick| Snap::FaceCenter { pick, face: None, x: None };
+        let mut j = joint(JointKind::Planar);
+        j.angle = 0.0;
+        j.constraint = Some(Constraint::Mate);
+        j.a = JointOrigin::new(a, face(Vec3::new(50.0, 50.0, 10.0)));
+        j.b = JointOrigin::new(b, face(Vec3::new(180.0, 90.0, 40.0)));
+        // The values the mate of an older design was saved with: the block's own lateral place,
+        // so the two faces are level and a gap apart.
+        j.values = vec![40.0, -130.0, std::f64::consts::PI];
+        doc.assembly.joints.push(j);
+        // Where the block is as the design is saved: the mate's own placement.
+        let saved = place_of(&doc, &st, b);
+        // The design as an older build saved it: the format number before this change and no
+        // list of the changes it has, so the step that marks its mates runs as it opens.
+        let mut old: serde_json::Value = serde_json::from_str(&doc.to_json()).unwrap();
+        old["format"] = serde_json::json!(crate::format::format_string(crate::format::FORMAT - 1));
+        old.as_object_mut().unwrap().remove("format_pending");
+        let opened = crate::Document::from_json(&old.to_string()).unwrap();
+        // The mate is marked: it keeps the placement it was saved with.
+        assert!(opened.assembly.joints[0].old_placement, "the mate of the older design is marked");
+        let mut model = Model::new();
+        model.evaluate(&opened);
+        let st = model.state();
+        // The block is where it was: its bottom face's centre is where the mate left it.
+        let now = place_of(&opened, &st, b);
+        let moved = at_of(&now, Vec3::new(180.0, 90.0, 40.0)) - at_of(&saved, Vec3::new(180.0, 90.0, 40.0));
+        assert!(moved.x.abs() < 1e-9 && moved.y.abs() < 1e-9 && moved.z.abs() < 1e-9, "the block is where it was: {moved:?}");
+        // And the mate keeps that placement: its lateral offsets are the ones it was saved with,
+        // not the zeros a new mate starts with.
+        let q = relation_values(&opened, &st, &opened.assembly.joints[0]).expect("the joint's origins resolve");
+        assert!((q[0] - 40.0).abs() < 1e-6 && (q[1] + 130.0).abs() < 1e-6, "the mate keeps its lateral offsets: {q:?}");
+        // A design saved now keeps its mate unmarked: the mate of a new design brings the two
+        // faces together.
+        let now = crate::Document::from_json(&doc.to_json()).unwrap();
+        assert!(!now.assembly.joints[0].old_placement, "the mate of a design saved now is not marked");
     }
 
     /// Whatever its values, each relation keeps what it ties.
