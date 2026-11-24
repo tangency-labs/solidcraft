@@ -26,7 +26,7 @@ What the prototype uses:
 | Direction | Message | Use |
 |---|---|---|
 | → agent | `initialize {protocolVersion: 1, clientCapabilities, clientInfo}` | We declare no file system and no terminal (`fs.readTextFile/writeTextFile: false`, `terminal: false`), and terminal login (`auth.terminal: true`, plus the older `_meta["terminal-auth"]`). The reply carries `agentInfo` and `authMethods`. |
-| → agent | `session/new {cwd, mcpServers}` | `mcpServers` holds one stdio server named `solidcraft-app`: `solidcraft-cli mcp --connect 127.0.0.1:PORT`. Its `env` contains ACP `name`/`value` entries for `XDG_DATA_HOME` (when set) and the effective `SOLIDCRAFT_CONTROL_DIR`. No token is sent to the agent. `cwd` is the open design's folder (else SolidCraft's own `agent` folder). The system note goes in the standard `systemPrompt` field when the agent offers `sessionCapabilities.systemPrompt`, in `_meta.antigravity.systemPrompt.append` when Antigravity offers that, and always in `_meta.systemPrompt.append` for the Claude adapter. An agent with none of these doesn't get it. |
+| → agent | `session/new {cwd, mcpServers}` | `mcpServers` holds one stdio server: `solidcraft-cli mcp --connect 127.0.0.1:PORT`. `cwd` is the open design's folder (else SolidCraft's own `agent` folder). The system note goes in the standard `systemPrompt` field when the agent offers `sessionCapabilities.systemPrompt`, in `_meta.antigravity.systemPrompt.append` when Antigravity offers that, and always in `_meta.systemPrompt.append` for the Claude adapter. An agent with none of these doesn't get it. |
 | → agent | `session/set_config_option {sessionId, configId, value}` | Set an advertised select option, including a model, reasoning effort or mode. The complete returned `configOptions` snapshot confirms the state; rejection leaves the previous confirmed snapshot intact. |
 | → agent | `session/prompt {sessionId, prompt: [content]}` | One text block. The reply comes at the end of the turn with `stopReason` (`end_turn`, `cancelled`, `refusal`, …). |
 | → agent | `session/cancel {sessionId}` (notification) | Cancel button. Open permission prompts are answered `cancelled` first, as the spec asks. |
@@ -174,23 +174,6 @@ Requests from that endpoint don't go to the app directly. `pump_tools` passes ea
 What runs goes to the same queue as the control channel's held requests, so file loads, the
 agent cursor and the per-request folder scope all apply as for any other client.
 
-### ACP/MCP control-token discovery
-
-The original failure was `unauthorized: send the control token as "token"` when the ACP agent's
-MCP child called the SolidCraft control endpoint. The endpoint creates a random token for its
-port and writes it to `control_auth::token_path(port)`. The CLI's `Remote` parses the port from
-`--connect` and looks up that port's token file for each control request; it does not rely on
-`current.port` when the connection has an explicit port.
-
-The token directory can be overridden by `SOLIDCRAFT_CONTROL_DIR`; otherwise it comes from the
-platform data directory, which uses `XDG_DATA_HOME` on Linux. Forwarding `XDG_DATA_HOME` alone
-does not communicate an explicit `SOLIDCRAFT_CONTROL_DIR` override to an MCP subprocess. The
-bridge now derives the directory from `control_auth::token_path(self.port)` and supplies it as
-`SOLIDCRAFT_CONTROL_DIR`, while retaining `XDG_DATA_HOME` for other data lookups. Both are
-serialized as ACP `env` entries (`{name, value}`). The token itself remains in the private
-per-port file and is not included in ACP session configuration, arguments, or logs. The test ACP
-agent applies the received `env` entries when it starts the MCP child.
-
 ### One undo step per message
 
 When a message is sent the chat remembers the design (`Arc<Document>`) and the undo depth. When
@@ -242,10 +225,26 @@ behavior.
 
 ACP lets the client offer a file system and a terminal; the chat offers neither, and starts the
 agent in an empty working folder of SolidCraft's own (`<data>/agent-chat/work`), not the
-design's folder. The Claude Code adapter has shell, file and web tools of its own anyway: the
-session asks it to turn them off (`_meta.claudeCode.options.disallowedTools`) and not to offer
-"bypass permissions". Other agents' own permission requests appear in the panel with their
-options.
+design's folder. The Claude Code adapter has shell, file and web tools of its own anyway, and
+loads the user's claude.ai connectors and their own MCP servers (#19554). The session's
+`_meta.claudeCode.options`, which the adapter spreads over its own defaults, close all of that:
+- `tools: ["ExitPlanMode"]` (`acp::CLAUDE_TOOLS`): the only built-in tools. A list of what is
+  allowed, so a tool a later Claude Code adds stays off. `ExitPlanMode` ends the plan mode the
+  mode picker offers; without it the agent stays in plan mode.
+- `disallowedTools` (`acp::CLAUDE_DISALLOWED_TOOLS`): the shell, file and web tools, a second
+  guard.
+- `strictMcpConfig: true`: only the servers in `session/new`'s `mcpServers`, that is
+  `solidcraft-app`, or none.
+- `allowDangerouslySkipPermissions: false`: no "bypass permissions".
+
+The user's own Claude Code settings still load (`settingSources` is the adapter's default):
+leaving them out removed nothing more and would drop a settings file's `env` (Bedrock, Vertex or
+a proxy). Plugins synced from the user's claude.ai organisation still load too; with no `Skill`
+tool their skills can't run, but their hooks do. Checked with `claude-agent-acp` 0.107.0, from the
+session's `init` event and with `ToolSearch` over ACP after the connectors had time to load:
+before, 39 connector tools, the user's own servers and 21 built-in tools outside the disallowed
+list; after, `solidcraft-app`'s tools and `ExitPlanMode`. Other agents' own permission requests
+appear in the panel with their options.
 
 ### Processes
 
