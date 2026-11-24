@@ -1,4 +1,4 @@
-//! Bounded hatch expansion over polygons and canonical circular regions.
+//! Bounded line-family clipping over polygons and canonical circular regions.
 
 use super::support::HatchVec;
 use crate::math::Vec2;
@@ -7,7 +7,7 @@ use crate::prism::profile::Region2;
 use super::budget::{Budget, Limits};
 use super::clip::{ClippedLine, Frame, PreparedRegion};
 use super::phase::{Dyadic, Param};
-use super::{Invalid, Pattern};
+use super::{require, Invalid, LineFamily, MAX_FAMILIES};
 
 type Result<T> = std::result::Result<T, Invalid>;
 
@@ -22,13 +22,13 @@ pub enum Mark {
     Dot { at: Vec2 },
 }
 
-/// Expand a validated pattern over a supported polygon, disk or concentric annulus.
+/// Clip each family's lines, in turn, to a supported polygon, disk or concentric annulus.
 /// Circular regions use the canonical full-turn or two-semicircle encoding, with at most one
 /// concentric circular hole; general arc boundaries remain unsupported.
-/// The result is complete or an error; inputs are never changed. Stored lengths already
-/// use paper millimetres, so this function applies no unit conversion or view scale.
+/// The result is complete or an error; inputs are never changed. Lengths are taken as
+/// given, so this function applies no unit conversion or view scale.
 ///
-/// Output follows family order, ascending signed line index and ascending dash cycles
+/// Every family is validated before the region is prepared. Output follows family order, ascending signed line index and ascending dash cycles
 /// within each clipped span. A hole or boundary contact does not restart dash phase.
 /// Strokes retain their clipped endpoints; dots require strict interior membership.
 /// Every explicit zero retains its own dot, including coincident zeros across cycles.
@@ -42,22 +42,23 @@ pub enum Mark {
 /// Excessive exponent alignment or arithmetic overflow is refused.
 /// Parameters round once to nearest-even after the complete exact phase expression;
 /// clipping uses their enclosures. Ambiguous contacts, collapsed rounded steps and
-/// uncertain normal contacts can still refuse valid patterns. Final frame coordinates are
+/// uncertain normal contacts can still refuse valid families. Final frame coordinates are
 /// rounded f64 values, not an exact geometry or universal accuracy certificate.
-pub fn generate(pattern: &Pattern, region: &Region2) -> Result<Vec<Mark>> {
-    generate_with_limits(pattern, region, Limits::default())
+pub fn clip(families: &[LineFamily], region: &Region2) -> Result<Vec<Mark>> {
+    clip_with_limits(families, region, Limits::default())
 }
 
-pub(super) fn generate_with_limits(
-    pattern: &Pattern,
+pub(super) fn clip_with_limits(
+    families: &[LineFamily],
     region: &Region2,
     limits: Limits,
 ) -> Result<Vec<Mark>> {
-    pattern.validate()?;
+    require(families.len() <= MAX_FAMILIES, "more than 64 line families")?;
+    families.iter().try_for_each(LineFamily::validate)?;
     let mut budget = Budget::new(limits);
     let region = PreparedRegion::new(region, &mut budget)?;
     let mut marks = Vec::new();
-    for family in &pattern.families {
+    for family in families {
         budget.work(1)?;
         let frame = Frame::new(family.origin, Vec2::from_angle(family.angle))?;
         let (low, high) = region.normal_bounds(&frame, &mut budget)?;
@@ -196,7 +197,7 @@ impl Cycle {
             .try_reserve_exact(dashes.len())
             .map_err(|_| Invalid("cannot allocate hatch dash entries"))?;
         let mut period = Dyadic::from_parts(0, 0, budget)?;
-        // Pattern::validate has already bounded this list to six entries.
+        // LineFamily::validate has already bounded this list to six entries.
         for &value in dashes {
             budget.work(1)?;
             let end = period.add(Dyadic::from_f64(value.abs(), budget)?, budget)?;

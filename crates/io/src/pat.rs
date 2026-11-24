@@ -5,8 +5,10 @@
 //! family order, signed angles and dash/gap/dot values are preserved, including repeated
 //! names. This reader neither installs a pattern library nor generates hatch geometry.
 
+use solidcore_ops::profile::MAX_FAMILIES;
 use solidcore_record::Vec2;
-use solidcore_record::hatch::{Family, MAX_DASHES, MAX_FAMILIES, Pattern};
+use solidcore_record::profile::line_family::{LineFamily, MAX_DASHES};
+use solidcraft_doc::drawing::hatch::{Invalid, Pattern};
 
 use crate::{IoError, Result};
 
@@ -154,7 +156,7 @@ fn finish_pattern(current: &mut Option<(Pattern, usize)>, patterns: &mut Vec<Pat
     Ok(())
 }
 
-fn read_family(line: &str, number: usize, factor: f64) -> Result<Family> {
+fn read_family(line: &str, number: usize, factor: f64) -> Result<LineFamily> {
     let mut fields = line.split(',');
     let mut next = |name| -> Result<f64> {
         let field = fields.next().ok_or_else(|| invalid(number, format!("missing {name} field")))?;
@@ -176,8 +178,8 @@ fn read_family(line: &str, number: usize, factor: f64) -> Result<Family> {
         }
         dashes.push(scaled(read_number(field, number, "dash")?, factor, number, "dash")?);
     }
-    let family = Family { angle, origin: Vec2::new(origin_x, origin_y), delta_x, delta_y, dashes };
-    family.validate().map_err(|error| invalid(number, error))?;
+    let family = LineFamily { angle, origin: Vec2::new(origin_x, origin_y), delta_x, delta_y, dashes };
+    family.validate().map_err(|error| invalid(number, Invalid(error.0)))?;
     Ok(family)
 }
 

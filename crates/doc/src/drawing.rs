@@ -75,6 +75,7 @@ pub mod dimension;
 pub mod fields;
 mod fill;
 pub mod fold;
+pub mod hatch;
 pub mod image;
 mod newer;
 pub mod note;
