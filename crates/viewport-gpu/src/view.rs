@@ -3045,12 +3045,15 @@ struct Cut {
     /// ray comes into what the section keeps adds one, a front face takes one away. No colour, no depth. Above the base, the plane is
     /// inside a body; at or below it, outside (an open sheet seen from its front counts below).
     count: wgpu::RenderPipeline,
-    /// Where the count is above the base, the nearest back face past that point, by its true
-    /// depth, in its body's cut colour (the body the cut lies inside: the ray leaves it there),
-    /// hidden itself where the body reaches past another plane first.
+    /// Where the count is above the base, the nearest closed body's back face past that point,
+    /// by its true depth, in its body's cut colour (the body the cut lies inside: the ray leaves
+    /// it there), hidden itself where the body reaches past another plane first. An open body
+    /// is left out: its back face is no cut face, and a sheet inside a cut solid painted the
+    /// cap in its colour from one side only (#4258); `rest` leaves it out there too.
     fill: wgpu::RenderPipeline,
     /// The cap again, only there, at the section plane's depth (pushed as faces are), so what
-    /// lies on the cut face draws over it: depth only, as `fill` drew its colour (#6728).
+    /// lies on the cut face draws over it: depth only, as `fill` drew its colour (#6728), from
+    /// the same closed bodies.
     cap: wgpu::RenderPipeline,
     /// Elsewhere, the faces as they are drawn without a section, pushed back by
     /// `FACE_BIAS` so their edges draw over them (#1434); a back face there is an open body's
@@ -5273,7 +5276,7 @@ impl Renderer {
         pass.set_bind_group(1, &res.access_bind, &[]);
         pass.set_bind_group(2, &res.ao.maps.bind, &[]);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
-        // `counting`: only closed bodies, for a section's crossing count ([`Cut::count`]).
+        // `counting`: only closed bodies, for a section's crossing count, fill and cap ([`Cut`]).
         let planned = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline, b: &Batches, counting: bool| {
             for d in b.planned.iter().filter(|d| d.class == TriClass::Opaque && (d.closed || !counting)) {
                 pass.set_pipeline(p);
@@ -5337,11 +5340,12 @@ impl Renderer {
             (Some(cut), Some(cut_planned), Some(cut_instanced), Some(cut_flat), Some(base)) => {
                 // The model's own triangles, blocks, plans and instances with its palette, then the
                 // preview's with its own.
-                // `counting`: the crossing count, which leaves open bodies out.
-                let all = |pass: &mut wgpu::RenderPass<'static>, pick: fn(&Cut) -> &wgpu::RenderPipeline, counting: bool| {
+                // `closed_only`: the crossing count, the fill and the cap, which leave open bodies
+                // out (an open body has no inside, so its back face is no cut face, #4258).
+                let all = |pass: &mut wgpu::RenderPass<'static>, pick: fn(&Cut) -> &wgpu::RenderPipeline, closed_only: bool| {
                     pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
                     tris(pass, pick(cut), &m.tris);
-                    if counting {
+                    if closed_only {
                         for block in m.block_order.iter().filter_map(|k| m.blocks.get(k)).filter(|b| b.closed.is_some()) {
                             pass.set_pipeline(pick(cut));
                             block.draw_closed(pass, tally);
@@ -5350,11 +5354,11 @@ impl Renderer {
                         tris(pass, pick(cut), &m.open_tris);
                         block_class(pass, pick(cut), TriClass::Opaque);
                     }
-                    planned(pass, pick(cut_planned), m, counting);
-                    instanced(pass, pick(cut_instanced), pick(cut_flat), m, counting);
+                    planned(pass, pick(cut_planned), m, closed_only);
+                    instanced(pass, pick(cut_instanced), pick(cut_flat), m, closed_only);
                     in_moving(pass, &|pass, mv| {
                         tris(pass, pick(cut), &mv.tris);
-                        if counting {
+                        if closed_only {
                             for block in mv.block_order.iter().filter_map(|k| mv.blocks.get(k)).filter(|b| b.closed.is_some()) {
                                 pass.set_pipeline(pick(cut));
                                 block.draw_closed(pass, tally);
@@ -5363,12 +5367,12 @@ impl Renderer {
                             tris(pass, pick(cut), &mv.open_tris);
                             blocks_of(pass, pick(cut), TriClass::Opaque, mv);
                         }
-                        planned(pass, pick(cut_planned), mv, counting);
-                        instanced(pass, pick(cut_instanced), pick(cut_flat), mv, counting);
+                        planned(pass, pick(cut_planned), mv, closed_only);
+                        instanced(pass, pick(cut_instanced), pick(cut_flat), mv, closed_only);
                     });
                     pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);
                     tris(pass, pick(cut), &pv.tris);
-                    if !counting {
+                    if !closed_only {
                         tris(pass, pick(cut), &pv.open_tris);
                     }
                 };
@@ -5377,8 +5381,8 @@ impl Renderer {
                 pass.draw(0..3, 0..1);
                 tally.call();
                 all(pass, |c| &c.count, true);
-                all(pass, |c| &c.fill, false);
-                all(pass, |c| &c.cap, false);
+                all(pass, |c| &c.fill, true);
+                all(pass, |c| &c.cap, true);
                 all(pass, |c| &c.rest, false);
             }
             _ => {

@@ -5476,7 +5476,7 @@
   "select the sheet edge first": "יש לבחור תחילה את מקצוע הפח",
   "select two components": "יש לבחור שני רכיבים",
   "set by the sketch's lines": "נקבע לפי קווי הסקיצה",
-  "settings.cadmpeg_import": "קריאת קובצי STEP, FreeCAD ו-Rhino עם cadmpeg ישירות ל-B-rep, במקום דרך קורא ה-STEP של SolidCraft",
+  "settings.cadmpeg_import": "קריאת קובצי STEP, IGES, FreeCAD ו-Rhino עם cadmpeg ישירות ל-B-rep, במקום דרך קוראי ה-STEP וה-IGES של SolidCraft",
   "settings.display_quality_note": "ברמות עדינות יותר, פאות ומקצועות מעוקלים מוצגים חלקים יותר ויצירת הרשת אורכת זמן רב יותר. רק אזור התצוגה משתנה, לא התכן ולא קובצי הייצוא.",
   "settings.double_click_components": "לחיצה כפולה על רכיב להפעלתו",
   "settings.frame_rate_details_note": "מוסיף גרף של זמני התמונות האחרונות עם המשולשים שצוירו מעליו, היסטוגרמה של זמני התמונות ואת מה שה־GPU צייר. לחיצה על קצב התמונות בתצוגה מציגה או מסתירה אותם.",

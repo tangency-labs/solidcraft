@@ -97,7 +97,8 @@ struct App {
     /// The viewport's shader compile, running beside the window while the start page shows (it no
     /// longer waits for it); the app waits for it when it closes (#1210).
     gpu_job: Option<solidcraft_ui_egui::starting::Worker<solidcraft_ui_egui::WgpuBuilt>>,
-    /// The settings folder whose start marker the first frame clears (`startup::started`).
+    /// The settings folder whose start marker clears once startup is over (`startup::started`):
+    /// the first app frame presented and the 3D view's shader compile done.
     starting: Option<std::path::PathBuf>,
     /// A newly selected API is confirmed only once the first frame has been presented.
     backend_attempt: Option<(std::path::PathBuf, startup::BackendAttempt)>,
@@ -112,8 +113,8 @@ struct App {
     /// Frames the window has begun, the starting page's included: the first is fitted to the work
     /// area before the window shows, the second asks for the foreground.
     window_frames: u32,
-    /// Frames begun once the setup was done; the second one means the first was drawn (the start
-    /// page is up).
+    /// Painted frames begun once the setup was done; the second one means the first was presented
+    /// (the start page is up). Logic-only updates and repeated layout passes do not advance startup.
     frames: u32,
     /// Startup is over: the start page was drawn and the 3D view's pipelines are compiled (or
     /// failed). Until then a crash still counts as a failed start.
@@ -232,24 +233,6 @@ impl eframe::App for App {
     /// A frame's logic. The first frames show the starting page while the setup runs behind it, a
     /// step a frame (#1210); then the app's own.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if self.window_frames < 2 {
-            self.window_frames += 1;
-            // Before the window is shown: its title bar must be within reach (window_fit.rs).
-            #[cfg(target_os = "windows")]
-            if self.window_frames == 1 {
-                fit_window_to_work_area(ctx, _frame);
-            }
-            mark(if self.window_frames == 1 { "first frame begins" } else { "second frame begins (first presented)" });
-            ctx.request_repaint();
-            // The window is shown only once its first frame is presented, and Windows then keeps
-            // a window of a process started from a shortcut or an installer behind the others. Ask
-            // for the foreground once, now that it is on screen; never again, so later frames don't
-            // take the focus from whatever the user moved to. Automation over the control channel
-            // keeps the focus where it is.
-            if self.window_frames == 2 && !self.take_focus_unwanted {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-            }
-        }
         // The system asked the app to stop (shutdown, SIGTERM): close as a forced quit does,
         // keeping unsaved changes for recovery, since nobody is there to answer "save changes?".
         // Before the starting page returns, so a signal during the setup closes the app too.
@@ -276,50 +259,6 @@ impl eframe::App for App {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             return;
-        }
-        if self.frames < 2 {
-            self.frames += 1;
-            // A second frame right away, which means the first was presented: the start page is up.
-            ctx.request_repaint();
-            if self.frames == 2 {
-                mark("start page up (first app frame presented)");
-                // The device is up and presented a frame: its API did not crash the process.
-                if let Some(guard) = self.backend_guard.take() {
-                    guard.clear();
-                }
-                // A DMG install has no installer step: put solidcraft-cli on PATH, quietly.
-                #[cfg(target_os = "macos")]
-                std::thread::spawn(solidcraft_ui_egui::cli_link::install_on_launch);
-                // Automation runs (a control port was asked for) leave the user's AI apps alone.
-                if !self.take_focus_unwanted {
-                    solidcraft_ui_egui::ai_connect::begin(&mut self.solve);
-                    solidcraft_ui_egui::agent_chat::begin(&mut self.solve);
-                }
-                if !self.setup.settled() {
-                    solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
-                }
-            }
-        }
-        // Startup is over once the 3D view's shader compile, running beside the start page, is
-        // done too: a driver that crashes in it still counts as a failed start (safe mode, the
-        // backend retry), and a new graphics API is confirmed only once it drew the view.
-        if !self.up && self.frames >= 2 && self.setup.settled() {
-            self.up = true;
-            mark("app up (3D view ready)");
-            solidcraft_engine::crash::phase(solidcraft_engine::crash::RUNNING);
-            if let Some((path, attempt)) = self.backend_attempt.take()
-                && let Err(reason) = startup::confirm_backend_start(&path, &attempt)
-            {
-                log::warn!("graphics: could not confirm the startup choice: {reason}");
-                self.solve.set_status(reason, true);
-            }
-            if let Some(dir) = self.starting.take() {
-                startup::started(&dir);
-            }
-            // The minute that proves full graphics runs from here (`prove_full_graphics`).
-            if self.safe_graphics_record.is_some() {
-                self.full_graphics_up = Some(std::time::Instant::now());
-            }
         }
         self.watch_device();
         self.prove_full_graphics(ctx);
@@ -423,6 +362,26 @@ impl eframe::App for App {
     /// A frame's UI: the starting page while the setup runs (in the saved language and fonts),
     /// then the app's, whose changed settings are written soon after (#8275).
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        // Logic-only control updates cannot present a frame or complete startup.
+        let ctx = ui.ctx();
+        if self.window_frames < 2 && ctx.current_pass_index() == 0 {
+            self.window_frames += 1;
+            // Before the window is shown: its title bar must be within reach (window_fit.rs).
+            #[cfg(target_os = "windows")]
+            if self.window_frames == 1 {
+                fit_window_to_work_area(ctx, frame);
+            }
+            mark(if self.window_frames == 1 { "first frame begins" } else { "second frame begins (first presented)" });
+            ctx.request_repaint();
+            // The window is shown only once its first frame is presented, and Windows then keeps
+            // a window of a process started from a shortcut or an installer behind the others. Ask
+            // for the foreground once, now that it is on screen; never again, so later frames don't
+            // take the focus from whatever the user moved to. Automation over the control channel
+            // keeps the focus where it is.
+            if self.window_frames == 2 && !self.take_focus_unwanted {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+        }
         if !self.setup.done() {
             let _language = self.solve.prepare_text(ui.ctx());
             self.setup.ui(ui);
@@ -450,6 +409,51 @@ impl eframe::App for App {
             };
             self.solve.refresh_panel_monitors(monitors);
             solidcraft_ui_egui::view_windows::refresh_displays(&mut self.solve, monitors);
+        }
+        // Only painted passes count: a logic-only control update presents nothing (#743).
+        if self.frames < 2 && ctx.current_pass_index() == 0 {
+            self.frames += 1;
+            // A second frame right away, which means the first was presented: the start page is up.
+            ctx.request_repaint();
+            if self.frames == 2 {
+                mark("start page up (first app frame presented)");
+                // The device is up and presented a frame: its API did not crash the process.
+                if let Some(guard) = self.backend_guard.take() {
+                    guard.clear();
+                }
+                // A DMG install has no installer step: put solidcraft-cli on PATH, quietly.
+                #[cfg(target_os = "macos")]
+                std::thread::spawn(solidcraft_ui_egui::cli_link::install_on_launch);
+                // Automation runs (a control port was asked for) leave the user's AI apps alone.
+                if !self.take_focus_unwanted {
+                    solidcraft_ui_egui::ai_connect::begin(&mut self.solve);
+                    solidcraft_ui_egui::agent_chat::begin(&mut self.solve);
+                }
+                if !self.setup.settled() {
+                    solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
+                }
+            }
+        }
+        // Startup is over once the 3D view's shader compile, running beside the start page, is
+        // done too: a driver that crashes in it still counts as a failed start (safe mode, the
+        // backend retry), and a new graphics API is confirmed only once it drew the view.
+        if !self.up && self.frames >= 2 && self.setup.settled() {
+            self.up = true;
+            mark("app up (3D view ready)");
+            solidcraft_engine::crash::phase(solidcraft_engine::crash::RUNNING);
+            if let Some((path, attempt)) = self.backend_attempt.take()
+                && let Err(reason) = startup::confirm_backend_start(&path, &attempt)
+            {
+                log::warn!("graphics: could not confirm the startup choice: {reason}");
+                self.solve.set_status(reason, true);
+            }
+            if let Some(dir) = self.starting.take() {
+                startup::started(&dir);
+            }
+            // The minute that proves full graphics runs from here (`prove_full_graphics`).
+            if self.safe_graphics_record.is_some() {
+                self.full_graphics_up = Some(std::time::Instant::now());
+            }
         }
         solidcraft_ui_egui::view_windows::prepare(&mut self.solve, ui.ctx());
         content_ui(&mut self.solve, ui);
@@ -1578,6 +1582,10 @@ fn main() -> eframe::Result {
     let custom_titlebar = CUSTOM_TITLEBAR && app_titlebar_wanted() && !startup::system_title_bar(cfg!(target_os = "windows"), started);
     eframe::egui_wgpu::set_startup_hook(startup_step);
     solidcraft_engine::crash::phase("window");
+    // The control channel's wake (#743): eframe's event loop proxy, handed over when the loop
+    // starts, so the control server serves requests without waiting for a GUI frame.
+    let wake = control_server::Wake::new(std::sync::Arc::new(std::sync::Mutex::new(None)));
+    let wake_hook = wake.clone();
     let options = eframe::NativeOptions {
         viewport: app_viewport(custom_titlebar)?,
         // The window's pass (egui's) has no depth and one sample: the viewport draws its scene
@@ -1596,6 +1604,8 @@ fn main() -> eframe::Result {
         },
         persist_window: !safe_mode,
         wgpu_options,
+        // #743: hand the control channel the event loop's proxy so it can run a logic pass at once.
+        event_loop_ready: Some(Box::new(move |proxy| wake_hook.set(proxy.clone()))),
         ..Default::default()
     };
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -1746,11 +1756,17 @@ fn main() -> eframe::Result {
             // by default) opens its port, and turning it off or on later takes effect at once
             // (docs/control-protocol.md).
             let ctx = cc.egui_ctx.clone();
-            solidcraft_ui_egui::control_switch::launch(&mut app, Box::new(move |listen| control_server::start(listen, ctx.clone())), control_port);
+            let control_wake = wake.clone();
+            solidcraft_ui_egui::control_switch::launch(
+                &mut app,
+                Box::new(move |listen| control_server::start(listen, ctx.clone(), control_wake.clone())),
+                control_port,
+            );
             // The agent chat's MCP bridge reaches the app through an endpoint of its own, started
             // on a free port the first time the chat connects (docs/agent-chat.md).
             let ctx = cc.egui_ctx.clone();
-            app.agent_chat.control_starter = Some(Box::new(move |tx| control_server::listen_agent(tx, ctx.clone())));
+            let wake = wake.clone();
+            app.agent_chat.control_starter = Some(Box::new(move |tx| control_server::listen_agent(tx, ctx.clone(), &wake)));
             // Later launches with a file hand it to this window instead of opening another app. Not
             // when driven over the control channel or by `--new-instance`.
             if !new_instance && !sample && control_port.is_none() {

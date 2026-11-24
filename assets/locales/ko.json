@@ -4586,7 +4586,7 @@
   "select the sheet edge first": "판금 모서리를 먼저 선택하세요",
   "select two components": "구성요소 두 개를 선택하세요",
   "set by the sketch's lines": "스케치의 선으로 정해짐",
-  "settings.cadmpeg_import": "STEP, FreeCAD 및 Rhino 파일을 SolidCraft의 STEP 리더를 거치지 않고 cadmpeg로 B-rep에 직접 읽기",
+  "settings.cadmpeg_import": "STEP, IGES, FreeCAD 및 Rhino 파일을 SolidCraft의 STEP 및 IGES 리더를 거치지 않고 cadmpeg로 B-rep에 직접 읽기",
   "settings.display_quality_note": "세밀할수록 곡면과 모서리가 더 매끄럽게 표시되지만 메시 생성 시간이 늘어납니다. 뷰포트만 바뀌며 설계나 내보내기는 바뀌지 않습니다.",
   "settings.double_click_components": "구성요소를 두 번 클릭하여 활성화",
   "settings.frame_rate_details_note": "최근 프레임들의 시간 그래프(그린 삼각형 수를 겹쳐 표시), 프레임 시간 히스토그램, GPU가 그린 내용을 추가합니다. 뷰의 프레임 속도를 클릭하면 표시하거나 숨깁니다.",

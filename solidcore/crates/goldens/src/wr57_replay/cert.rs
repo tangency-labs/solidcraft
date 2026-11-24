@@ -270,17 +270,7 @@ fn nearer_boundary_witness(k: &Kernel, c: &Call<'_>, p: Vec3, main_lo: f64) -> b
         .is_some_and(|(_, hi)| (hi + tol) * (1.0 + f64::EPSILON) < main_lo)
 }
 
-/// The certificate classes of `blend.fillet_executive_p3`'s substituted calls (its two
-/// rows left; see the module doc of the parent).
-pub(super) const EXECUTIVE_P3: &[(&str, usize)] = &[
-    ("degen: aligned equally to the rounding", 3),
-    (
-        "invert: main refuses, this branch answers, proven nearer than the guess",
-        8,
-    ),
-    ("invert: proven nearer", 1),
-];
-/// Of `heal.heal_data_p3`'s.
+/// The certificate classes of `heal.heal_data_p3`'s substituted calls.
 pub(super) const HEAL_DATA_P3: &[(&str, usize)] = &[
     ("invert: proven nearer", 21),
     (
