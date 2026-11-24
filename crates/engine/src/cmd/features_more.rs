@@ -40,6 +40,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.coil", "Coil", crate::checked!("solid.coil", coil)).begins_edit().at("SOLID", "CREATE").icon("coil").contract(&COIL_CONTRACT).output(output_schema_for::<FeatureResult>).params(
         "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
          base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; \
+         end_cut?: axial|square (the wire's ends in a plane through the axis, the default, or square to the wire); \
          sketch? (a sketch; its plane is the section plane, so its placement sets the radius and start phase), profiles? (default: all; one closed profile without holes); \
          operation?, targets?, name?, body_name?",
     ),
@@ -86,7 +87,7 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     let given = |k: &str| p.get(k).is_some_and(|v| !v.is_null());
     let profile_mode = given("sketch");
     if profile_mode {
-        if let Some(k) = ["diameter", "section_size", "section", "section_position", "start_angle"].into_iter().find(|k| given(k)) {
+        if let Some(k) = ["diameter", "section_size", "section", "section_position", "start_angle", "end_cut"].into_iter().find(|k| given(k)) {
             return Err(bad(cmd, format!("`{k}` does not apply with `sketch`: the section comes from the sketch")));
         }
     } else if given("profiles") {
@@ -144,6 +145,11 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, a, Kind::Angle, cmd, "start_angle")?;
     }
     let clockwise = bool_(p, "clockwise").unwrap_or(false);
+    let end_cut = match str_(p, "end_cut").map(str::to_ascii_lowercase).as_deref() {
+        None | Some("axial") => solidcraft_doc::CoilEndCut::Axial,
+        Some("square") => solidcraft_doc::CoilEndCut::Square,
+        Some(o) => return Err(bad(cmd, format!("unknown end cut `{o}` (axial or square)"))),
+    };
     let operation = super::features::operation(p, cmd)?;
     add_feature(
         s,
@@ -161,6 +167,7 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
             position,
             start_angle,
             clockwise,
+            end_cut,
             operation,
             targets: string_list(cmd, p, "targets")?.into_iter().map(BodyName).collect(),
         },

@@ -195,7 +195,12 @@ impl<C: RailClassificationContext> SplitCorners for ContextCorners<'_, C> {
         &mut self,
         _id: FilletCornerId,
     ) -> Result<&mut crate::blend::fillet_corner::p3::FilletCorner> {
-        Err(SolidError::blend_missing(OP, "a corner to change"))
+        Err(SolidError::blend_null_defect(
+            OP,
+            "a split asked this context for a corner to change: the context maps no vertex to \
+             a corner (`corner_of_vertex` is always `None`), and a split changes only the \
+             corner of the vertex it ends on",
+        ))
     }
     fn corner_type(&self, id: FilletCornerId) -> Result<FilletCornerType> {
         self.0.corner_type(id)
@@ -446,7 +451,7 @@ fn join_intervals_on_face(fillets: &mut FilletBrep, rail: EdgeId) -> Result<()> 
         .fillet_edge_mut(rail)?
         .curve_class
         .as_mut()
-        .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve classification"))?;
+        .ok_or_else(|| SolidError::blend_null_defect(OP, JOIN_CLASSIFIED))?;
     for index in (1..cc.size()).rev() {
         let this = cc.at(index)?.mid;
         let prev = cc.at(index - 1)?.mid;
@@ -463,6 +468,27 @@ fn join_intervals_on_face(fillets: &mut FilletBrep, rail: EdgeId) -> Result<()> 
     Ok(())
 }
 
+/// A rail lost the classification installed on it just before it was classified.
+const LENT_CLASSIFICATION: &str = "the rail lost the curve classification installed on it just \
+                                   before: `with_rail_classification` lends it in place and \
+                                   puts it back";
+/// The join found no classification on the rail (`SolidError::blend_null_defect`).
+const JOIN_CLASSIFIED: &str = "the join of the rail's intervals on its face found no curve \
+                               classification: `test_roll_over` installs it on the rail and \
+                               classifies it just before";
+/// The connection found no classification on the rail.
+const CONNECT_CLASSIFIED: &str = "the connection of the rail's intervals found no curve \
+                                  classification: it runs only on a rail `test_roll_over` has \
+                                  just classified";
+/// The refinement found no classification on the rail.
+const REFINE_CLASSIFIED: &str = "the refinement found no curve classification on the rail: \
+                                 `test_roll_over` installs it before it refines, and the \
+                                 refinement puts back what it takes on every return";
+/// The squeeze found no classification on the rail.
+const SQUEEZE_CLASSIFIED: &str = "the squeeze of the rail's end intervals found no curve \
+                                  classification: `test_roll_over` installs it before it \
+                                  squeezes, and connecting intervals keeps it";
+
 trait ClassificationOps {
     fn connect(
         &mut self,
@@ -477,7 +503,7 @@ trait ClassificationOps {
             .fillet_edge_mut(rail)?
             .curve_class
             .as_mut()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve classification"))?
+            .ok_or_else(|| SolidError::blend_null_defect(OP, CONNECT_CLASSIFIED))?
             .connect_intervals(
                 interval,
                 if at_end {
@@ -503,7 +529,7 @@ trait ClassificationOps {
             .fillet_edge_mut(rail)?
             .curve_class
             .take()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve classification"))?;
+            .ok_or_else(|| SolidError::blend_null_defect(OP, REFINE_CLASSIFIED))?;
         let result = super::p3::refine_rail_curve_classification_scoped_with_ops(
             solver,
             k,
@@ -550,7 +576,7 @@ fn squeeze_rail(
     let count = fillets
         .fillet_edge(rail)?
         .curve_class()
-        .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve classification"))?
+        .ok_or_else(|| SolidError::blend_null_defect(OP, SQUEEZE_CLASSIFIED))?
         .size();
     let mut small = Vec::new();
     if count > 1 {
@@ -558,10 +584,15 @@ fn squeeze_rail(
             let interval = fillets
                 .fillet_edge(rail)?
                 .curve_class()
-                .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve classification"))?
+                .ok_or_else(|| SolidError::blend_null_defect(OP, SQUEEZE_CLASSIFIED))?
                 .sub_interval(index)?;
-            let curve = edge::curve(fillets.brep(), rail)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve"))?;
+            let curve = edge::curve(fillets.brep(), rail)?.ok_or_else(|| {
+                SolidError::blend_null_defect(
+                    OP,
+                    "the squeeze found no curve on the rail: `test_roll_over` read the rail's \
+                     curve before it classified the rail, and nothing since removes it",
+                )
+            })?;
             let start = curve.evaluate_point(k, interval.min())?;
             let end = curve.evaluate_point(k, interval.max())?;
             if start.distance(end) > 50.0 * tolerance {

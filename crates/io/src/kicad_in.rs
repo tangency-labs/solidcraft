@@ -196,8 +196,12 @@ pub struct KicadFootprint {
 #[derive(Clone, Debug, PartialEq)]
 pub struct KicadText {
     pub text: String,
-    /// X/Y in millimetres and rotation in degrees, in the containing frame.
+    /// X/Y in millimetres in the containing frame, and the rotation in degrees. A footprint's
+    /// text stores its rotation on the board, not relative to the footprint (KiCad 5 files as well).
     pub at: [f64; 3],
+    /// A footprint text KiCad may draw upside down: `(unlocked yes)`, or `unlocked` in its `at`.
+    /// Other footprint text is turned to read upright (see [`footprint_text_angle`]).
+    pub unlocked: bool,
     pub layer: String,
     /// Cap height and glyph width in millimetres.
     pub height: f64,
@@ -236,6 +240,9 @@ pub struct KicadPad {
     pub layers: Vec<String>,
     /// `(width, height)` of the drill, if any.
     pub drill: Option<[f64; 2]>,
+    /// How far the pad's copper sits from its position (and its hole), in the pad's own frame:
+    /// `(drill … (offset dx dy))`. The hole stays at `at`.
+    pub offset: [f64; 2],
     pub roundrect_ratio: f64,
 }
 
@@ -271,6 +278,9 @@ pub struct KicadDrill {
     pub center: [f64; 2],
     /// Round holes have equal sides; a slot is a stadium of this width and height.
     pub size: [f64; 2],
+    /// The direction of a slot's width in the board frame, in radians anticlockwise from +X (its
+    /// pad's rotation on the board).
+    pub angle: f64,
 }
 
 /// A KiCad board and the reusable component placements it references.
@@ -304,6 +314,17 @@ pub fn is_kicad_path(path: &str) -> bool {
     Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("kicad_pro") || e.eq_ignore_ascii_case("kicad_pcb"))
 }
 
+/// The smallest board thickness, in millimetres, the import believes.
+///
+/// The import options window's "Board thickness" row offers the same range (see
+/// [`crate::formats`]), so the thickness the window shows for a file and the thickness the import
+/// uses for that file are the same number.
+pub(crate) const BOARD_THICKNESS_MIN_MM: f64 = 0.01;
+
+/// The largest board thickness, in millimetres, the import believes (see
+/// [`BOARD_THICKNESS_MIN_MM`]).
+pub(crate) const BOARD_THICKNESS_MAX_MM: f64 = 1000.0;
+
 /// The board's own thickness (mm), from its `(general (thickness …))`: the import options window
 /// shows it before the board is built. `None` when the file cannot be read or names no valid
 /// thickness.
@@ -328,13 +349,21 @@ pub fn kicad_board_thickness(bytes: &[u8]) -> Option<f64> {
                         Token::Atom(value) => value.parse::<f64>().ok(),
                         _ => None,
                     })?;
-                    return (value.is_finite() && value > 0.0 && value <= 1000.0).then_some(value);
+                    return (value.is_finite() && (BOARD_THICKNESS_MIN_MM..=BOARD_THICKNESS_MAX_MM).contains(&value)).then_some(value);
                 }
                 _ => {}
             }
         }
     }
     None
+}
+
+/// The thickness of the board a KiCad project or PCB path names, read from its file without
+/// building it (the import options start at it; `doc.open` uses it when given no `thickness`).
+pub fn kicad_file_thickness(path: &str) -> Option<f64> {
+    let board = kicad_board_path(Path::new(path)).ok()?;
+    let bytes = crate::vfs::read(&board.to_string_lossy(), MAX_KICAD_BYTES).ok()?;
+    kicad_board_thickness(&bytes)
 }
 
 /// Resolve a selected KiCad project to its same-stem board, or keep a directly selected board.
@@ -373,7 +402,7 @@ pub fn parse_kicad_board_with(bytes: &[u8], file: &str, options: KicadOptions) -
         .and_then(|g| field(g, "thickness"))
         .and_then(|e| numbers(e, 1).ok())
         .and_then(|n| n.first().copied())
-        .filter(|v| *v > 0.0 && *v <= 1000.0)
+        .filter(|v| (BOARD_THICKNESS_MIN_MM..=BOARD_THICKNESS_MAX_MM).contains(v))
         .unwrap_or(1.6);
 
     let color = options.color.map(|c| [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0]).unwrap_or(DEFAULT_BOARD_COLOR);
@@ -491,11 +520,15 @@ pub fn parse_kicad_board_with(bytes: &[u8], file: &str, options: KicadOptions) -
         for pad in &footprint.pads {
             let Some(drill) = pad.drill else { continue };
             let center = apply2(&transform, pad.at[0], pad.at[1]);
-            board.drills.push(KicadDrill { center, size: [drill[0].abs(), drill[1].abs()] });
+            // The pad's own X axis, turned by its rotation in the footprint frame, on the board.
+            let [ux, uy] = pad_axis(pad);
+            let ahead = apply2(&transform, pad.at[0] + ux, pad.at[1] + uy);
+            let angle = (ahead[1] - center[1]).atan2(ahead[0] - center[0]);
+            board.drills.push(KicadDrill { center, size: [drill[0].abs(), drill[1].abs()], angle });
         }
     }
     for via in &board.vias {
-        board.drills.push(KicadDrill { center: [via.at[0], -via.at[1]], size: [via.drill.abs(), via.drill.abs()] });
+        board.drills.push(KicadDrill { center: [via.at[0], -via.at[1]], size: [via.drill.abs(), via.drill.abs()], angle: 0.0 });
     }
     if extra_text_seen {
         board.warnings.push("text boxes, dimensions and tables are not modeled yet".into());
@@ -946,8 +979,11 @@ pub fn kicad_board_mesh(board: &KicadBoard, thickness: f64) -> Result<crate::Mes
 fn board_solid(board: &KicadBoard, thickness: f64) -> Result<String> {
     let loops = outline_loops(board)?;
     let regions = regions_from_loops(loops.clone(), Some(&board.drills));
-    let bodies =
-        extrude_regions_bodies(&regions, 0.0, thickness).or_else(|_| extrude_regions_bodies(&regions_from_loops(loops, None), 0.0, thickness))?;
+    // SMLib's check of each extrusion runs here: a board with drills it refuses is built without them.
+    let checked = |regions: &[Region2]| {
+        solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || extrude_regions_bodies(regions, 0.0, thickness)).0
+    };
+    let bodies = checked(&regions).or_else(|_| checked(&regions_from_loops(loops, None)))?;
     if bodies.is_empty() {
         return Err(IoError::Invalid("the board has no closed outline to build".into()));
     }
@@ -1075,7 +1111,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                                     .map(|p| Vec3::new(p.x * KICAD_VRML_UNIT_MM, p.y * KICAD_VRML_UNIT_MM, p.z * KICAD_VRML_UNIT_MM))
                                     .collect();
                                 match solidcraft_kernel::mesh_body(&positions, &m.triangles) {
-                                    Ok(_) => (vec![mesh_data(component_name(footprint, &model.path), positions, m.triangles, m.color)], None, notes),
+                                    Ok(_) => (vec![mesh_data(component_name(&model.path), positions, m.triangles, m.color)], None, notes),
                                     Err(e) => (Vec::new(), Some(short_reason(&e.to_string())), std::mem::take(&mut notes)),
                                 }
                             }
@@ -1110,7 +1146,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                     continue;
                 }
                 let slot = plan.slots.len();
-                plan.slots.push(component_name(footprint, &model.path));
+                plan.slots.push(component_name(&model.path));
                 let transform = model_local_matrix(model, back);
                 let mut failed = None;
                 let mut placed = Vec::with_capacity(imported_meshes.len());
@@ -1193,9 +1229,11 @@ fn board_corner(board: &KicadBoard) -> Option<[f64; 2]> {
 /// Millimetres in one unit of a KiCad VRML model (0.1 inch).
 const KICAD_VRML_UNIT_MM: f64 = 2.54;
 
-fn component_name(footprint: &KicadFootprint, path: &str) -> String {
-    let label = footprint.reference.trim();
-    if label.is_empty() { path.to_string() } else { label.to_string() }
+/// The component a model becomes: named after the model's file (`R_0603_1608Metric`), since every
+/// footprint that places the model shares it. Each placement carries its footprint's reference.
+fn component_name(path: &str) -> String {
+    let stem = Path::new(path).file_stem().and_then(|stem| stem.to_str()).map(str::trim).unwrap_or("");
+    if stem.is_empty() { path.to_string() } else { stem.to_string() }
 }
 
 /// The STEP file inside a KiCad `….stpZ` (a zip archive holding one `….step`).
@@ -1304,7 +1342,8 @@ fn file_id(path: &str) -> std::path::PathBuf {
 }
 
 /// Place a built model in a footprint, once per footprint: a footprint that names one model more
-/// than once (both formats of the same file, say) shows it once.
+/// than once (both formats of the same file, say) shows it once. The placement is named after the
+/// footprint's reference (none when it has none).
 fn place_model(
     plan: &mut crate::MeshPlan,
     placed_here: &mut std::collections::HashSet<usize>,
@@ -1314,7 +1353,9 @@ fn place_model(
     thickness: f64,
 ) {
     if placed_here.insert(slot) {
-        plan.places.push(crate::PlanPlace { slot, parent: None, transform: footprint_place(footprint, back, thickness) });
+        let reference = footprint.reference.trim();
+        let name = (!reference.is_empty()).then(|| reference.to_string());
+        plan.places.push(crate::PlanPlace { slot, parent: None, transform: footprint_place(footprint, back, thickness), name });
     }
 }
 
@@ -1517,7 +1558,8 @@ fn regions_from_loops(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>) -> Vec<R
             let Some(i) = best else { continue };
             let size = [drill.size[0].abs(), drill.size[1].abs()];
             let r = (size[0].min(size[1]) * 0.5).max(1e-4);
-            let hole = if (size[0] - size[1]).abs() <= 1e-6 { Loop2::circle_from(center, r, 0.0) } else { slot_loop(center, size[0], size[1]) };
+            let hole =
+                if (size[0] - size[1]).abs() <= 1e-6 { Loop2::circle_from(center, r, 0.0) } else { slot_loop(center, size[0], size[1], drill.angle) };
             if let Some((_, region)) = regions.get_mut(i) {
                 region.holes.push(hole.reversed());
             }
@@ -1526,7 +1568,9 @@ fn regions_from_loops(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>) -> Vec<R
     regions.into_iter().map(|(_, r)| r).collect()
 }
 
-fn slot_loop(center: Vec2, width: f64, height: f64) -> Loop2 {
+/// A slot (stadium) of `width` × `height` about `center`, its width turned to point along `angle`
+/// (radians from +X towards +Y in the frame it is drawn in).
+fn slot_loop(center: Vec2, width: f64, height: f64, angle: f64) -> Loop2 {
     let (long, short, vertical) = if width >= height { (width, height, false) } else { (height, width, true) };
     let r = short * 0.5;
     let half = (long * 0.5 - r).max(0.0);
@@ -1541,6 +1585,11 @@ fn slot_loop(center: Vec2, width: f64, height: f64) -> Loop2 {
         let a = std::f64::consts::FRAC_PI_2 + std::f64::consts::PI * i as f64 / n as f64;
         let (dx, dy) = (r * a.cos(), r * a.sin());
         pts.push(if vertical { Vec2::new(center.x + dy, center.y - half + dx) } else { Vec2::new(center.x - half + dx, center.y + dy) });
+    }
+    let (s, c) = angle.sin_cos();
+    for p in &mut pts {
+        let (x, y) = (p.x - center.x, p.y - center.y);
+        *p = Vec2::new(center.x + c * x - s * y, center.y + s * x + c * y);
     }
     Loop2::polygon(&pts)
 }
@@ -2749,7 +2798,7 @@ fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings
             let frame = footprint_world(footprint);
             for text in &footprint.texts {
                 let origin = apply2(&frame, text.at[0], text.at[1]);
-                one(text, Vec2::new(origin[0], origin[1]), (footprint.at[2] + text.at[2]).to_radians());
+                one(text, Vec2::new(origin[0], origin[1]), footprint_text_angle(text).to_radians());
             }
         }
     }
@@ -2866,7 +2915,7 @@ fn silkscreen_meshes(board: &KicadBoard, thickness: f64, warnings: &mut Vec<Stri
             let frame = footprint_world(footprint);
             for text in &footprint.texts {
                 let origin = apply2(&frame, text.at[0], text.at[1]);
-                text_one(text, Vec2::new(origin[0], origin[1]), (footprint.at[2] + text.at[2]).to_radians());
+                text_one(text, Vec2::new(origin[0], origin[1]), footprint_text_angle(text).to_radians());
             }
         }
     }
@@ -2909,14 +2958,25 @@ fn pad_loops(pad: &KicadPad) -> Vec<Vec<[f64; 2]>> {
         "roundrect" => rounded_rect_points(sx, sy, (pad.roundrect_ratio.clamp(0.0, 0.5)) * sx.min(sy)),
         _ => vec![[-sx * 0.5, -sy * 0.5], [sx * 0.5, -sy * 0.5], [sx * 0.5, sy * 0.5], [-sx * 0.5, sy * 0.5]],
     };
-    let angle = pad.at[2].to_radians();
-    let (s, c) = angle.sin_cos();
     for p in &mut points {
-        let (x, y) = (p[0], p[1]);
-        p[0] = c * x + s * y + pad.at[0];
-        p[1] = -s * x + c * y + pad.at[1];
+        // The copper's offset from the hole is in the pad's frame, so it turns with the pad.
+        let [x, y] = turn_in_pad(pad, p[0] + pad.offset[0], p[1] + pad.offset[1]);
+        p[0] = x + pad.at[0];
+        p[1] = y + pad.at[1];
     }
     vec![points]
+}
+
+/// A vector in the pad's own frame turned by the pad's rotation, into the footprint frame (KiCad's
+/// Y down, where a positive rotation turns anticlockwise as the board is seen).
+fn turn_in_pad(pad: &KicadPad, x: f64, y: f64) -> [f64; 2] {
+    let (s, c) = pad.at[2].to_radians().sin_cos();
+    [c * x + s * y, -s * x + c * y]
+}
+
+/// The pad's own X axis in the footprint frame.
+fn pad_axis(pad: &KicadPad) -> [f64; 2] {
+    turn_in_pad(pad, 1.0, 0.0)
 }
 
 /// A via's copper in the board frame: a disc, or a ring when the via is drilled.
@@ -2938,7 +2998,13 @@ fn pad_drill_points(pad: &KicadPad) -> Option<Vec<[f64; 2]>> {
         return None;
     }
     let center = Vec2::new(pad.at[0], pad.at[1]);
-    let hole = if (size[0] - size[1]).abs() <= 1e-6 { Loop2::circle_from(center, size[0] * 0.5, 0.0) } else { slot_loop(center, size[0], size[1]) };
+    // A slot lies along the pad's own axis.
+    let [ux, uy] = pad_axis(pad);
+    let hole = if (size[0] - size[1]).abs() <= 1e-6 {
+        Loop2::circle_from(center, size[0] * 0.5, 0.0)
+    } else {
+        slot_loop(center, size[0], size[1], uy.atan2(ux))
+    };
     Some(hole.polyline(1e-3).to_vec().into_iter().map(|p| [p.x, p.y]).collect())
 }
 
@@ -2967,8 +3033,11 @@ fn pad_holes(outer: &Loop2, points: &[[f64; 2]], drills: &[KicadDrill]) -> Vec<L
         }
         let reach = size[0].max(size[1]) * 0.5;
         let key = ((center.x * 1000.0).round() as i64, (center.y * 1000.0).round() as i64);
-        let hole =
-            if (size[0] - size[1]).abs() <= 1e-6 { Loop2::circle_from(center, size[0] * 0.5, 0.0) } else { slot_loop(center, size[0], size[1]) };
+        let hole = if (size[0] - size[1]).abs() <= 1e-6 {
+            Loop2::circle_from(center, size[0] * 0.5, 0.0)
+        } else {
+            slot_loop(center, size[0], size[1], drill.angle)
+        };
         match widest.get(&key) {
             Some((wider, _)) if *wider >= reach => {}
             _ => {
@@ -3110,6 +3179,11 @@ fn parse_footprint(
             _ => {}
         }
     }
+    // A pad's rotation is stored on the board (KiCad adds the footprint's); kept here in the
+    // footprint frame, where the pad is placed, so that the footprint's rotation turns it once.
+    for pad in &mut pads {
+        pad.at[2] -= position[2];
+    }
     position[2] = position[2].rem_euclid(360.0);
     Ok(KicadFootprint { reference, value, layer, at: position, models, pads, graphics, texts })
 }
@@ -3138,12 +3212,18 @@ fn parse_pad(expr: &Expr<'_>) -> std::result::Result<KicadPad, String> {
         let second = n.get(1).copied().unwrap_or(first);
         Some([first, if second.is_finite() && second > 0.0 { second } else { first }])
     });
+    // An SMD pad writes `(drill (offset dx dy))` with no drill size: the offset still applies.
+    let offset = field(expr, "drill")
+        .and_then(|drill| field(drill, "offset"))
+        .and_then(numeric_atoms)
+        .and_then(|n| Some([*n.first()?, *n.get(1)?]))
+        .unwrap_or([0.0, 0.0]);
     let roundrect_ratio = field(expr, "roundrect_rratio")
         .and_then(|e| numbers(e, 1).ok())
         .and_then(|n| n.first().copied())
         .filter(|v| v.is_finite() && *v >= 0.0 && *v <= 0.5)
         .unwrap_or(0.0);
-    Ok(KicadPad { at: [x, y, angle], size: [sx, sy], shape, layers, drill, roundrect_ratio })
+    Ok(KicadPad { at: [x, y, angle], size: [sx, sy], shape, layers, drill, offset, roundrect_ratio })
 }
 
 fn numeric_atoms(expr: &Expr<'_>) -> Option<Vec<f64>> {
@@ -3180,7 +3260,11 @@ fn parse_text(expr: &Expr<'_>, text_index: usize) -> Option<KicadText> {
     if is_hidden(expr) || effects.is_some_and(is_hidden) {
         return None;
     }
-    let at = field(expr, "at").and_then(|e| numbers(e, 2).ok()).unwrap_or_default();
+    // Older files write `(at x y angle unlocked)`; the word is not a number.
+    let at_field = field(expr, "at");
+    let at = at_field.and_then(|e| numbers_but(e, 2, "unlocked").ok()).unwrap_or_default();
+    let unlocked = at_field.is_some_and(|e| children(e).iter().any(|c| atom(c) == Some("unlocked")))
+        || field(expr, "unlocked").is_some_and(|e| children(e).get(1).and_then(atom) != Some("no"));
     let x = at.first().copied().unwrap_or(0.0);
     let y = at.get(1).copied().unwrap_or(0.0);
     let angle = at.get(2).copied().unwrap_or(0.0);
@@ -3216,7 +3300,27 @@ fn parse_text(expr: &Expr<'_>, text_index: usize) -> Option<KicadText> {
             }
         }
     }
-    Some(KicadText { text, at: [x, y, angle], layer, height, width, thickness, bold, italic, mirror, left, right, top, bottom })
+    Some(KicadText { text, at: [x, y, angle], unlocked, layer, height, width, thickness, bold, italic, mirror, left, right, top, bottom })
+}
+
+/// The rotation a footprint's text is drawn at, in degrees on the board. The file stores it on the
+/// board already (the footprint's own rotation is not added). Unless the text is unlocked, KiCad
+/// keeps it readable: a rotation past a quarter turn either way is drawn half a turn round, in
+/// (-90, 90], about the same anchor and with the same justification. Board text is never turned.
+fn footprint_text_angle(text: &KicadText) -> f64 {
+    if text.unlocked {
+        return text.at[2];
+    }
+    let mut angle = text.at[2].rem_euclid(360.0);
+    if angle > 180.0 {
+        angle -= 360.0;
+    }
+    if angle > 90.0 {
+        angle -= 180.0;
+    } else if angle <= -90.0 {
+        angle += 180.0;
+    }
+    angle
 }
 
 /// A 3D model offset: KiCad writes `(offset (xyz ...))` in millimetres; the legacy
@@ -3308,9 +3412,14 @@ fn atom<'e, 'a>(expr: &'e Expr<'a>) -> Option<&'e str> {
 }
 
 fn numbers(expr: &Expr<'_>, minimum: usize) -> std::result::Result<Vec<f64>, String> {
+    numbers_but(expr, minimum, "")
+}
+
+/// [`numbers`], passing over the one word `skip` among them (a text's `(at x y angle unlocked)`).
+fn numbers_but(expr: &Expr<'_>, minimum: usize, skip: &str) -> std::result::Result<Vec<f64>, String> {
     let mut values = Vec::new();
     for item in children(expr).iter().skip(1) {
-        if let Some(value) = atom(item) {
+        if let Some(value) = atom(item).filter(|value| skip.is_empty() || *value != skip) {
             let number = value.parse::<f64>().map_err(|_| format!("invalid number `{value}`"))?;
             if !number.is_finite() || number.abs() > MAX_NUMBER {
                 return Err(format!("number `{value}` is outside the supported range"));
