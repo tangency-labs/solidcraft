@@ -1629,7 +1629,9 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                         let expr = e.expr.clone();
                         reevaluate(app, draft, &expr);
                     }
-                    if let Some(error) = e.create_variable.as_ref().map(|offer| &offer.error).or_else(|| e.draft.as_ref().and_then(|d| d.error.as_ref())) {
+                    if let Some(error) =
+                        e.create_variable.as_ref().map(|offer| &offer.error).or_else(|| e.draft.as_ref().and_then(|d| d.error.as_ref()))
+                    {
                         crate::ui_kit::text(ui, error, crate::ui_kit::Text::Report("dimension_error", true));
                     }
                     let create = create_variable_button(ui, e.create_variable.as_ref());
