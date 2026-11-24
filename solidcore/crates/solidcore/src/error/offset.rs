@@ -47,7 +47,7 @@
 //! | [`OffsetFailure::BrepNotGiven`] | `SM_ERR_NULL_POINTER`, or the site's through `with_status` (`offset_executive::p2`) |
 //! | [`OffsetFailure::ShellLeavesNoCavity`], [`OffsetFailure::ShellWallUnresolved`], [`OffsetFailure::ShellFaceNotOfBody`] | `SM_ERR_INVALID_INPUT` (`offset_executive::p2`) |
 //! | [`OffsetFailure::ExtendedFaceCollapses`], [`OffsetFailure::TrimPastExtension`] | `SM_ERR` (`offset_executive::p2`) |
-//! | [`OffsetFailure::FaceHasNoFaceuse`], [`OffsetFailure::FaceuseHasNoShell`], [`OffsetFailure::ShellHasNoRegion`], [`OffsetFailure::FaceuseHasNoMate`] | `SM_ERR_NULL_POINTER` (`offset_executive::p2`) |
+//! | [`OffsetFailure::FaceHasNoFaceuse`], [`OffsetFailure::FaceuseHasNoShell`], [`OffsetFailure::ShellHasNoRegion`], [`OffsetFailure::FaceuseHasNoMate`], [`OffsetFailure::EdgeuseHasNoEdge`], [`OffsetFailure::EdgeuseHasNoMate`], [`OffsetFailure::EdgeuseHasNoRadial`], [`OffsetFailure::EdgeuseHasNoFaceuse`] | `SM_ERR_NULL_POINTER` (`offset_executive::p1`, `offset_executive::p2`) |
 //!
 //! A stage of an offset routine that fails with no reason the kernel names is an
 //! [`OffsetFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping the
@@ -73,7 +73,7 @@ use super::{
     SM_ERR_OFFSET_WALLS_TOUCH,
 };
 use crate::offset::offset_faces::OffsetFacesRefusal;
-use crate::topology::{EdgeId, FaceId, FaceuseId, ShellId};
+use crate::topology::{EdgeId, EdgeuseId, FaceId, FaceuseId, ShellId};
 
 /// Why an offset, shell, thicken or local operation is refused.
 ///
@@ -188,6 +188,32 @@ pub enum OffsetFailure {
         edge: Option<EdgeId>,
         /// A face the edge bounds, when the edge itself is not known.
         face: Option<FaceId>,
+    },
+    /// An edge use of the operation's input names no edge. A caller can build such a body
+    /// (`Brep::edgeuse_mut`), so it is the caller's input, not the kernel's fault.
+    EdgeuseHasNoEdge {
+        /// The edge use, of the operation's input.
+        edgeuse: EdgeuseId,
+    },
+    /// An edge use of the operation's input has no face use (it is in no loop of a face).
+    /// A caller can build such a body (`Brep::edgeuse_mut`, `Brep::loopuse_mut`), so it is
+    /// the caller's input, not the kernel's fault.
+    EdgeuseHasNoFaceuse {
+        /// The edge use, of the operation's input.
+        edgeuse: EdgeuseId,
+    },
+    /// An edge use of the operation's input has no mate. A caller can build such a body
+    /// (`Brep::add_edgeuse_record`), so it is the caller's input, not the kernel's fault.
+    EdgeuseHasNoMate {
+        /// The edge use, of the operation's input.
+        edgeuse: EdgeuseId,
+    },
+    /// An edge use of the operation's input has no radial (no other use around its edge).
+    /// A caller can build such a body (`Brep::add_edgeuse_record`), so it is the caller's
+    /// input, not the kernel's fault.
+    EdgeuseHasNoRadial {
+        /// The edge use, of the operation's input.
+        edgeuse: EdgeuseId,
     },
     /// An edge use of the edge `edge` has no UV trim curve (`None` where the handle names no
     /// edge of the input), which the cap between the edge's offsets is made from, and which
@@ -798,6 +824,10 @@ impl OffsetFailure {
             | Self::FaceuseHasNoShell { faceuse }
             | Self::FaceuseHasNoMate { faceuse } => Some(EntityRef::Faceuse(faceuse)),
             Self::ShellHasNoRegion { shell } => Some(EntityRef::Shell(shell)),
+            Self::EdgeuseHasNoEdge { edgeuse }
+            | Self::EdgeuseHasNoMate { edgeuse }
+            | Self::EdgeuseHasNoRadial { edgeuse }
+            | Self::EdgeuseHasNoFaceuse { edgeuse } => Some(EntityRef::Edgeuse(edgeuse)),
             Self::BlendRailWithoutSupport { edge }
             | Self::EdgeOffsetsUnpaired { edge }
             | Self::GapEndWithoutEdge { edge }
@@ -884,6 +914,10 @@ impl OffsetFailure {
                 | Self::FaceuseHasNoShell { .. }
                 | Self::ShellHasNoRegion { .. }
                 | Self::FaceuseHasNoMate { .. }
+                | Self::EdgeuseHasNoEdge { .. }
+                | Self::EdgeuseHasNoMate { .. }
+                | Self::EdgeuseHasNoRadial { .. }
+                | Self::EdgeuseHasNoFaceuse { .. }
         ) || self.is_named_at_a_status_site()
     }
 
@@ -946,6 +980,10 @@ impl OffsetFailure {
             | Self::EdgeHasNoCurve { .. }
             | Self::EdgeOffsetsUnpaired { .. }
             | Self::EdgeVanishes { .. }
+            | Self::EdgeuseHasNoEdge { .. }
+            | Self::EdgeuseHasNoFaceuse { .. }
+            | Self::EdgeuseHasNoMate { .. }
+            | Self::EdgeuseHasNoRadial { .. }
             | Self::EdgeuseHasNoUvTrim { .. }
             | Self::EdgeuseNotGiven
             | Self::ExactCurveUncut
@@ -1035,6 +1073,10 @@ impl OffsetFailure {
             | Self::EdgeHasNoCurve { .. }
             | Self::EdgeOffsetsUnpaired { .. }
             | Self::EdgeVanishes { .. }
+            | Self::EdgeuseHasNoEdge { .. }
+            | Self::EdgeuseHasNoFaceuse { .. }
+            | Self::EdgeuseHasNoMate { .. }
+            | Self::EdgeuseHasNoRadial { .. }
             | Self::EdgeuseHasNoUvTrim { .. }
             | Self::EdgeuseNotGiven
             | Self::ExactCurveUncut
@@ -1111,6 +1153,10 @@ impl OffsetFailure {
             | Self::CurveKindUnsupported { .. }
             | Self::EdgeHasNoCurve { .. }
             | Self::EdgeOffsetsUnpaired { .. }
+            | Self::EdgeuseHasNoEdge { .. }
+            | Self::EdgeuseHasNoFaceuse { .. }
+            | Self::EdgeuseHasNoMate { .. }
+            | Self::EdgeuseHasNoRadial { .. }
             | Self::EdgeuseHasNoUvTrim { .. }
             | Self::EdgeuseNotGiven
             | Self::FaceHasNoFaceuse { .. }
@@ -1237,6 +1283,10 @@ impl OffsetFailure {
             Self::BrepNotGiven
             | Self::DistanceUnresolved { .. }
             | Self::EdgeHasNoCurve { .. }
+            | Self::EdgeuseHasNoEdge { .. }
+            | Self::EdgeuseHasNoFaceuse { .. }
+            | Self::EdgeuseHasNoMate { .. }
+            | Self::EdgeuseHasNoRadial { .. }
             | Self::EdgeuseNotGiven
             | Self::FaceHasNoFaceuse { .. }
             | Self::FaceHasNoOuterFaceuse { .. }
@@ -1768,6 +1818,18 @@ impl core::fmt::Display for OffsetFailure {
             Self::FaceuseHasNoMate { .. } => {
                 f.write_str("invalid input: a face use of the body has no mate")
             }
+            Self::EdgeuseHasNoEdge { .. } => {
+                f.write_str("invalid input: an edge use of the body has no edge")
+            }
+            Self::EdgeuseHasNoMate { .. } => {
+                f.write_str("invalid input: an edge use of the body has no mate")
+            }
+            Self::EdgeuseHasNoRadial { .. } => {
+                f.write_str("invalid input: an edge use of the body has no radial")
+            }
+            Self::EdgeuseHasNoFaceuse { .. } => {
+                f.write_str("invalid input: an edge use of the body has no face use")
+            }
         }
     }
 }
@@ -2090,6 +2152,42 @@ mod tests {
                 false,
                 false,
                 false,
+            ),
+            (
+                O::EdgeuseHasNoEdge {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+                true,
+            ),
+            (
+                O::EdgeuseHasNoFaceuse {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+                true,
+            ),
+            (
+                O::EdgeuseHasNoMate {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+                true,
+            ),
+            (
+                O::EdgeuseHasNoRadial {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+                true,
             ),
             (
                 O::EdgeuseHasNoUvTrim { edge: None },
@@ -2612,6 +2710,10 @@ mod tests {
                 O::EdgeHasNoCurve { .. } => "EdgeHasNoCurve",
                 O::EdgeOffsetsUnpaired { .. } => "EdgeOffsetsUnpaired",
                 O::EdgeVanishes { .. } => "EdgeVanishes",
+                O::EdgeuseHasNoEdge { .. } => "EdgeuseHasNoEdge",
+                O::EdgeuseHasNoFaceuse { .. } => "EdgeuseHasNoFaceuse",
+                O::EdgeuseHasNoMate { .. } => "EdgeuseHasNoMate",
+                O::EdgeuseHasNoRadial { .. } => "EdgeuseHasNoRadial",
                 O::EdgeuseHasNoUvTrim { .. } => "EdgeuseHasNoUvTrim",
                 O::EdgeuseNotGiven => "EdgeuseNotGiven",
                 O::ExactCurveUncut => "ExactCurveUncut",
@@ -2881,6 +2983,34 @@ mod tests {
                 SM_ERR_NULL_POINTER,
                 Some(EntityRef::Faceuse(FaceuseId::from_index(2))),
             ),
+            (
+                OffsetFailure::EdgeuseHasNoEdge {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                SM_ERR_NULL_POINTER,
+                Some(EntityRef::Edgeuse(EdgeuseId::from_index(3))),
+            ),
+            (
+                OffsetFailure::EdgeuseHasNoMate {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                SM_ERR_NULL_POINTER,
+                Some(EntityRef::Edgeuse(EdgeuseId::from_index(3))),
+            ),
+            (
+                OffsetFailure::EdgeuseHasNoRadial {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                SM_ERR_NULL_POINTER,
+                Some(EntityRef::Edgeuse(EdgeuseId::from_index(3))),
+            ),
+            (
+                OffsetFailure::EdgeuseHasNoFaceuse {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                SM_ERR_NULL_POINTER,
+                Some(EntityRef::Edgeuse(EdgeuseId::from_index(3))),
+            ),
         ];
         for (cause, status, entity) in samples {
             assert!(cause.replaces_upstream_status(), "{cause:?}");
@@ -2991,15 +3121,10 @@ mod tests {
     }
 
     /// The offset routines describe their failures: their library code builds no bare
-    /// `Upstream` status, except the files listed (with the bare sites each may still
-    /// hold) whose conversion waits on other open work.
+    /// `Upstream` status.
     #[test]
     fn the_offset_routines_build_no_bare_statuses() {
-        super::super::bare_scan::assert_waiting(
-            "offset",
-            20,
-            &[("offset/offset_executive/p2.rs", 28)],
-        );
+        super::super::bare_scan::assert_waiting("offset", 20, &[]);
     }
 
     /// The sites that build a offset phrase cause only fall:

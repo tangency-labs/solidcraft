@@ -576,6 +576,13 @@ fn encode_complex(complex: &solidcraft_doc::point_cloud::Complex) -> Result<Opti
     Ok(Some(bytes))
 }
 
+/// A complex blob's length in bytes, its `header` and then 4 bytes for each index and value, or
+/// `None` when that does not fit in a `usize` (a 32-bit build, such as the web app, reading the
+/// counts of a shared file).
+fn complex_len(header: usize, segments: usize, triangles: usize, counts: &[usize]) -> Option<usize> {
+    counts.iter().try_fold(segments.checked_add(triangles)?, |n, &c| n.checked_add(c))?.checked_mul(4)?.checked_add(header)
+}
+
 /// Fills `complex`, read from its record with empty numbers, from its part ([`encode_complex`]).
 /// What the numbers mean is checked with the points ([`decode_cloud`]).
 fn decode_complex(bytes: &[u8], complex: &mut solidcraft_doc::point_cloud::Complex) -> Result<()> {
@@ -597,8 +604,7 @@ fn decode_complex(bytes: &[u8], complex: &mut solidcraft_doc::point_cloud::Compl
     for _ in 0..columns {
         counts.push(word()?.min(MAX_POINTS.max(MAX_CELLS) + 1));
     }
-    let words = counts.iter().fold(segments + triangles, |n, c| n + c);
-    if bytes.len() != at + words * 4 {
+    if complex_len(at, segments, triangles, &counts) != Some(bytes.len()) {
         return Err(invalid("invalid point cloud complex lengths"));
     }
     let mut values = bytes[at..].as_chunks::<4>().0.iter();
@@ -3604,6 +3610,55 @@ mod tests {
         let mut bytes = valid;
         bytes[7] = b'2';
         assert!(decode_mesh(&bytes, &mut mesh()).is_err());
+    }
+
+    /// A point cloud's segments, triangles and numbers decode as saved, and counts that don't fit
+    /// the blob are refused. On a 32-bit build (the web app) 64 counts of 20 million values pass
+    /// `u32::MAX` bytes, so an unchecked length panics there, or wraps and lets a short blob
+    /// through with shorter columns than its counts.
+    #[test]
+    fn a_point_cloud_complex_whose_counts_overflow_its_length_is_refused() {
+        use solidcraft_doc::point_cloud::{Column, Complex, Floats, Indices, MAX_CELLS, MAX_COLUMNS, MAX_POINTS, On};
+        let column = Column { name: "nz".into(), on: On::Point, integer: false, values: Floats::default() };
+        let saved = Complex {
+            segments: Indices(vec![0, 1].into()),
+            triangles: Indices(vec![0, 1, 2].into()),
+            columns: vec![Column { values: Floats(vec![1.0, 2.0, 3.0].into()), ..column.clone() }],
+            names: Vec::new(),
+        };
+        let valid = encode_complex(&saved).unwrap().unwrap();
+        let read = |bytes: &[u8], columns: usize| {
+            let mut complex = Complex { columns: vec![column.clone(); columns], ..Complex::default() };
+            decode_complex(bytes, &mut complex).map(|()| complex)
+        };
+        assert_eq!(read(&valid, 1).unwrap(), saved);
+        for length in 0..valid.len() {
+            assert!(read(&valid[..length], 1).is_err());
+        }
+        assert!(read(&[valid.as_slice(), &[0; 4]].concat(), 1).is_err());
+
+        // Lengths past a `usize` are `None` at any width, never a panic.
+        assert_eq!(complex_len(32, usize::MAX, 1, &[]), None);
+        assert_eq!(complex_len(32, 0, 0, &[usize::MAX, 1]), None);
+        assert_eq!(complex_len(32, 0, 0, &[usize::MAX / 4 + 1]), None);
+        assert_eq!(complex_len(usize::MAX, 0, 0, &[1]), None);
+        assert_eq!(complex_len(40, 2, 3, &[3]), Some(40 + 8 * 4));
+
+        // A blob of its header alone whose counts (each clamped as it is read) add up to 2^30
+        // values. At 4 bytes each that is 2^32, which a 32-bit length wraps to 0, so an unchecked
+        // sum took the header alone for the whole blob (a 64-bit host refused it even so).
+        let clamp = MAX_POINTS.max(MAX_CELLS) + 1;
+        let full = (1usize << 30) / clamp;
+        assert!(full < MAX_COLUMNS);
+        let mut counts = vec![u32::MAX as usize; full];
+        counts.push((1 << 30) - full * clamp);
+        counts.resize(MAX_COLUMNS, 0);
+        let mut header = COMPLEX_MAGIC.to_vec();
+        for n in [0, 0, MAX_COLUMNS].into_iter().chain(counts) {
+            header.extend_from_slice(&(n as u64).to_le_bytes());
+        }
+        let e = read(&header, MAX_COLUMNS).unwrap_err();
+        assert!(e.to_string().contains("invalid point cloud complex lengths"), "{e}");
     }
 
     #[test]
