@@ -71,6 +71,21 @@ fn operation(kind: &mut Kind) -> Option<&mut usize> {
     }
 }
 
+/// Preferences › Tools › "Start in New Body" (`new_body_default`, #19870): a new window that
+/// chooses its operation opens in New Body instead, and keeps it as if it were picked by hand.
+pub fn start_new_body(app: &SolveApp, d: &mut Dialog) {
+    if !app.preferences.new_body_default || d.editing.is_some() || rule(&d.kind).is_none() {
+        return;
+    }
+    if let Some(op) = operation(&mut d.kind) {
+        *op = NEW;
+    }
+    if let Kind::Extrude { auto_op, .. } = &mut d.kind {
+        *auto_op = false;
+    }
+    d.op_auto.manual = true;
+}
+
 /// What a check found, with the Join it evaluated when the material joins.
 type Found = (Option<Addition>, Option<solidcraft_engine::Evaluated>);
 

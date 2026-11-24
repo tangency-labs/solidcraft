@@ -1287,6 +1287,7 @@ impl Dialog {
             }
         };
         recall(app, &mut d);
+        crate::op_auto::start_new_body(app, &mut d);
         // Patterns of features picked in the timeline: the objects are features.
         if is_pattern(&d.kind)
             && s.selection.iter().any(|x| matches!(x, Sel::Feature { .. }))

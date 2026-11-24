@@ -65,6 +65,10 @@ macro_rules! tools_preferences {
             /// so a step neither meshes the dragged bodies where they stand nor looks up the Browser row a
             /// highlight follows (`drag_layer::holds_pointer`).
             move_drag_highlights: bool = false, PAGE_TOOLS => check_id("prefs.move_drag_highlights");
+            /// A new Extrude, Revolve, Loft, Sweep or primitive (Box, Cylinder, ...) opens in New Body and
+            /// keeps it, as if New Body were picked by hand: `auto_operation` doesn't choose for it (#19870).
+            /// Off by default: the window opens and chooses as before. Editing a feature keeps its operation.
+            new_body_default: bool = false, PAGE_TOOLS => check_id("prefs.new_body_default");
             /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit, and the Box,
             /// Cylinder, Cone, Sphere, Torus and Coil): a marker that drags it across the model and, where
             /// it can turn in the face, a ring that turns it. Off by default: a Rest, Boss or Snap Fit is
