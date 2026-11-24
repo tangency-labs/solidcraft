@@ -4713,6 +4713,25 @@ fn align_snaps_to_the_centre_of_a_drilled_bore() {
     }
 }
 
+/// `timeline.edit` of a circle-centre Align (#21331): `flip` turns the block over; a new `from`
+/// faces as its own pick does (the block's bottom rim faces down, so the block meets the plate
+/// without turning), never as the old one did; two bare points move plainly and refuse a flip.
+#[test]
+fn align_edits_take_the_ways_of_their_new_picks() {
+    let mut s = drilled_plate_and_block();
+    let id = run(&mut s, "solid.align", rims(false))["feature"].clone();
+    run(&mut s, "timeline.edit", json!({"feature": id, "set": {"flip": true}}));
+    assert_bounds(&mut s, "Block", [4.5, -11., -10.], [64.5, 29., 0.]);
+    let bottom = json!({"snap": "circle_center", "at": [40, 30, 0]});
+    run(&mut s, "timeline.edit", json!({"feature": id, "set": {"from": bottom, "flip": false}}));
+    assert_bounds(&mut s, "Block", [4.5, -11., 0.], [64.5, 29., 10.]);
+    let points = json!({"from": [35, 30, 10], "to": [14.5, -1, 0], "flip": true});
+    let e = s.execute("timeline.edit", &json!({"feature": id, "set": points}));
+    assert!(e.as_ref().is_err_and(|e| e.to_string().contains("flip needs")), "{e:?}");
+    run(&mut s, "timeline.edit", json!({"feature": id, "set": {"from": [35, 30, 10], "to": [14.5, -1, 0], "flip": false}}));
+    assert_bounds(&mut s, "Block", [4.5, -11., -10.], [64.5, 29., 0.]);
+}
+
 /// The ways the Align of `s` stores for its two sides.
 fn align_ways(s: &Session) -> (Option<solidcore_record::Vec3>, Option<solidcore_record::Vec3>) {
     let way = |n: &Option<solidcraft_doc::Dir>| n.map(|d| d.0);
@@ -4735,16 +4754,18 @@ fn chamfered_block() -> Session {
 }
 
 /// A face pick faces along its face's exact outward normal (#21331): the block's top beside its
-/// hole, the plate's top, the chamfer's tilted face.
+/// hole, the plate's top, the chamfer's tilted face, also when `timeline.edit` picks it.
 #[test]
 fn align_face_picks_store_their_exact_normals() {
     use solidcore_record::Vec3;
     let tilted = Vec3::new(0.0, -std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2);
     let mut s = chamfered_block();
-    run(&mut s, "solid.align", json!({"bodies": ["Block"], "from_face": [50, 50, 10], "to_face": [14.5, 5, 0]}));
+    let id = run(&mut s, "solid.align", json!({"bodies": ["Block"], "from_face": [50, 50, 10], "to_face": [14.5, 5, 0]}))["feature"].clone();
     let (from, to) = align_ways(&s);
     assert_way(from, Vec3::Z);
     assert_way(to, Vec3::Z);
+    run(&mut s, "timeline.edit", json!({"feature": id, "set": {"from_face": [50, 21, 9]}}));
+    assert_way(align_ways(&s).0, tilted);
     let mut s = chamfered_block();
     run(&mut s, "solid.align", json!({"bodies": ["Block"], "from_face": [50, 21, 9], "to_face": [14.5, 5, 0]}));
     assert_way(align_ways(&s).0, tilted);
