@@ -658,30 +658,27 @@ fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usiz
 /// #18490 moves these four rows (the round sits on the sphere drop's finer trims), so each
 /// hash is of the row with that change, from Linux CI.
 /// Each hash is of the line without the `fillet_point_step` key, which recorded the retired
-/// step latch (#18916). The drop tracer's clamped-sliver rule (a span whose clamped UV image
-/// is one point within the drop's tolerances is left out) moves all four in their
-/// `mass_properties` only, so each hash is of the row with that rule;
-/// `tests/drop_clamped_sliver_moved_mass_rows.rs` classifies each moved entry against a certified enclosure.
+/// step latch (#18916).
 const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0x751d_c931_5b45_292d,
+        0x9e43_eafe_0171_4c09,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x5132_edc0_4baf_f026,
+        0xe2ec_b89d_309a_54a8,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0xc413_26f0_108d_e3f1,
+        0x9fc9_deff_361b_7066,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0xd7e9_450b_63e6_d0d1,
+        0x5669_c3ab_dde7_2e76,
     ),
 ];
 
@@ -756,9 +753,7 @@ fn record() {
 /// `uv_trim_f2`, `f3`, `f10` and `f11` rows (each with its `_rebuild`) hold main's blessed line
 /// after #20939 cleared their gap-cache flags (main at 1562e5f516). The two
 /// `uv_trim_f6` rows read the file too but do not move with #20179; they are listed so that
-/// the put-back is shown to keep them. `uv_trim_f7_rebuild` holds the run with the drop
-/// tracer's clamped-sliver rule, which moves that row's rebuilt face-7 trim alone
-/// (`certify::trim_tolerance` certifies its moved tolerance).
+/// the put-back is shown to keep them.
 const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "corpus.parity",
@@ -869,7 +864,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f7_rebuild",
-        0x0abafafb0e5def7a,
+        0xc8792b6ad7002c8b,
     ),
     (
         "topology.face_p3",
