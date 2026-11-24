@@ -1694,11 +1694,11 @@ mod tests {
             "the exact generator lies on its cone's implicit equation"
         );
         let plane = Surface::from(
-            Plane::create_canonical(&placement.transform_axis2_placement(&Axis2Placement::new(
-                Point3::ZERO,
-                Vec3::new(0.0, 1.0, 0.0),
-                Vec3::new(0.0, 0.0, 1.0),
-            )))
+            Plane::create_canonical(&Axis2Placement::new(
+                placement.transform_point(Point3::ZERO),
+                placement.transform_vector(Vec3::new(0.0, 1.0, 0.0)),
+                placement.transform_vector(Vec3::new(0.0, 0.0, 1.0)),
+            ))
             .unwrap(),
         );
         let inputs = ClassInputs {
