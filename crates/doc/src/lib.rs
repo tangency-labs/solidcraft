@@ -160,6 +160,7 @@ pub use assembly::is_identity;
 pub use assembly::is_placement;
 pub use assembly::map_dir_expr;
 pub use assembly::map_plane;
+pub use assembly::map_plane_ref;
 pub use assembly::map_point_expr;
 pub use assembly::map_vector_expr;
 pub use assembly::mat_inverse;
