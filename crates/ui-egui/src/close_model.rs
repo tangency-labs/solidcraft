@@ -487,7 +487,7 @@ impl Closing {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
+    use serde_json::{Value, json};
 
     fn difference(got: &Value, want: &Value, at: &str) -> Option<String> {
         match want {
@@ -678,44 +678,1074 @@ mod tests {
         assert!(changed.ticked, "the later change needs another saving decision");
     }
 
-    #[test]
-    fn no_file_left_behind_scenarios() {
-        let suite: Value = serde_json::from_str(include_str!("testdata/nflb-scenarios.json")).expect("valid scenario file");
-        let scenarios = suite["scenarios"].as_array().expect("scenario array");
-        assert_eq!(scenarios.len(), 37);
-        for scenario in scenarios {
-            let id = scenario["id"].as_str().expect("scenario id");
-            let docs = serde_json::from_value(scenario["docs"].clone()).expect("scenario documents");
-            let mut model = Closing::new(docs);
-            for (index, step) in scenario["steps"].as_array().expect("scenario steps").iter().enumerate() {
-                if let Some(want) = step.get("expect") {
+    enum Input {
+        Tick(&'static str, bool),
+        SaveSelected,
+        DontSave,
+        Cancel,
+        RowSave(&'static str),
+        RowDiscard(&'static str),
+        Picked(&'static str),
+        PickCancelled,
+        SaveDone,
+        SaveFailed(&'static str),
+        DocChanged(&'static str),
+    }
+
+    enum Step {
+        /// The model takes this input.
+        Accepted(Input),
+        /// The model ignores this input (it is not allowed in the current state).
+        Ignored(Input),
+        /// The snapshot matches this value (only the keys named here are compared).
+        Expect(Value),
+    }
+
+    fn play(docs: Vec<Document>, steps: Vec<Step>) {
+        let mut model = Closing::new(docs);
+        for (index, step) in steps.into_iter().enumerate() {
+            let number = index + 1;
+            let (input, wanted) = match step {
+                Step::Expect(want) => {
                     let got = serde_json::to_value(model.snapshot()).expect("serializable snapshot");
-                    assert!(
-                        difference(&got, want, "snapshot").is_none(),
-                        "{id}, step {}: {}",
-                        index + 1,
-                        difference(&got, want, "snapshot").unwrap_or_default()
-                    );
+                    let found = difference(&got, &want, "snapshot");
+                    assert!(found.is_none(), "step {number}: {}", found.unwrap_or_default());
                     continue;
                 }
-                let doc_id = step["id"].as_str().unwrap_or_default();
-                let input = step["do"].as_str().expect("input name");
-                let accepted = match input {
-                    "tick" => model.tick(doc_id, step["on"].as_bool().expect("tick value")),
-                    "saveSelected" => model.save_selected(),
-                    "dontSave" => model.dont_save(),
-                    "cancel" => model.cancel(),
-                    "rowSave" => model.row_save(doc_id),
-                    "rowDiscard" => model.row_discard(doc_id),
-                    "picked" => model.picked(step["path"].as_str().expect("picked path").to_owned()),
-                    "pickCancelled" => model.pick_cancelled(),
-                    "saveDone" => model.save_done(),
-                    "saveFailed" => model.save_failed(step["reason"].as_str().expect("failure reason").to_owned()),
-                    "docChanged" => model.doc_changed(doc_id),
-                    _ => panic!("{id}: unknown input {input}"),
-                };
-                assert_eq!(accepted, !step["ignored"].as_bool().unwrap_or(false), "{id}, step {}: {input} acceptance", index + 1);
-            }
+                Step::Accepted(input) => (input, true),
+                Step::Ignored(input) => (input, false),
+            };
+            let accepted = match input {
+                Input::Tick(id, on) => model.tick(id, on),
+                Input::SaveSelected => model.save_selected(),
+                Input::DontSave => model.dont_save(),
+                Input::Cancel => model.cancel(),
+                Input::RowSave(id) => model.row_save(id),
+                Input::RowDiscard(id) => model.row_discard(id),
+                Input::Picked(path) => model.picked(path.to_owned()),
+                Input::PickCancelled => model.pick_cancelled(),
+                Input::SaveDone => model.save_done(),
+                Input::SaveFailed(reason) => model.save_failed(reason.to_owned()),
+                Input::DocChanged(id) => model.doc_changed(id),
+            };
+            assert_eq!(accepted, wanted, "step {number}: input acceptance");
         }
+    }
+
+    /// Nothing unsaved: no prompt, the action goes ahead
+    #[test]
+    fn nothing_unsaved_means_no_prompt_and_the_action_goes_ahead() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: false,
+                    read_only: false,
+                },
+                Document {
+                    id: "gearbox".to_owned(),
+                    name: "Gearbox".to_owned(),
+                    path: Some("~/Designs/Gearbox.sc".to_owned()),
+                    dirty: false,
+                    read_only: false,
+                },
+            ],
+            vec![Step::Expect(json!({"prompt": "none", "outcome": "proceeded", "open": [], "lost": []}))],
+        );
+    }
+
+    /// One unsaved document keeps the single prompt
+    #[test]
+    fn one_unsaved_document_keeps_the_single_prompt() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document {
+                    id: "gearbox".to_owned(),
+                    name: "Gearbox".to_owned(),
+                    path: Some("~/Designs/Gearbox.sc".to_owned()),
+                    dirty: false,
+                    read_only: false,
+                },
+            ],
+            vec![Step::Expect(json!({"prompt": "single", "count": 1, "rows": [{"id": "bracket"}], "outcome": null, "open": ["bracket", "gearbox"]}))],
+        );
+    }
+
+    /// Two or more unsaved: one list, a row each in order, all ticked, clean documents left out
+    #[test]
+    fn two_unsaved_documents_open_one_ticked_list_without_clean_ones() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+                Document { id: "untitled".to_owned(), name: "Untitled".to_owned(), path: None.map(str::to_owned), dirty: true, read_only: false },
+                Document {
+                    id: "gearbox".to_owned(),
+                    name: "Gearbox".to_owned(),
+                    path: Some("~/Designs/Gearbox.sc".to_owned()),
+                    dirty: false,
+                    read_only: false,
+                },
+            ],
+            vec![Step::Expect(
+                json!({"prompt": "list", "count": 3, "request": null, "outcome": null, "rows": [{"id": "bracket", "name": "Bracket", "where": "~/Designs/Bracket.sc", "ticked": true, "state": "unsaved", "note": null}, {"id": "lid", "where": "~/Designs/Lid.sc", "ticked": true}, {"id": "untitled", "where": null, "ticked": true}]}),
+            )],
+        );
+    }
+
+    /// Save Selected saves in row order without asking where, then everything closes
+    #[test]
+    fn save_selected_saves_in_row_order_without_asking_where_then_closes_all() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+                Document {
+                    id: "gearbox".to_owned(),
+                    name: "Gearbox".to_owned(),
+                    path: Some("~/Designs/Gearbox.sc".to_owned()),
+                    dirty: false,
+                    read_only: false,
+                },
+            ],
+            vec![
+                Step::Accepted(Input::SaveSelected),
+                Step::Expect(
+                    json!({"request": {"type": "save", "id": "bracket", "path": "~/Designs/Bracket.sc"}, "rows": [{"id": "bracket", "state": "saving"}, {"id": "lid", "state": "unsaved"}]}),
+                ),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(
+                    json!({"request": {"type": "save", "id": "lid"}, "rows": [{"id": "bracket", "state": "saved"}, {"id": "lid", "state": "saving"}], "open": ["bracket", "lid", "gearbox"]}),
+                ),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(
+                    json!({"prompt": "none", "outcome": "proceeded", "open": [], "saved": {"bracket": "~/Designs/Bracket.sc", "lid": "~/Designs/Lid.sc"}, "lost": []}),
+                ),
+            ],
+        );
+    }
+
+    /// Save Selected asks where only for the never-saved document
+    #[test]
+    fn save_selected_asks_where_only_for_the_never_saved_document() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "untitled".to_owned(), name: "Untitled".to_owned(), path: None.map(str::to_owned), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::SaveSelected),
+                Step::Expect(json!({"request": {"type": "save", "id": "bracket"}})),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(json!({"request": {"type": "pick", "id": "untitled", "why": "never-saved"}})),
+                Step::Accepted(Input::Picked("~/Designs/Clip.sc")),
+                Step::Expect(json!({"request": {"type": "save", "id": "untitled", "path": "~/Designs/Clip.sc"}})),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(json!({"outcome": "proceeded", "saved": {"untitled": "~/Designs/Clip.sc"}, "lost": []})),
+            ],
+        );
+    }
+
+    /// A save fails: nothing closes, the list stays, the row says why, the saved one shows as saved
+    #[test]
+    fn a_failed_save_closes_nothing_and_the_row_says_why() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+                Document {
+                    id: "gearbox".to_owned(),
+                    name: "Gearbox".to_owned(),
+                    path: Some("~/Designs/Gearbox.sc".to_owned()),
+                    dirty: false,
+                    read_only: false,
+                },
+            ],
+            vec![
+                Step::Accepted(Input::SaveSelected),
+                Step::Accepted(Input::SaveDone),
+                Step::Accepted(Input::SaveFailed("The disk is full")),
+                Step::Expect(
+                    json!({"prompt": "list", "outcome": null, "request": null, "count": 1, "open": ["bracket", "lid", "gearbox"], "closed": [], "rows": [{"id": "bracket", "state": "saved", "ticked": false, "note": null}, {"id": "lid", "state": "unsaved", "ticked": true, "note": {"kind": "failed", "text": "The disk is full"}}]}),
+                ),
+            ],
+        );
+    }
+
+    /// A failed save doesn't stop the others: the later documents are still saved, and nothing closes
+    #[test]
+    fn a_failed_save_does_not_stop_the_later_documents_saving() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+                Document { id: "untitled".to_owned(), name: "Untitled".to_owned(), path: None.map(str::to_owned), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::SaveSelected),
+                Step::Accepted(Input::SaveFailed("The disk is full")),
+                Step::Expect(json!({"request": {"type": "save", "id": "lid"}})),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(json!({"request": {"type": "pick", "id": "untitled"}})),
+                Step::Accepted(Input::Picked("~/Designs/Clip.sc")),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(
+                    json!({"prompt": "list", "outcome": null, "count": 1, "closed": [], "rows": [{"id": "bracket", "state": "unsaved", "note": {"kind": "failed"}}, {"id": "lid", "state": "saved"}, {"id": "untitled", "state": "saved", "where": "~/Designs/Clip.sc"}]}),
+                ),
+            ],
+        );
+    }
+
+    /// A cancelled picker stops the run: no second picker, nothing closes
+    #[test]
+    fn a_cancelled_picker_stops_the_run_with_no_second_picker() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "untitled".to_owned(), name: "Untitled".to_owned(), path: None.map(str::to_owned), dirty: true, read_only: false },
+                Document { id: "untitled2".to_owned(), name: "Untitled 2".to_owned(), path: None.map(str::to_owned), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::SaveSelected),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(json!({"request": {"type": "pick", "id": "untitled"}})),
+                Step::Accepted(Input::PickCancelled),
+                Step::Expect(
+                    json!({"prompt": "list", "request": null, "outcome": null, "closed": [], "count": 2, "rows": [{"id": "bracket", "state": "saved"}, {"id": "untitled", "state": "unsaved", "note": {"kind": "cancelled"}}, {"id": "untitled2", "state": "unsaved", "note": null}]}),
+                ),
+            ],
+        );
+    }
+
+    /// After the failure is fixed, Save Selected again saves the rest and everything closes
+    #[test]
+    fn save_selected_again_after_the_failure_is_fixed_saves_the_rest_and_closes_all() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::SaveSelected),
+                Step::Accepted(Input::SaveDone),
+                Step::Accepted(Input::SaveFailed("The disk is full")),
+                Step::Accepted(Input::SaveSelected),
+                Step::Expect(json!({"request": {"type": "save", "id": "lid"}, "rows": [{"id": "bracket"}, {"id": "lid", "note": null}]})),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(
+                    json!({"outcome": "proceeded", "open": [], "lost": [], "saved": {"bracket": "~/Designs/Bracket.sc", "lid": "~/Designs/Lid.sc"}}),
+                ),
+            ],
+        );
+    }
+
+    /// An unticked document closes without saving when the ticked ones have saved
+    #[test]
+    fn unticked_documents_close_unsaved_once_the_ticked_ones_have_saved() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+                Document { id: "untitled".to_owned(), name: "Untitled".to_owned(), path: None.map(str::to_owned), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::Tick("lid", false)),
+                Step::Expect(json!({"rows": [{"ticked": true}, {"id": "lid", "ticked": false}, {"ticked": true}]})),
+                Step::Accepted(Input::SaveSelected),
+                Step::Accepted(Input::SaveDone),
+                Step::Accepted(Input::Picked("~/Designs/Clip.sc")),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(
+                    json!({"outcome": "proceeded", "open": [], "lost": ["lid"], "saved": {"bracket": "~/Designs/Bracket.sc", "untitled": "~/Designs/Clip.sc"}}),
+                ),
+            ],
+        );
+    }
+
+    /// When a save fails, the unticked documents don't close either
+    #[test]
+    fn unticked_documents_stay_open_when_a_save_fails() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+                Document { id: "untitled".to_owned(), name: "Untitled".to_owned(), path: None.map(str::to_owned), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::Tick("untitled", false)),
+                Step::Accepted(Input::SaveSelected),
+                Step::Accepted(Input::SaveDone),
+                Step::Accepted(Input::SaveFailed("The disk is full")),
+                Step::Expect(
+                    json!({"outcome": null, "closed": [], "lost": [], "rows": [{"id": "bracket"}, {"id": "lid"}, {"id": "untitled", "ticked": false, "state": "unsaved"}]}),
+                ),
+            ],
+        );
+    }
+
+    /// Save Selected with nothing ticked closes everything unsaved, like Don't Save
+    #[test]
+    fn save_selected_with_nothing_ticked_closes_everything_like_dont_save() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::Tick("bracket", false)),
+                Step::Accepted(Input::Tick("lid", false)),
+                Step::Accepted(Input::SaveSelected),
+                Step::Expect(json!({"outcome": "proceeded", "lost": ["bracket", "lid"], "saved": {}})),
+            ],
+        );
+    }
+
+    /// Don't Save closes every listed document without saving
+    #[test]
+    fn dont_save_closes_every_listed_document_without_saving() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+                Document { id: "untitled".to_owned(), name: "Untitled".to_owned(), path: None.map(str::to_owned), dirty: true, read_only: false },
+                Document {
+                    id: "gearbox".to_owned(),
+                    name: "Gearbox".to_owned(),
+                    path: Some("~/Designs/Gearbox.sc".to_owned()),
+                    dirty: false,
+                    read_only: false,
+                },
+            ],
+            vec![
+                Step::Accepted(Input::DontSave),
+                Step::Expect(json!({"prompt": "none", "outcome": "proceeded", "open": [], "lost": ["bracket", "lid", "untitled"], "saved": {}})),
+            ],
+        );
+    }
+
+    /// Cancel closes nothing and stops the action
+    #[test]
+    fn cancel_closes_nothing_and_stops_the_action() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+                Document {
+                    id: "gearbox".to_owned(),
+                    name: "Gearbox".to_owned(),
+                    path: Some("~/Designs/Gearbox.sc".to_owned()),
+                    dirty: false,
+                    read_only: false,
+                },
+            ],
+            vec![
+                Step::Accepted(Input::Cancel),
+                Step::Expect(json!({"prompt": "none", "outcome": "stopped", "open": ["bracket", "lid", "gearbox"], "closed": [], "lost": []})),
+                Step::Ignored(Input::SaveSelected),
+                Step::Ignored(Input::DontSave),
+            ],
+        );
+    }
+
+    /// Cancel closes nothing more: rows already answered stay answered
+    #[test]
+    fn cancel_after_row_answers_closes_nothing_more_and_answered_rows_stay_answered() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+                Document { id: "untitled".to_owned(), name: "Untitled".to_owned(), path: None.map(str::to_owned), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::RowSave("bracket")),
+                Step::Accepted(Input::SaveDone),
+                Step::Accepted(Input::RowDiscard("lid")),
+                Step::Expect(json!({"prompt": "list", "count": 1, "rows": [{"id": "untitled"}], "closed": ["bracket", "lid"]})),
+                Step::Accepted(Input::Cancel),
+                Step::Expect(
+                    json!({"outcome": "stopped", "open": ["untitled"], "closed": ["bracket", "lid"], "saved": {"bracket": "~/Designs/Bracket.sc"}, "lost": ["lid"]}),
+                ),
+            ],
+        );
+    }
+
+    /// A row's Save saves that document only; it closes and its row leaves
+    #[test]
+    fn a_row_save_saves_only_that_document_and_its_row_leaves() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+                Document { id: "untitled".to_owned(), name: "Untitled".to_owned(), path: None.map(str::to_owned), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::Tick("untitled", false)),
+                Step::Accepted(Input::RowSave("lid")),
+                Step::Expect(json!({"request": {"type": "save", "id": "lid"}})),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(
+                    json!({"prompt": "list", "outcome": null, "count": 2, "closed": ["lid"], "rows": [{"id": "bracket", "ticked": true, "state": "unsaved"}, {"id": "untitled", "ticked": false, "state": "unsaved"}]}),
+                ),
+            ],
+        );
+    }
+
+    /// A row's Save that fails leaves the row, with the reason
+    #[test]
+    fn a_row_save_that_fails_keeps_the_row_with_the_reason() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::RowSave("lid")),
+                Step::Accepted(Input::SaveFailed("The disk is full")),
+                Step::Expect(
+                    json!({"prompt": "list", "closed": [], "request": null, "rows": [{"id": "bracket", "note": null}, {"id": "lid", "state": "unsaved", "note": {"kind": "failed", "text": "The disk is full"}}]}),
+                ),
+            ],
+        );
+    }
+
+    /// A row's Save on a never-saved document asks where; cancelling leaves the row
+    #[test]
+    fn a_row_save_on_a_never_saved_document_asks_where_and_cancelling_keeps_the_row() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "untitled".to_owned(), name: "Untitled".to_owned(), path: None.map(str::to_owned), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::RowSave("untitled")),
+                Step::Expect(json!({"request": {"type": "pick", "id": "untitled", "why": "never-saved"}})),
+                Step::Accepted(Input::PickCancelled),
+                Step::Expect(
+                    json!({"prompt": "list", "closed": [], "rows": [{"id": "bracket"}, {"id": "untitled", "state": "unsaved", "note": {"kind": "cancelled"}}]}),
+                ),
+            ],
+        );
+    }
+
+    /// A row's Discard closes that document only
+    #[test]
+    fn a_row_discard_closes_only_that_document() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+                Document { id: "untitled".to_owned(), name: "Untitled".to_owned(), path: None.map(str::to_owned), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::RowDiscard("lid")),
+                Step::Expect(
+                    json!({"prompt": "list", "count": 2, "closed": ["lid"], "lost": ["lid"], "rows": [{"id": "bracket", "ticked": true}, {"id": "untitled", "ticked": true}]}),
+                ),
+            ],
+        );
+    }
+
+    /// Answering the last row carries on with the action
+    #[test]
+    fn answering_the_last_row_carries_on_with_the_action() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+                Document {
+                    id: "gearbox".to_owned(),
+                    name: "Gearbox".to_owned(),
+                    path: Some("~/Designs/Gearbox.sc".to_owned()),
+                    dirty: false,
+                    read_only: false,
+                },
+            ],
+            vec![
+                Step::Accepted(Input::RowSave("bracket")),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(json!({"prompt": "list", "count": 1, "outcome": null})),
+                Step::Accepted(Input::RowDiscard("lid")),
+                Step::Expect(
+                    json!({"prompt": "none", "outcome": "proceeded", "open": [], "saved": {"bracket": "~/Designs/Bracket.sc"}, "lost": ["lid"]}),
+                ),
+            ],
+        );
+    }
+
+    /// After a failed Save Selected, discarding the failed row carries on and closes the saved ones too
+    #[test]
+    fn discarding_the_failed_row_after_a_partial_save_closes_the_saved_ones_too() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::SaveSelected),
+                Step::Accepted(Input::SaveDone),
+                Step::Accepted(Input::SaveFailed("The disk is full")),
+                Step::Expect(json!({"closed": []})),
+                Step::Accepted(Input::RowDiscard("lid")),
+                Step::Expect(json!({"outcome": "proceeded", "open": [], "saved": {"bracket": "~/Designs/Bracket.sc"}, "lost": ["lid"]})),
+            ],
+        );
+    }
+
+    /// A row that already saved has nothing left to answer
+    #[test]
+    fn a_row_that_already_saved_has_nothing_left_to_answer() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::SaveSelected),
+                Step::Accepted(Input::SaveDone),
+                Step::Accepted(Input::SaveFailed("The disk is full")),
+                Step::Ignored(Input::RowSave("bracket")),
+                Step::Ignored(Input::RowDiscard("bracket")),
+                Step::Ignored(Input::Tick("bracket", true)),
+            ],
+        );
+    }
+
+    /// A read-only file asks for a new place, and the row knows why
+    #[test]
+    fn a_read_only_file_asks_for_a_new_place_and_the_row_says_why() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: true,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Expect(json!({"rows": [{"id": "bracket", "readOnly": true}, {"id": "lid", "readOnly": false}]})),
+                Step::Accepted(Input::SaveSelected),
+                Step::Expect(json!({"request": {"type": "pick", "id": "bracket", "why": "read-only"}})),
+                Step::Accepted(Input::Picked("~/Designs/Bracket copy.sc")),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(
+                    json!({"request": {"type": "save", "id": "lid"}, "rows": [{"id": "bracket", "state": "saved", "where": "~/Designs/Bracket copy.sc", "readOnly": false}, {"id": "lid"}]}),
+                ),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(json!({"outcome": "proceeded", "saved": {"bracket": "~/Designs/Bracket copy.sc"}})),
+            ],
+        );
+    }
+
+    /// While a save is running every button except Cancel waits
+    #[test]
+    fn while_saving_every_button_except_cancel_waits() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+                Document { id: "untitled".to_owned(), name: "Untitled".to_owned(), path: None.map(str::to_owned), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::SaveSelected),
+                Step::Expect(json!({"request": {"type": "save", "id": "bracket"}, "rows": [{"state": "saving"}, {}, {}]})),
+                Step::Ignored(Input::SaveSelected),
+                Step::Ignored(Input::DontSave),
+                Step::Ignored(Input::RowSave("lid")),
+                Step::Ignored(Input::RowDiscard("lid")),
+                Step::Ignored(Input::Tick("lid", false)),
+                Step::Expect(json!({"request": {"type": "save", "id": "bracket"}, "rows": [{}, {"id": "lid", "ticked": true}, {}]})),
+            ],
+        );
+    }
+
+    /// Cancel during a slow save abandons it and stops the rest; what already saved stays saved; nothing closes
+    #[test]
+    fn cancel_during_a_slow_save_abandons_it_keeps_what_saved_and_closes_nothing() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+                Document { id: "untitled".to_owned(), name: "Untitled".to_owned(), path: None.map(str::to_owned), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::SaveSelected),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(json!({"request": {"type": "save", "id": "lid"}})),
+                Step::Accepted(Input::Cancel),
+                Step::Expect(
+                    json!({"outcome": "stopped", "request": null, "abandoned": ["lid"], "open": ["bracket", "lid", "untitled"], "closed": [], "saved": {"bracket": "~/Designs/Bracket.sc"}, "lost": []}),
+                ),
+                Step::Ignored(Input::SaveDone),
+            ],
+        );
+    }
+
+    /// While a save picker is open, it is the picker that gets answered, not the list
+    #[test]
+    fn while_a_picker_is_open_the_picker_is_answered_not_the_list() {
+        play(
+            vec![
+                Document { id: "untitled".to_owned(), name: "Untitled".to_owned(), path: None.map(str::to_owned), dirty: true, read_only: false },
+                Document { id: "untitled2".to_owned(), name: "Untitled 2".to_owned(), path: None.map(str::to_owned), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::SaveSelected),
+                Step::Expect(json!({"request": {"type": "pick", "id": "untitled"}})),
+                Step::Ignored(Input::Cancel),
+                Step::Ignored(Input::DontSave),
+                Step::Accepted(Input::PickCancelled),
+                Step::Accepted(Input::Cancel),
+                Step::Expect(json!({"outcome": "stopped", "closed": []})),
+            ],
+        );
+    }
+
+    /// A document that changes again after it saved needs saving again; its row stays
+    #[test]
+    fn a_document_that_changes_after_saving_needs_saving_again_and_keeps_its_row() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::SaveSelected),
+                Step::Accepted(Input::SaveDone),
+                Step::Accepted(Input::SaveFailed("The disk is full")),
+                Step::Expect(json!({"count": 1})),
+                Step::Accepted(Input::DocChanged("bracket")),
+                Step::Expect(json!({"count": 2, "rows": [{"id": "bracket", "state": "unsaved", "ticked": true}, {"id": "lid"}]})),
+                Step::Accepted(Input::SaveSelected),
+                Step::Expect(json!({"request": {"type": "save", "id": "bracket"}})),
+            ],
+        );
+    }
+
+    /// A document that gains changes while the list is open gets a row, ticked
+    #[test]
+    fn a_clean_document_that_gains_changes_while_the_list_is_open_gets_a_ticked_row() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+                Document {
+                    id: "gearbox".to_owned(),
+                    name: "Gearbox".to_owned(),
+                    path: Some("~/Designs/Gearbox.sc".to_owned()),
+                    dirty: false,
+                    read_only: false,
+                },
+            ],
+            vec![
+                Step::Expect(json!({"count": 2})),
+                Step::Accepted(Input::DocChanged("gearbox")),
+                Step::Expect(
+                    json!({"prompt": "list", "count": 3, "rows": [{"id": "bracket"}, {"id": "lid"}, {"id": "gearbox", "state": "unsaved", "ticked": true}]}),
+                ),
+            ],
+        );
+    }
+
+    /// The single prompt: Save saves it and the action goes ahead
+    #[test]
+    fn single_prompt_save_saves_it_and_the_action_goes_ahead() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document {
+                    id: "gearbox".to_owned(),
+                    name: "Gearbox".to_owned(),
+                    path: Some("~/Designs/Gearbox.sc".to_owned()),
+                    dirty: false,
+                    read_only: false,
+                },
+            ],
+            vec![
+                Step::Accepted(Input::SaveSelected),
+                Step::Expect(json!({"request": {"type": "save", "id": "bracket"}})),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(json!({"outcome": "proceeded", "open": [], "lost": []})),
+            ],
+        );
+    }
+
+    /// The single prompt: a failed save closes nothing and the prompt stays, with the reason
+    #[test]
+    fn single_prompt_failed_save_closes_nothing_and_keeps_the_prompt_with_the_reason() {
+        play(
+            vec![
+                Document { id: "untitled".to_owned(), name: "Untitled".to_owned(), path: None.map(str::to_owned), dirty: true, read_only: false },
+                Document {
+                    id: "gearbox".to_owned(),
+                    name: "Gearbox".to_owned(),
+                    path: Some("~/Designs/Gearbox.sc".to_owned()),
+                    dirty: false,
+                    read_only: false,
+                },
+            ],
+            vec![
+                Step::Accepted(Input::SaveSelected),
+                Step::Accepted(Input::Picked("~/Designs/Clip.sc")),
+                Step::Accepted(Input::SaveFailed("The disk is full")),
+                Step::Expect(
+                    json!({"prompt": "single", "outcome": null, "closed": [], "rows": [{"id": "untitled", "where": null, "note": {"kind": "failed", "text": "The disk is full"}}]}),
+                ),
+            ],
+        );
+    }
+
+    /// The single prompt: Don't Save closes it unsaved
+    #[test]
+    fn single_prompt_dont_save_closes_it_unsaved() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document {
+                    id: "gearbox".to_owned(),
+                    name: "Gearbox".to_owned(),
+                    path: Some("~/Designs/Gearbox.sc".to_owned()),
+                    dirty: false,
+                    read_only: false,
+                },
+            ],
+            vec![Step::Accepted(Input::DontSave), Step::Expect(json!({"outcome": "proceeded", "lost": ["bracket"], "open": []}))],
+        );
+    }
+
+    /// The single prompt becomes the list when a second document gains changes
+    #[test]
+    fn single_prompt_becomes_the_list_when_a_second_document_gains_changes() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document {
+                    id: "gearbox".to_owned(),
+                    name: "Gearbox".to_owned(),
+                    path: Some("~/Designs/Gearbox.sc".to_owned()),
+                    dirty: false,
+                    read_only: false,
+                },
+            ],
+            vec![
+                Step::Expect(json!({"prompt": "single"})),
+                Step::Accepted(Input::DocChanged("gearbox")),
+                Step::Expect(json!({"prompt": "list", "count": 2})),
+            ],
+        );
+    }
+
+    /// A document that saved and then changes while the others are still saving does not close unasked: the list stays
+    #[test]
+    fn a_document_that_changes_after_saving_during_a_run_does_not_close_unasked() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::SaveSelected),
+                Step::Accepted(Input::SaveDone),
+                Step::Accepted(Input::DocChanged("bracket")),
+                Step::Expect(json!({"request": {"type": "save", "id": "lid"}})),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(
+                    json!({"prompt": "list", "outcome": null, "closed": [], "lost": [], "count": 1, "rows": [{"id": "bracket", "state": "unsaved", "ticked": true}, {"id": "lid", "state": "saved"}]}),
+                ),
+                Step::Accepted(Input::SaveSelected),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(json!({"outcome": "proceeded", "lost": []})),
+            ],
+        );
+    }
+
+    /// A document that gains changes during a run of saves gets a row and holds the list open
+    #[test]
+    fn a_clean_document_that_gains_changes_during_a_run_gets_a_row_and_holds_the_list_open() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+                Document {
+                    id: "gearbox".to_owned(),
+                    name: "Gearbox".to_owned(),
+                    path: Some("~/Designs/Gearbox.sc".to_owned()),
+                    dirty: false,
+                    read_only: false,
+                },
+            ],
+            vec![
+                Step::Accepted(Input::SaveSelected),
+                Step::Accepted(Input::DocChanged("gearbox")),
+                Step::Accepted(Input::SaveDone),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(
+                    json!({"prompt": "list", "outcome": null, "closed": [], "lost": [], "count": 1, "rows": [{"id": "bracket", "state": "saved"}, {"id": "lid", "state": "saved"}, {"id": "gearbox", "state": "unsaved", "ticked": true}]}),
+                ),
+            ],
+        );
+    }
+
+    /// A change that arrives while that document is being saved leaves it needing a save
+    #[test]
+    fn a_change_while_the_document_is_being_saved_leaves_it_needing_a_save() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::SaveSelected),
+                Step::Expect(json!({"request": {"type": "save", "id": "bracket"}})),
+                Step::Accepted(Input::DocChanged("bracket")),
+                Step::Accepted(Input::SaveDone),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(
+                    json!({"prompt": "list", "outcome": null, "closed": [], "count": 1, "rows": [{"id": "bracket", "state": "unsaved", "ticked": true}, {"id": "lid", "state": "saved"}]}),
+                ),
+            ],
+        );
+    }
+
+    /// A row's Save whose document changes during the save does not close it
+    #[test]
+    fn a_row_save_whose_document_changes_during_the_save_does_not_close_it() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document { id: "lid".to_owned(), name: "Lid".to_owned(), path: Some("~/Designs/Lid.sc".to_owned()), dirty: true, read_only: false },
+            ],
+            vec![
+                Step::Accepted(Input::RowSave("bracket")),
+                Step::Accepted(Input::DocChanged("bracket")),
+                Step::Accepted(Input::SaveDone),
+                Step::Expect(json!({"prompt": "list", "closed": [], "count": 2, "rows": [{"id": "bracket", "state": "unsaved"}, {"id": "lid"}]})),
+            ],
+        );
+    }
+
+    /// The single prompt has no tick box: its document can't be unticked
+    #[test]
+    fn single_prompt_has_no_tick_so_its_document_cannot_be_unticked() {
+        play(
+            vec![
+                Document {
+                    id: "bracket".to_owned(),
+                    name: "Bracket".to_owned(),
+                    path: Some("~/Designs/Bracket.sc".to_owned()),
+                    dirty: true,
+                    read_only: false,
+                },
+                Document {
+                    id: "gearbox".to_owned(),
+                    name: "Gearbox".to_owned(),
+                    path: Some("~/Designs/Gearbox.sc".to_owned()),
+                    dirty: false,
+                    read_only: false,
+                },
+            ],
+            vec![
+                Step::Ignored(Input::Tick("bracket", false)),
+                Step::Accepted(Input::SaveSelected),
+                Step::Expect(json!({"request": {"type": "save", "id": "bracket"}})),
+            ],
+        );
     }
 }
