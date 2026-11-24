@@ -48,6 +48,7 @@ use solidcore::kernel::Kernel;
 use solidcore::math::PI;
 use solidcore::nurbs::math::{gamma, CPoint, NOW};
 use solidcore::surface::cone::Cone;
+use std::fmt::Write as _;
 
 /// `(case, main's status, the new status)`.
 const ROWS: &[(&str, f64, f64)] = &[("adv_reb_cylarc_s1i0_id_tw", 1000.0, 1001.0)];
@@ -214,11 +215,13 @@ fn issue_17228_moved_row_is_off_every_cylinder_the_rebuild_tries() {
             closed > 100.0 * rounding,
             "{name}: gap {closed:e} not far beyond rounding {rounding:e}"
         );
-        report.push_str(&format!(
+        writeln!(
+            report,
             "{name}: turn {angle:e} deg about z; mid-generator gap measured {gap:e}, \
-             closed form 2 r sin^2(a/4) {closed:e}, rounding {rounding:e} ({:.0}x)\n",
+             closed form 2 r sin^2(a/4) {closed:e}, rounding {rounding:e} ({:.0}x)",
             closed / rounding
-        ));
+        )
+        .unwrap();
     }
     println!("{report}");
 }
@@ -308,10 +311,12 @@ fn issue_17228_rigidly_moved_rows_rebuild_on_the_centre_line() {
             moved <= 4.0 * ulp,
             "{name}: net moved {moved:e}, ulp {ulp:e}"
         );
-        report.push_str(&format!(
+        writeln!(
+            report,
             "{name}: tilt {tilt:e} rad, turn {angle:e} deg; closed-form gap {gap:e}; \
-             net moved {moved:e} (ulp of {size:e}: {ulp:e})\n"
-        ));
+             net moved {moved:e} (ulp of {size:e}: {ulp:e})"
+        )
+        .unwrap();
     }
     println!("{report}");
 }
