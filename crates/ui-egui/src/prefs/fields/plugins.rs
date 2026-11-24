@@ -12,6 +12,9 @@ macro_rules! plugins_preferences {
             disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
             /// Last-run importer options, by plugin id and entry name. Bookkeeping, never design data.
             plugin_importer_options: std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>> = std::collections::BTreeMap::new();
+            /// Show the global fuel and memory controls on Preferences > Plugins (#18764).
+            /// Off keeps advanced controls folded; on exposes the prior always-visible controls.
+            plugin_limits_expanded: bool = false, PAGE_PLUGINS;
             /// User ceilings, not automatic increases to a package's approved execution budget.
             plugin_max_fuel: u64 = solidcraft_engine::plugin::HostLimits::default().max_fuel, PAGE_PLUGINS;
             plugin_max_memory_mib: usize = solidcraft_engine::plugin::HostLimits::default().max_memory_mib, PAGE_PLUGINS;
