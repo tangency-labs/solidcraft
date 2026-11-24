@@ -963,11 +963,6 @@ pub struct Kernel {
     /// caches, which call through the same seam.
     #[cfg(feature = "wr57-replay")]
     pub replay: crate::surface::surface::replay::ReplaySeam,
-    /// Not upstream, test only (feature `wr469-replay`): the seam of the goldens' WR-469
-    /// substitution replay ([`crate::topology::brep::p9::replay`]). No hook by default,
-    /// and then it changes nothing. Shared with the kernel copies an operation makes.
-    #[cfg(feature = "wr469-replay")]
-    pub wr469_replay: crate::topology::brep::p9::replay::VertexStepSeam,
 }
 
 /// Test-only seam of `boolean::topology_intersector::curved_strip`
@@ -1043,8 +1038,6 @@ impl Kernel {
             strip_probe: Arc::default(),
             #[cfg(feature = "wr57-replay")]
             replay: crate::surface::surface::replay::ReplaySeam::default(),
-            #[cfg(feature = "wr469-replay")]
-            wr469_replay: crate::topology::brep::p9::replay::VertexStepSeam::default(),
         }
     }
 
