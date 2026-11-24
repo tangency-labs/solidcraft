@@ -2803,6 +2803,76 @@ pub fn plane_uv_lipschitz(s: &Surface, ends: &[crate::nurbs::math::CPoint], d: f
     l.is_finite().then_some(l)
 }
 
+/// A bound on `|S(p) - S(q)|` for the surface `s` and UV points `p`, `q` within `d` of each
+/// other in each coordinate, both within `d` of the segment between the UV points `ends` (a UV
+/// line's NURB, so `d` its [`line_evaluation_slack`]): what a UV line's analytic evaluation
+/// adds to the bound [`trim_image_gap_bound`] gives for its NURB. On a plane it is
+/// [`plane_uv_lipschitz`] times `d`. On another surface with an exact net
+/// ([`NetSurface::of_exact`], probed at `ends`), the net's first partials are enclosed in
+/// interval arithmetic over the segment's box widened by `d` ([`NetSurface::partials`]),
+/// which holds `p`, `q` and the segment between them: the net is continuous and piecewise
+/// polynomial there, so `|S~(p) - S~(q)| <= (sup |S_u| + sup |S_v|) d` along that segment,
+/// `S~` the net with its end spans continued past the net. Where the box overshoots the net
+/// (a seam on the domain's boundary, its parameters a rounding out), the surface is taken at
+/// the clamped point as the gap bound takes it, within the partials' slack of `S~` at each of
+/// `p` and `q`: twice the slack is added. `None` for a surface without an exact net, `ends`
+/// that are not polynomial points, a box the partials refuse, or numbers not finite.
+///
+/// Not upstream (#18923): the WR-450 certificate of the UV lines a copied analytic face keeps.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub fn uv_line_slack_on_surface(
+    k: &Kernel,
+    s: &Surface,
+    ends: &[crate::nurbs::math::CPoint],
+    d: f64,
+) -> Result<Option<f64>> {
+    use crate::nurbs::math::NOW;
+    use crate::surface::surface::SurfaceKind;
+    if matches!(s.kind(), SurfaceKind::Plane(_)) {
+        return Ok(plane_uv_lipschitz(s, ends, d)
+            .map(|l| l * d * (1.0 + 4.0 * f64::EPSILON))
+            .filter(|x| x.is_finite()));
+    }
+    if !(d.is_finite() && d >= 0.0) || ends.is_empty() {
+        return Ok(None);
+    }
+    let mut u = Ivl::new(f64::INFINITY, f64::NEG_INFINITY);
+    let mut v = u;
+    let mut probes = Vec::new();
+    for c in ends {
+        if !(c.w == NOW || c.w == 1.0) || !(c.x.is_finite() && c.y.is_finite()) {
+            return Ok(None);
+        }
+        let du = Ivl::from(c.x) - Ivl::from(d);
+        let dv = Ivl::from(c.y) - Ivl::from(d);
+        let eu = Ivl::from(c.x) + Ivl::from(d);
+        let ev = Ivl::from(c.y) + Ivl::from(d);
+        u = Ivl::new(u.lo.min(du.lo), u.hi.max(eu.hi));
+        v = Ivl::new(v.lo.min(dv.lo), v.hi.max(ev.hi));
+        probes.push(Point2::new(c.x, c.y));
+    }
+    let Some(net) = NetSurface::of_exact(k, s, &probes)? else {
+        return Ok(None);
+    };
+    let w = V3 {
+        x: u,
+        y: v,
+        z: Ivl::from(0.0),
+    };
+    let Ok((p, slack)) = net.partials(&[w], 1, 0) else {
+        return Ok(None);
+    };
+    let (Some(su), Some(sv)) = (norm_upper(p.at(1, 0)), norm_upper(p.at(0, 1))) else {
+        return Ok(None);
+    };
+    let bound =
+        ((Ivl::from(su) + Ivl::from(sv)) * Ivl::from(d) + Ivl::from(2.0) * Ivl::from(slack)).hi;
+    Ok(bound.is_finite().then_some(bound))
+}
+
 /// Not upstream: [`line_nurb_slack`] of the line `l` and its NURB (made on a copy when it has
 /// none), a UV line when `is_2d`: how far its analytic point can be from its NURB's exact point
 /// at the same parameter. `None` where that NURB's data is not two control points of weight

@@ -29,17 +29,24 @@
 //!   (`BSplineSurface::copy`), where main's analytic was off it at the same parameters by
 //!   more than the 3D tolerance at a grid point (a witnessed distance, so main's surface
 //!   is not the source's there);
-//! - `copy+trims`: a split face that main gave the analytic copy is now the exact copy,
-//!   so main's restaging also dropped the new face's trims; with the exact copy the trims
-//!   are the split face's own, on the same surface at the same parameters;
+//! - `copy+trims`: both seams' choices differ somewhere in the row's run (the class is
+//!   per row: the hook does not tie a copy to a split, so a copy and a kept trim may be on
+//!   different faces); each kept trim that differs from main's is certified
+//!   ([`kept_trims_are_certified`]);
 //! - `trims`: the analytic is kept (it gives the source's points within the tolerance at
 //!   every grid point) and the new face keeps the split face's trims instead of dropping
-//!   and rebuilding them.
+//!   and rebuilding them; each kept trim that differs from main's is certified over its
+//!   whole edge ([`kept_trims_are_certified`]), not on the grid.
 //!
 //! [`DATA`] was made by [`record`] with main's expected files (`WR450_MAIN`, a directory
 //! of main's `expected/*.jsonl` at [`MAIN_COMMIT`]). **When a later change moves one of
-//! these rows**, delete its entry (the tape is the retirement's proof against
-//! [`MAIN_COMMIT`]) or record the data again on the main it merges into.
+//! these rows**, either delete it everywhere it is pinned (its `DATA` entry, its
+//! `main.jsonl` line at the same position, its unit's count in `UNITS`, the total in
+//! [`data_covers_the_moved_rows`] and any [`WITHIN_RULE`] entry), or record the data
+//! again on the main it merges into: `WR450_MAIN=<main's expected/> cargo test -p goldens
+//! --lib -- wr450_rows::record --ignored` rewrites `DATA` and `main.jsonl`; then set
+//! [`MAIN_COMMIT`] (the recorder does not write it), `UNITS`, the total and
+//! [`WITHIN_RULE`] by hand from its output.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -241,25 +248,190 @@ fn data_covers_the_moved_rows() {
     let want: BTreeMap<&str, usize> = UNITS.iter().copied().collect();
     assert_eq!(per_unit, want);
     assert_eq!(DATA.len(), 402);
+    // each (unit, case) once
+    let keys: std::collections::BTreeSet<(&str, &str)> = DATA.iter().map(|r| (r.0, r.1)).collect();
+    assert_eq!(keys.len(), DATA.len(), "a (unit, case) listed twice");
     // main.jsonl holds main's line for exactly these rows, in order, and every listed
-    // row's committed line differs from main's: each listed row moved.
+    // row's committed line is there and its text differs from main's. Under the goldens'
+    // rule (`diff` with the unit's floors) each moves too, except [`WITHIN_RULE`]: rows
+    // whose text the bless rewrote although every value stayed within the rule (replayed
+    // like the others).
     let mains: Vec<Value> = MAIN_LINES
         .lines()
         .map(|l| serde_json::from_str(l).unwrap())
         .collect();
     assert_eq!(mains.len(), DATA.len());
+    let mut within = Vec::new();
     for (&(unit_id, name, _), m) in DATA.iter().zip(&mains) {
         assert_eq!(
             (m["unit"].as_str(), m["line"]["case"].as_str()),
             (Some(unit_id), Some(name))
         );
         let golden = read(&default_dir(), unit_id).unwrap();
-        assert_ne!(
-            golden.get(name),
-            Some(&m["line"]),
-            "{unit_id} {name} did not move"
-        );
+        let now = golden
+            .get(name)
+            .unwrap_or_else(|| panic!("{unit_id} {name}: no committed line"));
+        assert_ne!(now, &m["line"], "{unit_id} {name}: its text did not move");
+        if diff(&m["line"], now, unit(unit_id).abs_floors()).is_none() {
+            within.push((unit_id, name));
+        }
     }
+    assert_eq!(within, WITHIN_RULE, "rows within the goldens' rule");
+}
+
+/// The listed rows whose text moved but whose values all stay within the goldens' rule
+/// (`diff` with the unit's floors), unit and case: [`data_covers_the_moved_rows`] requires
+/// exactly these.
+const WITHIN_RULE: &[(&str, &str)] = &[];
+
+/// The UV trims of `b`'s edge `e`, one per edge use, as their debug text (`None` where the
+/// use keeps none).
+fn use_trims(b: &solidcore::topology::Brep, e: solidcore::topology::EdgeId) -> Vec<Option<String>> {
+    b.edge(e)
+        .expect("edge")
+        .edgeuses
+        .iter()
+        .map(|&eu| {
+            let trim = b.edgeuse(eu).expect("edge use").uv_trim_curve.as_ref();
+            trim.map(|t| format!("{t:?}"))
+        })
+        .collect()
+}
+
+/// Regression (#18923): splitting a cone face at its seam moves edge uses whose trims run
+/// past the source surface's natural domain (to `u = 1.125` on `[0, 1]`) onto the new
+/// face, whose analytic copy keeps the source's parameterisation on that domain only (it
+/// clamps there; 0.765 off the edge). The split drops such trims, so each trim the new
+/// face's edges 3 and 4 hold when the healer writes its B-rep is one made again on the
+/// copy, certified within the edge's tolerance over the whole edge.
+#[test]
+fn seam_cone_split_drops_trims_off_the_domain() {
+    let k = solidcore::kernel::Kernel::default();
+    let u = unit("heal.heal_data_p3");
+    let all = cases(u.as_ref());
+    let case = all
+        .get("split_face_seam_cone_r1_1_h1_s90_q0")
+        .expect("the seam cone case");
+    crate::certify::watch_written();
+    let _ = row(u.as_ref(), case);
+    let written = crate::certify::take_written();
+    let b = written.first().expect("the healed B-rep");
+    let edges = solidcore::topology::brep::p1::edges(b, None).expect("edges");
+    let mut checked = 0;
+    for &e in edges.iter().filter(|e| [3, 4].contains(&e.index())) {
+        let tol = b.edge(e).expect("edge").tolerance;
+        for (eu, bound) in crate::certify::trim_tolerance::trim_bounds_any_surface(&k, b, e) {
+            let bound = bound
+                .unwrap_or_else(|| panic!("edge {} use {}: not enclosed", e.index(), eu.index()));
+            assert!(
+                bound <= tol,
+                "edge {} use {}: B {bound:e} > tolerance {tol:e}",
+                e.index(),
+                eu.index()
+            );
+            checked += 1;
+        }
+    }
+    eprintln!("seam_cone_split_drops_trims_off_the_domain: {checked} trims certified");
+}
+
+/// The rows whose new face keeps its trims (`trims`, `copy+trims`): each UV trim that this
+/// branch's B-reps hold and main's do not (the B-reps each runner writes, run as is and with
+/// main's choices, matched by body, edge and edge use: the topology is the same in both)
+/// is certified on its face's surface as kept. Its proved bound `B` on the Hausdorff
+/// distance between the edge curve and the trim's image
+/// ([`crate::certify::trim_tolerance::trim_bounds`]: the kernel's `trim_image_gap_bound`,
+/// bisected interval enclosures, rounding carried) is within the edge's tolerance, over the
+/// whole edge interval. No point sample decides it. A trim both runs hold the same is not
+/// this change's.
+#[test]
+fn kept_trims_are_certified() {
+    let k = solidcore::kernel::Kernel::default();
+    let mut failures = Vec::new();
+    let mut certified = 0_usize;
+    for &(unit_id, name, class) in DATA.iter().filter(|r| r.2 != "copy") {
+        let u = unit(unit_id);
+        let all = cases(u.as_ref());
+        let case = all
+            .get(name)
+            .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
+        crate::certify::watch_written();
+        let _ = row(u.as_ref(), case);
+        let ours = crate::certify::take_written();
+        crate::certify::watch_written();
+        let _ = with_mains_choices(u.as_ref(), case);
+        let mains = crate::certify::take_written();
+        let at = format!("{unit_id} {name} ({class})");
+        if ours.is_empty() || ours.len() != mains.len() {
+            failures.push(format!(
+                "{at}: B-reps written {} and main's {}",
+                ours.len(),
+                mains.len()
+            ));
+            continue;
+        }
+        let mut row_trims = 0_usize;
+        for (bi, (b, m)) in ours.iter().zip(&mains).enumerate() {
+            let edges = solidcore::topology::brep::p1::edges(b, None).expect("edges");
+            let main_edges = solidcore::topology::brep::p1::edges(m, None).expect("edges");
+            if edges.len() != main_edges.len() {
+                failures.push(format!(
+                    "{at} body {bi}: {} edges, main's {}",
+                    edges.len(),
+                    main_edges.len()
+                ));
+                continue;
+            }
+            for (&e, &me) in edges.iter().zip(&main_edges) {
+                let (now, then) = (use_trims(b, e), use_trims(m, me));
+                if now.len() != then.len() {
+                    failures.push(format!(
+                        "{at} body {bi} edge {}: edge uses differ",
+                        e.index()
+                    ));
+                    continue;
+                }
+                if b.edge(e).expect("edge").curve.is_none() {
+                    if now != then {
+                        failures.push(format!("{at} body {bi} edge {}: no edge curve", e.index()));
+                    }
+                    continue;
+                }
+                let tol = b.edge(e).expect("edge").tolerance;
+                let bounds = crate::certify::trim_tolerance::trim_bounds_any_surface(&k, b, e);
+                let kept = now.iter().zip(&then).filter(|(n, _)| n.is_some());
+                for ((n, t), (eu, bound)) in kept.zip(bounds) {
+                    if n == t {
+                        continue;
+                    }
+                    row_trims += 1;
+                    match bound {
+                        Some(x) if x <= tol => certified += 1,
+                        Some(x) => failures.push(format!(
+                            "{at} body {bi} edge {} use {}: B {x:e} > tolerance {tol:e}",
+                            e.index(),
+                            eu.index()
+                        )),
+                        None => failures.push(format!(
+                            "{at} body {bi} edge {} use {}: not enclosed",
+                            e.index(),
+                            eu.index()
+                        )),
+                    }
+                }
+            }
+        }
+        if row_trims == 0 {
+            failures.push(format!("{at}: no kept trim differs from main's"));
+        }
+    }
+    eprintln!("kept_trims_are_certified: {certified} trims certified");
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }
 
 /// Writes [`DATA`] (`src/wr450_rows/data.rs`) and main's lines (`src/wr450_rows/main.jsonl`):
@@ -283,6 +455,15 @@ fn record() {
         let id = u.id();
         let now = read(&default_dir(), id).unwrap();
         let main = read(&main_dir, id).unwrap();
+        let added_or_removed: Vec<&String> = main
+            .keys()
+            .filter(|n| !now.contains_key(*n))
+            .chain(now.keys().filter(|n| !main.contains_key(*n)))
+            .collect();
+        assert!(
+            added_or_removed.is_empty(),
+            "{id}: cases added or removed since main, not rows to replay: {added_or_removed:?}"
+        );
         let moved: Vec<(&String, &Value)> = main
             .iter()
             .filter(|(n, v)| now.get(*n) != Some(*v))

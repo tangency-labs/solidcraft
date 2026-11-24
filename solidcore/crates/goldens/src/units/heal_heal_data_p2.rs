@@ -1413,6 +1413,8 @@ fn put_owner_block(b: &Brep, o: &mut Vec<f64>) -> Result<(), SolidError> {
 }
 
 fn dump(h: &HealData<H>, b: &Brep, o: &mut Vec<f64>) -> Result<(), SolidError> {
+    #[cfg(test)]
+    crate::certify::written(b);
     o.push(STATE);
     o.push(h.tgt_vertices.len() as f64);
     o.extend(h.tgt_vertices.iter().map(|v| f64::from(v.index())));
@@ -2593,6 +2595,8 @@ fn rust_heal(
                     crate::trim_hook::observe(&mut b);
                     put_owner_block(&b, &mut o).map_err(|e| harness(e.to_string()))?;
                 }
+                #[cfg(test)]
+                crate::certify::written(&b);
                 o.extend([0.0, flag(new_probs)]);
                 stop = true;
                 break;

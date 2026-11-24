@@ -49,6 +49,7 @@ use solidcore::nurbs::b_spline_curve::ControlPointForm;
 use solidcore::nurbs::math::CPoint;
 use solidcore::query::curve_surface_gap::{
     curve_face_gap_bound_within, line_evaluation_slack, plane_uv_lipschitz, trim_image_gap_bound,
+    uv_line_slack_on_surface,
 };
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::edgeuse::p1 as eu1;
@@ -404,6 +405,31 @@ enum UseBound {
 
 /// `B` of the UV trim of `e`'s use `eu` ([`trim_bounds`]).
 fn use_bound(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId) -> UseBound {
+    use_bound_on(k, b, e, eu, false)
+}
+
+/// [`trim_bounds`] with a UV line enclosed on any surface with an exact net, not only a plane
+/// ([`uv_line_slack_on_surface`]), each with its edge use: the WR-450 certificate of the trims
+/// a copied analytic face keeps (`wr450_rows`).
+pub(crate) fn trim_bounds_any_surface(
+    k: &Kernel,
+    b: &Brep,
+    e: EdgeId,
+) -> Vec<(EdgeuseId, Option<f64>)> {
+    let rec = b.edge(e).expect("edge");
+    rec.edgeuses
+        .iter()
+        .filter_map(|&eu| match use_bound_on(k, b, e, eu, true) {
+            UseBound::NoTrim => None,
+            UseBound::Open => Some((eu, None)),
+            UseBound::Bound(x) => Some((eu, Some(x))),
+        })
+        .collect()
+}
+
+/// [`use_bound`]; with `any_surface`, a UV line on a surface other than a plane is enclosed
+/// too ([`trim_bounds_any_surface`]).
+fn use_bound_on(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId, any_surface: bool) -> UseBound {
     let rec = b.edge(e).expect("edge");
     let Some(curve) = rec.curve.as_ref() else {
         return UseBound::NoTrim;
@@ -434,10 +460,17 @@ fn use_bound(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId) -> UseBound {
             let Some(d) = line_evaluation_slack(l, true) else {
                 return UseBound::Open;
             };
-            let Some(lip) = plane_uv_lipschitz(surface, &cpts, d) else {
-                return UseBound::Open;
+            line_slack = if any_surface {
+                match uv_line_slack_on_surface(k, surface, &cpts, d).expect("the slack") {
+                    Some(x) => x,
+                    None => return UseBound::Open,
+                }
+            } else {
+                let Some(lip) = plane_uv_lipschitz(surface, &cpts, d) else {
+                    return UseBound::Open;
+                };
+                lip * d * (1.0 + 4.0 * f64::EPSILON)
             };
-            line_slack = lip * d * (1.0 + 4.0 * f64::EPSILON);
             line_nurb = Curve::from(nurb);
             &line_nurb
         }
