@@ -85,9 +85,19 @@
 //!   curves on surfaces, ...) adds nothing, so no uncertified figure becomes a tolerance and
 //!   such an end stays as upstream leaves it. Upstream
 //!   leaves a split's new vertex smaller than that until a later UV-trim build covers it,
-//!   if one runs. Ends outside the neighbourhood (an `sss_point` move off the edges,
-//!   #21511) are left as upstream leaves them. The opaque-handle
+//!   if one runs. The opaque-handle
 //!   [`PointClassification::merge_into_object`] reaches no edges and is unchanged.
+//! - **The surf/surf/surf point carries the edge ends (#21511).** `MergeIntoObject` moves a
+//!   vertex to its `m_vSSSPoint` and leaves its edges ending where they did, up to tens of
+//!   units off a vertex of tolerance `1e-7`, which `AssertValid`'s edge-end test refuses.
+//!   [`PointClassification::merge_into_brep`] moves each such end (one outside the vertex's
+//!   ball) to the vertex (`vertex::carry_far_edge_ends`): a line stays the line to its kept
+//!   end, a B-spline or conic becomes a B-spline with that end's control point moved (both
+//!   ends knots it passes through). The change is notified, deleting the edge uses' UV trim
+//!   curves as upstream's own surf/surf/surf edge edit does (`sm_SetXSectEdgeThroughPoint`),
+//!   and kept only when certified to put the end within half the vertex tolerance without
+//!   pushing another valid end out; otherwise, and for a curve kind with no B-spline form,
+//!   the edge stays as upstream leaves it.
 //! - **Mutable topology.** [`BrepMerge`] supplies an arena, resolved target,
 //!   handle mapping and notification environment for [`PointClassification::merge_into_brep`],
 //!   and [`CombineBrep`] the arena and notifications
@@ -1778,9 +1788,13 @@ impl<O: ClassObject> PointClassification<O> {
         // vertex whose ends all lie inside that ball is raised to twice the farthest
         // end's bound ([`vertex::edge_end_reach`]; doubling is exact). This is grow-only
         // and at most doubles the tolerance, and later merges and classifications read the
-        // larger radius (a later point within it joins this vertex). Ends outside the ball (the
-        // `sss_point` move can carry a vertex off its edges) are not the merge's
-        // neighbourhood and stay as upstream leaves them (#21511).
+        // larger radius (a later point within it joins this vertex). Ends outside the ball are
+        // not the merge's neighbourhood: the `sss_point` move can carry a vertex off its
+        // edges, and those edges' ends are moved to the vertex first (#21511,
+        // [`vertex::carry_far_edge_ends`]), so the vertex still bounds them.
+        if self.sss_point_flag {
+            vertex::carry_far_edge_ends(k, b, vertex_id, env)?;
+        }
         vertex::cover_merged_ends(k, b, vertex_id)?;
         Ok(outputs)
     }
