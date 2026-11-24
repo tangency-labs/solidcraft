@@ -2680,8 +2680,6 @@
   "prefs.ribbon_click_ends_tool": "Clicar no botão da ferramenta em execução a encerra",
   "prefs.ribbon_click_ends_tool_note": "Um clique no botão aceso da faixa de opções da ferramenta de esboço em uso encerra a ferramenta, então os cliques na vista voltam a selecionar. Desativado: o clique inicia a ferramenta novamente.",
   "prefs.saving": "Salvamento automático e recuperação",
-  "prefs.select_hidden_edges": "Selecionar arestas ocultas em Sombreado com arestas ocultas",
-  "prefs.select_hidden_edges_help": "Selecionar arestas através das faces quando Sombreado com arestas ocultas está ativo, inclusive para Concordância. Desativado mantém o comportamento de seleção da v0.30.1. Corpos ocultos continuam não selecionáveis.",
   "prefs.select_one_item": "Selecionar um item",
   "prefs.select_other_hidden": "Selecionar geometria oculta com Selecionar outro",
   "prefs.select_other_hidden_help": "Ativado: incluir corpos ocultos, esboços e arestas encobertas perto do ponteiro. Desativado: usar a lista original de geometria visível sob o ponteiro.",

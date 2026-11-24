@@ -18,7 +18,7 @@ use solidcore_record::{Seg2, Vec2};
 use solidcraft_geom::prelude::*;
 
 use crate::decompose::Budget;
-use crate::linalg::{Mat, determined_vars, solve as lin_solve};
+use crate::linalg::{Mat, determined_vars, solve as lin_solve, solve_unless};
 use crate::model::{ConstraintKind, CurveKind, Sketch, TwoCircles};
 #[cfg(feature = "solver-profiling")]
 use crate::profiling::{self, Decision, Phase, StopReason};
@@ -1480,6 +1480,11 @@ fn lm_run(
     // The sum of squares at the start of each iteration, while giving up is allowed.
     let mut costs = Vec::new();
     for it in 0..max_iters {
+        if cancelled() {
+            #[cfg(feature = "solver-profiling")]
+            profiling::finish_run(run, StopReason::Cancelled, max_abs(&r));
+            return Some((it, max_abs(&r)));
+        }
         if max_abs(&r) < TOL {
             #[cfg(feature = "solver-profiling")]
             profiling::finish_run(run, StopReason::ResidualTolerance, max_abs(&r));
@@ -1558,9 +1563,14 @@ fn lm_run(
             let rhs: Vec<f64> = g.iter().map(|v| -v).collect();
             #[cfg(feature = "solver-profiling")]
             let linear_timer = profiling::timer(Phase::LinearSolve);
-            let step = lin_solve(m, rhs);
+            let step = solve_unless(m, rhs, &mut 0.0, &cancelled);
             #[cfg(feature = "solver-profiling")]
             drop(linear_timer);
+            if cancelled() {
+                #[cfg(feature = "solver-profiling")]
+                profiling::finish_run(run, StopReason::Cancelled, max_abs(&r));
+                return Some((it, max_abs(&r)));
+            }
             let Some(step) = step else {
                 #[cfg(feature = "solver-profiling")]
                 profiling::record_trial(run, it, _attempt, lambda, f, None, &g, &j, None, Decision::LinearFailure);
@@ -1610,6 +1620,11 @@ fn lm_run(
     #[cfg(feature = "solver-profiling")]
     profiling::finish_run(run, StopReason::IterationLimit, max_abs(&r));
     Some((max_iters, max_abs(&r)))
+}
+
+/// Whether the work this solve runs for was cancelled ([`crate::cancel`]).
+fn cancelled() -> bool {
+    crate::cancel::is_cancelled()
 }
 
 fn within_budget(budget: &mut Option<&mut Budget>, work: usize) -> bool {
@@ -3385,6 +3400,25 @@ fn solve_inner(
     let _timer = profiling::timer(Phase::Solve);
     #[cfg(feature = "solver-profiling")]
     profiling::count(|c| c.solve_calls = c.solve_calls.saturating_add(1));
+    // Cancelled: the work this solve was for is no longer wanted. Nothing is solved, and the
+    // geometry stays as it was. (An edit's continuation and its retries each solve again, and
+    // each would otherwise still construct its start.)
+    if cancelled() {
+        return SolveReport {
+            status: SolveStatus::Failed,
+            dof: 0,
+            iterations: 0,
+            max_residual: f64::MAX,
+            failing: Vec::new(),
+            folded: Vec::new(),
+            continuations: 0,
+            point_determined: Vec::new(),
+            curve_determined: Vec::new(),
+            redundant: Vec::new(),
+            oversized: None,
+            wires: None,
+        };
+    }
     sk.prune_patterns();
     sk.refresh_pattern_shapes();
     place_pierced_points(sk);
@@ -3634,6 +3668,8 @@ fn solve_inner(
         }
     }
 
+    // A cancelled solve's report is not shown: it only says whether it solved.
+    let analysis = if cancelled() { Analysis::StatusOnly } else { analysis };
     // Final residuals and analysis, component by component (the Jacobian is block diagonal:
     // its rank is the sum of the components' ranks).
     #[cfg(feature = "solver-profiling")]
