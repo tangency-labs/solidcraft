@@ -1930,7 +1930,10 @@ fn overlap_meshes(st: &solidcraft_engine::doc::ModelState, r: &Value) -> Vec<Mes
     let pairs: Vec<_> =
         r["overlaps"].as_array().into_iter().flatten().filter_map(|hit| Some((st.body(hit["a"].as_str()?)?, st.body(hit["b"].as_str()?)?))).collect();
     kernel::map_with_local_pools(&pairs, usize::MAX, |&(a, b)| {
-        let Some(o) = kernel::boolean(&a.body, &b.body, kernel::BoolOp::Intersect)? else { return Ok(None) };
+        // SMLib's check of the shared part runs here, as the interference check that found it ran it.
+        let Some(o) = kernel::validating(kernel::Validation::EachStep, || kernel::boolean(&a.body, &b.body, kernel::BoolOp::Intersect)).0? else {
+            return Ok(None);
+        };
         o.mesh(&kernel::MeshTolerance::chord((o.size() * 2e-3).max(1e-3))).map(Some)
     })
     .into_iter()
