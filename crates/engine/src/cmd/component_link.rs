@@ -977,28 +977,19 @@ fn is_linked_copy(name: &str) -> bool {
     linked_stem(name) != name
 }
 
-fn same_linked_family(a: &str, b: &str) -> bool {
-    let (sa, sb) = (linked_stem(a), linked_stem(b));
-    if sa.eq_ignore_ascii_case(sb) {
-        return true;
-    }
-    let trunc = |s: &str| s.chars().take(64).collect::<String>();
-    (is_linked_copy(b) && trunc(sa).eq_ignore_ascii_case(sb)) || (is_linked_copy(a) && trunc(sb).eq_ignore_ascii_case(sa))
-}
-
 fn same_material_properties(a: &UserMaterial, b: &UserMaterial) -> bool {
     let mut candidate = a.clone();
     candidate.name.clone_from(&b.name);
     &candidate == b
 }
 
-/// Remove auto-generated `(linked N)` materials no longer referenced by any body, link snapshot,
-/// or material configuration column. User-created materials (without `(linked N)`) are never removed.
-pub(super) fn prune_unused_linked_materials(doc: &mut Document) -> bool {
+fn referenced_materials(doc: &Document) -> std::collections::HashSet<String> {
     let mut referenced: std::collections::HashSet<String> = doc.materials.values().map(|m| m.to_ascii_lowercase()).collect();
     for link in doc.links.values() {
         for snap in &link.inherited {
-            referenced.insert(snap.material.to_ascii_lowercase());
+            if !snap.material.is_empty() {
+                referenced.insert(snap.material.to_ascii_lowercase());
+            }
         }
     }
     let material_cols: Vec<usize> =
@@ -1010,37 +1001,83 @@ pub(super) fn prune_unused_linked_materials(doc: &mut Document) -> bool {
             }
         }
     }
+    referenced
+}
+
+fn link_inherited_linked_copies(doc: &Document) -> std::collections::HashSet<String> {
+    doc.links
+        .values()
+        .flat_map(|l| &l.inherited)
+        .filter(|snap| is_linked_copy(&snap.material))
+        .map(|snap| snap.material.to_ascii_lowercase())
+        .collect()
+}
+
+/// Remove unreferenced auto-generated `(linked N)` materials whose provenance is established via
+/// `candidates` (lowercased names previously held by a link's `inherited` snapshots). User-created
+/// materials — even if named with a `(linked N)` suffix — are never removed.
+pub(super) fn prune_unused_linked_materials(doc: &mut Document, candidates: &std::collections::HashSet<String>) -> bool {
+    if candidates.is_empty() {
+        return false;
+    }
+    let referenced = referenced_materials(doc);
     let before = doc.user_materials.len();
-    doc.user_materials.retain(|m| !is_linked_copy(&m.name) || referenced.contains(&m.name.to_ascii_lowercase()));
+    doc.user_materials.retain(|m| {
+        let lower = m.name.to_ascii_lowercase();
+        !(is_linked_copy(&m.name) && candidates.contains(&lower) && !referenced.contains(&lower))
+    });
     doc.user_materials.len() != before
 }
 
-/// Merge identical auto-generated `(linked N)` material copies of the same stem onto a single
-/// canonical entry, remap body assignments / link snapshots / material configuration cells, and
-/// prune any unreferenced `(linked N)` copies (#21651).
-fn consolidate_and_prune_linked_materials(doc: &mut Document) -> Result<bool> {
-    let mut kept_linked: Vec<usize> = Vec::new();
+/// Merge identical link-proven `(linked N)` material copies sharing the exact same stem onto a
+/// single canonical `(linked N)` entry, remap body assignments / link snapshots / material
+/// configuration cells, and prune unreferenced link-proven `(linked N)` copies (#21651).
+///
+/// Only materials with established link provenance (referenced by `doc.links[*].inherited`, or
+/// unreferenced exact stem+property duplicates of such a link-proven copy) are touched; user-created
+/// materials — including authored names containing `(linked N)` — and ambiguous truncated stems are
+/// left intact.
+fn consolidate_and_prune_linked_materials(doc: &mut Document, prune_candidates: &std::collections::HashSet<String>) -> Result<bool> {
+    let proven = link_inherited_linked_copies(doc);
+    let referenced = referenced_materials(doc);
+    // First pick one canonical link-proven `(linked N)` entry per (exact linked_stem, properties).
+    let mut canonicals: Vec<usize> = Vec::new();
+    for (i, m) in doc.user_materials.iter().enumerate() {
+        let lower = m.name.to_ascii_lowercase();
+        if !is_linked_copy(&m.name) || !proven.contains(&lower) {
+            continue;
+        }
+        let stem = linked_stem(&m.name);
+        let already = canonicals.iter().any(|&j| {
+            let c = &doc.user_materials[j];
+            linked_stem(&c.name).eq_ignore_ascii_case(stem) && same_material_properties(c, m)
+        });
+        if !already {
+            canonicals.push(i);
+        }
+    }
     let mut removed = vec![false; doc.user_materials.len()];
     let mut remap: std::collections::HashMap<String, (String, Option<String>, Option<String>)> = std::collections::HashMap::new();
     for (i, m) in doc.user_materials.iter().enumerate() {
-        if !is_linked_copy(&m.name) {
+        if !is_linked_copy(&m.name) || canonicals.contains(&i) {
             continue;
         }
-        let canonical = doc
-            .user_materials
-            .iter()
-            .find(|c| !is_linked_copy(&c.name) && same_linked_family(&c.name, &m.name) && same_material_properties(c, m))
-            .or_else(|| {
-                kept_linked.iter().map(|&j| &doc.user_materials[j]).find(|c| same_linked_family(&c.name, &m.name) && same_material_properties(c, m))
-            });
-        if let Some(canon) = canonical {
-            let dup_fp = LinkedBodyProperties::fingerprint(m).map_err(|e| EngineError::Other(e.to_string()))?;
-            let canon_fp = LinkedBodyProperties::fingerprint(canon).map_err(|e| EngineError::Other(e.to_string()))?;
-            remap.insert(m.name.to_ascii_lowercase(), (canon.name.clone(), Some(dup_fp), Some(canon_fp)));
-            removed[i] = true;
-        } else {
-            kept_linked.push(i);
+        let lower = m.name.to_ascii_lowercase();
+        if !proven.contains(&lower) && referenced.contains(&lower) {
+            continue;
         }
+        let stem = linked_stem(&m.name);
+        let Some(&canon_idx) = canonicals.iter().find(|&&j| {
+            let c = &doc.user_materials[j];
+            linked_stem(&c.name).eq_ignore_ascii_case(stem) && same_material_properties(c, m)
+        }) else {
+            continue;
+        };
+        let canon = &doc.user_materials[canon_idx];
+        let dup_fp = LinkedBodyProperties::fingerprint(m).map_err(|e| EngineError::Other(e.to_string()))?;
+        let canon_fp = LinkedBodyProperties::fingerprint(canon).map_err(|e| EngineError::Other(e.to_string()))?;
+        remap.insert(lower, (canon.name.clone(), Some(dup_fp), Some(canon_fp)));
+        removed[i] = true;
     }
     if !remap.is_empty() {
         for mat in doc.materials.values_mut() {
@@ -1081,20 +1118,28 @@ fn consolidate_and_prune_linked_materials(doc: &mut Document) -> Result<bool> {
             keep
         });
     }
-    let pruned = prune_unused_linked_materials(doc);
+    let pruned = prune_unused_linked_materials(doc, prune_candidates);
     Ok(!remap.is_empty() || pruned)
 }
 
 /// Copy a design-owned definition without changing a same-named assembly material.
-fn inherit_material(doc: &mut Document, source: &SourceProperties, previous: Option<&str>) -> Result<String> {
+fn inherit_material(
+    doc: &mut Document,
+    source: &SourceProperties,
+    previous: Option<&str>,
+    prune_candidates: &std::collections::HashSet<String>,
+) -> Result<String> {
     let Some(definition) = &source.definition else { return Ok(source.material.clone()) };
     let stem = linked_stem(&definition.name);
     let short: String = stem.chars().take(64).collect();
     // Equal density/optics do not make differently named materials interchangeable. Reuse the exact
-    // source name first, then the canonical `(linked N)` copy of the same stem, and finally any
-    // previously assigned renamed copy so updates converge rather than preserving duplicates (#21651).
+    // source name first, then a matching `(linked N)` copy of the same stem, and finally any
+    // previously assigned copy so updates converge rather than preserving duplicates (#21651).
     let exact = |m: &UserMaterial| m.name.eq_ignore_ascii_case(&definition.name);
-    let copy = |m: &UserMaterial| [stem, short.as_str()].iter().any(|n| linked_stem(&m.name).eq_ignore_ascii_case(n));
+    let copy = |m: &UserMaterial| {
+        let ms = linked_stem(&m.name);
+        ms.eq_ignore_ascii_case(stem) || (is_linked_copy(&m.name) && ms.eq_ignore_ascii_case(&short))
+    };
     let prev = |m: &UserMaterial| previous.is_some_and(|p| m.name.eq_ignore_ascii_case(p));
     for same_name in [&exact as &dyn Fn(&UserMaterial) -> bool, &copy, &prev] {
         for existing in doc.user_materials.iter().filter(|m| same_name(m)) {
@@ -1104,7 +1149,7 @@ fn inherit_material(doc: &mut Document, source: &SourceProperties, previous: Opt
         }
     }
     if doc.user_materials.len() >= solidcraft_doc::MAX_USER_MATERIALS {
-        prune_unused_linked_materials(doc);
+        prune_unused_linked_materials(doc, prune_candidates);
     }
     if doc.user_materials.len() >= solidcraft_doc::MAX_USER_MATERIALS {
         return Err(EngineError::Other(format!(
@@ -1227,7 +1272,9 @@ fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperti
     if !s.doc.links.contains_key(&component) {
         return Ok(false);
     }
-    let mut changed = consolidate_and_prune_linked_materials(s.doc_mut())?;
+    let mut prune_candidates = link_inherited_linked_copies(&s.doc);
+    let mut changed = consolidate_and_prune_linked_materials(s.doc_mut(), &prune_candidates)?;
+    prune_candidates.extend(link_inherited_linked_copies(&s.doc));
     let Some(link) = s.doc.links.get(&component).cloned() else { return Ok(false) };
     let state = s.model.state();
     let names: Vec<String> = state.bodies.iter().filter(|b| b.feature == link.feature).map(|b| b.name.clone()).collect();
@@ -1255,7 +1302,7 @@ fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperti
         };
         let mut next = old.cloned().unwrap_or_default();
         if may_change_material {
-            let material = inherit_material(s.doc_mut(), source, old.map(|old| old.material.as_str()))?;
+            let material = inherit_material(s.doc_mut(), source, old.map(|old| old.material.as_str()), &prune_candidates)?;
             changed |= s.doc.materials.get(name) != Some(&material);
             s.doc_mut().materials.insert(name.clone(), material.clone());
             next.material_fingerprint = material_fingerprint(&s.doc, &material)?;
@@ -1283,7 +1330,7 @@ fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperti
     if let Some(link) = s.doc_mut().links.get_mut(&component) {
         link.inherited = inherited;
     }
-    changed |= consolidate_and_prune_linked_materials(s.doc_mut())?;
+    changed |= consolidate_and_prune_linked_materials(s.doc_mut(), &prune_candidates)?;
     Ok(changed)
 }
 

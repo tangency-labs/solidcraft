@@ -565,6 +565,140 @@ fn orphaned_linked_materials_are_pruned_on_update_and_component_delete() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// PR #21663 review: user-created materials whose names contain `(linked N)` — whether unreferenced
+/// or assigned to a non-linked body — must never be pruned or consolidated by link inheritance or
+/// component deletion.
+#[test]
+fn user_created_material_with_linked_suffix_is_never_pruned_or_consolidated() {
+    let dir = folder("properties-user-linked-suffix");
+    let file = dir.join("source.solidcraft");
+    properties_part(&file, "Source alloy", Some(4.2), [12, 34, 56]);
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "LocalBox"}));
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Workshop alloy".into(),
+        density: 4.2,
+        appearance: None,
+        physical_card: None,
+    });
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Workshop alloy (linked 1)".into(),
+        density: 4.2,
+        appearance: None,
+        physical_card: None,
+    });
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Unused authored (linked 1)".into(),
+        density: 2.5,
+        appearance: None,
+        physical_card: None,
+    });
+    run(&mut s, "material.assign", json!({"bodies": ["LocalBox"], "material": "Workshop alloy (linked 1)"}));
+
+    let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+    assert!(s.doc.user_material("Workshop alloy (linked 1)").is_some());
+    assert!(s.doc.user_material("Unused authored (linked 1)").is_some());
+    assert_eq!(s.doc.materials.get("LocalBox").map(String::as_str), Some("Workshop alloy (linked 1)"));
+
+    run(&mut s, "component.update_links", json!({}));
+    assert!(s.doc.user_material("Workshop alloy (linked 1)").is_some());
+    assert!(s.doc.user_material("Unused authored (linked 1)").is_some());
+    assert_eq!(s.doc.materials.get("LocalBox").map(String::as_str), Some("Workshop alloy (linked 1)"));
+
+    run(&mut s, "component.delete", json!({"component": c}));
+    assert!(s.doc.user_material("Workshop alloy (linked 1)").is_some());
+    assert!(s.doc.user_material("Unused authored (linked 1)").is_some());
+    assert_eq!(s.doc.materials.get("LocalBox").map(String::as_str), Some("Workshop alloy (linked 1)"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// PR #21663 review: a linked material whose name exceeds 64 characters and gets truncated to
+/// `P (linked 1)` must never be consolidated into an unrelated material `PA` that merely shares
+/// the 64-character prefix `P`.
+#[test]
+fn truncated_64_char_prefix_does_not_consolidate_unrelated_long_material_names() {
+    let dir = folder("properties-truncated-prefix");
+    let file = dir.join("source.solidcraft");
+    let prefix = "A".repeat(64);
+    let name_pa = format!("{prefix}A");
+    let name_pb = format!("{prefix}B");
+    properties_part(&file, &name_pb, Some(4.2), [12, 34, 56]);
+
+    let mut s = Session::default();
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: name_pa.clone(),
+        density: 4.2,
+        appearance: None,
+        physical_card: None,
+    });
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: name_pb.clone(),
+        density: 9.0,
+        appearance: None,
+        physical_card: None,
+    });
+    let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+    let p = run(&mut s, "component.properties", json!({"component": c}));
+    let assigned = p["bodies"][0]["material"].as_str().unwrap().to_string();
+    assert_eq!(assigned, format!("{prefix} (linked 1)"));
+    assert!(s.doc.user_material(&assigned).is_some());
+
+    // Editing unrelated `PA` must not affect the linked body.
+    s.doc_mut().user_materials.iter_mut().find(|m| m.name == name_pa).unwrap().density = 7.7;
+    run(&mut s, "component.update_links", json!({}));
+    let p2 = run(&mut s, "component.properties", json!({"component": c}));
+    assert_eq!(p2["bodies"][0]["material"].as_str(), Some(assigned.as_str()));
+    assert!((p2["total"]["mass_g"].as_f64().unwrap() - 4.2).abs() < 1e-6, "{p2}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// PR #21663 review: deleting a sub-component whose body belongs to a surviving parent Import
+/// feature removes that deleted body's material assignment and prunes its orphaned `(linked N)`
+/// material while keeping the surviving sibling body's material assignment intact.
+#[test]
+fn deleting_subcomponent_of_surviving_import_clears_its_material_and_prunes_linked_copy() {
+    let dir = folder("properties-surviving-import-delete");
+    let file = dir.join("two_bodies.solidcraft");
+    let mut part = Session::default();
+    run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "First"}));
+    run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "body_name": "Second"}));
+    part.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Custom alloy".into(),
+        density: 4.2,
+        appearance: None,
+        physical_card: None,
+    });
+    run(&mut part, "material.assign", json!({"bodies": ["First"], "material": "Custom alloy"}));
+    run(&mut part, "material.assign", json!({"bodies": ["Second"], "material": "Steel"}));
+    run(&mut part, "file.save_as", json!({"path": file}));
+
+    let mut s = Session::default();
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Custom alloy".into(),
+        density: 9.0,
+        appearance: None,
+        physical_card: None,
+    });
+    let parent = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+    assert!(s.doc.user_material("Custom alloy (linked 1)").is_some());
+
+    // Place `First` under a child component inside `parent` so deleting that child keeps the
+    // parent Import feature alive and adds `First`'s slot to `Import.skip`.
+    let child = s.doc_mut().add_component(Some("RemovedChild"), parent).unwrap();
+    s.doc_mut().body_components.insert("First".into(), child);
+    s.refresh();
+    assert_eq!(s.doc.materials.get("First").map(String::as_str), Some("Custom alloy (linked 1)"));
+    assert_eq!(s.doc.materials.get("Second").map(String::as_str), Some("Steel"));
+
+    run(&mut s, "component.delete", json!({"component": child}));
+    assert!(!s.doc.materials.contains_key("First"), "deleted imported body material must be cleared");
+    assert_eq!(s.doc.materials.get("Second").map(String::as_str), Some("Steel"), "surviving body keeps its material");
+    assert!(s.doc.user_material("Custom alloy (linked 1)").is_none(), "orphaned linked material must be pruned");
+    assert!(s.doc.user_material("Custom alloy").is_some(), "base user material stays");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn linked_design_properties_keep_distinct_names_for_equal_material_properties() {
     let dir = folder("properties-equal-density");
