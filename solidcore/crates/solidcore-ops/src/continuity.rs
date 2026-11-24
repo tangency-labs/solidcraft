@@ -7,16 +7,33 @@
 //! highest order whose test, and every lower one's, its worst station passes. The one verdict
 //! that holds along the whole edge is [`SeamReport::g1_all_along`], the kernel's proved
 //! tangency test (`solidcore::query::tangent_edge::tangent_all_along`) at the caller's angle.
+//!
+//! Separate sheets ([`sheet_seams`]): where two sheets' boundary edges run together within the
+//! caller's zone is the kernel's ([`solidcore::curve::proximity::Overlap`], the run proved
+//! both ways), and each seam is measured by the same kernel measure over that run
+//! ([`solidcore::query::continuity::continuity_over`]), each face in its own body. Ops only
+//! picks the pairs of boundary edges, and the side of the second sheet that agrees with the
+//! first across the seam (the side sewing would orient it to: the two edge uses running
+//! opposite ways along the run, in the sense the kernel's run reports).
 
-use solidcore::query::continuity::{continuity_along, edge_comb, iso_comb, CurvatureAt};
+use solidcore::curve::proximity::Overlap;
+use solidcore::geom::object::Shape;
+use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use solidcore::query::api_queries::face_closest_point_in_shape;
+use solidcore::query::brep::{BrepQuery, LiveBrepObjects};
+use solidcore::query::continuity::{
+    continuity_along, continuity_over, edge_comb, iso_comb, ContinuityStation, CurvatureAt,
+};
 use solidcore::query::tangent_edge::{tangent_all_along, Tangency};
-use solidcore::topology::{edge, Brep, EdgeId, FaceId};
+use solidcore::topology::edgeuse::p1 as eu1;
+use solidcore::topology::face::p2 as face_p2;
+use solidcore::topology::{edge, Brep, BrepId, EdgeId, FaceId, FaceuseId};
 use solidcore::Vec3;
 
 use crate::body::Body;
 use crate::measure::outer_faceuse;
 use crate::order::{self, Order};
-use crate::session::{read_body, with_body};
+use crate::session::{answer, read_body, run_on, with_body};
 use crate::{Error, Result};
 
 /// Fewest and most stations along one edge: three are its two ends and its middle.
@@ -193,7 +210,19 @@ fn seam(
     let (Some(&a), Some(&c)) = (uses.first(), uses.get(1)) else {
         return Ok(Err(Error::Exception));
     };
-    let out: Vec<SeamStation> = continuity_along(k, b, e, [a, c], stations)?
+    let measured = continuity_along(k, b, e, [a, c], stations)?;
+    Ok(Ok(report(record_edge, measured, tolerances, g1_all_along)))
+}
+
+/// The report of a seam from the kernel's stations along it, judged against `tolerances`;
+/// `None` where no station measured.
+fn report(
+    record_edge: usize,
+    measured: Vec<ContinuityStation>,
+    tolerances: [f64; 5],
+    g1_all_along: G1AllAlong,
+) -> Option<SeamReport> {
+    let out: Vec<SeamStation> = measured
         .into_iter()
         .map(|st| {
             let [jump, change, rate] = st.measure.jumps;
@@ -210,7 +239,7 @@ fn seam(
         })
         .collect();
     if out.is_empty() {
-        return Ok(Ok(None));
+        return None;
     }
     let mut worst = [0_usize; 5];
     let mut worst_values = [f64::INFINITY; 5];
@@ -227,13 +256,13 @@ fn seam(
             *v = x;
         }
     }
-    Ok(Ok(Some(SeamReport {
+    Some(SeamReport {
         edge: record_edge,
         order_at_stations: highest_met(worst_values, tolerances),
         g1_all_along,
         worst,
         stations: out,
-    })))
+    })
 }
 
 impl Body {
@@ -320,7 +349,7 @@ impl Body {
             return Err(Error::Argument);
         }
         let e = order::edge(order, edge)?;
-        with_body("edge_comb", self, |k, b| {
+        read_body("edge_comb", self, |k, b| {
             Ok(Ok(edge_comb(k, b, e, teeth)?
                 .into_iter()
                 .map(tooth)
@@ -350,7 +379,7 @@ impl Body {
             return Err(Error::Argument);
         }
         let f = order::face(order, face)?;
-        with_body("iso_comb", self, |k, b| {
+        read_body("iso_comb", self, |k, b| {
             match iso_comb(k, b, f, along_u, fixed, span, teeth) {
                 Ok(teeth) => Ok(Ok(teeth.into_iter().map(tooth).collect())),
                 Err(solidcore::SolidError::InvalidInput { .. }) => Ok(Err(Error::Argument)),
@@ -358,6 +387,216 @@ impl Body {
             }
         })?
     }
+}
+
+/// Two sheets' boundary edges that meet ([`SheetSeams`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SheetMeet {
+    /// The two sheets, by their index in the list given, the first the lower.
+    pub sheets: [usize; 2],
+    /// Each sheet's edge, by its index in that sheet's record.
+    pub edges: [usize; 2],
+}
+
+/// The seam where two separate sheets meet ([`sheet_seams`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SheetSeam {
+    /// The two sheets, by their index in the list given, the first the lower.
+    pub sheets: [usize; 2],
+    /// Each sheet's edge along the seam, by its index in that sheet's record.
+    pub edges: [usize; 2],
+    /// The part of each edge the seam runs over: `[low, high]` fractions of its curve's
+    /// parameter over the edge (0 at its start, 1 at its end), the first sheet's, then the
+    /// second's.
+    pub along: [[f64; 2]; 2],
+    /// The seam measured along the first sheet's edge over its part (its
+    /// [`SeamReport::edge`] is `edges[0]`, its stations' fractions of that edge), between the
+    /// first sheet's upward face use and the second sheet's use that agrees with it across
+    /// the seam. [`SeamReport::g1_all_along`] is [`G1AllAlong::NotDecided`]: the kernel's
+    /// proof runs on one edge between two face uses.
+    pub report: SeamReport,
+}
+
+/// Where separate sheets meet, and each seam's continuity ([`sheet_seams`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SheetSeams {
+    /// The seams, in order of the sheets, then of the first sheet's edges, then the second's.
+    pub seams: Vec<SheetSeam>,
+    /// Pairs of edges whose ends meet within the zone but whose run the kernel does not prove
+    /// within it: they may part between those ends.
+    pub unproved: Vec<SheetMeet>,
+    /// Seams of which no station measured.
+    pub unmeasured: Vec<SheetMeet>,
+}
+
+/// Why a seam between separate sheets has no proved verdict on G1 all along it.
+const G1_ONE_EDGE: &str =
+    "the proof of G1 all along runs on one edge between two face uses; separate sheets meet along two edges";
+
+/// One sheet's boundary edges: the record index, the kernel edge and the upward face use of
+/// its one face.
+fn boundary(b: &Brep, order: &Order) -> solidcore::Result<Result<Vec<(usize, EdgeId, FaceuseId)>>> {
+    let mut out = Vec::new();
+    for (i, &e) in order.edges.iter().enumerate() {
+        if !eu1::edge_is_lamina(b, e)? {
+            continue;
+        }
+        let [f] = edge::faces(b, e, None)?[..] else {
+            continue;
+        };
+        match outer_faceuse(b, f)? {
+            Ok(fu) => out.push((i, e, fu)),
+            Err(err) => return Ok(Err(err)),
+        }
+    }
+    Ok(Ok(out))
+}
+
+/// Whether edge `e`'s use in face use `fu` runs along its curve's parameter; `None` for a use
+/// of unknown orientation or no use of `e` in `fu`.
+fn runs_forward(b: &Brep, e: EdgeId, fu: FaceuseId) -> solidcore::Result<Option<bool>> {
+    for u in edge::edgeuses(b, e, None, None)? {
+        if eu1::faceuse(b, u)? == Some(fu) {
+            return Ok(match eu1::orientation(b, u)? {
+                OrientType::Same => Some(true),
+                OrientType::Opposite => Some(false),
+                OrientType::Unknown => None,
+            });
+        }
+    }
+    Ok(None)
+}
+
+/// The continuity of the seams where separate `sheets` meet (each with its [`Order`]): every
+/// pair of boundary edges (edges one face uses once) of two different sheets whose curves the
+/// kernel proves run together within `zone_mm` over a run of positive length
+/// ([`solidcore::curve::proximity::Overlap`]) is a seam over that run, measured as
+/// [`Body::continuity_report`] measures a seam inside one body: `stations` stations at even
+/// steps of the first sheet's edge over the run, the ends included, by the kernel
+/// ([`solidcore::query::continuity::continuity_over`]), judged against `tolerances`. The
+/// second sheet's face is measured on the side that agrees with the first's upward side
+/// across the seam, as sewing the two would orient it. The sheets are unchanged.
+///
+/// # Errors
+/// [`Error::Argument`] for fewer than two sheets, a sheet given twice, a zone not finite and
+/// positive, a station count outside [`MIN_STATIONS`]..=[`MAX_STATIONS`] or a tolerance that is
+/// negative or not finite; [`Error::Unsupported`] for a face with material on both sides;
+/// [`Error::Internal`] for a sheet an earlier panic left unfinished; the kernel's error.
+pub fn sheet_seams(
+    sheets: &[(&Body, &Order)],
+    zone_mm: f64,
+    stations: usize,
+    tolerances: ContinuityTolerances,
+) -> Result<SheetSeams> {
+    let tol = tolerances.by_order();
+    let twice = sheets
+        .iter()
+        .enumerate()
+        .any(|(i, (a, _))| sheets.iter().skip(i + 1).any(|(b, _)| std::ptr::eq(*a, *b)));
+    if sheets.len() < 2
+        || twice
+        || !(zone_mm.is_finite() && zone_mm > 0.0)
+        || !(MIN_STATIONS..=MAX_STATIONS).contains(&stations)
+        || !tol.iter().all(|t| t.is_finite() && *t >= 0.0)
+    {
+        return Err(Error::Argument);
+    }
+    if sheets.iter().any(|(b, _)| b.is_poisoned()) {
+        return Err(Error::Internal(
+            "continuity::sheet_seams: a sheet was left unfinished by an earlier panic".into(),
+        ));
+    }
+    let inputs: Vec<(&'static str, &Body)> = sheets.iter().map(|(b, _)| ("sheet", *b)).collect();
+    run_on("continuity::sheet_seams", &inputs, |k| {
+        // each sheet once (refused above when given twice), read only, under the kernel's lock
+        let guards: Vec<_> = sheets.iter().map(|(b, _)| b.lock()).collect();
+        let mut edges = Vec::with_capacity(sheets.len());
+        for (g, (_, order)) in guards.iter().zip(sheets) {
+            match boundary(g, order)? {
+                Ok(e) => edges.push(e),
+                Err(err) => return Ok(Err(err)),
+            }
+        }
+        let mut out = SheetSeams {
+            seams: Vec::new(),
+            unproved: Vec::new(),
+            unmeasured: Vec::new(),
+        };
+        for (i, (ba, ea)) in guards.iter().zip(&edges).enumerate() {
+            for (j, (bb, eb)) in guards.iter().zip(&edges).enumerate().skip(i + 1) {
+                for &(ia, a, fa) in ea {
+                    for &(ib, b, fb) in eb {
+                        k.check_cancelled("continuity::sheet_seams")?;
+                        let meet = SheetMeet {
+                            sheets: [i, j],
+                            edges: [ia, ib],
+                        };
+                        let (Some(ca), Some(cb)) = (edge::curve(ba, a)?, edge::curve(bb, b)?)
+                        else {
+                            continue;
+                        };
+                        let (va, vb) = (edge::interval(ba, a)?, edge::interval(bb, b)?);
+                        let run = match ca.proved_overlap(k, &va, cb, &vb, zone_mm)? {
+                            Overlap::Apart => continue,
+                            Overlap::Unproved(_) => {
+                                out.unproved.push(meet);
+                                continue;
+                            }
+                            Overlap::Proved(run) => run,
+                        };
+                        let (Some(da), Some(db)) =
+                            (runs_forward(ba, a, fa)?, runs_forward(bb, b, fb)?)
+                        else {
+                            out.unmeasured.push(meet);
+                            continue;
+                        };
+                        // agreeing sides run the seam opposite ways; else the second sheet's
+                        // other side agrees
+                        let agree = (da == db) != run.same_sense;
+                        let fb = if agree {
+                            fb
+                        } else {
+                            let (Some(x), Some(y)) = face_p2::faceuses(bb, b_face(bb, fb)?)? else {
+                                out.unmeasured.push(meet);
+                                continue;
+                            };
+                            if x == fb {
+                                y
+                            } else {
+                                x
+                            }
+                        };
+                        let measured = continuity_over(
+                            k,
+                            ca,
+                            va,
+                            run.fractions[0],
+                            [(&**ba, fa), (&**bb, fb)],
+                            stations,
+                        )?;
+                        let g1 = G1AllAlong::NotDecided(G1_ONE_EDGE.into());
+                        match report(ia, measured, tol, g1) {
+                            Some(report) => out.seams.push(SheetSeam {
+                                sheets: [i, j],
+                                edges: [ia, ib],
+                                along: run.fractions,
+                                report,
+                            }),
+                            None => out.unmeasured.push(meet),
+                        }
+                    }
+                }
+            }
+        }
+        Ok(Ok(out))
+    })?
+}
+
+/// The face of face use `fu`.
+fn b_face(b: &Brep, fu: FaceuseId) -> solidcore::Result<FaceId> {
+    b.faceuse(fu)?.face.ok_or_else(|| {
+        solidcore::SolidError::invalid_input("continuity::sheet_seams", "a face use of no face")
+    })
 }
 
 /// The most points [`principal_curvatures`] takes.
@@ -381,11 +620,11 @@ pub struct Principal {
     pub d2: [f64; 3],
 }
 
-/// The principal curvatures of `sheet` at each of `points`: each point dropped on every face's
-/// surface, the face whose foot is nearest (the kernel's distance) answering with the kernel's
-/// [`solidcore::query::continuity::principal_curvatures`] there (`k1 >= k2`, convex positive
+/// The principal curvatures of `sheet` at each of `points`: the nearest point within each
+/// face's boundaries is found by the kernel, and the nearest face answers with the kernel's
+/// [`solidcore::query::continuity::principal_curvatures`] at that point (`k1 >= k2`, convex positive
 /// against the face's normal in its shell, with their directions, Gaussian and mean curvature).
-/// `None` for a point no face answers for (no foot, or a singular point such as a pole).
+/// `None` if no face has a nearest point, or that point is singular, such as a pole.
 ///
 /// # Errors
 /// [`Error::Argument`] for more than [`MAX_CURVATURE_POINTS`] points or a coordinate not finite
@@ -398,23 +637,40 @@ pub fn principal_curvatures(
         return Err(Error::Argument);
     }
     let (body, _) = Body::from_record(sheet, true)?;
-    read_body("continuity::principal_curvatures", &body, |k, b| {
+    if points.is_empty() {
+        return Ok(Vec::new());
+    }
+    with_body("continuity::principal_curvatures", &body, |k, b| {
         let faces = b.face_list().to_vec();
-        let mut out = Vec::with_capacity(points.len());
-        for p in points {
-            let p = Vec3::new(p[0], p[1], p[2]);
-            let mut best: Option<(f64, solidcore::query::continuity::Principal)> = None;
-            for &f in &faces {
-                let Some(pr) = solidcore::query::continuity::principal_curvatures(k, b, f, p)?
+        let id = BrepId::from_index(0);
+        let mut nearest: Vec<Option<(f64, FaceId, Vec3)>> = vec![None; points.len()];
+        for f in faces {
+            let Some(shape) = answer(Shape::new(k, &(id, &*b), &[], &[(id, f)], &[], &[]))? else {
+                continue;
+            };
+            let query = BrepQuery::of_brep(b);
+            let identity = query.effective_identity();
+            let objects = LiveBrepObjects::new(b, &identity, None)?;
+            for (p, best) in points.iter().zip(&mut nearest) {
+                let p = Vec3::new(p[0], p[1], p[2]);
+                let Some(closest) =
+                    answer(face_closest_point_in_shape(k, &shape, &objects, (id, f), p))?
                 else {
                     continue;
                 };
-                let d = solidcore::query::api_queries::point_distance(p, pr.point)?.value;
-                if best.is_none_or(|(w, _)| d < w) {
-                    best = Some((d, pr));
+                if best.is_none_or(|(distance, _, _)| closest.distance < distance) {
+                    *best = Some((closest.distance, f, closest.point));
                 }
             }
-            out.push(best.map(|(_, pr)| Principal {
+        }
+        let mut out = Vec::with_capacity(points.len());
+        for closest in nearest {
+            let Some((_, f, p)) = closest else {
+                out.push(None);
+                continue;
+            };
+            let principal = solidcore::query::continuity::principal_curvatures(k, b, f, p)?;
+            out.push(principal.map(|pr| Principal {
                 k1: pr.k1,
                 k2: pr.k2,
                 gaussian: pr.gaussian,

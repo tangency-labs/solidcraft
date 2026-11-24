@@ -15,9 +15,12 @@ view.
 - **Title bar.** On Windows and Linux the application bar is the window's title bar. On the left:
   the File menu (New, Open, Save, Save As, Export…), undo and redo, the Home tab (the start page)
   and one tab per open design (each with its own undo history, selection and camera; a dot marks
-  unsaved changes). Double-click a design's tab to rename the design: type the name, then press
-  Enter or click elsewhere to keep it, or Esc to leave the old one (Preferences › Interface turns
-  this off, for a double-click that maximizes the window instead). On the right: Report a bug,
+  unsaved changes). Double-click a design's tab, or right-click it and choose **Rename**, to rename
+  the design: type the name, then press Enter or click elsewhere to keep it, or Esc to leave the old
+  one (Preferences › Interface turns the double-click off, for a double-click that maximizes the
+  window instead; **Rename** stays in the menu). **Save** and **Save As…** in a design tab's
+  right-click menu save that tab's design (it is shown first), as the File menu's do. On the right:
+  Report a bug,
   Help (?), Preferences (which hold the theme) and the window's buttons. On Linux, to have your
   desktop's own title bar and window buttons instead, set
   `SOLIDCRAFT_TITLEBAR=system` or put `"titlebar": "system"` in `graphics.json` in the settings
@@ -83,6 +86,11 @@ view.
   off: scroll zooms like the wheel); mouse wheels zoom and the thumb wheel pans sideways.
   On Linux, pinch needs the native Wayland window system
   (see [Troubleshooting](troubleshooting.md)).
+  In the web app, turn on **Pencil mode** in **Preferences › Sketch** to work with a pen such as
+  Apple Pencil and your fingers. A pen tap adds an item to the selection or removes it. A pen
+  double-tap selects the item's whole body, or its whole sketch. A pen tap on empty space clears
+  the selection. Fingers in the view only move the view, and a finger double-tap on a flat face
+  starts a sketch on it. Buttons and panels take finger taps as usual.
   To zoom with vertical two-finger scroll while holding a key, choose the key in Navigation › Zoom with two-finger scroll while holding (Cmd on macOS or Ctrl on Windows/Linux, Alt, or Control). It is off until you choose one.
   With the **Fusion** preset and two-finger pan enabled, hold **Shift** while scrolling with
   two fingers to orbit freely instead of panning. No click is needed. Releasing Shift returns
@@ -92,6 +100,8 @@ view.
   in the default and Inventor presets. In every preset, Ctrl+left drag (Cmd on macOS) that starts
   on empty space orbits; a Ctrl+click still adds to the selection. Shift+right-drag snaps to the nearest standard or
   diagonal view; Shift does not request snapping when the preset already requires it to orbit.
+  (In the web app in Firefox, Shift+right-click opens Firefox's menu instead; see
+  [Shift+right-click in Firefox](getting-started.md#shiftright-click-in-firefox).)
   An orbit drag that reaches the edge of the view carries on: the cursor reappears at the opposite
   edge, so you can keep turning round the model without letting go (not on Wayland or in the browser).
   **Preferences › Navigation › Wrap the cursor while orbiting** turns this off.

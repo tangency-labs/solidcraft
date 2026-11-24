@@ -111,7 +111,10 @@ fn round_faces(b: &Brep) -> Vec<(Surface, bool)> {
         .ids()
         .filter_map(|f| {
             let s = face::surface(b, f).unwrap()?;
-            if let SurfaceKind::BSpline(bs) = s.kind() {
+            // a traced round is a procedural blend: its net is the traced fit
+            if let Some(BlendNet::Approx(bs)) = s.procedural_blend().map(|d| d.net()) {
+                Some((Surface::from(bs.clone()), bs.is_rational()))
+            } else if let SurfaceKind::BSpline(bs) = s.kind() {
                 Some((s.clone(), bs.is_rational()))
             } else {
                 None
@@ -237,14 +240,8 @@ fn cylinder_flux(
 /// The plate (top face z = 0) and the r3 peg through the origin tilted 30 degrees from z,
 /// from 10 below the plate's face to 15 above it along its axis, the rim rounded r1.
 fn plate_and_peg(exact: bool) -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
-    plate_and_peg_kept(exact, false)
-}
-
-/// [`plate_and_peg`] with `definition` (`fillet_round_as_definition`, #2485) set.
-fn plate_and_peg_kept(exact: bool, definition: bool) -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
     let mut k = Kernel::default();
     k.fixes.fillet_exact_round_classes = exact;
-    k.fixes.fillet_round_as_definition = definition;
     let plate = create_box(&mut k, Point3::new(-20.0, -20.0, -20.0), 40.0, 40.0, 20.0).unwrap();
     let mut peg = create_cylinder(&mut k, Point3::new(0.0, 0.0, -10.0), R, 25.0).unwrap();
     tilt(&mut k, &mut peg, 30f64.to_radians());
@@ -332,9 +329,9 @@ fn an_oblique_plane_and_cylinder_round_is_the_exact_rational_ball_sweep() {
     );
 }
 
-/// Without the fix the round is traced: a skin through its stations' sections (the ball's
-/// exact circles, so rational too), off the ball between them where the exact sweep is on it
-/// to 1e-12.
+/// Without the fix the round is traced: a procedural blend whose net is a skin through its
+/// stations' sections (the ball's exact circles, so rational too), off the ball between them
+/// where the exact sweep is on it to 1e-12.
 #[test]
 fn upstream_traces_the_oblique_plane_and_cylinder_round() {
     let (spine, _, _) = plate_and_peg_round(30f64.to_radians());
@@ -349,14 +346,8 @@ fn upstream_traces_the_oblique_plane_and_cylinder_round() {
 /// 3 / sin 45 from the origin, from 1 below the apex to 20 below it; the concave conic
 /// where the cone leaves the pole rounded r1.
 fn pole_and_cone(exact: bool) -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
-    pole_and_cone_kept(exact, false)
-}
-
-/// [`pole_and_cone`] with `definition` (`fillet_round_as_definition`, #2485) set.
-fn pole_and_cone_kept(exact: bool, definition: bool) -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
     let mut k = Kernel::default();
     k.fixes.fillet_exact_round_classes = exact;
-    k.fixes.fillet_round_as_definition = definition;
     let alpha = 45f64.to_radians();
     let d = R / alpha.sin();
     let pole = create_cylinder(&mut k, Point3::new(0.0, 0.0, -12.0), R, 20.0).unwrap();
@@ -443,7 +434,8 @@ fn two_quadrics_touching_one_ball_round_exactly_on_their_conic() {
     );
 }
 
-/// Without the fix the round is traced, off the ball between its stations (as for the peg).
+/// Without the fix the round is traced, its net off the ball between its stations (as for
+/// the peg).
 #[test]
 fn upstream_traces_the_round_between_two_quadrics_touching_one_ball() {
     let (spine, _, _) = pole_and_cone_round();
@@ -504,19 +496,10 @@ fn surface_bits(k: &Kernel, s: &Surface) -> Vec<[u64; 3]> {
     pts
 }
 
-/// The points of every face of `b` as bits.
-fn body_bits(k: &Kernel, b: &Brep) -> Vec<Vec<[u64; 3]>> {
-    b.faces()
-        .ids()
-        .filter_map(|f| face::surface(b, f).unwrap())
-        .map(|s| surface_bits(k, s))
-        .collect()
-}
-
 #[test]
 fn the_conic_rounds_are_their_definitions() {
     let (spine, added, _) = plate_and_peg_round(30f64.to_radians());
-    let (k, mut b, before, rounds) = plate_and_peg_kept(true, true);
+    let (k, mut b, before, rounds) = plate_and_peg(true);
     let checked = exact_round_checks(&k, &b);
     assert_eq!(checked.len(), 2);
     assert!(
@@ -526,8 +509,6 @@ fn the_conic_rounds_are_their_definitions() {
     assert!(off_spine(&k, &rounds, &spine) < 1e-12);
     let after = volume(&k, &mut b);
     assert!((after - before - added).abs() < VOLUME_TOL);
-    let (k0, b0, _, _) = plate_and_peg_kept(true, false);
-    assert_eq!(body_bits(&k, &b), body_bits(&k0, &b0));
     // the round reversed, swapped and reparametrised is still its definition, through its
     // record too; a moved support is refused
     for f in b.faces().ids() {
@@ -558,15 +539,13 @@ fn the_conic_rounds_are_their_definitions() {
 
 #[test]
 fn the_conic_pair_rounds_are_their_definitions() {
-    let (k, b, _, _) = pole_and_cone_kept(true, true);
+    let (k, b, _, _) = pole_and_cone(true);
     let checked = exact_round_checks(&k, &b);
     assert_eq!(checked.len(), 2);
     assert!(
         checked.iter().all(|(c, _)| *c == ExactClass::ConicPair),
         "{checked:?}"
     );
-    let (k0, b0, _, _) = pole_and_cone_kept(true, false);
-    assert_eq!(body_bits(&k, &b), body_bits(&k0, &b0));
 }
 
 /// tangency-labs/solidcraft#14000, #15037: a boss r5 standing 10 out of a 40 x 40 x 10 block
@@ -582,7 +561,6 @@ fn a_round_on_a_boss_tilted_a_few_degrees_is_its_definition() {
         let tau = deg.to_radians();
         let mut k = Kernel::default();
         k.fixes.fillet_exact_round_classes = true;
-        k.fixes.fillet_round_as_definition = true;
         let block = create_box(&mut k, Point3::new(-20.0, -20.0, -10.0), 40.0, 40.0, 10.0).unwrap();
         let mut peg = create_cylinder(&mut k, Point3::new(0.0, 0.0, -5.0), boss, 15.0).unwrap();
         tilt(&mut k, &mut peg, tau);

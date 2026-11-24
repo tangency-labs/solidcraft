@@ -1,0 +1,10 @@
+# Build with: trunk build --release   (from apps/ui-kit-gallery); the docs site serves it at /kit/.
+[build]
+target = "index.html"
+dist = "../../dist/kit"
+public_url = "./"
+filehash = true
+
+[serve]
+addresses = ["127.0.0.1"]
+port = 8782

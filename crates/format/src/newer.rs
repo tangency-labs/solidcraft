@@ -123,18 +123,21 @@ impl NewerFile {
         !self.parts.is_empty()
     }
 
-    /// Whether anything kept back names this text (a blob's name in a container).
-    pub fn mentions(&self, text: &str) -> bool {
-        fn kept(k: &Kept, text: &str) -> bool {
+    /// Give `found` every string anything kept back holds, at any depth (a blob's name in a
+    /// container is one). One walk answers for every name at once.
+    pub fn strings(&self, found: &mut impl FnMut(&str)) {
+        fn kept(k: &Kept, found: &mut impl FnMut(&str)) {
             match k {
-                Kept::Field(v) => value_mentions(v, text),
-                Kept::Fields(m) => m.values().any(|x| kept(x, text)),
-                Kept::Items(l) => l.iter().any(|(_, x)| kept(x, text)),
+                Kept::Field(v) => strings_in(v, found),
+                Kept::Fields(m) => m.values().for_each(|x| kept(x, found)),
+                Kept::Items(l) => l.iter().for_each(|(_, x)| kept(x, found)),
             }
         }
-        self.kept.as_ref().is_some_and(|k| kept(k, text))
-            || self.sections.iter().any(|s| value_mentions(&s.value, text))
-            || self.elements.iter().any(|(_, v)| value_mentions(v, text))
+        if let Some(k) = &self.kept {
+            kept(k, found);
+        }
+        self.sections.iter().for_each(|s| strings_in(&s.value, found));
+        self.elements.iter().for_each(|(_, v)| strings_in(v, found));
     }
 
     /// Say that a section the reader couldn't finish reading is left out. `empty` is what the
@@ -192,12 +195,13 @@ impl NewerFile {
     }
 }
 
-fn value_mentions(v: &Value, text: &str) -> bool {
+/// Give `found` every string in `v`, at any depth. An object's values count, not its keys.
+pub fn strings_in(v: &Value, found: &mut impl FnMut(&str)) {
     match v {
-        Value::String(s) => s == text,
-        Value::Array(a) => a.iter().any(|x| value_mentions(x, text)),
-        Value::Object(o) => o.values().any(|x| value_mentions(x, text)),
-        _ => false,
+        Value::String(s) => found(s),
+        Value::Array(a) => a.iter().for_each(|x| strings_in(x, found)),
+        Value::Object(o) => o.values().for_each(|x| strings_in(x, found)),
+        _ => {}
     }
 }
 

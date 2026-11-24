@@ -45,4 +45,5 @@ pub mod srf_fit;
 pub mod srf_match;
 pub mod srf_nurb;
 pub mod srf_offset;
+pub mod srf_seam;
 pub mod srf_tool;

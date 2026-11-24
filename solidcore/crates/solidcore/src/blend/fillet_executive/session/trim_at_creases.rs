@@ -1,7 +1,8 @@
 //! The cliff overflow trimmed at its creases on the live session (not upstream): the
 //! fork's `SmFilletExecutive::TrimAtCreases` (`source/SMLib/src/SmFilletOverflow.cpp`,
 //! tangency-labs/smlib#79 step 6 at 5e8c9c1: 99e57b8, 668fe9f, bacd0bb, 2d4b154, bc8c44d,
-//! de5df14, 8832ead; `fixes.fillet_overflow_trim_at_creases`, WR-695). The geometry steps
+//! de5df14, 8832ead; WR-695, unconditional since `fillet_overflow_trim_at_creases` was
+//! removed). The geometry steps
 //! are in [`crate::blend::fillet_overflow`].
 //!
 //! | Rust                                | Fork                                 |
@@ -12,8 +13,10 @@
 //! | `open_setback_springs` (private)    | `TrimAtCreases`' open setback corners' spring curves and hole edges (ef57570) |
 //!
 //! Deviations:
-//! - **The sheet leaves the session.** As in `subtract_removal_region`, the sheet (the
-//!   intermediate body) is taken out of the session first and edited on its own; the
+//! - **Bounded sheets before sewing.** Open ends are cut and capped before the first
+//!   stitch, so independent sheets never sew their coincident continuations together.
+//! - **The sheet leaves the session.** As in the removed `subtract_removal_region`, the
+//!   sheet (the intermediate body) is taken out of the session first and edited on its own; the
 //!   target is edited in place through the session's notifications, as the fork edits
 //!   it, and put back as it was when the trim fails (the fork leaves whatever it reached).
 //! - **Sets.** The fork's pointer-keyed `std::set` / `std::map` are `BTreeSet` /
@@ -24,17 +27,16 @@
 //!   edge and the extension, `NoteFitRadius` from `sm_CornerTakesPerRadius` after the
 //!   whole edge; tangency-labs/smlib a3d6d81, 49f393d) note them (WR-696, #2278).
 //! - **Section ends (not the fork's).** A round with WR-674's section ends is trimmed here
-//!   with `fixes.fillet_overflow_trim_at_creases` (WR-706, #2223): each such end is
-//!   cut by its section's plane and closed by the section's flat face, and a side of that
-//!   face that lies along an edge of the body is sewn to the edge's piece the rail's
-//!   imprint cuts off, not imprinted.
-//! - **Creases along an edge (not the fork's).** With
-//!   `fixes.fillet_overflow_crease_along_edge` (WR-717, #2385), a crease that runs along an
-//!   edge of the face it crosses, within the trim's tolerance, is that edge: the sheet is
-//!   split along it, and the edge stands as its imprint, so the material taken off stops
-//!   there and the sheet is sewn to it. The fork drops such a crease as not inside the
-//!   face, leaves the sheet's piece past the face, and refuses at the sewing (a disc 2 high
-//!   rounded 2.001: the crease runs 2.5e-7 inside the bottom edge). Without it the caller subtracts the round, as before.
+//!   (WR-706, #2223): each such end is cut by its section's plane and closed by the
+//!   section's flat face, and a side of that face that lies along an edge of the body is
+//!   sewn to the edge's piece the rail's imprint cuts off, not imprinted.
+//! - **Creases along an edge (not the fork's).** (WR-717, #2385; once the flag
+//!   `fillet_overflow_crease_along_edge`) A crease that runs along an edge of the face it
+//!   crosses, within the trim's tolerance, is that edge: the sheet is split along it, and
+//!   the edge stands as its imprint, so the material taken off stops there and the sheet
+//!   is sewn to it. The fork drops such a crease as not inside the face, leaves the
+//!   sheet's piece past the face, and refuses at the sewing (a disc 2 high rounded 2.001:
+//!   the crease runs 2.5e-7 inside the bottom edge).
 //! - **A strip below resolution (not the fork's, #2404).** A body edge that runs along the
 //!   kept sheet, just off it, leaves a strip whose sides the trim's tolerances cannot tell
 //!   apart: refused (`NoRoomReason::StripBelowResolution`), not left to fail at the sewing or
@@ -51,27 +53,37 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{invalid, FilletBody, FilletObject, FilletSession, SessionObjects};
+use super::cliff_overflow::SOLVER_EDGE;
+use super::{invalid, FilletBody, FilletExecutive, FilletObject, FilletSession, SessionObjects};
 use crate::blend::fillet_cliff_overflow::{
     cut_fillet_at_open_end, section_edge, section_end, section_end_face, Refusal, SectionEnd,
 };
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_executive::p3::NoRoomReason;
-use crate::blend::fillet_geom::p1::{FilletEdgeType, FilletErrorType, FilletGeomId};
+use crate::blend::fillet_geom::p1::{
+    FilletEdgeType, FilletErrorType, FilletGeomId, FilletSurfaceStorage,
+};
 use crate::blend::fillet_overflow::{
-    creases, edge_curve, edge_on_surface, extend, in_material, make_extension_face,
-    pieces_along_edges, pieces_in_face, ExtendOutcome, Extension, Rail,
+    creases, edge_curve, edge_on_surface, extend, in_material, make_extension_face, outward_plane,
+    ExtendOutcome, Extension, Rail,
 };
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{EntityRef, Result, SolidError};
+use crate::curve::line::Line;
+use crate::error::blend::{BlendFailure, CliffInput, CreaseTrimStop, CrossingInput, OverflowInput};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::ids;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::ObjectRef;
+use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE};
-use crate::nurbs::b_spline_curve::ControlPointForm;
+use crate::nurbs::b_spline_curve::{BSplineCurve, ControlPointForm};
+use crate::nurbs::b_spline_surface::p1::SurfParamType;
+use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+use crate::nurbs::iges::clamp_curve;
 use crate::nurbs::knots::Side;
+use crate::nurbs::nurbs_crv::is_clamped;
 use crate::query::brep::BrepIdentity;
 use crate::surface::plane::Plane;
 use crate::surface::procedural_blend::NetScope;
@@ -85,6 +97,46 @@ use crate::topology::topology_traverser::Marks;
 use crate::topology::{edge, edgeuse::p1 as eu1, face, vertex, Brep, BrepId, EdgeId, FaceId};
 
 const OP: &str = "blend::fillet_executive::session::trim_at_creases";
+
+/// A face or edge the trim reads lacks `input` ([`BlendFailure::OverflowInputMissing`], the
+/// cause of the overflows' helpers, which read the same bodies): the faces and edges read are
+/// the caller's body's and the sheet's alike, so the failure names no entity.
+fn input_missing(input: OverflowInput) -> SolidError {
+    SolidError::blend(OP, BlendFailure::OverflowInputMissing(input))
+}
+
+/// A step the executive's own construction guarantees, failed ([`BlendFailure::Defect`],
+/// status `SM_ERR`), `why` saying why it is the kernel's fault.
+fn defect(why: &'static str) -> SolidError {
+    SolidError::blend(OP, BlendFailure::Defect { why })
+}
+
+/// A missing thing the executive built ([`BlendFailure::Defect`] keeping the upstream `NER`
+/// status `SM_ERR_NULL_POINTER`), `why` saying why it is always there.
+fn null_defect(why: &'static str) -> SolidError {
+    Failure::new(OP, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// A trim refused for a blend too large, `reason` ([`BlendFailure::NoRoom`]), as noted.
+fn no_room(reason: NoRoomReason) -> SolidError {
+    SolidError::blend(OP, BlendFailure::NoRoom(reason))
+}
+
+/// Why a section end's solver still rolls on an edge use with an edge when the trim reads it.
+const SECTION_END_SOLVER: &str = "a section end's solver has no edge use, or its edge use no \
+     edge: the bound of the open ends built and capped this end from the same solver's edge \
+     before sewing";
+
+/// Why the session's intermediate body is there when the trim runs.
+const INTERMEDIATE: &str = "the session has no intermediate body when the blend is trimmed at \
+     its creases: the trim runs on the fillet body the executive has just made (its open ends \
+     bounded), before anything else takes it";
+
+/// Why each solver's rolling offset surface is there.
+const SOLVER_OFFSET: &str = "a solver that rolls a ball has no offset surface: the solver \
+     set-up gives each rail the offset of its face's surface before the solver is loaded";
 
 /// `smos_Max` of two doubles.
 fn smos_max(a: f64, b: f64) -> f64 {
@@ -106,13 +158,25 @@ fn smos_min(a: f64, b: f64) -> f64 {
 
 /// `SmFilletSolver::IsTangentEdge` (the fork's bacd0bb): whether the two faces at the
 /// manifold edge `e` meet tangentially there (`sm_TestManifoldTangentRollover`).
-fn is_tangent_edge(k: &Kernel, b: &mut Brep, e: EdgeId, tangency_tol_rad: f64) -> Result<bool> {
+fn is_tangent_edge(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    parameter: f64,
+    tangency_tol_rad: f64,
+) -> Result<bool> {
     if !edge::is_manifold(b, e)? {
         return Ok(false);
     }
     Ok(
-        crate::blend::fillet_solver::p1::test_manifold_tangent_rollover(k, b, e, tangency_tol_rad)?
-            .0,
+        crate::blend::fillet_solver::p1::test_manifold_tangent_rollover_at(
+            k,
+            b,
+            e,
+            parameter,
+            tangency_tol_rad,
+        )?
+        .0,
     )
 }
 
@@ -641,6 +705,631 @@ fn move_leftovers_kept(k: &Kernel, target: &Brep, moves: &MovedEdges, tol: f64) 
     Ok(false)
 }
 
+/// The fraction of the body's tolerance the creases and the open ends' sections are
+/// fitted to (#17673). Each becomes an edge between the sheet and a planar face of the
+/// body, whose area (and the body's volume) follows the edge's curve while the sheet's
+/// side follows its surface: a curve fitted to the body's tolerance (1e-5) lies up to
+/// ~3e-6 off the sheet, which moves a box's variable round 1.3e-7 of its volume. A
+/// thousandth keeps them within ~1e-8, the sheet surface's own accuracy.
+const SECTION_FIT: f64 = 1e-3;
+
+/// The point where `curve` crosses face `f` of `b`'s surface, solved from `start` by
+/// Newton's method on the curve's parameter: each step zeroes the distance to the
+/// surface's tangent plane at the foot of the current point (the plane itself for a
+/// planar face), so it converges quadratically wherever the curve crosses the surface,
+/// however shallow the crossing. Accepted only on the solved residual: the point on
+/// `curve` when its distance along the normal to the tangent plane at its foot is within
+/// `tol * 1e-6`, or within 64 eps of its own coordinates where those ulps are larger
+/// (iterated on while that still halves the residual). `None` when the face has no
+/// surface, a drop or an evaluation fails, the curve runs along the tangent plane to
+/// rounding, or no step within 32 reaches the residual (a crossing past the curve's end,
+/// or none): no crossing, so the caller leaves the piece where it ends.
+fn crosses_surface(
+    k: &Kernel,
+    curve: &Curve,
+    b: &Brep,
+    f: FaceId,
+    start: Point3,
+    tol: f64,
+) -> Result<Option<Point3>> {
+    let Some(surface) = face::p2::surface(b, f)? else {
+        return Ok(None);
+    };
+    let plane = crate::blend::fillet_overflow::plane_of(k, surface)?;
+    let domain = if plane.is_none() {
+        Some(surface.natural_uv_domain_with_nurb(k)?)
+    } else {
+        None
+    };
+    let interval = curve.natural_interval();
+    let Some((mut t, _)) = drop_on(k, curve, &interval, start)? else {
+        return Ok(None);
+    };
+    let mut found: Option<(f64, Point3)> = None;
+    for _ in 0..32 {
+        let d = curve.evaluate(k, t, 1, false, false)?;
+        let (Some(&p), Some(&dp)) = (d.first(), d.get(1)) else {
+            return Ok(None);
+        };
+        // the foot of `p` on the surface and the unit normal there
+        let (foot, normal) = match (plane, &domain) {
+            (Some((at, n)), _) => (p - n * (p - at).dot(n), n),
+            (None, Some(domain)) => {
+                let dropped =
+                    surface.drop_point::<NoObject>(k, p, domain, &DropPointOptions::default())?;
+                if !dropped.success {
+                    return Ok(None);
+                }
+                let e = surface.evaluate(k, dropped.result_uv, 1, 1, EvaluateFlags::default())?;
+                let (Some(&foot), Some(&su), Some(&sv)) = (
+                    e.first().and_then(|r| r.first()),
+                    e.get(1).and_then(|r| r.first()),
+                    e.first().and_then(|r| r.get(1)),
+                ) else {
+                    return Ok(None);
+                };
+                let Ok(n) = su.cross(sv).unitize() else {
+                    return Ok(None);
+                };
+                (foot, n)
+            }
+            (None, None) => return Ok(None),
+        };
+        // the residual along the normal (a drop's tangential error is not the crossing's);
+        // accepted at `tol * 1e-6`, or at the rounding of `p`'s own coordinates where
+        // those are so large that their ulps exceed it
+        let gap = normal.dot(p - foot).abs();
+        let accept = smos_max(
+            tol * 1e-6,
+            64.0 * f64::EPSILON * smos_max(p.x.abs(), smos_max(p.y.abs(), p.z.abs())),
+        );
+        // NaN fails every comparison and so is never accepted
+        if gap <= accept {
+            match found {
+                Some((best, _)) if gap > 0.5 * best => break,
+                _ => found = Some((gap, p)),
+            }
+            if gap == 0.0 {
+                break;
+            }
+        }
+        let slope = normal.dot(dp);
+        let solvable = slope.abs() > 64.0 * f64::EPSILON * dp.length();
+        if !solvable {
+            break;
+        }
+        t = smos_min(
+            smos_max(t - normal.dot(p - foot) / slope, interval.min()),
+            interval.max(),
+        );
+    }
+    Ok(found.map(|(_, p)| p))
+}
+
+/// The refusal of a crease piece (its kind `kind`) whose first end with a meet (the start
+/// at `start.0` where it has one, else the end at `end.0`) has no construction to put it on
+/// its meet: a curve kind with no control polygon, or a B-spline not clamped there, whose
+/// end is not its classified end (#17673; never a piece left short of its meet).
+fn piece_end_unbuildable(
+    kind: &'static str,
+    start: (f64, Option<Point3>),
+    end: (f64, Option<Point3>),
+) -> SolidError {
+    let (at_end, t) = match start.1 {
+        Some(_) => (false, start.0),
+        None => (true, end.0),
+    };
+    SolidError::blend(
+        OP,
+        BlendFailure::CreasePieceEndUnbuildable { kind, at_end, t },
+    )
+}
+
+/// `crease` with each B-spline clamped at both ends: an unclamped one as the same curve
+/// over its domain ([`clamped_spline`]), whose natural ends are its real ends; any other
+/// as it is. The trim classifies, meets and ends its pieces on this curve, so an end it
+/// records is the piece's end (#17673 review: an unclamped crease's natural end is its end
+/// control point, off the curve, and the kernel cannot evaluate it inside its domain).
+fn crease_as_clamped(crease: &Curve) -> Result<std::borrow::Cow<'_, Curve>> {
+    Ok(match crease.kind() {
+        CurveKind::BSpline(spline) if !spline_clamped(spline)? => {
+            std::borrow::Cow::Owned(Curve::from(clamped_spline(spline)?))
+        }
+        _ => std::borrow::Cow::Borrowed(crease),
+    })
+}
+
+/// An invariant of the crease piece's end construction that did not hold (a B-spline
+/// with too few knots or control points, or one not clamped where its end is moved):
+/// `Unsupported`, never a piece left short of its meet.
+const fn piece_end_unsupported(reason: &'static str) -> SolidError {
+    SolidError::Unsupported {
+        operation: OP,
+        reason,
+    }
+}
+
+/// Whether `spline`'s knots are clamped at both ends (the first and the last `p + 1`
+/// equal), so that each end of the curve is its end control point.
+fn spline_clamped(spline: &BSplineCurve) -> Result<bool> {
+    let nurb = spline.nurb_ref()?;
+    Ok(is_clamped(nurb.knots(), nurb.degree()))
+}
+
+/// `spline` as a B-spline clamped at both ends: a clamped one as it is
+/// ([`BSplineCurve::clone_exact`]). An unclamped one (its first or last `p + 1` knots not
+/// all equal) is a curve over its domain `[U_p, U_{m-p}]` only: the kernel's B-spline is
+/// clamped by contract, its canonical constructor
+/// ([`BSplineCurve::create_canonical`]) reads unclamped knots so, and its evaluation
+/// gives the end control point at a natural end `U0` or `Um` but the end span's
+/// polynomial just inside it, two different points. Such a curve is clamped to its
+/// domain by knot insertion ([`clamp_curve`], `N_IgesClampCrv`, as the canonical
+/// constructor does), which leaves every point of the domain where it is, so its ends
+/// are the domain's end points and its end control points.
+fn clamped_spline(spline: &BSplineCurve) -> Result<BSplineCurve> {
+    if spline_clamped(spline)? {
+        return Ok(spline.clone_exact());
+    }
+    let nurb = spline.nurb_ref()?;
+    let p = nurb.degree();
+    let u = nurb.knots();
+    let at = |i: Option<usize>| {
+        i.and_then(|i| u.get(i))
+            .copied()
+            .ok_or_else(|| piece_end_unsupported("a crease piece's B-spline with too few knots"))
+    };
+    let domain = [at(Some(p))?, at(u.len().checked_sub(p + 1))?];
+    let mut clamped = nurb.clone();
+    clamp_curve(&mut clamped, domain)?;
+    Ok(BSplineCurve::from_gw_nurb(spline.dim(), &clamped))
+}
+
+/// `spline`'s end (`at_end`: the last; else the first) put at `q` by moving its end
+/// control point, with its weight. A clamped end is that control point, whose rational
+/// basis function lies in `[0, 1]` and vanishes past the end span, so the end lands on
+/// `q` and no point of the curve moves farther than `|q - end|`, and only the end span
+/// moves. `Unsupported` for a B-spline not clamped at both ends (never one from
+/// [`clamped_spline`]).
+fn move_spline_end(spline: &mut BSplineCurve, at_end: bool, q: Point3) -> Result<()> {
+    if !spline_clamped(spline)? {
+        return Err(piece_end_unsupported(
+            "a crease piece's B-spline end that is not its control point",
+        ));
+    }
+    let idx = if at_end {
+        spline
+            .number_control_points()?
+            .checked_sub(1)
+            .ok_or_else(|| {
+                piece_end_unsupported("a crease piece's B-spline with no control point")
+            })?
+    } else {
+        0
+    };
+    let (_, w) = spline.control_point(ControlPointForm::EuclideanRational, idx)?;
+    spline.set_control_point(ControlPointForm::EuclideanRational, idx, q, w)?;
+    Ok(())
+}
+
+/// #17673: [`crate::blend::fillet_overflow::pieces_in_face`] for a crease on target face
+/// `f`, each piece run on to the crease's own end (start or end) when every run between
+/// the piece and that end is classified along an edge of the face (within `tol` of it).
+/// A crease of a sheet tangent to the face beside `f` (a round rolling on it) meets `f`'s
+/// edge there at a shallow angle: it comes within `tol` of that edge a run before its
+/// end, which lies on the edge (the sheet's rail end). Clipped where it comes within
+/// `tol`, the piece stops short of the corner by that run, and the sheet's boundary no
+/// longer closes there.
+///
+/// The run-on is not limited to that approach: any stretch from a piece to the crease's
+/// end that lies along the face's edges is taken into the piece, whether it is a shallow
+/// approach or a crease that runs along an edge to its end. Either way the sheet is split
+/// along the same stretch as the piece and its along-edge runs together (WR-717), now as
+/// one curve. A stretch along an edge followed by another run inside the face, or a
+/// crease that ends off the face's boundary, is not run on: those pieces are clipped as
+/// before.
+///
+/// The crease's along-edge runs ([`crate::blend::fillet_overflow::pieces_along_edges`],
+/// from the same classification) are appended to `along`, each marked whether a piece was
+/// run on over it, so that the caller splits the sheet along each stretch once.
+fn pieces_in_face_to_ends(
+    k: &Kernel,
+    crease: &Curve,
+    b: &mut Brep,
+    f: FaceId,
+    tol: f64,
+    pieces: &mut Vec<Curve>,
+    along: &mut Vec<(Curve, bool)>,
+) -> Result<Vec<(EdgeId, f64)>> {
+    let natural = crease.natural_interval();
+    let runs = face::p2::classify_free_curve_on_face(k, b, f, crease, natural, tol, true)?;
+    // which runs a piece was run on over
+    let mut taken = vec![false; runs.len()];
+    for (i, run) in runs.iter().enumerate() {
+        if run.mid != PointClassType::Face {
+            continue;
+        }
+        let (mut lo, mut hi) = (run.interval.min(), run.interval.max());
+        let (mut on_before, mut on_after) = (false, false);
+        // the runs before it, all along an edge, reaching the crease's start
+        let before = runs.get(..i).unwrap_or_default();
+        if !before.is_empty()
+            && before.iter().all(|r| r.mid == PointClassType::Edge)
+            && before
+                .first()
+                .is_some_and(|r| r.interval.min() <= natural.min())
+        {
+            lo = natural.min();
+            on_before = true;
+        }
+        let after = runs.get(i + 1..).unwrap_or_default();
+        if !after.is_empty()
+            && after.iter().all(|r| r.mid == PointClassType::Edge)
+            && after
+                .last()
+                .is_some_and(|r| r.interval.max() >= natural.max())
+        {
+            hi = natural.max();
+            on_after = true;
+        }
+        let a = crease.evaluate_point(k, lo)?;
+        let z = crease.evaluate_point(k, hi)?;
+        if a.distance(z) <= tol && !crease.is_closed(k, &natural, tol)? {
+            continue;
+        }
+        let mut piece = crease.copy(k)?;
+        let ivl = crate::geom::extent1d::Extent1d::from_min_max(lo, hi);
+        if ivl != piece.natural_interval() {
+            let mut trim = ivl;
+            piece.trim(
+                k,
+                &mut trim,
+                crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+            )?;
+        }
+        pieces.push(piece);
+        if on_before {
+            taken.iter_mut().take(i).for_each(|t| *t = true);
+        }
+        if on_after {
+            taken.iter_mut().skip(i + 1).for_each(|t| *t = true);
+        }
+    }
+    // `pieces_along_edges`, step for step, on the same runs
+    for (run, &taken) in runs.iter().zip(&taken) {
+        if run.mid != PointClassType::Edge {
+            continue;
+        }
+        let ivl = run.interval;
+        let a = crease.evaluate_point(k, ivl.min())?;
+        let z = crease.evaluate_point(k, ivl.max())?;
+        if a.distance(z) <= tol && !crease.is_closed(k, &natural, tol)? {
+            continue;
+        }
+        let mut piece = crease.copy(k)?;
+        if ivl != piece.natural_interval() {
+            let mut trim = ivl;
+            piece.trim(
+                k,
+                &mut trim,
+                crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+            )?;
+        }
+        along.push((piece, taken));
+    }
+    let mut events: Vec<(EdgeId, f64)> = runs
+        .iter()
+        .flat_map(|run| {
+            [
+                run.start.1.zip(run.start_edge_param),
+                run.end.1.zip(run.end_edge_param),
+            ]
+            .into_iter()
+            .flatten()
+        })
+        .collect();
+    // A run end classified at a vertex names no edge, yet the crease leaves the face there
+    // across each of the face's own edges that meet it: each is an event, at the parameter
+    // of the vertex on it. Edges at the vertex that bound other faces only (a seam of the
+    // face next door, between two uses of that one face) separate no face from this one,
+    // so the crease crosses none of them out of this face (#2385's disc: a crease along
+    // the bottom edge through the vertex at the foot of the side face's seam).
+    for v in runs
+        .iter()
+        .flat_map(|run| [run.start_vertex, run.end_vertex])
+        .flatten()
+    {
+        for e in vertex::edges(b, v, Some(f))? {
+            let at_start = edge::start_vertex(b, e)? == Some(v);
+            let range = edge::interval(b, e)?;
+            let parameter = if at_start { range.min() } else { range.max() };
+            if !events.contains(&(e, parameter)) {
+                events.push((e, parameter));
+            }
+        }
+    }
+    Ok(events)
+}
+
+/// #17673: the pieces of the crease `crease` (on face `f` of `target`) that lie inside the
+/// sheet face `s` (its runs classified in the face, as [`crate::blend::fillet_overflow::pieces_in_face`]), each end that
+/// the classification puts on a boundary edge of the sheet face (one no other sheet face
+/// shares) ended where that edge's curve crosses `f`'s surface ([`crosses_surface`]):
+/// the merge then joins the two at a point both curves pass through, and the edge is split
+/// on its own curve (it was split where the piece's end dropped onto it, up to `tol` off,
+/// and kept its curve short of its new vertex).
+///
+/// The meet is taken when it lies on the crease (within `tol`) at a parameter between the
+/// end and the far end of the runs beyond it that the classification puts along that same
+/// edge, `tol` past those, or within `tol` of the end. Where the crease runs into the edge
+/// at a shallow angle (a sheet tangent to the face the edge lies on), the classification
+/// ends the piece where the crease comes within `tol` of the edge, short of their meet by
+/// up to the length of that run. The piece is trimmed to the meet's parameter and ends
+/// exactly on the meet ([`piece_ending_at`], by a construction chosen from its geometry;
+/// a typed refusal for a curve kind it has none for). An end with no such meet is left as
+/// classified. Where the two meets come out of order (each past the other), the piece
+/// keeps both its classified ends (as before #17673).
+fn pieces_ending_at_meets(
+    k: &Kernel,
+    crease: &Curve,
+    sheet: &mut Brep,
+    s: FaceId,
+    target: &Brep,
+    f: FaceId,
+    tol: f64,
+    pieces: &mut Vec<Curve>,
+) -> Result<()> {
+    // classified, met and ended on the crease clamped, so every recorded end is its piece's
+    let clamped = crease_as_clamped(crease)?;
+    let crease: &Curve = &clamped;
+    let natural = crease.natural_interval();
+    let runs = face::p2::classify_free_curve_on_face(k, sheet, s, crease, natural, tol, true)?;
+    for (i, run) in runs.iter().enumerate() {
+        if run.mid != PointClassType::Face {
+            continue;
+        }
+        let ivl = run.interval;
+        let a = crease.evaluate_point(k, ivl.min())?;
+        let z = crease.evaluate_point(k, ivl.max())?;
+        if a.distance(z) <= tol && !crease.is_closed(k, &natural, tol)? {
+            continue;
+        }
+        // each end: its parameter, the boundary edge it lies on, and the parameter the
+        // runs beyond it along that edge reach
+        let mut ends: [(f64, Option<Point3>); 2] = [(ivl.min(), None), (ivl.max(), None)];
+        for (side, slot) in ends.iter_mut().enumerate() {
+            let (t, (_, on_edge)) = if side == 0 {
+                (ivl.min(), run.start)
+            } else {
+                (ivl.max(), run.end)
+            };
+            let Some(e) = on_edge else {
+                continue;
+            };
+            if !edge::is_lamina(sheet, e)? {
+                continue;
+            }
+            // the runs beyond this end along the same edge
+            let mut reach = t;
+            let mut j = i;
+            loop {
+                let next = if side == 0 {
+                    j.checked_sub(1)
+                } else {
+                    Some(j + 1)
+                };
+                let Some(n) = next else { break };
+                let Some(r) = runs.get(n) else { break };
+                let along = r.mid == PointClassType::Edge
+                    && (if side == 0 { r.end.1 } else { r.start.1 }) == Some(e);
+                if !along {
+                    break;
+                }
+                reach = if side == 0 {
+                    r.interval.min()
+                } else {
+                    r.interval.max()
+                };
+                j = n;
+            }
+            let end = crease.evaluate_point(k, t)?;
+            let edge_curve = edge_curve(k, sheet, e)?;
+            let Some(q) = crosses_surface(k, &edge_curve, target, f, end, tol)? else {
+                continue;
+            };
+            let Some((tq, d)) = drop_on(k, crease, &natural, q)? else {
+                continue;
+            };
+            let on_crease = d <= tol;
+            let (lo, hi) = if t <= reach { (t, reach) } else { (reach, t) };
+            let within = (tq >= lo && tq <= hi) || q.distance(end) <= tol || {
+                let past = crease.evaluate_point(k, tq)?;
+                let at_reach = crease.evaluate_point(k, reach)?;
+                past.distance(at_reach) <= tol
+            };
+            if on_crease && within {
+                *slot = (tq, Some(q));
+            }
+        }
+        let [start, end] = ends;
+        let classified = ((ivl.min(), None), (ivl.max(), None));
+        // two meets out of order (each end's meet past the other's): the ends as
+        // classified
+        let (start, end) = if start.0 < end.0 {
+            (start, end)
+        } else {
+            classified
+        };
+        pieces.push(piece_ending_at(k, crease, start, end, tol)?);
+    }
+    Ok(())
+}
+
+/// `crease` trimmed to `start.0 .. end.0`, each end that has a meet ending exactly on it,
+/// by a construction chosen from the piece's geometry:
+/// - a line: the line between its two ends, each meet in place of its end (a line still,
+///   every point within `|q - end|` of where it was); `Degenerate` where the two are within
+///   `tol` of each other;
+/// - a B-spline, or a conic (an ellipse or circle, hyperbola or parabola, taken as its
+///   exact rational B-spline, the kernel's own NURB of it), clamped at both ends: each
+///   end's control point moved onto its meet ([`move_spline_end`]). One not clamped (its
+///   natural end a control point off the curve, not the end the caller classified) is
+///   refused ([`BlendFailure::CreasePieceEndUnbuildable`]); the trim's creases are clamped
+///   before they are classified ([`crease_as_clamped`]);
+/// - any other kind (a curve with no control polygon):
+///   [`BlendFailure::CreasePieceEndUnbuildable`], naming the kind and the first end with a
+///   meet, never a piece left ending short of its meet.
+///
+/// Both meets are applied, or none and the error: a meet taken at one end is never
+/// dropped because of the other. A piece with no meet is the trimmed crease as it is.
+fn piece_ending_at(
+    k: &Kernel,
+    crease: &Curve,
+    start: (f64, Option<Point3>),
+    end: (f64, Option<Point3>),
+    tol: f64,
+) -> Result<Curve> {
+    let mut piece = crease_piece(k, crease, start.0, end.0)?;
+    if start.1.is_none() && end.1.is_none() {
+        return Ok(piece);
+    }
+    match piece.kind() {
+        CurveKind::Line(_) => {
+            let ivl = piece.natural_interval();
+            let a = match start.1 {
+                Some(q) => q,
+                None => piece.evaluate_point(k, ivl.min())?,
+            };
+            let z = match end.1 {
+                Some(q) => q,
+                None => piece.evaluate_point(k, ivl.max())?,
+            };
+            // the meets within `tol` of each other: no line between them
+            if a.distance(z) <= tol {
+                return Err(SolidError::Degenerate {
+                    operation: OP,
+                    entity: None,
+                });
+            }
+            let mut line = Line::from_points(a, z, piece.dim());
+            line.make_nurb()?;
+            Ok(Curve::from(line))
+        }
+        CurveKind::BSpline(_)
+        | CurveKind::Ellipse(_)
+        | CurveKind::Hyperbola(_)
+        | CurveKind::Parabola(_) => {
+            // a B-spline is edited in place; a conic is replaced by its exact NURB. Either
+            // must be clamped at both ends: an unclamped one's ends are not its classified
+            // ends ([`crease_as_clamped`] clamps the trim's creases first)
+            let replacement = {
+                let base = piece.b_spline_base().ok_or_else(|| {
+                    piece_end_unsupported("a crease piece with no B-spline of its own")
+                })?;
+                if !spline_clamped(base)? {
+                    let kind = match piece.kind() {
+                        CurveKind::BSpline(_) => "unclamped B-spline",
+                        _ => "conic with an unclamped NURB",
+                    };
+                    return Err(piece_end_unbuildable(kind, start, end));
+                }
+                match piece.kind() {
+                    CurveKind::BSpline(_) => None,
+                    _ => Some(base.clone_exact()),
+                }
+            };
+            if let Some(nurb) = replacement {
+                piece = Curve::from(nurb);
+            }
+            let CurveKind::BSpline(spline) = piece.kind_mut() else {
+                return Err(piece_end_unsupported(
+                    "a crease piece with no B-spline of its own",
+                ));
+            };
+            if let Some(q) = start.1 {
+                move_spline_end(spline, false, q)?;
+            }
+            if let Some(q) = end.1 {
+                move_spline_end(spline, true, q)?;
+            }
+            Ok(piece)
+        }
+        CurveKind::Hermite(_)
+        | CurveKind::Projected(_)
+        | CurveKind::Iso(_)
+        | CurveKind::Offset(_)
+        | CurveKind::Conic(_)
+        | CurveKind::CrvInVolume(_)
+        | CurveKind::CrvOnSurf(_)
+        | CurveKind::TangentField(_)
+        | CurveKind::Composite(_) => Err(piece_end_unbuildable(piece.kind().name(), start, end)),
+    }
+}
+
+/// `crease` trimmed to `t0 .. t1`.
+fn crease_piece(k: &Kernel, crease: &Curve, t0: f64, t1: f64) -> Result<Curve> {
+    let mut piece = crease.copy(k)?;
+    let trim_to = crate::geom::extent1d::Extent1d::from_min_max(t0, t1);
+    if trim_to != piece.natural_interval() {
+        let mut trim = trim_to;
+        piece.trim(
+            k,
+            &mut trim,
+            crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+        )?;
+    }
+    Ok(piece)
+}
+
+/// The refusal of a crease on the target face `f` whose rail leaves a face it rolls on (one
+/// of `rolled_supports`) across a tangent edge, with that face; `None` when no such edge is
+/// crossed. A face past a cliff meets the face the rail leaves at a sharp edge; one that
+/// runs on from it tangentially (a round already on the face) is no cliff: the rail would
+/// roll over onto it, and the ball does not fit between.
+///
+/// The edges the crease crosses (`seam_events`, each with the parameter it crosses at,
+/// each edge of `f` at a vertex it crosses through included) are judged where it crosses them,
+/// against the round's section budget `tangent_budget` (a spline seam's tangency varies
+/// along it). The face's other edges are judged as ever: at a fixed point of the edge,
+/// against the solvers' tangency tolerance `face_tangency`.
+fn crease_across_tangent_edge(
+    k: &Kernel,
+    target: &mut Brep,
+    f: FaceId,
+    seam_events: &[(EdgeId, f64)],
+    rolled_supports: &BTreeSet<FaceId>,
+    tangent_budget: f64,
+    face_tangency: f64,
+) -> Result<Option<(FaceId, Refusal)>> {
+    let mut judged: Vec<(EdgeId, f64, f64)> = seam_events
+        .iter()
+        .map(|&(e, parameter)| (e, parameter, tangent_budget))
+        .collect();
+    for e in face::p4::edges(target, f, None, false, None)? {
+        if !seam_events.iter().any(|&(crossed, _)| crossed == e) {
+            let parameter = edge::interval(target, e)?.evaluate(0.34);
+            judged.push((e, parameter, face_tangency));
+        }
+    }
+    for (e, parameter, budget) in judged {
+        for g in edge::faces(target, e, None)? {
+            if g != f
+                && rolled_supports.contains(&g)
+                && is_tangent_edge(k, target, e, parameter, budget)?
+            {
+                return Ok(Some((
+                    g,
+                    refusal(
+                        FilletErrorType::NoRoom,
+                        Some(NoRoomReason::CreaseAcrossTangentEdge),
+                        "Fillet Error: a rail leaves the face it rolls on across a tangent edge, onto a face it would cut (the blend is larger than the face allows)",
+                    ),
+                )));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// A refusal with its fillet error and typed reason.
 const fn refusal(
     code: FilletErrorType,
@@ -654,14 +1343,198 @@ const fn refusal(
     }
 }
 
+impl SessionObjects<'_> {
+    /// Whether the intermediate sheet has an open G1 setback hole.
+    fn has_open_setback(&self, executive: &FilletExecutive<FilletObject>) -> bool {
+        executive.corners.iter().any(|c| {
+            matches!(c, FilletObject::Corner(id)
+                if self.corners.get(id.0 as usize).is_some_and(FilletCorner::is_setback_open))
+        })
+    }
+
+    /// Bound every open-ended sheet before sewing: sheets on the same continuation
+    /// may overlap away from their own end planes, where they must never share topology.
+    /// The retained faces remain the owning faces of their fillet geometries.
+    #[allow(clippy::too_many_lines)] // the existing end cuts and section caps form one stage
+    pub(super) fn bound_open_fillet_ends(
+        &mut self,
+        k: &mut Kernel,
+        executive: &mut FilletExecutive<FilletObject>,
+    ) -> Result<()> {
+        if !executive.cliff_overflow
+            && !executive.open_ends.iter().any(|end| end.section)
+            && !self.has_open_setback(executive)
+        {
+            return Ok(());
+        }
+        let solvers = executive.solvers.clone();
+        for &solver in &solvers {
+            if !self.holds_its_law(k, solver)? {
+                executive.note_trim_refusal(refusal(
+                    FilletErrorType::NoRoom,
+                    Some(NoRoomReason::CliffLawNotHeld),
+                    "Fillet Error: a variable round traced on its faces' continuations does not hold its radius law",
+                ));
+                return Err(no_room(NoRoomReason::CliffLawNotHeld));
+            }
+        }
+
+        let mut faces_of = BTreeMap::new();
+        let mut approx = Vec::new();
+        for &solver in &solvers {
+            let FilletObject::Solver(id) = solver else {
+                return Err(invalid("object is not a solver"));
+            };
+            approx.push(self.solver(id)?.base().approx_tol_3d);
+            faces_of.insert(solver, self.fillet_faces(solver)?);
+        }
+        let open_ends = executive.open_ends.clone();
+        let body = self.intermediate_identity(EntityRef::Brep(BrepId::from_index(0)))?;
+        let mut sheet = self.intermediate.take().ok_or_else(|| {
+            defect(
+                "the session has no fillet body when its open ends are bounded: the \
+                     executive bounds the open ends of the fillet body it has just made",
+            )
+        })?;
+        let bounded = (|| {
+            // the ends the corners left uncut, cut off by their end faces' surfaces continued
+            // (an end's event: the end face cuts the blend whatever lies past it, a lip over a
+            // wall's top)
+            let mut note = None;
+            let mut section_ends: Vec<SectionEnd> = Vec::new();
+            // each section end's solver, whose round it ends (#2314)
+            let mut section_solvers: Vec<FilletObject> = Vec::new();
+            for end in &open_ends {
+                let FilletObject::Solver(id) = end.solver else {
+                    return Err(invalid("open end solver is not a solver"));
+                };
+                let (
+                    FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(v)),
+                    FilletObject::Topology(FilletBody::Target, EntityRef::Face(end_face)),
+                ) = (end.vertex, end.end_face)
+                else {
+                    return Err(invalid("open end is not target topology"));
+                };
+                let base = self.solver(id)?.base();
+                let solver_tol = base.approx_tol_3d;
+                let target = &*self.target;
+                let eu = base.edgeuse(0)?.ok_or_else(|| null_defect(SOLVER_EDGE))?;
+                let fil_edge = eu1::edge(target, eu)?.ok_or_else(|| null_defect(SOLVER_EDGE))?;
+                let edge_mid = edge::curve(target, fil_edge)?
+                    .ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?
+                    .evaluate_point(k, edge::interval(target, fil_edge)?.evaluate(0.5))?;
+                let vertex_point = vertex::point(target, v)?;
+                let end_surface = if end.section {
+                    // WR-706: a section end (WR-674) is cut by the section through the vertex,
+                    // normal to the filleted edge
+                    let section = section_end(k, target, fil_edge, v)?.ok_or_else(|| {
+                        SolidError::blend(
+                            OP,
+                            BlendFailure::CreaseTrimNotBuilt(
+                                CreaseTrimStop::NoSectionThroughEndVertex,
+                            ),
+                        )
+                    })?;
+                    section_ends.push(section);
+                    section_solvers.push(end.solver);
+                    Surface::from(Plane::from_normal(vertex_point, section.normal))
+                } else {
+                    face::p2::surface(target, end_face)?
+                        .ok_or_else(|| input_missing(OverflowInput::FaceSurface))?
+                        .clone_for_evaluation()?
+                };
+                let entry = faces_of.get_mut(&end.solver).ok_or_else(|| {
+                    null_defect(
+                        "an open end's solver has no fillet faces: each open end is noted \
+                             for a solver of the executive, and every solver's faces are read \
+                             before the ends are bounded",
+                    )
+                })?;
+                let mut faces: Vec<Option<FaceId>> = entry.iter().map(|&(_, f)| f).collect();
+                let cut = cut_fillet_at_open_end(
+                    k,
+                    &mut sheet,
+                    &mut faces,
+                    &end_surface,
+                    vertex_point,
+                    edge_mid,
+                    solver_tol,
+                    smos_min(solver_tol, self.target.tolerance()) * SECTION_FIT,
+                    &mut note,
+                );
+                for (slot, f) in entry.iter_mut().zip(faces) {
+                    if slot.1 != f {
+                        self.pseudo.geom_mut(slot.0)?.fillet_surface =
+                            f.map(|face| FilletSurfaceStorage::ManagedFace { body, face });
+                        slot.1 = f;
+                    }
+                }
+                // not the fork's (#2401, WR-696): an open end the end face does not cut is an
+                // overflow's, absent below the size at which the end's blend stays on its
+                // faces: that size (open)
+                if note.is_some() && cut.is_err() {
+                    executive.note_fit_on_its_faces(k, self, end.solver)?;
+                }
+                if let Some(refused) = note.take() {
+                    executive.note_trim_refusal(refused);
+                }
+                cut?;
+            }
+
+            // WR-706: each section end closed by its flat face, from the round's section to the
+            // vertex (WR-674's, as the subtraction closes it)
+            if !section_ends.is_empty() {
+                let mut tol = 0.0;
+                for &a in &approx {
+                    tol = smos_max(tol, a);
+                }
+                for (end, solver) in section_ends.iter().zip(&section_solvers) {
+                    // the end's own round's faces, as the cut left them
+                    let faces: Vec<FaceId> = faces_of
+                        .get(solver)
+                        .map_or(&[][..], Vec::as_slice)
+                        .iter()
+                        .filter_map(|&(_, f)| f)
+                        .collect();
+                    let Some(section) = section_edge(k, &sheet, end, &faces, 10.0 * tol)? else {
+                        executive.note_trim_refusal(refusal(
+                        FilletErrorType::NoRoom,
+                        Some(NoRoomReason::TangentContinuationEndUnsupported),
+                        "Fillet Error: a round ending where its edge runs on tangentially has no single section there",
+                    ));
+                        return Err(no_room(NoRoomReason::TangentContinuationEndUnsupported));
+                    };
+                    section_end_face(k, &mut sheet, end, section, 10.0 * tol)?;
+                }
+            }
+
+            Ok(())
+        })();
+        // Standalone cuts return geometry under the body's naming scheme. The live
+        // session stitches and shrinks under its issued identities, including the
+        // retained faces recorded by ManagedFace above. Restore those identities on
+        // failure too, preserving the boundary construction's original error.
+        let rebound = (|| {
+            let serial = sheet
+                .notify_serial()
+                .ok_or_else(|| invalid("intermediate body has no kernel identity"))?;
+            let naming = sheet.naming();
+            p3::rebind_geometry_owners(
+                &mut sheet,
+                |e| crate::topology::scheme_owner_identity(naming, e),
+                |e| p3::topology_ref(serial, e),
+            )
+        })();
+        self.intermediate = Some(sheet);
+        bounded.and(rebound)
+    }
+}
+
 impl FilletSession<'_> {
     /// `SmFilletExecutive::HasOpenSetBack` (the fork's ef57570): whether a corner is an
     /// open G1 setback (its hole made by the trim's imprint, no patches).
     pub(super) fn has_open_setback(&self) -> bool {
-        self.executive.corners.iter().any(|c| {
-            matches!(c, FilletObject::Corner(id)
-                if self.objects.corners.get(id.0 as usize).is_some_and(FilletCorner::is_setback_open))
-        })
+        self.objects.has_open_setback(&self.executive)
     }
 
     /// The open G1 setback corners' spring curves (`SM_FE_PRECOMPUTED` edges with a
@@ -730,7 +1603,7 @@ impl FilletSession<'_> {
         let offset = |o: &super::SolverObject| -> Result<f64> {
             Ok(o.base()
                 .surface(0)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
+                .ok_or_else(|| null_defect(SOLVER_OFFSET))?
                 .surface
                 .offset_distance())
         };
@@ -760,7 +1633,7 @@ impl FilletSession<'_> {
             }
         }
         let curve = edge::evaluation_curve(target, e)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+            .ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
         let length = curve.length(k, &edge::interval(target, e)?, crate::math::EFF_ZERO)?;
         if per[0] + per[1] > 0.0 {
             let margin = 1000.0 * edge::tolerance(target, e)?;
@@ -836,7 +1709,7 @@ impl FilletSession<'_> {
         // the signed drop of `p` on face `s`: its gap, and its side of the surface
         let drop_on_face = |s: FaceId, p: Point3| -> Result<Option<(f64, f64)>> {
             let surface = face::p2::surface(sheet, s)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
+                .ok_or_else(|| input_missing(OverflowInput::FaceSurface))?;
             let domain = face::p2::uv_domain(sheet, s)?;
             let dropped =
                 surface.drop_point::<NoObject>(k, p, &domain, &DropPointOptions::default())?;
@@ -919,7 +1792,7 @@ impl FilletSession<'_> {
                 let surface = object
                     .base()
                     .surface(0)?
-                    .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
+                    .ok_or_else(|| null_defect(SOLVER_OFFSET))?;
                 size = smos_min(size, surface.surface.offset_distance().abs());
             }
         }
@@ -966,9 +1839,9 @@ impl FilletSession<'_> {
         let on_tol = 10.0 * tol;
         let (sv, ev) = (
             edge::start_vertex(sheet, e)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's start vertex"))?,
+                .ok_or_else(|| input_missing(OverflowInput::EdgeStartVertex))?,
             edge::end_vertex(sheet, e)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's end vertex"))?,
+                .ok_or_else(|| input_missing(OverflowInput::EdgeEndVertex))?,
         );
         let (a, b) = (vertex::point(sheet, sv)?, vertex::point(sheet, ev)?);
         let curve = edge_curve(k, sheet, e)?;
@@ -990,7 +1863,7 @@ impl FilletSession<'_> {
                     continue;
                 }
                 let t_curve = edge::curve(target, te)?
-                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+                    .ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
                 if let Some((_, dist)) = drop_on(k, t_curve, &edge::interval(target, te)?, mid)? {
                     if dist <= on_tol {
                         return Ok(Some((a, b)));
@@ -1006,11 +1879,12 @@ impl FilletSession<'_> {
     /// the target: the blends built on their faces' continuations, the sharp edges moved
     /// to where they meet the body.
     ///
-    /// Each variable round on planes must hold its law; each open end is cut by its end
-    /// face's plane ([`cut_fillet_at_open_end`]). Each sheet face is sectioned by every
+    /// Each variable round on planes holds its law and each open end is already bounded
+    /// by its end plane before sewing ([`SessionObjects::bound_open_fillet_ends`]).
+    /// Each sheet face is sectioned by every
     /// face of the target near it whose surface holds none of its boundary ([`creases`]); a
     /// crease is kept where it lies inside the face it is on and the sheet face
-    /// ([`pieces_in_face`]), and the sheet face is split along all of them at once; a
+    /// ([`crate::blend::fillet_overflow::pieces_in_face`]), and the sheet face is split along all of them at once; a
     /// piece whose inner point lies inside the target is kept, the others go. A support
     /// face whose kept rail runs past its boundary into the material is carried on along
     /// its plane ([`extend`]). The kept pieces' lamina edges are imprinted on the target
@@ -1027,161 +1901,80 @@ impl FilletSession<'_> {
     /// manifold solid. Each refusal is noted in the error info.
     ///
     /// # Errors
-    /// The refusals as `SM_ERR`; those of the steps.
+    /// The refusals as `SM_ERR`: a blend too large as [`BlendFailure::NoRoom`] with the
+    /// reason noted, any other as a [`BlendFailure::CreaseTrimNotBuilt`] naming why
+    /// ([`CreaseTrimStop`]); a face or edge read without its geometry,
+    /// [`BlendFailure::OverflowInputMissing`]; those of the steps.
     #[allow(clippy::too_many_lines)] // one fork routine
     pub(super) fn trim_at_creases(&mut self, k: &mut Kernel) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::session::trim_at_creases");
         if self.objects.intermediate.is_none() {
-            return Err(SolidError::blend_missing(OP, "the intermediate body"));
+            return Err(null_defect(INTERMEDIATE));
         }
         let solvers = self.executive.solvers.clone();
-        for &solver in &solvers {
-            if !self.holds_its_law(k, solver)? {
-                self.note_refusal(refusal(
-                    FilletErrorType::NoRoom,
-                    Some(NoRoomReason::CliffLawNotHeld),
-                    "Fillet Error: a variable round traced on its faces' continuations does not hold its radius law",
-                ));
-                return Err(SolidError::blend_failed(
-                    OP,
-                    "a variable round does not hold its radius law on its faces' continuations",
-                ));
-            }
-        }
-
         // What the trim reads of the solvers, before the sheet leaves the session.
         let mut faces_of: BTreeMap<FilletObject, Vec<(FilletGeomId, Option<FaceId>)>> =
             BTreeMap::new();
         let mut approx = Vec::new();
-        let mut tangency = 0.0;
+        let mut tangency = Vec::new();
+        let mut face_tangency = 0.0;
         let mut blended_edges: Vec<EdgeId> = Vec::new();
         for &solver in &solvers {
             let FilletObject::Solver(id) = solver else {
                 return Err(invalid("object is not a solver"));
             };
-            let base = self.objects.solver(id)?.base();
+            let active_solver = self.objects.solver(id)?;
+            let base = active_solver.base();
             approx.push(base.approx_tol_3d);
-            tangency = smos_max(tangency, base.tangency_tolerance());
-            let eu = base
-                .edgeuse(0)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
-            blended_edges.push(
-                eu1::edge(self.objects.target, eu)?
-                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?,
-            );
-            faces_of.insert(solver, self.fillet_faces(solver)?);
-        }
-        let open_ends = self.executive.open_ends.clone();
-        // WR-706: a section end (WR-674) is trimmed here only with the crease trim
-        let section_trim = k.fixes.fillet_overflow_trim_at_creases;
-        if !section_trim && open_ends.iter().any(|end| end.section) {
-            return Err(invalid("a section end is not trimmed at its creases"));
+            let budget = if let Some(offsets) = active_solver.constant_offsets()? {
+                base.constant_offset_rollover_tolerance(k, self.objects.target, offsets)
+            } else {
+                base.tangency_tolerance()
+            };
+            tangency.push(budget);
+            face_tangency = smos_max(face_tangency, base.tangency_tolerance());
+            let eu = base.edgeuse(0)?.ok_or_else(|| null_defect(SOLVER_EDGE))?;
+            blended_edges
+                .push(eu1::edge(self.objects.target, eu)?.ok_or_else(|| null_defect(SOLVER_EDGE))?);
+            faces_of.insert(solver, self.objects.fillet_faces(solver)?);
         }
 
-        let mut sheet = self
+        let sheet = self
             .objects
             .intermediate
             .take()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the intermediate body"))?;
+            .ok_or_else(|| null_defect(INTERMEDIATE))?;
 
-        // the ends the corners left uncut, cut off by their end faces' surfaces continued
-        // (an end's event: the end face cuts the blend whatever lies past it, a lip over a
-        // wall's top)
-        let mut note = None;
-        let mut section_ends: Vec<SectionEnd> = Vec::new();
-        // each section end's solver, whose round it ends (#2314)
-        let mut section_solvers: Vec<FilletObject> = Vec::new();
-        for end in &open_ends {
+        // These ends were already built and capped before sewing. Losing their solver
+        // topology or section here is a stage defect, not a geometric refusal.
+        let mut section_ends = Vec::new();
+        for end in self.executive.open_ends.iter().filter(|end| end.section) {
             let FilletObject::Solver(id) = end.solver else {
                 return Err(invalid("open end solver is not a solver"));
             };
-            let (
-                FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(v)),
-                FilletObject::Topology(FilletBody::Target, EntityRef::Face(end_face)),
-            ) = (end.vertex, end.end_face)
+            let FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(v)) = end.vertex
             else {
-                return Err(invalid("open end is not target topology"));
+                return Err(invalid("open end is not a target vertex"));
             };
-            let base = self.objects.solver(id)?.base();
-            let solver_tol = base.approx_tol_3d;
-            let target = &*self.objects.target;
-            let eu = base
+            let eu = self
+                .objects
+                .solver(id)?
+                .base()
                 .edgeuse(0)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
-            let fil_edge = eu1::edge(target, eu)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
-            let edge_mid = edge::curve(target, fil_edge)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?
-                .evaluate_point(k, edge::interval(target, fil_edge)?.evaluate(0.5))?;
-            let vertex_point = vertex::point(target, v)?;
-            let end_surface = if end.section {
-                // WR-706: a section end (WR-674) is cut by the section through the vertex,
-                // normal to the filleted edge
-                let section = section_end(k, target, fil_edge, v)?.ok_or_else(|| {
-                    SolidError::blend_failed(OP, "no section through the end vertex")
-                })?;
-                section_ends.push(section);
-                section_solvers.push(end.solver);
-                Surface::from(Plane::from_normal(vertex_point, section.normal))
-            } else {
-                face::p2::surface(target, end_face)?
-                    .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
-                    .clone_for_evaluation()?
-            };
-            let entry = faces_of
-                .get_mut(&end.solver)
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's fillet faces"))?;
-            let mut faces: Vec<Option<FaceId>> = entry.iter().map(|&(_, f)| f).collect();
-            let cut = cut_fillet_at_open_end(
-                k,
-                &mut sheet,
-                &mut faces,
-                &end_surface,
-                vertex_point,
-                edge_mid,
-                solver_tol,
-                &mut note,
+                .ok_or_else(|| defect(SECTION_END_SOLVER))?;
+            let edge =
+                eu1::edge(self.objects.target, eu)?.ok_or_else(|| defect(SECTION_END_SOLVER))?;
+            section_ends.push(
+                section_end(k, self.objects.target, edge, v)?.ok_or_else(|| {
+                    defect(
+                        "a section end has no section through its vertex: the bound of the open \
+                     ends found that section on the same edge and vertex of the unchanged \
+                     target before sewing",
+                    )
+                })?,
             );
-            for (slot, f) in entry.iter_mut().zip(faces) {
-                slot.1 = f;
-            }
-            // not the fork's (#2401, WR-696): an open end the end face does not cut is an
-            // overflow's, absent below the size at which the end's blend stays on its
-            // faces: that size (open)
-            if note.is_some() && cut.is_err() {
-                self.executive
-                    .note_fit_on_its_faces(k, &mut self.objects, end.solver)?;
-            }
-            self.noted(note.take(), cut)?;
         }
-
-        // WR-706: each section end closed by its flat face, from the round's section to the
-        // vertex (WR-674's, as the subtraction closes it)
-        if !section_ends.is_empty() {
-            let mut tol = 0.0;
-            for &a in &approx {
-                tol = smos_max(tol, a);
-            }
-            for (end, solver) in section_ends.iter().zip(&section_solvers) {
-                // the end's own round's faces, as the cut left them
-                let faces: Vec<FaceId> = faces_of
-                    .get(solver)
-                    .map_or(&[][..], Vec::as_slice)
-                    .iter()
-                    .filter_map(|&(_, f)| f)
-                    .collect();
-                let Some(section) = section_edge(k, &sheet, end, &faces, 10.0 * tol)? else {
-                    self.objects.intermediate = Some(sheet);
-                    self.note_refusal(refusal(
-                        FilletErrorType::NoRoom,
-                        Some(NoRoomReason::TangentContinuationEndUnsupported),
-                        "Fillet Error: a round ending where its edge runs on tangentially has no single section there",
-                    ));
-                    return Err(SolidError::blend_failed(OP, "a round that ends where its edge runs on tangentially has no single section there"));
-                };
-                section_end_face(k, &mut sheet, end, section, 10.0 * tol)?;
-            }
-        }
+        let mut note = None;
 
         // the target is trimmed in place; a failed trim puts it back as it was, from a
         // snapshot that keeps its geometry's owners (#2715: a clone's surfaces have none)
@@ -1193,7 +1986,8 @@ impl FilletSession<'_> {
             &faces_of,
             &blended_edges,
             &approx,
-            tangency,
+            &tangency,
+            face_tangency,
             &section_ends,
             &mut note,
         );
@@ -1204,6 +1998,65 @@ impl FilletSession<'_> {
             self.objects.target.restore(kept);
         }
         trimmed
+    }
+
+    /// The two creases that touch at the seam of a closed strip end on different
+    /// parameter sides. Cut it at an interior section first so the following
+    /// face splits retain both arcs of the closed contact rail at the seam.
+    fn divide_closed_cliff_strips(
+        &mut self,
+        k: &mut Kernel,
+        sheet: &mut Brep,
+        solvers: &[FilletObject],
+        round_of: &mut BTreeMap<FaceId, usize>,
+        tol: f64,
+    ) -> Result<()> {
+        if self.executive.continued_cliffs.is_empty() {
+            return Ok(());
+        }
+        for (face, index) in round_of.clone() {
+            let Some(solver) = solvers.get(index) else {
+                continue;
+            };
+            if !self.executive.continued_cliffs.contains_key(solver) {
+                continue;
+            }
+            let domain = face::p2::uv_domain(sheet, face)?;
+            let surface = face::p2::surface(sheet, face)?.ok_or_else(|| {
+                SolidError::blend(
+                    OP,
+                    BlendFailure::CliffInputMissing {
+                        face,
+                        input: CliffInput::Surface,
+                    },
+                )
+            })?;
+            if !surface.is_periodic(k, &domain, SurfParamType::U)? {
+                continue;
+            }
+            let section = surface
+                .create_iso_parametric_curve(
+                    k,
+                    SurfParamType::U,
+                    domain.evaluate(0.5, 0.5).x,
+                    tol,
+                    Some(&domain),
+                    false,
+                )?
+                .curve;
+            let (extra, _) = with_kernel_callbacks(k, sheet, |k, b, env| {
+                merge_curves(k, b, env, face, tol, vec![section], None)
+            })?;
+            if extra.is_empty() {
+                return Err(SolidError::blend(
+                    OP,
+                    BlendFailure::ClosedCliffWouldNotSplit { face },
+                ));
+            }
+            self.copy_divided_blend_face_mark(sheet, face, &extra)?;
+            round_of.extend(extra.into_iter().map(|part| (part, index)));
+        }
+        Ok(())
     }
 
     /// The fork's `TrimAtCreases` from its tolerances on: `sheet` (the open ends cut)
@@ -1217,15 +2070,27 @@ impl FilletSession<'_> {
         faces_of: &BTreeMap<FilletObject, Vec<(FilletGeomId, Option<FaceId>)>>,
         blended_edges: &[EdgeId],
         approx: &[f64],
-        tangency: f64,
+        tangency: &[f64],
+        face_tangency: f64,
         section_ends: &[SectionEnd],
         note: &mut Option<Refusal>,
     ) -> Result<()> {
-        let refuse = |note: &mut Option<Refusal>, r: Refusal| -> Result<()> {
-            *note = Some(r);
-            Err(SolidError::blend_failed(
+        // a refusal for a blend too large, noted with its reason and failing with it
+        let refuse_no_room =
+            |note: &mut Option<Refusal>, reason: NoRoomReason, comment| -> Result<()> {
+                *note = Some(refusal(FilletErrorType::NoRoom, Some(reason), comment));
+                Err(no_room(reason))
+            };
+        // a refusal with no reason a size decides, noted under `code` and failing with `stop`
+        let refuse = |note: &mut Option<Refusal>,
+                      code: FilletErrorType,
+                      stop: CreaseTrimStop,
+                      comment|
+         -> Result<()> {
+            *note = Some(refusal(code, None, comment));
+            Err(SolidError::blend(
                 OP,
-                "the trim at the creases is refused",
+                BlendFailure::CreaseTrimNotBuilt(stop),
             ))
         };
         let mut tol = sheet.tolerance();
@@ -1238,14 +2103,7 @@ impl FilletSession<'_> {
         // the part resolves, has no topology to build
         if self.strip_below_resolution(k, &sheet, blended_edges, tol)? {
             self.note_fit_of_the_strip(solvers, blended_edges)?;
-            return refuse(
-                note,
-                refusal(
-                    FilletErrorType::NoRoom,
-                    Some(NoRoomReason::StripBelowResolution),
-                    "Fillet Error: a blend past its faces would leave a strip of the body along an edge thinner than the part resolves: a smaller blend keeps it",
-                ),
-            );
+            return refuse_no_room(note, NoRoomReason::StripBelowResolution, "Fillet Error: a blend past its faces would leave a strip of the body along an edge thinner than the part resolves: a smaller blend keeps it");
         }
         // the blended edges' curves, to find their pieces after the imprint
         let mut blended_curves = Vec::new();
@@ -1279,7 +2137,10 @@ impl FilletSession<'_> {
                 }
             }
         }
+        self.divide_closed_cliff_strips(k, &mut sheet, solvers, &mut round_of, tol)?;
         let mut kept_rounds: BTreeSet<usize> = BTreeSet::new();
+        // #18646: each kept piece of a round's face, with its round
+        let mut piece_round: BTreeMap<FaceId, usize> = BTreeMap::new();
 
         // each round's side of the body (the fork's ce748fa): a
         // convex blend's sheet lies in the material it takes off, a concave blend's (an open
@@ -1304,13 +2165,36 @@ impl FilletSession<'_> {
         let mut edge_creases: Vec<Curve> = Vec::new();
         // #17633: each such crease with the face it crosses
         let mut face_creases: Vec<(FaceId, Curve)> = Vec::new();
+        let mut continued_walls: BTreeMap<FaceId, BTreeSet<EdgeId>> = BTreeMap::new();
         // WR-717: the body's edges those creases stand for
         let mut crease_edges: Vec<EdgeId> = Vec::new();
         for s in crate::topology::brep::p1::faces(&sheet, None)? {
+            // Each round uses its own section budget; a shared corner must meet all.
+            let tangent_budget = if let Some(&i) = round_of.get(&s) {
+                tangency.get(i).copied()
+            } else {
+                tangency.iter().copied().reduce(f64::min)
+            }
+            .ok_or_else(|| {
+                SolidError::blend_crossing_input_missing(OP, CrossingInput::SheetFaceTangencyBudget)
+            })?;
             let mut sheet_box =
                 crate::query::face::p1::calculate_bounding_box(k, &sheet, s, false)?;
             sheet_box.expand_absolute(on_tol);
             let sheet_edges = face::p4::edges(&sheet, s, None, false, None)?;
+            let mut cliffs = BTreeMap::new();
+            if let Some(crossings) = round_of
+                .get(&s)
+                .and_then(|&i| solvers.get(i))
+                .and_then(|solver| self.executive.continued_cliffs.get(solver))
+            {
+                for &(rim, wall) in crossings {
+                    continued_walls.entry(wall).or_default().insert(rim);
+                    if let std::collections::btree_map::Entry::Vacant(entry) = cliffs.entry(wall) {
+                        entry.insert(outward_plane(k, self.objects.target, wall)?);
+                    }
+                }
+            }
             let mut pieces: Vec<Curve> = Vec::new();
             let mut only: Option<Surface> = None;
             let mut crossed = 0_usize;
@@ -1332,10 +2216,7 @@ impl FilletSession<'_> {
                         continue;
                     }
                     holds = edge_on_surface(k, &sheet, e, self.objects.target, f, on_tol)?;
-                    if holds
-                        && k.fixes.fillet_overflow_crease_along_edge
-                        && edge_on_surface(k, &sheet, e, self.objects.target, f, tol)?
-                    {
+                    if holds && edge_on_surface(k, &sheet, e, self.objects.target, f, tol)? {
                         held.insert(f);
                     }
                 }
@@ -1347,20 +2228,16 @@ impl FilletSession<'_> {
                 // WR-717: a face that holds a rail only to the looser `on_tol` (a rail that
                 // runs past it by less than that, beside the edge where the sheet crosses
                 // it) is still looked at for creases
-                let skip = if k.fixes.fillet_overflow_crease_along_edge {
-                    held.contains(&f)
-                } else {
-                    supports.contains(&f)
-                };
-                if bx.are_disjoint(&sheet_box, on_tol) || skip {
+                let continues = cliffs.contains_key(&f);
+                if !continues && (bx.are_disjoint(&sheet_box, on_tol) || held.contains(&f)) {
                     continue;
                 }
-                // fitted to the body's own accuracy, so that creases meeting at a corner of
-                // the sheet (on two faces past a cliff) meet there within it; exact
-                // sections stay exact
-                // Not upstream (#10876): the Roll-over's torus against a cliff face parallel
-                // to its axis, its creases as certified graphs over the face's profile
-                let certified = if self.executive.roll_over_pass {
+                // fitted to a thousandth of the body's accuracy (#17673, `SECTION_FIT`), so
+                // that creases meeting at a corner of the sheet (on two faces past a cliff)
+                // meet there well within it; exact sections stay exact
+                // Where a roll-over or continued cliff meets a torus parallel to its axis,
+                // use the certified creases over the face's profile (#10876).
+                let certified = if self.executive.roll_over_pass || continues {
                     match (
                         face::p2::surface(&sheet, s)?,
                         face::p2::surface(self.objects.target, f)?,
@@ -1377,62 +2254,91 @@ impl FilletSession<'_> {
                 };
                 let found = match certified {
                     Some(found) => found,
-                    None => creases(k, &mut sheet, s, self.objects.target, f, body_tol)?,
+                    None => creases(
+                        k,
+                        &mut sheet,
+                        s,
+                        self.objects.target,
+                        f,
+                        body_tol * SECTION_FIT,
+                    )?,
                 };
                 // each crease where it lies inside both faces
                 let mut in_face = Vec::new();
-                for c in &found {
-                    pieces_in_face(k, c, self.objects.target, f, tol, &mut in_face)?;
+                let mut along = Vec::new();
+                let mut seam_events = Vec::new();
+                if continues {
+                    in_face = found;
+                } else {
+                    for c in &found {
+                        seam_events.extend(pieces_in_face_to_ends(
+                            k,
+                            c,
+                            self.objects.target,
+                            f,
+                            tol,
+                            &mut in_face,
+                            &mut along,
+                        )?);
+                    }
                 }
                 // Not the fork's (WR-717, #2385): a crease that runs along an edge of the
                 // face, within tolerance, is that edge. The sheet is split along it as along
-                // any crease, and the edge stands as its imprint (below).
-                if k.fixes.fillet_overflow_crease_along_edge {
-                    let first = in_face.len();
-                    for c in &found {
-                        pieces_along_edges(k, c, self.objects.target, f, tol, &mut in_face)?;
-                    }
-                    for c in in_face.get(first..).unwrap_or_default() {
-                        edge_creases.push(c.copy(k)?);
-                        face_creases.push((f, c.copy(k)?));
+                // any crease, and the edge stands as its imprint (below). #17673: a run a
+                // piece was run on over is split along once, in that piece; it still stands
+                // for its edge.
+                for (c, taken) in along {
+                    edge_creases.push(c.copy(k)?);
+                    face_creases.push((f, c.copy(k)?));
+                    if !taken {
+                        in_face.push(c);
                     }
                 }
                 let before = pieces.len();
                 for c in &in_face {
-                    pieces_in_face(k, c, &mut sheet, s, tol, &mut pieces)?;
+                    // #17673: each piece that ends on the sheet face's boundary ends where
+                    // that edge crosses the face
+                    pieces_ending_at_meets(
+                        k,
+                        c,
+                        &mut sheet,
+                        s,
+                        self.objects.target,
+                        f,
+                        tol,
+                        &mut pieces,
+                    )?;
                 }
                 if pieces.len() > before {
                     // A face past a cliff meets the face the rail leaves (one the blend
                     // rolls on) at a sharp edge. One that runs on from it tangentially (a
                     // round already on the face) is no cliff: the rail would roll over
                     // onto it, and the ball does not fit between.
-                    for e in face::p4::edges(self.objects.target, f, None, false, None)? {
-                        for g in edge::faces(self.objects.target, e, None)? {
-                            if g != f
-                                && supports.contains(&g)
-                                && rolled_on.contains(&g)
-                                && is_tangent_edge(k, self.objects.target, e, tangency)?
-                            {
-                                // the fork's NoteFitOnFace(g) (49f393d, WR-696)
-                                let face =
-                                    FilletObject::Topology(FilletBody::Target, EntityRef::Face(g));
-                                self.executive
-                                    .note_fit_on_face(k, &mut self.objects, face)?;
-                                return refuse(
-                                    note,
-                                    refusal(
-                                        FilletErrorType::NoRoom,
-                                        Some(NoRoomReason::CreaseAcrossTangentEdge),
-                                        "Fillet Error: a rail leaves the face it rolls on across a tangent edge, onto a face it would cut (the blend is larger than the face allows)",
-                                    ),
-                                );
-                            }
-                        }
+                    let rolled_supports: BTreeSet<FaceId> =
+                        supports.intersection(&rolled_on).copied().collect();
+                    if let Some((g, r)) = crease_across_tangent_edge(
+                        k,
+                        self.objects.target,
+                        f,
+                        &seam_events,
+                        &rolled_supports,
+                        tangent_budget,
+                        face_tangency,
+                    )? {
+                        // the fork's NoteFitOnFace(g) (49f393d, WR-696)
+                        let face = FilletObject::Topology(FilletBody::Target, EntityRef::Face(g));
+                        self.executive
+                            .note_fit_on_face(k, &mut self.objects, face)?;
+                        return refuse_no_room(
+                            note,
+                            NoRoomReason::CreaseAcrossTangentEdge,
+                            r.comment,
+                        );
                     }
                     crossed += 1;
                     only = Some(
                         face::p2::surface(self.objects.target, f)?
-                            .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
+                            .ok_or_else(|| input_missing(OverflowInput::FaceSurface))?
                             .clone_for_evaluation()?,
                     );
                 }
@@ -1445,6 +2351,7 @@ impl FilletSession<'_> {
                 })?
                 .0;
             }
+            self.copy_divided_blend_face_mark(&sheet, s, &new_faces)?;
             // keep the pieces inside the target
             let mut all = vec![s];
             all.extend(new_faces);
@@ -1461,11 +2368,9 @@ impl FilletSession<'_> {
                 if on_boundary {
                     return refuse(
                         note,
-                        refusal(
-                            FilletErrorType::BadMerge,
-                            None,
-                            "Fillet Error: a blend past its faces lies on the body's boundary away from its creases",
-                        ),
+                        FilletErrorType::BadMerge,
+                        CreaseTrimStop::PieceOnBoundaryAwayFromCreases,
+                        "Fillet Error: a blend past its faces lies on the body's boundary away from its creases",
                     );
                 }
                 let mut piece_adds = any_adds;
@@ -1474,17 +2379,19 @@ impl FilletSession<'_> {
                 } else if any_adds && any_takes {
                     return refuse(
                         note,
-                        refusal(
-                            FilletErrorType::CornerUnsupported,
-                            None,
-                            "Fillet Error: a corner's face between blends that add and blends that take off material, past their faces or at an open setback, is not built",
-                        ),
+                        FilletErrorType::CornerUnsupported,
+                        CreaseTrimStop::CornerBetweenAddingAndTaking,
+                        "Fillet Error: a corner's face between blends that add and blends that take off material, past their faces or at an open setback, is not built",
                     );
                 }
-                if if piece_adds { inside } else { !inside } {
+                let beyond_cliff = cliffs
+                    .values()
+                    .any(|&(at, outward)| (inner - at).dot(outward) > tol);
+                if beyond_cliff || if piece_adds { inside } else { !inside } {
                     with_kernel_callbacks(k, &mut sheet, |k, b, env| delete(k, b, env, p))?;
                 } else if let Some(&i) = round_of.get(&s) {
                     kept_rounds.insert(i);
+                    piece_round.insert(p, i);
                 }
             }
         }
@@ -1511,10 +2418,7 @@ impl FilletSession<'_> {
                 } else {
                     "Fillet Error: a blend past its faces keeps no length of its edge: its corners take the whole of it (the blend is larger than the faces allow)"
                 };
-                return refuse(
-                    note,
-                    refusal(FilletErrorType::NoRoom, Some(reason), comment),
-                );
+                return refuse_no_room(note, reason, comment);
             }
         }
 
@@ -1542,51 +2446,90 @@ impl FilletSession<'_> {
             }
             lamina_edges = kept_lamina;
         }
+        // #18646: a rail on a face of its own blended edge extends only that edge's faces.
+        // Matching another face's surface does not make that face a support of this round,
+        // whether the faces share a surface or merely meet along the rail. Creases and
+        // section ends with no own-face match keep all the faces they lie on.
+        let mut on_faces: Vec<Vec<FaceId>> = Vec::new();
+        for &e in &lamina_edges {
+            let mut on = Vec::new();
+            for &f in &target_faces {
+                if edge_on_surface(k, &sheet, e, self.objects.target, f, on_tol)? {
+                    on.push(f);
+                }
+            }
+            let mut own: Vec<FaceId> = Vec::new();
+            for s in edge::faces(&sheet, e, None)? {
+                let round = piece_round.get(&s).or_else(|| round_of.get(&s));
+                if let Some(&be) = round.and_then(|&i| blended_edges.get(i)) {
+                    own.extend(edge::faces(self.objects.target, be, None)?);
+                }
+            }
+            if on.iter().any(|f| own.contains(f)) {
+                on.retain(|f| own.contains(f));
+            }
+            on_faces.push(on);
+        }
         let mut extensions: Vec<Extension> = Vec::new();
         let mut along: Vec<Curve> = Vec::new();
         for &f in &target_faces {
             let mut rails = Vec::new();
-            for &e in &lamina_edges {
-                if edge_on_surface(k, &sheet, e, self.objects.target, f, on_tol)? {
+            let mut cliff_rails = Vec::new();
+            let rim = continued_walls.get(&f);
+            for (&e, on) in lamina_edges.iter().zip(&on_faces) {
+                if on.contains(&f) {
                     let start = edge::start_vertex(&sheet, e)?
-                        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's start vertex"))?;
+                        .ok_or_else(|| input_missing(OverflowInput::EdgeStartVertex))?;
                     let end = edge::end_vertex(&sheet, e)?
-                        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's end vertex"))?;
-                    rails.push(Rail {
+                        .ok_or_else(|| input_missing(OverflowInput::EdgeEndVertex))?;
+                    let rail = Rail {
                         curve: edge_curve(k, &sheet, e)?,
                         start,
                         end,
                         start_point: vertex::point(&sheet, start)?,
                         end_point: vertex::point(&sheet, end)?,
-                    });
-                }
-            }
-            if rails.is_empty() {
-                continue;
-            }
-            let outcome = extend(k, self.objects.target, f, &rails, blended_edges, tol)?;
-            match outcome {
-                ExtendOutcome::Refused(why) => {
-                    // the fork's NoteFitOnFace(f) (49f393d, WR-696)
-                    let face = FilletObject::Topology(FilletBody::Target, EntityRef::Face(f));
-                    self.executive
-                        .note_fit_on_face(k, &mut self.objects, face)?;
-                    return refuse(
-                        note,
-                        refusal(
-                            FilletErrorType::NoRoom,
-                            Some(NoRoomReason::RailRunsPastFaceIntoMaterial),
-                            why,
-                        ),
-                    );
-                }
-                ExtendOutcome::Extended(made) => {
-                    for ext in &made {
-                        for &e in &ext.along {
-                            along.push(edge_curve(k, self.objects.target, e)?);
-                        }
+                    };
+                    // A shared target face can carry an ordinary rail from a
+                    // different span. Only this span's crease extends into void.
+                    let fills_void = rim.is_some()
+                        && edge::faces(&sheet, e, None)?
+                            .iter()
+                            .filter_map(|face| piece_round.get(face))
+                            .filter_map(|&i| solvers.get(i))
+                            .filter_map(|solver| self.executive.continued_cliffs.get(solver))
+                            .flatten()
+                            .any(|&(_, wall)| wall == f);
+                    if fills_void {
+                        cliff_rails.push(rail);
+                    } else {
+                        rails.push(rail);
                     }
-                    extensions.extend(made);
+                }
+            }
+            for (rails, rim) in [(&rails, None), (&cliff_rails, rim)] {
+                if rails.is_empty() {
+                    continue;
+                }
+                match extend(k, self.objects.target, f, rails, blended_edges, tol, rim)? {
+                    ExtendOutcome::Refused(why) => {
+                        // the fork's NoteFitOnFace(f) (49f393d, WR-696)
+                        let face = FilletObject::Topology(FilletBody::Target, EntityRef::Face(f));
+                        self.executive
+                            .note_fit_on_face(k, &mut self.objects, face)?;
+                        return refuse_no_room(
+                            note,
+                            NoRoomReason::RailRunsPastFaceIntoMaterial,
+                            why,
+                        );
+                    }
+                    ExtendOutcome::Extended(made) => {
+                        for ext in &made {
+                            for &e in &ext.along {
+                                along.push(edge_curve(k, self.objects.target, e)?);
+                            }
+                        }
+                        extensions.extend(made);
+                    }
                 }
             }
         }
@@ -1675,9 +2618,9 @@ impl FilletSession<'_> {
             for e in crate::topology::brep::p1::edges(target, None)? {
                 let (sv, ev) = (
                     edge::start_vertex(target, e)?
-                        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's start vertex"))?,
+                        .ok_or_else(|| input_missing(OverflowInput::EdgeStartVertex))?,
                     edge::end_vertex(target, e)?
-                        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's end vertex"))?,
+                        .ok_or_else(|| input_missing(OverflowInput::EdgeEndVertex))?,
                 );
                 let (s_pt, e_pt) = (vertex::point(target, sv)?, vertex::point(target, ev)?);
                 if (s_pt.distance(a) <= on_tol && e_pt.distance(b) <= on_tol)
@@ -1690,11 +2633,9 @@ impl FilletSession<'_> {
             if !found {
                 return refuse(
                     note,
-                    refusal(
-                        FilletErrorType::BadMerge,
-                        None,
-                        "Fillet Error: a round's section end lies along an edge of the body that its rail does not cut",
-                    ),
+                    FilletErrorType::BadMerge,
+                    CreaseTrimStop::SectionEndAlongUncutEdge,
+                    "Fillet Error: a round's section end lies along an edge of the body that its rail does not cut",
                 );
             }
         }
@@ -1706,9 +2647,9 @@ impl FilletSession<'_> {
         for &e in &target_edges {
             let (sv, ev) = (
                 edge::start_vertex(target, e)?
-                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge's start vertex"))?,
+                    .ok_or_else(|| input_missing(OverflowInput::EdgeStartVertex))?,
                 edge::end_vertex(target, e)?
-                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge's end vertex"))?,
+                    .ok_or_else(|| input_missing(OverflowInput::EdgeEndVertex))?,
             );
             let (s_pt, e_pt) = (vertex::point(target, sv)?, vertex::point(target, ev)?);
             // a piece of an edge an extension runs along, cut at its crossing by the imprint
@@ -1724,8 +2665,8 @@ impl FilletSession<'_> {
             if along.is_empty() && edge_creases.is_empty() {
                 continue;
             }
-            let curve = edge::curve(target, e)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+            let curve =
+                edge::curve(target, e)?.ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
             let mid = curve.evaluate_point(k, edge::interval(target, e)?.evaluate(0.5))?;
             for c in &along {
                 if let Some((_, dist)) = drop_on(k, c, &c.natural_interval(), mid)? {
@@ -1753,8 +2694,8 @@ impl FilletSession<'_> {
         // the sheet edge to be on the face at
         let mut sew_tol = tol;
         for &e in &lamina_edges {
-            let curve = edge::curve(&sheet, e)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+            let curve =
+                edge::curve(&sheet, e)?.ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
             let ivl = edge::interval(&sheet, e)?;
             let mut worst = 0.0_f64;
             let mut along_one = !crease_edges.is_empty();
@@ -1765,7 +2706,7 @@ impl FilletSession<'_> {
                 let mut best = f64::INFINITY;
                 for &ce in &crease_edges {
                     let c = edge::curve(target, ce)?
-                        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+                        .ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
                     if let Some((_, dist)) = drop_on(k, c, &edge::interval(target, ce)?, p)? {
                         best = smos_min(best, dist);
                     }
@@ -1781,8 +2722,8 @@ impl FilletSession<'_> {
         let mut gone_order: Vec<FaceId> = Vec::new();
         let mut front: Vec<FaceId> = Vec::new();
         for &e in &target_edges {
-            let curve = edge::curve(target, e)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+            let curve =
+                edge::curve(target, e)?.ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
             let mid = curve.evaluate_point(k, edge::interval(target, e)?.evaluate(0.5))?;
             let mut on_blended = false;
             for c in &blended_curves {
@@ -1819,21 +2760,17 @@ impl FilletSession<'_> {
         if gone.is_empty() {
             return refuse(
                 note,
-                refusal(
-                    FilletErrorType::BadMerge,
-                    None,
-                    "Fillet Error: a blend past its faces takes off nothing round its blended edges",
-                ),
+                FilletErrorType::BadMerge,
+                CreaseTrimStop::TakesOffNothing,
+                "Fillet Error: a blend past its faces takes off nothing round its blended edges",
             );
         }
         if gone.len() >= crate::topology::brep::p1::num_faces(target) {
             return refuse(
                 note,
-                refusal(
-                    FilletErrorType::BadMerge,
-                    None,
-                    "Fillet Error: a blend past its faces reaches every face of the body (its creases and rails enclose no part of it)",
-                ),
+                FilletErrorType::BadMerge,
+                CreaseTrimStop::ReachesEveryFace,
+                "Fillet Error: a blend past its faces reaches every face of the body (its creases and rails enclose no part of it)",
             );
         }
         self.with_target_env(k, |k, b, env, _| {
@@ -1850,11 +2787,9 @@ impl FilletSession<'_> {
             if kept_off {
                 return refuse(
                     note,
-                    refusal(
-                        FilletErrorType::BadMerge,
-                        None,
-                        "Fillet Error: a body edge moved onto a blend's crease leaves geometry the trim does not take off",
-                    ),
+                    FilletErrorType::BadMerge,
+                    CreaseTrimStop::MovedEdgeLeavesGeometry,
+                    "Fillet Error: a body edge moved onto a blend's crease leaves geometry the trim does not take off",
                 );
             }
         }
@@ -1895,12 +2830,10 @@ impl FilletSession<'_> {
                             break;
                         }
                         let (sv, ev) = (
-                            edge::start_vertex(&sheet, e)?.ok_or_else(|| {
-                                SolidError::blend_missing(OP, "the edge's start vertex")
-                            })?,
-                            edge::end_vertex(&sheet, e)?.ok_or_else(|| {
-                                SolidError::blend_missing(OP, "the edge's end vertex")
-                            })?,
+                            edge::start_vertex(&sheet, e)?
+                                .ok_or_else(|| input_missing(OverflowInput::EdgeStartVertex))?,
+                            edge::end_vertex(&sheet, e)?
+                                .ok_or_else(|| input_missing(OverflowInput::EdgeEndVertex))?,
                         );
                         if !edge::is_lamina(&sheet, e)?
                             || vertex::point(&sheet, sv)?.distance(p) <= 10.0 * tol
@@ -1909,7 +2842,7 @@ impl FilletSession<'_> {
                             continue;
                         }
                         let curve = edge::curve(&sheet, e)?
-                            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+                            .ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
                         if let Some((t, dist)) = drop_on(k, curve, &edge::interval(&sheet, e)?, p)?
                         {
                             if dist <= 10.0 * tol {
@@ -1994,11 +2927,9 @@ impl FilletSession<'_> {
             {
                 return refuse(
                     note,
-                    refusal(
-                        FilletErrorType::BadMerge,
-                        None,
-                        "Fillet Error: a blend past its faces does not sew into the body along its creases and rails",
-                    ),
+                    FilletErrorType::BadMerge,
+                    CreaseTrimStop::NotSewn,
+                    "Fillet Error: a blend past its faces does not sew into the body along its creases and rails",
                 );
             }
 
@@ -2090,9 +3021,66 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
     use super::*;
-    use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::crv_basic::Curve as NlCurve;
     use crate::nurbs::math::{CPoint, NOW};
+
+    /// The trim tolerance the end-construction tests pass.
+    const TOL: f64 = 1e-6;
+
+    /// The control points of `c` (a B-spline), each with its weight.
+    fn control_polygon(c: &BSplineCurve) -> Vec<(Point3, f64)> {
+        (0..c.number_control_points().unwrap())
+            .map(|i| {
+                c.control_point(ControlPointForm::EuclideanRational, i)
+                    .unwrap()
+            })
+            .collect()
+    }
+
+    /// A certificate that `piece` is `before` with only its end control points moved: the
+    /// same degree and knots, every control point and weight bit-identical but the first
+    /// (where `q0` is given) and the last (where `q1` is), each of which is its meet (moved
+    /// by `q - old`), its weight unchanged. A moved point is stored homogeneous (`q w`) and
+    /// read back divided by `w`: equal to `q` but for that product's and quotient's
+    /// rounding, 2 ulps of each coordinate (exact where `w = 1`).
+    fn assert_only_ends_moved(
+        before: &BSplineCurve,
+        piece: &Curve,
+        q0: Option<Point3>,
+        q1: Option<Point3>,
+    ) {
+        let CurveKind::BSpline(after) = piece.kind() else {
+            panic!("a B-spline piece: {:?}", piece.kind());
+        };
+        let (nb, na) = (before.nurb_ref().unwrap(), after.nurb_ref().unwrap());
+        assert_eq!(na.degree(), nb.degree(), "the degree");
+        assert_eq!(na.knots(), nb.knots(), "the knots");
+        let (pb, pa) = (control_polygon(before), control_polygon(after));
+        assert_eq!(pa.len(), pb.len(), "the control points' count");
+        let last = pb.len() - 1;
+        for (i, (&(b, wb), &(a, wa))) in pb.iter().zip(&pa).enumerate() {
+            assert_eq!(wa, wb, "control point {i}'s weight");
+            let want = match (i, q0, q1) {
+                (0, Some(q), _) => q,
+                (i, _, Some(q)) if i == last => q,
+                _ => b,
+            };
+            if want == b {
+                assert_eq!(a, b, "control point {i} unmoved");
+            } else {
+                for (x, y) in [(a.x, want.x), (a.y, want.y), (a.z, want.z)] {
+                    let ulps = 2.0 * f64::EPSILON * y.abs().max(f64::MIN_POSITIVE);
+                    assert!(
+                        (x - y).abs() <= ulps,
+                        "control point {i}: {a:?} on its meet {want:?}"
+                    );
+                }
+                if wa == 1.0 {
+                    assert_eq!(a, want, "control point {i}: exact at weight 1");
+                }
+            }
+        }
+    }
 
     /// A cubic S through (0, 0, 0) and (3, 0, 0) that crosses its chord at its middle:
     /// its ends and midpoint lie on the line, its quarter points `0.2887 h` off it.
@@ -2141,6 +3129,137 @@ mod tests {
         assert!(bound > tol, "the gate refuses: bound {bound} > tol {tol}");
         // and the S is not taken as a straight edge
         assert!(straight_ends(&k, &c).unwrap().is_none());
+    }
+
+    /// A crease that crosses the top of a box at a corner vertex ends its run at that vertex,
+    /// which names no edge. The seam events still carry each edge of the top that meets the
+    /// vertex, at the vertex's parameter on it, so the tangent-edge refusal sees the
+    /// crossing; the vertical edge there bounds the two side faces only and is no event.
+    #[test]
+    fn a_crease_through_a_vertex_gives_a_seam_event_for_each_face_edge_there() {
+        use crate::primitive::api_primitives::create_box;
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::ZERO, 40.0, 20.0, 10.0).unwrap();
+        let corner = Point3::new(40.0, 20.0, 10.0);
+        let v = b
+            .vertices()
+            .ids()
+            .find(|&v| b.vertex(v).unwrap().point.distance(corner) < 1e-9)
+            .unwrap();
+        // the top: the face at the corner whose two edges there both lie at z = 10
+        let top = edge_faces_at(&b, v)
+            .into_iter()
+            .find(|&f| {
+                let es = vertex::edges(&b, v, Some(f)).unwrap();
+                es.len() == 2
+                    && es.iter().all(|&e| {
+                        let other = edge::other_vertex(&b, e, Some(v)).unwrap().unwrap();
+                        (b.vertex(other).unwrap().point.z - 10.0).abs() < 1e-9
+                    })
+            })
+            .unwrap();
+        // in the plane of the top, from inside it through the corner and on past it
+        let crease: Curve = Line::from_points(
+            Point3::new(30.0, 10.0, 10.0),
+            Point3::new(50.0, 30.0, 10.0),
+            3,
+        )
+        .into();
+        let (mut in_face, mut along) = (Vec::new(), Vec::new());
+        let events =
+            pieces_in_face_to_ends(&k, &crease, &mut b, top, TOL, &mut in_face, &mut along)
+                .unwrap();
+        let of_top = vertex::edges(&b, v, Some(top)).unwrap();
+        for e in vertex::edges(&b, v, None).unwrap() {
+            let range = edge::interval(&b, e).unwrap();
+            let at = if edge::start_vertex(&b, e).unwrap() == Some(v) {
+                range.min()
+            } else {
+                range.max()
+            };
+            assert_eq!(
+                events.contains(&(e, at)),
+                of_top.contains(&e),
+                "edge {e:?} at the corner, parameter {at}, is a seam event exactly when it \
+                 bounds the top: {events:?}"
+            );
+        }
+    }
+
+    /// The faces the edges at `v` lie on.
+    fn edge_faces_at(b: &Brep, v: crate::topology::VertexId) -> Vec<FaceId> {
+        let mut out = Vec::new();
+        for e in vertex::edges(b, v, None).unwrap() {
+            for f in edge::faces(b, e, None).unwrap() {
+                if !out.contains(&f) {
+                    out.push(f);
+                }
+            }
+        }
+        out
+    }
+
+    /// #17016, #2385: a crease that leaves the top of a cylinder through the vertex where its
+    /// seam starts ends its run at that vertex, which names no edge. The seam, an edge of
+    /// the side face only (tangent to itself all along), touches the top at that vertex
+    /// alone and separates no face from the top: the crease leaves the top there across the
+    /// top's own circle, which is sharp, so it is not refused. (Judging the seam refused
+    /// #2385's disc, whose crease runs along the bottom edge through the seam's foot.)
+    #[test]
+    fn a_crease_through_a_seam_vertex_crosses_only_the_face_edges_there() {
+        use crate::primitive::api_primitives::create_cylinder;
+        let mut k = Kernel::default();
+        let mut b = create_cylinder(&mut k, Point3::ZERO, 10.0, 20.0).unwrap();
+        // the vertex of the top circle: the end of the seam at z = 20
+        let v = b
+            .vertices()
+            .ids()
+            .find(|&v| (b.vertex(v).unwrap().point.z - 20.0).abs() < 1e-9)
+            .unwrap();
+        let at = b.vertex(v).unwrap().point;
+        let (mut seam, mut circle) = (None, None);
+        for e in vertex::edges(&b, v, None).unwrap() {
+            if edge::other_vertex(&b, e, Some(v)).unwrap() == Some(v) {
+                circle = Some(e);
+            } else {
+                seam = Some(e);
+            }
+        }
+        let (seam, circle) = (seam.unwrap(), circle.unwrap());
+        let side = edge::faces(&b, seam, None).unwrap();
+        assert!(side.iter().all(|&g| g == side[0]), "the seam has one face");
+        let side = side[0];
+        let top = edge::faces(&b, circle, None)
+            .unwrap()
+            .into_iter()
+            .find(|&g| g != side)
+            .unwrap();
+        // in the plane of the top, from its centre out through the vertex and on past it
+        let centre = Point3::new(0.0, 0.0, 20.0);
+        let crease: Curve = Line::from_points(centre, centre + (at - centre) * 2.0, 3).into();
+        let (mut in_face, mut along) = (Vec::new(), Vec::new());
+        let events =
+            pieces_in_face_to_ends(&k, &crease, &mut b, top, TOL, &mut in_face, &mut along)
+                .unwrap();
+        // the circle is an event at the vertex's parameter on it; the seam is none
+        let range = edge::interval(&b, circle).unwrap();
+        assert!(events.contains(&(circle, range.min())), "{events:?}");
+        assert!(events.iter().all(|&(e, _)| e != seam), "{events:?}");
+        // the fillet's default tangency, 10 degrees (`edge_refusals::DEFAULT_TANGENCY`): the
+        // circle is sharp at 90 degrees, so any budget below that decides the same
+        let tangency = 10.0 * (crate::math::PI / 180.0);
+        let rolled_supports = BTreeSet::from([side]);
+        let refused = crease_across_tangent_edge(
+            &k,
+            &mut b,
+            top,
+            &events,
+            &rolled_supports,
+            tangency,
+            tangency,
+        )
+        .unwrap();
+        assert!(refused.is_none(), "the circle at the vertex is sharp");
     }
 
     /// The leftover check refuses what a move left off and passes a body that holds
@@ -2197,5 +3316,472 @@ mod tests {
             ..MovedEdges::default()
         };
         assert!(move_leftovers_kept(&k, &c, &moves, tol).unwrap());
+    }
+
+    /// A polynomial B-spline of degree 2 through `pts` over `knots` (`pts.len() + 3`).
+    fn quadratic(pts: &[(f64, f64, f64)], knots: Vec<f64>) -> Curve {
+        Curve::from(BSplineCurve::from_nurb(
+            NlCurve::new(
+                pts.iter()
+                    .map(|&(x, y, z)| CPoint::new(x, y, z, NOW))
+                    .collect(),
+                2,
+                knots,
+            )
+            .unwrap(),
+            3,
+            false,
+        ))
+    }
+
+    /// The ends of `c` over its natural interval.
+    fn ends(k: &Kernel, c: &Curve) -> (Point3, Point3) {
+        let ivl = c.natural_interval();
+        (
+            c.evaluate_point(k, ivl.min()).unwrap(),
+            c.evaluate_point(k, ivl.max()).unwrap(),
+        )
+    }
+
+    /// #17673 review: a line crease ends exactly on both its meets, as a line. Before, a
+    /// piece that was no B-spline kept both its classified ends, short of the meets.
+    #[test]
+    fn a_line_crease_piece_ends_on_both_its_meets() {
+        let k = Kernel::default();
+        let mut line = Line::from_points(Point3::ZERO, Point3::new(10.0, 0.0, 0.0), 3);
+        line.make_nurb().unwrap();
+        let crease = Curve::from(line);
+        let ivl = crease.natural_interval();
+        let (q0, q1) = (
+            Point3::new(-2e-6, 3e-7, 0.0),
+            Point3::new(10.0 + 4e-6, -1e-7, 0.0),
+        );
+        let piece = piece_ending_at(
+            &k,
+            &crease,
+            (ivl.min(), Some(q0)),
+            (ivl.max(), Some(q1)),
+            TOL,
+        )
+        .unwrap();
+        assert!(matches!(piece.kind(), CurveKind::Line(_)), "still a line");
+        let (a, z) = ends(&k, &piece);
+        assert!(a.distance(q0) <= 1e-15, "start {a:?} on its meet {q0:?}");
+        assert!(z.distance(q1) <= 1e-14, "end {z:?} on its meet {q1:?}");
+        // one meet only: the other end stays where it was
+        let piece =
+            piece_ending_at(&k, &crease, (ivl.min(), None), (ivl.max(), Some(q1)), TOL).unwrap();
+        let (a, z) = ends(&k, &piece);
+        assert_eq!(a, Point3::ZERO);
+        assert!(z.distance(q1) <= 1e-14, "end {z:?} on its meet {q1:?}");
+    }
+
+    /// #17673 review: a circular arc's end is put on its meet through the arc's exact
+    /// rational B-spline: the end lands on the meet, the start stays, and no point moves
+    /// farther than the meet is from the end (the moved control point's rational basis
+    /// function is at most 1); the arc away from its last span is the circle still.
+    #[test]
+    fn a_circle_crease_piece_ends_on_its_meet() {
+        let k = Kernel::default();
+        let (r, centre) = (5.0, Point3::new(1.0, 2.0, 3.0));
+        let place = crate::geom::axis2_placement::Axis2Placement::new(centre, Vec3::X, Vec3::Y);
+        let domain = crate::geom::extent1d::Extent1d::from_min_max(0.0, 270.0);
+        let circle = crate::curve::ellipse::Ellipse::create_canonical_circle(
+            &k,
+            &place,
+            r,
+            Some(&domain),
+            None,
+        )
+        .unwrap();
+        let crease = Curve::from(circle);
+        let ivl = crease.natural_interval();
+        let (a0, z0) = ends(&k, &crease);
+        let q = z0 + Vec3::new(3e-6, -2e-6, 1e-6);
+        let piece =
+            piece_ending_at(&k, &crease, (ivl.min(), None), (ivl.max(), Some(q)), TOL).unwrap();
+        assert!(matches!(piece.kind(), CurveKind::BSpline(_)));
+        // certificate: the circle's own exact NURB, only its last control point moved
+        let before = clamped_spline(crease.b_spline_base().unwrap()).unwrap();
+        assert_only_ends_moved(&before, &piece, None, Some(q));
+        let (a, z) = ends(&k, &piece);
+        assert!(a.distance(a0) <= 1e-14, "start {a:?} stays at {a0:?}");
+        assert!(z.distance(q) <= 1e-14, "end {z:?} on its meet {q:?}");
+        let moved = q.distance(z0);
+        let pivl = piece.natural_interval();
+        // where the last span starts: the last knot below the end
+        let CurveKind::BSpline(spline) = piece.kind() else {
+            panic!("a B-spline");
+        };
+        let last_span = *spline
+            .nurb_ref()
+            .unwrap()
+            .knots()
+            .iter()
+            .rev()
+            .find(|&&u| u < pivl.max())
+            .unwrap();
+        assert!(last_span > pivl.min(), "an arc of more than one span");
+        for i in 0..=400 {
+            let t = pivl.min() + (pivl.max() - pivl.min()) * f64::from(i) / 400.0;
+            let p = piece.evaluate_point(&k, t).unwrap();
+            let off = ((p - centre).length() - r).abs();
+            assert!(off <= moved + 1e-12, "t {t}: {off} off the circle");
+            if t <= last_span {
+                assert!(
+                    off <= 1e-12,
+                    "t {t}: {off} off the circle before the last span"
+                );
+            }
+        }
+    }
+
+    /// The largest distance between `c`'s end (`at_end`: the last; else the first) and its
+    /// points within `1e-9` of its parameter range of it: a curve that runs on to its end
+    /// point, not one whose end is a lone control point off its last span.
+    fn end_gap(k: &Kernel, c: &Curve, at_end: bool) -> f64 {
+        let ivl = c.natural_interval();
+        let (t, inward) = if at_end {
+            (ivl.max(), -1.0)
+        } else {
+            (ivl.min(), 1.0)
+        };
+        let end = c.evaluate_point(k, t).unwrap();
+        (1..=10)
+            .map(|i| {
+                let s = t + inward * f64::from(i) * 1e-10 * (ivl.max() - ivl.min());
+                c.evaluate_point(k, s).unwrap().distance(end)
+            })
+            .fold(0.0, f64::max)
+    }
+
+    /// #17673 review: a B-spline unclamped at both ends is a curve over its domain
+    /// `[U_p, U_{m-p}]` (the kernel's evaluation gives the end control point at `U0` and
+    /// `Um`, off the end spans, and fails inside the domain). The trim clamps it first
+    /// ([`crease_as_clamped`]) and ends its pieces on the clamped curve: they end on both
+    /// their meets and run on to them. The unclamped curve itself is refused, naming its
+    /// first met end, never ended away from its classified end.
+    #[test]
+    fn an_unclamped_crease_is_clamped_first_and_its_piece_ends_on_its_meets() {
+        let k = Kernel::default();
+        let crease = quadratic(
+            &[
+                (0.0, 0.0, 0.0),
+                (1.0, 2.0, 0.0),
+                (3.0, 2.0, 1.0),
+                (4.0, 0.0, 1.0),
+            ],
+            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        );
+        let ivl = crease.natural_interval();
+        let CurveKind::BSpline(spline) = crease.kind() else {
+            panic!("a B-spline");
+        };
+        assert!(!spline_clamped(spline).unwrap());
+        // the clamped curve is the curve over its domain [U_p, U_{m-p}] = [2, 4]
+        let clamped = crease_as_clamped(&crease).unwrap().into_owned();
+        let CurveKind::BSpline(c) = clamped.kind() else {
+            panic!("a B-spline");
+        };
+        assert!(spline_clamped(c).unwrap());
+        let civl = clamped.natural_interval();
+        assert_eq!((civl.min(), civl.max()), (2.0, 4.0));
+        // the uniform quadratic's closed forms (the kernel cannot evaluate the unclamped
+        // crease inside its domain): (P0+P1)/2, (P0+6P1+P2)/8, (P1+P2)/2, (P1+6P2+P3)/8,
+        // (P2+P3)/2 at 2, 2.5, 3, 3.5, 4
+        let pts = [
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 2.0, 0.0),
+            Point3::new(3.0, 2.0, 1.0),
+            Point3::new(4.0, 0.0, 1.0),
+        ];
+        let half = |i: usize| (pts[i] + pts[i + 1]) * 0.5;
+        let mid = |i: usize| (pts[i] + pts[i + 1] * 6.0 + pts[i + 2]) * 0.125;
+        for (t, want) in [
+            (2.0, half(0)),
+            (2.5, mid(0)),
+            (3.0, half(1)),
+            (3.5, mid(1)),
+            (4.0, half(2)),
+        ] {
+            let got = clamped.evaluate_point(&k, t).unwrap();
+            assert!(
+                got.distance(want) <= 1e-14,
+                "t {t}: {got:?} against {want:?}"
+            );
+        }
+        // meets near the domain's ends, classified on the clamped curve
+        let (d0, d1) = (Vec3::new(2e-6, 1e-6, 0.0), Vec3::new(-1e-6, 0.0, 3e-6));
+        let (q0, q1) = (half(0) + d0, half(2) + d1);
+        let piece = piece_ending_at(
+            &k,
+            &clamped,
+            (civl.min(), Some(q0)),
+            (civl.max(), Some(q1)),
+            TOL,
+        )
+        .unwrap();
+        // certificate: the clamped curve, only its two end control points moved
+        assert_only_ends_moved(c, &piece, Some(q0), Some(q1));
+        let (a, z) = ends(&k, &piece);
+        assert!(a.distance(q0) <= 1e-14, "start {a:?} on its meet {q0:?}");
+        assert!(z.distance(q1) <= 1e-14, "end {z:?} on its meet {q1:?}");
+        for at_end in [false, true] {
+            let gap = end_gap(&k, &piece, at_end);
+            assert!(gap <= 1e-8, "end {at_end}: the curve {gap} off its end");
+        }
+        // no point moves farther than the two meets' moves together
+        for i in 0..=60 {
+            let t = 2.0 + 2.0 * f64::from(i) / 60.0;
+            let moved = piece
+                .evaluate_point(&k, t)
+                .unwrap()
+                .distance(clamped.evaluate_point(&k, t).unwrap());
+            assert!(
+                moved <= d0.length() + d1.length() + 1e-14,
+                "t {t}: moved {moved}"
+            );
+        }
+        // the unclamped curve itself: refused at its start, never ended off its
+        // classified ends
+        let err = piece_ending_at(
+            &k,
+            &crease,
+            (ivl.min(), Some(q0)),
+            (ivl.max(), Some(q1)),
+            TOL,
+        )
+        .expect_err("an unclamped piece's ends are not its classified ends");
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::CreasePieceEndUnbuildable {
+                kind: "unclamped B-spline",
+                at_end: false,
+                t: ivl.min(),
+            }),
+            "{err:?}"
+        );
+    }
+
+    /// #17673 review (review comment 4587418682): a B-spline clamped at its start but not at
+    /// its end, its start's meet alone. Clamped first, the end the trim records is the
+    /// clamped curve's end, and the piece's un-met end is that end bit for bit, not the
+    /// original end control point (4, 0, 1), 1.118 away. Both meets together are kept
+    /// too; the unclamped curve itself is refused, naming its start.
+    #[test]
+    fn a_meet_at_one_end_of_a_crease_unclamped_at_the_other_keeps_the_recorded_end() {
+        let k = Kernel::default();
+        let crease = quadratic(
+            &[
+                (0.0, 0.0, 0.0),
+                (1.0, 2.0, 0.0),
+                (3.0, 2.0, 1.0),
+                (4.0, 0.0, 1.0),
+            ],
+            vec![0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0],
+        );
+        let ivl = crease.natural_interval();
+        let original_end = crease.evaluate_point(&k, ivl.max()).unwrap();
+        assert_eq!(
+            original_end,
+            Point3::new(4.0, 0.0, 1.0),
+            "the end control point"
+        );
+        // clamped first: the curve over its domain [U_2, U_4] = [0, 2]
+        let clamped = crease_as_clamped(&crease).unwrap().into_owned();
+        let civl = clamped.natural_interval();
+        assert_eq!((civl.min(), civl.max()), (0.0, 2.0));
+        let CurveKind::BSpline(before) = clamped.kind() else {
+            panic!("a B-spline");
+        };
+        // the ends the trim records: the clamped curve's, evaluated
+        let (a0, z0) = ends(&k, &clamped);
+        // closed form: the uniform quadratic's end (P2+P3)/2
+        assert!(z0.distance(Point3::new(3.5, 1.0, 1.0)) <= 1e-14, "{z0:?}");
+        assert!(
+            z0.distance(original_end) > 1.0,
+            "the clamp moved the natural end"
+        );
+        let (q0, q1) = (
+            a0 + Vec3::new(0.0, 2e-6, 1e-6),
+            z0 + Vec3::new(1e-6, 1e-6, 0.0),
+        );
+        // the start's meet alone: the piece's end is the recorded end, bit for bit
+        let piece = piece_ending_at(
+            &k,
+            &clamped,
+            (civl.min(), Some(q0)),
+            (civl.max(), None),
+            TOL,
+        )
+        .unwrap();
+        assert_only_ends_moved(before, &piece, Some(q0), None);
+        let (a, z) = ends(&k, &piece);
+        assert_eq!(a, q0, "the start's meet");
+        assert_eq!(z, z0, "the un-met end is the recorded (clamped) end");
+        assert_ne!(z, original_end);
+        assert!(end_gap(&k, &piece, true) <= 1e-8);
+        // both meets: both kept
+        let piece = piece_ending_at(
+            &k,
+            &clamped,
+            (civl.min(), Some(q0)),
+            (civl.max(), Some(q1)),
+            TOL,
+        )
+        .unwrap();
+        assert_only_ends_moved(before, &piece, Some(q0), Some(q1));
+        let (a, z) = ends(&k, &piece);
+        assert_eq!(a, q0, "the start's meet is kept");
+        assert!(z.distance(q1) <= 1e-14, "end {z:?} on its meet {q1:?}");
+        for at_end in [false, true] {
+            let gap = end_gap(&k, &piece, at_end);
+            assert!(gap <= 1e-8, "end {at_end}: the curve {gap} off its end");
+        }
+        // the unclamped curve itself: refused, naming its met start, never a piece whose
+        // un-met end is not the one recorded
+        let err = piece_ending_at(&k, &crease, (ivl.min(), Some(q0)), (ivl.max(), None), TOL)
+            .expect_err("an unclamped piece's end is not its classified end");
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::CreasePieceEndUnbuildable {
+                kind: "unclamped B-spline",
+                at_end: false,
+                t: ivl.min(),
+            }),
+            "{err:?}"
+        );
+    }
+
+    /// #17673 review: a crease piece of a curve kind with no control polygon (an offset
+    /// curve) is refused with a typed error where it has a meet, never left short of it;
+    /// with none it is the crease as it is.
+    #[test]
+    fn a_crease_piece_with_no_control_polygon_is_refused_at_a_meet() {
+        let k = Kernel::default();
+        let base = s_curve(0.5);
+        let interval = base.natural_interval();
+        let offset =
+            crate::curve::offset_curve::OffsetCurve::new(3, base, interval, Vec3::Z, 0.25, true)
+                .unwrap();
+        let crease = Curve::from(offset);
+        let ivl = crease.natural_interval();
+        let (_, z0) = ends(&k, &crease);
+        let q = z0 + Vec3::new(1e-6, 0.0, 0.0);
+        let err = piece_ending_at(&k, &crease, (ivl.min(), None), (ivl.max(), Some(q)), TOL)
+            .expect_err("no construction for its end");
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::CreasePieceEndUnbuildable {
+                kind: "offset",
+                at_end: true,
+                t: ivl.max(),
+            }),
+            "{err:?}"
+        );
+        assert_eq!(err.kind(), crate::error::ErrorKind::Unsupported);
+        // the first end with a meet is named: the start, where both have one
+        let q0 = ends(&k, &crease).0 + Vec3::new(0.0, 1e-6, 0.0);
+        let err = piece_ending_at(
+            &k,
+            &crease,
+            (ivl.min(), Some(q0)),
+            (ivl.max(), Some(q)),
+            TOL,
+        )
+        .expect_err("no construction for its ends");
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::CreasePieceEndUnbuildable {
+                kind: "offset",
+                at_end: false,
+                t: ivl.min(),
+            }),
+            "{err:?}"
+        );
+        let piece =
+            piece_ending_at(&k, &crease, (ivl.min(), None), (ivl.max(), None), TOL).unwrap();
+        assert!(matches!(piece.kind(), CurveKind::Offset(_)));
+    }
+
+    /// #17673 review: a trimmed circular arc's piece is the trimmed arc's own exact NURB
+    /// (the conic's base follows `crease_piece`'s trim), only its end control point moved:
+    /// its start is the circle's point at the trim's start, the unmoved base ends on the
+    /// circle's point at the trim's end, and the piece ends on its meet.
+    #[test]
+    fn a_trimmed_circle_crease_piece_is_its_trimmed_arc_with_its_end_on_its_meet() {
+        let k = Kernel::default();
+        let (r, centre) = (5.0, Point3::new(1.0, 2.0, 3.0));
+        let place = crate::geom::axis2_placement::Axis2Placement::new(centre, Vec3::X, Vec3::Y);
+        let domain = crate::geom::extent1d::Extent1d::from_min_max(0.0, 270.0);
+        let circle = crate::curve::ellipse::Ellipse::create_canonical_circle(
+            &k,
+            &place,
+            r,
+            Some(&domain),
+            None,
+        )
+        .unwrap();
+        let crease = Curve::from(circle);
+        // 30 and 200 degrees along the 270-degree arc, in its natural parameter
+        let ivl = crease.natural_interval();
+        let at = |deg: f64| ivl.min() + (ivl.max() - ivl.min()) * deg / 270.0;
+        let (t0, t1) = (at(30.0), at(200.0));
+        let (p0, p1) = (
+            crease.evaluate_point(&k, t0).unwrap(),
+            crease.evaluate_point(&k, t1).unwrap(),
+        );
+        // the trimmed arc's exact NURB runs from the circle's point at t0 to its point at t1
+        let trimmed = crease_piece(&k, &crease, t0, t1).unwrap();
+        assert!(matches!(trimmed.kind(), CurveKind::Ellipse(_)));
+        let base = clamped_spline(trimmed.b_spline_base().unwrap()).unwrap();
+        let base_curve = Curve::from(base.clone_exact());
+        let (b0, b1) = ends(&k, &base_curve);
+        assert!(b0.distance(p0) <= 1e-12, "base start {b0:?} at {p0:?}");
+        assert!(b1.distance(p1) <= 1e-12, "base end {b1:?} at {p1:?}");
+        // and it is on the circle throughout: the base is the trimmed arc, not the 270 one
+        let bivl = base_curve.natural_interval();
+        for i in 0..=100 {
+            let t = bivl.min() + (bivl.max() - bivl.min()) * f64::from(i) / 100.0;
+            let p = base_curve.evaluate_point(&k, t).unwrap();
+            let off = ((p - centre).length() - r).abs();
+            assert!(off <= 1e-12, "t {t}: {off} off the circle");
+        }
+        let q = p1 + Vec3::new(-2e-6, 1e-6, 3e-6);
+        let piece = piece_ending_at(&k, &crease, (t0, None), (t1, Some(q)), TOL).unwrap();
+        assert_only_ends_moved(&base, &piece, None, Some(q));
+        let (a, z) = ends(&k, &piece);
+        assert!(a.distance(p0) <= 1e-12, "start {a:?} at the trim's {p0:?}");
+        assert!(z.distance(q) <= 1e-14, "end {z:?} on its meet {q:?}");
+    }
+
+    /// #17673 review: a line piece whose two meets are within the trim tolerance of each
+    /// other is refused as degenerate, never built as a degenerate line.
+    #[test]
+    fn a_line_crease_piece_whose_meets_coincide_is_refused() {
+        let k = Kernel::default();
+        let mut line = Line::from_points(Point3::ZERO, Point3::new(10.0, 0.0, 0.0), 3);
+        line.make_nurb().unwrap();
+        let crease = Curve::from(line);
+        let ivl = crease.natural_interval();
+        let q = Point3::new(5.0, 0.0, 0.0);
+        let err = piece_ending_at(
+            &k,
+            &crease,
+            (ivl.min(), Some(q)),
+            (ivl.max(), Some(q + Vec3::new(TOL * 0.5, 0.0, 0.0))),
+            TOL,
+        )
+        .expect_err("no line between coinciding meets");
+        assert!(
+            matches!(
+                err,
+                SolidError::Degenerate {
+                    operation: OP,
+                    entity: None
+                }
+            ),
+            "{err:?}"
+        );
     }
 }

@@ -65,8 +65,9 @@
 //!   Option vectors an operation reads without a `NULL` check are `InvalidInput`
 //!   when missing.
 //! - **Approximation work.** The Hermite approximation keeps upstream's depth-first
-//!   span order, but stops with `SM_ERR` after 8192 subdivisions or when the native
-//!   midpoint formula cannot produce a finite, distinct parameter. The subdivision
+//!   span order, but stops with `SM_ERR` after 8192 subdivisions
+//!   (`CurveFailure::SubdivisionCap`) or when the native midpoint formula cannot
+//!   produce a finite, distinct parameter (`CurveFailure::IntervalNotSplittable`). The subdivision
 //!   count is total across break intervals: upstream's natural-interval / 1500
 //!   stopping rule permits at most 2047 subdivisions for one in-domain interval.
 //!   Across a partition of the natural interval, the total stays below roughly
@@ -111,7 +112,8 @@ use crate::curve::curve::p5::{local_property_analysis, make_curve_cache};
 use crate::curve::curve_cache::CurveCache;
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::curve::line::TessellationRequest;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::curve::{CurveFailure, FastDropBlock};
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p1::segment_point_angle_deg_to_perp;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -147,6 +149,12 @@ const CONTINUITY_ANGLE: f64 = 0.5;
 
 /// Maximum adaptive Hermite subdivisions in one approximation (see deviations).
 const MAX_APPROXIMATION_SUBDIVISIONS: usize = 8192;
+
+/// Why a curve cache this module solves on has a tree: the crate-private slot is filled
+/// only by `make_curve_cache` (here, or earlier from the curve's memo of the same build),
+/// whose build sets the tree (with its top node) whenever it succeeds.
+const BUILT_CACHE_HAS_TREE: &str = "the curve's cache, filled only by make_curve_cache, \
+     has a tree: the build sets it whenever it succeeds";
 
 /// Entry `i` of a three-slot sample array (`d` past its end).
 fn at3<T: Copy>(a: &[T; 3], i: usize, d: T) -> T {
@@ -192,8 +200,9 @@ fn status_value(e: &SolidError) -> f64 {
 ///
 /// # Errors
 ///
-/// `SM_ERR` for a range solution without two variables; `SM_ERR_NULL_POINTER` for
-/// an object that is not a curve; those of the local intersection.
+/// `InvalidInput` for a range solution without two variables (status `SM_ERR`) and for
+/// an object that is not a curve (status `SM_ERR_NULL_POINTER`); those of the local
+/// intersection.
 pub fn refine_cc_solutions<'c, O, F>(
     k: &Kernel,
     solutions: &mut SolutionArray<O>,
@@ -217,17 +226,19 @@ where
         }
 
         if sol.num_variables != 2 {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_REFINE,
-                "a range solution does not have two variables",
+                CurveFailure::RangeSolutionVariables {
+                    variables: sol.num_variables,
+                },
             ));
         }
 
         let crv1 = curve_of(sol.objects[0]).ok_or_else(|| {
-            SolidError::curve_missing(OP_REFINE, "a range solution's first curve")
+            SolidError::curve(OP_REFINE, CurveFailure::SolutionWithoutCurve { object: 0 })
         })?;
         let crv2 = curve_of(sol.objects[1]).ok_or_else(|| {
-            SolidError::curve_missing(OP_REFINE, "a range solution's second curve")
+            SolidError::curve(OP_REFINE, CurveFailure::SolutionWithoutCurve { object: 1 })
         })?;
 
         let natural_dom1 = crv1.natural_interval();
@@ -546,18 +557,14 @@ impl Curve {
         }
 
         // need 2 breakpoints to define the curve interval
-        let (Some(&first), Some(&last)) = (breaks.first(), breaks.last()) else {
-            return Err(SolidError::curve_failed(
+        let &[first, .., last] = breaks else {
+            return Err(SolidError::curve(
                 OP_APPROX,
-                "there are fewer than two breakpoints",
+                CurveFailure::TooFewBreakpoints {
+                    given: breaks.len(),
+                },
             ));
         };
-        if breaks.len() < 2 {
-            return Err(SolidError::curve_failed(
-                OP_APPROX,
-                "there are fewer than two breakpoints",
-            ));
-        }
 
         // low work - degenerate curves
         if self.is_degenerate(k, EFF_ZERO, None)? {
@@ -663,9 +670,11 @@ impl Curve {
                     pop_stack(&mut stack)?;
                 } else {
                     if subdivisions >= MAX_APPROXIMATION_SUBDIVISIONS {
-                        return Err(SolidError::curve_failed(
+                        return Err(SolidError::curve(
                             OP_APPROX,
-                            "the approximation passed its most subdivisions",
+                            CurveFailure::SubdivisionCap {
+                                limit: MAX_APPROXIMATION_SUBDIVISIONS,
+                            },
                         ));
                     }
                     subdivisions += 1;
@@ -673,9 +682,12 @@ impl Curve {
                     // get param mid point and associated curve pos and tan
                     let mid_t = (last_t + curr_t) / 2.0;
                     if !mid_t.is_finite() || mid_t == last_t || mid_t == curr_t {
-                        return Err(SolidError::curve_failed(
+                        return Err(SolidError::curve(
                             OP_APPROX,
-                            "the midpoint parameter no longer splits the step",
+                            CurveFailure::IntervalNotSplittable {
+                                lo: last_t,
+                                hi: curr_t,
+                            },
                         ));
                     }
                     let mid_pv: [Vec3; 2] = eval_n(k, self, mid_t, 1, true, true)?; // NonZeroTangent values
@@ -1013,7 +1025,8 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` for a node without data; `InvalidInput` for a missing
+    /// `InvalidInput` with status `SM_ERR_NULL_POINTER` for a curve node without data
+    /// ([`CurveFailure::CurveNodeWithoutData`]); `InvalidInput` for a missing
     /// branch node, curve or option vector or a node that is not a curve leaf; those
     /// of `Unitize`, the signed angle, `AddSortedSolution` and `LocalPropertyAnalysis`.
     pub fn local_solve_branch(&mut self, k: &Kernel, branch: &Branch) -> Result<bool> {
@@ -1025,9 +1038,9 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
         let point_node = self.base.branch_node(branch, 0)?;
         let curve_node = self.base.branch_node(branch, 1)?;
         if matches!(curve_node.data, NodeData::None) {
-            return Err(SolidError::curve_missing(
+            return Err(SolidError::curve(
                 OP_LOCAL,
-                "the branch's curve node data",
+                CurveFailure::CurveNodeWithoutData,
             ));
         }
         let curve_tree = self.base.tree(1)?;
@@ -1449,7 +1462,17 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
                     target_distance: Some(self.base.at_distance_sq),
                     vectors: opt_slice,
                 };
-                match curve.local_point_solve::<O>(k, &bez_ivl, local_op, test_pnt, &opts, guess) {
+                // (not upstream, #17735) an intersection's minimisation is held to the gap
+                let intersecting = op == SolverOperation::Intersect;
+                match curve.local_point_solve_held::<O>(
+                    k,
+                    &bez_ivl,
+                    local_op,
+                    test_pnt,
+                    &opts,
+                    guess,
+                    intersecting,
+                ) {
                     Ok((f, s)) => {
                         found_solution = f;
                         merge_point_solution(&mut solution, f, &s, local_op);
@@ -1802,9 +1825,11 @@ fn drop_point_fast<O: Copy>(
             requested,
             handle,
         ),
-        _ => Err(SolidError::curve_failed(
+        _ => Err(SolidError::curve(
             "curve::curve::p1::drop_point_fast",
-            "the curve kind has no fast point drop",
+            CurveFailure::FastDropUnavailable {
+                reason: FastDropBlock::CurveKind,
+            },
         )),
     }
 }
@@ -1974,16 +1999,18 @@ impl Curve {
 
         // get target curve's cache
         let mut solutions: SolutionArray<O> = SolutionArray::new();
-        if cache.is_none() {
-            *cache = Some(match make_curve_cache::<O>(k, self, opts.handle) {
+        let cache = match cache {
+            Some(c) => c,
+            slot @ None => slot.insert(match make_curve_cache::<O>(k, self, opts.handle) {
                 Ok(c) => c,
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => return Err(SolidError::curve_missing(OP_GLOBAL, "the curve's cache")),
-            });
-        }
-        let cache = cache
-            .as_mut()
-            .ok_or_else(|| SolidError::curve_missing(OP_GLOBAL, "the curve's cache"))?;
+                Err(e) => {
+                    return Err(Failure::new(OP_GLOBAL, CurveFailure::CacheNotBuilt)
+                        .caused_by(e)
+                        .into_error())
+                }
+            }),
+        };
 
         // Analytical Curve Optimization
         if op == SolverOperation::Minimize || op == SolverOperation::Intersect {
@@ -2043,9 +2070,16 @@ impl Curve {
         // Execute a Point/CurveLeafNode solution for every LeafNode in the target
         // curve's cache.
         let point_tree: Tree<O> = Tree::from_point(test_point, 0.0, false);
-        let curve_tree = cache
-            .tree()
-            .ok_or_else(|| SolidError::curve_missing(OP_GLOBAL, "the curve cache's tree"))?;
+        let curve_tree = cache.tree().ok_or_else(|| {
+            Failure::new(
+                OP_GLOBAL,
+                CurveFailure::Defect {
+                    why: BUILT_CACHE_HAS_TREE,
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
 
         // Construct and init global solver
         let mut gs = CpGlobalSolver::new(k, &point_tree, curve_tree, *interval).with_curve(self);
@@ -2055,7 +2089,7 @@ impl Curve {
         // set atDistance value - when appropriate
         if op == SolverOperation::AtDistance {
             let d = target
-                .ok_or_else(|| SolidError::curve_missing(OP_GLOBAL, "the target distance"))?;
+                .ok_or_else(|| SolidError::curve(OP_GLOBAL, CurveFailure::TargetDistanceMissing))?;
             gs.base.set_at_distance(d);
         }
 

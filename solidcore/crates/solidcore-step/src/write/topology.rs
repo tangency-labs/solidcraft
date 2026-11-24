@@ -325,8 +325,10 @@ fn singular_torus(surface: &BSurface, tolerance: f64) -> bool {
 }
 
 /// Whether a face keeps its NURBS parameters and pcurves: a procedural definition or a
-/// singular torus cannot be written as an ordinary analytic STEP surface.
-fn as_form(face: &Face, tolerance: f64) -> bool {
+/// singular torus cannot be written as an ordinary analytic STEP surface. The CADIR writer makes
+/// the same choice, as its own policy: CADIR's torus takes equal radii, but the face is kept on
+/// its NURBS form there too.
+pub fn as_form(face: &Face, tolerance: f64) -> bool {
     face.nurbs.is_some() && (matches!(face.surface, BSurface::BallPatch { .. } | BSurface::Blend { .. }) || singular_torus(&face.surface, tolerance))
 }
 
@@ -699,7 +701,7 @@ fn signed_area(ring: &[[f64; 2]]) -> f64 {
 /// record's cylinder, cone, sphere and torus have their natural normal pointing away from the
 /// axis (the sphere's centre, the torus's centre circle); `None` when the NURBS has no normal at
 /// its domain's centre.
-fn form_map(analytic: &BSurface, n: &BSurface, domain: [[f64; 2]; 2], map: Map) -> Option<Map> {
+pub fn form_map(analytic: &BSurface, n: &BSurface, domain: [[f64; 2]; 2], map: Map) -> Option<Map> {
     let eval = crate::kernel::SurfaceEval::new(n).ok()?;
     let (p, su, sv) = eval.derivs(0.5 * (domain[0][0] + domain[0][1]), 0.5 * (domain[1][0] + domain[1][1]))?;
     let normal = su.cross(sv);

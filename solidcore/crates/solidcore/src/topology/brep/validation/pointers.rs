@@ -388,12 +388,27 @@ pub(crate) fn validate_pointers_excluding(
     walk: bool,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
 ) -> Result<(i32, bool)> {
+    validate_pointers_traced(k, b, reports, level, walk, keys, &mut true)
+}
+
+/// [`validate_pointers_excluding`], also clearing `faces_whole` (not upstream) when a face's
+/// `CheckFace` stopped early: then a second pass with `walk` may check a face where this one
+/// did not. Otherwise `walk` only drops tests, also for a face checked on the copy standing
+/// for the body (see the face loop below).
+pub(crate) fn validate_pointers_traced(
+    k: &Kernel,
+    b: &mut Brep,
+    reports: Option<&mut AssertArray>,
+    level: u8,
+    walk: bool,
+    keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
+    faces_whole: &mut bool,
+) -> Result<(i32, bool)> {
     if level > 4 {
         return Err(invalid("invalid assert test level"));
     }
     let mut r = Reports {
         array: reports,
-        level,
         failed: false,
     };
     let mut cache = Lists::new(b);
@@ -451,6 +466,15 @@ pub(crate) fn validate_pointers_excluding(
     // `check_face` makes its trims, here on a copy standing for this B-rep (made once, for
     // the first such face), so the check's answer does not depend on whether an earlier
     // operation made them, and checking does not change the body it checks.
+    //
+    // A face checked on that copy leaves `faces_whole` set (#21131). A second pass makes its
+    // own copy from this B-rep, and its caller runs it only when this pass wrote nothing
+    // to the B-rep (its write stamps, `check_with_keys_counted`). So that copy starts as this
+    // one did, and the same deterministic `CheckFace` makes the same trims on it, face after
+    // face in the same order. With `walk` it then only skips `check_loop`, whose reads
+    // (`edge_uv_extremes`, the junction and gap tests) write nothing that a later loop or face
+    // reads. So the second pass would find nothing this one missed, as on a face checked on
+    // the body itself.
     let mut standing: Option<Brep> = None;
     for &f in &faces {
         // (not upstream) cooperative cancellation once per face: checking a face's trim
@@ -477,6 +501,7 @@ pub(crate) fn validate_pointers_excluding(
             if e.is_unported_or_cancelled() {
                 return Err(e);
             }
+            *faces_whole = false;
         }
         let face = b.face(f)?;
         for (i, ok) in [
@@ -700,8 +725,9 @@ pub(crate) fn validate_pointers_excluding(
         for j in (1..uses.len()).step_by(2) {
             let eu0 = *uses.get(j - 1).ok_or_else(|| invalid("edge list"))?;
             let eu1 = *uses.get(j).ok_or_else(|| invalid("edge list"))?;
-            let next = *uses
-                .get((j + 1) % uses.len())
+            let next = *(j + 1)
+                .checked_rem(uses.len())
+                .and_then(|k| uses.get(k))
                 .ok_or_else(|| invalid("edge list"))?;
             r.check(
                 b,
@@ -973,8 +999,8 @@ fn wide_vertex_limit(b: &Brep) -> f64 {
 /// millimetre off its edges in a 10 mm box 50 times. A tolerance covers a rounding or intersection
 /// gap, never a misplaced vertex, so past this many times the limit Test #82 refuses it whatever
 /// its ball clears. The boolean's tolerance update grows a vertex no further than this either
-/// (`validate_and_update`).
-pub(super) const GROWTH_PAST_RATIO: f64 = 2.0;
+/// (`validate_and_update`), nor does the healer's `Fix_TolSizes` (`heal::heal_data`).
+pub(crate) const GROWTH_PAST_RATIO: f64 = 2.0;
 
 fn check_vertices(b: &Brep, r: &mut Reports<'_>) -> Result<()> {
     for &v in b.vertex_list() {
@@ -1218,10 +1244,23 @@ fn box_distance(bbox: &Extent3d, p: Vec3) -> f64 {
 /// as reaching).
 const CLEARANCE_BOXES: usize = 512;
 
+/// A box that provably holds `surface` over `cell`, or `None` when none is known: a plane's is
+/// that of the cell's corners ([`plane_cell_box`]), any other surface's the box of its own piece
+/// over the cell ([`Surface::certified_bounding_box`]).
+fn surface_cell_box(k: &Kernel, surface: &Surface, cell: &Extent2d) -> Result<Option<Extent3d>> {
+    Ok(match surface.kind() {
+        SurfaceKind::Plane(_) => plane_cell_box(k, surface, cell)?,
+        _ => exclusion_probe(surface.certified_bounding_box(k, cell))?.flatten(),
+    }
+    .filter(Extent3d::is_defined))
+}
+
 /// Whether every point of `surface` over `domain` is at least `radius` from `point`, proven by
-/// bounding boxes: a cell whose box (grown by the zone) is that far away is clear, any other is
-/// split in four. Running out of boxes, a failed box or a domain that cannot be split proves
-/// nothing, so the answer is false.
+/// bounding boxes. The surface's own box comes first; it is the whole control net's, whatever
+/// the domain ([`Surface::calculate_bounding_box`]), so where it is not clear the proof goes on
+/// cell by cell from `domain`: a cell whose box ([`surface_cell_box`], grown by the zone) is
+/// `radius` away is clear, any other is split in four. Running out of boxes, a cell with no box
+/// or a domain that cannot be split proves nothing, so the answer is false.
 fn surface_clears(
     k: &Kernel,
     surface: &Surface,
@@ -1231,23 +1270,32 @@ fn surface_clears(
     radius: f64,
 ) -> Result<bool> {
     let zone = tol::zone_tol3d(k, face_tolerance);
+    let clear = |mut bounds: Extent3d| {
+        bounds.expand_absolute(zone);
+        box_distance(&bounds, point) >= radius
+    };
+    let Some(whole) =
+        exclusion_probe(surface.calculate_bounding_box(k, domain, [true, false, false], true))?
+            .and_then(|boxes| boxes.normal_box)
+            .filter(Extent3d::is_defined)
+    else {
+        return Ok(false);
+    };
+    if clear(whole) {
+        return Ok(true);
+    }
     let mut cells = vec![*domain];
-    let mut asked = 0_usize;
+    let mut asked = 1_usize;
     while let Some(cell) = cells.pop() {
         k.check_cancelled("topology::brep::validation::vertex_exclusion")?;
         if asked >= CLEARANCE_BOXES {
             return Ok(false);
         }
         asked += 1;
-        let Some(mut cell_box) =
-            exclusion_probe(surface.calculate_bounding_box(k, &cell, [true, false, false], true))?
-                .and_then(|boxes| boxes.normal_box)
-                .filter(Extent3d::is_defined)
-        else {
+        let Some(cell_box) = surface_cell_box(k, surface, &cell)? else {
             return Ok(false);
         };
-        cell_box.expand_absolute(zone);
-        if box_distance(&cell_box, point) >= radius {
+        if clear(cell_box) {
             continue;
         }
         let (lo, hi) = (cell.min(), cell.max());
@@ -1320,7 +1368,6 @@ fn curve_clears(
 pub fn vertex_ball_reaches(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
     let mut r = Reports {
         array: None,
-        level: 0,
         failed: false,
     };
     check_vertex_clearance(k, b, &mut r, &[v])?;
@@ -1987,9 +2034,49 @@ fn fix_reversed_on(k: &Kernel, c: &mut Curve, surface: Option<&Surface>) -> Resu
     };
     let surface = surface.filter(|_| base.dim == 2);
     let points = base.get_or_create_gw_nurb()?.cpts_mut();
+    let Some(turned) = turned_ends(k, points, surface)? else {
+        return Ok(());
+    };
+    let n = points.len();
+    // (the ends' points are disjoint: `turned_ends` needs at least 5)
+    for ((a, m, z), turned) in [(0, 1, 2), (n - 1, n - 2, n - 3)].into_iter().zip(turned) {
+        if !turned {
+            continue;
+        }
+        let p0 = points
+            .get(a)
+            .copied()
+            .ok_or_else(|| invalid("control point"))?
+            .to_euclid();
+        let p2 = points
+            .get(z)
+            .copied()
+            .ok_or_else(|| invalid("control point"))?
+            .to_euclid();
+        let p = points.get_mut(m).ok_or_else(|| invalid("control point"))?;
+        p.x = (p0.x + p2.x) / 2.0;
+        p.y = (p0.y + p2.y) / 2.0;
+        if p.z != crate::nurbs::math::NOZ {
+            p.z = (p0.z + p2.z) / 2.0;
+        }
+        if p.w != crate::nurbs::math::NOW {
+            p.w = 1.0;
+        }
+    }
+    Ok(())
+}
+
+/// Which ends (`[start, end]`) of the control polygon `points` turn back, as
+/// [`fix_reversed_on`] judges them (on `surface` when given); `None` when it leaves the
+/// curve as it is: fewer than 5 points, or a surface it cannot evaluate at an end.
+fn turned_ends(
+    k: &Kernel,
+    points: &[crate::nurbs::math::CPoint],
+    surface: Option<&Surface>,
+) -> Result<Option<[bool; 2]>> {
     let n = points.len();
     if n < 5 {
-        return Ok(());
+        return Ok(None);
     }
     // each end's form, on the side its first leg runs into
     let mut metrics = [None, None];
@@ -2008,12 +2095,17 @@ fn fix_reversed_on(k: &Kernel, c: &mut Curve, surface: Option<&Surface>) -> Resu
             let Some(form) =
                 first_fundamental_form(k, surface, uv, next.x >= end.x, next.y >= end.y)?
             else {
-                return Ok(());
+                return Ok(None);
             };
             *slot = Some(form);
         }
     }
-    for ((a, m, z), metric) in [(0, 1, 2), (n - 1, n - 2, n - 3)].into_iter().zip(metrics) {
+    let mut turned = [false, false];
+    for (((a, m, z), metric), slot) in [(0, 1, 2), (n - 1, n - 2, n - 3)]
+        .into_iter()
+        .zip(metrics)
+        .zip(turned.iter_mut())
+    {
         let p0 = points
             .get(a)
             .copied()
@@ -2029,19 +2121,36 @@ fn fix_reversed_on(k: &Kernel, c: &mut Curve, surface: Option<&Surface>) -> Resu
             .copied()
             .ok_or_else(|| invalid("control point"))?
             .to_euclid();
-        if end_turns_back(p0, p1, p2, metric) {
-            let p = points.get_mut(m).ok_or_else(|| invalid("control point"))?;
-            p.x = (p0.x + p2.x) / 2.0;
-            p.y = (p0.y + p2.y) / 2.0;
-            if p.z != crate::nurbs::math::NOZ {
-                p.z = (p0.z + p2.z) / 2.0;
-            }
-            if p.w != crate::nurbs::math::NOW {
-                p.w = 1.0;
-            }
-        }
+        *slot = end_turns_back(p0, p1, p2, metric);
     }
-    Ok(())
+    Ok(Some(turned))
+}
+
+/// (not upstream) Whether [`fix_reversed_on`] would write to `c`: a curve with an end
+/// to straighten, or one whose NURB it would make first. With
+/// [`Kernel::memoize_curve_caches`] the check reads first and takes the curve mutably
+/// only then, so a check that changes nothing leaves the body unwritten (and keeps the
+/// curve's memo, which a mutable access starts afresh). Without it, always `true`: every
+/// curve is taken mutably, as upstream does.
+fn reversed_needs_fix(k: &Kernel, c: &Curve, surface: Option<&Surface>) -> Result<bool> {
+    use crate::curve::curve::CurveKind;
+    if !k.memoize_curve_caches {
+        return Ok(true);
+    }
+    let base = match c.kind() {
+        CurveKind::BSpline(base) => base,
+        CurveKind::Line(line) => line.base(),
+        CurveKind::Ellipse(ellipse) => ellipse.base(),
+        CurveKind::Hyperbola(h) => h.base(),
+        CurveKind::Parabola(p) => p.base(),
+        _ => return Ok(false),
+    };
+    // without its NURB the fix makes it (or fails trying)
+    let Some(nurb) = base.gw_nurb() else {
+        return Ok(true);
+    };
+    let surface = surface.filter(|_| base.dim == 2);
+    Ok(turned_ends(k, nurb.cpts(), surface)?.is_some_and(|t| t.contains(&true)))
 }
 
 fn check_edge_geometry(
@@ -2100,14 +2209,16 @@ fn edge_geometry(
     let vu = required(b.edgeuse(eu)?.vertexuse)?;
     let start = required(b.vertexuse(vu)?.vertex)?;
     let end = required(edge::other_vertex(b, e, Some(start))?)?;
-    fix_reversed(k, required(b.edge_mut(e)?.curve.as_mut())?)?;
+    if reversed_needs_fix(k, required(b.edge(e)?.curve.as_ref())?, None)? {
+        fix_reversed(k, required(b.edge_mut(e)?.curve.as_mut())?)?;
+    }
     let curve = required(b.edge(e)?.curve.as_ref())?;
     // The owner naming scheme belongs to the caller; the type and edge-owner
     // identity resolved by that caller are kept by the curve itself.
     if curve.owner() != Some(keys(EntityRef::Edge(e))) {
-        return Err(crate::SolidError::topology_failed(
+        return Err(crate::SolidError::topology(
             super::OP,
-            "the edge's curve is not owned by the edge",
+            crate::error::topology::TopologyFailure::CurveNotOwnedByEdge,
         ));
     }
     let ivl = b.edge(e)?.interval;
@@ -2121,9 +2232,12 @@ fn edge_geometry(
                 let zone = tol::zone_tol3d(k, dist * 2.0);
                 crate::topology::vertex::set_tolerance(b, v, zone, true, true)?;
             } else {
-                return Err(crate::SolidError::topology_failed(
+                return Err(crate::SolidError::topology(
                     super::OP,
-                    "the edge's end is farther from its vertex than their tolerances",
+                    crate::error::topology::TopologyFailure::EdgeEndOffVertex {
+                        distance: dist,
+                        tolerance: v_tol + b.edge(e)?.tolerance,
+                    },
                 ));
             }
         }
@@ -2170,11 +2284,13 @@ fn edge_geometry(
             }
             // not upstream (WR-406, #891): the turn judged on the face's surface
             let surface = required(b.face(f)?.surface.as_ref())?.clone_for_evaluation()?;
-            fix_reversed_on(
-                k,
-                required(b.edgeuse_mut(eu)?.uv_trim_curve.as_mut())?,
-                Some(&surface),
-            )?;
+            if reversed_needs_fix(k, trim, Some(&surface))? {
+                fix_reversed_on(
+                    k,
+                    required(b.edgeuse_mut(eu)?.uv_trim_curve.as_mut())?,
+                    Some(&surface),
+                )?;
+            }
         }
     }
     Ok(())
@@ -2259,6 +2375,67 @@ mod issue_891_tests {
         assert_eq!(middle_control_point(&mut on_surface), before);
     }
 
+    /// The reversal test reads before it writes: it says a fix is needed exactly where the
+    /// fix moves a point (the plain test of the exact trim), not where the fix leaves the
+    /// curve as it is (on its surface); with the memos off every curve is taken mutably.
+    #[test]
+    fn the_reversal_test_reads_before_it_writes() {
+        let k = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        let plane = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(60.0, 0.0, 0.0),
+                Vec3::new(0.0, 4.0, 0.0),
+                Vec3::new(60.0, 4.0, 0.0),
+            )
+            .unwrap(),
+        );
+        assert!(reversed_needs_fix(&k, &trim(), None).unwrap());
+        assert!(!reversed_needs_fix(&k, &trim(), Some(&plane)).unwrap());
+        let off = Kernel {
+            memoize_curve_caches: false,
+            ..Kernel::default()
+        };
+        assert!(reversed_needs_fix(&off, &trim(), Some(&plane)).unwrap());
+    }
+
+    /// A curve end off its vertex by more than the vertex's and the edge's tolerance fails
+    /// as `EdgeEndOffVertex` with that gap and that tolerance, and `fix_tolerances` does
+    /// not grow a vertex 100 tolerances or more away (review of #21132).
+    #[test]
+    fn an_edge_end_off_its_vertex_reports_the_gap_and_the_tolerance() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 2.0, 3.0, 4.0)
+            .unwrap();
+        let e = b.edge_list()[0];
+        let owner = b.owner_identity(EntityRef::Edge(e));
+        let keys = move |_: EntityRef| owner;
+        validate_geometry(&k, &mut b, e, false, &keys).unwrap();
+        let v = b.edge(e).unwrap().vertices[0];
+        let tolerance = b.vertex(v).unwrap().tolerance + b.edge(e).unwrap().tolerance;
+        let gap = 0.25;
+        let moved = b.vertex(v).unwrap().point + Vec3::new(0.0, 0.0, gap);
+        b.vertex_mut(v).unwrap().point = moved;
+        for fix in [false, true] {
+            let e = validate_geometry(&k, &mut b, e, fix, &keys).unwrap_err();
+            let Some(&crate::error::topology::TopologyFailure::EdgeEndOffVertex {
+                distance,
+                tolerance: exceeded,
+            }) = e.topology_failure()
+            else {
+                panic!("{e:?}");
+            };
+            assert!((distance - gap).abs() < 1e-9, "{distance}");
+            assert_eq!(exceeded, tolerance);
+            assert!(distance > exceeded);
+            assert_eq!(e.kind(), crate::error::ErrorKind::NotWithinTolerance);
+            assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        }
+    }
+
     #[test]
     fn vertex_ball_cannot_reach_a_separate_wire_edge() {
         use crate::curve::line::Line;
@@ -2282,7 +2459,6 @@ mod issue_891_tests {
         let vertex = body.vertex_list()[0];
         let mut reports = Reports {
             array: None,
-            level: 0,
             failed: false,
         };
         // a body tolerance whose limit is 1000 / 1500, so both radii are between 1 x and 2 x it
@@ -2328,7 +2504,6 @@ mod issue_891_tests {
             assert!(local.edges.contains(&edges[1]), "gap {gap}");
             let mut reports = Reports {
                 array: None,
-                level: 0,
                 failed: false,
             };
             check_vertex_exclusion(&k, &mut body, &mut reports).unwrap();
@@ -2350,7 +2525,6 @@ mod issue_891_tests {
         assert_eq!(after.edges.len(), 3, "only the three incident box edges");
         let mut reports = Reports {
             array: None,
-            level: 0,
             failed: false,
         };
         check_vertex_exclusion(&k, &mut body, &mut reports).unwrap();
@@ -2430,7 +2604,6 @@ mod issue_891_tests {
         let mut array = AssertArray::new();
         let mut reports = Reports {
             array: Some(&mut array),
-            level: 0,
             failed: false,
         };
         check_vertex_exclusion(&k, &mut body, &mut reports).unwrap();
@@ -2476,7 +2649,6 @@ mod issue_891_tests {
         let vertex = edge::start_vertex(&body, wire).unwrap().unwrap();
         let mut reports = Reports {
             array: None,
-            level: 0,
             failed: false,
         };
         check_vertex_exclusion(&k, &mut body, &mut reports).unwrap();
@@ -2701,6 +2873,86 @@ mod issue_891_tests {
         assert_eq!(curve.certified_bounding_box(&k, &interval).unwrap(), None);
         let far = Vec3::new(100.0, 100.0, 100.0);
         assert!(!curve_clears(&k, &curve, &interval, 1e-5, far, 0.1).unwrap());
+    }
+
+    /// The wall of a cylinder of radius 2 from z = 0 to 3, and its top rim with its interval.
+    fn cylinder_wall_and_top_rim(k: &mut Kernel) -> (Surface, Extent2d, Curve, Extent1d) {
+        let b = crate::primitive::api_primitives::create_cylinder(k, Vec3::ZERO, 2.0, 3.0).unwrap();
+        let wall = b
+            .face_list()
+            .iter()
+            .map(|&f| b.face(f).unwrap())
+            .find(|face| !matches!(face.surface.as_ref().unwrap().kind(), SurfaceKind::Plane(_)))
+            .unwrap();
+        let surface = wall
+            .surface
+            .as_ref()
+            .unwrap()
+            .clone_for_evaluation()
+            .unwrap();
+        let rim = b
+            .edge_list()
+            .iter()
+            .map(|&e| b.edge(e).unwrap())
+            .find(|edge| {
+                let curve = edge.curve.as_ref().unwrap();
+                matches!(curve.kind(), CurveKind::Ellipse(_))
+                    && curve.evaluate_point(k, edge.interval.min()).unwrap().z == 3.0
+            })
+            .unwrap();
+        (
+            surface,
+            wall.uv_domain,
+            rim.curve.clone().unwrap(),
+            rim.interval,
+        )
+    }
+
+    /// A point on a cylinder's axis lies inside the box of the wall's control net, 2 from the
+    /// wall: the proof by boxes reaches the answer by splitting the wall, clear for a ball of
+    /// radius 1, not clear for one of 2.1 (which does reach it).
+    #[test]
+    fn a_ball_on_the_axis_of_a_round_wall_is_proved_clear_of_the_wall() {
+        let mut k = Kernel::default();
+        let (wall, domain, _, _) = cylinder_wall_and_top_rim(&mut k);
+        let on_axis = Vec3::new(0.0, 0.0, 1.5);
+        let whole = wall
+            .calculate_bounding_box(&k, &domain, [true, false, false], true)
+            .unwrap()
+            .normal_box
+            .unwrap();
+        assert_eq!(box_distance(&whole, on_axis), 0.0);
+        assert!(surface_clears(&k, &wall, &domain, 1e-5, on_axis, 1.0).unwrap());
+        assert!(!surface_clears(&k, &wall, &domain, 1e-5, on_axis, 2.1).unwrap());
+    }
+
+    /// The same for a circle: its centre is a corner of the box of each quarter's control
+    /// points, 2 from the circle. A ball there of radius 1.9 is clear of the rim, one of 2.1 is
+    /// not.
+    #[test]
+    fn a_ball_at_the_centre_of_a_rim_is_proved_clear_of_the_rim() {
+        let mut k = Kernel::default();
+        let (_, _, rim, interval) = cylinder_wall_and_top_rim(&mut k);
+        let centre = Vec3::new(0.0, 0.0, 3.0);
+        let whole = rim.certified_bounding_box(&k, &interval).unwrap().unwrap();
+        assert_eq!(box_distance(&whole, centre), 0.0);
+        assert!(curve_clears(&k, &rim, &interval, 1e-5, centre, 1.9).unwrap());
+        assert!(!curve_clears(&k, &rim, &interval, 1e-5, centre, 2.1).unwrap());
+    }
+
+    /// A surface kind with no certified box of a cell (here an offset surface, which is not its
+    /// base's control net) is proved clear by its own box or not at all.
+    #[test]
+    fn a_surface_without_a_cell_box_is_clear_only_by_its_whole_box() {
+        let mut k = Kernel::default();
+        let (wall, domain, _, _) = cylinder_wall_and_top_rim(&mut k);
+        let offset =
+            crate::surface::surface::p1::base_create_offset_surface(&k, &wall, 0.5).unwrap();
+        assert_eq!(offset.certified_bounding_box(&k, &domain).unwrap(), None);
+        let on_axis = Vec3::new(0.0, 0.0, 1.5);
+        assert!(!surface_clears(&k, &offset, &domain, 1e-5, on_axis, 1.0).unwrap());
+        let far = Vec3::new(100.0, 100.0, 100.0);
+        assert!(surface_clears(&k, &offset, &domain, 1e-5, far, 1.0).unwrap());
     }
 
     /// WR-446 (`plan/upstream-issues/WR-446--brepconstructor-endshell-validatepointers-makes-uv-trim-curves.md`):

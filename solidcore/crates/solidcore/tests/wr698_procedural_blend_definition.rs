@@ -36,9 +36,7 @@ const L: f64 = 10.0;
 const R: f64 = 2.0;
 
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = true;
-    k
+    Kernel::default()
 }
 
 fn bilinear(p: [Point3; 4]) -> BSplineSurface {
@@ -357,11 +355,16 @@ fn the_record_is_the_fork_s_and_reads_back() {
             let tol = if ft == FileType::Binary { 0.0 } else { 1e-9 };
             assert!((p - want).length() <= tol, "{ft:?}: {p:?} != {want:?}");
 
-            // without the flag the type is refused, as the pinned reader refuses it
-            let off = Kernel::default();
+            // a fresh kernel (no cache shared with the writer's) reads the type too, to the
+            // same point; the pinned reader refused it
+            let default = Kernel::default();
             let mut r = DatabaseReader::new();
             r.open_for_read(bytes.clone(), ft);
-            assert!(Surface::read_from_db(&off, PROCEDURAL_BLEND_TYPE, &mut r, 30).is_err());
+            let back = Surface::read_from_db(&default, PROCEDURAL_BLEND_TYPE, &mut r, 30).unwrap();
+            let q = back
+                .evaluate_point(&default, Point2::new(0.37, 0.6))
+                .unwrap();
+            assert!((q - want).length() <= tol, "{ft:?}: {q:?} != {want:?}");
         }
     }
 }
@@ -809,6 +812,7 @@ fn a_plane_label_needs_the_plane_s_parametrisation() {
         }
         r.definition.supports[0] = SupportRecord::Nurbs {
             kind: SupportKindRecord::Plane,
+            revolution: None,
             form: NurbsSurfaceRecord {
                 u_degree: 2,
                 v_degree: 1,

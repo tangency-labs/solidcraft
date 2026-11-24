@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Space drawing annotations</title>
+  <path d="M28.5 9L53.5 9A2.5 2.5 0 0 1 56 11.5L56 14.5A2.5 2.5 0 0 1 53.5 17L28.5 17A2.5 2.5 0 0 1 26 14.5L26 11.5A2.5 2.5 0 0 1 28.5 9Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M28.5 28L53.5 28A2.5 2.5 0 0 1 56 30.5L56 33.5A2.5 2.5 0 0 1 53.5 36L28.5 36A2.5 2.5 0 0 1 26 33.5L26 30.5A2.5 2.5 0 0 1 28.5 28Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M28.5 47L53.5 47A2.5 2.5 0 0 1 56 49.5L56 52.5A2.5 2.5 0 0 1 53.5 55L28.5 55A2.5 2.5 0 0 1 26 52.5L26 49.5A2.5 2.5 0 0 1 28.5 47Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M15 19L15 25M15 38L15 44" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M15 14L10 21L20 21ZM15 30L10 23L20 23ZM15 33L10 40L20 40ZM15 49L10 42L20 42Z" fill="#236ead"/>
+</svg>

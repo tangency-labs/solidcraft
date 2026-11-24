@@ -9,14 +9,14 @@
   Per-machine install with a setup wizard: Welcome, install folder (Program Files\SolidCraft by
   default; an update keeps the installed folder and skips this page), Ready, progress, and a Finish page with a ticked "Launch
   SolidCraft" box. Installs a Start Menu shortcut, solidcraft-cli (and adds its folder to the system PATH), the licence files (including
-  THIRD-PARTY-LICENSES.txt), makes SolidCraft the owner of `.sc` (and of the older `.solidcraft` and pre-rename `.solvecraft`), and offers it under
+  THIRD-PARTY-LICENSES.txt), makes SolidCraft the owner of `.sc` (and of the older `.solidcraft`), and offers it under
   "Open with" for STEP, IGES, 3MF and STL. `msiexec /qn` installs silently.
   Adapted from PhotoCraft's (storytold/photocraft, Apache-2.0; see ATTRIBUTION.md).
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <!-- Never change the UpgradeCode: it is what lets a new MSI replace every earlier install,
-       including those from before the SolveCraft -> SolidCraft rename (docs/compatibility.md). -->
+       including those from before the product was renamed (docs/compatibility.md). -->
   <Package
       Name="SolidCraft"
       Manufacturer="SolidCraft contributors"
@@ -42,6 +42,11 @@
          of the same X.Y.Z, whose file version is the same. "a" replaces every file; all of them
          are SolidCraft's own. -->
     <Property Id="REINSTALLMODE" Value="amus" />
+    <!-- Never restart the computer at the end of an install or update, whoever starts it: the
+         in-app updater of an older SolidCraft runs `msiexec /passive` without REBOOT, and Windows
+         then restarted the PC by itself when a file was in use (#18774). A file that is in use is
+         replaced at the next restart instead. -->
+    <Property Id="REBOOT" Value="ReallySuppress" />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
     <!-- This MSI icon is only for Programs and Features. A shortcut must use the installed
@@ -59,9 +64,9 @@
     <StandardDirectory Id="ProgramMenuFolder" />
 
     <!-- An upgrade installs where the user put the previous version (written by SolidcraftApp). -->
-    <!-- Since the rename the folder and this key say SolidCraft. A pre-rename install recorded
-         Software\SolveCraft, which isn't read: its upgrade (same UpgradeCode) removes the old
-         folder and installs into Program Files\SolidCraft (docs/compatibility.md). -->
+    <!-- A pre-rename install recorded a different key, which isn't read: its upgrade (same
+         UpgradeCode) removes the old folder and installs into Program Files\SolidCraft
+         (docs/compatibility.md). -->
     <Property Id="INSTALLFOLDER">
       <RegistrySearch Id="PreviousInstallFolder" Root="HKLM" Key="Software\SolidCraft" Name="InstallDir" Type="raw" />
     </Property>
@@ -94,8 +99,8 @@
 
   <Fragment>
     <ComponentGroup Id="SolidcraftFiles" Directory="INSTALLFOLDER">
-      <!-- A new GUID with the rename: the key file changed from solvecraft.exe to solidcraft.exe.
-           The UpgradeCode above is unchanged, so this MSI major-upgrades a pre-rename install. -->
+      <!-- A new GUID with the rename: the key file changed name. The UpgradeCode above is
+           unchanged, so this MSI major-upgrades a pre-rename install. -->
       <Component Id="SolidcraftApp" Guid="A379D509-D776-4B34-A3A4-71FBF5724971">
         <File Id="SolidcraftExe" Source="$(var.BinDir)\solidcraft.exe" KeyPath="yes">
           <!-- The shortcut is "SolidCraft.lnk" again. Releases 0.30.1 and earlier advertised their
@@ -119,12 +124,10 @@
           </Extension>
         </ProgId>
         <!-- Compatibility shim (docs/compatibility.md): designs saved as .solidcraft (before .sc)
-             and as .solvecraft (before the rename) open as the same ProgId. Registered by hand: a
+             open as the same ProgId. Registered by hand: a
              second Extension under one ProgId would write its open verb twice (WIX0091). -->
         <RegistryValue Root="HKLM" Key="Software\Classes\.solidcraft" Value="Solidcraft.Design" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\.solidcraft" Name="Content Type" Value="application/x-solidcraft" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.solvecraft" Value="Solidcraft.Design" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.solvecraft" Name="Content Type" Value="application/x-solvecraft" Type="string" />
         <!-- STEP, IGES and meshes: offered under "Open with", never forced as the default. -->
         <ProgId Id="Solidcraft.Model" Description="3D model" Icon="SolidcraftExe" IconIndex="0" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Solidcraft.Model\shell\open\command" Value="&quot;[#SolidcraftExe]&quot; &quot;%1&quot;" Type="string" />
@@ -140,7 +143,6 @@
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\shell\open\command" Value="&quot;[#SolidcraftExe]&quot; &quot;%1&quot;" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".sc" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".solidcraft" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".solvecraft" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".step" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".stp" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".igs" Value="" Type="string" />
@@ -156,10 +158,6 @@
         <!-- The install folder on the system PATH, so MCP clients and shells find `solidcraft-cli` by name;
              removed again on uninstall. -->
         <Environment Id="SolidcraftPath" Name="PATH" Value="[INSTALLFOLDER]" Action="set" Part="last" System="yes" Permanent="no" />
-      </Component>
-      <!-- Compatibility shim (docs/compatibility.md): the old CLI name, forwarding to solidcraft-cli. -->
-      <Component Id="SolidcraftCliAlias">
-        <File Id="SolvecraftCliAliasExe" Source="$(var.BinDir)\solvecraft-cli.exe" KeyPath="yes" />
       </Component>
       <!-- Several unversioned files: an explicit GUID (WIX0367). -->
       <Component Id="SolidcraftLicences" Guid="CDEDEE8D-4BE9-4872-A2EA-EE623A6C7E91">

@@ -88,7 +88,7 @@ fn with(base: &Value, key: &str, value: Value) -> Value {
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<RibParams>(),
-        &["body_name", "body_names", "curves", "depth", "direction", "flip", "name", "participants", "sketch", "thickness", "touching"],
+        &["body_name", "body_names", "curves", "depth", "direction", "extend", "flip", "name", "participants", "sketch", "thickness", "touching"],
     );
     assert_keys(input_schema_for::<RemoveParams>(), &["bodies", "body_name", "body_names", "name", "participants"]);
     assert_keys(
@@ -108,6 +108,7 @@ fn schemas_and_the_key_check_agree() {
             "body_names",
             "clockwise",
             "diameter",
+            "end_cut",
             "height",
             "name",
             "operation",

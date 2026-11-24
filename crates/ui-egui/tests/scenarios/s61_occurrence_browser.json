@@ -19,6 +19,6 @@
   {"click":{"handle":"activate:occurrence:4"}},
   {"call":"ui.menu","params":{"x":300,"y":300,"target":{"type":"occurrence","path":[4]}}},
   {"call":"ui.menuPick","params":{"item":"Move/Copy"}},
-  {"expect":{"shown":"Move: Block:2"}},
+  {"expect":{"shown":"Move/Copy"}},
   {"shot":"second_occurrence_move"}
 ]

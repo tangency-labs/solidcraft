@@ -4,8 +4,6 @@
 //! picker the operation runs, on a copy of the body as the operation received it: a pick builds
 //! query caches on the body it reads, and the body traced stays as an untraced run leaves it.
 
-use std::sync::PoisonError;
-
 use solidcore::geom::vector3d::Vec3;
 use solidcore::topology::brep::p1 as brep_p1;
 use solidcore::topology::brep::p3::brep_copy;
@@ -23,7 +21,7 @@ use crate::trace::{Pick, PickKind};
 /// edge, its end points; for a vertex, its point.
 pub(crate) fn picks(body: &Body, kind: PickKind, points: &[[f64; 3]], tolerance: f64) -> Result<Vec<Pick>> {
     super::run_on("trace pick", &[], |k| {
-        let mut b = brep_copy(k, &body.0.lock().unwrap_or_else(PoisonError::into_inner))?;
+        let mut b = brep_copy(k, &body.kernel())?;
         let mut out = Vec::with_capacity(points.len());
         for p in points {
             let one = std::slice::from_ref(p);

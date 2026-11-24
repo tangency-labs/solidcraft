@@ -13,6 +13,7 @@
 use solidcore_ops::continuity::principal_curvatures;
 use solidcore_ops::curve::{curve_deviation, curve_surface_deviation};
 use solidcore_ops::surface::{reverse_sheet, ruled};
+use solidcore_ops::trim::{remove_faces, split_face_by_curves};
 use solidcore_ops::{make_cylinder, make_sphere, Error};
 use solidcore_record::brep::Curve;
 
@@ -71,6 +72,85 @@ fn a_cylinder_reads_its_inverse_radius_round_and_nothing_along() {
     assert!(p.k2.abs() < 1e-9, "{p:?}");
     assert!(p.gaussian.abs() < 1e-9, "{p:?}");
     assert!((p.mean - 1.0 / 6.0).abs() < 1e-9, "{p:?}");
+}
+
+#[test]
+fn a_cylinder_reads_wall_curvature_near_its_cap_boundaries() {
+    let (can, _) = make_cylinder([0.0; 3], 3.0, 10.0)
+        .unwrap()
+        .to_record()
+        .unwrap();
+    // Each probe is 2 from the wall. Near either end, the cap's infinite plane is closer,
+    // but the circular cap itself is farther away than the wall.
+    let points = [
+        [5.0, 0.0, 0.5],
+        [5.0, 0.0, 1.5],
+        [5.0, 0.0, 8.5],
+        [5.0, 0.0, 9.5],
+    ];
+    let got = principal_curvatures(&can, &points).unwrap();
+    assert_eq!(got.len(), points.len());
+    for (point, p) in points.iter().zip(got) {
+        let p = p.unwrap();
+        assert!((p.k1 - 1.0 / 3.0).abs() < 1e-9, "{point:?}: {p:?}");
+        assert!(p.k2.abs() < 1e-9, "{point:?}: {p:?}");
+        assert!(p.gaussian.abs() < 1e-9, "{point:?}: {p:?}");
+        assert!((p.mean - 1.0 / 6.0).abs() < 1e-9, "{point:?}: {p:?}");
+    }
+    assert!(principal_curvatures(&can, &[]).unwrap().is_empty());
+}
+
+#[test]
+fn a_cylinder_reads_zero_curvature_when_a_cap_is_nearest() {
+    let (can, _) = make_cylinder([0.0; 3], 3.0, 10.0)
+        .unwrap()
+        .to_record()
+        .unwrap();
+    let points = [[1.0, 0.0, -2.0], [1.0, 0.0, 12.0]];
+    let got = principal_curvatures(&can, &points).unwrap();
+    assert_eq!(got.len(), points.len());
+    for (point, p) in points.iter().zip(got) {
+        let p = p.unwrap();
+        assert!(p.k1.abs() < 1e-9 && p.k2.abs() < 1e-9, "{point:?}: {p:?}");
+        assert!(
+            p.gaussian.abs() < 1e-9 && p.mean.abs() < 1e-9,
+            "{point:?}: {p:?}"
+        );
+    }
+}
+
+#[test]
+fn a_trimmed_saddle_reads_curvature_at_its_nearest_boundary_point() {
+    let saddle = ruled(
+        &line([-1.0, -1.0, 1.0], [1.0, -1.0, -1.0]),
+        &line([-1.0, 1.0, -1.0], [1.0, 1.0, 1.0]),
+        false,
+    )
+    .unwrap();
+    let (body, order) = solidcore_ops::Body::from_record(&saddle, true).unwrap();
+    let cut = [solidcore_ops::sweep::Curve::Line {
+        start: [0.0, -1.0, 0.0],
+        end: [0.0, 1.0, 0.0],
+    }];
+    let (split, regions) = split_face_by_curves(&body, &order, 0, &cut, 1e-6).unwrap();
+    assert_eq!(regions.len(), 2);
+    let negative = regions.iter().find(|r| r.inside[0] < 0.0).unwrap();
+    let (_, order) = split.to_record().unwrap();
+    let trimmed = remove_faces(&split, &order, &[negative.face]).unwrap();
+    let (trimmed, _) = trimmed.to_record().unwrap();
+
+    // For x >= 0, squared distance to (-1, 0, 0) is (x+1)^2 + y^2 + x^2*y^2.
+    // Its unique minimum is the origin, where the principal curvatures are +1 and -1.
+    let got = principal_curvatures(&trimmed, &[[-1.0, 0.0, 0.0]]).unwrap();
+    let p = got[0].unwrap();
+    assert!(
+        (p.k1 - 1.0).abs() < 1e-9 && (p.k2 + 1.0).abs() < 1e-9,
+        "{p:?}"
+    );
+    assert!(
+        (p.gaussian + 1.0).abs() < 1e-9 && p.mean.abs() < 1e-9,
+        "{p:?}"
+    );
 }
 
 /// The saddle z = x y (the ruled sheet between two crossed lines) bends up one way and down the

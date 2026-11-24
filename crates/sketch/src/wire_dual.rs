@@ -8,7 +8,7 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 use solidcore_record::Vec3;
 
 /// Most unknowns one constraint reads: three coordinates of each of its points.
-pub const N: usize = 12;
+pub const N: usize = 18;
 
 /// What a residual is computed in: plain numbers, or numbers with their derivatives.
 pub trait Num: Copy + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self> + Div<Output = Self> + Neg<Output = Self> {

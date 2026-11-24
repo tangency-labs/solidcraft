@@ -1,14 +1,15 @@
 //! tangency-labs/solidcore#1981 (WR-654): chamfering the four rim edges of a pocket (box
 //! (0,0,0) 60 x 40 x 10 minus box (15,10,5) 30 x 20 x 6, so the pocket is 5 deep) with
 //! leg 5.5, straight on the Boolean's direct body, fails with error code 3 "Fillet Corner
-//! Error: Corner Edge Computation Failure" when `keep_operand_uv_trims` (WR-361) is on
-//! together with the fillet fixes SolidCraft runs with (`fillet_trace_reaches_rails`,
-//! `fillet_mitre_concave_face_corners`; the refusal of rails leaving their faces, the rail
+//! Error: Corner Edge Computation Failure" now that the Boolean keeps the operand's exact
+//! UV trims (WR-361, always on since its flag was retired), with the fillet fixes SolidCraft runs with (`fillet_trace_reaches_rails`,
+//! the WR-642 mitre; the refusal of rails leaving their faces, the rail
 //! end on the continued surface and the cliff overflow, once flags too, are the only path).
 //!
-//! The Boolean's copy of the cut box's trims is exact; the cut box's faces at x = 15 and
-//! y = 30 carry the exact degree-1 B-spline trims `SwapUV` mirrors onto them, the other
-//! walls lines. WR-610's run-on (`fillet_trace_reaches_rails`) widens a side edge's
+//! The Boolean copied the cut box's trims: its faces at x = 15 and y = 30 carry the exact
+//! degree-1 B-spline trims `SwapUV` mirrors onto them, the other walls lines (since
+//! solidcraft#17896 a plane keeps `MakeFace`'s exact UV line for a line edge instead, but a
+//! lone box still mixes the two, as below). WR-610's run-on (`fillet_trace_reaches_rails`) widens a side edge's
 //! parameter interval past its ends, but a B-spline trim clamps the parameter to its own
 //! interval, so one wall's rail met the pocket's vertical edge past the floor and the
 //! other's not at all, and the bevel vertex split. The widened B-spline trim now runs on
@@ -41,12 +42,10 @@ fn expected() -> f64 {
     21000.0 - (50.0 * D * D + 4.0 / 3.0 * D * D * D)
 }
 
-/// SolidCraft's fillet flag set, with `keep_operand_uv_trims` as given.
-fn kernel(keep_operand_uv_trims: bool) -> Kernel {
+/// SolidCraft's fillet flag set.
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_mitre_concave_face_corners = true;
-    k.fixes.keep_operand_uv_trims = keep_operand_uv_trims;
     k
 }
 
@@ -99,8 +98,8 @@ fn rim_edges(b: &Brep) -> Vec<EdgeId> {
 }
 
 /// Chamfers the rim; `Err` carries the fillet session's error code and comment.
-fn chamfer_rim(keep_operand_uv_trims: bool) -> Result<f64, (i32, String)> {
-    let mut k = kernel(keep_operand_uv_trims);
+fn chamfer_rim() -> Result<f64, (i32, String)> {
+    let mut k = kernel();
     let mut b = pocket(&mut k);
     let ids = rim_edges(&b);
     let mut s = FilletSession::new(&mut k, &mut b).unwrap();
@@ -116,7 +115,7 @@ fn chamfer_rim(keep_operand_uv_trims: bool) -> Result<f64, (i32, String)> {
 
 /// Rounds the long edge at (`x`, `y`) of a 5 x 5 x 30 box with radius `r`.
 fn round_bar_edge(x: f64, y: f64, r: f64) -> Result<f64, i32> {
-    let mut k = kernel(false);
+    let mut k = kernel();
     let mut b = create_box(&mut k, Point3::ZERO, 5.0, 5.0, 30.0).unwrap();
     let e = b
         .edges()
@@ -138,19 +137,9 @@ fn round_bar_edge(x: f64, y: f64, r: f64) -> Result<f64, i32> {
 
 #[test]
 fn pocket_chamfer_on_a_boolean_body() {
-    let v = chamfer_rim(true).unwrap_or_else(|(code, comment)| panic!("{code} {comment}"));
+    let v = chamfer_rim().unwrap_or_else(|(code, comment)| panic!("{code} {comment}"));
     let want = expected();
     eprintln!("pocket chamfer, operand trims kept: {v:.12} (want {want:.12})");
-    assert!((v - want).abs() / want < 1e-8, "{v} vs {want}");
-}
-
-/// With `keep_operand_uv_trims` off the pocket's walls carry line trims only: the
-/// expected volume.
-#[test]
-fn pocket_chamfer_without_operand_trims() {
-    let want = expected();
-    let v = chamfer_rim(false).unwrap_or_else(|(code, comment)| panic!("{code} {comment}"));
-    eprintln!("pocket chamfer, no operand trims: {v}");
     assert!((v - want).abs() / want < 1e-8, "{v} vs {want}");
 }
 

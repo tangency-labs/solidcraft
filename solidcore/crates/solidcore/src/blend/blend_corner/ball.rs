@@ -39,7 +39,7 @@
 //! [`crate::surface::ball_patch::BallPatch`] (`SmBallPatch`): the rational patch carrying
 //! its sphere as its definition (its own type, exact offset and database IO). The patch
 //! and its loop are kept in [`BallCorner`] from the edge geometry until the patch takes them.
-//! With `Kernel::fixes.fillet_round_as_definition` the patch also keeps its corner
+//! The patch also keeps its corner
 //! definition (#2357, not the fork's): its sphere and its loop, certified on it
 //! ([`crate::surface::procedural_blend::corner::BallDefinition`]). The fork's
 //! `SmFilletExecutive::IsSetBackVertex` is the caller's `set_back` argument (WR-697). No
@@ -57,7 +57,8 @@ use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverType, FilletSurfaceGeneratorType};
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::blend::{BlendFailure, CornerInput, CornerStep, FilletSetUp, SolverFailure};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::krawczyk::{contraction, k_operator};
 use crate::intersect::surface_intersector::p1::SrfIndex;
 use crate::kernel::Kernel;
@@ -82,6 +83,131 @@ const OP_PLACE: &str = "blend::blend_corner::ball::place_ball_contacts";
 const OP_BUILD: &str = "blend::blend_corner::ball::ball_corner_edge_geom";
 const OP_PATCH_NET: &str = "blend::blend_corner::ball::ball_triangle_patch";
 const OP_PATCH: &str = "blend::blend_corner::ball::create_ball_patch";
+
+/// A defect of `op`: a step the corner's own checks or constructions (the ball's, or the
+/// setback fill's) promise did not hold (`why`).
+#[track_caller]
+pub(super) fn defect(op: &'static str, why: &'static str) -> SolidError {
+    SolidError::blend(op, BlendFailure::Defect { why })
+}
+
+/// A defect of `op` where something the kernel built is missing (`why`), with the
+/// `SM_ERR_NULL_POINTER` status of the `NER` it replaces.
+#[track_caller]
+pub(super) fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
+    Failure::new(op, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// Invalid input to `op`: the caller's corner, fillet B-rep or body is not what the corner's
+/// construction reads (`input`), about `entity` where the check reads one, with the status
+/// the site returned before ([`CornerInput::upstream_status`]). The entry points are public
+/// and take a caller's corner.
+#[track_caller]
+pub(super) fn bad_input(
+    op: &'static str,
+    input: CornerInput,
+    entity: Option<EntityRef>,
+) -> SolidError {
+    corner_input(op, input, entity).into_error()
+}
+
+/// The [`Failure`] of [`bad_input`], located at `entity` where there is one.
+#[track_caller]
+pub(super) fn corner_input(
+    op: &'static str,
+    input: CornerInput,
+    entity: Option<EntityRef>,
+) -> Failure {
+    let failure = Failure::new(op, BlendFailure::CornerInputInvalid { input, entity });
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+}
+
+/// A face of the caller's body that the corner reads, `face`, has no surface: the caller's
+/// input, [`BlendFailure::FaceHasNoSurface`] at the face, status `SM_ERR_NULL_POINTER` (the
+/// site's).
+#[track_caller]
+pub(super) fn face_without_surface(op: &'static str, face: FaceId) -> SolidError {
+    Failure::new(op, BlendFailure::FaceHasNoSurface)
+        .with_status(SM_ERR_NULL_POINTER)
+        .at(EntityRef::Face(face))
+        .into_error()
+}
+
+/// An edge use of the caller's body or fillet B-rep, `edgeuse`, has no edge: the caller's
+/// input, [`BlendFailure::EdgeUseWithoutEdge`] at the edge use, status
+/// `SM_ERR_NULL_POINTER`.
+#[track_caller]
+pub(super) fn edge_use_without_edge(op: &'static str, edgeuse: EdgeuseId) -> SolidError {
+    SolidError::blend_at(
+        op,
+        BlendFailure::EdgeUseWithoutEdge,
+        EntityRef::Edgeuse(edgeuse),
+    )
+}
+
+/// Invalid input to `op`: the caller's fillet solver set-up lacks what the corner reads
+/// (`cause`, [`BlendFailure::Solver`]), about `entity` where the check reads one; status
+/// the cause's, `SM_ERR_NULL_POINTER`, the site's.
+#[track_caller]
+pub(super) fn solver_input(
+    op: &'static str,
+    cause: SolverFailure,
+    entity: Option<EntityRef>,
+) -> SolidError {
+    let failure = Failure::new(op, BlendFailure::Solver(cause));
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+    .into_error()
+}
+
+/// Invalid input to `op`: a link of the caller's fillet structures that the corner reads is
+/// not there (`part`), about `entity` where the check reads one; status
+/// `SM_ERR_NULL_POINTER`, the site's.
+#[track_caller]
+pub(super) fn bad_setup(
+    op: &'static str,
+    part: FilletSetUp,
+    entity: Option<EntityRef>,
+) -> SolidError {
+    let failure = Failure::new(op, BlendFailure::FilletSetUpInvalid(part));
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+    .into_error()
+}
+
+/// The corner has no construction at `step` (status `SM_ERR`).
+#[track_caller]
+pub(super) fn unbuildable(op: &'static str, step: CornerStep) -> SolidError {
+    SolidError::blend(op, BlendFailure::CornerUnbuildable(step))
+}
+
+/// [`unbuildable`] with the `SM_ERR_NULL_POINTER` status of the site it replaces.
+#[track_caller]
+pub(super) fn unbuildable_missing(op: &'static str, step: CornerStep) -> SolidError {
+    Failure::new(op, BlendFailure::CornerUnbuildable(step))
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// `a[i]` of a triple, the last for any `i` past the second (the callers' indices are
+/// below 3).
+fn of3<T: Copy>(a: &[T; 3], i: usize) -> T {
+    let [x, y, z] = *a;
+    match i {
+        0 => x,
+        1 => y,
+        _ => z,
+    }
+}
 
 /// A Ball's own members on its corner, from the edge geometry until the patches take
 /// them: the faces' surfaces (`m_vBallSurfaces`, the `n - 2` patches of the n-gon fanned
@@ -185,9 +311,11 @@ fn planes_meet(on: &[Point3; 3], normal: &[Vec3; 3]) -> Result<Point3> {
     let [n0, n1, n2] = *normal;
     let det = n0.dot(n1.cross(n2));
     if det.abs() <= EFF_ZERO {
-        return Err(SolidError::blend_failed(
+        // the offset planes' normals are the first three faces' normals, which
+        // classify_ball checked are independent (|det| > EFF_ZERO_SQRT)
+        return Err(unbuildable(
             OP_CLASSIFY,
-            "the three faces' planes do not meet in one point",
+            CornerStep::BallOffsetPlanesDegenerate,
         ));
     }
     let mut rhs = [0.0; 3];
@@ -212,8 +340,7 @@ fn max(a: f64, b: f64) -> f64 {
 /// `sm_BallFaceQuadric` (the fork's 7048946): the quadric (a plane or a natural quadric) a
 /// ring face lies on, [`QuadricKind::None`] where it lies on none.
 fn ball_face_quadric(k: &Kernel, b: &Brep, face: FaceId, tol: f64) -> Result<BlendQuadric> {
-    let surface = face2::surface(b, face)?
-        .ok_or_else(|| SolidError::blend_missing(OP_QUADRIC, "the ring face's surface"))?;
+    let surface = face2::surface(b, face)?.ok_or_else(|| face_without_surface(OP_QUADRIC, face))?;
     let q = BlendQuadric::from_surface(k, surface, face2::uv_domain(b, face)?.mid(), tol)?;
     if !matches!(
         q.kind,
@@ -396,14 +523,6 @@ fn ball_certified_root(f: &[BallImplicit; 3], half: f64) -> ([f64; 3], bool) {
     (x, inside)
 }
 
-/// `GetSurface(rail)->GetOffsetDistance()` of a solver, absolute (`NER` on none).
-fn offset_radius(solver: &FilletSolver, rail: usize, op: &'static str) -> Result<f64> {
-    let slot = solver
-        .surface(rail)?
-        .ok_or_else(|| SolidError::blend_missing(op, "the rail's offset surface"))?;
-    Ok(slot.surface.offset_distance().abs())
-}
-
 /// `SmBlendCorner::ClassifyBall` (the fork's 79d4763, a6243fa, 7048946, 278bf77): whether
 /// the filleted `vertex` is a Ball. Every edge there is blended (`n >= 3` solver edge uses,
 /// `all_eus` the corner's ring of `n`), each a constant circular round of the same radius
@@ -429,12 +548,6 @@ pub fn classify_ball(
     set_back: bool,
     solvers: &dyn BallSolvers,
 ) -> Result<BlendCornerEvent> {
-    let nul = || {
-        SolidError::blend_missing(
-            OP_CLASSIFY,
-            "topology or a solver the ball corner's classification reads",
-        )
-    };
     let none = Ok(BlendCornerEvent::None);
     let n = all_eus.len();
     if n < 3 || solver_eus.len() != n || set_back {
@@ -452,7 +565,8 @@ pub fn classify_ball(
         };
         ids.push(id);
         let fs = solvers.solver(id)?;
-        let (Some(fsg), Some(_), Some(_)) = (fs.fsg.as_ref(), fs.surface(0)?, fs.surface(1)?)
+        // `GetSurface(rail)->GetOffsetDistance()`, absolute, of the two rails just found
+        let (Some(fsg), Some(s0), Some(s1)) = (fs.fsg.as_ref(), fs.surface(0)?, fs.surface(1)?)
         else {
             return none;
         };
@@ -463,13 +577,13 @@ pub fn classify_ball(
             return none;
         }
         tol = min(tol, fs.approx_tol_3d);
-        let r0 = offset_radius(fs, 0, OP_CLASSIFY)?;
-        let r1 = offset_radius(fs, 1, OP_CLASSIFY)?;
+        let r0 = s0.surface.offset_distance().abs();
+        let r1 = s1.surface.offset_distance().abs();
         if (r0 - r1).abs() > tol || (radius >= 0.0 && (r0 - radius).abs() > tol) {
             return none;
         }
         radius = r0;
-        let e = eu1::edge(b, eu)?.ok_or_else(nul)?;
+        let e = eu1::edge(b, eu)?.ok_or_else(|| edge_use_without_edge(OP_CLASSIFY, eu))?;
         let concave = is_concave_edge(k, b, e)?;
         if ii == 0 {
             concave0 = concave;
@@ -524,10 +638,15 @@ pub fn classify_ball(
         for (&id, face) in ids.iter().zip(faces.iter()) {
             let fs = solvers.solver(id)?;
             let rail = fs.find_index_of_rail_on_face(b, *face)?;
-            if rail > 1 {
+            // both rails' offset surfaces were found above, for every round
+            let (Some(s0), Some(s1)) = (fs.surface(0)?, fs.surface(1)?) else {
                 return none;
-            }
-            let off = &fs.surface(rail)?.ok_or_else(nul)?.surface;
+            };
+            let off = match rail {
+                0 => &s0.surface,
+                1 => &s1.surface,
+                _ => return none,
+            };
             let uv = off.surface.natural_uv_domain().evaluate(0.5, 0.5);
             on.push(off.surface.evaluate_point(k, uv)?);
             off_normal.push(
@@ -568,34 +687,55 @@ fn ball_centre(
     corner: &FilletCorner,
     solvers: &dyn BallSolvers,
 ) -> Result<(Point3, f64, Vec<Point3>)> {
-    let nul = || {
-        SolidError::blend_missing(
-            OP_CENTRE,
-            "topology or a solver the ball's centre is found from",
-        )
-    };
-    let err = || SolidError::blend_failed(OP_CENTRE, "the ball's centre could not be found");
-    let all_eus = corner.all_eus.as_deref().ok_or_else(nul)?;
+    let all_eus = corner
+        .all_eus
+        .as_deref()
+        .ok_or_else(|| bad_input(OP_CENTRE, CornerInput::RingNotSet, None))?;
     let n = all_eus.len();
-    if n < 3 || corner.vertices.len() != n || corner.edges.len() != n {
-        return Err(err());
-    }
-    let (Some(&v0), Some(&e0)) = (corner.vertices.first(), corner.edges.first()) else {
-        return Err(err());
+    let (true, Some(&v0), Some(&e0)) = (
+        n >= 3 && corner.vertices.len() == n && corner.edges.len() == n,
+        corner.vertices.first(),
+        corner.edges.first(),
+    ) else {
+        return Err(bad_input(OP_CENTRE, CornerInput::TopologyMismatch, None));
     };
     let tol = corner.approx_tol_3d;
 
     // a ball of the rounds at the contacts: round 0's offset surfaces at vertex 0
-    let section0 = eu1::primary_edgeuse(pseudo.brep(), e0)?.ok_or_else(nul)?;
+    let section0 = eu1::primary_edgeuse(pseudo.brep(), e0)?.ok_or_else(|| {
+        bad_setup(
+            OP_CENTRE,
+            FilletSetUp::PrimaryEdgeUse,
+            Some(EntityRef::Edge(e0)),
+        )
+    })?;
     let g0 = pseudo
         .fillet_edgeuse(section0)?
         .fillet_geom()
-        .ok_or_else(nul)?;
+        .ok_or_else(|| {
+            bad_setup(
+                OP_CENTRE,
+                FilletSetUp::CrossSectionGeom,
+                Some(EntityRef::Edgeuse(section0)),
+            )
+        })?;
     let vu = pseudo
         .vu_at_rail_end(v0, Some(g0), None, None)?
-        .ok_or_else(nul)?;
+        .ok_or_else(|| {
+            bad_setup(
+                OP_CENTRE,
+                FilletSetUp::RailEndVertexUse,
+                Some(EntityRef::Vertex(v0)),
+            )
+        })?;
     let tsect = pseudo.fillet_vertexuse(vu)?.tsect_pnt().clone();
-    let solver_id = pseudo.geom(g0)?.fillet_solver().ok_or_else(nul)?;
+    let solver_id = pseudo.geom(g0)?.fillet_solver().ok_or_else(|| {
+        solver_input(
+            OP_CENTRE,
+            SolverFailure::FilletGeomWithoutSolver { fillet_geom: g0 },
+            None,
+        )
+    })?;
     let solver = solvers.solver(solver_id)?;
     let mut on = [Point3::default(); 2];
     for (p, side) in on.iter_mut().zip([SrfIndex::First, SrfIndex::Second]) {
@@ -603,17 +743,17 @@ fn ball_centre(
         let offset = pseudo
             .geom(g0)?
             .offset_surface(rail, Some(solver))?
-            .ok_or_else(nul)?;
+            .ok_or_else(|| bad_setup(OP_CENTRE, FilletSetUp::RailOffsetSurface, None))?;
         *p = offset.surface.evaluate_point(k, tsect.uv_pos(side))?;
     }
     if on[0].distance(on[1]) > tol {
-        return Err(err()); // the section's offset points are its ball's centre
+        return Err(unbuildable(OP_CENTRE, CornerStep::RoundSectionOffsetsApart));
     }
     let ball = on[0];
     let radius = pseudo
         .geom(g0)?
         .offset_surface(0, Some(solver))?
-        .ok_or_else(nul)?
+        .ok_or_else(|| bad_setup(OP_CENTRE, FilletSetUp::RailOffsetSurface, None))?
         .surface
         .offset_distance()
         .abs();
@@ -625,16 +765,28 @@ fn ball_centre(
     let mut offsets = vec![BlendQuadric::default(); n];
     let mut side = vec![0.0; n];
     let mut planes = 0usize; // of the first three
+    let mut face_ids = Vec::new();
     for (ii, ((face, &v), (offset, sd))) in faces
         .iter()
         .zip(vertices.iter())
         .zip(offsets.iter_mut().zip(side.iter_mut()))
         .enumerate()
     {
-        let face = face.ok_or_else(nul)?;
+        let face = face.ok_or_else(|| {
+            solver_input(
+                OP_CENTRE,
+                SolverFailure::EdgeUseWithoutFace,
+                all_eus.get(ii).copied().map(EntityRef::Edgeuse),
+            )
+        })?;
+        face_ids.push(face);
         let quadric = ball_face_quadric(k, target, face, tol)?;
         if quadric.kind == QuadricKind::None {
-            return Err(err()); // ClassifyBall took the faces to be planes or quadrics
+            return Err(bad_input(
+                OP_CENTRE,
+                CornerInput::FaceNotAsClassified,
+                Some(EntityRef::Face(face)),
+            ));
         }
         let on = pseudo.vertex_point(v)?;
         *sd = if quadric.normal(on).dot(ball - on) >= 0.0 {
@@ -644,40 +796,33 @@ fn ball_centre(
         };
         *offset = quadric.offset(*sd * radius, tol);
         if offset.kind != quadric.kind || offset.side != quadric.side {
-            return Err(err()); // ClassifyBall took the quadrics wider than the ball
+            return Err(bad_input(
+                OP_CENTRE,
+                CornerInput::FaceNotAsClassified,
+                Some(EntityRef::Face(face)),
+            ));
         }
         if ii < 3 && offset.kind == QuadricKind::Plane {
             planes += 1;
         }
         if ii >= 3 && offset.kind != QuadricKind::Plane {
-            return Err(err()); // ClassifyBall took four or more faces to be planes
+            return Err(bad_input(
+                OP_CENTRE,
+                CornerInput::FaceNotAsClassified,
+                Some(EntityRef::Face(face)),
+            ));
         }
     }
 
     // C: where the first three offsets meet, about the rounds' ball (each quadric's implicit
     // form there)
-    let mut order = [0usize, 1, 2]; // the planes first
-    let mut at = 0usize;
-    for (ii, o) in offsets.iter().take(3).enumerate() {
-        if o.kind == QuadricKind::Plane {
-            if let Some(slot) = order.get_mut(at) {
-                *slot = ii;
-            }
-            at += 1;
-        }
-    }
-    let mut at = planes;
-    for (ii, o) in offsets.iter().take(3).enumerate() {
-        if o.kind != QuadricKind::Plane {
-            if let Some(slot) = order.get_mut(at) {
-                *slot = ii;
-            }
-            at += 1;
-        }
-    }
+    let first3 = offsets.iter().take(3);
+    let planes_first = first3
+        .clone()
+        .filter(|o| o.kind == QuadricKind::Plane)
+        .chain(first3.filter(|o| o.kind != QuadricKind::Plane)); // the planes first
     let mut f = [BallImplicit::default(); 3];
-    for (fi, &oi) in f.iter_mut().zip(order.iter()) {
-        let o = offsets.get(oi).ok_or_else(err)?;
+    for (fi, o) in f.iter_mut().zip(planes_first) {
         *fi = BallImplicit::new(o, ball);
     }
     let [f0, f1, f2] = f;
@@ -689,7 +834,10 @@ fn ball_centre(
         let dv = n0.cross(n1);
         let dd = dv.dot(dv);
         if dd <= EFF_ZERO {
-            return Err(err());
+            return Err(unbuildable(
+                OP_CENTRE,
+                CornerStep::BallOffsetPlanesDegenerate,
+            ));
         }
         // its point nearest the origin: (h_0 (n_1 x d) + h_1 (d x n_0)) / |d|^2, h_i = -c_i
         let p0v = (n1.cross(dv) * (-f0.c) + dv.cross(n0) * (-f1.c)) * (1.0 / dd);
@@ -699,7 +847,10 @@ fn ball_centre(
             // the third plane: n_2 . (p0 + t d) = -c_2
             let den = 2.0 * (f2.b[0] * d[0] + f2.b[1] * d[1] + f2.b[2] * d[2]);
             if den.abs() <= EFF_ZERO {
-                return Err(err());
+                return Err(unbuildable(
+                    OP_CENTRE,
+                    CornerStep::BallOffsetPlanesDegenerate,
+                ));
             }
             let t = -f2.value(&p0).0 / den;
             for ((xk, pk), dk) in x.iter_mut().zip(p0.iter()).zip(d.iter()) {
@@ -723,7 +874,13 @@ fn ball_centre(
             let qc = f2.value(&p0).0;
             let disc = qb * qb - qa * qc;
             if disc < 0.0 || (qa.abs() <= EFF_ZERO * dd && qb.abs() <= EFF_ZERO * dd) {
-                return Err(err()); // the line misses the offset quadric
+                // the rounds' ball is on all three offsets, so the line meets the quadric
+                // but for rounding: where the line is tangent to the offset, or in it,
+                // the computed discriminant can fall below zero
+                return Err(SolidError::blend(
+                    OP_CENTRE,
+                    BlendFailure::CornerUnbuildable(CornerStep::BallCentreLineMissesOffset),
+                ));
             }
             let mut roots = [0.0; 2];
             let count;
@@ -756,21 +913,26 @@ fn ball_centre(
     } else {
         // no closed form: the root certified within rounding of the part's size
         let mut size = 0.0;
-        for face in faces.iter().take(3) {
-            let face = face.ok_or_else(nul)?;
+        for &face in face_ids.iter().take(3) {
             let bx = crate::query::face::p1::calculate_bounding_box(k, target, face, false)?;
             size = max(size, (bx.max - bx.min).length());
         }
         k.work_counters.add_ball_certified_root();
         let (root, proved) = ball_certified_root(&f, 1e-12 * max(size, 1.0));
         if !proved {
-            return Err(err());
+            // classify_ball checked the normals' independence at the vertex, not at the
+            // ball, and only to EFF_ZERO_SQRT: nearly dependent normals leave the box too
+            // small for the proof, though a root is there
+            return Err(SolidError::blend(
+                OP_CENTRE,
+                BlendFailure::CornerUnbuildable(CornerStep::BallCentreNotProved),
+            ));
         }
         x = root;
     }
     let centre = Point3::new(ball.x + x[0], ball.y + x[1], ball.z + x[2]);
     if centre.distance(ball) > tol {
-        return Err(err()); // the rounds' ball is the offsets' meeting point
+        return Err(unbuildable(OP_CENTRE, CornerStep::BallCentreOffRound));
     }
     // four or more planes: the others' offsets pass through it (n . x + c, n = 2 b)
     for o in offsets.iter().skip(3) {
@@ -780,7 +942,7 @@ fn ball_centre(
         if dn.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
             || fo.value(&x0).0.abs() > tol * dn
         {
-            return Err(err()); // ClassifyBall found the ball common to every plane
+            return Err(unbuildable(OP_CENTRE, CornerStep::BallPlaneOffCentre));
         }
     }
     // the contacts: the centre moved back along the offset's normal there (the face's at the
@@ -795,7 +957,7 @@ fn ball_centre(
         let n = o.normal(centre).unitize()?;
         *contact = centre - n * (s * radius);
         if contact.distance(pseudo.vertex_point(v)?) > tol {
-            return Err(err()); // vertex i is the ball's contact with face i
+            return Err(unbuildable(OP_CENTRE, CornerStep::BallContactOffVertex));
         }
     }
     Ok((centre, radius, contacts))
@@ -821,13 +983,6 @@ pub fn place_ball_contacts(
     corner: &FilletCorner,
     solvers: &dyn BallSolvers,
 ) -> Result<()> {
-    let nul = || {
-        SolidError::blend_missing(
-            OP_PLACE,
-            "topology or a solver the ball's contacts are placed from",
-        )
-    };
-    let err = || SolidError::blend_failed(OP_PLACE, "the ball's contacts could not be placed");
     let (centre, _radius, contacts) = ball_centre(k, target, pseudo, corner, solvers)?;
     let tol = corner.approx_tol_3d;
     for (&fv, &contact) in corner.vertices.iter().zip(contacts.iter()) {
@@ -840,11 +995,21 @@ pub fn place_ball_contacts(
             let Some(g) = pseudo.fillet_edgeuse(eu)?.fillet_geom() else {
                 continue;
             };
-            let e = pseudo.brep().edgeuse(eu)?.edge.ok_or_else(nul)?;
+            let e = pseudo
+                .brep()
+                .edgeuse(eu)?
+                .edge
+                .ok_or_else(|| edge_use_without_edge(OP_PLACE, eu))?;
             if pseudo.fillet_edge(e)?.fillet_edge_type() != FilletEdgeType::Rail {
                 continue;
             }
-            let solver_id = pseudo.geom(g)?.fillet_solver().ok_or_else(nul)?;
+            let solver_id = pseudo.geom(g)?.fillet_solver().ok_or_else(|| {
+                solver_input(
+                    OP_PLACE,
+                    SolverFailure::FilletGeomWithoutSolver { fillet_geom: g },
+                    None,
+                )
+            })?;
             let solver = solvers.solver(solver_id)?;
             for side in [SrfIndex::First, SrfIndex::Second] {
                 let rail = usize::from(side == SrfIndex::Second);
@@ -852,15 +1017,15 @@ pub fn place_ball_contacts(
                 let offset = pseudo
                     .geom(g)?
                     .offset_surface(rail, Some(solver))?
-                    .ok_or_else(nul)?;
+                    .ok_or_else(|| bad_setup(OP_PLACE, FilletSetUp::RailOffsetSurface, None))?;
                 let domain = offset_natural_uv_domain(offset);
                 let solved = offset_local_point_solve(k, offset, &domain, centre, guess)?;
                 let Some((uv, _)) = solved else {
-                    return Err(err());
+                    return Err(unbuildable(OP_PLACE, CornerStep::BallContactFootNotFound));
                 };
                 let at = offset.surface.evaluate_point(k, uv)?;
                 if at.distance(centre) > tol {
-                    return Err(err());
+                    return Err(unbuildable(OP_PLACE, CornerStep::BallContactOffOffset));
                 }
                 *pseudo
                     .fillet_vertexuse_mut(vu)?
@@ -890,16 +1055,11 @@ impl BallPoly {
             .unwrap_or(0.0)
     }
 
-    fn set(&mut self, i: usize, j: usize, v: f64) -> Result<()> {
-        let slot = self
-            .c
-            .get_mut(i)
-            .and_then(|row| row.get_mut(j))
-            .ok_or_else(|| {
-                SolidError::blend_failed(OP_PATCH_NET, "a control point past the patch's net")
-            })?;
-        *slot = v;
-        Ok(())
+    /// Sets `c[i][j]`; nothing out of range (never: the degrees are at most `(4, 2)`).
+    fn set(&mut self, i: usize, j: usize, v: f64) {
+        if let Some(slot) = self.c.get_mut(i).and_then(|row| row.get_mut(j)) {
+            *slot = v;
+        }
     }
 }
 
@@ -913,7 +1073,7 @@ fn choose(n: usize, k: usize) -> f64 {
 }
 
 /// `sm_BallTimes`: the product of two polynomials in the Bernstein basis.
-fn times(a: &BallPoly, b: &BallPoly) -> Result<BallPoly> {
+fn times(a: &BallPoly, b: &BallPoly) -> BallPoly {
     let mut p = BallPoly {
         m: a.m + b.m,
         n: a.n + b.n,
@@ -935,21 +1095,130 @@ fn times(a: &BallPoly, b: &BallPoly) -> Result<BallPoly> {
                         * choose(b.n, j - bj);
                 }
             }
-            p.set(i, j, d / (choose(p.m, i) * choose(p.n, j)))?;
+            p.set(i, j, d / (choose(p.m, i) * choose(p.n, j)));
         }
     }
-    Ok(p)
+    p
 }
 
 /// `sm_BallSum`: `da a + db b`, of one degree.
-fn sum(da: f64, a: &BallPoly, db: f64, b: &BallPoly) -> Result<BallPoly> {
+fn sum(da: f64, a: &BallPoly, db: f64, b: &BallPoly) -> BallPoly {
     let mut p = *a;
     for i in 0..=p.m {
         for j in 0..=p.n {
-            p.set(i, j, da * a.at(i, j) + db * b.at(i, j))?;
+            p.set(i, j, da * a.at(i, j) + db * b.at(i, j));
         }
     }
-    Ok(p)
+    p
+}
+
+/// The far side of the ball's triangle `dirs` (unit directions from the ball's centre) as
+/// [`ball_triangle_patch`] takes it with the pole at `pole`: the frame of the sphere's
+/// stereographic projection from the pole's antipode (`e3` towards that antipode), and in
+/// its plane the far side's ends `a` (of contact `pole + 1`) and `b` (of `pole + 2`), the
+/// centre `o` and radius `r` of the circle the far side's great circle projects to, the
+/// ends' unit directions from `o` (`ua`, `ub`) with their cosine, and where the far side's
+/// middle lies along the bisector of those directions (`middle`).
+struct FarSide {
+    e1: Vec3,
+    e2: Vec3,
+    e3: Vec3,
+    a: [f64; 2],
+    b: [f64; 2],
+    o: [f64; 2],
+    r: f64,
+    ua: [f64; 2],
+    ub: [f64; 2],
+    cos: f64,
+    middle: f64,
+}
+
+impl FarSide {
+    /// Whether the far side's image is one rational quadratic arc: the arc from `a` to `b`
+    /// through the middle's image, under a half turn (its middle control point is where
+    /// the tangents at its ends cross, its weight the cosine of half its angle). A triangle
+    /// with a side so long that no pole makes it one is not one patch: the ball's triangle
+    /// at a corner sharper than a regular tetrahedron's (three faces whose normals stand
+    /// arccos(-1/3) apart) is the first.
+    fn is_one_arc(&self) -> bool {
+        1.0 + self.cos > EFF_ZERO_SQRT && self.middle > 0.0
+    }
+}
+
+/// The far side of the triangle `dirs` from the pole at `pole` ([`FarSide`]); `None` where
+/// it has no image to judge: a contact lies at the pole's antipode, or the far side runs
+/// through the pole (no triangle).
+///
+/// # Errors
+///
+/// Those of the unit vectors.
+fn far_side(dirs: &[Vec3; 3], pole: usize) -> Result<Option<FarSide>> {
+    let (Some(&d_pole), Some(&d_from), Some(&d_to)) = (
+        dirs.get(pole),
+        dirs.get((pole + 1) % 3),
+        dirs.get((pole + 2) % 3),
+    ) else {
+        return Ok(None);
+    };
+    let e3 = -d_pole;
+    let e1 = (d_from - e3 * d_from.dot(e3)).unitize()?;
+    let e2 = e3.cross(e1);
+    // the projection: p -> (p.e1, p.e2) / (1 - p.e3)
+    let mid = (d_from + d_to).unitize()?;
+    let mut out = [[0.0; 2]; 3];
+    for (p, o) in [d_from, d_to, mid].iter().zip(out.iter_mut()) {
+        let den = 1.0 - p.dot(e3);
+        if den <= EFF_ZERO {
+            return Ok(None);
+        }
+        *o = [p.dot(e1) / den, p.dot(e2) / den];
+    }
+    let [a, b, m] = out;
+    // the third side's great circle (normal m) projects to the circle about -(m1, m2) / m3,
+    // of radius^2 1 + (m1^2 + m2^2) / m3^2
+    let sm = d_from.cross(d_to).unitize()?;
+    let m3 = sm.dot(e3);
+    if m3.abs() <= EFF_ZERO {
+        return Ok(None); // the third side runs through the pole: no triangle
+    }
+    let o = [-sm.dot(e1) / m3, -sm.dot(e2) / m3];
+    let r = (1.0 + (o[0] * o[0] + o[1] * o[1])).sqrt();
+    let ua = [(a[0] - o[0]) / r, (a[1] - o[1]) / r];
+    let ub = [(b[0] - o[0]) / r, (b[1] - o[1]) / r];
+    let cos = ua[0] * ub[0] + ua[1] * ub[1];
+    let middle = (m[0] - o[0]) * (ua[0] + ub[0]) + (m[1] - o[1]) * (ua[1] + ub[1]);
+    Ok(Some(FarSide {
+        e1,
+        e2,
+        e3,
+        a,
+        b,
+        o,
+        r,
+        ua,
+        ub,
+        cos,
+        middle,
+    }))
+}
+
+/// The point a ball's triangle `dirs` is fanned about where it is not one patch: the point of
+/// the sphere equally far from its three corners, on their side. `None` where that point is
+/// not inside the triangle: about a point outside it (an obtuse triangle's) or on a side, the
+/// three triangles (centre, i, i + 1) would overlap or fold, not cover it once; and where the
+/// corners lie on one great circle, which has no such point. Inside means on the triangle's
+/// side of each of its three great circles.
+fn fan_centre(dirs: &[Vec3; 3]) -> Option<Vec3> {
+    let [d0, d1, d2] = *dirs;
+    let (_, mut mid) = (d1 - d0).cross(d2 - d0).length_and_unit()?;
+    if mid.dot(d0) < 0.0 {
+        mid = -mid;
+    }
+    let turn = d0.dot(d1.cross(d2));
+    let inside = [(d0, d1), (d1, d2), (d2, d0)]
+        .iter()
+        .all(|&(a, b)| mid.dot(a.cross(b)) * turn > EFF_ZERO);
+    inside.then_some(mid)
 }
 
 /// `sm_BallTrianglePatch` (the fork's a6243fa): the ball's triangle between the
@@ -967,53 +1236,29 @@ pub(crate) fn ball_triangle_patch(
     pole: usize,
     reverse_s: bool,
 ) -> Result<(BSplineSurface, usize, usize)> {
-    let err = || {
-        SolidError::blend_failed(
-            OP_PATCH_NET,
-            "the ball's triangular patch could not be built",
-        )
-    };
+    let not_one_patch =
+        || SolidError::blend(OP_PATCH_NET, BlendFailure::BallTriangleNotOnePatch { pole });
     let mut from = (pole + 1) % 3;
     let mut to = (pole + 2) % 3;
-    let (Some(&d_pole), Some(&d_from), Some(&d_to)) =
-        (dirs.get(pole), dirs.get(from), dirs.get(to))
-    else {
-        return Err(err());
-    };
-    let e3 = -d_pole;
-    let e1 = (d_from - e3 * d_from.dot(e3)).unitize()?;
-    let e2 = e3.cross(e1);
-    // the projection: p -> (p.e1, p.e2) / (1 - p.e3)
-    let mid = (d_from + d_to).unitize()?;
-    let mut out = [[0.0; 2]; 3];
-    for (p, o) in [d_from, d_to, mid].iter().zip(out.iter_mut()) {
-        let den = 1.0 - p.dot(e3);
-        if den <= EFF_ZERO {
-            return Err(err());
-        }
-        *o = [p.dot(e1) / den, p.dot(e2) / den];
-    }
-    let [a, b, m] = out;
-    // the third side's great circle (normal m) projects to the circle about -(m1, m2) / m3,
-    // of radius^2 1 + (m1^2 + m2^2) / m3^2
-    let sm = d_from.cross(d_to).unitize()?;
-    let m3 = sm.dot(e3);
-    if m3.abs() <= EFF_ZERO {
-        return Err(err()); // the third side runs through the pole: no triangle
-    }
-    let o = [-sm.dot(e1) / m3, -sm.dot(e2) / m3];
-    let r = (1.0 + (o[0] * o[0] + o[1] * o[1])).sqrt();
-    let ua = [(a[0] - o[0]) / r, (a[1] - o[1]) / r];
-    let ub = [(b[0] - o[0]) / r, (b[1] - o[1]) / r];
-    let cos = ua[0] * ub[0] + ua[1] * ub[1];
     // the arc from A to B through the middle's image, less than a half turn: its middle
     // control point where the tangents at A and B cross, its weight the cosine of half its
     // angle
-    if 1.0 + cos <= EFF_ZERO_SQRT
-        || (m[0] - o[0]) * (ua[0] + ub[0]) + (m[1] - o[1]) * (ua[1] + ub[1]) <= 0.0
-    {
-        return Err(err());
-    }
+    let Some(far) = far_side(dirs, pole)?.filter(FarSide::is_one_arc) else {
+        return Err(not_one_patch());
+    };
+    let FarSide {
+        e1,
+        e2,
+        e3,
+        a,
+        b,
+        o,
+        r,
+        ua,
+        ub,
+        cos,
+        ..
+    } = far;
     let w = (0.5 * (1.0 + cos)).sqrt();
     let d = [
         o[0] + r * (ua[0] + ub[0]) / (1.0 + cos),
@@ -1030,21 +1275,18 @@ pub(crate) fn ball_triangle_patch(
     let xs = [a[0], w * d[0], b[0]];
     let ys = [a[1], w * d[1], b[1]];
     let wts = [1.0, w, 1.0];
-    for i in 0..3 {
-        let (Some(&x), Some(&y), Some(&wt)) = (xs.get(i), ys.get(i), wts.get(i)) else {
-            return Err(err());
-        };
-        pu.set(i, 1, x)?;
-        pv.set(i, 1, y)?;
-        pt.set(i, 0, wt)?;
-        pt.set(i, 1, wt)?;
+    for (i, ((&x, &y), &wt)) in xs.iter().zip(&ys).zip(&wts).enumerate() {
+        pu.set(i, 1, x);
+        pv.set(i, 1, y);
+        pt.set(i, 0, wt);
+        pt.set(i, 1, wt);
     }
-    let ut = times(&pu, &pt)?;
-    let vt = times(&pv, &pt)?;
-    let sq = sum(1.0, &times(&pu, &pu)?, 1.0, &times(&pv, &pv)?)?;
-    let tt = times(&pt, &pt)?;
-    let h3 = sum(1.0, &sq, -1.0, &tt)?;
-    let h4 = sum(1.0, &sq, 1.0, &tt)?;
+    let ut = times(&pu, &pt);
+    let vt = times(&pv, &pt);
+    let sq = sum(1.0, &times(&pu, &pu), 1.0, &times(&pv, &pv));
+    let tt = times(&pt, &pt);
+    let h3 = sum(1.0, &sq, -1.0, &tt);
+    let h4 = sum(1.0, &sq, 1.0, &tt);
 
     // control points, s (u) outer, t (v) inner
     let mut points = Vec::new();
@@ -1054,7 +1296,7 @@ pub(crate) fn ball_triangle_patch(
         for j in 0..=2 {
             let wij = h4.at(i, j);
             if wij <= EFF_ZERO {
-                return Err(err());
+                return Err(not_one_patch());
             }
             let off = (e1 * (2.0 * ut.at(i, j)) + e2 * (2.0 * vt.at(i, j)) + e3 * h3.at(i, j))
                 * (radius / wij);
@@ -1106,14 +1348,10 @@ pub fn ball_corner_edge_geom(
     corner: &mut FilletCorner,
     solvers: &dyn BallSolvers,
 ) -> Result<()> {
-    let nul = || {
-        SolidError::blend_missing(
-            OP_BUILD,
-            "topology or geometry the ball corner's edges are built from",
-        )
+    let Some(slot) = corner.ball.as_mut() else {
+        return Err(bad_input(OP_BUILD, CornerInput::EventNotSet, None));
     };
-    let err = || SolidError::blend_failed(OP_BUILD, "the ball corner's edges could not be built");
-    corner.ball.as_mut().ok_or_else(nul)?.delete_surface();
+    slot.delete_surface();
     let (centre, radius, contacts) = ball_centre(k, target, pseudo, corner, solvers)?;
     let tol = corner.approx_tol_3d;
 
@@ -1125,24 +1363,49 @@ pub fn ball_corner_edge_geom(
         .as_deref()
         .and_then(<[EdgeuseId]>::first)
         .copied()
-        .ok_or_else(nul)?;
-    let first_edge = eu1::edge(target, first)?.ok_or_else(nul)?;
+        .ok_or_else(|| bad_input(OP_BUILD, CornerInput::RingNotSet, None))?;
+    let first_edge =
+        eu1::edge(target, first)?.ok_or_else(|| edge_use_without_edge(OP_BUILD, first))?;
     let adds_material = is_concave_edge(k, target, first_edge)?;
 
+    // each contact's direction from the centre and its corner vertex's point (ball_centre
+    // checked one vertex per contact)
     let n = contacts.len();
     let mut dirs = Vec::with_capacity(n);
-    for &contact in &contacts {
-        dirs.push((contact - centre).unitize()?);
+    for (&contact, &v) in contacts.iter().zip(corner.vertices.iter()) {
+        dirs.push(((contact - centre).unitize()?, pseudo.vertex_point(v)?));
+    }
+    // the triangles, each with the pole first, and the corner's vertex's point at each of
+    // its corners (none at a fan's centre)
+    let mut triangles: Vec<([Vec3; 3], [Option<Point3>; 3])> = Vec::new();
+    if let Some(&(d0, p0)) = dirs.first() {
+        for pair in dirs.windows(2).skip(1) {
+            // the triangle (0, k, k + 1): the pole at contact 0
+            if let &[(dk, pk), (dk1, pk1)] = pair {
+                triangles.push(([d0, dk, dk1], [Some(p0), Some(pk), Some(pk1)]));
+            }
+        }
+    }
+    // Not the fork's (SolidCraft #19583): three contacts whose triangle is not one patch (a
+    // side too long, at a corner as sharp as a regular tetrahedron's or sharper) are fanned
+    // about the point of the ball equally far from the three, which faces the vertex: the
+    // three triangles (centre, i, i + 1), on the same sphere, each far side a shorter arc.
+    // Only where that point lies inside the triangle (`fan_centre`): otherwise the triangle
+    // stays one, and its patch refuses it as before
+    if let ([first], &[(d0, p0), (d1, p1), (d2, p2)]) = (triangles.as_slice(), dirs.as_slice()) {
+        if far_side(&first.0, 0)?.is_some_and(|far| !far.is_one_arc()) {
+            if let Some(mid) = fan_centre(&[d0, d1, d2]) {
+                let fan = [(d0, d1, p0, p1), (d1, d2, p1, p2), (d2, d0, p2, p0)];
+                triangles = fan
+                    .iter()
+                    .map(|&(a, b, i, j)| ([mid, a, b], [None, Some(i), Some(j)]))
+                    .collect();
+            }
+        }
     }
     let mut ball = BallCorner::default();
-    for kk in 1..n.saturating_sub(1) {
-        // the triangle (0, k, k + 1): the pole at contact 0, its normal turned as the face's
-        let (Some(&d0), Some(&dk), Some(&dk1)) = (dirs.first(), dirs.get(kk), dirs.get(kk + 1))
-        else {
-            return Err(err());
-        };
-        let tri = [d0, dk, dk1];
-        let index = [0, kk, kk + 1];
+    for (tri, index) in triangles {
+        // the pole first, its normal turned as the face's
         let pole = 0;
         let mut from = 0;
         let mut to = 0;
@@ -1164,7 +1427,10 @@ pub fn ball_corner_edge_geom(
                 chosen = Some(Surface::from(BallPatch::create(&net, centre, radius)?));
             }
         }
-        let surface = chosen.ok_or_else(nul)?;
+        // the two turns of s give the patch opposite normals, so one of them faces the
+        // material's way unless its normal is square to the radius
+        let surface = chosen
+            .ok_or_else(|| unbuildable_missing(OP_BUILD, CornerStep::BallPatchNormalUndecided))?;
 
         // its corners are the contacts: the pole at v = vmin, the others at v = vmax
         let nurb_domain = surface.natural_uv_domain_with_nurb(k)?;
@@ -1175,14 +1441,13 @@ pub fn ball_corner_edge_geom(
             Point2::new(lo.x, lo.y),
         ];
         for (&uv, at) in corners_uv.iter().zip([from, to, pole]) {
-            let at_vertex = *index.get(at).ok_or_else(err)?;
-            let v = *corner.vertices.get(at_vertex).ok_or_else(err)?;
-            if surface
-                .evaluate_point(k, uv)?
-                .distance(pseudo.vertex_point(v)?)
-                > tol
-            {
-                return Err(err());
+            // a contact is the corner's vertex; a fan's centre is its point of the sphere
+            let want = match of3(&index, at) {
+                Some(vertex_point) => vertex_point,
+                None => centre + of3(&tri, at) * radius,
+            };
+            if surface.evaluate_point(k, uv)?.distance(want) > tol {
+                return Err(unbuildable(OP_BUILD, CornerStep::BallPatchOffVertex));
             }
         }
 
@@ -1193,27 +1458,30 @@ pub fn ball_corner_edge_geom(
         // each patch keeps its definition (#2357): the ball's sphere and the patch's own loop,
         // certified on it
         let mut surface = surface;
-        if k.fixes.fillet_round_as_definition {
-            let boundary = trims
-                .curves_3d
-                .iter()
-                .map(|c| nurbs_curve(c).cloned())
-                .collect::<Result<_>>()?;
-            let definition = CornerDefinition::ball(centre, radius, boundary)?;
-            definition.recertify(k, &surface)?;
-            surface.set_corner_definition(definition);
-        }
+        let boundary = trims
+            .curves_3d
+            .iter()
+            .map(|c| nurbs_curve(c).cloned())
+            .collect::<Result<_>>()?;
+        let definition = CornerDefinition::ball(centre, radius, boundary)?;
+        definition.recertify(k, &surface)?;
+        surface.set_corner_definition(definition);
         ball.curves_3d.extend(trims.curves_3d);
         ball.uv_curves
             .extend(trims.uv_curves.iter().cloned().map(Curve::from));
         ball.orients.extend(trims.orients.iter().copied());
         if count != 3 || trims.uv_curves.len() != 3 || trims.orients.len() != 3 {
-            return Err(err());
+            return Err(defect(
+                OP_BUILD,
+                "the ball's triangular patch's natural loop is not three curves, though the patch's side at the pole is a point, left out of its loop",
+            ));
         }
         ball.surfaces.push(surface);
         ball.loops.push(3);
     }
-    *corner.ball.as_mut().ok_or_else(nul)? = ball;
+    if let Some(slot) = corner.ball.as_mut() {
+        *slot = ball; // there since the start
+    }
     Ok(())
 }
 
@@ -1231,13 +1499,12 @@ pub fn create_ball_patch(
     corner: &mut FilletCorner,
     env: &mut CornerPatchEnv<'_, '_>,
 ) -> Result<()> {
-    let nul = || SolidError::blend_missing(OP_PATCH, "the ball corner's event or topology");
-    let ball = corner.ball.as_mut().ok_or_else(nul)?;
+    let ball = corner
+        .ball
+        .as_mut()
+        .ok_or_else(|| bad_input(OP_PATCH, CornerInput::EventNotSet, None))?;
     if ball.surfaces.is_empty() || ball.loops.len() != ball.surfaces.len() {
-        return Err(SolidError::blend_failed(
-            OP_PATCH,
-            "the ball's surfaces and loops do not pair up",
-        ));
+        return Err(bad_input(OP_PATCH, CornerInput::EventMalformed, None));
     }
     let surfaces = std::mem::take(&mut ball.surfaces);
     let loops = std::mem::take(&mut ball.loops);
@@ -1252,16 +1519,16 @@ pub fn create_ball_patch(
         for _ in 0..count {
             let (Some(c), Some(u), Some(o)) = (curves_3d.next(), uv_curves.next(), orients.next())
             else {
-                return Err(SolidError::blend_failed(
-                    OP_PATCH,
-                    "a ball loop lacks a curve, its uv curve or its orientation",
-                ));
+                return Err(bad_input(OP_PATCH, CornerInput::EventMalformed, None));
             };
             c3.push(Some(c));
             uv.push(u);
             or.push(o);
         }
-        let fillet = env.fillet.as_mut().ok_or_else(nul)?;
+        let fillet = env
+            .fillet
+            .as_mut()
+            .ok_or_else(|| bad_input(OP_PATCH, CornerInput::FilletBrepNotGiven, None))?;
         let input = FaceCurvesInput {
             loops: vec![count],
             curves_3d: Some(c3),
@@ -1285,7 +1552,12 @@ pub fn create_ball_patch(
             &face_ref,
             &mut fillet.notify,
         )?;
-        let face = made.face.ok_or_else(nul)?;
+        let face = made.face.ok_or_else(|| {
+            missing_defect(
+                OP_PATCH,
+                "making a ball patch's face returned no face, though the face construction succeeded",
+            )
+        })?;
         // the corner's patch faces (SmFilletCorner::GetPatchFaces, the stitch)
         corner.surfaces.push(surface);
         corner.surface_faces.push(face);
@@ -1343,19 +1615,21 @@ mod tests {
         assert!(!proved, "proved at {x:?}");
     }
 
-    /// Three planes through one line meet in no single point: a typed `Failed`, with the
-    /// `SM_ERR` status the bare status had.
+    /// Three planes through one line meet in no single point: the ball's offset planes are
+    /// degenerate there (neither a defect nor a refusal), with the `SM_ERR` status the bare
+    /// status had.
     #[test]
-    fn planes_through_one_line_are_a_typed_failure() {
+    fn planes_through_one_line_are_degenerate() {
         let on = [Point3::ZERO; 3];
         let normal = [Vec3::X, Vec3::Y, (Vec3::X + Vec3::Y).unitize().unwrap()];
         let err = planes_meet(&on, &normal).unwrap_err();
         assert_eq!(
             err.blend_failure(),
-            Some(&crate::error::blend::BlendFailure::Failed(
-                "the three faces' planes do not meet in one point"
+            Some(&BlendFailure::CornerUnbuildable(
+                CornerStep::BallOffsetPlanesDegenerate
             ))
         );
+        assert!(!err.is_defect() && !err.is_refusal(), "{err:?}");
         assert_eq!(
             crate::error::upstream_status(&err),
             Some(crate::error::SM_ERR)
@@ -1367,6 +1641,109 @@ mod tests {
         assert_eq!(choose(4, 2), 6.0);
         assert_eq!(choose(2, 0), 1.0);
         assert_eq!(choose(3, 3), 1.0);
+    }
+
+    /// Three unit directions each `angle` from the other two, about +z.
+    fn equal_sides(angle: f64) -> [Vec3; 3] {
+        let z = ((1.0 + 2.0 * angle.cos()) / 3.0).sqrt();
+        let r = (1.0 - z * z).sqrt();
+        [0.0_f64, 120.0, 240.0].map(|a| {
+            let a = a.to_radians();
+            Vec3::new(r * a.cos(), r * a.sin(), z)
+        })
+    }
+
+    /// One patch holds a triangle only while its far side's image is under a half turn. That
+    /// image is a half turn where its ends and its circle's centre are in line: with the
+    /// projection from `-p` and the far side from `f` to `t`,
+    /// `((f + p) x (t + p)) . (f x t) = 0`. For three directions with one cosine `c` between
+    /// them that is `(1 - c)(1 + 3 c) = 0`: `c = -1/3`, the corner of a regular tetrahedron
+    /// (its faces' normals stand arccos(-1/3) = 109.47 degrees apart). Under that angle
+    /// the triangle is one patch from any pole; over it, from none.
+    #[test]
+    fn a_triangle_is_one_patch_up_to_a_regular_tetrahedrons_corner() {
+        let limit = (-1.0_f64 / 3.0).acos();
+        for (angle, one) in [
+            (90.0_f64.to_radians(), true),
+            (limit - 1e-3, true),
+            (limit + 1e-3, false),
+            (116.0_f64.to_radians(), false),
+        ] {
+            let dirs = equal_sides(angle);
+            for pole in 0..3 {
+                assert_eq!(
+                    far_side(&dirs, pole).unwrap().unwrap().is_one_arc(),
+                    one,
+                    "{angle} {pole}"
+                );
+                let patch = ball_triangle_patch(Point3::ZERO, 1.0, &dirs, pole, false);
+                assert_eq!(patch.is_ok(), one, "{angle} {pole}");
+            }
+        }
+    }
+
+    /// A triangle too large for one patch, fanned about the point equally far from its three
+    /// corners (+z for equal sides): each of the three triangles (centre, i, i + 1) is one
+    /// patch, on the sphere, its corners the centre and the two contacts.
+    #[test]
+    fn a_large_triangle_fans_into_three_patches_on_the_sphere() {
+        let k = Kernel::default();
+        let dirs = equal_sides(116.0_f64.to_radians());
+        let c = Point3::new(1.0, 2.0, 3.0);
+        let mid = fan_centre(&dirs).unwrap();
+        assert!((mid - Vec3::new(0.0, 0.0, 1.0)).length() < 1e-15);
+        for i in 0..3 {
+            let tri = [mid, dirs[i], dirs[(i + 1) % 3]];
+            assert!(far_side(&tri, 0).unwrap().unwrap().is_one_arc());
+            let (net, from, to) = ball_triangle_patch(c, 2.0, &tri, 0, false).unwrap();
+            assert_eq!((from, to), (1, 2));
+            let s = Surface::from(net);
+            let dom = s.natural_uv_domain_with_nurb(&k).unwrap();
+            for a in 0..=8 {
+                for b in 0..=8 {
+                    let p = s
+                        .evaluate_point(&k, dom.evaluate(f64::from(a) / 8.0, f64::from(b) / 8.0))
+                        .unwrap();
+                    assert!(((p - c).length() - 2.0).abs() < 1e-13);
+                }
+            }
+            let (lo, hi) = (dom.min(), dom.max());
+            let at = |u: f64, v: f64| s.evaluate_point(&k, Point2::new(u, v)).unwrap();
+            assert!((at(lo.x, lo.y) - (c + mid * 2.0)).length() < 1e-13);
+            assert!((at(lo.x, hi.y) - (c + tri[1] * 2.0)).length() < 1e-13);
+            assert!((at(hi.x, hi.y) - (c + tri[2] * 2.0)).length() < 1e-13);
+        }
+    }
+
+    /// A fan's centre has to lie inside its triangle. Three corners nearly on one great circle,
+    /// the middle one 0.05 off it (40 degrees between neighbours along the equator): the circle
+    /// through them is nearly that great circle, and the point equally far from the three is
+    /// near its pole, far outside the thin triangle. About it the three triangles would
+    /// overlap, so no centre is given. Three corners on one great circle have none either.
+    #[test]
+    fn a_fan_centre_outside_its_triangle_is_not_taken() {
+        let on_equator = |degrees: f64| {
+            let a = degrees.to_radians();
+            Vec3::new(a.cos(), a.sin(), 0.0)
+        };
+        let lifted = (on_equator(40.0) + Vec3::new(0.0, 0.0, 0.05))
+            .unitize()
+            .unwrap();
+        let thin = [on_equator(0.0), lifted, on_equator(80.0)];
+        // the point equally far from the three is within 26 degrees of the pole: not in the triangle
+        let pole = (thin[1] - thin[0])
+            .cross(thin[2] - thin[0])
+            .unitize()
+            .unwrap();
+        assert!(pole.z.abs() > 0.9, "{pole:?}");
+        assert_eq!(fan_centre(&thin), None);
+        let flat = [on_equator(0.0), on_equator(120.0), on_equator(240.0)];
+        assert_eq!(fan_centre(&flat), None);
+        // and the same corners turned the other way round
+        assert_eq!(fan_centre(&[thin[2], thin[1], thin[0]]), None);
+        assert!(fan_centre(&equal_sides(116.0_f64.to_radians())).is_some());
+        let turned = equal_sides(116.0_f64.to_radians());
+        assert!(fan_centre(&[turned[2], turned[1], turned[0]]).is_some());
     }
 
     /// The octant of the unit sphere (contacts +x, +y, +z, pole at +x): every net point's

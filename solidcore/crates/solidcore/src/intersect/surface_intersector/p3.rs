@@ -96,9 +96,11 @@
 //!   `SM_ASSERT`s (no-ops in release builds) and the user pointers
 //!   (`m_apUserPointer`, not modelled by [`TsectPnt`]).
 
+use crate::blend::blend_corner::on_face::{bezier_pieces, pieces_rounding, Hom};
 use crate::blend::fillet_standard_solver::p1::FilletLaw;
 use crate::curve::curve::Curve;
-use crate::error::{passed_on, Result, SolidError};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{passed_on, Failure, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -116,12 +118,13 @@ use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
+use crate::nurbs::math::gamma;
 use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::surface_cache;
 use crate::surface::surface::p2::TsectCurveType;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::surface_cache::face_context::FaceQueries;
-use crate::surface::surface_cache::SurfaceCache;
+use crate::surface::surface_cache::{SolveModes, SurfaceCache};
 use crate::topology::ObjectHandle;
 
 use super::p1::{
@@ -261,6 +264,29 @@ fn at_mut<T>(a: &mut [T; 2], s: SrfIndex) -> &mut T {
     }
 }
 
+/// The cache of surface `i` (0 or 1) among `caches`: the last one when there are fewer
+/// (a self intersection passes one), [`IntersectFailure::NoSurfaceCaches`] for none.
+fn cache_mut<T>(caches: &mut [T], i: usize) -> Result<&mut T> {
+    match caches.split_last_mut() {
+        Some((last, init)) => Ok(init.get_mut(i).unwrap_or(last)),
+        None => Err(SolidError::intersect(
+            OP_FBSP,
+            IntersectFailure::NoSurfaceCaches,
+        )),
+    }
+}
+
+/// As [`cache_mut`], shared.
+fn cache_ref<T>(caches: &[T], i: usize) -> Result<&T> {
+    match caches.split_last() {
+        Some((last, init)) => Ok(init.get(i).unwrap_or(last)),
+        None => Err(SolidError::intersect(
+            OP_FBSP,
+            IntersectFailure::NoSurfaceCaches,
+        )),
+    }
+}
+
 /// `SrfIndex` of `m_cpSurface[i]`.
 const fn srf(i: usize) -> SrfIndex {
     if i == 0 {
@@ -296,11 +322,28 @@ pub(crate) struct DeferredTouching {
     boundary: Curve,
 }
 
+#[cfg(test)]
+impl DeferredTouching {
+    /// A deferred touching point at `point` from `tsp`, on the boundary curve
+    /// `boundary`.
+    pub(crate) fn new(point: Point3, tsp: TsectPnt, boundary: Curve) -> Self {
+        Self {
+            point,
+            tsp,
+            boundary,
+        }
+    }
+}
+
 /// Appends the touching curve of `tsp` to `out`: degenerate 3D and UV curves at
 /// `point` and the UV points of `tsp`, of type touching, deviated by the distance
 /// between `tsp`'s surface points (the degenerate point branch of
 /// `FindBoundaryStartPoints`).
-fn push_touching_curve(out: &mut TsectCurves, point: Point3, tsp: &TsectPnt) -> Result<()> {
+pub(crate) fn push_touching_curve(
+    out: &mut TsectCurves,
+    point: Point3,
+    tsp: &TsectPnt,
+) -> Result<()> {
     // 3D curve, then the UV curves
     let c3 = BSplineCurve::create_degenerate_curve(3, point)?;
     out.curves_3d.push(Curve::from(c3));
@@ -364,10 +407,11 @@ impl SurfaceIntersector<'_> {
         let get = |i: SrfIndex| match surface_cache::<SrfIndex>(k, self.surface(i), Some(i)) {
             Ok(c) => Ok(c),
             Err(e) if e.is_unported_or_cancelled() => Err(e),
-            Err(_) => Err(SolidError::intersect_missing(
-                OP_FBSP,
-                "the surface's cache",
-            )),
+            Err(e) => Err(
+                Failure::new(OP_FBSP, IntersectFailure::SurfaceCacheNotBuilt)
+                    .caused_by(e)
+                    .into_error(),
+            ),
         };
         let mut caches = vec![get(SrfIndex::First)?];
         if !self.doing_self_intersection {
@@ -379,9 +423,10 @@ impl SurfaceIntersector<'_> {
 
     /// [`SurfaceIntersector::find_boundary_start_points`] with the given surface
     /// caches: `caches[0]` of the first surface, `caches[1]` (or `caches[0]` when only
-    /// one is given, as for a self intersection) of the second. Only their iso boundary
-    /// curves are used; their `process_boundary_curves` flags are set for the call and
-    /// restored on every exit (`SmTemporaryChangeValue`).
+    /// one is given, as for a self intersection) of the second. Their iso boundary
+    /// curves are used, and the boundary curve solves on them run with boundary curve
+    /// processing on (upstream sets the caches' flag for the call,
+    /// `SmTemporaryChangeValue`); the caches keep their flags.
     ///
     /// # Errors
     ///
@@ -415,39 +460,55 @@ impl SurfaceIntersector<'_> {
         out: &mut TsectCurves,
         queries: Option<&dyn FaceQueries<O>>,
     ) -> Result<()> {
-        if caches.is_empty() {
-            return Err(SolidError::intersect_missing(
-                OP_FBSP,
-                "the surfaces' caches",
-            ));
-        }
-
         // Turn on boundary curve processing to force LocalSolve to look for drop
-        // points on boundary curves (restored on every exit, last change first).
-        let saved: Vec<bool> = caches
-            .iter()
-            .take(2)
-            .map(|c| c.process_boundary_curves)
-            .collect();
-        for c in caches.iter_mut().take(2) {
-            c.process_boundary_curves = true;
-        }
-        let r = self.find_boundary_start_points_body(k, caches, intersection_box, out, queries);
-        for (c, s) in caches.iter_mut().zip(saved).rev() {
-            c.process_boundary_curves = s;
-        }
-        r
+        // points on boundary curves: the solves run with it on, each cache's point
+        // testing as it is (the caches keep their flags).
+        // (without a cache the body fails before any solve: its modes are not read)
+        let boundary_on = |c: &SurfaceCache<O>| SolveModes {
+            process_boundary_curves: true,
+            ..c.solve_modes()
+        };
+        let first = caches.first().map_or(
+            SolveModes {
+                point_test_enabled: false,
+                process_boundary_curves: true,
+            },
+            boundary_on,
+        );
+        let second = caches.get(1).map_or(first, boundary_on);
+        self.find_boundary_start_points_under(
+            k,
+            caches,
+            [first, second],
+            intersection_box,
+            out,
+            queries,
+        )
     }
 
+    /// [`SurfaceIntersector::find_boundary_start_points_with_queries`] whose solves
+    /// on `caches[i]` run in `modes[i]` (indexed as the caches are), not in the
+    /// caches' own modes; the caches keep their flags.
+    ///
+    /// # Errors
+    ///
+    /// As [`SurfaceIntersector::find_boundary_start_points_with_queries`].
     #[allow(clippy::too_many_lines)]
-    fn find_boundary_start_points_body<O: Copy + PartialEq>(
+    pub(crate) fn find_boundary_start_points_under<O: Copy + PartialEq>(
         &mut self,
         k: &Kernel,
         caches: &mut [SurfaceCache<O>],
+        modes: [SolveModes; 2],
         intersection_box: &Extent3d,
         out: &mut TsectCurves,
         queries: Option<&dyn FaceQueries<O>>,
     ) -> Result<()> {
+        if caches.is_empty() {
+            return Err(SolidError::intersect(
+                OP_FBSP,
+                IntersectFailure::NoSurfaceCaches,
+            ));
+        }
         let mut work = BoundaryWork::default();
         self.deferred_touching.clear();
         // sIntervals keeps its values from surface to surface (SetMinMax failures)
@@ -469,10 +530,7 @@ impl SurfaceIntersector<'_> {
 
             // Get thisSurface->3DBoundaryCurves: [0] min u, [1] min v, [2] max u,
             // [3] max v
-            let cache_index = l_srf.min(caches.len() - 1);
-            let cache = caches
-                .get_mut(cache_index)
-                .ok_or_else(|| SolidError::intersect_missing(OP_FBSP, "the surface's cache"))?;
+            let cache = cache_mut(caches, l_srf)?;
             let iso = cache.iso_boundary_curves(k, &domain, self.this_approx_tol_3d / 3.0)?;
 
             // add the intervals of the iso curves (statuses ignored, passed on with
@@ -531,16 +589,19 @@ impl SurfaceIntersector<'_> {
                 } else {
                     // on OtherSurface's cache: upstream's GlobalCurveIntersect fetches
                     // that same cache (smsurf_GetSurfaceCache) and solves on its tree
-                    let other_cache =
-                        caches
-                            .get((1 - l_srf).min(caches.len() - 1))
-                            .ok_or_else(|| {
-                                SolidError::intersect_missing(OP_FBSP, "the other surface's cache")
-                            })?;
+                    let other_index = (1 - l_srf).min(caches.len() - 1);
+                    let other_cache = cache_ref(caches, other_index)?;
+                    let [first_modes, second_modes] = modes;
+                    let other_modes = if other_index == 0 {
+                        first_modes
+                    } else {
+                        second_modes
+                    };
                     surface_global_curve_intersect(
                         k,
                         self.surface(other),
                         other_cache,
+                        other_modes,
                         &other_domain,
                         &tgt_curve,
                         &bsc_ivl,
@@ -749,7 +810,9 @@ impl SurfaceIntersector<'_> {
     /// Adds the touching points [`SurfaceIntersector::find_boundary_start_points`]
     /// left out for a start point on them (in the order it found them) whose two
     /// surface points are closer than `this_approx_tol_3d` and which are on none of
-    /// the curves found (boundary, traced and interior); the list is emptied.
+    /// the curves `out` holds; the list is emptied. `DoIntersection` calls it last,
+    /// on the curves left once it has removed degenerate curves that lie on others, so
+    /// a removed curve covers nothing.
     ///
     /// Upstream drops a touching point on a start point for good, as the curve traced
     /// from that start point is to cover it ("due to seams"). A start point that traces
@@ -815,16 +878,29 @@ impl SurfaceIntersector<'_> {
         Ok(())
     }
 
-    /// True when `curve` stays within `this_approx_tol_3d` of `boundary` over its whole
-    /// length: each of its distinct knots in its interval (its ends among them) and
-    /// each midpoint between two of them drops onto `boundary` closer than the
-    /// tolerance. False when one is farther, or a drop fails or finds nothing.
+    /// True when `curve` is proved to stay within `this_approx_tol_3d` of `boundary` over
+    /// its whole length, decided on control points, never at sample points
+    /// (`docs/definitions-and-certificates.md` §7.6). A rational Bézier piece with positive
+    /// weights lies in the convex hull of its control points (Farin), and the distance to a
+    /// segment is convex, so a piece of the curve whose control points are within `d` of a
+    /// chord `[a, b]` stays within `d` of it. A piece of the boundary from `a` to `b` whose
+    /// control points are within `e` of the line through them passes within `e` of each
+    /// point of the chord (its foot on the line runs from `a` to `b`). Where the computed
+    /// points are within `r` of the exact ones ([`pieces_rounding`]), the boundary piece is
+    /// within `e + r` of the line and its exact ends within `r` of `a` and `b`, so within
+    /// `e + 2 r` of each point of the chord. Each piece of the curve needs one piece of the
+    /// boundary with `d + e`, the curve's `r` and twice the boundary's below the tolerance,
+    /// the sum rounded up by `gamma(4)`. False otherwise: also for a curve or boundary
+    /// [`bezier_pieces`] does not cut (another kind, a weight not positive, a failed
+    /// decomposition) or whose rounding is not bounded. A boundary piece whose ends coincide
+    /// gives no chord, and one that bends away from its chord by the tolerance gives none a
+    /// curve piece is near, so a curve along an arc of the boundary is kept.
     ///
     /// # Errors
     ///
     /// [`SolidError::Unported`] and a cancellation.
     fn runs_along_boundary(&self, k: &Kernel, curve: &Curve, boundary: &Curve) -> Result<bool> {
-        match self.samples_near_boundary(k, curve, boundary) {
+        match self.hulls_near_boundary(k, curve, boundary) {
             Ok(along) => Ok(along),
             Err(e) if e.is_unported_or_cancelled() => Err(e),
             Err(_) => Ok(false),
@@ -833,34 +909,57 @@ impl SurfaceIntersector<'_> {
 
     /// The test of [`SurfaceIntersector::runs_along_boundary`], with every failure an
     /// error.
-    fn samples_near_boundary(&self, k: &Kernel, curve: &Curve, boundary: &Curve) -> Result<bool> {
+    fn hulls_near_boundary(&self, k: &Kernel, curve: &Curve, boundary: &Curve) -> Result<bool> {
         let tol = self.this_approx_tol_3d;
-        let ivl = curve.natural_interval();
-        let b_ivl = boundary.natural_interval();
-        let (knots, _) = curve.knots(k, Some(&ivl))?;
-        let mut ts = vec![ivl.min()];
-        ts.extend(
-            knots
-                .into_iter()
-                .filter(|&t| t > ivl.min() && t < ivl.max()),
-        );
-        ts.push(ivl.max());
-        let mids: Vec<f64> = ts
-            .iter()
-            .zip(ts.iter().skip(1))
-            .map(|(a, b)| (a + b) / 2.0)
-            .collect();
-        for t in ts.into_iter().chain(mids) {
+        let (Some(pieces), Some(along)) = (bezier_pieces(k, curve)?, bezier_pieces(k, boundary)?)
+        else {
+            return Ok(false);
+        };
+        let (Some(r_curve), Some(r_boundary)) =
+            (pieces_rounding(k, curve)?, pieces_rounding(k, boundary)?)
+        else {
+            return Ok(false);
+        };
+        // each boundary piece's chord and how far the piece strays from it, its rounding
+        // counted twice (its points off the line, its ends off the chord's)
+        let mut chords = Vec::new();
+        for piece in &along {
             k.check_cancelled(OP_ALONG)?;
-            let p = curve.evaluate_point(k, t)?;
-            let drop =
-                boundary.drop_point(k, &b_ivl, p, None, tol, None, SolverOperation::Minimize)?;
-            let within = drop.success && drop.distance < tol;
-            if !within {
+            let Some(points) = euclidean(piece) else {
+                return Ok(false);
+            };
+            let (Some(&a), Some(&b)) = (points.first(), points.last()) else {
+                continue;
+            };
+            let stray = points
+                .iter()
+                .map(|&q| distance_to_chord(q, a, b, false))
+                .try_fold(0.0f64, |m, d| d.map(|d| m.max(d)));
+            if let Some(stray) = stray {
+                chords.push((a, b, stray + 2.0 * r_boundary));
+            }
+        }
+        for piece in &pieces {
+            let Some(points) = euclidean(piece) else {
+                return Ok(false);
+            };
+            let mut near = false;
+            for &(a, b, stray) in &chords {
+                k.check_cancelled(OP_ALONG)?;
+                let far = points
+                    .iter()
+                    .map(|&p| distance_to_chord(p, a, b, true))
+                    .try_fold(0.0f64, |m, d| d.map(|d| m.max(d)));
+                if far.is_some_and(|far| (far + r_curve + stray) * (1.0 + gamma(4)) < tol) {
+                    near = true;
+                    break;
+                }
+            }
+            if !near {
                 return Ok(false);
             }
         }
-        Ok(true)
+        Ok(!pieces.is_empty())
     }
 
     /// The tail of a boundary point solution (single value or small range): the
@@ -1117,9 +1216,11 @@ impl SurfaceIntersector<'_> {
         if !self.uv_domains[0].contains_point(prev_tsp.uv_pos(s0), EFF_ZERO)
             || !self.uv_domains[1].contains_point(prev_tsp.uv_pos(s1), EFF_ZERO)
         {
-            return Err(SolidError::intersect_failed(
+            let surface =
+                usize::from(self.uv_domains[0].contains_point(prev_tsp.uv_pos(s0), EFF_ZERO));
+            return Err(SolidError::intersect(
                 OP_NEXT,
-                "the previous point lies outside a surface's domain",
+                IntersectFailure::PointOutsideDomain { surface },
             ));
         }
 
@@ -1970,6 +2071,10 @@ impl<O: Copy + PartialEq> FaceQueries<SolveObject> for TrimmedFaceContext<'_, O>
         self.queries.face_zone_tol_3d(self.face)
     }
 
+    fn face_has_loopuses(&self, _: SolveObject) -> Result<bool> {
+        self.queries.face_has_loopuses(self.face)
+    }
+
     fn face_point_classify(
         &self,
         k: &Kernel,
@@ -2006,13 +2111,15 @@ impl<O: Copy + PartialEq> FaceQueries<SolveObject> for TrimmedFaceContext<'_, O>
 /// upstream runs on the surface's one cache: here on a copy of `cache` (the
 /// intersector's cache of `surface`; its handles, which name only the surface, become
 /// the [`SolveObject`] of the surface; a cache naming no surface cannot serve the leaf
-/// solves, so the solve then builds its own). The solutions, `[t, u, v]` each (their
-/// objects and nodes are not kept).
+/// solves, so the solve then builds its own, in its own modes). The solve on the copy
+/// runs in `modes`. The solutions, `[t, u, v]` each (their objects and nodes are not
+/// kept).
 #[allow(clippy::too_many_arguments)]
 fn surface_global_curve_intersect<O: Copy + PartialEq>(
     k: &Kernel,
     surface: &Surface,
     cache: &SurfaceCache<O>,
+    modes: SolveModes,
     domain: &Extent2d,
     curve: &Curve,
     interval: &Extent1d,
@@ -2038,11 +2145,12 @@ fn surface_global_curve_intersect<O: Copy + PartialEq>(
     };
     let found = if let Some(mut face_context) = face_context {
         let mut solve_cache = cache.map_handles(|_| Ok(surface_object))?;
-        surface.global_curve_intersect_with_context::<SolveObject>(
+        surface.global_curve_intersect_from::<SolveObject>(
             k,
             [Some(curve_object), Some(surface_object)],
             Some(&mut solve_cache),
-            &mut face_context,
+            Some(&mut face_context),
+            Some(modes),
             domain,
             curve,
             interval,
@@ -2050,10 +2158,12 @@ fn surface_global_curve_intersect<O: Copy + PartialEq>(
         )?
     } else if cache.surface_handle().is_some() {
         let mut solve_cache = cache.map_handles(|_| Ok(surface_object))?;
-        surface.global_curve_intersect_in::<SolveObject>(
+        surface.global_curve_intersect_from::<SolveObject>(
             k,
             [Some(curve_object), Some(surface_object)],
             Some(&mut solve_cache),
+            None,
+            Some(modes),
             domain,
             curve,
             interval,
@@ -2133,10 +2243,48 @@ fn surface_drop_and_trim_curve<O: Copy + PartialEq>(
     })
 }
 
+/// The Euclidean control points of a rational Bézier piece (its homogeneous points);
+/// `None` where a weight is not positive or a coordinate not finite.
+fn euclidean(piece: &[Hom]) -> Option<Vec<Vec3>> {
+    let mut points = Vec::new();
+    for h in piece {
+        let positive = h[3] > 0.0;
+        if !(positive && h.iter().all(|c| c.is_finite())) {
+            return None;
+        }
+        points.push(Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]));
+    }
+    Some(points)
+}
+
+/// The distance from `p` to the segment `[a, b]` (`clamp`) or to the line through `a` and
+/// `b`, plus the bound of its rounding: `8 gamma(16)` of the largest coordinate `s` of the
+/// three. Whatever the quotient `t` rounds to, the point `a + t (b - a)` is on the line (in
+/// the segment once clamped), so the distance to it bounds the distance from above; the
+/// differences, products, sums and root are at most 16 rounded operations on numbers of
+/// at most `4 sqrt 3 s`. `None` where `a` and `b` coincide or a number is not finite.
+fn distance_to_chord(p: Vec3, a: Vec3, b: Vec3, clamp: bool) -> Option<f64> {
+    let size = [p, a, b].iter().fold(0.0f64, |m, c| {
+        m.max(c.x.abs()).max(c.y.abs()).max(c.z.abs())
+    });
+    let (v, w) = (b - a, p - a);
+    let vv = v.dot(v);
+    let apart = vv > 0.0;
+    if !apart {
+        return None;
+    }
+    let t = w.dot(v) / vv;
+    let t = if clamp { t.clamp(0.0, 1.0) } else { t };
+    let d = (w - v * t).length() + 8.0 * gamma(16) * size;
+    d.is_finite().then_some(d)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::geom::vector3d::Vec3;
+    use crate::nurbs::crv_basic::Curve as NurbCurve;
+    use crate::nurbs::math::{CPoint, NOW};
     use crate::surface::plane::Plane;
 
     fn plane(o: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Surface {
@@ -2436,9 +2584,11 @@ mod tests {
 
     /// #11749: a crossing curve through a deferred contact that runs within the tolerance
     /// along the contact's boundary curve, either way round, is the contact and gives way
-    /// to its touching point. A curve through it that leaves the boundary stays and covers
-    /// it: by twice the tolerance at its far end, by 0.1, or by 0.012 in its middle with
-    /// both ends on the boundary. A tangent curve along the boundary stays too.
+    /// to its touching point, a cubic of two pieces that wavers within half the tolerance
+    /// too. A curve through it that leaves the boundary stays and covers it: by twice the
+    /// tolerance at its far end, by 0.1, by 0.012 in its middle with both ends on the
+    /// boundary, by 3 tolerances between the points it is on the boundary at, or along the
+    /// boundary's line past its end. A tangent curve along the boundary stays too.
     #[test]
     fn a_crossing_curve_along_the_boundary_of_a_deferred_contact_gives_way_to_it() {
         let k = &Kernel::default();
@@ -2482,6 +2632,19 @@ mod tests {
         }
         let out = run(line(at, [0.3, 0.5, 0.5 * tol]), TsectCurveType::NearTangent);
         assert_eq!(out.curve_types, [TsectCurveType::Touching]);
+        let cubic = |zs: [f64; 5], knots: Vec<f64>| {
+            let pw = [0.0, 0.25, 0.5, 0.75, 1.0]
+                .iter()
+                .zip(zs)
+                .map(|(&s, z)| CPoint::new(0.2 + 0.1 * s, 0.5, z * tol, NOW))
+                .collect();
+            let c = NurbCurve::new(pw, 3, knots).expect("cubic");
+            Curve::from(BSplineCurve::from_nurb(c, 3, false))
+        };
+        let two = vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
+        let waver = cubic([0.0, 0.4, 0.1, 0.45, 0.3], two);
+        let out = run(waver, TsectCurveType::Crossing);
+        assert_eq!(out.curve_types, [TsectCurveType::Touching]);
         // leaving the boundary: the curve stays and covers the point
         for far in [2.0 * tol, 0.1] {
             let out = run(line(at, [0.3, 0.5, far]), TsectCurveType::Crossing);
@@ -2496,6 +2659,23 @@ mod tests {
         )
         .unwrap();
         let out = run(Curve::from(bulge), TsectCurveType::Crossing);
+        assert_eq!(out.curve_types, [TsectCurveType::Crossing]);
+        // a cubic on the boundary at its ends and its middle, 3 tol off it at a quarter:
+        // z = 64 tol t (t - 1/2) (t - 1), Bernstein coefficients 64 tol (0, 1/6, -1/6, 0)
+        let z = 64.0 * tol / 6.0;
+        let pw = [(0.0, 0.0), (1.0 / 3.0, z), (2.0 / 3.0, -z), (1.0, 0.0)]
+            .iter()
+            .map(|&(s, z)| CPoint::new(0.2 + 0.1 * s, 0.5, z, NOW))
+            .collect();
+        let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let wave = NurbCurve::new(pw, 3, knots).expect("cubic");
+        let wave = Curve::from(BSplineCurve::from_nurb(wave, 3, false));
+        let off = wave.evaluate_point(k, 0.25).unwrap().z;
+        assert!((off - 3.0 * tol).abs() < 1e-3 * tol, "{off}");
+        let out = run(wave, TsectCurveType::Crossing);
+        assert_eq!(out.curve_types, [TsectCurveType::Crossing]);
+        // along the boundary's line past its end at x = 1
+        let out = run(line(at, [1.2, 0.5, 0.0]), TsectCurveType::Crossing);
         assert_eq!(out.curve_types, [TsectCurveType::Crossing]);
         // a tangent curve along the boundary is no crossing
         let out = run(line(at, [0.3, 0.5, 0.5 * tol]), TsectCurveType::Tangent);
@@ -2524,6 +2704,69 @@ mod tests {
             .is_err());
         assert!(out.curves_3d.is_empty());
         assert!(si.start_points().is_empty());
+    }
+
+    /// The boundary solves run in the modes the caller gives, not in the caches' flags,
+    /// and leave the caches' flags as built: overriding caches with point testing on and
+    /// boundary curve processing off finds what caches holding the override do.
+    #[test]
+    fn boundary_solves_run_in_the_given_modes_and_leave_the_cache_flags() {
+        let k = Kernel::default();
+        let (a, b) = two_planes();
+        let all = Extent3d::from_bounds(-10.0, -10.0, -10.0, 10.0, 10.0, 10.0);
+        let caches_with = |modes: SolveModes| {
+            [(&a, SrfIndex::First), (&b, SrfIndex::Second)]
+                .map(|(s, i)| {
+                    let mut c = surface_cache::<SrfIndex>(&k, s, Some(i)).expect("cache");
+                    c.point_test_enabled = modes.point_test_enabled;
+                    c.process_boundary_curves = modes.process_boundary_curves;
+                    c
+                })
+                .to_vec()
+        };
+        let found = |si: &SurfaceIntersector<'_>, out: &TsectCurves| {
+            let points: Vec<String> = si
+                .start_points()
+                .iter()
+                .map(|&id| format!("{:?}", si.point(id).expect("point")))
+                .collect();
+            (points, format!("{out:?}"))
+        };
+        let built = SolveModes {
+            point_test_enabled: true,
+            process_boundary_curves: false,
+        };
+        let boundary = SolveModes {
+            point_test_enabled: false,
+            process_boundary_curves: true,
+        };
+
+        // the override, over caches built with other flags
+        let mut caches = caches_with(built);
+        let mut si = intersector(&k, &a, &b);
+        let mut out = TsectCurves::default();
+        si.find_boundary_start_points_under(&k, &mut caches, [boundary; 2], &all, &mut out, None)
+            .expect("boundary start points");
+        assert!(caches.iter().all(|c| c.solve_modes() == built));
+        let overridden = found(&si, &out);
+        assert!(!overridden.0.is_empty());
+
+        // the same solves on caches that hold the override's flags themselves
+        let mut caches = caches_with(boundary);
+        let mut si = intersector(&k, &a, &b);
+        let mut out = TsectCurves::default();
+        si.find_boundary_start_points_with_caches(&k, &mut caches, &all, &mut out)
+            .expect("boundary start points");
+        assert!(caches.iter().all(|c| c.solve_modes() == boundary));
+        assert_eq!(found(&si, &out), overridden);
+
+        // and the public entry turns boundary curve processing on for its solves only
+        let mut caches = caches_with(built);
+        let mut si = intersector(&k, &a, &b);
+        let mut out = TsectCurves::default();
+        si.find_boundary_start_points_with_caches(&k, &mut caches, &all, &mut out)
+            .expect("boundary start points");
+        assert!(caches.iter().all(|c| c.solve_modes() == built));
     }
 
     /// A boundary curve whose trim to the domain ends at a knot just inside it is

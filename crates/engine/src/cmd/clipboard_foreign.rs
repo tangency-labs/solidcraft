@@ -272,6 +272,11 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
         }
+        if let FeatureKind::Sketch { plane, sketch } = &mut feature.kind {
+            let source = |id| transforms.get(&id).copied().unwrap_or(solidcraft_doc::IDENTITY);
+            solidcraft_doc::project::reframe_link_sketch_placements(sketch, transform, source)?;
+            solidcraft_doc::reframe_plane_placements(plane, transform, source)?;
+        }
         feature.remap_clone(&ids, &names, &BTreeMap::new(), &mapped, &BTreeMap::new(), &copy.doc)?;
         if let FeatureKind::Sketch { plane, sketch } = &mut feature.kind {
             // 3D wires carry their own coordinate space, independently of the sketch plane.
@@ -286,6 +291,10 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
             let component: std::collections::HashSet<String> =
                 sketch.wires.iter().filter(|w| w.space == solidcraft_sketch::WireSpace::Component).map(|w| w.id.clone()).collect();
             let matrix = |wire: &str| if component.contains(wire) { transform } else { &world_shift };
+            // Distances from a plane the paste shifts along its normal: their parameter's new
+            // expression, and On Plane constraints turned into such distances, which need one.
+            let mut shifted: Vec<(String, String)> = Vec::new();
+            let mut to_param: Vec<(String, String)> = Vec::new();
             sketch.wire_constraints.retain_mut(|c| match &mut c.kind {
                 solidcraft_sketch::WireConstraintKind::Fix { p, at, exprs } => {
                     let m = matrix(&p.wire);
@@ -316,8 +325,68 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                         None => false,
                     }
                 }
+                // To an origin plane: the plane the paste turns it onto, the side it was on, and
+                // the paste's shift along it (a point on the plane is then that far from it).
+                // One the paste turns onto no origin plane goes.
+                solidcraft_sketch::WireConstraintKind::ParallelToPlane { line, plane } => match onto_plane(matrix(line), *plane) {
+                    Some((to, _, _)) => {
+                        *plane = to;
+                        true
+                    }
+                    None => false,
+                },
+                solidcraft_sketch::WireConstraintKind::PlaneAngle { line, plane, reversed, .. } => match onto_plane(matrix(line), *plane) {
+                    Some((to, flip, _)) => {
+                        *plane = to;
+                        *reversed ^= flip;
+                        true
+                    }
+                    None => false,
+                },
+                solidcraft_sketch::WireConstraintKind::PlaneDistance { p, plane, reversed, value } => match onto_plane(matrix(&p.wire), *plane) {
+                    // Turned only: the value (and the parameter that drives it) stays, the side turns.
+                    Some((to, flip, shift)) if shift.abs() <= 1e-9 => {
+                        (*plane, *reversed) = (to, *reversed ^ flip);
+                        true
+                    }
+                    // Shifted: the signed distance along the new normal is the shift and the old
+                    // distance, on its side; the parameter says so, so a solve keeps it.
+                    Some((to, flip, shift)) => {
+                        let side = if *reversed != flip { -1.0 } else { 1.0 };
+                        let w = shift + side * *value;
+                        (*plane, *reversed, *value) = (to, false, w);
+                        if let Some(name) = &c.param {
+                            shifted.push((name.clone(), format!("{} mm {} ({{old}})", shift, if side < 0.0 { "-" } else { "+" })));
+                        }
+                        true
+                    }
+                    None => false,
+                },
+                solidcraft_sketch::WireConstraintKind::OnPlane { p, plane } => match onto_plane(matrix(&p.wire), *plane) {
+                    Some((to, _, shift)) if shift.abs() <= 1e-9 => {
+                        *plane = to;
+                        true
+                    }
+                    Some((to, _, shift)) => {
+                        c.kind = solidcraft_sketch::WireConstraintKind::PlaneDistance { p: p.clone(), plane: to, reversed: false, value: shift };
+                        to_param.push((c.id.clone(), format!("{shift} mm")));
+                        true
+                    }
+                    None => false,
+                },
                 _ => true,
             });
+            for (name, expr) in shifted {
+                if let Some(param) = scratch.doc_mut().params.iter_mut().find(|p| p.name == name) {
+                    param.expr = expr.replace("{old}", &param.expr);
+                }
+            }
+            for (id, expr) in to_param {
+                let name = scratch.doc_mut().new_model_param(&expr, "mm");
+                if let Some(c) = sketch.wire_constraints.iter_mut().find(|c| c.id == id) {
+                    c.param = Some(name);
+                }
+            }
             // Patterns and text words have expressions outside FeatureKind's numeric inputs.
             for pattern in &mut sketch.patterns {
                 for e in pattern.count_expression.iter_mut().chain(pattern.expressions.values_mut()) {
@@ -345,7 +414,23 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     scratch.selection = ids.values().map(|id| Sel::Feature { id: *id }).collect();
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     serde_json::to_value(PasteResult { pasted: made, errors: Vec::new(), notices: Vec::new(), param_warnings: Vec::new() })
         .map_err(|e| bad(CMD, e.to_string()))
+}
+
+/// The origin plane `matrix` turns `plane` onto, whether it turns the normal round (the plane's
+/// back side to its front), and how far the matrix shifts points along the new normal; `None`
+/// when it turns it onto no origin plane.
+fn onto_plane(matrix: &solidcraft_doc::Mat, plane: solidcraft_sketch::OriginPlane) -> Option<(solidcraft_sketch::OriginPlane, bool, f64)> {
+    use solidcraft_sketch::{Axis, OriginPlane};
+    let n = solidcraft_doc::apply_vector(matrix, plane.normal());
+    let axis = Axis::along(n)?;
+    let to = match axis {
+        Axis::X => OriginPlane::Yz,
+        Axis::Y => OriginPlane::Xz,
+        Axis::Z => OriginPlane::Xy,
+    };
+    let shift = solidcraft_doc::apply_point(matrix, solidcore_record::Vec3::ZERO).dot(to.normal());
+    Some((to, n.dot(to.normal()) < 0.0, shift))
 }
