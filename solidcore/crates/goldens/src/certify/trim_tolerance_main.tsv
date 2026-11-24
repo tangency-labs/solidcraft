@@ -22,6 +22,7 @@
 # blend.fillet_executive_p3: the glue keeps a trim curve only when it spans the surviving edge (#18294): the digest is this branch's file with the rows put back. Seven issue-880 rows are this branch's lines (half-arc-rim-whole-offsets-1-1, -1-2, -1.4437-1.4437 and tilted-cylinder-rim-offsets-1-1, -1-2, setbacks-1-1, -1-2: the centroid's y and two products of inertia within 6.1e-11, whole-offsets-1-1's two edges swapped); none is a ROWS case, and no ROWS tolerance moves. The two half-arc-rim-0-setbacks rows it moves are FILLET_UV_CHANGES, put back before the digest
 # blend.fillet_executive_p3: a variable round's span follows the fillet solved at its test shares (WR-646, tangency-labs/solidcraft#18917): the digest is this branch's file with the rows put back. The seven law rows of a smooth or linear radius law are this branch's lines (volume, mass and geometry only; status and counts unchanged); the two law-box edge-map rows' lowered tolerances move 4.852094517696912e-5 -> 4.884070562533064e-5 and 4.166766991111495e-5 -> 4.192993148410815e-5, still below the rows' old values 5.957125873966091e-5 and 5.0819176600091676e-5, and each new value is certified over its trims on this branch's body by certify::trim_tolerance::fillet_executive_p3
 # blend.fillet_executive_p3, offset.offset_executive_p2: every shell ends with its exact analytic edges (WR-545's flag retired): the digests are this branch's files with the rows put back. fillet_executive_p3 lines moved against this main: real-box-fillet1v-r3-shell-closed and real-box-fillet4v-r3-shell-closed (the rim's edges exact arcs and lines, its vertices on them, the shell's area nearer its closed form; wr545_moved_rows_are_exact proves them); their rows lose the 26 rounding entries of vertex coordinates the exact edges move (6 and 20), and keep every moved tolerance. offset_executive_p2 lines moved: its 62 rows (59 lines where B-spline edges were, the vertex bounds of 36 of them moved by at most 1.7e-12, all proved by wr545_moved_rows_are_exact).
+# blend.fillet_geom_p1, blend.fillet_solver_p4, blend.fillet_standard_solver_p2, nlib.srf_adv_p1, nlib.srf_adv_p3, nurbs.b_spline_surface_n_lib_p1, surface.offset_surface: #21383 moves 179 rows, all ok -> ok, by the G1R homogeneous continuation (a rational side with mixed weight ratios gets the far row cb(1+t)B - tI, which is G1); each moved row is certified by its unit's g1r_moved_rows test (or each_moved_row_extends_its_base_by_certified_g1_steps); the digests are the branch files
 # topology.face_p1: a seam move needs a closed direction (UB-138, tangency-labs/solidcraft#21368): the digest is this branch's file. Its 62 MoveSeam rows move (the 37 UB-137 rows on vase_rev.smb and 25 op9/p5 rows), each replayed and checked by topology_face_p1::tests::seam_move_rows_keep_the_tolerances_the_geometry_needs; no other value moved
 # intersect.surface_intersector_p2, intersect.surface_intersector_p3, offset.offset_executive_p2, topology.proto_topology_p1, topology.proto_topology_p2, topology.proto_topology_p3: this branch's files (the proto-topology statuses passed on and WR-73's misses answering false, #18927): 604 lines moved, none a ROWS case (offset_executive_p2's digest is main's file with its 5 k0.35 overlap lines this branch's, its 3 ROWS cases put back by the ledger as before); each proved by its unit's replay tests (status_proof_replays, moved_rows_return_their_failed_steps, k035_overlap_offsets_are_refused)
 blend.feature_executive	2a4bd65805caa498
@@ -32,7 +33,7 @@ blend.fillet_custom_solver	d5a7b6227772dc0a
 blend.fillet_executive_p1	29550c0f9b47966c
 blend.fillet_executive_p2	68a6e765f600c883
 blend.fillet_executive_p3	be2e67021a9d3656
-blend.fillet_geom_p1	82c1f975f967a59d
+blend.fillet_geom_p1	555c086725065e34
 blend.fillet_geom_p2	4a54b5291270572a
 blend.fillet_geom_p3	15646cd3bfb41d7e
 blend.fillet_geom_p4	9137b943cfc62a3a
@@ -43,10 +44,10 @@ blend.fillet_removal	157659e7ac959b87
 blend.fillet_solver_p1	12290b86d065d83e
 blend.fillet_solver_p2	f443bb49d42e8636
 blend.fillet_solver_p3	1538c605eb4dcb47
-blend.fillet_solver_p4	0905c6ebc3407321
+blend.fillet_solver_p4	7d856b9edeb38ac1
 blend.fillet_solver_p5	872c5100402aeb0a
 blend.fillet_standard_solver_p1	fcd2f44f6127b6b5
-blend.fillet_standard_solver_p2	9b97d9fbe57a37e9
+blend.fillet_standard_solver_p2	e8c0be100d77a5a3
 blend.hcr	a705633d84e1c3b4
 blend.identify_fillet	47f73eabb1499edd
 boolean.api_brep	9e85ef5f95f90792
@@ -171,9 +172,9 @@ nlib.iges	dd6206ffb6758c19
 nlib.knots	34061253b4f834dc
 nlib.math	e339f5f294f0b19d
 nlib.spiral	bd04f48d03866d08
-nlib.srf_adv_p1	e084031bf30a2ba5
+nlib.srf_adv_p1	507097c24a2303d3
 nlib.srf_adv_p2	08e6c93cc34eafc2
-nlib.srf_adv_p3	637cb717986ed828
+nlib.srf_adv_p3	e6649ba3e44a83c6
 nlib.srf_adv_p4	a1d793974a829076
 nlib.srf_adv_p5	d4c6d57ccc60d3ca
 nlib.srf_adv_p6	c19cdfa152a017d4
@@ -190,7 +191,7 @@ nurbs.b_spline_curve_n_lib	f7fb8ca2a9800d2a
 nurbs.b_spline_curve_p1	4c5368e396f7daee
 nurbs.b_spline_curve_p2	247e46e7e432d38f
 nurbs.b_spline_curve_p3	ada5ade2070b1547
-nurbs.b_spline_surface_n_lib_p1	0a0019fb0b942c25
+nurbs.b_spline_surface_n_lib_p1	a8c9fd2fa24dfe18
 nurbs.b_spline_surface_n_lib_p2	106afe3418f36f6f
 nurbs.b_spline_surface_p1	9a32d0b889c30c68
 nurbs.b_spline_surface_p2	f6eae99ab71257f5
@@ -226,7 +227,7 @@ surface.cone_p1	f919b20fa0fedb98
 surface.cone_p2	e45d5bc9b7336f39
 surface.cone_p3	a5fb6323191885b2
 surface.curve_bounded_surface	f1010cd243b40745
-surface.offset_surface	cbddc9fc2f5d54c6
+surface.offset_surface	bcb31e3779792b46
 surface.plane_p1	9a012f3facc74618
 surface.plane_p2	0888f448b19211d9
 surface.sphere	cec019c8fc8ad824
