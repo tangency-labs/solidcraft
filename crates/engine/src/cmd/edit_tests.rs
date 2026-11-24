@@ -2944,19 +2944,20 @@ fn remove_history_keeps_a_feature_another_body_shares() {
     same_body_shape(a, body_shape(&s, "A"));
     same_body_shape(b, body_shape(&s, "B"));
     assert!(s.model.results.iter().all(|r| r.error.is_none()));
-    // B's history is still B's: editing its box still changes it.
+    // One undo step brings A's fillet back.
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(feature_names(&s), ["Box A", "Box B", "Lift", "Round A"]);
     run(&mut s, "edit.redo", json!({}));
 
-    // With every feature of B also building A, nothing of B's can go.
+    // With the last feature that built A also moving B, nothing of A's can go: refused, unchanged.
     let mut t = Session::default();
     run(&mut t, "solid.box", json!({"body_name": "A", "length": 10, "width": 10, "height": 10}));
     run(&mut t, "solid.box", json!({"body_name": "B", "corner": [30, 0, 0], "length": 10, "width": 10, "height": 10, "operation": "new_body"}));
     run(&mut t, "solid.move", json!({"bodies": ["A", "B"], "translate": [0, 0, 5]}));
-    run(&mut t, "body.remove_history", json!({"body": "A"}));
-    let err = t.execute("body.remove_history", &json!({"body": "B"})).unwrap_err().to_string();
+    let doc = t.doc.clone();
+    let err = t.execute("body.remove_history", &json!({"body": "A"})).unwrap_err().to_string();
     assert!(err.contains("nothing to remove"), "{err}");
+    assert_eq!(t.doc, doc);
 }
 
 /// The base feature's B-rep is saved inside the design as a binary part, not text in its JSON,
