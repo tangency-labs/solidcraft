@@ -144,7 +144,8 @@ impl Drag {
 
 #[derive(Default)]
 pub(crate) struct State {
-    drag: Option<Drag>,
+    // Keep the drag payload off idle view stacks.
+    drag: Option<Box<Drag>>,
     /// A cancelled press still owns the pointer until release.
     cancelled: bool,
 }
@@ -223,7 +224,7 @@ pub(crate) fn interact(app: &mut SolveApp, ui: &Ui, proj: &Proj, response: &Resp
         if started && let Some(cursor) = cursor {
             drag.follow(proj, cursor);
         }
-        app.viewport.biarc_edit.drag = Some(drag);
+        app.viewport.biarc_edit.drag = Some(Box::new(drag));
         return true;
     }
     !down && hover.is_some_and(|p| owns_pointer(app, proj, p))
