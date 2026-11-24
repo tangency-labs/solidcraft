@@ -127,6 +127,13 @@ pub(crate) fn step() -> Step {
     })
 }
 
+/// Whether the evaluation skips SMLib's checks ([`Validation::Off`]), for a step that checks its
+/// result at once under the other modes. Unlike [`step`], it never leaves a check for the end
+/// of the feature.
+pub(crate) fn skipped() -> bool {
+    CURRENT.with(|c| matches!(c.borrow().as_deref(), Some(Scope { mode: Validation::Off, .. })))
+}
+
 /// How a step's own check takes its result.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Checked {
@@ -520,6 +527,46 @@ mod tests {
         for mode in Validation::ALL {
             let (moved, _) = validating(mode, || crate::offset_faces(&good, &side, 1.0));
             assert!(moved.as_ref().is_ok_and(|m| check_kept(m).is_ok()), "{mode:?}: {moved:?}");
+        }
+    }
+
+    /// Surface Offset skips SMLib's check of each offset face and of their stitch under off, as
+    /// Offset Faces does (#17601). A box edge stored as a cubic that runs a, b, a, b along its
+    /// line stops half way (zero speed there, as some imported trims nearly do): SMLib's check
+    /// refuses the box, and the offset of a face beside that edge inherits the defect. The offset
+    /// is refused under each_step and each_feature, which still check at the step, and made
+    /// under off.
+    #[test]
+    fn surface_offset_of_a_face_the_check_refuses_is_made_under_off() {
+        use solidcore_record::Vec3;
+        use solidcore_record::brep::Curve;
+        let good = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let mut record = good.record().clone();
+        let edge = &mut record.edges[0];
+        let Curve::Line { start, end } = edge.curve else { panic!("a box edge is a line: {:?}", edge.curve) };
+        let at = |t: f64| std::array::from_fn::<f64, 3, _>(|i| start[i] + t * (end[i] - start[i]));
+        let [t0, t1] = edge.interval;
+        let (a, b) = (at(t0), at(t1));
+        edge.curve = Curve::Spline { knots: vec![t0, t0, t0, t0, t1, t1, t1, t1], points: vec![a, b, a, b] };
+        let face = edge.uses[0].face as usize;
+        let bad = Body::from_record(record).unwrap();
+        let e = check_kept(&bad).unwrap_err().to_string();
+        assert!(e.contains("Bad SpeedPt"), "{e}");
+        let offset = |b: &Body| crate::offset_surface(b, &[face], 1.0, 0.01);
+        for mode in [Validation::EachStep, Validation::EachFeature] {
+            let (refused, deferred) = validating(mode, || offset(&bad));
+            let e = refused.unwrap_err().to_string();
+            assert!(e.contains("SMLib offset: SMLib's check refuses the result") && e.contains("Bad SpeedPt") && !deferred, "{mode:?}: {e}");
+        }
+        let (off, deferred) = validating(Validation::Off, || offset(&bad));
+        let off = off.unwrap();
+        assert!(off.is_surface() && off.face_count() == 1 && !deferred, "{off:?}");
+        let m = crate::measure(&off).unwrap();
+        assert!((m.area - 100.0).abs() < 1e-6, "{m:?}");
+        // A face the check accepts is offset under every mode.
+        for mode in Validation::ALL {
+            let (moved, _) = validating(mode, || offset(&good));
+            assert!(moved.as_ref().is_ok_and(|m| m.face_count() == 1 && check_kept(m).is_ok()), "{mode:?}: {moved:?}");
         }
     }
 
