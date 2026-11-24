@@ -337,9 +337,6 @@ fn origin_plane_names(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
         crate::scenario::publish_target("prefs:origin_axes_across_view", response.rect);
         let response = setting::browser_hover_shows_origin(app, ui).backing_on_hover_text(app.tr("prefs.browser_hover_shows_origin_help"));
         crate::scenario::publish_target("prefs:browser_hover_shows_origin", response.rect);
-        // Model Parameters listed under their components (#20648), off by default.
-        let response = setting::params_group_by_component(app, ui);
-        crate::scenario::publish_target("prefs:params_group_by_component", response.rect);
     });
 }
 

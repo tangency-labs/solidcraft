@@ -79,9 +79,6 @@ macro_rules! design_preferences {
             /// The most parameters Down arrow lists in an empty expression box (#9246): fewer keeps the
             /// list light in a large design.
             parameter_list_rows: u16 = 50, PAGE_DESIGN;
-            /// Opt into Model Parameters listed under the component each feature belongs to (#20648); off
-            /// keeps the flat list in listing order.
-            params_group_by_component: bool = false, PAGE_DESIGN => check_tr("prefs.params_group_by_component");
             /// The template new drawings of a part start from: a part's built-in, by name (ISO A3 when not set,
             /// or set to one this version doesn't have for a part).
             part_drawing_template: String = template::default_for(false).into(), PAGE_DESIGN;

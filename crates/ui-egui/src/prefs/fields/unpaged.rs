@@ -49,6 +49,9 @@ macro_rules! unpaged_preferences {
             /// edits wait in the dialog until Apply or OK sets them together, in one rebuild and one undo
             /// step. Its checkbox is in the dialog itself.
             parameters_apply_live: bool = true;
+            /// Model Parameters are listed under the component each feature belongs to (#20648); off keeps
+            /// the flat list in listing order. Its check box is in the Parameters window, next to the list.
+            params_group_by_component: bool = false;
             /// Personal Sheet Metal Rules, offered by the rule manager of every design in this profile
             /// (#9346). No page reset discards this user-authored library.
             personal_sheet_rules: crate::personal_sheet_rules::Library = crate::personal_sheet_rules::Library::default();

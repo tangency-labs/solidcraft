@@ -440,6 +440,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             |ui| {
                 ui_kit::text(ui, hint(live), ui_kit::Text::Hint("manage"));
                 apply_live_checkbox(app, ui, &mut d, &all);
+                group_checkbox(app, ui);
                 ui_kit::row(ui, "Filter", |ui| {
                     let id = ui.make_persistent_id("parameter_filter");
                     ui_kit::search_field(ui, id, &mut d.filter, "Filter");
@@ -1272,6 +1273,13 @@ fn apply_live_checkbox(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDial
     if response.changed() && app.preferences.parameters_apply_live {
         apply_held(app, d, rows);
     }
+}
+
+/// "Group model parameters by component" (#20648), remembered across sessions; off lists the model
+/// parameters flat, in listing order.
+fn group_checkbox(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let response = ui_kit::checkbox(ui, solidcraft_ui_text::tr("parameters.group_by_component"), &mut app.preferences.params_group_by_component);
+    crate::scenario::publish_handle("params:group_by_component", response.rect.center());
 }
 
 /// The add row's draft (name, unit, expression, comment) an add was refused with, the design
@@ -2137,6 +2145,24 @@ mod tests {
         assert!(!other.app.preferences.parameters_apply_live, "the choice persists with the preferences");
     }
 
+    /// #20648: the Parameters window's own option turns the grouping on and off, and the choice is kept
+    /// with the stored preferences; there is no Preferences page row for it.
+    #[test]
+    fn the_windows_option_toggles_the_grouping_and_is_remembered() {
+        crate::i18n::install();
+        assert!(!crate::prefs::Prefs::default().params_group_by_component, "grouping stays off by default");
+        let mut h = held_dialog();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"params:group_by_component"}})).unwrap();
+        assert!(h.app.preferences.params_group_by_component, "the option turns the grouping on");
+        let saved = h.app.prefs();
+        let mut other = crate::scenario::Harness::new();
+        other.app.load_prefs(&saved);
+        assert!(other.app.preferences.params_group_by_component, "the choice persists with the preferences");
+        h.step(&json!({"click":{"handle":"params:group_by_component"}})).unwrap();
+        assert!(!h.app.preferences.params_group_by_component, "and off again");
+    }
+
     #[test]
     fn words_and_suggestions() {
         assert_eq!(word_before("2 * wid", 7), (4, "wid".to_string()));
@@ -2797,7 +2823,7 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.session = solidcraft_engine::Session::new(doc);
-        // Grouping is opt-in (Preferences › Design).
+        // Grouping is opt-in (the Parameters window's own option).
         h.app.preferences.params_group_by_component = true;
         h.app.start("parameters.change");
         h.frames(5);
