@@ -23,18 +23,17 @@
 //! independently, pins 1299.4830955384505, 2e-15 from this pin.) With the kernel's own
 //! defaults the volume is checked against the closed form only.
 //!
-//! With `shell_edges_on_analytics_exact` (WR-545) on as well, as the SolidCraft rig runs
-//! it, `make_edges_on_analytics_exact` intersected the walls' face-owned surfaces without
-//! their faces and the shell failed with `Unported(topology.face_p2)`; it now goes through
-//! the result's face services. With the kernel's defaults two marched edges between the
-//! inner planar walls become lines; with SolidCraft's fixes none does (see the last shell
-//! test); the volumes stay as above.
+//! The shell ends with `make_edges_on_analytics_exact` (WR-545, once the
+//! `shell_edges_on_analytics_exact` flag, which the SolidCraft rig ran on). It intersected
+//! the walls' face-owned surfaces without their faces and the shell failed with
+//! `Unported(topology.face_p2)`; it now goes through the result's face services. With the
+//! kernel's defaults two marched edges between the inner planar walls become lines; with
+//! SolidCraft's fixes none does; the volumes stay as above.
 //!
 //! Since WR-495's exact mate is the only path (#21301), `MateEdges` itself makes those two
-//! edges lines, so the default shell has 18 lines (it had 16, the two edges marched), as
-//! `shell_edges_on_analytics_exact` gave. Every line edge of each shell is proved on the
+//! edges lines before that step runs. Every line edge of each shell is proved on the
 //! surfaces of both its faces within the edge's tolerance (`curve_on_surfaces`, an
-//! enclosure certificate), so the two new lines are the exact intersections of their walls.
+//! enclosure certificate), so the lines are the exact intersections of their walls.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -181,15 +180,6 @@ fn check_validated(fixes: &UpstreamFixes, want: Option<f64>, validate: bool) -> 
     kinds.iter().filter(|&&k| k == "line").count()
 }
 
-/// The default kernel (18 lines since the exact mate, WR-495; see the module docs), which keeps an inset's cavity regions (WR-667). The merge leaves one
-/// finite region (deduced: before #17064 the one-name fixture shelled with this selection, which
-/// the verdicts' point-solve cache would have refused), which `make_manifold` keeps whatever its cavity
-/// verdict, so the verdict's point solves over the operand are not run (#17393).
-#[test]
-fn issue_1476_swept_bar_shells() {
-    assert_eq!(check(&UpstreamFixes::default(), None), 18);
-}
-
 /// SolidCraft's configuration (which also keeps an inset's cavity regions, now the
 /// default): the shell is the closed form and passes `check_brep` at every level. Slow in
 /// debug builds, as below.
@@ -201,19 +191,29 @@ fn issue_1476_swept_bar_shells_with_solidcraft_fixes_validates() {
 
 /// About 6 s at opt-level 3 but over 4 min in a debug build (the two 38 000-sample
 /// offsets' knot removal): run with `--ignored` (`--profile difftest`). The default
-/// test above keeps the extrusion fix live; `nurbs::crv_offset`'s unit tests keep the
+/// test below keeps the extrusion fix live; `nurbs::crv_offset`'s unit tests keep the
 /// bound live.
+///
+/// The shell ends with `make_edges_on_analytics_exact` (WR-545; the rig's run of shell/566
+/// failed with `Unported(topology.face_p2)` before it reached the faces through the result's
+/// face services): the shell builds and no edge changes. The inner straight walls are
+/// certified nets (WR-718) that do not give the recognised plane's points at the same
+/// parameters, so with `analytic_copy_keeps_parameterization` (WR-450) the merge keeps them
+/// as B-splines; no marched edge then lies between two analytic faces, and the shell has the
+/// lines and the volume it had without the pass (with `N_SrfOffset`'s fits two edges became
+/// lines). The fork (tangency-labs/smlib 68fb9162) gives V = 1299.4823.
 #[test]
 #[ignore = "slow in debug builds (two 38 000-sample curve offsets)"]
 fn issue_1476_swept_bar_shells_with_solidcraft_fixes() {
-    let mut fixes = solidcraft_fixes();
-    // The preset has it on; this test is SolidCraft's configuration without it (the last
-    // test in this file turns it on).
-    fixes.shell_edges_on_analytics_exact = false;
-    assert_eq!(check(&fixes, Some(1299.4830955384534)), 16);
+    assert_eq!(check(&solidcraft_fixes(), Some(1299.4830955384534)), 16);
 }
 
-/// `shell_edges_on_analytics_exact` (WR-545) alone: `make_edges_on_analytics_exact`
+/// The default kernel, which keeps an inset's cavity regions (WR-667). The merge leaves one
+/// finite region (deduced: before #17064 the one-name fixture shelled with this selection, which
+/// the verdicts' point-solve cache would have refused), which `make_manifold` keeps whatever its cavity
+/// verdict, so the verdict's point solves over the operand are not run (#17393).
+///
+/// The shell ends with `make_edges_on_analytics_exact` (WR-545), which
 /// intersects the result's face-owned surfaces (the extrusion walls) with their faces'
 /// trimmed caches, as the fork's `GlobalSurfaceIntersect` reaches them through
 /// `SmSurface::GetFace`; without the face context it failed with
@@ -225,26 +225,7 @@ fn issue_1476_swept_bar_shells_with_solidcraft_fixes() {
 /// relative, within the pin.
 #[test]
 fn issue_1476_swept_bar_shells_with_edges_on_analytics_exact() {
-    let mut fixes = UpstreamFixes::default();
-    fixes.shell_edges_on_analytics_exact = true;
-    assert_eq!(check(&fixes, None), 18);
-}
-
-/// SolidCraft's configuration with `shell_edges_on_analytics_exact` on as well (the
-/// rig's run of shell/566, which failed with `Unported(topology.face_p2)`): the shell
-/// builds and no edge changes. The inner straight walls are certified nets (WR-718) that
-/// do not give the recognised plane's points at the same parameters, so with
-/// `analytic_copy_keeps_parameterization` (WR-450) the merge keeps them as B-splines; no
-/// marched edge then lies between two analytic faces, and the shell has the lines and
-/// the volume of the test without the pass (with `N_SrfOffset`'s fits two edges became
-/// lines). The fork (tangency-labs/smlib 68fb9162) gives V = 1299.4823. Slow in debug
-/// builds, as above.
-#[test]
-#[ignore = "slow in debug builds (two 38 000-sample curve offsets)"]
-fn issue_1476_swept_bar_shells_with_solidcraft_fixes_and_edges_on_analytics_exact() {
-    let mut fixes = solidcraft_fixes();
-    fixes.shell_edges_on_analytics_exact = true;
-    assert_eq!(check(&fixes, Some(1299.4830955384534)), 16);
+    assert_eq!(check(&UpstreamFixes::default(), None), 18);
 }
 
 /// The shell's volume is the closed B-rep's, origin-independent (#16735; adapted from
