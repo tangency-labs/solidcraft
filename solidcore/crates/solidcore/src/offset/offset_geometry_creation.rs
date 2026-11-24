@@ -34,7 +34,7 @@
 //! | `FaceOffsetBrep` (private)                                   | the face creator's topology/owned-geometry subset |
 //! | `create_analytic_extension` (private)                       | the SolidCraft fork's `sm_CreateAnalyticExtension` (tangency-labs/smlib@fddc366, @98ab1b0; opt-in) |
 //! | `exact_piece` (private)                                     | the fork's `sm_ExactPiece` (tangency-labs/smlib@fddc366; opt-in) |
-//! | [`make_edges_on_analytics_exact`]                          | the fork's `MakeEdgesOnAnalyticsExact` (tangency-labs/smlib@cd85d34; opt-in) |
+//! | [`make_edges_on_analytics_exact`]                          | the fork's `MakeEdgesOnAnalyticsExact` (tangency-labs/smlib@cd85d34) |
 //! | [`OffsetGeometryCreation::default_tangency_tol_radians`]    | the constructor's `m_dTangencyTolRadians` (half a degree in the fork's tangency-labs/smlib@2e1bb8c; opt-in) |
 //! | `first_cut_from_far_end` (private)                          | the fork's cut-first-from-the-far-end choice in `TrimExtendedEdge` (tangency-labs/smlib@2e1bb8c; opt-in) |
 //! | `offset_vertex_image` (private)                             | not upstream: a vertex's image on its face's offset (WR-736; opt-in) |
@@ -172,8 +172,8 @@
 //!   upstream's. `exact_piece` counts the whole turns it moves a conic angle by and
 //!   returns [`SolidError::NotConverged`] past `MAX_EXACT_PIECE_TURNS` (65536), where
 //!   the fork's loop would not end for a non-finite or huge angle.
-//! - **Opt-in fork fix.** With `Kernel::fixes.shell_edges_on_analytics_exact` (WR-545),
-//!   the shell's result runs [`make_edges_on_analytics_exact`]. Upstream's
+//! - **Fork fix.** The shell's result always runs [`make_edges_on_analytics_exact`]
+//!   (WR-545; the fork's tangency-labs/smlib@cd85d34, which upstream lacks). Upstream's
 //!   `CreateTrimmedNURBSCurve` gives `NULL` where the port returns an error; any error
 //!   but [`SolidError::Unported`] skips the edge as `NULL` does, as does a failing
 //!   `GlobalSurfaceIntersect`. `SmBrep::ReplaceCurve` is
@@ -2565,8 +2565,7 @@ fn move_within(distance: f64, allowed: f64) -> bool {
 }
 
 /// The fork's `SmOffsetGeometryCreation::MakeEdgesOnAnalyticsExact`
-/// (tangency-labs/smlib@cd85d34, behind
-/// [`crate::kernel::UpstreamFixes::shell_edges_on_analytics_exact`]; WR-545): each edge
+/// (tangency-labs/smlib@cd85d34; WR-545), run at the end of every shell: each edge
 /// of `b` whose curve is not analytic (an intersection marched and approximated)
 /// between two faces on analytic surfaces takes the exact line or conic the surfaces
 /// meet on through its ends and middle (`exact_piece`), running as the edge did,
@@ -2586,12 +2585,16 @@ fn move_within(distance: f64, allowed: f64) -> bool {
 ///   is within the smallest of its tolerance and those of its edges and every edge it
 ///   bounds ends within that of the new point ([`vertex_move_fits`]); otherwise every
 ///   changed edge at that vertex keeps its marched curve, and the check is made again
-///   over the remaining ones.
+///   over the remaining ones;
+/// * an edge whose exact curve cannot be found or checked keeps its marched curve rather
+///   than fail the shell: a grown copy refused, the intersection failing, the edge's
+///   trimmed curve not built, no line or conic through its three points, or the piece
+///   failing its validity check ([`exact_edge`]).
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] from the intersections; those of the evaluations, of the
-/// curve replacement and of `CreateUVTrimCurves`.
+/// Those of [`exact_edge`]; those of the vertex checks and moves, of the curve
+/// replacement and of `CreateUVTrimCurves`.
 pub fn make_edges_on_analytics_exact(
     k: &mut Kernel,
     b: &mut Brep,
@@ -2600,113 +2603,12 @@ pub fn make_edges_on_analytics_exact(
     let tol = b.tolerance();
     let ssi_tol = tol / 4.0;
     let deg20_rad = 20.0 * PI / 180.0;
-    let use_surface_edges = [false, false];
     let margin = tol + 2.0 * approx_tol3d(k, ssi_tol);
     let mut exact_edges: Vec<ExactEdge> = Vec::new();
     for e in bp1::edges(b, None)? {
-        let Some(curve) = topo_edge::curve(b, e)? else {
-            continue;
-        };
-        if curve.is_analytic() {
-            continue;
+        if let Some(x) = exact_edge(k, b, e, tol, ssi_tol, deg20_rad, margin)? {
+            exact_edges.push(x);
         }
-        let faces = topo_edge::faces(b, e, None)?;
-        let &[f0, f1] = faces.as_slice() else {
-            continue;
-        };
-        if f0 == f1 {
-            continue;
-        }
-        let (Some(s1), Some(s2)) = (b.face(f0)?.surface.as_ref(), b.face(f1)?.surface.as_ref())
-        else {
-            continue;
-        };
-        if !s1.is_analytic()? || !s2.is_analytic()? {
-            continue;
-        }
-        // The faces' own surfaces: the SSI reaches each one's cache through its face
-        // (`SmSurface::GetFace`, a trimmed surface cache), so the evaluation copies
-        // (same owner and cache slot) are intersected through the B-rep's face
-        // services, the handles naming the two faces.
-        let mut s1 = s1.clone_for_evaluation()?;
-        let mut s2 = s2.clone_for_evaluation()?;
-        // A copy that cannot be grown (its domain refused, e.g. rounding past the apex)
-        // leaves the edge marched rather than fail the shell.
-        match grow_along_axis(k, &mut s1, margin).and_then(|()| grow_along_axis(k, &mut s2, margin))
-        {
-            Ok(()) => {}
-            Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                return Err(err)
-            }
-            Err(_) => continue,
-        }
-        let domain1 = s1.natural_uv_domain_with_nurb(k)?;
-        let domain2 = s2.natural_uv_domain_with_nurb(k)?;
-        // The surfaces' own intersection: none found (tangent surfaces) leaves the edge.
-        let exact = match s1.global_surface_intersect_with_context(
-            k,
-            [
-                Some(CacheObject::Surface(f0)),
-                Some(CacheObject::Surface(f1)),
-            ],
-            &mut BrepFaceServices::new(&mut *b),
-            &domain1,
-            &s2,
-            &domain2,
-            use_surface_edges,
-            Some(ssi_tol),
-            Some(deg20_rad),
-        ) {
-            Ok(exact) => exact,
-            Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                return Err(err)
-            }
-            Err(_) => continue,
-        };
-        let trimmed = match topo_edge::create_trimmed_nurbs_curve(k, b, e) {
-            Ok(Some(trimmed)) => trimmed,
-            Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                return Err(err)
-            }
-            Ok(None) | Err(_) => continue,
-        };
-        let Some(mut found) = exact_piece(k, &trimmed, &exact.curves_3d, tol)? else {
-            continue;
-        };
-        // The piece runs as the edge does (exact_piece may give it end to start).
-        let old = trimmed.evaluate(k, trimmed.natural_interval().evaluate(0.5), 1, true, true)?;
-        let (new, found_ivl) = {
-            let probe = Curve::from(found.clone());
-            let ivl = probe.natural_interval();
-            (probe.evaluate(k, ivl.evaluate(0.5), 1, true, true)?, ivl)
-        };
-        let (Some(old_tangent), Some(new_tangent)) = (old.get(1), new.get(1)) else {
-            return Err(defect(OP_ANALYTICS_EXACT, NO_TANGENT, SM_ERR));
-        };
-        if old_tangent.dot(*new_tangent) < 0.0 {
-            found.reverse_parameterization(k, &found_ivl)?;
-        }
-        // A conic whose own parameters SMLib cannot hold consistently (its polar
-        // conversion off by more than its own zero, far from the origin) fails its
-        // validity check: the edge keeps its marched curve rather than take it.
-        if !found.assert_valid(k)? {
-            continue;
-        }
-        let piece = Curve::from(found);
-        // The edge's curve becomes the piece over its natural interval (Replace3DCurve).
-        let ivl = piece.natural_interval();
-        let ends = [
-            piece.evaluate_point(k, ivl.min())?,
-            piece.evaluate_point(k, ivl.max())?,
-        ];
-        let (start, end) = topo_edge::start_end_vertices(b, e)?;
-        exact_edges.push(ExactEdge {
-            edge: e,
-            piece,
-            ends,
-            faces: [f0, f1],
-            vertices: [start, end],
-        });
     }
 
     // Not upstream (#16587): the vertices of the changed edges move onto their exact
@@ -2769,6 +2671,126 @@ pub fn make_edges_on_analytics_exact(
         create_uv_trim_curves(k, b, f, true, None)?;
     }
     Ok(())
+}
+
+/// The exact curve [`make_edges_on_analytics_exact`] gives the edge `e`, or `None` where it
+/// keeps its marched curve: the edge is outside the pass, or its exact curve cannot be
+/// found or checked (a grown copy refused, the intersection or the trimmed curve failing,
+/// no line or conic through its three points, the piece failing its validity check).
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] and [`SolidError::Cancelled`] from the growth, the
+/// intersection and the trimmed curve; those of the topology reads, the surface copies
+/// and domains and the evaluations; a defect where an evaluation gives no tangent.
+/// `exact_piece`'s [`SolidError::NotConverged`] is its turn-count guard, not a failed
+/// match: the STEP parameters it counts come from the conic's own inversion, within a
+/// turn, so only a broken conic reaches it, and that propagates.
+fn exact_edge(
+    k: &mut Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    tol: f64,
+    ssi_tol: f64,
+    deg20_rad: f64,
+    margin: f64,
+) -> Result<Option<ExactEdge>> {
+    let use_surface_edges = [false, false];
+    let Some(curve) = topo_edge::curve(b, e)? else {
+        return Ok(None);
+    };
+    if curve.is_analytic() {
+        return Ok(None);
+    }
+    let faces = topo_edge::faces(b, e, None)?;
+    let &[f0, f1] = faces.as_slice() else {
+        return Ok(None);
+    };
+    if f0 == f1 {
+        return Ok(None);
+    }
+    let (Some(s1), Some(s2)) = (b.face(f0)?.surface.as_ref(), b.face(f1)?.surface.as_ref()) else {
+        return Ok(None);
+    };
+    if !s1.is_analytic()? || !s2.is_analytic()? {
+        return Ok(None);
+    }
+    // The faces' own surfaces: the SSI reaches each one's cache through its face
+    // (`SmSurface::GetFace`, a trimmed surface cache), so the evaluation copies
+    // (same owner and cache slot) are intersected through the B-rep's face
+    // services, the handles naming the two faces.
+    let mut s1 = s1.clone_for_evaluation()?;
+    let mut s2 = s2.clone_for_evaluation()?;
+    // A copy that cannot be grown (its domain refused, e.g. rounding past the apex)
+    // leaves the edge marched rather than fail the shell.
+    match grow_along_axis(k, &mut s1, margin).and_then(|()| grow_along_axis(k, &mut s2, margin)) {
+        Ok(()) => {}
+        Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(err),
+        Err(_) => return Ok(None),
+    }
+    let domain1 = s1.natural_uv_domain_with_nurb(k)?;
+    let domain2 = s2.natural_uv_domain_with_nurb(k)?;
+    // The surfaces' own intersection: none found (tangent surfaces) leaves the edge.
+    let exact = match s1.global_surface_intersect_with_context(
+        k,
+        [
+            Some(CacheObject::Surface(f0)),
+            Some(CacheObject::Surface(f1)),
+        ],
+        &mut BrepFaceServices::new(&mut *b),
+        &domain1,
+        &s2,
+        &domain2,
+        use_surface_edges,
+        Some(ssi_tol),
+        Some(deg20_rad),
+    ) {
+        Ok(exact) => exact,
+        Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(err),
+        Err(_) => return Ok(None),
+    };
+    let trimmed = match topo_edge::create_trimmed_nurbs_curve(k, b, e) {
+        Ok(Some(trimmed)) => trimmed,
+        Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(err),
+        Ok(None) | Err(_) => return Ok(None),
+    };
+    let Some(mut found) = exact_piece(k, &trimmed, &exact.curves_3d, tol)? else {
+        return Ok(None);
+    };
+    // The piece runs as the edge does (exact_piece may give it end to start).
+    let old = trimmed.evaluate(k, trimmed.natural_interval().evaluate(0.5), 1, true, true)?;
+    let (new, found_ivl) = {
+        let probe = Curve::from(found.clone());
+        let ivl = probe.natural_interval();
+        (probe.evaluate(k, ivl.evaluate(0.5), 1, true, true)?, ivl)
+    };
+    let (Some(old_tangent), Some(new_tangent)) = (old.get(1), new.get(1)) else {
+        return Err(defect(OP_ANALYTICS_EXACT, NO_TANGENT, SM_ERR));
+    };
+    if old_tangent.dot(*new_tangent) < 0.0 {
+        found.reverse_parameterization(k, &found_ivl)?;
+    }
+    // A conic whose own parameters SMLib cannot hold consistently (its polar
+    // conversion off by more than its own zero, far from the origin) fails its
+    // validity check: the edge keeps its marched curve rather than take it.
+    if !found.assert_valid(k)? {
+        return Ok(None);
+    }
+    let piece = Curve::from(found);
+    // The edge's curve becomes the piece over its natural interval (Replace3DCurve).
+    let ivl = piece.natural_interval();
+    let ends = [
+        piece.evaluate_point(k, ivl.min())?,
+        piece.evaluate_point(k, ivl.max())?,
+    ];
+    let (start, end) = topo_edge::start_end_vertices(b, e)?;
+    Ok(Some(ExactEdge {
+        edge: e,
+        piece,
+        ends,
+        faces: [f0, f1],
+        vertices: [start, end],
+    }))
 }
 
 /// `pSur->CreateOffsetSurface(ctx, signed_distance, approx_tol_3d, rNewSurface)`: the
