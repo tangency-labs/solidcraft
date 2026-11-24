@@ -5427,7 +5427,7 @@ mod tests {
                     .unwrap_or_else(|| {
                         panic!("edge {} trim on {:?} not structured", e.index(), s.kind())
                     });
-                assert!(g <= 1e-9, "{g:e}");
+                assert!(g <= trim_cap(&s), "{g:e}");
                 match s.kind() {
                     SurfaceKind::Plane(_) => planes += 1,
                     _ => sides += 1,
@@ -5440,6 +5440,24 @@ mod tests {
             sides == 2 && planes >= 1,
             "{planes} cap and {sides} wall trims structured"
         );
+    }
+
+    /// The cap on a structured trim's answer on `s`: `1e-9` off a cone, and on the full-turn
+    /// cylinders of radius 12.5 these tests build `1e-9` plus the seam snap's reach
+    /// (#20643): `Ellipse::step_inversion` snaps a polar point within `τ = 1e-7` of the
+    /// domain's end onto the seam, so the surface is up to `(π/2) √2 τ r / rx` (`L = √2` the
+    /// map's norm for an orthonormal frame; `r = rx = 12.5` here: 2.2e-7) off its net there (measured 9e-8
+    /// at 1e-7 before the end: `a_full_turn_cones_seam_snap_is_inside_the_bound`), and the
+    /// bound counts it; 1% over for the bound's frame factor and margins. Still far below
+    /// the `1e-5` the bisection was asked for.
+    fn trim_cap(s: &Surface) -> f64 {
+        use crate::surface::surface::SurfaceKind;
+        match s.kind() {
+            SurfaceKind::Cone(_) => {
+                1e-9 + std::f64::consts::FRAC_PI_2 * std::f64::consts::SQRT_2 * 1e-7 * 1.01
+            }
+            _ => 1e-9,
+        }
     }
 
     /// That [`trim_image_gap_bound_within`] answers `[1e-5, ∞)` with the structured bound `g`
@@ -5472,7 +5490,7 @@ mod tests {
             answer >= (Ivl::from(g) + Ivl::from(0.0)).hi,
             "{answer:e} against {g:e}"
         );
-        assert!(answer <= 1e-9, "{answer:e}");
+        assert!(answer <= trim_cap(s), "{answer:e}");
         assert_eq!(within, Some(answer), "the structured bound is the answer");
         let bisected = trim_image_gap_bound_within(
             k,
