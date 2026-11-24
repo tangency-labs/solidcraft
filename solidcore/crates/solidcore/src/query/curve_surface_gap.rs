@@ -1358,7 +1358,11 @@ pub(super) fn cone_net_offset(
 /// the curve's evaluation. `None` (no box: the residual is then taken over the whole net)
 /// where a control point is not finite or a weight is not positive.
 fn uv_box(uv: &BSplineCurve) -> Option<[[f64; 2]; 2]> {
-    let n = polynomial_pieces::stored_nurbs(uv)?;
+    nurbs_uv_box(&polynomial_pieces::stored_nurbs(uv)?)
+}
+
+/// [`uv_box`] of a UV curve's homogeneous data `n` (`(x w, y w, z w, w)` per control point).
+fn nurbs_uv_box(n: &NurbsCurve) -> Option<[[f64; 2]; 2]> {
     let mut b = [[f64::INFINITY, f64::NEG_INFINITY]; 2];
     for c in n.pw.chunks_exact(4) {
         let (&x, &y, &w) = (c.first()?, c.get(1)?, c.get(3)?);
@@ -1609,6 +1613,20 @@ fn plane_face_gap_bound(
 /// while it clamps its parameters there (the plane then not affine over the box).
 /// `Err` only for a cancelled kernel (the cone's enclosure polls it per piece).
 fn net_to_surface_bound(k: &Kernel, surface: &Surface, net: &Nurbs) -> Result<Option<f64>> {
+    net_to_surface_bound_within(k, surface, net, None)
+}
+
+/// [`net_to_surface_bound`] over the net's parameters in `window` (`[[u0, u1], [v0, v1]]`,
+/// the whole net where `None`): a cone's residual taken over that box only
+/// ([`cone_residual::cone_net_residual_within`]), every other surface's as over the whole net
+/// (#20643: a trim's image lies over the box of its UV curve, [`nurbs_uv_box`], so the seam's
+/// tear of a full-turn cone counts only for a trim that reaches the seam).
+fn net_to_surface_bound_within(
+    k: &Kernel,
+    surface: &Surface,
+    net: &Nurbs,
+    window: Option<[[f64; 2]; 2]>,
+) -> Result<Option<f64>> {
     use crate::surface::surface::SurfaceKind;
     Ok(match surface.kind() {
         SurfaceKind::BSpline(_)
@@ -1617,7 +1635,7 @@ fn net_to_surface_bound(k: &Kernel, surface: &Surface, net: &Nurbs) -> Result<Op
         | SurfaceKind::Torus(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::SurfOfExtrusion(_) => Some(0.0),
-        SurfaceKind::Cone(c) => return cone_residual::cone_net_residual(k, c, net),
+        SurfaceKind::Cone(c) => return cone_residual::cone_net_residual_within(k, c, net, window),
         SurfaceKind::Plane(plane) => plane_net_to_surface_bound(plane, net),
         _ => None,
     })
@@ -1715,11 +1733,18 @@ fn exact_corner_offset(
 /// net; `None` where it is not enclosed (the bisection then gives no bound): a surface or
 /// net [`net_to_surface_bound`] does not bound, and an offset of a base whose net is off it
 /// (the offset's normals are then the base's, not the net's, which no residual of points
-/// bounds).
-fn bisection_residual(k: &Kernel, surface: &Surface, net: &NetSurface) -> Result<Option<f64>> {
+/// bounds). `window` limits a cone's residual to the net's parameters in that box
+/// ([`net_to_surface_bound_within`]: a trim's UV box, [`nurbs_uv_box`]); the whole net where
+/// `None`.
+fn bisection_residual(
+    k: &Kernel,
+    surface: &Surface,
+    net: &NetSurface,
+    window: Option<[[f64; 2]; 2]>,
+) -> Result<Option<f64>> {
     use crate::surface::surface::SurfaceKind;
     Ok(match (net.offset, surface.kind()) {
-        (None, _) => return net_to_surface_bound(k, surface, &net.net),
+        (None, _) => return net_to_surface_bound_within(k, surface, &net.net, window),
         (Some(_), SurfaceKind::OffsetSurface(off)) => {
             let base_surface = off.base_surface();
             if matches!(base_surface.kind(), SurfaceKind::Cone(_)) {
@@ -1732,7 +1757,7 @@ fn bisection_residual(k: &Kernel, surface: &Surface, net: &NetSurface) -> Result
                 // [`NetSurface::partials`] bounds: it refuses one whose cross product may be
                 // under `1e3 EFF_ZERO`.) Not counted here, as for every offset base: the
                 // rounding of that step's normal and of its product with the distance.
-                return net_to_surface_bound(k, base_surface, &net.net);
+                return net_to_surface_bound_within(k, base_surface, &net.net, window);
             }
             match net_to_surface_bound(k, base_surface, &net.net)? {
                 Some(base) => (base == 0.0).then_some(0.0),
@@ -2416,7 +2441,7 @@ fn bisected_surface_gap_bound(
     // (#20373 review r4: the pieces bound the net's image; the net's own distance to the
     // surface ([`bisection_residual`]) is taken off `enough` and added to the bound, rounded
     // up, so a bound past the net's is not taken for the surface's)
-    let Some(to_surface) = bisection_residual(k, surface, &net)? else {
+    let Some(to_surface) = bisection_residual(k, surface, &net, None)? else {
         return Ok(None);
     };
     let net_enough = if to_surface > 0.0 {
@@ -3604,7 +3629,7 @@ pub(crate) fn structured_trim_image_gap_bound(
         return Ok(None);
     };
     structured_pair_bound(&p.cn, p.c_slack, &p.wn, &p.net, range, || {
-        net_to_surface_bound(k, surface, &p.net.net)
+        net_to_surface_bound_within(k, surface, &p.net.net, nurbs_uv_box(&p.wn))
     })
 }
 
@@ -3654,7 +3679,7 @@ pub fn trim_image_gap_bound_within(
     // surface ([`bisection_residual`]) is added to the curve's slack, so a bound past the
     // net's is not taken for the surface's; a net it does not enclose is not bounded. Taken
     // once, before the structured bound, which adds the same distance: #20643)
-    let Some(to_surface) = bisection_residual(k, surface, &net)? else {
+    let Some(to_surface) = bisection_residual(k, surface, &net, nurbs_uv_box(&wn))? else {
         return Ok(None);
     };
     if enough.is_finite() {
@@ -4028,6 +4053,78 @@ mod tests {
                         residual * 100.0 < whole,
                         "{e:e}: {residual:e} not local against {whole:e}"
                     );
+                }
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, 1);
+    }
+
+    /// A trim's bound counts its cone's distance off the net over the trim's UV box only
+    /// (#20643): on a full-turn cylinder of radius 12.5 the net is torn from the formula by
+    /// up to 1.05e-7 at the seam (`Ellipse::step_inversion`'s snap), which a trim along an
+    /// axial line halfway round never reaches. Its edge is the net's image of that line, so
+    /// the trim's bound is rounding and the residual over its box; with the whole net's
+    /// residual counted it carried the seam's tear (above 1e-8) and the stitch and kept-trim
+    /// covers raised edges far from any seam by it.
+    #[test]
+    fn a_trim_away_from_the_seam_carries_no_seam_tear() {
+        use crate::surface::surface::SurfaceKind;
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 12.5, 3.0)
+            .unwrap();
+        let mut checked = 0;
+        for f in crate::query::api_queries::get_faces(&b).unwrap() {
+            let rec = b.face(f).unwrap();
+            let Some(s) = rec.surface.as_ref() else {
+                continue;
+            };
+            let mut s = s.clone_for_evaluation().unwrap();
+            let _ = s.set_owner(None);
+            let SurfaceKind::Cone(c) = s.kind() else {
+                continue;
+            };
+            let d = &rec.uv_domain;
+            let (u0, u1) = (d.u_interval().min(), d.u_interval().max());
+            let (v0, v1) = (d.v_interval().min(), d.v_interval().max());
+            let net = NetSurface::of(&k, &s, &[]).unwrap().unwrap();
+            let whole = bisection_residual(&k, &s, &net, None).unwrap().unwrap();
+            assert!(whole > 1e-8, "the seam tear {whole:e}");
+            for at in [0.25, 0.5, 0.75] {
+                let u = u0 + (u1 - u0) * at;
+                let n0 = c.rev.base.evaluate_point(Point2::new(u, v0)).unwrap();
+                let n1 = c.rev.base.evaluate_point(Point2::new(u, v1)).unwrap();
+                let line = NurbCurve::new(
+                    vec![
+                        CPoint::new(n0.x, n0.y, n0.z, NOW),
+                        CPoint::new(n1.x, n1.y, n1.z, NOW),
+                    ],
+                    1,
+                    vec![0.0, 0.0, 1.0, 1.0],
+                )
+                .unwrap();
+                let line = Curve::from(BSplineCurve::from_nurb(line, 3, false));
+                let trim = NurbCurve::new(
+                    vec![CPoint::new(u, v0, 0.0, 1.0), CPoint::new(u, v1, 0.0, 1.0)],
+                    1,
+                    vec![0.0, 0.0, 1.0, 1.0],
+                )
+                .unwrap();
+                let trim = Curve::from(BSplineCurve::from_nurb(trim, 2, false));
+                let (wn, _) = exact_curve_data(&trim, true).unwrap().unwrap();
+                let local = bisection_residual(&k, &s, &net, nurbs_uv_box(&wn))
+                    .unwrap()
+                    .unwrap();
+                assert!(local * 100.0 < whole, "{at}: {local:e} against {whole:e}");
+                let g = trim_image_gap_bound(&k, &s, &line, &trim, [0.0, 1.0], 1e-14)
+                    .unwrap()
+                    .unwrap();
+                assert!(g >= local, "{at}: {g:e} under the residual {local:e}");
+                assert!(g < 1e-9, "{at}: {g:e} carries the seam tear {whole:e}");
+                let at_once =
+                    structured_trim_image_gap_bound(&k, &s, &line, &trim, [0.0, 1.0]).unwrap();
+                if let Some(x) = at_once {
+                    assert!(x >= local && x < 1e-9, "{at}: structured {x:e}");
                 }
             }
             checked += 1;
@@ -5751,10 +5848,19 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(bisected >= g, "{bisected:e} against {g:e}");
-        // (#20643 review: both answers carry the net's own distance to the surface, the
-        // cone's seam tear on a full-turn cylinder; `0` off a cone)
+        // (#20643 review: both answers carry the net's own distance to the surface over the
+        // trim's UV box, the cone's seam tear on a full-turn cylinder, which every trim here
+        // reaches; `0` off a cone; at most the whole net's)
         let net = NetSurface::of(k, s, &[]).unwrap().unwrap();
-        let residual = bisection_residual(k, s, &net).unwrap().unwrap();
+        let (wn, _) = exact_curve_data(trim, true).unwrap().unwrap();
+        let window = nurbs_uv_box(&wn);
+        assert!(window.is_some());
+        let residual = bisection_residual(k, s, &net, window).unwrap().unwrap();
+        let whole = bisection_residual(k, s, &net, None).unwrap().unwrap();
+        assert!(
+            residual <= whole,
+            "{residual:e} over the whole net's {whole:e}"
+        );
         if matches!(s.kind(), crate::surface::surface::SurfaceKind::Cone(_)) {
             assert!(residual > 1e-8, "the seam tear {residual:e}");
         }

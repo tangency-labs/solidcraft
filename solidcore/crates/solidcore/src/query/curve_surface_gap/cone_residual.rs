@@ -855,6 +855,7 @@ impl Setup<'_> {
 /// # Errors
 ///
 /// The kernel's cancelled status (polled once per piece of the sweep).
+#[cfg(test)]
 pub(super) fn cone_net_residual(k: &Kernel, cone: &Cone, net: &Nurbs) -> Result<Option<f64>> {
     cone_net_residual_within(k, cone, net, None)
 }
@@ -1081,7 +1082,7 @@ fn enclose(
         let last = cuts
             .iter()
             .position(|c| *c >= w1)
-            .unwrap_or(cuts.len().saturating_sub(1));
+            .unwrap_or_else(|| cuts.len().saturating_sub(1));
         if let Some(kept) = cuts.get(first..=last).filter(|kept| kept.len() >= 2) {
             cuts = kept.to_vec();
         }
@@ -1119,14 +1120,13 @@ fn enclose(
             Piece::Loose => (Some(setup.loose), cap),
             Piece::Split => (None, cap),
         };
-        match b {
-            Some(b) => worst = worst.max(b.min(cap)),
-            None => {
-                pieces += 1;
-                for half in [[s0, m], [m, s1]] {
-                    if meets(half) {
-                        stack.push((half, depth + 1, cut_cap));
-                    }
+        if let Some(b) = b {
+            worst = worst.max(b.min(cap));
+        } else {
+            pieces += 1;
+            for half in [[s0, m], [m, s1]] {
+                if meets(half) {
+                    stack.push((half, depth + 1, cut_cap));
                 }
             }
         }
@@ -1671,7 +1671,7 @@ mod tests {
         assert!((step - 1.5).abs() < 1.0e-12, "the offset steps {step}");
         let net = NetSurface::of_exact(&k, &s, &[]).unwrap().unwrap();
         assert!(net.offset.is_some());
-        let r = bisection_residual(&k, &s, &net).unwrap().unwrap();
+        let r = bisection_residual(&k, &s, &net, None).unwrap().unwrap();
         assert!(tear <= r, "{tear:e} over the residual {r:e}");
     }
 }
