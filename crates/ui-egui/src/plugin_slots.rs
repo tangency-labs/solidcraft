@@ -1,5 +1,6 @@
 //! Manifest placements drawn by the host, opening the Plugins menu entry dialog.
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use crate::{SolveApp, plugins, ui_kit};
@@ -26,9 +27,15 @@ pub(crate) enum Slot {
 #[derive(Default)]
 pub(crate) struct State {
     items: Vec<Item>,
-    scanned: Option<f64>,
+    /// The installed plugins have been read (or are being read) since they last changed. False at
+    /// startup, and again after an install, a removal or the Plugins page opening: the next frame
+    /// then starts one background read. A frame that finds it true reads no plugin file (#21228).
+    settled: bool,
     discovery: Option<Receiver<Inventory>>,
-    inventory: Option<Inventory>,
+    /// The last discovery, shared: every frame reads this and never the plugin folders.
+    inventory: Option<Arc<Inventory>>,
+    /// The pass the Plugins page last drew on, to tell it opening from it staying open.
+    page_pass: Option<u64>,
 }
 
 struct Inventory {
@@ -41,7 +48,7 @@ struct Inventory {
 pub(crate) fn preferences_inventory(app: &mut SolveApp, dir: &Path) -> Vec<plugins::Plugin> {
     if app.plugin_slots.inventory.as_ref().is_none_or(|inventory| inventory.root.as_deref() != Some(dir)) {
         let (plugins, skipped) = plugins::inventory(Some(dir), app.session.plugin_state.packages.values());
-        app.plugin_slots.inventory = Some(Inventory { root: Some(dir.to_path_buf()), plugins, skipped });
+        app.plugin_slots.inventory = Some(Arc::new(Inventory { root: Some(dir.to_path_buf()), plugins, skipped }));
     }
     app.plugin_slots.inventory.as_ref().map(|inventory| inventory.plugins.clone()).unwrap_or_default()
 }
@@ -102,19 +109,41 @@ fn declared(plugin: &plugins::Plugin) -> Vec<Item> {
     }
     items
 }
+/// The installed plugins changed (installed, removed, inspected, approvals taken back): read them
+/// again, in the background. What was read before stays on show until the new reading arrives.
 pub(crate) fn invalidate(app: &mut SolveApp) {
     app.plugin_slots.discovery = None;
     app.plugin_slots.items.clear();
-    app.plugin_slots.scanned = None;
-    app.plugin_slots.inventory = None;
-    // The Plugins menu and the Model tab's Plugins group read the installed plugins again.
+    request(app);
+}
+
+/// Read the installed plugins again, in the background, from the next frame: the Plugins page has
+/// opened, or something outside the window may have changed them.
+pub(crate) fn request(app: &mut SolveApp) {
+    app.plugin_slots.settled = false;
+    // The Plugins menu and the Model tab's Plugins group take the new reading when it arrives.
     app.plugin_menu.loaded = false;
 }
 
+/// The Plugins page is drawing: when it has just opened, read the installed plugins again (a
+/// plugin may have been added to the folder from outside), in the background.
+pub(crate) fn page_shown(app: &mut SolveApp, ctx: &egui::Context) {
+    let pass = ctx.cumulative_pass_nr();
+    let open = app.plugin_slots.page_pass.is_some_and(|last| pass.saturating_sub(last) <= 8);
+    app.plugin_slots.page_pass = Some(pass);
+    if !open {
+        request(app);
+    }
+}
+
 fn discovered(app: &mut SolveApp, inventory: Inventory) {
+    let inventory = Arc::new(inventory);
     #[cfg(not(target_arch = "wasm32"))]
     {
         app.plugin_slots.items = inventory.plugins.iter().flat_map(declared).take(8192).collect();
+        if !app.plugin_menu.loaded {
+            crate::plugin_menu::adopt(app, &inventory.plugins);
+        }
     }
     app.plugin_slots.inventory = Some(inventory);
 }
@@ -122,7 +151,6 @@ pub(crate) fn refresh(app: &mut SolveApp) {
     if cfg!(target_arch = "wasm32") {
         return;
     }
-    let now = crate::now_ms();
     if let Some(rx) = &app.plugin_slots.discovery {
         match rx.try_recv() {
             Ok(inventory) => {
@@ -135,7 +163,7 @@ pub(crate) fn refresh(app: &mut SolveApp) {
             }
         }
     }
-    if app.plugin_slots.scanned.is_some_and(|at| now - at < 1000.0) {
+    if app.plugin_slots.settled {
         return;
     }
     let root = app.session.plugin_state.plugins_dir();
@@ -155,7 +183,7 @@ pub(crate) fn refresh(app: &mut SolveApp) {
     #[cfg(target_arch = "wasm32")]
     let _ = (root, inspected, tx);
     app.plugin_slots.discovery = Some(rx);
-    app.plugin_slots.scanned = Some(now);
+    app.plugin_slots.settled = true;
 }
 pub(crate) fn items(app: &SolveApp, slot: Slot) -> Vec<Item> {
     app.plugin_slots
@@ -170,7 +198,7 @@ pub(crate) fn items(app: &SolveApp, slot: Slot) -> Vec<Item> {
 /// each slot's `plugin_id.entry` and its row label, "Export <label> (.ext)…", where the label is
 /// the slot's own or the plugin's name. From the discovered inventory: no file is read here.
 pub(crate) fn export_slots(app: &SolveApp) -> Vec<(String, String)> {
-    let Some(inventory) = app.plugin_slots.inventory.as_ref() else { return Vec::new() };
+    let Some(inventory) = app.plugin_slots.inventory.as_deref() else { return Vec::new() };
     let mut rows = Vec::new();
     for plugin in inventory.plugins.iter().filter(|p| plugins::enabled(app, &p.id)) {
         for entry in plugin.entries.iter().filter(|e| e.kind == solidcraft_engine::plugin::EntryKind::Exporter) {
@@ -450,5 +478,65 @@ mod tests {
         std::fs::remove_file(dir.join("plugin.wasm")).unwrap();
         begin(&mut h.app, "helper.report");
         assert!(h.app.plugin_menu.dialogs.is_empty(), "a package the shared reader refuses cannot open a slot dialog");
+    }
+
+    /// #21228, #21594: once the installed plugins have been read, drawing frames (the Model tab's
+    /// ribbon, the app bar, the viewport) reads and hashes no plugin file. Only a change (an
+    /// install or removal) or the Plugins page opening reads them again, once, in the background.
+    #[test]
+    fn steady_state_frames_read_no_plugin_files() {
+        let mut h = crate::scenario::Harness::new();
+        let root = h.dir.join("plugins-steady");
+        let package = root.join("big-importer");
+        std::fs::create_dir_all(&package).unwrap();
+        // A component big enough that hashing it every frame would show in the time of a frame.
+        std::fs::write(package.join("plugin.wasm"), vec![7u8; 8 << 20]).unwrap();
+        std::fs::write(package.join("plugin.json"), json!({
+            "id":"big-importer", "name":"Big importer", "version":"1", "capabilities":["commands@0.1"],
+            "runtime":{"module":"plugin.wasm","commands":[],
+                "entries":[{"name":"report","effect":"read","slots":[{"kind":"menu","name":"Help"}]}]}
+        }).to_string()).unwrap();
+        h.app.session.plugin_state.plugins_dir = Some(root.clone());
+        invalidate(&mut h.app);
+        let settle = |h: &mut crate::scenario::Harness| {
+            for _ in 0..2000 {
+                h.frame();
+                if h.app.plugin_slots.settled && !h.app.plugin_slots.discovery_pending() {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            panic!("discovery never finished");
+        };
+        settle(&mut h);
+        let reads = plugins::inventory_reads(&root);
+        assert!(reads >= 1, "startup reads the installed plugins once");
+        assert_eq!(h.app.plugin_menu.listed.len(), 1, "the ribbon and menus list what discovery found");
+        assert_eq!(items(&h.app, Slot::Menu("Help")).len(), 1);
+        h.frames(150);
+        assert_eq!(plugins::inventory_reads(&root), reads, "steady-state frames read no plugin file");
+        assert!(!h.app.plugin_slots.discovery_pending());
+
+        // A change reads them again, once.
+        invalidate(&mut h.app);
+        settle(&mut h);
+        h.frames(150);
+        assert_eq!(plugins::inventory_reads(&root), reads + 1);
+
+        // The Plugins page opening reads them again, once; staying open does not.
+        let ctx = h.ctx.clone();
+        for _ in 0..2000 {
+            page_shown(&mut h.app, &ctx);
+            h.frame();
+            if h.app.plugin_slots.settled && !h.app.plugin_slots.discovery_pending() && plugins::inventory_reads(&root) > reads + 1 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        for _ in 0..150 {
+            page_shown(&mut h.app, &ctx);
+            h.frame();
+        }
+        assert_eq!(plugins::inventory_reads(&root), reads + 2);
     }
 }

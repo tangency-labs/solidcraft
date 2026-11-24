@@ -1975,9 +1975,6 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             ribbon::text(ui, at, app.tr("ui.toolbar_tabs_hidden"), t.font_body, t.text_dim, false);
             crate::scenario::publish_handle("ribbon:tabs_hidden", at);
         }
-        if tab == "MODEL" {
-            crate::plugin_menu::ensure_listed(app);
-        }
         let panels = RibbonPanels::new(app, ui, &tab, &lists, &painter, running.clone());
         let more_tip = solidcraft_ui_text::tr_label("More toolbar panels");
         let accent = crate::workspace::tab_accent(&t, &tab);

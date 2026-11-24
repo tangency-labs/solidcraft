@@ -157,17 +157,55 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
     })
 }
 
+/// What a listed package's approval hash was worked out from: its manifest's bytes and its
+/// component's size and modification time.
+type ListedKey = (Vec<u8>, Option<(u64, std::time::SystemTime)>);
+
+/// A package's manifest and approval hash, as `read_package` gives them, for the listing only
+/// (Preferences, menus, ribbon slots). Hashing a large component stalls the thread that does it
+/// (#21228), so an unchanged manifest and component reuse the hash worked out before. Running a
+/// plugin never takes this path: it reads and hashes the package again (`read_package`).
+fn read_package_listed(dir: &Path, folder: &str) -> Result<(solidcraft_engine::plugin::Manifest, String), String> {
+    static LISTED: std::sync::Mutex<Option<std::collections::HashMap<std::path::PathBuf, (ListedKey, String)>>> = std::sync::Mutex::new(None);
+    let key = || -> Option<(solidcraft_engine::plugin::Manifest, ListedKey)> {
+        let bytes = std::fs::read(dir.join("plugin.json")).ok()?;
+        let manifest = solidcraft_engine::plugin::parse_manifest(&bytes, folder).ok()?;
+        let component = match &manifest.runtime {
+            Some(runtime) => {
+                let meta = std::fs::metadata(dir.join(&runtime.module)).ok()?;
+                Some((meta.len(), meta.modified().ok()?))
+            }
+            None => None,
+        };
+        Some((manifest, (bytes, component)))
+    };
+    let known = key();
+    if let Some((manifest, key)) = &known
+        && let Ok(listed) = LISTED.lock()
+        && let Some((seen, approval)) = listed.as_ref().and_then(|m| m.get(dir))
+        && seen == key
+    {
+        return Ok((manifest.clone(), approval.clone()));
+    }
+    let package = solidcraft_engine::plugin::read_package(&dir.to_string_lossy()).map_err(|e| e.to_string())?;
+    if let Some((_, key)) = known
+        && let Ok(mut listed) = LISTED.lock()
+    {
+        listed.get_or_insert_with(Default::default).insert(dir.to_path_buf(), (key, package.approval.clone()));
+    }
+    Ok((package.manifest, package.approval))
+}
+
 fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
     let path = dir.join("plugin.json");
     let meta = std::fs::symlink_metadata(&path).map_err(|_| "no plugin.json".to_string())?;
     if !meta.is_file() || meta.len() > MAX_MANIFEST_BYTES {
         return Err("plugin.json is missing or larger than 64 KiB".into());
     }
-    let package = solidcraft_engine::plugin::read_package(&dir.to_string_lossy()).map_err(|e| e.to_string())?;
-    let parsed = package.manifest;
+    let (parsed, approval) = read_package_listed(dir, folder)?;
     let mut plugin = check(Manifest { id: parsed.id, name: parsed.name, version: parsed.version, description: parsed.description }, folder)?;
     plugin.path = dir.to_string_lossy().into_owned();
-    plugin.approval = package.approval;
+    plugin.approval = approval;
     let executable = parsed.runtime.is_some();
     if let Some(runtime) = parsed.runtime {
         plugin.entries = runtime.entries;
@@ -205,8 +243,24 @@ fn scan_packages(dir: &Path) -> (Vec<(Plugin, bool)>, Vec<Skipped>) {
     (plugins, skipped)
 }
 
+/// How many times each plugins folder was read for a listing; the tests watch it to prove that
+/// drawing frames reads nothing (#21228, #21594). Keyed by folder, as tests run side by side.
+#[cfg(test)]
+pub(crate) static INVENTORY_READS: std::sync::Mutex<std::collections::BTreeMap<std::path::PathBuf, usize>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// How many listings read `dir` so far (tests).
+#[cfg(test)]
+pub(crate) fn inventory_reads(dir: &Path) -> usize {
+    INVENTORY_READS.lock().unwrap().get(dir).copied().unwrap_or(0)
+}
+
 /// Installed and inspected packages share one reader across Preferences, menus and ribbon slots.
 pub(crate) fn inventory<'a>(dir: Option<&Path>, inspected: impl Iterator<Item = &'a String>) -> (Vec<Plugin>, Vec<Skipped>) {
+    #[cfg(test)]
+    if let Some(dir) = dir {
+        *INVENTORY_READS.lock().unwrap().entry(dir.to_path_buf()).or_default() += 1;
+    }
     let mut packages = std::collections::BTreeMap::new();
     // Explicitly inspected packages win over installed folders with the same id, as in plugin.run.
     let mut found = Vec::new();
@@ -695,6 +749,7 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
             ui.label(solidcraft_ui_text::tr("ui.plugins_desktop"));
             return;
         };
+        crate::plugin_slots::page_shown(app, ui.ctx());
         let plugins = crate::plugin_slots::preferences_inventory(app, dir);
         if plugins.is_empty() {
             // First-time users need the package format and a way to find the guide before
@@ -1736,6 +1791,25 @@ mod tests {
         assert_eq!(plugins[0].entries[0].name, "inspect", "metadata-only inspection does not hide main's executable menu entries");
         let (plugins, _) = inventory(None, [&path].into_iter());
         assert_eq!(plugins[0].path, path, "Preferences still lists metadata-only inspected packages");
+    }
+
+    /// #21228: listing the installed plugins, about once a second, reads and hashes a component
+    /// only when it changed. Same-size bytes written back with the old modification time are not
+    /// read again (the approval stays), and a component of another size is hashed again.
+    #[test]
+    fn listing_plugins_hashes_a_component_only_when_it_changed() {
+        let h = crate::scenario::Harness::new();
+        let installed = h.dir.join("installed");
+        hand_install(&package(&h, "workshop-helper"), &installed, "workshop-helper");
+        let approval = || inventory(Some(&installed), std::iter::empty()).0[0].approval.clone();
+        let first = approval();
+        let component = installed.join("workshop-helper").join("plugin.wasm");
+        let modified = std::fs::metadata(&component).unwrap().modified().unwrap();
+        std::fs::write(&component, b"\0asm\x0d\0\x01\x01").unwrap();
+        std::fs::File::options().write(true).open(&component).unwrap().set_modified(modified).unwrap();
+        assert_eq!(approval(), first, "an unchanged size and time is not read again");
+        std::fs::write(&component, b"\0asm\x0d\0\x01\0\0").unwrap();
+        assert_ne!(approval(), first, "a changed component is hashed again");
     }
 
     #[test]

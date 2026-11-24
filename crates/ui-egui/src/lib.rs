@@ -1872,6 +1872,11 @@ impl SolveApp {
                 plugin_slots::invalidate(self);
                 saved.map(|()| v)
             }
+            // An inspected package is listed beside the installed ones.
+            Ok(v) if id.eq_ignore_ascii_case("plugin.inspect") => {
+                plugin_slots::invalidate(self);
+                Ok(v)
+            }
             r => r,
         };
         if let Ok(v) = &r {
