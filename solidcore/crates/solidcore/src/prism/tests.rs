@@ -3009,6 +3009,247 @@ fn symmetric_offset_intervals_and_probes_are_symmetric_about_sketch_plane() {
     assert_eq!(neg_start_probes, pos_start_probes);
 }
 
+/// Straight members (`member`): closed forms for the middle line, the extrusion range, trims to
+/// planes and butt joints, and the refusals.
+mod member {
+    use std::f64::consts::FRAC_1_SQRT_2;
+
+    use crate::eval::Frame;
+    use crate::geom::vector3d::{Point3, Vec3};
+    use crate::math::Vec2;
+    use crate::prism::member::{axis, butt, extent, to_plane, End, Member, Refusal, Side};
+
+    fn frame(o: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Frame {
+        Frame {
+            origin: o,
+            x_axis: x,
+            y_axis: y,
+        }
+    }
+
+    /// The plane through `o` with unit normal `n`: its x the unit vector square to `n` in the
+    /// plane of `n` and world y, or world x when `n` is along y; y = n × x.
+    fn plane(o: [f64; 3], n: [f64; 3]) -> Frame {
+        let n = Vec3::new(n[0], n[1], n[2]);
+        let up = if n.y.abs() > 0.9 {
+            Vec3::new(1.0, 0.0, 0.0)
+        } else {
+            Vec3::new(0.0, 1.0, 0.0)
+        };
+        let x = (up - n * up.dot(n)).unitize().unwrap();
+        let y = n.cross(x);
+        frame(o, [x.x, x.y, x.z], [y.x, y.y, y.z])
+    }
+
+    fn near(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-9
+    }
+
+    /// A `w` × `w` bar centred on the line from `a` to `b` along +x, its section in y and z.
+    fn bar_along_x(a: f64, b: f64, w: f64) -> Member {
+        let h = w / 2.0;
+        Member::along(
+            frame([a, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+            Point3::new(a, 0.0, 0.0),
+            Point3::new(b, 0.0, 0.0),
+            Vec2::new(-h, -h),
+            Vec2::new(h, h),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_line_without_length_or_a_section_without_area_is_degenerate() {
+        let f = frame([0.0; 3], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+        let p = Point3::new(0.0, 0.0, 0.0);
+        let r = Member::along(f.clone(), p, p, Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0));
+        assert_eq!(r.unwrap_err(), Refusal::Degenerate);
+        let r = Member::along(
+            f,
+            p,
+            Point3::new(1.0, 0.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(-1.0, -1.0),
+        );
+        assert_eq!(r.unwrap_err(), Refusal::Degenerate);
+    }
+
+    /// The plane x + z = 150 cuts a 10 × 10 bar along x: its middle line at 150, its corners at
+    /// 145 and 155, so the section runs past 155 by the slant and 1 more before the cut.
+    #[test]
+    fn a_slanted_end_crosses_the_middle_line_where_the_plane_does() {
+        let m = bar_along_x(0.0, 100.0, 10.0);
+        let ends = [
+            None,
+            Some(plane(
+                [150.0, 0.0, 0.0],
+                [FRAC_1_SQRT_2, 0.0, FRAC_1_SQRT_2],
+            )),
+        ];
+        let a = axis(&m, &ends).unwrap();
+        assert!(
+            near(a.t0, 0.0) && near(a.t1, 150.0) && near(a.length, 150.0),
+            "{a:?}"
+        );
+        let e = extent(&m, &ends).unwrap();
+        assert!(
+            near(e.from, 0.0) && near(e.to, 155.0 + 10.0 + 1.0) && e.cut == [false, true],
+            "{e:?}"
+        );
+        // Square ends: the line's own ends, nothing cut.
+        let e = extent(&m, &[None, None]).unwrap();
+        assert!(
+            near(e.from, 0.0) && near(e.to, 100.0) && e.cut == [false, false],
+            "{e:?}"
+        );
+    }
+
+    /// Ends x + y = 0 and x + y = 30 are parallel: every line through the 45 × 45 section keeps
+    /// 30 between them, though their extents along the line overlap. Ends x + y = 0 and
+    /// x − y = 30 cross inside the section.
+    #[test]
+    fn parallel_slanted_ends_leave_a_short_member_and_crossing_ends_are_refused() {
+        let m = bar_along_x(0.0, 30.0, 45.0);
+        let start = Some(plane([0.0; 3], [-FRAC_1_SQRT_2, -FRAC_1_SQRT_2, 0.0]));
+        let parallel = [
+            start.clone(),
+            Some(plane([30.0, 0.0, 0.0], [FRAC_1_SQRT_2, FRAC_1_SQRT_2, 0.0])),
+        ];
+        let e = extent(&m, &parallel).unwrap();
+        assert!(e.cut == [true, true], "{e:?}");
+        assert!(near(axis(&m, &parallel).unwrap().length, 30.0));
+        let crossing = [
+            start,
+            Some(plane(
+                [30.0, 0.0, 0.0],
+                [FRAC_1_SQRT_2, -FRAC_1_SQRT_2, 0.0],
+            )),
+        ];
+        assert_eq!(extent(&m, &crossing).unwrap_err(), Refusal::EndsCross);
+    }
+
+    #[test]
+    fn end_planes_facing_into_the_member_running_along_it_or_too_far_are_refused() {
+        let m = bar_along_x(0.0, 100.0, 10.0);
+        let into = [None, Some(plane([90.0, 0.0, 0.0], [-1.0, 0.0, 0.0]))];
+        assert_eq!(extent(&m, &into).unwrap_err(), Refusal::WrongWay);
+        let along = [None, Some(plane([0.0, 50.0, 0.0], [0.0, 1.0, 0.0]))];
+        assert_eq!(extent(&m, &along).unwrap_err(), Refusal::WrongWay);
+        assert_eq!(axis(&m, &along).unwrap_err(), Refusal::RunsAlong);
+        let far = [None, Some(plane([2e6, 0.0, 0.0], [1.0, 0.0, 0.0]))];
+        assert_eq!(extent(&m, &far).unwrap_err(), Refusal::TooFar);
+    }
+
+    /// A bar from 0 to 100 trimmed to x = 150 with a gap of 2: its end moves, to the plane
+    /// x = 148 facing on along the line. The start, asked for, moves there instead.
+    #[test]
+    fn a_trim_to_a_plane_moves_the_nearer_end_short_of_it_by_the_gap() {
+        let m = bar_along_x(0.0, 100.0, 10.0);
+        let a = axis(&m, &[None, None]).unwrap();
+        let target = plane([150.0, 0.0, 0.0], [-1.0, 0.0, 0.0]);
+        let (which, cut) = to_plane(&m, &a, End::Nearer, &target, 2.0).unwrap();
+        assert_eq!(which, 1);
+        assert!(
+            near(cut.origin.x, 148.0) && near(cut.normal.dot(Vec3::new(1.0, 0.0, 0.0)), 1.0),
+            "{cut:?}"
+        );
+        let (which, cut) = to_plane(&m, &a, End::Start, &target, 0.0).unwrap();
+        assert_eq!(which, 0);
+        assert!(
+            near(cut.origin.x, 150.0) && near(cut.normal.dot(Vec3::new(-1.0, 0.0, 0.0)), 1.0),
+            "{cut:?}"
+        );
+        // A plane along the bar doesn't trim it.
+        assert!(to_plane(
+            &m,
+            &a,
+            End::Nearer,
+            &plane([0.0, 30.0, 0.0], [0.0, 1.0, 0.0]),
+            0.0
+        )
+        .is_none());
+    }
+
+    /// A 45 × 45 post along +y at x = 0 (its section's x is world −x, y up) and a rail along +x
+    /// from 100: the rail's start butts against the post's side facing it, x = 22.5, which is
+    /// the post's left (−x of its section). Its right faces away; a parallel rail misses.
+    #[test]
+    fn a_butt_joint_cuts_the_nearer_end_on_the_targets_side_facing_it() {
+        let post = Member::along(
+            frame([0.0, -100.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+            Point3::new(0.0, -100.0, 0.0),
+            Point3::new(0.0, 100.0, 0.0),
+            Vec2::new(-22.5, -22.5),
+            Vec2::new(22.5, 22.5),
+        )
+        .unwrap();
+        let post_axis = axis(&post, &[None, None]).unwrap();
+        let rail = bar_along_x(100.0, 300.0, 45.0);
+        let rail_axis = axis(&rail, &[None, None]).unwrap();
+        let (which, cut) = butt(&rail, &rail_axis, End::Nearer, &post, &post_axis, None, 0.0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(which, 0);
+        assert!(
+            near(cut.origin.x, 22.5) && near(cut.normal.dot(Vec3::new(-1.0, 0.0, 0.0)), 1.0),
+            "{cut:?}"
+        );
+        let left = butt(
+            &rail,
+            &rail_axis,
+            End::Nearer,
+            &post,
+            &post_axis,
+            Some(Side::Left),
+            0.0,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(left, (which, cut));
+        let away = butt(
+            &rail,
+            &rail_axis,
+            End::Nearer,
+            &post,
+            &post_axis,
+            Some(Side::Right),
+            0.0,
+        );
+        assert_eq!(away.unwrap_err(), Refusal::FacesAway);
+        let beside = Member::along(
+            frame([100.0, 200.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+            Point3::new(100.0, 200.0, 0.0),
+            Point3::new(300.0, 200.0, 0.0),
+            Vec2::new(-22.5, -22.5),
+            Vec2::new(22.5, 22.5),
+        )
+        .unwrap();
+        let beside_axis = axis(&beside, &[None, None]).unwrap();
+        assert!(butt(
+            &beside,
+            &beside_axis,
+            End::Nearer,
+            &post,
+            &post_axis,
+            None,
+            0.0
+        )
+        .unwrap()
+        .is_none());
+        assert!(butt(
+            &rail,
+            &rail_axis,
+            End::Nearer,
+            &beside,
+            &beside_axis,
+            None,
+            0.0
+        )
+        .unwrap()
+        .is_none());
+    }
+}
+
 #[test]
 /// Curved face boundaries contribute their actual area and projected extent to contact checks.
 fn gusset_face_boundaries_are_measured_on_their_exact_curves() {
