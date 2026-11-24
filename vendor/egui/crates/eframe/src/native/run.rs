@@ -56,7 +56,16 @@ fn create_event_loop(native_options: &mut epi::NativeOptions) -> Result<EventLoo
     }
 
     profiling::scope!("EventLoopBuilder::build");
-    Ok(builder.build()?)
+    let event_loop = builder.build()?;
+
+    // SolidCraft: hand the app the loop's proxy before the loop starts, so the app's own threads
+    // can wake the loop (e.g. to serve a control request that would otherwise wait for the
+    // compositor's next frame; `UserEvent::RunLogicNow`).
+    if let Some(hook) = core::mem::take(&mut native_options.event_loop_ready) {
+        hook(&event_loop.create_proxy());
+    }
+
+    Ok(event_loop)
 }
 
 /// Access a thread-local event loop.
@@ -348,6 +357,7 @@ impl<T: WinitApp> ApplicationHandler<UserEvent> for WinitAppWrapper<T> {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         profiling::function_scope!(match &event {
             UserEvent::RequestRepaint { .. } => "UserEvent::RequestRepaint",
+            UserEvent::RunLogicNow { .. } => "UserEvent::RunLogicNow",
             #[cfg(feature = "accesskit")]
             UserEvent::AccessKitActionRequest(_) => "UserEvent::AccessKitActionRequest",
         });
@@ -387,6 +397,25 @@ impl<T: WinitApp> ApplicationHandler<UserEvent> for WinitAppWrapper<T> {
                     } else {
                         log::trace!("Got outdated UserEvent::RequestRepaint");
                         Ok(EventResult::Wait) // old request - we've already repainted
+                    }
+                }
+                // SolidCraft: run this viewport's logic pass now, without waiting for a
+                // compositor frame callback and without the GPU paint: the pass serves the
+                // control request that sent this event (its answer goes over the socket, not
+                // the screen), and the compositor's next frame presents the result whenever
+                // it comes. This is what keeps the control channel responsive while the
+                // window is off-screen or the screen is off (#743).
+                UserEvent::RunLogicNow { viewport_id } => {
+                    if let Some(window_id) = self.winit_app.window_id_from_viewport_id(viewport_id)
+                    {
+                        log::trace!("UserEvent::RunLogicNow running pass for {window_id:?}");
+                        let event_result = self
+                            .winit_app
+                            .run_ui_and_paint(event_loop, window_id, PassMode::LogicOnly);
+                        self.handle_event_result(event_loop, event_result);
+                        Ok(EventResult::Wait)
+                    } else {
+                        Ok(EventResult::Wait)
                     }
                 }
                 #[cfg(feature = "accesskit")]

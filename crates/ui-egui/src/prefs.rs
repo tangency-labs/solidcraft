@@ -6539,6 +6539,8 @@ mod tests {
             ("history_sketches", json!("under_feature"), PAGE_LAYOUT),
             ("history_play_button", json!(false), PAGE_LAYOUT),
             ("history_folder_kind_icon", json!(true), PAGE_LAYOUT),
+            ("history_last_stops_at_component", json!(true), PAGE_LAYOUT),
+            ("feature_menus_act_on_selection", json!(false), PAGE_LAYOUT),
             ("history_group_joints", json!(true), PAGE_LAYOUT),
             ("history_bar_groups", json!(true), PAGE_LAYOUT),
             ("color_vision", json!("protan"), PAGE_APPEARANCE),
@@ -10018,8 +10020,132 @@ mod tests {
         assert!(crate::scenario::rect_of("prefs:panel_layout:save_popover").is_some());
         h.step(&json!({"click":{"handle":"prefs:panel_layout:replace"}})).unwrap();
         h.frames(2);
-        assert!(crate::scenario::rect_of("prefs:panel_layout:replace_confirm").is_some(), "a full library still requires explicit confirmation");
+        assert!(crate::scenario::handle_at("dialog:Replace").is_some(), "a full library still requires explicit confirmation");
         assert_eq!(crate::panel_runtime::user_preset_names(&h.app).len(), 64);
+    }
+
+    /// A layout window with "Bench setup" saved from collapsed panels, so no built-in matches them.
+    fn layout_page_with_a_saved_layout() -> crate::scenario::Harness {
+        use solidcraft_engine::panels::{LayoutAction, Mutation};
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1100}));
+        h.call("ui.panel_fixture", json!({"preset":"docks","remember":true}));
+        h.frames(2);
+        let section = h.app.panel_runtime().unwrap().layout().layout().sections.first().unwrap().id.clone();
+        h.app
+            .dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::Collapse { section, collapsed: true }] })
+            .unwrap();
+        h.app.run_panel_command("layout.save", &json!({"name":"Bench setup"})).unwrap();
+        h.call("ui.prefs", json!({"open":"Layout","language":"en"}));
+        h.frames(3);
+        h
+    }
+
+    fn open_layout_menu(h: &mut crate::scenario::Harness, name: &str, row: &str) {
+        h.step(&json!({"click":{"handle":format!("prefs:panel_layout:menu:{name}")}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":format!("prefs:panel_layout:{row}")}})).unwrap();
+        h.frames(2);
+    }
+
+    #[test]
+    fn deleting_a_saved_layout_from_its_menu_asks_first_and_keeps_the_panels() {
+        let mut h = layout_page_with_a_saved_layout();
+        let layout = h.app.panel_runtime().unwrap().layout().layout().clone();
+        assert!(crate::scenario::rect_of("prefs:panel_layout:custom").is_none(), "the panels match the saved layout");
+        open_layout_menu(&mut h, "Bench setup", "delete");
+        assert!(crate::scenario::handle_at("dialog:Delete").is_some(), "Delete asks first, in the shared confirmation");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.shell.open, "the first Escape belongs to the confirmation");
+        assert!(crate::scenario::handle_at("dialog:Delete").is_none());
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"], "Cancel keeps the layout");
+        open_layout_menu(&mut h, "Bench setup", "delete");
+        h.step(&json!({"click":{"handle":"dialog:Delete"}})).unwrap();
+        h.frames(3);
+        assert!(crate::panel_runtime::user_preset_names(&h.app).is_empty());
+        assert_eq!(h.app.panel_runtime().unwrap().layout().layout(), &layout, "deleting the applied layout leaves the panels where they are");
+        assert!(crate::scenario::rect_of("prefs:panel_layout:tile:Bench setup").is_none());
+        assert!(crate::scenario::rect_of("prefs:panel_layout:custom").is_some(), "the arrangement now shows as Custom");
+        assert_eq!(h.app.status.clone().map(|(text, ..)| text).as_deref(), Some("Deleted layout Bench setup"));
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(!h.app.prefs_window.shell.open);
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"], "Preferences Cancel brings the deleted layout back");
+    }
+
+    #[test]
+    fn replacing_a_saved_layout_from_its_menu_asks_in_the_shared_confirmation() {
+        use solidcraft_engine::panels::{LayoutAction, Mutation};
+        let mut h = layout_page_with_a_saved_layout();
+        let section = h.app.panel_runtime().unwrap().layout().layout().sections.first().unwrap().id.clone();
+        h.app
+            .dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::Collapse { section, collapsed: false }] })
+            .unwrap();
+        h.frames(2);
+        open_layout_menu(&mut h, "Bench setup", "menu_replace");
+        assert!(crate::scenario::handle_at("dialog:Replace").is_some(), "Replace asks first, in the shared confirmation");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.shell.open);
+        let unmatched = |h: &crate::scenario::Harness| {
+            crate::panel_runtime::layout_preferences_view(&h.app).unwrap().entries.iter().any(|entry| entry.name == "Bench setup" && !entry.matches)
+        };
+        assert!(unmatched(&h), "Cancel keeps the saved arrangement");
+        open_layout_menu(&mut h, "Bench setup", "menu_replace");
+        h.step(&json!({"click":{"handle":"dialog:Replace"}})).unwrap();
+        h.frames(3);
+        assert!(!unmatched(&h), "Replace saves the current panels under the name");
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"]);
+    }
+
+    #[test]
+    fn the_delete_key_asks_before_deleting_a_saved_layout_and_ignores_built_ins() {
+        let mut h = layout_page_with_a_saved_layout();
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:tile:Bench setup"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::handle_at("dialog:Delete").is_some(), "the Delete key asks first");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.shell.open, "the first Escape belongs to the confirmation");
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"]);
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:tile:Bench setup"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(2);
+        // Enter answers with the primary action, Delete, as in the app's other delete confirmations.
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(3);
+        assert!(crate::panel_runtime::user_preset_names(&h.app).is_empty());
+
+        let builtin = crate::panel_runtime::layout_preferences_view(&h.app).unwrap().entries.into_iter().find(|entry| !entry.user).unwrap().name;
+        h.step(&json!({"click":{"handle":format!("prefs:panel_layout:tile:{builtin}")}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::handle_at("dialog:Delete").is_none(), "a built-in layout can't be deleted");
+        assert!(crate::panel_runtime::layout_preferences_view(&h.app).unwrap().entries.iter().any(|entry| entry.name == builtin));
+    }
+
+    #[test]
+    fn delete_with_preferences_open_never_deletes_the_design_selection_behind_it() {
+        let mut h = layout_page_with_a_saved_layout();
+        h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        let body = h.app.session.model.state().bodies.last().unwrap().name.clone();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": body}]})).unwrap();
+        h.frames(2);
+        // Nothing in Preferences has the keyboard focus, as after a click on a layout tile.
+        for key in ["Delete", "Backspace"] {
+            h.step(&json!({"key":key})).unwrap();
+            h.frames(2);
+        }
+        assert!(h.app.prefs_window.shell.open);
+        assert!(h.app.session.model.state().body(&body).is_some(), "the selected body stays");
+        assert!(h.app.menu.confirm.is_none(), "and nothing asks to delete it");
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"]);
     }
 
     #[test]

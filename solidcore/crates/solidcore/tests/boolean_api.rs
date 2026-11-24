@@ -2448,3 +2448,62 @@ fn issue_18639_small_cylinders_union_as_tangent_and_still_report_real_defects() 
         );
     }
 }
+
+/// #21104: a box 40 x 30 x 10 united with a cylinder of radius 5 and length 50 lying along
+/// its top face, axis along x at y = 15, sunk `d` = 1e-5 (exactly the contact tolerance)
+/// into the face, turned so the cylinder's seam lies on the contact line. Within the
+/// contact tolerance the wall touches the face along that line (WR-510,
+/// docs/booleans.md §6, `within_contact_tol` takes a distance at the tolerance as within
+/// it), so the union is the body of the exact tangency: the box's top face split in two by
+/// the line (7 faces) and the cylinder's wall and caps (3), 10 faces; the box's 12 edges,
+/// the two top edges the line ends on split (2 more) and the line, which is also the seam's
+/// middle piece, plus the two circles and the seam's two pieces past the box, 19 edges;
+/// the box's 8 vertices, the line's ends and the seam's two ends on the circles, 12
+/// vertices. Below the tolerance (#20695) this body is clean at Level 2; at the tolerance
+/// test 9 read the crossing check at its strict side and kept the 20 edge tolerance step,
+/// where the box face reads inside the cylinder (`SmEdge` test 9).
+///
+/// The test asks for that body, clean at Level 2, in both operand orders, with no operand
+/// lost: the volume is 12000 + 1250 pi less the overlap, 40 times the circular segment of
+/// height d, within 1e-6 relative (a union that dropped the cylinder would miss by
+/// 1250 pi).
+#[test]
+fn issue_21104_cylinder_sunk_the_contact_tolerance_on_its_seam_unions_as_tangent() {
+    let d = 1e-5;
+    let r = 5.0;
+    for cylinder_first in [false, true] {
+        let case = format!("d {d:e}, cylinder first {cylinder_first}");
+        let mut k = Kernel::default();
+        let block = api::create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 10.0).unwrap();
+        let mut cylinder =
+            api::create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), r, 50.0).unwrap();
+        // The cylinder's axis (local z) goes to x, its seam (local x) to -z: the seam is
+        // the cylinder's lowest line, on the box's top face.
+        let place = Axis2Placement::new(
+            Point3::new(-5.0, 15.0, 15.0 - d),
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        solidcore::topology::brep::p5::transform(&mut k, &mut cylinder, &place, None, false)
+            .unwrap();
+        let (a, b) = if cylinder_first {
+            (cylinder, block)
+        } else {
+            (block, cylinder)
+        };
+        let mut u = boolean_union(&mut k, a, b).unwrap_or_else(|e| panic!("{case}: {e}"));
+        assert_eq!(counts(&u), [10, 19, 12], "{case}");
+        let lines = check_brep(&mut k, &mut u, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "{case}: {lines:?}");
+        let e: f64 = r - d;
+        let segment = r * r * (e / r).acos() - e * (r * r - e * e).sqrt();
+        let want = 12000.0 + 1250.0 * PI - 40.0 * segment;
+        let v = volume_of(&k, &mut u);
+        assert!(
+            (v - want).abs() <= VOLUME_REL_TOL * want,
+            "{case}: {v} against {want}"
+        );
+    }
+}

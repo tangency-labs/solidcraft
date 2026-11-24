@@ -188,9 +188,15 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let cadmpeg = setting::cadmpeg_import(app, ui);
             crate::scenario::publish_target("prefs:cadmpeg_import", cadmpeg.rect);
         });
+        ui_kit::settings_section(ui, "cadmpeg_export", app.tr("prefs.cadmpeg_export"), |ui| {
+            let cadmpeg = setting::cadmpeg_export(app, ui);
+            crate::scenario::publish_target("prefs:cadmpeg_export", cadmpeg.rect);
+        });
         ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {
             let right_click = setting::right_click_confirms(app, ui);
             crate::scenario::publish_target("prefs:right_click_confirms", right_click.rect);
+            let import_options = setting::ask_import_options(app, ui);
+            crate::scenario::publish_target("prefs:ask_import_options", import_options.rect);
             let first_letter = setting::dialog_first_letter_buttons(app, ui).backing_on_hover_text(app.tr("prefs.dialog_first_letter_buttons_help"));
             crate::scenario::publish_target("prefs:dialog_first_letter_buttons", first_letter.rect);
         });
