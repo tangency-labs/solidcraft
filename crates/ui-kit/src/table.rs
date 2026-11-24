@@ -5,6 +5,9 @@ use crate::{Container, Surface};
 use egui::{Response, Ui, vec2};
 use solidcraft_theme::Tokens;
 
+// Match the upstream capacity of persisted column widths, including wide configuration tables.
+const MAX_COLUMNS: usize = 1024;
+
 /// A column's minimum width is a multiple of the measured form label column.
 pub struct Column<'a> {
     label: &'a str,
@@ -65,6 +68,7 @@ impl<'a> Column<'a> {
 pub struct Table<'a> {
     columns: &'a [Column<'a>],
     widths: Vec<f32>,
+    min_width: f32,
     id: String,
     rows: usize,
     empty: String,
@@ -74,39 +78,68 @@ pub struct Table<'a> {
     scroll_x: f32,
     /// How wide the table's visible part is.
     view_width: f32,
+    selection: Option<SelectionPaint>,
+    previous_row: Option<(egui::Rect, bool)>,
+    groups: usize,
+    group_has_rows: bool,
+}
+
+/// One reserved background slot for an entire contiguous selection, below all its cells.
+/// Painting the union once avoids alpha overlap and antialiasing seams at row boundaries.
+struct SelectionPaint {
+    rect: egui::Rect,
+    slot: egui::layers::ShapeIdx,
+    bar_slot: egui::layers::ShapeIdx,
+    painter: egui::Painter,
 }
 
 /// Table grid with caller-supplied header actions through Table::headers.
 /// Custom cells own their actions; all body rows share the same widths and metrics.
 pub fn table_custom<R>(ui: &mut Ui, id: &str, columns: &[Column<'_>], empty: &str, add: impl FnOnce(&mut Ui, &mut Table<'_>) -> R) -> R {
+    let t = Tokens::get();
+    let columns = columns.get(..columns.len().min(MAX_COLUMNS)).unwrap_or_default();
     let mut reveal = None;
-    let output = egui::ScrollArea::horizontal().id_salt(("table", id)).content_margin(egui::Margin::ZERO).auto_shrink([false, true]).show_viewport(
-        ui,
-        |ui, viewport| {
-            // ScrollArea snaps its content rect. Measure here, after that rounding and any
-            // enclosing list margins, and never allocate more than the actual viewport.
-            let ppp = ui.ctx().pixels_per_point().max(0.5);
-            let available = (dimension(ui.available_width()).min(viewport.width()) * ppp).floor() / ppp;
-            let mut table = Table {
-                columns,
-                widths: column_widths(ui, columns, available),
-                id: id.to_owned(),
-                rows: 0,
-                empty: empty.to_owned(),
-                empty_shown: false,
-                reveal: None,
-                scroll_x: viewport.left().max(0.0),
-                view_width: viewport.width(),
-            };
-            ui.spacing_mut().item_spacing.y = 0.0;
-            let result = add(ui, &mut table);
-            if table.rows == 0 && !table.empty_shown {
-                super::text(ui, empty, super::Text::Note(id));
-            }
-            reveal = table.reveal;
-            result
-        },
-    );
+    let output = egui::Frame::NONE
+        .outer_margin(egui::Margin::same(t.space_12 as i8))
+        .corner_radius(t.radius_lg)
+        .fill(t.table_fill())
+        .stroke(t.container_border(t.border))
+        .show(ui, |ui| {
+            egui::ScrollArea::horizontal().id_salt(("table", id)).content_margin(egui::Margin::ZERO).auto_shrink([false, true]).show_viewport(
+                ui,
+                |ui, viewport| {
+                    // ScrollArea snaps its content rect. Measure here, after that rounding and any
+                    // enclosing list margins, and never allocate more than the actual viewport.
+                    let ppp = ui.ctx().pixels_per_point().max(0.5);
+                    let available = (dimension(ui.available_width()).min(viewport.width()) * ppp).floor() / ppp;
+                    let mut table = Table {
+                        columns,
+                        widths: column_widths(ui, columns, available),
+                        min_width: available,
+                        id: id.to_owned(),
+                        rows: 0,
+                        empty: empty.to_owned(),
+                        empty_shown: false,
+                        reveal: None,
+                        scroll_x: viewport.left().max(0.0),
+                        view_width: viewport.width(),
+                        selection: None,
+                        previous_row: None,
+                        groups: 0,
+                        group_has_rows: false,
+                    };
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    let result = add(ui, &mut table);
+                    table.finish_selection();
+                    if table.is_empty() && !table.empty_shown {
+                        super::text(ui, empty, super::Text::Note(id));
+                    }
+                    reveal = table.reveal;
+                    result
+                },
+            )
+        })
+        .inner;
     solidcraft_ui_registry::publish_rect(&format!("dialog:table:{id}:viewport"), output.inner_rect);
     solidcraft_ui_registry::publish_count(&format!("dialog:table:{id}:content_width"), f64::from(output.content_size.x));
     // The nested horizontal ScrollArea consumes vertical scroll targets too. Request the
@@ -133,24 +166,25 @@ fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
             } else if c.flexible || c.icon_only {
                 c.min_content_width.max(t.control_height)
             } else {
-                (header_column(ui, c.label) * dimension(c.width)).max(label_width(ui, c.label)).max(c.min_content_width)
+                (header_column(ui, c.label) * dimension(c.width).min(64.0)).max(label_width(ui, c.label)).max(c.min_content_width)
             }
+            .min(t.form_card_width * 64.0)
         })
         .collect();
     let fixed: f32 = columns.iter().zip(&widths).filter(|(c, _)| !c.shares()).map(|(_, w)| *w).sum();
-    let mut remaining = (available - fixed - t.space_8 * (columns.len().saturating_sub(1) + 2) as f32).max(0.0);
+    let mut remaining = (available - fixed - t.space_8 * (columns.len().saturating_sub(1) + 2) as f32 - t.space_4 * 2.0).max(0.0);
     let mut sharing: Vec<_> = columns.iter().map(|c| c.shares() && dimension(c.width) > 0.0).collect();
     // Freeze columns at their control minimum before sharing the remaining width. The bounded
     // passes also keep a hostile design with many columns from creating an unbounded loop.
     for _ in 0..columns.len().min(64) {
-        let weight: f32 = columns.iter().zip(&sharing).filter(|(_, share)| **share).map(|(c, _)| dimension(c.width)).sum();
+        let weight: f32 = columns.iter().zip(&sharing).filter(|(_, share)| **share).map(|(c, _)| dimension(c.width).min(64.0)).sum();
         if weight <= 0.0 {
             break;
         }
         let available = remaining;
         let mut frozen = false;
         for ((column, width), share) in columns.iter().zip(&mut widths).zip(&mut sharing) {
-            if *share && *width > available * dimension(column.width) / weight {
+            if *share && *width > available * dimension(column.width).min(64.0) / weight {
                 *share = false;
                 remaining = (remaining - *width).max(0.0);
                 frozen = true;
@@ -159,7 +193,7 @@ fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
         if !frozen {
             for ((column, width), share) in columns.iter().zip(&mut widths).zip(&sharing) {
                 if *share {
-                    *width = remaining * dimension(column.width) / weight;
+                    *width = remaining * dimension(column.width).min(64.0) / weight;
                 }
             }
             break;
@@ -226,9 +260,10 @@ impl Table<'_> {
     fn headers_impl(&self, ui: &mut Ui, resize: Option<egui::Id>, mut header: impl FnMut(&mut Ui, usize) -> bool) {
         let t = Tokens::get();
         let width = self.width();
-        let (rect, _) = ui.allocate_exact_size(vec2(width, row_height()), egui::Sense::hover());
-        let ppp = ui.ctx().pixels_per_point().max(0.5);
-        let mut left = (rect.left() * ppp).round() / ppp + t.space_8;
+        let (rect, _) = ui.allocate_exact_size(vec2(width, row_height() + t.space_6), egui::Sense::hover());
+        let radius = egui::CornerRadius { nw: t.radius_lg, ne: t.radius_lg, sw: 0, se: 0 };
+        ui.painter().rect_filled(rect, radius, t.text.gamma_multiply(0.08));
+        let mut left = rect.left() + t.space_12;
         let first_left = left;
         let mut dividers = Vec::new();
         for (index, (column, width)) in self.columns.iter().zip(&self.widths).enumerate() {
@@ -285,7 +320,7 @@ impl Table<'_> {
         };
         if let Some(chosen) = chosen {
             // Bounded, with room for a configuration table's most columns.
-            let count = self.columns.len().min(1024);
+            let count = self.columns.len().min(MAX_COLUMNS);
             ui.ctx().data_mut(|m| {
                 let mut stored: Vec<Option<f32>> = m.get_persisted(key).unwrap_or_default();
                 stored.resize(count, None);
@@ -299,7 +334,74 @@ impl Table<'_> {
     }
 
     fn width(&self) -> f32 {
-        self.widths.iter().sum::<f32>() + Tokens::get().space_8 * (self.widths.len().saturating_sub(1) + 2) as f32
+        let t = Tokens::get();
+        (self.widths.iter().sum::<f32>() + t.space_8 * (self.widths.len().saturating_sub(1) + 2) as f32 + t.space_4 * 2.0).max(self.min_width)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.rows == 0 && !self.group_has_rows
+    }
+
+    /// A section owns no rows: callers omit its rows when closed and supply the actual count.
+    /// Pass a translated label. The stable response supports pointer, Space and Enter.
+    pub fn group(&mut self, ui: &mut Ui, key: &str, label: &str, count: usize, open: &mut bool) -> Response {
+        self.finish_selection();
+        self.previous_row = None;
+        self.group_has_rows |= count > 0;
+        let t = Tokens::get();
+        let (rect, _) = ui.allocate_exact_size(vec2(self.width(), row_height() - t.space_2), egui::Sense::hover());
+        let mut response = ui.interact(rect, ui.scope_id().with((&self.id, "group", key)), egui::Sense::click());
+        if response.clicked() {
+            *open = !*open;
+            response.mark_changed();
+        }
+        ui.painter().rect_filled(rect, 0, t.text.gamma_multiply(0.05));
+        let rule = t.tertiary_border(t.dialog_rule);
+        if self.groups > 0 {
+            ui.painter().hline(rect.x_range(), rect.top(), rule);
+        }
+        ui.painter().hline(rect.x_range(), rect.bottom(), rule);
+        self.groups = self.groups.saturating_add(1);
+
+        let icon = egui::Rect::from_center_size(rect.left_center() + vec2(t.space_12, 0.0), vec2(t.space_12, t.space_12));
+        super::disclosure(ui.painter(), icon.center(), *open, t.form_dim);
+        let mut format = egui::TextFormat::simple(crate::type_face::bold(t.font_small), t.form_dim);
+        format.extra_letter_spacing = t.font_small * t.font_section_tracking * 1.5;
+        let text = label.to_uppercase();
+        let mut job = egui::text::LayoutJob::single_section(text, format);
+        let count = count.to_string();
+        let count_galley = ui.painter().layout_no_wrap(count, egui::FontId::proportional(t.font_panel), t.form_dim);
+        let count_width = count_galley.size().x + t.space_12;
+        let left = icon.right() + t.space_6;
+        job.wrap.max_width = (rect.right() - t.space_8 - count_width - t.space_8 - left).max(0.0);
+        job.wrap.max_rows = 1;
+        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        let label_width = galley.size().x;
+        let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
+        painter.galley(egui::pos2(left, rect.center().y - galley.size().y * 0.5), galley, t.form_dim);
+        let pill = egui::Rect::from_min_size(egui::pos2(left + label_width + t.space_8, rect.center().y - t.space_8), vec2(count_width, t.space_16));
+        painter.rect(pill, t.radius_lg, t.text.gamma_multiply(0.05), rule, egui::StrokeKind::Inside);
+        painter.galley(egui::pos2(pill.left() + t.space_6, pill.center().y - count_galley.size().y * 0.5), count_galley, t.form_dim);
+        if response.has_focus() {
+            painter.rect_stroke(rect.shrink(t.space_2 * 0.5), 0, t.control_border_stroke(t.form_primary), egui::StrokeKind::Inside);
+        }
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::DisclosureTriangle, ui.is_enabled(), *open, label));
+        ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(*open));
+        let id = format!("dialog:table:{}:group:{key}", self.id);
+        solidcraft_ui_registry::publish_rect(&id, rect);
+        solidcraft_ui_registry::publish_handle(&id, rect.center());
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    }
+
+    fn finish_selection(&mut self) {
+        if let Some(selection) = self.selection.take() {
+            let t = Tokens::get();
+            let rect = selection.rect;
+            selection.painter.set(selection.slot, egui::Shape::rect_filled(rect, t.radius_md, t.selected_bg));
+            // The same silhouette clipped to a strip keeps the block's rounded outer edge.
+            let bar = egui::Rect::from_min_max(rect.min, egui::pos2(rect.left() + t.space_3, rect.bottom()));
+            selection.painter.with_clip_rect(bar).set(selection.bar_slot, egui::Shape::rect_filled(rect, t.radius_md, t.form_primary));
+        }
     }
 
     /// A selectable row with independently interactive cells and actions.
@@ -310,7 +412,7 @@ impl Table<'_> {
     /// Keep off-screen rows' space without building their cells. Force active drafts to stay live.
     pub fn row_visible(&mut self, ui: &mut Ui, key: &str, selected: bool, force: bool, add: impl FnOnce(&mut TableRow<'_>)) -> Response {
         let response = self.row_content(ui, key, selected, force, add);
-        self.rows += 1;
+        self.rows = self.rows.saturating_add(1);
         response
     }
 
@@ -318,16 +420,20 @@ impl Table<'_> {
     /// count them as rows, so the table does not say it is empty.
     pub fn skip_rows(&mut self, ui: &mut Ui, count: usize) {
         if count > 0 {
+            self.finish_selection();
+            self.previous_row = None;
             ui.allocate_space(vec2(0.0, super::table_row_height() * count as f32));
-            self.rows += count;
+            self.rows = self.rows.saturating_add(count);
         }
     }
 
     /// The last, slim button line. Clicking asks the owner to insert a regular draft row. It is
     /// drawn as a normal button (solid border, body ink, hover highlight), not a placeholder.
     pub fn add_prompt(&mut self, ui: &mut Ui, label: &str, tooltip: &str) -> Response {
+        self.finish_selection();
+        self.previous_row = None;
         let t = Tokens::get();
-        if self.rows == 0 && !self.empty_shown {
+        if self.is_empty() && !self.empty_shown {
             super::text(ui, &self.empty, super::Text::Note(&self.id));
             self.empty_shown = true;
         }
@@ -348,19 +454,43 @@ impl Table<'_> {
         response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(solidcraft_ui_text::tr_label(tooltip))
     }
 
-    fn row_content(&self, ui: &mut Ui, key: &str, selected: bool, force: bool, add: impl FnOnce(&mut TableRow<'_>)) -> Response {
+    fn row_content(&mut self, ui: &mut Ui, key: &str, selected: bool, force: bool, add: impl FnOnce(&mut TableRow<'_>)) -> Response {
         let t = Tokens::get();
-        let (rect, response) = ui.allocate_exact_size(vec2(self.width(), super::table_row_height()), egui::Sense::click());
+        let (allocation, _) = ui.allocate_exact_size(vec2(self.width(), super::table_row_height()), egui::Sense::hover());
+        let rect = allocation.shrink2(vec2(t.space_4, 0.0));
+        let response = ui.interact(rect, ui.scope_id().with((&self.id, key)), egui::Sense::click());
+        let adjacent = self.previous_row.is_some_and(|(previous, _)| (previous.bottom() - rect.top()).abs() <= egui::emath::GUI_ROUNDING);
+        if !selected || !adjacent {
+            self.finish_selection();
+        }
+        if let Some((previous, was_selected)) = self.previous_row
+            && adjacent
+            && !(selected && was_selected)
+        {
+            ui.painter().hline(rect.x_range(), previous.bottom(), t.tertiary_border(t.dialog_rule.gamma_multiply(0.5)));
+        }
+        self.previous_row = Some((rect, selected));
+        if selected {
+            if let Some(selection) = &mut self.selection {
+                selection.rect = selection.rect.union(rect);
+            } else {
+                self.selection = Some(SelectionPaint {
+                    rect,
+                    slot: ui.painter().add(egui::Shape::Noop),
+                    bar_slot: ui.painter().add(egui::Shape::Noop),
+                    painter: ui.painter().clone(),
+                });
+            }
+        }
         if !force && !ui.is_rect_visible(rect) {
             return response;
         }
-        if selected || (ui.is_enabled() && ui.rect_contains_pointer(rect)) {
-            ui.painter().rect_filled(rect, t.control_radius, if selected { t.selected_bg } else { t.hover });
+        if !selected && ui.is_enabled() && ui.rect_contains_pointer(rect) {
+            ui.painter().rect_filled(rect, t.radius_md, t.hover);
         }
         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, key));
         solidcraft_ui_registry::publish_rect(&format!("dialog:table:{}:{key}", self.id), rect);
-        let ppp = ui.ctx().pixels_per_point().max(0.5);
-        let left = (rect.left() * ppp).round() / ppp + t.space_8;
+        let left = rect.left() + t.space_8;
         ui.push_id((&self.id, key), |ui| {
             add(&mut TableRow {
                 ui,
@@ -374,7 +504,7 @@ impl Table<'_> {
                 id: format!("dialog:table:{}:{key}", self.id),
             });
         });
-        ui.advance_cursor_after_rect(rect);
+        ui.advance_cursor_after_rect(allocation);
         response
     }
 }
@@ -435,8 +565,11 @@ pub fn label_actions(ui: &mut Ui, text: &str, add: impl FnOnce(&mut Ui)) {
 /// Table heading text. Tokens: font_small, form_dim.
 fn header_label(ui: &mut Ui, label: &str) {
     let t = Tokens::get();
-    ui.add(egui::Label::new(egui::RichText::new(solidcraft_ui_text::tr_label(label)).size(t.font_small).strong().color(t.form_dim)).truncate())
-        .backing_on_hover_text(solidcraft_ui_text::tr_label(label));
+    ui.add(
+        egui::Label::new(egui::RichText::new(solidcraft_ui_text::tr_label(label)).font(crate::type_face::semibold(t.font_small)).color(t.form_dim))
+            .truncate(),
+    )
+    .backing_on_hover_text(solidcraft_ui_text::tr_label(label));
 }
 
 /// How a table orders its rows by one column. `Listed` keeps the order the owner gave them.
@@ -516,11 +649,12 @@ pub fn sort_header(ui: &mut Ui, label: &str, sort: &mut Sort) -> Response {
     super::text::paint_text(ui, text_rect, text, font, t.form_dim, false);
     let icon =
         egui::Rect::from_center_size(egui::pos2(text_rect.right() + t.space_4 + t.space_14 * 0.5, rect.center().y), vec2(t.space_14, t.space_14));
-    match *sort {
-        Sort::Ascending => crate::icons::paint_ink_flipped(ui.painter(), icon, "chevron", t.form_primary),
-        Sort::Descending => crate::icons::paint_ink(ui.painter(), icon, "chevron", t.form_primary),
-        Sort::Listed if response.hovered() => crate::icons::paint_ink(ui.painter(), icon, "chevron", t.form_dim.gamma_multiply(0.5)),
-        Sort::Listed => {}
+    if response.hovered() {
+        match *sort {
+            Sort::Ascending => crate::icons::paint_ink_flipped(ui.painter(), icon, "chevron", t.form_primary),
+            Sort::Descending => crate::icons::paint_ink(ui.painter(), icon, "chevron", t.form_primary),
+            Sort::Listed => crate::icons::paint_ink(ui.painter(), icon, "chevron", t.form_dim.gamma_multiply(0.5)),
+        }
     }
     if response.clicked() {
         *sort = sort.next();
@@ -540,7 +674,7 @@ pub fn removable_header(ui: &mut Ui, label: &str) -> bool {
     let rect = ui.max_rect();
     let hovered = ui.rect_contains_pointer(rect);
     if hovered {
-        ui.painter().rect_filled(rect, t.control_radius, t.dialog_footer);
+        ui.painter().rect_filled(rect, t.control_radius, t.hover);
     }
     let button = egui::Rect::from_center_size(egui::pos2(rect.right() - t.space_10, rect.center().y), vec2(t.space_10 * 2.0, t.space_10 * 2.0));
     let text_rect = egui::Rect::from_min_max(rect.min, egui::pos2(if hovered { button.left() } else { rect.right() }, rect.bottom()));

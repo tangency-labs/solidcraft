@@ -1510,6 +1510,44 @@ pub const ELEMENTS: &[Element] = &[
             },
         );
     }),
+    element!("table_groups", |ui, s| {
+        table_custom(ui, "groups", &[Column::new("Name", 1.0).flex(), Column::new("Value", 1.0).flex()], "Empty", |ui, table| {
+            table.headers(ui, |_, _| false);
+            if table.group(ui, "parameters", solidcraft_ui_text::tr("ui.table.gallery.parameters"), 2, &mut s.checked).clicked() {
+                ui.ctx().request_repaint();
+            }
+            if s.checked {
+                for (name, value) in [("Width", "12 mm"), ("Height", "25 mm")] {
+                    table.row(ui, name, false, |row| {
+                        row.cell(|ui| text(ui, name, Text::Cell));
+                        row.cell(|ui| text(ui, value, Text::MonoCell));
+                    });
+                }
+            }
+            let key = ui.scope_id().with("gallery_collapsed_group");
+            let mut open = ui.data_mut(|data| *data.get_temp_mut_or(key, false));
+            table.group(ui, "configurations", solidcraft_ui_text::tr("ui.table.gallery.configurations"), 1, &mut open);
+            ui.data_mut(|data| data.insert_temp(key, open));
+            if open {
+                table.row(ui, "Default", false, |row| {
+                    row.cell(|ui| text(ui, "Default", Text::Cell));
+                    row.cell(|ui| text(ui, "Active", Text::Cell));
+                });
+            }
+            table.add_prompt(ui, "Add parameter", "Add parameter");
+        });
+    }),
+    element!("table_selection", "dialog:table:selection:Width", None, |ui, _| {
+        table_custom(ui, "selection", &[Column::new("Name", 1.0).flex(), Column::new("Value", 1.0).flex()], "Empty", |ui, table| {
+            table.headers(ui, |_, _| false);
+            for (name, value, selected) in [("Width", "12 mm", true), ("Height", "25 mm", true), ("Depth", "10 mm", false)] {
+                table.row(ui, name, selected, |row| {
+                    row.cell(|ui| text(ui, name, Text::Cell));
+                    row.cell(|ui| text(ui, value, Text::MonoCell));
+                });
+            }
+        });
+    }),
     element!("cell_name", |ui, _| {
         text(ui, "Width", Text::NameCell(false));
     }),
@@ -1615,7 +1653,7 @@ pub const ELEMENTS: &[Element] = &[
     element!("table", "dialog:table:gallery:row", None, |ui, s| {
         table_custom(ui, "gallery", &[Column::new("Name", 1.0), Column::new("Expression", 1.5)], "No rows", |ui, table| {
             table.headers(ui, |_, _| false);
-            table.row(ui, "row", true, |row| {
+            table.row(ui, "row", false, |row| {
                 row.cell(|ui| {
                     text(ui, "Width", Text::Cell);
                 });
@@ -2242,6 +2280,8 @@ pub fn check_elements(elements: &[Element], context: fn() -> egui::Context) {
             for pass in 0..3 {
                 let events = if element.name.starts_with("checkbox_hovered") && pass > 0 {
                     vec![egui::Event::PointerMoved(solidcraft_ui_registry::rect_of("gallery:allocation").expect("hover allocation").center())]
+                } else if element.name == "table_selection" && pass > 0 {
+                    vec![egui::Event::PointerMoved(solidcraft_ui_registry::rect_of("dialog:table:selection:Depth").expect("hover row").center())]
                 } else {
                     vec![]
                 };

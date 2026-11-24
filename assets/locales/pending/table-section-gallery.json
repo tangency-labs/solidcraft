@@ -1,0 +1,22 @@
+{
+  "de": {
+    "ui.table.gallery.configurations": "Konfigurationen",
+    "ui.table.gallery.parameters": "Parameter"
+  },
+  "en": {
+    "ui.table.gallery.configurations": "Configurations",
+    "ui.table.gallery.parameters": "Parameters"
+  },
+  "ja": {
+    "ui.table.gallery.configurations": "構成",
+    "ui.table.gallery.parameters": "パラメーター"
+  },
+  "ko": {
+    "ui.table.gallery.configurations": "구성",
+    "ui.table.gallery.parameters": "매개변수"
+  },
+  "zh": {
+    "ui.table.gallery.configurations": "配置",
+    "ui.table.gallery.parameters": "参数"
+  }
+}

@@ -123,7 +123,8 @@ impl GridColumn {
         &self.label
     }
 
-    fn layout(&self, manual: Option<f32>) -> Column<'_> {
+    /// The table column for this grid column, also used by a shared table of grid sections.
+    pub fn layout(&self, manual: Option<f32>) -> Column<'_> {
         let mut column = Column::new(&self.label, self.weight).min_content_width(self.min_content_width).manual_width(manual);
         if self.flex {
             column = column.flex();
@@ -444,6 +445,30 @@ impl<'a> Grid<'a> {
     /// Draw the grid, with `footer` drawing extra rows (a draft row) inside the table after the
     /// last row and before the add-row control.
     pub fn show_with<S: GridSource>(self, ui: &mut Ui, source: &mut S, footer: impl FnOnce(&mut Ui, &mut Table<'_>, &mut S)) -> GridOutput {
+        self.show_impl(ui, source, None, footer)
+    }
+
+    /// Draw this grid's rows inside an existing table, sharing its columns and header. Each
+    /// section retains its own cursor, edit buffer and virtual rows; table row keys are prefixed
+    /// by the grid id so a row repeated in another section has independent widgets.
+    pub fn show_in<S: GridSource>(
+        self,
+        ui: &mut Ui,
+        table: &mut Table<'_>,
+        source: &mut S,
+        footer: impl FnOnce(&mut Ui, &mut Table<'_>, &mut S),
+    ) -> GridOutput {
+        self.show_impl(ui, source, Some(table), footer)
+    }
+
+    fn show_impl<S: GridSource>(
+        self,
+        ui: &mut Ui,
+        source: &mut S,
+        table: Option<&mut Table<'_>>,
+        footer: impl FnOnce(&mut Ui, &mut Table<'_>, &mut S),
+    ) -> GridOutput {
+        let embedded = table.is_some();
         let id = self.id;
         let sid = self.state.unwrap_or_else(|| Grid::state_of(id));
         let ctx = ui.ctx().clone();
@@ -489,7 +514,7 @@ impl<'a> Grid<'a> {
         let mut clicks: Vec<Click> = Vec::new();
         let mut cells: Vec<(usize, usize, egui::Rect)> = Vec::new();
         let resize = self.resize;
-        table_custom(ui, id, &layout, self.empty, |ui, table| {
+        let draw = |ui: &mut Ui, table: &mut Table<'_>| {
             let header = |ui: &mut Ui, index: usize| {
                 if index == extra && adds_column {
                     super::add_column_button(ui, |ui| source.add_column(ui));
@@ -497,9 +522,11 @@ impl<'a> Grid<'a> {
                 }
                 source.header(ui, index)
             };
-            match resize {
-                Some(key) => table.headers_resizable(ui, key, header),
-                None => table.headers(ui, header),
+            if !embedded {
+                match resize {
+                    Some(key) => table.headers_resizable(ui, key, header),
+                    None => table.headers(ui, header),
+                }
             }
             // The focus target that holds the keyboard while no cell is edited. Arrows and Tab stay
             // with it rather than egui's focus order.
@@ -531,7 +558,8 @@ impl<'a> Grid<'a> {
                 let Some(source_row) = shown.source(row) else { continue };
                 let key = source.row_key(source_row).into_owned();
                 let mut reveal = None;
-                table.row_visible(ui, &key, false, true, |table_row| {
+                let table_key = if embedded { format!("{id}:{key}") } else { key.clone() };
+                table.row_visible(ui, &table_key, false, true, |table_row| {
                     for (col, column) in columns.iter().enumerate() {
                         table_row.cell(|ui| {
                             let rect = ui.max_rect();
@@ -562,7 +590,11 @@ impl<'a> Grid<'a> {
                     out.add_row = true;
                 }
             }
-        });
+        };
+        match table {
+            Some(table) => draw(ui, table),
+            None => table_custom(ui, id, &layout, self.empty, draw),
+        }
         pointer(ui, &mut state, source, &shown, &columns, &cells, clicks, &mut out);
         take_focus(&ctx, &mut state, focus);
         state.held = ctx.memory(|m| m.has_focus(focus));

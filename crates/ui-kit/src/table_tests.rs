@@ -442,3 +442,261 @@ fn a_frozen_column_too_wide_for_the_view_scrolls_with_the_rest() {
     draw(false);
     assert!(registry::rect_of("dialog:table:too_wide:row:cell:Name").unwrap().left() < name.left() - 100.0, "the name column scrolled away");
 }
+
+fn painted_frame(ctx: &egui::Context, events: Vec<egui::Event>, mut add: impl FnMut(&mut Ui)) -> egui::FullOutput {
+    registry::clear_handles();
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 800.0))),
+            events,
+            focused: true,
+            ..Default::default()
+        },
+        |ui| {
+            ui.set_width(600.0);
+            crate::scope(ui, &mut add);
+        },
+    );
+    output.textures_delta.clear();
+    output
+}
+
+#[test]
+fn card_and_header_are_translucent_in_both_themes_and_keep_the_token_geometry() {
+    let previous = solidcraft_theme::is_dark();
+    for dark in [false, true] {
+        solidcraft_theme::set_dark(dark);
+        let t = Tokens::get();
+        let ctx = crate::test_support::context();
+        let output = painted_frame(&ctx, vec![], |ui| {
+            table_custom(ui, "card", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+                table.headers(ui, |_, _| false);
+                table.row(ui, "row", false, |_| {});
+                table.add_prompt(ui, "Add parameter", "Add parameter");
+            });
+        });
+        let card = output
+            .shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Rect(r) if r.fill == t.table_fill() => Some(r),
+                _ => None,
+            })
+            .unwrap();
+        assert!(card.fill.a() > 0 && card.fill.a() < 255);
+        assert_eq!(card.corner_radius, egui::CornerRadius::same(t.radius_lg));
+        assert_eq!(card.stroke, t.container_border(t.border));
+        assert_eq!(card.rect.left(), t.space_12);
+        assert_eq!(card.rect.top(), t.space_12);
+        let row = registry::rect_of("dialog:table:card:row").unwrap();
+        let viewport = registry::rect_of("dialog:table:card:viewport").unwrap();
+        assert_eq!(row.left() - viewport.left(), t.space_4);
+        assert_eq!(viewport.right() - row.right(), t.space_4);
+        let header = registry::rect_of("dialog:column:card:Name").unwrap();
+        assert_eq!(header.height(), row_height() + t.space_6);
+        assert_eq!(row.height(), crate::table_row_height());
+        assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == t.text.gamma_multiply(0.08)
+            && r.rect.width() == viewport.width() && r.rect.height() == header.height())));
+    }
+    solidcraft_theme::set_dark(previous);
+}
+
+#[test]
+fn consecutive_selection_is_one_rounded_painted_block_without_internal_rules_or_alpha_overlap() {
+    for ppp in [1.0, 1.25, 2.0] {
+        let ctx = crate::test_support::context();
+        ctx.set_pixels_per_point(ppp);
+        let output = painted_frame(&ctx, vec![], |ui| {
+            table_custom(ui, "selection", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+                table.headers(ui, |_, _| false);
+                for (key, selected) in [("before", false), ("a", true), ("b", true), ("c", true), ("after", false)] {
+                    table.row_visible(ui, key, selected, false, |row| {
+                        row.cell(|ui| crate::text(ui, key, crate::Text::Cell));
+                    });
+                }
+            });
+        });
+        let t = Tokens::get();
+        let rows: Vec<_> = ["a", "b", "c"].map(|key| registry::rect_of(&format!("dialog:table:selection:{key}")).unwrap()).into();
+        for pair in rows.windows(2) {
+            assert_eq!(pair[0].bottom(), pair[1].top(), "no layout gap at {ppp}");
+            assert!(
+                !output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { points, .. }
+                if points[0].y == pair[0].bottom() && points[1].y == pair[0].bottom())),
+                "no internal hairline at {ppp}"
+            );
+        }
+        let union = rows[0].union(rows[2]);
+        let fills: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Rect(r) if r.fill == t.selected_bg => Some(r),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(fills.len(), 1, "one fill means no overlapping alpha or rounded internal seams");
+        assert_eq!(fills[0].rect, union);
+        assert_eq!(fills[0].corner_radius, egui::CornerRadius::same(t.radius_md));
+        let bars: Vec<_> = output.shapes.iter().filter(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == t.form_primary)).collect();
+        assert_eq!(bars.len(), 1);
+        assert_eq!(bars[0].clip_rect, egui::Rect::from_min_max(union.min, egui::pos2(union.left() + t.space_3, union.bottom())));
+        let last = registry::rect_of("dialog:table:selection:after").unwrap();
+        assert!(
+            !output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { points, .. }
+            if points[0].y == last.bottom() && points[1].y == last.bottom())),
+            "no last-row hairline"
+        );
+    }
+}
+
+#[test]
+fn section_bands_toggle_by_pointer_space_and_enter_with_stable_identity() {
+    let ctx = crate::test_support::context();
+    let open = std::cell::Cell::new(false);
+    let id = std::cell::Cell::new(egui::Id::NULL);
+    let mut draw = |ui: &mut Ui| {
+        table_custom(ui, "groups", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+            table.headers(ui, |_, _| false);
+            let mut value = open.get();
+            let response = table.group(ui, "first", "Parameters", 2, &mut value);
+            id.set(response.id);
+            open.set(value);
+            if value {
+                table.row(ui, "row", false, |_| {});
+            }
+        });
+    };
+    painted_frame(&ctx, vec![], &mut draw);
+    let band = registry::rect_of("dialog:table:groups:group:first").unwrap();
+    assert_eq!(band.height(), row_height() - Tokens::get().space_2);
+    // Far from the chevron: the entire band is the target.
+    let at = band.right_center() - vec2(Tokens::get().space_4, 0.0);
+    painted_frame(&ctx, harness::pointer(at, true), &mut draw);
+    painted_frame(&ctx, harness::pointer(at, false), &mut draw);
+    assert!(open.get());
+    let stable_id = id.get();
+    for (key, expected) in [(egui::Key::Space, false), (egui::Key::Enter, true)] {
+        ctx.memory_mut(|memory| memory.request_focus(stable_id));
+        painted_frame(&ctx, harness::key(key), &mut draw);
+        assert_eq!(open.get(), expected);
+        assert_eq!(id.get(), stable_id);
+        painted_frame(
+            &ctx,
+            vec![egui::Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers: Default::default() }],
+            &mut draw,
+        );
+    }
+    assert!(registry::rect_of("dialog:table:groups:row").is_some());
+}
+
+#[test]
+fn empty_groups_do_not_hide_the_empty_state_and_nonempty_collapsed_groups_do() {
+    for count in [0, 2] {
+        let ctx = crate::test_support::context();
+        let output = painted_frame(&ctx, vec![], |ui| {
+            table_custom(ui, "empty_groups", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+                table.headers(ui, |_, _| false);
+                table.group(ui, "group", "Parameters", count, &mut false);
+                table.add_prompt(ui, "Add parameter", "Add parameter");
+            });
+        });
+        let empty = output
+            .shapes
+            .iter()
+            .filter(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.job.text == solidcraft_ui_text::tr_label("Empty")))
+            .count();
+        assert_eq!(empty, usize::from(count == 0));
+        assert!(registry::rect_of("dialog:table:empty_groups:add").is_some());
+    }
+}
+
+#[test]
+fn section_bands_break_selection_blocks_and_keep_header_and_cell_columns_aligned() {
+    let ctx = crate::test_support::context();
+    let output = painted_frame(&ctx, vec![], |ui| {
+        table_custom(ui, "sections", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+            table.headers(ui, |_, _| false);
+            for key in ["first", "second"] {
+                table.group(ui, key, "Parameters", 1, &mut true);
+                table.row(ui, key, true, |row| {
+                    row.cell(|ui| crate::text(ui, "Width", crate::Text::Cell));
+                });
+            }
+            table.add_prompt(ui, "Add parameter", "Add parameter");
+        });
+    });
+    let t = Tokens::get();
+    let fills = output.shapes.iter().filter(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == t.selected_bg)).count();
+    assert_eq!(fills, 2);
+    for key in ["first", "second"] {
+        let band = registry::rect_of(&format!("dialog:table:sections:group:{key}")).unwrap();
+        let row = registry::rect_of(&format!("dialog:table:sections:{key}")).unwrap();
+        let cell = registry::rect_of(&format!("dialog:table:sections:{key}:cell:Name")).unwrap();
+        assert_eq!(band.bottom(), row.top());
+        assert_eq!(band.left() + t.space_4, row.left());
+        assert_eq!(cell.x_range(), registry::rect_of("dialog:column:sections:Name").unwrap().x_range());
+        assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { points, stroke }
+            if points[0].y == band.bottom() && points[1].y == band.bottom() && *stroke == t.tertiary_border(t.dialog_rule))));
+    }
+}
+
+#[test]
+fn virtual_rows_keep_selection_geometry_and_forced_cells_and_reveal_targets() {
+    let ctx = crate::test_support::context();
+    let mut built = Vec::new();
+    let mut rects = Vec::new();
+    let output = painted_frame(&ctx, vec![], |ui| {
+        ui.set_clip_rect(egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(600.0, 100.0)));
+        table_custom(ui, "virtual", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+            table.headers(ui, |_, _| false);
+            for index in 0..8 {
+                let response = table.row_visible(ui, &index.to_string(), true, index == 7, |_| built.push(index));
+                rects.push(response.rect);
+                if index == 7 {
+                    table.reveal_row(response.rect);
+                    assert_eq!(table.reveal, Some(response.rect));
+                }
+            }
+        });
+    });
+    assert!(built.contains(&0) && built.contains(&7));
+    assert!(!built.contains(&6));
+    for pair in rects.windows(2) {
+        assert_eq!(pair[0].bottom(), pair[1].top());
+    }
+    let union = rects[0].union(rects[7]);
+    let fills: Vec<_> = output
+        .shapes
+        .iter()
+        .filter_map(|s| match &s.shape {
+            egui::Shape::Rect(r) if r.fill == Tokens::get().selected_bg => Some((r.rect, s.clip_rect)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fills.len(), 1);
+    assert_eq!(fills[0].0, union);
+    assert_eq!(fills[0].1.bottom(), 100.0, "deferred paint keeps the original clip");
+}
+
+#[test]
+fn hostile_column_counts_weights_and_minimums_are_bounded() {
+    let ctx = crate::test_support::context();
+    painted_frame(&ctx, vec![], |ui| {
+        let columns: Vec<_> = [f32::NAN, f32::INFINITY, -1.0, f32::MAX]
+            .into_iter()
+            .cycle()
+            .take(1500)
+            .map(|width| Column::new("Name", width).flex().min_content_width(width))
+            .collect();
+        table_custom(ui, "bounded", &columns, "Empty", |ui, table| {
+            table.headers(ui, |_, _| false);
+            assert_eq!(table.columns.len(), MAX_COLUMNS);
+            // Upstream grids support more than the old card implementation's 64 columns.
+            assert!(table.columns.len() > 64);
+            assert!(table.widths.iter().all(|width| width.is_finite() && *width >= 0.0 && *width <= Tokens::get().form_card_width * 64.0));
+            table.row(ui, "row", false, |_| {});
+        });
+    });
+    assert!(registry::rect_of("dialog:table:bounded:row").unwrap().is_finite());
+}

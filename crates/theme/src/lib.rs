@@ -1271,6 +1271,12 @@ pub struct Tokens {
 }
 
 impl Tokens {
+    /// Neutral light over glass, shared by table cards in built-in and custom themes.
+    /// Keep this translucent so the window beneath the card remains visible.
+    pub fn table_fill(&self) -> Color32 {
+        Color32::from_white_alpha(if is_dark() { 14 } else { 153 })
+    }
+
     /// An expanded outline follows its fill, including a theme's deliberately square corners.
     pub fn outset_radius(radius: f32, outset: f32) -> f32 {
         if radius > 0.0 { radius + outset } else { 0.0 }
