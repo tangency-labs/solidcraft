@@ -62,7 +62,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "new_edge_vertex_tolerance_covers_gap",
     "offset_analytic_mate_edges",
     "point_class_gap_3d_propagates_no_drop_error",
-    "revolve_analytic_profile_faces",
     "simple_coincidence_crossing_is_point",
     "ssi_tangent_curve_tracer",
     "surface_continuity_checks_last_v_knot",

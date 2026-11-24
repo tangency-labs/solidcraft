@@ -164,7 +164,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes.offset_analytic_mate_edges = true;
-    k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.simple_coincidence_crossing_is_point = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     let mut b = plate(&mut k);
