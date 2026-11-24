@@ -104,7 +104,10 @@
 //! operation; their statuses are unchanged. Not the fork's (tangency-labs/solidcore#2697):
 //! `round_jets` puts its rows in the section's standard form across and returns no
 //! `rdDtDs`; the G2 fill's spokes are measured on the rows the patch takes, not on the round's own
-//! evaluation at the middle of its parameter across. No recursion.
+//! evaluation at the middle of its parameter across. Not the fork's (#16408): a G2 fill's
+//! interior map is taken at the least degree that meets its conditions and leaves no patch
+//! whose control net turns back (`check_brep`'s `SmBSplineSurface` test #5), and is refused
+//! with [`SETBACK_G2_NET_TURNS_BACK`] where no degree up to 9 does. No recursion.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-safe tests
 
@@ -118,17 +121,21 @@ use crate::nurbs::b_spline_curve::KnotType;
 use crate::nurbs::b_spline_surface::{
     BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData, SurfParamType,
 };
+use crate::surface::surface::assert_valid::grid_has_non_monotonic_points_to_rounding;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 mod certify;
 mod convexity;
 mod curved;
+mod face_plane;
 mod graph;
 mod qp;
+mod saddle;
 mod scale;
 mod spring;
 
 pub use curved::{no_more_concave, round_end_curvature};
+pub(crate) use face_plane::{FacePlane, Hom2};
 pub use spring::{spring_curve, SpringCurve, SpringHalf};
 
 pub(crate) use scale::bisect_thousandths;
@@ -139,6 +146,14 @@ const OP: &str = "blend::blend_setback";
 /// `SM_ERR`.
 fn sm_err() -> SolidError {
     SolidError::blend_failed(OP, "the setback corner's construction could not continue")
+}
+
+/// A stage of the setback corner that failed with no reason the kernel names (a defect,
+/// [`crate::error::blend::BlendFailure::StageFailed`]): a fill that is not the one its
+/// construction builds. Its origin is the caller's line.
+#[track_caller]
+fn stage_failed() -> SolidError {
+    SolidError::blend(OP, crate::error::blend::BlendFailure::StageFailed)
 }
 
 // ---- the ease of a round into another section before its setback ----------------------
@@ -330,7 +345,7 @@ pub fn ease_surface(
 }
 
 /// [`ease_surface`] of two fillet surfaces that may be the fork's procedural blends
-/// (`SmProceduralBlend`, opt-in `fillet_round_as_definition`): the fork's `EaseSurface`
+/// (`SmProceduralBlend`): the fork's `EaseSurface`
 /// takes them as `SmBSplineSurface`s, and its copies' `Reparameterize`, `Reverse` and
 /// `EvaluatePoint` are a blend's own (its map follows, its points are its
 /// definition's); the ease itself is made of the nets. Surfaces that are not blends go
@@ -2526,6 +2541,8 @@ fn fill_hole_with(
     }
 
     // the interior map's degree: the least from 2k + 1 at which its conditions can be met
+    // and no patch's control net turns back
+    let mut turned_back = false;
     for d in big_n..=9 {
         let mono = monomials(d);
         let mc = mono.len();
@@ -2834,26 +2851,37 @@ fn fill_hole_with(
             continue;
         }
 
-        // no fold: every patch's normal keeps to one side, and each setback patch's agrees
-        // with its round's side's interior part where they meet
-        for net in &fill_nets {
-            let (_, su, sv) = first(net, 0.5, 0.5)?;
-            let mid = su.cross(sv);
-            for a in 0..=8 {
-                for b in 0..=8 {
-                    let (_, su, sv) = first(net, f64::from(a) / 8.0, f64::from(b) / 8.0)?;
-                    if !(su.cross(sv).dot(mid) > 0.0) {
-                        return Err(Refusal::sm_err("SmBlendSetback: the fill folds"));
-                    }
-                }
+        // no fold, at any convexity mix (owner, 2026-11-13): every patch's normal certified
+        // regular and one-signed against the outward normal of its round (a setback patch:
+        // the round's at its section's middle, the bisector of its faces' outward normals)
+        // or of the corner (an interior part: the faces' outward normals summed), and of one
+        // sign over the whole fill, so that its parts face one way (saddle::certified_side)
+        let mut outward = Vec3::ZERO;
+        for m in 0..n {
+            outward += face_of(m)?.normal;
+        }
+        let outward = outward.unitize()?;
+        let mut facing = 0.0;
+        for (i, net) in fill_nets.iter().enumerate() {
+            let d = if i < n {
+                (face_of(i)?.normal + face_of(i + 1)?.normal).unitize()?
+            } else {
+                outward
+            };
+            let side = saddle::certified_side(net, d)?;
+            if side == 0.0 || (facing != 0.0 && side != facing) {
+                return Err(Refusal::sm_err(
+                    "SmBlendSetback: the fill's normal is not certified regular and to one side of its rounds' (the fill may fold)",
+                ));
             }
+            facing = side;
         }
         for m in 0..n {
-            let (sp, su, sv) = first(el_ref(&fill_nets, m)?, 1.0, 0.25)?;
-            let (qp, qu, qv) = first(el_ref(&fill_nets, n + m)?, 1.0, 0.5)?;
-            if !(su.cross(sv).dot(qu.cross(qv)) > 0.0) || !((sp - qp).length() <= tol) {
+            let (sp, _, _) = first(el_ref(&fill_nets, m)?, 1.0, 0.25)?;
+            let (qp, _, _) = first(el_ref(&fill_nets, n + m)?, 1.0, 0.5)?;
+            if !((sp - qp).length() <= tol) {
                 return Err(Refusal::sm_err(
-                    "SmBlendSetback: the fill folds where a setback patch meets the interior",
+                    "SmBlendSetback: a setback patch does not meet the interior",
                 ));
             }
         }
@@ -2891,6 +2919,14 @@ fn fill_hole_with(
                 uv_domain: None,
             })?);
         }
+        // a patch whose control net turns back is not taken (#16408): `check_brep` refuses
+        // the body it makes (its `SmBSplineSurface` test #5), so the next degree is tried, as
+        // the G1 fill beside a curved face holds its nets to the same test
+        // (`curved::net_monotone`)
+        if !nets_never_turn_back(&patches)? {
+            turned_back = true;
+            continue;
+        }
         return Ok(Fill {
             patches,
             round: cycle_round,
@@ -2899,9 +2935,29 @@ fn fill_hole_with(
             degree: d,
         });
     }
-    Err(Refusal::sm_err(
-        "SmBlendSetback: no interior map up to degree 9 meets the setback patches' conditions",
-    ))
+    Err(Refusal::sm_err(if turned_back {
+        SETBACK_G2_NET_TURNS_BACK
+    } else {
+        "SmBlendSetback: no interior map up to degree 9 meets the setback patches' conditions"
+    }))
+}
+
+/// The refusal of a G2 fill whose every interior map up to degree 9 that meets the setback
+/// patches' conditions leaves a patch whose control net turns back (#16408).
+pub const SETBACK_G2_NET_TURNS_BACK: &str =
+    "SmBlendSetback: every G2 fill up to degree 9 has a patch whose control net turns back";
+
+/// Whether no patch has a control net whose rows or columns turn back: the predicate of
+/// `check_brep`'s `SmBSplineSurface` test #5
+/// ([`grid_has_non_monotonic_points_to_rounding`]), each patch open both ways.
+fn nets_never_turn_back(patches: &[BSplineSurface]) -> Result<bool> {
+    for patch in patches {
+        let net = patch.control_point_net()?;
+        if grid_has_non_monotonic_points_to_rounding(&net.points, net.v_count, false, false)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// `SmBlendSetback::Containment`: the most any patch of `fill` stands past a face out of the
@@ -2947,6 +3003,97 @@ pub fn containment(k: &Kernel, fill: &Fill, faces: &[Face], convex: bool, tol: f
         }
     }
     Ok(worst)
+}
+
+/// Not the fork's (owner, 2026-11-13): [`containment`] at a corner of any convexity mix, each
+/// round's convexity read from the fill (its setback patch's end section's middle on the
+/// material's side of its first face: convex). Where every round has one convexity, it is
+/// [`containment`]'s. Else each face is held by the rounds beside it: past its plane on
+/// their side ([`containment`]'s bound) where they agree; where a convex and a concave round
+/// meet on it the fill has no side of it to keep to, and is certified off its kept part
+/// instead (`saddle::clear_of_kept_face`), 0 where it is and `f64::INFINITY` where not. A
+/// corner of mixed convexity beside a curved face is not taken (`f64::INFINITY`): its kept
+/// parts have no test yet.
+///
+/// # Errors
+/// As [`containment`]'s; a stage failure for a fill that is not the setback split's (`2n`
+/// patches of one span), `SM_ERR` for one whose faces meet in no one point.
+pub fn containment_kept(k: &Kernel, fill: &Fill, faces: &[Face], tol: f64) -> Result<f64> {
+    let n = fill.round.len();
+    if n < 3 || fill.patches.len() != 2 * n || fill.face.len() != n {
+        return Err(stage_failed());
+    }
+    let mut convex = Vec::new();
+    for m in 0..n {
+        let patch = el_ref(&fill.patches, m)?;
+        let face = el_ref(faces, el(&fill.face, m)?)?;
+        let middle = patch.evaluate_point(Point2::new(0.0, 0.5))?;
+        convex.push(face.distance(middle).0 < 0.0);
+    }
+    let first_convex = el(&convex, 0)?;
+    if convex.iter().all(|&c| c == first_convex) {
+        return containment(k, fill, faces, first_convex, tol);
+    }
+    if faces.iter().any(Face::is_curved) {
+        return Ok(f64::INFINITY);
+    }
+    let vertex = graph::faces_common_point(faces).ok_or_else(sm_err)?;
+    let mut nets = Vec::new();
+    for patch in &fill.patches {
+        nets.push(net_of(patch)?);
+    }
+    let mut worst = f64::NEG_INFINITY;
+    for m in 0..n {
+        let face = el_ref(faces, el(&fill.face, m)?)?;
+        let prev = (m + n - 1).checked_rem(n).ok_or_else(sm_err)?;
+        let (before, after) = (el(&convex, prev)?, el(&convex, m)?);
+        if before == after {
+            let side = if after { 1.0 } else { -1.0 };
+            for patch in &fill.patches {
+                let canonical = patch.canonical()?;
+                let mut hull = f64::NEG_INFINITY;
+                for &pt in &canonical.control_points {
+                    hull = smax(hull, side * (pt - face.point).dot(face.normal));
+                }
+                if hull > tol {
+                    hull = plane_bound(k, &canonical, face, side, tol)?;
+                }
+                worst = smax(worst, hull);
+            }
+        } else if saddle::clear_of_kept_face(k, &nets, m, face, vertex, tol)? {
+            worst = smax(worst, 0.0);
+        } else {
+            return Ok(f64::INFINITY);
+        }
+    }
+    Ok(worst)
+}
+
+/// A one-span patch's homogeneous net (a stage failure for more than one span or a weight
+/// not positive).
+fn net_of(patch: &BSplineSurface) -> Result<Net> {
+    let canonical = patch.canonical()?;
+    if canonical.u_knots.len() != 2 || canonical.v_knots.len() != 2 {
+        return Err(stage_failed());
+    }
+    let rational = canonical.weights.len() == canonical.control_points.len();
+    let mut pts = Vec::new();
+    for (i, &pt) in canonical.control_points.iter().enumerate() {
+        let w = if rational {
+            el(&canonical.weights, i)?
+        } else {
+            1.0
+        };
+        if !(w > 0.0) {
+            return Err(stage_failed());
+        }
+        pts.push([pt.x * w, pt.y * w, pt.z * w, w]);
+    }
+    Ok(Net {
+        p: canonical.u_degree,
+        q: canonical.v_degree,
+        pts,
+    })
 }
 
 /// A certified bound of how far a one-span patch (`canonical`, weights positive) stands past

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Model dimensions</title>
+  <path d="M20 25L44 25Q47 25 47 28L47 49Q47 52 44 52L20 52Q17 52 17 49L17 28Q17 25 20 25Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M12 14L52 14M18 9L12 14L18 19M46 9L52 14L46 19M12 23L12 47M52 23L52 47" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

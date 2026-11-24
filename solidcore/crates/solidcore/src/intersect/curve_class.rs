@@ -30,7 +30,7 @@ pub use p1::{
 pub use p2::{refine_cci_to_surfaces, RefineCci, ResetOptions};
 pub use p3::{
     change_edge_point_class_to_near_vertex, curve_is_degenerate, fix_problems_by_squeezing,
-    FoundInterval, NO_INTERVAL,
+    EdgeToleranceRaise, FoundInterval, NO_INTERVAL,
 };
 pub use p4::{squeeze_out_smallest_interval, ClassificationInit, LoopCrossings};
 pub use p7::{

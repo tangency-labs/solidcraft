@@ -130,6 +130,23 @@ fn a_body_drawn_see_through_is_the_picture_of_the_same_appearance_assigned() {
     assert_same(&by_option, &dir.snapshot(&painted, "painted-script.png", &[]), "the same colour assigned by a script");
 }
 
+#[test]
+fn body_and_tool_options_can_still_be_repeated() {
+    let dir = Scratch::new();
+    let script = dir.script("part.json", &[]);
+    let by_script = dir.script(
+        "painted.json",
+        &[
+            json!({"command": "appearance.assign", "params": {"bodies": ["Target"], "color": "#00aa33", "opacity": 1.0}}),
+            json!({"command": "appearance.assign", "params": {"bodies": ["Tool"], "color": "#2255cc", "opacity": 1.0}}),
+        ],
+    );
+    let painted = dir.snapshot(&script, "painted.png", &["--body", "Target:color=#00aa33", "--body", "Tool:color=#2255cc"]);
+    assert_same(&painted, &dir.snapshot(&by_script, "by-script.png", &[]), "both body appearances apply");
+    let tools = dir.snapshot(&script, "tools.png", &["--tool", "Target", "--tool", "Tool"]);
+    assert!(tool_pixels(&tools) > tool_pixels(&dir.snapshot(&script, "one-tool.png", &["--tool", "Tool"])), "both tool bodies are solid");
+}
+
 /// `--tool NAME` is the whole point: the tool solid in the tool colour, every other body
 /// see-through, so the tool shows inside the material it meets. The tool's colour covers more
 /// of the picture than it does without the option, because the target no longer hides it.

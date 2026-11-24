@@ -27,7 +27,8 @@ pub fn motion_axes(doc: &Document, st: &ModelState, occurrence: u64) -> Vec<Moti
     let asm = &doc.assembly;
     let values = joint_values(asm);
     let mut report = Solution::default();
-    let built = build(doc, st, &values, &mut report);
+    let held_contents = doc.rigid_group_joints();
+    let built = build(doc, st, &held_contents, &values, &mut report);
     let tree = &built.tree;
     if tree.fixed.contains_key(&occurrence) || !tree.parent.contains_key(&occurrence) || !report.errors.is_empty() {
         return Vec::new();

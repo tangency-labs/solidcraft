@@ -8,8 +8,6 @@
    "name": "fin_top_edge_round_4",
    "note": "A 40 x 30 x 20 block with a 2 x 30 x 10 fin on it (x 19..21); the fin's top edge at x = 21 rounded r 4.",
    "fixes": [
-    "fillet_refuse_rails_leaving_faces",
-    "fillet_cliff_overflow"
    ],
    "steps": [
     {

@@ -8,6 +8,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var("CARGO_CFG_TARGET_OS")? != "windows" {
         return Ok(());
     }
+    // Design changes run on the window thread, and Windows gives a main thread 1 MiB of stack unless
+    // the binary asks for more: the kernel asks for 8 MiB (`KERNEL_STACK`), and fillet certification
+    // overflows 1 MiB (#15438).
+    if std::env::var("CARGO_CFG_TARGET_ENV")? == "msvc" {
+        println!("cargo:rustc-link-arg-bins=/STACK:8388608");
+    }
     let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").ok_or("missing OUT_DIR")?);
     let copy = out.join("solidcraft.ico");
     std::fs::copy(icon, &copy)?;

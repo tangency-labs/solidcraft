@@ -23,7 +23,7 @@ pub fn panel_host_container(ctx: &egui::Context, floating: bool) -> Container {
 
 /// The same adaptive frame supplies both paint and the content's safe clip.
 pub fn panel_host_frame(ctx: &egui::Context, floating: bool) -> egui::Frame {
-    panel_host_container(ctx, floating).frame(ctx, Tokens::get().panel, crate::frame::Side::Left).inner_margin(0).outer_margin(0)
+    panel_host_container(ctx, floating).frame(ctx, Tokens::get().toolbar, crate::frame::Side::Left).inner_margin(0).outer_margin(0)
 }
 
 pub fn panel_host_surface<R>(
@@ -114,12 +114,19 @@ pub fn panel_host_control_label_opacity(
         t.form_ink
     };
     let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(bounds));
-    let paint_bounds = bounds.shrink2(egui::vec2(t.space_4.min(bounds.width() / 2.0), t.space_4.min(bounds.height() / 2.0)));
+    let inset = if chrome.icon_only { t.space_2 } else { t.space_4 };
+    let paint_bounds = bounds.shrink2(egui::vec2(inset.min(bounds.width() / 2.0), inset.min(bounds.height() / 2.0)));
     if let Some(fill) = fill {
         if chrome.title {
             super::panel::panel_header_hover(&painter, paint_bounds);
         } else {
-            painter.rect_filled(paint_bounds, t.control_radius, fill);
+            let radius = if chrome.icon_only {
+                // The button inset and header margin share the panel corner's center.
+                t.radius_lg.saturating_sub(t.space_4.round() as u8)
+            } else {
+                t.control_radius
+            };
+            painter.rect_filled(paint_bounds, radius, fill);
         }
     }
     if response.has_focus() {
@@ -148,7 +155,7 @@ pub fn panel_host_control_label_opacity(
     let icon = chrome.icon.filter(|icon| !icon.is_empty());
     if let Some(icon) = icon {
         let extent = if chrome.icon_only {
-            (bounds.width().min(bounds.height()) - t.form_icon_inset * 2.0).max(0.0)
+            (bounds.width().min(bounds.height()).min(t.control_height) - t.form_icon_inset * 2.0).max(0.0)
         } else {
             t.form_icon_size.min(bounds.height()).min(text.width())
         };
@@ -243,7 +250,7 @@ pub fn panel_host_disclosure(
     ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(!collapsed));
     let t = Tokens::get();
     let ink = if enabled { t.form_ink } else { t.form_dim };
-    let extent = (bounds.width().min(bounds.height()) - t.form_icon_inset * 2.0).max(0.0);
+    let extent = (bounds.width().min(bounds.height()).min(t.control_height) - t.form_icon_inset * 2.0).max(0.0);
     let icon = egui::Rect::from_center_size(bounds.center(), egui::vec2(extent, extent));
     let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(bounds));
     // Only the two existing glyphs blend. The response, expanded state and
@@ -427,6 +434,47 @@ pub fn panel_host_neighbour_preview(ui: &egui::Ui, bounds: egui::Rect, removed: 
     if removed {
         painter.line_segment([bounds.left_top(), bounds.right_bottom()], stroke);
     }
+}
+
+/// A panel tab uses the same chip and text treatment as a document tab.
+#[allow(clippy::too_many_arguments)]
+pub fn paint_panel_tab(ui: &egui::Ui, bounds: egui::Rect, label: &str, active: bool, lit: bool, incoming: bool, rtl: bool, label_opacity: f32) {
+    let t = Tokens::get();
+    let chip = bounds.shrink2(egui::vec2((t.space_2 / 2.0).min(bounds.width() / 2.0), t.space_4.min(bounds.height() / 2.0)));
+    let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(chip));
+    crate::app_bar::tab_shape(&painter, &t, chip, active || incoming, lit);
+    if incoming {
+        painter.rect_stroke(chip, t.radius_md, t.control_border_stroke(t.form_primary), egui::StrokeKind::Inside);
+    }
+    let ink = t.app_bar_text.gamma_multiply(label_opacity * if active || lit || incoming { 1.0 } else { 0.7 });
+    let font = if active { crate::type_face::semibold(t.font_button) } else { egui::FontId::proportional(t.font_button) };
+    let mut text = chip.shrink2(egui::vec2(t.space_8.min(chip.width() / 2.0), 0.0));
+    if rtl {
+        let width = painter.layout_no_wrap(label.to_owned(), font.clone(), ink).size().x;
+        text.min.x = text.right() - width.min(text.width());
+    }
+    crate::paint_text(ui, text, label, font, ink, false);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn panel_tab(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    bounds: egui::Rect,
+    label: &str,
+    active: bool,
+    enabled: bool,
+    rtl: bool,
+    label_opacity: f32,
+) -> egui::Response {
+    let enabled = enabled && ui.is_enabled();
+    let response = ui.interact(bounds, id, if enabled { egui::Sense::click_and_drag() } else { egui::Sense::hover() });
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
+    if enabled && response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+    paint_panel_tab(ui, bounds, label, active, enabled && (response.hovered() || response.has_focus()), false, rtl, label_opacity);
+    response.backing_on_hover_text(label)
 }
 
 pub fn panel_host_tab_insertion(ui: &egui::Ui, bounds: egui::Rect, opacity: f32) {

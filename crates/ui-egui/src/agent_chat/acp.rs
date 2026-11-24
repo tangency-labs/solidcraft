@@ -254,7 +254,10 @@ measure or inspect_design. Before building anything beyond one primitive, read `
 SKILL.md has the workflow, its reference.md the command shapes and this version's traps), work the numbers out first, and after \
 each stage compare `measure` with them. Prefer one `batch` over many small calls. Saving, opening or exporting files waits for the user's approval in \
 the chat, and each message allows a limited number of changes. Don't use shell or file tools: work through the SolidCraft tools. \
-Keep answers short.";
+On a drawing, make section views and their section lines with `drawing.view.section`, and dimensions with \
+`drawing.dimension.add` or `drawing.dimension.from_model`, never with free sketch lines or text notes: those do not move with their \
+view, cannot be selected as section lines or dimensions, and do not update the model. If a drawing object has no command, say so \
+and explain the limitation instead of drawing an imitation. Keep answers short.";
 
 /// The most of the user's custom instructions (#8220) a session gets, in characters: the
 /// Preferences field takes no more, and a longer text from an edited settings file is cut here.
@@ -761,6 +764,17 @@ mod tests {
         // their server, e.g. `mcp__solidcraft-app__batch`).
         assert!(BRIDGE_NAME.contains("solidcraft"));
         assert!(is_bridge_tool(&format!("mcp__{BRIDGE_NAME}__batch"), Some("other")));
+    }
+
+    /// #20731: the note sends drawing work to the real commands and says to explain a limitation
+    /// rather than imitate a section line or a dimension with free lines or text.
+    #[test]
+    fn the_note_names_the_drawing_commands_and_forbids_imitations() {
+        for name in ["drawing.view.section", "drawing.dimension.add", "drawing.dimension.from_model"] {
+            assert!(SYSTEM_NOTE.contains(name), "{name}");
+        }
+        assert!(SYSTEM_NOTE.contains("never with free sketch lines or text notes"));
+        assert!(SYSTEM_NOTE.contains("explain the limitation instead of drawing an imitation"));
     }
 
     /// Only the whole name of a tool of the chat's own server counts, whatever else a title holds.

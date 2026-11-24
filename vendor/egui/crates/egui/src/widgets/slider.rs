@@ -1,0 +1,668 @@
+use core::ops::RangeInclusive;
+
+use crate::{
+    Color32, IntoAtoms, Label, Rangef, Response, Sense, TextWrapMode, Ui, Widget, WidgetInfo,
+    WidgetText, emath, style::HandleShape,
+};
+
+use super::drag_value::{GetSetValue, get, set};
+use super::slider_core::{self, DragValueSettings, SliderCore, SliderGeometry, SliderSpec};
+use super::value_format::ValueFormat;
+
+// ----------------------------------------------------------------------------
+
+/// Specifies the orientation of a [`Slider`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub enum SliderOrientation {
+    Horizontal,
+    Vertical,
+}
+
+/// Specifies how values in a [`Slider`] are clamped.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub enum SliderClamping {
+    /// Values are not clamped.
+    ///
+    /// This means editing the value with the keyboard,
+    /// or dragging the number next to the slider will always work.
+    ///
+    /// The actual slider part is always clamped though.
+    Never,
+
+    /// Users cannot enter new values that are outside the range.
+    ///
+    /// Existing values remain intact though.
+    Edits,
+
+    /// Always clamp values, even existing ones.
+    #[default]
+    Always,
+}
+
+/// Control a number with a slider.
+///
+/// The slider range defines the values you get when pulling the slider to the far edges.
+/// By default all values are clamped to this range, even when not interacted with.
+/// You can change this behavior by passing `false` to [`Slider::clamping`].
+///
+/// The range can include any numbers, and go from low-to-high or from high-to-low.
+///
+/// The slider consists of three parts: a slider, a value display, and an optional text.
+/// The user can click the value display to edit its value. It can be turned off with `.show_value(false)`.
+///
+/// ```
+/// # egui::__run_test_ui(|ui| {
+/// # let mut my_f32: f32 = 0.0;
+/// ui.add(egui::Slider::new(&mut my_f32, 0.0..=100.0).text("My value"));
+/// # });
+/// ```
+///
+/// The default [`Slider`] size is set by [`crate::style::Spacing::slider_width`].
+#[must_use = "You should put this widget in a ui with `ui.add(widget);`"]
+pub struct Slider<'a> {
+    get_set_value: GetSetValue<'a>,
+    core: SliderCore<'a>,
+    trailing_fill: Option<bool>,
+}
+
+impl<'a> Slider<'a> {
+    // ---- Constructors
+
+    /// Creates a new horizontal slider.
+    ///
+    /// The `value` given will be clamped to the `range`,
+    /// unless you change this behavior with [`Self::clamping`].
+    pub fn new<Num: emath::Numeric>(
+        value: &'a mut Num,
+        range: impl Into<RangeInclusive<Num>>,
+    ) -> Self {
+        let range = range.into();
+        let range_f64 = range.start().to_f64()..=range.end().to_f64();
+        let slf = Self::from_get_set(range_f64, move |v: Option<f64>| {
+            if let Some(v) = v {
+                *value = Num::from_f64(v);
+            }
+            value.to_f64()
+        });
+
+        if Num::INTEGRAL { slf.integer() } else { slf }
+    }
+
+    /// Creates a slider over a value that cannot be borrowed directly.
+    ///
+    /// The closure is called with `None` to read the value and with `Some(new_value)` to write it,
+    /// and returns the value either way.
+    pub fn from_get_set(
+        range: RangeInclusive<f64>,
+        get_set_value: impl 'a + FnMut(Option<f64>) -> f64,
+    ) -> Self {
+        Self {
+            get_set_value: Box::new(get_set_value),
+            core: SliderCore::new(range),
+            trailing_fill: None,
+        }
+    }
+
+    /// Helper: equivalent to `self.precision(0).smallest_positive(1.0)`.
+    /// If you use one of the integer constructors (e.g. `Slider::i32`) this is called for you,
+    /// but if you want to have a slider for picking integer values in an `Slider::f64`, use this.
+    pub fn integer(self) -> Self {
+        self.fixed_decimals(0).smallest_positive(1.0).step_by(1.0)
+    }
+
+    // ---- The rail
+
+    /// Show a text next to the slider (e.g. explaining what the slider controls).
+    #[inline]
+    pub fn text(mut self, text: impl Into<WidgetText>) -> Self {
+        self.core.text = text.into();
+        self
+    }
+
+    /// Set the color of the text shown next to the slider.
+    #[inline]
+    pub fn text_color(mut self, text_color: Color32) -> Self {
+        self.core.text = self.core.text.color(text_color);
+        self
+    }
+
+    /// Vertical or horizontal slider? The default is horizontal.
+    #[inline]
+    pub fn orientation(mut self, orientation: SliderOrientation) -> Self {
+        self.core.orientation = orientation;
+        self
+    }
+
+    /// Make this a vertical slider.
+    #[inline]
+    pub fn vertical(mut self) -> Self {
+        self.core.orientation = SliderOrientation::Vertical;
+        self
+    }
+
+    /// Controls when the values will be clamped to the range.
+    ///
+    /// ### With `.clamping(SliderClamping::Always)` (default)
+    /// ```
+    /// # egui::__run_test_ui(|ui| {
+    /// let mut my_value: f32 = 1337.0;
+    /// ui.add(egui::Slider::new(&mut my_value, 0.0..=1.0));
+    /// assert!(0.0 <= my_value && my_value <= 1.0, "Existing value should be clamped");
+    /// # });
+    /// ```
+    ///
+    /// ### With `.clamping(SliderClamping::Edits)`
+    /// ```
+    /// # egui::__run_test_ui(|ui| {
+    /// let mut my_value: f32 = 1337.0;
+    /// let response = ui.add(
+    ///     egui::Slider::new(&mut my_value, 0.0..=1.0)
+    ///         .clamping(egui::SliderClamping::Edits)
+    /// );
+    /// if response.dragged() {
+    ///     // The user edited the value, so it should now be clamped to the range
+    ///     assert!(0.0 <= my_value && my_value <= 1.0);
+    /// }
+    /// # });
+    /// ```
+    ///
+    /// ### With `.clamping(SliderClamping::Never)`
+    /// ```
+    /// # egui::__run_test_ui(|ui| {
+    /// let mut my_value: f32 = 1337.0;
+    /// let response = ui.add(
+    ///     egui::Slider::new(&mut my_value, 0.0..=1.0)
+    ///         .clamping(egui::SliderClamping::Never)
+    /// );
+    /// // The user could have set the value to anything
+    /// # });
+    /// ```
+    #[inline]
+    pub fn clamping(mut self, clamping: SliderClamping) -> Self {
+        self.core.clamping = clamping;
+        self
+    }
+
+    /// Turn smart aim on/off. Default is ON.
+    /// There is almost no point in turning this off.
+    #[inline]
+    pub fn smart_aim(mut self, smart_aim: bool) -> Self {
+        self.core.smart_aim = smart_aim;
+        self
+    }
+
+    /// Sets the minimal change of the value.
+    ///
+    /// Value `0.0` effectively disables the feature. If the new value is out of range
+    /// and `clamp_to_range` is enabled, you would not have the ability to change the value.
+    ///
+    /// Default: `0.0` (disabled).
+    #[inline]
+    pub fn step_by(mut self, step: f64) -> Self {
+        self.core.step = if step == 0.0 { None } else { Some(step) };
+        self
+    }
+
+    /// Change the shape of the slider handle
+    ///
+    /// This setting can be enabled globally for all sliders with [`crate::Visuals::handle_shape`].
+    /// Changing it here will override the above setting ONLY for this individual slider.
+    #[inline]
+    pub fn handle_shape(mut self, handle_shape: HandleShape) -> Self {
+        self.core.handle_shape = Some(handle_shape);
+        self
+    }
+
+    /// Display trailing color behind the slider's circle. Default is OFF.
+    ///
+    /// This setting can be enabled globally for all sliders with [`crate::Visuals::slider_trailing_fill`].
+    /// Toggling it here will override the above setting ONLY for this individual slider.
+    ///
+    /// The fill color will be taken from `selection.bg_fill` in your [`crate::Visuals`], the same as a [`crate::ProgressBar`].
+    #[inline]
+    pub fn trailing_fill(mut self, trailing_fill: bool) -> Self {
+        self.trailing_fill = Some(trailing_fill);
+        self
+    }
+
+    // ---- How values are spread along the rail
+
+    /// Replace how values are spread along the rail.
+    #[inline]
+    pub fn spec(mut self, spec: SliderSpec) -> Self {
+        self.core.spec = spec;
+        self
+    }
+
+    /// Make this a logarithmic slider.
+    ///
+    /// This is great for when the slider spans a huge range, e.g. from one to a million.
+    /// The default is OFF.
+    #[inline]
+    pub fn logarithmic(mut self, logarithmic: bool) -> Self {
+        self.core.spec.logarithmic = logarithmic;
+        self
+    }
+
+    /// For logarithmic sliders that includes zero:
+    /// what is the smallest positive value you want to be able to select?
+    /// The default is `1` for integer sliders and `1e-6` for real sliders.
+    #[inline]
+    pub fn smallest_positive(mut self, smallest_positive: f64) -> Self {
+        self.core.spec.smallest_positive = smallest_positive;
+        self
+    }
+
+    /// For logarithmic sliders, the largest positive value we are interested in
+    /// before the slider switches to `INFINITY`, if that is the higher end.
+    /// Default: INFINITY.
+    #[inline]
+    pub fn largest_finite(mut self, largest_finite: f64) -> Self {
+        self.core.spec.largest_finite = largest_finite;
+        self
+    }
+
+    // ---- The number beside the rail
+
+    /// Replace every setting for the number beside the rail.
+    #[inline]
+    pub fn drag_value(mut self, drag_value: DragValueSettings<'a>) -> Self {
+        self.core.drag_value = drag_value;
+        self
+    }
+
+    /// Control whether or not the slider shows the current value.
+    /// Default: `true`.
+    #[inline]
+    pub fn show_value(mut self, show_value: bool) -> Self {
+        self.core.drag_value.show = show_value;
+        self
+    }
+
+    /// When dragging the value, how fast does it move?
+    ///
+    /// Unit: values per point (logical pixel).
+    /// See also [`crate::DragValue::speed`].
+    ///
+    /// By default this is the same speed as when dragging the slider,
+    /// but you can change it here to for instance have a much finer control
+    /// by dragging the slider value rather than the slider itself.
+    #[inline]
+    pub fn drag_value_speed(mut self, drag_value_speed: f64) -> Self {
+        self.core.drag_value.speed = Some(drag_value_speed);
+        self
+    }
+
+    // ---- How that number is written and read back
+
+    /// Replace how the number beside the rail is written and read back.
+    #[inline]
+    pub fn format(mut self, format: ValueFormat<'a>) -> Self {
+        self.core.drag_value.format = format;
+        self
+    }
+
+    /// Show a prefix before the number, e.g. "x: ".
+    ///
+    /// Goes in front of any prefix already set, so `.prefix("b").prefix("a")` shows `ab`.
+    #[inline]
+    pub fn prefix(mut self, prefix: impl IntoAtoms<'a>) -> Self {
+        self.core.drag_value.format = self.core.drag_value.format.prefix(prefix);
+        self
+    }
+
+    /// Add a suffix to the number, this can be e.g. a unit ("°" or " m").
+    ///
+    /// Goes after any suffix already set, so `.suffix("a").suffix("b")` shows `ab`.
+    #[inline]
+    pub fn suffix(mut self, suffix: impl IntoAtoms<'a>) -> Self {
+        self.core.drag_value.format = self.core.drag_value.format.suffix(suffix);
+        self
+    }
+
+    // TODO(emilk): we should also have a "min precision".
+    /// Set a minimum number of decimals to display.
+    ///
+    /// Normally you don't need to pick a precision, as the slider will intelligently pick a precision for you.
+    /// Regardless of precision the slider will use "smart aim" to help the user select nice, round values.
+    #[inline]
+    pub fn min_decimals(mut self, min_decimals: usize) -> Self {
+        self.core.drag_value.format = self.core.drag_value.format.min_decimals(min_decimals);
+        self
+    }
+
+    // TODO(emilk): we should also have a "max precision".
+    /// Set a maximum number of decimals to display.
+    ///
+    /// Values will also be rounded to this number of decimals.
+    /// Normally you don't need to pick a precision, as the slider will intelligently pick a precision for you.
+    /// Regardless of precision the slider will use "smart aim" to help the user select nice, round values.
+    #[inline]
+    pub fn max_decimals(mut self, max_decimals: usize) -> Self {
+        self.core.drag_value.format = self.core.drag_value.format.max_decimals(max_decimals);
+        self
+    }
+
+    /// Set the maximum number of decimals to display, or `None` to let the widget pick.
+    ///
+    /// Values will also be rounded to this number of decimals when it is set.
+    #[inline]
+    pub fn max_decimals_opt(mut self, max_decimals: Option<usize>) -> Self {
+        self.core.drag_value.format = self.core.drag_value.format.max_decimals_opt(max_decimals);
+        self
+    }
+
+    /// Set an exact number of decimals to display.
+    ///
+    /// Values will also be rounded to this number of decimals.
+    /// Normally you don't need to pick a precision, as the slider will intelligently pick a precision for you.
+    /// Regardless of precision the slider will use "smart aim" to help the user select nice, round values.
+    #[inline]
+    pub fn fixed_decimals(mut self, num_decimals: usize) -> Self {
+        self.core.drag_value.format = self.core.drag_value.format.fixed_decimals(num_decimals);
+        self
+    }
+
+    /// Set custom formatter defining how numbers are converted into text.
+    ///
+    /// A custom formatter takes a `f64` for the numeric value and a `RangeInclusive<usize>` representing
+    /// the decimal range i.e. minimum and maximum number of decimal places shown.
+    ///
+    /// The default formatter is [`crate::Style::number_formatter`].
+    ///
+    /// See also: [`Slider::custom_parser`]
+    ///
+    /// ```
+    /// # egui::__run_test_ui(|ui| {
+    /// # let mut my_i32: i32 = 0;
+    /// ui.add(egui::Slider::new(&mut my_i32, 0..=((60 * 60 * 24) - 1))
+    ///     .custom_formatter(|n, _| {
+    ///         let n = n as i32;
+    ///         let hours = n / (60 * 60);
+    ///         let mins = (n / 60) % 60;
+    ///         let secs = n % 60;
+    ///         format!("{hours:02}:{mins:02}:{secs:02}")
+    ///     })
+    ///     .custom_parser(|s| {
+    ///         let parts: Vec<&str> = s.split(':').collect();
+    ///         if parts.len() == 3 {
+    ///             parts[0].parse::<i32>().and_then(|h| {
+    ///                 parts[1].parse::<i32>().and_then(|m| {
+    ///                     parts[2].parse::<i32>().map(|s| {
+    ///                         ((h * 60 * 60) + (m * 60) + s) as f64
+    ///                     })
+    ///                 })
+    ///             })
+    ///             .ok()
+    ///         } else {
+    ///             None
+    ///         }
+    ///     }));
+    /// # });
+    /// ```
+    pub fn custom_formatter(
+        mut self,
+        formatter: impl 'a + Fn(f64, RangeInclusive<usize>) -> String,
+    ) -> Self {
+        self.core.drag_value.format = self.core.drag_value.format.custom_formatter(formatter);
+        self
+    }
+
+    /// Set custom parser defining how the text input is parsed into a number.
+    ///
+    /// A custom parser takes an `&str` to parse into a number and returns `Some` if it was successfully parsed
+    /// or `None` otherwise.
+    ///
+    /// See also: [`Slider::custom_formatter`]
+    ///
+    /// ```
+    /// # egui::__run_test_ui(|ui| {
+    /// # let mut my_i32: i32 = 0;
+    /// ui.add(egui::Slider::new(&mut my_i32, 0..=((60 * 60 * 24) - 1))
+    ///     .custom_formatter(|n, _| {
+    ///         let n = n as i32;
+    ///         let hours = n / (60 * 60);
+    ///         let mins = (n / 60) % 60;
+    ///         let secs = n % 60;
+    ///         format!("{hours:02}:{mins:02}:{secs:02}")
+    ///     })
+    ///     .custom_parser(|s| {
+    ///         let parts: Vec<&str> = s.split(':').collect();
+    ///         if parts.len() == 3 {
+    ///             parts[0].parse::<i32>().and_then(|h| {
+    ///                 parts[1].parse::<i32>().and_then(|m| {
+    ///                     parts[2].parse::<i32>().map(|s| {
+    ///                         ((h * 60 * 60) + (m * 60) + s) as f64
+    ///                     })
+    ///                 })
+    ///             })
+    ///             .ok()
+    ///         } else {
+    ///             None
+    ///         }
+    ///     }));
+    /// # });
+    /// ```
+    #[inline]
+    pub fn custom_parser(mut self, parser: impl 'a + Fn(&str) -> Option<f64>) -> Self {
+        self.core.drag_value.format = self.core.drag_value.format.custom_parser(parser);
+        self
+    }
+
+    /// Display and parse the number as a binary integer. See [`ValueFormat::binary`].
+    ///
+    /// ```
+    /// # egui::__run_test_ui(|ui| {
+    /// # let mut my_i32: i32 = 0;
+    /// ui.add(egui::Slider::new(&mut my_i32, -100..=100).binary(64, false));
+    /// # });
+    /// ```
+    #[inline]
+    pub fn binary(mut self, min_width: usize, twos_complement: bool) -> Self {
+        self.core.drag_value.format = self
+            .core
+            .drag_value
+            .format
+            .binary(min_width, twos_complement);
+        self
+    }
+
+    /// Display and parse the number as an octal integer. See [`ValueFormat::octal`].
+    ///
+    /// ```
+    /// # egui::__run_test_ui(|ui| {
+    /// # let mut my_i32: i32 = 0;
+    /// ui.add(egui::Slider::new(&mut my_i32, -100..=100).octal(22, false));
+    /// # });
+    /// ```
+    #[inline]
+    pub fn octal(mut self, min_width: usize, twos_complement: bool) -> Self {
+        self.core.drag_value.format = self
+            .core
+            .drag_value
+            .format
+            .octal(min_width, twos_complement);
+        self
+    }
+
+    /// Display and parse the number as a hexadecimal integer. See [`ValueFormat::hexadecimal`].
+    ///
+    /// ```
+    /// # egui::__run_test_ui(|ui| {
+    /// # let mut my_i32: i32 = 0;
+    /// ui.add(egui::Slider::new(&mut my_i32, -100..=100).hexadecimal(16, false, true));
+    /// # });
+    /// ```
+    #[inline]
+    pub fn hexadecimal(mut self, min_width: usize, twos_complement: bool, upper: bool) -> Self {
+        self.core.drag_value.format =
+            self.core
+                .drag_value
+                .format
+                .hexadecimal(min_width, twos_complement, upper);
+        self
+    }
+
+    /// Update the value on each key press when text-editing the value.
+    ///
+    /// Default: `true`.
+    /// If `false`, the value will only be updated when user presses enter or deselects the value.
+    #[inline]
+    pub fn update_while_editing(mut self, update: bool) -> Self {
+        self.core.drag_value.format = self.core.drag_value.format.update_while_editing(update);
+        self
+    }
+}
+
+impl Slider<'_> {
+    fn get_value(&mut self) -> f64 {
+        self.core.existing(get(&mut self.get_set_value))
+    }
+
+    fn set_value(&mut self, value: f64) {
+        set(&mut self.get_set_value, self.core.rounded(value));
+    }
+
+    /// Just the slider, no text
+    fn slider_ui(&mut self, ui: &Ui, response: &Response) {
+        let geom = self.core.geometry(response.rect, ui);
+
+        if let Some(pointer_position_2d) = response.interact_pointer_pos() {
+            let new_value =
+                slider_core::value_at_pointer(ui, &geom, pointer_position_2d, self.core.smart_aim);
+            self.set_value(new_value);
+        }
+
+        let rail_steps = slider_core::keyboard_steps(ui, response, &geom);
+        if rail_steps != 0.0 {
+            let prev_value = self.get_value();
+            let new_value = self.core.stepped_value(&geom, prev_value, rail_steps);
+            self.set_value(new_value);
+        }
+
+        if let Some(new_value) = slider_core::accesskit_set_value_request(ui, response.id) {
+            self.set_value(new_value);
+        }
+
+        // Paint it:
+        if ui.is_rect_visible(response.rect) {
+            let value = self.get_value();
+
+            let rail_rect = slider_core::paint_rail(ui, &geom);
+            let center = geom.marker_center(geom.position_from_value(value), &rail_rect);
+
+            // Decide if we should add trailing fill.
+            let trailing_fill = self
+                .trailing_fill
+                .unwrap_or_else(|| ui.visuals().slider_trailing_fill);
+
+            if trailing_fill {
+                // The fill runs from the start of the rail to the handle. A range slider hands
+                // the same function two handles instead.
+                let span = match self.core.orientation {
+                    SliderOrientation::Horizontal => Rangef::new(rail_rect.left(), center.x),
+                    SliderOrientation::Vertical => Rangef::new(center.y, rail_rect.bottom()),
+                };
+                slider_core::paint_fill(ui, rail_rect, span, self.core.orientation);
+            }
+
+            slider_core::paint_handle(ui, &geom, center, ui.style().interact(response));
+        }
+    }
+
+    fn value_ui(&mut self, ui: &mut Ui, geom: &SliderGeometry) -> Response {
+        let mut value = self.get_value();
+        let speed = self.core.drag_value_speed_at(ui, geom, value);
+        let bounds = self.core.editable_range();
+        let response = self.core.drag_value_ui(ui, &mut value, bounds, speed);
+
+        if value != self.get_value() {
+            self.set_value(value);
+        }
+        response
+    }
+
+    fn add_contents(&mut self, ui: &mut Ui) -> Response {
+        let old_value = self.get_value();
+
+        if self.core.clamping == SliderClamping::Always {
+            self.set_value(old_value);
+        }
+
+        let mut response = ui.allocate_response(self.core.desired_size(ui), Sense::drag());
+        self.slider_ui(ui, &response);
+
+        let value = self.get_value();
+        if value != old_value {
+            response.mark_changed();
+        }
+        response.widget_info(|| WidgetInfo::slider(ui.is_enabled(), value, self.core.text.text()));
+
+        slider_core::declare_accesskit_slider(
+            ui,
+            response.id,
+            value,
+            &self.core.range,
+            &self.core.editable_range(),
+            self.core.step,
+        );
+
+        let slider_response = response.clone();
+
+        let value_response = if self.core.drag_value.show {
+            let geom = self.core.geometry(response.rect, ui);
+            let value_response = self.value_ui(ui, &geom);
+            if value_response.gained_focus()
+                || value_response.has_focus()
+                || value_response.lost_focus()
+            {
+                // Use the [`DragValue`] id as the id of the whole widget,
+                // so that the focus events work as expected.
+                response = value_response.union(response);
+            } else {
+                // Use the slider id as the id for the whole widget
+                response = response.union(value_response.clone());
+            }
+            Some(value_response)
+        } else {
+            None
+        };
+
+        if !self.core.text.is_empty() {
+            let label_response =
+                ui.add(Label::new(self.core.text.clone()).wrap_mode(TextWrapMode::Extend));
+            // The slider already has an accessibility label via widget info,
+            // but sometimes it's useful for a screen reader to know
+            // that a piece of text is a label for another widget,
+            // e.g. so the text itself can be excluded from navigation.
+            slider_response.labelled_by(label_response.id);
+            if let Some(value_response) = value_response {
+                value_response.labelled_by(label_response.id);
+            }
+        } else if let Some(value_response) = value_response {
+            // The caller names `response` (with `labelled_by` or `on_hover_text`),
+            // and the other half of the slider shares that name.
+            // `response` is the number field while it has focus, and the slider otherwise.
+            if response.id == value_response.id {
+                slider_response.labelled_by(value_response.id);
+            } else {
+                value_response.labelled_by(slider_response.id);
+            }
+        }
+
+        response
+    }
+}
+
+impl Widget for Slider<'_> {
+    fn ui(mut self, ui: &mut Ui) -> Response {
+        let inner_response = match self.core.orientation {
+            SliderOrientation::Horizontal => ui.horizontal(|ui| self.add_contents(ui)),
+            SliderOrientation::Vertical => ui.vertical(|ui| self.add_contents(ui)),
+        };
+
+        inner_response.inner | inner_response.response
+    }
+}

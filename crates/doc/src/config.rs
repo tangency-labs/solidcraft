@@ -3,6 +3,7 @@
 //! those values in the design atomically, which then rebuilds as usual.
 
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{DEFAULT_MATERIAL, DocError, Document, Result};
 
@@ -39,7 +40,7 @@ pub enum Column {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ConfigRow {
     /// Fixed for the row's life, from the design's id counter ([`Document::allocate_id`]): a rename
-    /// keeps it and no other row is ever given it, so what points at a row still finds it (#14750).
+    /// keeps it. Undo can rewind the counter; external links also check [`ConfigTable::row_identity`].
     pub id: u64,
     pub name: String,
     /// One cell per column: expression, suppression, material name or appearance look.
@@ -50,6 +51,10 @@ pub struct ConfigRow {
 pub struct ConfigTable {
     pub columns: Vec<Column>,
     pub rows: Vec<ConfigRow>,
+    /// Creation identities for rows made by this version. Unlike the numeric row id, a new
+    /// identity is not reused after undo. Legacy rows have no entry and keep that absence.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub row_identities: BTreeMap<u64, u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -114,6 +119,11 @@ impl ConfigTable {
             RowKey::Id(id) => r.id == id,
             RowKey::Name(name) => r.name == name,
         })
+    }
+
+    /// A row's persistent creation identity, absent for a legacy row.
+    pub fn row_identity(&self, id: u64) -> Option<u64> {
+        self.row_identities.get(&id).copied()
     }
 
     /// The active row, when the table still has it.
@@ -221,8 +231,11 @@ impl Document {
         if self.configs.rows.len() >= MAX_ROWS {
             return Err(DocError::Invalid("too many rows".into()));
         }
+        let in_use: BTreeSet<_> = self.configs.row_identities.values().copied().collect();
+        let identity = crate::ids::IdSource::from_entropy().next(&in_use)?;
         let id = self.allocate_id()?;
         self.configs.rows.push(ConfigRow { id, name, cells });
+        self.configs.row_identities.insert(id, identity);
         Ok(id)
     }
 
@@ -416,6 +429,28 @@ mod tests {
         assert!(d.allocate_id().unwrap() > large, "a deleted row's id is never given again");
         let gone = d.apply_configuration(large).unwrap_err().to_string();
         assert!(gone.contains(&format!("configuration `{large}`")), "{gone}");
+    }
+
+    #[test]
+    fn configuration_row_identities_survive_reopen_and_distinguish_reused_numeric_ids() {
+        let mut before = Document::new("Family");
+        before.set_param("L", "25 mm", None, None).unwrap();
+        before.configs.columns.push(Column::Param("L".into()));
+        let mut first = before.clone();
+        let id = first.add_configuration_row("First".into(), vec!["30 mm".into()]).unwrap();
+        let identity = first.configs.row_identity(id).unwrap();
+        assert_ne!(identity, 0);
+        let reopened = Document::from_json(&first.to_json()).unwrap();
+        assert_eq!(reopened.configs.row_identity(id), Some(identity));
+        // An old snapshot can reuse the numeric id, but cannot supply this creation identity.
+        let replacement = before.add_configuration_row("Replacement".into(), vec!["80 mm".into()]).unwrap();
+        assert_eq!(replacement, id);
+        assert_ne!(before.configs.row_identity(replacement), Some(identity));
+        let mut legacy = serde_json::to_value(&first.configs).unwrap();
+        legacy.as_object_mut().unwrap().remove("row_identities");
+        let legacy: ConfigTable = serde_json::from_value(legacy).unwrap();
+        assert_eq!(legacy.row_identity(id), None);
+        assert_eq!(legacy.rows, first.configs.rows);
     }
 
     #[test]

@@ -51,6 +51,8 @@ pub const TABLE: &[(&str, Class)] = &[
     // the profiler: timed spans for every layer, the kernel's calls to commands (no workspace dependencies)
     ("profile", Class::Standalone),
     ("sketch", Class::Layer(1)),
+    // sheet development: solidcore's (solidcore-ops' develop and query) with SolidCraft's wording of its refusals
+    ("develop", Class::Layer(1)),
     // the B-rep kernel, solidcore (the Rust port of NVIDIA's SMLib, ADR 0002); only the kernel uses it
     ("smlib", Class::Layer(1)),
     // STEP (ISO 10303) exchange structure and geometry, no modelling backend
@@ -71,6 +73,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("craft-plugin-wasm", Class::Shared),
     // the sRGB transfer rule and the surface-analysis palette, read by the renderer and the theme (#13291)
     ("color", Class::Shared),
+    // length display: a millimetre value in a design unit with its decimal places (no dependencies)
+    ("display-units", Class::Shared),
     // the widget handle and rect registry UI components publish into and scenarios/the control channel read (#12936)
     ("ui-registry", Class::Shared),
     // message catalogs' machinery and bidirectional text: lookup, formatting, language choice (#13290)
@@ -83,6 +87,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("theme", Class::Shared),
     // the UI kit and its components (ribbon, app bar, history and navigation bars, view compass, window chrome, theme files), drawn from host data (#14251)
     ("ui-kit", Class::Shared),
+    // the app-neutral panel placement core: panels by id, dock, floating and window placement, saved layout values (#17363)
+    ("panel-layout", Class::Shared),
     // SolidCraft's look, ready to install into the kit: icon masters and roles, code-drawn glyphs, IBM Plex faces, built-in themes
     ("look", Class::Shared),
     // the control channel: the per-launch token and its files, what a request still running does (#12946)
@@ -95,10 +101,14 @@ pub const TABLE: &[(&str, Class)] = &[
     ("viewport-gpu", Class::Shared),
     // the viewport in an egui window: egui-wgpu paint callbacks and install (#12943)
     ("viewport-egui", Class::Shared),
+    // the views of a design as plain data: kinds, the set a design keeps open, the saved form (no UI toolkit)
+    ("views", Class::Shared),
     // apps and tooling
     ("solidcraft", Class::Exempt),
     ("cli", Class::Exempt),
     ("web", Class::Exempt),
+    // the UI kit's component gallery (docs.solidcraft.io/kit/), desktop and browser
+    ("ui-kit-gallery", Class::Exempt),
     ("xtask", Class::Exempt),
 ];
 

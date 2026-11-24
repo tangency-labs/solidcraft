@@ -264,7 +264,11 @@ pub fn answer_disk(app: &mut SolveApp, answer: DiskAnswer) {
     match answer {
         DiskAnswer::SaveCopy => crate::toolbar::save_copy(app),
         DiskAnswer::Overwrite => {
-            if !crate::save_job::start(app, "file.save", json!({"overwrite": true})) {
+            if !crate::save_job::start(app, "file.save", {
+                let mut params = crate::toolbar::provenance_params(app);
+                params["overwrite"] = json!(true);
+                params
+            }) {
                 crate::documents::saved_for_close(app);
             }
         }

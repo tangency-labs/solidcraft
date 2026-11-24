@@ -17,7 +17,7 @@ on:
 permissions:
   contents: read # to check out scripts/claim
   issues: write
-  pull-requests: read
+  pull-requests: write # to comment on a claim PR through the issues API
 
 # One run at a time per issue, so two simultaneous /claim comments can't both win.
 concurrency:
@@ -27,7 +27,7 @@ concurrency:
 jobs:
   claim:
     name: Claim bot
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     if: >-
       github.event_name != 'issue_comment' ||

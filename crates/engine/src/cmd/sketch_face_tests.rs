@@ -414,7 +414,7 @@ fn angled_attachment_tracks_source_plane_and_reopens() {
     let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &mut s.doc_mut().feature_mut(id).unwrap().kind else { panic!("not sketch") };
     *plane = solidcraft_doc::PlaneRef::AtAngle {
         base: Box::new(plane.clone()),
-        axis_origin: Vec3::ZERO,
+        axis_origin: solidcraft_doc::point_expr(Vec3::ZERO),
         axis_dir: Vec3::X,
         angle: "90 deg".into(),
         line: None,
@@ -728,15 +728,16 @@ fn a_face_next_to_plane_is_refused_not_ignored() {
     assert_eq!(r["attachment"], "exact_face", "{r}");
 }
 
-/// #3248: a custom plane's `origin` that is present but not three numbers (an expression such as
-/// "w/2", a number with a unit, too few values) became [0, 0, 0] without a word. It is refused,
-/// like a bad `x_dir`, and nothing is added. A missing origin is still the world origin.
+/// #3248: a custom plane's `origin` that is present but not three numbers or length expressions
+/// (too few values, a bare name, a null entry) became [0, 0, 0] without a word. It is refused,
+/// like a bad `x_dir`, and nothing is added. A missing origin is still the world origin. (Length
+/// expressions are accepted since #8192.)
 #[test]
 fn a_custom_plane_origin_that_is_not_numbers_is_refused_not_zeroed() {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name": "w", "expression": "40 mm"}));
     let features = s.doc.features.len();
-    for origin in [json!(["w/2", 0, 0]), json!(["20 mm", 0, 0]), json!([20, 0]), json!("w"), json!([20, 0, null])] {
+    for origin in [json!([20, 0]), json!("w"), json!([20, 0, null]), json!(["w/2", "nope", 0])] {
         let p = json!({"plane": {"origin": origin, "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}});
         let e = s.execute("sketch.create", &p).unwrap_err().to_string();
         assert!(e.contains("origin"), "{p}: {e}");
@@ -751,6 +752,12 @@ fn a_custom_plane_origin_that_is_not_numbers_is_refused_not_zeroed() {
     };
     assert_eq!(origin_of(&mut s, json!({"origin": [20, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]})), json!([20.0, 0.0, 0.0]));
     assert_eq!(origin_of(&mut s, json!({"x_dir": [0, 1, 0], "y_dir": [0, 0, 1]})), json!([0.0, 0.0, 0.0]));
+    // Since #8192 the inputs this test once refused are evaluated: `w` is 40 mm, so "w/2" is 20 mm
+    // and "20 mm" is 20 mm, and the sketch's plane sits there, not at the origin.
+    for x in ["w/2", "20 mm"] {
+        let o = origin_of(&mut s, json!({"origin": [x, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}));
+        assert_eq!(o, json!([20.0, 0.0, 0.0]), "origin [{x}, 0, 0]");
+    }
 }
 /// A sketch on a body's face projects that face's edges from the body's display mesh. The body
 /// it projects from is the model's own, not a copy that meshes it again: on a body whose curved
@@ -981,4 +988,30 @@ fn a_sketch_on_a_face_of_an_imported_spline_body_meshes_nothing_more() {
     // A point on the cap's plane but off the cap is on no face.
     let off = s.execute("sketch.create", &json!({"plane": {"body": name, "index": bottom.index, "face": [100, 0, 0]}}));
     assert!(off.is_err(), "{off:?}");
+}
+
+#[test]
+fn top_of_a_block_with_a_modeled_thread_and_rounded_corners_keeps_its_attachment() {
+    // A modeled thread cuts thousands of facets into the bore. Its splitting planes must not
+    // leave the block's walls and corner edges in pieces: a corner round of such an edge loses
+    // the history that names the faces after it, and the top face can't be attached.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":20,"body_name":"Block","name":"BlockFeature"}));
+    run(&mut s, "solid.hole", json!({"position":[10,10,20],"diameter":5,"depth":20}));
+    run(&mut s, "solid.thread", json!({"face":[12.5,10,10],"designation":"M6","modeled":true}));
+    run(&mut s, "solid.fillet", json!({"edges":[[0,0,10],[20,0,10],[0,20,10],[20,20,10]],"radius":2,"name":"Corners"}));
+    let index = top_pick(&s, "Block")["index"].clone();
+    let id =
+        run(&mut s, "sketch.create", json!({"name":"Top","plane":{"face":[5,5,20],"body":"Block","index":index},"project_edges":false}))["sketch"]
+            .as_u64()
+            .unwrap();
+    let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &s.doc.feature(id).unwrap().kind else { panic!("not a sketch") };
+    let anchor = super::anchor(plane).expect("a durable attachment");
+    assert_eq!(anchor.target.name, "F1:+z");
+    draw(&mut s);
+    let radius = s.doc.find_feature("Corners").unwrap().param_names[0].clone();
+    run(&mut s, "parameters.change", json!({"name":radius,"expression":"3 mm"}));
+    assert!(s.model.result(id).unwrap().error.is_none(), "{:?}", s.model.result(id).unwrap().error);
+    let plane = s.model.state().sketch(id).unwrap().plane;
+    assert!((plane.origin.z - 20.).abs() < 1e-6 && plane.normal().z > 1. - 1e-9, "{plane:?}");
 }

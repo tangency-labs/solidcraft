@@ -424,13 +424,28 @@ mod tests {
         let cloned = settings.clone();
         assert!(std::ptr::eq(settings.resources.required(&id).unwrap().bytes().as_ptr(), cloned.resources.required(&id).unwrap().bytes().as_ptr()));
         let document = Document { render: Arc::new(settings), ..Default::default() };
-        let reopened = Document::from_json(&document.to_json()).unwrap();
+        // Never written as text: an empty `data`. An older plain JSON design's base64 reads the same,
+        // and so does a container's part handed to the reader as bytes.
+        let saved: serde_json::Value = serde_json::from_str(&document.to_json()).unwrap();
+        assert_eq!(saved["render"]["resources"][id.to_string()]["data"], "");
+        assert!(Document::from_json(&saved.to_string()).unwrap_err().to_string().contains("has no data"), "no part, no file");
+        let mut older = saved.clone();
+        older["render"]["resources"][id.to_string()]["data"] =
+            crate::canvas::base64_encode(document.render.resources.required(&id).unwrap().bytes()).into();
+        let reopened = Document::from_json(&older.to_string()).unwrap();
         assert_eq!(document, reopened);
+        let mut parts = crate::render_resources::ContainerParts::default();
+        parts.hdr.insert(id, document.render.resources.required(&id).unwrap().bytes().to_vec());
+        // Every decode in the read gets the part: a newer file is checked a section at a time first.
+        let (from_part, again) = crate::render_resources::with_container_parts(parts, || {
+            (Document::from_json(&saved.to_string()), Document::from_json(&saved.to_string()))
+        });
+        assert_eq!((document.clone(), document.clone()), (from_part.unwrap(), again.unwrap()));
         assert_eq!(reopened.render.resources.len(), 1);
         let legacy: RenderSettings = serde_json::from_str(r#"{"setups":{"Old":{}}}"#).unwrap();
         assert!(legacy.resources.is_empty());
         assert!(legacy.setups["Old"].job.is_none());
-        let mut missing = serde_json::to_value(&document).unwrap();
+        let mut missing = older.clone();
         missing["render"]["resources"] = serde_json::json!({});
         assert!(Document::from_json(&missing.to_string()).unwrap_err().to_string().contains("missing embedded HDR"));
     }
@@ -441,11 +456,12 @@ mod tests {
         use serde_json::json;
         let source = HdrResource::new(hdr_fixture(128)).unwrap();
         let id = source.id().to_string();
-        let valid = serde_json::to_value(&source).unwrap();
+        let mut valid = serde_json::to_value(&source).unwrap();
+        valid["data"] = crate::canvas::base64_encode(source.bytes()).into();
         for (key, value) in [
             ("kind", json!("png")),
             ("data", json!("")),
-            ("data", json!(format!("{}\n", source.base64().unwrap()))),
+            ("data", json!(format!("{}\n", crate::canvas::base64_encode(source.bytes())))),
             ("data", json!("AA==")),
             ("path", json!("original.hdr")),
             ("hdr_blob", json!("blobs/not-in-plain-json.hdr")),
@@ -462,7 +478,7 @@ mod tests {
         let mut many = serde_json::Map::new();
         for pixel in 0..64 {
             let resource = HdrResource::new(hdr_fixture(pixel)).unwrap();
-            many.insert(resource.id().to_string(), json!(resource));
+            many.insert(resource.id().to_string(), json!({"kind":"radiance_hdr","data":crate::canvas::base64_encode(resource.bytes())}));
         }
         assert!(serde_json::from_value::<HdrResources>(serde_json::Value::Object(many.clone())).is_ok());
         many.insert("f".repeat(64), json!({"kind":"radiance_hdr","data":"invalid"}));
@@ -474,13 +490,13 @@ mod tests {
 
     #[test]
     fn embedded_hdr_parser_debits_aggregate_before_decoding_the_next_source() {
-        use crate::render_resources::{HdrId, HdrResources, MAX_HDR_BYTES, encode_hdr_base64};
+        use crate::render_resources::{HdrId, HdrResources, MAX_HDR_BYTES};
         use serde::de::value::{Error, MapDeserializer};
         // One borrowed base64 buffer supplies distinct valid prefixes: this exercises the
         // real aggregate visitor without constructing a >100 MiB JSON value/string tree.
         let mut bytes = hdr_fixture(128);
         bytes.resize(MAX_HDR_BYTES - 1, 0);
-        let encoded = encode_hdr_base64(&bytes).unwrap();
+        let encoded = crate::canvas::base64_encode(&bytes);
         assert!(!encoded.ends_with('='));
         let sources: Vec<_> = (0..5)
             .map(|i| {
@@ -499,10 +515,10 @@ mod tests {
         use crate::render_resources::{HdrResource, MAX_HDR_BYTES};
         let source = HdrResource::new(hdr_fixture(128)).unwrap();
         let id = source.id().to_string();
-        let encoded = source.base64().unwrap();
+        let encoded = crate::canvas::base64_encode(source.bytes());
         let escaped = format!("\\u{:04x}{}", encoded.as_bytes()[0], &encoded[1..]);
         let mut document = serde_json::to_value(Document::default()).unwrap();
-        document["render"] = serde_json::json!({"setups":{},"resources":{(id.clone()):source}});
+        document["render"] = serde_json::json!({"setups":{},"resources":{(id.clone()):{"kind":"radiance_hdr","data":encoded}}});
         let wire = document.to_string().replacen(&encoded, &escaped, 1);
         assert_eq!(Document::from_json(&wire).unwrap().render.resources.len(), 1, "legal bounded JSON escapes retain the same payload");
         // One escape makes deserialize_str require owned scratch. The borrowed RawValue

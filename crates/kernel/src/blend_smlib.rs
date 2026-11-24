@@ -463,28 +463,33 @@ mod imp {
                     None => failed(what, "operation", SmError::CornerRefused { corner }),
                 },
                 SmError::NoEffect => KernelError::Failed(format!("SMLib made no change: the {what} reported success but built no face")),
-                SmError::CornerUnsupported => KernelError::Invalid(format!(
-                    "not supported yet: the {what} meets a corner of this kind, which SMLib's blends do not handle yet (where its edges \
-                     run on tangentially into each other, or meet in a way no blend corner builds)"
-                )),
+                SmError::CornerUnsupported { why, at } => {
+                    let at = at.map(|[x, y, z]| format!(" at ({x:.3}, {y:.3}, {z:.3})")).unwrap_or_default();
+                    let why = why.map(|why| format!(": {why}")).unwrap_or_default();
+                    KernelError::Invalid(format!(
+                        "not supported yet: the {what} meets a corner of this kind{at}, which SMLib's blends do not handle yet (where its edges \
+                         run on tangentially into each other, or meet in a way no blend corner builds){why}"
+                    ))
+                }
                 SmError::NoRoom => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
                 // Not a size a smaller radius fixes: solidcore builds no swept turn there.
                 SmError::TurnRefused { why, at, .. } => {
                     let at = at.map(|[x, y, z]| format!(" at ({x:.3}, {y:.3}, {z:.3})")).unwrap_or_default();
                     KernelError::Invalid(format!("the {what}'s swept corner{at} is not built: {why}"))
                 }
-                SmError::TooLarge { size, kind, at, why } => {
+                SmError::TooLarge { size, kind, at, face, why } => {
                     let mut beside = match at {
                         Some([x, y, z]) => format!(", at the edge at ({x:.3}, {y:.3}, {z:.3})"),
                         None => String::new(),
                     };
+                    if let Some([x, y, z]) = face {
+                        beside = format!("{beside}, limited by the face containing ({x:.3}, {y:.3}, {z:.3})");
+                    }
                     if let Some(why) = why {
-                        beside = format!("{beside}: {}", why.words());
+                        beside = format!("{beside}: {}", why.words_for(kind));
                     }
                     let fits = match kind {
-                        solidcraft_smlib::FitKind::Scale => {
-                            format!("the largest that fits is {} times the distances given", crate::blend::trimmed_mm(size))
-                        }
+                        solidcraft_smlib::FitKind::Scale => crate::blend::scale_fit_note(size),
                         kind => crate::blend::largest_fit_note(kind.word(), size),
                     };
                     KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow{beside}; {fits}"))
@@ -510,13 +515,7 @@ mod imp {
             if step == crate::validation::Step::Check {
                 let check = r.check(CheckLevel::All).map_err(|e| failed(what, "check", e))?;
                 if !check.is_valid() {
-                    let input_fails = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
-                    let step = if input_fails {
-                        "SMLib's check refuses the result (the input already fails it)"
-                    } else {
-                        "SMLib's check refuses the result"
-                    };
-                    return Err(failed(what, step, check));
+                    return Err(failed(what, &crate::validation::refuses([sb.check(CheckLevel::All)].into_iter()), check));
                 }
             }
             let (out, result_order) = body_from_smlib_ordered(&r)?;
@@ -537,7 +536,7 @@ mod imp {
             };
             let out = out.with_checked_history(history, &record::counts(&[body])).inherit_regularization_protection(body);
             let out = if step == crate::validation::Step::Defer {
-                out.left_unchecked(&format!("SMLib {what}"), crate::validation::Checked::AsIs, r)
+                out.left_unchecked(&format!("SMLib {what}"), crate::validation::Checked::AsIs, r, &[body])
             } else {
                 out
             };
@@ -709,6 +708,56 @@ mod tests {
             let picked = imp::resolve(&b, &[foot]).unwrap();
             let [_, _, z] = picked.points[0];
             assert!((z - 20.0).abs() < 1e-9, "the pick at {foot:?} took an edge through z = {z}");
+        }
+    }
+
+    /// The reporter's case of #12128: a chamfer wider than the rounds at the corners of a block's
+    /// top edge is refused, naming the largest distance that fits (the rounds' radius), in a
+    /// chamfer's words: no rolling ball, which a chamfer has not.
+    #[test]
+    fn a_chamfer_too_wide_for_the_rounded_corners_is_refused_in_its_own_words() {
+        let block = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(60.0, 30.0, 10.0)).unwrap();
+        let uprights = [Vec3::new(0.0, 0.0, 5.0), Vec3::new(60.0, 0.0, 5.0), Vec3::new(60.0, 30.0, 5.0), Vec3::new(0.0, 30.0, 5.0)];
+        let rounded = crate::fillet(&block, &uprights, 2.5).unwrap();
+        // The top edge all round: the four straight edges and the four quarter circles.
+        let c = 2.5 - 2.5 * std::f64::consts::FRAC_1_SQRT_2;
+        let top = [
+            Vec3::new(30.0, 0.0, 10.0),
+            Vec3::new(60.0, 15.0, 10.0),
+            Vec3::new(30.0, 30.0, 10.0),
+            Vec3::new(0.0, 15.0, 10.0),
+            Vec3::new(c, c, 10.0),
+            Vec3::new(60.0 - c, c, 10.0),
+            Vec3::new(60.0 - c, 30.0 - c, 10.0),
+            Vec3::new(c, 30.0 - c, 10.0),
+        ];
+        assert!(imp::blend(&rounded, "chamfer", Kind::Chamfer, &top, &[2.0; 8]).is_ok(), "a 2 mm chamfer fits the 2.5 mm rounds");
+        let e = imp::blend(&rounded, "chamfer", Kind::Chamfer, &top, &[3.0; 8]).unwrap_err();
+        let KernelError::TooLarge(text) = &e else { panic!("{e:?}") };
+        assert!(text.contains("the largest distance that fits is 2.5"), "{text}");
+        assert!(!text.contains("ball") && !text.contains("roll"), "{text}");
+    }
+
+    /// A fixed-angle chamfer's refusal identifies the edge, limiting top face and first
+    /// distance. Two explicit setbacks retain the common scale of both inputs.
+    #[test]
+    fn a_distance_angle_refusal_names_the_limiting_face_and_first_distance() {
+        let body = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(30.0, 0.6, 10.0)).unwrap();
+        let picks = [Vec3::new(15.0, 0.0, 10.0), Vec3::new(15.0, 0.6, 10.0)];
+        let angle = 80.0_f64.to_radians();
+        for second in [crate::ChamferSide::Angle(angle), crate::ChamferSide::Distance(angle.tan())] {
+            let e = imp::sides(&body, &picks, 1.0, second, false).unwrap_err();
+            let KernelError::TooLarge(text) = e else { panic!("{e:?}") };
+            assert!(text.contains("at the edge at ("), "{text}");
+            assert!(text.contains("limited by the face containing ("), "{text}");
+            match second {
+                crate::ChamferSide::Angle(_) => {
+                    assert!(text.contains("the largest distance that fits is "), "{text}");
+                    let named = crate::named_fit(&text).unwrap();
+                    assert!(named > 0.29 && named <= 0.3, "{text}");
+                }
+                crate::ChamferSide::Distance(_) => assert!(text.contains("times the distances given"), "{text}"),
+            }
         }
     }
 

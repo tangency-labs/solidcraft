@@ -257,6 +257,10 @@ fn run_box(input: &BoxInput) -> Result<Output, HarnessError> {
         Vec3::new(SEED_MIN[0], SEED_MIN[1], SEED_MIN[2]),
         Vec3::new(SEED_MAX[0], SEED_MAX[1], SEED_MAX[2]),
     );
+    if tight {
+        // the body boxed, kept when a test captures it (`dump::capture`)
+        crate::dump::body(&k, "tight", b);
+    }
     let r = match input.target {
         0 => p1::calculate_bounding_box(&k, b, FaceId::from_index(id), tight).map(|x| bx = x),
         1 => p1::calculate_shell_bounding_box_into(
@@ -374,12 +378,9 @@ impl solidcore::intersect::point_class::ClassGeometry<EntityRef> for NoGeometry 
 }
 
 /// The reference shim's `drop_trim_cache(f)` (before `Point3DClassify`):
-/// `SmCacheMgr::DeleteObjectsCache(SM_OC_TRIMSRF, srf)`. The cache's tree state lives in
-/// the deleted object upstream, so the slot goes back to [`CacheTreeState::NoCache`]: the
-/// next lookup makes a cache whose tree is built, as upstream's does. (A Rust `.smb` read
-/// can leave a kept cache whose state is `Unbuilt`.)
+/// `SmCacheMgr::DeleteObjectsCache(SM_OC_TRIMSRF, srf)`: the next lookup makes a cache
+/// whose tree is built.
 pub(crate) fn drop_trim_cache(b: &Brep, f: FaceId) -> Result<(), HarnessError> {
-    use solidcore::surface::surface::CacheTreeState;
     if let Some(surface) = b
         .face(f)
         .map_err(|e| harness(e.to_string()))?
@@ -387,7 +388,6 @@ pub(crate) fn drop_trim_cache(b: &Brep, f: FaceId) -> Result<(), HarnessError> {
         .as_ref()
     {
         surface.delete_trim_cache();
-        surface.set_cache_tree_state(CacheTreeState::NoCache);
     }
     Ok(())
 }

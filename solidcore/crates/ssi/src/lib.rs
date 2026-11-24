@@ -44,7 +44,13 @@ mod taylor;
 mod trace2d;
 
 pub use densify::densify;
-pub use intersect::{intersect_bodies, Curve, CurvePoint, Intersection, Options, Param, Stats};
+pub use intersect::intersect_bodies;
+pub use intersect::Curve;
+pub use intersect::CurvePoint;
+pub use intersect::Intersection;
+pub use intersect::Options;
+pub use intersect::Param;
+pub use intersect::Stats;
 pub use patch::Patch;
 
 use std::fmt;

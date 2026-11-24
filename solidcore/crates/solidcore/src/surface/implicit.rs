@@ -8,14 +8,16 @@
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
-use crate::error::{Result, SolidError};
+use crate::blend::fillet_section::interval::Ivl;
+use crate::error::surface::SurfaceFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
 use crate::math::{Vec2, Vec3, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
-use crate::nurbs::math::{gamma, NOW};
+use crate::nurbs::math::{gamma, NOW, NOZ};
 use crate::nurbs::srf_tool::p1::decompose_to_bez;
 use crate::surface::cone::Cone;
 use crate::surface::plane::Plane;
@@ -181,9 +183,11 @@ impl BPoly {
 ///
 /// `SM_ERR` without NURB data; those of the Bézier decomposition.
 pub fn lies_on(form: &BSplineSurface, a: &Implicit) -> Result<bool> {
-    let nurb = form
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let nurb = form.gw_nurb().ok_or_else(|| {
+        Failure::new(OP, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
     for row in decompose_to_bez(nurb)? {
         for patch in row {
             let (p, q) = patch.degrees();
@@ -213,7 +217,7 @@ pub fn curve_lies_on(curve: &BSplineCurve, a: &Implicit) -> Result<bool> {
     let nurb = curve
         .nurb
         .as_ref()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline curve has no NURB"))?;
+        .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::CurveWithoutNurb))?;
     for seg in nurb.decompose_bez()? {
         if !bezier_on(seg.degree(), 0, seg.cpts().iter(), a) {
             return Ok(false);
@@ -257,14 +261,14 @@ pub fn plane_of_net(form: &BSplineSurface) -> Result<Option<Implicit>> {
     Ok(lies_on(form, &plane)?.then_some(plane))
 }
 
-/// Whether the Bézier patch of degrees `(p, q)` with homogeneous points `points` (row by
-/// row) lies on `a` ([`lies_on`]).
-fn bezier_on<'a>(
+/// The [`Residual`] of `a`'s equation over the Bézier patch of degrees `(p, q)` with
+/// homogeneous points `points` (row by row).
+fn bezier_residual<'a>(
     p: usize,
     q: usize,
     points: impl Iterator<Item = &'a crate::nurbs::math::CPoint>,
     a: &Implicit,
-) -> bool {
+) -> Residual {
     let origin = match *a {
         Implicit::Plane { origin, .. } | Implicit::Cone { origin, .. } => origin,
         Implicit::Sphere { centre, .. } | Implicit::Torus { centre, .. } => centre,
@@ -339,13 +343,531 @@ fn bezier_on<'a>(
         }
     };
     let tol = gamma(4 * degree * (p + 1) * (q + 1) + 16) * scale;
-    let within = |v: &f64| {
-        matches!(
-            v.abs().partial_cmp(&tol),
-            Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
-        )
+    let least_weight = ws.c.iter().copied().fold(f64::INFINITY, f64::min);
+    Residual {
+        coefficients: f.c,
+        tol,
+        degree,
+        absolute,
+        wmax,
+        least_weight,
+    }
+}
+
+/// Whether the Bézier patch of degrees `(p, q)` with homogeneous points `points` (row by
+/// row) lies on `a` ([`lies_on`]): every coefficient of its [`Residual`] within the
+/// rounding of computing it.
+fn bezier_on<'a>(
+    p: usize,
+    q: usize,
+    points: impl Iterator<Item = &'a crate::nurbs::math::CPoint>,
+    a: &Implicit,
+) -> bool {
+    bezier_residual(p, q, points, a).within()
+}
+
+/// [`lies_on`]'s acceptance turned into a distance, ARGUED (not checked by a certificate):
+/// how far a point of the surface `form` describes can lie from `a`'s surface, where
+/// [`lies_on`] accepts `form`; `None` where it does not, for a torus, for a weight that is
+/// not positive, for a patch whose rounding `τ` is below `MIN_POSITIVE / ε` or whose weight
+/// power `W₀^d` is below `MIN_POSITIVE`, or for a bound (any patch's) that is not finite.
+/// The `γ` model of `τ` leaves out underflow: each of a coefficient's `n` operations
+/// (`n = 4d(p+1)(q+1) + 16`) may add up to `2⁻¹⁰⁷⁴` absolutely, `n · 2⁻¹⁰⁷⁴` in all. With
+/// `τ ≥ MIN_POSITIVE / ε = 2⁻⁹⁷⁰` that is at most `n · 2⁻¹⁰⁴ · τ`, far inside the final
+/// growth by `8ε` for any `n` below `2⁴⁹`. Points of tiny weight, whose coefficients
+/// underflow to zeros that pass on nothing, are refused that way.
+///
+/// On a Bézier patch with least weight `W₀ > 0` (a rational patch's weight is a convex
+/// combination of its points' weights, so at least `W₀` everywhere), every coefficient of
+/// `a`'s equation of degree `d` in `(X W, W)` is computed within `τ` ([`lies_on`]'s
+/// rounding) and accepted within `τ`, so the exact coefficient is within `2τ`, and by the
+/// convex hull property of the Bernstein basis `|W^d F(X)| ≤ 2τ` over the whole patch:
+/// `|F(X)| ≤ 2τ / W₀^d`. For a plane `F` is the signed distance (over the normal's
+/// length, a few roundings from 1). For a cone whose stored axis `a` has `|a|² = 1 + δ`
+/// (`δ` enclosed in `delta` by the caller; [`AnalyticSupport::implicit`] need not give a
+/// unit axis), with `s` the height along the unit axis `â`, `ρ` the distance from it and
+/// `R = r + t |a| s`: `|X|² − (a · X)² = ρ² − δ s²`, so `F = ρ² − δ s² − R²`. The surface is
+/// one of revolution about `â`, of radius `ρ_P = √(R² + δ s²)` at height `s` where
+/// `R² + δ s² ≥ 0`; there `ρ² − ρ_P² = F` and `|ρ − ρ_P| ≤ ρ + ρ_P`, so the point is within
+/// `|ρ − ρ_P| ≤ √|F|` of the surface, radially at its height. With `δ < 0` the surface has
+/// no point at a height where `|R| < √|δ| |s|` (a band about the apex), and a point there
+/// has no such bound: a patch whose heights reach that band gives `None` (conservative;
+/// with `δ ≥ 0`, or `δ` exactly 0 for a cardinal axis, every height has a point). A sphere
+/// is the same with `|X|` for `ρ` and `R = r`. The square root is the bound near a cone's
+/// apex, where `ρ_P` is small; elsewhere `|F| / (ρ + ρ_P)` is far smaller, but the bound
+/// does not need it.
+///
+/// [`lies_on`] does not cover the rounding of the Bézier decomposition (knot insertion,
+/// a chain of at most `p + q` convex combinations per point, each a few roundings of the
+/// homogeneous terms' size): a patch point is moved by at most `γ · 2 absolute` in `H`
+/// and `γ · W_max` in `W` (`γ = γ_{4(p+q)+4}`, `absolute` the largest coordinate of
+/// `|H| + |O| W`), so the Euclidean point `X = H / W` by at most
+/// `(|δH| + |X| |δW|) / W₀ ≤ 2 γ absolute (1 + W_max / W₀) / W₀`. That slack is added to
+/// each patch's bound. The whole is the largest over the patches, grown by a few roundings.
+///
+/// # Errors
+///
+/// `SM_ERR` without NURB data; those of the Bézier decomposition.
+pub fn distance_bound(form: &BSplineSurface, a: &Implicit, delta: [f64; 2]) -> Result<Option<f64>> {
+    if matches!(a, Implicit::Torus { .. }) {
+        return Ok(None);
+    }
+    // the most negative `δ` may be (0 when it cannot be below 0)
+    let below = match delta {
+        [lo, hi] if lo <= hi => (-lo).max(0.0),
+        _ => return Ok(None),
     };
-    f.c.iter().all(within)
+    let nurb = form.gw_nurb().ok_or_else(|| {
+        Failure::new(OP, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
+    let mut bound = 0.0_f64;
+    for row in decompose_to_bez(nurb)? {
+        for patch in row {
+            let (p, q) = patch.degrees();
+            let r = bezier_residual(p, q, patch.rows().flatten(), a);
+            let w0 = r.least_weight;
+            if !(r.within() && w0 > 0.0 && w0.is_finite()) {
+                return Ok(None);
+            }
+            if let Implicit::Cone {
+                origin,
+                axis,
+                radius,
+                tan_angle,
+            } = *a
+            {
+                if below > 0.0
+                    && !clear_of_apex(
+                        patch.rows().flatten(),
+                        origin,
+                        axis,
+                        radius,
+                        tan_angle,
+                        below,
+                    )
+                {
+                    return Ok(None);
+                }
+            }
+            // `τ`'s rounding model leaves out underflow: with `τ ≥ MIN_POSITIVE / ε` the
+            // coefficients' underflow (`n · 2⁻¹⁰⁷⁴`) is a relative `n · 2⁻¹⁰⁴` of `τ`, inside
+            // the final growth; a smaller residual scale, or a weight power that underflows
+            // (homogeneous points of tiny weight), has no bound
+            let power = match r.degree {
+                1 => w0,
+                _ => w0 * w0,
+            };
+            if !(r.tol >= f64::MIN_POSITIVE / f64::EPSILON && power >= f64::MIN_POSITIVE) {
+                return Ok(None);
+            }
+            let exact = 2.0 * r.tol;
+            let residual = exact / power;
+            let off = match *a {
+                // the normal's length, a few roundings from 1
+                Implicit::Plane { normal, .. } => {
+                    residual / (normal.length() * (1.0 - 4.0 * f64::EPSILON))
+                }
+                _ => residual.sqrt(),
+            };
+            let g = gamma(4 * (p + q) + 4);
+            // (`absolute` is a largest coordinate: a Euclidean length is under twice it)
+            let slack = 2.0 * g * r.absolute * (1.0 + r.wmax / w0) / w0;
+            // (`max` would drop a value that is not a number)
+            let patch_bound = off + slack;
+            if !patch_bound.is_finite() {
+                return Ok(None);
+            }
+            bound = bound.max(patch_bound);
+        }
+    }
+    let bound = bound * (1.0 + 8.0 * f64::EPSILON);
+    Ok(bound.is_finite().then_some(bound))
+}
+
+/// Not upstream (tangency-labs/solidcraft#18166): a certified bound on how far every point
+/// of the surface `form` lies from the plane or cone (a cylinder included) `a`, whether or
+/// not it lies on it; `None` for a sphere or torus, a weight that is not positive, a cone
+/// patch reaching the band about the apex where the bound does not hold, or a bound that is
+/// not finite (not a number included).
+///
+/// PROVEN, per Bézier patch (as [`distance_bound`], whose terms these are): every Bernstein
+/// coefficient of `a`'s equation of degree `d` in the patch's homogeneous coordinates is
+/// computed within `τ` ([`lies_on`]'s rounding), so the exact one is within `τ` of the
+/// computed, and by the convex hull property of the Bernstein basis
+/// `|W^d F(X)| ≤ c + τ` over the whole patch, `c` the largest computed coefficient's size.
+/// The weight is at least the least control weight `W₀ > 0` (a convex combination of
+/// them), so `|F(X)| ≤ (c + τ) / W₀^d`. For a plane `F` is the signed distance times the
+/// normal's length. For a cone, with `s` the height along the unit axis, `ρ` the distance
+/// from it and `R = r + t |a| s` (`|a|² = 1 + δ`, `δ` enclosed from the stored axis),
+/// `F = ρ² − ρ_P²` with `ρ_P = √(R² + δ s²)` the surface's radius at that height, and the
+/// point of the surface at the same height and angle lies `|ρ − ρ_P| = |F| / (ρ + ρ_P) ≤
+/// |F| / ρ_P` away. `ρ_P` is bounded below over the patch's heights by [`radius_floor`]
+/// (`None` near the apex, where it is not).
+///
+/// PROVEN, the rounding of the extraction and decomposition (`γ_n = n u / (1 − n u)`,
+/// `u = ε / 2` the unit roundoff, [`gamma`]): the patches are made from the net of
+/// `source` (the surface `form` was cut from, or `form` itself) by knot insertions, each a
+/// level of
+/// [`CPoint::combine2`](crate::nurbs::math::CPoint::combine2) `α a + (1 − α) b` per
+/// homogeneous coordinate, `0 ≤ α ≤ 1`:
+/// - the ratio `α` takes 3 roundings, two subtractions and a division, so
+///   `α̂ = α (1 + θ₃)`: `alf = (ul − left) / (knot − left)` in
+///   [`extract_patch`](crate::nurbs::srf_tool::p1::extract_patch), and
+///   `x = num / (u[isu + i] − u[isu])` with `num = u[ieu] − u[isu]` in
+///   [`decompose_to_bez`];
+/// - its complement `1 − α̂` takes 1 (`oma = 1.0 − alf`, `1.0 − x`);
+/// - `combine2` takes 3, two products and a sum;
+/// - so, against `α a + (1 − α) b` of the computed `a` and `b`, the `a` term carries
+///   `α (1 + θ₅)` (ratio, product, sum) and the `b` term
+///   `(1 − α) (1 + θ₃) − α θ₃ (1 + θ₃)` (complement, product, sum, and the ratio's error
+///   through the complement); with `|a|, |b| ≤ M̂`, the largest computed size, the level's
+///   new error is at most `(α (γ₅ + γ₃ + γ₃²) + (1 − α) γ₃) M̂ ≤ γ₈ M̂`
+///   (`γ_j + γ_k + γ_j γ_k ≤ γ_{j+k}`), and the earlier errors pass through with the
+///   exact factors `α` and `1 − α`, so a level's error is at most the larger of its two
+///   inputs' plus `γ₈ M̂`.
+///
+/// `M` is the size of the original net: every intermediate point is within its error of a
+/// convex combination of its control points, so each homogeneous coordinate is within
+/// `max |H|∞` and each weight within `W_max` up to that error. After a chain of `L` levels
+/// the error is at most `L γ₈ M̂ ≤ γ_{8L} M̂`, and with `M̂ ≤ M + γ_{8L} M̂` at most
+/// `γ_{8L} / (1 − γ_{8L}) M ≤ γ_{8L+1} M` (as `8L (8L + 1) u ≤ 1`).
+///
+/// `L`, the longest chain of levels behind one point of a patch, is at most
+/// `L_u + L_v` with `L_u = 2p + p (p − 1) / 2` and `L_v` alike in `q`
+/// (`insertion_levels`), counted from the loops that run (`nurbs/srf_tool/p1.rs`):
+/// - the extraction in u ([`extract_patch`](crate::nurbs::srf_tool::p1::extract_patch),
+///   per column): the left knot's round `i` (`1..=p − mul`) sets `aw[j]` from `aw[j]` and
+///   `aw[j + 1]` of round `i − 1`, one level per round, so at most `p − mul`; the right
+///   knot's round `i` (`1..=p − mur`) sets `aw[k]` from `aw[k]` and `aw[k − 1]`, which may
+///   be left-inserted points, so at most `(p − mul) + (p − mur) ≤ 2p`; then in v, per
+///   row of those points, `(q − mvl) + (q − mvr)` more;
+/// - the decomposition in u ([`decompose_to_bez`], per column): at a knot of multiplicity
+///   `μ < p` it runs `r = p − μ` rounds; round `i` sets `bw[j]` for `j = p` down to `μ + i`
+///   from `bw[j]` and `bw[j − 1]`, and saves `bw[p]` as the next strip's point `r − i`
+///   (`nbw[save]`), whose points `r..=p` come fresh from the net. So a chain runs on
+///   through the saves of earlier knots: at the start of every strip the point at
+///   position `x` is at most `B(x) = (p − x) (p − x − 1) / 2` levels past the net it is
+///   decomposed from. Fresh points are 0; a saved point `r − i` is `bw[p]` after `i`
+///   rounds, at most `i + B(p − i) = i (i + 1) / 2 ≤ B(r − i) = (μ + i) (μ + i − 1) / 2`
+///   (`μ ≥ 1`, `B` falls with `x`). The strip's point `j`, set in `n` rounds
+///   (`j − n ≥ μ`, so `k = p − (j − n) ≤ p − 1` and `n ≤ k`), is at most
+///   `n + B(j − n) ≤ k (k + 1) / 2 ≤ p (p − 1) / 2`, and an untouched one at most
+///   `B(0) = p (p − 1) / 2`. Simple knots reach it: the chain runs back through the saves
+///   of `p − 1` earlier knots, `Σ_{i=1}^{p−1} i`;
+/// - the decomposition in v, per row of each strip, the same on the strip's points:
+///   `q (q − 1) / 2` more.
+///
+/// `γ_{8L+16}` covers `γ_{8L+1}` and `8` more roundings for the coefficients' scale. The
+/// test `the_rounding_count_covers_the_insertion_chains` runs the loops above on tracked
+/// points for degrees 1 to 10 (bit-equal to the real extraction and decomposition) and
+/// checks the count against the deepest chain they make. In the coordinates moved to the equation's origin
+/// `O` the error is at most `γ A` with `A = max |H|∞ + |O|∞ W_max`, and in the weight at
+/// most `γ W_max`, so at a point with weight `W ≥ W₀`, `X − O = (H − O W) / W` moves by at
+/// most `γ A / W₀ + A (1 + γ) γ W_max / (W₀ (W₀ − γ W_max))`, twice that as a Euclidean
+/// length (`√3 < 2`); `None` where `W₀ ≤ γ W_max`. The net's size is the larger of
+/// `source`'s and `form`'s and the patch's own (so `form` alone, as `source`, is sound when
+/// it was not cut from another net). The margin against the uses is wide: the slack is a
+/// relative `2 γ_{160} ≈ 3.6e-14` for a bicubic patch (`L = 18`), against bounds compared with
+/// tolerances of `1e-6` and more. A patch whose rounding `τ` is below `MIN_POSITIVE / ε`
+/// (where the coefficients' underflow is not inside the `γ` model, as [`distance_bound`])
+/// has no bound. The whole is the largest over the patches, grown by a few roundings.
+///
+/// # Errors
+///
+/// `SM_ERR` without NURB data; those of the Bézier decomposition.
+pub(crate) fn off_surface_bound(
+    form: &BSplineSurface,
+    a: &Implicit,
+    source: &BSplineSurface,
+) -> Result<Option<f64>> {
+    let below = match *a {
+        Implicit::Plane { .. } => 0.0,
+        Implicit::Cone { axis, .. } => {
+            let sq = |x: f64| Ivl::from(x) * Ivl::from(x);
+            let delta = sq(axis.x) + sq(axis.y) + sq(axis.z) - Ivl::from(1.0);
+            if !delta.is_finite() {
+                return Ok(None);
+            }
+            (-delta.lo).max(0.0)
+        }
+        Implicit::Sphere { .. } | Implicit::Torus { .. } => return Ok(None),
+    };
+    let nurb = form.gw_nurb().ok_or_else(|| {
+        Failure::new(OP, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
+    let origin = match *a {
+        Implicit::Plane { origin, .. } | Implicit::Cone { origin, .. } => origin,
+        Implicit::Sphere { centre, .. } | Implicit::Torus { centre, .. } => centre,
+    };
+    let Some(net) = source.gw_nurb() else {
+        return Ok(None);
+    };
+    let (Some(from), Some(own)) = (net_size(net, origin), net_size(nurb, origin)) else {
+        return Ok(None);
+    };
+    let (net_absolute, net_wmax) = (from.0.max(own.0), from.1.max(own.1));
+    let mut bound = 0.0_f64;
+    for row in decompose_to_bez(nurb)? {
+        for patch in row {
+            let (p, q) = patch.degrees();
+            let r = bezier_residual(p, q, patch.rows().flatten(), a);
+            let w0 = r.least_weight;
+            if !(w0 > 0.0 && w0.is_finite()) {
+                return Ok(None);
+            }
+            let mut top = 0.0_f64;
+            for c in &r.coefficients {
+                // (not a number refuses: `max` would drop it)
+                if !c.is_finite() {
+                    return Ok(None);
+                }
+                top = top.max(c.abs());
+            }
+            let power = match r.degree {
+                1 => Ivl::from(w0),
+                _ => Ivl::from(w0) * Ivl::from(w0),
+            };
+            // (not a number refuses; as [`distance_bound`], the `γ` model leaves out
+            // underflow, inside the final growth only with `τ ≥ MIN_POSITIVE / ε`)
+            let normal = power.lo >= f64::MIN_POSITIVE && r.tol >= f64::MIN_POSITIVE / f64::EPSILON;
+            if !normal {
+                return Ok(None);
+            }
+            let f = (Ivl::from(top) + Ivl::from(r.tol)) / power;
+            let off = match *a {
+                // the normal's length, a few roundings from its computed value
+                Implicit::Plane { normal, .. } => {
+                    (f / Ivl::from(normal.length() * (1.0 - 4.0 * f64::EPSILON))).hi
+                }
+                Implicit::Cone {
+                    origin,
+                    axis,
+                    radius,
+                    tan_angle,
+                } => {
+                    let Some(floor) = radius_floor(
+                        patch.rows().flatten(),
+                        origin,
+                        axis,
+                        radius,
+                        tan_angle,
+                        below,
+                    ) else {
+                        return Ok(None);
+                    };
+                    (f / Ivl::from(floor)).hi
+                }
+                Implicit::Sphere { .. } | Implicit::Torus { .. } => return Ok(None),
+            };
+            let g = gamma(rounding_index(p, q));
+            let absolute = net_absolute.max(r.absolute);
+            let wmax = net_wmax.max(r.wmax);
+            // (the true weight is at least `W₀ − γ W_max`)
+            let low = w0 - g * wmax;
+            if !(low > 0.0 && low.is_finite()) {
+                return Ok(None);
+            }
+            // (`absolute` is a largest coordinate: a Euclidean length is under twice it)
+            let slack = 2.0 * g * absolute * (1.0 / w0 + (1.0 + g) * wmax / (w0 * low));
+            let patch_bound = off + slack;
+            if !patch_bound.is_finite() {
+                return Ok(None);
+            }
+            bound = bound.max(patch_bound);
+        }
+    }
+    let bound = bound * (1.0 + 8.0 * f64::EPSILON);
+    Ok(bound.is_finite().then_some(bound))
+}
+
+/// The longest chain of knot-insertion levels behind a point of [`off_surface_bound`]'s
+/// Bézier patches of degrees `(p, q)`, `L_u + L_v` with `L_u = 2p + p (p − 1) / 2` (the
+/// extraction's two ends and the decomposition's saved points; derived there) and `L_v`
+/// alike in `q`. Saturates (a degree that large has no net to decompose).
+fn insertion_levels(p: usize, q: usize) -> usize {
+    let per = |d: usize| {
+        d.saturating_mul(2)
+            .saturating_add(d.saturating_mul(d.saturating_sub(1)) / 2)
+    };
+    per(p).saturating_add(per(q))
+}
+
+/// The `n` of [`off_surface_bound`]'s `γ_n`: `8 L + 16`, `L` the [`insertion_levels`]
+/// (eight roundings a level, one for the size's feedback, eight for the coefficients'
+/// scale, the rest spare).
+fn rounding_index(p: usize, q: usize) -> usize {
+    insertion_levels(p, q).saturating_mul(8).saturating_add(16)
+}
+
+/// The size of the control net `net` for [`off_surface_bound`]'s rounding, moved to the
+/// origin `origin`: `(max |H|∞ + |O|∞ W_max, W_max)` over its homogeneous points `H`
+/// (stored weighted when rational) and weights `W` (1 when not rational); `None` when a
+/// value is not finite.
+fn net_size(net: &crate::nurbs::srf_basic::Surface, origin: Vec3) -> Option<(f64, f64)> {
+    let mut hmax = 0.0_f64;
+    let mut wmax = 0.0_f64;
+    for c in net.rows().flatten() {
+        let wi = if c.w == NOW { 1.0 } else { c.w };
+        let z = if c.z == NOZ { 0.0 } else { c.z };
+        // (each coordinate checked: `max` would drop a value that is not a number)
+        if !(c.x.is_finite() && c.y.is_finite() && z.is_finite() && wi.is_finite()) {
+            return None;
+        }
+        let hm = c.x.abs().max(c.y.abs()).max(z.abs());
+        hmax = hmax.max(hm);
+        wmax = wmax.max(wi.abs());
+    }
+    let om = origin.x.abs().max(origin.y.abs()).max(origin.z.abs());
+    let absolute = (hmax + om * wmax) * (1.0 + 2.0 * f64::EPSILON);
+    absolute.is_finite().then_some((absolute, wmax))
+}
+
+/// A lower bound of the cone's radius `ρ_P = √(R² + δ s²)` over the heights `s` of the
+/// Bézier patch with homogeneous points `points` ([`off_surface_bound`]), `δ ≥ −below`:
+/// `ρ_P ≥ √(R_min² − below s_max²)`, `R_min` the least `|R|` over the heights (`R` linear
+/// in `s`, of one sign over them, so reached at an end) and `s_max` the largest `|s|`. The
+/// heights lie between the Euclidean points' (the patch is in their convex hull, `s`
+/// linear), widened by their rounding as [`clear_of_apex`]'s. `None` where `R` changes
+/// sign over them, the floor is not positive, or a value is not a number.
+fn radius_floor<'a>(
+    points: impl Iterator<Item = &'a crate::nurbs::math::CPoint>,
+    origin: Vec3,
+    axis: Vec3,
+    radius: f64,
+    tan_angle: f64,
+    below: f64,
+) -> Option<f64> {
+    let length = axis.length();
+    if !(length > 0.0 && length.is_finite()) {
+        return None;
+    }
+    let unit = axis * (1.0 / length);
+    let (mut lo, mut hi, mut size) = (f64::INFINITY, f64::NEG_INFINITY, 0.0_f64);
+    for c in points {
+        let w = if c.w == NOW { 1.0 } else { c.w };
+        // (not a number is not positive)
+        if w.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+            return None;
+        }
+        let x = Vec3::new(c.x, c.y, c.z) * (1.0 / w) - origin;
+        let s = x.dot(unit);
+        lo = lo.min(s);
+        hi = hi.max(s);
+        size = size.max(x.x.abs().max(x.y.abs()).max(x.z.abs()));
+    }
+    let spread =
+        32.0 * f64::EPSILON * (size + origin.x.abs().max(origin.y.abs()).max(origin.z.abs()));
+    let (lo, hi) = (lo - spread, hi + spread);
+    if !(lo <= hi && spread.is_finite()) {
+        return None;
+    }
+    // `R = r + t |a| s` at the ends, enclosed (the unit axis's length rounds within a few ε)
+    let slope = Ivl::from(tan_angle)
+        * Ivl::new(
+            length * (1.0 - 4.0 * f64::EPSILON),
+            length * (1.0 + 4.0 * f64::EPSILON),
+        );
+    let r_at = |s: f64| Ivl::from(radius) + slope * Ivl::from(s);
+    let (r_lo, r_hi) = (r_at(lo), r_at(hi));
+    let r_min = if r_lo.lo > 0.0 && r_hi.lo > 0.0 {
+        r_lo.lo.min(r_hi.lo)
+    } else if r_lo.hi < 0.0 && r_hi.hi < 0.0 {
+        (-r_lo.hi).min(-r_hi.hi)
+    } else {
+        return None;
+    };
+    let s_max = lo.abs().max(hi.abs());
+    let floor2 = Ivl::from(r_min) * Ivl::from(r_min)
+        - Ivl::from(below) * Ivl::from(s_max) * Ivl::from(s_max);
+    let floor = floor2.sqrt().lo;
+    (floor > 0.0 && floor.is_finite()).then_some(floor)
+}
+
+/// Whether every height `s` of the Bézier patch with homogeneous points `points` along
+/// the cone's unit axis keeps `|R(s)| > √below |s|` (`R = r + t |a| s`): the cone with
+/// `|a|² = 1 + δ`, `δ ≥ −below`, has a point at each of them ([`distance_bound`]). The
+/// heights lie between the Euclidean points' (the patch is in their convex hull, `s`
+/// linear), widened by their rounding; `R` keeps one sign over them, so `|R(s)| − √below |s|`
+/// is linear between the ends and 0 and is checked there. Not a number fails.
+fn clear_of_apex<'a>(
+    points: impl Iterator<Item = &'a crate::nurbs::math::CPoint>,
+    origin: Vec3,
+    axis: Vec3,
+    radius: f64,
+    tan_angle: f64,
+    below: f64,
+) -> bool {
+    let length = axis.length();
+    if !(length > 0.0 && length.is_finite()) {
+        return false;
+    }
+    let unit = axis * (1.0 / length);
+    let (mut lo, mut hi, mut size) = (f64::INFINITY, f64::NEG_INFINITY, 0.0_f64);
+    for c in points {
+        let w = if c.w == NOW { 1.0 } else { c.w };
+        // (not a number is not positive)
+        if w.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+            return false;
+        }
+        let x = Vec3::new(c.x, c.y, c.z) * (1.0 / w) - origin;
+        let s = x.dot(unit);
+        lo = lo.min(s);
+        hi = hi.max(s);
+        size = size.max(x.x.abs().max(x.y.abs()).max(x.z.abs()));
+    }
+    // each height's rounding: the division, the move to the origin, the unit axis and the
+    // dot product, a few roundings of the coordinates' size each
+    let spread =
+        32.0 * f64::EPSILON * (size + origin.x.abs().max(origin.y.abs()).max(origin.z.abs()));
+    let (lo, hi) = (lo - spread, hi + spread);
+    if !(lo <= hi && spread.is_finite()) {
+        return false;
+    }
+    let slope = tan_angle * length;
+    let r_of = |s: f64| radius + slope * s;
+    // `R`'s own rounding at a height
+    let r_err = |s: f64| 4.0 * f64::EPSILON * (radius.abs() + (slope * s).abs());
+    let (r_lo, r_hi) = (r_of(lo), r_of(hi));
+    let same_sign = (r_lo - r_err(lo) > 0.0 && r_hi - r_err(hi) > 0.0)
+        || (r_lo + r_err(lo) < 0.0 && r_hi + r_err(hi) < 0.0);
+    if !same_sign {
+        return false;
+    }
+    let root = below.sqrt() * (1.0 + 4.0 * f64::EPSILON);
+    let clear = |s: f64| r_of(s).abs() - r_err(s) > root * s.abs();
+    clear(lo) && clear(hi) && (!(lo < 0.0 && hi > 0.0) || clear(0.0))
+}
+
+/// `a`'s equation over a Bézier patch in its homogeneous coordinates ([`lies_on`]).
+struct Residual {
+    /// Its Bernstein coefficients.
+    coefficients: Vec<f64>,
+    /// The rounding each is computed within.
+    tol: f64,
+    /// The equation's degree.
+    degree: usize,
+    /// The largest absolute homogeneous term, `|H| + |O| W`.
+    absolute: f64,
+    /// The largest weight.
+    wmax: f64,
+    /// The least weight.
+    least_weight: f64,
+}
+
+impl Residual {
+    /// Every coefficient within its rounding (not a number is not).
+    fn within(&self) -> bool {
+        self.coefficients.iter().all(|v| {
+            matches!(
+                v.abs().partial_cmp(&self.tol),
+                Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
+            )
+        })
+    }
 }
 
 pub(crate) const OP_EXACT: &str = "surface::implicit::check_exact_net";
@@ -453,13 +975,13 @@ fn curve_segments(curve: &BSplineCurve) -> Result<(Vec<CurveSegment>, Vec3)> {
     let nurb = curve
         .nurb
         .as_ref()
-        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the B-spline curve has no NURB"))?;
+        .ok_or_else(|| SolidError::surface(OP_EXACT, SurfaceFailure::CurveWithoutNurb))?;
     let w_of = |w: f64| if w == NOW { 1.0 } else { w };
     let origin = nurb
         .cpts()
         .first()
         .map(|c| Vec3::new(c.x, c.y, c.z) * (1.0 / w_of(c.w)))
-        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the curve has no control points"))?;
+        .ok_or_else(|| SolidError::surface(OP_EXACT, SurfaceFailure::CurveWithoutControlPoints))?;
     let mut out = Vec::new();
     for seg in nurb.decompose_bez()? {
         let p = seg.degree();
@@ -846,15 +1368,17 @@ fn lies_on_canal(
     map: &LeaderMap,
     radius: f64,
 ) -> Result<bool> {
-    let nurb = form
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the B-spline surface has no NURB"))?;
+    let nurb = form.gw_nurb().ok_or_else(|| {
+        Failure::new(OP_EXACT, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
     let (segs, o) = curve_segments(spine)?;
+    // `curve_segments` above has returned `CurveWithoutNurb` for a spine without its NURB
     let spine_breaks = spine
         .nurb
         .as_ref()
-        .map(|n| breaks(n.knots()))
-        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the spine has no NURB"))?;
+        .map_or_else(Vec::new, |n| breaks(n.knots()));
     let (ub, vb) = (breaks(nurb.u_knots()), breaks(nurb.v_knots()));
     let along = if map.along_v { &vb } else { &ub };
     // the rounding of placing a span on the spine: of a + b w and of the spine's knots
@@ -1199,8 +1723,29 @@ impl AnalyticSupport {
     fn on_form(&self, k: &Kernel, form: &BSplineSurface) -> Result<Surface> {
         let form = form.copy();
         let mut surface = recognise(k, self.kind(), &form)?.ok_or_else(not_form)?;
+        // Recover the generator's height interval from its actual endpoints. The
+        // recogniser supplies the swap and inside-out conventions, but its fitted
+        // height datum and span can retain amplified circle-centre rounding.
+        let axial_anchors = match (self, surface.kind()) {
+            (Self::Cylinder { .. } | Self::Cone { .. }, SurfaceKind::Cone(c)) => {
+                let d = form.natural_uv_domain();
+                let end = if c.rev.swap_uv {
+                    Vec2::new(d.u_max(), d.v_min())
+                } else {
+                    Vec2::new(d.u_min(), d.v_max())
+                };
+                let anchor = |uv| -> Result<(Vec3, f64)> {
+                    Ok((
+                        form.evaluate_point(uv)?,
+                        surface.convert_uv_from_nurbs_to_step(k, uv)?.y,
+                    ))
+                };
+                Some([anchor(d.min())?, anchor(end)?])
+            }
+            _ => None,
+        };
         // the recognised surface gives its conventions only (its frame turn, sweep, generator
-        // range and swap), as in `derive`: the kind and the numbers are this support's. The
+        // direction and swap), as in `derive`: the kind and the numbers are this support's. The
         // numbers recognition recomputed are not compared with the support's, because it
         // recomputes them from the control points and so reproduces a support's own numbers
         // only to rounding (#2554), and far from the world origin it reads a cylinder as a cone
@@ -1211,7 +1756,7 @@ impl AnalyticSupport {
         // and the sweep converter carry, so that `of` reads the support back unchanged
         match (surface.kind_mut(), *self) {
             (SurfaceKind::Cone(c), Self::Cylinder { placement, radius }) => {
-                on_axis_from(&mut c.rev, placement)?;
+                on_axis_from(&mut c.rev, placement, axial_anchors.ok_or_else(not_form)?)?;
                 c.base_radius = radius;
                 c.semi_angle_deg = 0.0;
                 c.cylinder = true;
@@ -1225,7 +1770,7 @@ impl AnalyticSupport {
                     semi_angle_deg,
                 },
             ) => {
-                on_axis_from(&mut c.rev, placement)?;
+                on_axis_from(&mut c.rev, placement, axial_anchors.ok_or_else(not_form)?)?;
                 c.base_radius = base_radius;
                 c.semi_angle_deg = semi_angle_deg;
                 c.rev.base = form.copy();
@@ -1243,10 +1788,7 @@ impl AnalyticSupport {
                     minor_radius,
                 },
             ) => {
-                t.base.position = placement;
-                t.major_radius = major_radius;
-                t.minor_radius = minor_radius;
-                t.base.base = form.copy();
+                t.on_support(k, placement, major_radius, minor_radius, form.copy())?;
             }
             _ => return Err(not_form()),
         }
@@ -1262,25 +1804,41 @@ fn not_form() -> SolidError {
     )
 }
 
-/// A cylinder's or cone's recognised parametrisation carried by the support's own
-/// `placement`: its heights are measured along the axis from the placement's origin, so the
-/// recognised heights move by how far along the axis the recognised origin lies from it.
-/// The record puts a frame's origin anywhere on the axis (a hole's at the solid's floor, its
-/// form from the face's own bottom); the point at each parameter is then unchanged, which
-/// [`evaluates_as`] proves. A placement off the axis or turned about it is not the form's
-/// parametrisation, and is refused there.
-///
-/// The generator line's parameters are the heights too, so it moves with them: its STEP
-/// interval stays the surface's v interval, as the kernel's check requires
-/// (`SmSurfOfRevolution::Test` #2, `SmCone::Test` #1), and its points stay where they are.
+/// Carry the recognised generator's conventions onto the support's own axis. Its
+/// endpoint heights are projected from the form, avoiding a fitted circle centre's
+/// axial rounding in either the height datum or span. The original converted heights
+/// determine their order for inside-out surfaces. The generator line is reparameterised
+/// with the same affine map, keeping its NURBS points and matching the surface interval.
+/// A placement off the axis or turned about it is still refused by `evaluates_as`.
 fn on_axis_from(
     rev: &mut crate::surface::surf_of_revolution::SurfOfRevolution,
     placement: Axis2Placement,
+    anchors: [(Vec3, f64); 2],
 ) -> Result<()> {
     use crate::curve::curve::CurveKind;
-    let h = (rev.position.origin() - placement.origin()).dot(placement.z_axis());
+    use crate::geom::extent1d::Extent1d;
+    let [(p0, h0), (p1, h1)] = anchors;
+    let project = |p: Vec3| (p - placement.origin()).dot(placement.z_axis());
+    let (lo, hi) = if h0 < h1 {
+        (project(p0), project(p1))
+    } else {
+        (project(p1), project(p0))
+    };
     let d = rev.anal_uv_domain;
-    rev.anal_uv_domain = Extent2d::from_bounds(d.u_min(), d.v_min() + h, d.u_max(), d.v_max() + h);
+    let old_length = d.v_max() - d.v_min();
+    let new_length = hi - lo;
+    if old_length <= 0.0 || new_length <= 0.0 {
+        return Err(not_form());
+    }
+    let scale = new_length / old_length;
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err(not_form());
+    }
+    let offset = lo - scale * d.v_min();
+    if !offset.is_finite() {
+        return Err(not_form());
+    }
+    rev.anal_uv_domain = Extent2d::from_bounds(d.u_min(), lo, d.u_max(), hi);
     rev.position = placement;
     match rev
         .gen_curve
@@ -1288,7 +1846,13 @@ fn on_axis_from(
         .map(crate::curve::curve::Curve::kind_mut)
     {
         Some(CurveKind::Line(line)) => {
-            line.shift_step_parameter(h);
+            let line_scale = line.line_scale() / scale;
+            if !line_scale.is_finite() || line_scale == 0.0 {
+                return Err(not_form());
+            }
+            line.set_line_scale(line_scale);
+            line.shift_step_parameter(offset);
+            line.set_analytic_domain(Extent1d::from_min_max(lo, hi));
             Ok(())
         }
         _ => Err(SolidError::invalid_input(
@@ -1396,6 +1960,34 @@ fn recognise(k: &Kernel, kind: SupportKind, form: &BSplineSurface) -> Result<Opt
 /// Those of the parameter conversion and the evaluations and of the form's knots.
 fn evaluates_as(k: &Kernel, surface: &Surface, form: &BSplineSurface) -> Result<bool> {
     Ok(evaluation_margin(k, surface, form)?.is_some_and(|m| m <= 1.0))
+}
+
+/// [`evaluates_as`]'s ratio of distance to bound between the analytic surface's STEP point
+/// at `step_uv` and the point `f` a caller says the form `form` has there (infinite for a
+/// distance that is not a number): at most 1 where the two agree within the rounding
+/// [`evaluates_as`] derives at that STEP parameter. `None` for a surface the bound does not
+/// cover. A certificate of one parameter pair, for checking an evaluation or a conversion
+/// a caller made (`f` the form's point at the NURB parameter the conversion pairs with
+/// `step_uv`).
+///
+/// # Errors
+///
+/// Those of the STEP evaluation and of the form's net.
+pub fn evaluation_ratio_of(
+    k: &Kernel,
+    surface: &Surface,
+    form: &BSplineSurface,
+    step_uv: Vec2,
+    f: Vec3,
+) -> Result<Option<f64>> {
+    let (net, p, q) = euclidean_net(form)?;
+    let size = net.iter().flatten().fold(0.0_f64, |a, x| a.max(x.length()));
+    let Some(r) = Rounding::of(surface, form.is_rational(), p, q, size, &net)? else {
+        return Ok(None);
+    };
+    let s = surface.evaluate_step_point(k, step_uv)?;
+    let ratio = (s - f).length() / r.at(step_uv, s, f);
+    Ok(Some(if ratio.is_nan() { f64::INFINITY } else { ratio }))
 }
 
 /// [`evaluates_as`]'s largest ratio of distance to bound over the Greville points (infinite
@@ -1673,7 +2265,12 @@ fn euclidean_net(form: &BSplineSurface) -> Result<(Vec<Vec<Vec3>>, usize, usize)
     for (i, row) in net.iter_mut().enumerate() {
         for j in 0..nv {
             let c = cps.get(i * nv + j).ok_or_else(|| {
-                SolidError::surface_failed(OP_DERIVE, "the control point is outside the net")
+                SolidError::surface(
+                    OP_DERIVE,
+                    SurfaceFailure::Defect {
+                        why: "the net has no control point (i, j) with i < nu and j < nv, though `control_points` returns the (n + 1)(m + 1) points of the net's rows, each of which holds m + 1 points by `srf_basic::Surface`'s invariant",
+                    },
+                )
             })?;
             let w = if c.w == NOW { 1.0 } else { c.w };
             row.push(Vec3::new(c.x, c.y, c.z) * (1.0 / w));
@@ -1683,6 +2280,27 @@ fn euclidean_net(form: &BSplineSurface) -> Result<(Vec<Vec<Vec3>>, usize, usize)
         net,
         form.degree(SurfParamType::U),
         form.degree(SurfParamType::V),
+    ))
+}
+
+/// The circle of a rational quadratic arc from its control triangle `p0`, `p1`, `p2` (its
+/// ends and its tangents' intersection): its centre and radius together from the endpoint
+/// tangent and the chord, its plane's normal, and the triangle's doubled area, which says how
+/// well the triangle fixes that plane (The NURBS Book, section 7.3). `None` for a degenerate
+/// triangle.
+fn control_circle(p0: Vec3, p1: Vec3, p2: Vec3) -> Option<(Vec3, f64, Vec3, f64)> {
+    let leg = p1 - p0;
+    let chord = p2 - p0;
+    let tangent = leg.unitize().ok()?;
+    let across = chord.unitize().ok()?;
+    let normal = leg.cross(chord).unitize().ok()?;
+    let radius = leg.length() * tangent.dot(across) / tangent.cross(across).length();
+    let centre = p0 + normal.cross(tangent) * radius;
+    (radius.is_finite() && radius > 0.0).then_some((
+        centre,
+        radius,
+        normal,
+        leg.cross(chord).length(),
     ))
 }
 
@@ -1715,8 +2333,9 @@ impl AnalyticSupport {
     /// sphere or torus as the kernel recognises it in the form ([`recognise`]: the
     /// recognisers `CopyAndAddAnalytics` runs), on the form's own frame, sweep, generator
     /// range and swap, so that it is the form's parametrisation, not only its point set.
-    /// Exact to rounding: a rational NURBS represents these surfaces exactly.
-    /// [`AnalyticSupport::build`] then checks the form against the derived surface.
+    /// Cylinders, cones and tori take their numbers from the form's control circles;
+    /// recognition supplies their conventions. A rational NURBS represents these surfaces
+    /// exactly. [`AnalyticSupport::build`] checks the form against the derived surface.
     ///
     /// # Errors
     ///
@@ -1806,26 +2425,91 @@ impl AnalyticSupport {
             (SupportKind::Cone, Self::Cone { .. }) => {
                 Self::revolved_from_rows(recognised, false, &net, form).ok_or_else(not_kind)
             }
+            (SupportKind::Torus, Self::Torus { placement, .. }) => {
+                // Use a Bezier patch: after knot insertion the first three controls of
+                // the whole net need not be an arc's endpoints and tangent intersection.
+                let patches = decompose_to_bez(form.gw_nurb().ok_or_else(not_kind)?)?;
+                let patch = patches
+                    .first()
+                    .and_then(|row| row.first())
+                    .ok_or_else(not_kind)?;
+                let net: Vec<Vec<Vec3>> = patch
+                    .rows()
+                    .map(|row| {
+                        row.iter()
+                            .map(|c| {
+                                let w = if c.w == NOW { 1.0 } else { c.w };
+                                Vec3::new(c.x, c.y, c.z) * (1.0 / w)
+                            })
+                            .collect()
+                    })
+                    .collect();
+                Self::torus_from_net(placement, &net).ok_or_else(not_kind)
+            }
             (kind, other) if other.kind() == kind => Ok(other),
             _ => Err(not_kind()),
         }
     }
 
+    /// A torus's circles from its quadratic boundary control triangles, rather than a fit
+    /// through evaluated points. The sweep circle fixes the axis; the meridian circle
+    /// fixes the tube centre and radius together (The NURBS Book, sections 7.3 and 7.5).
+    fn torus_from_net(placement: Axis2Placement, net: &[Vec<Vec3>]) -> Option<Self> {
+        let at = |i: usize, j: usize| net.get(i).and_then(|r| r.get(j)).copied();
+        let circle = control_circle;
+        let boundary = |along_u: bool, fixed: usize| {
+            if along_u {
+                circle(at(0, fixed)?, at(1, fixed)?, at(2, fixed)?)
+            } else {
+                circle(at(fixed, 0)?, at(fixed, 1)?, at(fixed, 2)?)
+            }
+        };
+        // Either boundary sweep can collapse on the axis. Use the boundary with
+        // the larger control triangle to recover each direction's plane robustly.
+        let strongest = |along_u| {
+            [0, 2]
+                .into_iter()
+                .filter_map(|fixed| boundary(along_u, fixed))
+                .max_by(|a, b| a.3.total_cmp(&b.3))
+        };
+        let a = strongest(true)?;
+        let b = strongest(false)?;
+        let sweep_along_u = a.2.dot(placement.z_axis()).abs() >= b.2.dot(placement.z_axis()).abs();
+        let sweep = if sweep_along_u { a } else { b };
+        // Keep the meridian at the start of the sweep: its centre defines the
+        // support's radial direction, including when its first point is on-axis.
+        let tube = boundary(!sweep_along_u, 0)?;
+        let mut axis = sweep.2;
+        if axis.dot(placement.z_axis()) < 0.0 {
+            axis = -axis;
+        }
+        let origin = sweep.0 + axis * (tube.0 - sweep.0).dot(axis);
+        let radial = tube.0 - origin;
+        let major_radius = radial.length();
+        let x = radial.unitize().ok()?;
+        Some(Self::Torus {
+            placement: Axis2Placement::from_stored(origin, x, axis.cross(x)),
+            major_radius,
+            minor_radius: tube.1,
+        })
+    }
+
     /// A cylinder's or cone's numbers read straight off its NURBS form's control structure
     /// (#15010): the form's circles are its rows across the generator, each a rational arc
-    /// whose on-curve control points (those of the end weight) lie on its circle, so each
-    /// row's centre is the circumcentre of three of them and its radius their distance from
-    /// it. The axis is a cylinder's columns' direction (its generators) through the first
-    /// row's centre, or the line through a cone's first and last rows' centres, the origin the
-    /// point of it nearest the recogniser's, the x axis the recogniser's made square to it, the
-    /// cone's angle the radii's change along it. No fitting and no long chains: the numbers are
-    /// the stored control points' to their rounding, where the recognisers' chained
-    /// computations tilt the axis by about 1e-13 (an ulp of the origin's size), which a form
+    /// whose endpoint tangent and chord recover its centre and radius together. A cylinder
+    /// keeps that pair from the first row; averaging independently recovered radii breaks
+    /// their correlated rounding on shallow arcs. The axis is a cylinder's columns' direction
+    /// (its generators) through the first row's centre, or a cone's circular-row normal. The
+    /// origin is the point of the axis nearest the recogniser's, the x axis the recogniser's
+    /// made square to it, and the cone's angle the radii's change along it. No fitting and
+    /// no long chains: the numbers are the stored control points' to their rounding. The
+    /// recognisers' chained computations tilt the axis by about 1e-13 (an ulp of the origin's
+    /// size), which a form
     /// far from the world origin turns into a parametrisation `build` refuses. The
-    /// recogniser's frame turn, sweep, generator range and swap are kept: they are
+    /// recogniser's frame turn, sweep, generator direction and swap are kept: they are
     /// conventions, not numbers. A row collapsed to one point (a cone's apex) is the axis's
     /// point of radius 0. `None` where the form gives no such rows (fewer than two circles,
-    /// or three on-curve points in line).
+    /// or a degenerate tangent and chord).
     fn revolved_from_rows(
         recognised: Self,
         cylinder: bool,
@@ -1861,9 +2545,11 @@ impl AnalyticSupport {
         };
         let along_v = spread(true) <= spread(false);
         let (rows, len) = if along_v { (nu, nv) } else { (nv, nu) };
-        // each row's circle from its first rational quadratic arc, control points p0, p1, p2:
-        // the tangents at p0 and p2 meet at p1, so the centre lies on the line from p1 through
-        // the chord's midpoint m, where |c - p1| |m - p1| = |p0 - p1|^2 (the right angle at p0)
+        // Each row's circle from its first rational quadratic arc, control points p0, p1,
+        // p2 (The NURBS Book, sections 7.3 and 7.5): the angle between its first tangent
+        // leg and chord is half the sweep, so r = |leg| cot(half sweep). Build the centre
+        // from p0 along the inward normal by r: the radius and centre then reproduce p0
+        // together, without a shallow arc's circumcentre rounding shifting it off its frame.
         let degree = form.degree(if along_v {
             crate::nurbs::b_spline_surface::SurfParamType::V
         } else {
@@ -1872,7 +2558,7 @@ impl AnalyticSupport {
         if degree != 2 || len < 3 {
             return None;
         }
-        let circle = |r: usize| -> Option<(Vec3, f64)> {
+        let circle = |r: usize| -> Option<(Vec3, f64, Vec3)> {
             let point = |c: usize| if along_v { at(r, c) } else { at(c, r) };
             let (p0, p1, p2) = (point(0)?, point(1)?, point(2)?);
             // a row collapsed to one point is a cone's apex: a point of the axis, of radius
@@ -1886,43 +2572,53 @@ impl AnalyticSupport {
                 .filter_map(point)
                 .all(|q| (q - p0).length() <= gamma(4) * size);
             if collapsed {
-                return Some((p0, 0.0));
+                return Some((p0, 0.0, Vec3::ZERO));
             }
-            let m = (p0 + p2) * 0.5;
-            let to_m = m - p1;
-            let mm = to_m.dot(to_m);
-            if mm.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
-                return None;
-            }
-            let side = p0 - p1;
-            let centre = p1 + to_m * (side.dot(side) / mm);
-            let radius = ((p0 - centre).length() + (p2 - centre).length()) * 0.5;
+            let leg = p1 - p0;
+            let chord = p2 - p0;
+            let normal = leg.cross(chord);
+            let unit = |v: Vec3| {
+                let length = v.length();
+                (length > 0.0 && length.is_finite()).then(|| v * (1.0 / length))
+            };
+            let tangent = unit(leg)?;
+            let across = unit(chord)?;
+            let inward = unit(normal)?.cross(tangent);
+            let radius = leg.length() * tangent.dot(across) / tangent.cross(across).length();
+            let centre = p0 + inward * radius;
             (centre.x.is_finite() && centre.y.is_finite() && centre.z.is_finite() && radius > 0.0)
-                .then_some((centre, radius))
+                .then_some((centre, radius, normal))
         };
-        let circles: Vec<(Vec3, f64)> = (0..rows).filter_map(circle).collect();
-        let (&(c0, r0), &(c1, r1)) = (circles.first()?, circles.last()?);
+        let circles: Vec<(Vec3, f64, Vec3)> = (0..rows).filter_map(circle).collect();
+        if circles.len() < 2 {
+            return None;
+        }
+        let (&(c0, r0, _), &(c1, r1, _)) = (circles.first()?, circles.last()?);
         let along = c1 - c0;
         // a cylinder's axis runs along its generators, which are the form's columns: each
         // column's first and last control points differ by the stored extrusion, exactly for
-        // an extruded circle. The rows' centres carry the rounding of a circumcentre, which a
-        // shallow arc amplifies by its radius over its sagitta: on a 20 mm arc of radius
-        // 77.6 mm the centres' line tilts by 1.3e-14, which `build` refuses. A cone's
-        // generators meet at its apex, so its axis is its centres' line.
-        let generator = if cylinder {
+        // an extruded circle. Deriving an axis from the circle centres can amplify their
+        // rounding: on a 20 mm arc of radius 77.6 mm the old centres' line tilted by
+        // 1.3e-14, which `build` refused. A cone's
+        // axis is normal to its circular rows. Use the largest control-polygon normal
+        // to avoid amplifying the centres' rounding by the rows' short separation.
+        let axis_vector = if cylinder {
             let point = |r: usize, c: usize| if along_v { at(r, c) } else { at(c, r) };
             let last = rows.checked_sub(1)?;
             (0..len).try_fold(Vec3::new(0.0, 0.0, 0.0), |g, c| {
                 Some(g + (point(last, c)? - point(0, c)?))
             })?
         } else {
-            along
+            circles
+                .iter()
+                .map(|&(_, _, normal)| normal)
+                .max_by(|a, b| a.length_squared().total_cmp(&b.length_squared()))?
         };
-        let length = generator.length();
+        let length = axis_vector.length();
         if length.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
             return None;
         }
-        let mut axis = generator * (1.0 / length);
+        let mut axis = axis_vector * (1.0 / length);
         if axis.dot(axis_r) < 0.0 {
             axis *= -1.0;
         }
@@ -1939,9 +2635,13 @@ impl AnalyticSupport {
             return None;
         }
         if cylinder {
-            #[allow(clippy::cast_precision_loss)] // a few rows
-            let radius = circles.iter().map(|(_, r)| r).sum::<f64>() / circles.len() as f64;
-            return Some(Self::Cylinder { placement, radius });
+            // Keep the first row's centre and radius together. On a shallow arc their
+            // rounding is correlated: averaging radii from other rows while retaining c0
+            // moves the cylinder off its own endpoints, even with joint circle recovery.
+            return Some(Self::Cylinder {
+                placement,
+                radius: r0,
+            });
         }
         // the radius changes by tan(angle) per unit along the axis
         let tan = (r1 - r0) / along.dot(axis);
@@ -1957,16 +2657,18 @@ impl AnalyticSupport {
         })
     }
 
-    /// Not a support's kind (#2485): the surface of revolution a NURBS form is, as the
-    /// kernel recognises it in the form (`IsNurbSurfaceSurfOfRevolution`, which
-    /// `CopyAndAddAnalytics` runs), on the form's own frame, sweep, generator and swap;
-    /// it takes `form` as its NURB and must evaluate as the form at the form's own
-    /// parameters, as [`AnalyticSupport::build`] requires of a support.
+    /// Not a support's kind (#2485): the surface of revolution a NURBS form is, its numbers
+    /// read off the form's control structure ([`Self::revolution_from_rows`]) on the
+    /// conventions the kernel recognises in the form (`IsNurbSurfaceSurfOfRevolution`, which
+    /// `CopyAndAddAnalytics` runs: its generator, generator range, swap and axis sense); it
+    /// takes `form` as its NURB and must evaluate as the form at the form's own parameters,
+    /// as [`AnalyticSupport::build`] requires of a support.
     ///
     /// # Errors
     ///
-    /// `InvalidInput` where the form is no surface of revolution or is not the recognised
-    /// one's parametrisation; those of the recogniser and the evaluations.
+    /// `InvalidInput` where the form is no surface of revolution, has no circular control
+    /// row, or is not the derived one's parametrisation; those of the recogniser, the
+    /// derivation and the evaluations.
     pub fn derive_revolution(k: &Kernel, form: &BSplineSurface) -> Result<Surface> {
         use crate::surface::surf_of_revolution::SurfOfRevolution;
         let not_kind = || {
@@ -1976,17 +2678,202 @@ impl AnalyticSupport {
             )
         };
         let test = Surface::from(form.copy());
-        let mut rev = match SurfOfRevolution::is_nurb_surface_surf_of_revolution(k, &test, 1.0) {
+        let recognised = match SurfOfRevolution::is_nurb_surface_surf_of_revolution(k, &test, 1.0) {
             Ok(Some(rev)) => rev,
             Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
             Ok(None) | Err(_) => return Err(not_kind()),
         };
-        rev.base = form.copy();
-        let surface = Surface::from(rev);
+        let surface = Self::revolution_from_rows(k, &recognised, form)?.ok_or_else(not_kind)?;
         if !evaluates_as(k, &surface, form)? {
             return Err(not_kind());
         }
         Ok(surface)
+    }
+
+    /// The surface of revolution `recognised` in `form`, its numbers read off the form's
+    /// control structure rather than the recogniser's fit, as a cylinder's, cone's and torus's
+    /// are ([`Self::revolved_from_rows`], [`Self::torus_from_net`]). The recogniser's axis is
+    /// the circle's through three evaluated points of the first sweep (`is_arc`); on a sweep of
+    /// a fraction of a degree, 0.45 degrees at a radius of 15.6 mm in
+    /// tangency-labs/solidcraft#17004, that centre lies 4e-11 off sideways and turns the swept
+    /// points past the rounding [`evaluates_as`] forgives.
+    ///
+    /// Every control row across the sweep is a circle, a generator control point turned about
+    /// the axis. Of the rows of the form's Bezier patches, the one whose first sweep span has
+    /// the largest control triangle gives the numbers ([`control_circle`]; a row on the axis has
+    /// none): the axis is the triangle's normal, in the recogniser's sense; the centre is the
+    /// triangle's, moved onto the chord's perpendicular bisector. A short arc's control points
+    /// fix the centre's distance along the bisector only to their rounding over the arc's angle
+    /// squared, but the bisector itself to that over the angle; a centre off along the bisector
+    /// moves the swept points by the square of the sweep, one off across it turns them by the
+    /// sweep. The x axis points to the start of the sweep circle on which the surface's polar
+    /// converter measures the NURB's angles (`RebuildPolarConverter`: the sweep iso at the
+    /// generator's start, or at 0.45 of its range where that one lies on the axis), and the
+    /// sweep ends at the angle of that circle's end. Another row's start is turned from it by
+    /// the net's rounding, and every converted angle with it: 5e-14 radians between the
+    /// generator's ends on a 286 degree sweep in #17004's body. The recogniser's generator,
+    /// generator range and swap are kept, and its origin's height on the axis: they are
+    /// conventions, not numbers. `None` where no row has a triangle or both sweep isos lie on
+    /// the axis.
+    ///
+    /// # Errors
+    ///
+    /// Those of the form's control net and Bezier decomposition, its sweep iso and that one's
+    /// evaluation, the generator's copy,
+    /// [`SurfOfRevolution::new`](crate::surface::surf_of_revolution::SurfOfRevolution::new)
+    /// and its reparameterisation.
+    fn revolution_from_rows(
+        k: &Kernel,
+        recognised: &crate::surface::surf_of_revolution::SurfOfRevolution,
+        form: &BSplineSurface,
+    ) -> Result<Option<Surface>> {
+        use crate::math::EFF_ZERO;
+        use crate::nurbs::b_spline_surface::{IsoCurveOptions, SurfParamType};
+        use crate::surface::surf_of_revolution::SurfOfRevolution;
+        let Some(nurb) = form.gw_nurb() else {
+            return Ok(None);
+        };
+        let euclid = |c: &crate::nurbs::math::CPoint| {
+            let w = if c.w == NOW { 1.0 } else { c.w };
+            Vec3::new(c.x, c.y, c.z) * (1.0 / w)
+        };
+        let patches: Vec<Vec<Vec<Vec<Vec3>>>> = decompose_to_bez(nurb)?
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|patch| {
+                        patch
+                            .rows()
+                            .map(|r| r.iter().map(euclid).collect())
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect();
+        // the sweep runs along u unless the recogniser swapped it
+        let sweep_along_u = !recognised.swap_uv;
+        // the patch of the first span along the sweep and span `g` along the generator
+        let patch = |g: usize| -> Option<&Vec<Vec<Vec3>>> {
+            if sweep_along_u {
+                patches.first()?.get(g)
+            } else {
+                patches.get(g)?.first()
+            }
+        };
+        // a patch's control point `j` along the sweep of its generator row `r`
+        let at = |net: &Vec<Vec<Vec3>>, r: usize, j: usize| -> Option<Vec3> {
+            if sweep_along_u {
+                net.get(j)?.get(r).copied()
+            } else {
+                net.get(r)?.get(j).copied()
+            }
+        };
+        let generator_spans = if sweep_along_u {
+            patches.first().map_or(0, Vec::len)
+        } else {
+            patches.len()
+        };
+        let mut best: Option<(f64, Vec3, Vec3, Vec3, Vec3)> = None;
+        for g in 0..generator_spans {
+            let Some(first) = patch(g) else {
+                return Ok(None);
+            };
+            let rows = if sweep_along_u {
+                first.first().map_or(0, Vec::len)
+            } else {
+                first.len()
+            };
+            for r in 0..rows {
+                let (Some(p0), Some(p1), Some(p2)) =
+                    (at(first, r, 0), at(first, r, 1), at(first, r, 2))
+                else {
+                    return Ok(None);
+                };
+                let Some((centre, _, normal, area)) = control_circle(p0, p1, p2) else {
+                    continue;
+                };
+                if best.as_ref().is_none_or(|b| area > b.0) {
+                    best = Some((area, centre, normal, p0, p2));
+                }
+            }
+        }
+        let Some((_, centre, normal, p0, p2)) = best else {
+            return Ok(None);
+        };
+        // the sweep circle the polar converter measures the NURB's angles on
+        // (`RebuildPolarConverter`): the sweep iso at the generator's start, or at 0.45 of
+        // its range where that one lies on the axis
+        let uv = form.natural_uv_domain();
+        let sweep_iso = |fraction: f64| -> Result<BSplineCurve> {
+            let at = uv.evaluate(fraction, fraction);
+            let (param, value) = if sweep_along_u {
+                (SurfParamType::V, at.y)
+            } else {
+                (SurfParamType::U, at.x)
+            };
+            Ok(form
+                .create_iso_parametric_curve(k, param, value, IsoCurveOptions::default())?
+                .curve)
+        };
+        let mut circle = sweep_iso(0.0)?;
+        if circle.is_degenerate(k, EFF_ZERO, None)? {
+            circle = sweep_iso(0.45)?;
+            if circle.is_degenerate(k, EFF_ZERO, None)? {
+                return Ok(None);
+            }
+        }
+        let ends = circle.natural_interval();
+        let (start, stop) = (
+            circle.evaluate_point(ends.min())?,
+            circle.evaluate_point(ends.max())?,
+        );
+        let position = recognised.position;
+        let axis = if normal.dot(position.z_axis()) < 0.0 {
+            -normal
+        } else {
+            normal
+        };
+        let mid = (p0 + p2) * 0.5;
+        let Ok(bisector) = axis.cross(p2 - p0).unitize() else {
+            return Ok(None);
+        };
+        let centre = mid + bisector * (centre - mid).dot(bisector);
+        let radial = |p: Vec3| {
+            let d = p - centre;
+            d - axis * d.dot(axis)
+        };
+        let Ok(x) = radial(start).unitize() else {
+            return Ok(None);
+        };
+        let y = axis.cross(x);
+        let end = radial(stop);
+        let domain = recognised.anal_uv_domain;
+        // the turn nearest the recognised sweep's: a sweep past 180 degrees
+        let mut sweep = end.dot(y).atan2(end.dot(x)).to_degrees();
+        sweep += 360.0 * ((domain.max().x - domain.min().x - sweep) / 360.0).round();
+        let origin = centre + axis * (position.origin() - centre).dot(axis);
+        let finite = [origin, x, y]
+            .iter()
+            .all(|v| v.x.is_finite() && v.y.is_finite() && v.z.is_finite());
+        if !finite || !sweep.is_finite() || sweep <= 0.0 {
+            return Ok(None);
+        }
+        let Some(generator) = recognised.gen_curve.as_ref() else {
+            return Ok(None);
+        };
+        let mut rev = SurfOfRevolution::new(
+            k,
+            generator.copy(k)?,
+            origin,
+            x,
+            y,
+            Extent2d::from_bounds(0.0, domain.min().y, sweep, domain.max().y),
+            recognised.swap_uv,
+        )?;
+        // (as the recogniser: the NURB's domain the form's, status ignored)
+        crate::error::ignore_status(rev.reparameterize(k, &form.natural_uv_domain()))?;
+        rev.base = form.copy();
+        Ok(Some(Surface::from(rev)))
     }
 
     /// Its kind, without its parameters.
@@ -1999,5 +2886,508 @@ impl AnalyticSupport {
             Self::Sphere { .. } => SupportKind::Sphere,
             Self::Torus { .. } => SupportKind::Torus,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::math::Point3;
+    use crate::nurbs::b_spline_curve::KnotType;
+    use crate::nurbs::b_spline_surface::{BSplineSurfaceForm, CanonicalSurfaceData};
+    use crate::primitive::api_primitives as ap;
+
+    /// The NURBS form of an analytic surface, and its implicit equation.
+    fn form_and_equation(k: &Kernel, s: &Surface) -> (BSplineSurface, Implicit) {
+        let form = crate::blend::fillet_section::station::as_b_spline(k, s)
+            .unwrap()
+            .unwrap();
+        (
+            form.into_owned(),
+            AnalyticSupport::of(s).unwrap().implicit(),
+        )
+    }
+
+    /// The cone about Z through the origin, radius `radius` there.
+    fn cone(radius: f64, tan_angle: f64) -> Implicit {
+        Implicit::Cone {
+            origin: Vec3::ZERO,
+            axis: Vec3::Z,
+            radius,
+            tan_angle,
+        }
+    }
+
+    /// [`off_surface_bound`] of a plane patch a known distance off a plane: the bilinear
+    /// patch at x = 2 (y, z from 0 to 1) lies 0.5 from the plane x = 1.5, and its equation
+    /// is linear in the homogeneous coordinates (weights 1), so the bound is 0.5 within a
+    /// few roundings (PROVEN: never below the true distance), and on the plane x = 2 only
+    /// the counted rounding (the slack `2 γ₄₈ · 4 · 2 ≈ 8.5e-14`, `4 = |H|∞ + |O|∞ W`, plus
+    /// the coefficients' `τ = γ₃₂ · 4 ≈ 1.4e-14`, under 2e-13). Not a number in a control
+    /// point or in the equation has no bound. Cut from a net a million times larger, the
+    /// same patch carries that net's rounding: at least `2 γ₄₈ · 2e6 · 2 ≈ 4.3e-8`.
+    #[test]
+    fn a_plane_patch_off_a_plane_is_bounded_by_its_distance() {
+        let patch = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(2.0, 0.0, 0.0),
+                Point3::new(2.0, 1.0, 0.0),
+                Point3::new(2.0, 0.0, 1.0),
+                Point3::new(2.0, 1.0, 1.0),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        })
+        .unwrap();
+        let plane = |x: f64| Implicit::Plane {
+            origin: Vec3::new(x, 0.0, 0.0),
+            normal: Vec3::X,
+        };
+        let off = off_surface_bound(&patch, &plane(1.5), &patch)
+            .unwrap()
+            .unwrap();
+        assert!((0.5..=0.5 * (1.0 + 1e-12)).contains(&off), "{off:e}");
+        let on = off_surface_bound(&patch, &plane(2.0), &patch)
+            .unwrap()
+            .unwrap();
+        assert!((0.0..=2e-13).contains(&on), "{on:e}");
+        let large = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(2e6, 0.0, 0.0),
+                Point3::new(2e6, 1.0, 0.0),
+                Point3::new(2e6, 0.0, 1.0),
+                Point3::new(2e6, 1.0, 1.0),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        })
+        .unwrap();
+        let from_large = off_surface_bound(&patch, &plane(2.0), &large)
+            .unwrap()
+            .unwrap();
+        assert!(from_large >= 2.0 * gamma(48) * 2e6 * 2.0, "{from_large:e}");
+        // (not a number in the equation, or in a control point)
+        let nan_plane = Implicit::Plane {
+            origin: Vec3::new(f64::NAN, 0.0, 0.0),
+            normal: Vec3::X,
+        };
+        assert_eq!(off_surface_bound(&patch, &nan_plane, &patch).unwrap(), None);
+        assert_eq!(
+            off_surface_bound(&patch, &cone(1.0, f64::NAN), &patch).unwrap(),
+            None
+        );
+        let nan_patch = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(2.0, 0.0, 0.0),
+                Point3::new(f64::NAN, 1.0, 0.0),
+                Point3::new(2.0, 0.0, 1.0),
+                Point3::new(2.0, 1.0, 1.0),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        });
+        // (a patch so small that its coefficients' rounding `τ` is below
+        // `MIN_POSITIVE / ε`, where underflow is outside the `γ` model: no bound)
+        let tiny = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(2e-300, 0.0, 0.0),
+                Point3::new(2e-300, 1e-300, 0.0),
+                Point3::new(2e-300, 0.0, 1e-300),
+                Point3::new(2e-300, 1e-300, 1e-300),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        })
+        .unwrap();
+        let tiny_plane = Implicit::Plane {
+            origin: Vec3::new(1.5e-300, 0.0, 0.0),
+            normal: Vec3::X,
+        };
+        assert_eq!(off_surface_bound(&tiny, &tiny_plane, &tiny).unwrap(), None);
+        // (not a number in one coordinate of a source point outside the patch, the others
+        // finite: `max` would hide it, and the source's size would not be a number)
+        let mut source = patch.gw_nurb().unwrap().clone();
+        source.cpt_mut(0, 1).unwrap().x = f64::NAN;
+        let source = BSplineSurface::from_nurb(source, true);
+        assert_eq!(
+            off_surface_bound(&patch, &plane(1.5), &source).unwrap(),
+            None
+        );
+        // (a surface that cannot be made from it is refused earlier, as well)
+        if let Ok(nan_patch) = nan_patch {
+            assert_eq!(
+                off_surface_bound(&nan_patch, &plane(2.0), &nan_patch).unwrap_or(None),
+                None
+            );
+        }
+    }
+
+    /// [`off_surface_bound`] of a cylinder r 50, z 0 to 100, as the kernel stores it (a
+    /// rational form, exact in exact arithmetic): within roundings of 0 against its own
+    /// equation, and against the cylinders r 50 ∓ 1e-3 about the same axis, which every
+    /// point of it lies exactly 1e-3 from, at least 1e-3 (PROVEN: never below the true
+    /// distance) and at most 5e-3: `|ρ² − ρ_P²| / ρ_P` is `(ρ + ρ_P) / ρ_P ≈ 2` times the
+    /// distance, and the rational form's weights 1 and √2/2 give coefficients up to `W₀⁻² =
+    /// 2` times the values (ARGUED, so about 4e-3).
+    #[test]
+    fn a_cylinder_is_bounded_by_its_distance_from_a_coaxial_cylinder() {
+        let k = Kernel::default();
+        let s = Surface::from(ap::create_cylinder_surface(&k, Point3::ZERO, 50.0, 100.0).unwrap());
+        let (form, own) = form_and_equation(&k, &s);
+        let on = off_surface_bound(&form, &own, &form).unwrap().unwrap();
+        assert!((0.0..=1e-9).contains(&on), "{on:e}");
+        for r in [50.0 - 1e-3, 50.0 + 1e-3] {
+            let off = off_surface_bound(&form, &cone(r, 0.0), &form)
+                .unwrap()
+                .unwrap();
+            assert!((1e-3..=5e-3).contains(&off), "{r} {off:e}");
+        }
+    }
+
+    /// [`off_surface_bound`] of a frustum r 50 at z 0 to r 30 at z 100 as the kernel
+    /// stores it: within roundings of 0 against its own equation; against the cone of the
+    /// same axis and angle shifted out by 1e-3 in radius (every point of the frustum is
+    /// 1e-3 · cos(semi-angle) from it), at least that distance (PROVEN) and at most eight
+    /// times it: `|ρ² − ρ_P²|` is up to `(50 + 50)` times the radial offset and is divided
+    /// by the least radius 30, the weights give up to 2 more, and the radial offset is
+    /// `√(1 + t²)` times the distance (ARGUED, so about 6.8; MEASURED 6.80). A sphere's
+    /// equation has no bound (`None`).
+    #[test]
+    fn a_cone_is_bounded_by_its_distance_from_a_shifted_cone() {
+        let k = Kernel::default();
+        let s =
+            Surface::from(ap::create_cone_surface(&k, Point3::ZERO, 50.0, 30.0, 100.0).unwrap());
+        let (form, own) = form_and_equation(&k, &s);
+        let on = off_surface_bound(&form, &own, &form).unwrap().unwrap();
+        assert!((0.0..=1e-9).contains(&on), "{on:e}");
+        let Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        } = own
+        else {
+            panic!("{own:?}");
+        };
+        let shifted = Implicit::Cone {
+            origin,
+            axis,
+            radius: radius + 1e-3,
+            tan_angle,
+        };
+        let d = 1e-3 / (1.0 + tan_angle * tan_angle).sqrt();
+        let off = off_surface_bound(&form, &shifted, &form).unwrap().unwrap();
+        assert!(d <= off && off <= 8.0 * d, "{d:e} {off:e}");
+        let sphere = Implicit::Sphere {
+            centre: Vec3::ZERO,
+            radius: 50.0,
+        };
+        assert_eq!(off_surface_bound(&form, &sphere, &form).unwrap(), None);
+    }
+
+    /// A homogeneous point and the length of the longest chain of
+    /// [`CPoint::combine2`](crate::nurbs::math::CPoint::combine2) levels behind it.
+    type Tracked = (crate::nurbs::math::CPoint, usize);
+
+    fn mix(a: f64, x: Tracked, b: f64, y: Tracked) -> Tracked {
+        (
+            crate::nurbs::math::CPoint::combine2(a, x.0, b, y.0),
+            x.1.max(y.1) + 1,
+        )
+    }
+
+    /// One column (or row) of `extract_patch` over `[a, b]`, its loops as written there
+    /// (`a`, `b` inside the domain and off the knots, so nothing snaps).
+    fn extract_line(pts: &[Tracked], p: usize, u: &[f64], a: f64, b: f64) -> Vec<Tracked> {
+        use crate::nurbs::knots::{KnotVector, Side};
+        let kv = KnotVector::from_slice(u).unwrap();
+        let (span_l, mul) = kv.find_span_and_mult(p, a, Side::Left).unwrap();
+        let (span_r, mur) = kv.find_span_and_mult(p, b, Side::Left).unwrap();
+        let (p, span_l, mul, span_r, mur) = (
+            p as isize,
+            span_l as isize,
+            mul as isize,
+            span_r as isize,
+            mur as isize,
+        );
+        let at = |i: isize| u[i as usize];
+        let (is, ie) = (span_l - p, span_r - mur);
+        let n = ie - is;
+        let mut aw: Vec<Tracked> = pts[is as usize..=ie as usize].to_vec();
+        let ll = span_l - p;
+        for i in 1..=p - mul {
+            for j in 0..=p - i - mul {
+                let left = at(ll + i + j);
+                let alf = (a - left) / (at(span_l + j + 1) - left);
+                let (j, oma) = (j as usize, 1.0 - alf);
+                aw[j] = mix(alf, aw[j + 1], oma, aw[j]);
+            }
+        }
+        let (lr, lk) = (span_r - p, n - p + mur);
+        for i in 1..=p - mur {
+            let mut j = p - i - mur;
+            while j >= 0 {
+                let k = (lk + i + j) as usize;
+                let left = at(lr + i + j).max(a);
+                let alf = (b - left) / (at(span_r + j + 1) - left);
+                aw[k] = mix(alf, aw[k], 1.0 - alf, aw[k - 1]);
+                j -= 1;
+            }
+        }
+        aw
+    }
+
+    /// One column (or row) of [`decompose_to_bez`], its loops as written there: the
+    /// Bézier segments.
+    fn decompose_line(pts: &[Tracked], p: usize, u: &[f64]) -> Vec<Vec<Tracked>> {
+        let r = u.len() - 1;
+        let mut bw: Vec<Tracked> = pts[..=p].to_vec();
+        let mut nbw = bw.clone();
+        let (mut al, mut om) = (vec![0.0; p], vec![0.0; p]);
+        let (mut isu, mut ieu) = (p, p + 1);
+        let mut out = Vec::new();
+        while ieu < r {
+            let i0 = ieu;
+            while ieu < r && u[ieu] == u[ieu + 1] {
+                ieu += 1;
+            }
+            let mlu = ieu - i0 + 1;
+            // (the last strip ends at the clamped end, `mlu = p + 1`: no insertion, and
+            // nothing is saved)
+            let ru = p.saturating_sub(mlu);
+            if mlu < p {
+                let num = u[ieu] - u[isu];
+                for i in (mlu + 1..=p).rev() {
+                    let x = num / (u[isu + i] - u[isu]);
+                    al[i - mlu - 1] = x;
+                    om[i - mlu - 1] = 1.0 - x;
+                }
+                for i in 1..=ru {
+                    let su = mlu + i;
+                    for j in (su..=p).rev() {
+                        bw[j] = mix(al[j - su], bw[j], om[j - su], bw[j - 1]);
+                    }
+                    if ieu < r {
+                        nbw[ru - i] = bw[p];
+                    }
+                }
+            }
+            out.push(bw.clone());
+            if ieu < r {
+                for i in ru..=p {
+                    nbw[i] = pts[ieu - p + i];
+                }
+            }
+            isu = ieu;
+            ieu += 1;
+            core::mem::swap(&mut bw, &mut nbw);
+        }
+        out
+    }
+
+    /// The deepest chain over the Bézier patches of `net` (rows u, columns v), decomposed
+    /// as [`decompose_to_bez`] does, each point checked bit-equal to `real`'s.
+    fn deepest(
+        net: &[Vec<Tracked>],
+        p: usize,
+        q: usize,
+        u: &[f64],
+        v: &[f64],
+        real: &[Vec<crate::nurbs::srf_basic::Surface>],
+    ) -> usize {
+        let cols: Vec<Vec<Vec<Tracked>>> = (0..net[0].len())
+            .map(|l| {
+                let col: Vec<Tracked> = net.iter().map(|row| row[l]).collect();
+                decompose_line(&col, p, u)
+            })
+            .collect();
+        let mut depth = 0;
+        for (iu, real_row) in real.iter().enumerate() {
+            assert_eq!(cols[0].len(), real.len());
+            for k in 0..=p {
+                let row: Vec<Tracked> = cols.iter().map(|c| c[iu][k]).collect();
+                let segs = decompose_line(&row, q, v);
+                assert_eq!(segs.len(), real_row.len());
+                for (seg, patch) in segs.iter().zip(real_row) {
+                    let got: Vec<_> = patch.rows().nth(k).unwrap().to_vec();
+                    let want: Vec<_> = seg.iter().map(|t| t.0).collect();
+                    assert_eq!(got, want, "p {p} q {q} strip {iu} row {k}");
+                    depth = seg.iter().fold(depth, |d, t| d.max(t.1));
+                }
+            }
+        }
+        depth
+    }
+
+    /// B7 of #18612's review: [`off_surface_bound`]'s `γ` covers the longest chain of
+    /// knot-insertion levels its patches carry. For degrees 1 to 10 in u and v, on
+    /// nets with simple interior knots (where the decomposition's chains through saved
+    /// points are longest, `p (p − 1) / 2`) and with knots of mixed multiplicity, the
+    /// loops of `extract_patch` and [`decompose_to_bez`] run on tracked points (bit-equal
+    /// to the real ones), from the net itself (`form` as its own `source`) and from every
+    /// patch cut from inside one span to inside the same or a later one. The deepest chain
+    /// `L` must be within [`insertion_levels`] and `γ`'s index at least `8 L + 9` (eight
+    /// roundings a level, one for the size's feedback, eight for the coefficients'
+    /// scale). MEASURED: simple knots give the decomposition alone exactly
+    /// `p (p − 1) / 2 + q (q − 1) / 2`, the cut patches 4 levels at `(1, 1)` (the count's
+    /// 4), 41 at `(9, 1)` and 96 at `(10, 10)` (counted 130). The count before r4,
+    /// `32 (p + q) + 8` from `L ≤ 4 (p + q) − 4`, fails it from `(1, 9)` and `(9, 1)`.
+    #[test]
+    fn the_rounding_count_covers_the_insertion_chains() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as Net;
+        use crate::nurbs::srf_tool::p1::extract_patch;
+        // clamped knots on [0, spans] with interior multiplicities `mults`
+        let knots = |p: usize, mults: &[usize]| {
+            let mut u = vec![0.0; p + 1];
+            for (i, &m) in mults.iter().enumerate() {
+                let t = (i + 1) as f64 + 0.13 * ((i * 7) % 5) as f64;
+                u.extend(std::iter::repeat_n(t, m.min(p)));
+            }
+            let end = (mults.len() + 1) as f64 + 0.5;
+            u.extend(std::iter::repeat_n(end, p + 1));
+            u
+        };
+        let mut worst = 0;
+        for p in 1..=10_usize {
+            for q in 1..=10_usize {
+                let simple = |d: usize| vec![1; d + 2];
+                let mixed = |d: usize| (0..d + 3).map(|i| [1, 2, 1, 3][i % 4]).collect::<Vec<_>>();
+                for (mu, mv) in [(simple(p), simple(q)), (mixed(p), mixed(q))] {
+                    let (u, v) = (knots(p, &mu), knots(q, &mv));
+                    let (rows, cols) = (u.len() - p - 1, v.len() - q - 1);
+                    let net: Vec<Vec<CPoint>> = (0..rows)
+                        .map(|i| {
+                            (0..cols)
+                                .map(|j| {
+                                    let (x, y) = (i as f64, j as f64);
+                                    let w = 1.0 + 0.25 * (1.3 * x + 0.7 * y).sin().abs();
+                                    CPoint::new(
+                                        w * (x + 0.1 * y.sin()),
+                                        w * (y + 0.1 * x.cos()),
+                                        w * (0.3 * x * y).sin(),
+                                        w,
+                                    )
+                                })
+                                .collect()
+                        })
+                        .collect();
+                    let tracked: Vec<Vec<Tracked>> = net
+                        .iter()
+                        .map(|row| row.iter().map(|&c| (c, 0)).collect())
+                        .collect();
+                    let source = Net::new(net, p, q, u.clone(), v.clone()).unwrap();
+                    // the net decomposed as it is
+                    let own = deepest(&tracked, p, q, &u, &v, &decompose_to_bez(&source).unwrap());
+                    // patches cut from it, each from inside a span to inside a later one
+                    // (or the same), the same choice in u and v: the extraction's chains
+                    // feed the decomposition's
+                    let spans = |k: &[f64], d: usize| -> Vec<usize> {
+                        (d..k.len() - d - 1).filter(|&i| k[i] < k[i + 1]).collect()
+                    };
+                    let (su, sv) = (spans(&u, p), spans(&v, q));
+                    let inside = |k: &[f64], i: usize, f: f64| k[i] + f * (k[i + 1] - k[i]);
+                    let mut from_cut = 0;
+                    for a in 0..su.len().max(sv.len()) {
+                        for b in a..su.len().max(sv.len()) {
+                            let pick = |s: &[usize], i: usize| s[i.min(s.len() - 1)];
+                            let (ul, ur) = (
+                                inside(&u, pick(&su, a), 0.37),
+                                inside(&u, pick(&su, b), 0.61),
+                            );
+                            let (vl, vr) = (
+                                inside(&v, pick(&sv, a), 0.41),
+                                inside(&v, pick(&sv, b), 0.58),
+                            );
+                            let rect = crate::nurbs::geom::Rectangle {
+                                ul,
+                                ur,
+                                vb: vl,
+                                vt: vr,
+                            };
+                            let cut = extract_patch(&source, rect).unwrap();
+                            let (_, _, cr, cs) = cut.array_sizes();
+                            let aw: Vec<Vec<Tracked>> = (0..cols)
+                                .map(|l| {
+                                    let col: Vec<Tracked> =
+                                        tracked.iter().map(|row| row[l]).collect();
+                                    extract_line(&col, p, &u, ul, ur)
+                                })
+                                .collect();
+                            let cut_net: Vec<Vec<Tracked>> = (0..aw[0].len())
+                                .map(|i| {
+                                    let row: Vec<Tracked> = aw.iter().map(|c| c[i]).collect();
+                                    extract_line(&row, q, &v, vl, vr)
+                                })
+                                .collect();
+                            let real: Vec<Vec<CPoint>> =
+                                cut.rows().map(<[CPoint]>::to_vec).collect();
+                            let mirror: Vec<Vec<CPoint>> = cut_net
+                                .iter()
+                                .map(|row| row.iter().map(|t| t.0).collect())
+                                .collect();
+                            assert_eq!(real, mirror, "p {p} q {q} box {a} {b}: the extraction");
+                            from_cut = from_cut.max(deepest(
+                                &cut_net,
+                                p,
+                                q,
+                                &cut.u_knots()[..=cr],
+                                &cut.v_knots()[..=cs],
+                                &decompose_to_bez(&cut).unwrap(),
+                            ));
+                        }
+                    }
+                    let chain = own.max(from_cut);
+                    worst = worst.max(chain);
+                    assert!(
+                        chain <= insertion_levels(p, q),
+                        "p {p} q {q}: {chain} levels, {} counted",
+                        insertion_levels(p, q)
+                    );
+                    assert!(
+                        rounding_index(p, q) >= 8 * chain + 9,
+                        "p {p} q {q}: γ index {} below 8 · {chain} + 9",
+                        rounding_index(p, q)
+                    );
+                    // (simple knots: the decomposition alone reaches its count)
+                    if mu.iter().all(|&m| m == 1) && mv.iter().all(|&m| m == 1) {
+                        assert_eq!(own, p * (p - 1) / 2 + q * (q - 1) / 2, "p {p} q {q}");
+                    }
+                }
+            }
+        }
+        assert_eq!(worst, 96, "the deepest chain, at (10, 10)");
     }
 }

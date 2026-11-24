@@ -54,7 +54,9 @@
 //!
 //! **Knots.** The source's net and knots are kept bit for bit (but for the Ruled product
 //! form past its reach, above): the end knot stays at multiplicity `p` as the joint, and the extension's
-//! spans follow it. No knot is removed.
+//! spans follow it. No knot is removed. A candidate whose ends make the knot fixup merge
+//! or spread a span is unproved. The solve can then name a distance from a net that keeps
+//! its knots.
 //!
 //! **Weights.** Every weight control point of the result is positive, which proves `w > 0` on
 //! it. An extension whose weights are not is refused ([`SolidError::ExtendRefused`]) naming a
@@ -90,10 +92,12 @@
 
 use std::cell::Cell;
 
-use crate::error::{Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::tol::scaled_zero2;
 use crate::geom::vector2d::Point2;
+use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
 use crate::math::EFF_ZERO_PARAM;
 use crate::nurbs::b_spline_surface::BSplineSurface;
@@ -171,6 +175,12 @@ pub enum ExtendRefusal {
     /// `1e-6` of the distance): the refusal names the longest distance found that is, if
     /// any.
     NotExact,
+    /// A curve made longer keeping its control polygon's proportions
+    /// ([`crate::nurbs::crv_basic::Curve::extend_keeping_proportion`]) whose growth in arc
+    /// length is not certified within its tolerance of the length asked: the stretch that
+    /// reaches it was not bracketed or not found, or the arc lengths' certified enclosures
+    /// were not narrow enough. Names no distance.
+    LengthNotMet,
 }
 
 /// An extended surface and its certified bounds.
@@ -281,7 +291,7 @@ impl Surface {
     /// `at`'s side (the same side coordinate as `dom`'s) rather than `dom`'s: where earlier
     /// sides grew the box, `at` is the face's own extent along the side, so the distance is
     /// met at the face, not where the surface has grown ([`Surface::extended_sides`]).
-    pub(super) fn extended_by_distance_at(
+    pub fn extended_by_distance_at(
         &self,
         k: &Kernel,
         dom: &Extent2d,
@@ -309,9 +319,12 @@ impl Surface {
                 reason: "the surface has no exact B-spline form",
             },
         )?;
-        let net = form
-            .gw_nurb()
-            .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+        // the caller's surface's own NURB (a B-spline whose data was never read or set has none)
+        let net = form.gw_nurb().ok_or_else(|| {
+            Failure::new(OP, SurfaceFailure::NoNurb)
+                .with_status(SM_ERR)
+                .into_error()
+        })?;
         let degree = if side.is_u() { net.p() } else { net.q() };
         let local = Local::of(net, side);
         let fixed = side.at(dom);
@@ -330,6 +343,9 @@ impl Surface {
             }
             let bound = grown.bound();
             let out = grown.surface(side)?;
+            if !knot_fixup_preserves(out.u_knots()) || !knot_fixup_preserves(out.v_knots()) {
+                return Ok(Some((None, f64::INFINITY)));
+            }
             Ok(Some((
                 Some(Surface::from(BSplineSurface::from_gw_nurb(&out))),
                 bound,
@@ -420,9 +436,14 @@ impl Surface {
                 "the extension is not a B-spline",
             ));
         };
-        let out = b
-            .gw_nurb()
-            .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+        let out = b.gw_nurb().ok_or_else(|| {
+            SolidError::surface(
+                OP,
+                SurfaceFailure::Defect {
+                    why: "the extension has no NURB, though the continuation built it from a NURB",
+                },
+            )
+        })?;
         let regraded = if side.is_u() {
             out.q() != net.q()
         } else {
@@ -519,12 +540,19 @@ fn widened(
         .and_then(|i| sides.get(i))
         .copied()
         .ok_or_else(op_err)?;
-    let across = grown.length_across_side(k, &on, to, REL)?;
-    // the widened's length across is the distance, by its closed form: checked as any
-    // extension's is
+    // Keep the existing stored-net resolution allowance unchanged. Use the general
+    // integrator where it certifies the distance; where its position-sized resolution
+    // cannot, the analytic's local chord/arc can, at the same construction.
+    let mut across = grown.length_across_side(k, &on, to, REL)?;
     if !matches!(says(Some(&across), 0.0, distance), Says::Met) {
-        return Err(not_exact(None));
+        let mut local = analytic::widened_across(k, (s, dom, side), (&grown, &on, to))?;
+        local.resolution = across.resolution;
+        if !matches!(says(Some(&local), 0.0, distance), Says::Met) {
+            return Err(not_exact(None));
+        }
+        across = local;
     }
+    // the widened's length across is the distance, checked as any extension's is
     Ok(Extended {
         surface: grown,
         source: 0.0,
@@ -1300,6 +1328,12 @@ impl Local {
     /// moves it at most `(sqrt 3 err + |S| err_w) / w_min` (a polynomial net's weights are
     /// exactly 1: `sqrt 3 err`, whatever the part's position).
     fn bound(&self) -> f64 {
+        self.bound_about(Vec3::ZERO)
+    }
+
+    /// [`Self::bound`] with the points measured from `origin`: the same homogeneous
+    /// rounding, sized on the local coordinates rather than where the part sits.
+    fn bound_about(&self, origin: Vec3) -> f64 {
         if let Some(b) = self.frame {
             return b;
         }
@@ -1310,7 +1344,12 @@ impl Local {
         for x in self.rows.iter().flatten() {
             let w = if self.rational { x[3] } else { 1.0 };
             wmin = wmin.min(w);
-            pmax = pmax.max((x[0].abs() + x[1].abs() + x[2].abs()) / w.abs());
+            pmax = pmax.max(
+                ((x[0] - origin.x * w).abs()
+                    + (x[1] - origin.y * w).abs()
+                    + (x[2] - origin.z * w).abs())
+                    / w.abs(),
+            );
         }
         let err_w = if self.rational { self.err_w } else { 0.0 };
         // the rounding of this bound itself, a few ulps
@@ -1992,6 +2031,21 @@ fn merge_scale(a: f64, end: f64) -> f64 {
     EFF_ZERO_PARAM.max(scaled_zero2(&a, &end))
 }
 
+/// Every distinct span must survive both knot fixup passes at the scale of the final ends.
+/// The two tests use the same floating-point subtraction and scale as the fixup. Check the
+/// actual result knots, including any interior spans made by the extension.
+fn knot_fixup_preserves(knots: &[f64]) -> bool {
+    let Some((&first, &last)) = knots.first().zip(knots.last()) else {
+        return false;
+    };
+    let scale = merge_scale(first, last);
+    knots.iter().all(|knot| knot.is_finite())
+        && knots.windows(2).all(|pair| match pair {
+            [a, b] => a.to_bits() == b.to_bits() || b - a >= scale,
+            _ => false,
+        })
+}
+
 /// The row's `w_(n-1) / w_n`.
 fn end_ratio(row: &[H]) -> Option<f64> {
     let mut back = row.iter().rev();
@@ -2134,8 +2188,11 @@ fn keeps(net: &Net, out: &Net, side: BoxSide) -> Result<bool> {
 mod analytic;
 mod ball;
 mod blend;
+mod local_iso;
+mod measure;
 mod sides;
+pub(crate) use sides::round_the_axis;
 pub use sides::{ExtendedSides, SideExtension};
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

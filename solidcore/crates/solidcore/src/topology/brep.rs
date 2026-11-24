@@ -15,6 +15,7 @@
 //! | [`p6`]    | see the module                                                  |
 //! | [`p7`]    | see the module                                                  |
 //! | [`planar_section`] | `CreatePlanarSectionCurves` (unit `topology.brep_planar_section`) |
+//! | [`primitive_outward`] | (not upstream) a primitive's volume sign from its closed form |
 //! | [`p8`]    | making faces from surfaces and from loops of curves              |
 //! | [`vertex_fans`] | `SplitVertexByFans`, `JoinVertexFans` (the fork's, `4ecfbab`) |
 //! | [`p10`]   | `MakeTopologyFromData`, `ProjectAndTrim`, `RemoveAllTopology`, `TestClosureSplitRegion` (edge version) |
@@ -38,7 +39,10 @@ pub mod p7;
 pub mod p8;
 pub mod p9;
 pub mod planar_section;
+pub mod primitive_outward;
+pub mod seam_turn;
 pub mod sheet;
+pub mod side_extend;
 pub mod trim_extend;
 pub mod validation;
 pub mod vertex_fans;
@@ -49,7 +53,9 @@ pub use p10::{
     make_topology_from_data, merge_curves_on_surface_through_surface, MakeTopologyOptions,
     TopologyEnv, HEALER_VERSION,
 };
-pub use p2::{is_manifold_solid, is_sheet, shell_vertices, ArenaNotifyState};
+pub use p2::{
+    create_missing_uv_trim_curves, is_manifold_solid, is_sheet, shell_vertices, ArenaNotifyState,
+};
 pub use p3::{
     api_brep_copy, delete_face, new_brep, orient_trimmed_surfaces, topology_ref,
     with_kernel_callbacks, DeleteFaceOptions,
@@ -80,7 +86,8 @@ pub use p9::{make_vertex_loop, orient_sheet_surfaces, OrientSheetNote};
 ///
 /// A sign the enclosure leaves undecided (its interval still holds 0 when refinement ends:
 /// a gap between faces as large as the volume, or the cell budget spent) is "not a solid" on
-/// purpose: a solid is what is proved one, so ops' `finish` refuses the body as `NotSolid`.
+/// purpose: a solid is what is proved one, so ops' `finish` refuses the body as
+/// `NotSolidBecause(VolumeUndecided)`.
 /// A body the enclosure cannot read at all is an error, not `false`: a face with no NURBS form
 /// (an offset surface, as the offset of a round keeps; a curve-bounded or in-volume surface),
 /// a face without trim loops, or weights not proved positive.

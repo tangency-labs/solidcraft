@@ -1,0 +1,8 @@
+Updates: WR-74
+
+#### WR-74 (update, 2026-11-16). `ssi_tangent_contact_points` is removed
+
+The fix is the default and its flag is gone (tangency-labs/solidcraft#14246, group-B batch intersect). `SmAdvSurfaceIntersector::FindInteriorCurves` (`intersect/adv_surface_intersector.rs`) always seeds the tangential contact point search (`adv_surface_intersector/tangent_contacts.rs`) from the leaf pairs it cannot trace, for every intersection that is not a self intersection. Removed: the field `UpstreamFixes::ssi_tangent_contact_points`, the `k` parameter of `push_tangent_seed`, SolidCraft's preset line, its entries in `fixes.json` and `issue_2260`'s list, and every test setting of it.
+
+- **Tests:** `tests/issue_394_ssi_tangent_contact_points.rs` keeps its three closed-form cases on the default kernel (the paraboloid apex, the four points, the y23 tangential point); its three default-kernel "misses" halves are removed. `tests/issue_395_tangential_contact_corpus.rs` now expects the sphere- and paraboloid-on-plane touch points with and without the tracer.
+- **Results:** 11 goldens rows move, each from no touching point to one touching point at the point where the two surfaces meet: `surface.surface_p2` `tc_sphere_plane_point`, `tc_paraboloid_plane_point` (both operand orders; the closed form (0, 0, 0)) and `ssi_adv_ssi_tor_sph_touch_f0_f0`, `topology.face_p3` `touching_cylinder_sphere_{01,10}_tol{1e-4,1e-6}` (the closed form (0, 1, 1)) and `topology.brep_p1` `cross_body_tangent(_reverse)` (the closed form (1/2, 1/2, 0)). The pull request's class table gives the exact check of each row.

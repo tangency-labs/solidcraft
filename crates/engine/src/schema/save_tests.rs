@@ -9,7 +9,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    let keys = ["cache", "compression", "format", "overwrite", "path", "preview"];
+    let keys = ["cache", "compression", "format", "overwrite", "path", "preview", "sign", "signing_key"];
     assert_keys(input_schema_for::<SaveParams>(), &keys);
     assert_keys(input_schema_for::<SaveAsParams>(), &keys);
 }
@@ -205,9 +205,11 @@ fn a_newer_files_reply_matches_the_output_schema() {
         bytes: 3,
         name: "a".into(),
         kept_format: Some("solidcraft/99".into()),
+        cache_not_saved: None,
         warnings: Some(vec!["Not kept: x. The previous file is `a.sc.bak`.".into()]),
         not_kept: Some(vec!["x".into()]),
         param_warnings: Vec::new(),
+        signature: None,
     })
     .unwrap_or_default();
     assert_eq!(
@@ -216,4 +218,21 @@ fn a_newer_files_reply_matches_the_output_schema() {
     );
     matches("file.save", &lost);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A script or agent never produces a signature, but its save is not refused for asking: the file
+/// is written unsigned and the warning says signing is only available from the app's Save (#18686).
+#[test]
+fn a_script_or_agent_cannot_sign_a_save() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    let path = std::env::temp_dir().join(format!("solidcraft-script-sign-{}.sc", std::process::id()));
+    let saved = s.execute("file.save", &json!({"path": path, "sign": true})).expect("the save is written, unsigned");
+    assert!(path.exists(), "the file is written");
+    assert!(saved.get("signature").is_none_or(serde_json::Value::is_null), "no signature: {saved}");
+    assert!(solidcraft_io::read_design_provenance_chain(&std::fs::read(&path).unwrap()).is_none_or(|chain| chain.records.is_empty()));
+    let warning = saved["warnings"][0].as_str().unwrap_or_default();
+    assert!(warning.contains("only available from the app's Save"), "{saved}");
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(path.with_extension("sc.bak"));
 }

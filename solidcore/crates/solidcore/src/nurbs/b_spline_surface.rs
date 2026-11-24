@@ -4,8 +4,10 @@
 //!
 //! Upstream: `source/SMLib/src/SmBSplineSurface.cpp`, `source/SMLib/inc/SmBSplineSurface.h`.
 //! The file is split over several plan units (`nurbs.b_spline_surface_p1`, `_p2`, ...);
-//! each lives in its own submodule and adds methods to [`BSplineSurface`].
+//! each lives in its own submodule and adds methods to [`BSplineSurface`]. Not upstream:
+//! [`net_ties`], the control points of a net that move together.
 
+pub mod net_ties;
 pub mod p1;
 pub mod p2;
 

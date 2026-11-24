@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1280" height="780" viewBox="0 0 1280 780">
+  <title>Artboard 1</title>
+  <metadata>
+    <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/">
+      <rdf:Description rdf:about="">
+        <dc:format>image/svg+xml</dc:format>
+        <dc:title>WR-383 — oriented endpoint shift</dc:title>
+        <dc:date>2026-11-15T10:00:00Z</dc:date>
+      </rdf:Description>
+    </rdf:RDF>
+  </metadata>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect x="0" y="0" width="1280" height="780" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 40 45)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">WR-383: judge a range end from its own endpoint</tspan></text>
+    <text transform="matrix(1 0 0 1 40 77)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">An accurate root can still be the wrong replacement for a range end.</tspan></text>
+    <text transform="matrix(1 0 0 1 40 105)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">s is the oriented fraction of a curve range: start = 0, original end = 1.</tspan></text>
+    <rect x="150" y="164" width="1.96" height="48" fill="#dce9f5"/>
+    <rect x="1128.04" y="164" width="1.96" height="48" fill="#dce9f5"/>
+    <line x1="130" y1="188" x2="1150" y2="188" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="7 5"/>
+    <g>
+      <g>
+        <path d="M150 186.5 L1125.8 186.5 L1125.8 189.5 L150 189.5 Z" fill="#1f6fb2"/>
+        <path d="M1130 188 L1118 194 L1121.6 188 L1118 182 Z" fill="#1f6fb2"/>
+      </g>
+    </g>
+    <line x1="150" y1="179" x2="150" y2="197" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line x1="1130" y1="179" x2="1130" y2="197" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <circle cx="150.0000031" cy="188" r="5" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 175 135)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">candidate s ≈ 3.168881e-9</tspan></text>
+    <line x1="285" y1="143" x2="155.0000031" y2="181" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 150 224)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">0 (start)</tspan></text>
+    <text transform="matrix(1 0 0 1 1130 224)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">1 (original end)</tspan></text>
+    <g>
+      <g>
+        <path d="M1120 258.75 L162.1 258.75 L162.1 257.25 L1120 257.25 Z" fill="#555555"/>
+        <path d="M160 258 L166 255 L164.2 258 L166 261 Z" fill="#555555"/>
+      </g>
+    </g>
+    <text transform="matrix(1 0 0 1 640 286)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">Legacy accepts this end-to-start jump</tspan></text>
+    <text transform="matrix(1 0 0 1 60 344)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">Legacy: end judged from the start</tspan></text>
+    <text transform="matrix(1 0 0 1 690 344)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">Correct: end judged from the end</tspan></text>
+    <rect x="225" y="400" width="250" height="60" fill="#dce9f5"/>
+    <rect x="845" y="400" width="250" height="60" fill="#dce9f5"/>
+    <line x1="90" y1="430" x2="610" y2="430" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="7 5"/>
+    <line x1="710" y1="430" x2="1230" y2="430" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="7 5"/>
+    <line x1="100" y1="421" x2="100" y2="439" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 100 481)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">-0.004</tspan></text>
+    <line x1="225" y1="421" x2="225" y2="439" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 225 481)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">-0.002</tspan></text>
+    <line x1="350" y1="421" x2="350" y2="439" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 350 481)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">0</tspan></text>
+    <line x1="475" y1="421" x2="475" y2="439" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 475 481)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">0.002</tspan></text>
+    <line x1="600" y1="421" x2="600" y2="439" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 600 481)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">0.004</tspan></text>
+    <line x1="720" y1="421" x2="720" y2="439" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 720 481)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">0.996</tspan></text>
+    <line x1="845" y1="421" x2="845" y2="439" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 845 481)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">0.998</tspan></text>
+    <line x1="970" y1="421" x2="970" y2="439" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 970 481)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">1</tspan></text>
+    <line x1="1095" y1="421" x2="1095" y2="439" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 1095 481)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">1.002</tspan></text>
+    <line x1="1220" y1="421" x2="1220" y2="439" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 1220 481)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">1.004</tspan></text>
+    <circle cx="350.0001981" cy="430" r="5" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 385 380)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">candidate inside start window</tspan></text>
+    <line x1="430" y1="388" x2="355.0001981" y2="420" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="970" cy="430" r="4" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 695 380)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">candidate near 0 is far outside this window</tspan></text>
+    <g>
+      <g>
+        <path d="M785.1381537 391.4805347 L706.4836507 414.0937043 L706.2073433 413.132635 L784.8618463 390.5194653 Z" fill="#555555"/>
+        <path d="M705 414 L708.2916624 410.9726317 L707.6909941 413.2263392 L709.3968921 414.8169089 Z" fill="#555555"/>
+      </g>
+    </g>
+    <text transform="matrix(1 0 0 1 60 532)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">End guard: |s| &lt; 0.002</tspan></text>
+    <text transform="matrix(1 0 0 1 60 560)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">Candidate: 3.168881e-9 &lt; 0.002</tspan></text>
+    <text transform="matrix(1 0 0 1 60 590)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">ACCEPTS jump; almost collapses the range.</tspan></text>
+    <text transform="matrix(1 0 0 1 690 532)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">End guard: |1 - s| &lt; 0.002</tspan></text>
+    <text transform="matrix(1 0 0 1 690 560)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">Candidate: 0.9999999968311187 &gt; 0.002</tspan></text>
+    <text transform="matrix(1 0 0 1 690 590)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">REJECTS jump; keeps the original end.</tspan></text>
+    <text transform="matrix(1 0 0 1 40 646)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Insets magnify the two endpoint neighborhoods; the full normalized range above is [0,1].</tspan></text>
+    <text transform="matrix(1 0 0 1 40 672)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Both parameters must pass: s₂ = 3.153772e-9 gives the same acceptance / rejection.</tspan></text>
+    <text transform="matrix(1 0 0 1 40 698)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Issue 948, first parameter: old end 0.7372758233088273; candidate 2.336339553063178e-9.</tspan></text>
+    <text transform="matrix(1 0 0 1 40 724)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Endpoint move: 0.7372758209730443 mm, despite an intersection deviation of 3.552713678800501e-14.</tspan></text>
+  </g>
+</svg>

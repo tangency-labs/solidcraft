@@ -764,8 +764,8 @@ pub struct MixedSideRecord {
     pub has_t: bool,
 }
 
-/// A Mixed corner's face (#2488): its rule (the Coons patch of its four sides, bilinear for
-/// chamfers, turned or not), its supports (the two trimmed blends and T), its trimline's
+/// A Mixed corner's face (#2488): its rule (the Coons patch of its four sides, the chamfer's
+/// for chamfers, turned or not), its supports (the two trimmed blends and T), its trimline's
 /// blend, side and uv, its conic's side, the construction's tolerance and its net.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MixedCornerRecord {
@@ -775,7 +775,8 @@ pub struct MixedCornerRecord {
     pub common: SupportRecord,
     /// The four sides c0, c1, d0, d1.
     pub sides: Vec<MixedSideRecord>,
-    /// Whether the rule is the bilinear Coons patch.
+    /// Whether the rule is the chamfer's Coons patch (bilinear unless two sides lie in a
+    /// plane wall).
     pub bilinear: bool,
     /// Whether the patch is turned.
     pub transposed: bool,
@@ -800,6 +801,9 @@ impl BezierCurveRecord {
             return Err(refuse(field, "a curve has one break more than segments"));
         }
         let degree = self.seg.first().map_or(0, Vec::len);
+        if self.seg.first().is_some_and(Vec::is_empty) {
+            return Err(refuse(field, "a curve's segments have control points"));
+        }
         if self.seg.iter().any(|s| s.len() != degree)
             || !all_finite(&self.brk)
             || self.seg.iter().flatten().any(|q| !all_finite(q))
@@ -811,6 +815,62 @@ impl BezierCurveRecord {
         }
         Ok(())
     }
+
+    /// [`BezierCurveRecord::validate`], and a curve the rule reads: one segment or more
+    /// (an empty curve is refused where the rule reads the field), its breaks strictly
+    /// increasing from 0 to 1, no two closer than the rounding the algebra's union of breaks
+    /// merges (`algebra::breaks_merge`). The kernel makes every Mixed side and trim curve on
+    /// `[0, 1]` (the rule reads the sides' ends at 0 and 1), and its algebra refines two curves
+    /// to the union of their breaks, so a curve over another range, or with breaks out of
+    /// order, would leave the two with different segment counts.
+    fn validate_read(&self, field: &'static str) -> Result<(), RecordError> {
+        self.validate(field)?;
+        if self.seg.is_empty() {
+            return Err(refuse(field, "a curve the rule reads has a segment"));
+        }
+        if !self.brk.windows(2).all(|w| matches!(w, [a, b] if a < b)) {
+            return Err(refuse(field, "a curve's breaks strictly increase"));
+        }
+        if self
+            .brk
+            .windows(2)
+            .any(|w| matches!(w, [a, b] if crate::blend::blend_corner::mixed::algebra::breaks_merge(*a, *b)))
+        {
+            return Err(refuse(
+                field,
+                "a curve's breaks lie farther apart than the rounding its algebra merges",
+            ));
+        }
+        if self.brk.first() != Some(&0.0) || self.brk.last() != Some(&1.0) {
+            return Err(refuse(field, "a curve the rule reads runs from 0 to 1"));
+        }
+        Ok(())
+    }
+}
+
+/// Whether two of the sorted `breaks` lie within the rounding the Mixed algebra's union
+/// merges (`algebra::breaks_merge`) but are not one break to its refinement
+/// (`algebra::breaks_coincide`).
+///
+/// The check is conservative: it may refuse a record the algebra would combine soundly, in
+/// two cases. It pools the trim curve's breaks, though the rule only evaluates that curve and
+/// never combines it with another; and it tests every pair within merging distance, though
+/// `union` compares a break only with the last break it kept (with `x`, `y` coinciding,
+/// `y`, `z` merging and `x`, `z` not merging, `union` drops `y`, keeps `z`, and never
+/// compares `y` with `z`). Both need two breaks that merge but do not coincide: on `[0, 1]`
+/// their gap `y - x` exceeds `1e-14·(1 + |y|) >= 1e-14` and is at most
+/// `1e-13·(1 + |y|) <= 2e-13`. So only a record holding two breaks `1e-14` to `2e-13` apart
+/// can be over-refused; the records the kernel writes for its own Mixed faces pass (the
+/// round-trip tests rebuild each of them).
+fn mixed_breaks_split(breaks: &[f64]) -> bool {
+    use crate::blend::blend_corner::mixed::algebra::{breaks_coincide, breaks_merge};
+    breaks.iter().enumerate().any(|(i, &x)| {
+        breaks
+            .iter()
+            .skip(i + 1)
+            .take_while(|&&y| breaks_merge(x, y))
+            .any(|&y| y != x && !breaks_coincide(x, y))
+    })
 }
 
 /// A support or net of a corner's: a NURBS form (corners' faces are not blends here).
@@ -937,10 +997,20 @@ impl CornerRecord {
                 if r.sides.len() != 4 || r.blend > 1 || r.trim_side > 3 || r.conic_side > 3 {
                     return Err(refuse("sides", "a mixed face has four sides on two blends"));
                 }
+                // the rule reads every side, and the Coons rule (not the chamfer's) its
+                // field and, where it has one, its cross field too
                 for side in &r.sides {
-                    side.c.validate("sides")?;
-                    side.dir.validate("sides")?;
-                    side.t.validate("sides")?;
+                    side.c.validate_read("sides")?;
+                    if r.bilinear {
+                        side.dir.validate("sides")?;
+                    } else {
+                        side.dir.validate_read("sides")?;
+                    }
+                    if side.has_t && !r.bilinear {
+                        side.t.validate_read("sides")?;
+                    } else {
+                        side.t.validate("sides")?;
+                    }
                     let numbers = side.val.iter().chain(&side.der).flatten();
                     let fields = side
                         .dir_val
@@ -952,7 +1022,27 @@ impl CornerRecord {
                         return Err(refuse("sides", "a side's numbers are finite"));
                     }
                 }
-                r.trim_uv.validate("trim_uv")?;
+                r.trim_uv.validate_read("trim_uv")?;
+                // the algebra refines the curves it combines to the union of their breaks:
+                // two breaks of different curves the union merges must be one break to the
+                // refinement too, or the two curves keep different segment counts
+                let mut breaks: Vec<f64> = r.trim_uv.brk.clone();
+                for side in &r.sides {
+                    breaks.extend_from_slice(&side.c.brk);
+                    if !r.bilinear {
+                        breaks.extend_from_slice(&side.dir.brk);
+                        if side.has_t {
+                            breaks.extend_from_slice(&side.t.brk);
+                        }
+                    }
+                }
+                breaks.sort_by(f64::total_cmp);
+                if mixed_breaks_split(&breaks) {
+                    return Err(refuse(
+                        "sides",
+                        "breaks of two curves the algebra merges are one break to its refinement",
+                    ));
+                }
                 if !(r.tol.is_finite() && r.tol > 0.0) {
                     return Err(refuse(
                         "tol",

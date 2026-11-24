@@ -90,3 +90,39 @@ fn a_station_count_out_of_range_is_refused() {
     assert!(curve_deviation(&k, &a, &a, 1).is_err());
     assert!(curve_deviation(&k, &a, &a, MAX_SAMPLES + 1).is_err());
 }
+
+/// A line 5 from another reads 0 from lying 5 away, and 2 from lying 3 away; a line that
+/// approaches the other reads its worst station.
+#[test]
+fn a_distance_deviation_reads_how_far_from_the_asked_distance() {
+    let k = Kernel::new(&KernelOptions::default());
+    let a = line([0.0, 0.0, 0.0], [10.0, 0.0, 0.0]);
+    let b = line([0.0, 5.0, 0.0], [10.0, 5.0, 0.0]);
+    let d = distance_deviation(&k, &b, &a, 5.0, 11).unwrap();
+    assert!(d.worst <= 1e-9, "{d:?}");
+    let d = distance_deviation(&k, &b, &a, 3.0, 11).unwrap();
+    assert!((d.worst - 2.0).abs() <= 1e-9, "{d:?}");
+    // from 5 away at x = 0 to 4 away at x = 10: worst 1, at x = 10
+    let leaning = line([0.0, 5.0, 0.0], [10.0, 4.0, 0.0]);
+    let d = distance_deviation(&k, &leaning, &a, 5.0, 11).unwrap();
+    assert!((d.worst - 1.0).abs() <= 1e-9, "{d:?}");
+    assert!(d.at.distance(v([10.0, 4.0, 0.0])) <= 1e-9, "{d:?}");
+    assert!(d.to.distance(v([10.0, 0.0, 0.0])) <= 1e-9, "{d:?}");
+}
+
+/// A distance not finite or negative, and a station count out of range, are refused.
+#[test]
+fn a_distance_deviation_refuses_a_bad_distance() {
+    let k = Kernel::new(&KernelOptions::default());
+    let a = line([0.0, 0.0, 0.0], [10.0, 0.0, 0.0]);
+    for bad in [-1.0, f64::NAN, f64::INFINITY] {
+        assert!(matches!(
+            distance_deviation(&k, &a, &a, bad, 11),
+            Err(SolidError::InvalidInput { .. })
+        ));
+    }
+    assert!(matches!(
+        distance_deviation(&k, &a, &a, 1.0, 1),
+        Err(SolidError::InvalidInput { .. })
+    ));
+}

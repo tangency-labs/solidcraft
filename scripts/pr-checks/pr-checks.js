@@ -12,6 +12,7 @@
 
 const SKIP_LABEL = 'not-a-duplicate';
 const DEFAULT_LABEL = 'changes-default';
+const OWNER_APPROVED_LABEL = 'owner-approved';
 // PRs opened before this predate the template line; they pass the defaults check with a notice.
 const DEFAULTS_ENFORCED_FROM = Date.parse('2026-10-25T00:00:00Z');
 // PRs opened before this predate the picture rule; they pass the picture check with a notice.
@@ -57,13 +58,18 @@ function parseDefaults(body) {
     if (pref && pref[1].trim() && !/^<.*>$/.test(pref[2])) {
       return { status: 'yes', detail: pref[1].trim(), preference: pref[2] };
     }
+    // No setting restores the old behaviour, but the owner approved the change; checkDefaults
+    // requires the `owner-approved` label for this form.
+    const owner = yes[1].match(/^(.*?)[ ,;]*\bapproved by the owner\.?$/i);
+    if (owner && owner[1].trim()) return { status: 'yes', detail: owner[1].trim(), approvedByOwner: true };
   }
   return { status: 'malformed', detail: value };
 }
 
 const DEFAULTS_HELP =
   'Add one line to the description: `Changes a default: no`, or ' +
-  '`Changes a default: yes — <what>, old behaviour kept behind preference <name>`. ' +
+  '`Changes a default: yes — <what>, old behaviour kept behind preference <name>`, or ' +
+  '`Changes a default: yes — <what>, approved by the owner` (needs the owner-approved label). ' +
   '(UX defaults only; a kernel result change is \'no\'.)';
 
 function isBot(user) {
@@ -259,6 +265,8 @@ async function checkDefaults({ github, context, core }) {
     core.setFailed(`The description has no "Changes a default:" line. ${DEFAULTS_HELP}`);
   } else if (result.status === 'malformed') {
     core.setFailed(`Could not read "Changes a default: ${result.detail}". ${DEFAULTS_HELP}`);
+  } else if (result.approvedByOwner && !hasLabel(pull, OWNER_APPROVED_LABEL)) {
+    core.setFailed(`approved by the owner needs the ${OWNER_APPROVED_LABEL} label. ${DEFAULTS_HELP}`);
   }
   return result;
 }

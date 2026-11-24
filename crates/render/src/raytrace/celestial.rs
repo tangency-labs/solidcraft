@@ -30,9 +30,12 @@ pub(super) fn sample(sun: Sun, u: [f64; 2]) -> Result<Sample> {
     let n = sun.direction();
     let axis = if n.z.abs() > 0.9 { Vec3::Y } else { Vec3::Z };
     let tangent = unit_direction(axis.cross(n)).map_err(|_| invalid())?;
-    let z = 1.0 - u[0] * sun.solid_angle() / (2.0 * PI);
+    let solid_angle = sun.solid_angle();
+    // Keep rim samples inside the PDF cutoff after the world-space rotation and normalization round.
+    let min_z = sun.angular_radius_rad.cos() + 8.0 * f64::EPSILON;
+    let z = (1.0 - u[0] * solid_angle / (2.0 * PI)).max(min_z);
     let radius = ((1.0 - z) * (1.0 + z)).max(0.0).sqrt();
     let phi = TAU * u[1];
     let direction = unit_direction(tangent * (radius * phi.cos()) + n.cross(tangent) * (radius * phi.sin()) + n * z).map_err(|_| invalid())?;
-    Ok(Sample { direction, radiance: Vec3::new(sun.radiance[0], sun.radiance[1], sun.radiance[2]), pdf: sun.solid_angle().recip() })
+    Ok(Sample { direction, radiance: Vec3::new(sun.radiance[0], sun.radiance[1], sun.radiance[2]), pdf: solid_angle.recip() })
 }
