@@ -251,7 +251,13 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         names.insert(feature.name.clone(), name.clone());
         made.push(Pasted { id, name: name.clone(), from: feature.name.clone() });
     }
-    parameters(scratch.doc_mut(), &copy.doc, &copy.features, &mut mapped)?;
+    let mut independent = copy.features.clone();
+    for feature in &mut independent {
+        if let FeatureKind::Sketch { sketch, .. } = &mut feature.kind {
+            sketch.wire_constraints.retain(|c| c.kind.model_plane().is_none());
+        }
+    }
+    parameters(scratch.doc_mut(), &copy.doc, &independent, &mut mapped)?;
     let source_values = copy.doc.param_values().0;
     for original in &copy.features {
         let mut feature = original.clone();

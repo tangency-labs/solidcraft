@@ -2058,3 +2058,70 @@ fn a_lune_between_two_poles_keeps_its_width_round_the_axis() {
         }
     }
 }
+
+#[test]
+fn attachment_residuals_keep_derivatives_of_the_point_and_the_moving_curve() {
+    use super::constraint::{self as k, Dual, Num, V};
+    // Radius five in XY. A point at (8,0,3) is three above the plane and
+    // three beyond the circle. Translating the circle alone reverses the point gradient.
+    let p = V {
+        x: Dual::var(8.0, 0),
+        y: Dual::var(0.0, 1),
+        z: Dual::var(3.0, 2),
+    };
+    let circle = |x, y| V {
+        x: Dual::num(x) + Dual::var(0.0, 3),
+        y: Dual::num(y),
+        z: Dual::var(0.0, 4),
+    };
+    let [height, radial] =
+        k::point_on_circle(p, circle(5.0, 0.0), circle(0.0, 5.0), circle(-5.0, 0.0));
+    assert!((height.v - 3.0).abs() < 1e-12);
+    assert!((radial.v - 3.0).abs() < 1e-12);
+    for (actual, expected) in height.d.into_iter().take(5).zip([0.0, 0.0, 1.0, 0.0, -1.0]) {
+        assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+    }
+    for (actual, expected) in radial.d.into_iter().take(5).zip([1.0, 0.0, 0.0, -1.0, 0.0]) {
+        assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+    }
+    let line = k::point_on_line(p, V::of([0.0, 0.0, 0.0]), V::of([10.0, 0.0, 0.0]));
+    assert_eq!(line.map(|v| v.v), [0.0, 3.0, 0.0]);
+    assert_eq!(line[1].d[2], 1.0);
+    assert_eq!(line[2].d[1], -1.0);
+}
+
+#[test]
+fn plane_measurements_and_circle_operands_have_closed_form_values() {
+    use super::constraint::{self as k, Dual, Num, V};
+    let origin = V::of([0.0, 0.0, 5.0]);
+    let normal = V::of([0.0, 0.0, 1.0]);
+    let point = V {
+        x: Dual::num(4.0),
+        y: Dual::num(0.0),
+        z: Dual::var(2.0, 0),
+    };
+    let d = k::plane_distance(point, origin, normal);
+    assert_eq!((d.v, d.d[0]), (-3.0, 1.0));
+    let end = V {
+        x: Dual::num(4.0),
+        y: Dual::num(0.0),
+        z: Dual::var(3.0, 0),
+    };
+    let (angle, length) = k::plane_angle(V::of([0.0; 3]), end, normal);
+    assert!((angle.v - 3.0_f64.atan2(4.0)).abs() < 1e-12);
+    assert!((angle.d[0] - 4.0 / 25.0).abs() < 1e-12);
+    assert_eq!(length.v, 5.0);
+    let frame = a_frame();
+    assert_eq!(k::plane_point(&frame, [2.0, 4.0]), [3.0, 6.0, 3.0]);
+    assert_eq!(k::plane_normal(&frame), [0.0, 0.0, 1.0]);
+    for [x, y, z] in k::arc_circle_points([0.0, 0.0], [5.0, 0.0], &frame) {
+        assert!(((x - 1.0).powi(2) + (y - 2.0).powi(2) - 25.0).abs() < 1e-12);
+        assert_eq!(z, 3.0);
+    }
+    let mut other = frame.clone();
+    other.origin = [100.0, 200.0, 3.0];
+    other.y_axis = [0.0, -1.0, 0.0];
+    assert!(k::same_plane(&frame, &other));
+    other.origin[2] = 4.0;
+    assert!(!k::same_plane(&frame, &other));
+}

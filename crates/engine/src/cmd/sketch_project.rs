@@ -338,7 +338,7 @@ pub(super) fn wire_context(
     s: &Session,
     id: u64,
     named: &[&str],
-) -> Option<(std::collections::BTreeMap<String, solidcraft_doc::expr::Value>, solidcraft_doc::ModelState, Plane)> {
+) -> Option<(std::collections::BTreeMap<String, solidcraft_doc::expr::Value>, solidcraft_doc::ModelState, Plane, (u64, solidcraft_doc::Mat))> {
     let doc = placed_candidate(s, &s.doc);
     let (vals, _) = doc.param_values();
     let before = s.model.state_before(id);
@@ -346,7 +346,7 @@ pub(super) fn wire_context(
     bodies.extend_from_slice(named);
     let st = state_for_sketch(s, &doc, id, &before, &bodies).ok()?.into_owned();
     let plane = sketch_plane(&doc, id, &st).ok()?;
-    Some((vals, st, plane))
+    Some((vals, st, plane, sketch_frame(s, &doc, id)?))
 }
 
 /// Keep candidate feature edits while overlaying uncommitted occurrence placements.

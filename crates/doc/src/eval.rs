@@ -2744,6 +2744,12 @@ impl PlacementReads {
             // In the sketch's own frame: the component's origin, axes and planes, its own axes, text.
             // A construction point is kept in its own component's frame: the sketch reads where
             // that component is placed (#12075).
+            L::Plane { name } if Plane::named(name).is_none() => match doc.find_feature(name) {
+                Some(plane) => {
+                    self.components.insert(plane.component);
+                }
+                None => self.all = true,
+            },
             L::ConstructionPoint { name } => match doc.find_feature(name) {
                 Some(point) => {
                     self.components.insert(point.component);

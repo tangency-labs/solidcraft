@@ -524,16 +524,17 @@ fn plane_target(s: &Session, id: u64, v: &Value, cmd: &str) -> Result<Option<sol
         Value::Object(o) if o.contains_key("face") => {
             let at = o.get("face").and_then(vec3).ok_or_else(|| bad(cmd, "`face` must be [x,y,z], a point on a planar face"))?;
             let body = o.get("body").and_then(Value::as_str);
-            let (_, st, _) = super::sketch_project::wire_context(s, id, &body.into_iter().collect::<Vec<_>>())
+            let (_, st, _, _) = super::sketch_project::wire_context(s, id, &body.into_iter().collect::<Vec<_>>())
                 .ok_or_else(|| bad(cmd, "the sketch is not evaluated"))?;
             let (body, face, _) = solidcraft_doc::project::pick_planar_face(&st, body, at).map_err(|why| bad(cmd, why))?;
             (LinkSource::Face { body, at }, Some(face))
         }
         _ => return Ok(None),
     };
-    let mut m = ModelPlane { source: source.0, face_name: source.1, resolved: None };
-    let (vals, st, _) = super::sketch_project::wire_context(s, id, &m.source.bodies()).ok_or_else(|| bad(cmd, "the sketch is not evaluated"))?;
-    solidcraft_doc::project::resolve_model_plane(&s.doc, &vals, &st, &mut m).map_err(|why| bad(cmd, why))?;
+    let mut m = ModelPlane { source: source.0, face_name: source.1, resolved: None, resolved_face: None };
+    let (vals, st, _, frame) =
+        super::sketch_project::wire_context(s, id, &m.source.bodies()).ok_or_else(|| bad(cmd, "the sketch is not evaluated"))?;
+    solidcraft_doc::project::resolve_model_plane(&s.design_document(), &vals, &st, &mut m, Some(&frame)).map_err(|why| bad(cmd, why))?;
     Ok(Some(PlaneOf::Model(Box::new(m))))
 }
 
@@ -807,9 +808,18 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
     // where they are: the stored sketch keeps the geometry of its last edit.
     let mut solved = stored.clone();
     s.doc.apply_wire_values(&s.doc.param_values().0, &mut solved)?;
-    if let Some((vals, st, plane)) = super::sketch_project::wire_context(s, id, &[]) {
-        solidcraft_doc::project::refresh_wire_targets(&s.doc, &vals, &st, &plane, &mut solved);
+    let (vals, st, plane, frame) = super::sketch_project::wire_context(s, id, &[]).ok_or_else(|| bad(cmd, "the sketch is not evaluated"))?;
+    let doc = s.design_document();
+    let attachment = doc.feature(id).and_then(|feature| match &feature.kind {
+        solidcraft_doc::FeatureKind::Sketch { plane, .. } => super::sketch::face::anchor(plane),
+        _ => None,
+    });
+    solidcraft_doc::project::refresh_links_at(&doc, &vals, &st, &plane, &mut solved, attachment, Some(&frame))
+        .map_err(|e| bad(cmd, e.to_string()))?;
+    if solved.links.iter().any(|link| link.lost) {
+        return Err(bad(cmd, "a linked reference is lost; repair it before measuring a new 3D dimension"));
     }
+    drop(doc);
     let counted = solved.solve_wires(None);
     // A count the work ran out on says nothing about redundancy.
     let dof_before = (!counted.uncounted).then_some(counted.dof);
@@ -832,27 +842,19 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
         _ => None,
     };
     let kind = if let Some((r, plane)) = to_plane.clone() {
-        let (o, n) = plane.frame().ok_or_else(|| bad(cmd, "that plane cannot be found now"))?;
         match (sk.wire_point(&r), sk.is_drawn_line(&r)) {
             (Some(q), _) if matches!(ty.as_str(), "auto" | "distance" | "plane_distance") => {
-                let d = sk.wire_point_at(&q).map(|at| (at - o).dot(n)).unwrap_or(0.0);
-                WireConstraintKind::PlaneDistance { p: q, plane, reversed: d < -SIDE, value: 0.0 }
+                WireConstraintKind::PlaneDistance { p: q, plane, reversed: false, value: 0.0 }
             }
             (None, true) if matches!(ty.as_str(), "auto" | "angle" | "plane_angle") => {
-                // Rising from the line's start towards the normal, or away from it: the side it
-                // was measured on (a line lying in the plane to rounding rises towards it).
-                let run = ends(&r).0.zip(ends(&r).1).and_then(|(a, b)| Some(sk.wire_point_at(&b)? - sk.wire_point_at(&a)?));
-                let reversed = run.is_some_and(|d| d.dot(n) < -SIDE * d.len().max(1.0));
-                WireConstraintKind::PlaneAngle { line: r, plane, reversed, value: 0.0 }
+                WireConstraintKind::PlaneAngle { line: r, plane, reversed: false, value: 0.0 }
             }
             _ => return Err(bad(cmd, "to a plane: a 3D point (distance) or a drawn 3D line (angle)")),
         }
     } else {
         match (ents.as_slice(), pair, axis) {
             (_, Some((a, b)), Some(axis)) if matches!(ty.as_str(), "distance_x" | "distance_y" | "distance_z") => {
-                let d = sk.wire_point_at(&b).zip(sk.wire_point_at(&a)).map(|(q, p)| (q - p).dot(axis.unit())).unwrap_or(0.0);
-                // Behind only when clearly so: rounding left by a solve keeps the front side.
-                WireConstraintKind::AxisDistance { a, b, axis, reversed: d < -SIDE, value: 0.0 }
+                WireConstraintKind::AxisDistance { a, b, axis, reversed: false, value: 0.0 }
             }
             (_, Some((a, b)), None) if matches!(ty.as_str(), "auto" | "distance" | "length") => WireConstraintKind::Distance { a, b, value: 0.0 },
             ([a, b], None, None) if matches!(ty.as_str(), "auto" | "angle") && sk.is_drawn_line(a) && sk.is_drawn_line(b) => {
@@ -869,6 +871,13 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
     };
     let is_angle = kind.is_angle();
     let mut kind = kind;
+    let side = sk.wire_dimension_reversed(&kind).ok_or_else(|| bad(cmd, "that cannot be measured"))?;
+    match &mut kind {
+        WireConstraintKind::AxisDistance { reversed, .. }
+        | WireConstraintKind::PlaneDistance { reversed, .. }
+        | WireConstraintKind::PlaneAngle { reversed, .. } => *reversed = side,
+        _ => {}
+    }
     let cur = sk.measure_wire_dimension(&kind).ok_or_else(|| bad(cmd, "that cannot be measured"))?;
     kind.set_value(cur);
     let driven = p.get("driven").and_then(Value::as_bool).unwrap_or(false);
@@ -992,14 +1001,6 @@ pub(super) fn toggle_driven_3d(s: &mut Session, p: &Value, cmd: &str, cid: &str,
     let Some(c) = sk.wire_constraints.iter().find(|c| c.id == cid).cloned() else { return Ok(None) };
     let v = c.kind.value().ok_or_else(|| bad(cmd, format!("`{cid}` is not a dimension")))?;
     let driven = want.unwrap_or(!c.driven);
-    // Where an angle to a plane's line runs now, from its start.
-    let rise = match &c.kind {
-        WireConstraintKind::PlaneAngle { line, .. } => {
-            let at = |role: &str| sk.wire_point(&format!("{line}.{role}")).and_then(|q| sk.wire_point_at(&q));
-            at("end").zip(at("start")).map(|(e, s)| e - s)
-        }
-        _ => None,
-    };
     let freed = {
         let mut without = sk.clone();
         if let Some(slot) = without.wire_constraints.iter_mut().find(|c| c.id == cid) {
@@ -1009,11 +1010,13 @@ pub(super) fn toggle_driven_3d(s: &mut Session, p: &Value, cmd: &str, cid: &str,
     };
     let start = s.doc.clone();
     let (_, info) = edit(s, p, cmd, true, |sk, doc| {
+        let current = sk.wire_constraints.iter().find(|c| c.id == cid).ok_or_else(|| bad(cmd, format!("no constraint `{cid}`")))?;
+        let side = sk.wire_dimension_reversed(&current.kind).ok_or_else(|| bad(cmd, "that cannot be measured"))?;
+        let v = sk.measure_wire_dimension(&current.kind).unwrap_or(v);
         let slot = sk.wire_constraints.iter_mut().find(|c| c.id == cid).ok_or_else(|| bad(cmd, format!("no constraint `{cid}`")))?;
-        // Only as it turns driving: a driving one keeps the side it was given.
-        if let (false, true, WireConstraintKind::PlaneAngle { plane, reversed, .. }) = (driven, slot.driven, &mut slot.kind) {
-            // It measured the angle whichever side the line rose to: it drives it on that side.
-            *reversed = rise.zip(plane.frame()).is_some_and(|(d, (_, n))| d.dot(n) < -SIDE * d.len().max(1.0));
+        // Only as it turns driving: a driving dimension keeps its stored side.
+        if let (false, true, WireConstraintKind::PlaneAngle { reversed, .. }) = (driven, slot.driven, &mut slot.kind) {
+            *reversed = side;
         }
         if driven != slot.driven {
             slot.driven = driven;
@@ -1033,9 +1036,6 @@ pub(super) fn toggle_driven_3d(s: &mut Session, p: &Value, cmd: &str, cid: &str,
     s.doc_mut().prune_model_params();
     Ok(Some(json!({"constraint": cid, "driven": driven, "sketch": info})))
 }
-
-/// How far behind (mm) a point must lie for a dimension to keep that side.
-const SIDE: f64 = 1e-9;
 
 fn round6(v: f64) -> f64 {
     (v * 1e6).round() / 1e6

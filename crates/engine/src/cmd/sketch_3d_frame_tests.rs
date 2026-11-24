@@ -1980,6 +1980,8 @@ fn a_paste_into_another_design_drops_what_is_held_to_this_designs_model() {
     let kinds: Vec<_> = t.doc.sketch(pasted).unwrap().wire_constraints.iter().map(|c| c.kind.clone()).collect();
     assert_eq!(kinds.len(), 1, "{kinds:?}");
     assert!(kinds[0].model_plane().is_none());
+    assert!(matches!(&kinds[0], solidcraft_sketch::WireConstraintKind::OnPlane { p, plane }
+        if p.wire == r && p.index == 0 && plane.origin_plane() == Some(solidcraft_sketch::OriginPlane::Xy)));
 }
 
 #[test]
@@ -2028,4 +2030,108 @@ fn a_3d_point_held_to_a_second_occurrences_face_follows_the_copy() {
     // Only the second placement moves: its top face rises from 15 to 20.
     run(&mut s, "occurrence.move", json!({"occurrence":copy,"translate":[0,0,5],"capture":true}));
     near(solved_fit(&s, sketch, &q, 0), Vec3::new(60.0, 10.0, 20.0));
+}
+
+#[test]
+fn a_3d_attachment_follows_a_named_planes_owner_placement_and_rename() {
+    let mut s = Session::default();
+    let owner = run(&mut s, "component.create", json!({"name":"Plane owner","grounded":false}));
+    let occurrence = owner["occurrence"].as_u64().unwrap();
+    run(&mut s, "construct.plane.offset", json!({"base":"XY","offset":5,"name":"Shelf"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[0,0,10],"capture":true}));
+    let sketch = sketch_3d_on_xy(&mut s);
+    let q = run(&mut s, "sketch.point3d", json!({"point":[3,4,19]}))["point"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.on_plane", json!({"point":q,"plane":"Shelf"}));
+    near(fit(&s, &q, 0), Vec3::new(3.0, 4.0, 15.0));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[0,0,5],"capture":true}));
+    near(solved_fit(&s, sketch, &q, 0), Vec3::new(3.0, 4.0, 20.0));
+    run(&mut s, "timeline.rename", json!({"feature":"Shelf","name":"Deck"}));
+    let source = &s.doc.sketch(sketch).unwrap().wire_constraints[0].kind.model_plane().unwrap().source;
+    assert!(matches!(source, solidcraft_sketch::LinkSource::Plane { name } if name == "Deck"));
+    let mut reopened = Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap());
+    near(solved_fit(&reopened, sketch, &q, 0), Vec3::new(3.0, 4.0, 20.0));
+    run(&mut reopened, "timeline.edit", json!({"feature":"Deck","set":{"plane.distance":"8"}}));
+    near(solved_fit(&reopened, sketch, &q, 0), Vec3::new(3.0, 4.0, 23.0));
+}
+
+#[test]
+fn axis_dimensions_keep_the_side_of_fixed_and_drawn_operands() {
+    for fixed in [true, false] {
+        for explicit in [true, false] {
+            let mut s = Session::default();
+            sketch_3d_on_xy(&mut s);
+            let a = if fixed {
+                run(&mut s, "sketch.point", json!({"point":[10,0]}))["point"].as_str().unwrap().to_string()
+            } else {
+                run(&mut s, "sketch.point3d", json!({"point":[10,0,0]}))["point"].as_str().unwrap().to_string()
+            };
+            let b = run(&mut s, "sketch.point3d", json!({"point":[5,0,0]}))["point"].as_str().unwrap().to_string();
+            let mut params = json!({"entities":[a,b],"type":"distance_x"});
+            if explicit {
+                params["value"] = json!(5);
+            }
+            let result = run(&mut s, "sketch.dimension", params);
+            assert_eq!(result["measured"], 5.0, "{result}");
+            near(fit(&s, &b, 0), Vec3::new(5.0, 0.0, 0.0));
+        }
+    }
+}
+
+#[test]
+fn a_new_3d_dimension_measures_the_current_included_endpoint() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"h","expression":"10 mm"}));
+    run(&mut s, "solid.box", json!({"length":40,"width":20,"height":"h"}));
+    let sketch = sketch_3d_on_xy(&mut s);
+    run(&mut s, "sketch.include_3d", json!({"refs":[{"edge":[20,0,10],"body":"Body1"}]}));
+    let edge = s.doc.sketch(sketch).unwrap().wires.iter().find(|w| w.link.is_some()).unwrap().id.clone();
+    let q = run(&mut s, "sketch.point3d", json!({"point":[3,4,40]}))["point"].as_str().unwrap().to_string();
+    run(&mut s, "parameters.change", json!({"name":"h","expression":"25 mm"}));
+    let result = run(&mut s, "sketch.dimension", json!({"entities":[format!("{edge}.start"),q],"type":"distance_z"}));
+    assert_eq!(result["measured"], 15.0, "the current top is at 25, so 40 - 25 = 15: {result}");
+    near(fit(&s, &q, 0), Vec3::new(3.0, 4.0, 40.0));
+}
+
+#[test]
+fn toggling_a_driven_plane_angle_uses_the_refreshed_plane() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"tilt","expression":"30 deg"}));
+    run(&mut s, "construct.plane.at_angle", json!({"base":"XY","axis":"X","angle":"tilt","name":"Slope"}));
+    let sketch = sketch_3d_on_xy(&mut s);
+    let line = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[0,10,0]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity":format!("{line}.start")}));
+    let dimension = run(&mut s, "sketch.dimension", json!({"entities":[line,"Slope"],"driven":true}))["constraint"].as_str().unwrap().to_string();
+    run(&mut s, "parameters.change", json!({"name":"tilt","expression":"15 deg"}));
+    run(&mut s, "sketch.toggle_driven", json!({"constraint":dimension,"driven":false}));
+    let slot = s.doc.sketch(sketch).unwrap().wire_constraints.iter().find(|c| c.id == dimension).unwrap();
+    let value = s.doc.param_values().0[slot.param.as_ref().unwrap()].to_kind(solidcraft_doc::expr::Kind::Angle).unwrap();
+    assert!((value - 15.0_f64.to_radians()).abs() < 1e-9, "{value}");
+    near(fit(&s, &line, 1), Vec3::new(0.0, 10.0, 0.0));
+}
+
+#[test]
+fn a_foreign_model_plane_dimension_does_not_consume_the_paste_parameter_budget() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":20,"height":10}));
+    sketch_3d_on_xy(&mut s);
+    let q = run(&mut s, "sketch.point3d", json!({"point":[3,4,15]}))["point"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.dimension", json!({"entities":[q,{"face":[20,10,10]}],"value":5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "timeline.copy", json!({"features":["Path"]}));
+    let mut target = Session { foreign_copy: s.foreign_copy.clone(), ..Default::default() };
+    for index in 0..solidcraft_doc::MAX_PARAMS {
+        target.doc_mut().params.push(solidcraft_doc::Param {
+            name: format!("p{index}"),
+            expr: "1 mm".into(),
+            unit: "mm".into(),
+            comment: String::new(),
+            model: false,
+        });
+    }
+    let result = run(&mut target, "timeline.paste", json!({"from_design":true}));
+    let id = result["pasted"][0]["id"].as_u64().unwrap();
+    assert!(target.doc.sketch(id).unwrap().wire_constraints.is_empty());
+    assert_eq!(target.doc.params.len(), solidcraft_doc::MAX_PARAMS);
 }

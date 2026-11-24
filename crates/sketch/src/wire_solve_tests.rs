@@ -989,7 +989,7 @@ fn a_drawn_point_is_held_on_a_model_plane_once_it_is_resolved() {
     let q = sk.add_drawn_wire_in(&[v(10.0, 0.0, 10.0)], WireSpace::Component).unwrap();
     // A face plane through (0,0,5) whose normal leans in XZ.
     let source = crate::LinkSource::Face { body: "Body1".into(), at: v(0.0, 0.0, 5.0) };
-    let plane = ModelPlane { source, face_name: Some("f1".into()), resolved: None };
+    let plane = ModelPlane { source, face_name: Some("f1".into()), resolved: None, resolved_face: None };
     let k = sk.add_wire_constraint(WireConstraintKind::OnPlane { p: sk.wire_point(&q).unwrap(), plane: PlaneOf::Model(Box::new(plane)) }).unwrap();
     let rep = sk.solve_wires(None);
     assert!(!rep.ok && rep.failing == vec![k.clone()], "unresolved: {rep:?}");
@@ -1029,4 +1029,94 @@ fn constraints_that_move_nothing_or_fix_fixed_geometry_are_refused() {
     let held = WireConstraintKind::Coincident { a: sk.wire_point(&w).unwrap(), b: sk.point_operand(&p2).unwrap() };
     let err = sk.add_wire_constraint(held).unwrap_err().to_string();
     assert!(err.contains("fixed in the world"), "{err}");
+}
+
+#[test]
+fn a_rejected_anchor_keeps_its_dependent_group_but_valid_groups_still_commit() {
+    let mut sk = Sketch::new();
+    sk.frame = crate::model::SketchFrame(Some(solidcore_record::Plane::XY));
+    let reference = sk.add_point(solidcore_record::Vec2::new(0.0, 0.0), None).unwrap();
+    let reference_id = sk.points[reference].id.clone();
+    let a = sk.add_drawn_wire_in(&[Vec3::ZERO], WireSpace::Component).unwrap();
+    let b = sk.add_drawn_wire_in(&[v(5.0, 0.0, 0.0)], WireSpace::Component).unwrap();
+    let c = sk.add_drawn_wire_in(&[Vec3::ZERO], WireSpace::Component).unwrap();
+    let d = sk.add_drawn_wire_in(&[v(5.0, 0.0, 0.0)], WireSpace::Component).unwrap();
+    let free = sk.add_drawn_wire_in(&[v(0.0, 0.0, 9.0)], WireSpace::Component).unwrap();
+    let p = |wire: &str| WirePoint { wire: wire.to_string(), index: 0 };
+    sk.add_wire_constraint(WireConstraintKind::Coincident { a: p(&a), b: sk.point_operand(&reference_id).unwrap() }).unwrap();
+    sk.add_wire_constraint(WireConstraintKind::Fix { p: p(&a), at: Vec3::ZERO, exprs: None }).unwrap();
+    let dependent = sk
+        .add_wire_dimension(WireConstraintKind::AxisDistance { a: p(&a), b: p(&b), axis: Axis::X, reversed: false, value: 5.0 }, None, false)
+        .unwrap();
+    sk.add_wire_constraint(WireConstraintKind::Fix { p: p(&c), at: Vec3::ZERO, exprs: None }).unwrap();
+    sk.add_wire_dimension(WireConstraintKind::AxisDistance { a: p(&c), b: p(&d), axis: Axis::X, reversed: false, value: 8.0 }, None, false).unwrap();
+    sk.add_wire_constraint(WireConstraintKind::OnPlane { p: p(&free), plane: OriginPlane::Xy.into() }).unwrap();
+    sk.points[reference].pos.x = 10.0;
+    let report = sk.solve_wires(None);
+    assert!(!report.ok && report.failing.contains(&dependent), "{report:?}");
+    assert_eq!(at(&sk, &a), Vec3::ZERO);
+    assert_eq!(at(&sk, &b), v(5.0, 0.0, 0.0), "A stays at zero, so B must not commit the trial X=15");
+    assert!((at(&sk, &d).x - 8.0).abs() < 1e-7, "valid fixed anchor still drives its group");
+    assert!(at(&sk, &free).z.abs() < 1e-7, "independent group still commits");
+}
+
+#[test]
+fn model_plane_constraints_never_mix_component_planes_with_world_fixed_points() {
+    let mut sk = Sketch::new();
+    let q = sk.add_drawn_wire_in(&[v(3.0, 4.0, 20.0)], WireSpace::World).unwrap();
+    let p = sk.wire_point(&q).unwrap();
+    let plane = PlaneOf::Model(Box::new(ModelPlane {
+        source: crate::LinkSource::Plane { name: "Shelf".into() },
+        face_name: None,
+        resolved_face: None,
+        resolved: Some(solidcore_record::Plane::new(v(0.0, 0.0, 10.0), v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0)).unwrap()),
+    }));
+    let kind = WireConstraintKind::OnPlane { p: p.clone(), plane };
+    let error = sk.add_wire_constraint(kind.clone()).unwrap_err().to_string();
+    assert!(error.contains("fixed in the world"), "{error}");
+    // A constraint read from an old design must also fail without moving its world point.
+    sk.wire_constraints.push(WireConstraint { id: "loaded".into(), kind, param: None, driven: false });
+    let report = sk.solve_wires(None);
+    assert!(!report.ok && report.failing == ["loaded"], "{report:?}");
+    assert_eq!(at(&sk, &q), v(3.0, 4.0, 20.0));
+    sk.wire_constraints.clear();
+    sk.add_wire_constraint(WireConstraintKind::OnPlane { p, plane: OriginPlane::Xy.into() }).unwrap();
+    assert!(sk.solve_wires(None).ok, "legacy world-origin constraints still solve");
+    assert!(at(&sk, &q).z.abs() < 1e-7);
+}
+
+#[test]
+fn face_dimension_identity_keeps_pick_coordinates_without_accepting_duplicate_picks() {
+    let mut sk = Sketch::new();
+    let q = sk.add_drawn_wire_in(&[v(0.0, 0.0, 5.0)], WireSpace::Component).unwrap();
+    let p = sk.wire_point(&q).unwrap();
+    let target = |name: &str, at| {
+        PlaneOf::Model(Box::new(ModelPlane {
+            source: crate::LinkSource::Face { body: "Body1".into(), at },
+            face_name: Some(name.into()),
+            resolved_face: Some(if name == "top" { 0 } else { 1 }),
+            resolved: Some(solidcore_record::Plane::XY),
+        }))
+    };
+    sk.add_wire_dimension(
+        WireConstraintKind::PlaneDistance { p: p.clone(), plane: target("top", v(1.0, 2.0, 0.0)), reversed: false, value: 5.0 },
+        None,
+        true,
+    )
+    .unwrap();
+    let duplicate = WireConstraintKind::PlaneDistance { p: p.clone(), plane: target("top", v(8.0, 9.0, 0.0)), reversed: false, value: 5.0 };
+    assert!(sk.add_wire_dimension(duplicate, None, true).is_err());
+    let mut split_target = target("top", v(8.0, 9.0, 0.0));
+    if let PlaneOf::Model(plane) = &mut split_target {
+        plane.resolved_face = Some(2);
+    }
+    sk.add_wire_dimension(WireConstraintKind::PlaneDistance { p: p.clone(), plane: split_target, reversed: false, value: 5.0 }, None, true).unwrap();
+    sk.add_wire_dimension(
+        WireConstraintKind::PlaneDistance { p, plane: target("bottom", v(8.0, 9.0, 0.0)), reversed: false, value: 5.0 },
+        None,
+        true,
+    )
+    .unwrap();
+    assert!(matches!(&sk.wire_constraints[0].kind.model_plane().unwrap().source,
+        crate::LinkSource::Face { at, .. } if *at == v(1.0,2.0,0.0)));
 }

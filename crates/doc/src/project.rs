@@ -399,23 +399,11 @@ fn resolve_uncached(
             let ss = st.sketch(*sketch).ok_or_else(|| lost(&format!("sketch {sketch}")))?;
             let ci = ss.sketch.curve_index(curve).ok_or_else(|| lost(&format!("sketch curve {curve}")))?;
             match kind {
-                LinkKind::Intersect
-                    if matches!(
-                        ss.sketch.curves.get(ci).map(|c| &c.kind),
-                        Some(CurveKind::Line { .. } | CurveKind::Circle { .. } | CurveKind::Arc { .. })
-                    ) =>
-                {
-                    let mut points = Vec::new();
-                    for piece in sketch_curves(ss, ci) {
-                        let hits = solidcore_ops::curve::plane_crossings(&piece.curve, piece.interval, plane)
-                            .map_err(|e| DocError::Invalid(e.to_string()))?;
-                        points.extend(hits.into_iter().map(LinkGeom::Point));
-                    }
-                    points
-                }
                 LinkKind::Intersect => {
-                    let pts: Vec<Vec3> = ss.sketch.segs(ci).iter().flat_map(|s| s.polyline(1e-3)).map(|p| ss.plane.to_world(p)).collect();
-                    section_of_polyline(plane, &pts)
+                    let curves = sketch_curves(ss, ci);
+                    let pieces: Vec<_> = curves.iter().map(|piece| (&piece.curve, piece.interval)).collect();
+                    let hits = solidcore_ops::curve::piece_plane_crossings(&pieces, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
+                    hits.into_iter().map(LinkGeom::Point).collect()
                 }
                 LinkKind::Include => {
                     let pts: Vec<Vec3> = ss.sketch.polyline(ci).iter().map(|p| ss.plane.to_world(*p)).collect();
@@ -1538,7 +1526,7 @@ fn refresh_links_in(
     if lost_names == LostNames::Fail && !lost_by_name.is_empty() {
         return Err(DocError::LostProjections { feature: String::new(), links: lost_by_name });
     }
-    warn.extend(refresh_wire_targets(doc, vals, st, plane, sk));
+    warn.extend(refresh_wire_targets(doc, vals, st, plane, sk, frame));
     Ok(warn)
 }
 
@@ -1580,13 +1568,20 @@ fn features_named_in(doc: &Document, name: &str) -> Vec<String> {
 /// constraint is held to. A named plane is resolved like any plane reference; a face by its
 /// persistent face name, then its exact plane (`Body::planar_face`). A model plane that cannot be
 /// resolved stays unresolved, its constraint does not solve, and a warning says why.
-pub fn refresh_wire_targets(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, plane: &Plane, sk: &mut Sketch) -> Vec<String> {
+pub fn refresh_wire_targets(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    plane: &Plane,
+    sk: &mut Sketch,
+    frame: Option<&(u64, crate::Mat)>,
+) -> Vec<String> {
     sk.frame = solidcraft_sketch::SketchFrame(Some(*plane));
     let mut warn = Vec::new();
     for c in &mut sk.wire_constraints {
         let id = c.id.clone();
         let Some(solidcraft_sketch::PlaneOf::Model(m)) = c.kind.plane_mut() else { continue };
-        if let Err(why) = resolve_model_plane(doc, vals, st, m) {
+        if let Err(why) = resolve_model_plane(doc, vals, st, m, frame) {
             warn.push(format!("3D constraint {id}: {why}"));
         }
     }
@@ -1600,9 +1595,11 @@ pub fn resolve_model_plane(
     vals: &BTreeMap<String, Value>,
     st: &ModelState,
     m: &mut solidcraft_sketch::ModelPlane,
+    frame: Option<&(u64, crate::Mat)>,
 ) -> std::result::Result<(), String> {
     {
         let (source, face_name) = (m.source.clone(), m.face_name.clone());
+        let mut resolved_face = None;
         let resolved = match &source {
             LinkSource::Plane { name } => {
                 let pr = if Plane::named(name.as_str()).is_some() {
@@ -1611,36 +1608,46 @@ pub fn resolve_model_plane(
                     let feature = doc.find_feature(name.as_str()).map(|f| crate::FeatureId(f.id)).unwrap_or(crate::FeatureId::DANGLING);
                     PlaneRef::Construction { feature, placement: None }
                 };
-                doc.resolve_plane_in(vals, &pr, 0, 0, Some(st)).map_err(|_| format!("the plane {name} no longer exists"))
+                let owner = match &pr {
+                    PlaneRef::Construction { feature, .. } => doc.feature(feature.0).map(|f| f.component).unwrap_or(0),
+                    _ => 0,
+                };
+                doc.resolve_plane_in(vals, &pr, 0, owner, Some(st))
+                    .and_then(|plane| plane_in_sketch_frame(doc, &pr, plane, st, frame))
+                    .map_err(|e| format!("the plane {name} cannot be resolved: {e}"))
             }
             LinkSource::Face { body, at } => match &face_name {
                 Some(name) => st
                     .body(body.as_str())
-                    .and_then(|target| crate::naming::face_on_body(target, name, *at).and_then(|(index, _)| target.body.planar_face(index)))
+                    .and_then(|target| {
+                        let (index, _) = crate::naming::face_on_body(target, name, *at)?;
+                        let plane = target.body.planar_face(index)?;
+                        resolved_face = Some(index);
+                        Some(plane)
+                    })
                     .ok_or_else(|| format!("the planar face {name} of {body} no longer exists")),
                 None => Err(format!("the face of {body} has no name to find it by")),
             },
             other => Err(format!("{} is not a plane", other.describe())),
         };
         m.resolved = resolved.as_ref().ok().copied();
+        m.resolved_face = resolved_face;
         resolved.map(|_| ())
     }
 }
 
 /// The planar face of the model a 3D constraint is held to, picked through `at` (#10616): of
-/// the bodies (`body`, or all), the planar faces whose exact plane passes through `at`, where `at`
-/// lies on the body's surface (SMLib's classification). Decided exactly, on the B-rep's planes:
+/// the bodies (`body`, or all), the planar faces whose exact trimmed surface contains `at`.
+/// The kernel checks the B-rep's surface and trim curves, then compares the support planes:
 /// every face found must lie on one plane, else the pick is refused (a point on an edge between
 /// two planar faces). Returns the body, the face's persistent name and its plane.
 pub fn pick_planar_face(st: &ModelState, body: Option<&str>, at: Vec3) -> std::result::Result<(String, String, Plane), String> {
     let mut found: Vec<(String, usize, Plane, &crate::ModelBody)> = Vec::new();
     for b in st.bodies.iter().filter(|b| body.is_none_or(|n| b.name == n) && !b.body.is_mesh()) {
         let tol = (b.body.size() * 1e-9).max(1e-6);
-        if !matches!(b.body.classify_point(at), Ok(solidcraft_kernel::PointClass::OnBoundary)) {
-            continue;
-        }
-        for i in 0..b.body.face_count() {
-            if let Some(p) = b.body.planar_face(i).filter(|p| p.height(at).abs() <= tol) {
+        let query = solidcore_ops::query::Query::new(b.body.record());
+        for (_, i) in query.faces_at(at, tol) {
+            if let Some(p) = b.body.planar_face(i) {
                 found.push((b.name.clone(), i, p, b));
             }
         }
@@ -1648,8 +1655,7 @@ pub fn pick_planar_face(st: &ModelState, body: Option<&str>, at: Vec3) -> std::r
     let Some((name, index, plane, b)) = found.first() else {
         return Err("no planar face of the model passes through that point".into());
     };
-    let same = |p: &Plane| p.normal().cross(plane.normal()).len() <= 1e-9 && plane.height(p.origin).abs() <= 1e-6;
-    if !found.iter().all(|(_, _, p, _)| same(p)) {
+    if !found.iter().all(|(_, _, p, _)| solidcore_ops::constraint::same_plane(p, plane)) {
         return Err("that point lies where faces on different planes meet: pick a point inside one planar face".into());
     }
     let face = crate::naming::face_names(b).get(*index).cloned().ok_or_else(|| "that face has no name to keep it by".to_string())?;
@@ -2331,8 +2337,10 @@ fn plane_in_sketch_frame(doc: &Document, pr: &PlaneRef, plane: Plane, st: &Model
         return Ok(plane);
     }
     // The plane as it was built, in its own component's frame.
-    let Some(crate::construct::ConstructGeom::Plane(built)) = st.construct.iter().find(|c| c.feature == feature.0).map(|c| &c.geom) else {
-        return Ok(plane);
+    let built = match st.construct.iter().find(|c| c.feature == feature.0).map(|c| &c.geom) {
+        Some(crate::construct::ConstructGeom::Plane(built)) => built,
+        // The uncached resolver also returns the construction plane in its owner's frame.
+        _ => &plane,
     };
     let inverse = crate::mat_inverse(author_frame).ok_or_else(|| DocError::Invalid("the sketch's frame cannot be inverted".into()))?;
     let m = crate::mat_mul(&inverse, &doc.component_transform(owner));
