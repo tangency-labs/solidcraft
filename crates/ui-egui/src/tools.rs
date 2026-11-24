@@ -249,20 +249,35 @@ fn held(app: &SolveApp, p: &(Vec2, Option<String>)) -> Value {
 /// take that middle, as near as a sketch line's middle is offered.
 const EDGE_MIDDLE_PX: f32 = 8.0;
 
-fn midpoint_at(app: &SolveApp, proj: &Proj, pos: Pos2, radius: f32) -> Option<(Vec2, String)> {
+/// How near (screen pixels) the cursor must be to a sketch line's middle for the alignment tool
+/// to take that middle as the point it aligns, as near as the idle viewport offers that middle
+/// (#20442).
+const LINE_MIDDLE_PX: f32 = 8.0;
+
+/// The middle of the straight line among `hits` whose middle is within `radius` (screen pixels)
+/// of the cursor.
+fn midpoint_of(app: &SolveApp, proj: &Proj, hits: &[Hit], pos: Pos2, radius: f32) -> Option<(Vec2, String)> {
     let sid = app.session.active_sketch?;
     let state = crate::open_meshing::session_world(&app.session);
     let ss = state.sketch(sid)?;
-    pick(app, proj, pos).into_iter().find_map(|hit| {
+    hits.iter().find_map(|hit| {
         let Hit::SketchCurve { sketch, id, straight: true, .. } = hit else { return None };
-        if sketch != sid {
+        if *sketch != sid {
             return None;
         }
-        let l = ss.sketch.curve_index(&id)?;
+        let l = ss.sketch.curve_index(id)?;
         let solidcraft_engine::sketch::Shape::Line { a, b } = ss.sketch.shape(l)? else { return None };
         let mid = (a + b) * 0.5;
         let screen = proj.to_screen(ss.plane.to_world(mid))?;
-        (screen.distance(pos) <= radius).then_some((mid, id))
+        (screen.distance(pos) <= radius).then_some((mid, id.clone()))
+    })
+}
+
+/// The active sketch's closest point or curve under the cursor.
+fn active_hit<'a>(hits: &'a [Hit], app: &SolveApp) -> Option<&'a Hit> {
+    hits.iter().find(|hit| match hit {
+        Hit::SketchPoint { sketch, .. } | Hit::SketchCurve { sketch, .. } => Some(*sketch) == app.session.active_sketch,
+        _ => false,
     })
 }
 
@@ -291,9 +306,23 @@ pub fn on_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
         crate::sketch_line_arc::rejoin(app, &mut tool);
         app.tool = Some(tool);
     }
-    let midpoint = (shift && app.tool.as_ref().is_some_and(|t| t.kind == Kind::HorizontalVertical))
-        .then(|| midpoint_at(app, proj, pos, f32::INFINITY))
-        .flatten();
+    // The alignment tool takes a line's middle as a point: with Shift held, from anywhere on the
+    // line; with a point already picked, where the cursor is on the middle (#20442). With no
+    // point picked the cursor takes the line, so a line picked on its own is still made
+    // horizontal or vertical.
+    let alignment = app.tool.as_ref().is_some_and(|t| t.kind == Kind::HorizontalVertical);
+    let picked = app.tool.as_ref().is_some_and(|t| t.kind == Kind::HorizontalVertical && !t.point_picks.is_empty());
+    let want_middle = alignment && (shift || picked);
+    let hits = if want_middle { pick(app, proj, pos) } else { Vec::new() };
+    let midpoint = if !want_middle {
+        None
+    } else if shift {
+        midpoint_of(app, proj, &hits, pos, f32::INFINITY)
+    } else if matches!(active_hit(&hits, app), Some(Hit::SketchCurve { straight: true, .. })) {
+        midpoint_of(app, proj, &hits, pos, LINE_MIDDLE_PX)
+    } else {
+        None
+    };
     let h = if let Some((point, _)) = midpoint {
         Some((point, Some("Midpoint".into())))
     } else if let Some(point) = app.tool.as_ref().and_then(|tool| crate::sketch_tools::periodic_start_snap(app, tool, proj, pos)) {
@@ -373,11 +402,19 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
         }
         Kind::HorizontalVertical => {
             let hits = pick(app, proj, pos);
-            let midpoint = shift.then(|| midpoint_at(app, proj, pos, 12.0)).flatten();
-            let hit = hits.iter().find(|hit| match hit {
-                Hit::SketchPoint { sketch, .. } | Hit::SketchCurve { sketch, .. } => Some(*sketch) == app.session.active_sketch,
-                _ => false,
-            });
+            let hit = active_hit(&hits, app);
+            // A line's middle is a point the tool takes, the way it takes the line's ends: with
+            // Shift held, from anywhere on the line; with a point already picked, where the
+            // cursor is on the middle (#20442). With no point picked the click takes the line,
+            // so a line picked on its own is still made horizontal or vertical.
+            let picked = !tool.point_picks.is_empty();
+            let midpoint = if shift {
+                midpoint_of(app, proj, &hits, pos, 12.0)
+            } else if picked && matches!(hit, Some(Hit::SketchCurve { straight: true, .. })) {
+                midpoint_of(app, proj, &hits, pos, LINE_MIDDLE_PX)
+            } else {
+                None
+            };
             let point = midpoint.map(|(_, id)| json!({"midpoint": id})).or_else(|| match hit {
                 Some(Hit::SketchPoint { id, .. }) => Some(json!(id)),
                 _ => None,

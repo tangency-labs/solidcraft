@@ -2571,6 +2571,12 @@ fn own_corner_members(corners: &mut [solidcraft_doc::frame::CornerOverride], own
 /// The name a frame member feature gives the member on `line` (its group's `body_name`); none:
 /// named after the profile.
 fn member_group_name(kind: &FeatureKind, line: &str) -> Option<String> {
+    // A continuous tube is one physical member; `$path` is not one of its sketch curves.
+    if let FeatureKind::FrameMember { continuous: true, body_name, .. } = kind
+        && line == "$path"
+    {
+        return body_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
+    }
     let groups = solidcraft_doc::frame::member_groups(kind);
     let group = groups.iter().find(|g| g.lines.is_empty() || g.lines.iter().any(|l| l == line))?;
     group.body_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map(str::to_string)
@@ -2588,6 +2594,7 @@ fn given_group_name(p: &serde_json::Map<String, Value>, line: &str) -> Option<St
     named.and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()).map(str::to_string)
 }
 
+/// Rebuild a feature in its original timeline slot and authoring context before accepting the edit.
 fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.redefine";
     let id = feature_id(s, p.get("feature"), cmd)?;
@@ -2621,7 +2628,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "plastic.rest"
                 | "frame.end_cap"
                 | "frame.rotate_member"
+                | "frame.gusset"
                 | "frame.member"
+                | "frame.trim"
                 | "frame.plate"
         );
     if !constructor {
@@ -2646,6 +2655,12 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("convention").or_insert_with(|| json!(convention));
+    }
+    if let FeatureKind::SurfaceRevolve { faced, .. } = &old.kind
+        && cid == "surface.revolve"
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("faced").or_insert_with(|| json!(faced));
     }
     if let FeatureKind::Thread { continuous_flanks, .. } = &old.kind
         && cid == "solid.thread"
@@ -2762,6 +2777,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         trial.active_occurrence_path = (!anchor.author_path.is_empty()).then(|| anchor.author_path.clone());
     }
+    if let FeatureKind::FrameGusset { supports, .. } = &old.kind
+        && let Some(anchor) = supports.first().and_then(|s| super::sketch::face::anchor(&s.plane))
+    {
+        trial.active_occurrence_path = (!anchor.author_path.is_empty()).then(|| anchor.author_path.clone());
+    }
     if let FeatureKind::Emboss { face: Some(face), .. } = &old.kind {
         trial.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
     }
@@ -2794,6 +2814,19 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }?;
     let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     let mut new = trial.doc.feature(made).cloned().ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
+    if let FeatureKind::Pattern { components, occurrences, .. } = &old.kind
+        && !occurrences.is_empty()
+    {
+        let removed = match &mut new.kind {
+            FeatureKind::Pattern { components: after, occurrences: copies, .. } if after == components => {
+                // The constructor built a temporary pattern. Rebuild the edited feature with
+                // its original placements so a spacing or count edit keeps its surviving ids.
+                std::mem::replace(copies, occurrences.clone())
+            }
+            _ => occurrences.clone(),
+        };
+        trial.doc_mut().remove_occurrences(&removed.into_iter().collect());
+    }
     if let (FeatureKind::Emboss { face: Some(before), .. }, FeatureKind::Emboss { face: Some(after), .. }) = (&old.kind, &mut new.kind)
         && before.body == after.body
         && before.path == after.path
@@ -2812,8 +2845,13 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         *profiles = picked.clone();
     }
     // An old design's Join To Object keeps the body it runs to apart through an edit (#8151).
+    // An edit that says otherwise (the dialog's choice) changes it. An edit that makes a Join
+    // To Object out of an extrude that had none takes the new rule (#19671): what the old
+    // extent had to say about the body it runs to was about nothing.
     if let (FeatureKind::Extrude { extent: before, .. }, FeatureKind::Extrude { extent: after, .. }) = (&old.kind, &mut new.kind)
         && after.to.is_some()
+        && before.to.is_some()
+        && params.get("to_body_apart").is_none()
     {
         after.to_body_apart = before.to_body_apart;
     }

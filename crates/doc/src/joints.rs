@@ -518,6 +518,9 @@ impl JointOrigin {
 pub struct NamedOrigin {
     pub name: String,
     pub origin: JointOrigin,
+    /// Robot exports write it as a frame of its own (a tool tip, a sensor mount).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub export_frame: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -795,9 +798,17 @@ pub struct Joint {
     /// The assembly constraint it was made as; `None` for a joint made as a joint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub constraint: Option<Constraint>,
+    /// Per value: what a simulator reads (`JointDynamics`). The joint solver does not use them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dynamics: Vec<Option<JointDynamics>>,
 }
 
 impl Joint {
+    /// Whether either side of the joint refers to one of these occurrences.
+    pub fn uses_any_occurrence(&self, occurrences: &BTreeSet<u64>) -> bool {
+        !occurrences.is_empty() && self.a.occurrences().chain(self.b.occurrences()).any(|o| occurrences.contains(&o))
+    }
+
     /// Whether its values start where its parts are when it is made or changed, so B moves no
     /// further than the joint needs: a relation, or any joint made as an assembly constraint.
     pub fn starts_where_it_is(&self) -> bool {
@@ -814,6 +825,37 @@ impl Joint {
         offset[3][0] = self.offset_xy[0];
         offset[3][1] = self.offset_xy[1];
         mat_mul(&frame, &offset)
+    }
+}
+
+/// The largest effort, velocity, damping or friction a joint can hold.
+pub const MAX_DYNAMICS: f64 = 1e9;
+
+/// What a simulator needs to know about one joint value, in SI: effort in N or N m, velocity in
+/// m/s or rad/s, damping in N s/m or N m s/rad, friction in N or N m.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct JointDynamics {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub velocity: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub damping: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub friction: Option<f64>,
+}
+
+impl JointDynamics {
+    /// Without the values a hand-edited file could hold that no command accepts.
+    pub fn sane(&self) -> JointDynamics {
+        let positive = |x: &f64| x.is_finite() && *x > 0.0 && *x <= MAX_DYNAMICS;
+        let not_negative = |x: &f64| x.is_finite() && *x >= 0.0 && *x <= MAX_DYNAMICS;
+        JointDynamics {
+            effort: self.effort.filter(positive),
+            velocity: self.velocity.filter(positive),
+            damping: self.damping.filter(not_negative),
+            friction: self.friction.filter(not_negative),
+        }
     }
 }
 
@@ -1022,6 +1064,11 @@ pub struct MotionLink {
 }
 
 impl MotionLink {
+    /// The follower's value is `ratio · a + offset`; a cam's comes from its table.
+    pub fn coupling_is_linear(&self) -> bool {
+        !matches!(self.coupling, Some(Coupling::Cam(_)))
+    }
+
     /// b's value for a's value `x` (before b's limits). A cam's table that is not whole (a
     /// hand-edited file) gives no value, so b keeps where it is; a table on any other link is
     /// not read.
@@ -2942,6 +2989,8 @@ pub fn solve_holding(doc: &Document, st: &ModelState, held: &Held) -> Solution {
 /// solves still close and check every loop, respect held values and limits, and report errors;
 /// they leave `Solution::dof` empty rather than returning the spanning tree's approximate count.
 pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held, analysis: Analysis) -> Solution {
+    let active = doc.active_assembly();
+    let doc = &*active;
     let asm = &doc.assembly;
     let mut sol = Solution::default();
     let mut vals = joint_values(asm);
@@ -3244,10 +3293,13 @@ impl Document {
             }
         }
         let parents: BTreeMap<u64, u64> = self.occurrences.iter().map(|o| (o.id, o.parent)).collect();
+        let inactive = self.inactive_pattern_occurrences();
         let (mut occurrence_at, mut first_of) = (std::collections::HashMap::new(), std::collections::HashMap::new());
         for (i, o) in self.occurrences.iter().enumerate() {
             occurrence_at.entry(o.id).or_insert(i);
-            first_of.entry(o.component).or_insert(i);
+            if !inactive.contains(&o.id) {
+                first_of.entry(o.component).or_insert(i);
+            }
         }
         // Outer occurrences first: each one is stored in its parent's frame as this loop has left
         // it, so a parent the solution also moves must be moved before the parts inside it. In id
@@ -3266,7 +3318,7 @@ impl Document {
         for (_, occ, world) in order {
             let occ = &occ;
             let parent = parents.get(occ).copied().unwrap_or(0);
-            // Through the transforms as this loop has left them, as `component_transform` reads.
+            // Through the active parent transforms as this loop has left them, as the solver read them.
             let occurrences = &self.occurrences;
             let pw = if parent == 0 {
                 IDENTITY
@@ -3543,6 +3595,7 @@ mod tests {
                 offset_xy: [0.0; 2],
                 captured: None,
                 constraint: None,
+                dynamics: Vec::new(),
             })
             .collect();
         let links =
@@ -3723,6 +3776,52 @@ mod tests {
             assert!(close(&at, &w), "component {component}: at x {:.3}, wanted {:.3}", at[3][0], w[3][0]);
         }
         assert!(!doc.apply_joint_solution(&Solution { world, ..Solution::default() }), "applied twice, nothing moves");
+    }
+
+    #[test]
+    fn a_solution_places_children_in_their_active_parents_frame() {
+        let mut doc = Document::default();
+        let parent = doc.add_component(Some("Parent"), 0).unwrap();
+        let original = doc.occurrence_of(parent).unwrap().id;
+        let inactive = doc.add_occurrence(parent, 0, shift(20.0, 0.0, 0.0)).unwrap();
+        let replacement = doc.add_occurrence(parent, 0, shift(4.0, 0.0, 0.0)).unwrap();
+        let child = doc.add_component(Some("Child"), parent).unwrap();
+        let child = doc.occurrence_of(child).unwrap().id;
+        let pattern = doc
+            .add_feature(
+                FeatureKind::Pattern {
+                    features: Vec::new(),
+                    pattern: crate::PatternKind::Rectangular {
+                        dir1: crate::Dir(Vec3::X),
+                        count1: "2".into(),
+                        spacing1: "20".into(),
+                        dir2: None,
+                        count2: None,
+                        spacing2: None,
+                        alignment: Default::default(),
+                        alignment2: Default::default(),
+                        reversed: false,
+                        reversed2: false,
+                        distance1: Default::default(),
+                        distance2: Default::default(),
+                        extent1: None,
+                        extent2: None,
+                        copy_at_end1: false,
+                        copy_at_end2: false,
+                    },
+                    bodies: Vec::new(),
+                    placements: Vec::new(),
+                    components: vec![parent],
+                    occurrences: vec![inactive],
+                },
+                Some("Copies"),
+            )
+            .unwrap();
+        doc.feature_mut(pattern).unwrap().suppressed = true;
+        doc.remove_occurrences(&BTreeSet::from([original]));
+        let target = shift(12.0, 0.0, 0.0);
+        assert!(doc.apply_joint_solution(&Solution { world: BTreeMap::from([(child, target)]), ..Solution::default() }));
+        assert_eq!(doc.path_placement(&[replacement, child]).unwrap().1, target);
     }
 
     #[test]
