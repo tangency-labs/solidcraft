@@ -2200,7 +2200,16 @@ mod tests {
             }
             write(&root, "solidcore/crates/solidcore/src/lib.rs", "pub fn kernel() { }\n");
             commit(&root, "kernel");
-            assert_ne!(build_script::evaluation_source(&root).as_deref(), Some(clean.as_str()), "the kernel computes the model");
+            let kernel = build_script::evaluation_source(&root).expect("a digest");
+            assert_ne!(kernel, clean, "the kernel computes the model");
+            // A file whose name git would quote (not ASCII) is keyed like any other.
+            write(&root, "solidcore/crates/solidcore/src/\u{66f2}\u{7dda}.rs", "pub fn curve() {}\n");
+            commit(&root, "curve");
+            let curve = build_script::evaluation_source(&root).expect("a digest");
+            assert_ne!(curve, kernel, "a new kernel file with a non-ASCII name");
+            write(&root, "solidcore/crates/solidcore/src/\u{66f2}\u{7dda}.rs", "pub fn curve() { }\n");
+            commit(&root, "curve edited");
+            assert_ne!(build_script::evaluation_source(&root).as_deref(), Some(curve.as_str()), "an edit to it");
             let _ = fs::remove_dir_all(&root);
         }
 

@@ -157,14 +157,17 @@ pub(crate) fn evaluation_source(root: &Path) -> Option<String> {
     for (path, id) in paths.iter().zip(ids.lines()) {
         // The vendored kernel's tree: every file that computes models, not the repository's own.
         if EVALUATION_TREES.contains(&path.as_str()) {
+            // NUL-separated, so a name git would quote (non-ASCII, a tab) is listed as it is; a
+            // record that cannot be read is hashed whole rather than left out.
             let prefix = format!("{path}/");
-            let listing = git(root, &["ls-tree", "-r", "HEAD", &format!("./{prefix}")])?;
-            for line in listing.lines() {
-                let (meta, file) = line.split_once('\t')?;
-                let id = meta.split_whitespace().nth(2)?;
-                let Some(file) = file.strip_prefix(&prefix) else { continue };
-                if solidcore_evaluated(file) {
-                    digest.update(format!("{path} {file} {id}\n"));
+            let listing = git_bytes(root, &["ls-tree", "-r", "-z", "HEAD", &format!("./{prefix}")])?;
+            for record in listing.split(|&b| b == 0).filter(|r| !r.is_empty()) {
+                let record = String::from_utf8_lossy(record);
+                let parsed = record.split_once('\t').and_then(|(meta, file)| Some((meta.split_whitespace().nth(2)?, file.strip_prefix(&prefix)?)));
+                match parsed {
+                    Some((_, file)) if !solidcore_evaluated(file) => {}
+                    Some((id, file)) => digest.update(format!("{path} {file} {id}\n")),
+                    None => digest.update(format!("{path} record {record}\n")),
                 }
             }
             continue;
