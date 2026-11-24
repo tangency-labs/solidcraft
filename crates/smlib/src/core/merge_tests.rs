@@ -20,7 +20,7 @@ use solidcore::primitive::api_trim_ops::trim_surface_with_3d_curves;
 use solidcore::surface::plane::p1::Plane;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::Brep;
-use solidcore::topology::brep::p2::ArenaNotifyState;
+use solidcore::topology::brep::p2::{ArenaNotifyState, copy_source_ref};
 use solidcore::topology::brep::p3::{merge_brep, new_brep};
 use solidcore::topology::brep::p8::create_face_from_surface;
 
@@ -384,7 +384,7 @@ fn merge_faces_keeping_edges_keeps_named_edges_and_exceeds_max_points() {
             let next = create_box(k, Vec3::new((i as f64) * 2.0, 0.0, 0.0), 1.0, 1.0, 1.0)?;
             let mut state = ArenaNotifyState::new(&combined);
             let mut env = state.env(None);
-            merge_brep(k, &mut env, &mut combined, &next, &solidcore::topology::brep::p2::copy_source_ref, None, None, true)?;
+            merge_brep(k, &mut env, &mut combined, &next, &copy_source_ref, None, None, true)?;
         }
         combined.refresh_cached_topology();
         Ok(combined)

@@ -21,13 +21,14 @@ use solidcore::topology::brep::p4::stitch_faces;
 use solidcore::topology::brep::p5::remove_topological_edges_and_vertices;
 use solidcore::topology::face::p2 as face_p2;
 use solidcore::topology::topology_traverser::Marks;
-use solidcore::topology::{Brep, FaceId, RegionId, edge};
+use solidcore::topology::{Brep, EdgeId, FaceId, RegionId, edge};
 
 use super::Body;
 use super::blend::{edge_miss, finish, on_copy, pick_edges, points_ok, status, tolerance_ok};
 use crate::{Error, Result};
 use solidcore::topology::brep::p3::brep_copy;
 
+type Core<T> = solidcore::Result<T>;
 type Out<T> = std::result::Result<T, Error>;
 
 /// `smlib_stitch`: the faces of a copy of `body` sewn along the vertices and edges that coincide
@@ -65,7 +66,7 @@ pub(crate) fn stitch(body: &Body, tolerance: f64) -> Result<(Body, bool)> {
 
 /// How many regions of `b` are material: neither the infinite region nor a void (`IsVoid`'s
 /// `UNSURE` counts as void, as the capi's `!IsVoid()`).
-fn material_regions(b: &Brep) -> solidcore::Result<usize> {
+fn material_regions(b: &Brep) -> Core<usize> {
     let infinite = b.infinite_region();
     let mut n = 0;
     for r in bl::regions(b, None)? {
@@ -75,7 +76,7 @@ fn material_regions(b: &Brep) -> solidcore::Result<usize> {
 }
 
 /// The region on the side of `f`'s faceuse `fu` (its shell's), if any.
-fn region_of(b: &Brep, fu: Option<solidcore::topology::FaceuseId>) -> solidcore::Result<Option<RegionId>> {
+fn region_of(b: &Brep, fu: Option<solidcore::topology::FaceuseId>) -> Core<Option<RegionId>> {
     let Some(fu) = fu else { return Ok(None) };
     match b.faceuse(fu)?.shell {
         Some(sh) => Ok(b.shell(sh)?.region),
@@ -92,7 +93,7 @@ fn remove_faces_inside(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<Out<()
     for f in bl::faces(b, None)? {
         let (u1, u2) = face_p2::faceuses(b, f)?;
         let (Some(r1), Some(r2)) = (region_of(b, u1)?, region_of(b, u2)?) else { continue };
-        let material = |r: RegionId| -> solidcore::Result<bool> { Ok(Some(r) != infinite && b.region(r)?.is_void() == 0) };
+        let material = |r: RegionId| -> Core<bool> { Ok(Some(r) != infinite && b.region(r)?.is_void() == 0) };
         if r1 != r2 && material(r1)? && material(r2)? {
             inside.push(f);
         }
@@ -154,7 +155,7 @@ fn close_onto_shared_edges(k: &mut Kernel, b: Brep, tolerance: f64, lamina: &mut
 /// Shared body of [`merge_faces`] and [`merge_faces_keeping_edges`]: runs
 /// `SmBrep::RemoveTopologicalEdgesAndVertices` on a copy of `body`, keeping the edges `resolve`
 /// selects; then `finish` (faces left, and a solid in gives a manifold solid).
-fn merge_faces_with(body: &Body, resolve: impl FnOnce(&Kernel, &Brep) -> solidcore::Result<Out<Vec<solidcore::topology::EdgeId>>>) -> Result<Body> {
+fn merge_faces_with(body: &Body, resolve: impl FnOnce(&Kernel, &Brep) -> Core<Out<Vec<EdgeId>>>) -> Result<Body> {
     on_copy("SmBrep::RemoveTopologicalEdgesAndVertices", body, |k, mut b| {
         let kept = match resolve(k, &b)? {
             Ok(edges) => edges,
