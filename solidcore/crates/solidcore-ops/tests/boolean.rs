@@ -4034,3 +4034,71 @@ fn curved_pockets_touching_along_a_vertical_spline_edge_cut_after_round_trip() {
     let got = volume(&r);
     assert!(near(got, want), "volume {got} vs closed form {want}");
 }
+
+/// acid-10's near miss: a 50 mm block, joined (or not) by a Ø20 cylinder along x lying 2e-5
+/// deep in its top face, then joined by an r 15 ball centred 14.99998 from its +x face, so
+/// that the ball dips 2e-5 into it, twice the zone tolerance. They meet in a circle of radius
+/// √(2 · 15 · 2e-5 − 4e-10) = 0.0245, at 0.094° to each other. At that angle the radial sector
+/// steps off the circle until the ball's face and the block's are more than the tolerance
+/// apart; upstream's secant step aimed at the tolerance itself, settled 0.009 from the
+/// circle with the faces exactly that far apart, and read the unchanging distance as a
+/// coincidence. Taken for a copy of the block face, the ball's face was put in the block's
+/// material, and the union deleting the disc the ball covers merged the block into the
+/// outside: refused. The step now aims at twice the tolerance, the faces part, and the ball's
+/// face is outside the block.
+///
+/// The volume is the closed form: block, cylinder and ball, less the cap the ball dips in,
+/// π d² (3R − d) / 3 with d = 2e-5, and the cylinder's segment under the top face over its
+/// 50 mm, (r² acos((r − d) / r) − (r − d) √(2 r d − d²)) · 50; the ball and cylinder are
+/// apart (the ball's top is at z = 40, the cylinder's bottom at 49.99998).
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_ball_dipped_twice_the_tolerance_into_a_block_face_joins_it() {
+    all_fixes();
+    let (d, rb, rc): (f64, f64, f64) = (2e-5, 15.0, 10.0);
+    let cap = PI * d * d * (3.0 * rb - d) / 3.0;
+    let segment =
+        (rc * rc * ((rc - d) / rc).acos() - (rc - d) * (2.0 * rc * d - d * d).sqrt()) * 50.0;
+    for with_cylinder in [false, true] {
+        let mut part = make_box([0.0; 3], [50.0; 3]).unwrap();
+        let mut want = 125_000.0 + 4.0 / 3.0 * PI * rb.powi(3) - cap;
+        if with_cylinder {
+            let v = solidcore_record::Vec3::new;
+            let plane = Plane {
+                origin: v(0.0, 25.0, 60.0 - d),
+                x: v(0.0, 1.0, 0.0),
+                y: v(0.0, 0.0, 1.0),
+            };
+            let region = Region2 {
+                outer: Loop2::circle_from(Vec2::new(0.0, 0.0), rc, 0.6131),
+                holes: vec![],
+            };
+            let cylinder = extrude_planar_regions(&plane, &[region], 0.0, 50.0).unwrap();
+            part = boolean(part, cylinder, BooleanOp::Union).unwrap().unwrap();
+            want += PI * rc * rc * 50.0 - segment;
+        }
+        let ball = make_sphere([65.0 - d, 25.0, 25.0], rb).unwrap();
+        let u = boolean(part, ball, BooleanOp::Union)
+            .unwrap_or_else(|e| panic!("cylinder {with_cylinder}: {e:?}"))
+            .unwrap();
+        assert_eq!(u.solid_count().unwrap(), 1, "cylinder {with_cylinder}");
+        assert!(u.is_manifold_solid().unwrap(), "cylinder {with_cylinder}");
+        assert!(
+            near(volume(&u), want),
+            "cylinder {with_cylinder}: {} vs {want}",
+            volume(&u)
+        );
+        // In the ball beyond the block face, at its middle and where the ball dips in.
+        for p in [
+            [79.0, 25.0, 25.0],
+            [50.000_005, 25.0, 25.0],
+            [49.999_99, 25.0, 25.0],
+        ] {
+            assert_eq!(
+                u.classify_point(p).unwrap(),
+                PointClass::Inside,
+                "cylinder {with_cylinder}: {p:?}"
+            );
+        }
+    }
+}

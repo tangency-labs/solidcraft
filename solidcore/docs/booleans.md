@@ -144,8 +144,11 @@ until one classifies uniquely. Each test is `query::edge::radial_sector_classify
 edge) are compared, and when any two are within 10° the faces are stepped off the edge at growing
 distances (the two edges' tolerances, twice that, then growing with how fast the step-off points
 separate) until the sector test is unambiguous. This is the radial-edge form of Mäntylä's
-neighbourhood classification [4, 6]. The sector's region gives the class: `region_keep` reads its
-void flag.
+neighbourhood classification [4, 6]. One thing differs from upstream: the steps grow by a secant
+aimed where the faces are twice the tolerance apart. Aimed at the tolerance itself, as upstream's
+was, faces parting at a small angle (a ball dipped 2e-5 into a face leaves it at 0.094°) settled
+exactly that far apart, and the unchanging distance read as a coincidence. The sector's region
+gives the class: `region_keep` reads its void flag.
 
 A sector whose faces coincide is the coincident case of §5.
 

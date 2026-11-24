@@ -61,6 +61,10 @@
 //!   the edge: two of them closer than 0.001° there are coincident only where their faces
 //!   stay within the tolerance band of each other's plane; walls 3.3e-7 rad apart through
 //!   the edge, 2.8e-5 apart 85 mm from it, are classified by their exact binormals.
+//! - **The secant step** (not upstream). Once the steps grow with how fast the faces part,
+//!   they aim where the faces are twice the tolerance apart, past the exit at the tolerance;
+//!   upstream aimed at the tolerance itself, and faces parting at a small angle settled there
+//!   until their steady distance read as a coincidence.
 //! - **Loops.** The step-off loops of both classifications keep upstream's bound (20
 //!   rounds of growing step-offs). No recursion.
 
@@ -1059,8 +1063,20 @@ pub fn radial_sector_classify_between(
                     step_off_distance = 2.0 * last_step_off_distance;
                 } else {
                     let ratio = (step_off_distance - last_step_off_distance) / denom;
-                    last_step_off_distance = step_off_distance;
-                    step_off_distance = tolerance * ratio;
+                    let step = step_off_distance;
+                    last_step_off_distance = step;
+                    // (not upstream) The secant aims where the faces are twice the tolerance
+                    // apart, past the exit above (farther apart than the tolerance). Upstream's
+                    // `tolerance * ratio` aims at the tolerance itself: faces parting at a small
+                    // angle (a sphere dipped 2e-5 into a face leaves it at 0.094 degrees) settle
+                    // there, their distance stops changing, and once the rounds run out that
+                    // reads as a coincidence. A falling distance (`ratio` below 0) doubles the
+                    // step, as upstream's negative step did.
+                    step_off_distance = if ratio < 0.0 {
+                        -1.0
+                    } else {
+                        step + (2.0 * tolerance - min_dist) * ratio
+                    };
                     // Don't let step distance grow or shrink by more than a factor of 3
                     if step_off_distance < 0.0 {
                         step_off_distance = 2.0 * last_step_off_distance;
