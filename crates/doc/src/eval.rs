@@ -14920,7 +14920,7 @@ fn eval_feature_kind(
             // A linked design's bodies left out of the file, and not read back when it opened.
             if records.is_none() && step.is_empty() && doc.links.values().any(|link| link.feature == f.id) {
                 return Err(DocError::Invalid(format!(
-                    "the bodies of the linked design {file} are not in this design: it was saved without them, and they have not been read from the file since; Update Links reads them"
+                    "the bodies of the linked file {file} are not in this design: it was saved without them, and they have not been read from the file since; Update Links reads them"
                 )));
             }
             let (imp, digest) = match records {

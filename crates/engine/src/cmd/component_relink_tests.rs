@@ -2093,17 +2093,40 @@ fn recovering_a_design_saved_without_linked_bodies_reads_only_the_folders_allowe
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// A save without linked bodies leaves out the bodies of linked designs only: a linked STEP file
-/// (Insert STEP) keeps its bodies in the design's file, and the save has nothing to say of it.
+/// The Import feature of each link in the design saved at `file`: whether the link is to a STEP
+/// file, and whether its bodies are in the file.
+fn bodies_in_file(file: &Path) -> Vec<(bool, bool)> {
+    let doc = solidcraft_io::read_design(&std::fs::read(file).unwrap()).unwrap();
+    let mut kept: Vec<(bool, bool)> = doc
+        .links
+        .values()
+        .map(|link| match &doc.feature(link.feature).unwrap().kind {
+            solidcraft_doc::FeatureKind::Import { step, records, .. } => (link.step_names.is_some(), !step.is_empty() || records.is_some()),
+            _ => panic!("a link's feature is an Import"),
+        })
+        .collect();
+    kept.sort_unstable();
+    kept
+}
+
+/// A 10 mm cube at x = 100, `height` tall, exported as a STEP file at `step`.
+fn step_block(step: &Path, height: u32) {
+    let mut block = Session::default();
+    run(&mut block, "solid.box", json!({"length": 10, "width": 10, "height": height, "corner": [100,0,0]}));
+    run(&mut block, "file.export", json!({"path": step}));
+}
+
+/// A save without linked bodies leaves out the bodies of a linked STEP file (Insert STEP) too,
+/// and opening the design reads them from the STEP file again. A STEP file that changed while
+/// the design was closed comes in with its new bodies and is listed as changed; a missing one
+/// leaves its component without bodies, saying why.
 #[test]
-fn a_save_without_linked_bodies_keeps_the_bodies_of_a_linked_step_file() {
+fn a_save_without_linked_bodies_leaves_out_a_linked_step_file_and_opening_reads_it() {
     let dir = folder("left-out-step");
     let source = dir.join("part.json");
     part(&source, 30);
     let step = dir.join("block.step");
-    let mut block = Session::default();
-    run(&mut block, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100,0,0]}));
-    run(&mut block, "file.export", json!({"path": step}));
+    step_block(&step, 10);
 
     let mut s = Session::default();
     run(&mut s, "component.insert_design", json!({"path": source}));
@@ -2112,23 +2135,106 @@ fn a_save_without_linked_bodies_keeps_the_bodies_of_a_linked_step_file() {
     let file = dir.join("assembly.json");
     let saved = run(&mut s, "file.save", json!({"path": file, "linked_bodies": false}));
     assert!(saved.get("warnings").is_none(), "{saved}");
-    let doc = solidcraft_io::read_design(&std::fs::read(&file).unwrap()).unwrap();
-    let kept: Vec<(bool, bool)> = doc
-        .links
-        .values()
-        .map(|link| match &doc.feature(link.feature).unwrap().kind {
-            solidcraft_doc::FeatureKind::Import { step, records, .. } => (link.step_names.is_some(), !step.is_empty() || records.is_some()),
-            _ => panic!("a link's feature is an Import"),
-        })
-        .collect();
-    assert_eq!(kept, [(false, false), (true, true)], "only the linked design's bodies are left out");
+    assert_eq!(bodies_in_file(&file), [(false, false), (true, false)], "both links are saved without their bodies");
 
     let mut opened = Session::default();
     assert_eq!(run(&mut opened, "doc.open", json!({"path": file}))["errors"], 0);
-    // The 10 x 20 x 30 part and the 10 x 10 x 10 block.
+    // The 10 x 20 x 30 part and the 10 x 10 x 10 block: 6000 + 1000 mm³.
     assert!((volume(&mut opened) - 7000.0).abs() < 1e-5);
     let listed = run(&mut opened, "component.links", json!({}));
     assert!(listed["links"].as_array().unwrap().iter().all(|l| l["changed"] != true), "{listed}");
+    // Opening is no change, and saving again gives the same bytes.
+    let bytes = std::fs::read(&file).unwrap();
+    run(&mut opened, "file.save", json!({}));
+    assert_eq!(std::fs::read(&file).unwrap(), bytes);
+    // Saved with the bodies again, the STEP text is back in the file.
+    let mut whole = Session::default();
+    run(&mut whole, "doc.open", json!({"path": file}));
+    let back = dir.join("whole.json");
+    run(&mut whole, "file.save", json!({"path": back, "linked_bodies": true}));
+    assert_eq!(bodies_in_file(&back), [(false, true), (true, true)]);
+
+    // The block grows to 10 x 10 x 20 while the design is closed: 6000 + 2000 mm³.
+    step_block(&step, 20);
+    let mut changed = Session::default();
+    let reply = run(&mut changed, "doc.open", json!({"path": file}));
+    assert_eq!(reply["errors"], 0, "{reply}");
+    assert!(reply["warnings"].to_string().contains("STEP file changed"), "{reply}");
+    assert!((volume(&mut changed) - 8000.0).abs() < 1e-5);
+    let listed = run(&mut changed, "component.links", json!({}));
+    assert_eq!(listed["links"].as_array().unwrap().iter().filter(|l| l["changed"] == true).count(), 1, "{listed}");
+
+    // The STEP file is gone: its component has no bodies, and the open says why.
+    std::fs::remove_file(&step).unwrap();
+    let mut missing = Session::default();
+    let reply = run(&mut missing, "doc.open", json!({"path": file}));
+    assert_eq!(reply["errors"], 1, "{reply}");
+    assert!(reply["warnings"].to_string().contains("has no bodies"), "{reply}");
+    assert!((volume(&mut missing) - 6000.0).abs() < 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A linked STEP file that cannot be read when the design is saved keeps its bodies in the
+/// file, and the save names it.
+#[test]
+fn a_save_without_linked_bodies_keeps_a_missing_step_files_bodies() {
+    let dir = folder("left-out-step-missing");
+    let step = dir.join("block.step");
+    step_block(&step, 10);
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": step}));
+    std::fs::remove_file(&step).unwrap();
+    let file = dir.join("assembly.json");
+    let saved = run(&mut s, "file.save", json!({"path": file, "linked_bodies": false}));
+    assert!(saved["warnings"].to_string().contains("keeps its bodies in the file"), "{saved}");
+    assert_eq!(bodies_in_file(&file), [(true, true)]);
+    let mut opened = Session::default();
+    assert_eq!(run(&mut opened, "doc.open", json!({"path": file}))["errors"], 0);
+    assert!((volume(&mut opened) - 1000.0).abs() < 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The mesh bodies a linked design brings (an STL part on a board) are left out with its solids,
+/// and opening the design reads them back from the design file.
+#[test]
+fn a_save_without_linked_bodies_leaves_out_a_linked_designs_mesh_bodies() {
+    let dir = folder("left-out-meshes");
+    let (board, stl) = (dir.join("board.json"), dir.join("Chip.stl"));
+    std::fs::write(&stl, super::tests::tetra_stl()).unwrap();
+    let meshes = |s: &Session| -> Vec<String> { s.model.state().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect() };
+    let mut part = Session::default();
+    run(&mut part, "solid.box", json!({"length": 10, "width": 20, "height": 2, "body_name": "Board"}));
+    run(&mut part, "file.insert_mesh", json!({"path": stl}));
+    run(&mut part, "file.save", json!({"path": board}));
+    let chip = meshes(&part);
+    assert_eq!(chip.len(), 1, "{chip:?}");
+
+    let mut s = Session::default();
+    run(&mut s, "component.insert_design", json!({"path": board}));
+    assert_eq!(meshes(&s), chip);
+    let file = dir.join("assembly.json");
+    run(&mut s, "file.save", json!({"path": file, "linked_bodies": false}));
+    let doc = solidcraft_io::read_design(&std::fs::read(&file).unwrap()).unwrap();
+    let held: Vec<usize> = doc
+        .features
+        .iter()
+        .filter_map(|f| match &f.kind {
+            solidcraft_doc::FeatureKind::MeshImport { meshes, .. } => Some(meshes.len()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(held, [0], "the linked design's Mesh Import feature is saved without its meshes");
+
+    let mut opened = Session::default();
+    assert_eq!(run(&mut opened, "doc.open", json!({"path": file}))["errors"], 0);
+    assert_eq!(meshes(&opened), chip);
+    // The 10 x 20 x 2 board and the chip, a tetrahedron with 10 mm legs: 400 + 1000 / 6 mm³.
+    assert!((volume(&mut opened) - (400.0 + 1000.0 / 6.0)).abs() < 1e-5, "{}", volume(&mut opened));
+    let listed = run(&mut opened, "component.links", json!({}));
+    assert!(listed["links"].as_array().unwrap().iter().all(|l| l["changed"] != true), "{listed}");
+    let bytes = std::fs::read(&file).unwrap();
+    run(&mut opened, "file.save", json!({}));
+    assert_eq!(std::fs::read(&file).unwrap(), bytes, "opening is no change");
     let _ = std::fs::remove_dir_all(dir);
 }
 

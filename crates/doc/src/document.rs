@@ -4268,9 +4268,10 @@ pub struct Document {
     /// Components linked to another design file (by component id).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub links: std::collections::BTreeMap<u64, DesignLink>,
-    /// Set in a file saved without the bodies of its linked designs (`file.save`'s
-    /// `linked_bodies: false`): the Import feature of each link is saved with no STEP text and no
-    /// records, and opening the design reads those bodies from the linked files again. Only the
+    /// Set in a file saved without the bodies of its linked designs and linked STEP files
+    /// (`file.save`'s `linked_bodies: false`): the Import feature of each link is saved with no
+    /// STEP text and no records, the Mesh Import feature beside a linked design's link with no
+    /// meshes, and opening the design reads those bodies from the linked files again. Only the
     /// file carries it: the session keeps the choice, and a design in memory always holds the
     /// bodies it could read.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
