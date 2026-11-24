@@ -333,8 +333,8 @@ settings_profile	false
 shaft_spline	false
 sheet	false
 sheet_corner_butt	false
-sheet_corner_full	false
-sheet_corner_partial	false
+sheet_corner_overlap	false
+sheet_corner_overlap_flipped	false
 sheet_rules	false
 sheet_tab	false
 shell	false
@@ -401,6 +401,7 @@ surface_trim	false
 surface_unstitch	false
 surface_untrim	false
 svg	false
+swap	false
 sweep	false
 text	false
 thread	false

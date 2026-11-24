@@ -1,0 +1,20 @@
+[
+  {"note": "Three edge flanges produce two corner cards. Set the first to overlap, swap it and set its gap."},
+  {"call": "ui.resize", "params": {"width": 1600, "height": 1400}},
+  {"call": "engine.execute", "params": {"command": "sketch.create", "params": {"plane": "XY", "name": "Base"}}},
+  {"call": "engine.execute", "params": {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [100, 60]}}},
+  {"call": "engine.execute", "params": {"command": "sketch.finish", "params": {}}},
+  {"call": "engine.execute", "params": {"command": "sheet.flange", "params": {"sketch": "Base"}}},
+  {"call": "ui.camera", "params": {"target": [50, 30, 0], "distance": 230}},
+  {"call": "ui.view", "params": {"view": "iso"}},
+  {"start": "sheet.flange"},
+  {"click": {"world": [50, 0, 2.5]}},
+  {"click": {"world": [100, 30, 2.5]}},
+  {"click": {"world": [50, 60, 2.5]}},
+  {"click": {"handle": "dialog:card_header:Corner 2"}},
+  {"click": {"handle": "dialog:ui.surface_corner_type:Overlap"}},
+  {"click": {"handle": "dialog:corner_swap"}},
+  {"click": {"handle": "dialog:ui.surface_corner_gap"}},
+  {"text": "0.6 mm"},
+  {"click": {"handle": "dialog:card_header:Corner 1"}}
+]

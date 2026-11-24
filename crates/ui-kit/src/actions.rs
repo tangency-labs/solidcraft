@@ -167,16 +167,29 @@ pub fn filter_button_at<R>(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &st
 
 /// Quiet secondary action: a small, muted glyph with the normal full-size hit target.
 pub fn quiet_icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str) -> Response {
-    icon_button_presentation(ui, rect, icon, label, None, true, false)
+    icon_button_presentation(ui, rect, icon, label, None, IconPresentation::Quiet)
+}
+
+/// A quiet action whose glyph brightens without painting a hover background.
+pub fn bare_icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str) -> Response {
+    icon_button_presentation(ui, rect, icon, label, None, IconPresentation::Bare)
 }
 
 /// Directional counterpart of an existing master, with the same hit target and accessibility.
 pub fn mirrored_icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str) -> Response {
-    icon_button_presentation(ui, rect, icon, label, None, false, true)
+    icon_button_presentation(ui, rect, icon, label, None, IconPresentation::Mirrored)
 }
 
 pub fn icon_button_colored(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str, ink: Option<egui::Color32>) -> Response {
-    icon_button_presentation(ui, rect, icon, label, ink, false, false)
+    icon_button_presentation(ui, rect, icon, label, ink, IconPresentation::Normal)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IconPresentation {
+    Normal,
+    Mirrored,
+    Quiet,
+    Bare,
 }
 
 fn icon_button_presentation(
@@ -185,18 +198,18 @@ fn icon_button_presentation(
     icon: &str,
     label: &str,
     ink: Option<egui::Color32>,
-    quiet: bool,
-    mirrored: bool,
+    presentation: IconPresentation,
 ) -> Response {
     let t = Tokens::get();
+    let quiet = matches!(presentation, IconPresentation::Quiet | IconPresentation::Bare);
     let response = ui.interact(rect, ui.make_persistent_id(("icon_button", icon, label)), egui::Sense::click());
     if response.clicked() {
         response.request_focus();
     }
-    if response.hovered() {
+    if response.hovered() && presentation != IconPresentation::Bare {
         ui.painter().rect_filled(rect, t.control_radius, t.hover);
     }
-    let paint = if mirrored { crate::icons::paint_ink_mirrored } else { crate::icons::paint_ink };
+    let paint = if presentation == IconPresentation::Mirrored { crate::icons::paint_ink_mirrored } else { crate::icons::paint_ink };
     paint(
         ui.painter(),
         if quiet { egui::Rect::from_center_size(rect.center(), vec2(t.space_12, t.space_12)) } else { rect.shrink(t.form_icon_inset) },
