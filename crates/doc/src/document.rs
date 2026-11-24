@@ -3465,7 +3465,8 @@ impl FeatureKind {
             FeatureKind::Extrude { sketch, .. }
             | FeatureKind::Revolve { sketch, .. }
             | FeatureKind::SurfaceExtrude { sketch, .. }
-            | FeatureKind::SurfaceRevolve { sketch, .. } => Some(sketch.0),
+            | FeatureKind::SurfaceRevolve { sketch, .. }
+            | FeatureKind::Sweep { sketch, .. } => Some(sketch.0),
             _ => None,
         }
     }
@@ -3915,11 +3916,11 @@ pub struct Feature {
     /// default), or every piece stays one body.
     #[serde(default, skip_serializing_if = "Touching::is_separate")]
     pub touching: Touching,
-    /// For a constructor feature (`Extrude`, `Revolve`, `SurfaceExtrude`, `SurfaceRevolve`) built
-    /// from a profile sketch owned by another component: the rigid transform of this feature's
-    /// component relative to the lowest common ancestor of both components at feature creation
-    /// time. Later moves or joints on this component then carry the built body rigidly with it,
-    /// while moves of the sketch's own component still propagate.
+    /// For a constructor feature (`Extrude`, `Revolve`, `SurfaceExtrude`, `SurfaceRevolve`,
+    /// `Sweep`) built from a profile sketch owned by another component: the rigid transform of
+    /// this feature's component relative to the lowest common ancestor of both components at
+    /// feature creation time. Later moves or joints on this component then carry the built body
+    /// rigidly with it, while moves of the sketch's own component still propagate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_frame: Option<crate::Mat>,
     #[serde(flatten)]
