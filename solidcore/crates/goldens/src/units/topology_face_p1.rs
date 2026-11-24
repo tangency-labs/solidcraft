@@ -795,6 +795,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
             let serial =
                 solidcore::topology::brep::p3::notify_serial(&mut k.context, &mut b).map_err(e)?;
             put_owners(&mut o, &b, serial).map_err(e)?;
+            crate::trim_hook::observe(&mut b);
         }
         OpIn::SplitAtSeam { props } => {
             let face = b.face(f).map_err(e)?;
@@ -1413,5 +1414,78 @@ impl UnitDiff for Runner {
             }
         }
         Ok(v)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Runner;
+    use crate::case::{repo_root, CaseContext};
+    use crate::UnitDiff;
+    use solidcore::topology::Brep;
+    use solidcore::Kernel;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// Per edge end of `b`: (edge, vertex, the distance from the edge curve's end to the
+    /// vertex, the vertex's tolerance).
+    fn ends(b: &Brep) -> Vec<(u32, u32, f64, f64)> {
+        let k = Kernel::default();
+        let mut ends = Vec::new();
+        for (e, rec) in b.edges().iter() {
+            let Some(c) = rec.curve.as_ref() else {
+                continue;
+            };
+            let (s, t) = solidcore::topology::edge::start_end_vertices(b, e).unwrap();
+            let iv = solidcore::topology::edge::interval(b, e).unwrap();
+            for (v, at) in [(s, iv.min()), (t, iv.max())] {
+                let Some(v) = v else { continue };
+                let vr = b.vertex(v).unwrap();
+                let gap = c.evaluate_point(&k, at).unwrap().distance(vr.point);
+                ends.push((e.index(), v.index(), gap, vr.tolerance));
+            }
+        }
+        ends
+    }
+
+    /// #21340: `MoveSeam` with split on `vase_rev.smb` face 0 splits edges through the
+    /// point merge, whose new vertices (v6, v7) were sized by the merged points' zone
+    /// neighbourhood only and left the ends of edges 6, 7 and 8 farther than half their
+    /// tolerance (gap 1.1770682885410504 against 1.1770782885410496 at v6). Every edge end
+    /// of the body the operation leaves lies within half its vertex's tolerance
+    /// (`AssertValid`'s test of an edge end).
+    #[test]
+    fn move_seam_split_vertices_cover_their_edge_ends() {
+        let cases: Vec<_> = Runner
+            .cases(&CaseContext {
+                root: repo_root(),
+                seeds: 16,
+            })
+            .unwrap()
+            .into_iter()
+            .filter(|c| c.name.starts_with("guard_vase_rev_"))
+            .collect();
+        assert_eq!(cases.len(), 36);
+        let mut checked = 0;
+        for case in cases {
+            let bodies: Rc<RefCell<Vec<Vec<(u32, u32, f64, f64)>>>> = Rc::default();
+            let into = Rc::clone(&bodies);
+            let out = crate::trim_hook::with_hook(
+                Box::new(move |b: &mut Brep| into.borrow_mut().push(ends(b))),
+                || Runner.run_rust(&case),
+            );
+            out.unwrap_or_else(|e| panic!("{}: {e:?}", case.name));
+            let bodies = bodies.take();
+            assert_eq!(bodies.len(), 1, "{}: one body", case.name);
+            for (e, v, gap, tol) in &bodies[0] {
+                assert!(
+                    *gap <= 0.5 * tol,
+                    "{}: edge {e} ends {gap} from v{v}, tolerance {tol}",
+                    case.name
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0);
     }
 }
