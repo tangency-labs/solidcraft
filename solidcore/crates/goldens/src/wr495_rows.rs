@@ -46,20 +46,20 @@
 )]
 
 use serde_json::Value;
+use solidcore::Kernel;
 use solidcore::curve::curve::CurveKind;
-use solidcore::mass::enclosure::{enclose_mass_properties, VolumeSign};
+use solidcore::mass::enclosure::{VolumeSign, enclose_mass_properties};
 use solidcore::offset::curve_on_surfaces::curve_on_surfaces;
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::brep::p1 as brep_p1;
 use solidcore::topology::face::p2 as face_p2;
-use solidcore::topology::{edge, Brep};
-use solidcore::Kernel;
+use solidcore::topology::{Brep, edge};
 
+use crate::UnitDiff;
 use crate::case::regression_case;
 use crate::dump::Captured;
 use crate::golden::{default_dir, encode, read};
 use crate::soundness::Soundness;
-use crate::UnitDiff;
 
 /// What [`crate::soundness`] found of a row's body on main.
 struct Fact {
@@ -459,12 +459,15 @@ fn row_line(u: &dyn UnitDiff, case: &str) -> String {
 /// [`OFFSET`]'s and [`LOCAL`]'s cases. Run on main (`$MAIN_SHA`), with this module, `lib.rs`'s
 /// line for it, the runners' `crate::dump::body` hooks it reads and this branch's
 /// `offset/curve_on_surfaces.rs` (the measure [`unproved`] uses) copied in, it writes the
-/// committed file: the kernel is main's, so the facts are main's, counted by this branch's
-/// measure (`git diff origin/main -- <those files> | git apply` in a worktree at main, then
+/// committed file: the kernel is main's but for that file, so the facts are main's, counted by
+/// this branch's measure. Main's `keeps_old_edge` calls the file too; its one change cuts a
+/// crease crossing whose parameter rounds onto a segment's end at that end, where main left a
+/// piece of no length that no halving proves; no other crossing is cut differently (`git diff origin/main -- <those files> | git apply` in a worktree at main, then
 /// `cargo test --profile goldens -p goldens --lib -- --ignored --exact wr495_rows::main_facts`).
 #[test]
 #[ignore = "generator: run on main with this module's hooks"]
 fn main_facts() {
+    use std::fmt::Write as _;
     let out = std::env::var("WR495_FACTS_OUT").expect("WR495_FACTS_OUT");
     let sha = std::env::var("MAIN_SHA").expect("MAIN_SHA");
     let mut s = format!(
@@ -480,9 +483,11 @@ fn main_facts() {
     for (name, id, rows) in units {
         let u = unit(id);
         let n = rows.len();
-        s.push_str(&format!(
-            "\n/// `{id}`'s moved rows.\nconst {name}: [Row; {n}] = [\n"
-        ));
+        writeln!(
+            s,
+            "\n/// `{id}`'s moved rows.\nconst {name}: [Row; {n}] = ["
+        )
+        .expect("written");
         for row in rows {
             s.push_str(&row_line(u.as_ref(), row.case));
         }

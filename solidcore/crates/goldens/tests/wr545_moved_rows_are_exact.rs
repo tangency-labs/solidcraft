@@ -307,8 +307,10 @@ fn closed_forms(n: f64) -> (f64, f64) {
 /// instead of main's two arcs, so the body has one vertex fewer (`goldens::wr495_rows`'
 /// `ONE_CIRCLE` proves the counts and that every circle edge is closed). The removed vertex
 /// set main's vertex box, so its bounds cannot be compared one by one. The check is still
-/// derived: every remaining vertex moves by at most the tolerance, and removing a vertex can
-/// only shrink the box. So the new box must lie inside main's box grown by the tolerance.
+/// derived: removing a vertex can only shrink the box, and the pass moves a remaining vertex
+/// only within the tolerance (its guard `vertex_move_fits`, which this test does not
+/// re-check), so the new box must lie inside main's box grown by the tolerance (checked
+/// one-sided, bound by bound). `wr495_rows`' other two `ONE_CIRCLE` rows are not WR-545 rows.
 const ONE_CIRCLE: [&str; 1] = ["api_shell_cylinder_r5_top_open_tol_1e6"];
 
 /// Main's `shell_mass_properties` of the two `blend.fillet_executive_p3` rows.
