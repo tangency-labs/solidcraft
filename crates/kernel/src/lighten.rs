@@ -17,9 +17,7 @@ pub use solidcore_ops::ManufacturingMethod;
 pub use solidcore_ops::PocketDepthSpec;
 
 fn ops_from_body(body: &Body) -> Result<solidcore_ops::Body, String> {
-    solidcore_ops::Body::from_record(body.record(), false)
-        .map(|(b, _)| b)
-        .map_err(|e| e.to_string())
+    solidcore_ops::Body::from_record(body.record(), false).map(|(b, _)| b).map_err(|e| e.to_string())
 }
 
 fn body_from_ops(ops_body: &solidcore_ops::Body) -> Result<Body, String> {
@@ -36,9 +34,31 @@ fn kernel_taper_extrude(
     dir_sign: f64,
     taper: f64,
 ) -> Result<solidcore_ops::Body, String> {
-    let body = extrude_tapered_between(plane, region, from, to, foot, dir_sign, taper, DraftCorner::Round)
-        .map_err(|e| e.to_string())?;
+    if taper.abs() < 1e-9 {
+        let mut bodies = crate::build::extrude(plane, std::slice::from_ref(region), from, to).map_err(|e| e.to_string())?;
+        let body = bodies.pop().ok_or_else(|| "extrude produced no body".to_string())?;
+        return ops_from_body(&body);
+    }
+    let body = extrude_tapered_between(plane, region, from, to, foot, dir_sign, taper, DraftCorner::Round).map_err(|e| e.to_string())?;
     ops_from_body(&body)
+}
+
+fn kernel_edge_blend(
+    ops_body: &solidcore_ops::Body,
+    pts: &[solidcore_record::Vec3],
+    kind: solidcore_ops::blend::Blend,
+    size: f64,
+) -> Result<solidcore_ops::Body, String> {
+    let body = body_from_ops(ops_body)?;
+    let blended = match kind {
+        solidcore_ops::blend::Blend::Round => crate::blend::fillet(&body, pts, size),
+        solidcore_ops::blend::Blend::Chamfer => crate::blend::chamfer(&body, pts, size),
+        solidcore_ops::blend::Blend::Curvature | solidcore_ops::blend::Blend::Chord => {
+            return Err("unsupported blend kind".into());
+        }
+    }
+    .map_err(|e| e.to_string())?;
+    ops_from_body(&blended)
 }
 
 /// Resolve the pocket cut depth (in mm) along `-face_normal` for `depth_spec`.
@@ -61,14 +81,8 @@ pub fn preview_pockets_with_locations(
     chamfer_loc: ChamferLocation,
 ) -> Result<Vec<Body>, String> {
     let ops_body = ops_from_body(body)?;
-    let ops_cutters = solidcore_ops::preview_pockets_with_locations(
-        &ops_body,
-        face_id,
-        config,
-        fillet_loc,
-        chamfer_loc,
-        Some(&kernel_taper_extrude),
-    )?;
+    let ops_cutters =
+        solidcore_ops::preview_pockets_with_locations(&ops_body, face_id, config, fillet_loc, chamfer_loc, Some(&kernel_taper_extrude))?;
     ops_cutters.iter().map(body_from_ops).collect()
 }
 
@@ -121,6 +135,7 @@ pub fn auto_pocket_with_warnings(
         fillet_loc,
         chamfer_loc,
         Some(&kernel_taper_extrude),
+        Some(&kernel_edge_blend),
     )?;
     *body = body_from_ops(&result_ops)?;
     Ok(warnings)
@@ -129,9 +144,16 @@ pub fn auto_pocket_with_warnings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::boolean;
-    use crate::build::{box_solid, cylinder};
-    use crate::measure;
+    use crate::build::{box_solid, cylinder, extrude};
+    use crate::{BoolOp, MeshTolerance, boolean, fillet, measure};
+    use solidcore_record::{Loop2, Seg2, Vec2, Vec3};
+    use solidcraft_geom::prelude::*;
+    use std::f64::consts::TAU;
+
+    fn build_pocket_regions(body: &Body, face_idx: usize, _plane: &Plane, config: &LightenConfig) -> Result<Vec<Region2>, String> {
+        let ops_body = ops_from_body(body)?;
+        solidcore_ops::build_pocket_regions(&ops_body, face_idx as u64, config)
+    }
 
     #[test]
     fn test_auto_pocket_box_blind() {

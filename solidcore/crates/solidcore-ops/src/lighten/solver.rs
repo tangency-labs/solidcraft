@@ -1135,7 +1135,13 @@ pub(super) fn exact_ccw_loop2_offset(lp: &Loop2, inward_dist: f64) -> Option<Reg
     } else {
         lp.clone()
     };
-    let out = dilate_ccw_loop(&prepared, -inward_dist)?;
+    let out = if inward_dist > 1e-6 {
+        dilate_ccw_loop(&prepared.reversed(), inward_dist)?.reversed()
+    } else if inward_dist < -1e-6 {
+        dilate_ccw_loop(&prepared, -inward_dist)?
+    } else {
+        prepared
+    };
     let out = merge_continuous_loop(&out);
     if !out.segs.is_empty() && out.is_closed(1e-2) && loop2_signed_area(&out) > 1e-2 {
         Some(Region2 {
@@ -1199,6 +1205,11 @@ pub(super) fn dilate_ccw_loop(lp: &Loop2, r: f64) -> Option<Loop2> {
     if clean.segs.is_empty() {
         return None;
     }
+    let expected_sign = if loop2_signed_area(&clean) >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
     if clean.segs.len() == 1 {
         if let Seg2::Arc {
             center,
@@ -1334,7 +1345,8 @@ pub(super) fn dilate_ccw_loop(lp: &Loop2, r: f64) -> Option<Loop2> {
     }
 
     let out = merge_continuous_loop(&Loop2 { segs: out_segs });
-    if !out.segs.is_empty() && out.is_closed(1e-2) && loop2_signed_area(&out) > 1e-2 {
+    if !out.segs.is_empty() && out.is_closed(1e-2) && loop2_signed_area(&out) * expected_sign > 1e-2
+    {
         Some(out)
     } else {
         None

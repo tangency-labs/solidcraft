@@ -10994,26 +10994,30 @@ mod lighten_dialog_tests {
 
         let d = h.app.dialog.as_ref().expect("Lighten dialog opened");
         assert_eq!(d.inputs[0].items.len(), 1, "selected planar face pre-populated");
-        assert!(matches!(
-            &d.kind,
-            Kind::Lighten {
-                wall_offset,
-                depth,
-                draft_angle,
-                corner_radius,
-                auto_fillet_enabled: true,
-                auto_fillet_radius,
-                auto_fillet_loc: 0,
-                auto_chamfer_enabled: true,
-                auto_chamfer_size,
-                auto_chamfer_loc: 0,
-            } if wall_offset.contains("4")
-                && depth.contains("7")
-                && draft_angle == "0 deg"
-                && corner_radius.contains("3")
-                && auto_fillet_radius.contains("2")
-                && auto_chamfer_size.contains("1")
-        ), "unexpected Lighten defaults: {:?}", d.kind);
+        assert!(
+            matches!(
+                &d.kind,
+                Kind::Lighten {
+                    wall_offset,
+                    depth,
+                    draft_angle,
+                    corner_radius,
+                    auto_fillet_enabled: true,
+                    auto_fillet_radius,
+                    auto_fillet_loc: 0,
+                    auto_chamfer_enabled: true,
+                    auto_chamfer_size,
+                    auto_chamfer_loc: 0,
+                } if wall_offset.contains("4")
+                    && depth.contains("7")
+                    && draft_angle == "0 deg"
+                    && corner_radius.contains("3")
+                    && auto_fillet_radius.contains("2")
+                    && auto_chamfer_size.contains("1")
+            ),
+            "unexpected Lighten defaults: {:?}",
+            d.kind
+        );
 
         if let (Some(dlg), Some(vp)) = (h.app.viewport.dialog_rect, h.app.viewport.rect) {
             assert!(dlg.bottom() <= vp.bottom() + 1.0, "dialog {dlg:?} must fit within viewport {vp:?}");
@@ -11029,10 +11033,7 @@ mod lighten_dialog_tests {
         h.step(&json!({"key": "Enter"})).unwrap();
         h.frames(4);
         assert!(h.app.dialog.is_none(), "Enter commits Lighten dialog: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.as_ref()));
-        assert!(
-            h.app.session.doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Lighten(_))),
-            "LightenFeature recorded on timeline"
-        );
+        assert!(h.app.session.doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Lighten(_))), "LightenFeature recorded on timeline");
     }
 }
 

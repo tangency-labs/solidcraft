@@ -8,8 +8,8 @@
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Plane, Region2, Vec3};
 
-use crate::blend::{Blend, Corners, blend};
-use crate::boolean::{BooleanOp, boolean, union_all};
+use crate::blend::{blend, Blend, Corners};
+use crate::boolean::{boolean, union_all, BooleanOp};
 use crate::pick::edges as pick_edges;
 use crate::prism::extrude_planar_regions;
 use crate::{Body, Error, Result};
@@ -20,6 +20,11 @@ mod solver;
 /// are requested (`plane, region, from, to, foot, dir_sign, taper_rad`).
 pub type TaperExtruder<'a> =
     &'a dyn Fn(&Plane, &Region2, f64, f64, f64, f64, f64) -> std::result::Result<Body, String>;
+
+/// Callback type for edge fillet/chamfer blending when the caller provides its own blender
+/// (`body, edge_midpoints, kind, size`).
+pub type EdgeBlender<'a> =
+    &'a dyn Fn(&Body, &[Vec3], Blend, f64) -> std::result::Result<Body, String>;
 
 /// Manufacturing method preset controlling pocket corner and depth defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -183,6 +188,19 @@ pub fn resolve_cut_depth(
     solver::resolve_cut_depth(&record, plane, depth_spec)
 }
 
+/// Build the 2D pocket regions on `face_id` for `config`.
+pub fn build_pocket_regions(
+    body: &Body,
+    face_id: u64,
+    config: &LightenConfig,
+) -> std::result::Result<Vec<Region2>, String> {
+    let (record, order) = body.to_record().map_err(|e| e.to_string())?;
+    let face_idx = usize::try_from(face_id).map_err(|_| "face_id overflow".to_string())?;
+    let plane = solver::body_planar_face(&record, face_idx)
+        .ok_or_else(|| format!("target face {face_id} is not planar"))?;
+    solver::build_pocket_regions(body, &order, &record, face_idx, &plane, config)
+}
+
 /// Extrude all 2D pocket regions into cutter prism bodies.
 fn extrude_pocket_prisms(
     plane: &Plane,
@@ -195,8 +213,12 @@ fn extrude_pocket_prisms(
         let mut out = Vec::with_capacity(pocket_regions.len());
         let neg_depth = solver::negate(cut_depth);
         for region in pocket_regions {
-            let body = extrude_planar_regions(plane, std::slice::from_ref(region), neg_depth, 0.02)
-                .map_err(|e| e.to_string())?;
+            let body = if let Some(extrude_fn) = taper_extrude {
+                extrude_fn(plane, region, neg_depth, 0.02, 0.0, 1.0, 0.0)?
+            } else {
+                extrude_planar_regions(plane, std::slice::from_ref(region), neg_depth, 0.02)
+                    .map_err(|e| e.to_string())?
+            };
             out.push(body);
         }
         return Ok(out);
@@ -220,7 +242,11 @@ fn apply_edge_blend(
     pts: &[Vec3],
     kind: Blend,
     size: f64,
+    edge_blend: Option<EdgeBlender<'_>>,
 ) -> std::result::Result<Body, String> {
+    if let Some(blend_fn) = edge_blend {
+        return blend_fn(body, pts, kind, size);
+    }
     let coords: Vec<[f64; 3]> = pts.iter().map(|p| [p.x, p.y, p.z]).collect();
     let tol = solver::blend_pick_tolerance(size);
     let picked = pick_edges(body, &coords, tol)
@@ -245,18 +271,28 @@ pub fn preview_pockets_with_locations(
     let (record, order) = body.to_record().map_err(|e| e.to_string())?;
     let face_idx = usize::try_from(face_id).map_err(|_| "face_id overflow".to_string())?;
     if face_idx >= record.faces.len() {
-        return Err(format!("face_id {face_id} out of range (body has {} faces)", record.faces.len()));
+        return Err(format!(
+            "face_id {face_id} out of range (body has {} faces)",
+            record.faces.len()
+        ));
     }
     let plane = solver::body_planar_face(&record, face_idx)
         .ok_or_else(|| format!("target face {face_id} is not planar"))?;
-    let pocket_regions = solver::build_pocket_regions(body, &order, &record, face_idx, &plane, config)?;
+    let pocket_regions =
+        solver::build_pocket_regions(body, &order, &record, face_idx, &plane, config)?;
     let cut_depth = solver::resolve_cut_depth(&record, &plane, config.depth_spec)?;
 
     let top_bevel = solver::top_bevel_size(config, fillet_loc, chamfer_loc);
     let bottom_bevel = solver::bottom_bevel_size(config, fillet_loc, chamfer_loc);
 
     if top_bevel.is_none() && bottom_bevel.is_none() {
-        return extrude_pocket_prisms(&plane, &pocket_regions, cut_depth, config.draft_angle, taper_extrude);
+        return extrude_pocket_prisms(
+            &plane,
+            &pocket_regions,
+            cut_depth,
+            config.draft_angle,
+            taper_extrude,
+        );
     }
 
     let Some(taper_fn) = taper_extrude else {
@@ -273,7 +309,9 @@ pub fn preview_pockets_with_locations(
             Some(taper_fn),
         )?;
         if let Some(top_s) = top_bevel {
-            if let Some((dilated, bevel_h, taper)) = solver::top_bevel_params(region, top_s, cut_depth) {
+            if let Some((dilated, bevel_h, taper)) =
+                solver::top_bevel_params(region, top_s, cut_depth)
+            {
                 if let Ok(flare) = taper_fn(&plane, &dilated, 0.0, bevel_h, 0.0, -1.0, taper) {
                     pieces.push(flare);
                 }
@@ -310,21 +348,32 @@ pub fn build_lighten_pockets(
     fillet_loc: FilletLocation,
     chamfer_loc: ChamferLocation,
     taper_extrude: Option<TaperExtruder<'_>>,
+    edge_blend: Option<EdgeBlender<'_>>,
 ) -> std::result::Result<(Body, Vec<String>), String> {
     config.validate()?;
     let (record, order) = body.to_record().map_err(|e| e.to_string())?;
     let face_idx = usize::try_from(face_id).map_err(|_| "face_id overflow".to_string())?;
     if face_idx >= record.faces.len() {
-        return Err(format!("face_id {face_id} out of range (body has {} faces)", record.faces.len()));
+        return Err(format!(
+            "face_id {face_id} out of range (body has {} faces)",
+            record.faces.len()
+        ));
     }
     let plane = solver::body_planar_face(&record, face_idx)
         .ok_or_else(|| format!("target face {face_id} is not planar"))?;
 
-    let pocket_regions = solver::build_pocket_regions(body, &order, &record, face_idx, &plane, config)?;
+    let pocket_regions =
+        solver::build_pocket_regions(body, &order, &record, face_idx, &plane, config)?;
     let cut_depth = solver::resolve_cut_depth(&record, &plane, config.depth_spec)?;
     let is_through = matches!(config.depth_spec, PocketDepthSpec::ThroughHole);
 
-    let cutters = extrude_pocket_prisms(&plane, &pocket_regions, cut_depth, config.draft_angle, taper_extrude)?;
+    let cutters = extrude_pocket_prisms(
+        &plane,
+        &pocket_regions,
+        cut_depth,
+        config.draft_angle,
+        taper_extrude,
+    )?;
     if cutters.is_empty() {
         return Err("failed to build pocket cutter prisms".into());
     }
@@ -370,18 +419,32 @@ pub fn build_lighten_pockets(
     if let Some(fillet_r) = config.auto_fillet_radius {
         if let Some(tracked) = cached_tracked.as_ref() {
             let pts = solver::select_fillet_edges(tracked, fillet_loc);
-            let is_bottom_fillet = matches!(fillet_loc, FilletLocation::Bottom | FilletLocation::All);
+            let is_bottom_fillet =
+                matches!(fillet_loc, FilletLocation::Bottom | FilletLocation::All);
             let primary_r = solver::primary_fillet_radius(fillet_r, min_arc_r, is_bottom_fillet);
             if !pts.is_empty() {
-                match apply_edge_blend(&current, &pts, Blend::Round, primary_r) {
+                match apply_edge_blend(&current, &pts, Blend::Round, primary_r, edge_blend) {
                     Ok(filleted) => {
                         current = filleted;
                         fillet_applied = true;
                     }
                     Err(err) => {
-                        let fallback_r = solver::fallback_fillet_radius(fillet_r, min_arc_r, cut_depth);
-                        if solver::can_retry_fillet(is_bottom_fillet, fillet_r, cut_depth, fallback_r, primary_r) {
-                            match apply_edge_blend(&current, &pts, Blend::Round, fallback_r) {
+                        let fallback_r =
+                            solver::fallback_fillet_radius(fillet_r, min_arc_r, cut_depth);
+                        if solver::can_retry_fillet(
+                            is_bottom_fillet,
+                            fillet_r,
+                            cut_depth,
+                            fallback_r,
+                            primary_r,
+                        ) {
+                            match apply_edge_blend(
+                                &current,
+                                &pts,
+                                Blend::Round,
+                                fallback_r,
+                                edge_blend,
+                            ) {
                                 Ok(filleted) => {
                                     current = filleted;
                                     fillet_applied = true;
@@ -423,7 +486,7 @@ pub fn build_lighten_pockets(
         if let Some(tracked) = cached_tracked.as_ref() {
             let pts = solver::select_chamfer_edges(tracked, chamfer_loc);
             if !pts.is_empty() {
-                match apply_edge_blend(&current, &pts, Blend::Chamfer, chamfer_s) {
+                match apply_edge_blend(&current, &pts, Blend::Chamfer, chamfer_s, edge_blend) {
                     Ok(chamfered) => {
                         current = chamfered;
                     }

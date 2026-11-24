@@ -103,6 +103,11 @@ pub use edit_start::EditStart;
 pub use edit_start::RefreshedSketchModel;
 pub use edit_start::SketchDomain;
 pub use edit_start::SketchFinishEvent;
+pub use features::lighten::ChamferLocation;
+pub use features::lighten::FilletLocation;
+pub use features::lighten::LightenConfig;
+pub use features::lighten::ManufacturingMethod;
+pub use features::lighten::PocketDepthSpec;
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
 pub use solidcraft_geom as geom;
@@ -111,33 +116,17 @@ pub use solidcraft_io as io;
 pub use solidcraft_kernel as kernel;
 pub use solidcraft_profile as profile;
 pub use solidcraft_render as render;
-pub use features::lighten::ChamferLocation;
-pub use features::lighten::FilletLocation;
-pub use features::lighten::LightenConfig;
-pub use features::lighten::ManufacturingMethod;
-pub use features::lighten::PocketDepthSpec;
 pub use solidcraft_sketch as sketch;
 pub use view_context::ViewContext;
 pub use view_context::ViewDescriptor;
 
 /// AI client and Model Context Protocol (MCP) configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct AiClient {
     pub endpoint: Option<String>,
     pub api_key: Option<String>,
     pub model: Option<String>,
     pub mcp_connected: bool,
-}
-
-impl Default for AiClient {
-    fn default() -> Self {
-        Self {
-            endpoint: None,
-            api_key: None,
-            model: None,
-            mcp_connected: false,
-        }
-    }
 }
 
 impl AiClient {
@@ -1547,7 +1536,6 @@ impl Session {
             count_usage: false,
         }
     }
-
 
     /// Access the active AI client / MCP configuration.
     pub fn ai_client(&self) -> &AiClient {
