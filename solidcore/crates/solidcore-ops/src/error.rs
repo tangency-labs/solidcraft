@@ -317,8 +317,9 @@ pub enum Error {
         /// The index of the edge it runs on into.
         continues_into: usize,
     },
-    /// A round too small to change the part (the kernel's `BlendRefusal::RoundTooSmall`): it
-    /// lies within the edge's tolerance of the edge.
+    /// A round too small to change the part or to build (the kernel's
+    /// `BlendRefusal::RoundTooSmall`): it lies within the edge's tolerance of the edge, or is
+    /// narrower across its faces than eight times the body's tolerance.
     RoundTooSmall {
         /// The edge's index.
         edge: usize,
