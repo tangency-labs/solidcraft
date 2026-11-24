@@ -1231,6 +1231,7 @@ fn hostile_params_never_panic() {
         "crown",
         "curve",
         "curves",
+        "damping",
         "datum",
         "delete",
         "density",
@@ -1246,6 +1247,7 @@ fn hostile_params_never_panic() {
         "drills_text",
         "driven",
         "edges",
+        "effort",
         "end",
         "entities",
         "entity",
@@ -1261,7 +1263,9 @@ fn hostile_params_never_panic() {
         "filter",
         "fixed",
         "format",
+        "friction",
         "from",
+        "gap",
         "head",
         "head_gap",
         "height",
@@ -1354,6 +1358,7 @@ fn hostile_params_never_panic() {
         "unit",
         "v",
         "value",
+        "velocity",
         "view",
         "visual_style",
         "web",
@@ -1404,6 +1409,7 @@ fn hostile_params_never_panic() {
                                                 | "file.export_step"
                                                 | "file.export_stl"
                                                 | "file.export_urdf"
+                                                | "file.export_urdf_options"
                                         ))
                                 {
                                     continue; // parameter, script and export files: covered by their own tests (no stray files)
