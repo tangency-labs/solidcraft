@@ -784,7 +784,10 @@ pub(crate) fn drop_on_view(app: &mut SolveApp, view: &egui::Response) -> bool {
     if view.contains_pointer() && pointer.is_some_and(|p| !crate::shell::covered(app, p)) {
         app.library.drop_ready = true;
         view.ctx.set_cursor_icon(egui::CursorIcon::Copy);
-        if let Some(entry) = view.dnd_release_payload::<Entry>() {
+        // Another button let go meanwhile ends the drag, as everywhere in egui.
+        if view.ctx.input(|i| i.pointer.primary_released())
+            && let Some(entry) = view.dnd_release_payload::<Entry>()
+        {
             app.library.dropped = Some(entry.as_ref().clone());
             view.ctx.request_repaint();
         }

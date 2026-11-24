@@ -649,7 +649,7 @@ mod tests {
         };
         let before = h.app.session.doc.to_json();
 
-        // Back on the panel, with Escape, or a folder: nothing is inserted or opened.
+        // Back on the panel, with Escape, another button, or a folder: nothing is inserted or opened.
         press_and_move(&mut h, at, panel);
         assert_eq!(h.output.cursor_icon, egui::CursorIcon::NotAllowed, "the document browser takes no drop");
         h.frame_with(vec![button(panel, false)]);
@@ -660,6 +660,14 @@ mod tests {
         assert_ne!(h.output.cursor_icon, egui::CursorIcon::NotAllowed, "Escape ended the drag");
         h.frame_with(vec![button(view, false)]);
         until_idle(&mut h);
+        // Another button let go over the view ends the drag.
+        press_and_move(&mut h, at, view);
+        for pressed in [true, false] {
+            h.frame_with(vec![egui::Event::PointerButton { pos: view, button: egui::PointerButton::Middle, pressed, modifiers: Default::default() }]);
+        }
+        h.frame_with(vec![button(view, false)]);
+        until_idle(&mut h);
+        assert_eq!(h.app.session.doc.to_json(), before, "only the left button drops the design");
         press_and_move(&mut h, folder_at, view);
         assert!(crate::scenario::rect_of("library:drag_label").is_none());
         h.frame_with(vec![button(view, false)]);
