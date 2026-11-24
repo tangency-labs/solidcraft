@@ -5142,6 +5142,9 @@ impl Document {
 
     fn resolve_feature_name_with(&self, name: &str, component: Option<u64>) -> Result<&Feature> {
         let of_component = |f: &Feature| component.is_some_and(|c| f.component == c);
+        // The exact name in the component that asks: a name belongs to the component that holds
+        // the feature (#11258), so two components may hold features with the same name and each
+        // of them finds its own.
         if let Some(feature) = self.features.iter().filter(|f| of_component(f)).find(|f| f.name == name) {
             return Ok(feature);
         }
@@ -5153,9 +5156,8 @@ impl Document {
         {
             return Ok(feature);
         }
-        if let Some(feature) = self.features.iter().filter(|f| of_component(f)).find(|f| same_feature_name(&f.name, name)) {
-            return Ok(feature);
-        }
+        // A name that only the case tells apart is ambiguous, as it always was: the components do
+        // not make it a name of one of them.
         let mut matches = self.features.iter().filter(|f| same_feature_name(&f.name, name));
         let feature = matches.next().ok_or_else(|| DocError::Invalid(format!("no feature `{name}`")))?;
         if matches.next().is_some() {
