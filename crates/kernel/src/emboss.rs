@@ -2493,4 +2493,35 @@ mod tests {
         let e = emboss_cylinder_at(&slotted, other, &plane(), &[profile()], 1.).unwrap_err();
         assert!(e.to_string().contains("no longer identifies"), "{e}");
     }
+
+    fn rect(lo: f64, hi: f64) -> Region2 {
+        Region2 { outer: Loop2::polygon(&[Vec2::new(-2., lo), Vec2::new(2., lo), Vec2::new(2., hi), Vec2::new(-2., hi)]), holes: vec![] }
+    }
+
+    #[test]
+    fn a_second_emboss_beside_the_first_on_a_cylinder_wall_adds_its_exact_volume() {
+        let body = crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 20.).unwrap();
+        let (first, second) = (rect(12., 16.), rect(3., 7.));
+        for depth in [1., -1.] {
+            let one = emboss_cylinder(&body, &plane(), std::slice::from_ref(&first), depth).unwrap();
+            let alone = emboss_cylinder(&body, &plane(), std::slice::from_ref(&second), depth).unwrap();
+            assert!(infer_cylinder_emboss(&one, &plane(), std::slice::from_ref(&second), depth).unwrap().is_some());
+            let two = emboss_cylinder(&one, &plane(), std::slice::from_ref(&second), depth).unwrap();
+            assert!(two.validity().is_empty());
+            let expected = volume(&one) + volume(&alone) - volume(&body);
+            assert!((volume(&two) - expected).abs() < 1e-6, "{} vs {expected}", volume(&two));
+            let sector = 0.5 * 0.4 * ((10. + depth) * (10. + depth) - 100.) * 4.;
+            assert!((volume(&two) - volume(&body) - 2. * sector).abs() < 1e-6, "{}", volume(&two) - volume(&body));
+        }
+    }
+
+    #[test]
+    fn a_second_emboss_overlapping_the_first_on_a_cylinder_wall_is_still_refused() {
+        let body = crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 20.).unwrap();
+        for depth in [1., -1.] {
+            let one = emboss_cylinder(&body, &plane(), &[rect(12., 16.)], depth).unwrap();
+            let e = emboss_cylinder(&one, &plane(), &[rect(10., 14.)], depth).unwrap_err().to_string();
+            assert!(e.contains(if depth > 0. { "runs into another part" } else { "breaks through another face" }), "{e}");
+        }
+    }
 }
