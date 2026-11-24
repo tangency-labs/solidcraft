@@ -259,7 +259,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::text(ui, &entry.name, ui_kit::Text::Hint("plugin_entry"));
                     for slot in &entry.slots {
                         let (key, name) = match slot {
-                            solidcraft_engine::plugin::UiSlot::Menu { name } => {
+                            solidcraft_engine::plugin::UiSlot::Menu { name, .. } => {
                                 let name = match crate::plugin_slots::menu_name(name) {
                                     Some("File") => tr("ui.file"),
                                     Some("Help") => tr("ui.help"),
@@ -267,7 +267,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 };
                                 ("prefs.plugin_slot_menu", name.to_string())
                             }
-                            solidcraft_engine::plugin::UiSlot::Ribbon { name } => (
+                            solidcraft_engine::plugin::UiSlot::Ribbon { name, .. } => (
                                 "prefs.plugin_slot_ribbon",
                                 // A tab the app doesn't have: the entry goes in the Plugins group.
                                 crate::plugin_slots::ribbon_name(name)

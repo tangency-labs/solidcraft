@@ -1729,6 +1729,64 @@ fn each_plugin_command_has_its_own_menu_row_and_ribbon_button_and_a_disabled_plu
 }
 
 #[test]
+fn plugin_ribbon_slot_labels_and_model_tab_opt_out() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let mold = listed(
+        "mold",
+        vec![
+            entry("feature", "edit", json!([{"kind":"ribbon","name":"Inspect","label":"형상인식"}])),
+            entry("height", "edit", json!([{"kind":"ribbon","name":"Inspect","label":"높이측정"}])),
+            entry("overview", "read", json!([{"kind":"ribbon","name":"Inspect","label":"개요","model_group":true}])),
+        ],
+    );
+    app.plugin_menu.listed = vec![mold];
+    let model_buttons = ribbon_buttons(&app);
+    assert_eq!(model_buttons.len(), 1);
+    assert_eq!(model_buttons[0].id, "plugin_entry:mold:overview");
+    assert_eq!(model_buttons[0].label, "개요");
+}
+
+#[test]
+fn plugin_slots_display_custom_label_on_ribbon_tab() {
+    let mut h = crate::scenario::Harness::new();
+    let root = h.dir.join("plugins-slots-custom");
+    let package = root.join("mold-helper");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(package.join("entry.wasm"), []).unwrap();
+    std::fs::write(
+        package.join("plugin.json"),
+        json!({
+            "id": "mold-helper", "name": "Mold helper", "version": "1.0", "capabilities": ["commands@0.1"],
+            "runtime": {
+                "module": "entry.wasm",
+                "commands": [],
+                "entries": [
+                    {"name": "feature", "effect": "edit", "slots": [{"kind": "ribbon", "name": "Inspect", "label": "형상인식"}]},
+                    {"name": "height", "effect": "edit", "slots": [{"kind": "ribbon", "name": "Inspect", "label": "높이측정"}]}
+                ]
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    h.app.session.plugin_state.plugins_dir = Some(root);
+    crate::plugin_slots::invalidate(&mut h.app);
+    crate::plugin_slots::refresh(&mut h.app);
+    crate::plugin_slots::wait_for_discovery(&mut h.app);
+    crate::test_support::frame(&h.ctx, egui::RawInput::default(), |ui| {
+        let groups = crate::plugin_slots::ribbon_groups(&h.app, ui, "INSPECT");
+        assert_eq!(groups.len(), 1);
+        let group = groups[0].group(ui);
+        assert_eq!(group.label, "Mold helper");
+        assert_eq!(group.buttons.len(), 2);
+        assert_eq!(group.buttons[0].label, "형상인식");
+        assert_eq!(group.buttons[1].label, "높이측정");
+    });
+    crate::plugin_menu::ensure_listed(&mut h.app);
+    assert!(crate::plugin_menu::ribbon_buttons(&h.app).is_empty());
+}
+
+#[test]
 fn plugin_dialog_titles_are_the_command_alone_and_plugin_text_has_no_long_dashes() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     let mut gears = listed("gears", vec![entry("spur", "edit", json!([]))]);

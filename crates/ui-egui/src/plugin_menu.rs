@@ -795,6 +795,40 @@ fn slot_name(entry: &solidcraft_engine::plugin::Entry, kind: &str) -> Option<Str
         .and_then(|slot| slot["name"].as_str().map(str::trim).filter(|n| !n.is_empty()).map(str::to_owned))
 }
 
+fn slot_label_or_name(entry: &solidcraft_engine::plugin::Entry, kind: &str) -> Option<String> {
+    for slot in &entry.slots {
+        match slot {
+            solidcraft_engine::plugin::UiSlot::Ribbon { label: Some(l), .. } if kind == "ribbon" && !l.trim().is_empty() => {
+                return Some(l.trim().to_owned());
+            }
+            solidcraft_engine::plugin::UiSlot::Menu { label: Some(l), .. } if kind == "menu" && !l.trim().is_empty() => {
+                return Some(l.trim().to_owned());
+            }
+            _ => {}
+        }
+    }
+    if !entry.label.trim().is_empty() {
+        return Some(entry.label.trim().to_owned());
+    }
+    slot_name(entry, kind).filter(|name| kind != "ribbon" || crate::plugin_slots::ribbon_name(name).is_none() && !name.eq_ignore_ascii_case("model"))
+}
+
+/// Whether this entry appears in the Model tab's Plugins group.
+pub(crate) fn entry_shows_in_model_group(entry: &solidcraft_engine::plugin::Entry) -> bool {
+    if let Some(explicit) = entry.model_group {
+        return explicit;
+    }
+    for slot in &entry.slots {
+        if let solidcraft_engine::plugin::UiSlot::Ribbon { model_group: Some(explicit), .. } = slot {
+            return *explicit;
+        }
+    }
+    !entry.slots.iter().any(|slot| match slot {
+        solidcraft_engine::plugin::UiSlot::Ribbon { name, .. } => crate::plugin_slots::ribbon_name(name).is_some(),
+        _ => false,
+    })
+}
+
 /// Whether the user has `plugin` turned on in Preferences › Plugins (read live, so turning it off
 /// hides it at once).
 pub(crate) fn shown(app: &SolveApp, plugin: &Listed) -> bool {
@@ -823,11 +857,14 @@ pub(crate) fn ribbon_buttons(app: &SolveApp) -> Vec<RibbonButton> {
     let mut buttons = Vec::new();
     for plugin in app.plugin_menu.listed.iter().filter(|p| shown(app, p)) {
         for entry in &plugin.entries {
+            if !entry_shows_in_model_group(entry) {
+                continue;
+            }
             let title = command_title(plugin, entry);
             let name = if title == plugin.name { title.clone() } else { format!("{}: {title}", plugin.name) };
             buttons.push(RibbonButton {
                 id: format!("{RIBBON_PREFIX}{}:{}", plugin.id, entry.name),
-                label: slot_name(entry, "ribbon").unwrap_or(title),
+                label: slot_label_or_name(entry, "ribbon").unwrap_or(title),
                 name,
                 icon: command_icon(plugin, entry).to_owned(),
             });
