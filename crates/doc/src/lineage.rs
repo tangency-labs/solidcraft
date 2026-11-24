@@ -216,6 +216,20 @@ impl Traced {
         }
     }
 
+    /// Label this instance of a tool. A cached or moved tool can have the same geometry but
+    /// belong to a different sketch point.
+    pub fn with_part_prefix(mut self, prefix: Option<&str>) -> Traced {
+        if let (Some(prefix), Some(lineage)) = (prefix, self.lineage.as_mut()) {
+            for operand in &mut lineage.operands {
+                if let Operand::Made(roles) = operand.as_ref() {
+                    let roles = roles.iter().map(|names| names.iter().map(|role| format!("{prefix}:{role}")).collect()).collect();
+                    *operand = Arc::new(Operand::Made(roles));
+                }
+            }
+        }
+        self
+    }
+
     /// `copy`, this tool moved: instance `instance` of a pattern or mirror of feature `feature`,
     /// which built it.
     pub fn copied(&self, copy: Body, feature: u64, instance: usize) -> Traced {
@@ -565,17 +579,18 @@ pub(crate) fn cone_roles(body: &Body) -> Option<Vec<Vec<String>>> {
 /// by the part it makes: `<part>:top` (its end cap), `<part>:base` (its start cap) and
 /// `<part>:side:<k>` (swept from segment `k` of its profile), as its construction records them.
 pub(crate) fn part_tool(body: Body, part: &str) -> Traced {
-    let roles = body.history().filter(|h| h.operands == 0).map(|h| {
-        h.faces
-            .iter()
-            .map(|f| match f.origins.as_slice() {
-                [FaceOrigin::Cap { end }] => vec![format!("{part}:{}", if *end { "top" } else { "base" })],
-                [FaceOrigin::Profile { segment }] => vec![format!("{part}:side:{segment}")],
-                _ => Vec::new(),
-            })
-            .collect()
-    });
+    let roles =
+        body.history().filter(|h| h.operands == 0).map(|h| h.faces.iter().map(|f| part_role(&f.origins, part).into_iter().collect()).collect());
     Traced::made(body, roles)
+}
+
+/// The role of one face of a tool built from a profile (see [`part_tool`]).
+pub(crate) fn part_role(origins: &[FaceOrigin], part: &str) -> Option<String> {
+    match origins {
+        [FaceOrigin::Cap { end }] => Some(format!("{part}:{}", if *end { "top" } else { "base" })),
+        [FaceOrigin::Profile { segment }] => Some(format!("{part}:side:{segment}")),
+        _ => None,
+    }
 }
 
 /// Faces named by their place in a body built as a whole (an imported part's faces in the
@@ -779,7 +794,7 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
                 Some((_, PanelMade::Converted { face, .. })) => vec![*face],
                 _ => Vec::new(),
             },
-            (SheetPart::Hole { .. }, _) => Vec::new(),
+            (SheetPart::Hole { .. } | SheetPart::Drill { .. }, _) => Vec::new(),
             _ => had.get(x).cloned().unwrap_or_default(),
         };
         if !source.is_empty() {
@@ -984,6 +999,9 @@ fn sheet_role(
         }
         SheetPart::Hole { feature, curve } => {
             Some(GrownFace { role: format!("side:{curve}"), feature: Some(*feature), on: Vec::new(), across: Vec::new(), ordinal: place })
+        }
+        SheetPart::Drill { feature, role } => {
+            Some(GrownFace { role: role.clone(), feature: Some(*feature), on: Vec::new(), across: Vec::new(), ordinal: place })
         }
     }
 }

@@ -144,8 +144,16 @@ until one classifies uniquely. Each test is `query::edge::radial_sector_classify
 edge) are compared, and when any two are within 10° the faces are stepped off the edge at growing
 distances (the two edges' tolerances, twice that, then growing with how fast the step-off points
 separate) until the sector test is unambiguous. This is the radial-edge form of Mäntylä's
-neighbourhood classification [4, 6]. The sector's region gives the class: `region_keep` reads its
-void flag.
+neighbourhood classification [4, 6]. One thing differs from upstream. A point where every
+candidate classifies from the binormals at the edge (all three at least 10° apart) is looked for
+first, in the same order of points, and the faces are stepped off only where the edge has none
+(`radial_sector_classify_at_edge`, `query/edge.rs`): near tangent, the steps read the faces where
+they part, and a stretch of face within the tolerance of the other can lead them past the face to
+where the surfaces cross back. Where two equal holes cross a hair off each other's axes, an edge
+round the tip of one hole's lens in the other's wall has its midpoint in a neck 0.018 mm wide, the
+walls within 1e-5 of each other, and read there the face lying in the material was put in the
+holes' space; a point nearer the edge's ends, where the walls cross at a clear angle (36° at the
+ends), decides at the edge. The sector's region gives the class: `region_keep` reads its void flag.
 
 A sector whose faces coincide is the coincident case of §5.
 
