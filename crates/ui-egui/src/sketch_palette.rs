@@ -100,13 +100,29 @@ pub fn set_mode(app: &mut SolveApp, m: u8) {
 /// switch construction mode on or off.
 pub fn toggle_construction(app: &mut SolveApp) {
     let curves = selected_curves(app);
-    if curves.is_empty() && app.session.active_sketch.is_none() {
+    // Selected points switch too (#18448); the origin is the sketch's own and stays as it is.
+    let points: Vec<String> = app
+        .session
+        .selection
+        .iter()
+        .filter_map(|sel| crate::sketch_modify_ui::point_id(&app.session, sel))
+        .filter(|id| *id != "origin")
+        .map(str::to_string)
+        .collect();
+    if curves.is_empty() && points.is_empty() && app.session.active_sketch.is_none() {
         app.set_status("Construction mode is for drawing in a sketch: edit a sketch first", false);
-    } else if curves.is_empty() {
+    } else if curves.is_empty() && points.is_empty() {
         let m = if mode(app) == 1 { 0 } else { 1 };
         set_mode(app, m);
     } else {
-        let _ = app.run("sketch.construction", json!({ "curves": curves }));
+        let mut params = json!({});
+        if !curves.is_empty() {
+            params["curves"] = json!(curves);
+        }
+        if !points.is_empty() {
+            params["points"] = json!(points);
+        }
+        let _ = app.run("sketch.construction", params);
     }
 }
 
