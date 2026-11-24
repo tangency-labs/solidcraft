@@ -366,10 +366,11 @@ the root along the face where the leg holds over the piece (not in a shaped end'
 of Krawczyk boxes over the leg, `t` over the piece and the distance `ρ` from the root over each
 step (the first to an eighth of the leg, each further one an eighth longer than its start's
 distance from the root), from the root (in `(S − e)/ρ` near it, from 64 times the bound on the
-root's own gap from the support) to the toe, each box's root strictly inside the next box, the
-foot's box inside the last (`FootBlend::prove_chain`); and the corner's rise `(n₁ × n₂)·e′` keeps
-one sign over every such piece, so the corner read at the stations stays an inside corner
-between them. The chord's net (sagitta 0) is proved: on
+root's own gap from the support) to the toe, two boxes joined by the branch's point where they
+meet (proved to rounding, strictly inside both boxes' regions, each of which holds one root
+only), the last joined to the foot's own box the same way (`FootBlend::prove_chain`); and the
+corner's rise `(n₁ × n₂)·e′` keeps one sign over every such piece, so the corner read at the
+stations stays an inside corner between them. The chord's net (sagitta 0) is proved: on
 each span between two stations it is the cubic Hermite through the feet and their rates, and its
 distance from the section is bounded by the Hermite remainder `h⁴/16 · max |a_4|` from the feet's
 Taylor series enclosed over the span (`FootBlend::feet_series`, solved order by order from the

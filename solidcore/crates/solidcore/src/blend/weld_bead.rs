@@ -899,7 +899,11 @@ fn beads_together(
         })?;
         let mut made = Vec::new();
         for &p in &params {
-            made.extend(blend.add_span(k, &mut body, legs, sagitta, tol, p, ends)?);
+            match blend.add_span(k, &mut body, legs, sagitta, tol, p, ends) {
+                Ok(faces) => made.extend(faces),
+                // a refusal's size over all of the joint's spans, not the failed one's alone
+                Err(refused) => return Err(blend.fit_over(k, legs, sagitta, &params, refused)?),
+            }
         }
         let weld = BeadWeld {
             legs,

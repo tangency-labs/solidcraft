@@ -1787,6 +1787,40 @@ fn a_sagitta_past_its_bound_is_refused_with_the_sagitta_that_fits() {
     assert!(smb(&k, &part) == before, "the tubes changed");
 }
 
+/// A refusal's size is searched over the whole weld, not the failed piece's alone: round the
+/// T-joint the concave bound changes along the joint, and a stitch of three short spans that
+/// is too deep names a depth no larger than the least any of its spans names alone (to a
+/// twentieth: a span's own size is that of its own stations), and a tenth shallower than it
+/// the stitch builds. Both ways round the joint, so that in one the first span is not the
+/// tightest.
+#[test]
+fn a_stitch_too_deep_names_the_least_depth_of_its_spans() {
+    use solidcore::error::FitMeasure;
+    let mut k = kernel();
+    let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+    let size = ChamferSize::Distances([4.0; 2]);
+    let mut bead = |spans: &[(f64, f64)], h: f64| {
+        let spans = BeadSpan::along(spans).unwrap();
+        weld_bead_body(&mut k, &mut part, &joints, &[size], h, &[], &spans, SQUARE)
+    };
+    for stitch in [
+        [(0.02, 0.08), (0.10, 0.16), (0.18, 0.24)],
+        [(0.76, 0.82), (0.84, 0.90), (0.92, 0.98)],
+    ] {
+        let mut depth = |spans: &[(f64, f64)]| {
+            let fit = bead(spans, -1.3).err()?.fit()?;
+            (fit.measure == FitMeasure::Sagitta).then_some(fit.size)
+        };
+        let alone: Vec<f64> = stitch.iter().filter_map(|&s| depth(&[s])).collect();
+        let least = alone.iter().copied().fold(f64::INFINITY, f64::min);
+        let together = depth(&stitch).expect("the stitch is refused with a depth");
+        println!("spans alone {alone:?}, together {together}");
+        assert!(least.is_finite(), "no span alone is refused with a depth");
+        assert!(together <= least * 1.05, "{together} against {alone:?}");
+        assert!(bead(&stitch, -0.9 * together).is_ok(), "{together}");
+    }
+}
+
 /// Two spans round the T-joint (a stitch): one body of two lumps, each span its section face,
 /// a strip on each tube and two square end caps (10 faces), sound; each section face keeps
 /// both spans and the square ends in its definition; the tubes are unchanged.
