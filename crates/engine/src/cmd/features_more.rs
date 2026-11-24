@@ -621,7 +621,7 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
         rest.bodies.retain(|b| !bodies.contains(&b.name));
         let same = |(a, n): (Vec3, Vec3), (b, m): (Vec3, Vec3)| a.dist(b) <= 1e-9 * (1.0 + a.len()) && n.dot(m) > 1.0 - 1e-12;
         if !matches!((fr.resolve(&s.doc, &st), fr.resolve(&s.doc, &rest)), (Ok(a), Ok(b)) if same(a, b)) {
-            return Err(bad(cmd, "`to_frame` is on a body that moves: pick the target on another body or on a sketch"));
+            return Err(bad(cmd, on_moving("to_frame")));
         }
     }
     // Worked out from the plane or the frame when the feature is evaluated.
@@ -632,15 +632,19 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
         let picked = frames.into_iter().filter(|(world, own, ..)| bodies.contains(world) || bodies.contains(own));
         picked.map(|(world, ..)| world).chain(bodies.clone()).collect()
     };
-    // A face or snap picked for the start lies on a body that moves (`at`: the pick and where it
-    // snaps to); a typed point is a coordinate, wherever it lies.
+    // A face or snap picked for the start lies on a body that moves, and for the target on one that
+    // does not (`at`: the pick and where it snaps to); a typed point is a coordinate, wherever it lies.
     let on_side = |st: &solidcraft_doc::ModelState, key: &str, at: &[Vec3]| -> Result<()> {
         let from = key.starts_with("from");
         let Some((b, ..)) = at.iter().find_map(|&q| face_pick(st, q)) else { return Ok(()) };
         if at.iter().any(|&q| face_pick_on(st, q, |b| moved.contains(&b.name) == from).is_some()) {
             return Ok(());
         }
-        if from { Err(bad(cmd, format!("`{key}` is on `{}`, which is not moved: pick the start on a body in `bodies`", b.name))) } else { Ok(()) }
+        if from {
+            Err(bad(cmd, format!("`{key}` is on `{}`, which is not moved: pick the start on a body in `bodies`", b.name)))
+        } else {
+            Err(bad(cmd, on_moving(key)))
+        }
     };
     let world_pick = |s: &Session, pk: &str, fk: &str, held: bool| -> Result<(Vec3, Option<Vec3>)> {
         if held {
@@ -955,6 +959,11 @@ pub(crate) fn snap_pick(st: &solidcraft_doc::ModelState, kind: &str, at: Vec3) -
         "circle_center" => Ok(circle_pick(st, at)?.map(|(centre, axis)| (centre, Some(axis)))),
         _ => Ok(None),
     }
+}
+
+/// What Align says when the target `key` is on the bodies it moves.
+fn on_moving(key: &str) -> String {
+    format!("`{key}` is on a body that moves: pick the target on another body or on a sketch")
 }
 
 /// The face a pick at `at` lies on in the placed model `st`, found on the exact geometry, never
