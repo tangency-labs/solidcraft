@@ -354,3 +354,47 @@ fn the_body_stays_as_it_was() {
     let _ = merge_faces(&block, &[], TOL).unwrap();
     assert_eq!(counts(&block).unwrap(), was);
 }
+
+/// Index-based `merge_faces_keeping_edges` keeps only the named edges, refuses out-of-range
+/// indices, deduplicates repeats, and handles more than `MAX_POINTS` distinct kept edges (#21834).
+#[test]
+fn merge_faces_keeping_edges_keeps_named_edges_and_exceeds_max_points() {
+    use super::merge::merge_faces_keeping_edges;
+
+    // On a split cube, keeping the seam edge by its index keeps all 7 faces; empty merges to 6.
+    let split = split_cube();
+    let edge_count = counts(&split).unwrap()[1];
+    assert_eq!(counts(&merge_faces_keeping_edges(&split, &[]).unwrap()).unwrap()[0], 6);
+
+    let seam = (0..edge_count)
+        .find(|&idx| counts(&merge_faces_keeping_edges(&split, &[idx]).unwrap()).unwrap()[0] == 7)
+        .expect("split cube must have a topological seam edge");
+    // Duplicates (even exceeding MAX_POINTS entries) deduplicate and keep the seam.
+    let dupes = vec![seam; crate::MAX_POINTS + 17];
+    assert_eq!(counts(&merge_faces_keeping_edges(&split, &dupes).unwrap()).unwrap()[0], 7);
+    // Out-of-range indices are refused without modifying or panicking.
+    assert_eq!(merge_faces_keeping_edges(&split, &[edge_count]).err(), Some(Error::Argument));
+    assert_eq!(merge_faces_keeping_edges(&split, &[usize::MAX]).err(), Some(Error::Argument));
+
+    // A compound body of 350 disjoint boxes has 4,200 distinct edges (> MAX_POINTS = 4,096):
+    // keeping every distinct edge index succeeds, whereas point-based `merge_faces` caps at 4,096.
+    let many_boxes = run("350 boxes", |k| {
+        let mut combined = create_box(k, Vec3::new(0.0, 0.0, 0.0), 1.0, 1.0, 1.0)?;
+        for i in 1..350usize {
+            let next = create_box(k, Vec3::new((i as f64) * 2.0, 0.0, 0.0), 1.0, 1.0, 1.0)?;
+            let mut state = ArenaNotifyState::new(&combined);
+            let mut env = state.env(None);
+            merge_brep(k, &mut env, &mut combined, &next, &solidcore::topology::brep::p2::copy_source_ref, None, None, true)?;
+        }
+        combined.refresh_cached_topology();
+        Ok(combined)
+    })
+    .map(Body::from_kernel)
+    .unwrap();
+    let n_edges = counts(&many_boxes).unwrap()[1];
+    assert_eq!(n_edges, 350 * 12);
+    assert!(n_edges > crate::MAX_POINTS);
+    let all_indices: Vec<usize> = (0..n_edges).collect();
+    let merged = merge_faces_keeping_edges(&many_boxes, &all_indices).unwrap();
+    assert_eq!(counts(&merged).unwrap(), [350 * 6, 350 * 12, 350 * 8]);
+}

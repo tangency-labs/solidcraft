@@ -151,21 +151,14 @@ fn close_onto_shared_edges(k: &mut Kernel, b: Brep, tolerance: f64, lamina: &mut
     Ok(Ok(c))
 }
 
-/// `smlib_merge_faces`: `SmBrep::RemoveTopologicalEdgesAndVertices` on a copy of `body`, keeping
-/// the edges nearest `keep` (each within `tolerance`); then `finish` (faces left, and a solid in
-/// gives a manifold solid).
-pub(crate) fn merge_faces(body: &Body, keep: &[[f64; 3]], tolerance: f64) -> Result<Body> {
-    if !points_ok(keep, true) || !tolerance_ok(tolerance) {
-        return Err(Error::Argument);
-    }
+/// Shared body of [`merge_faces`] and [`merge_faces_keeping_edges`]: runs
+/// `SmBrep::RemoveTopologicalEdgesAndVertices` on a copy of `body`, keeping the edges `resolve`
+/// selects; then `finish` (faces left, and a solid in gives a manifold solid).
+fn merge_faces_with(body: &Body, resolve: impl FnOnce(&Kernel, &Brep) -> solidcore::Result<Out<Vec<solidcore::topology::EdgeId>>>) -> Result<Body> {
     on_copy("SmBrep::RemoveTopologicalEdgesAndVertices", body, |k, mut b| {
-        let kept = if keep.is_empty() {
-            Vec::new()
-        } else {
-            match pick_edges(k, &b, keep, tolerance)? {
-                Ok((edges, _)) => edges,
-                Err(m) => return Ok(Err(edge_miss(m))),
-            }
+        let kept = match resolve(k, &b)? {
+            Ok(edges) => edges,
+            Err(e) => return Ok(Err(e)),
         };
         let solid_in = is_manifold_solid(&b)?;
         let keep_edges = (!kept.is_empty()).then_some(kept.as_slice());
@@ -174,5 +167,53 @@ pub(crate) fn merge_faces(body: &Body, keep: &[[f64; 3]], tolerance: f64) -> Res
         }
         b.refresh_cached_topology();
         finish(k, b, solid_in)
+    })
+}
+
+/// `smlib_merge_faces`: `SmBrep::RemoveTopologicalEdgesAndVertices` on a copy of `body`, keeping
+/// the edges nearest `keep` (each within `tolerance`); then `finish` (faces left, and a solid in
+/// gives a manifold solid).
+pub(crate) fn merge_faces(body: &Body, keep: &[[f64; 3]], tolerance: f64) -> Result<Body> {
+    if !points_ok(keep, true) || !tolerance_ok(tolerance) {
+        return Err(Error::Argument);
+    }
+    merge_faces_with(body, |k, b| {
+        if keep.is_empty() {
+            return Ok(Ok(Vec::new()));
+        }
+        Ok(match pick_edges(k, b, keep, tolerance)? {
+            Ok((edges, _)) => Ok(edges),
+            Err(m) => Err(edge_miss(m)),
+        })
+    })
+}
+
+/// `SmBrep::RemoveTopologicalEdgesAndVertices` on a copy of `body`, keeping the edges at
+/// indices `keep` in SMLib's edge order (`Brep::edge_list`). Unlike [`merge_faces`], this names
+/// edges by topology index rather than 3D proximity, so it is not capped at `MAX_POINTS`, cannot
+/// be ambiguous when another edge passes near a midpoint, and avoids the `O(|keep| * |edges|)`
+/// closest-point search.
+///
+/// Refuses any out-of-range index with [`Error::Argument`].
+pub(crate) fn merge_faces_keeping_edges(body: &Body, keep: &[usize]) -> Result<Body> {
+    merge_faces_with(body, |_k, b| {
+        if keep.is_empty() {
+            return Ok(Ok(Vec::new()));
+        }
+        let all = b.edge_list();
+        let mut seen = vec![false; all.len()];
+        let mut kept = Vec::new();
+        for &idx in keep {
+            let Some(&edge_id) = all.get(idx) else {
+                return Ok(Err(Error::Argument));
+            };
+            if let Some(flag) = seen.get_mut(idx)
+                && !*flag
+            {
+                *flag = true;
+                kept.push(edge_id);
+            }
+        }
+        Ok(Ok(kept))
     })
 }
