@@ -78,7 +78,6 @@ fn the_chamfer_runs_round_the_corner_rounds_with_the_fix() {
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_executive::{FitKind, NoRoomReason};
 use solidcore::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
-use solidcore::surface::procedural_blend::convert::{rebuild, to_record};
 use solidcore::surface::procedural_blend::{BlendRef, ProceduralBlend};
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::edgeuse::p1 as eu1;
@@ -128,12 +127,12 @@ fn definitions(b: &Brep) -> Vec<ProceduralBlend> {
         .collect()
 }
 
-/// Each kind of chamfer of the cylinder's top rim is the chord by its definition, its
-/// sizes kept, certified; the body loses the triangle of legs a (along the top) and b
-/// (down the side) turned about the axis at its centroid's radius 5 - a/3; the record
-/// round trips and re-certifies.
+/// Each kind of chamfer of the cylinder's top rim is the cone it is (WR-421, the only path
+/// since #18913): one new face, an `SmCone` beside the side's, and no blend by its definition; the body loses
+/// the triangle of legs a (along the top) and b (down the side) turned about the axis at its
+/// centroid's radius 5 - a/3 (Pappus, exact for the cone's ruled section).
 #[test]
-fn issue_2486_rim_chamfers_on_a_cylinder_are_chords_by_their_definitions() {
+fn issue_2486_rim_chamfers_on_a_cylinder_are_their_cones() {
     let kinds = [
         ChamferSize::Distances([1.0, 1.0]),
         ChamferSize::Distances([1.0, 1.5]),
@@ -145,26 +144,31 @@ fn issue_2486_rim_chamfers_on_a_cylinder_are_chords_by_their_definitions() {
     for size in kinds {
         let (k, mut b, plane_first, r) = chamfered_rim(size);
         r.unwrap();
-        let defs = definitions(&b);
-        assert_eq!(defs.len(), 1, "{size:?}: one chamfer face");
-        let pb = &defs[0];
-        assert_eq!(pb.order(), 0, "{size:?}");
-        assert_eq!(pb.chamfer().unwrap().size, size, "{size:?}");
         assert!(
-            pb.bound() > 0.0 && pb.bound() < 1e-5,
-            "{size:?}: {}",
-            pb.bound()
+            definitions(&b).is_empty(),
+            "{size:?}: no chamfer by its definition"
+        );
+        let cones = b
+            .face_list()
+            .iter()
+            .filter(|&&f| {
+                matches!(
+                    b.face(f).unwrap().surface.as_ref().unwrap().kind(),
+                    SurfaceKind::Cone(_)
+                )
+            })
+            .count();
+        // the cylinder's side is an `SmCone` of half-angle 0 too
+        assert_eq!(
+            cones, 2,
+            "{size:?}: the side and one chamfer face, the cone"
         );
         let d = ChamferDefinition::new(size, 0.5 * PI).unwrap().setbacks();
         let [a, bb] = if plane_first { d } else { [d[1], d[0]] };
         let want = PI * 25.0 * 10.0 - 2.0 * PI * (5.0 - a / 3.0) * a * bb / 2.0;
         let v = volume(&k, &mut b);
-        eprintln!("{size:?}: bound {:e}, volume {v} want {want}", pb.bound());
+        eprintln!("{size:?}: volume {v} want {want}");
         assert!((v - want).abs() <= 1e-6 * want, "{size:?}: {v} vs {want}");
-        let rec = to_record(&k, pb).unwrap();
-        let back = rebuild(&k, &rec).unwrap();
-        assert!(back.same_definition(&k, pb).unwrap(), "{size:?}");
-        assert_eq!(to_record(&k, &back).unwrap(), rec);
     }
 }
 
