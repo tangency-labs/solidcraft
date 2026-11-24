@@ -13352,11 +13352,7 @@ fn distance_to_regions(q: Vec2, regions: &[Region2]) -> f64 {
 fn distance_point_segment(p: Vec2, a: Vec2, b: Vec2) -> f64 {
     let (ux, uy) = (b.x - a.x, b.y - a.y);
     let len2 = ux * ux + uy * uy;
-    let t = if len2 <= 0.0 {
-        0.0
-    } else {
-        (((p.x - a.x) * ux + (p.y - a.y) * uy) / len2).clamp(0.0, 1.0)
-    };
+    let t = if len2 <= 0.0 { 0.0 } else { (((p.x - a.x) * ux + (p.y - a.y) * uy) / len2).clamp(0.0, 1.0) };
     let (dx, dy) = (p.x - (a.x + t * ux), p.y - (a.y + t * uy));
     (dx * dx + dy * dy).sqrt()
 }
