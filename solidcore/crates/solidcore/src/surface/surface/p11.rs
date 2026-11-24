@@ -2753,6 +2753,66 @@ mod tests {
         asked.continuities(&k).unwrap();
         same(&lift(&k, &asked));
     }
+
+    /// `LiftCurve` of one UV line on a biquadratic bump, `S(u, v) = (2u, 2v, 4uv(1 - u)(1 - v))`
+    /// over `[0, 1]²`, at three parameter speeds: the line from `(0.1, 0.2)` along
+    /// `(0.7, 0.5)·f` over `[0, 1/f]`, `f` in `1e-3`, `1`, `1e3`, is the same segment from
+    /// `(0.1, 0.2)` to `(0.8, 0.7)` each time, and the line's natural interval is `[0, 1]`
+    /// each time. The lift is within the tolerance at every speed (#21657): the bump is the
+    /// graph of `g(x, y) = x(2 - x)y(2 - y)/4`, so a lifted point `p` lies at most
+    /// `|p.z - g(p.x, p.y)|` from it. The fit's shortest tested span was 1/1500 of the
+    /// curve's natural interval, not of the interval being fitted, so at `f = 1e3` every
+    /// span after the first halving was accepted untested.
+    #[test]
+    fn lift_curve_is_within_the_tolerance_at_any_parameter_speed() {
+        let row = |x: f64, z: f64| {
+            vec![
+                Vec3::new(x, 0.0, 0.0),
+                Vec3::new(x, 1.0, z),
+                Vec3::new(x, 2.0, 0.0),
+            ]
+        };
+        let rows = [row(0.0, 0.0), row(1.0, 1.0), row(2.0, 0.0)];
+        let bump = bspline_surface(2, 2, &[&rows[0], &rows[1], &rows[2]]);
+        let off = |p: Point3| (p.z - p.x * (2.0 - p.x) * p.y * (2.0 - p.y) / 4.0).abs();
+        let k = Kernel::default();
+        let tol = 1e-6;
+        let dom = Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0));
+        for f in [1e-3, 1.0, 1e3] {
+            let uv_line = Curve::from(crate::curve::line::Line::from_points(
+                Point3::new(0.1, 0.2, 0.0),
+                Point3::new(0.1 + 0.7 * f, 0.2 + 0.5 * f, 0.0),
+                2,
+            ));
+            let interval = Extent1d::from_min_max(0.0, 1.0 / f);
+            let lifted = bump
+                .lift_curve(&k, &dom, &uv_line, &interval, tol, false)
+                .unwrap();
+            assert!(
+                lifted.max_approx_dev <= tol,
+                "f = {f:e}: the fit reports {:e}",
+                lifted.max_approx_dev
+            );
+            let curve = &lifted.curve;
+            let ivl = curve.natural_interval();
+            for i in 0..=1000 {
+                let p = curve
+                    .evaluate_point(&k, ivl.evaluate(f64::from(i) / 1000.0))
+                    .unwrap();
+                assert!(
+                    off(p) <= tol,
+                    "f = {f:e}: {p:?} is {:e} off the bump",
+                    off(p)
+                );
+            }
+            let ends = [ivl.min(), ivl.max()].map(|t| curve.evaluate_point(&k, t).unwrap());
+            let want = [(0.1, 0.2), (0.8, 0.7)]
+                .map(|(u, v)| bump.evaluate_point(&k, Point2::new(u, v)).unwrap());
+            for (got, want) in ends.iter().zip(&want) {
+                assert!(got.distance(*want) <= tol, "f = {f:e}: {got:?} vs {want:?}");
+            }
+        }
+    }
     /// `LiftCurve` with the continuity checks skipped, during a Boolean operation, on a
     /// curve-bounded surface over the roof (and one nested in another) is the lift on the
     /// bare roof: the segment's continuity domain is the basis's (#20054). With the
