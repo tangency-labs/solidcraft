@@ -80,6 +80,17 @@ pub static COMMANDS: &[CommandSpec] = &[
             "verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); ",
             "newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving",
         )),
+    CommandSpec::new("file.revert_saved", "Revert to Saved", crate::checked!("file.revert_saved", revert_saved))
+        .any_part()
+        .icon("open")
+        .noundo()
+        .contract(&REVERT_SAVED_CONTRACT)
+        .output(output_schema_for::<OpenResult>)
+        .params(concat!(
+            "→ reads the active design again from the file it was opened or saved as, as File > Revert to Saved does, and answers as doc.open does. ",
+            "It never asks: unsaved changes are lost, and the history with them. ",
+            "A design with no file yet, and a file that is gone or unreadable, are refused and leave the design as it is",
+        )),
     CommandSpec::new("file.insert_step", "Insert STEP", crate::checked!("file.insert_step", insert_step)).begins_edit()
         .at("SOLID", "INSERT")
         .icon("import")
@@ -361,6 +372,16 @@ fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
     s.user_named = !name.trim().is_empty() && name.trim() != DEFAULT_NAME;
     let reply = NewDesignResult { name: name.to_string(), document_id: None, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| bad("file.new", e.to_string()))
+}
+
+const REVERT_SAVED_CONTRACT: TypedContract<crate::schema::file::RevertSavedParams> = TypedContract::new();
+
+/// File > Revert to Saved without the question (#16629): the design's file is read again through
+/// [`open`], so a file only an importer plugin reads, a bad path and a missing file answer as
+/// `doc.open` answers, and the design stays as it was when the file cannot be read.
+fn revert_saved(s: &mut Session, _p: &Value) -> Result<Value> {
+    let path = s.path.clone().ok_or_else(|| bad("file.revert_saved", "the design has no file to go back to yet; save it first"))?;
+    open(s, &json!({"path": path}))
 }
 
 const OPEN_CONTRACT: TypedContract<crate::schema::file::OpenParams> = TypedContract::new();
@@ -3875,6 +3896,33 @@ mod tests {
         };
         assert!(has_thumbnail(&mut s, "part.3mf"));
         assert!(!has_thumbnail(&mut s, "part.stl"), "STL has no place for a picture");
+    }
+
+    /// File > Revert to Saved without a dialog (#16629): the design is read again from its file,
+    /// changes since the last save are gone, and a design with no file or a file that is gone is
+    /// refused with the design left as it was.
+    #[test]
+    fn revert_saved_reads_the_design_again_from_its_file() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-revert-saved-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("block.sc").to_string_lossy().to_string();
+        let mut s = Session::default();
+        let refused = s.execute("file.revert_saved", &json!({})).unwrap_err().to_string();
+        assert!(refused.contains("no file"), "{refused}");
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5})).unwrap();
+        s.execute("file.save_as", &json!({"path": path})).unwrap();
+        let saved = s.doc.features.len();
+        s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        assert!(s.doc.features.len() > saved && s.is_dirty());
+        s.execute("file.revert_saved", &json!({})).unwrap();
+        assert_eq!((s.doc.features.len(), s.is_dirty(), s.path.as_deref()), (saved, false, Some(path.as_str())), "the unsaved box is gone");
+        // The file goes away: refused, and the design keeps what it has.
+        s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        let before = s.doc.features.len();
+        std::fs::remove_file(&path).unwrap();
+        assert!(s.execute("file.revert_saved", &json!({})).is_err());
+        assert_eq!(s.doc.features.len(), before, "a failed revert keeps the design");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Three-digit hex colours expand one digit per channel, as CSS does: `#fff` is white.

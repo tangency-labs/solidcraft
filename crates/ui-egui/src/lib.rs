@@ -2196,7 +2196,7 @@ impl SolveApp {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
                 }
-                if matches!(id, "file.new" | "doc.open" | "doc.recover") {
+                if matches!(id, "file.new" | "doc.open" | "doc.recover" | "file.revert_saved") {
                     documents::reset_chat(self);
                     self.edit_in_place.active = None;
                     render_workspace::reset_document(self);
@@ -4735,6 +4735,8 @@ impl SolveApp {
                 browser::editors(self, ui);
                 // File › Install plugin… is offered on Home too: its question must show there.
                 plugin_install::show(self, ui.ctx());
+                // The recovery banner's Discard all asks here (File view lists the designs inline).
+                recovery_ui::show(self, ui.ctx());
                 // Entry dialogs from every plugin slot are available on Home too.
                 plugin_menu::show(self, ui.ctx());
                 // The unit of an imported mesh is asked on the screen the import starts: the
