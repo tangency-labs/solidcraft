@@ -279,6 +279,42 @@ pub(super) fn line_endpoints(line: &Line, interval: &Extent1d) -> Option<[PointB
     Some([bounds(interval.min(), first), bounds(interval.max(), last)])
 }
 
+/// Enclose each spatial coordinate independently at the selected endpoint.
+pub(super) fn line_end_with_error(
+    line: &Line,
+    parameter: f64,
+) -> Option<(PointBounds, PointBounds)> {
+    let errors = line.point_coordinate_errors(parameter)?;
+    let point = line.evaluate_point(parameter);
+    if !coords(point).into_iter().all(f64::is_finite) {
+        return None;
+    }
+    let work = coords(point).into_iter().zip(errors).map(|(value, error)| {
+        let span = measured_span(value, error);
+        Ivl::new(span.lo, span.hi)
+    });
+    let mut bounds = [Ivl::from(0.0); 3];
+    for (out, value) in bounds.iter_mut().zip(work) {
+        *out = value;
+    }
+    if let Some(exact) = line.point_expansions_at_parameter(parameter) {
+        for (value, terms) in bounds.iter_mut().zip(exact) {
+            let span = expansion_span(&terms)?;
+            *value = Ivl::new(span.lo, span.hi);
+        }
+    }
+    for ((value, direction), origin) in bounds
+        .iter_mut()
+        .zip(coords(line.line_vector()))
+        .zip(coords(line.line_point()))
+    {
+        if direction == 0.0 {
+            *value = Ivl::from(origin);
+        }
+    }
+    Some((bounds, errors.map(|error| Ivl::new(-error, error))))
+}
+
 /// The lifted ends of an affine stored trim over the actual edge interval.
 pub(super) fn lifted_trim(
     b: &Brep,
@@ -298,7 +334,9 @@ pub(super) fn lifted_trim(
             spline_uv_endpoints(spline.control_points()?)
         }
         CurveKind::Line(line) if line.dim() == 2 => {
-            line_endpoints(line, interval).map(|ends| ends.map(|[u, v, _]| [u, v]))
+            let [a, z] = [interval.min(), interval.max()]
+                .map(|t| line_end_with_error(line, t).map(|([u, v, _], _)| [u, v]));
+            a.zip(z).map(|(a, z)| [a, z])
         }
         _ => None,
     };

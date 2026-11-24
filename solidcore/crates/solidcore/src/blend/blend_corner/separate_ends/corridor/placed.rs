@@ -3,9 +3,7 @@
 mod levels;
 
 use self::levels::Levels;
-use super::{
-    cardinal, coords, expansion_span, line_roundoff, trim, Arm, Corridor, PointBounds, Segment,
-};
+use super::{cardinal, coords, expansion_span, trim, Arm, Corridor, PointBounds, Segment};
 use crate::blend::fillet_section::interval::Ivl;
 use crate::curve::line::Line;
 use crate::error::Result;
@@ -72,6 +70,21 @@ impl Axis {
     fn coordinate_bounds(self, point: PointBounds) -> Ivl {
         trim::dot(point, coords(self.direction).map(Ivl::from)).div_ulp(self.length_squared)
     }
+
+    fn contact_roundoff(self, error: PointBounds) -> Ivl {
+        // A cardinal projection can use the actual Cartesian enclosures.
+        // A placed axis needs the rounding from this endpoint in its own chart.
+        if cardinal([0.0; 3], coords(self.direction)).is_some() {
+            Ivl::from(0.0)
+        } else {
+            self.coordinate_bounds(error)
+        }
+    }
+}
+
+fn reaches_level(range: Ivl, roundoff: Ivl, level: f64) -> bool {
+    let range = range.add_ulp(roundoff);
+    range.is_finite() && range.lo <= level && level <= range.hi
 }
 
 impl Frame {
@@ -301,22 +314,18 @@ impl Placed {
             return Ok(None);
         };
         let interval = edge::interval(b, e)?;
-        let Some(arithmetic) =
-            line_roundoff(line, &interval).and_then(|error| self.frame.width(error))
+        let [Some(first), Some(last)] = [interval.min(), interval.max()]
+            .map(|parameter| trim::line_end_with_error(line, parameter))
         else {
             return Ok(None);
         };
-        let Some(spatial) = trim::line_endpoints(line, &interval) else {
-            return Ok(None);
-        };
         let project = |point| self.frame.axes.map(|axis| axis.coordinate_bounds(point));
-        let spatial = spatial.map(project);
         let mut projected = raw.map(project);
-        let rounding = Ivl::new(-arithmetic, arithmetic);
         let mut regenerated = None;
-        for ((bounds, (vertex, nominal)), spatial) in
-            projected.iter_mut().zip(endpoints).zip(spatial)
+        for ((bounds, (vertex, nominal)), (spatial, error)) in
+            projected.iter_mut().zip(endpoints).zip([first, last])
         {
+            let spatial = project(spatial);
             for (other, axis, level) in boundaries {
                 let Some(level) = level else {
                     continue;
@@ -324,16 +333,18 @@ impl Placed {
                 if other == face || coords(nominal).get(axis) != Some(&level) {
                     continue;
                 }
-                let (Some(value), Some(spatial)) = (bounds.get_mut(axis), spatial.get(axis)) else {
+                let (Some(value), Some(spatial), Some(basis)) = (
+                    bounds.get_mut(axis),
+                    spatial.get(axis),
+                    self.frame.axes.get(axis),
+                ) else {
                     return Ok(None);
                 };
-                // The trim and its independent spatial carrier must both
-                // reach this level within the line's arithmetic enclosure.
-                let reaches_level = |range: Ivl| {
-                    let range = range.add_ulp(rounding);
-                    range.is_finite() && range.lo <= level && level <= range.hi
-                };
-                if !reaches_level(*value) || !reaches_level(*spatial) {
+                // Both representations must reach the level at this endpoint.
+                let rounding = basis.contact_roundoff(error);
+                if !reaches_level(*value, rounding, level)
+                    || !reaches_level(*spatial, rounding, level)
+                {
                     continue;
                 }
                 let same_support = |peer| self.levels.same_support(peer, other);
@@ -422,5 +433,37 @@ impl Placed {
             Point3::new(x.lo, y.lo, z.lo),
             Point3::new(x.hi, y.hi, z.hi),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::curve::line::BoundedLineOptions;
+    use crate::geom::extent1d::Extent1d;
+
+    #[test]
+    fn a_long_edge_does_not_hide_an_offset_across_a_cardinal_cap() {
+        let length = 2.0_f64.powi(20);
+        let line = Line::bounded(
+            Point3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.6, 0.8),
+            &Extent1d::from_min_max(0.0, length),
+            &BoundedLineOptions::default(),
+        );
+        let axis = Axis::new(Vec3::new(1.0, 0.0, 0.0)).expect("finite cap normal");
+        let offset = 2.0_f64.powi(-35);
+        assert!(line.point_error(length).expect("finite end error") > offset);
+        for t in [0.0, length] {
+            let (spatial, error) =
+                trim::line_end_with_error(&line, t).expect("finite line endpoint");
+            let rounding = axis.contact_roundoff(error);
+            assert!(reaches_level(
+                axis.coordinate_bounds(spatial),
+                rounding,
+                1.0
+            ));
+            assert!(!reaches_level(Ivl::from(1.0 + offset), rounding, 1.0));
+        }
     }
 }

@@ -939,10 +939,28 @@ impl Line {
     pub(crate) fn point_error(&self, t: f64) -> Option<f64> {
         let size = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
         let (s, ds) = self.step_param_enclosure(t)?;
-        let e = (gamma(3) * (size(self.point) + (s * self.scale).abs() * size(self.vector))
-            + ds * self.scale.abs() * size(self.vector))
-            * (1.0 + gamma(3));
-        e.is_finite().then_some(e)
+        let error = self.point_evaluation_error(s, ds, size(self.point), size(self.vector));
+        error.is_finite().then_some(error)
+    }
+
+    /// The separate Cartesian rounding bounds of the line evaluation at this endpoint.
+    pub(crate) fn point_coordinate_errors(&self, t: f64) -> Option<[f64; 3]> {
+        let (s, ds) = self.step_param_enclosure(t)?;
+        let errors = [
+            (self.point.x, self.vector.x),
+            (self.point.y, self.vector.y),
+            (self.point.z, self.vector.z),
+        ]
+        .map(|(point, vector)| self.point_evaluation_error(s, ds, point.abs(), vector.abs()));
+        errors
+            .iter()
+            .all(|error| error.is_finite())
+            .then_some(errors)
+    }
+
+    fn point_evaluation_error(&self, s: f64, ds: f64, point: f64, vector: f64) -> f64 {
+        (gamma(3) * (point + (s * self.scale).abs() * vector) + ds * self.scale.abs() * vector)
+            * (1.0 + gamma(3))
     }
 
     /// Not upstream: an upper bound on the speed of [`Self::evaluate_point`] in its NURB
