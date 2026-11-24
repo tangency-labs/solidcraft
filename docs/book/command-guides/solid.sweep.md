@@ -3,6 +3,7 @@ Drag a sketched profile along a path to make a solid of the same section all the
 #### Before you start
 
 - You need a profile sketch (a closed shape) and a path: either a second sketch of connected curves, or a chain of a part's edges. An edge path needs no second sketch.
+- You can also select a planar face of an existing body instead of a sketch.
 - Draw the profile on a plane square to the start of the path, touching the path. The profile then runs along the path from there.
 - For a plain round tube or rod, {{#command solid.pipe}} is quicker: it needs only the path and a diameter, plus a wall thickness for a hollow tube. Without a wall it makes a solid rod.
 
@@ -10,7 +11,7 @@ Drag a sketched profile along a path to make a solid of the same section all the
 
 | Choice in the dialog | Meaning | Example or reason to choose it |
 | --- | --- | --- |
-| Profile | The closed sketch shape to sweep. | A 0.5 in × 0.25 in rectangle for flat bar. |
+| Profile | The closed sketch shape to sweep, or a planar face of an existing body. | A 0.5 in × 0.25 in rectangle for flat bar. |
 | Path | The curves or edges the profile follows. | A line, an arc and a line for a bend. |
 | Orientation | Turn with Path: the profile turns to stay square to the path, as bent bar does. Keep as Drawn: the profile keeps the direction it was drawn in. Follow Direction: the profile stays square to the path, and the Direction you pick fixes how it turns about the path. | Turn with Path for almost everything. |
 | Direction | An axis, sketch line or straight edge, used only with Follow Direction. | The Z axis, to keep a profile upright on a path that climbs. |

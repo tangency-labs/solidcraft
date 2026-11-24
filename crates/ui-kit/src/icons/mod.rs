@@ -14,10 +14,24 @@ use egui::{Color32, Painter, Rect, TextureHandle, TextureOptions, pos2};
 pub mod glyphs;
 mod svg;
 
-pub use svg::{
-    Doc, IconData, IconExtension, IconSet, Look, MAX_ACCENTS, MAX_ADDED, MAX_ADDED_BYTES, MAX_ROLES, PLACEHOLDER, Palette, Resolved, audit, render,
-    render_tinted, set_theme_palette, theme_palette, theme_palette_state,
-};
+pub use svg::Doc;
+pub use svg::IconData;
+pub use svg::IconExtension;
+pub use svg::IconSet;
+pub use svg::Look;
+pub use svg::MAX_ACCENTS;
+pub use svg::MAX_ADDED;
+pub use svg::MAX_ADDED_BYTES;
+pub use svg::MAX_ROLES;
+pub use svg::PLACEHOLDER;
+pub use svg::Palette;
+pub use svg::Resolved;
+pub use svg::audit;
+pub use svg::render;
+pub use svg::render_tinted;
+pub use svg::set_theme_palette;
+pub use svg::theme_palette;
+pub use svg::theme_palette_state;
 
 static INSTALLED: OnceLock<&'static IconSet> = OnceLock::new();
 
@@ -75,6 +89,7 @@ enum Finish {
     Artwork,
     Ink(Color32),
     Danger,
+    Greyscale,
 }
 
 /// Textures already rasterised: one per (master, look, pixel size, finish).
@@ -158,6 +173,17 @@ pub fn paint_accented(p: &Painter, r: Rect, name: &str, accent: Option<&str>, op
     paint_resolved(p, r, resolved, look, opacity, Finish::Artwork, Mirror::None);
 }
 
+/// Draw palette-owned icon artwork converted to greyscale, preserving facet shading, highlights and outlines.
+pub fn paint_greyscale(p: &Painter, r: Rect, name: &str, accent: Option<&str>, opacity: f32) {
+    let resolved = resolve(name);
+    let accent = match accent {
+        Some(name) => accent_index(name).or(resolved.accent),
+        None => None,
+    };
+    let look = Look::themed(p.ctx().global_style().visuals.dark_mode, accent, solidcraft_theme::vision());
+    paint_resolved(p, r, resolved, look, opacity, Finish::Greyscale, Mirror::None);
+}
+
 /// Shared destructive-action artwork: shaded faces in the set's danger ramp, normal outlines and cutouts.
 /// Unlike a single-colour mask, this also tints a master's passive faces through
 /// that ramp without flattening the lid, handle or other details.
@@ -197,6 +223,12 @@ fn paint_resolved(p: &Painter, r: Rect, resolved: Resolved, look: Look, opacity:
         if let Finish::Ink(ink) = finish {
             for pixel in &mut image.pixels {
                 *pixel = ink.gamma_multiply(f32::from(pixel.a()) / 255.0);
+            }
+        } else if finish == Finish::Greyscale {
+            for pixel in &mut image.pixels {
+                let [r, g, b, a] = pixel.to_array();
+                let y = ((r as u32 * 54 + g as u32 * 183 + b as u32 * 19) >> 8) as u8;
+                *pixel = Color32::from_rgba_premultiplied(y, y, y, a);
             }
         }
         slot.insert(ctx.load_texture(format!("icon:{}:{px}", resolved.master), image, TextureOptions::LINEAR));

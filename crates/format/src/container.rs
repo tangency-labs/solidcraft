@@ -47,6 +47,23 @@ fn invalid(message: impl std::fmt::Display) -> FormatError {
     FormatError::Invalid(message.to_string())
 }
 
+/// A part's bytes, at most `limit` and exactly its declared size.
+fn read_limited<R: Read + ?Sized>(part: zip::read::ZipFile<'_, R>, limit: usize) -> Result<Vec<u8>, FormatError> {
+    let expected = part.size();
+    if expected > limit as u64 {
+        return Err(invalid("part too large"));
+    }
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(expected as usize).map_err(|_| invalid("could not reserve required part"))?;
+    // A compressed part may expand beyond its declared size (a decompression bomb): stop
+    // one byte past it instead of at the limit.
+    part.take(expected + 1).read_to_end(&mut bytes).map_err(invalid)?;
+    if bytes.len() > limit || bytes.len() as u64 != expected {
+        return Err(invalid("part too large or length mismatch"));
+    }
+    Ok(bytes)
+}
+
 /// Whether the bytes start as a container does, whatever the file is called.
 pub fn is_container(bytes: &[u8]) -> bool {
     bytes.starts_with(b"PK\x03\x04")
@@ -342,22 +359,24 @@ impl<R: Read + Seek> Reader<R> {
         self.zip.file_names().filter_map(|name| name.ok().map(|name| name.into_owned())).collect()
     }
 
+    /// The names of every part with each one's place in the container, in the container's order.
+    /// A name that does not decode is left out. Reading a part by its place
+    /// ([`Self::limited_part_at`]) skips the name lookup, which for a name stored without the
+    /// UTF-8 flag decodes every name in the container.
+    pub fn indexed_part_names(&self) -> Vec<(String, usize)> {
+        self.zip.file_names().enumerate().filter_map(|(index, name)| name.ok().map(|name| (name.into_owned(), index))).collect()
+    }
+
     /// The part of this name, at most `limit` bytes.
     pub fn limited_part(&mut self, name: &str, limit: usize) -> Result<Vec<u8>, FormatError> {
         let part = self.zip.by_name(name).map_err(|e| invalid(format!("required part `{name}`: {e}")))?;
-        let expected = part.size();
-        if expected > limit as u64 {
-            return Err(invalid("part too large"));
-        }
-        let mut bytes = Vec::new();
-        bytes.try_reserve_exact(expected as usize).map_err(|_| invalid("could not reserve required part"))?;
-        // A compressed part may expand beyond its declared size (a decompression bomb): stop
-        // one byte past it instead of at the limit.
-        part.take(expected + 1).read_to_end(&mut bytes).map_err(invalid)?;
-        if bytes.len() > limit || bytes.len() as u64 != expected {
-            return Err(invalid("part too large or length mismatch"));
-        }
-        Ok(bytes)
+        read_limited(part, limit)
+    }
+
+    /// The part at this place in the container ([`Self::indexed_part_names`]), at most `limit` bytes.
+    pub fn limited_part_at(&mut self, index: usize, limit: usize) -> Result<Vec<u8>, FormatError> {
+        let part = self.zip.by_index(index).map_err(|e| invalid(format!("part {index}: {e}")))?;
+        read_limited(part, limit)
     }
 
     /// The blob `value`'s `field` names, of this extension, within its part limit.

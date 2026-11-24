@@ -30,6 +30,7 @@ pub use live::{
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::error::query::QueryFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::Point2;
@@ -204,7 +205,7 @@ fn face_surface_cache(
         .face(face)?
         .surface
         .as_ref()
-        .ok_or_else(|| SolidError::query_missing(OP, "the face's surface"))?
+        .ok_or_else(|| SolidError::query(OP, QueryFailure::FaceWithoutSurface))?
         .clone_for_evaluation()?;
     // WR-732: while editing, classify against the face's current trims; a face whose
     // loops are open has no boundary to implant, and no answer
@@ -382,7 +383,7 @@ impl SurfaceSolveContext<CacheObject> for RaySurfaceContext<'_> {
             .face(face)?
             .surface
             .as_ref()
-            .ok_or_else(|| SolidError::query_missing(OP, "the face's surface"))?
+            .ok_or_else(|| SolidError::query(OP, QueryFailure::FaceWithoutSurface))?
             .face()?;
         if surface.face()? != owner {
             return Err(SolidError::invalid_input(OP, "surface owner mismatch"));
@@ -401,6 +402,13 @@ impl FaceQueries<CacheObject> for RaySurfaceContext<'_> {
             return Err(SolidError::invalid_input(OP, "expected face"));
         };
         PreparedFaceQueries::new(self.brep, id, &cache_handle)?.face_zone_tol_3d(face)
+    }
+
+    fn face_has_loopuses(&self, face: CacheObject) -> Result<bool> {
+        let CacheObject::Face(id) = face else {
+            return Err(SolidError::invalid_input(OP, "expected face"));
+        };
+        crate::topology::face::p4::has_loopuses(self.brep, id)
     }
 
     fn face_point_classify(
@@ -434,6 +442,10 @@ impl FaceQueries<CacheObject> for RaySurfaceContext<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::curve::curve::Curve;
+    use crate::math::Point3;
+    use crate::surface::surface::p1::LentSurfaceCache;
+    use crate::surface::surface_cache::SurfaceCacheState;
 
     #[test]
     fn classification_reads_the_prepared_cache_before_vertex_fallback() {
@@ -509,32 +521,27 @@ mod tests {
         );
     }
 
-    /// During a Boolean operation `smsurf_GetSurfaceCache` defers the tree build
-    /// (`CacheMakeOrValidate`), so `GlobalPointSolve`'s fast-drop face test reads the
-    /// `SmTrimSrfCache` constructor's state bits until a solve's `GetTree` builds the
-    /// tree, whose build turns point testing off on a face without loops (the
+    /// #20179: whether `GlobalPointSolve`'s fast-drop face test runs depends only on
+    /// the face, not on when its cache was built. During a Boolean operation
+    /// `smsurf_GetSurfaceCache` defers the tree build (`CacheMakeOrValidate`), so the
+    /// cache keeps the `SmTrimSrfCache` constructor's state until a solve's `GetTree`
+    /// builds the tree; upstream's build then turns point testing off on a face without
+    /// loop uses, so the same face rejected every candidate (a face without loop uses
+    /// classifies every point as unknown) before the build and kept them after (the
     /// `blend.fillet_executive_p3` rollover-404 case, a merged face without loop uses).
     /// On a full torus whose face's loops are unlinked from it (`RemoveLoop`: a face
-    /// without loop uses, as the merged face mid-Boolean is) the context reader
-    /// ([`SurfaceSolveContext::surface_cache_without_get_tree`]) and the live reader
-    /// (`live_face_fast_drop_test`) both see point testing on while the tree is
-    /// deferred, as upstream does (main's answer in the rollover case). Outside a
-    /// Boolean operation both readers make the cache with its tree, so both see point
-    /// testing off. The test pins what the readers do and that they agree; which value
-    /// the bit should have on a face without loops is the open question of the
-    /// point-test follow-up issue.
+    /// without loop uses) the context reader
+    /// ([`SurfaceSolveContext::surface_cache_without_get_tree`] read through
+    /// [`SurfaceCache::point_test_with`]) and the live reader
+    /// (`live_face_fast_drop_test`) keep the point in both orders: while the tree is
+    /// deferred and once it is built.
     #[test]
-    fn fast_drop_point_test_on_a_face_without_loops_while_the_tree_is_deferred() {
+    fn fast_drop_point_test_on_a_face_without_loops_does_not_depend_on_the_tree_build() {
         let mut k = Kernel::default();
         // a torus whose single face has its loops unlinked
         let loopless = |k: &mut Kernel| {
-            let mut b = crate::primitive::api_primitives::create_torus(
-                k,
-                crate::math::Point3::ZERO,
-                10.0,
-                2.0,
-            )
-            .unwrap();
+            let mut b =
+                crate::primitive::api_primitives::create_torus(k, Point3::ZERO, 10.0, 2.0).unwrap();
             let faces = crate::topology::brep::p1::faces(&b, None).unwrap();
             assert_eq!(faces.len(), 1);
             let face = faces[0];
@@ -557,7 +564,7 @@ mod tests {
             .unwrap();
         k.context.set_doing_boolean(true);
         let handle = Some(CacheObject::Surface(face));
-        let on = |c: &SurfaceCache<CacheObject>| {
+        let on = |c: &SurfaceCacheState<CacheObject>| {
             c.is_trimmed() && c.point_test_enabled && !c.face_was_modified
         };
 
@@ -580,14 +587,25 @@ mod tests {
         let state = services
             .surface_cache_without_get_tree(&k, &surface, handle)
             .unwrap();
-        assert!(state.tree().is_none());
+        let caches = services.into_caches();
+        let kept = caches.get(&face).unwrap();
+        assert!(kept.tree().is_none());
+        // the cache still reads as trimmed with point testing on, but the face has no
+        // loop uses: the point is kept, not classified
         assert!(on(&state));
-        assert_eq!(live_on, Some(on(&state)));
+        let copy = kept.map_handles(Ok).unwrap();
+        let services = BrepFaceServices::with_caches(&mut b, caches);
+        assert_eq!(
+            copy.point_test_with(&k, uv, Some(1e-6), Some(&services))
+                .unwrap(),
+            (true, None)
+        );
+        assert_eq!(live_on, Some(false));
         drop(services);
 
         // outside a Boolean operation, on fresh B-reps (no cache kept from the first half):
         // both readers make the face's cache with its tree, whose build on a face without
-        // loops leaves it untrimmed and turns point testing off
+        // loops leaves it untrimmed (no trim test); the answer is the same
         let mut k = Kernel::default();
         let (mut b, face) = loopless(&mut k);
         let (mut live_b, _) = loopless(&mut k);
@@ -613,23 +631,367 @@ mod tests {
         let state = services
             .surface_cache_without_get_tree(&k, &surface, handle)
             .unwrap();
-        assert!(state.tree().is_some());
+        assert!(services.into_caches().get(&face).unwrap().tree().is_some());
         assert!(!state.is_trimmed());
-        assert!(!state.point_test_enabled);
         assert!(!on(&state));
         assert_eq!(live_on, Some(false));
+    }
+
+    /// #20179: a face with loop uses tests the fast drop's points whatever mode its
+    /// cache was built in. Upstream's `BuildTree` turns point testing off when the
+    /// B-rep is being edited (the standalone branch), and its face branch's restore
+    /// brings back the value from before the build, so a cache first built while the
+    /// B-rep was edited kept every point, even one far off the face, while the same
+    /// face built outside an edit rejected it.
+    #[test]
+    fn point_test_of_a_face_with_loops_does_not_depend_on_the_build_mode() {
+        use crate::query::face::p2::{face_cache_tree, face_surface_cache};
+        let answers = |editing: bool| {
+            let mut k = Kernel::default();
+            let mut b = crate::primitive::api_primitives::create_box(
+                &mut k,
+                Point3::ZERO,
+                10.0,
+                10.0,
+                10.0,
+            )
+            .unwrap();
+            let face = crate::topology::brep::p1::faces(&b, None).unwrap()[0];
+            assert!(crate::topology::face::p4::has_loopuses(&b, face).unwrap());
+            let domain = b.face(face).unwrap().uv_domain;
+            let inside = Point2::new(
+                0.5 * (domain.min.x + domain.max.x),
+                0.5 * (domain.min.y + domain.max.y),
+            );
+            let outside = Point2::new(
+                domain.max.x + 10.0 * (domain.max.x - domain.min.x),
+                domain.max.y + 10.0 * (domain.max.y - domain.min.y),
+            );
+            b.set_editing_enabled(editing);
+            let mut lease = face_surface_cache(&k, &mut b, face).unwrap();
+            face_cache_tree(&k, &mut b, face, &mut lease.cache).unwrap();
+            b.set_editing_enabled(false);
+            assert!(lease.trimmed);
+            let mut test = |uv| {
+                lease
+                    .cache
+                    .point_test_in(&k, &mut BrepCacheFace { b: &mut b, f: face }, uv, None)
+                    .unwrap()
+                    .0
+            };
+            let answers = (test(inside), test(outside));
+            lease.release();
+            answers
+        };
+        assert_eq!(answers(false), (true, false));
+        assert_eq!(answers(true), (true, false));
+    }
+
+    /// The state bits a solve reads from a face's kept cache
+    /// ([`SurfaceSolveContext::surface_cache_without_get_tree`], read in place by
+    /// [`SurfaceCache::mapped_state`]) are those a copy of the cache (`map_handles`)
+    /// answers, on a kept cache without its tree (during a Boolean operation) and with
+    /// it, and with a stale face binding, where the copy drops the binding: the face
+    /// reads as the copy's, not the kept cache's own stale-binding error.
+    #[test]
+    fn kept_cache_state_reads_as_its_copy() {
+        let read_and_copy = |cache: &SurfaceCache<CacheObject>| {
+            (
+                cache.mapped_state(|c| c).unwrap(),
+                cache.map_handles(Ok).unwrap().state().unwrap(),
+            )
+        };
+        let face_answer = |s: &SurfaceCacheState<CacheObject>| format!("{:?}", s.face());
+        for doing_boolean in [true, false] {
+            let mut k = Kernel::default();
+            let mut b =
+                crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 5.0, 20.0)
+                    .unwrap();
+            let face = crate::topology::brep::p1::faces(&b, None).unwrap()[0];
+            let surface = b
+                .face(face)
+                .unwrap()
+                .surface
+                .as_ref()
+                .unwrap()
+                .clone_for_evaluation()
+                .unwrap();
+            k.context.set_doing_boolean(doing_boolean);
+            let mut services = BrepFaceServices::new(&mut b);
+            let state = services
+                .surface_cache_without_get_tree(&k, &surface, Some(CacheObject::Surface(face)))
+                .unwrap();
+            let mut caches = services.into_caches();
+            let cache = caches.get_mut(face).unwrap();
+            assert_eq!(cache.tree().is_some(), !doing_boolean);
+            let (read, copy) = read_and_copy(cache);
+            assert_eq!(read, copy);
+            assert_eq!(state, read);
+            assert_eq!(read, cache.state().unwrap());
+            assert!(read.face().unwrap().is_some());
+
+            // the surface no longer owned by the bound face: the copy reads no face
+            let owner = cache.surface_mut().set_owner(None).unwrap();
+            assert!(cache.state().unwrap().face().is_err());
+            let (read, copy) = read_and_copy(cache);
+            assert_eq!(read, copy);
+            assert_eq!(read.face().unwrap(), None);
+
+            // owned by another face: the copy's answer for that face's handle
+            cache
+                .surface_mut()
+                .set_owner(Some(crate::geom::object::ObjectRef {
+                    key: crate::geom::attribute::ObjectKey(owner.key.0.wrapping_add(1)),
+                    ..owner
+                }));
+            let own = cache.state().unwrap();
+            let (read, copy) = read_and_copy(cache);
+            assert_eq!(read, copy);
+            assert_eq!(face_answer(&read), face_answer(&copy));
+            assert_ne!(face_answer(&read), face_answer(&own));
+        }
+    }
+
+    /// A cylinder face's kept cache (made by a first solve's `GetTree`), its surface and
+    /// handle, and the B-rep holding it.
+    fn kept_cylinder_cache(
+        k: &mut Kernel,
+    ) -> (Brep, Surface, Option<CacheObject>, FaceId, FaceCaches) {
+        let mut b =
+            crate::primitive::api_primitives::create_cylinder(k, Point3::ZERO, 5.0, 20.0).unwrap();
+        let face = crate::topology::brep::p1::faces(&b, None).unwrap()[0];
+        let surface = b
+            .face(face)
+            .unwrap()
+            .surface
+            .as_ref()
+            .unwrap()
+            .clone_for_evaluation()
+            .unwrap();
+        let handle = Some(CacheObject::Surface(face));
+        let mut services = BrepFaceServices::new(&mut b);
+        services.build_surface_cache(k, &surface, handle).unwrap();
+        let caches = services.into_caches();
+        assert!(caches.get(&face).unwrap().tree().is_some());
+        (b, surface, handle, face, caches)
+    }
+
+    /// The copy a face's services lend a solve that only reads the cache: one shared copy.
+    fn lent_copy(
+        k: &Kernel,
+        services: &mut BrepFaceServices<'_>,
+        surface: &Surface,
+        handle: Option<CacheObject>,
+    ) -> std::sync::Arc<SurfaceCache<CacheObject>> {
+        match services.lend_surface_cache(k, surface, handle).unwrap() {
+            LentSurfaceCache::Shared(c) => c,
+            LentSurfaceCache::Owned(_) => panic!("a kept cache with its tree is lent shared"),
+        }
+    }
+
+    /// The solves that only read a face's kept cache
+    /// ([`SurfaceSolveContext::lend_surface_cache`]) are handed one copy of it, the same
+    /// object at every fetch instead of a copy each, also by the next services the kept
+    /// caches are handed to: it holds what the copy each fetch made (`map_handles`) holds,
+    /// and the kept cache is left as it was.
+    #[test]
+    fn a_kept_cache_is_lent_as_one_copy() {
+        let mut k = Kernel::default();
+        let (mut b, surface, handle, face, caches) = kept_cylinder_cache(&mut k);
+        let kept = format!("{:?}", caches.get(&face).unwrap());
+        let copy = format!("{:?}", caches.get(&face).unwrap().map_handles(Ok).unwrap());
+        let mut services = BrepFaceServices::with_caches(&mut b, caches);
+        let first = lent_copy(&k, &mut services, &surface, handle);
+        let second = lent_copy(&k, &mut services, &surface, handle);
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+        assert_eq!(format!("{first:?}"), copy);
+        let caches = services.into_caches();
+        assert_eq!(format!("{:?}", caches.get(&face).unwrap()), kept);
+        // the lent copy is kept with the kept cache for the next services of the B-rep
+        let mut services = BrepFaceServices::with_caches(&mut b, caches);
+        let next = lent_copy(&k, &mut services, &surface, handle);
+        assert!(std::sync::Arc::ptr_eq(&first, &next));
+        assert_eq!(format!("{next:?}"), copy);
+    }
+
+    /// A solve that changes its cache (here its point-test flag and its surface's owner)
+    /// is handed a copy of its own ([`SurfaceSolveContext::build_surface_cache`]): the
+    /// kept cache and the copy lent to the readers stay as they were.
+    #[test]
+    fn a_mutable_consumer_leaves_the_kept_cache() {
+        let mut k = Kernel::default();
+        let (mut b, surface, handle, face, caches) = kept_cylinder_cache(&mut k);
+        let kept = format!("{:?}", caches.get(&face).unwrap());
+        let mut services = BrepFaceServices::with_caches(&mut b, caches);
+        let lent = lent_copy(&k, &mut services, &surface, handle);
+        let lent_before = format!("{lent:?}");
+        let mut own = services.build_surface_cache(&k, &surface, handle).unwrap();
+        own.point_test_enabled = !own.point_test_enabled;
+        own.surface_mut().set_owner(None);
+        assert_ne!(format!("{own:?}"), lent_before);
+        let again = lent_copy(&k, &mut services, &surface, handle);
+        assert!(std::sync::Arc::ptr_eq(&lent, &again));
+        assert_eq!(format!("{again:?}"), lent_before);
+        let caches = services.into_caches();
+        assert_eq!(format!("{:?}", caches.get(&face).unwrap()), kept);
+    }
+
+    /// A face whose kept cache holds geometry whose reads keep state a later read sees
+    /// ([`SurfaceCache::reads_leave_unchanged`]: an offset surface, or a curve on surface
+    /// anywhere in its surface) is not lent shared: each solve reading it gets a copy of
+    /// its own, as before.
+    #[test]
+    fn a_kept_cache_with_read_state_is_not_lent_shared() {
+        use crate::curve::crv_on_surf::CrvOnSurf;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::surface::curve_bounded_surface::CurveBoundedSurface;
+        use crate::surface::offset_surface::OffsetSurface;
+        type Wrap = fn(&Kernel, &Surface) -> Surface;
+        let k = &mut Kernel::default();
+        let offset = |k: &Kernel, s: &Surface| {
+            Surface::from(
+                OffsetSurface::new(k, 1.0, s.clone(), true, crate::geom::extent2d::SS_NONE)
+                    .unwrap(),
+            )
+        };
+        let curve_on = |k: &Kernel, s: &Surface| {
+            let uv = Curve::from(
+                BSplineCurve::create_line_segment(
+                    2,
+                    Point3::new(0.1, 0.1, 0.0),
+                    Point3::new(0.4, 0.3, 0.0),
+                )
+                .unwrap(),
+            );
+            let boundary = Curve::from(CrvOnSurf::new(k, uv, s.clone(), None, 0).unwrap());
+            Surface::from(
+                CurveBoundedSurface::new(s.clone(), vec![boundary], vec![], true).unwrap(),
+            )
+        };
+        let wrappers: [Wrap; 2] = [offset, curve_on];
+        for wrap in wrappers {
+            let (mut b, surface, handle, face, mut caches) = kept_cylinder_cache(k);
+            let cache = caches.get_mut(face).unwrap();
+            let wrapped = wrap(k, cache.surface());
+            *cache.surface_mut() = wrapped;
+            assert!(!caches.get(&face).unwrap().reads_leave_unchanged().unwrap());
+            let mut services = BrepFaceServices::with_caches(&mut b, caches);
+            for _ in 0..2 {
+                assert!(matches!(
+                    services.lend_surface_cache(k, &surface, handle).unwrap(),
+                    LentSurfaceCache::Owned(_)
+                ));
+            }
+        }
+        // the cylinder's own kept cache is lent shared
+        let (mut b, surface, handle, _, caches) = kept_cylinder_cache(k);
+        assert!(matches!(
+            BrepFaceServices::with_caches(&mut b, caches)
+                .lend_surface_cache(k, &surface, handle)
+                .unwrap(),
+            LentSurfaceCache::Shared(_)
+        ));
+    }
+
+    /// A curve intersection that only reads a B-spline face's cache
+    /// ([`Surface::global_curve_intersect_with_context`], no cache given) solves through
+    /// the face's lent copy, and the copy still holds what a fresh copy of the kept cache
+    /// holds afterwards: the solve's reads (evaluations, the tree solve) leave the lent
+    /// copy as it was, so the next reader reads what a copy of its own would hold.
+    #[test]
+    fn a_read_solve_leaves_the_lent_copy_as_a_fresh_copy() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        let mut k = Kernel::default();
+        // the twisted bilinear patch z = x y over the unit square
+        let patch = BSplineSurface::create_bilinear_surface(
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(1.0, 1.0, 1.0),
+        )
+        .unwrap();
+        let (mut b, face) =
+            crate::topology::brep::sheet::sheet_on(&mut k, Surface::from(patch), 1e-5).unwrap();
+        let surface = b
+            .face(face)
+            .unwrap()
+            .surface
+            .as_ref()
+            .unwrap()
+            .clone_for_evaluation()
+            .unwrap();
+        let handle = Some(CacheObject::Surface(face));
+        // a quadratic crossing the patch once, below it at its start and above at its end
+        let mut nurb = crate::nurbs::nurbs_crv::allocate_nurb_curve(2, 2, 5).unwrap();
+        let points = [(0.3, 0.3, -1.0), (0.5, 0.6, 0.5), (0.7, 0.4, 2.0)];
+        for (p, (x, y, z)) in nurb.cpts_mut().iter_mut().zip(points) {
+            p.x = x;
+            p.y = y;
+            p.z = z;
+            p.w = -f64::MAX;
+        }
+        nurb.knots_mut()
+            .copy_from_slice(&[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+        let curve = Curve::from(BSplineCurve::from_nurb(nurb, 3, false));
+
+        let mut services = BrepFaceServices::new(&mut b);
+        services.build_surface_cache(&k, &surface, handle).unwrap();
+        let lent = lent_copy(&k, &mut services, &surface, handle);
+        let before = format!("{lent:?}");
+        let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        let hits = surface
+            .global_curve_intersect_with_context(
+                &k,
+                [None, handle],
+                None,
+                &mut services,
+                &domain,
+                &curve,
+                &curve.natural_interval(),
+                1e-6,
+            )
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        let again = lent_copy(&k, &mut services, &surface, handle);
+        assert!(std::sync::Arc::ptr_eq(&lent, &again));
+        assert_eq!(format!("{again:?}"), before);
+        let caches = services.into_caches();
+        let fresh = caches.get(&face).unwrap().map_handles(Ok).unwrap();
+        assert_eq!(format!("{again:?}"), format!("{fresh:?}"));
+    }
+
+    /// A face's lent copy goes with its kept cache: keeping another cache for the face
+    /// drops it, and so does dropping every kept cache, so the next lend makes a new copy
+    /// of the cache kept then.
+    #[test]
+    fn replacing_or_clearing_the_kept_caches_drops_the_lent_copy() {
+        let mut k = Kernel::default();
+        let (mut b, surface, handle, face, caches) = kept_cylinder_cache(&mut k);
+        let mut services = BrepFaceServices::with_caches(&mut b, caches);
+        let first = lent_copy(&k, &mut services, &surface, handle);
+        let mut caches = services.into_caches();
+        let replacement = caches.get(&face).unwrap().map_handles(Ok).unwrap();
+        caches.insert(face, replacement);
+        let mut services = BrepFaceServices::with_caches(&mut b, caches);
+        let second = lent_copy(&k, &mut services, &surface, handle);
+        assert!(!std::sync::Arc::ptr_eq(&first, &second));
+        assert_eq!(format!("{second:?}"), format!("{first:?}"));
+        let mut caches = services.into_caches();
+        caches.clear();
+        assert!(caches.is_empty());
+        let mut services = BrepFaceServices::with_caches(&mut b, caches);
+        let third = lent_copy(&k, &mut services, &surface, handle);
+        assert!(!std::sync::Arc::ptr_eq(&second, &third));
+        assert_eq!(format!("{third:?}"), format!("{first:?}"));
     }
 
     #[test]
     fn surface_cache_requests_are_scoped_and_bounded() {
         let mut k = Kernel::default();
-        let mut b = crate::primitive::api_primitives::create_cylinder(
-            &mut k,
-            crate::math::Point3::ZERO,
-            5.0,
-            20.0,
-        )
-        .unwrap();
+        let mut b =
+            crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 5.0, 20.0)
+                .unwrap();
         let face = crate::topology::brep::p1::faces(&b, None)
             .unwrap()
             .into_iter()
@@ -667,13 +1029,8 @@ mod tests {
         use crate::geom::attribute::ObjectKey;
         use crate::geom::object::ObjectRef;
         let mut k = Kernel::default();
-        let b = crate::primitive::api_primitives::create_cylinder(
-            &mut k,
-            crate::math::Point3::ZERO,
-            5.0,
-            20.0,
-        )
-        .unwrap();
+        let b = crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 5.0, 20.0)
+            .unwrap();
         let uses: BTreeMap<_, _> = b
             .loopuses()
             .iter()
