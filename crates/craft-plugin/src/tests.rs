@@ -111,6 +111,7 @@ fn selection_alternatives_preserve_strict_schema_parity() {
             let schema = json!({"type":"object","properties":{key:property}});
             let value = json!({key:[{"type":"face","body":"Box","index":0,"point":[0,0,0]}]});
             assert_eq!(check_input(&schema, &value).is_ok(), selection, "{key}/{alternative}");
+            assert_eq!(check_input_field(key, &schema["properties"][key], &value[key]).is_ok(), selection, "{key}/{alternative}");
             if selection {
                 assert_eq!(prepare_input(&schema, &value).unwrap(), value);
             }
@@ -119,6 +120,21 @@ fn selection_alternatives_preserve_strict_schema_parity() {
             assert_eq!(strict["properties"][key][alternative][0]["items"].get("additionalProperties").is_none(), selection);
         }
     }
+}
+
+#[test]
+fn filtered_selection_options_keep_the_enclosing_annotation() {
+    let schema = json!({"type":"object","properties":{
+        "enabled":{"type":"boolean"},
+        "picks":{"x-solidcraft-selection":{"version":1,"accept":["body"]},"oneOf":[{
+            "type":"array","items":{"type":"object"},"x-solidcraft-when":{"field":"enabled","eq":true}
+        }]}
+    }});
+    assert!(check_input(&schema, &json!({"enabled":true,"picks":[{"type":"body","name":"Box"}]})).is_ok());
+    assert!(matches!(
+        check_input(&schema, &json!({"enabled":false,"picks":[{"type":"body","name":"Box"}]})),
+        Err(HostError::InvalidInput { field, .. }) if field == "params.picks"
+    ));
 }
 
 #[test]
@@ -495,6 +511,12 @@ fn host_limits_have_typed_failures() {
     assert!(limits.check(&Limits::default()).is_ok());
     let fuel = limits.check(&Limits { fuel: limits.max_fuel + 1, ..Limits::default() }).unwrap_err();
     assert_eq!(fuel, HostError::OverCeiling { limit: "fuel".into(), requested: limits.max_fuel + 1, allowed: limits.max_fuel });
+    assert!(fuel.to_string().contains("allow its fuel request when you install it"));
+    // Approved per-package fuel reaches HostLimits::check just as approved memory does.
+    let approved = HostLimits { max_fuel: MAX_APPROVED_FUEL, ..limits };
+    assert!(approved.check(&Limits { fuel: MAX_APPROVED_FUEL, ..Limits::default() }).is_ok());
+    let hard = HostError::OverCeiling { limit: "fuel".into(), requested: MAX_APPROVED_FUEL + 1, allowed: MAX_APPROVED_FUEL };
+    assert!(hard.to_string().contains("hard host ceiling of 10000000000000"));
     // A refusal gives both numbers and what to change.
     let memory = limits.check(&Limits { memory_mib: 2048, ..Limits::default() }).unwrap_err();
     assert_eq!(memory, HostError::OverCeiling { limit: "memory_mib".into(), requested: 2048, allowed: 128 });
@@ -747,6 +769,7 @@ fn panel_wit_preserves_the_reviewed_interfaces() {
         assert!(WIT.contains(signature), "{signature}");
     }
     assert!(WIT.contains("world panel-plugin"));
+    assert!(WIT.contains("world panel-dialog-plugin"));
     assert_eq!(serde_json::to_value(ui::ColorRole::Series1).unwrap(), "series-1");
 }
 
@@ -897,6 +920,17 @@ fn an_export_slot_claims_extensions_reads_the_design_and_asks_for_no_files() {
     newer["capabilities"] = json!(["formats@0.3"]);
     newer["runtime"]["entries"][0]["kind"] = json!("printer");
     assert!(matches!(parse(&newer), Err(HostError::UnsupportedCapability { .. })));
+}
+
+#[test]
+fn a_command_may_be_a_long_job_and_an_importer_may_not() {
+    let mut long = manifest();
+    long["runtime"]["entries"] = json!([{"name":"make","job":true}, "other"]);
+    let entries = parse(&long).unwrap().runtime.unwrap().entries;
+    assert_eq!((entries[0].job, entries[1].job), (true, false));
+    let mut importing = importer();
+    importing["runtime"]["entries"][0]["job"] = json!(true);
+    assert!(matches!(parse(&importing), Err(HostError::InvalidManifest { field, .. }) if field.ends_with(".job")));
 }
 
 #[test]

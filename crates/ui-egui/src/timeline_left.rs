@@ -418,7 +418,7 @@ pub fn reveal_feature(app: &mut SolveApp, feature: u64) {
 }
 
 /// The features of these folders and of the folders nested in them, in timeline order.
-fn folder_features(app: &SolveApp, roots: &[u64]) -> Vec<u64> {
+pub(crate) fn folder_features(app: &SolveApp, roots: &[u64]) -> Vec<u64> {
     let groups = &app.session.doc.timeline_groups;
     let inside = |feature: u64| {
         group_for(groups, feature).is_some_and(|group| roots.contains(&group) || roots.iter().any(|root| group_is_descendant(groups, group, *root)))
@@ -1249,33 +1249,37 @@ fn feature_row_body(
     let mut edit = false;
     let (edit_label, edit_icon) = crate::timeline::edit_label(*kind);
     crate::ui_kit::Menu::context(&response, |ui| {
-        if crate::ui_kit::menu::button(ui, edit_label, edit_icon).clicked() {
+        // On several selected features an entry acts on them all or cannot be used; the entries
+        // that take one feature go through `one_row`.
+        let rule = crate::timeline::menu_rule(app, id);
+        if rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, edit_label, edit_icon, on)).clicked() {
             edit = true;
             ui.close();
         }
         crate::timeline::sketch_plane_button(app, ui, id);
         if let Some(sketch) = sketch
-            && crate::ui_kit::menu::button(ui, "Edit Profile Sketch", "sketch").clicked()
+            && rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Edit Profile Sketch", "sketch", on)).clicked()
         {
             app.edit_sketch(sketch.0);
             ui.close();
         }
-        if crate::ui_kit::menu::button(ui, "Rename Feature", "rename").clicked() {
+        if rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Rename Feature", "rename", on)).clicked() {
             crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::Feature(id), rect.center());
             ui.close();
         }
-        if crate::ui_kit::menu::button(ui, if *suppressed { "Unsuppress Feature" } else { "Suppress Feature" }, "suppress").clicked() {
+        // The entry for every selected feature takes this one's place. With the rule off it is
+        // an extra entry, and this one still acts on this feature alone.
+        if !rule.many && crate::ui_kit::menu::button(ui, if *suppressed { "Unsuppress Feature" } else { "Suppress Feature" }, "suppress").clicked() {
             let _ = app.run_heavy("timeline.suppress", json!({"feature": id}));
             ui.close();
         }
-        // An extra entry for the selection; the one above still acts on this feature alone.
         if let Some((label, params)) = crate::timeline::suppress_selected(app, id)
             && crate::ui_kit::menu::button(ui, &label, "suppress").clicked()
         {
             let _ = app.run_heavy("timeline.suppress", params);
             ui.close();
         }
-        if crate::ui_kit::menu::button(ui, "Roll Back Here", "rollback").clicked() {
+        if rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Roll Back Here", "rollback", on)).clicked() {
             let _ = app.run_heavy("timeline.roll_to", json!({"feature": id}));
             ui.close();
         }
@@ -2204,7 +2208,7 @@ mod tests {
         h.settle();
         assert!(row_y("timeline:Block") < row_y("timeline:Profile") && row_y("timeline:Profile") < row_y("timeline:Second"));
         assert!(handle_at("timeline:Pocket").is_none(), "only the opened feature shows its sketch");
-        assert!(h.app.session.selection.is_empty(), "the fold arrow only folds");
+        assert!(!h.app.session.has_selection(), "the fold arrow only folds");
         // The fold is kept with the browser's folds, between runs.
         let mut restored = Harness::new();
         restored.app.load_prefs(&h.app.prefs());
@@ -2361,7 +2365,7 @@ mod tests {
         h.frames(30);
         h.step(&json!({"click": {"handle": "timeline:Profile"}})).unwrap();
         assert!(h.app.dialog.is_some() && h.app.session.active_sketch.is_none(), "the sketch row's click goes to the dialog too");
-        assert!(h.app.session.selection.is_empty(), "dialog picks leave the ordinary selection alone");
+        assert!(!h.app.session.has_selection(), "dialog picks leave the ordinary selection alone");
     }
 
     #[test]

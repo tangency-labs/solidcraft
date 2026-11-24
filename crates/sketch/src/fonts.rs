@@ -23,8 +23,16 @@ const MAX_DIR_DEPTH: usize = 6;
 /// Font files kept in memory once read, and the most bytes they may add up to.
 const MAX_CACHED_FONTS: usize = 16;
 const MAX_CACHED_BYTES: usize = 128 << 20;
-/// Longest font name or path accepted.
+/// Longest font name accepted.
 const MAX_FONT_NAME: usize = 1024;
+/// Longest font file path accepted: a design's fonts are kept whole against its folder, which
+/// can itself be long.
+const MAX_FONT_PATH: usize = 4096;
+
+/// Whether `name` is longer than a font name, or for a file, a font file path, may be.
+fn too_long(name: &str) -> bool {
+    name.len() > if is_path(name) { MAX_FONT_PATH } else { MAX_FONT_NAME }
+}
 
 /// Asked before a font file named by its path is read. A design names such files, and an
 /// agent's folders (`vfs::PathScope`) live above this crate; the first check set stays.
@@ -76,7 +84,7 @@ pub fn font_data(name: Option<&str>) -> Result<FontData> {
     if name.is_empty() || normalize(name) == normalize(DEFAULT_FONT_FAMILY) {
         return Ok(FontData { bytes: FontBytes::Builtin, index: 0, weight: None });
     }
-    if name.len() > MAX_FONT_NAME {
+    if too_long(name) {
         return Err(SketchError::Invalid("the font name is too long".into()));
     }
     if is_path(name) {
@@ -98,7 +106,7 @@ pub fn font_data(name: Option<&str>) -> Result<FontData> {
 /// The file a font name means (`~` and `%VAR%` expanded), or `None` for a family name.
 pub fn font_file_path(name: &str) -> Option<PathBuf> {
     let name = name.trim();
-    (name.len() <= MAX_FONT_NAME && is_path(name)).then(|| expand(name))
+    (!too_long(name) && is_path(name)).then(|| expand(name))
 }
 
 /// The face of a font for a style: the bold and/or italic face of an installed family (or the
@@ -743,7 +751,10 @@ mod tests {
             assert_eq!(font_file_path("~/Foo.ttf"), Some(PathBuf::from(format!("{}/Foo.ttf", home.display()))));
         }
         assert_eq!(font_file_path("DejaVu Sans"), None);
-        assert_eq!(font_file_path(&format!("/{}.ttf", "a".repeat(MAX_FONT_NAME))), None);
+        // A font file path may be longer than a font name, up to MAX_FONT_PATH.
+        assert!(font_file_path(&format!("/{}.ttf", "a".repeat(MAX_FONT_NAME))).is_some());
+        assert_eq!(font_file_path(&format!("/{}.ttf", "a".repeat(MAX_FONT_PATH))), None);
+        assert_eq!(font_file_path(&"a".repeat(MAX_FONT_NAME + 1)), None);
     }
 
     #[test]

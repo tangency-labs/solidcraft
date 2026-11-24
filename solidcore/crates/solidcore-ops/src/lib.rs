@@ -34,6 +34,7 @@
 
 pub mod affine;
 pub mod axial_section;
+pub mod bead;
 pub mod blend;
 pub mod blend_definition;
 pub mod blend_surface;
@@ -56,19 +57,27 @@ pub mod develop;
 pub mod error;
 pub mod export_geometry;
 pub mod extend;
+pub mod face_pair;
 pub mod face_surface;
 pub mod faceted;
+pub mod facing_trough;
 pub mod file;
 pub mod fit_projection;
+pub mod frame_gusset;
+pub mod frame_member;
+pub mod frame_trim;
 pub mod hatch;
 pub mod heal;
 pub mod history;
 pub mod hlr;
+pub mod hole_stacks;
 pub mod import_geometry;
 pub mod joint_turn;
 pub mod label;
 pub mod measure;
 pub mod member_turn;
+pub mod mid_joint;
+pub mod mid_sheet;
 pub mod network;
 pub mod offset;
 pub mod order;
@@ -130,6 +139,7 @@ pub use blend::HoleEdge;
 pub use blend::Room;
 pub use blend::SetBack;
 pub use blend::Turn;
+pub use body::backward_sheet_faces;
 pub use body::make_box;
 pub use body::make_cone;
 pub use body::make_cylinder;
@@ -141,6 +151,7 @@ pub use body::TurnedOver;
 pub use boolean::BooleanOp;
 pub use check::CheckLevel;
 pub use check::CheckReport;
+pub use contact::flush_contact_points;
 pub use contact::Gap;
 pub use error::Error;
 pub use error::FailureCode;
@@ -153,9 +164,9 @@ pub use error::SolidTest;
 pub use error::Unblendable;
 pub use error::Unsoundness;
 pub use faceted::faceted_volume;
+pub use measure::centroid_and_mean_radius;
 pub use measure::point_displacement;
 pub use measure::point_distance;
-pub use measure::point_set_summary;
 pub use measure::points_meet;
 pub use measure::ClassifiedPoint;
 pub use measure::Distance;
@@ -182,8 +193,26 @@ pub use offset::offset_surface;
 pub use offset::shell;
 pub use offset::thicken;
 pub use order::Order;
+pub use solidcore::mesh_reduce::ReducedMesh;
 pub use step_assembly::placed_bodies;
 pub use step_assembly::PlacedBody;
+
+/// Reduce a mesh under the current cooperative cancellation context.
+pub fn reduce_mesh(
+    positions: &[[f64; 3]],
+    indices: &[u32],
+    corner_normals: Option<&[[f64; 3]]>,
+    target_triangles: usize,
+) -> Result<ReducedMesh> {
+    solidcore::mesh_reduce::reduce_mesh_with_cancel(
+        positions,
+        indices,
+        corner_normals,
+        target_triangles,
+        cancel::is_cancelled,
+    )
+    .map_err(error::status)
+}
 
 #[cfg(test)]
 mod ball_corner_tests;

@@ -28,10 +28,19 @@ pub const MAX_EXPORT_FILE_BYTES: usize = 256 * 1024 * 1024;
 /// A command entry finishes within 30 s; an importer converting a large assembly may take minutes.
 pub const MAX_COMMAND_DEADLINE_MS: u64 = 30_000;
 pub const MAX_IMPORTER_DEADLINE_MS: u64 = 600_000;
+/// A long job (an entry with `"job": true`) runs for at most ten minutes. The limit is fixed: a
+/// plugin that needs longer asks for it through its own limits, not an app-wide setting.
+pub const JOB_DEADLINE_SECONDS: u64 = 600;
+/// The most host calls a long job makes (its progress reports among them); an ordinary command
+/// makes at most 256.
+pub const MAX_JOB_CALLS: usize = 1 << 20;
 /// The most extensions one import or export slot claims.
 pub const MAX_EXTENSIONS: usize = 32;
 /// Memory32 has at most 65536 pages of 64 KiB.
 pub const MAX_MEMORY_MIB: usize = 4096;
+/// Hard ceiling for fuel approved at install: ten trillion fuel units (10^13).
+/// The user's Max plugin fuel remains the default for packages without an approval.
+pub const MAX_APPROVED_FUEL: u64 = 10_000_000_000_000;
 
 pub type Result<T> = std::result::Result<T, HostError>;
 
@@ -73,6 +82,7 @@ pub mod swatches;
 pub mod ui;
 pub use input::FONT_KEY;
 pub use input::check_input;
+pub use input::check_input_field;
 pub use input::font_field;
 pub use input::prepare_input;
 pub use input::strict_input_schema;
@@ -135,7 +145,12 @@ fn over_ceiling(limit: &str, requested: u64, allowed: u64) -> String {
         "memory_mib" => format!(
             "asks for {requested} MiB of memory, more than the {allowed} MiB plugins may use; allow its memory request when you install it, or raise the memory ceiling for plugins"
         ),
-        "fuel" => format!("asks for {requested} fuel, more than the {allowed} plugins may use; raise the fuel ceiling for plugins"),
+        "fuel" if requested > MAX_APPROVED_FUEL && allowed == MAX_APPROVED_FUEL => {
+            format!("asks for {requested} fuel, more than the hard host ceiling of {allowed} that may be approved at install")
+        }
+        "fuel" => format!(
+            "asks for {requested} fuel, more than the {allowed} plugins may use; allow its fuel request when you install it, or raise the fuel ceiling for plugins"
+        ),
         _ => format!("asks for {requested} {limit}, more than the {allowed} plugins may use"),
     }
 }
@@ -543,6 +558,9 @@ pub struct Entry {
     /// Opt in to the read-only dialog-provider export (dialog@0.1).
     pub dialog_hook: bool,
     pub slots: Vec<UiSlot>,
+    /// A long job: it runs for up to [`JOB_DEADLINE_SECONDS`] instead of the runtime's `deadline_ms`,
+    /// and shows its progress in the app's operations.
+    pub job: bool,
 }
 
 impl Entry {
@@ -589,6 +607,8 @@ struct DeclaredEntry {
     dialog_hook: bool,
     #[serde(default)]
     slots: Vec<UiSlot>,
+    #[serde(default)]
+    job: bool,
 }
 impl From<EntryDeclaration> for Entry {
     fn from(value: EntryDeclaration) -> Self {
@@ -603,6 +623,7 @@ impl From<EntryDeclaration> for Entry {
                 input_schema: empty_input_schema(),
                 dialog_hook: false,
                 slots: Vec::new(),
+                job: false,
             },
             EntryDeclaration::Declared(value) => Self {
                 name: value.name,
@@ -619,6 +640,7 @@ impl From<EntryDeclaration> for Entry {
                 input_schema: value.input_schema,
                 dialog_hook: value.dialog_hook,
                 slots: value.slots,
+                job: value.job,
             },
         }
     }
@@ -801,6 +823,9 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
         }
         EntryKind::Command if entry.effect == Effect::Open => {
             Err(invalid(format!("{field}.effect"), "only an importer opens a file as a new design; a command's effect is read or edit"))
+        }
+        EntryKind::Importer if entry.job => {
+            Err(invalid(format!("{field}.job"), "an import already runs as a long job; only a command is declared one"))
         }
         EntryKind::Command => Ok(()),
         EntryKind::Importer | EntryKind::Exporter => {

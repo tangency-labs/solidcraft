@@ -99,3 +99,5 @@ pollster = { workspace = true }
 
 [build-dependencies]
 serde_json = { workspace = true }
+# Packs the message catalogs the app embeds (build.rs).
+flate2 = { workspace = true }

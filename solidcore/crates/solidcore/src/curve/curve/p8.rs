@@ -141,7 +141,8 @@ use crate::curve::curve::p3::local_curve_intersect;
 use crate::curve::curve::p4::{analytic_curve_intersect, AnalyticOperand};
 use crate::curve::curve::p5::{make_curve_cache_with_zone_tol, memoized_cache_top_box};
 use crate::curve::curve_cache::CurveCache;
-use crate::error::{native_failure, Result, SolidError};
+use crate::error::curve::CurveFailure;
+use crate::error::{native_failure, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{
@@ -252,6 +253,7 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
     other: &Curve,
     other_interval: &Extent1d,
     dist_tol: f64,
+    excluded_target_ends: [bool; 2],
     sols: &mut SolutionArray<O>,
 ) -> Result<()> {
     let mut moved_any = Vec::new();
@@ -279,6 +281,9 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
             };
             let (sol_on_end, sol_on_drop) = if which == 0 { (t1, t2) } else { (t2, t1) };
             for end in 0..2 {
+                if which == 1 && excluded_target_ends.get(end).copied() == Some(true) {
+                    continue;
+                }
                 if moved {
                     break;
                 }
@@ -313,6 +318,16 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                     continue;
                 }
                 let drop_t = dropped.parameter;
+                // Dropping a source end can also land on an excluded target end.
+                // Reject the move before it can replace or remove the interior root.
+                let target_t = if which == 0 { drop_t } else { end_t };
+                if excluded_target_ends
+                    .iter()
+                    .zip([other_interval.min(), other_interval.max()])
+                    .any(|(&excluded, end)| excluded && target_t == end)
+                {
+                    continue;
+                }
                 // A range solution overlapping the stretch (in either curve's parameter)
                 // already reports that contact as a coincidence. Moving the point across
                 // it onto the range's far end would drop the point there as named twice,
@@ -337,6 +352,7 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                 // has a point of the other within tolerance). Not certified (a curve kind
                 // without a speed bound, a point too far, the piece budget spent): the
                 // solution stays where upstream puts it.
+                k.work_counters.add_contact_stretch_certification();
                 let Some(within) = native_failure(curves_stay_within(
                     k,
                     end_curve,
@@ -726,11 +742,28 @@ fn memoized_top_box(k: &Kernel, curve: &Curve, zone_tol_3d: Option<f64>) -> Opti
     memoized_cache_top_box(k, curve, zone_tol_3d.or_else(|| curve.owner_zone_tol_3d()))
 }
 
+/// Why a cache in this module's slots has a tree with a top node: the slots are crate
+/// private and filled only by [`build_cache`], whose build sets the tree, with its top
+/// node, whenever it succeeds.
+const BUILT_CACHE_HAS_TREE: &str = "the curve's cache, filled only by build_cache, has a \
+     tree with its top node: the build sets both whenever it succeeds";
+
+/// The kernel's defect for a built cache without its tree or top node, with the `NER`
+/// status upstream reports.
+fn built_cache_defect() -> SolidError {
+    Failure::new(
+        OP_GCI,
+        CurveFailure::Defect {
+            why: BUILT_CACHE_HAS_TREE,
+        },
+    )
+    .with_status(SM_ERR_NULL_POINTER)
+    .into_error()
+}
+
 /// The cache tree (`GetTree`, `NER`).
 fn cache_tree<O: SolutionObject>(cache: &CurveCache<O>) -> Result<&Tree<O>> {
-    cache
-        .tree()
-        .ok_or_else(|| SolidError::curve_missing(OP_GCI, "the curve cache's tree"))
+    cache.tree().ok_or_else(built_cache_defect)
 }
 
 /// `GetOrCreateObjectCache` for a curve (`NER` on failure). `zone_tol_3d` is the zone
@@ -753,7 +786,9 @@ fn build_cache<O: SolutionObject>(
     ) {
         Ok(c) => Ok(c),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Err(SolidError::curve_missing(OP_GCI, "the curve's cache")),
+        Err(e) => Err(Failure::new(OP_GCI, CurveFailure::CacheNotBuilt)
+            .caused_by(e)
+            .into_error()),
     }
 }
 
@@ -837,6 +872,7 @@ impl Curve {
             [None, None],
             0.0,
             true,
+            [false; 2],
         )
     }
 
@@ -876,6 +912,7 @@ impl Curve {
             cache2,
             [None, None],
             0.0,
+            [false; 2],
         )
     }
 
@@ -908,6 +945,7 @@ impl Curve {
         cache2: &mut Option<CurveCache<O>>,
         zone_tols: [Option<f64>; 2],
         contact_tol: f64,
+        excluded_target_ends: [bool; 2],
     ) -> Result<SolutionArray<O>> {
         if opts.handles == [None, None] && opts.analytic_handles == [None, None] {
             let own = operand_handles(self, other);
@@ -928,6 +966,7 @@ impl Curve {
                     &mut None,
                     zone_tols,
                     contact_tol,
+                    excluded_target_ends,
                 )?
                 .without_objects());
         }
@@ -943,6 +982,7 @@ impl Curve {
             zone_tols,
             contact_tol,
             false,
+            excluded_target_ends,
         )
     }
 
@@ -987,6 +1027,7 @@ impl Curve {
                 [None, None],
                 0.0,
                 false,
+                [false; 2],
             )?
             .without_objects())
     }
@@ -1012,6 +1053,7 @@ impl Curve {
         zone_tols: [Option<f64>; 2],
         contact_tol: f64,
         own_slots: bool,
+        excluded_target_ends: [bool; 2],
     ) -> Result<SolutionArray<O>> {
         let [h_this, h_other] = opts.handles;
         let same_curve = core::ptr::eq(self, other);
@@ -1079,23 +1121,17 @@ impl Curve {
         // get target curves' caches (kept in the caller's slots, see
         // `global_curve_intersect_cached`), each at its owner's zone tolerance when the
         // caller resolved one
-        if cache1_slot.is_none() {
-            *cache1_slot = Some(build_cache(k, self, h_this, zone_tols[0])?);
-        }
-        if !same_curve && cache2_slot.is_none() {
-            *cache2_slot = Some(build_cache(k, other, h_other, zone_tols[1])?);
-        }
-        let cache1 = cache1_slot
-            .as_mut()
-            .ok_or_else(|| SolidError::curve_missing(OP_GCI, "the first curve's cache"))?;
+        let cache1 = match cache1_slot {
+            Some(c) => c,
+            slot @ None => slot.insert(build_cache(k, self, h_this, zone_tols[0])?),
+        };
         let mut cache2_own = if same_curve {
             None
         } else {
-            Some(
-                cache2_slot
-                    .as_mut()
-                    .ok_or_else(|| SolidError::curve_missing(OP_GCI, "the second curve's cache"))?,
-            )
+            Some(match cache2_slot {
+                Some(c) => c,
+                slot @ None => slot.insert(build_cache(k, other, h_other, zone_tols[1])?),
+            })
         };
 
         // get curve spatial decomposition trees from each cache
@@ -1104,13 +1140,8 @@ impl Curve {
             let tree2 = cache_tree(cache2_own.as_deref().unwrap_or(cache1))?;
 
             // no work - topNode bounding boxes are disjoint
-            let root1 =
-                tree1.node(tree1.top_node().ok_or_else(|| {
-                    SolidError::curve_missing(OP_GCI, "the first tree's top node")
-                })?)?;
-            let root2 = tree2.node(tree2.top_node().ok_or_else(|| {
-                SolidError::curve_missing(OP_GCI, "the second tree's top node")
-            })?)?;
+            let root1 = tree1.node(tree1.top_node().ok_or_else(built_cache_defect)?)?;
+            let root2 = tree2.node(tree2.top_node().ok_or_else(built_cache_defect)?)?;
             let mut bbox = root1.bbox;
             bbox.expand_absolute(dist_tol);
             if bbox.are_disjoint(&root2.bbox, 0.0) {
@@ -1467,6 +1498,7 @@ impl Curve {
                 other,
                 other_interval,
                 dist_tol,
+                excluded_target_ends,
                 &mut sols,
             )?;
         }
@@ -2168,11 +2200,11 @@ impl Curve {
 
                 // Ok, one sol is much better than the other. Check the distances at
                 // both solutions and at the midpoint.
-                let curve_a = named
-                    .curve_of(sol_a.objects[0])
-                    .ok_or_else(|| SolidError::curve_missing(OP_GCI, "a solution's first curve"))?;
+                let curve_a = named.curve_of(sol_a.objects[0]).ok_or_else(|| {
+                    SolidError::curve(OP_GCI, CurveFailure::SolutionWithoutCurve { object: 0 })
+                })?;
                 let curve_b = named.curve_of(sol_a.objects[1]).ok_or_else(|| {
-                    SolidError::curve_missing(OP_GCI, "a solution's second curve")
+                    SolidError::curve(OP_GCI, CurveFailure::SolutionWithoutCurve { object: 1 })
                 })?;
                 // (statuses ignored upstream; passed on as the fork, tangency-labs/smlib
                 // 8311f8e)
@@ -4380,7 +4412,8 @@ mod tests {
         let mut sols = SolutionArray::new();
         sols.add(&range);
         sols.add(&point);
-        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, &mut sols).unwrap();
+        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, [false; 2], &mut sols)
+            .unwrap();
         assert_eq!(sols.len(), 2, "the point is kept");
         let kept = sols.get(1).unwrap();
         assert_eq!(kept.solution_type, SolutionType::SingleValue);
@@ -4391,7 +4424,8 @@ mod tests {
         // so it moves there
         let mut alone = SolutionArray::new();
         alone.add(&point);
-        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, &mut alone).unwrap();
+        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, [false; 2], &mut alone)
+            .unwrap();
         assert_eq!(alone.len(), 1);
         assert_eq!(alone.get(0).unwrap().start.parameters[..2], [0.0, 0.0]);
 
@@ -4400,9 +4434,39 @@ mod tests {
         for t in [0.1, 0.3, 0.5] {
             chain.add(&sol(SolutionType::SingleValue, [t, t], [0.0, 0.0]));
         }
-        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, &mut chain).unwrap();
+        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, [false; 2], &mut chain)
+            .unwrap();
         assert_eq!(chain.len(), 1);
         assert_eq!(chain.get(0).unwrap().start.parameters[..2], [0.0, 0.0]);
+
+        // A source end drops onto the bounded target's start, even though the
+        // actual oblique crossing is interior to both curves. Its mask applies
+        // through this indirect route as well as when moving to a target end.
+        let zone = 1e-5;
+        let oblique = polyline(&[
+            [-3.0 * zone, 0.0, 4.8 * zone],
+            [0.0, 0.0, 1.8 * zone],
+            [1.9 * zone, 0.0, -0.1 * zone],
+        ]);
+        let bounded = polyline(&[[0.0, 0.0, 0.0], [0.0, 0.0, 6.0 * zone]]);
+        let crossing = sol(SolutionType::SingleValue, [0.5, 0.3], [0.0, 0.0]);
+        for (mask, expected) in [([false; 2], [1.0, 0.0]), ([true, false], [0.5, 0.3])] {
+            let mut contact = SolutionArray::new();
+            contact.add(&crossing);
+            move_contacts_to_curve_ends(
+                &k,
+                &oblique,
+                &unit(),
+                &bounded,
+                &unit(),
+                2.0 * zone,
+                mask,
+                &mut contact,
+            )
+            .unwrap();
+            assert_eq!(contact.len(), 1);
+            assert_eq!(contact.get(0).unwrap().start.parameters[..2], expected);
+        }
 
         let crosses = |others: &[Solution<H>], gone: &[usize]| {
             let mut s = SolutionArray::new();
@@ -4881,6 +4945,7 @@ mod tests {
                     &mut None,
                     [None, None],
                     1e-5,
+                    [false; 2],
                 )
                 .unwrap();
             let points: Vec<Vec3> = sols
