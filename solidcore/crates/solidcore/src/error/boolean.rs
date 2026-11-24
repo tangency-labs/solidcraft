@@ -611,7 +611,7 @@ impl core::fmt::Display for BooleanFailure {
                 "an operand of the planar Boolean has no faces, so it made no result B-rep",
             ),
             Self::OverlapGroupNotReplaced => f.write_str(
-                "replacing a group of overlapping intersection curves failed after the group                  was taken out of the intersection",
+                "replacing a group of overlapping intersection curves failed after the group was taken out of the intersection",
             ),
             Self::RelateConflict {
                 side,

@@ -1878,7 +1878,6 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// # Errors
     ///
     /// The first failing step's error; the caller refuses on it (#18927).
-    #[allow(clippy::too_many_arguments)]
     fn replace_overlap_group(
         &mut self,
         k: &Kernel,

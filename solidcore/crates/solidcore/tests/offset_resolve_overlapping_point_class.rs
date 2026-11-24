@@ -8,10 +8,11 @@
 //! the B-rep owner now lends the face's B-rep, as upstream edits it in place.
 //!
 //! The C++ reference builds a body of 47 faces, 100 edges and 53 vertices (difftest
-//! `offset.offset_executive_p2` `overlap_pc_extrudeHoles1_f0_k0.35_out_rnd`). It is not
-//! a solid: the checker finds 10 problems, the first a face with partially coincident
-//! edges, and the body is not manifold (measured by
-//! `offset_executive_p2::tests::moved_cases_results_measured`, #18927). It is built after
+//! `offset.offset_executive_p2` `overlap_pc_extrudeHoles1_f0_k0.35_out_rnd`), and so did
+//! main's kernel before #18927. It is not a solid: on main's kernel the checker finds 10
+//! problems, the first a face with partially coincident edges, and the body is not
+//! manifold (measured on main 6ea034c437 by the goldens probe
+//! `offset_executive_p2::tests::moved_cases_results_measured`). It is built after
 //! a group of overlapping intersection curves was taken out of the intersection and its
 //! replacement failed (`CurveClassification::find_interval`: the parameter is before the
 //! start), which upstream ignores. The offset is refused there now, with

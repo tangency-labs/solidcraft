@@ -145,7 +145,10 @@ fn closed_form() -> f64 {
 
 /// The union of the block and the lip: the exact face, edge and vertex counts, the volume
 /// and the check are pinned, so a body that merely looks right (same volume, a different
-/// rim split) still fails.
+/// rim split) still fails. This union builds on main's kernel too (the miss is not on
+/// its path); it guards the default path against a regression, and WR-73's own
+/// regression check is the goldens invariant over every removal call
+/// (`topology_proto_topology_p1::status_proof`).
 #[test]
 fn wr73_proto_vertex_miss_is_false_lip_union_builds() {
     let mut k = Kernel::default();

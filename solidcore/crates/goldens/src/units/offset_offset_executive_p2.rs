@@ -2163,34 +2163,16 @@ mod tests {
     /// offsets at k 0.35 reach `resolve_overlapping_proto_edges`, whose replacement of an
     /// overlap group fails (`find_interval`: the parameter is before the start) after the
     /// group's proto edges and edge definitions were taken out of the intersection. Each is
-    /// refused (1001) and builds no result body.
+    /// refused (1001) and builds no result body. Measured on main 6ea034c437 (before
+    /// #18927, with `moved_cases_results_measured`): each returned success with a body
+    /// that `check_brep` level 2 refuses (faces with partially coincident edges, or a loop
+    /// of bad orientation), four of them not manifold.
     #[test]
     fn k035_overlap_offsets_are_refused() {
         for (name, status, body, present) in overlap_offsets("0.35") {
             assert_eq!(status, 1001, "{name}");
             assert!(body.is_none(), "{name}: a refused case builds no result body");
             assert_eq!(present, 0, "{name}");
-        }
-    }
-
-    /// Main's side of the k 0.35 offsets, run on main 6ea034c437 (before #18927): each
-    /// returned success with a body that `check_brep` level 2 refuses (faces with partially
-    /// coincident edges, or a loop of bad orientation), four of them not manifold. It
-    /// fails with the fix, which refuses them.
-    #[test]
-    #[ignore = "main's side, run on main before #18927; the fix refuses these"]
-    fn k035_overlap_offsets_fail_the_check_on_main() {
-        for (name, status, body, _) in overlap_offsets("0.35") {
-            assert_eq!(status, i64::from(NATIVE_SUCCESS), "{name}");
-            let Some(body) = body else {
-                panic!("{name}: no result body")
-            };
-            let lines = body.check.as_ref().unwrap();
-            assert!(
-                lines.iter().any(|l| l.contains("partially Coincident Edges") || l.contains("Loop Orientation")),
-                "{name}: {lines:?}"
-            );
-            assert!(!body.sound(), "{name}");
         }
     }
 
