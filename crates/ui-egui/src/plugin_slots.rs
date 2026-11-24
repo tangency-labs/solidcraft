@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Mutex;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc::{RecvTimeoutError, Sender, TryRecvError};
@@ -49,11 +51,26 @@ pub(crate) struct State {
     ctx: Option<egui::Context>,
     #[cfg(not(target_arch = "wasm32"))]
     watch: Option<Watch>,
-    /// The [`signature`] of what the latest scan read, taken by the scan's worker before it reads:
-    /// the watcher compares the folder with this, so a change made while a scan runs, or before
-    /// the watcher's first look, is never taken as the settled state.
+    /// The latest scan, recorded by the scan's worker before it reads: the watcher compares the
+    /// folder with it, so a change made while a scan runs, or before the watcher's first look, is
+    /// never taken as the settled state.
     #[cfg(not(target_arch = "wasm32"))]
-    scanned_signature: Arc<AtomicU64>,
+    latest_scan: Arc<Mutex<Scan>>,
+}
+
+/// One scan: which one (each scan counts up, so two scans that read the same folder state are
+/// still told apart) and the [`signature`] of what it read.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Default, PartialEq)]
+struct Scan {
+    generation: u64,
+    signature: u64,
+}
+
+/// The latest scan; a poisoned lock still holds a whole value (it is only ever assigned).
+#[cfg(not(target_arch = "wasm32"))]
+fn latest(scanned: &Mutex<Scan>) -> Scan {
+    *scanned.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// What the watcher and the scan read: the plugins' directory and the packages inspected from
@@ -211,12 +228,15 @@ pub(crate) fn refresh(app: &mut SolveApp) {
 fn start_scan(app: &mut SolveApp, root: Option<PathBuf>) {
     let inspected = app.session.plugin_state.packages.clone();
     let ctx = app.plugin_slots.ctx.clone();
-    let scanned = app.plugin_slots.scanned_signature.clone();
+    let scanned = app.plugin_slots.latest_scan.clone();
     let (tx, rx) = std::sync::mpsc::channel();
     let spawned = std::thread::Builder::new().name("plugin-discovery".into()).spawn(move || {
         // Before the read: a change made during it differs from this, so the watcher asks again.
         let watched = Watched { root: root.clone(), inspected: inspected.values().map(PathBuf::from).collect() };
-        scanned.store(signature(&watched), Ordering::Relaxed);
+        let signature = signature(&watched);
+        let mut latest = scanned.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        *latest = Scan { generation: latest.generation.wrapping_add(1), signature };
+        drop(latest);
         let (plugins, skipped) = plugins::inventory(root.as_deref(), inspected.values());
         let _ = tx.send(Inventory { root, plugins, skipped });
         if let Some(ctx) = ctx {
@@ -241,7 +261,7 @@ fn start_watch(app: &mut SolveApp, watched: Watched, every: std::time::Duration)
     }
     // A watcher that cannot start is harmless: the folder is read when the design opens and when
     // Preferences or the Plugins menu ask, and a restart finds a plugin dropped in meanwhile.
-    let scanned = app.plugin_slots.scanned_signature.clone();
+    let scanned = app.plugin_slots.latest_scan.clone();
     if let Some(watch) = spawn_watch(watched, every, scanned, move || ctx.request_repaint()) {
         app.plugin_slots.watch = Some(watch);
     }
@@ -251,7 +271,7 @@ fn start_watch(app: &mut SolveApp, watched: Watched, every: std::time::Duration)
 /// (`scanned`), and wakes the window once for each new state that differs. It never takes a
 /// state as settled by itself, so nothing that changed around a scan is missed.
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn_watch(watched: Watched, every: std::time::Duration, scanned: Arc<AtomicU64>, wake: impl Fn() + Send + 'static) -> Option<Watch> {
+fn spawn_watch(watched: Watched, every: std::time::Duration, scanned: Arc<Mutex<Scan>>, wake: impl Fn() + Send + 'static) -> Option<Watch> {
     let changed = Arc::new(AtomicBool::new(false));
     let (stop, stopped) = std::sync::mpsc::channel::<()>();
     let (flag, looked_at) = (changed.clone(), watched.clone());
@@ -259,7 +279,7 @@ fn spawn_watch(watched: Watched, every: std::time::Duration, scanned: Arc<Atomic
         let mut woken_for = None;
         // Nothing is ever sent: the wait times out between looks, and ends when the Watch drops.
         while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
-            if should_wake(&mut woken_for, signature(&looked_at), scanned.load(Ordering::Relaxed)) {
+            if should_wake(&mut woken_for, signature(&looked_at), latest(&scanned)) {
                 flag.store(true, Ordering::Relaxed);
                 wake();
             }
@@ -268,16 +288,16 @@ fn spawn_watch(watched: Watched, every: std::time::Duration, scanned: Arc<Atomic
     spawned.ok().map(|_| Watch { watched, changed, _stop: stop })
 }
 
-/// Whether the watcher wakes the window: the folder (`now`) differs from what the latest scan read
-/// (`scanned`), and it has not already woken it for this folder against this scan. The scan is
-/// part of the memory, so after another scan reads something else the same folder wakes it again
-/// (the folder going B, scanned, A, scanned, back to B is a change to report).
+/// Whether the watcher wakes the window: the folder (`now`) differs from what the latest scan read,
+/// and it has not already woken it for this folder since that scan. The memory is per scan, not
+/// per folder state: any scan since the last wake, even one the watcher never saw and even one
+/// that read the same state as an earlier scan, lets the folder wake it again.
 #[cfg(not(target_arch = "wasm32"))]
-fn should_wake(woken_for: &mut Option<(u64, u64)>, now: u64, scanned: u64) -> bool {
-    if now == scanned || *woken_for == Some((now, scanned)) {
+fn should_wake(woken_for: &mut Option<(u64, u64)>, now: u64, scanned: Scan) -> bool {
+    if now == scanned.signature || *woken_for == Some((now, scanned.generation)) {
         return false;
     }
-    *woken_for = Some((now, scanned));
+    *woken_for = Some((now, scanned.generation));
     true
 }
 
@@ -692,7 +712,7 @@ mod tests {
         let count = woken.clone();
         let inspected = h.app.session.plugin_state.packages.values().map(PathBuf::from).collect();
         let watched = Watched { root: Some(dir.clone()), inspected };
-        let scanned = h.app.plugin_slots.scanned_signature.clone();
+        let scanned = h.app.plugin_slots.latest_scan.clone();
         let wake = move || {
             count.fetch_add(1, Ordering::Relaxed);
         };
@@ -717,7 +737,7 @@ mod tests {
         let dir = h.dir.join("installed");
         std::fs::create_dir_all(&dir).unwrap();
         let watched = Watched { root: Some(dir.clone()), inspected: Vec::new() };
-        let scanned = Arc::new(AtomicU64::new(signature(&watched)));
+        let scanned = Arc::new(Mutex::new(Scan { generation: 1, signature: signature(&watched) }));
         std::fs::create_dir_all(dir.join("helper")).unwrap();
         let woken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let count = woken.clone();
@@ -729,29 +749,36 @@ mod tests {
         assert!(watch.as_ref().is_some_and(|w| w.changed.load(Ordering::Relaxed)), "the plugin asks for a scan");
     }
 
-    /// Polls a condition another thread makes true. The limit only bounds a failing run, so it is
-    /// generous: a slow CI runner waits longer, it never fails a passing run.
-    /// The watcher wakes once per new folder state, and again for a state it already reported
-    /// when a scan has since read something else: B is reported, a scan reads B, the folder
-    /// becomes A and an invalidation scans A before the watcher looks, then the folder returns to
-    /// exactly B. The last scan read A, so B must wake the window again.
+    /// The watcher wakes once per new folder state while that state's scan is pending, and again
+    /// for a state it already reported once any scan has run since, because the folder may have
+    /// changed and been scanned in between (an invalidation's scan) without the watcher seeing it.
     #[test]
     fn a_folder_returning_to_a_reported_state_after_another_scan_wakes_again() {
-        let (a, b, start) = (1_u64, 2_u64, 0_u64);
+        let (a, b) = (1_u64, 2_u64);
+        let scan = |generation, signature| Scan { generation, signature };
+        // The first scan read A; the folder became B.
         let mut woken_for = None;
-        assert!(should_wake(&mut woken_for, b, start), "B differs from the first scan");
-        assert!(!should_wake(&mut woken_for, b, start), "and wakes once while its scan is pending");
-        assert!(!should_wake(&mut woken_for, b, b), "the scan read B: nothing to say");
-        // The folder became A and an invalidation scanned it before the watcher looked.
-        assert!(!should_wake(&mut woken_for, a, a), "the scan read A: nothing to say");
-        assert!(should_wake(&mut woken_for, b, a), "back to B after a scan of A wakes the window");
-        assert!(!should_wake(&mut woken_for, b, a), "once");
+        assert!(should_wake(&mut woken_for, b, scan(1, a)), "B differs from the scan of A");
+        assert!(!should_wake(&mut woken_for, b, scan(1, a)), "and wakes once while its scan is pending");
+        assert!(!should_wake(&mut woken_for, b, scan(2, b)), "the scan read B: nothing to say");
+        // The folder became A and an invalidation scanned it before the watcher looked, then the
+        // folder returned to B: the latest scan read A again, as the first did.
+        assert!(!should_wake(&mut woken_for, a, scan(3, a)), "the scan read A: nothing to say");
+        assert!(should_wake(&mut woken_for, b, scan(3, a)), "back to B after a scan of A wakes the window");
+        assert!(!should_wake(&mut woken_for, b, scan(3, a)), "once");
+        // The same, with the watcher seeing none of the scans in between: it woke for B against
+        // the scan of A, a scan read B and another read A, and the folder is B again.
+        let mut woken_for = None;
+        assert!(should_wake(&mut woken_for, b, scan(1, a)), "B differs from the scan of A");
+        assert!(should_wake(&mut woken_for, b, scan(3, a)), "two unseen scans later, B wakes the window again");
     }
 
     fn sig(dir: &Path) -> u64 {
         signature(&Watched { root: Some(dir.to_path_buf()), inspected: Vec::new() })
     }
 
+    /// Polls a condition another thread makes true. The limit only bounds a failing run, so it is
+    /// generous: a slow CI runner waits longer, it never fails a passing run.
     fn wait_until(mut done: impl FnMut() -> bool) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         while !done() {
