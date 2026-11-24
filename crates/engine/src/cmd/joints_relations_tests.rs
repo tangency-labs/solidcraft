@@ -565,11 +565,23 @@ fn a_round_face_given_as_a_face_is_its_axis_where_the_rule_needs_one() {
     assert_eq!(dof_of(&r, &s, "Collar"), Some(2), "{r}");
     let c = place(&s, "Collar", Vec3::new(50.0, 10.0, 30.0));
     assert!(c.x.abs() < 1e-6 && c.y.abs() < 1e-6, "on the shaft's axis: {c:?}");
+    // Each side keeps the face the roundness check saw, as a round origin.
+    let st = s.model.state();
+    let wall =
+        |s: &Session, part: &str, p: Vec3| solidcraft_doc::joints::face_name_at(&s.doc, &st, s.doc.find_component(part).unwrap(), p, false).unwrap();
+    let (shaft_name, collar_name) = (wall(&s, "Shaft", Vec3::new(5.0, 0.0, 10.0)), wall(&s, "Collar", Vec3::new(55.0, 10.0, 35.0)));
+    let j = s.doc.assembly.joints.first().unwrap();
+    let kept: Vec<_> = [&j.a, &j.b]
+        .iter()
+        .map(|o| match &o.snap {
+            solidcraft_doc::joints::Snap::CircleCenter { face, .. } => face.clone(),
+            other => panic!("a round origin, not {other:?}"),
+        })
+        .collect();
+    assert_eq!(kept, vec![Some(shaft_name), Some(collar_name.clone())], "{r}");
     // The wall by its name, as `model.faces` lists it.
     let mut s = shaft();
-    let st = s.model.state();
-    let collar = s.doc.find_component("Collar").unwrap();
-    let name = solidcraft_doc::joints::face_name_at(&s.doc, &st, collar, Vec3::new(55.0, 10.0, 35.0), false).unwrap();
+    let name = collar_name;
     let r = constrain(&mut s, "concentric", shaft_wall.clone(), json!({"occurrence": "Collar", "face": name}), json!({}));
     assert!(clean(&r), "{r}");
     assert_eq!(dof_of(&r, &s, "Collar"), Some(2), "{r}");

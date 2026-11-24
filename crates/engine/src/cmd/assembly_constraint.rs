@@ -8,7 +8,7 @@
 use serde_json::{Map, Value, json};
 use solidcraft_doc::joints::{Constraint, Fit, Joint, JointKind, JointOrigin, RefShape, Snap};
 
-use super::{CommandSpec, add_joint, component_of, joint_id, new_joint, origin_param, value};
+use super::{CommandSpec, add_joint, component_of, joint_id, new_joint, origin_param, round_origin, value};
 use crate::params::{bad, bool_, str_};
 use crate::schema::joints::{CreateConstraintParams, EditConstraintParams, EditJointResult, JointAddedResult};
 use crate::schema::{TypedContract, output_schema_for};
@@ -51,8 +51,8 @@ fn shape(o: &JointOrigin) -> RefShape {
     RefShape::of(&o.snap)
 }
 
-/// A reference given as a `face` that is round (a cylinder): the same reference given as a
-/// `circle`, as the Constrain dialog sends a click on a round face (#21549). `None` for any other
+/// A reference given as a `face` that is round (a cylinder): that face as a circle origin (its
+/// axis), as the Constrain dialog sends a click on a round face (#21549). `None` for any other
 /// reference: a planar face, a named origin, an edge, a point.
 fn round_face(s: &Session, o: &JointOrigin, v: Option<&Value>, cmd: &str) -> Result<Option<JointOrigin>> {
     let Snap::FaceCenter { pick, face: Some(name), .. } = &o.snap else { return Ok(None) };
@@ -60,11 +60,8 @@ fn round_face(s: &Session, o: &JointOrigin, v: Option<&Value>, cmd: &str) -> Res
     if !solidcraft_doc::joints::face_is_round(&s.doc, &s.model.state(), component_of(s, o.occurrence), *pick, name) {
         return Ok(None);
     }
-    let mut circle = given.clone();
-    if let Some(f) = circle.remove("face") {
-        circle.insert("circle".into(), f);
-    }
-    Ok(origin_param(s, Some(&Value::Object(circle)), cmd).ok())
+    // The face the check saw, at the point it was picked: no second search by the point.
+    Ok(round_origin(s, o.occurrence, *pick, name, &Value::Object(given.clone()), cmd).ok())
 }
 
 /// The references as rule `c` takes them: as given where they fit it, else with a round face given

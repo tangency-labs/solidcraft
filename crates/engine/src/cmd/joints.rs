@@ -1074,6 +1074,18 @@ fn origin_by_name(s: &Session, v: &Value, what: &str, name: &str, cmd: &str) -> 
     settle(s, JointOrigin::new(occurrence, snap), v, cmd)
 }
 
+/// A round face already named and picked (`pick`, the component's coordinates) on `occurrence`,
+/// made a circle origin there: its axis, with the `x?` and `end?` that `v` gives, checked as a
+/// `circle` origin is. It keeps the face it is given, so no second search by the point can land on
+/// another face.
+pub(crate) fn round_origin(s: &Session, occurrence: u64, pick: Vec3, name: &str, v: &Value, cmd: &str) -> Result<JointOrigin> {
+    let component = component_of(s, occurrence);
+    let t = if occurrence == 0 { solidcraft_doc::IDENTITY } else { joints::occurrence_world(&s.doc, occurrence) };
+    let inv = solidcraft_doc::mat_inverse(&t).ok_or_else(|| bad(cmd, "occurrence transform"))?;
+    let x = x_param(s, v, component, &inv, cmd)?;
+    settle(s, JointOrigin::new(occurrence, Snap::CircleCenter { pick, face: Some(name.to_string()), end: None, x }), v, cmd)
+}
+
 /// A new joint origin checked: `end?` (a circle's end, by the name of the face across its rim
 /// there) set, and the end it takes named so it keeps it; refused when it doesn't resolve.
 fn settle(s: &Session, mut o: JointOrigin, v: &Value, cmd: &str) -> Result<JointOrigin> {
