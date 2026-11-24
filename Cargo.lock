@@ -6520,6 +6520,7 @@ name = "solidcraft-ui-egui"
 version = "0.48.0"
 dependencies = [
  "arboard",
+ "eframe",
  "egui",
  "egui-wgpu",
  "flate2",
