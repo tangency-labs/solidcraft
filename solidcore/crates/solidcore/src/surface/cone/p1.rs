@@ -2240,6 +2240,26 @@ pub fn total_coincidence_checker(
     })
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for Cone {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            rev,
+            base_radius,
+            semi_angle_deg,
+            inside_out,
+            cylinder,
+        } = self;
+        d.tag(0xC0E);
+        rev.content(d)?;
+        d.f64(*base_radius);
+        d.f64(*semi_angle_deg);
+        d.bool(*inside_out);
+        d.bool(*cylinder);
+        Some(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
