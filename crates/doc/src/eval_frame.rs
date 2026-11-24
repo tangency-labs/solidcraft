@@ -15,7 +15,7 @@ use solidcraft_sketch::{CurveKind, Sketch};
 use super::{ModelBody, ModelState, SolvedSketch, new_name, path_in_frame, select_profiles, sketch_in_feature_frame, val};
 use crate::expr::{Expr, Kind, Value};
 use crate::frame::{self, CornerOverride, CornerType, MAX_MEMBERS, MemberGroup, MemberPair, MemberProfile, MemberRef};
-use crate::frame_corners::{self, Corner, Cut, Override};
+use crate::frame_corners::{self, Corner, Cut, EndCut, MemberEnds, Override};
 use crate::frame_layout::{self, ChainCorner, Fit, Joint, MemberPlane, Plan};
 use crate::frame_multi_trim;
 use crate::lineage::Traced;
@@ -61,6 +61,8 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
 
 // Preserve main's complete flat/grouped evaluation before adding optional provenance.
 fn evaluate_members(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
+    // Each build adds its members' ends ([`record_ends`]); a group's, one after another.
+    st.member_ends.remove(&f.id);
     if paths::uses(st, &f.kind)? {
         return paths::evaluate(doc, vals, f, st);
     }
@@ -90,6 +92,7 @@ fn evaluate_members(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
             st.bodies.truncate(start);
             st.body_counter = counter;
             st.frame_members.truncate(records);
+            st.member_ends.remove(&f.id);
         }
         return result;
     }
@@ -234,19 +237,20 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
     let joined = if resolving { joints(&segments, &planes, &drawn, plan.as_ref(), crossing.as_ref()) } else { HashSet::new() };
     // Only an Auto frame builds by Auto's rules; an Auto override elsewhere is the frame's own type (corner_ends).
     // The cut ends each member is built with ([`frame_ends`] gives the same), for the tools of tubes that overlap others.
-    let (mut cut, dropped, ends) = if let Some(plan) = plan {
+    let (mut cut, dropped, ends, coped_at) = if let Some(plan) = plan {
         auto_members(&segments, &regions, (&placed, &unreversed), plan, (sketch_x, &drawn), coped, gap)?
     } else if corner.is_none() && corners.is_empty() {
         // A frame with no corners to finish is built exactly as it always was.
-        (Vec::new(), Vec::new(), Vec::new())
+        (Vec::new(), Vec::new(), Vec::new(), HashSet::new())
     } else {
         let tie = (planes.as_slice(), sketch_x, drawn.as_slice());
         let overrides = (corners.as_slice(), overlap_overrides.as_slice());
         let ((ends, copes), fits) = corner_ends(&segments, &regions, &placed, (*corner, *flip, gap), overrides, tie, crossing.as_ref(), coped)?;
+        let coped_at = coped_ends(&copes, &segments);
         let mut cut = cut_members(&segments, &regions, (&placed, &|_, _| None), &ends, copes)?;
         let mut dropped = vec![false; segments.len()];
         fit_members(&segments, &regions, &placed, &ends, &fits, (&mut cut, &crossed, &mut dropped), (coped, gap))?;
-        (cut, dropped, ends)
+        (cut, dropped, ends, coped_at)
     };
     // Each member's body; `None` for a piece left wholly inside the tubes it is fitted to.
     let mut made = Vec::with_capacity(segments.len());
@@ -270,7 +274,8 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
     let near = |k: usize, p: Vec3| near_with(&own_ends, k, p);
     let tool = |k: usize| member_tool(&segments, &regions, &placed, &own_ends, k, coped, gap);
     let fitting = grown_earlier.as_deref().unwrap_or(&earlier);
-    fit_to_earlier(&mut made, &segments, &unjointed, fitting, &mut Own { laid, near: &near, tool: &tool, tools }, &middle, &crossed)?;
+    let refitted = fit_to_earlier(&mut made, &segments, &unjointed, fitting, &mut Own { laid, near: &near, tool: &tool, tools }, &middle, &crossed)?;
+    let finished = finished_ends(segments.len(), &ends, &coped_at, &refitted);
     let mut split = if resolving {
         // How far each member reaches from its line: its section, and its ends built past the line's.
         let section = ats.iter().map(|at| section_reach(&regions, *at)).fold(0.0, f64::max);
@@ -288,45 +293,66 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
     if !f.body_names.is_empty() {
         // A copy (pasted, or in a copied component) names its members by position, as any
         // feature's bodies.
-        let all: Vec<Traced> = made.into_iter().enumerate().flat_map(|(m, t)| t.into_iter().chain(later_of(m).into_iter().map(|p| p.1))).collect();
-        for (k, t) in all.into_iter().enumerate() {
-            let name = new_name(st, f, copy_offset + k);
-            if trimming::can_rebuild(&f.kind)
-                && let Some((line, ..)) = segments.get(k)
-            {
-                st.frame_members.push(trimming::record(f.id, line, &name, [None, None], &t.body));
+        let mut recorded = Vec::new();
+        let mut k = 0;
+        for (m, t) in made.into_iter().enumerate() {
+            let later = later_of(m);
+            let member = segments.get(m).map_or("", |s| s.0.as_str());
+            let mut pieces = piece_ends(finished.get(m).copied().unwrap_or([EndCut::Square; 2]), later.len()).into_iter();
+            // A member with no body still has its later pieces; its own ends are not recorded.
+            let first = match t {
+                Some(t) => Some((member.to_string(), t, pieces.next().unwrap_or([EndCut::Square; 2]))),
+                None => {
+                    pieces.next();
+                    None
+                }
+            };
+            let later =
+                later.into_iter().map(|(by, t)| (piece_id(member, by, &lines, &earlier_ids), t, pieces.next().unwrap_or([EndCut::Square; 2])));
+            for (id, t, ends) in first.into_iter().chain(later) {
+                let name = new_name(st, f, copy_offset + k);
+                if trimming::can_rebuild(&f.kind)
+                    && let Some((line, ..)) = segments.get(k)
+                {
+                    st.frame_members.push(trimming::record(f.id, line, &name, [None, None], &t.body));
+                }
+                k += 1;
+                recorded.push(MemberEnds { body: name.clone(), member: id, ends });
+                st.bodies.push(ModelBody::traced_new(name, t, f.id));
             }
-            st.bodies.push(ModelBody::traced_new(name, t, f.id));
         }
+        record_ends(st, f.id, recorded);
         return Ok(());
     }
     let base = body_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map_or(description, str::to_string);
     let ids: Vec<String> = segments.into_iter().map(|(id, _, _)| id).collect();
     let named = member_names(st, &ids, &parts, names, &base);
     let piece_pins: Vec<(&String, &str)> = names.iter().filter(|(k, _)| k.contains('>')).map(|(k, n)| (k, n.trim())).collect();
+    let mut recorded = Vec::new();
     // A piece with no body leaves its name unused.
     for (m, (name, t)) in named.iter().zip(made).enumerate() {
+        let later = later_of(m);
+        let mut pieces = piece_ends(finished.get(m).copied().unwrap_or([EndCut::Square; 2]), later.len()).into_iter();
+        let member = ids.get(m).map_or("", String::as_str);
         if let Some(t) = t {
             if trimming::can_rebuild(&f.kind)
                 && let Some(line) = ids.get(m)
             {
                 st.frame_members.push(trimming::record(f.id, line, name, [None, None], &t.body));
             }
+            recorded.push(MemberEnds { body: name.clone(), member: member.to_string(), ends: pieces.next().unwrap_or([EndCut::Square; 2]) });
             st.bodies.push(ModelBody::traced_new(name.clone(), t, f.id));
         }
         // A later piece of a tube split where another overlaps it, `L>X` (X: the other's line or pair id, a piece's
         // line's, or an earlier tube's id, [`earlier::earlier_tools`]): its pinned name, else `<its name> · <the
         // other's>`, a piece's line's name, so a crossing elsewhere on that line renames nothing ([`member_of_body`]
         // finds it by either).
-        for (by, t) in later_of(m) {
-            let (x, x_name) = match by {
-                Cutter::Own(k) => {
-                    let line = lines.get(k);
-                    (line, line.and_then(|l| ids.iter().position(|i| i == l)).and_then(|k| named.get(k)))
-                }
-                Cutter::Earlier(e) => (earlier_ids.get(e), earlier.get(e).map(|e| &e.0)),
+        for (by, t) in later {
+            let x_name = match by {
+                Cutter::Own(k) => lines.get(k).and_then(|l| ids.iter().position(|i| i == l)).and_then(|k| named.get(k)),
+                Cutter::Earlier(e) => earlier.get(e).map(|e| &e.0),
             };
-            let id = format!("{}>{}", ids.get(m).map_or("", String::as_str), x.map_or("", String::as_str));
+            let id = piece_id(member, by, &lines, &earlier_ids);
             // A name pinned to another piece is kept for it, whichever of the two is named first; of two
             // pinned to one name, the first named takes it.
             let own = names.get(&id).map(|n| n.trim());
@@ -336,10 +362,74 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
             let pinned = names.get(&id).map(|n| n.trim().to_string()).filter(|n| !n.is_empty() && free(n));
             let joined = format!("{name} · {}", x_name.map_or("", String::as_str));
             let piece = (1..=MAX_MEMBERS + 1).map(|k| if k == 1 { joined.clone() } else { format!("{joined} ({k})") }).find(free);
-            st.bodies.push(ModelBody::traced_new(pinned.or(piece).unwrap_or(joined), t, f.id));
+            let body = pinned.or(piece).unwrap_or(joined);
+            recorded.push(MemberEnds { body: body.clone(), member: id, ends: pieces.next().unwrap_or([EndCut::Square; 2]) });
+            st.bodies.push(ModelBody::traced_new(body, t, f.id));
         }
     }
+    record_ends(st, f.id, recorded);
     Ok(())
+}
+
+/// Adds `recorded` to Frame Member `feature`'s members' ends ([`ModelState::member_ends`]): a group's build adds its own
+/// after the groups built before it.
+fn record_ends(st: &mut ModelState, feature: u64, recorded: Vec<MemberEnds>) {
+    if !recorded.is_empty() {
+        st.member_ends.entry(feature).or_default().extend(recorded);
+    }
+}
+
+/// The id of a later piece of `member` split where tube `by` overlaps it ([`resolve_overlaps`]): `member>X`, X the
+/// other tube's line (`lines`, a piece's line's) or the earlier tube's id (`earlier_ids`).
+fn piece_id(member: &str, by: Cutter, lines: &[String], earlier_ids: &[String]) -> String {
+    let x = match by {
+        Cutter::Own(k) => lines.get(k),
+        Cutter::Earlier(e) => earlier_ids.get(e),
+    };
+    format!("{member}>{}", x.map_or("", String::as_str))
+}
+
+/// Each member's two ends as it was built: its plane cuts, coped and fitted ends (`ends`, as [`corner_ends`] or
+/// [`auto_ends`] give them; none listed: square), `coped` the coped ones ([`coped_ends`]), and `refitted` those Fit
+/// Ends cut to earlier tubes ([`fit_to_earlier`]).
+fn finished_ends(n: usize, ends: &[[Option<CutEnd>; 2]], coped: &HashSet<(usize, bool)>, refitted: &[(usize, bool)]) -> Vec<[EndCut; 2]> {
+    let mut out: Vec<[EndCut; 2]> = (0..n)
+        .map(|m| {
+            let at = |k: usize| match ends.get(m).and_then(|e| e.get(k)).copied().flatten() {
+                None => EndCut::Square,
+                Some((Some(cut), _, _)) => EndCut::Plane { origin: cut.origin, normal: cut.normal },
+                Some((None, _, _)) if coped.contains(&(m, k == 0)) => EndCut::Coped,
+                Some((None, _, _)) => EndCut::Fitted,
+            };
+            [at(0), at(1)]
+        })
+        .collect();
+    for &(m, at_start) in refitted {
+        if let Some(e) = out.get_mut(m).and_then(|e| e.get_mut(usize::from(!at_start))) {
+            *e = EndCut::Fitted;
+        }
+    }
+    out
+}
+
+/// The ends of a member finished as `ends` and split where `later` other tubes overlap it ([`resolve_overlaps`]),
+/// one per piece in order along its line: each split end is fitted to the tube that cut it; the first piece keeps the
+/// member's start, the last its end. ponytail: an overlap that cuts away a member's end, or notches it, is not
+/// told; it shows as that end's own finish.
+fn piece_ends([start, end]: [EndCut; 2], later: usize) -> Vec<[EndCut; 2]> {
+    let mut out = vec![[EndCut::Fitted; 2]; later + 1];
+    if let Some(first) = out.first_mut() {
+        first[0] = start;
+    }
+    if let Some(last) = out.last_mut() {
+        last[1] = end;
+    }
+    out
+}
+
+/// The ends that the copes in `copes` ([`CornerEnds`]: T, U, corner point, …) cope: each U's end nearer its corner.
+fn coped_ends(copes: &[(usize, usize, Vec3, Vec3, f64)], segments: &[(String, Vec3, Vec3)]) -> HashSet<(usize, bool)> {
+    copes.iter().filter_map(|&(_, u, point, _, _)| segments.get(u).map(|(_, a, b)| (u, a.dist(point) <= b.dist(point)))).collect()
 }
 
 /// Whether frame `kind` copes (#17854): Coped ticked, under every type but None. Its butts are cut as Coped Butt
@@ -1526,7 +1616,8 @@ fn auto_ends(
 /// keep names of their own whatever the laying or pick order, and where three tubes cross. `plan`: the frame's
 /// [`frame_layout::plan`], over `segments` [`pieced`] by it. A piece of a line cut where tubes cross keeps what lies
 /// past the tubes it is fitted to ([`frame_multi_trim::fit_piece_end`], ruling C4): with nothing left it is dropped, as
-/// the second list says (`true`: no body). The third: each member's cut ends, as it was built with them. `coped`:
+/// the second list says (`true`: no body). The third: each member's cut ends, as it was built with them; the fourth, the
+/// coped ones. `coped`:
 /// the frame copes ([`copes`]); `gap`: its weld gap.
 pub(crate) fn auto_members(
     segments: &[(String, Vec3, Vec3)],
@@ -1536,14 +1627,19 @@ pub(crate) fn auto_members(
     tie: Tie,
     coped: bool,
     gap: f64,
-) -> Result<(Vec<Option<Traced>>, Vec<bool>, Vec<[Option<CutEnd>; 2]>)> {
+) -> Result<AutoBuilt> {
     let crossed = cut_pieces(&plan);
     let mut dropped = vec![false; segments.len()];
     let ((ends, copes), fits) = auto_ends(segments, regions, placed, plan, tie, coped, gap)?;
+    let coped_at = coped_ends(&copes, segments);
     let mut out = cut_members(segments, regions, (placed, unreversed), &ends, copes)?;
     fit_members(segments, regions, placed, &ends, &fits, (&mut out, &crossed, &mut dropped), (coped, gap))?;
-    Ok((out, dropped, ends))
+    Ok((out, dropped, ends, coped_at))
 }
+
+/// [`auto_members`]' members as built (`None`: no body), whether each was dropped, each one's cut ends, and the
+/// coped ends among them ([`coped_ends`]).
+type AutoBuilt = (Vec<Option<Traced>>, Vec<bool>, Vec<[Option<CutEnd>; 2]>, HashSet<(usize, bool)>);
 
 /// Each end of `fits` (in laying order) of `out` (each member as built) cut to fit the members it meets as their plane
 /// cuts (`ends`) build them (each member's cutting tool, [`member_tool`], made once). A fitted face is named for the
@@ -1792,7 +1888,7 @@ struct Own<'a> {
 /// once. A fitted face is named for the end it finishes and the body or line it fits, `corner_start:<body>:face:<k>`
 /// (`corner_end:…`). `middle(m)`: a point in member m's material half way along. A piece cut where tubes cross
 /// (`crossed`, [`cut_pieces`]) is fitted as [`frame_multi_trim::fit_piece_end`] fits it, and has no body (`None` in `made`)
-/// when nothing of it is left.
+/// when nothing of it is left. The ends it cut (each (member, at_start)).
 fn fit_to_earlier(
     made: &mut [Option<Traced>],
     segments: &[(String, Vec3, Vec3)],
@@ -1801,7 +1897,8 @@ fn fit_to_earlier(
     own: &mut Own,
     middle: &dyn Fn(usize) -> Vec3,
     crossed: &[bool],
-) -> Result<()> {
+) -> Result<Vec<(usize, bool)>> {
+    let mut refitted = Vec::new();
     let named = |role: &str, name: &str, body: &kernel::Body| {
         let roles = (0..body.face_count()).map(|k| vec![format!("{role}:{name}:face:{k}")]).collect();
         Traced::made(body.clone(), Some(roles))
@@ -1829,13 +1926,18 @@ fn fit_to_earlier(
         let against: Vec<&Traced> = against.iter().collect();
         let slot = made.get_mut(m).ok_or_else(|| DocError::Invalid(format!("no member {m}")))?;
         let Some(member) = slot.as_ref() else { continue };
-        *slot = if crossed.get(m) == Some(&true) {
+        let fitted = if crossed.get(m) == Some(&true) {
             frame_multi_trim::fit_piece_end(member, end, toward, middle(m), &against, id)?
         } else {
             Some(frame_multi_trim::fit_end(member, end, toward, middle(m), &against, id)?)
         };
+        // A tube clear of every tool it is fitted to keeps its very shape: that end stays as it was.
+        if fitted.as_ref().is_none_or(|t| !t.body.same_shape(&member.body)) {
+            refitted.push((m, at_start));
+        }
+        *slot = fitted;
     }
-    Ok(())
+    Ok(refitted)
 }
 
 /// A member feature's lines (in its component frame), profile regions, default name, the

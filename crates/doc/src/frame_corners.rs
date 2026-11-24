@@ -164,6 +164,33 @@ pub struct Cut {
     pub normal: Vec3,
 }
 
+/// How one end of a frame member's body is finished, as its Frame Member feature built it (#4003): what a cut list
+/// reads its end angles from. Coordinates are the frame's own, as its bodies'.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EndCut {
+    /// Left square to its line, at the line's end.
+    Square,
+    /// Cut by one plane (a mitre, a butt, an angled butt, set back by the weld gap): the body keeps the side where
+    /// dot(X - origin, normal) >= 0, so `normal` points into the member.
+    Plane { origin: Vec3, normal: Vec3 },
+    /// Coped: built out across the tube it meets and cut to that tube's shape (a Coped Butt's short tube).
+    Coped,
+    /// Cut to fit the tubes it meets (a butt's short tube, a T-junction, a third end at a point, a crossing, an end
+    /// fitted to an earlier frame, a piece split where another tube overlaps it): not one plane.
+    Fitted,
+}
+
+/// A frame member's body and how its two ends are finished, [start, end] along its line as drawn.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MemberEnds {
+    /// The body's name.
+    pub body: String,
+    /// The member's id: its line's, a piece's (`L>X`), or a pair's.
+    pub member: String,
+    pub ends: [EndCut; 2],
+}
+
 /// The points where exactly two members end and no third member ends or passes, ordered by the
 /// lower member index, then the other.
 pub fn find_corners(segments: &[(String, Vec3, Vec3)]) -> Vec<Corner> {

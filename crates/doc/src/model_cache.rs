@@ -398,7 +398,7 @@ impl Writer {
                 Some(record)
             })
             .collect::<Option<Vec<_>>>()?;
-        let r = json!({
+        let mut r = json!({
             "bodies": runs(&bodies), "sketches": runs(&sketches), "body_counter": st.body_counter,
             "reserved_body_names": st.reserved_body_names.iter().collect::<Vec<_>>(),
             "surface_sheets": surface_sheets, "construct": serde_json::to_value(&st.construct).ok()?,
@@ -410,6 +410,10 @@ impl Writer {
             "tapered": serde_json::to_value(&st.tapered).ok()?,
             "pattern_left_out": serde_json::to_value(&st.pattern_left_out).ok()?,
         });
+        // Only a state after a Frame Member has ends to keep: the rest stay as small as before.
+        if !st.member_ends.is_empty() {
+            r["member_ends"] = serde_json::to_value(&st.member_ends).ok()?;
+        }
         self.states.push(r);
         self.state_index.insert(id, self.states.len() - 1);
         Some(self.states.len() - 1)
@@ -801,6 +805,11 @@ impl SavedModel {
                 tapered: serde_json::from_value(field("tapered")?).map_err(invalid)?,
                 // Older saved models have none: their patterns left no body out.
                 pattern_left_out: match s.get("pattern_left_out") {
+                    Some(v) => serde_json::from_value(v.clone()).map_err(invalid)?,
+                    None => BTreeMap::new(),
+                },
+                // Older saved models have none: a cache is read back only by the source that wrote it.
+                member_ends: match s.get("member_ends") {
                     Some(v) => serde_json::from_value(v.clone()).map_err(invalid)?,
                     None => BTreeMap::new(),
                 },

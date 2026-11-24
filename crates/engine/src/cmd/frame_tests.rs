@@ -8986,3 +8986,210 @@ fn saved_plate_planes_cannot_silently_ignore_a_wrapped_offset() {
     assert!(reopened.model.result(id).unwrap().error.as_deref().unwrap().contains("direct persistent planar face"));
     assert!(reopened.model.state().body("EndPlate").is_none());
 }
+
+/// The last Frame Member's record of its members' ends ([`solidcraft_doc::ModelState::member_ends`]).
+fn member_ends(s: &Session) -> Vec<solidcraft_doc::frame_corners::MemberEnds> {
+    let fid = s.doc.features.iter().rev().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::FrameMember { .. })).unwrap().id;
+    s.model.state().member_ends(fid).to_vec()
+}
+
+/// A plane end's origin and unit normal; panics on any other finish.
+fn plane_of(e: &solidcraft_doc::frame_corners::EndCut) -> ([f64; 3], [f64; 3]) {
+    match e {
+        solidcraft_doc::frame_corners::EndCut::Plane { origin, normal } => ([origin.x, origin.y, origin.z], [normal.x, normal.y, normal.z]),
+        other => panic!("not a plane end: {other:?}"),
+    }
+}
+
+fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn sub3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+const RECTANGLE_CORNERS: [[f64; 3]; 4] = [[0.0, 0.0, 0.0], [600.0, 0.0, 0.0], [600.0, 400.0, 0.0], [0.0, 400.0, 0.0]];
+
+#[test]
+fn a_mitred_rectangle_records_each_end_on_its_corners_bisector() {
+    // Each corner is 90°, so its mitre plane holds the corner and its normal bisects the two lines: in the sketch
+    // plane, 45° to each line (|n·x| = |n·y| = 1/√2). A weld gap g sets each plane back g/2 into its own member.
+    for gap in [0.0, 4.0] {
+        let mut s = Session::default();
+        rectangle_frame(&mut s);
+        run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube(), "corner": "mitre", "gap": gap}));
+        let ends = member_ends(&s);
+        let names: Vec<String> = bodies(&mut s).into_iter().map(|b| b.0).collect();
+        let mut recorded: Vec<String> = ends.iter().map(|e| e.body.clone()).collect();
+        recorded.sort();
+        let mut want = names.clone();
+        want.sort();
+        assert_eq!(recorded, want, "one record per body");
+        let h = std::f64::consts::FRAC_1_SQRT_2;
+        for e in &ends {
+            let com = measured(&mut s, &e.body).4;
+            let mut at = Vec::new();
+            for end in &e.ends {
+                let (o, n) = plane_of(end);
+                assert!((dot3(n, n) - 1.0).abs() < 1e-12 && n[2].abs() < 1e-12, "{e:?}");
+                assert!((n[0].abs() - h).abs() < 1e-12 && (n[1].abs() - h).abs() < 1e-12, "{e:?}");
+                // The corner lies g/2 behind the plane, on the side cut away; the member's middle on the side kept.
+                let k = RECTANGLE_CORNERS.iter().position(|c| (dot3(sub3(*c, o), n) + gap / 2.0).abs() < 1e-9).unwrap_or_else(|| panic!("{e:?}"));
+                assert!(dot3(sub3(com, o), n) > 0.0, "{e:?}");
+                at.push(k);
+            }
+            assert_ne!(at[0], at[1], "{e:?}: its two ends are at two corners");
+        }
+    }
+}
+
+#[test]
+fn a_butted_rectangle_records_square_plane_ends() {
+    // Butt: the 600 tubes run out to the 400s' outer faces, planes x = -20 and x = 620 square to their lines; the 400s
+    // stop at the 600s' near faces, y = 20 and y = 380, square to theirs.
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube(), "corner": "butt"}));
+    let ends = member_ends(&s);
+    assert_eq!(ends.len(), 4, "{ends:?}");
+    for e in &ends {
+        let b = measured(&mut s, &e.body);
+        let long = b.3[0] - b.2[0] > b.3[1] - b.2[1];
+        let (axis, at): (usize, [f64; 2]) = if long { (0, [-20.0, 620.0]) } else { (1, [20.0, 380.0]) };
+        let mut found: Vec<f64> = e
+            .ends
+            .iter()
+            .map(|end| {
+                let (o, n) = plane_of(end);
+                assert!((n[axis].abs() - 1.0).abs() < 1e-12, "{e:?}");
+                // n points into the member, towards its centre of mass.
+                assert!(dot3(sub3(b.4, o), n) > 0.0, "{e:?}");
+                o[axis]
+            })
+            .collect();
+        found.sort_by(f64::total_cmp);
+        assert!((found[0] - at[0]).abs() < 1e-9 && (found[1] - at[1]).abs() < 1e-9, "{e:?}: {found:?} vs {at:?}");
+    }
+}
+
+#[test]
+fn coped_auto_and_none_frames_record_coped_fitted_and_square_ends() {
+    use solidcraft_doc::frame_corners::EndCut;
+    // A Coped Butt frame: the 600s through, cut by planes; the 400s coped to them at both ends. Auto at 90° (60° to
+    // 120° from in line): a butt whose short tube is fitted to the long one. None: every end left square.
+    for (p, short) in [
+        (json!({"corner": "butt", "coped": true}), Some(EndCut::Coped)),
+        (json!({"corner": "auto"}), Some(EndCut::Fitted)),
+        (json!({"corner": "none"}), None),
+    ] {
+        let mut s = Session::default();
+        rectangle_frame(&mut s);
+        let mut params = json!({"sketch": "Frame", "profile": tube()});
+        params.as_object_mut().unwrap().extend(p.as_object().unwrap().clone());
+        run(&mut s, "frame.member", params.clone());
+        let ends = member_ends(&s);
+        assert_eq!(ends.len(), 4, "{params}: {ends:?}");
+        for e in &ends {
+            let b = measured(&mut s, &e.body);
+            let long = b.3[0] - b.2[0] > b.3[1] - b.2[1];
+            match short {
+                None => assert_eq!(e.ends, [EndCut::Square; 2], "{params}: {e:?}"),
+                Some(_) if long => e.ends.iter().for_each(|end| assert!((plane_of(end).1[0].abs() - 1.0).abs() < 1e-12, "{params}: {e:?}")),
+                Some(finish) => assert_eq!(e.ends, [finish; 2], "{params}: {e:?}"),
+            }
+        }
+    }
+}
+
+#[test]
+fn an_angled_butt_records_the_long_tubes_square_end_and_the_short_one_on_it() {
+    // Auto at 20° from in line (30° or less): an angled butt. The long tube is cut square to its own line at the
+    // corner, the short one on that same plane, keeping its own side: two planes through the corner, normals
+    // opposite, one along a line (|n·d| = 1), the other at 20° to its own (|n·d| = cos 20°).
+    let a = 20f64.to_radians();
+    let (mut s, r) = polyline_frame(json!([[-300, 0], [0, 0], [300.0 * a.cos(), 300.0 * a.sin()]]), "auto");
+    r.unwrap();
+    let ends = member_ends(&s);
+    assert_eq!(ends.len(), 2, "{ends:?}");
+    let dirs = [[1.0, 0.0, 0.0], [a.cos(), a.sin(), 0.0]];
+    let mut at_corner = Vec::new();
+    for e in &ends {
+        let b = measured(&mut s, &e.body);
+        let d = if b.4[1] > 1.0 { dirs[1] } else { dirs[0] };
+        let planes: Vec<_> = e.ends.iter().filter(|end| matches!(end, solidcraft_doc::frame_corners::EndCut::Plane { .. })).map(plane_of).collect();
+        assert_eq!(planes.len(), 1, "{e:?}: the free end stays square");
+        assert!(e.ends.contains(&solidcraft_doc::frame_corners::EndCut::Square), "{e:?}");
+        let (o, n) = planes[0];
+        assert!(o.iter().all(|c| c.abs() < 1e-9), "{e:?}");
+        at_corner.push((n, dot3(n, d).abs()));
+    }
+    let (n0, n1) = (at_corner[0].0, at_corner[1].0);
+    assert!((dot3(n0, n1) + 1.0).abs() < 1e-12, "{at_corner:?}");
+    let mut c: Vec<f64> = at_corner.iter().map(|x| x.1).collect();
+    c.sort_by(f64::total_cmp);
+    assert!((c[0] - a.cos()).abs() < 1e-12 && (c[1] - 1.0).abs() < 1e-12, "{c:?}");
+}
+
+#[test]
+fn the_third_member_at_a_point_records_its_fitted_end() {
+    use solidcraft_doc::frame_corners::EndCut;
+    // As `the_third_member_at_a_point_is_fitted_to_the_first_two`: the two in line stay square, the upright is fitted
+    // at its foot and square at its top.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "T"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [300, 0], [600, 0]]}));
+    run(&mut s, "sketch.line", json!({"points": [[300, 0], [300, 300]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "frame.member", json!({"sketch": "T", "profile": tube(), "corner": "mitre"}));
+    let ends = member_ends(&s);
+    assert_eq!(ends.len(), 3, "{ends:?}");
+    for e in &ends {
+        let up = measured(&mut s, &e.body).4[1] > 1.0;
+        let want = if up { [EndCut::Fitted, EndCut::Square] } else { [EndCut::Square; 2] };
+        assert_eq!(e.ends, want, "{e:?}");
+    }
+}
+
+#[test]
+fn member_ends_survive_a_saved_model() {
+    // A frame with no corners (the kind a saved model is adopted for, since Trim/Extend needs its
+    // member records) keeps its record through the saved model.
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube()}));
+    let before = member_ends(&s);
+    assert_eq!(before.len(), 4);
+    let saved = s.model.saved(&s.doc).unwrap();
+    let adopted = solidcraft_doc::Model::adopt(&s.doc, &saved).unwrap();
+    let fid = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::FrameMember { .. })).unwrap().id;
+    assert_eq!(adopted.state().member_ends(fid), before.as_slice());
+    // A mitred frame's plane ends are written and read back as they are.
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube(), "corner": "mitre"}));
+    let mitred = member_ends(&s);
+    let json = serde_json::to_value(&mitred).unwrap();
+    assert_eq!(serde_json::from_value::<Vec<solidcraft_doc::frame_corners::MemberEnds>>(json).unwrap(), mitred);
+}
+
+#[test]
+fn a_trim_leaves_the_member_ends_and_puts_its_plane_on_the_member_record() {
+    // A bar along X from 0 to 100, extended by Trim/Extend to the plane x = 150: its own build
+    // finished both ends square, and the trim's end plane is on its member record.
+    let mut s = Session::default();
+    let m = members_3d(&mut s, "Bar", &[([0.0, 0.0, 0.0], [100.0, 0.0, 0.0])]);
+    let built = member_ends(&s);
+    assert_eq!(built.len(), 1);
+    assert_eq!(built[0].ends, [solidcraft_doc::frame_corners::EndCut::Square; 2]);
+    run(&mut s, "frame.trim", json!({"members": m, "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 0]}}}));
+    assert_eq!(member_ends(&s), built);
+    let st = s.model.state();
+    let record = st.frame_member(&m[0]).unwrap();
+    assert!(record.ends[0].is_none(), "the start is untouched");
+    let end = record.ends[1].expect("the end is cut in the trim's plane");
+    assert!((end.origin.x - 150.0).abs() < 1e-9, "{:?}", end.origin);
+    // The normal points out of the member, along +X.
+    let n = end.normal();
+    assert!((n.x.abs() - 1.0).abs() < 1e-9 && n.x > 0.0, "{n:?}");
+}
