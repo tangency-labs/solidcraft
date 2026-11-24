@@ -729,11 +729,12 @@ pub enum AnalyticCheck {
     /// A meridian at an end of its sweep has no control point off the axis on the side of
     /// the fitted sweep, so the sweep has no start or end direction.
     MeridianOnAxis,
-    /// Moved onto the mean-radius cylinder, its net is not on that cylinder (its end
-    /// circles are turned against each other or off the axis).
+    /// Moved onto the cylinder its rebuild records (or as it is, for radii within
+    /// `EFF_ZERO`), its net is not on that cylinder (its end circles are turned against
+    /// each other or off the axis).
     NetOffCylinder,
-    /// Moved onto the mean-radius cylinder, its net would have a radius not above zero at
-    /// a control point.
+    /// Moved onto the cylinder its rebuild records, its net would have a radius not above
+    /// zero at a control point.
     NetRadiusNotPositive,
     /// Neither direction of its iso curves is a family of coaxial circles in parallel
     /// planes with a planar generator.
@@ -763,9 +764,9 @@ impl core::fmt::Display for AnalyticCheck {
             Self::MeridianOnAxis => {
                 "a meridian at an end of its sweep has no control point off the axis on its side"
             }
-            Self::NetOffCylinder => "its moved net is not on the mean-radius cylinder",
+            Self::NetOffCylinder => "its net is not on the cylinder it rebuilds as",
             Self::NetRadiusNotPositive => {
-                "its net has no positive radius at a control point on the mean-radius cylinder"
+                "its net has no positive radius at a control point on the cylinder it rebuilds as"
             }
             Self::NoCircularDirection => "neither direction's iso curves are coaxial circles",
             Self::RadiiDiffer => "its top and bottom radii differ",

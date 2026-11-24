@@ -70,6 +70,10 @@
 //!   degrees as `is_parallel_to` takes it) or turned about it (`twisted`, below
 //!   `ang_tol`); radial scaling keeps those, so the moved net is kept only when
 //!   `surface::implicit::lies_on` certifies it on the cylinder (#16982 review).
+//!   Radii within `EFF_ZERO * (1 + bottom_radius)` keep upstream's copy of the bottom
+//!   radius, but the cylinder is recorded only when `lies_on` certifies the net on it,
+//!   as it is (kept bit for bit) or else moved onto it as above (#17228: upstream
+//!   recorded it whatever the net, an oblique or twisted one included).
 //!   Every cone rebuild also requires the top circle's normal to be parallel to the
 //!   centre line, as the bottom's is (not upstream, #16982 review): before, a top
 //!   circle tilted about its x axis passed. A larger taper, or a net that cannot be
@@ -1685,6 +1689,24 @@ impl Cone {
         Ok(base)
     }
 
+    /// Not upstream (#17228): whether [`implicit::lies_on`] certifies the NURB as it is
+    /// on the cylinder of `radius` about the axis through `centre` along `z`.
+    ///
+    /// # Errors
+    ///
+    /// Those of the certificate.
+    fn net_on_cylinder(&self, centre: Point3, z: Vec3, radius: f64) -> Result<bool> {
+        implicit::lies_on(
+            &self.rev.base,
+            &implicit::Implicit::Cone {
+                origin: centre,
+                axis: z,
+                radius,
+                tan_angle: 0.0,
+            },
+        )
+    }
+
     /// Rebuilds the analytic data from the NURB after an edit
     /// (`RebuildSTEPFromNURBParameters`): the circles at both ends of the linear
     /// direction (tested as [`Self::is_nurb_surface_cone`] does with the scale `1000`,
@@ -1697,13 +1719,17 @@ impl Cone {
     /// they use the mean radius and an exactly zero semi-angle, and the NURB's control
     /// points are moved radially onto that cylinder about the recorded axis, before any
     /// state changes, so for coaxial, parallel end circles the NURB and the analytic form
-    /// describe one surface (WR-385, #713; see [`Self::cylinder_net`]). Not upstream
-    /// (#16982 review): the top circle's plane must be perpendicular to the axis too.
+    /// describe one surface (WR-385, #713; see [`Self::cylinder_net`]). Radii within
+    /// `EFF_ZERO * (1 + bottom_radius)` take the bottom radius, and the net is kept
+    /// when certified on that cylinder as it is, else moved onto it and certified
+    /// (#17228). Not upstream (#16982 review): the top circle's plane must be
+    /// perpendicular to the axis too.
     ///
     /// # Errors
     ///
-    /// `SM_ERR` when the NURB is no longer a cone, or a cylinder's radii differ
-    /// beyond the reconstruction tolerance; those of the iso curves.
+    /// `SM_ERR` when the NURB is no longer a cone, a cylinder's radii differ
+    /// beyond the reconstruction tolerance, or a cylinder's net is not certified on
+    /// the cylinder recorded; those of the iso curves.
     pub fn rebuild_step_from_nurb_parameters(&mut self, k: &Kernel) -> Result<()> {
         // check m_pNurb - a degree 2 rational surface in at least 1 direction
         let deg_u = self.rev.base.degree(SurfParamType::U);
@@ -1848,12 +1874,19 @@ impl Cone {
         // (upstream also computes the STEP Y axis from the top frame's X axis here;
         // it is unused)
 
-        // the fitted end radii (bottom, top) when the NURB's net must be moved onto the
-        // mean-radius cylinder below
+        // the fitted end radii (bottom, top) when the NURB's net must lie on the
+        // cylinder recorded below, and whether a net already certified on it is kept
+        // as it is (the `EFF_ZERO` branch) rather than moved onto it
         let mut net_onto_cylinder = None;
 
         // when top and bot radius values are nearly equal - make them exactly equal
         if (bot.radius - top.radius).abs() < EFF_ZERO * (1.0 + bot.radius) {
+            // Not upstream (#17228): an SmCylinder recorded from this branch is
+            // certified as the mean-radius one below is; upstream recorded it
+            // whatever the net (an oblique or twisted net within the angle checks)
+            if self.cylinder {
+                net_onto_cylinder = Some((bot.radius, top.radius, true));
+            }
             top.radius = bot.radius;
         } else if self.cylinder {
             // Not upstream (WR-385, tangency-labs/solidcore#713; the fork's 5df5b27):
@@ -1863,7 +1896,7 @@ impl Cone {
                 let mean = 0.5 * (bot.radius + top.radius);
                 // the NURB becomes that cylinder too (below), so for coaxial end
                 // circles it and the analytic form describe one surface
-                net_onto_cylinder = Some((bot.radius, top.radius));
+                net_onto_cylinder = Some((bot.radius, top.radius, false));
                 bot.radius = mean;
                 top.radius = mean;
             } else {
@@ -1876,21 +1909,27 @@ impl Cone {
             }
         }
 
-        // Not upstream (WR-385): the net moved onto the mean-radius cylinder, about the
+        // Not upstream (WR-385, #17228): the net moved onto the recorded cylinder, about the
         // axis of the placement recorded below so the net and the analytic cylinder
         // share one axis and radius (heights along it run from the placement's end
         // circle to the other one). Computed before any state changes, so a refused net
         // leaves the cone as it was
         let moved_net = match net_onto_cylinder {
-            Some((bot_radius, top_radius)) => {
+            Some((bot_radius, top_radius, keep_if_on)) => {
                 let (frame, radii) = if inside_out {
                     (&top.frame, (top_radius, bot_radius))
                 } else {
                     (&bot.frame, (bot_radius, top_radius))
                 };
                 let (origin, z) = (frame.origin(), frame.z_axis());
-                let moved = self.cylinder_net(origin, z, height, radii, bot.radius)?;
-                Some(self.certified_cylinder_net(moved, origin, z, bot.radius)?)
+                // (#17228) a net the certificate already puts on the cylinder is the
+                // upstream result and stays untouched; any other is moved and certified
+                if keep_if_on && self.net_on_cylinder(origin, z, bot.radius)? {
+                    None
+                } else {
+                    let moved = self.cylinder_net(origin, z, height, radii, bot.radius)?;
+                    Some(self.certified_cylinder_net(moved, origin, z, bot.radius)?)
+                }
             }
             None => None,
         };
@@ -2943,6 +2982,79 @@ mod tests {
                         } else {
                             assert_ne!(net_of(after), net, "{case}");
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    /// #17228: radii within `EFF_ZERO (1 + r)` took the branch that copies the bottom
+    /// radius and recorded the cylinder whatever the net. A net of exactly equal radii
+    /// whose top row is turned 1e-4 rad (middle section 9 (1 - cos 5e-5) = 1.1e-8
+    /// inside), or moved 0.01 sideways on a 1000 long cylinder (5.7e-4 degrees off
+    /// the axis, under the 1e-3 degree angle checks; `surface.cone_p2` `gen0152` is this
+    /// shape, 0.353 off at r 2.8, with radii just outside the branch), is now refused
+    /// with the cone, its net and its analytic data unchanged; before, both rebuilt as
+    /// the right cylinder. The untouched cylinder still rebuilds, its net kept bit for
+    /// bit (certified on the cylinder as it is).
+    #[test]
+    fn rebuild_cylinder_within_eff_zero_certifies_the_net() {
+        let k = kernel();
+        // (turn in rad, sideways shift of the top row, refused)
+        for (turn, shift, refused) in [(1e-4_f64, 0.0, true), (0.0, 0.01, true), (0.0, 0.0, false)]
+        {
+            for swap in [false, true] {
+                for inside in [false, true] {
+                    let mut c = Cone::new_cylinder_bounded(
+                        Vec3::ZERO,
+                        Vec3::X,
+                        Vec3::Y,
+                        9.0,
+                        0.0,
+                        360.0,
+                        1000.0,
+                        swap,
+                        inside,
+                        false,
+                    );
+                    c.make_nurb(&k).unwrap();
+                    let (sin, cos) = turn.sin_cos();
+                    let s = c.base_mut().get_or_create_gw_nurb().unwrap();
+                    let (n, m) = (s.n(), s.m());
+                    for i in 0..=n {
+                        for j in 0..=m {
+                            if if swap { i == n } else { j == m } {
+                                // turn about z and shift along x, in homogeneous form
+                                let p = s.cpt_mut(i, j).unwrap();
+                                let (x, y) = (p.x, p.y);
+                                p.x = x * cos - y * sin + shift * p.w;
+                                p.y = x * sin + y * cos;
+                            }
+                        }
+                    }
+                    let (net, radius, angle, position) = (
+                        net_of(&c),
+                        c.base_radius(),
+                        c.semi_angle_deg(),
+                        *c.rev().position(),
+                    );
+                    let result = c.rebuild_step_from_nurb_parameters(&k);
+                    let case = format!("{turn} {shift} {swap} {inside}");
+                    assert_eq!(result.is_err(), refused, "{case}: {result:?}");
+                    assert_eq!(net_of(&c), net, "{case}");
+                    if let Err(e) = &result {
+                        assert_eq!(
+                            e.surface_failure(),
+                            Some(&SurfaceFailure::NurbNotAnalytic {
+                                check: AnalyticCheck::NetOffCylinder
+                            }),
+                            "{case}"
+                        );
+                        assert_eq!(c.base_radius(), radius, "{case}");
+                        assert_eq!(c.semi_angle_deg(), angle, "{case}");
+                        assert_eq!(*c.rev().position(), position, "{case}");
+                    } else {
+                        assert!(c.is_cylinder_class() && c.semi_angle_deg() == 0.0, "{case}");
                     }
                 }
             }
