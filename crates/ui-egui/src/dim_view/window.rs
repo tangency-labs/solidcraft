@@ -430,13 +430,11 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                     None
                 };
                 answer = answer.or(field);
-                if create {
-                    if let Some(offer) = e.create_variable.take() {
-                        e.expr = offer.definition;
-                        e.owned = true;
-                        e.typed = true;
-                        answer = Some(true);
-                    }
+                if create && let Some(offer) = e.create_variable.take() {
+                    e.expr = offer.definition;
+                    e.owned = true;
+                    e.typed = true;
+                    answer = Some(true);
                 }
                 if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     answer = Some(false);

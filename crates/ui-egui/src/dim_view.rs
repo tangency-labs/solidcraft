@@ -1650,13 +1650,11 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                         // Esc cancels the whole dimension, picks included.
                         escaped = true;
                     }
-                    if create && !escaped {
-                        if let Some(offer) = e.create_variable.take() {
-                            e.expr = offer.definition;
-                            e.owned = true;
-                            e.typed = true;
-                            done = Some(true);
-                        }
+                    if create && !escaped && let Some(offer) = e.create_variable.take() {
+                        e.expr = offer.definition;
+                        e.owned = true;
+                        e.typed = true;
+                        done = Some(true);
                     }
                 });
             });
