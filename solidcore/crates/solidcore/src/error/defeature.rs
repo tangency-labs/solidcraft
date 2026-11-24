@@ -3,10 +3,9 @@
 //! Upstream: none. `SmFeatureExecutive::DoDefeature` leaves a feature whose base patch is not
 //! built as an open hole; solidcore puts it back and names it ([`crate::blend::feature_executive::KeptFeature`]),
 //! and these say why its patch is not built. Each is decided where the patch's
-//! construction refuses, from what that construction found there; the error of the
-//! refusing step is kept as the failure's cause. Every one is a limit of the construction
-//! (the patch is built from the faces along the loop, extended, or as a planar cap), not a
-//! defect of the input.
+//! construction fails, from what that step found. A geometric refusal describes a limit
+//! of the construction. Losing a face while copying the kernel's own replacement patch
+//! is a defect. A failing step's error is kept as the cause.
 //!
 //! | Rust                                         | Status difftest compares |
 //! |----------------------------------------------|--------------------------|
@@ -16,6 +15,7 @@
 //! | [`DefeatureFailure::LoopNotPlanar`]          | `SM_ERR` (WR-656)        |
 //! | [`DefeatureFailure::NotEnclosed`]            | `SM_ERR` (WR-656)        |
 //! | [`DefeatureFailure::PatchEnclosesFace`]      | no upstream counterpart  |
+//! | [`DefeatureFailure::PatchFaceNotCopied`]     | no upstream counterpart  |
 //! | [`DefeatureFailure::PatchIntersectsFace`]    | no upstream counterpart  |
 //! | [`DefeatureFailure::TangentNeighbours`]      | `SM_ERR` (WR-656)        |
 //!
@@ -68,9 +68,15 @@ pub enum DefeatureFailure {
         /// How far the faces were extended, when the patch was built in this call.
         extended_by: Option<f64>,
     },
-    /// The patch would bury another shell's face within the rebuilt material.
+    /// A retained shell would cease to separate material from void after the patch.
     PatchEnclosesFace {
         /// A retained face that would cease to separate material from void.
+        face: crate::topology::FaceId,
+    },
+    /// The kernel lost all or part of a face while copying its own replacement patch
+    /// into the target B-rep.
+    PatchFaceNotCopied {
+        /// The face of the patch that could not be transferred.
         face: crate::topology::FaceId,
     },
     /// A face outside the feature and its supports obstructs the proposed patch.
@@ -100,12 +106,14 @@ impl DefeatureFailure {
             | Self::LoopNotPlanar
             | Self::NotEnclosed { .. }
             | Self::PatchEnclosesFace { .. }
+            | Self::PatchFaceNotCopied { .. }
             | Self::PatchIntersectsFace { .. }
             | Self::TangentNeighbours { .. } => SM_ERR,
         }
     }
 
-    /// Its stable [`ErrorKind`]: each is a combination the construction does not support.
+    /// Its stable [`ErrorKind`]. An incomplete transfer of the kernel's own patch is a
+    /// defect. The geometric refusals describe unsupported constructions.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
@@ -117,6 +125,7 @@ impl DefeatureFailure {
             | Self::PatchEnclosesFace { .. }
             | Self::PatchIntersectsFace { .. }
             | Self::TangentNeighbours { .. } => ErrorKind::Unsupported,
+            Self::PatchFaceNotCopied { .. } => ErrorKind::StageFailed,
         }
     }
 }
@@ -150,6 +159,9 @@ impl core::fmt::Display for DefeatureFailure {
             ),
             Self::NotEnclosed { extended_by: None } => {
                 f.write_str("the faces along the loop, extended, do not enclose it")
+            }
+            Self::PatchFaceNotCopied { face } => {
+                write!(f, "the repair could not copy patch face {}", face.index())
             }
             Self::ExtensionWithinTolerance {
                 extended_by,

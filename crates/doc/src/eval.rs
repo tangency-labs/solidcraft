@@ -1114,6 +1114,8 @@ pub struct ModelState {
     pub surface_sheets: Vec<crate::SurfaceSheet>,
     /// Construction planes, axes and points as evaluated (by feature).
     pub construct: Vec<crate::construct::Construct>,
+    /// Frame members as made and trimmed so far (`frame.member`, `frame.trim`).
+    pub frame_members: Vec<crate::frame::MemberRecord>,
     /// Evaluation-cache keys of the sketches (by sketch feature id).
     sketch_keys: BTreeMap<u64, u64>,
     /// The edges each fillet or chamfer blended, as found in this evaluation (by feature id):
@@ -1199,6 +1201,7 @@ impl ModelState {
             reserved_body_names,
             surface_sheets,
             construct,
+            frame_members,
             sketch_keys,
             blend_edges,
             named_faces,
@@ -1219,6 +1222,7 @@ impl ModelState {
             reserved_body_names: reserved_body_names.clone(),
             surface_sheets: surface_sheets.clone(),
             construct: construct.clone(),
+            frame_members: frame_members.clone(),
             sketch_keys: sketch_keys.clone(),
             blend_edges: blend_edges.clone(),
             named_faces: named_faces.clone(),
@@ -1310,6 +1314,10 @@ impl ModelState {
         // a feature must change the key (#9544). A state without any hashes as before.
         if !self.construct.is_empty() {
             serde_json::to_string(&self.construct).unwrap_or_default().hash(&mut h);
+        }
+        // Designs without frame members retain their existing cache identities.
+        if !self.frame_members.is_empty() {
+            serde_json::to_string(&self.frame_members).unwrap_or_default().hash(&mut h);
         }
         h.finish()
     }
@@ -1757,6 +1765,14 @@ impl ModelState {
         #[cfg(test)]
         cost_tests::count(|c| c.body_searches += 1);
         self.bodies.iter().find(|b| b.name == name)
+    }
+
+    /// The frame member whose body is the body called `name` now. A member's record stays when a
+    /// later feature removes its body, and another body can take the name; it counts only while
+    /// the body of that name is the one its feature made.
+    pub fn frame_member(&self, name: &str) -> Option<&crate::frame::MemberRecord> {
+        let body = self.body(name)?;
+        self.frame_members.iter().rev().find(|m| m.body == name && m.feature == body.feature)
     }
 
     /// Make every body's display mesh now, on all cores (bodies are meshed independently and
@@ -3572,7 +3588,9 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     };
     // Members map their frame sketch into their own component's frame, 2D lines included.
     let member = matches!(f.kind, FeatureKind::FrameMember { .. });
-    if path.as_ref().is_some_and(|p| member || wired(p)) || rails.iter().any(|r| wired(&r.sketch)) {
+    // A feature that captured its component's frame reads the components it names through that
+    // frame, so their placement still counts (the path of a sweep, the rails of any of them).
+    if path.as_ref().is_some_and(|p| member || wired(p) || has_captured_profile) || rails.iter().any(|r| wired(&r.sketch) || has_captured_profile) {
         if let Some(path) = path {
             reads.sketch(doc, path.0);
         }
@@ -3752,6 +3770,28 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         // through the placement it was picked at, so moving that occurrence rebuilds the cap.
         FeatureKind::FrameEndCap { ends, .. } => {
             for anchor in ends.iter().filter_map(|end| crate::face_anchor::plane_face_anchor(&end.plane)) {
+                match anchor.author_frame(doc, f.component) {
+                    Ok(m) => {
+                        hash_placement(&m, &mut h);
+                        frame.get_or_insert(m);
+                    }
+                    Err(e) => e.to_string().hash(&mut h),
+                }
+                if anchor.path.is_empty() {
+                    reads.components.insert(anchor.component);
+                } else {
+                    reads.paths.push(anchor.path.clone());
+                }
+            }
+        }
+        // A trim's face targets are read as an end cap's faces are: in the frame each was picked
+        // in, through the placement it was picked at, so moving that occurrence trims again.
+        FeatureKind::FrameTrim { to, .. } => {
+            let faces = to.iter().filter_map(|t| match t {
+                crate::frame::TrimTarget::Plane { plane } => crate::face_anchor::plane_face_anchor(plane),
+                crate::frame::TrimTarget::Member { .. } => None,
+            });
+            for anchor in faces {
                 match anchor.author_frame(doc, f.component) {
                     Ok(m) => {
                         hash_placement(&m, &mut h);
@@ -5567,7 +5607,7 @@ fn voids(b: &Body) -> usize {
 }
 
 /// The operation of a feature that makes or changes bodies with one.
-fn feature_operation(f: &Feature) -> Option<Operation> {
+pub fn feature_operation(f: &Feature) -> Option<Operation> {
     Some(match &f.kind {
         FeatureKind::Extrude { operation, .. }
         | FeatureKind::Revolve { operation, .. }
@@ -9570,11 +9610,18 @@ fn feature_tools_with_constructor(
                 return regions.iter().map(|r| Ok(tool(r, kernel::sweep_with(&ss.plane, r, &segs, &ctl)?))).collect();
             }
             // Each path curve in the sketch it is in, mapped into the feature's frame: the path
-            // may join the curves of several sketches (#16168).
-            let curves = path_curves(doc, st, path, *path_sketch, f.component)?;
+            // may join the curves of several sketches (#16168). The profile and the path are read
+            // through the frame captured when the sweep was made, so the body it builds moves with
+            // the sweep's own component; a sweep that reads components of its own keeps the live
+            // placement of each. A guide rail is read through its own live placement, so a sweep
+            // that has one keeps that too.
+            let readers = sweep_readers(doc, sketch.0, path, *path_sketch, rails);
+            let frames = ReadFrames::of(doc, f, &readers, rails.is_empty());
+            let curves = path_curves(doc, st, path, *path_sketch, f.component, &frames)?;
             // The profile joins the path in the feature's frame, whatever sketch each is drawn
             // in (identity when a sketch shares the feature's component).
-            let profile = profile_in_frame(doc, ss, f.component)?;
+            let profile_owner = doc.feature(sketch.0).map(|g| g.component).unwrap_or(0);
+            let profile = profile_with_transform(ss, &frames.relative(doc, profile_owner)?)?;
             let ss = &profile;
             let regions = solidcraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
             let start = regions.first().map(|r| ss.plane.to_world(r.centroid())).unwrap_or_default();
@@ -9772,6 +9819,46 @@ fn profile_in_frame(doc: &Document, sketch: &SolvedSketch, consumer: u64) -> Res
     profile_with_transform(sketch, &relative)
 }
 
+/// The frames a feature reads the geometry of other components through: the frame it captured
+/// when it was made (its own component as it stood then, against the common ancestor of the two
+/// components), so that the body it builds moves with its own component, or the live placement of
+/// the component the geometry is in.
+struct ReadFrames {
+    /// The captured frame and the common ancestor it was captured against.
+    captured: Option<(Mat, u64)>,
+    /// The feature's own component.
+    consumer: u64,
+}
+
+impl ReadFrames {
+    /// The frames a feature reads the components it names through. The captured frame applies
+    /// when every one of them shares the common ancestor it was captured against; else each is
+    /// read through its live placement, as before.
+    fn of(doc: &Document, feature: &Feature, owners: &[u64], use_captured: bool) -> Self {
+        let profile_owner = owners.first().copied().unwrap_or(0);
+        let ancestor = doc.common_ancestor(feature.component, profile_owner);
+        let frame = if use_captured { feature.profile_frame } else { None };
+        let captured = frame.filter(|_| owners.iter().all(|o| doc.common_ancestor(feature.component, *o) == ancestor));
+        Self { captured: captured.map(|frame| (frame, ancestor)), consumer: feature.component }
+    }
+
+    /// The frame of `owner` in the feature's own component's frame.
+    fn relative(&self, doc: &Document, owner: u64) -> Result<Mat> {
+        match self.captured {
+            Some((consumer_in_lca, ancestor)) => {
+                let owner_in_lca = doc.component_transform_in(owner, ancestor);
+                let inverse = crate::mat_inverse(&consumer_in_lca).ok_or_else(|| DocError::Invalid("stored profile frame is singular".into()))?;
+                Ok(crate::mat_mul(&inverse, &owner_in_lca))
+            }
+            None => {
+                let inverse = crate::mat_inverse(&doc.component_transform(self.consumer))
+                    .ok_or_else(|| DocError::Invalid("consumer frame is invalid".into()))?;
+                Ok(crate::mat_mul(&inverse, &doc.component_transform(owner)))
+            }
+        }
+    }
+}
+
 fn profile_with_transform(sketch: &SolvedSketch, relative: &Mat) -> Result<SolvedSketch> {
     let mut mapped = sketch.clone();
     mapped.plane = Plane::new(
@@ -9786,20 +9873,27 @@ fn profile_with_transform(sketch: &SolvedSketch, relative: &Mat) -> Result<Solve
 /// Stored coordinates are converted once into the feature consumer frame: the sketch's plane
 /// (its planar curves are read through it, #16168) and its 3D wires.
 fn path_in_frame<'a>(doc: &Document, sketch: &'a SolvedSketch, consumer: u64) -> Result<std::borrow::Cow<'a, SolvedSketch>> {
-    use std::borrow::Cow;
     let owner = doc.feature(sketch.feature).map(|f| f.component).unwrap_or(0);
     let inverse =
         crate::mat_inverse(&doc.component_transform(consumer)).ok_or_else(|| DocError::Invalid("path consumer frame is not invertible".into()))?;
     let relative = crate::mat_mul(&inverse, &doc.component_transform(owner));
+    path_with_frame(sketch, &relative, &inverse)
+}
+
+/// A sketch's plane and its 3D wires in the frame they are read in: the relative frame of the
+/// sketch's component in the consumer's, and the consumer's own frame inverted for the wires
+/// that are in the world.
+fn path_with_frame<'a>(sketch: &'a SolvedSketch, relative: &Mat, inverse: &Mat) -> Result<std::borrow::Cow<'a, SolvedSketch>> {
+    use std::borrow::Cow;
     let mut mapped = sketch.clone();
     mapped.plane = Plane::new(
-        crate::apply_point(&relative, sketch.plane.origin),
-        crate::apply_vector(&relative, sketch.plane.x),
-        crate::apply_vector(&relative, sketch.plane.y),
+        crate::apply_point(relative, sketch.plane.origin),
+        crate::apply_vector(relative, sketch.plane.x),
+        crate::apply_vector(relative, sketch.plane.y),
     )
     .ok_or_else(|| DocError::Invalid("path sketch frame is invalid".into()))?;
     for wire in &mut mapped.sketch.wires {
-        let matrix = if wire.space == solidcraft_sketch::WireSpace::Component { &relative } else { &inverse };
+        let matrix = if wire.space == solidcraft_sketch::WireSpace::Component { relative } else { inverse };
         map_wire(wire, matrix);
     }
     Ok(Cow::Owned(mapped))
@@ -9822,13 +9916,24 @@ fn curves_in(ps: &SolvedSketch, ids: &[String]) -> Vec<PathCurve> {
 /// A sweep's path curves resolved: each entry's curve in its own sketch, each sketch mapped into
 /// the feature's frame (#16168). An entry without a sketch of its own is a curve of the path's
 /// sketch, as designs before cross-sketch paths saved.
-fn path_curves(doc: &Document, st: &ModelState, path: &[crate::PathEntry], path_sketch: crate::SketchId, component: u64) -> Result<Vec<PathCurve>> {
+fn path_curves(
+    doc: &Document,
+    st: &ModelState,
+    path: &[crate::PathEntry],
+    path_sketch: crate::SketchId,
+    component: u64,
+    frames: &ReadFrames,
+) -> Result<Vec<PathCurve>> {
     let mut mapped: Vec<(u64, std::rc::Rc<SolvedSketch>)> = Vec::new();
+    // The wires that are in the world stay in the world: they follow what they are linked to.
+    let inverse =
+        crate::mat_inverse(&doc.component_transform(component)).ok_or_else(|| DocError::Invalid("path consumer frame is not invertible".into()))?;
     for entry in path {
         let (sid, _) = entry.split(path_sketch);
         if !mapped.iter().any(|(s, _)| *s == sid.0) {
             let sk = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid} (it must come earlier in the timeline)")))?;
-            let sketch = std::rc::Rc::new(path_in_frame(doc, sk, component)?.into_owned());
+            let owner = doc.feature(sid.0).map(|f| f.component).unwrap_or(0);
+            let sketch = std::rc::Rc::new(path_with_frame(sk, &frames.relative(doc, owner)?, &inverse)?.into_owned());
             mapped.push((sid.0, sketch));
         }
     }
@@ -9839,6 +9944,19 @@ fn path_curves(doc: &Document, st: &ModelState, path: &[crate::PathEntry], path_
         curves.push(PathCurve { ss: ss.clone(), id: id.to_string() });
     }
     Ok(curves)
+}
+
+/// The components a sweep reads its profile, its path and its rails from.
+fn sweep_readers(doc: &Document, profile: u64, path: &[crate::PathEntry], path_sketch: crate::SketchId, rails: &[crate::SweepRail]) -> Vec<u64> {
+    let owner = |sketch: u64| doc.feature(sketch).map(|f| f.component).unwrap_or(0);
+    let mut owners = vec![owner(profile)];
+    for entry in path {
+        owners.push(owner(entry.split(path_sketch).0.0));
+    }
+    for rail in rails {
+        owners.push(owner(rail.sketch.0));
+    }
+    owners
 }
 
 /// A path that uses 3D sketch curves (wires), as one chain of pieces put in order from the end
@@ -14633,6 +14751,7 @@ fn eval_feature_kind(
         FeatureKind::FrameMemberTurn { .. } => frame_member::check_turn(doc, vals, f, st),
         FeatureKind::FrameGusset { .. } => crate::gusset::evaluate(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
+        FeatureKind::FrameTrim { .. } => frame_member::trim(doc, vals, f, st, warning),
         FeatureKind::FramePlate { .. } => crate::frame_plate::evaluate(doc, vals, f, st),
         FeatureKind::BoundingSolid { bodies, margin, contents, margins } => {
             let m = val(vals, margin, Kind::Length)?;
