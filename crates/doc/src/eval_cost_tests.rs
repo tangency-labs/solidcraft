@@ -602,7 +602,7 @@ fn a_frame_without_turns_keeps_its_fingerprint() {
         let steps = super::ImportDigests::default();
         let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, None);
         // And the key its result is cached under, which leaves the chain out.
-        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, &ModelState::default(), &steps, 0).whole)
+        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, 0, &ModelState::default(), &steps).whole)
     };
     let before = key(&doc);
     let turn = doc
@@ -676,6 +676,192 @@ fn an_import_after_a_moved_sketch_is_not_read_again() {
     assert_eq!(work.imports_read, 0, "the import after the sketch must not be read again: {work:?}");
     assert_eq!(model.last_recomputed, 1, "only the sketch is evaluated again: {work:?}");
     assert_eq!(model.state().bodies.len(), 2, "the plate and the imported part: {work:?}");
+}
+
+/// Adds a single-box imported component to `doc`, returning `(component_id, feature_id)`.
+fn add_imported_part(doc: &mut Document, part_name: &str, body_name: &str, origin_x: f64, size: f64) -> (u64, u64) {
+    let solid = kernel::box_solid(Vec3::new(origin_x, 0.0, 0.0), Vec3::new(origin_x + size, size, size)).unwrap();
+    let step: Arc<str> = kernel::step_export(&[&solid], part_name).unwrap().into();
+    let comp = doc.add_component(Some(part_name), 0).unwrap();
+    let kind = FeatureKind::Import { file: format!("{part_name}.step"), step, components: Vec::new(), skip: Vec::new(), records: None };
+    let id = doc.add_feature(kind, Some(part_name)).unwrap();
+    let f = doc.feature_mut(id).unwrap();
+    f.component = comp;
+    f.body_names = vec![body_name.into()];
+    (comp, id)
+}
+
+/// Snapshot of a model's bodies (name, cache key, owning component, face names) and threads for
+/// verifying cached replay matches fresh evaluation identically.
+fn import_snapshot(model: &Model) -> (Vec<(String, u64, u64, Vec<String>)>, Vec<ThreadInfo>) {
+    let st = model.state();
+    let bodies = st.bodies.iter().map(|b| (b.name.clone(), b.key, b.component, (*crate::naming::face_names(b)).clone())).collect();
+    (bodies, st.threads.clone())
+}
+
+/// Deleting an early independent Import component must not re-evaluate later independent Import
+/// components — both in-session and on the first edit after opening a saved design — while
+/// preserving carried face names and linked cosmetic threads. A saved import whose bodies carry a
+/// legacy key safely falls back to evaluating once.
+#[test]
+fn deleting_an_early_import_keeps_later_independent_imports() {
+    let mut doc = Document::new("assembly delete");
+    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Origin { name: "XY".into() } }, Some("Datum")).unwrap();
+    let (_comp_a, _feat_a) = add_imported_part(&mut doc, "PartA", "BlockA", 0.0, 10.0);
+    let (comp_b, _feat_b) = add_imported_part(&mut doc, "PartB", "BlockB", 20.0, 10.0);
+    let (_comp_c, feat_c) = add_imported_part(&mut doc, "PartC", "BlockC", 40.0, 10.0);
+    let (_comp_d, feat_d) = add_imported_part(&mut doc, "PartD", "BlockD", 60.0, 10.0);
+    let (_comp_e, _feat_e) = add_imported_part(&mut doc, "PartE", "BlockE", 80.0, 10.0);
+
+    doc.feature_mut(feat_c).unwrap().link_faces = vec![vec!["F1:top".into(), "F1:bottom".into()]];
+    doc.feature_mut(feat_d).unwrap().link_threads = vec![vec![ThreadInfo {
+        feature: 0,
+        body: String::new(),
+        designation: "M8".into(),
+        major_diameter: 8.0,
+        radius: 4.0,
+        pitch: 1.25,
+        internal: true,
+        axis_point: Vec3::new(65.0, 5.0, 0.0),
+        axis: solidcraft_geom::UnitVec3::new(Vec3::Z).unwrap(),
+        start: 0.0,
+        end: 10.0,
+        form: crate::thread_forms::ThreadForm::default(),
+        hand: crate::thread_forms::ThreadHand::default(),
+        starts: 1,
+    }]];
+
+    let mut model = Model::new();
+    let initial = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(initial.imports_read, 5, "{initial:?}");
+
+    let saved = model.saved(&doc).unwrap();
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+
+    // Mutate PartD's saved body key to simulate a design saved by an older version with a
+    // different key: PartD must fall back to evaluating once while PartC and PartE stay cached.
+    let mut legacy_saved = model.saved(&doc).unwrap();
+    let block_d = legacy_saved.records["model_bodies"].as_array_mut().unwrap().iter_mut().find(|b| b["name"] == "BlockD").unwrap();
+    block_d["key"] = serde_json::json!("deadbeef");
+    let rekeyed = Model::adopt(&doc, &legacy_saved).unwrap();
+
+    doc.remove_component_tree(comp_b).unwrap();
+
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    let expected = import_snapshot(&fresh);
+    assert_eq!(expected.0.len(), 4);
+    assert_eq!(expected.1.len(), 1);
+    assert_eq!(expected.1[0].body, "BlockD");
+    assert_eq!(expected.1[0].feature, feat_d);
+
+    for (what, mut candidate, reads) in [("in-session", model, 0), ("opened", reopened, 0), ("opened legacy key", rekeyed, 1)] {
+        let work = counted(|| candidate.evaluate(&doc));
+        assert!(candidate.results.iter().all(|r| r.error.is_none()), "{what}");
+        assert_eq!(work.imports_read, reads, "{what}: {work:?}");
+        assert_eq!(candidate.last_recomputed, reads, "{what}: {work:?}");
+        assert_eq!(import_snapshot(&candidate), expected, "{what}: cached replay must match fresh evaluation");
+    }
+}
+
+/// Updating an early independent Import feature (changing its STEP payload and body count) must
+/// re-evaluate only that import and reuse every later independent Import feature, both in-session
+/// and on the first edit after opening a saved design.
+#[test]
+fn updating_an_early_import_keeps_later_independent_imports() {
+    let mut doc = Document::new("assembly update");
+    let (_comp_a, _feat_a) = add_imported_part(&mut doc, "PartA", "BlockA", 0.0, 10.0);
+    let (_comp_b, feat_b) = add_imported_part(&mut doc, "PartB", "BlockB", 20.0, 10.0);
+    let (_comp_c, _feat_c) = add_imported_part(&mut doc, "PartC", "BlockC", 40.0, 10.0);
+    let (_comp_d, _feat_d) = add_imported_part(&mut doc, "PartD", "BlockD", 60.0, 10.0);
+
+    let mut model = Model::new();
+    let initial = counted(|| model.evaluate(&doc));
+    assert_eq!(initial.imports_read, 4, "{initial:?}");
+
+    let saved = model.saved(&doc).unwrap();
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+
+    // Update PartB to carry two bodies instead of one, shifting body indices before PartC and PartD.
+    let b1 = kernel::box_solid(Vec3::new(20.0, 0.0, 0.0), Vec3::new(32.0, 12.0, 12.0)).unwrap();
+    let b2 = kernel::box_solid(Vec3::new(20.0, 20.0, 0.0), Vec3::new(26.0, 26.0, 6.0)).unwrap();
+    let new_step: Arc<str> = kernel::step_export(&[&b1, &b2], "PartB").unwrap().into();
+    let f = doc.feature_mut(feat_b).unwrap();
+    if let FeatureKind::Import { step, .. } = &mut f.kind {
+        *step = new_step;
+    }
+    f.body_names = vec!["BlockB1".into(), "BlockB2".into()];
+
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    let expected = import_snapshot(&fresh);
+    assert_eq!(expected.0.len(), 5);
+
+    for (what, mut candidate) in [("in-session", model), ("opened", reopened)] {
+        let work = counted(|| candidate.evaluate(&doc));
+        assert!(candidate.results.iter().all(|r| r.error.is_none()), "{what}");
+        assert_eq!(work.imports_read, 1, "{what}: only the updated import should be read: {work:?}");
+        assert_eq!(candidate.last_recomputed, 1, "{what}: only the updated import should recompute: {work:?}");
+        assert_eq!(import_snapshot(&candidate), expected, "{what}: cached replay must match fresh evaluation");
+    }
+}
+
+/// Independent Import caching must stay exact when body-name collisions are unchanged, removed, or
+/// newly introduced by an earlier edit (both in-session and after opening a saved design).
+#[test]
+fn import_cache_recomputes_when_body_name_collisions_change() {
+    let mut doc = Document::new("assembly collisions");
+    let (comp_a, _feat_a) = add_imported_part(&mut doc, "PartA", "Block", 0.0, 10.0);
+    let (comp_b, _feat_b) = add_imported_part(&mut doc, "PartB", "Plate", 20.0, 10.0);
+    let (_comp_c, feat_c) = add_imported_part(&mut doc, "PartC", "Block", 40.0, 10.0);
+    let (_comp_d, _feat_d) = add_imported_part(&mut doc, "PartD", "Cap", 60.0, 10.0);
+
+    let mut model = Model::new();
+    let initial = counted(|| model.evaluate(&doc));
+    assert_eq!(initial.imports_read, 4, "{initial:?}");
+    let names = |m: &Model| m.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&model), ["Block", "Plate", "Block (2)", "Cap"]);
+
+    // 1. Deleting unrelated PartB leaves PartC's blocker ("Block") intact: zero imports re-read.
+    doc.remove_component_tree(comp_b).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert_eq!(work.imports_read, 0, "unrelated delete must keep PartC and PartD cached: {work:?}");
+    assert_eq!(model.last_recomputed, 0, "{work:?}");
+    assert_eq!(names(&model), ["Block", "Block (2)", "Cap"]);
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    assert_eq!(import_snapshot(&model), import_snapshot(&fresh));
+
+    // Save this colliding state and reopen it before removing the blocker.
+    let saved = model.saved(&doc).unwrap();
+    let mut reopened = Model::adopt(&doc, &saved).unwrap();
+
+    // 2. Deleting PartA frees "Block": PartC must re-evaluate and claim "Block", while PartD stays cached.
+    doc.remove_component_tree(comp_a).unwrap();
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    let expected = import_snapshot(&fresh);
+    assert_eq!(names(&fresh), ["Block", "Cap"]);
+
+    for (what, candidate) in [("in-session", &mut model), ("opened", &mut reopened)] {
+        let work = counted(|| candidate.evaluate(&doc));
+        assert_eq!(work.imports_read, 1, "{what}: only PartC should re-evaluate when its blocker disappears: {work:?}");
+        assert_eq!(candidate.last_recomputed, 1, "{what}: {work:?}");
+        assert_eq!(import_snapshot(candidate), expected, "{what}");
+    }
+    assert_eq!(names(&model), ["Block", "Cap"]);
+
+    // 3. Introducing a new collision ("Cap" in PartC) before PartD must force PartD to re-evaluate
+    //    and disambiguate to "Cap (2)".
+    doc.feature_mut(feat_c).unwrap().body_names = vec!["Cap".into()];
+    let work = counted(|| model.evaluate(&doc));
+    assert_eq!(work.imports_read, 2, "PartC and colliding PartD must both evaluate: {work:?}");
+    assert_eq!(model.last_recomputed, 2, "{work:?}");
+    assert_eq!(names(&model), ["Cap", "Cap (2)"]);
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    assert_eq!(import_snapshot(&model), import_snapshot(&fresh));
 }
 
 /// Pinning body names fingerprints the timeline again only from the first renamed feature on
