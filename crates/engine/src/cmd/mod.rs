@@ -168,7 +168,7 @@ pub use component_link::resolve_design_links;
 mod config;
 mod design_drawings;
 mod design_internal;
-pub use design_internal::{in_work_folder, internal_owner, set_work_folder_hider, tidy_work_folder};
+pub use design_internal::{in_work_folder, internal_owner, set_work_folder_hider, tidy_work_folder, unpack_work_files};
 mod design_link;
 mod design_stamps;
 mod documents;

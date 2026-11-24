@@ -23,6 +23,11 @@ pub struct Locks {
     held: BTreeMap<String, u64>,
     /// When the locks were last written again.
     refreshed: u64,
+    /// Designs closed while one of their internal components was still open in a tab (#6892):
+    /// their work folders are tidied once that tab has closed too.
+    untidy: BTreeSet<String>,
+    /// Whether the hybrid environment was on at the last look, to see it being turned on.
+    hybrid: bool,
 }
 
 /// An Open waiting for the answer to "open elsewhere".
@@ -56,6 +61,18 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     if app.locks.is_none() {
         return;
     }
+    // The environment was switched to hybrid with designs open (#6892): they were opened with
+    // no work files, and get them now, so their internal components can be edited in place.
+    let hybrid = solidcraft_engine::experimental_file_kinds();
+    if app.locks.as_ref().is_some_and(|locks| hybrid && !locks.hybrid) {
+        solidcraft_engine::unpack_work_files(&mut app.session);
+        for slot in app.docs.background_mut() {
+            solidcraft_engine::unpack_work_files(&mut slot.session);
+        }
+    }
+    if let Some(locks) = app.locks.as_mut() {
+        locks.hybrid = hybrid;
+    }
     let wanted = wanted(app);
     let open: Vec<String> = std::iter::once(&app.session).chain(app.docs.background()).filter_map(|s| s.path.clone()).collect();
     let Some(locks) = app.locks.as_mut() else { return };
@@ -64,14 +81,18 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     if refresh {
         locks.refreshed = now;
     }
+    let mut untidy = Vec::new();
     locks.held.retain(|path, _| {
         let keep = wanted.contains(path);
         if !keep {
             design_lock::remove(std::path::Path::new(path));
-            tidy(path, &open, now);
+            untidy.push(path.clone());
         }
         keep
     });
+    // A design whose part was still open in a tab waits, and is tidied when that tab has gone.
+    locks.untidy.extend(untidy);
+    locks.untidy.retain(|path| !wanted.contains(path) && !tidy(path, &open, now));
     for path in wanted {
         let new = !locks.held.contains_key(&path);
         let opened = *locks.held.entry(path.clone()).or_insert(now);
@@ -92,7 +113,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 pub fn close(app: &mut SolveApp) {
     if let Some(locks) = app.locks.take() {
         let now = design_lock::now_secs();
-        for path in locks.held.keys() {
+        for path in locks.held.keys().chain(&locks.untidy) {
             design_lock::remove(std::path::Path::new(path));
             tidy(path, &[], now);
         }
@@ -102,14 +123,17 @@ pub fn close(app: &mut SolveApp) {
 /// The design at `path` was closed here: its internal components' work folder is tidied
 /// (`solidcraft_engine::tidy_work_folder`), unless another SolidCraft still has the design open
 /// or one of its internal components is open in a tab of this app (`open`: every tab's file).
-fn tidy(path: &str, open: &[String], now: u64) {
+/// Whether it is settled: `false` while a tab still has one of its components open, so it is
+/// tried again.
+fn tidy(path: &str, open: &[String], now: u64) -> bool {
     if design_lock::held_elsewhere(std::path::Path::new(path), now).is_some() {
-        return;
+        return true;
     }
     if open.iter().any(|file| file == path || solidcraft_engine::in_work_folder(path, file)) {
-        return;
+        return false;
     }
     solidcraft_engine::tidy_work_folder(path);
+    true
 }
 
 /// Before an interactive Open of a design: when another SolidCraft has it open, hold the request

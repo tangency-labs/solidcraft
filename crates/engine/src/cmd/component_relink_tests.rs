@@ -2865,3 +2865,33 @@ fn a_save_without_linked_bodies_keeps_the_bodies_of_a_linked_step_file() {
     assert!(listed["links"].as_array().unwrap().iter().all(|l| l["changed"] != true), "{listed}");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A design opened while no work files are made (read as the Single design environment reads
+/// it: its folder deleted here) gets them when asked (#6892), as the app asks when the
+/// environment is switched to hybrid with the design open. A design opened read-only gets none.
+#[test]
+fn a_design_open_without_work_files_gets_them_when_the_environment_turns_hybrid() {
+    crate::set_experimental_file_kinds(true);
+    let root = folder("unpack-when-hybrid");
+    part(&root.join("bracket.scprt"), 10);
+    let design = root.join("counter.sc");
+    let work = root.join(".~counter.sc.parts");
+    let mut s = Session::default();
+    run(&mut s, "file.save", json!({"path": design}));
+    run(&mut s, "component.insert_design", json!({"path": root.join("bracket.scprt")}));
+    run(&mut s, "component.make_internal", json!({"component": "bracket"}));
+    run(&mut s, "file.save", json!({}));
+    std::fs::remove_dir_all(&work).unwrap();
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["found"], false);
+    assert!(crate::unpack_work_files(&mut s));
+    assert!(work.join("bracket.scprt").is_file(), "the part has its work file");
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["found"], true);
+    assert!(s.recovery_components.is_empty(), "a file just unpacked is what the design holds");
+
+    std::fs::remove_dir_all(&work).unwrap();
+    let mut read_only = Session::default();
+    run(&mut read_only, "doc.open", json!({"path": design, "read_only": true}));
+    assert!(!crate::unpack_work_files(&mut read_only));
+    assert!(!work.exists(), "a read-only open writes nothing");
+    let _ = std::fs::remove_dir_all(root);
+}

@@ -58,6 +58,23 @@ fn linked(doc: &Document) -> BTreeSet<String> {
     doc.links.values().filter_map(|link| internal::linked(&link.path)).map(str::to_string).collect()
 }
 
+/// The design `s` holds gets its work files now where it has none (#6892): it was opened
+/// while the environment made none (Single design) and the environment is hybrid now, so Edit in
+/// Place and Open Linked Design have a file to open. As an open does it: nothing for a design
+/// with no file or opened read-only, nothing outside the hybrid environment, and a work file
+/// that differs from what the design's file holds waits as a recovery component. Whether it
+/// looked.
+pub fn unpack_work_files(s: &mut crate::Session) -> bool {
+    let Some(path) = s.path.clone() else { return false };
+    if s.read_only || !super::experimental_file_kinds() || linked(&s.doc).is_empty() {
+        return false;
+    }
+    let unpacked = unpack(&s.doc, &path);
+    s.recovery_components.extend(unpacked.differ);
+    super::design_drawings::unpack(&s.doc, &path, s.design_kind);
+    true
+}
+
 /// What [`unpack`] did.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Unpacked {
