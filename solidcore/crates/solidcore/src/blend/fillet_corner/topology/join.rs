@@ -304,7 +304,9 @@ fn unequal_blends(
             )
         }
         (Some(SolverObject::ConstantDistance(a)), Some(SolverObject::ConstantDistance(b)))
-            if cliff_join =>
+            if cliff_join
+                && a.solver.station_setback().is_none()
+                && b.solver.station_setback().is_none() =>
         {
             ([a.distance(); 2], [b.distance(); 2], FitKind::Chord)
         }

@@ -121,6 +121,8 @@ frame_member
   moves: pairs[0].b.at[0], pairs[0].b.at[1], pairs[0].b.at[2]
 frame_member_sketch
   profiles: 2 all
+frame_trim
+  moves: to[1].plane.axis_dir[0], to[1].plane.axis_dir[1], to[1].plane.axis_origin[0], to[1].plane.axis_origin[1], to[1].plane.axis_origin[2]
 frame_plate
   moves: plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2]
 emboss

@@ -206,7 +206,9 @@ impl Renderer {
         device
             .poll(wgpu::PollType::Wait { submission_index: None, timeout: Some(std::time::Duration::from_secs(10)) })
             .map_err(|e| GpuError::Render(format!("anti-aliasing check wait: {e}")))?;
-        rx.try_recv()
+        // Another thread polling the same device can pick up this map's callback and run it a moment
+        // after our poll returns, so wait for it (bounded) instead of expecting it to be there already.
+        rx.recv_timeout(std::time::Duration::from_secs(10))
             .map_err(|e| GpuError::Render(format!("anti-aliasing check callback: {e}")))?
             .map_err(|e| GpuError::Render(format!("anti-aliasing check map: {e}")))?;
         let bytes = slice.get_mapped_range().map_err(|e| GpuError::Render(e.to_string()))?;
