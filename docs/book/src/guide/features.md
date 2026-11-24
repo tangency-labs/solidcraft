@@ -302,6 +302,31 @@ local segment. Preview does not change the design; OK creates one editable timel
 The plane follows later path edits. Curved paths use their sampled polyline; absolute distance,
 reference-object placement and multi-curve chains are not yet available in this dialog.
 
+## Cell Grid
+
+`solid.cell_grid` fills the closed profiles of a sketch with cells and cuts them out of the bodies
+(vents, grilles, weight-saving pockets), or with `mode: raised` stands them on the sketch plane as
+material. A profile's outer loop is the field; a loop inside it is a keep-out.
+
+The cells are hexagons, squares, triangles, circles or regular polygons (`shape`, with `size`), or
+your own: `shape: sketch` repeats the one closed profile of another sketch of the design
+(`cell_sketch`, lines and arcs, no holes), drawn and constrained like any sketch. A sketched cell
+has no lattice of its own, so you give the layout:
+
+- `pitch_x`, `pitch_y`: the distance between cell origins along a row and between rows.
+- `stagger`: how far each row shifts along the row, as a fraction of `pitch_x`, 0 to 1 (default 0).
+  0.5 gives hexagonal and brick layouts; other values give a skewed lattice.
+- `cell_angle`: turns the cell about its own origin. `angle` turns the whole grid, as for every shape.
+- `flip`: mirrors every other cell (row plus column odd), for cells that interlock.
+- `cell_origin`: the cell's origin as `[x, y]` in the cell sketch's own coordinates (default: the
+  profile's centroid). `anchor` is where the origin of the first cell sits.
+
+`web` is the least distance between neighbouring cells, checked exactly on the lines and arcs: a
+pitch that makes a cell overlap a neighbour or come nearer than `web` is refused. `size`, `sides`
+and `dot_grid` are not used by a sketched cell. `clip` defaults to `whole` for a sketched cell
+(`snap` for the built-in shapes), `free` trims the cells at the edge, and `snap` is refused.
+A cell sketch with no closed profile, or with several, is refused with the sketch's name.
+
 ## Section Analysis
 
 Section Analysis cuts the view, not the design: what lies beyond the section's planes is hidden

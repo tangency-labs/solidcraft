@@ -409,6 +409,44 @@ impl JsonSchema for PointExpr3 {
     }
 }
 
+/// A point of a sketch's own plane: `[x, y]` or `{"x", "y"}`, each a number or a length
+/// expression, as `cell_grid::cell_origin` reads it. Whether the expressions evaluate is checked
+/// by the handler, which has the design.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PointExpr2(pub [Expr; 2]);
+
+impl<'de> Deserialize<'de> for PointExpr2 {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let coords: Option<Vec<&Value>> = match &v {
+            Value::Array(a) if a.len() == 2 => Some(a.iter().collect()),
+            Value::Object(o) => ["x", "y"].iter().map(|k| o.get(*k)).collect(),
+            _ => None,
+        };
+        coords
+            .and_then(|c| c.into_iter().map(|c| params::expr(&wrap(c.clone()), "v")).collect::<Option<Vec<Expr>>>())
+            .and_then(|c| <[Expr; 2]>::try_from(c).ok())
+            .map(PointExpr2)
+            .ok_or_else(|| D::Error::custom("must be a point [x, y] of numbers or length expressions"))
+    }
+}
+
+impl JsonSchema for PointExpr2 {
+    fn schema_name() -> Cow<'static, str> {
+        "PointExpr2".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let c = generator.subschema_for::<LengthExpr>();
+        json_schema!({
+            "description": "A point of a sketch: [x, y] or {\"x\", \"y\"}, each a number in mm or a length expression.",
+            "anyOf": [
+                {"type": "array", "items": c, "minItems": 2, "maxItems": 2},
+                {"type": "object", "properties": {"x": c, "y": c}, "required": ["x", "y"]}
+            ]
+        })
+    }
+}
+
 /// A feature referred to by its id (a number) or its name (a string).
 #[derive(Clone, Debug, PartialEq)]
 pub struct IdOrName(pub String);

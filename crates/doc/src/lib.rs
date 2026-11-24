@@ -189,6 +189,7 @@ pub use eval::ThreadInfo;
 pub use eval::blend_target;
 pub use eval::cell_grid::MAX_CUT_CELLS;
 pub use eval::cell_grid::SLOW_CUT_CELLS;
+pub use eval::cell_grid::cell_profile;
 pub use eval::curve_pick_error;
 pub use eval::draft_corner_options;
 pub use eval::edge_names_for;

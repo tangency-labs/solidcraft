@@ -1715,9 +1715,43 @@ pub enum FeatureKind {
         /// The centres' grid for circles and polygons.
         #[serde(default = "default_cell_dot_grid")]
         dot_grid: solidcore_record::cell_grid::DotGrid,
-        /// A cell's inscribed diameter.
+        /// A cell's inscribed diameter. Not used by a sketched cell (`cell_sketch`), which has
+        /// its own outline and is laid out by `pitch_x` and `pitch_y`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Cell size")]
-        size: Expr,
+        size: Option<Expr>,
+        /// The sketch holding the cell, with exactly one closed profile (#21722): the cells are
+        /// that profile repeated on a lattice, instead of one of the built-in `shape`s (which is
+        /// then not used). Saved by designs of a newer format.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cell_sketch: Option<SketchId>,
+        /// A sketched cell's distance between origins along a row.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Pitch X")]
+        pitch_x: Option<Expr>,
+        /// A sketched cell's distance between rows.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Pitch Y")]
+        pitch_y: Option<Expr>,
+        /// How far each row shifts along the row, as a fraction of `pitch_x` (0 to 1; default 0).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Stagger")]
+        stagger: Option<Expr>,
+        /// A sketched cell's turn about its own origin, apart from the grid's `angle`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Cell angle")]
+        cell_angle: Option<Expr>,
+        /// Mirror every other sketched cell (those with `i + j` odd).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        /// A sketched cell's origin in its sketch's own coordinates (default: the profile's
+        /// centroid); both or neither.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Cell origin X")]
+        cell_origin_x: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Cell origin Y")]
+        cell_origin_y: Option<Expr>,
         /// The wall between neighbouring cells.
         #[walk(length = "Web")]
         web: Expr,

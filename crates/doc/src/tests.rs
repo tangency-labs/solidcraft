@@ -2551,3 +2551,36 @@ fn a_closed_control_spline_design_saves_and_reopens_unchanged() {
     model.evaluate(&reopened);
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
 }
+
+#[test]
+fn an_old_cell_grid_has_no_sketched_cell_and_is_saved_as_it_was() {
+    // A design from before the sketched cell (#21722): a built-in shape and a size, none of the
+    // sketched cell's fields. It reads with them all absent and writes none of them back.
+    let old = serde_json::json!({
+        "type": "cell_grid", "sketch": 1, "profiles": {"type": "all"}, "shape": "square",
+        "size": "10", "web": "2", "clip": "whole", "depth": "1.5"
+    });
+    let kind: FeatureKind = serde_json::from_value(old.clone()).unwrap();
+    let FeatureKind::CellGrid { size, cell_sketch, pitch_x, pitch_y, stagger, cell_angle, flip, cell_origin_x, cell_origin_y, .. } = &kind else {
+        panic!("a cell grid");
+    };
+    assert!(size.is_some() && cell_sketch.is_none() && pitch_x.is_none() && pitch_y.is_none());
+    assert!(stagger.is_none() && cell_angle.is_none() && !flip && cell_origin_x.is_none() && cell_origin_y.is_none());
+    let saved = serde_json::to_value(&kind).unwrap();
+    for key in ["cell_sketch", "pitch_x", "pitch_y", "stagger", "cell_angle", "flip", "cell_origin_x", "cell_origin_y"] {
+        assert!(saved.get(key).is_none(), "{key} in {saved}");
+    }
+    assert_eq!(saved.get("size"), old.get("size"));
+    // A sketched cell has no size, and keeps its layout through a save.
+    let sketched = serde_json::json!({
+        "type": "cell_grid", "sketch": 1, "profiles": {"type": "all"}, "web": "2", "depth": "1.5",
+        "cell_sketch": 2, "pitch_x": "20", "pitch_y": "20", "stagger": "0.5", "flip": true
+    });
+    let kind: FeatureKind = serde_json::from_value(sketched.clone()).unwrap();
+    let saved = serde_json::to_value(&kind).unwrap();
+    for key in ["cell_sketch", "pitch_x", "pitch_y", "stagger", "flip"] {
+        assert_eq!(saved.get(key), sketched.get(key), "{key}");
+    }
+    assert!(saved.get("size").is_none());
+    assert_eq!(kind.input_sketches(), vec![1, 2], "deleting the cell's sketch deletes the grid");
+}

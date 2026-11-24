@@ -506,3 +506,244 @@ fn snap_inset_leaves_a_thicker_rim_and_needs_snap() {
     assert!(build(json!({"snap_inset": 1.5})).0.is_err());
     assert!(build(json!({"snap_inset": -1})).0.is_err());
 }
+
+/// A sketch `name` holding the cell, in its own coordinates, 500 mm above the plane (away from the
+/// plate, so nothing is projected into it): an L of lines with a semicircular arc closing its
+/// tall arm.
+///
+///   (0,0) -> (8,0) -> (8,3) -> (3,3) -> (3,8), the arc through (1.5,9.5) to (0,8), (0,8) -> (0,0).
+///
+/// Area: the bar 8 x 3 = 24, the arm 3 x 5 = 15 and the half disc of radius 1.5, 9 pi / 8 = 3.534,
+/// so A = 39 + 9 pi / 8 = 42.534. The centroid (the origin of a cell when `cell_origin` is not
+/// given) is x = (24 * 4 + 15 * 1.5 + 3.534 * 1.5) / A = 2.9107 and, taking the half disc's first
+/// moment about y = 8 as 2/3 r^3 = 2.25, y = (24 * 1.5 + 15 * 5.5 + 3.534 * 8 + 2.25) / A = 3.5036.
+fn l_cell(s: &mut Session, name: &str) {
+    run(s, "sketch.create", json!({"plane": "XY", "offset": 500, "name": name}));
+    run(s, "sketch.line", json!({"points": [[0, 0], [8, 0], [8, 3], [3, 3], [3, 8]]}));
+    run(s, "sketch.arc.three_point", json!({"start": [3, 8], "end": [0, 8], "through": [1.5, 9.5]}));
+    run(s, "sketch.line", json!({"points": [[0, 8], [0, 0]]}));
+    run(s, "sketch.finish", json!({}));
+}
+
+fn l_area() -> f64 {
+    39.0 + 9.0 * std::f64::consts::PI / 8.0
+}
+
+/// A 100 x 100 x 3 plate with the field sketched on its bottom face and the L cell in "Cell".
+fn l_plate() -> Session {
+    let mut s = plate(100.0, 3.0);
+    l_cell(&mut s, "Cell");
+    s
+}
+
+/// A sketched grid on the plate: pitch 20 x 20, stagger 0.5, web 2, cell (0,0) with its origin at
+/// (3, 4), so each cell spans x -2.9107..5.0893 and y -3.5036..5.9964 about its origin. Whole clip is
+/// the default for a sketched cell and is not given.
+fn sketched(s: &mut Session, extra: Value) -> Result<Value, crate::EngineError> {
+    let mut p = json!({"sketch": "Field", "shape": "sketch", "cell_sketch": "Cell", "pitch_x": 20, "pitch_y": 20, "stagger": 0.5, "web": 2, "anchor": [3, 4, 0]});
+    for (k, v) in extra.as_object().cloned().unwrap_or_default() {
+        p[k] = v;
+    }
+    s.execute("solid.cell_grid", &p)
+}
+
+/// `base` with the keys of `extra` set over it.
+fn with(mut base: Value, extra: Value) -> Value {
+    for (k, v) in extra.as_object().cloned().unwrap_or_default() {
+        base[k] = v;
+    }
+    base
+}
+
+fn cell_grid_clip(s: &Session) -> Option<solidcore_record::cell_grid::Clip> {
+    s.doc.features.iter().find_map(|f| match &f.kind {
+        solidcraft_doc::FeatureKind::CellGrid { clip, .. } => Some(*clip),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_sketched_l_cell_cut_on_a_staggered_lattice_removes_exactly_its_volume() {
+    // Rows are 20 apart and row j is shifted 10 j along; origins are (3 + 20 i + 10 j, 4 + 20 j).
+    // Whole cells in the 100 x 100 field: rows j = 0..4 (the cell spans y 0.4964 + 20 j to
+    // 9.9964 + 20 j; row 5 would end at 109.99, row -1 starts below 0). In an even row x runs
+    // 0.0893 + 20 k to 8.0893 + 20 k: k = 0..4 (k = 5 ends at 108), five cells. In an odd row the
+    // shift of 10 gives 10.0893 + 20 k to 18.0893 + 20 k: k = 0..4 ends at 98.09, five cells, and
+    // k = -1 starts at -9.9. So 5 x 5 = 25 cells and the cut takes 25 * A * 1.5 from the
+    // 100 x 100 x 3 plate.
+    let mut s = l_plate();
+    sketched(&mut s, json!({"depth": 1.5})).unwrap();
+    let expect = 100.0 * 100.0 * 3.0 - 25.0 * l_area() * 1.5;
+    assert!((volume(&s) - expect).abs() < 1e-3, "{} vs {expect}", volume(&s));
+    assert_eq!(cell_grid_clip(&s), Some(solidcore_record::cell_grid::Clip::Whole), "a sketched cell defaults to whole");
+}
+
+#[test]
+fn a_sketched_l_cell_raised_adds_the_volume_the_cut_removes() {
+    // The same 25 cells, standing below the plate's bottom face and joined to it.
+    let mut s = l_plate();
+    sketched(&mut s, json!({"mode": "raised", "depth": 1.5, "direction": "negative"})).unwrap();
+    let expect = 100.0 * 100.0 * 3.0 + 25.0 * l_area() * 1.5;
+    assert!((volume(&s) - expect).abs() < 1e-3, "{} vs {expect}", volume(&s));
+    assert_eq!(s.model.state().bodies.len(), 1, "the cells join the plate");
+}
+
+#[test]
+fn a_sketched_cell_follows_its_sketch_and_its_parameters() {
+    let mut s = l_plate();
+    run(&mut s, "parameters.add", json!({"name": "px", "expression": "20 mm"}));
+    sketched(&mut s, json!({"depth": 1.5, "pitch_x": "px"})).unwrap();
+    // Pitch 25: even rows x 0.0893 + 25 k (k = 0..3, k = 4 ends at 108), odd rows 12.5 shifted:
+    // 12.5 + 0.0893 + 25 k ends at 8.0893 + 12.5 + 25 k <= 100 for k = 0..3: 4 cells per row,
+    // 20 cells in the five rows.
+    run(&mut s, "parameters.change", json!({"name": "px", "expression": "25 mm"}));
+    let expect = 100.0 * 100.0 * 3.0 - 20.0 * l_area() * 1.5;
+    assert!((volume(&s) - expect).abs() < 1e-3, "{} vs {expect}", volume(&s));
+}
+
+#[test]
+fn a_cell_sketch_must_hold_exactly_one_closed_profile() {
+    let mut s = l_plate();
+    // Two separate squares: two profiles.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 600, "name": "Two"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [4, 4]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 0], "p1": [14, 4]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = sketched(&mut s, json!({"depth": 1, "cell_sketch": "Two"})).unwrap_err().to_string();
+    assert!(e.contains("Two") && e.contains("2 closed profiles"), "{e}");
+    // A sketch with only an open line: no profile.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 700, "name": "Open"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [5, 0], [5, 5]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = sketched(&mut s, json!({"depth": 1, "cell_sketch": "Open"})).unwrap_err().to_string();
+    assert!(e.contains("Open"), "{e}");
+    assert!(s.doc.features.iter().all(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::CellGrid { .. })));
+}
+
+#[test]
+fn a_sketched_cell_needs_its_sketch_and_its_pitch() {
+    let mut s = l_plate();
+    let mut p = json!({"sketch": "Field", "shape": "sketch", "cell_sketch": "Cell", "pitch_x": 20, "pitch_y": 20, "web": 2, "depth": 1});
+    for gone in ["cell_sketch", "pitch_x", "pitch_y"] {
+        let mut q = p.clone();
+        q.as_object_mut().unwrap().remove(gone);
+        let e = s.execute("solid.cell_grid", &q).unwrap_err().to_string();
+        assert!(e.contains(gone), "{gone}: {e}");
+    }
+    p["cell_sketch"] = json!("Nowhere");
+    assert!(s.execute("solid.cell_grid", &p).unwrap_err().to_string().contains("Nowhere"));
+    // The field's own sketch is a sketch with a profile, so it is a cell (a 100 mm square the lattice cannot hold).
+    p["cell_sketch"] = json!("Field");
+    assert!(s.execute("solid.cell_grid", &p).is_err());
+    // The sketch-only parameters are refused with a built-in shape.
+    for extra in [
+        json!({"cell_sketch": "Cell"}),
+        json!({"pitch_x": 20}),
+        json!({"stagger": 0.5}),
+        json!({"flip": true}),
+        json!({"cell_angle": 10}),
+        json!({"cell_origin": [0, 0]}),
+    ] {
+        let e = cut(&mut s, with(json!({"depth": 1, "shape": "hexagon"}), extra.clone())).unwrap_err().to_string();
+        assert!(e.contains("shape: sketch"), "{extra}: {e}");
+    }
+}
+
+#[test]
+fn a_pitch_too_tight_for_the_cell_and_the_web_is_refused_as_a_layout() {
+    // The cell is 8 wide: at pitch 9 the neighbours are 1 mm apart, closer than the 2 mm web.
+    let mut s = l_plate();
+    let e = sketched(&mut s, json!({"depth": 1, "pitch_x": 9, "pitch_y": 40, "stagger": 0})).unwrap_err().to_string();
+    assert!(e.contains("the layout"), "{e}");
+    // A pitch smaller than the cell's width overlaps outright.
+    let e = sketched(&mut s, json!({"depth": 1, "pitch_x": 5, "pitch_y": 40, "stagger": 0})).unwrap_err().to_string();
+    assert!(e.contains("the layout"), "{e}");
+    assert!(s.doc.features.iter().all(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::CellGrid { .. })));
+}
+
+#[test]
+fn snap_is_refused_for_a_sketched_cell_and_free_is_allowed() {
+    let mut s = l_plate();
+    for p in [json!({"clip": "snap"}), json!({"keepout_clip": "snap"}), json!({"clip": "free", "keepout_clip": "snap"})] {
+        let e = sketched(&mut s, with(json!({"depth": 1}), p.clone())).unwrap_err().to_string();
+        assert!(e.contains("snap") && e.contains("whole or free"), "{p}: {e}");
+    }
+    sketched(&mut s, json!({"depth": 1, "clip": "free"})).unwrap();
+    assert_eq!(cell_grid_clip(&s), Some(solidcore_record::cell_grid::Clip::Free));
+    // No cell of this lattice crosses the field's edge, so free keeps the same 25 whole cells.
+    assert!((volume(&s) - (100.0 * 100.0 * 3.0 - 25.0 * l_area())).abs() < 1e-3, "{}", volume(&s));
+}
+
+#[test]
+fn a_sketched_grids_size_sides_and_dot_grid_are_not_used() {
+    let mut s = l_plate();
+    sketched(&mut s, json!({"depth": 1.5, "size": 0, "sides": 1, "dot_grid": "square"})).unwrap();
+    let expect = 100.0 * 100.0 * 3.0 - 25.0 * l_area() * 1.5;
+    assert!((volume(&s) - expect).abs() < 1e-3, "{} vs {expect}", volume(&s));
+}
+
+#[test]
+fn a_sketched_cell_turned_flipped_or_given_an_origin_is_still_planned_exactly() {
+    // A cell origin at the profile's corner (0, 0) and the anchor at (3, 4): the cell spans x 3..11,
+    // y 4..13.5, so every cell is 8 wide and 9.5 tall as before and the count follows from it.
+    // Rows 4 + 20 j .. 13.5 + 20 j: j = 0..4 (j = 4 ends at 93.5; the next starts at 104). Even rows
+    // 3 + 20 k .. 11 + 20 k, k = 0..4 (ends 91); odd rows 13 + 20 k .. 21 + 20 k, k = 0..4 (ends
+    // 101: out), so k = 0..3: 4 cells. Rows 0, 2, 4 have 5, rows 1, 3 have 4: 5 * 3 + 4 * 2 = 23.
+    let mut s = l_plate();
+    sketched(&mut s, json!({"depth": 1.5, "cell_origin": [0, 0]})).unwrap();
+    let expect = 100.0 * 100.0 * 3.0 - 23.0 * l_area() * 1.5;
+    assert!((volume(&s) - expect).abs() < 1e-3, "{} vs {expect}", volume(&s));
+    // Flipped (alternate cells mirrored) and turned cells keep the area of every cell: the planner
+    // checks them exactly, so the volume is a whole number of cell areas.
+    for extra in [json!({"flip": true}), json!({"cell_angle": 90})] {
+        let mut t = l_plate();
+        sketched(&mut t, with(json!({"depth": 1.5, "pitch_x": 30, "pitch_y": 30, "stagger": 0}), extra.clone())).unwrap();
+        let removed = 100.0 * 100.0 * 3.0 - volume(&t);
+        let cells = removed / (l_area() * 1.5);
+        assert!((cells - cells.round()).abs() < 1e-6 && cells >= 1.0, "{extra}: {cells} cells");
+    }
+}
+
+#[test]
+fn hostile_sketched_cell_parameters_are_refused_without_a_feature() {
+    let mut s = l_plate();
+    for p in [
+        json!({"pitch_x": -20}),
+        json!({"pitch_x": 0}),
+        json!({"pitch_y": 0}),
+        json!({"pitch_y": -1}),
+        json!({"pitch_x": f64::NAN}),
+        json!({"pitch_y": f64::INFINITY}),
+        json!({"pitch_x": 1e300}),
+        json!({"pitch_x": 1e-9}),
+        json!({"pitch_x": "twenty"}),
+        json!({"stagger": 1.5}),
+        json!({"stagger": -0.1}),
+        json!({"stagger": "2 mm"}),
+        json!({"cell_angle": "ten"}),
+        json!({"cell_angle": 1e300}),
+        json!({"flip": "yes"}),
+        json!({"cell_origin": [1]}),
+        json!({"cell_origin": [1, 2, 3]}),
+        json!({"cell_origin": [1e12, 0]}),
+        json!({"cell_origin": ["a", "b"]}),
+        json!({"cell_origin": 5}),
+        json!({"cell_sketch": true}),
+        json!({"cell_sketch": 999}),
+        json!({"web": -1}),
+        json!({"web": f64::NAN}),
+        json!({"depth": f64::NAN}),
+        json!({"clip": "snap"}),
+    ] {
+        assert!(sketched(&mut s, with(json!({"depth": 1}), p.clone())).is_err(), "{p}");
+    }
+    assert!(s.doc.features.iter().all(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::CellGrid { .. })));
+}
+
+#[test]
+fn the_command_help_names_the_sketched_cell() {
+    let help = crate::cmd::find_command("solid.cell_grid").map(|c| c.params).unwrap_or_default();
+    for word in ["sketch", "cell_sketch", "pitch_x", "pitch_y", "stagger", "cell_angle", "flip", "cell_origin", "whole with shape sketch"] {
+        assert!(help.contains(word), "{word}: {help}");
+    }
+}

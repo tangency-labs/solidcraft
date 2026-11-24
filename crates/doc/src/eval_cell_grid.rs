@@ -32,6 +32,14 @@ pub(crate) fn tools(
         sides,
         dot_grid,
         size,
+        cell_sketch,
+        pitch_x,
+        pitch_y,
+        stagger,
+        cell_angle,
+        flip,
+        cell_origin_x,
+        cell_origin_y,
         web,
         angle,
         anchor,
@@ -89,7 +97,12 @@ pub(crate) fn tools(
         shape: *shape,
         sides,
         dot_grid: *dot_grid,
-        size: val(vals, size, Kind::Length)?,
+        size: match (size, cell_sketch) {
+            (Some(e), _) => val(vals, e, Kind::Length)?,
+            // A sketched cell has its outline and its pitch, not a size.
+            (None, Some(_)) => defaults.size,
+            (None, None) => return Err(DocError::Invalid("a cell grid needs a cell `size` (or a `cell_sketch`)".into())),
+        },
         web: val(vals, web, Kind::Length)?,
         angle: match angle {
             Some(e) => val(vals, e, Kind::Angle)?,
@@ -117,7 +130,39 @@ pub(crate) fn tools(
         },
     };
     let loops: Vec<solidcore_record::Loop2> = regions.iter().flat_map(|r| r.loops().cloned()).collect();
-    let plan = solidcore_ops::cell_grid::plan_cell_grid(&loops, &spec).map_err(|e| DocError::Invalid(e.to_string()))?;
+    let plan = match cell_sketch {
+        None => solidcore_ops::cell_grid::plan_cell_grid(&loops, &spec),
+        Some(id) => {
+            let origin = match (cell_origin_x, cell_origin_y) {
+                (Some(x), Some(y)) => Some(Vec2::new(val(vals, x, Kind::Length)?, val(vals, y, Kind::Length)?)),
+                (None, None) => None,
+                _ => return Err(DocError::Invalid("a cell origin needs both its x and its y".into())),
+            };
+            let need = |e: &Option<crate::Expr>, what: &str| match e {
+                Some(e) => val(vals, e, Kind::Length),
+                None => Err(DocError::Invalid(format!("a sketched cell needs `{what}`"))),
+            };
+            let cell = solidcore_record::cell_grid::SketchCell {
+                profile: cell_profile(
+                    st.sketch(id.0).ok_or_else(|| DocError::Unknown(format!("cell sketch {id} (it must come earlier in the timeline)")))?,
+                )?,
+                origin,
+                pitch_x: need(pitch_x, "pitch_x")?,
+                pitch_y: need(pitch_y, "pitch_y")?,
+                stagger: match stagger {
+                    Some(e) => val(vals, e, Kind::Unitless)?,
+                    None => 0.0,
+                },
+                cell_angle: match cell_angle {
+                    Some(e) => val(vals, e, Kind::Angle)?,
+                    None => 0.0,
+                },
+                flip: *flip,
+            };
+            solidcore_ops::cell_grid::plan_sketch_cell_grid(&loops, &cell, &spec)
+        }
+    }
+    .map_err(|e| DocError::Invalid(e.to_string()))?;
     if plan.cells.is_empty() {
         return Err(DocError::Invalid("no cell fits inside the profiles: use smaller cells, a thinner web or `clip: free`".into()));
     }
@@ -232,4 +277,26 @@ fn exact_reach(st: &ModelState, plane: &Plane, scope: &[String]) -> Result<f64> 
         return Err(DocError::Invalid("through all needs a body to cut".into()));
     }
     Ok(far * 1.02 + 1.0)
+}
+
+/// The cell of a sketched grid: the one closed profile of the sketch, as a loop in the sketch's own
+/// coordinates. A sketch with no closed profile, several, or one with a hole is refused, naming
+/// the sketch.
+pub fn cell_profile(ss: &SolvedSketch) -> Result<solidcore_record::Loop2> {
+    let chosen = select_profiles(ss, &ProfileSel::All)
+        .map_err(|e| DocError::Invalid(format!("the cell sketch `{}` holds no closed profile: {e}", ss.name)))?;
+    let regions = solidcraft_sketch::merge_regions(&chosen);
+    match regions.as_slice() {
+        [one] if one.holes.is_empty() => Ok(one.outer.clone()),
+        [one] => Err(DocError::Invalid(format!(
+            "the cell sketch `{}` holds a profile with {} holes: a cell is one closed profile without holes",
+            ss.name,
+            one.holes.len()
+        ))),
+        many => Err(DocError::Invalid(format!(
+            "the cell sketch `{}` holds {} closed profiles: a cell is exactly one closed profile",
+            ss.name,
+            many.len()
+        ))),
+    }
 }
