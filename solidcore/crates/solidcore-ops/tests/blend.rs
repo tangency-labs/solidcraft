@@ -3855,12 +3855,13 @@ fn a_session_failure_says_what_its_session_noted() {
     let e = s.do_filleting(&mut k, None).unwrap_err();
     assert_eq!(
         blend::failure(&e).unwrap().to_string(),
-        "the blend failed (status 1001): the fillet body has no faces"
+        "the blend failed (status 1001): failed: a step of the fillet executive failed (the \
+         error info says which)"
     );
     assert_eq!(
         blend::session_failure(&s, &e).unwrap().to_string(),
-        "the blend failed (status 1001): the fillet body has no faces: Fillet Surface \
-         Computation Failure: no fillet faces were made"
+        "the blend failed (status 1001): failed: a step of the fillet executive failed (the \
+         error info says which): Fillet Surface Computation Failure: no fillet faces were made"
     );
 }
 
@@ -5834,7 +5835,7 @@ fn capsule_section(plane: f64, round: f64, ball: bool) -> (f64, f64) {
 const HALF_CAPSULE: f64 = 0.5 * PI * 25.0 * 10.0 + 2.0 * PI * 125.0 / 3.0;
 
 /// An unequal chamfer of the half capsule's whole outline, the first size along the cut face,
-/// was refused ("the chamfer size", status 1007). The chain is measured at its narrowest
+/// was refused (then reported as "the chamfer size", status 1007). The chain is measured at its narrowest
 /// wedge, a right angle all round, and lifted to where unequal sizes do not fold, from each
 /// edge's widest wedge, which is bounded by its faces' normals enclosed along it. On a quarter
 /// arc that ends at a sphere's pole the normal `S_u x S_v` vanishes there, so the piece of the
@@ -6303,4 +6304,107 @@ fn a_chamfer_between_a_wall_and_a_cone_an_earlier_chamfer_made_builds() {
     assert_eq!(b.counts().unwrap(), [8, 18, 12]);
     let off = before - b.volume(1e-10).unwrap();
     assert!((0.264..=0.445).contains(&off), "the chamfer took off {off}");
+}
+
+/// #19724, the case #19789 did not cover. Rounding the 15° root together with a rib-end
+/// edge splits that round. The rib's cone is one 12° span. Read off its tangent leg, the
+/// centre misses the axis by more than the reload allows, the support was stored without
+/// its cone label, and the split round's net would not certify: the body could not be
+/// measured, and a later fillet of the unrelated rim was refused. The chord and the
+/// weight keep the cone label, so the body reads back and the rim fillet builds.
+#[test]
+fn a_round_meeting_a_short_rib_s_end_reads_back() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::sweep::revolve;
+    use solidcore_ops::BooleanOp;
+    all_fixes();
+    let line = |a: [f64; 3], b: [f64; 3]| Curve::Line { start: a, end: b };
+    let read_back = |body: Body, step: &str| {
+        let (record, _) = body.to_record().unwrap();
+        Body::from_record(&record, true)
+            .unwrap_or_else(|e| panic!("{step} does not read back: {e}"))
+            .0
+    };
+    // The frustum (radius 24 at x = 0, 36 at x = 48) and the 12° rib. Each revolve is
+    // read back before the join, as a feature's result is.
+    let cone = read_back(
+        revolve(
+            &[
+                line([0.0, 0.0, 0.0], [0.0, 0.0, -24.0]),
+                line([0.0, 0.0, -24.0], [48.0, 0.0, -36.0]),
+                line([48.0, 0.0, -36.0], [48.0, 0.0, 0.0]),
+                line([48.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+            ],
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            2.0 * PI,
+            true,
+        )
+        .unwrap(),
+        "the frustum",
+    );
+    // The rib profile turned −6° about X, so a 12° revolve is centred on the seam.
+    let tri = [
+        [18.0, 28.343_874_018, -2.979_061_203],
+        [26.743_129, 33.170_913_336, -3.486_403_479],
+        [27.370_857, 30.673_754_386, -3.223_941_497],
+    ];
+    let rib = read_back(
+        revolve(
+            &[
+                line(tri[0], tri[1]),
+                line(tri[1], tri[2]),
+                line(tri[2], tri[0]),
+            ],
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            12.0_f64.to_radians(),
+            true,
+        )
+        .unwrap(),
+        "the rib",
+    );
+    let b = read_back(
+        boolean(cone, rib, BooleanOp::Union).unwrap().unwrap(),
+        "the join",
+    );
+    // The 15° root, and the two edges where the rib's ends meet the cone (their mids).
+    let root = nearest_edge(&b, [18.0, 28.5, 0.0]);
+    let end_a = nearest_edge(&b, [22.685_428_5, 29.508_814, -3.101_501]);
+    let end_b = nearest_edge(&b, [22.685_428_5, 29.508_814, 3.101_501]);
+    assert!(root != end_a && root != end_b && end_a != end_b);
+    blend(
+        &b,
+        Blend::Round,
+        &[root, end_a, end_b],
+        &[2.0, 2.0, 2.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap_or_else(|e| panic!("the fillet builds: {e}"));
+    let (record, _) = b.to_record().unwrap();
+    for face in &record.faces {
+        let solidcore_record::brep::Surface::Blend { definition } = &face.surface else {
+            continue;
+        };
+        let solidcore_record::brep::blend::BlendDefinition::ExactRound(round) = definition.as_ref()
+        else {
+            continue;
+        };
+        for support in &round.supports {
+            let solidcore_record::brep::blend::SupportRecord::Nurbs { kind, .. } = support else {
+                continue;
+            };
+            assert!(
+                !matches!(kind, solidcore_record::brep::blend::SupportKindRecord::Free),
+                "a round support was stored without its cone label: {kind:?}"
+            );
+        }
+    }
+    let b = read_back(b, "the meeting fillet");
+    // (0, 0, −24) is also the cone's seam. A quarter turn away is only the sharp rim.
+    let rim = edge_at(&b, [0.0, 24.0, 0.0]);
+    blend(&b, Blend::Round, &[rim], &[2.0], &[], Corners::Filled)
+        .unwrap_or_else(|e| panic!("the rim fillet builds: {e}"));
+    read_back(b, "the rim fillet");
 }

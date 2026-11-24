@@ -70,6 +70,16 @@ impl Unpacked {
     }
 }
 
+static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Held while a package is written to or deleted from the plugins folder (an install's write and its
+/// stored approvals, a removal's delete), so two writes never overlap: a job the app gave up on can
+/// still be writing when the next one starts. Reading and checking a package takes no part in it, so a
+/// worker stuck in a read holds nothing. A holder that panicked leaves nothing locked.
+pub fn write_lock() -> std::sync::MutexGuard<'static, ()> {
+    WRITE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Files a desktop zip tool adds that are not part of the plugin.
 fn is_junk(path: &str) -> bool {
     path.starts_with("__MACOSX/") || path.rsplit('/').next().is_some_and(|name| name == ".DS_Store" || name == "Thumbs.db")
@@ -113,6 +123,16 @@ pub fn from_files(files: Vec<safe_zip::File>, archive: String) -> Result<Unpacke
         crate::EngineError::Plugin(e) => InstallError::Manifest(e),
         e => InstallError::Manifest(HostError::InvalidManifest { field: "manifest".into(), reason: e.to_string() }),
     })?;
+    // An install may ask for approval above the user's default, never above this hard ceiling.
+    if let Some(runtime) = &manifest.runtime
+        && runtime.limits.fuel > craft_plugin::MAX_APPROVED_FUEL
+    {
+        return Err(InstallError::Manifest(HostError::OverCeiling {
+            limit: "fuel".into(),
+            requested: runtime.limits.fuel,
+            allowed: craft_plugin::MAX_APPROVED_FUEL,
+        }));
+    }
     if let Some(runtime) = &manifest.runtime
         && !files.iter().any(|f| f.path == runtime.module)
     {
@@ -165,10 +185,17 @@ pub fn installed(plugins: &Path, id: &str) -> Option<(String, String)> {
     })
 }
 
-/// Writes `plugin` to `plugins/<id>/`. An installed plugin of that id is replaced only when
-/// `replace`; the old folder is kept until the new one is in place.
+/// [`install_locked`] under the write lock.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn install(plugin: &Unpacked, plugins: &Path, replace: bool) -> Result<PathBuf, InstallError> {
+    let _write = write_lock();
+    install_locked(plugin, plugins, replace)
+}
+
+/// Writes `plugin` to `plugins/<id>/`. An installed plugin of that id is replaced only when
+/// `replace`; the old folder is kept until the new one is in place. The caller holds [`write_lock`].
+#[cfg(not(target_arch = "wasm32"))]
+pub fn install_locked(plugin: &Unpacked, plugins: &Path, replace: bool) -> Result<PathBuf, InstallError> {
     let io = |e: std::io::Error| InstallError::Io(e.to_string());
     let id = &plugin.manifest.id;
     let target = plugins.join(id);

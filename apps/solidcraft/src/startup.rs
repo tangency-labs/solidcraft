@@ -1667,6 +1667,161 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// #4164: two windows saving at once leave `app.ron` holding one whole save, never a short
+    /// save with a longer one's tail behind it, and no temporary files. A window starting
+    /// meanwhile reads one whole save too.
+    #[test]
+    fn settings_saved_at_once_from_two_windows_stay_whole() {
+        let keys = ["solidcraft.prefs"];
+        let d = scratch("concurrent");
+        let path = d.join("app.ron");
+        let save = |size: usize| {
+            std::collections::HashMap::from([
+                ("solidcraft.prefs".to_string(), format!("{{\"grid\":{size}}}")),
+                ("window".to_string(), "x".repeat(size)),
+            ])
+        };
+        let (long, short) = (save(200_000), save(10));
+        let whole = |text: &str| ron::from_str::<std::collections::HashMap<String, String>>(text).is_ok_and(|kv| kv == long || kv == short);
+        eframe::save_to_disk(&path, &short);
+        let saving = std::sync::atomic::AtomicBool::new(true);
+        let damaged = std::thread::scope(|s| {
+            let reader = s.spawn(|| {
+                let mut damaged = 0;
+                while saving.load(std::sync::atomic::Ordering::Relaxed) {
+                    damaged += usize::from(!std::fs::read_to_string(&path).is_ok_and(|t| whole(&t)));
+                }
+                damaged
+            });
+            let writers: Vec<_> =
+                [&long, &short, &long, &short].into_iter().map(|kv| s.spawn(|| (0..40).for_each(|_| eframe::save_to_disk(&path, kv)))).collect();
+            writers.into_iter().for_each(|w| w.join().unwrap());
+            saving.store(false, std::sync::atomic::Ordering::Relaxed);
+            reader.join().unwrap()
+        });
+        assert_eq!(damaged, 0, "every read while saving found one whole save");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(whole(&text), "one whole save: {} bytes", text.len());
+        assert!(check_settings(&d, &keys).is_empty(), "the file reads");
+        let names: Vec<_> = std::fs::read_dir(&d).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(names, ["app.ron"], "no temporary files are left");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_settings_save_the_system_refuses_leaves_no_temporary_file() {
+        let d = scratch("refused-save");
+        let path = d.join("app.ron");
+        // A folder with something in it can't be replaced by a file, so every rename fails.
+        std::fs::create_dir_all(path.join("inside")).unwrap();
+        eframe::save_to_disk(&path, &std::collections::HashMap::from([("k".to_string(), "v".to_string())]));
+        assert!(path.join("inside").is_dir(), "what was there stays");
+        let names: Vec<_> = std::fs::read_dir(&d).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(names, ["app.ron"], "no temporary files are left");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn logic_only_ticks_and_extra_ui_passes_do_not_finish_startup() {
+        use eframe::App as _;
+
+        let d = scratch("logic-only");
+        assert_eq!(begin(&d), 0);
+        let path = d.join("graphics.json");
+        std::fs::write(&path, pending_backend("auto").to_string()).unwrap();
+        let attempt = prepare_backend_start(&path, true).unwrap().attempt.unwrap();
+        let ctx = egui::Context::default();
+        let solve = solidcraft_ui_egui::SolveApp::new(solidcraft_engine::Session::default(), solidcraft_ui_egui::Services::default());
+        let mut app = crate::App {
+            prefs_writer: crate::PrefsWriter::read(solve.prefs()),
+            solve,
+            setup: Default::default(),
+            gpu_job: None,
+            window_frames: 0,
+            starting: Some(d.clone()),
+            backend_attempt: Some((path.clone(), attempt)),
+            backend_guard: None,
+            safe_graphics_record: None,
+            full_graphics_up: None,
+            frames: 0,
+            up: false,
+            take_focus_unwanted: true,
+            come_forward: crate::come_forward::ComeForward::default(),
+            gpu: None,
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+            space_mouse: Some(crate::space_mouse::SpaceMouse::inactive()),
+            #[cfg(target_os = "macos")]
+            native_menu: None,
+            nav_bridge: crate::nav_bridge::NavBridge::inactive(),
+            dialog_folder: crate::DialogFolder::default(),
+            ctx: ctx.clone(),
+            #[cfg(target_os = "windows")]
+            window_move: crate::native_frame::WindowMove::default(),
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let input = egui::RawInput::default();
+        for _ in 0..3 {
+            let _ = ctx.run_logic(&input, |ctx| app.logic(ctx, &mut frame));
+            assert_eq!(app.frames, 0, "a logic-only update has not drawn a frame");
+            assert_eq!(app.window_frames, 0, "logic alone cannot show or focus the starting window");
+            assert!(app.starting.is_some());
+            assert!(app.backend_attempt.is_some());
+            assert!(backend_settings(&path).get(BACKEND_TRIAL).is_some());
+            assert!(d.join(MARKER).exists(), "a launch without a drawn window still counts as failed");
+        }
+
+        // A staged startup can remain busy across control updates and painted starting pages.
+        let ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let setup_ready = ready.clone();
+        app.setup = solidcraft_ui_egui::starting::Starting::default().until("", move |_, _| setup_ready.load(std::sync::atomic::Ordering::SeqCst));
+        ctx.run_ui(input.clone(), |ui| {
+            app.logic(ui.ctx(), &mut frame);
+            app.ui(ui, &mut frame);
+        })
+        .drop_without_applying_deltas();
+        assert_eq!(app.window_frames, 1);
+        assert_eq!(app.frames, 0, "a starting page is not an app frame");
+        assert!(app.backend_attempt.is_some());
+        ready.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = ctx.run_logic(&input, |ctx| app.logic(ctx, &mut frame));
+        assert!(app.setup.done(), "control updates can finish background setup");
+        assert_eq!(app.frames, 0, "finishing setup does not present an app frame");
+        assert!(d.join(MARKER).exists());
+
+        // Layout may discard its first pass: two UI calls still make only one drawn frame.
+        ctx.options_mut(|options| options.max_passes = 2.try_into().unwrap());
+        let mut passes = 0;
+        ctx.run_ui(input.clone(), |ui| {
+            app.logic(ui.ctx(), &mut frame);
+            app.ui(ui, &mut frame);
+            passes += 1;
+            ui.ctx().request_discard("exercise another layout pass during startup");
+        })
+        .drop_without_applying_deltas();
+        assert_eq!(passes, 2);
+        assert_eq!(app.frames, 1);
+        assert!(d.join(MARKER).exists(), "the first frame must be presented before startup completes");
+        assert!(app.backend_attempt.is_some());
+        assert!(backend_settings(&path).get(BACKEND_TRIAL).is_some());
+
+        for _ in 0..3 {
+            let _ = ctx.run_logic(&input, |ctx| app.logic(ctx, &mut frame));
+            assert_eq!(app.frames, 1);
+            assert!(d.join(MARKER).exists());
+        }
+        ctx.run_ui(input, |ui| {
+            app.logic(ui.ctx(), &mut frame);
+            app.ui(ui, &mut frame);
+        })
+        .drop_without_applying_deltas();
+        assert_eq!(app.frames, 2);
+        assert!(app.starting.is_none());
+        assert!(app.backend_attempt.is_none());
+        assert!(backend_settings(&path).get(BACKEND_TRIAL).is_none());
+        assert!(!d.join(MARKER).exists(), "the second drawn frame completes startup");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn launches_that_never_got_a_window_are_counted_until_one_does() {
         let d = scratch("marker");

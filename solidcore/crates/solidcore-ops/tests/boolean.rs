@@ -11,7 +11,7 @@ use std::io::Read as _;
 
 use serde_json::Value;
 use solidcore::topology::vertex::corner;
-use solidcore_ops::boolean::{boolean, imprint, union_all};
+use solidcore_ops::boolean::{boolean, imprint, union_all, union_copies};
 use solidcore_ops::prism::extrude_planar_regions;
 use solidcore_ops::sweep::{extrude, join_arcs, revolve, zone_tolerance, Curve, DraftCorner, Join};
 use solidcore_ops::{
@@ -45,6 +45,32 @@ fn two_overlapping_boxes() {
     assert!(near(volume(&d), 7.0), "{}", volume(&d));
     let i = boolean(a(), b(), BooleanOp::Intersect).unwrap().unwrap();
     assert!(near(volume(&i), 1.0), "{}", volume(&i));
+}
+
+/// The public repro in solidcraft#20408 joins two swept parts along their matching collars.
+#[test]
+fn a_union_of_overlapping_collars_keeps_both_input_bodies() {
+    all_fixes();
+    let a = Body::from_smb(include_bytes!("data/issue_20408_hoop.smb").to_vec(), false).unwrap();
+    let b = Body::from_smb(include_bytes!("data/issue_20408_back.smb").to_vec(), false).unwrap();
+    let before = [volume(&a), volume(&b)];
+    let joined = union_copies(&a, &b).unwrap().unwrap();
+    assert_eq!(joined.solid_count().unwrap(), 1);
+    assert!(joined.check(CheckLevel::Geometry).unwrap().is_valid());
+    // The operands overlap in their coaxial 1.3 mm-radius collars over exactly 2 mm.
+    let overlap = PI * 1.3 * 1.3 * 2.0;
+    assert!(near(volume(&joined), before[0] + before[1] - overlap));
+    assert_eq!(joined.counts().unwrap(), [25, 70, 46]);
+    // The outside of the surviving collar at x=4.75 + 1.3 is 0.1 mm from the probe.
+    let (_, order) = joined.to_record().unwrap();
+    let faces: Vec<usize> = (0..25).collect();
+    let closest = joined
+        .closest_to_point(&order, &faces, &[], [6.15, 15.25, 18.375])
+        .unwrap()
+        .unwrap();
+    assert!(near(closest.distance, 0.1));
+    assert!(near(volume(&a), before[0]));
+    assert!(near(volume(&b), before[1]));
 }
 
 #[test]
@@ -1182,6 +1208,32 @@ fn a_ball_centred_on_a_rolls_face_with_its_poles_on_the_face_is_cut_in_every_fra
 #[test]
 fn a_ball_with_its_poles_on_a_rolls_face_and_its_seam_turned_slightly_off_is_cut() {
     all_fixes();
+    let want = 3920.0 * PI - (ball_inside(|_| 50.0, 50.0) - ball_inside(|_| 48.0, 50.0));
+    let mut failed = Vec::new();
+    for turn in [1e-8, 1e-10, -1e-8] {
+        for frame in [2, 5, 8, 14] {
+            let what = format!("turned {turn:e}, frame {frame}");
+            let b = ball([0.0, 50.0, 20.0], turn);
+            failed.extend(cut_is_valid_solid(half_roll(frame), b, want, &what));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The same cuts with the coincidence crossing found as the section curve
+/// (`simple_coincidence_crossing_is_point` off; WR-647, #21306 part C). The section's
+/// meridian on the ball's seam runs into its pole, where the drop's pole adjustment once
+/// moved its start across the seam (u 1 to u 1.8e-9), out of the ball face's domain
+/// (Test #70, frame 2); it now keeps the seam side the drop point is on. Same V.
+#[test]
+fn a_seam_meridian_crossing_into_the_balls_pole_cuts_with_the_crossing_as_a_curve() {
+    session::set_thread_fixes(
+        solidcore::kernel::UpstreamFixes::NAMES
+            .iter()
+            .copied()
+            .filter(|n| *n != "simple_coincidence_crossing_is_point"),
+    )
+    .unwrap();
     let want = 3920.0 * PI - (ball_inside(|_| 50.0, 50.0) - ball_inside(|_| 48.0, 50.0));
     let mut failed = Vec::new();
     for turn in [1e-8, 1e-10, -1e-8] {

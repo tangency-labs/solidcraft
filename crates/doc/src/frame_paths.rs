@@ -131,7 +131,7 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
     if ids.iter().any(|id| !seen.insert(id)) || paths.len() > MAX_MEMBERS {
         return Err(DocError::Invalid(format!("at most {MAX_MEMBERS} distinct members in one feature")));
     }
-    let super::Section { regions, description, at, turn, turns, centre } = super::section(doc, vals, f, st)?;
+    let super::Section { regions, description, at, turn, turns, centre, .. } = super::section(doc, vals, f, st)?;
     Ok(Layout { paths, regions, description, at, turn, turns, centre })
 }
 
