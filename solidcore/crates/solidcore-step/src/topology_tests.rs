@@ -4841,3 +4841,26 @@ fn a_cube_with_conic_rounded_edges_and_corners_is_read_without_the_pcurve_kernel
     assert!(raised >= 24, "{raised} edges raised");
     assert!(s.brep.edges.iter().all(|e| e.tolerance < 1e-3));
 }
+
+/// A 40 x 10 mm block whose top is one ruled spline patch (cubic along, 40 poles), the two long
+/// edges of which are separate splines refitted through points of the patch's own boundary at a
+/// warped pace (`make_ruled_patch_fixture.py --poles 40 --period 20 --edge-warp 0.006`): they lie
+/// on the boundary to a few micrometres but are 0.16 mm from it at equal parameter, so no
+/// straight line in (u, v) is their pcurve. The reader gives each the line along the boundary at
+/// the edge's own pace, with the pcurve kernel never asked, and holds the edges' tolerance to the
+/// geometric gap, not the parametric one.
+#[test]
+fn an_edge_refitted_at_its_own_pace_along_a_patch_boundary_is_read_without_the_pcurve_kernel() {
+    let ex = p21::parse(include_str!("../tests/fixtures/ruled-spline-patch-reparametrised.step")).unwrap();
+    let trims = RefusedTrims(std::sync::atomic::AtomicUsize::new(0));
+    let read = read_solids_with(&ex, &trims);
+    assert!(read.failures.is_empty(), "{:?}", read.failures);
+    assert_eq!(read.solids.len(), 1);
+    let s = &read.solids[0];
+    assert!(!s.sheet);
+    assert_eq!(s.brep.faces.len(), 6);
+    assert_eq!(trims.0.load(std::sync::atomic::Ordering::Relaxed), 0, "the kernel was asked");
+    // Covered by the gap the proof found (a few micrometres), nowhere near the 0.16 mm at equal parameter.
+    let widest = s.brep.edges.iter().map(|e| e.tolerance).fold(0.0_f64, f64::max);
+    assert!(widest < 1e-3, "an edge tolerance of {widest} mm");
+}

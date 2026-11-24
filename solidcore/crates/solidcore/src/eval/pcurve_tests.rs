@@ -2656,7 +2656,17 @@ fn what_is_not_a_whole_boundary_curve_of_a_polynomial_patch_has_no_proof() {
         knots: vec![0., 0., 0., 1., 1., 1.],
         points: vec![[0., 0., 0.], [2.5, 0., 0.], [10., 0., 0.]],
     };
-    none(&surface, &slow, "a parameter that is not linear");
+    // The line itself, at a pace the boundary's straight line does not have: its own
+    // reparametrised line, not the straight one (the pcurve bends where the pace does).
+    let paced = boundary_iso(&surface, &slow, whole, cap)
+        .unwrap()
+        .expect("the boundary at another pace");
+    assert!(paced.gap < 1e-4, "{}", paced.gap);
+    let Curve2::Spline { points, .. } = &paced.pcurve else {
+        panic!("a spline pcurve")
+    };
+    assert!(points.len() > 2);
+    assert!(lift_error(&surface, &slow, whole, &paced.pcurve) <= paced.gap);
     // The same line at a parameter that is: a line's own elevation is the boundary.
     let elevated = Curve::Spline {
         knots: vec![0., 0., 0., 1., 1., 1.],
@@ -3425,6 +3435,134 @@ fn a_boundary_is_not_covered_at_a_tolerance_past_what_an_edge_is_honoured_at() {
     );
     let (surface, mid) = metres_edge(450.0);
     assert!(wide(&surface, &mid, 1000.0, margin, 4e3).is_some());
+}
+
+/// A patch whose side along u at v = 0 is the straight line from (0, 0, 0) to (10, 0, 0) run at
+/// an uneven pace (a cubic whose x control points are 0, 1, 9, 10), a second row 10 mm up in y.
+fn uneven_patch() -> Surface {
+    let row = |y: f64| [0., 1., 9., 10.].map(|x| [x, y, 0.]).to_vec();
+    Surface::Spline {
+        u_knots: vec![0., 0., 0., 0., 1., 1., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: (0..4).map(|i| vec![row(0.)[i], row(10.)[i]]).collect(),
+    }
+}
+
+/// [`uneven_patch`] with an interior knot (0.3) and five poles: a boundary of two spans, which a
+/// map across it has to meet at the knot.
+fn knotted_patch() -> Surface {
+    let row = |y: f64| [0., 1., 3., 9., 10.].map(|x| [x, y, 0.]).to_vec();
+    Surface::Spline {
+        u_knots: vec![0., 0., 0., 0., 0.3, 1., 1., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: (0..5).map(|i| vec![row(0.)[i], row(10.)[i]]).collect(),
+    }
+}
+
+/// A map from an edge's parameter onto a boundary of two spans passes the knot between them: the
+/// pcurve has a breakpoint there, and its lift is within the proved gap everywhere (the check is
+/// denser than the importer's).
+#[test]
+fn a_reparametrised_line_across_a_knot_of_the_boundary_lifts_within_its_gap() {
+    let surface = knotted_patch();
+    for (a, b) in [([0., 0., 0.], [10., 0., 0.]), ([10., 0., 0.], [0., 0., 0.])] {
+        let edge = line(a, b);
+        let found = boundary_iso(&surface, &edge, [0., 1.], 1e-3)
+            .unwrap()
+            .unwrap_or_else(|| panic!("{a:?}: no proof"));
+        let Curve2::Spline { points, .. } = &found.pcurve else {
+            panic!("a spline pcurve")
+        };
+        assert!(
+            points.iter().any(|q| (q[0] - 0.3).abs() < 1e-15),
+            "no breakpoint at the knot: {:?}",
+            points.iter().map(|q| q[0]).collect::<Vec<_>>()
+        );
+        let worst = lift_error(&surface, &edge, [0., 1.], &found.pcurve);
+        assert!(worst <= found.gap, "lifts {worst}, proved {}", found.gap);
+    }
+}
+
+/// The reparametrised proof of records no honest file holds gives `None` or an error, never a
+/// panic: numbers that are not finite, nets of one scale or another, an edge with no points on
+/// the boundary, and one whose ends are the boundary's but whose middle is far off.
+#[test]
+fn reparametrised_proofs_of_hostile_records_give_errors_or_none() {
+    let surface = uneven_patch();
+    let ends = |mid: [f64; 3]| Curve::Spline {
+        knots: vec![0., 0., 0., 1., 1., 1.],
+        points: vec![[0., 0., 0.], mid, [10., 0., 0.]],
+    };
+    for mid in [
+        [f64::NAN, 0., 0.],
+        [f64::INFINITY, 0., 0.],
+        [5., 1e300, 0.],
+        [5., 3., 0.],
+    ] {
+        let found = boundary_iso(&surface, &ends(mid), [0., 1.], 1e-3);
+        assert!(!matches!(found, Ok(Some(_))), "{mid:?}: {found:?}");
+    }
+    // The same line at a pace that is all but a jump is the boundary, proved or not: no panic.
+    let _ = boundary_iso(&surface, &ends([1e-300, 0., 0.]), [0., 1.], 1e-3);
+    for scale in [1e-300, 1e-150, 1e150, 1e300] {
+        let big = Surface::Spline {
+            u_knots: vec![0., 0., 0., 0., 1., 1., 1., 1.],
+            v_knots: vec![0., 0., 1., 1.],
+            points: [0., 1., 9., 10.]
+                .map(|x| vec![[x * scale, 0., 0.], [x * scale, 10. * scale, 0.]])
+                .to_vec(),
+        };
+        let edge = line([0., 0., 0.], [10. * scale, 0., 0.]);
+        let _ = boundary_iso(&big, &edge, [0., 1.], 1e-3);
+    }
+}
+
+/// An edge that lies on a patch's boundary but runs at a pace of its own is that boundary's line
+/// with the pace the edge has: the edge is a straight line at an even pace, the boundary the same
+/// line at an uneven one, 0.9 mm from it at equal parameter, so no straight line in (u, v) is
+/// the pcurve, and the proof finds a map `g` whose pcurve `(g(t), 0)` lifts onto the edge within
+/// what it certifies. Either way round.
+#[test]
+fn an_edge_at_its_own_pace_along_a_boundary_gets_a_reparametrised_line() {
+    let surface = uneven_patch();
+    for (a, b) in [([0., 0., 0.], [10., 0., 0.]), ([10., 0., 0.], [0., 0., 0.])] {
+        let edge = line(a, b);
+        // At equal parameter the boundary is far from it: the straight line is not the proof.
+        let found = boundary_iso(&surface, &edge, [0., 1.], 1e-3)
+            .unwrap()
+            .unwrap_or_else(|| panic!("{a:?} to {b:?}: no proof"));
+        assert!(found.gap < 1e-4, "{a:?}: gap {}", found.gap);
+        let Curve2::Spline { knots, points } = &found.pcurve else {
+            panic!("a spline pcurve")
+        };
+        assert!(
+            points.len() > 2,
+            "the line is not straight: {} points",
+            points.len()
+        );
+        assert_eq!(knots.len(), points.len() + 2);
+        assert!(points.iter().all(|q| q[1] == 0.0), "on v = 0");
+        // Monotone, from one end of the boundary to the other.
+        let us: Vec<f64> = points.iter().map(|q| q[0]).collect();
+        let rising = us.windows(2).all(|w| w[0] <= w[1]);
+        let falling = us.windows(2).all(|w| w[0] >= w[1]);
+        assert!(if a[0] == 0. { rising } else { falling }, "{us:?}");
+        let lifted = lift_error(&surface, &edge, [0., 1.], &found.pcurve);
+        assert!(lifted <= found.gap, "lifts {lifted}, proved {}", found.gap);
+    }
+    // An edge the same line at a pace the boundary cannot follow within the cap (the straight
+    // line is not along the quadratic bump of this boundary) has none.
+    let bump = Surface::Spline {
+        u_knots: vec![0., 0., 0., 1., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: vec![
+            vec![[0., 0., 0.], [0., 10., 0.]],
+            vec![[5., 0., 0.4], [5., 10., 0.4]],
+            vec![[10., 0., 0.], [10., 10., 0.]],
+        ],
+    };
+    let flat = line([0., 0., 0.], [10., 0., 0.]);
+    assert_eq!(boundary_iso(&bump, &flat, [0., 1.], 1e-3).unwrap(), None);
 }
 
 /// An edge 16 µm off a patch's boundary is another curve, not exporter rounding: no proof, no

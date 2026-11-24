@@ -30,6 +30,7 @@
 //!
 //! Deviations: the B-spline cut and the knot span search are kept here ([`segment`],
 //! [`find_span`]) as the routine had them.
+use super::boundary_reparam::reparametrised;
 use super::spline::{EvalSurface, Nurbs};
 use super::uv::{self, Domain};
 use super::vec::{v3, VecExt};
@@ -720,19 +721,48 @@ fn boundary_of(
             } else {
                 boundary_gap_of(&edge, moved, &iso, reversed, [t0, t1])
             };
-            let Some(gap) = proved else {
-                continue;
-            };
-            if gap <= cap && best.as_ref().is_none_or(|b| gap < b.gap) {
+            // The straight line at the edge's own pace where it is proved; failing that (an edge
+            // that lies on the boundary at a pace of its own is far from it at equal parameter),
+            // the line along the boundary with the pace the edge has ([`reparametrised`]).
+            let line = proved.filter(|g| *g <= cap).map(|gap| {
                 let (from, to) = if reversed { (b, a) } else { (a, b) };
-                best = Some(BoundaryIso {
-                    pcurve: Curve2::Spline {
+                (
+                    gap,
+                    Curve2::Spline {
                         knots: vec![t0, t0, t1, t1],
                         points: vec![from, to],
                     },
-                    gap,
-                    side,
-                });
+                )
+            });
+            let found = line.or_else(|| {
+                if edge.is_rational() || iso.is_rational() {
+                    return None;
+                }
+                // Asked at the policy's own cap whatever the caller's, so one answer serves every
+                // ask of the edge; the caller's cap is applied to it below.
+                let r = reparametrised(&edge, &iso, reversed, [t0, t1], BOUNDARY_GAP_CAP)?;
+                let gap = (r.gap + moved) * (1.0 + gamma(2));
+                let points: Vec<[f64; 2]> = r
+                    .iso
+                    .iter()
+                    .map(|g| {
+                        if dir == Direction::U {
+                            [*g, at]
+                        } else {
+                            [at, *g]
+                        }
+                    })
+                    .collect();
+                let mut knots = vec![t0];
+                knots.extend(&r.params);
+                knots.push(t1);
+                Some((gap, Curve2::Spline { knots, points }))
+            });
+            let Some((gap, pcurve)) = found else {
+                continue;
+            };
+            if gap <= cap && best.as_ref().is_none_or(|b| gap < b.gap) {
+                best = Some(BoundaryIso { pcurve, gap, side });
             }
         }
     }
