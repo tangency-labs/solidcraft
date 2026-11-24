@@ -61,6 +61,7 @@ pub mod faceted;
 pub mod facing_trough;
 pub mod file;
 pub mod fit_projection;
+pub mod frame_gusset;
 pub mod hatch;
 pub mod heal;
 pub mod history;

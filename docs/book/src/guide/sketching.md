@@ -415,14 +415,15 @@ fresh link once the source is available; their stored point values are preserved
 
 **Horizontal/Vertical** accepts a click on a line or clicks on two distinct sketch points,
 including the origin, endpoints and circle centres. For two points, it chooses horizontal
-or vertical alignment from their current positions. Hold **Shift** near a line's midpoint to
-highlight and select it as either point. The midpoint follows both endpoints as the line moves,
-resizes or rotates. Two line midpoints can also be aligned. Hovering and the first pick are
-only previews; Esc cancels them without changing the sketch. Accepting the second pick reuses
-or creates a sketch point with an ordinary Midpoint constraint, then adds the H/V constraint
-in one undo step. Both constraints can be selected and deleted independently; deleting either
-keeps the point. After a fillet or chamfer, its Midpoint constraint refers to the original full
-side, retained as construction geometry, just like a manually constrained midpoint.
+or vertical alignment from their current positions. With a point already picked, a click on a
+line's midpoint takes that midpoint, the way the line's ends are taken. Hold **Shift** near a
+line's midpoint to highlight and select it as either point. The midpoint follows both endpoints
+as the line moves, resizes or rotates. Two line midpoints can also be aligned. Hovering and the
+first pick are only previews; Esc cancels them without changing the sketch. Accepting the second
+pick reuses or creates a sketch point with an ordinary Midpoint constraint, then adds the H/V
+constraint in one undo step. Both constraints can be selected and deleted independently; deleting
+either keeps the point. After a fillet or chamfer, its Midpoint constraint refers to the original
+full side, retained as construction geometry, just like a manually constrained midpoint.
 
 Scripts use the same command, with a midpoint reference in the `points` array:
 
