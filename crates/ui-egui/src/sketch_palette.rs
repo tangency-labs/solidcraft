@@ -529,7 +529,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         // curves are drawn in, or what the construction line tool will draw.
         let names: Vec<&str> = LINE_TYPES.iter().zip(row_types).filter(|(_, on)| *on).map(|((_, _, name), _)| app.tr_label(name)).collect();
         crate::ui_kit::caption(ui, "Line Type", &names.join(", "));
-        for key in ["show_constraints", "show_dimensions", "show_points", "snap", "show_control_polygons"] {
+        for key in ["show_constraints", "show_dimensions", "show_points", "snap"] {
             if let Some((_, label)) = TOGGLES.iter().find(|(k, _)| *k == key)
                 && crate::ui_kit::checkbox_row(ui, key, option_label(label), shown(key))
             {
@@ -544,7 +544,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         );
         crate::ui_kit::section(ui, "more", more, false, |ui| {
             for &(key, label) in TOGGLES {
-                if !["show_constraints", "show_dimensions", "show_points", "snap", "show_control_polygons"].contains(&key)
+                if !["show_constraints", "show_dimensions", "show_points", "snap"].contains(&key)
                     && crate::ui_kit::checkbox_row(ui, key, option_label(label), shown(key))
                 {
                     set = Some((key.to_string(), !shown(key)));

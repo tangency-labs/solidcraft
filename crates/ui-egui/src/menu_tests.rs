@@ -3046,6 +3046,8 @@ fn drawn_control_polygon_uses_the_palette_checkbox() {
         assert!(guides.iter().all(|&index| solidcraft_engine::view::sketch_curve_visible(sk, index) == shown));
     };
     check(&h, true);
+    h.step(&json!({"click":{"handle":"sketch_palette:options_fold"}})).unwrap();
+    h.settle();
     for shown in [false, true] {
         h.step(&json!({"click":{"handle":"sketch_palette:toggle:show_control_polygons"}})).unwrap();
         h.settle();
