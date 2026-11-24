@@ -2774,6 +2774,8 @@ impl Session {
 
     fn execute_registered(&mut self, spec: &CommandSpec, params: &Value) -> Result<Value> {
         self.check_command(spec, params)?;
+        // Before an open edit is finished for it: a refused sheet sketch leaves the model's open.
+        cmd::refuse_outside_drawing(self, spec)?;
         self.note_edit_entry(spec, params);
         let event = self.prepare_command_edit(spec, params)?;
         let prepared = self.take_prepared_edit_source(spec, params);

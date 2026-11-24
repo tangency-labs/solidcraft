@@ -1678,6 +1678,17 @@ fn a_sheet_sketch_is_started_and_entered_only_with_the_drawing_focused() {
     }
     assert!(s.active_sheet_sketch.is_none());
     assert_eq!((s.doc.to_json(), s.undo.len()), before);
+    // A model sketch open in Design stays open: the refusal comes before it would be finished.
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [5, 5]], "infer": false}));
+    let open = (s.active_sketch, s.doc.to_json(), s.undo.len());
+    assert!(open.0.is_some());
+    for (command, params) in [("drawing.sketch.create", json!({"owner": made["sheet"]})), ("drawing.sketch.edit", json!({"sketch": made["sketch"]}))]
+    {
+        refused(&mut s, command, params);
+        assert_eq!((s.active_sketch, s.doc.to_json(), s.undo.len()), open, "{command} left the model's sketch open");
+    }
+    run(&mut s, "sketch.finish", json!({}));
     s.model_focus = false;
     run(&mut s, "drawing.sketch.edit", json!({"sketch": made["sketch"]}));
     run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "infer": false}));

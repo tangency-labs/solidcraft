@@ -38,6 +38,16 @@ fn in_drawing_workspace(s: &Session) -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// The same refusal, asked before the session finishes an open edit for the command
+/// ([`Session::execute`]): refused, `drawing.sketch.create` and `drawing.sketch.edit` leave the
+/// model's open sketch as it was.
+pub(crate) fn refuse_outside_drawing(s: &Session, spec: &CommandSpec) -> Result<()> {
+    if matches!(spec.id, "drawing.sketch.create" | "drawing.sketch.edit") {
+        in_drawing_workspace(s).map_err(|why| crate::EngineError::Disabled(spec.id.to_string(), why))?;
+    }
+    Ok(())
+}
+
 fn parsed<T: DeserializeOwned>(cmd: &str, p: &Value) -> Result<T> {
     T::deserialize(p).map_err(|e| bad(cmd, e.to_string()))
 }
