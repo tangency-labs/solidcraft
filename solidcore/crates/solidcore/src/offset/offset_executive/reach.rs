@@ -453,8 +453,9 @@ fn exact_class(k: &Kernel, surface: &Surface, tolerance: f64) -> Result<Option<E
 /// along the normal: a cone, or a cylinder whose axis is not parallel to the plane.
 ///
 /// A sphere about `c` of radius `r` spans `n.c ± r` along a unit `n`; a cylinder about an
-/// axis through `o` square to `n`, `n.o ± r`; a torus about `c` with minor radius `r` and its
-/// axis along `n`, `n.c ± r` (its tube's top and bottom). The heights are measured against these closed
+/// axis through `o` square to `n`, `n.o ± r`; a torus about `c` with major radius `R`, minor
+/// radius `r` and its axis along `n`, `n.c ± r` (its tube's top and bottom), widened by
+/// `R |n × axis|` for an axis within `EFF_ZERO` of `n`, which is above the lift of its major circle. The heights are measured against these closed
 /// forms with `tolerance` (the B-rep's, far above their rounding) on either side, so a plane
 /// within the tolerance of the extent is not decided here (the pieces' bounds decide it).
 fn past_extent(old: Tangent, new: Tangent, q: &Implicit, tolerance: f64) -> Option<f64> {
@@ -473,13 +474,17 @@ fn past_extent(old: Tangent, new: Tangent, q: &Implicit, tolerance: f64) -> Opti
         } if tan_angle.abs() <= EFF_ZERO && n.dot(axis).abs() <= EFF_ZERO => {
             (n.dot(origin), radius.abs())
         }
-        // a torus square to the plane spans its centre's height ± its minor radius
+        // a torus square to the plane spans its centre's height ± its minor radius; an axis
+        // tipped by up to EFF_ZERO lifts the major circle by up to `major` times the tip
         Implicit::Torus {
             centre,
             axis,
+            major,
             minor,
-            ..
-        } if n.cross(axis).length() <= EFF_ZERO => (n.dot(centre), minor.abs()),
+        } if n.cross(axis).length() <= EFF_ZERO => (
+            n.dot(centre),
+            minor.abs() + major.abs() * n.cross(axis).length(),
+        ),
         _ => return None,
     };
     let (lo, hi) = (middle - half, middle + half);
@@ -4072,6 +4077,17 @@ mod tests {
         );
         assert_eq!(past_extent(at(0.0), at(-3.2), &ring(Vec3::Z), tol), None);
         assert_eq!(past_extent(at(0.0), at(9.0), &ring(Vec3::X), tol), None);
+        // an axis tipped within EFF_ZERO lifts a wide torus's major circle (R 1e8 by 5e-13:
+        // 5e-5 above r 8): a plane 8.00002 up still meets it, and its room counts the lift
+        let tipped = Implicit::Torus {
+            centre: Vec3::new(0.0, 0.0, 0.0),
+            axis: Vec3::new(5e-13, 0.0, 1.0).unitize_or_z(),
+            major: 1e8,
+            minor: 8.0,
+        };
+        assert_eq!(past_extent(at(0.0), at(8.00002), &tipped, 1e-6), None);
+        let room = past_extent(at(0.0), at(9.0), &tipped, 1e-6);
+        assert!(room.is_some_and(|r| (8.00005..8.0001).contains(&r)), "{room:?}");
     }
 
     fn plane_at_x(x: f64) -> Surface {
