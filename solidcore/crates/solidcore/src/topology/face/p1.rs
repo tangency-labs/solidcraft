@@ -4372,7 +4372,7 @@ mod tests {
         assert!(matches!(e, Err(SolidError::InvalidInput { .. })));
     }
 
-    /// #21491 (CodeRabbit on #21622): `move_seam`'s final split merges only across a
+    /// #21491: `move_seam`'s final split merges only across a
     /// direction its net closes in; a problem the samples or props report in another
     /// direction leaves the face as it is.
     #[test]
