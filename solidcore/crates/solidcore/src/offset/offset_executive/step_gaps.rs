@@ -28,6 +28,7 @@ use super::p1::{forget_seconds, OffsetExecutive, OffsetOperation};
 use super::p2::OffsetNotifications;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
+use crate::error::intersect::IntersectFailure;
 use crate::error::offset::OffsetFailure;
 use crate::error::{EntityRef, Failure, Result, Site, SolidError, TargetEdge, TargetFace};
 use crate::geom::extent1d::Extent1d;
@@ -38,6 +39,7 @@ use crate::math::{max2, Point2, Point3, Vec2, Vec3, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::math::gamma;
 use crate::query::edge::closest_point;
 use crate::surface::plane::Plane;
 use crate::surface::surface::p2::SurfaceKind;
@@ -55,6 +57,11 @@ const OP: &str = "offset::offset_executive::step_gaps";
 
 /// The gap search's passes per face (the fork's `lGuard`).
 const MAX_GAP_PASSES: usize = 64;
+
+/// The fraction of a gap's tolerance below which the bound on its straight bridge's distance
+/// from the face stops tightening (the scale `curve_surface_gap_bound_within` asks for: a
+/// hundredth of the tolerance the bound is held to).
+const CHORD_BOUND_FLOOR: f64 = 1.0e-2;
 
 fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
@@ -467,6 +474,12 @@ impl OffsetExecutive {
                                 _ => None,
                             },
                         };
+                        // (#21446 review) a face whose outline touches itself at the vertex
+                        // is left to the steps before #21215 there
+                        let pinched = match vertex {
+                            Some(v0) => pinches_an_outline(original, v0)?,
+                            None => false,
+                        };
                         let segment = if end.distance(sv) <= tol && start.distance(sv) > tol {
                             self.close_loop_gap(
                                 kernel,
@@ -481,6 +494,7 @@ impl OffsetExecutive {
                                     vertex_point: sv,
                                     tol,
                                     original_vertex: vertex,
+                                    pinched,
                                 },
                                 notifications,
                                 closed_edges,
@@ -499,6 +513,7 @@ impl OffsetExecutive {
                                     vertex_point: sv,
                                     tol,
                                     original_vertex: vertex,
+                                    pinched,
                                 },
                                 notifications,
                                 closed_edges,
@@ -521,7 +536,7 @@ impl OffsetExecutive {
                             // (#21215) the segment as the face's offset face use runs: its
                             // loop here is the upward one, which runs the other way where
                             // the input's face use is not on its surface's normal side
-                            let segment = if self.loops_against_input(original, f)? {
+                            let segment = if !pinched && self.loops_against_input(original, f)? {
                                 GapSegment {
                                     face: f,
                                     from: to,
@@ -529,6 +544,7 @@ impl OffsetExecutive {
                                     bridge: reversed(bridge)?,
                                     tol,
                                     vertex,
+                                    pinched,
                                 }
                             } else {
                                 GapSegment {
@@ -538,6 +554,7 @@ impl OffsetExecutive {
                                     bridge,
                                     tol,
                                     vertex,
+                                    pinched,
                                 }
                             };
                             segments.push(segment);
@@ -677,6 +694,7 @@ impl OffsetExecutive {
             vertex_point,
             tol,
             original_vertex,
+            pinched,
         } = gap;
         let e = eu::edge(b, u)?.ok_or_else(|| null("edge use without edge"))?;
         let surface = b
@@ -754,6 +772,7 @@ impl OffsetExecutive {
         // at its old place (`a_far_top_on_a_unit_square_plane_is_refused_as_not_sound`),
         // its end on the other edge where the two do not meet.
         if self.operation() != OffsetOperation::LocalOperation
+            && !pinched
             && self.trim_other_to_gap_end(
                 kernel,
                 original,
@@ -780,33 +799,17 @@ impl OffsetExecutive {
             .get_create_extended_surface(kernel, key, &surface, margin)?
             .clone();
         let ext_domain = ext.natural_uv_domain_with_nurb(kernel)?;
-        let mut straight = true;
-        for ii in 1..4 {
-            let w = f64::from(ii) / 4.0;
-            let pnt = vertex_point + (gap_end - vertex_point) * w;
-            let sols = global_point_solve_starts(
-                kernel,
-                &ext,
-                &ext_domain,
-                SolverOperation::Minimize,
-                pnt,
-                tol,
-                SolutionRequested::Single,
-            )?;
-            if !sols.first().is_some_and(|s| s.solution_value <= tol) {
-                straight = false;
-                break;
-            }
-        }
+        let chord = BSplineCurve::create_line_segment(3, vertex_point, gap_end)?;
+        let straight = chord_on_surface(kernel, &ext, &ext_domain, &chord, tol)?;
 
         // The segment, from the vertex to the gap end, joined at the gap end: straight
         // where that lies on the face's surface, else the face's section by the plane of
         // the offset face that holds both ends (#21215).
         let (mut segment, bridge) = if straight {
-            (
-                BSplineCurve::create_line_segment(3, vertex_point, gap_end)?,
-                None,
-            )
+            (chord, None)
+        } else if pinched {
+            // a face's outline touches itself at the vertex: no section is sought there
+            return Err(self.loop_gap_uncertified(original, f));
         } else {
             match self.plane_section_bridge(
                 kernel,
@@ -995,13 +998,16 @@ impl OffsetExecutive {
     /// them, and its control polygon lies within `tol` of the plane, which bounds the curve
     /// there.
     ///
-    /// Returns `None` where no such plane holds both ends, or no single open section through
-    /// both ends is found.
+    /// Returns `None` where no such plane holds both ends, or no single held open section
+    /// through both ends is found ([`held_section`]); a plane whose section is empty
+    /// (`IntersectFailure::NoIntersection`) is passed over for the next.
     ///
     /// # Errors
     ///
     /// Those of the topology queries, the extension, the curve solves and the trim; a
-    /// cancelled intersection.
+    /// cancelled intersection; [`OffsetFailure::LoopGapUncertified`] caused by the
+    /// intersection's error where the intersection of a plane holding both ends fails other
+    /// than by finding no section (whether that section is the bridge is not known).
     #[allow(clippy::too_many_arguments)]
     fn plane_section_bridge(
         &mut self,
@@ -1063,52 +1069,25 @@ impl OffsetExecutive {
                 if e.is_cancelled() {
                     return Err(e);
                 }
-                // no section of this plane: another plane may still hold both ends
-                continue;
+                if is_no_section(&e) {
+                    // no section of this plane: another plane may still hold both ends
+                    continue;
+                }
+                // the intersection did not complete: whether this plane's section is the
+                // bridge is not known, so the bridge is not established, for that cause
+                return Err(Failure::new(
+                    OP,
+                    OffsetFailure::LoopGapUncertified {
+                        face: self.original_face(original, f),
+                    },
+                )
+                .caused_by(e)
+                .into_error());
             }
-            let mut found: Option<BSplineCurve> = None;
-            for c in &curves {
-                let CurveKind::BSpline(section) = c.kind() else {
-                    continue;
-                };
-                let ivl = section.natural_interval();
-                if section
-                    .evaluate_point(ivl.min())?
-                    .distance(section.evaluate_point(ivl.max())?)
-                    <= tol
-                {
-                    // a closed section has two ways between the ends
-                    continue;
-                }
-                let (Some((t0, d0)), Some((t1, d1))) = (
-                    closest_on(kernel, section, &ivl, from, tol)?,
-                    closest_on(kernel, section, &ivl, to, tol)?,
-                ) else {
-                    continue;
-                };
-                if d0 > tol || d1 > tol || (t1 - t0).abs() <= EFF_ZERO * (1.0 + ivl.max_dimension())
-                {
-                    continue;
-                }
-                if found.is_some() {
-                    // two sections through both ends: none is the bridge
-                    return Ok(None);
-                }
-                let mut piece = section.clone();
-                let mut keep = Extent1d::from_min_max(t0.min(t1), t0.max(t1));
-                piece.trim(kernel, &mut keep, TrimMode::Notify)?;
-                if t0 > t1 {
-                    let whole = piece.natural_interval();
-                    piece.reverse_parameterization(&whole)?;
-                }
-                let (polygon, _) = piece.control_polygon()?;
-                if polygon.iter().any(|&p| off(p) > tol) {
-                    continue;
-                }
-                found = Some(piece);
-            }
-            if found.is_some() {
-                return Ok(found);
+            match held_section(kernel, &curves, ends, &off, tol)? {
+                Held::One(piece) => return Ok(Some(piece)),
+                Held::Two => return Ok(None),
+                Held::None => {}
             }
         }
         Ok(None)
@@ -1439,6 +1418,133 @@ fn straight_edge_ends(
     )))
 }
 
+/// Whether the straight `chord` (a gap's bridge from the vertex to the gap's end) lies on
+/// `ext` (the face's extended surface, its parameters `ext_domain`) within `tol` over its
+/// whole length. Three points of it, at its quarters, are dropped onto the surface first:
+/// one farther than `tol` rules the chord out. They cannot rule it in, since a surface can
+/// meet the chord at its ends and at every probe and leave it between them; the chord is on
+/// the surface only where a proved bound on its distance from it over the whole chord,
+/// every rounding counted, is within `tol` (`curve_surface_gap_bound_within`; on a plane the
+/// chord's control points bound it at once, so a chord on a plane stays straight). `false`
+/// where the bound is not proved.
+///
+/// # Errors
+///
+/// Those of the probes' solves; the bound's unported and cancelled statuses.
+fn chord_on_surface(
+    kernel: &Kernel,
+    ext: &Surface,
+    ext_domain: &Extent2d,
+    chord: &BSplineCurve,
+    tol: f64,
+) -> Result<bool> {
+    let ivl = chord.natural_interval();
+    for ii in 1..4 {
+        let pnt = chord.evaluate_point(ivl.evaluate(f64::from(ii) / 4.0))?;
+        let sols = global_point_solve_starts(
+            kernel,
+            ext,
+            ext_domain,
+            SolverOperation::Minimize,
+            pnt,
+            tol,
+            SolutionRequested::Single,
+        )?;
+        if !sols.first().is_some_and(|s| s.solution_value <= tol) {
+            return Ok(false);
+        }
+    }
+    let bound = crate::query::curve_surface_gap::curve_surface_gap_bound_within(
+        kernel,
+        ext,
+        ext_domain,
+        chord,
+        [ivl.min(), ivl.max()],
+        CHORD_BOUND_FLOOR * tol,
+        [tol, tol],
+    )?;
+    Ok(bound.is_some_and(|g| g <= tol))
+}
+
+/// Whether intersection error `e` is the typed empty result
+/// (`IntersectFailure::NoIntersection`: the surfaces were intersected and have no section),
+/// not a failure to intersect them.
+fn is_no_section(e: &SolidError) -> bool {
+    e.intersect_failure() == Some(&IntersectFailure::NoIntersection)
+}
+
+/// `plane_section_bridge`'s pick among the sections `curves` of a face's surface by a plane
+/// (#21215): the one piece between `ends` that the plane holds. A candidate is an open
+/// B-spline section with both ends within `tol` of it at distinct parameters; its piece
+/// between them, run from the first end to the second, is held where its control polygon
+/// lies within `tol` of the plane (`off`, the distance from it), which bounds the piece
+/// there. A candidate the plane does not hold is passed over wherever it comes; two held
+/// pieces leave the bridge ambiguous ([`Held::Two`]).
+///
+/// # Errors
+///
+/// Those of the evaluations, the closest point solves, the trim and the reversal.
+fn held_section(
+    kernel: &Kernel,
+    curves: &[Curve],
+    [from, to]: [Point3; 2],
+    off: &dyn Fn(Point3) -> f64,
+    tol: f64,
+) -> Result<Held> {
+    let mut found: Option<BSplineCurve> = None;
+    for c in curves {
+        let CurveKind::BSpline(section) = c.kind() else {
+            continue;
+        };
+        let ivl = section.natural_interval();
+        if section
+            .evaluate_point(ivl.min())?
+            .distance(section.evaluate_point(ivl.max())?)
+            <= tol
+        {
+            // a closed section has two ways between the ends
+            continue;
+        }
+        let (Some((t0, d0)), Some((t1, d1))) = (
+            closest_on(kernel, section, &ivl, from, tol)?,
+            closest_on(kernel, section, &ivl, to, tol)?,
+        ) else {
+            continue;
+        };
+        if d0 > tol || d1 > tol || (t1 - t0).abs() <= EFF_ZERO * (1.0 + ivl.max_dimension()) {
+            continue;
+        }
+        let mut piece = section.clone();
+        let mut keep = Extent1d::from_min_max(t0.min(t1), t0.max(t1));
+        piece.trim(kernel, &mut keep, TrimMode::Notify)?;
+        if t0 > t1 {
+            let whole = piece.natural_interval();
+            piece.reverse_parameterization(&whole)?;
+        }
+        let (polygon, _) = piece.control_polygon()?;
+        if polygon.iter().any(|&p| off(p) > tol) {
+            continue;
+        }
+        if found.is_some() {
+            // two held pieces through both ends: none is the bridge
+            return Ok(Held::Two);
+        }
+        found = Some(piece);
+    }
+    Ok(found.map_or(Held::None, Held::One))
+}
+
+/// What [`held_section`] found among a plane's sections.
+#[derive(Debug)]
+enum Held {
+    /// No piece between the ends that the plane holds.
+    None,
+    /// The one held piece, from the first end to the second.
+    One(BSplineCurve),
+    /// Two held pieces or more: the bridge is ambiguous.
+    Two,
+}
+
 /// The parameter to split the joined `curve` at near `param`, the nearest point of `joint`
 /// on it: the knot there where the curve is only continuous (a joint of two curves meeting
 /// at an angle) and whose point is within `tol` of `joint`, else `param`. A split beside the
@@ -1485,6 +1591,9 @@ struct Gap {
     vertex_point: Point3,
     tol: f64,
     original_vertex: Option<VertexId>,
+    /// Whether `original_vertex` pinches an input face's outline ([`pinches_an_outline`]):
+    /// the #21215 steps are then left out.
+    pinched: bool,
 }
 
 /// A segment `close_loop_gap` added to an offset face's loop: the face, the segment's ends
@@ -1500,6 +1609,8 @@ struct GapSegment {
     bridge: Option<BSplineCurve>,
     tol: f64,
     vertex: Option<VertexId>,
+    /// Whether `vertex` pinches an input face's outline ([`pinches_an_outline`]).
+    pinched: bool,
 }
 
 /// A polygon of [`OffsetExecutive::cap_vertex_gaps`]: its corners in order, each side's
@@ -1513,6 +1624,9 @@ struct CapPolygon {
     /// The straight edge the polygon is closed along, from its last corner to its first,
     /// where its segments do not close it.
     along: Option<EdgeId>,
+    /// Whether a segment of the polygon is at a vertex that pinches an input face's outline:
+    /// the polygon is then not taken into a face (`widen_face_over_polygon`).
+    pinched: bool,
 }
 
 impl GapSegment {
@@ -1638,6 +1752,7 @@ impl OffsetExecutive {
                 let vertex = s
                     .vertex
                     .filter(|_| chain.iter().all(|c| c.vertex == s.vertex));
+                let pinched = chain.iter().any(|c| c.pinched);
                 if corners.len() >= 3 {
                     polygons.push(CapPolygon {
                         corners,
@@ -1645,12 +1760,13 @@ impl OffsetExecutive {
                         tol,
                         vertex,
                         along,
+                        pinched,
                     });
                 }
             }
         }
         for polygon in polygons {
-            if let Some(e) = polygon.along {
+            if let Some(e) = polygon.along.filter(|_| !polygon.pinched) {
                 let mut b = self
                     .take_offset_brep()
                     .ok_or_else(|| null("no offset B-rep"))?;
@@ -1935,33 +2051,67 @@ impl OffsetExecutive {
             return Ok(());
         };
         let sides = || corners.iter().zip(corners.iter().cycle().skip(1));
-        // Newell's normal: twice the polygon's area along its normal
+        let has_curved = curved.iter().any(Option::is_some);
+        // Newell's normal: twice the polygon's area along its normal. A curved side gives its
+        // own part (`curved_area_vector`), and the area test takes the parts' rounding off:
+        // the corners alone can be collinear while a curved side bounds an area (an arc and
+        // its chord). A cap of straight sides keeps the corners' sum.
         let mut normal = Vec3::ZERO;
         let mut perimeter = 0.0;
-        for (&p, &q) in sides() {
-            normal += (p - origin).cross(q - origin);
-            perimeter += p.distance(q);
+        let mut rounding = 0.0;
+        let mut straight_size = 0.0;
+        for (k, (&p, &q)) in sides().enumerate() {
+            if let Some(Some(curve)) = curved.get(k) {
+                let Some(part) = curved_area_vector(origin, curve)? else {
+                    // the side's part is not bounded: its area is not known
+                    return Ok(());
+                };
+                normal += part.twice_area;
+                perimeter += part.length;
+                rounding += part.rounding;
+            } else {
+                normal += (p - origin).cross(q - origin);
+                perimeter += p.distance(q);
+                straight_size += (p - origin).length() * (q - origin).length();
+            }
         }
-        if normal.length() <= tol * perimeter {
+        if has_curved {
+            // the straight parts' rounding (a cross product of two differences each) and the
+            // sum's, counted on the parts' sizes
+            rounding = (rounding
+                + gamma(corners.len().saturating_add(8))
+                    * (straight_size + normal.length() + rounding))
+                * (1.0 + gamma(2));
+        }
+        if normal.length() - rounding <= tol * perimeter {
             return Ok(());
         }
         let n = normal.unitize()?;
         if corners.iter().any(|&p| (p - origin).dot(n).abs() > tol) {
             return Ok(());
         }
+        let mut boundary: Vec<Point3> = corners.clone();
         for curve in curved.iter().flatten() {
             let (points, _) = curve.control_polygon()?;
             if points.iter().any(|&p| (p - origin).dot(n).abs() > tol) {
                 return Ok(());
             }
+            boundary.extend(points);
         }
         let Some(&second) = corners.get(1) else {
             return Ok(());
         };
-        let x_axis = (second - origin).unitize()?;
+        // (with a curved side the corners need not span the plane: the first side's direction
+        // is taken square to the boundary's normal)
+        let x_axis = if has_curved {
+            let along = second - origin;
+            (along - n * along.dot(n)).unitize()?
+        } else {
+            (second - origin).unitize()?
+        };
         let y_axis = n.cross(x_axis);
         let (mut u_min, mut u_max, mut v_min, mut v_max) = (0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64);
-        for &p in corners {
+        for &p in &boundary {
             let (u, v) = ((p - origin).dot(x_axis), (p - origin).dot(y_axis));
             u_min = u_min.min(u);
             u_max = u_max.max(u);
@@ -2005,8 +2155,124 @@ impl OffsetExecutive {
     }
 }
 
+/// A curved side's part of a cap's Newell normal ([`curved_area_vector`]).
+struct CurvedArea {
+    /// `∫ (C(t) - O) × C'(t) dt` over the side: its part of twice the cap's area vector.
+    twice_area: Vec3,
+    /// A bound on the rounding of `twice_area`, every coordinate error counted.
+    rounding: f64,
+    /// The length of the side's control polygon, no less than the side's own length.
+    length: f64,
+}
+
+/// The part of curved side `curve` (a non-rational 3D B-spline) of a cap's Newell normal
+/// about `origin`: `∫ (C(t) - O) × C'(t) dt` over its whole interval. A closed boundary's
+/// parts sum to twice its area vector (Green's theorem; a straight side `p q` gives
+/// `(p - O) × (q - O)`, Newell's term). The curve, moved by `-O`, is cut into its Bézier pieces
+/// (`decompose_bez`); a piece of degree `n` with control points `Q_i` gives
+///
+/// `∫ Q × Q' dt = Σ_i Σ_k ½ C(n, i) C(n - 1, k) / C(2n - 1, i + k) · Q_i × (Q_(k+1) - Q_k)`,
+///
+/// from `Q' = n Σ_k (Q_(k+1) - Q_k) b_k^(n-1)` and the integral of a product of Bernstein
+/// polynomials, `∫ b_i^n b_k^(n-1) dt = C(n, i) C(n - 1, k) / (2n C(2n - 1, i + k))`. A
+/// degree-1 piece gives Newell's term.
+///
+/// Rounding (`docs/definitions-and-certificates.md` §4.4): the move rounds each coordinate
+/// once (`γ_1` of the largest moved coordinate `M`) and the cut's `I` knot insertions carry
+/// `γ_(12 (I + 1))` of `2 M` (as `nurbs::crv_deviation` counts them), so with `e` their sum
+/// each control point is within `2 e` of its exact place and each difference within `4 e`.
+/// A term `c Q × D` is then off by at most `c (2 e (|D| + 4 e) + 4 e |Q|)`, and the products,
+/// the coefficients and the sum round within `γ_(12 + terms)` of the terms' sizes
+/// `c (|Q| + 2 e) (|D| + 4 e)`.
+///
+/// `None` for a rational or 2D curve, a degree past the binomial table, and numbers not
+/// finite: the side's part is then not bounded.
+///
+/// # Errors
+///
+/// Those of the moved form's construction and the cut.
+fn curved_area_vector(origin: Point3, curve: &BSplineCurve) -> Result<Option<CurvedArea>> {
+    use crate::nurbs::bezier::binomial;
+    use crate::nurbs::crv_basic::Curve as Nurb;
+    use crate::nurbs::math::CPoint;
+
+    let Ok(nurb) = curve.nurb_ref() else {
+        return Ok(None);
+    };
+    if nurb.is_rational() || !nurb.is_3d() {
+        return Ok(None);
+    }
+    let n = nurb.degree();
+    if n == 0 {
+        return Ok(None);
+    }
+    let moved = Nurb::new(
+        nurb.cpts()
+            .iter()
+            .map(|c| CPoint::from_point(Vec3::new(c.x - origin.x, c.y - origin.y, c.z - origin.z)))
+            .collect(),
+        n,
+        nurb.knots().to_vec(),
+    )?;
+    let largest = moved.cpts().iter().fold(0.0_f64, |m, c| {
+        m.max(c.x.abs()).max(c.y.abs()).max(c.z.abs())
+    });
+    let pieces = moved.decompose_bez()?;
+    // knots inserted: those of the pieces' joined knot vector, 2 (n + 1) + (s - 1) n, past
+    // the curve's
+    let joined = pieces
+        .len()
+        .saturating_sub(1)
+        .saturating_mul(n)
+        .saturating_add(2 * (n + 1));
+    let inserted = joined.saturating_sub(moved.knots().len());
+    let e =
+        gamma(1) * largest + gamma(inserted.saturating_add(1).saturating_mul(12)) * 2.0 * largest;
+    let point = |c: &CPoint| Vec3::new(c.x, c.y, c.z);
+    let mut twice_area = Vec3::ZERO;
+    let (mut error, mut size, mut terms) = (0.0_f64, 0.0_f64, 0_usize);
+    let mut length = 0.0;
+    for piece in &pieces {
+        let q = piece.cpts();
+        if q.len() != n.saturating_add(1) {
+            return Ok(None);
+        }
+        for (a, b) in q.iter().zip(q.iter().skip(1)) {
+            length += point(b).distance(point(a));
+        }
+        for (i, qi) in q.iter().enumerate() {
+            for (k, (qk, qk1)) in q.iter().zip(q.iter().skip(1)).enumerate() {
+                let (Ok(cn), Ok(cm), Ok(cd)) = (
+                    binomial(n, i),
+                    binomial(n.saturating_sub(1), k),
+                    binomial((2 * n).saturating_sub(1), i.saturating_add(k)),
+                ) else {
+                    return Ok(None);
+                };
+                let c = 0.5 * cn * cm / cd;
+                let (qv, d) = (point(qi), point(qk1) - point(qk));
+                twice_area += qv.cross(d) * c;
+                let (ql, dl) = (qv.length(), d.length());
+                error += c * (2.0 * e * (dl + 4.0 * e) + 4.0 * e * ql);
+                size += c * (ql + 2.0 * e) * (dl + 4.0 * e);
+                terms += 1;
+            }
+        }
+    }
+    let rounding = (error + gamma(terms.saturating_add(12)) * size) * (1.0 + gamma(2));
+    let finite = twice_area.length().is_finite() && rounding.is_finite() && length.is_finite();
+    Ok(finite.then_some(CurvedArea {
+        twice_area,
+        rounding,
+        length,
+    }))
+}
+
 /// Whether a face other than `s`'s has an edge between `s`'s ends (a step wall's, or the
-/// same segment of a neighbour): such a segment is no side of a vertex's polygon.
+/// same segment of a neighbour): such a segment is no side of a vertex's polygon. Shared ends
+/// are the filter; a curved segment (a bridge) is bordered only by an edge whose curve is also
+/// proved within the segment's tolerance of the bridge over both whole curves, either way round
+/// ([`curved_side_coincides`]): two curves with the same ends can bow apart.
 fn bordered_elsewhere(b: &Brep, s: &GapSegment) -> Result<bool> {
     for &e in b.edge_list() {
         let ends = crate::query::edge::edge_vertices(b, e)?;
@@ -2018,7 +2284,126 @@ fn bordered_elsewhere(b: &Brep, s: &GapSegment) -> Result<bool> {
                 .iter()
                 .any(|&f| f != s.face)
         {
-            return Ok(true);
+            let coincides = match &s.bridge {
+                None => true,
+                Some(bridge) => curved_side_coincides(b, e, bridge, s.tol)?,
+            };
+            if coincides {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Whether the curve of edge `e` over its interval and `bridge` over its own are proved
+/// within `tol` of each other, every point of each near a point of the other
+/// ([`crate::nurbs::crv_deviation::certified_hausdorff`] of their B-spline forms, a bound over
+/// both whole curves with every rounding counted, as
+/// [`crate::boolean::api_brep::coincidence_bound`] takes it for two B-splines), with `bridge`
+/// run either way ([`exactly_reversed`]). `false` where no bound is proved (an edge without a
+/// B-spline curve, a rational or 2D form, intervals that share no more than a point, a
+/// reversal that would round): the segment then stays a side.
+///
+/// # Errors
+///
+/// Those of the edge lookup and of the reversed form's construction.
+fn curved_side_coincides(b: &Brep, e: EdgeId, bridge: &BSplineCurve, tol: f64) -> Result<bool> {
+    use crate::nurbs::crv_deviation::certified_hausdorff;
+
+    let rec = b.edge(e)?;
+    let Some(CurveKind::BSpline(edge_curve)) = rec.curve.as_ref().map(Curve::kind) else {
+        return Ok(false);
+    };
+    let (Ok(edge_nurb), Ok(ahead)) = (edge_curve.nurb_ref(), bridge.nurb_ref()) else {
+        return Ok(false);
+    };
+    let (Some(&lo), Some(&hi)) = (ahead.knots().first(), ahead.knots().last()) else {
+        return Ok(false);
+    };
+    let along = [rec.interval.min(), rec.interval.max()];
+    if certified_hausdorff(ahead, [lo, hi], edge_nurb, along).is_ok_and(|d| d <= tol) {
+        return Ok(true);
+    }
+    let Some(back) = exactly_reversed(ahead)? else {
+        return Ok(false);
+    };
+    Ok(certified_hausdorff(&back, [lo, hi], edge_nurb, along).is_ok_and(|d| d <= tol))
+}
+
+/// `c` run the other way on its own domain `[lo, hi]`: its control points in reverse order on
+/// the knots `lo + hi - u` taken in reverse, the curve `C(lo + hi - t)`, where every one of
+/// those knots is exact in floating point (the sum `lo + hi` and each difference, checked by
+/// the error-free transformation TwoSum: Knuth, TAOCP vol. 2, §4.2.2); `None` where one would
+/// round, so the reversed form is the same point set and no rounding goes uncounted.
+///
+/// # Errors
+///
+/// Those of the reversed form's construction.
+fn exactly_reversed(
+    c: &crate::nurbs::crv_basic::Curve,
+) -> Result<Option<crate::nurbs::crv_basic::Curve>> {
+    // `a + b` with its rounding error (TwoSum): exact where the error is zero
+    let exact_sum = |x: f64, y: f64| -> Option<f64> {
+        let s = x + y;
+        let yy = s - x;
+        let err = (x - (s - yy)) + (y - yy);
+        (s.is_finite() && err == 0.0).then_some(s)
+    };
+    let (Some(&lo), Some(&hi)) = (c.knots().first(), c.knots().last()) else {
+        return Ok(None);
+    };
+    let Some(sum) = exact_sum(lo, hi) else {
+        return Ok(None);
+    };
+    let mut knots = Vec::new();
+    for &u in c.knots().iter().rev() {
+        let Some(r) = exact_sum(sum, -u) else {
+            return Ok(None);
+        };
+        knots.push(r);
+    }
+    Ok(Some(crate::nurbs::crv_basic::Curve::new(
+        c.cpts().iter().rev().copied().collect(),
+        c.degree(),
+        knots,
+    )?))
+}
+
+/// Whether vertex `v` of the input `original` pinches the outline of a face at it: a loop of
+/// the face passes through `v` twice, and not as a seam's end (the seam's edge in the loop
+/// twice, once each way). There the face's outline touches itself (a pad's corner on its
+/// face's rim), the walls offset from the two meet at that point, and the steps added for
+/// #21215 (the trim to the gap's end, the plane's section as bridge, the loops run by the
+/// input's face use and the widened plane face) are left out, so such a body is refused as
+/// before rather than built into a body that is not a manifold solid.
+///
+/// # Errors
+///
+/// Those of the topology queries.
+fn pinches_an_outline(original: &Brep, v: VertexId) -> Result<bool> {
+    for f in crate::topology::vertex::faces(original, v)? {
+        let Some(fu) = original.face(f)?.faceuse else {
+            continue;
+        };
+        for lu in eu::faceuse_loopuses(original, fu, false, None)? {
+            let mut starts: Vec<(Option<EdgeId>, VertexId)> = Vec::new();
+            for u in eu::loopuse_edgeuses(original, lu)? {
+                if let Some(vu) = eu::vertexuse(original, u)? {
+                    if let Some(w) = vertexuse::vertex(original, vu)? {
+                        starts.push((eu::edge(original, u)?, w));
+                    }
+                }
+            }
+            if starts.iter().filter(|(_, w)| *w == v).count() < 2 {
+                continue;
+            }
+            let seam_end = starts.iter().any(|&(e, w)| {
+                w == v && e.is_some() && starts.iter().filter(|(g, _)| *g == e).count() > 1
+            });
+            if !seam_end {
+                return Ok(true);
+            }
         }
     }
     Ok(false)
@@ -2540,5 +2925,250 @@ mod tests {
         assert!(site.edge.is_none());
         assert!(site.face.is_none());
         assert_eq!(site.at, Some(point));
+    }
+
+    use crate::nurbs::crv_basic::Curve as NurbCurve;
+    use crate::nurbs::math::{CPoint, NOW};
+
+    /// A non-rational 3D B-spline of degree `p` through control points `points` on `knots`.
+    fn spline(points: &[[f64; 3]], p: usize, knots: &[f64]) -> BSplineCurve {
+        let pw = points
+            .iter()
+            .map(|&[x, y, z]| CPoint::new(x, y, z, NOW))
+            .collect();
+        BSplineCurve::from_nurb(NurbCurve::new(pw, p, knots.to_vec()).unwrap(), 3, false)
+    }
+
+    /// The surface `z = q(x)`, `q(x) = x (x - 1/4) (x - 1/2) (x - 3/4) (x - 1)`, extruded
+    /// along y over `[0, 1] x [-1, 1]`: one Bézier patch of degree 5 by 1, its control points'
+    /// heights `q`'s Bernstein coefficients `b_i = Σ_(j <= i) C(i, j) / C(5, j) a_j`.
+    fn quintic_extrusion() -> Surface {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+        // q's power coefficients a_0..a_5, from its roots
+        let mut a = vec![1.0_f64];
+        for r in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let mut next = vec![0.0; a.len() + 1];
+            for (j, &c) in a.iter().enumerate() {
+                next[j + 1] += c;
+                next[j] -= r * c;
+            }
+            a = next;
+        }
+        let choose = |n: usize, k: usize| -> f64 {
+            (0..k).fold(1.0, |acc, i| acc * (n - i) as f64 / (i + 1) as f64)
+        };
+        let net: Vec<Vec<CPoint>> = (0..=5)
+            .map(|i| {
+                let b: f64 = (0..=i).map(|j| choose(i, j) / choose(5, j) * a[j]).sum();
+                [-1.0, 1.0]
+                    .iter()
+                    .map(|&y| CPoint::new(i as f64 / 5.0, y, b, NOW))
+                    .collect()
+            })
+            .collect();
+        let nurb = NurbSurface::new(
+            net,
+            5,
+            1,
+            vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        Surface::from(BSplineSurface::from_nurb(nurb, false))
+    }
+
+    /// Review r4674266684: the straight bridge along `z = 0` from `x = 0` to `x = 1` meets
+    /// the quintic extrusion at both ends and at all three probes (its quarters, roots of
+    /// `q`), yet leaves it between them by up to about `|q(0.1)| = 0.0035`: it is not on the
+    /// surface. A chord along the extrusion's ruling at a root, and a chord in a plane, are.
+    #[test]
+    fn a_chord_on_a_surface_at_its_probes_only_is_not_a_straight_bridge() {
+        let k = Kernel::default();
+        let tol = 1.0e-3;
+        let surface = quintic_extrusion();
+        let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        let chord = BSplineCurve::create_line_segment(
+            3,
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+        )
+        .unwrap();
+        // every probe is on the surface: the probes alone took this chord
+        for x in [0.25, 0.5, 0.75] {
+            let sols = global_point_solve_starts(
+                &k,
+                &surface,
+                &domain,
+                SolverOperation::Minimize,
+                Point3::new(x, 0.0, 0.0),
+                tol,
+                SolutionRequested::Single,
+            )
+            .unwrap();
+            assert!(
+                sols[0].solution_value <= 1.0e-9,
+                "{x}: {}",
+                sols[0].solution_value
+            );
+        }
+        assert!(!chord_on_surface(&k, &surface, &domain, &chord, tol).unwrap());
+
+        let ruling = BSplineCurve::create_line_segment(
+            3,
+            Point3::new(0.5, -0.5, 0.0),
+            Point3::new(0.5, 0.5, 0.0),
+        )
+        .unwrap();
+        assert!(chord_on_surface(&k, &surface, &domain, &ruling, tol).unwrap());
+
+        let mut plane = Plane::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            &Extent2d::from_points(Point2::new(-2.0, -2.0), Point2::new(2.0, 2.0)),
+        );
+        plane.make_nurb().unwrap();
+        let plane = Surface::from(plane);
+        let plane_domain = plane.natural_uv_domain_with_nurb(&k).unwrap();
+        assert!(chord_on_surface(&k, &plane, &plane_domain, &chord, tol).unwrap());
+    }
+
+    /// Review r4674266697: of a plane's sections through both ends, one held by the plane
+    /// and one whose piece leaves it, the held one is the bridge in either order; two held
+    /// pieces leave it ambiguous.
+    #[test]
+    fn a_section_the_plane_does_not_hold_never_makes_the_bridge_ambiguous() {
+        let k = Kernel::default();
+        let tol = 1.0e-4;
+        let ends = [Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0)];
+        let off = |p: Point3| p.z.abs();
+        let held = Curve::from(spline(
+            &[[-0.5, 0.0, 0.0], [1.5, 0.0, 0.0]],
+            1,
+            &[0.0, 0.0, 1.0, 1.0],
+        ));
+        // through both ends, bowing up off the plane between them
+        let leaving = Curve::from(spline(
+            &[
+                [-0.5, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+                [0.5, 0.0, 0.5],
+                [1.0, 0.0, 0.0],
+                [1.5, 0.0, 0.0],
+            ],
+            1,
+            &[0.0, 0.0, 0.25, 0.5, 0.75, 1.0, 1.0],
+        ));
+        let other_held = Curve::from(spline(
+            &[[-1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+            1,
+            &[0.0, 0.0, 1.0, 1.0],
+        ));
+        for curves in [
+            vec![held.clone(), leaving.clone()],
+            vec![leaving.clone(), held.clone()],
+        ] {
+            let Held::One(piece) = held_section(&k, &curves, ends, &off, tol).unwrap() else {
+                panic!("the held section is the bridge");
+            };
+            let ivl = piece.natural_interval();
+            assert!(piece.evaluate_point(ivl.min()).unwrap().distance(ends[0]) <= tol);
+            assert!(piece.evaluate_point(ivl.max()).unwrap().distance(ends[1]) <= tol);
+        }
+        assert!(matches!(
+            held_section(&k, &[leaving.clone()], ends, &off, tol).unwrap(),
+            Held::None
+        ));
+        assert!(matches!(
+            held_section(&k, &[held, leaving, other_held], ends, &off, tol).unwrap(),
+            Held::Two
+        ));
+    }
+
+    /// Review r4674266691: only the typed empty result passes a plane over; any other
+    /// failure of the intersection is no "no section".
+    #[test]
+    fn only_an_empty_intersection_is_no_section() {
+        let op = "test";
+        assert!(is_no_section(&SolidError::intersect(
+            op,
+            IntersectFailure::NoIntersection
+        )));
+        assert!(!is_no_section(&SolidError::intersect(
+            op,
+            IntersectFailure::UvPolygonNotInDomain
+        )));
+        assert!(!is_no_section(&SolidError::invalid_input(
+            op,
+            "not an intersection"
+        )));
+    }
+
+    /// Review r4674266706: a curved gap segment is bordered by an edge with the same ends
+    /// only where the edge's curve runs along it (here the same arc, run the other way); a
+    /// straight edge between the same ends, 0.1 from the arc's middle, is no border.
+    #[test]
+    fn a_curved_segment_is_bordered_only_by_an_edge_along_it() {
+        let tol = 1.0e-4;
+        let knots = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let arc = spline(
+            &[[0.0, 0.0, 0.0], [0.5, 0.2, 0.0], [1.0, 0.0, 0.0]],
+            2,
+            &knots,
+        );
+        let back = spline(
+            &[[1.0, 0.0, 0.0], [0.5, 0.2, 0.0], [0.0, 0.0, 0.0]],
+            2,
+            &knots,
+        );
+        let chord = spline(
+            &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            1,
+            &[0.0, 0.0, 1.0, 1.0],
+        );
+        let mut b = Brep::new();
+        let v0 = b.add_vertex(Vec3::new(0.0, 0.0, 0.0)).unwrap();
+        let v1 = b.add_vertex(Vec3::new(1.0, 0.0, 0.0)).unwrap();
+        let mut edge_of = |c: BSplineCurve| {
+            let e = b.add_edge(v1, v0).unwrap();
+            let rec = b.edge_mut(e).unwrap();
+            rec.interval = c.natural_interval();
+            rec.curve = Some(Curve::from(c));
+            e
+        };
+        let (along, across) = (edge_of(back), edge_of(chord));
+        assert!(curved_side_coincides(&b, along, &arc, tol).unwrap());
+        assert!(!curved_side_coincides(&b, across, &arc, tol).unwrap());
+    }
+
+    /// Review r4674266724: an arc from `(0, 0)` to `(2, 0)` through height 1 (a parabola,
+    /// control point `(1, 2)`), closed back along its chord, bounds `4/3` (two thirds of base
+    /// times height), though its corners are collinear. A polyline's part is Newell's sum.
+    #[test]
+    fn a_curved_side_bounds_area_its_corners_do_not() {
+        let origin = Point3::new(0.0, 0.0, 0.0);
+        let arc = spline(
+            &[[0.0, 0.0, 0.0], [1.0, 2.0, 0.0], [2.0, 0.0, 0.0]],
+            2,
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        );
+        let part = curved_area_vector(origin, &arc).unwrap().unwrap();
+        // the arc runs clockwise about +z, and the chord back through the origin adds nothing
+        assert!((part.twice_area - Vec3::new(0.0, 0.0, -8.0 / 3.0)).length() <= 1.0e-14);
+        assert!(
+            part.rounding > 0.0 && part.rounding < 1.0e-12,
+            "{}",
+            part.rounding
+        );
+        assert!(part.length >= 2.0 * 5.0_f64.sqrt() - 1.0e-12);
+        let polyline = spline(
+            &[[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 0.0, 0.0]],
+            1,
+            &[0.0, 0.0, 0.5, 1.0, 1.0],
+        );
+        let part = curved_area_vector(origin, &polyline).unwrap().unwrap();
+        assert!((part.twice_area - Vec3::new(0.0, 0.0, -2.0)).length() <= 1.0e-14);
     }
 }
