@@ -1435,7 +1435,7 @@ fn curve_with_moved_end(
     target: Point3,
 ) -> Result<Option<Curve>> {
     let (t0, t1) = (interval.min(), interval.max());
-    if !(t0 < t1) {
+    if !matches!(t0.partial_cmp(&t1), Some(std::cmp::Ordering::Less)) {
         return Ok(None);
     }
     if let CurveKind::Line(_) = curve.kind() {
@@ -1445,7 +1445,10 @@ fn curve_with_moved_end(
         } else {
             (kept, target)
         };
-        if !(p0.distance(p1) >= crate::math::EFF_ZERO) {
+        if !matches!(
+            p0.distance(p1).partial_cmp(&crate::math::EFF_ZERO),
+            Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal)
+        ) {
             return Ok(None);
         }
         let mut line = crate::curve::line::Line::from_points(p0, p1, CurveEvaluate::dim(curve));
@@ -1471,8 +1474,11 @@ fn curve_with_moved_end(
 /// on the edge's curve, as it does on an intersection edge whose curve is exact (a line or
 /// conic of two analytic surfaces): the edge then ends at the point on its own, unchanged
 /// curve, which stays a line, an ellipse, a hyperbola or a parabola. `None` when both ends
-/// are flagged (a closed edge: one projection cannot tell its two ends apart), a projection
-/// fails or leaves the curve's natural interval, or the new interval is not increasing.
+/// are flagged (a closed edge: one projection cannot tell its two ends apart), `interval`
+/// is not inside the curve's natural interval (an edge across a periodic curve's seam,
+/// whose foot could land a period away), a projection fails or leaves the natural
+/// interval, or the new interval is not increasing. Both intervals inside the natural
+/// interval keep the edge to at most the curve's one traversal: it cannot wrap.
 fn retrimmed_interval(
     k: &Kernel,
     curve: &Curve,
@@ -1486,6 +1492,9 @@ fn retrimmed_interval(
         return None;
     }
     let natural = curve.natural_interval();
+    if !interval.is_contained_by(&natural, 0.0) {
+        return None;
+    }
     let (mut t0, mut t1) = (interval.min(), interval.max());
     let at_start = far[0];
     let seed = if at_start { t0 } else { t1 };
@@ -1565,18 +1574,24 @@ fn edge_end_edit_certified(
 /// 1. [`retrimmed_interval`]: the curve unchanged and its far end's parameter moved to
 ///    where the curve passes `v`'s point. Exact, and the curve keeps its class, when the
 ///    point lies on the curve (an intersection edge of exact surfaces).
-/// 2. [`curve_with_moved_end`] at every far end (a closed edge moves both): the curve
-///    itself edited to end at `v`'s point. A line stays a line; a B-spline, ellipse,
-///    hyperbola or parabola becomes a B-spline, since a conic cannot end at a point off
-///    it and stay that conic.
+/// 2. Only for a wire edge (no face uses it): [`curve_with_moved_end`] at every far end
+///    (a closed edge moves both), the curve itself edited to end at `v`'s point. A line
+///    stays a line; a B-spline, ellipse, hyperbola or parabola becomes a B-spline, since a
+///    conic cannot end at a point off it and stay that conic. An edge of a face is never
+///    edited this way: the edit would pull the curve off the face's surface over the
+///    changed span, trading the edge-end gap for an edge/face gap. Such an edge is moved
+///    only by the exact re-trim, which keeps it on its unchanged curve.
 ///
-/// The kept edit is set with [`crate::topology::edge::set_curve`] (`SetCurve`: the change
-/// is notified, which deletes the edge uses' UV trim curves as upstream deletes them when
-/// the surf/surf/surf point edits an edge curve, `sm_SetXSectEdgeThroughPoint`, and the
-/// spatial cache is updated), then the edge interval with
-/// [`crate::topology::edge::set_interval`] when it changed. An edit is certified by
-/// [`edge_end_edit_certified`]: each moved end within half `v`'s tolerance and every
-/// other end of the edge that was within half its vertex's tolerance still within it.
+/// The kept edit sets the curve with [`crate::topology::edge::set_curve`] (`SetCurve`: the
+/// change is notified, which deletes the edge uses' UV trim curves, which end at the old
+/// point, as upstream deletes them when the surf/surf/surf point edits an edge curve,
+/// `sm_SetXSectEdgeThroughPoint`), then the edge interval with
+/// [`crate::topology::edge::set_interval`] when it changed, in
+/// [`crate::topology::edge::replace_3d_curve`]'s order. (The edge's brep notification
+/// carries no spatial-cache slot, so no cached box goes stale between the two.)
+/// An edit is certified by [`edge_end_edit_certified`]: every far end moved and within
+/// half `v`'s tolerance, and every other end of the edge that was within half its
+/// vertex's tolerance still within it.
 /// When neither edit is certified, and for a curve neither edit applies to, the edge is
 /// left as upstream leaves it.
 ///
@@ -1629,8 +1644,8 @@ pub(crate) fn carry_far_edge_ends(
                 kept = Some((curve.clone(), iv));
             }
         }
-        // 2. the curve edited to end at the point
-        if kept.is_none() {
+        // 2. a wire edge's curve edited to end at the point
+        if kept.is_none() && edge::faces(b, x, None)?.is_empty() {
             let mut moved: Option<Curve> = None;
             let mut moved_ends = [false; 2];
             for (i, &is_far) in far.iter().enumerate() {
@@ -1647,8 +1662,8 @@ pub(crate) fn carry_far_edge_ends(
                     }
                 }
             }
-            if let Some(c) = moved {
-                if edge_end_edit_certified(k, b, ends, old, (&c, &interval), moved_ends)? {
+            if let Some(c) = moved.filter(|_| moved_ends == far) {
+                if edge_end_edit_certified(k, b, ends, old, (&c, &interval), far)? {
                     kept = Some((c, interval));
                 }
             }
