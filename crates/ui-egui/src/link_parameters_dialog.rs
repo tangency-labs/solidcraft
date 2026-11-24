@@ -396,8 +396,9 @@ fn finish(app: &mut SolveApp, target: Target, tab: u64, source: Option<String>, 
                 app.insert_design_async(&path, note);
                 return;
             }
-            // Ticked when names match, as the request says: a design built for this one takes its sizes.
-            form.by_name = form.rows.iter().any(|r| r.here.is_some());
+            // Unticked, even when names match: Insert Design keeps the design's saved sizes until
+            // the user asks for this design's.
+            form.by_name = false;
             app.link_parameters = Some(form);
         }
         (Target::Insert { path, note, .. }, Err(_)) => app.insert_design_async(&path, note),

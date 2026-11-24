@@ -76,7 +76,7 @@ fn insert_design_asks_which_values_the_link_passes_and_inserts_with_them() {
 
     let form = h.app.link_parameters.clone().expect("the dialog asks before inserting");
     assert!(h.app.session.doc.links.is_empty(), "nothing is inserted before OK");
-    assert!(form.by_name, "ticked: this design has an `h` too");
+    assert!(!form.by_name, "unticked, although this design has an `h` too: the default is the design's saved sizes");
     let names: Vec<&str> = form.rows.iter().map(|r| r.name.as_str()).collect();
     assert_eq!(names, ["h", "w"]);
     assert_eq!((form.rows[0].design.as_str(), form.rows[0].here.as_deref()), ("5 mm", Some("8 mm")));
@@ -85,9 +85,12 @@ fn insert_design_asks_which_values_the_link_passes_and_inserts_with_them() {
         assert!(crate::scenario::handle_at(handle).is_some(), "missing {handle}");
     }
 
-    // w follows `lift`; h comes by name.
+    // w follows `lift`; h comes by name once the box is ticked.
     row(h.app.link_parameters.as_mut().unwrap(), "w").expression = "lift".into();
     h.frames(2);
+    h.step(&json!({"click": {"handle": "link_parameters:by_name"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.link_parameters.as_ref().unwrap().by_name);
     h.step(&json!({"click": {"handle": "link_parameters:ok"}})).unwrap();
     h.frames(2);
     settle(&mut h.app);
@@ -569,7 +572,7 @@ fn a_design_open_in_another_tab_asks_too() {
 
     pick(&mut h);
     let form = h.app.link_parameters.clone().expect("the dialog asks before inserting");
-    assert!(form.by_name && h.app.session.doc.links.is_empty(), "{form:?}");
+    assert!(!form.by_name && h.app.session.doc.links.is_empty(), "{form:?}");
     h.step(&json!({"click": {"handle": "link_parameters:cancel"}})).unwrap();
     h.settle();
     assert!(h.app.link_parameters.is_none() && h.app.session.doc.links.is_empty() && h.app.session.doc.occurrences.is_empty());
@@ -577,9 +580,10 @@ fn a_design_open_in_another_tab_asks_too() {
     pick(&mut h);
     h.step(&json!({"click": {"handle": "link_parameters:ok"}})).unwrap();
     h.settle();
+    // OK with the box left unticked inserts the design at its saved sizes, as before this dialog.
     let link = h.app.session.doc.links.values().next().expect("inserted").clone();
-    assert!(link.parameters_by_name);
-    assert!((volume(&h.app) - 10.0 * 20.0 * 8.0).abs() < 1e-6, "{}", volume(&h.app));
+    assert!(!link.parameters_by_name && link.parameters.is_empty(), "{link:?}");
+    assert!((volume(&h.app) - 10.0 * 20.0 * 5.0).abs() < 1e-6, "{}", volume(&h.app));
     assert!(h.app.status.as_ref().is_some_and(|(s, _, _)| s.contains("unsaved changes")), "{:?}", h.app.status);
     let _ = std::fs::remove_dir_all(dir);
 }
