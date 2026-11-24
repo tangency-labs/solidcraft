@@ -1728,7 +1728,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // Not upstream (WR-647): a curve's run along part of an edge that another curve of
         // the same pair is from end to end is a second copy of that edge, no event
         // (module docs of `duplicate_edge_run`).
-        drop_duplicate_edge_runs(k, &mut intersections)?;
+        drop_duplicate_edge_runs(k, &*brep, &mut intersections)?;
 
         // Not upstream: the contact points the strip rule proves (module docs of
         // `coincident_strip`), declared before any proto vertex of a face pair is made.

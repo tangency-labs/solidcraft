@@ -219,7 +219,12 @@ impl<O: ClassObject> CurveClassification<O> {
         input: &CurveInterval<O>,
     ) -> Result<()> {
         // every restart removes one interval, or splits an interval the input ends inside
-        // of, which happens at most once at each of the input's two ends
+        // of, which happens at most once at each of the input's two ends. Starting from n
+        // intervals, the two splits add at most two, and a removal (`connect_intervals`
+        // joins two into one) needs at least two left, so there are at most n + 1
+        // removals and two splits: n + 3 restarts, with no slack. A split that is refused
+        // (`insert_point_class_in` false) still sets its flag; that end is then never
+        // retried, which only leaves the part beyond it unlabelled (below).
         let allowed = self.size().saturating_add(3);
         let mut restarts = allowed;
         let mut split = [false; 2];
@@ -296,8 +301,20 @@ impl<O: ClassObject> CurveClassification<O> {
                 // input's extent; an end whose split is refused (an interior
                 // classification there conflicts) keeps the part beyond it unlabelled.
                 for (at, inside, done, end, param) in [
-                    (1, pb == IntervalPosition::Inside, split[1], &input.end, input.max()),
-                    (0, pa == IntervalPosition::Inside, split[0], &input.start, input.min()),
+                    (
+                        1,
+                        pb == IntervalPosition::Inside,
+                        split[1],
+                        &input.end,
+                        input.max(),
+                    ),
+                    (
+                        0,
+                        pa == IntervalPosition::Inside,
+                        split[0],
+                        &input.start,
+                        input.min(),
+                    ),
                 ] {
                     if inside && !done {
                         if let Some(flag) = split.get_mut(at) {
@@ -2260,6 +2277,84 @@ mod tests {
             Err(SolidError::InvalidInput { .. })
         ));
     }
+    /// A face classification object, for the WR-647 split of an F-F-F input.
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    enum Fc {
+        A,
+        B,
+    }
+    impl ClassObject for Fc {
+        fn class_kind(&self) -> ClassObjectKind {
+            ClassObjectKind::Face
+        }
+    }
+    struct Gf(Curve);
+    impl ClassGeometry<Fc> for Gf {
+        fn curve(&self, _: Fc) -> Option<&Curve> {
+            Some(&self.0)
+        }
+        fn surface(&self, _: Fc) -> Option<&Surface> {
+            None
+        }
+        fn volume(&self, _: Fc) -> Option<&Volume> {
+            None
+        }
+        fn point(&self, _: Fc) -> Option<Point3> {
+            None
+        }
+        fn topology_zone_tol_3d(&self, _: Fc) -> Option<f64> {
+            Some(1e-6)
+        }
+    }
+
+    /// WR-647: an F-F-F input over [0.25, 0.75] across [0, 0.5] and [0.5, 1], where the
+    /// second interval's middle is already classified to another face. The split at the
+    /// input's start is made; the split at its end is refused (the conflicting middle),
+    /// so the part of [0.5, 1] beyond the input keeps its middle and end, and only its
+    /// start (the shared boundary, which the input covers) takes the input's face.
+    /// Upstream's combine labelled all of [0.5, 1], its end included, as on face A.
+    #[test]
+    fn fff_input_ending_inside_a_classified_interval_keeps_its_far_end() {
+        let k = Kernel::default();
+        let range = Extent1d::from_min_max(0.0, 1.0);
+        let g = Gf(Curve::from(Line::bounded(
+            Vec3::ZERO,
+            Vec3::new(1.0, 0.0, 0.0),
+            &range,
+            &BoundedLineOptions::default(),
+        )));
+        let mut cc = CurveClassification::new(&k);
+        cc.set_curve(Some(Fc::A), false);
+        cc.set_size(&k, 2).unwrap();
+        cc.at_mut(0)
+            .unwrap()
+            .set_interval(&Extent1d::from_min_max(0.0, 0.5));
+        cc.at_mut(1)
+            .unwrap()
+            .set_interval(&Extent1d::from_min_max(0.5, 1.0));
+        cc.at_mut(1)
+            .unwrap()
+            .mid
+            .set_class_object(Pc::Face, Some(Fc::B));
+        let mut input = CurveInterval::with_interval(&k, &Extent1d::from_min_max(0.25, 0.75), None);
+        input.start.set_class_object(Pc::Face, Some(Fc::A));
+        input.mid = input.start;
+        input.end = input.start;
+        cc.insert_curve_interval(&k, &g, &input).unwrap();
+        assert_eq!(cc.size(), 3);
+        let (first, run, rest) = (*cc.at(0).unwrap(), *cc.at(1).unwrap(), *cc.at(2).unwrap());
+        assert_eq!(first.interval.max(), 0.25);
+        assert_eq!(first.mid.point_class(), Pc::Unknown);
+        assert_eq!((run.interval.min(), run.interval.max()), (0.25, 0.5));
+        assert_eq!(run.start.object(), Some(Fc::A));
+        assert_eq!(run.mid.object(), Some(Fc::A));
+        assert_eq!(run.end.object(), Some(Fc::A));
+        assert_eq!((rest.interval.min(), rest.interval.max()), (0.5, 1.0));
+        assert_eq!(rest.start.object(), Some(Fc::A));
+        assert_eq!(rest.mid.object(), Some(Fc::B));
+        assert_eq!(rest.end.point_class(), Pc::Unknown);
+    }
+
     #[test]
     fn unclassified_merge_and_empty_homogenization_use_real_api() {
         let (k, g, mut cc) = setup();
