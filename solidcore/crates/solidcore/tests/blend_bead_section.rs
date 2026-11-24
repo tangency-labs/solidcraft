@@ -2091,7 +2091,9 @@ fn a_toe_in_a_notch_of_its_face_is_refused_with_the_leg_that_fits() {
 /// Between planes at 60, 90 and 120 degrees (equal and unequal legs) and round the tube
 /// T-joint, every span between the section face's stations is proved: for each support, one
 /// foot in a box about the stations' feet for every point of the span (Krawczyk), the
-/// stations' own feet in it. The pieces cover every span; the T-joint's count is printed.
+/// stations' own feet in it, and joined to the root by a chain of boxes over the leg on the
+/// face's branch (one chain per piece and support). The pieces cover every span; the
+/// T-joint's count is printed.
 #[test]
 fn the_feet_are_proved_between_the_stations() {
     use solidcore::blend::foot_blend::{FootBlend, WELD_FIT_TOLERANCE};
@@ -2106,6 +2108,11 @@ fn the_feet_are_proved_between_the_stations() {
                     .prove_section(&k, legs, h, WELD_FIT_TOLERANCE)
                     .unwrap();
                 assert!(proof.pieces >= 3, "{adeg} {legs:?} {h}: {proof:?}");
+                assert_eq!(
+                    proof.chains,
+                    2 * proof.pieces,
+                    "{adeg} {legs:?} {h}: {proof:?}"
+                );
             }
         }
     }
@@ -2123,6 +2130,7 @@ fn the_feet_are_proved_between_the_stations() {
         started.elapsed()
     );
     assert!(proof.pieces >= 94, "{proof:?}");
+    assert_eq!(proof.chains, 2 * proof.pieces, "{proof:?}");
 }
 
 /// The feet's Taylor series (the certificate's fourth derivatives) in a square corner: the
