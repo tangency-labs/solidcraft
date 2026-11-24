@@ -60,6 +60,7 @@ pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
 pub mod dialogs_frame_plate;
+pub mod dialogs_gusset;
 mod dialogs_hole;
 pub mod dialogs_insert_airfoil;
 pub mod dialogs_insert_drawing;
@@ -121,6 +122,7 @@ mod i18n_painted_tests;
 mod i18n_ui_tests;
 pub mod icon_svg;
 pub mod icons;
+pub mod import_options;
 pub mod inference;
 pub mod insert_handles;
 pub mod install;
@@ -129,7 +131,6 @@ pub mod joint_drag;
 pub(crate) mod joint_handles;
 pub(crate) mod joint_symbols;
 pub mod keymap;
-pub mod kicad_import_dialog;
 #[cfg(test)]
 mod kit_gallery_tests;
 #[cfg(test)]
@@ -584,10 +585,11 @@ pub struct Services {
     /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
     /// Open dialog.
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
-    /// Open a dialog asking for a folder. `None` on the web build and when the host has no
-    /// folder picker: a plugin field shows no Browse button and the text field still accepts
-    /// a pasted path, and the document library cannot choose a folder.
-    pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    /// Open a dialog asking for a folder, starting in the one given (empty: the folder last used).
+    /// `None` on the web build and when the host has no folder picker: a plugin field shows no
+    /// Browse button and the text field still accepts a pasted path, the document library cannot
+    /// choose a folder, and Settings › Design hides the folder settings.
+    pub pick_folder: Option<Box<dyn Fn(&str) -> FilePickerFuture>>,
     /// Ask for a file to open. The extensions are the file type the command reads, offered as
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
@@ -749,8 +751,6 @@ pub struct SolveApp {
     pub design_properties: Option<design_properties::DesignProperties>,
     /// The Sketch report window (`sketch.inspect` from the ribbon), when open.
     pub sketch_report: Option<sketch_report::SketchReport>,
-    /// The KiCad import options window, when a board is chosen to open.
-    pub kicad_import: Option<kicad_import_dialog::Dialog>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
@@ -868,6 +868,9 @@ pub struct SolveApp {
     /// The status message is a refused JSON save of a design with binary data in it, and offers
     /// Save as .sc, so that data is never left out.
     pub status_save_sc: bool,
+    /// The status message that came at this time stays until it is dismissed, instead of going
+    /// after a few seconds (an export that left bodies out).
+    pub status_sticky_at: Option<f64>,
     pub quit_requested: bool,
     /// Autosave into the recovery folder (the desktop app turns it on).
     pub autosave: Option<recovery_ui::Autosaves>,
@@ -896,6 +899,10 @@ pub struct SolveApp {
     pub(crate) quick_measure: quick_measure::QuickMeasure,
     /// An STL or OBJ file waiting for the unit its coordinates are in (`mesh_units`).
     pub mesh_units: Option<mesh_units::Ask>,
+    /// A STEP, IGES, FreeCAD, Rhino or glTF file waiting for its import options (`import_options`).
+    pub import_options: Option<import_options::Ask>,
+    /// Files asked while another waits for its options (several dropped at once), asked in turn.
+    pub import_options_waiting: std::collections::VecDeque<import_options::Ask>,
     /// The Plugins menu and the open plugin entry dialog (`plugin_menu`).
     pub(crate) plugin_menu: plugin_menu::State,
     /// The bodies of a just-opened Y-up file, offered to be stood up (`stand_up`).
@@ -1137,7 +1144,6 @@ impl SolveApp {
             params: None,
             design_properties: None,
             sketch_report: None,
-            kicad_import: None,
             bom: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
@@ -1194,6 +1200,7 @@ impl SolveApp {
             status_is_tool_hint: false,
             status_undo: false,
             status_save_sc: false,
+            status_sticky_at: None,
             quit_requested: false,
             autosave: None,
             locks: None,
@@ -1207,6 +1214,8 @@ impl SolveApp {
             recovery_discard_all: false,
             quick_measure: Default::default(),
             mesh_units: None,
+            import_options: None,
+            import_options_waiting: Default::default(),
             plugin_menu: Default::default(),
             stand_up: None,
             stand_up_occurrence: None,
@@ -2286,14 +2295,12 @@ impl SolveApp {
 
     /// Insert Design's file picker: another design becomes a linked component; a STEP or mesh
     /// file picked here is inserted the way Insert STEP or Insert Mesh would (#1240), and a KiCad
-    /// board asks for its import settings.
+    /// board asks for its import options and opens as a design of its own (`import_options`).
     pub(crate) fn pick_design_to_insert(&mut self) {
         self.pick_open(|app, path| {
             let Some(path) = path else { return };
             if solidcraft_engine::io::is_design_path(&path) {
                 app.insert_design_async(&path, None);
-            } else if solidcraft_engine::io::is_kicad_path(&path) {
-                kicad_import_dialog::open(app, &path);
             } else {
                 app.insert_path_async(&path);
             }
@@ -3628,6 +3635,12 @@ impl SolveApp {
         self.status_save_sc = false;
     }
 
+    /// [`Self::set_status`] for a warning that must not be missed: it stays until dismissed.
+    pub fn set_status_sticky(&mut self, s: impl Into<String>) {
+        self.set_status(s, true);
+        self.status_sticky_at = self.status.as_ref().map(|(_, at, _)| *at);
+    }
+
     /// Retain tool guidance while its owner is suspended, without hiding ordinary statuses.
     pub(crate) fn set_tool_hint(&mut self, text: impl Into<String>) {
         self.set_status(text, false);
@@ -3823,13 +3836,10 @@ impl SolveApp {
         });
     }
 
-    /// Open a chosen file: a KiCad board asks for its import options first, anything else opens.
+    /// Open a chosen file; one whose format has import options (a STEP file, a KiCad board) asks
+    /// them first (`import_options`).
     pub fn open_chosen_file(&mut self, path: &str) {
-        if solidcraft_engine::io::is_kicad_path(path) {
-            kicad_import_dialog::open(self, path);
-        } else {
-            self.open_path_async(path);
-        }
+        self.open_path_async(path);
     }
     pub fn insert_path_async(&mut self, path: &str) {
         file_load::begin(self, path, true);
@@ -3900,8 +3910,6 @@ impl SolveApp {
             || solidcraft_engine::cmd::drawing_import_command(path).is_some();
         if import && (!self.session.doc.features.is_empty() || !self.session.doc.point_clouds.is_empty()) {
             self.insert_path_async(path);
-        } else if solidcraft_engine::io::is_kicad_path(path) {
-            self.open_chosen_file(path);
         } else {
             self.open_path_async(path);
         }
@@ -4682,7 +4690,8 @@ impl SolveApp {
         }
         issue_report::CadInput::block(self, ui, report_input);
         file_load::show(self, ui.ctx());
-        kicad_import_dialog::show(self, ui.ctx());
+        // A file's import options are asked on Home too, where Open and Import start.
+        import_options::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());

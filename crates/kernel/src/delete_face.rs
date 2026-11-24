@@ -1,9 +1,9 @@
-//! Delete Face with healing: faces are removed and their planar neighbours extend to close the
-//! gap, as when a fillet, chamfer, boss or hole is taken off a part.
+//! Delete Face with healing extends the neighbours of the selected faces to close the gap.
+//! SolidCore closes a ring groove across both circular rims.
 //!
-//! The body is rebuilt from its own schema 4 record. Faces away from the gap are kept as they
-//! are. Each neighbouring face (planar) keeps its plane and its edges that don't touch the gap;
-//! a loop that ran entirely along deleted faces is dropped for a hole's rim or a boss's
+//! For a planar gap the body is rebuilt from its own schema 4 record. Faces away from the gap
+//! are kept as they are. Each neighbouring face keeps its plane and its edges outside the gap.
+//! A loop that ran entirely along deleted faces is dropped for a hole's rim or a boss's
 //! footprint, or restored at the moved corners for a face enclosed by rounds. A corner on the
 //! gap moves to where its planes meet the neighbours across the gap (a fillet's tangent points
 //! go to the sharp corner), and the stretch of loop that bordered deleted faces closes with a
@@ -288,6 +288,48 @@ fn fill_on_planes(
     Ok(())
 }
 
+/// Remove a groove between two turned faces, with its history over the original body. The
+/// kernel decides whether the rims bound a band and records the identity of the surfaces it joins.
+fn heal_ring_groove(body: &Body, selected: &BTreeSet<usize>, neighbours: &BTreeSet<usize>) -> Result<Option<Body>> {
+    use crate::history::FaceOrigin;
+    use solidcore_ops::history::{Change as OpsChange, FaceOrigin as OpsOrigin};
+
+    let Some(form) = body.ops_body() else { return Ok(None) };
+    let (operand, order) = &*form;
+    let picks: Vec<_> = selected.iter().copied().collect();
+    let Some((healed, history)) = solidcore_ops::trim::remove_ring_groove(operand, order, &picks).map_err(|e| fail(e.to_string()))? else {
+        return Ok(None);
+    };
+    let (record, _) = healed.to_record().map_err(|e| fail(e.to_string()))?;
+    let faces = history
+        .faces
+        .into_iter()
+        .map(|f| {
+            let change = match f.change {
+                OpsChange::Kept if matches!(f.origins.as_slice(), [OpsOrigin::Face(i)] if neighbours.contains(i)) => Change::Modified,
+                OpsChange::Kept => Change::Kept,
+                OpsChange::Modified => Change::Modified,
+                OpsChange::Split => Change::Split,
+                OpsChange::Merged => Change::Merged,
+                OpsChange::Generated => Change::Generated,
+            };
+            let origins = f
+                .origins
+                .into_iter()
+                .map(|o| match o {
+                    OpsOrigin::Face(face) => FaceOrigin::Face { operand: 0, face },
+                    OpsOrigin::OffsetOf(face) => FaceOrigin::Offset { operand: 0, face },
+                    OpsOrigin::AlongEdge(edge) => FaceOrigin::Edge { operand: 0, edge },
+                })
+                .collect();
+            FaceProv { change, origins }
+        })
+        .collect();
+    let edges: Vec<_> = history.edges.into_iter().map(|e| crate::record::pieces_of(0, e)).collect();
+    let history = crate::record::of_faces(&record, 1, faces, &edges);
+    Ok(Some(Body::from_record(record)?.with_history_counts(history, &crate::record::counts(&[body]))?))
+}
+
 /// Delete faces (indices in the body's face order, as in its mesh's `tri_face`) and heal the
 /// gap by extending the neighbours. The result's history is over `[body]`.
 pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
@@ -327,7 +369,7 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
             }
         }
         let gap_edge = |e: u32| efaces.get(&e).is_some_and(|fs| fs.iter().any(|x| del.contains(x)));
-        // Neighbours: faces sharing an edge with a deleted face; they must be planar.
+        // Faces sharing an edge with the selection.
         let mut neighbours: BTreeSet<usize> = BTreeSet::new();
         for fs in efaces.values() {
             if fs.iter().any(|f| del.contains(f)) {
@@ -336,6 +378,13 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
         }
         if neighbours.is_empty() {
             return Err(fail("the faces don't border the rest of the body"));
+        }
+        if neighbours.len() == 2
+            && neighbours.iter().all(|&f| !matches!(surf_of(&rec, f), Some(Surf::Plane { .. })))
+            && let Some(groove) = heal_ring_groove(body, &del, &neighbours).transpose()
+        {
+            // Carry the groove result, including any refusal, past the planar fallback.
+            return Ok(groove);
         }
         let mut planes: HashMap<usize, (Vec3, f64)> = HashMap::new();
         for &f in &neighbours {
@@ -582,13 +631,13 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
             log::debug!("delete_faces assembly finish failed: {e}");
             fail("the neighbouring faces do not close the gap")
         })?;
-        crate::assemble::body_with_history(finished, &asm, body, history.into_iter().map(|(_, h)| h).collect())
+        crate::assemble::body_with_history(finished, &asm, body, history.into_iter().map(|(_, h)| h).collect()).map(Ok)
     });
     match planar {
         Err(e @ KernelError::Invalid(_)) if del.len() >= 2 && del.iter().all(|&f| !matches!(surf_of(&rec, f), Some(Surf::Plane { .. }))) => {
             delete_fillet_chain(body, &del)?.ok_or(e)
         }
-        outcome => outcome,
+        outcome => outcome?,
     }
 }
 
@@ -754,6 +803,70 @@ mod tests {
         assert_eq!(source.change, Change::Kept);
         assert_eq!(healed.classify_point(Vec3::new(10.0, 6.0, 4.0)).unwrap(), crate::PointClass::Outside);
         assert_eq!(healed.classify_point(Vec3::new(10.0, 0.12, 7.88)).unwrap(), crate::PointClass::Inside);
+    }
+
+    #[test]
+    fn deleting_ring_groove_faces_restores_the_shaft_and_tracks_both_supports() {
+        use crate::history::{Change, FaceOrigin};
+
+        let core = cylinder(Vec3::ZERO, Vec3::Z, 4.0, 20.0).unwrap();
+        let collar = |z| cylinder(Vec3::new(0.0, 0.0, z), Vec3::Z, 5.0, 8.0).unwrap();
+        let lower = boolean(&core, &collar(0.0), BoolOp::Union).unwrap().unwrap();
+        let shaft = boolean(&lower, &collar(12.0), BoolOp::Union).unwrap().unwrap();
+        let face_at = |r, z| shaft.nearest_face(Vec3::new(0.0, r, z)).unwrap().1;
+        let selected = [face_at(4.5, 8.0), face_at(4.0, 10.0), face_at(4.5, 12.0)];
+        let supports = [face_at(5.0, 4.0), face_at(5.0, 16.0)];
+
+        let closed = delete_faces(&shaft, &selected).unwrap();
+        assert_eq!(closed.face_count(), 3);
+        assert!((closed.volume_at(1e-8).unwrap() - 500.0 * std::f64::consts::PI).abs() < 1e-6);
+        let hist = closed.history().unwrap();
+        let wall = closed.nearest_face(Vec3::new(0.0, 5.0, 10.0)).unwrap().1;
+        assert_eq!(hist.faces[wall].change, Change::Merged);
+        for support in supports {
+            assert!(hist.faces[wall].origins.contains(&FaceOrigin::Face { operand: 0, face: support }));
+        }
+        for z in [0.0, 20.0] {
+            let cap = closed.nearest_face(Vec3::new(0.0, 0.0, z)).unwrap().1;
+            assert_eq!(hist.faces[cap].change, Change::Kept);
+            assert_eq!(hist.faces[cap].origins, [FaceOrigin::Face { operand: 0, face: face_at(0.0, z) }]);
+        }
+    }
+
+    #[test]
+    fn deleting_a_round_between_curved_supports_restores_the_sharp_rim() {
+        use crate::history::{EdgeOrigin, FaceOrigin};
+
+        let post = cylinder(Vec3::ZERO, Vec3::Z, 4.0, 6.0).unwrap();
+        let ball = crate::sphere(Vec3::new(0.0, 0.0, 3.0), 5.0).unwrap();
+        let upper = box_solid(Vec3::new(-6.0, -6.0, 6.0), Vec3::new(6.0, 6.0, 12.0)).unwrap();
+        let cap = boolean(&ball, &upper, BoolOp::Intersect).unwrap().unwrap();
+        // Rotating the spherical cap splits its common rim with the post at the two seams.
+        let cap = crate::transform(&cap, Vec3::ZERO, Vec3::ZERO, Vec3::Z, 1.5).unwrap();
+        let sharp = boolean(&post, &cap, BoolOp::Union).unwrap().unwrap();
+        let rim = crate::tangent_chain(&sharp, &[Vec3::new(0.0, 4.0, 6.0)]).unwrap();
+        let rounded = fillet(&sharp, &rim, 1.0).unwrap();
+        let rounds: Vec<_> = rounded
+            .history()
+            .unwrap()
+            .faces
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.origins.iter().any(|o| matches!(o, FaceOrigin::Edge { .. })))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(rounds.len(), 2);
+
+        let input = crate::Body::from_record(rounded.record().clone()).unwrap();
+        let healed = delete_faces(&input, &rounds).unwrap();
+        // A fillet-chain removal records a new sharp edge between the two surviving supports.
+        let edges = &healed.history().unwrap().edges;
+        assert!(edges.iter().any(|e| matches!(e.origins.as_slice(), [EdgeOrigin::Meet { .. }])));
+        assert_eq!(healed.face_count(), sharp.face_count());
+        // The R4 by 6 post contributes 96π and the R5 cap of height 2 contributes 52π/3.
+        let expected = 340.0 * std::f64::consts::PI / 3.0;
+        let actual = crate::measure_mass(&healed).unwrap().volume;
+        assert!((actual - expected).abs() < 1e-7, "restored volume {actual}, expected {expected}");
     }
 
     #[test]

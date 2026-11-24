@@ -1930,7 +1930,10 @@ fn overlap_meshes(st: &solidcraft_engine::doc::ModelState, r: &Value) -> Vec<Mes
     let pairs: Vec<_> =
         r["overlaps"].as_array().into_iter().flatten().filter_map(|hit| Some((st.body(hit["a"].as_str()?)?, st.body(hit["b"].as_str()?)?))).collect();
     kernel::map_with_local_pools(&pairs, usize::MAX, |&(a, b)| {
-        let Some(o) = kernel::boolean(&a.body, &b.body, kernel::BoolOp::Intersect)? else { return Ok(None) };
+        // SMLib's check of the shared part runs here, as the interference check that found it ran it.
+        let Some(o) = kernel::validating(kernel::Validation::EachStep, || kernel::boolean(&a.body, &b.body, kernel::BoolOp::Intersect)).0? else {
+            return Ok(None);
+        };
         o.mesh(&kernel::MeshTolerance::chord((o.size() * 2e-3).max(1e-3))).map(Some)
     })
     .into_iter()
@@ -3807,7 +3810,14 @@ pub fn joint_frames_world(s: &Session) -> Vec<(u64, solidcraft_engine::doc::Mat)
         std::borrow::Cow::Owned(d)
     };
     let st = s.model.state();
-    let v: Vec<_> = doc.assembly.joints.iter().filter_map(|j| doc.origin_world(&st, &j.a).ok().map(|m| (j.id, j.offset_frame_a(m)))).collect();
+    let inactive = doc.inactive_pattern_occurrences();
+    let v: Vec<_> = doc
+        .assembly
+        .joints
+        .iter()
+        .filter(|j| !j.uses_any_occurrence(&inactive))
+        .filter_map(|j| doc.origin_world(&st, &j.a).ok().map(|m| (j.id, j.offset_frame_a(m))))
+        .collect();
     JOINT_FRAMES.with(|o| *o.borrow_mut() = Some((key, v.clone())));
     v
 }
@@ -3819,11 +3829,13 @@ pub fn drawn_joints(app: &SolveApp) -> Vec<(u64, bool)> {
     // `Session::joint_drawn` for each joint, with the Joints folder looked up once: it was looked
     // up again for every joint of the design at every frame.
     let folder_shown = !app.session.folder_hidden("c0/joints");
+    let inactive = app.session.doc.inactive_pattern_occurrences();
     app.session
         .doc
         .assembly
         .joints
         .iter()
+        .filter(|j| !j.uses_any_occurrence(&inactive))
         .filter_map(|j| {
             let picked = app.tree.picked_joints.contains(&j.id);
             (picked || (folder_shown && app.session.joint_visible(j.id))).then_some((j.id, picked))

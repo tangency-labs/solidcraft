@@ -94,6 +94,21 @@ SolidCraft changes to egui and eframe:
   system refuses is tried again for up to 150 ms (Windows refuses while another process has the
   file open). `lib.rs` re-exports `save_to_disk`, hidden, for SolidCraft's tests
   (`settings_saved_at_once_from_two_windows_stay_whole` in `apps/solidcraft/src/startup.rs`).
+- `crates/eframe/src/epi.rs`, `crates/eframe/src/native/run.rs`,
+  `crates/eframe/src/native/winit_integration.rs`: `NativeOptions::event_loop_ready` hands the app
+  the event loop's proxy before the loop starts (dropped when the options are cloned, like the other
+  native hooks), and `UserEvent::RunLogicNow { viewport_id }` runs that viewport's logic-only pass at
+  once. The control channel (#743) serves a request with it without waiting for the compositor's
+  next frame: on Wayland a window that gets no frames (off-screen, on another workspace) otherwise
+  stalled each request for up to a second. Normal redraws still paint.
+
+- `crates/egui/src/data/input/pointer_button.rs`, `crates/egui-winit/src/lib.rs`,
+  `crates/eframe/src/web/input.rs`: mice with more than five buttons. `PointerButton` has
+  `Extra3` to `Extra13` (buttons 6 to 16; `NUM_POINTER_BUTTONS` is 16), `PointerButton::ALL`,
+  `number` and `from_number`. egui-winit turns winit's `MouseButton::Other(code)` into them by
+  each platform's code (`other_button_number`) and the web runner its `button` 5 and up, where
+  upstream drops them. Tests: `buttons_are_numbered_in_order` (egui) and
+  `further_mouse_buttons_reach_egui_by_number` (egui-winit).
 - `crates/egui/src/data/input/viewport_info.rs`, `crates/egui-winit/src/lib.rs`
   (`update_viewport_info`): `ViewportInfo::native_window`, the handle of the native window a
   viewport is shown in (the `HWND` on Windows, `None` elsewhere). Windows asks a window what is
@@ -174,6 +189,12 @@ separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
   error scopes, awaiting every result before returning it. A refused UI pipeline (D3D12
   `egui_pipeline` shader compilation, #6648) returns `WgpuError::CreateRendererError` through
   eframe so startup can retry another backend instead of invoking wgpu's panic handler.
+- `src/lib.rs`, `src/winit.rs`: `stalled_frames` counts the frames in a row whose texture took
+  at least `STALLED_ACQUIRE` (950 ms) to acquire. wgpu waits at most a second for the next
+  image and D3D12 then goes on as if it had come, so a hung GPU shows only as frames that each
+  wait that second; the app restarts on another renderer after a few of them (#3321). Only the
+  main window counts. `refused_for` says how long the main window has skipped its frames on a
+  refused configure, which never reach the acquire.
 
 ## winit 0.30.13 (Apache-2.0, © The winit contributors, https://github.com/rust-windowing/winit)
 
@@ -250,11 +271,14 @@ SolidCraft changes:
 - `src/platform_impl/windows/event_loop.rs` (`WM_NCCALCSIZE`), `window_state.rs`
   (`WindowFlags::adjust_rect`): a resizable undecorated window with the undecorated shadow keeps
   the system frame on the left, right and bottom (its invisible resize borders and drop shadow)
-  and has none at the top. This replaces winit's 1 px non-client row at the top, with which
-  Windows 11 offered no snap layouts on a restored window's maximize button, although the hit
-  test answered `HTMAXBUTTON` (#13996). `adjust_rect` grows an inner size by the same frame, so
-  requested and saved sizes and DPI changes keep the client area's size. The two places must
-  agree, which is why the calculation is here and not in the app. A window that cannot be
-  resized (the preview of a view dragged out of the window) has no resize borders to keep and is
-  winit's own, as is a maximized one. The hit test itself is the app's
-  (`apps/solidcraft/src/native_frame.rs`): nothing of it is in this copy.
+  and has none at the top. This replaces winit's client area moved down by 1 px, which blurred
+  text (#3927) and with which Windows 11 offered no snap layouts on a restored window's maximize
+  button, although the hit test answered `HTMAXBUTTON` (#13996). A window that is all client
+  area gets no snap layouts either: Windows 11 shows them only over a window that keeps a frame
+  of its own, so the frame is kept here and the app's window procedure leaves this answer alone.
+  `adjust_rect` grows an inner size by the same frame, so requested and saved sizes and DPI
+  changes keep the client area's size. The two places must agree, which is why the calculation
+  is here and not in the app. A window that cannot be resized (the preview of a view dragged out
+  of the window) has no resize borders to keep and is winit's own, as is a maximized one. The
+  hit test itself is the app's (`apps/solidcraft/src/native_frame.rs`): nothing of it is in this
+  copy.

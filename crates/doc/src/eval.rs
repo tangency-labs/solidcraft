@@ -49,6 +49,8 @@ pub struct ModelBody {
     pub body: Body,
     /// Feature that created it.
     pub feature: u64,
+    /// Sketch line that produced this frame member, independent of its current body name.
+    pub(crate) frame_member_line: Option<Arc<str>>,
     // Timeline snapshots are cloned before meshes are requested. Share the cell itself so
     // meshing any snapshot also warms every unchanged copy of this body.
     /// The box of the body's display mesh ([`ModelBody::mesh_bounds`]), worked out once: framing
@@ -214,6 +216,7 @@ impl ModelBody {
         Ok(section)
     }
 
+    /// A newly evaluated body with empty caches; a constructor adds its provenance afterward.
     pub fn new(name: String, body: Body, feature: u64) -> Self {
         ModelBody {
             name,
@@ -221,6 +224,7 @@ impl ModelBody {
             source_transform: crate::IDENTITY,
             body,
             feature,
+            frame_member_line: None,
             mesh: Arc::new(OnceLock::new()),
             bounds: Arc::new(OnceLock::new()),
             joint_faces: Arc::new(OnceLock::new()),
@@ -1345,6 +1349,12 @@ impl ModelState {
                 b.component = old.component;
                 b.source_transform = old.source_transform;
             }
+            // An in-place operation can replace the solid while keeping its producer.
+            if b.frame_member_line.is_none()
+                && let Some(old) = olds.iter().find(|old| old.feature == b.feature)
+            {
+                b.frame_member_line = old.frame_member_line.clone();
+            }
             let kept = olds.iter().find(|x| x.body.same(&b.body));
             match kept {
                 Some(x) => {
@@ -1925,6 +1935,7 @@ fn param_names(f: &Feature) -> Vec<String> {
     names
 }
 
+/// Hash a feature definition, its referenced values and the timeline prefix it evaluates against.
 fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, Value>, rolled_back: bool, steps: &ImportDigests) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     prev.hash(&mut h);
@@ -1938,6 +1949,10 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
     // An import whose checks healed its parts is the healed import ([`ImportDigests::heals`]).
     if let Some(heals) = steps.heals(f.id) {
         heals.digest().hash(&mut h);
+    }
+    if matches!(f.kind, FeatureKind::FrameMember { .. }) {
+        // Older cached member bodies do not have line provenance; rebuild them once.
+        "frame-member-line".hash(&mut h);
     }
     for n in param_names(f) {
         n.hash(&mut h);
@@ -3466,6 +3481,32 @@ fn geo_datum_paths(g: &crate::construct::GeoRef, out: &mut Vec<Vec<u64>>) {
     }
 }
 
+/// Fingerprint the exact transforms used by the two supports. Captured placements keep their
+/// geometry when an occurrence moves, but still depend on valid paths and live body offsets.
+fn gusset_placements_digest(doc: &Document, f: &Feature, st: Option<&ModelState>, supports: &[crate::gusset::Support]) -> u64 {
+    let [first, second] = supports else { return 0 };
+    let Some(st) = st else { return placements_hash(doc) };
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for support in [first, second] {
+        let PlaneRef::Face { anchor: Some(anchor), .. } = &support.plane else { return 0 };
+        let Some(body) = st.body(&anchor.target.body) else {
+            0u8.hash(&mut h);
+            continue;
+        };
+        match anchor.source_to_author(doc, f.component, body) {
+            Ok(transform) => {
+                1u8.hash(&mut h);
+                hash_placement(&transform, &mut h);
+            }
+            Err(err) => {
+                2u8.hash(&mut h);
+                err.to_string().hash(&mut h);
+            }
+        }
+    }
+    h.finish() | 1
+}
+
 /// Where the geometry a feature reads from other components is placed, as its own component
 /// sees it: the placement of each component (or occurrence path) it reads relative to its own
 /// frame. A feature that reads nothing outside its own frame gives 0, so moving parts around
@@ -3475,6 +3516,9 @@ fn geo_datum_paths(g: &crate::construct::GeoRef, out: &mut Vec<Vec<u64>>) {
 /// component a body it names belongs to (without it, every component is taken as read).
 fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64 {
     use crate::walk::Walk;
+    if let FeatureKind::FrameGusset { supports, .. } = &f.kind {
+        return gusset_placements_digest(doc, f, st, supports);
+    }
     // No shortcut for a design without placements: its first component (placed where the
     // design is) must not change what its features read, or creating it evaluates them all.
     let mut reads = PlacementReads::default();
@@ -7008,6 +7052,30 @@ fn body_on_edge(st: &ModelState, p: Vec3) -> Option<usize> {
     st.bodies.iter().enumerate().filter_map(|(i, b)| Some((i, edge_through(b, p)?))).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i)
 }
 
+/// The body (index) an edge picked at `p` without a name lies on, as [`body_on_edge`], and the note
+/// when `p` lies on edges of other bodies too: every body with an edge through `p` about as near
+/// as the nearest one, the window the `solid.fillet` command refuses such a pick with (#20517).
+fn body_on_edge_noted(st: &ModelState, p: Vec3) -> (Option<usize>, Option<String>) {
+    let near: Vec<(usize, f64)> = st.bodies.iter().enumerate().filter_map(|(i, b)| Some((i, edge_through(b, p)?))).collect();
+    let Some(&(chosen, d_min)) = near.iter().min_by(|a, b| a.1.total_cmp(&b.1)) else { return (None, None) };
+    let mut names: Vec<&str> =
+        near.iter().filter(|(_, d)| *d <= 2.0 * d_min + 1e-3).filter_map(|(i, _)| Some(st.bodies.get(*i)?.name.as_str())).collect();
+    let first = st.bodies.get(chosen).map(|b| b.name.as_str()).unwrap_or_default();
+    names.sort_by_key(|n| *n != first);
+    let note = match names.split_last() {
+        Some((last, others)) if !others.is_empty() => Some(format!(
+            "[{}, {}, {}] lies on edges of {} bodies, {} and {last}: `{first}` is blended; name the one to blend with `body`",
+            p.x,
+            p.y,
+            p.z,
+            names.len(),
+            others.join(", ")
+        )),
+        _ => None,
+    };
+    (Some(chosen), note)
+}
+
 /// How far `p` is from the edge of `b` that runs through it, when one does.
 fn edge_through(b: &ModelBody, p: Vec3) -> Option<f64> {
     if b.body.is_mesh() {
@@ -7022,12 +7090,14 @@ fn edge_through(b: &ModelBody, p: Vec3) -> Option<f64> {
 /// its stored name finds it on. A named edge that is gone stays on the bodies the feature's other
 /// edges were found on; an unnamed one goes to the body the pick lies on an edge of; failing
 /// both, the body nearest the first pick (as before blends were split by body). A named edge is
-/// never moved onto another body because that body's edge is nearer.
-fn blend_bodies(st: &ModelState, f: &Feature, body: &Option<crate::BodyName>, pts: &[Vec3]) -> Result<Vec<usize>> {
+/// never moved onto another body because that body's edge is nearer. The notes say which
+/// unnamed picks lie on edges of several bodies: the `solid.fillet` and `solid.chamfer` commands
+/// refuse such a pick, so a design file that has one blends the nearest body, but says so (#20517).
+fn blend_bodies(st: &ModelState, f: &Feature, body: &Option<crate::BodyName>, pts: &[Vec3]) -> Result<(Vec<usize>, Vec<String>)> {
     // Named, or only one body to blend: no lookup.
     if body.is_some() || st.bodies.iter().filter(|b| !b.body.is_mesh()).count() < 2 {
         let ti = blend_target(st, body, pts)?;
-        return Ok(vec![ti; pts.len()]);
+        return Ok((vec![ti; pts.len()], Vec::new()));
     }
     let names: Vec<Option<&str>> = pts.iter().enumerate().map(|(i, p)| trusted_edge_name(f, i, *p)).collect();
     let by_name: Vec<Option<usize>> = names.iter().zip(pts).map(|(n, p)| n.and_then(|n| named_body(st, n, *p))).collect();
@@ -7048,13 +7118,18 @@ fn blend_bodies(st: &ModelState, f: &Feature, body: &Option<crate::BodyName>, pt
     };
     let mut fallback = None;
     let mut out = Vec::with_capacity(pts.len());
+    let mut notes = Vec::new();
     for ((b, n), p) in by_name.into_iter().zip(&names).zip(pts) {
         let found = match (b, n) {
             (Some(ti), _) => Some(ti),
             // A named edge that is gone stays with the feature's other bodies: another body's
             // edge where it was picked is not it.
             (None, Some(_)) => nearest_named(*p).or_else(|| body_on_edge(st, *p)),
-            (None, None) => body_on_edge(st, *p).or_else(|| nearest_named(*p)),
+            (None, None) => {
+                let (on, note) = body_on_edge_noted(st, *p);
+                notes.extend(note);
+                on.or_else(|| nearest_named(*p))
+            }
         };
         let ti = match (found, fallback) {
             (Some(ti), _) => ti,
@@ -7063,7 +7138,7 @@ fn blend_bodies(st: &ModelState, f: &Feature, body: &Option<crate::BodyName>, pt
         };
         out.push(ti);
     }
-    Ok(out)
+    Ok((out, notes))
 }
 
 /// The edges `idx` of blend `f` found on body `mb`: by name, where the edge was stored with one.
@@ -10647,15 +10722,15 @@ pub fn pattern_row(
 
 /// Keep each Pattern of components' occurrences in step with its count and spacing (#12116):
 /// add or remove copies when the count changes, update transforms when the source or spacing
-/// moves, and drop copies of a suppressed or rolled-back Pattern. Surviving copies keep their
-/// occurrence ids.
+/// moves, and retain copies of a suppressed or rolled-back Pattern for later reactivation.
+/// Surviving copies keep their occurrence ids.
 pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Result<()> {
     let marker = doc.marker.unwrap_or(doc.features.len());
     // The values the features are built with, as `pattern_matrices` reads them when the copies
     // are first placed: a bare number is in the design's unit (#8523).
     let vals = doc.evaluation_values();
-    // Snapshot what each Pattern of components wants, then mutate. Features after the marker
-    // are rolled back: their copies go, like bodies of a rolled-back Pattern.
+    // Snapshot each Pattern of components before mutating the document. The placement tree
+    // excludes the stored copies of suppressed and rolled-back patterns.
     let plans: Vec<(u64, bool, Vec<u64>, crate::PatternKind, u64)> = doc
         .features
         .iter()
@@ -10669,7 +10744,6 @@ pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Resu
         .collect();
     for (feature_id, inactive, components, pattern, feature_component) in plans {
         if inactive {
-            clear_pattern_occurrences(doc, feature_id)?;
             continue;
         }
         let mats = pattern_transforms(doc, &vals, st, feature_component, &pattern)?;
@@ -10721,20 +10795,6 @@ pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Resu
         if let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature_mut(feature_id).map(|f| &mut f.kind) {
             *occurrences = made;
         }
-    }
-    Ok(())
-}
-
-fn clear_pattern_occurrences(doc: &mut Document, feature_id: u64) -> Result<()> {
-    let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature(feature_id).map(|f| &f.kind) else {
-        return Ok(());
-    };
-    let gone: std::collections::BTreeSet<u64> = occurrences.iter().copied().collect();
-    if !gone.is_empty() {
-        doc.remove_occurrences(&gone);
-    }
-    if let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature_mut(feature_id).map(|f| &mut f.kind) {
-        occurrences.clear();
     }
     Ok(())
 }
@@ -11042,6 +11102,12 @@ fn hole_targets<'a>(st: &'a ModelState, f: &Feature) -> Vec<&'a ModelBody> {
 /// faces all lie on surfaces the body had already (a thin wall cut away between two pockets)
 /// leaves none either, so the caller compares volumes when it finds none.
 fn has_a_new_surface(old: &Body, new: &Body) -> bool {
+    new_surface_faces(old, new).into_iter().any(|f| f)
+}
+
+/// For each face of `new`, whether it lies on a surface no face of `old` lies on, compared as
+/// [`has_a_new_surface`] compares them.
+fn new_surface_faces(old: &Body, new: &Body) -> Vec<bool> {
     use kernel::FaceSurface as S;
     let tol = (old.size().max(new.size()) * 1e-7).max(1e-7);
     let parallel = |a: Vec3, b: Vec3| a.cross(b).len() <= 1e-9;
@@ -11066,10 +11132,12 @@ fn has_a_new_surface(old: &Body, new: &Body) -> bool {
     let (old_rec, new_rec) = (old.record(), new.record());
     let olds: Vec<(Option<S>, Option<&solidcore_record::brep::Surface>)> =
         (0..old.face_count()).map(|fi| (kernel::face_surface(old, fi), old_rec.faces.get(fi).map(|f| &f.surface))).collect();
-    (0..new.face_count()).rev().any(|fi| match kernel::face_surface(new, fi) {
-        Some(surface) => !olds.iter().any(|(o, _)| o.as_ref().is_some_and(|o| same(o, &surface))),
-        None => new_rec.faces.get(fi).is_some_and(|f| !olds.iter().any(|(_, o)| *o == Some(&f.surface))),
-    })
+    (0..new.face_count())
+        .map(|fi| match kernel::face_surface(new, fi) {
+            Some(surface) => !olds.iter().any(|(o, _)| o.as_ref().is_some_and(|o| same(o, &surface))),
+            None => new_rec.faces.get(fi).is_some_and(|f| !olds.iter().any(|(_, o)| *o == Some(&f.surface))),
+        })
+        .collect()
 }
 
 /// Whether hole tool `tool` is clear of every body the hole cuts, by their exact boxes (#10701).
@@ -11191,6 +11259,143 @@ fn copies_as_bodies<'a>(copies: &[&'a [Traced]]) -> (Vec<(Body, Vec<&'a [Traced]
     (groups, one_by_one)
 }
 
+/// What a pattern's cut shows of one of its copies ([`copies_cut_by_history`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CopyCut {
+    /// It took material: a face of its tool is left in a body it cut.
+    Took,
+    /// It took none: no face of its tool is left anywhere, and no other copy reaches its box.
+    Missed,
+    /// The cut does not show which.
+    Unknown,
+}
+
+/// What each of a pattern's cut copies did (by its place among its instances, `instances.len()`
+/// of them: instance `first + k + 1` of source feature `src`, its tools `copies[instances[k]]`)
+/// to the bodies it cut (`before`, as they were before the cut; `count` bodies in the model
+/// then), as the cut's own history shows it (#18396: asking the kernel about every copy was half
+/// of a design's rebuild).
+///
+/// A copy took material when a face of its tool is left in a body after the cut on a surface no
+/// face of that body had before: a wall of the pocket the copy made, with material on its other
+/// side. A copy took none when no face of its tool is left in any body and no other copy's tool
+/// reaches its exact box (grown by the bodies' tolerance): a tool that shares material with a
+/// body leaves some of its boundary inside the body (the body is not inside it: it is still
+/// there), and that boundary is a face of the result unless another copy cut it away. That holds
+/// only for a body of one piece, still one piece after the cut (a tool can take a whole piece of
+/// a body of several and leave none of its faces), and for a copy whose tools' faces all trace
+/// to that copy. Anything else (a body the history does not cover, a body the cut split, a body
+/// of several pieces, a copy beside another or not traced) is not known from it.
+fn copies_cut_by_history(
+    st: &ModelState,
+    before: &[ModelBody],
+    count: usize,
+    src: u64,
+    first: usize,
+    copies: &[Traced],
+    instances: &[std::ops::Range<usize>],
+) -> Vec<CopyCut> {
+    use solidcraft_kernel::history::FaceOrigin;
+    let n = instances.len();
+    let mut took = vec![false; n];
+    let mut left = vec![false; n];
+    // Every body the copies cut is still there, alone, with what it came from.
+    let mut covered = st.bodies.len() == count;
+    for old in before {
+        let Some(now) = st.body(&old.name) else {
+            covered = false;
+            continue;
+        };
+        let crate::lineage::Made::Traced(lineage) = &now.made else {
+            covered = false;
+            continue;
+        };
+        if lineage.history.faces.len() != now.body.face_count() || old.body.is_mesh() || now.body.is_mesh() {
+            covered = false;
+            continue;
+        }
+        // A body of several pieces (or one the cut made so) can lose a whole piece to a copy
+        // that leaves no face of its own.
+        if old.body.shell_count() != 1 || now.body.shell_count() != 1 {
+            covered = false;
+        }
+        let copy_of: Vec<Option<usize>> = lineage
+            .operands
+            .iter()
+            .map(|op| match op.as_ref() {
+                crate::lineage::Operand::CopiedTool { feature, instance, .. } if *feature == src => {
+                    instance.checked_sub(first + 1).filter(|k| *k < n)
+                }
+                _ => None,
+            })
+            .collect();
+        if copy_of.iter().all(Option::is_none) {
+            continue;
+        }
+        let fresh = new_surface_faces(&old.body, &now.body);
+        for (face, fresh) in lineage.history.faces.iter().zip(fresh) {
+            for origin in &face.origins {
+                if let FaceOrigin::Face { operand, .. } | FaceOrigin::Edge { operand, .. } | FaceOrigin::Offset { operand, .. } = *origin
+                    && let Some(Some(k)) = copy_of.get(operand)
+                {
+                    if let Some(l) = left.get_mut(*k) {
+                        *l = true;
+                    }
+                    if fresh
+                        && matches!(origin, FaceOrigin::Face { .. })
+                        && let Some(t) = took.get_mut(*k)
+                    {
+                        *t = true;
+                    }
+                }
+            }
+        }
+    }
+    // Each copy's exact box over its tools, grown by twice the tolerance of the bodies it cuts
+    // (the tools' own is in [`more::exact_box`]): two copies closer than that may have the sliver
+    // between them taken by the kernel as one. None where a box can't be worked out.
+    let grow = 2.0 * before.iter().map(|b| b.body.record().tolerance).fold(0.0, f64::max);
+    let boxes: Vec<Option<solidcraft_geom::Aabb3>> = instances
+        .iter()
+        .map(|range| {
+            let tools = copies.get(range.clone())?;
+            let mut b = solidcraft_geom::Aabb3::EMPTY;
+            for t in tools {
+                if t.body.is_mesh() {
+                    return None;
+                }
+                b = b.union(&more::exact_box(&t.body)?);
+            }
+            Some(b.inflated(grow))
+        })
+        .collect();
+    // Whether every face of copy `k`'s tools traces to copy `k` alone: its tools have a lineage,
+    // and each of its operands is copy `k` of `src`'s tool.
+    let traced = |k: usize| {
+        instances.get(k).and_then(|range| copies.get(range.clone())).is_some_and(|tools| {
+            !tools.is_empty()
+                && tools.iter().all(|t| {
+                    t.lineage.as_ref().is_some_and(|l| {
+                        l.operands.iter().all(|op| {
+                            matches!(op.as_ref(), crate::lineage::Operand::CopiedTool { feature, instance, .. }
+                                if *feature == src && *instance == first + k + 1)
+                        })
+                    })
+                })
+        })
+    };
+    (0..n)
+        .map(|k| {
+            if took[k] {
+                return CopyCut::Took;
+            }
+            let alone =
+                boxes[k].is_some() && boxes.iter().enumerate().all(|(j, other)| j == k || (other.is_some() && more::boxes_apart(&boxes[k], other)));
+            if covered && !left[k] && alone && traced(k) { CopyCut::Missed } else { CopyCut::Unknown }
+        })
+        .collect()
+}
+
 /// How many of a pattern's cut copies (`instances`, ranges of `copies`) remove no material, and
 /// how many copies there are. [`copy_misses`] intersects a copy with every target, which on a
 /// body with many holes costs far more than cutting the copy (#9007). A copy that a point test
@@ -11214,6 +11419,7 @@ fn count_copy_misses(
     instances: &[std::ops::Range<usize>],
     axes: &[Vec<(Vec3, Vec3)>],
 ) -> (usize, usize) {
+    let _span = solidcraft_profile::span("doc", "copy_misses");
     let scope: Vec<(&ModelBody, Option<solidcraft_geom::Aabb3>)> =
         miss_scope(st, f, targets).map(|b| (b, (!b.body.is_mesh()).then(|| more::exact_box(&b.body)).flatten())).collect();
     let (mut missed, mut total) = (0, 0);
@@ -11997,14 +12203,16 @@ fn replay(
                 instances.push(start..copies.len());
             }
         }
-        if op == Operation::Cut {
-            // Checked against the bodies the copies cut, in the frames they cut them in.
-            let into: Vec<String> = miss_scope(st, f, &targets).map(|b| b.name.clone()).collect();
-            let shown = targets_as_shown(st, f, &into)?;
-            let (m, t) = count_copy_misses(&shown, f, &targets, &copies, &instances, &axes);
-            missed += m;
-            total += t;
-        }
+        // Checked against the bodies the copies cut, in the frames they cut them in, as they were
+        // before the cut.
+        let miss_check = match op {
+            Operation::Cut => {
+                let into: Vec<String> = miss_scope(st, f, &targets).map(|b| b.name.clone()).collect();
+                let before: Vec<ModelBody> = st.bodies.iter().filter(|b| into.contains(&b.name)).cloned().collect();
+                Some((targets_as_shown(st, f, &into)?.into_owned(), before, st.bodies.len(), copies.clone()))
+            }
+            _ => None,
+        };
         // New bodies from a pattern join their source when they touch it (as one feature would).
         if f.body_names.is_empty() {
             apply_traced(doc, st, f, copies, op, &targets)?;
@@ -12013,6 +12221,19 @@ fn replay(
             let mut named = f.clone();
             named.body_names = f.body_names.iter().skip(start).cloned().collect();
             apply_traced(doc, st, &named, copies, op, &targets)?;
+        }
+        if let Some((shown, before, count, copies)) = miss_check {
+            // A copy whose tool left a wall in a target took material: the cut says so itself
+            // (#18396: asking the kernel about every copy was half of a design's rebuild). The
+            // copies it does not show are asked about as before.
+            let cut = copies_cut_by_history(st, &before, count, src.id, *first, &copies, &instances);
+            let unsure: Vec<usize> = (0..instances.len()).filter(|k| cut.get(*k).is_none_or(|c| *c == CopyCut::Unknown)).collect();
+            let some_instances: Vec<std::ops::Range<usize>> = unsure.iter().filter_map(|k| instances.get(*k).cloned()).collect();
+            let some_axes: Vec<Vec<(Vec3, Vec3)>> =
+                if axes.is_empty() { Vec::new() } else { unsure.iter().map(|k| axes.get(*k).cloned().unwrap_or_default()).collect() };
+            let (m, t) = count_copy_misses(&shown, f, &targets, &copies, &some_instances, &some_axes);
+            missed += m + cut.iter().filter(|c| **c == CopyCut::Missed).count();
+            total += t + (instances.len() - unsure.len());
         }
         let mut unthreaded = 0;
         for (on, reach) in axes.iter().zip(&reaches) {
@@ -13167,8 +13388,9 @@ fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> 
         };
         return Ok((picked.offset(face.centroid.dot(n) - picked.origin.dot(n)), note));
     }
-    let mut best: Option<(f64, f64)> = None; // (distance from `at`, plane offset along n)
-    for b in &st.bodies {
+    // (distance from `at`, plane offset along n, body, face)
+    let mut best: Option<(f64, f64, usize, usize)> = None;
+    for (bi, b) in st.bodies.iter().enumerate() {
         let tol = (b.body.size() * 1e-3).max(1e-3);
         let (Ok(faces), Ok(mesh)) = (b.body.faces(tol), b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tol))) else { continue };
         for f in faces {
@@ -13185,17 +13407,36 @@ fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> 
                 .map(|[a, bb, c]| crate::project::closest_on_triangle(at, a, bb, c).dist(at))
                 .fold(f64::INFINITY, f64::min);
             if best.is_none_or(|x| d < x.0) {
-                best = Some((d, f.centroid.dot(n)));
+                best = Some((d, f.centroid.dot(n), bi, f.index));
             }
         }
     }
     Ok(match best {
-        Some((_, off)) => {
+        Some((_, off, bi, face)) => {
             let shift = off - picked.origin.dot(n);
-            (picked.offset(shift), None)
+            (picked.offset(shift), off_its_face(st, bi, face, at, n, off))
         }
         None => (*picked, Some("the face the sketch was on is gone; the sketch stays where it was".into())),
     })
+}
+
+/// The note for a sketch whose unnamed face point `at` is on no face now: `at`, moved along `n`
+/// onto the plane (offset `off`) of face `face` of body `bi`, the face nearest it, is decided
+/// exactly on that face (#20518). A face that moved along its normal (a taller box) still holds
+/// the point and says nothing; a pick off every face (the `sketch.create` command refuses it)
+/// keeps the sketch on that face's plane, but says so.
+fn off_its_face(st: &ModelState, bi: usize, face: usize, at: Vec3, n: Vec3, off: f64) -> Option<String> {
+    let b = st.bodies.get(bi).filter(|b| !b.body.is_mesh())?;
+    let tol = (b.body.size() * 1e-3).max(1e-3);
+    let on_plane = at + n * (off - at.dot(n));
+    match b.body.point_lies_on_face(face, on_plane, tol) {
+        Ok(None) => Some(format!(
+            "no face is at the point the sketch was placed on, [{}, {}, {}]; the sketch is on the plane of the nearest flat face \
+             facing the same way: check it",
+            at.x, at.y, at.z
+        )),
+        _ => None,
+    }
 }
 
 /// A chamfer, equal or by its second distance or angle.
@@ -13262,6 +13503,7 @@ fn chamfer_with(
     })
 }
 
+/// Evaluate one feature into its scratch state; the caller commits it only after validation.
 #[allow(clippy::too_many_arguments)]
 fn eval_feature(
     doc: &Document,
@@ -14082,7 +14324,7 @@ fn eval_feature_kind(
                 }
                 _ => None,
             };
-            let on = blend_bodies(st, f, body, &crate::plain(edges))?;
+            let (on, on_several) = blend_bodies(st, f, body, &crate::plain(edges))?;
             let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
             for (i, ti) in on.iter().enumerate() {
                 match groups.iter_mut().find(|(b, _)| b == ti) {
@@ -14090,7 +14332,7 @@ fn eval_feature_kind(
                     None => groups.push((*ti, vec![i])),
                 }
             }
-            let (mut found, mut notes, mut fitted, mut tapered_all) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+            let (mut found, mut notes, mut fitted, mut tapered_all) = (Vec::new(), on_several, Vec::new(), Vec::new());
             let mut reduced = false;
             // The kernel blends exactly the edges given: the feature adds each one's tangent
             // chain when it asks for it. A radius law runs along one edge, so a variable or
@@ -14389,6 +14631,7 @@ fn eval_feature_kind(
         }
         FeatureKind::FrameEndCap { .. } => crate::end_cap::evaluate(doc, vals, f, st),
         FeatureKind::FrameMemberTurn { .. } => frame_member::check_turn(doc, vals, f, st),
+        FeatureKind::FrameGusset { .. } => crate::gusset::evaluate(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
         FeatureKind::FramePlate { .. } => crate::frame_plate::evaluate(doc, vals, f, st),
         FeatureKind::BoundingSolid { bodies, margin, contents, margins } => {
@@ -14552,9 +14795,15 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::Import { step, skip, records, .. } => {
+        FeatureKind::Import { file, step, skip, records, .. } => {
             #[cfg(test)]
             cost_tests::count(|c| c.imports_read += 1);
+            // A linked design's bodies left out of the file, and not read back when it opened.
+            if records.is_none() && step.is_empty() && doc.links.values().any(|link| link.feature == f.id) {
+                return Err(DocError::Invalid(format!(
+                    "the bodies of the linked design {file} are not in this design: it was saved without them, and they have not been read from the file since; Update Links reads them"
+                )));
+            }
             let (imp, digest) = match records {
                 Some(r) => (kernel::records_import_shared(r)?, crate::config::payload_digest(&kernel::records_text(r)?)),
                 None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),
@@ -14869,8 +15118,10 @@ fn move_turn_line(
 ) -> Result<(Vec3, Vec3)> {
     let found = construction_state(doc, st, comp).and_then(|cs| crate::construct::model_axis_in(Some(doc), &cs, about, comp));
     match found {
-        Ok((o, d)) if o.is_finite() && d.is_finite() && d.len() > 1e-12 => Ok((o, if d.dot(axis) < 0.0 { -d } else { d })),
-        Ok(_) => lost_turn_line(origin, axis, "it has no direction".into(), warning),
+        Ok((o, d)) => match solidcore_ops::affine::same_sense(d.into(), axis.into()).filter(|_| o.is_finite()) {
+            Some(d) => Ok((o, Vec3::from(d))),
+            None => lost_turn_line(origin, axis, "it has no direction".into(), warning),
+        },
         Err(e) => lost_turn_line(origin, axis, e.to_string(), warning),
     }
 }

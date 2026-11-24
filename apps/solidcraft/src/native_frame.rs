@@ -330,6 +330,10 @@ unsafe extern "system" fn caption_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpa
                 _ => call_previous(),
             }
         }
+        // The client area stays winit's answer (vendored): the system frame on the left, right and
+        // bottom of a restored window. It has no 1 px shift, which is what blurred text (#3927),
+        // and it is not the whole window: over a window that is all client area Windows 11 shows
+        // no snap layouts, whatever the hit test answers (#13996).
         WM_NCCALCSIZE => {
             let result = call_previous();
             // SAFETY: for a nonzero wParam, lParam points to the NCCALCSIZE_PARAMS the system
@@ -504,7 +508,7 @@ fn resizable(hwnd: HWND) -> bool {
     // SAFETY: plain queries on a window handle the system passed in.
     unsafe {
         let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
-        style & WS_THICKFRAME != 0 && IsZoomed(hwnd) == 0 && IsIconic(hwnd) == 0
+        style & WS_THICKFRAME != 0 && !zoomed(hwnd) && IsIconic(hwnd) == 0
     }
 }
 
@@ -528,6 +532,11 @@ fn snapped(hwnd: HWND) -> bool {
 /// Sizes only: the restored rect is in work-area coordinates, the window's in screen coordinates.
 fn differs_in_size(a: RECT, b: RECT) -> bool {
     (a.right - a.left, a.bottom - a.top) != (b.right - b.left, b.bottom - b.top)
+}
+
+fn zoomed(hwnd: HWND) -> bool {
+    // SAFETY: a plain query on a window handle the system passed in.
+    unsafe { IsZoomed(hwnd) != 0 }
 }
 
 /// The client area's size in pixels (the window without the system frame on its left, right and

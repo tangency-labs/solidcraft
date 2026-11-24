@@ -72,7 +72,8 @@ fn refusable(error: &SolidError) -> Option<(&'static str, i32, Option<EntityRef>
 
 /// Whether `error` is the failure a missing corner produces in the live session: a solver
 /// that looks up the corner of its vertex and finds none
-/// (`SessionGeometryContext::corner`, the session's `Missing("the vertex's corner")`),
+/// (`SessionGeometryContext::corner`, the session's
+/// [`BlendFailure::FilletVertexWithoutCorner`]),
 /// keeping no cause. That failure names no vertex, so which missing corner it met is not
 /// checked.
 pub(super) fn is_missing_corner(error: &SolidError) -> bool {
@@ -80,7 +81,7 @@ pub(super) fn is_missing_corner(error: &SolidError) -> bool {
         && error.operation() == "blend::fillet_executive::session"
         && matches!(
             error.blend_failure(),
-            Some(BlendFailure::Missing("the vertex's corner"))
+            Some(BlendFailure::FilletVertexWithoutCorner)
         )
 }
 
@@ -108,11 +109,6 @@ fn rooted_in(mut error: SolidError, cause: SolidError) -> SolidError {
         }
     }
     error
-}
-
-/// `FILEXEC_ERR` (`SM_ERR`): the executive's generic failure status, as the phrase says.
-fn failure(what: &'static str) -> SolidError {
-    SolidError::blend_failed(OP, what)
 }
 
 /// The fillet body is not built, or has no faces: a step of the executive failed
@@ -1125,7 +1121,9 @@ impl FilletSession<'_> {
                 reason: None,
                 comment,
             });
-            return Err(failure("an asked setback is not built"));
+            // the refusal noted just above holds why: a corner refused at its vertex
+            // (`FILEXEC_ERR`, `SM_ERR`, as the phrase it replaces had)
+            return Err(SolidError::blend(OP, BlendFailure::CornerRefused));
         }
         // not the fork's (#3145): setbacks that overlap on an edge, before the trace
         if let Some((vertex, refusal)) = crate::blend::blend_corner::setback::overlapping_setbacks(
@@ -1854,8 +1852,10 @@ mod ball_fit_tests {
     /// classification's error at its end.
     #[test]
     fn a_classification_error_goes_to_the_root_of_the_later_failure() {
-        let missing =
-            SolidError::blend_missing("blend::fillet_executive::session", "the vertex's corner");
+        let missing = SolidError::blend(
+            "blend::fillet_executive::session",
+            BlendFailure::FilletVertexWithoutCorner,
+        );
         assert!(is_missing_corner(&missing));
         let before = later_failure_over(missing);
         let classification = a_classification_failure();
@@ -1895,7 +1895,10 @@ mod ball_fit_tests {
         );
         assert_eq!(after, before);
         assert_eq!(
-            rooted_in(SolidError::sm_err("op"), failure("w")),
+            rooted_in(
+                SolidError::sm_err("op"),
+                SolidError::blend(OP, BlendFailure::CornerRefused)
+            ),
             SolidError::sm_err("op")
         );
     }
@@ -1917,6 +1920,18 @@ mod ball_fit_tests {
                 SolidError::blend_missing(
                     "blend::fillet_executive::session",
                     "the vertex's corner",
+                ),
+                SolidError::sm_err("op"),
+            ),
+            // the same with the cause the session's missing corner now has
+            SolidError::blend(
+                "blend::fillet_solver::p1::set_extension_flags",
+                BlendFailure::FilletVertexWithoutCorner,
+            ),
+            keeping_cause(
+                SolidError::blend(
+                    "blend::fillet_executive::session",
+                    BlendFailure::FilletVertexWithoutCorner,
                 ),
                 SolidError::sm_err("op"),
             ),
