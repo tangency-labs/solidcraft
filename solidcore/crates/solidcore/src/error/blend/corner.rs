@@ -1,6 +1,7 @@
 //! Why a fillet corner fails: the shapes of a filleted vertex's edges the fillet corner
 //! topology does not build, the corner input a corner step is given otherwise than the
-//! topology makes it, and the ball, chamfer and Mixed corner steps with no construction.
+//! topology makes it, and the ball, chamfer, Mixed, Swept turn and End corner steps with no
+//! construction.
 //!
 //! Upstream: none. One of the modules of the blend failure causes, re-exported from
 //! [`super`].
@@ -115,13 +116,14 @@ pub enum CornerInput {
     /// unit normal, a patch order that does not run round its crossings, or patches and
     /// loops that do not pair up.
     EventMalformed,
-    /// A ball, chamfer or Mixed corner with no event of its kind (ball members, chamfer or
-    /// Mixed event).
+    /// A ball, chamfer or Mixed corner, a Swept turn or an End with no event of its kind
+    /// (ball members, chamfer, Mixed or Swept event, or an End's cap).
     EventNotSet,
     /// A ring face of a ball corner whose kind or offset is not the one the corner's
     /// classification took.
     FaceNotAsClassified,
-    /// A chamfer or Mixed corner with no faces' geometry for its patch step.
+    /// A chamfer or Mixed corner with no faces' geometry for its patch step, or a Swept turn
+    /// with no torus for it.
     FacesNotBuilt,
     /// A chamfer facet event with no normal.
     FacetNormalNotSet,
@@ -154,19 +156,32 @@ pub enum CornerInput {
     NoOtherCornerVertex,
     /// A concave corner with no rail-cross-edge-use vertex between two fillet geometries.
     NoRailXEdgeUseVertex,
-    /// A ball corner with no ring of edge uses.
+    /// A ball corner or an End with no ring of edge uses round its vertex.
     RingNotSet,
     /// A Roll-over's seam cap whose corner edges do not close one loop through the seam's
     /// split vertex.
     SeamCapLoopOpen,
     /// A squeezed corner edge neither of whose vertices is to be deleted.
     SqueezedEdgeKeepsBothVertices,
-    /// A ball, chamfer or Mixed corner whose vertices or edges are not the count or kind its
-    /// topology makes.
+    /// A ball, chamfer or Mixed corner, a Swept turn or an End whose vertices or edges are
+    /// not the count or kind its topology makes (an End without its end rib, or whose
+    /// vertex's edges do not hold its blended edge's two others).
     TopologyMismatch,
+    /// A Swept turn whose vertex has no edge use besides its two rounds' (none to find the
+    /// side edge from).
+    TurnRingWithoutSideEdgeUse,
+    /// A Swept turn whose two rounds' edge uses share no face of the body with its side edge
+    /// use.
+    TurnRoundsShareNoFace,
+    /// A Swept turn given `given` blended edge uses, fewer than its two rounds'.
+    TurnWithoutTwoBlendedEdgeUses {
+        /// The blended edge uses it holds.
+        given: usize,
+    },
     /// A squeezed corner edge's deleted vertex that is not among the corner's vertices.
     VertexNotInCorner,
-    /// A vertex of a chamfer or Mixed corner that is not processed.
+    /// A vertex of a chamfer or Mixed corner, of a Swept turn or of an End's cap that is not
+    /// processed.
     VertexNotProcessed,
     /// A vertex of a convex `NxN` corner of at most three vertices that is not where two
     /// rails cross.
@@ -211,6 +226,9 @@ impl CornerInput {
             Self::SeamCapLoopOpen => SM_ERR,
             Self::SqueezedEdgeKeepsBothVertices => SM_ERR,
             Self::TopologyMismatch => SM_ERR,
+            Self::TurnRingWithoutSideEdgeUse => SM_ERR_NULL_POINTER,
+            Self::TurnRoundsShareNoFace => SM_ERR_NULL_POINTER,
+            Self::TurnWithoutTwoBlendedEdgeUses { .. } => SM_ERR_NULL_POINTER,
             Self::VertexNotInCorner => SM_ERR,
             Self::VertexNotProcessed => SM_ERR,
             Self::VertexNotRailXRail => SM_ERR,
@@ -219,8 +237,8 @@ impl CornerInput {
     }
 }
 
-/// The step of a ball or chamfer corner's construction that has no result for the corner's
-/// geometry ([`BlendFailure::CornerUnbuildable`]).
+/// The step of a ball or chamfer corner's, a Swept turn's or a blend end's construction that
+/// has no result for the corner's geometry ([`BlendFailure::CornerUnbuildable`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CornerStep {
@@ -269,9 +287,55 @@ pub enum CornerStep {
     /// The Mixed corner's common face is not planar to the corner's tolerance. Not within
     /// tolerance.
     CommonFaceNotPlanar,
+    /// A centre of the ball an End's rail is sized by does not drop onto the fillet's
+    /// other face. Not found.
+    EndCentreOffOtherFace,
+    /// The side edge's far end does not drop onto the base surface of the fillet's offset
+    /// on the side face, where the End's ball is sized. Not found.
+    EndPointOffBaseSurface,
+    /// The ball solve finds that the End's rail at the round's radius does not run past
+    /// its side edge's far end, though the rail's end was not found on the side edge: the
+    /// two tests differ within rounding. Not within tolerance.
+    EndRailNotPastSideEdge,
+    /// The End's side edge, walked back across seams' vertices from where the rail's end
+    /// was last looked for, has no continuation towards the corner's vertex. Not found.
+    EndSideEdgeChainBroken,
+    /// A side face of an End at a smooth vertex does not meet the cap's plane between the
+    /// cap edge's ends. Not found.
+    EndSideFaceMissesCap,
     /// A round's end section has its two offset points farther apart than the tolerance.
     /// Not within tolerance.
     RoundSectionOffsetsApart,
+    /// No face of the side edge an End or a Join sizes its ball on, besides the fillet's
+    /// other face, is one of the blend solver's faces: no fillet surface lies on the side
+    /// face. Not found.
+    SideEdgeOffSolverFaces,
+    /// The arc of the Swept turn's torus was not found among the torus's boundary curves
+    /// for the corner's arc edge. Not found.
+    SweptArcNotFound,
+    /// The Swept turn's two balls (at its plate vertices) have radii farther apart than the
+    /// tolerance, though its classification took them to be equal. Not within tolerance.
+    SweptBallRadiiDiffer,
+    /// The Swept turn's two ball centres are at distances from the side edge's axis farther
+    /// apart than the tolerance. Not within tolerance.
+    SweptCentreAxisDistancesDiffer,
+    /// A Swept turn's ball centre is within the tolerance of the side edge's axis: the torus
+    /// has no major radius. Degenerate.
+    SweptCentreOnAxis,
+    /// The feet of the Swept turn's two ball centres on the side edge's axis are farther
+    /// apart than the tolerance. Not within tolerance.
+    SweptFeetApart,
+    /// The Swept turn's trimmed torus does not have three boundary curves (its two ends and
+    /// the arc). Unsupported.
+    SweptLoopNotThreeCurves,
+    /// The Swept turn's ball centres do not turn about the side edge's axis (the sine of
+    /// the angle between them is not above zero). Degenerate.
+    SweptNoTurn,
+    /// The Swept turn's side edge is not a line within the tolerance. Unsupported.
+    SweptSideEdgeNotLine,
+    /// A corner of the Swept turn's torus is farther than the tolerance from its vertex.
+    /// Not within tolerance.
+    SweptTorusOffVertex,
 }
 
 impl CornerStep {
@@ -299,7 +363,22 @@ impl CornerStep {
             Self::ChamferFacetOffPlane => ErrorKind::NotWithinTolerance,
             Self::ChamferSurfaceOffEdgeLine => ErrorKind::Unsupported,
             Self::CommonFaceNotPlanar => ErrorKind::NotWithinTolerance,
+            Self::EndCentreOffOtherFace => ErrorKind::NotFound,
+            Self::EndPointOffBaseSurface => ErrorKind::NotFound,
+            Self::EndRailNotPastSideEdge => ErrorKind::NotWithinTolerance,
+            Self::EndSideEdgeChainBroken => ErrorKind::NotFound,
+            Self::EndSideFaceMissesCap => ErrorKind::NotFound,
             Self::RoundSectionOffsetsApart => ErrorKind::NotWithinTolerance,
+            Self::SideEdgeOffSolverFaces => ErrorKind::NotFound,
+            Self::SweptArcNotFound => ErrorKind::NotFound,
+            Self::SweptBallRadiiDiffer => ErrorKind::NotWithinTolerance,
+            Self::SweptCentreAxisDistancesDiffer => ErrorKind::NotWithinTolerance,
+            Self::SweptCentreOnAxis => ErrorKind::Degenerate,
+            Self::SweptFeetApart => ErrorKind::NotWithinTolerance,
+            Self::SweptLoopNotThreeCurves => ErrorKind::Unsupported,
+            Self::SweptNoTurn => ErrorKind::Degenerate,
+            Self::SweptSideEdgeNotLine => ErrorKind::Unsupported,
+            Self::SweptTorusOffVertex => ErrorKind::NotWithinTolerance,
         }
     }
 
@@ -321,7 +400,22 @@ impl CornerStep {
             Self::ChamferFacetOffPlane => "the chamfer facet's plane does not hold a side's line within rounding",
             Self::ChamferSurfaceOffEdgeLine => "a chamfer's surface does not hold a corner edge's exact line within the corner's tolerance",
             Self::CommonFaceNotPlanar => "the Mixed corner's common face is not planar to the corner's tolerance",
+            Self::EndCentreOffOtherFace => "a centre of the End's sizing ball does not drop onto the fillet's other face",
+            Self::EndPointOffBaseSurface => "the side edge's far end does not drop onto the fillet's base surface on the side face",
+            Self::EndRailNotPastSideEdge => "the End's rail at the round's radius does not run past its side edge's far end",
+            Self::EndSideEdgeChainBroken => "the End's side edge chain has no continuation towards the corner's vertex",
+            Self::EndSideFaceMissesCap => "a side face of the End does not meet the cap's plane between the cap edge's ends",
             Self::RoundSectionOffsetsApart => "a round's end section has its offset points farther apart than the tolerance",
+            Self::SideEdgeOffSolverFaces => "no fillet surface lies on the face of the side edge the ball is sized on",
+            Self::SweptArcNotFound => "the Swept turn's torus has no boundary curve for the corner's arc edge",
+            Self::SweptBallRadiiDiffer => "the Swept turn's two balls have radii farther apart than the tolerance",
+            Self::SweptCentreAxisDistancesDiffer => "the Swept turn's ball centres are at distances from the side edge's axis farther apart than the tolerance",
+            Self::SweptCentreOnAxis => "a Swept turn's ball centre is within the tolerance of the side edge's axis",
+            Self::SweptFeetApart => "the feet of the Swept turn's ball centres on the side edge's axis are farther apart than the tolerance",
+            Self::SweptLoopNotThreeCurves => "the Swept turn's trimmed torus does not have three boundary curves",
+            Self::SweptNoTurn => "the Swept turn's ball centres do not turn about the side edge's axis",
+            Self::SweptSideEdgeNotLine => "the Swept turn's side edge is not a line within the tolerance",
+            Self::SweptTorusOffVertex => "a corner of the Swept turn's torus is farther than the tolerance from its vertex",
         }
     }
 }
