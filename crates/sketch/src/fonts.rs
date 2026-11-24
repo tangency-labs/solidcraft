@@ -23,8 +23,16 @@ const MAX_DIR_DEPTH: usize = 6;
 /// Font files kept in memory once read, and the most bytes they may add up to.
 const MAX_CACHED_FONTS: usize = 16;
 const MAX_CACHED_BYTES: usize = 128 << 20;
-/// Longest font name or path accepted.
+/// Longest font name accepted.
 const MAX_FONT_NAME: usize = 1024;
+/// Longest font file path accepted: a design's fonts are kept whole against its folder, which
+/// can itself be long.
+const MAX_FONT_PATH: usize = 4096;
+
+/// Whether `name` is longer than a font name, or for a file, a font file path, may be.
+fn too_long(name: &str) -> bool {
+    name.len() > if is_path(name) { MAX_FONT_PATH } else { MAX_FONT_NAME }
+}
 
 /// Asked before a font file named by its path is read. A design names such files, and an
 /// agent's folders (`vfs::PathScope`) live above this crate; the first check set stays.
@@ -76,7 +84,7 @@ pub fn font_data(name: Option<&str>) -> Result<FontData> {
     if name.is_empty() || normalize(name) == normalize(DEFAULT_FONT_FAMILY) {
         return Ok(FontData { bytes: FontBytes::Builtin, index: 0, weight: None });
     }
-    if name.len() > MAX_FONT_NAME {
+    if too_long(name) {
         return Err(SketchError::Invalid("the font name is too long".into()));
     }
     if is_path(name) {
@@ -98,7 +106,7 @@ pub fn font_data(name: Option<&str>) -> Result<FontData> {
 /// The file a font name means (`~` and `%VAR%` expanded), or `None` for a family name.
 pub fn font_file_path(name: &str) -> Option<PathBuf> {
     let name = name.trim();
-    (name.len() <= MAX_FONT_NAME && is_path(name)).then(|| expand(name))
+    (!too_long(name) && is_path(name)).then(|| expand(name))
 }
 
 /// The face of a font for a style: the bold and/or italic face of an installed family (or the
@@ -137,6 +145,25 @@ pub fn font_data_styled(name: Option<&str>, bold: bool, italic: bool) -> Result<
         data.weight = Some(variable_bold(&data).ok_or_else(|| SketchError::Invalid(format!("the font `{trimmed}` has no bold face")))?);
     }
     Ok((data, italic && !face_italic))
+}
+
+/// The face a saved text is set in (#19230). A saved design is not a choice of font: when this
+/// computer lacks the text's font, or its bold face, the text is not lost but set in what is here
+/// (the regular face of its font, else the built-in font in the text's slant) and the note says
+/// so. The text keeps the font it names, so it is set in it again where that font is installed.
+pub fn font_data_saved(name: Option<&str>, bold: bool, italic: bool) -> Result<((FontData, bool), Option<String>)> {
+    let first = match font_data_styled(name, bold, italic) {
+        Ok(found) => return Ok((found, None)),
+        Err(e) => e,
+    };
+    let trimmed = name.map(str::trim).unwrap_or("");
+    let builtin = trimmed.is_empty() || normalize(trimmed) == normalize(DEFAULT_FONT_FAMILY);
+    let which = if builtin { "the built-in font".to_string() } else { format!("the font `{trimmed}`") };
+    if bold && let Ok(regular) = font_data_styled(name, false, italic) {
+        return Ok((regular, Some(format!("{which} has no bold face here: the text is set in its regular face"))));
+    }
+    let fallback = font_data_styled(None, false, italic)?;
+    Ok((fallback, Some(format!("{first}; the text is set in the built-in font until {which} is installed"))))
 }
 
 /// Bold on a variable face's weight axis: 700 (the weight fonts name Bold), within the axis, when
@@ -582,6 +609,18 @@ mod tests {
     /// Files sort by their bytes within a folder, whatever order the system lists them in; a
     /// folder's files come before its subfolders', and `dirs`' order stands.
     /// A list's known files come row by row, each row's in its order: the order they are tried in.
+    /// The Last Resort font maps every code point to a box naming its block, so the search for a
+    /// font that has a character never takes it: on macOS it would "set" unassigned characters.
+    #[test]
+    fn the_last_resort_font_is_never_a_fallback() {
+        for path in ["/System/Library/Fonts/LastResort.otf", "/usr/share/fonts/LastResort-Regular.ttf", "C:\\Fonts\\LastResortHE-Regular.ttf"] {
+            assert!(fallback::placeholder(Path::new(path)), "{path}");
+        }
+        for path in ["/System/Library/Fonts/Supplemental/Arial Unicode.ttf", "/usr/share/fonts/NotoSans-Regular.ttf", "/fonts/Resort.ttf"] {
+            assert!(!fallback::placeholder(Path::new(path)), "{path}");
+        }
+    }
+
     #[test]
     fn candidate_files_keep_their_rows_and_their_order() {
         const ROWS: fallback::Candidates = &[("A", &["a1", "a2"]), ("B", &["b1"]), ("A", &["a3"])];
@@ -617,7 +656,10 @@ mod tests {
             assert_eq!(font_file_path("~/Foo.ttf"), Some(PathBuf::from(format!("{}/Foo.ttf", home.display()))));
         }
         assert_eq!(font_file_path("DejaVu Sans"), None);
-        assert_eq!(font_file_path(&format!("/{}.ttf", "a".repeat(MAX_FONT_NAME))), None);
+        // A font file path may be longer than a font name, up to MAX_FONT_PATH.
+        assert!(font_file_path(&format!("/{}.ttf", "a".repeat(MAX_FONT_NAME))).is_some());
+        assert_eq!(font_file_path(&format!("/{}.ttf", "a".repeat(MAX_FONT_PATH))), None);
+        assert_eq!(font_file_path(&"a".repeat(MAX_FONT_NAME + 1)), None);
     }
 
     #[test]

@@ -172,11 +172,12 @@ pub fn score(q: &str, s: &str) -> u32 {
 fn keywords(id: &str) -> &'static str {
     match id {
         "file.save_mesh" => "export stl 3mf mesh 3d print printing slicer",
-        "file.export" => "export stl 3mf obj step urdf mesh 3d print",
+        "file.export" => "export stl 3mf obj step urdf sdf gazebo mesh 3d print",
         "file.export_step" => "stp cad",
         "file.export_stl" | "file.export_3mf" => "mesh 3d print printing",
         "file.export_obj" => "mesh",
-        "file.export_urdf" => "robot ros simulation",
+        "file.export_urdf" | "file.export_urdf_options" => "robot ros simulation",
+        "file.export_sdf" => "gazebo model simulation world texture",
         "sketch.constraint.tangent" => "g1 tangency continuity smooth",
         "sketch.constraint.curvature" => "g2 curvature continuity smooth",
         "sketch.blend_curve" => "g1 g2 g3 g4 continuity tangent curvature bridge",
@@ -226,7 +227,7 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
             let (home_tab, home_panel) = crate::workspace::destination(c).unwrap_or(("", ""));
             let info = crate::render_workspace::interactive_command_info(app, c);
             let (label, tab, panel) = (
-                solidcraft_ui_text::tr_label(info.label),
+                solidcraft_ui_text::tr_command(c.id, info.label),
                 solidcraft_ui_text::tr_label(crate::workspace::tab_label(home_tab)),
                 solidcraft_ui_text::tr_label(home_panel),
             );
@@ -338,7 +339,7 @@ fn closest(query: &str) -> Option<&'static str> {
     command_specs()
         .into_iter()
         .map(|c| {
-            let label = solidcraft_ui_text::tr_label(c.label);
+            let label = solidcraft_ui_text::tr_command(c.id, c.label);
             let mut prev: Vec<_> = (0..=q.len()).collect();
             for (j, ch) in label.to_lowercase().chars().take(128).enumerate() {
                 let mut next = vec![j + 1];
@@ -914,7 +915,6 @@ mod tests {
     fn drawing_search_exposes_only_drawing_and_explicit_source_actions() {
         let mut app = SolveApp::new(Default::default(), Default::default());
         assert!(!search(&app, "").iter().any(|row| row.0.starts_with("drawing.")));
-        app.preferences.drawings_preview = true;
         crate::workspace::enter(&mut app, "drawing").unwrap();
         let rows = search(&app, "");
         assert!(rows.iter().any(|row| row.0 == "drawing.view.base.planned"));
@@ -1168,7 +1168,14 @@ mod tests {
         let fields: Vec<_> = nodes
             .iter()
             .filter(|(_, n)| n.role() == egui::accesskit::Role::TextInput)
-            .filter(|(_, n)| n.bounds().is_some_and(|b| b.y0 >= f64::from(field.top()) && b.y1 <= f64::from(sheet.bottom())))
+            .filter(|(_, n)| {
+                n.bounds().is_some_and(|b| {
+                    b.y0 >= f64::from(field.top())
+                        && b.y1 <= f64::from(sheet.bottom())
+                        && b.x0 >= f64::from(field.left())
+                        && b.x1 <= f64::from(field.right())
+                })
+            })
             .collect();
         assert_eq!(fields.len(), 1, "one editor in the field and sheet: {fields:?}");
         assert!(field.contains_rect(search_edit));

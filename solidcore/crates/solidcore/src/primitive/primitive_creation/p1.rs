@@ -49,6 +49,16 @@ use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::crv_adv::p1::CurveEnd;
 use crate::topology::RegionId;
 
+/// Why the legacy profile placement finds no first curve on its path.
+const NO_PATH_CURVE: &str =
+    "the path has no first curve, though its normal was just computed from \
+                             its curves, and an empty path gives no normal";
+/// Why the path's start evaluation gives no point and tangent.
+const NO_PATH_TANGENT: &str =
+    "the path's first curve, evaluated at its start with one derivative, \
+                               gave fewer than two vectors, though an evaluation gives the point \
+                               and each derivative asked for";
+
 /// Four topology associations of a primitive or topology sweep.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EntityMaps {
@@ -247,16 +257,24 @@ pub(super) fn position_profile_curves_impl(
         // Preserve upstream arithmetic for paths in or parallel to XY,
         // regardless of the direction in which the path turns.
         if normal.x.abs() > crate::math::EFF_ZERO || normal.y.abs() > crate::math::EFF_ZERO {
-            let no_start = || {
-                crate::error::SolidError::primitive_failed(
-                    "primitive::position_profile_curves",
-                    "the path has no start point and tangent",
-                )
+            use crate::error::primitive::PrimitiveFailure;
+            const OP: &str = "primitive::position_profile_curves";
+            let Some(first) = whole_path.first() else {
+                let why = NO_PATH_CURVE;
+                return Err(crate::error::SolidError::primitive(
+                    OP,
+                    PrimitiveFailure::Defect { why },
+                ));
             };
-            let first = whole_path.first().ok_or_else(no_start)?;
             let start = first.evaluate(k, first.natural_interval().min(), 1, true, true)?;
-            let origin = start.first().copied().ok_or_else(no_start)?;
-            let tangent = start.get(1).copied().ok_or_else(no_start)?.unitize()?;
+            let [origin, tangent, ..] = start.as_slice() else {
+                let why = NO_PATH_TANGENT;
+                return Err(crate::error::SolidError::primitive(
+                    OP,
+                    PrimitiveFailure::Defect { why },
+                ));
+            };
+            let (origin, tangent) = (*origin, tangent.unitize()?);
             let x = tangent.cross(normal).unitize()?;
             let frame = Axis2Placement::new(origin, x, tangent);
             let inverse = frame.invert();

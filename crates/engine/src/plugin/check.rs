@@ -72,9 +72,11 @@ fn read_folder(root: &Path) -> std::result::Result<Vec<safe_zip::File>, CheckPro
     let mut pending = vec![(root.to_path_buf(), String::new())];
     while let Some((dir, prefix)) = pending.pop() {
         solidcraft_io::vfs::check(&dir.to_string_lossy()).map_err(|e| unreadable(&dir, &e))?;
-        let mut entries: Vec<_> = std::fs::read_dir(&dir).map_err(|e| unreadable(&dir, &e))?.flatten().collect();
-        entries.sort_by_key(|e| e.file_name());
-        for entry in entries {
+        // Counted while listing, so one huge folder is not listed in full before the limit
+        // applies; an entry the listing cannot read is an error, not a file left out.
+        let mut entries = Vec::new();
+        for entry in std::fs::read_dir(&dir).map_err(|e| unreadable(&dir, &e))? {
+            let entry = entry.map_err(|e| unreadable(&dir, &e))?;
             let name = entry.file_name().to_string_lossy().into_owned();
             if name.starts_with('.') || (prefix.is_empty() && name == TESTS_FOLDER) {
                 continue;
@@ -83,7 +85,17 @@ fn read_folder(root: &Path) -> std::result::Result<Vec<safe_zip::File>, CheckPro
             if seen > super::MAX_FILES {
                 return Err(too_big(format!("the package holds more than {} files and folders", super::MAX_FILES)));
             }
-            let relative = format!("{prefix}{name}");
+            entries.push((name, entry));
+        }
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        for (name, entry) in entries {
+            let relative = safe_zip::checked_path(&format!("{prefix}{name}")).map_err(|reason| {
+                error_problem(
+                    "package",
+                    format!("{prefix}{name} has {reason}"),
+                    "Rename the file to a plain name: Install refuses a .zip entry with this name.",
+                )
+            })?;
             let kind = entry.file_type().map_err(|e| unreadable(&entry.path(), &e))?;
             if kind.is_symlink() {
                 return Err(error_problem(
@@ -134,7 +146,7 @@ fn fix_for(field: &str) -> String {
         "runtime.commands" => {
             "List exact command ids from `solidcraft-cli commands`; a command that reaches past the open design also needs its group in runtime.permissions.command_groups. An importer lists none."
         }
-        "runtime.entries" => "Declare 1 to 32 entries with distinct lowercase names, all commands or all importers.",
+        "runtime.entries" => "Declare 1 to 32 entries with distinct lowercase names, all commands, all importers or all exporters.",
         "runtime.entries.slots" => {
             "Give each entry at most 16 slots, each {\"kind\": \"menu\" or \"ribbon\", \"name\": \"...\"} with a name of at most 80 characters."
         }
@@ -149,7 +161,9 @@ fn fix_for(field: &str) -> String {
         "runtime.permissions.net" => {
             "Remove \"net\": SolidCraft gives plugins no network access. Read and write files through named folder grants instead."
         }
-        "runtime.limits.fuel" => "Set \"fuel\" to a positive number that fits the app's ceiling (100000000000 unless the user raised it).",
+        "runtime.limits.fuel" => {
+            "Set \"fuel\" to a positive number up to 10000000000000. Above Max plugin fuel, Install asks the user to approve it."
+        }
         "runtime.limits.memory_mib" => {
             "Set \"memory_mib\" to 1..4096. Above the user's ceiling (128 unless raised), Install asks the user to approve it."
         }
@@ -164,7 +178,7 @@ fn fix_for(field: &str) -> String {
     };
     if field == "capabilities" {
         return format!(
-            "List the capabilities the plugin uses: \"commands@0.2\" for a command plugin, \"formats@0.2\" for an importer (with \"evaluate@0.2\" to check its result). This SolidCraft serves {}, and still runs plugins built for 0.1.",
+            "List the capabilities the plugin uses: \"commands@0.2\" for a command plugin, \"formats@0.2\" for an importer (with \"evaluate@0.2\" to check its result) or an exporter. This SolidCraft serves {}, and still runs plugins built for 0.1.",
             served()
         );
     }
@@ -187,6 +201,11 @@ fn fix_for(field: &str) -> String {
 fn host_problem(e: &HostError) -> CheckProblem {
     let text = e.to_string();
     match e {
+        HostError::OverCeiling { limit, allowed, .. } if limit == "fuel" => error_problem(
+            "runtime.limits.fuel",
+            text,
+            format!("Lower \"fuel\" to at most {allowed}: this is the hard host ceiling for install approval."),
+        ),
         HostError::InvalidManifest { field, reason } => error_problem(field.clone(), reason.clone(), fix_for(field)),
         HostError::UnsupportedCapability { reason, .. } => error_problem(
             "capabilities",
@@ -238,10 +257,10 @@ fn component_fix(reason: &str) -> String {
     }
     if reason.contains("import") {
         return format!(
-            "Import only the interfaces of the plugin's world, from {API}: world command-plugin for a command plugin, world importer-plugin for an importer. Generate the bindings from this SolidCraft's crates/craft-plugin/wit/plugin.wit."
+            "Import only the interfaces of the plugin's world, from {API}: world command-plugin for a command plugin, world importer-plugin for an importer, world exporter-plugin for an exporter. Generate the bindings from this SolidCraft's crates/craft-plugin/wit/plugin.wit."
         );
     }
-    "Export the world's interface: `entry` for a command plugin (world command-plugin), `importer` for an importer (world importer-plugin), generated from crates/craft-plugin/wit/plugin.wit.".into()
+    "Export the world's interface: `entry` for a command plugin (world command-plugin), `importer` for an importer (world importer-plugin), `formats-provider` for an exporter (world exporter-plugin), generated from crates/craft-plugin/wit/plugin.wit.".into()
 }
 
 /// The problem an [`InstallError`] stands for.
@@ -279,6 +298,14 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
             return result;
         }
     };
+    for warning in package.swatch_warnings() {
+        result.problems.push(problem(
+            Severity::Warning,
+            craft_plugin::swatches::KEY,
+            warning,
+            "Use a package PNG or JPEG of at most 64 KiB and 256 × 256 pixels.",
+        ));
+    }
     let manifest = &package.manifest;
     result.id = Some(manifest.id.clone());
     result.name = Some(manifest.name.clone());
@@ -306,14 +333,24 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
         result.ok = true;
         return result;
     };
-    result.kind = Some(if runtime.is_importer() { "importer" } else { "command" }.into());
+    result.kind = Some(
+        if runtime.is_importer() {
+            "importer"
+        } else if runtime.is_exporter() {
+            "exporter"
+        } else {
+            "command"
+        }
+        .into(),
+    );
     result.entries = runtime.entries.clone();
     let ceilings = session.plugin_limits;
     if runtime.limits.fuel > ceilings.max_fuel {
-        result.problems.push(error_problem(
+        result.problems.push(problem(
+            Severity::Warning,
             "runtime.limits.fuel",
             format!("asks for {} fuel, over the app's ceiling of {}", runtime.limits.fuel, ceilings.max_fuel),
-            format!("Lower \"fuel\" to at most {}: the app refuses to run a plugin that asks for more.", ceilings.max_fuel),
+            "Install asks the user to allow the extra fuel, up to 10000000000000; without approval, the request must fit Max plugin fuel.",
         ));
     }
     if runtime.limits.memory_mib > ceilings.max_memory_mib {

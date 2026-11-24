@@ -817,7 +817,7 @@ fn fake_report(dir: &Path, secs: u64, sig: u64, kind: &str) -> String {
 fn a_report_from_an_earlier_release_still_finds_its_design() {
     let d = fresh_dir("legacy-design");
     let id = fake_report(&d, 1_700_000_000, 7, "command_panic");
-    fs::write(d.join(&id).join("design.solidcraft"), solidcraft_io::write_design(&solidcraft_doc::Document::default())).unwrap();
+    fs::write(d.join(&id).join("design.solidcraft"), solidcraft_io::write_design(&solidcraft_doc::Document::default()).unwrap()).unwrap();
     let v = read(&d, &id).unwrap();
     assert!(v["design_path"].as_str().unwrap().ends_with("design.solidcraft"), "{v}");
     let _ = fs::remove_dir_all(&d);

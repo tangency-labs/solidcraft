@@ -9,6 +9,23 @@
 //! The pinned C++ still fails; since the loft seam alignment (#15263, WR-778) this port
 //! builds the difference, and these tests pin that solid.
 //!
+//! The skin's side surfaces are split into faces at the knots that are at most G1. Their
+//! knots are curvature continuous (both sides' Frenet curvatures agree to 4e-6 relative,
+//! most to 1e-10), so with G2 judged by the geometry (WR-380) the outer skin has 7 faces
+//! and the inner 6. Upstream's parametric G2 test compares raw second derivatives, whose
+//! lengths follow the parameter speed (it jumps by up to 1.3e-5 relative at these knots),
+//! called hundreds of the knots G1 and split the skins into 342 and 274 faces. On the 7
+//! and 6 faces the difference once needed the nearest-point half of
+//! `simple_coincidence_crossing_is_point` (WR-647, on in SolidCraft; its crossing half is
+//! always on), and failed without it in `topology/brep/p6.rs` as the pinned C++ does. That
+//! failure was a classification fault, not the flag's to fix (WR-647 part B): a cap
+//! curve's run along a skin edge over [0, 1.18] of its 10.54 (a range within the
+//! tolerance) was combined into the whole interval it ended inside, so the classification
+//! said the curve ran along the edge over all of it, where it leaves the edge by up to
+//! 4.9e-5 at tolerance 2e-5. The run now labels only its own extent
+//! (`CurveClassification::insert_curve_interval`), and the difference is the same solid
+//! with the flag off (`issue_948_difference_is_the_same_solid_without_the_nearest_point_flag`).
+//!
 //! Provenance of `tests/data/issue_948_min7.txt` (third-party data): source
 //! <https://github.com/NVIDIA-Omniverse/usd-brep/issues/32>, the inline `min7.txt` block,
 //! posted by GitHub user `meros` on 2026-10-25. It is the reporter's posted repro data
@@ -89,21 +106,44 @@ fn ruled_skin(k: &mut Kernel, secs: &[Vec<Point3>]) -> Brep {
 /// sections, and the difference is one closed manifold solid smaller than the outer skin.
 /// The queries pass on the statuses SMLib drops (WR-663): with the fork's
 /// tangency-labs/smlib@8ea6a20 a refined end past a curve/curve range does not abort the
-/// intersection.
-fn difference_volume() -> f64 {
+/// intersection. The skins are 7 and 6 faces (see the module docs) and the difference 18
+/// faces and 2 shells. Its edge and vertex counts are not pinned: a fitted section curve
+/// lies within 8e-5 of a cap plane at tolerance 5e-6, and whether an edge is split at a
+/// vertex along it follows from that fit noise (42 edges and 26 vertices before #19912,
+/// 41 and 25 after). Splitting an edge adds one of each, so `V - E + F` stays 2.
+fn difference_volume(nearest_point: bool) -> f64 {
     use solidcore::mass::integrator::properties::brep_volume_default;
+    use solidcore::topology::brep::p1::shells;
     let data = sections(MIN7);
     let mut k = Kernel::default();
+    k.fixes.simple_coincidence_crossing_is_point = nearest_point;
     let mut outer = ruled_skin(&mut k, &data[0].1);
     let inner = ruled_skin(&mut k, &data[1].1);
     assert!(is_manifold_solid(&outer).unwrap());
     assert!(is_manifold_solid(&inner).unwrap());
+    assert_eq!(
+        (outer.face_list().len(), inner.face_list().len()),
+        (7, 6),
+        "the skins' faces"
+    );
     let outer_volume = brep_volume_default(&k, &mut outer, 1e-3).unwrap();
     let mut body = match boolean_difference(&mut k, outer, inner) {
         Ok(body) => body,
         Err(e) => panic!("expected a solid, got {e}"),
     };
     assert!(is_manifold_solid(&body).unwrap());
+    let (faces, edges, vertices) = (
+        body.face_list().len(),
+        body.edge_list().len(),
+        body.vertex_list().len(),
+    );
+    let shells = shells(&mut k, &body, None).unwrap().len();
+    assert_eq!((faces, shells), (18, 2), "faces, shells");
+    assert_eq!(
+        vertices + faces,
+        edges + 2,
+        "V - E + F = 2 ({vertices} vertices, {edges} edges)"
+    );
     let volume = brep_volume_default(&k, &mut body, 1e-3).unwrap();
     assert!(
         volume > 0.0 && volume < outer_volume,
@@ -119,6 +159,16 @@ fn issue_948_difference_of_two_ruled_skins_is_a_solid() {
     assert_eq!((data[0].0.as_str(), data[0].1.len()), ("outer", 7));
     assert_eq!((data[1].0.as_str(), data[1].1.len()), ("inner", 7));
     assert!(data.iter().all(|(_, s)| s.iter().all(|p| p.len() == 86)));
-    let volume = difference_volume();
+    let volume = difference_volume(true);
+    assert!((volume - 74_838.2).abs() < 1.0, "{volume}");
+}
+
+/// WR-647 part B: without `simple_coincidence_crossing_is_point` the difference is the
+/// same solid (18 faces, 2 shells, the same volume). Before the cap curve's edge run
+/// labelled only its own extent, it failed with "no radial sector of the edge takes the
+/// new edge use".
+#[test]
+fn issue_948_difference_is_the_same_solid_without_the_nearest_point_flag() {
+    let volume = difference_volume(false);
     assert!((volume - 74_838.2).abs() < 1.0, "{volume}");
 }

@@ -64,7 +64,7 @@ use std::f64::consts::{PI, TAU};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use solidcore_record::brep::Loop;
+use solidcore_record::brep::{Curve, Frame, Loop};
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::drawing_measure::{self, AngleFrom, Cone, Cylinder, LinearDirection, Measured, Reading, SilhouetteSide, Sphere};
 use solidcraft_geom::drawing_view::{Invalid, is_paper_coordinate};
@@ -112,6 +112,77 @@ pub fn reading_label(kind: LabelKind, value: f64, units: &str, decimals: u8) -> 
         LabelKind::SphericalRadius => format!("SR{}", length()),
         LabelKind::SphericalDiameter => format!("S{DIAMETER_SIGN}{}", length()),
     }
+}
+
+/// The token of a dimension's text that stands for its measured number as it reads with no text of
+/// its own: with its R or diameter sign, in the drawing's units, with the dimension's decimals.
+pub const VALUE_TOKEN: &str = "{value}";
+
+/// A piece of a dimension's text ([`Dimension::override_text`]): words as they are, or the
+/// measured number.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum TextPiece {
+    Words(String),
+    Value,
+}
+
+/// A dimension's text read as a template: `{value}` is the measured number, `{{` and `}}` are a
+/// brace each, everything else is itself. A brace on its own, or a name in braces other than
+/// `value`, is refused, saying which.
+fn text_pieces(text: &str) -> std::result::Result<Vec<TextPiece>, String> {
+    let mut pieces = Vec::new();
+    let mut words = String::new();
+    let mut rest = text;
+    while let Some(at) = rest.find(['{', '}']) {
+        words.push_str(&rest[..at]);
+        let tail = &rest[at..];
+        if tail.starts_with("{{") || tail.starts_with("}}") {
+            words.push_str(&tail[..1]);
+            rest = &tail[2..];
+        } else if tail.starts_with('}') {
+            return Err("a `}` on its own: write `}}` for a brace".into());
+        } else {
+            let end = tail.find('}').ok_or("a `{` on its own: write `{{` for a brace, or `{value}` for the measured number")?;
+            let name = &tail[1..end];
+            if name != "value" {
+                return Err(format!("`{{{name}}}` is not something a dimension's text can show: `{{value}}` is its measured number"));
+            }
+            if !words.is_empty() {
+                pieces.push(TextPiece::Words(std::mem::take(&mut words)));
+            }
+            pieces.push(TextPiece::Value);
+            rest = &tail[end + 1..];
+        }
+    }
+    words.push_str(rest);
+    if !words.is_empty() {
+        pieces.push(TextPiece::Words(words));
+    }
+    Ok(pieces)
+}
+
+/// Whether `text` shows the measured number somewhere ([`VALUE_TOKEN`]): it then follows the model.
+/// A text without it is shown instead of the number. A text that can't be read shows none.
+pub fn text_shows_value(text: &str) -> bool {
+    text_pieces(text).is_ok_and(|pieces| pieces.contains(&TextPiece::Value))
+}
+
+/// `text` as a dimension shows it, with `number` where it says `{value}` (a question mark while
+/// there is nothing measured to show). A text that can't be read as a template is shown as typed.
+pub fn text_shown(text: &str, number: Option<&str>) -> String {
+    let Ok(pieces) = text_pieces(text) else { return text.to_owned() };
+    pieces
+        .iter()
+        .map(|piece| match piece {
+            TextPiece::Words(words) => words.as_str(),
+            TextPiece::Value => number.unwrap_or("?"),
+        })
+        .collect()
+}
+
+/// `text` written so that a template reads it back as these very characters: each brace doubled.
+pub fn text_literal(text: &str) -> String {
+    text.replace('{', "{{").replace('}', "}}")
 }
 
 /// The most dimensions a drawing may have.
@@ -184,7 +255,8 @@ impl ModelDimension {
 pub enum DimensionKind {
     /// The distance between two corners.
     Linear { a: ModelPoint, b: ModelPoint, direction: LinearDirection, reading: Reading },
-    /// A straight edge's length: the distance between its ends.
+    /// A straight edge's length: the distance between its ends. A round edge the view sees
+    /// edge-on is drawn as a line, and its length is that line's.
     Length { edge: ModelEdge, direction: LinearDirection, reading: Reading },
     /// The angle between two straight edges' lines: the smaller one, or with `other_side` π minus it.
     Angle {
@@ -405,9 +477,12 @@ impl Drawing {
             format!("the model dimension it shows is named in 1 to {MAX_MODEL_NAME_BYTES} bytes, without control characters")
         })?;
         match &d.override_text {
-            Some(text) => require(!text.is_empty() && text.len() <= MAX_TEXT_BYTES, || {
-                format!("the text shown instead of its number is 1 to {MAX_TEXT_BYTES} bytes")
-            }),
+            Some(text) => {
+                require(!text.is_empty() && text.len() <= MAX_TEXT_BYTES, || {
+                    format!("the text shown instead of its number is 1 to {MAX_TEXT_BYTES} bytes")
+                })?;
+                text_pieces(text).map(|_| ()).map_err(|why| DocError::Invalid(format!("its text: {why}")))
+            }
             None => Ok(()),
         }
     }
@@ -479,6 +554,9 @@ pub struct Resolved {
     /// units with its decimals (degrees for an angle, after R or Ø for a radius or a diameter, SR
     /// or SØ for a sphere's). `None` with neither, and for a chain, which shows its members'.
     pub text: Option<String>,
+    /// Its measured number as it reads with no text of its own (R, the diameter sign and the
+    /// degree sign included), whenever it was measured; none for a chain.
+    pub number: Option<String>,
     /// What its number is, whenever it was measured, a chain's members aside: a sphere's says
     /// whether it is drawn as a diameter or a radius.
     pub label: Option<LabelKind>,
@@ -949,7 +1027,11 @@ impl<'a> Lookup<'a> {
 
     fn resolve(&mut self, d: &Dimension, basis: &Plane, units: &str) -> Resolved {
         let (status, found) = match self.measure(d, basis) {
-            Ok(found) => (if d.override_text.is_some() { Status::Overridden } else { Status::Ok }, Some(found)),
+            // A text that shows the measured number follows the model, as a plain dimension does:
+            // only one that hides the number is typed over it.
+            Ok(found) => {
+                (if d.override_text.as_deref().is_some_and(|text| !text_shows_value(text)) { Status::Overridden } else { Status::Ok }, Some(found))
+            }
             Err(status) => (status, None),
         };
         let measured = found.as_ref().map(|f| f.measured);
@@ -959,7 +1041,11 @@ impl<'a> Lookup<'a> {
         let (members, points, exact) = found.map_or_else(Default::default, |f| (f.members, f.points, f.exact));
         Resolved {
             status,
-            text: d.override_text.clone().or(number),
+            text: match &d.override_text {
+                Some(text) => Some(text_shown(text, number.as_deref())),
+                None => number.clone(),
+            },
+            number,
             label,
             members: members.into_iter().map(|m| Member { measured: m, text: length(m) }).collect(),
             exact,
@@ -984,7 +1070,7 @@ impl<'a> Lookup<'a> {
                 if !found.whole {
                     return Err(Status::Ambiguous(edge_candidates(&edge.body, &found)));
                 }
-                let ends = found.pieces.first().and_then(|(_, line)| straight(line));
+                let ends = found.pieces.first().and_then(|(_, line)| straight(line)).or_else(|| self.edge_on(&found, basis));
                 let [a, b] = ends.ok_or_else(|| Status::Unmeasurable(format!("edge `{}` isn't straight", edge.name)))?;
                 let measured = drawing_measure::linear(basis, a, b, *direction, *reading).map_err(unmeasurable)?;
                 Ok(Found::new(measured, vec![a, b], found.exact))
@@ -1162,6 +1248,36 @@ impl<'a> Lookup<'a> {
         }
     }
 
+    /// The line the view through `basis` draws for the round edge `found` when it sees the edge's
+    /// circle edge-on: the edge's two points furthest apart along that line, in the design's
+    /// frame. They are read from the circle the edge lies on ([`edge_circle`], exact), never from
+    /// its mesh: a whole circle's line is its diameter, and an arc's runs between its ends or out
+    /// to the side of the circle it reaches. `None` for an edge on no circle, or one the view sees
+    /// at a slant (an ellipse) or face on.
+    fn edge_on(&self, found: &Edges, basis: &Plane) -> Option<[Vec3; 2]> {
+        let (index, _) = found.pieces.first()?;
+        let body = self.state.bodies.get(found.body)?;
+        let circle = edge_circle(&body.body, *index)?;
+        // Worked in the body's own frame, which the occurrence carries rigidly to the design's.
+        let back = mat_inverse(&found.frame)?;
+        let view = apply_vector(&back, basis.normal()).normalized()?;
+        let axis = Vec3::from(circle.axis);
+        if axis.dot(view).abs() > EDGE_ON {
+            return None;
+        }
+        // The line runs square to both the view and the circle's axis.
+        let along = view.cross(axis).normalized()?;
+        let from = circle.start - circle.center;
+        let whole = circle.angle >= TAU - SAME_ANGLE;
+        let on_arc = |u: Vec3| whole || axis.dot(from.cross(u)).atan2(from.dot(u)).rem_euclid(TAU) <= circle.angle + SAME_ANGLE;
+        let mut points = vec![circle.start, circle.end];
+        points.extend([along, -along].into_iter().map(|side| side * circle.radius).filter(|u| on_arc(*u)).map(|u| circle.center + u));
+        let at = |p: &&Vec3| p.dot(along);
+        let lo = points.iter().min_by(|p, q| at(p).total_cmp(&at(q)))?;
+        let hi = points.iter().max_by(|p, q| at(p).total_cmp(&at(q)))?;
+        Some([apply_point(&found.frame, *lo), apply_point(&found.frame, *hi)])
+    }
+
     /// The point `point` names, in the design's frame: a corner, the one end all its named edges
     /// (or their pieces) share, or a centre.
     pub(super) fn corner(&mut self, point: &ModelPoint) -> std::result::Result<(Vec3, bool), Status> {
@@ -1253,7 +1369,7 @@ impl<'a> Lookup<'a> {
         let (label, value, (start, sweep)) = if rim.is_empty() {
             (LabelKind::SphericalDiameter, 2.0 * sphere.radius, (0.0, TAU))
         } else {
-            let arc = contour_on(b, &seen, &sphere, &rim)?.ok_or_else(|| {
+            let arc = contour_on(b, &seen, &sphere, &on.faces, &rim)?.ok_or_else(|| {
                 Status::Unmeasurable(format!("face `{}`'s contour in this view isn't on it: the view sees its rim, not its radius", face.name))
             })?;
             (LabelKind::SphericalRadius, sphere.radius, arc)
@@ -1283,7 +1399,7 @@ impl<'a> Lookup<'a> {
         let rim = rim(b, &on.faces);
         let mut points = Vec::with_capacity(4);
         for way in sides {
-            let (near, far) = ray_on(b, cone.apex, way, reach, &rim)?.ok_or_else(|| {
+            let (near, far) = ray_on(b, cone.apex, cone.axis, way, reach, &on.faces, &rim)?.ok_or_else(|| {
                 Status::Unmeasurable(format!("face `{}` isn't a whole cone in this view: one of its silhouettes isn't on it", face.name))
             })?;
             points.extend([near, far].map(|t| apply_point(&on.frame, cone.apex + way * t)));
@@ -1410,36 +1526,33 @@ fn rim(b: &ModelBody, faces: &[usize]) -> Vec<usize> {
 /// The most rim edges [`contour_on`] reads a sphere's contour across: past it, the faces are too
 /// broken up to read a radius off.
 const MAX_RIM_EDGES: usize = 128;
-/// Where a rim edge isn't a circle, [`contour_on`] also cuts the contour at this many even steps.
-const CONTOUR_STEPS: u32 = 32;
 /// Cuts closer than this round the contour (radians) are one.
 const SAME_ANGLE: f64 = 1e-9;
 
+/// A circle whose axis is within this (the sine of the angle) of square to the view is seen
+/// edge-on: its ellipse is then under a millionth of its diameter wide, which the Dimension tool's
+/// pick already reads as a line on the sheet.
+const EDGE_ON: f64 = 1e-6;
+
 /// The longest arc of `sphere`'s contour on the view `seen` (both in `b`'s own frame) that lies on
-/// `b`'s boundary: its start angle and its sweep, or `None` when none does. The contour is cut
-/// where it crosses the plane of each circle in `rim` (the edges where the sphere's faces end).
-/// Between two cuts it is all on the faces or all off them, so one point classification at its middle (exact,
-/// SMLib's) decides, and pieces on them next to each other join: a rim circle's plane can also cut
-/// the contour where the faces go on. A rim edge that isn't on a circle ([`edge_circle`]) adds
-/// [`CONTOUR_STEPS`] even cuts instead, so there the arc's ends are within half a step, and an arc
-/// that holds no step's middle is missed.
-fn contour_on(b: &ModelBody, seen: &Plane, sphere: &Sphere, rim: &[usize]) -> std::result::Result<Option<(f64, f64)>, Status> {
+/// `faces` of `b`: its start angle and its sweep, or `None` when none does. The contour is cut where
+/// it crosses the faces' rim `rim` (the kernel's `outline_cuts`: one call for every rim edge, each
+/// cut exact on the surface across it). Between two cuts it is all on the faces or all off them, so
+/// one point classification at its middle (exact, SMLib's) decides, and pieces on them next to each
+/// other join.
+fn contour_on(b: &ModelBody, seen: &Plane, sphere: &Sphere, faces: &[usize], rim: &[usize]) -> std::result::Result<Option<(f64, f64)>, Status> {
     if rim.len() > MAX_RIM_EDGES {
         return Err(Status::Unmeasurable(format!("the sphere's faces end at more than {MAX_RIM_EDGES} edges: give a radius another way")));
     }
-    let (mut cuts, mut stepped) = (Vec::new(), false);
-    for e in rim {
-        match edge_circle(&b.body, *e) {
-            Some(circle) => {
-                let crossed = drawing_measure::contour_crossings(seen, sphere, circle.center, Vec3::from(circle.axis));
-                cuts.extend(crossed.map_err(|e| Status::Unmeasurable(e.0.to_string()))?);
-            }
-            None => stepped = true,
-        }
-    }
-    if stepped {
-        cuts.extend((0..CONTOUR_STEPS).map(|k| TAU * f64::from(k) / f64::from(CONTOUR_STEPS)));
-    }
+    // The contour as a circle in its own axes about the centre, so a cut's parameter is the angle
+    // `Sphere::contour_point` turns.
+    let frame = Frame { origin: sphere.center.into(), x_axis: seen.x.into(), y_axis: seen.y.into() };
+    let contour = Curve::Circle { frame, radius: sphere.radius };
+    let crossed = b
+        .body
+        .outline_cuts(faces, &contour, [0.0, TAU], sphere.center, seen.normal())
+        .map_err(|why| Status::Unmeasurable(format!("the sphere's faces end at an edge that doesn't read ({why}): give a radius another way")))?;
+    let mut cuts: Vec<f64> = crossed.into_iter().map(|t| t.rem_euclid(TAU)).collect();
     cuts.sort_by(f64::total_cmp);
     cuts.dedup_by(|a, b| (*a - *b).abs() <= SAME_ANGLE);
     // Each cut to the next round, the last back to the first; no cut leaves the whole contour.
@@ -1478,35 +1591,33 @@ fn longest_run(pieces: &[(f64, f64, bool)], round: bool) -> Option<(f64, f64)> {
     longest
 }
 
-/// The longest piece of the ray from `apex` along the unit `way` (both in `b`'s own frame), out
-/// to `reach`, that lies on `b`'s boundary: how far from the apex it starts and ends, or `None`
-/// when none does. Cut as [`contour_on`] cuts a sphere's contour: where the ray crosses the plane of
-/// each circle in `rim`, or at [`CONTOUR_STEPS`] even steps where a rim edge isn't a circle, with
-/// one point classification at each piece's middle.
-fn ray_on(b: &ModelBody, apex: Vec3, way: Vec3, reach: f64, rim: &[usize]) -> std::result::Result<Option<(f64, f64)>, Status> {
+/// The longest piece of the ray from `apex` along the unit `way` (both in `b`'s own frame, `way`
+/// a side of the cone along `axis`), out to `reach`, that lies on `faces` of `b`: how far from the
+/// apex it starts and ends, or `None` when none does. Cut as [`contour_on`] cuts a sphere's
+/// contour, where the ray crosses the faces' rim `rim`, with one point classification at each
+/// piece's middle.
+fn ray_on(
+    b: &ModelBody,
+    apex: Vec3,
+    axis: Vec3,
+    way: Vec3,
+    reach: f64,
+    faces: &[usize],
+    rim: &[usize],
+) -> std::result::Result<Option<(f64, f64)>, Status> {
     if rim.len() > MAX_RIM_EDGES {
         return Err(Status::Unmeasurable(format!("the cone's faces end at more than {MAX_RIM_EDGES} edges: give its angle another way")));
     }
-    let (mut cuts, mut stepped) = (vec![0.0, reach], false);
-    for e in rim {
-        match edge_circle(&b.body, *e) {
-            Some(circle) => {
-                let normal = Vec3::from(circle.axis);
-                let slant = way.dot(normal);
-                // A ray in the circle's plane, or parallel to it, isn't cut by it.
-                if slant.abs() > SAME_ANGLE {
-                    let t = (circle.center - apex).dot(normal) / slant;
-                    if t > 0.0 && t < reach {
-                        cuts.push(t);
-                    }
-                }
-            }
-            None => stepped = true,
-        }
-    }
-    if stepped {
-        cuts.extend((1..CONTOUR_STEPS).map(|k| reach * f64::from(k) / f64::from(CONTOUR_STEPS)));
-    }
+    // The ray lies in the plane of the axis and the ray; as a line from the apex one unit along
+    // the ray, a cut's parameter is its distance from the apex.
+    let normal = way.cross(axis).normalized().ok_or_else(|| Status::Unmeasurable("the cone's silhouette runs along its axis".into()))?;
+    let ray = Curve::Line { start: apex.into(), end: (apex + way).into() };
+    let crossed = b
+        .body
+        .outline_cuts(faces, &ray, [0.0, reach], apex, normal)
+        .map_err(|why| Status::Unmeasurable(format!("the cone's faces end at an edge that doesn't read ({why}): give its angle another way")))?;
+    let mut cuts = vec![0.0, reach];
+    cuts.extend(crossed.into_iter().filter(|t| *t > 0.0 && *t < reach));
     cuts.sort_by(f64::total_cmp);
     cuts.dedup_by(|a, b| (*a - *b).abs() <= SAME_ANGLE * reach);
     let mut pieces = Vec::with_capacity(cuts.len());

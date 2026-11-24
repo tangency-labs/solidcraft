@@ -48,6 +48,31 @@ pub(crate) fn show(app: &mut SolveApp, rows: &mut Rows<'_>) {
     rows.ui().add_space(t.space_4);
 }
 
+/// Whether `object` of `drawing` is part of the selection: its row is drawn selected, as a
+/// selected body's is in the design's browser.
+fn picked(app: &SolveApp, drawing: &Drawing, object: u64) -> bool {
+    app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::Drawing { drawing: d, object: o } if *d == drawing.id && *o == object))
+}
+
+/// The row of something on a sheet takes the clicks its place on the sheet takes: a click
+/// selects it (Shift and Ctrl add and toggle, as in the model), and a right-click opens the
+/// sheet's menu on it. A double-click is the caller's: it opens the object's options.
+fn object_clicks(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet: u64, object: u64, hit: &RowOut) {
+    if !drawing.has_object(object) {
+        return;
+    }
+    let sel = solidcraft_engine::Sel::Drawing { drawing: drawing.id, object };
+    let held = crate::tool_modifiers::Held::from_modifiers(rows.ui().input(|input| input.modifiers));
+    if let Some(at) = hit.secondary {
+        select_sheet(app, sheet);
+        crate::context_menu::open_on_sheet(app, at, held, Some(sel));
+    } else if hit.clicked && !hit.double {
+        select_sheet(app, sheet);
+        let (add, toggle) = crate::tool_modifiers::selection_click(held, app.preferences.selection_shift_add_only);
+        crate::viewport::select(app, Some(sel), add, toggle);
+    }
+}
+
 fn row(rows: &mut Rows<'_>, key: &str, row: Row<'_>, menu: NodeMenu<'_>) -> RowOut {
     let publish = matches!(menu, NodeMenu::Host);
     let result = rows.row(Node { id: crate::browser::node_id(key), key, row, menu, ..Node::default() });
@@ -102,7 +127,13 @@ fn show_sheet(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet:
                 open = next;
                 rows.ui().data_mut(|data| data.insert_temp(id, open));
             }
-            Event::Click(_) | Event::Open(_) => select_sheet(app, sheet.id),
+            Event::Click(_) | Event::Open(_) => {
+                if !app.preferences.design_sub_tab_sheets {
+                    select_sheet(app, sheet.id);
+                } else if let Err(error) = crate::sheet_views::open_in(app, drawing.id, sheet.id, false) {
+                    app.set_status(error, true);
+                }
+            }
             Event::Menu { at, .. } => open_sheet_menu(app, drawing.id, sheet.id, Rect::from_min_max(at, at)),
             _ => {}
         }
@@ -114,18 +145,13 @@ fn show_sheet(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet:
 
 fn show_objects(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet: &Sheet, key: &str) {
     for (kind, label, icon, present) in [
-        ("paper", "ui.drawing_browser_sheet_border", "lock", true),
-        ("border", "ui.drawing_browser_drawing_border", "lock", sheet.border.is_some()),
+        ("paper", "ui.drawing_browser_sheet_border", "", true),
+        ("border", "ui.drawing_browser_drawing_border", "", sheet.border.is_some()),
         ("title-block", "ui.drawing_browser_title_block", "drawing_edit_table", sheet.title_block.is_some()),
     ] {
         if present {
             let label = app.tr(label).to_string();
-            row(
-                rows,
-                &format!("{key}:{kind}"),
-                Row { depth: 2, label: &label, icon, name: true, badges: &["lock"], ..Row::default() },
-                NodeMenu::None,
-            );
+            row(rows, &format!("{key}:{kind}"), Row { depth: 2, label: &label, icon, name: true, ..Row::default() }, NodeMenu::None);
         }
     }
 
@@ -153,9 +179,10 @@ fn show_objects(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, shee
             let hit = row(
                 rows,
                 &format!("{key}:{kind}:{}", encode(object)),
-                Row { depth: 2, label: &label, icon, name: true, ..Row::default() },
-                NodeMenu::None,
+                Row { depth: 2, label: &label, icon, name: true, selected: picked(app, drawing, object), ..Row::default() },
+                NodeMenu::Host,
             );
+            object_clicks(app, rows, drawing, sheet.id, object, &hit);
             if let Some(editor) = editor
                 && hit.events.iter().any(|event| matches!(event, Event::Open(_)))
             {
@@ -184,9 +211,18 @@ fn show_views(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet:
         let hit = row(
             rows,
             &key,
-            Row { depth, fold: nested.as_ref().map(|_| open), icon: "drawing_base_view", label: &label, name: true, ..Row::default() },
-            NodeMenu::None,
+            Row {
+                depth,
+                fold: nested.as_ref().map(|_| open),
+                icon: "drawing_base_view",
+                label: &label,
+                name: true,
+                selected: picked(app, drawing, view.id),
+                ..Row::default()
+            },
+            NodeMenu::Host,
         );
+        object_clicks(app, rows, drawing, sheet, view.id, &hit);
         let mut open = open;
         for event in hit.events {
             match event {
@@ -207,9 +243,26 @@ fn show_views(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet:
     }
 }
 
-fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> String {
+/// View `id` of the open drawing as the browser calls it, for anything that names a view to the
+/// person at the screen: one name for a view everywhere.
+pub(crate) fn name_of(app: &SolveApp, id: u64) -> Option<String> {
+    let drawing = app.session.drawing("drawing.inspect").ok()?;
+    let view = drawing.view(id)?;
+    let number = drawing.views.iter().filter(|other| other.sheet == view.sheet).position(|other| other.id == id)? + 1;
+    Some(view_name(app, drawing, view, number))
+}
+
+pub(crate) fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> String {
+    // A view with a label is called what its label says: its name, else its words and letter
+    // (`DETAIL A`), never nothing.
     if let Some(label) = &view.label {
-        return label.name.clone();
+        if !label.name.is_empty() {
+            return label.name.clone();
+        }
+        let called = format!("{} {}", label.words, label.letter);
+        if !called.trim().is_empty() {
+            return called.trim().to_string();
+        }
     }
     if matches!(view.kind, ViewKind::Base { .. } | ViewKind::Projected { .. })
         && let Ok(resolved) = drawing.resolve_view(view.id)
