@@ -78,9 +78,12 @@
 //! - **Merged vertex covers its edge ends (#21340).** After `MergeIntoObject` sizes the
 //!   vertex by the merged points' neighbourhood, [`PointClassification::merge_into_brep`]
 //!   grows its tolerance to twice the farthest end of its edges at it (the evaluated end's
-//!   distance plus its certified evaluation error where the curve bounds it, the computed
-//!   distance otherwise) when every end lies inside that neighbourhood, so `AssertValid`'s
-//!   edge-end test (half the vertex tolerance) holds for the vertex as returned. Upstream
+//!   distance plus its certified evaluation error) when every end lies inside that
+//!   neighbourhood, so `AssertValid`'s edge-end test (half the vertex tolerance) holds for
+//!   the vertex as returned (`vertex::cover_merged_ends`). An end whose curve kind has no
+//!   bound on its evaluation's error (`Curve::point_error_bound` is `None`: offset, conic,
+//!   curves on surfaces, ...) adds nothing, so no uncertified figure becomes a tolerance and
+//!   such an end stays as upstream leaves it. Upstream
 //!   leaves a split's new vertex smaller than that until a later UV-trim build covers it,
 //!   if one runs. Ends outside the neighbourhood (an `sss_point` move off the edges,
 //!   #21511) are left as upstream leaves them. The opaque-handle
@@ -1778,12 +1781,7 @@ impl<O: ClassObject> PointClassification<O> {
         // larger radius (a later point within it joins this vertex). Ends outside the ball (the
         // `sss_point` move can carry a vertex off its edges) are not the merge's
         // neighbourhood and stay as upstream leaves them (#21511).
-        let tol = vertex::tolerance(b, vertex_id)?;
-        let reach = vertex::edge_end_reach(k, b, vertex_id, vertex::UnboundedEnd::Computed)?;
-        let cover = 2.0 * reach;
-        if reach <= tol && cover.is_finite() {
-            vertex::set_tolerance(b, vertex_id, cover, true, true)?;
-        }
+        vertex::cover_merged_ends(k, b, vertex_id)?;
         Ok(outputs)
     }
 

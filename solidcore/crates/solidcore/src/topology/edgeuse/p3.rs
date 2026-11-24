@@ -2318,12 +2318,7 @@ fn cover_vertex_ends(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
     for v in vertices {
         // (an end not evaluated, or with no bound on its evaluation's error, raises
         // nothing: the vertex is left as upstream leaves it for that end)
-        let reach = crate::topology::vertex::edge_end_reach(
-            k,
-            b,
-            v,
-            crate::topology::vertex::UnboundedEnd::Skip,
-        )?;
+        let reach = crate::topology::vertex::edge_end_reach(k, b, v)?;
         if reach > b.vertex(v)?.tolerance {
             crate::topology::vertex::set_tolerance(b, v, reach, true, true)?;
         }
