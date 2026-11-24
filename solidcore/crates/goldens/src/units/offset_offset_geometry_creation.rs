@@ -4711,11 +4711,11 @@ mod tests {
             assert_eq!((nat.min(), nat.max()), (0.0, main_max), "{name}");
             assert!(curve.is_closed(&k, &nat, same_tol).unwrap(), "{name}");
             assert!(
-                is_first_point_again(&k, curve, nat.min(), nat.max(), same_tol).unwrap(),
+                is_first_point_again(&k, curve, nat.min(), nat.max(), same_tol, true).unwrap(),
                 "{name}"
             );
             assert!(
-                is_first_point_again(&k, curve, nat.max(), nat.min(), same_tol).unwrap(),
+                is_first_point_again(&k, curve, nat.max(), nat.min(), same_tol, true).unwrap(),
                 "{name}"
             );
             // the script through that op now: the trim finds no second point (status 0, no
