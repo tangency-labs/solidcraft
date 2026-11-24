@@ -281,6 +281,9 @@ fn emboss_contract_keeps_the_handlers_errors() {
             ("solid.emboss", with(&emboss(), "offset_x", json!("2 deg"))),
             ("solid.emboss", with(&emboss(), "offset_y", json!("nope"))),
             ("solid.emboss", with(&emboss(), "angle", json!("2 mm"))),
+            ("solid.emboss", with(&emboss(), "offset_x", json!(true))),
+            ("solid.emboss", with(&emboss(), "offset_y", json!({"mm": 2}))),
+            ("solid.emboss", with(&emboss(), "angle", json!(""))),
         ],
     );
     assert!(!crate::schema::issues("solid.emboss", &with(&emboss(), "mode", json!(5))).is_empty());
@@ -347,6 +350,10 @@ fn the_schemas_take_what_the_handlers_take() {
             with(&emboss(), "offset_x", json!(1)),
             with(&emboss(), "offset_y", json!("2 mm")),
             with(&emboss(), "angle", json!("10 deg")),
+            with(&emboss(), "offset_x", json!(null)),
+            with(&emboss(), "offset_x", json!(true)),
+            with(&emboss(), "offset_y", json!({"mm": 2})),
+            with(&emboss(), "angle", json!("")),
             with(&emboss(), "depth", json!("")),
             with(&emboss(), "mode", json!("glue")),
             with(&emboss(), "face", json!([0, 10])),

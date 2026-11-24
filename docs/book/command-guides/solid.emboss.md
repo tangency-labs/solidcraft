@@ -33,7 +33,7 @@ Raise sketch text or a logo out of a face, or sink it in: an engraved part numbe
 - **Do** change the Depth from its default. It starts at 1 in the design's unit, far too deep for a marking.
 - **Do** type the unit with the number when the print uses another unit. In a millimetre design, typing 0.010 in enters 0.254 mm.
 - **Do** use Offset X, Offset Y and Angle to put the profiles where you want them on the face, instead of redrawing the sketch. They take a parameter name too, so one sketch can mark several places or follow a dimension.
-- **Don't** move the profiles off the face. The whole of each profile must still lie on the target face, or the Emboss is refused.
+- **Don't** move the profiles off the face. With a Target Face picked, the whole of each profile must still lie on it, or the Emboss is refused. On a flat face with no Target Face picked, this isn't checked: a profile moved past the edge is still built, and a raised one hangs past the part.
 
 #### See also
 

@@ -742,6 +742,12 @@ fn in_body(s: &Session, name: &str, p: [f64; 3]) -> bool {
     mesh.contains(solidcore_record::Vec3::new(p[0], p[1], p[2]))
 }
 
+/// The point at `radius` from the Z axis and height `z`, `theta` radians round from +Y towards
+/// -X: where the tests probe a mark wrapped round a wall about Z.
+fn round_z(radius: f64, theta: f64, z: f64) -> [f64; 3] {
+    [-radius * theta.sin(), radius * theta.cos(), z]
+}
+
 /// `Block`, 40 x 30 x 10, and `Logo`, a sketch on its top (x along X, y along Y) with one
 /// rectangle from `p0` to `p1`.
 fn block_logo(p0: [f64; 2], p1: [f64; 2]) -> Session {
@@ -869,6 +875,24 @@ fn emboss_placement_refuses_a_wrong_unit_by_name() {
     }
 }
 
+/// #20957: a placement input that is given but is not a number or an expression is refused by
+/// name, with the check off too, rather than read as left out. `null` is the input left out.
+#[test]
+fn emboss_placement_refuses_a_value_it_cannot_read() {
+    let mut s = block_logo([5., 5.], [15., 15.]);
+    let saved = s.doc.to_json();
+    for (key, value) in [("offset_x", json!(true)), ("offset_y", json!({"mm": 2})), ("angle", json!("")), ("angle", json!([45]))] {
+        let mut p = json!({"sketch": "Logo", "depth": 2});
+        p[key] = value.clone();
+        let e = s.execute("solid.emboss", &p).unwrap_err().to_string();
+        assert!(e.contains(&format!("`{key}` must be a number or an expression")), "{key} {value}: {e}");
+        assert_eq!(s.doc.to_json(), saved, "{key} {value}");
+    }
+    run(&mut s, "solid.emboss", json!({"sketch": "Logo", "depth": 2, "offset_x": null, "offset_y": null, "angle": null}));
+    assert!(rel(volume(&mut s), 12000.0 + 200.0) < 1e-6, "{}", volume(&mut s));
+    assert!(in_body(&s, "Block", [10., 10., 11.]), "raised where it is drawn");
+}
+
 fn cylinder_badge() -> Session {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name":"badge_depth","expression":"1 mm"}));
@@ -975,7 +999,7 @@ fn cylinder_emboss_offsets_slide_the_wrap_round_and_along_the_wall() {
     assert_eq!(s.model.state().body("Sleeve").unwrap().body.shell_count(), 1);
     // The badge, drawn 2 either side of the tangent line and 5..10 up, covers 1..5 of arc
     // (0.1..0.5 rad towards the sketch's x, which is -X here) and 10..15 up.
-    let on_wall = |theta: f64, z: f64| [-10.5 * theta.sin(), 10.5 * theta.cos(), z];
+    let on_wall = |theta: f64, z: f64| round_z(10.5, theta, z);
     assert!(in_body(&s, "Sleeve", on_wall(0.3, 12.5)));
     assert!(!in_body(&s, "Sleeve", on_wall(0.15, 7.5)), "not at the height it is drawn at");
     assert!(!in_body(&s, "Sleeve", on_wall(-0.15, 12.5)), "nor round where it is drawn");
@@ -1014,7 +1038,7 @@ fn half_round_mark() -> Session {
 /// the offsets move it round and along the wall and the angle turns it.
 #[test]
 fn emboss_placement_on_a_partial_cylinder_wall() {
-    let on_wall = |theta: f64, z: f64| [-20.5 * theta.sin(), 20.5 * theta.cos(), z];
+    let on_wall = |theta: f64, z: f64| round_z(20.5, theta, z);
     let fine_volume =
         |s: &Session| s.model.state().body("Half").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
     let mut s = half_round_mark();

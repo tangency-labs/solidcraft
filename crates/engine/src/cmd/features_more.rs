@@ -12,7 +12,7 @@ use super::CommandSpec;
 use super::features::{
     add_feature, axis_dir_param, check_expr, feature_sketch, length_operands, plane_param, point_param, profiles, typed_length_unit,
 };
-use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
+use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec3};
 use crate::schema::align::AlignParams;
 use crate::schema::features::FeatureResult;
 use crate::schema::features_more::{BoundaryFillParams, CoilParams, EmbossParams, RemoveParams, ReplaceFaceParams, RibParams};
@@ -332,13 +332,14 @@ struct EmbossPlacement {
     angle: Option<Expr>,
 }
 
-/// An Emboss placement input: an expression of `kind`, or `None` when the call leaves it out.
+/// An Emboss placement input: an expression of `kind`, or `None` when the call leaves it out or
+/// gives `null`. A value given that isn't a number or an expression is refused rather than read
+/// as left out.
 fn placement_expr(s: &Session, p: &Value, key: &str, kind: Kind) -> Result<Option<Expr>> {
-    let given = expr(p, key);
-    if let Some(e) = &given {
-        check_expr(s, e, kind, "solid.emboss", key)?;
-    }
-    Ok(given)
+    let Some(given) = p.get(key).filter(|v| !v.is_null()) else { return Ok(None) };
+    let e = expr(p, key).ok_or_else(|| bad("solid.emboss", format!("`{key}` {}", expr_problem(Some(given)))))?;
+    check_expr(s, &e, kind, "solid.emboss", key)?;
+    Ok(Some(e))
 }
 
 impl EmbossPlacement {
