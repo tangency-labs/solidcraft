@@ -80,7 +80,9 @@
 //!   class). The bodies' own fork-fix flags apply unchanged. Not the fork (#2405): the
 //!   line spine's cylinder is built on the class's exact line (its centres the stations'
 //!   on it, its rails' ends their feet on the faces' quadrics) and stored on the frame it
-//!   was built on (`class_cylinder`), not recognised again from its patch.
+//!   was built on (`class_cylinder`), not recognised again from its patch. Not the fork
+//!   (#18913): the circle spine's start and end sections are turned about the class axis
+//!   into the half-plane through their ball's centre, so the generator is a meridian.
 //! - **The ball's triangle (solidcore #2403, not in the fork).** A point spine whose one
 //!   face's offset collapsed onto a line or circle (a round of the ball's radius) and the
 //!   other's not ([`crate::blend::fillet_exact::classify_ball_on_collapsed_offset`]) is
@@ -1596,6 +1598,18 @@ impl FilletSolver {
             (arc_center, p0, p1) = class_section(class, arc_center)?;
             None
         } else {
+            if class.is_some() {
+                // Not upstream (#18913): the section of a round about the class's axis lies
+                // in the half-plane through the axis and the ball's centre. The solver's
+                // rail points are each solved within its tolerance, so they stand a hair
+                // either side of that half-plane (2e-6 degrees, 3e-7 at 7.9 from the axis),
+                // and the arc through them, revolved, is not the round its generator names:
+                // its isocurves leave the generator turned about the axis
+                // (`SmSurfOfRevolution` Test #10). Both faces turn about that axis, so a rail
+                // point turned about it stays on its face's quadric.
+                turn_into_half_plane(axis_pnt, unit_axis, arc_center, center_tol, &mut p0);
+                turn_into_half_plane(axis_pnt, unit_axis, arc_center, center_tol, &mut p1);
+            }
             None
         };
 
@@ -1679,6 +1693,12 @@ impl FilletSolver {
             // Not upstream (#17263): an end section past a face as the start one, by the class
             let end_centre = eval_offset(k, s, 0, end_uv0)?;
             (_, end_p0, end_p1) = class_section(class, end_centre)?;
+        } else if class.is_some() {
+            // Not upstream (#18913): the end section in the half-plane through its ball's
+            // centre, as the start one, so the turn between them is the centres' turn
+            let end_centre = eval_offset(k, s, 0, end_uv0)?;
+            turn_into_half_plane(axis_pnt, unit_axis, end_centre, center_tol, &mut end_p0);
+            turn_into_half_plane(axis_pnt, unit_axis, end_centre, center_tol, &mut end_p1);
         }
 
         let mut end_vec = end_p0 - origin;
@@ -2344,6 +2364,69 @@ impl FilletSolver {
         Ok(sol.found)
     }
 
+    /// The box [`FilletSolver::rail_edgeuse_intersect`] solves in for the side edge use's
+    /// parameter and the rail's base surface parameters: the UV trim curve `uv_trim`'s
+    /// natural interval, widened along a straight side edge's line where
+    /// `run_side_edge_on_along_its_line` (WR-610) runs it on, and the rail's base domain
+    /// with the solver's offset extension (`SetupOffsetExtension`). Where it widens, a
+    /// B-spline `uv_trim` is continued past its ends (WR-654), as the solve evaluates it.
+    /// Certificates of a found point read the box and the trim the solve searched here.
+    ///
+    /// # Errors
+    ///
+    /// Those of the offset surface lookup, the domain and its extension, and the
+    /// widening's topology queries and evaluations.
+    pub fn rail_edgeuse_search_box(
+        ops: &mut dyn FilletSolverOps,
+        k: &Kernel,
+        b: &mut Brep,
+        rail_index: usize,
+        side_eu: EdgeuseId,
+        uv_trim: &mut Curve,
+    ) -> Result<(Extent1d, Extent2d)> {
+        let mut intervals = ExtentNd::new(1);
+        set_interval(&mut intervals, 0, uv_trim.natural_interval());
+        let base = ops
+            .solver_surface(rail_index)?
+            .map(|surface| surface.base_surface().clone())
+            .ok_or_else(|| invalid("no offset surface"))?;
+        let mut domain = base.natural_uv_domain_with_nurb(k)?;
+        // virtual SetupOffsetExtension: dispatched on the solver's kind
+        ops.setup_offset_extension(k, &base, &mut domain)?;
+
+        // Not upstream (WR-610; the fork's tangency-labs/smlib@6e77631): a straight side
+        // edge on a plane continues exactly along its line, as far as the base surface's
+        // domain is extended across the edge (its extension factor, or the trace's
+        // reach). A rail that leaves its face across a cliff meets the side edge's line
+        // past the edge's end; bounded to the edge's own interval, the solve found that
+        // point only from a first guess already on it.
+        let mut widened = false;
+        if let Some(side_edge) = eu::edge(b, side_eu)? {
+            widened = run_side_edge_on_along_its_line(
+                k,
+                b,
+                side_eu,
+                side_edge,
+                &*uv_trim,
+                &base,
+                &domain,
+                ops.solver(),
+                &mut intervals,
+            )?;
+        }
+        // Not upstream (WR-654, #1981): a B-spline trim clamps to its ends, so
+        // the widened interval reached no point of its line past them; a line
+        // trim on the other wall did, and the two rails' ends at the side vertex
+        // fell apart.
+        if widened {
+            continue_bspline_trim_past_its_ends(uv_trim);
+        }
+        let edge_interval = intervals
+            .get(0)
+            .ok_or_else(|| invalid("no edge-use parameter interval"))?;
+        Ok((edge_interval, domain))
+    }
+
     /// `RailEdgeuseIntersect(lRailIndex, pSideEU, dGuessEdgeParameter,
     /// rbFoundIntersection, rTsectPnt, rdEdgeuseParameter)`: the fillet point where
     /// rail `rail_index` meets the side edge use's UV trim curve (built when missing),
@@ -2397,42 +2480,9 @@ impl FilletSolver {
             .checked_add(1)
             .ok_or_else(|| invalid("Jacobian size overflows with edge-use parameter"))?;
         let mut intervals = ExtentNd::new(jacobian_size);
-        set_interval(&mut intervals, 0, uv_trim.natural_interval());
-
-        let base = ops
-            .solver_surface(rail_index)?
-            .map(|surface| surface.base_surface().clone())
-            .ok_or_else(|| invalid("no offset surface"))?;
-        let mut domain = base.natural_uv_domain_with_nurb(k)?;
-        // virtual SetupOffsetExtension: dispatched on the solver's kind
-        ops.setup_offset_extension(k, &base, &mut domain)?;
-
-        // Not upstream (WR-610; the fork's tangency-labs/smlib@6e77631): a straight side
-        // edge on a plane continues exactly along its line, as far as the base surface's
-        // domain is extended across the edge (its extension factor, or the trace's
-        // reach). A rail that leaves its face across a cliff meets the side edge's line
-        // past the edge's end; bounded to the edge's own interval, the solve found that
-        // point only from a first guess already on it.
-        if let Some(side_edge) = side_edge {
-            let widened = run_side_edge_on_along_its_line(
-                k,
-                b,
-                side_eu,
-                side_edge,
-                &uv_trim,
-                &base,
-                &domain,
-                ops.solver(),
-                &mut intervals,
-            )?;
-            // Not upstream (WR-654, #1981): a B-spline trim clamps to its ends, so
-            // the widened interval reached no point of its line past them; a line
-            // trim on the other wall did, and the two rails' ends at the side vertex
-            // fell apart.
-            if widened {
-                continue_bspline_trim_past_its_ends(&mut uv_trim);
-            }
-        }
+        let (edge_interval, domain) =
+            Self::rail_edgeuse_search_box(ops, k, b, rail_index, side_eu, &mut uv_trim)?;
+        set_interval(&mut intervals, 0, edge_interval);
         set_interval(
             &mut intervals,
             1,
