@@ -45,6 +45,10 @@ pub struct SurfaceRef {
     pub chart: SurfaceChart,
 }
 
+// The surface reference is not walked yet: its target and chart hold no design expressions or
+// sketch references for the walks to visit. The attachment pass replaces this.
+impl crate::walk::Walk for SurfaceRef {}
+
 impl SurfaceRef {
     /// Whether the target and the chart are valid.
     ///

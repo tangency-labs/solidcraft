@@ -899,6 +899,11 @@ pub enum FeatureKind {
         plane: PlaneRef,
         sketch: Sketch,
     },
+    /// A sketch attached to a curved face, solved in the chart in its reference.
+    SurfaceSketch {
+        surface: crate::SurfaceRef,
+        sketch: Sketch,
+    },
     Extrude {
         /// Feature id of the sketch.
         sketch: SketchId,
@@ -3535,6 +3540,7 @@ impl FeatureKind {
             FeatureKind::NewerFileFeature { .. } => "Unknown",
             FeatureKind::BodyTransfer { .. } => "BodyTransfer",
             FeatureKind::Sketch { .. } => "Sketch",
+            FeatureKind::SurfaceSketch { .. } => "SurfaceSketch",
             FeatureKind::Extrude { .. } => "Extrude",
             FeatureKind::Revolve { .. } => "Revolve",
             FeatureKind::Fillet { .. } => "Fillet",
