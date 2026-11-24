@@ -3856,10 +3856,11 @@ fn a_closed_spline_wall_with_a_curved_seam_keeps_all_faces() {
 
 /// The last wall of a circle of radius 5 swept along a 3D spline, as SolidCraft exports it, with its
 /// two caps (#21379; `tests/step-regressions/swept_tube_last_wall.step`). The wall is a spline closed
-/// round u whose seam edge is its first control column, on the knots' start. Projecting the seam's
-/// middle put it 5.5e-8 short of the knots' end, so the wall was started anew there, a sliver off
-/// its start; its rims, whole turns from the seam, then crossed the new start, the seam completion
-/// refused the wall and the part came in as two loose caps and no volume.
+/// round u whose seam edge is its first control column, on the knots' start. The seam, a nearly
+/// straight rational cubic, was read as a circle 8.6 km in radius lying about 4 µm off the wall, so
+/// it projected 5.5e-8 short of the knots' end and the wall was started anew there, a sliver off its
+/// seam; its rims then crossed the new start, the seam completion refused the wall and the part
+/// came in as two loose caps and no volume.
 #[test]
 fn a_swept_tube_wall_with_its_seam_on_the_knots_start_reads_whole() {
     let imp = step_import(include_str!("../../../../tests/step-regressions/swept_tube_last_wall.step")).unwrap();
@@ -3873,31 +3874,20 @@ fn a_swept_tube_wall_with_its_seam_on_the_knots_start_reads_whole() {
     // 187.491, 53.9195) and (682.2074, 232.5003, 70.1262): 48.0000050022914 mm apart.
     let volume = std::f64::consts::PI * 25.0 * 48.000_005_002_291_4;
     assert!(rel(m.volume, volume) < 1e-6, "volume {} against {volume}", m.volume);
-    // The wall keeps the file's knots, u in [0, 1] (not started anew), and every trim on it lies
-    // inside that period, up to floating-point rounding at the cut.
+    // The wall keeps the file's knots, u in [0, 1]: it is not started anew.
     let record = imp.bodies[0].body.record();
-    let walls: Vec<_> = record
+    let ranges: Vec<_> = record
         .faces
         .iter()
         .filter_map(|face| {
             let domain = solidcraft_geom::brep::eval::SurfaceEval::new(face.nurbs.as_ref().unwrap_or(&face.surface)).unwrap().domain();
-            domain.period[0].map(|period| (face, domain.range[0], period))
+            domain.period[0].map(|period| (domain.range[0], period))
         })
         .collect();
-    assert_eq!(walls.len(), 1);
-    let (wall, range, period) = walls[0];
-    assert_eq!((range, period), (Some((0.0, 1.0)), 1.0));
-    let round = 1e-9 * period;
-    for l in &wall.loops {
-        let solidcore_record::brep::Loop::Edges { edges } = l else { panic!("the wall is bounded by edges") };
-        for u in edges {
-            let us: Vec<f64> = match &u.pcurve {
-                solidcore_record::brep::Curve2::Spline { points, .. } => points.iter().map(|p| p[0]).collect(),
-                solidcore_record::brep::Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter().map(|h| h[0] / h[2]).collect(),
-            };
-            assert!(us.iter().all(|&x| (-round..=1.0 + round).contains(&x)), "edge {}: u {us:?}", u.edge);
-        }
-    }
+    assert_eq!(ranges, vec![(Some((0.0, 1.0)), 1.0)]);
+    assert_periodic_trim_domains_and_seams(&imp.bodies[0].body);
+    let check = imp.bodies[0].body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+    assert!(check.is_valid(), "{check}");
 }
 
 /// Containment of the positive-weight control hull proves containment of the entire stored

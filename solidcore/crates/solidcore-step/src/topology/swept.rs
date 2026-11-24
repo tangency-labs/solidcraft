@@ -733,7 +733,8 @@ const CIRCLE_SAMPLES: usize = 64;
 /// running the way the spline runs and starting at the spline's start, and the angle the spline
 /// sweeps (a full turn or more for one that closes); `None` for any other spline. The circle is
 /// the one through the spline's points at the start and a third and two thirds of the way along
-/// its parameter; every sample of the spline lies on it to within rounding (1e-9 of its size).
+/// its parameter; every sample of the spline lies on it to within rounding (1e-9 of the spline's
+/// size: its control points' distance from the origin plus their spread).
 pub(super) fn spline_circle(b: &crate::geom::BSplineCurve) -> Option<(Curve, f64)> {
     b.weights.as_ref()?;
     let (t0, t1) = b.domain()?;
@@ -751,7 +752,18 @@ pub(super) fn spline_circle(b: &crate::geom::BSplineCurve) -> Option<(Curve, f64
     let axis = n.normalized()?;
     let x = (a - centre).normalized()?;
     let y = axis.cross(x);
-    let reach = 1e-9 * (radius + centre.len());
+    // Rounding in the spline's own numbers: how far its control points lie from the origin and
+    // how far they spread. Not the circle's: three points of a spline that is nearly straight
+    // lie on a circle kilometres wide, 1e-9 of which is microns, and a sweep's straight seam
+    // microns off any circle was taken for one, about 4 µm off its face (#21379).
+    let inf = f64::INFINITY;
+    let (mut far, mut lo, mut hi) = (0.0f64, Vec3 { x: inf, y: inf, z: inf }, Vec3 { x: -inf, y: -inf, z: -inf });
+    for p in b.points.iter().map(|p| v3(*p)) {
+        far = far.max(p.len());
+        lo = Vec3 { x: lo.x.min(p.x), y: lo.y.min(p.y), z: lo.z.min(p.z) };
+        hi = Vec3 { x: hi.x.max(p.x), y: hi.y.max(p.y), z: hi.z.max(p.z) };
+    }
+    let reach = 1e-9 * (far + (hi - lo).len());
     let (mut swept, mut last) = (0.0, 0.0);
     for k in 0..=CIRCLE_SAMPLES {
         let d = at(k as f64 / CIRCLE_SAMPLES as f64)? - centre;

@@ -380,10 +380,10 @@ fn restarted(surface: &BSurface, s: f64, period: f64) -> Option<BSurface> {
 impl Assembly<'_> {
     /// Start every B-spline surface closed around u that a face lies across the start of, without
     /// winding round it, in the middle of the widest stretch of u the face leaves free, or at the
-    /// face's own seam where it goes once round bounded by one that is off the start by more than
-    /// the seam's tolerance: the face's pcurves then run inside the surface's knots, as a kernel's
-    /// trims have to (one crossing the start had its pcurve clamped there, mm off its edge). Exact
-    /// ([`restarted`]). Returns how many surfaces were started anew.
+    /// face's own seam where it goes once round bounded by one: the face's pcurves then run inside
+    /// the surface's knots, as a kernel's trims have to (one crossing the start had its pcurve
+    /// clamped there, mm off its edge). Exact ([`restarted`]). Returns how many surfaces were
+    /// started anew.
     pub(crate) fn start_splines_clear_of_faces(&mut self) -> R<usize> {
         let mut turned = 0;
         for fi in 0..self.faces.len() {
@@ -448,16 +448,7 @@ impl Assembly<'_> {
                 let edge = self.edges.get(e as usize).ok_or("edge reference")?;
                 let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
                 let [a, b] = edge.interval;
-                let Some(p) = c.point(0.5 * (a + b)) else { continue };
-                let Some(q) = eval.project(p, None, f64::INFINITY) else { continue };
-                // A seam on the start, within its tolerance, as a point is on a surface everywhere
-                // here: the face runs inside the knots already. A projection finds the start only
-                // to its own precision; on a swept tube's wall, whose seam is its first control
-                // column, it put the seam 5.5e-8 short of the knots' end, the wall was started
-                // anew a sliver off its start, and its rims crossed the new start (#21379).
-                if eval.point([u0, q[1]]).is_some_and(|s| s.dist(p) <= self.tol.max(edge.tolerance)) {
-                    continue;
-                }
+                let Some(q) = c.point(0.5 * (a + b)).and_then(|p| eval.project(p, None, f64::INFINITY)) else { continue };
                 let at = u0 + (q[0] - u0).rem_euclid(period);
                 if at - u0 <= clear || u0 + period - at <= clear {
                     continue;
