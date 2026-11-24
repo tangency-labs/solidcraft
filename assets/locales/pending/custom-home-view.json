@@ -5,6 +5,6 @@
   },
   "de": {
     "cmd.view_reset_home": "Startansicht zurücksetzen",
-    "cmd.view_set_home": "Aktuelle Ansicht als Startansicht festlegen"
+    "cmd.view_set_home": "Als Startansicht festlegen"
   }
 }

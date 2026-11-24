@@ -870,6 +870,13 @@ mod tests {
         h.app.cam.yaw = -2.0;
         let back = home(&mut h);
         assert_eq!((back.yaw, back.pitch, back.distance), (chosen.yaw, chosen.pitch, chosen.distance), "Home goes to the chosen view, not fitted");
+        h.app.cam.yaw = -2.0;
+        h.call("ui.view", json!({"view": "home"}));
+        assert_eq!(
+            (h.app.cam.yaw, h.app.cam.pitch, h.app.cam.distance),
+            (chosen.yaw, chosen.pitch, chosen.distance),
+            "the control channel's Home too"
+        );
 
         menu(&mut h);
         assert_eq!(h.call("ui.menuPick", json!({"item": "Reset Home View"}))["ok"], true);
