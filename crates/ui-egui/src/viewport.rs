@@ -1320,7 +1320,11 @@ const DRAW_DRAG_MIN: f32 = 24.0;
 /// ([`Instances`], [`repeated_copy`]). Evaluated from its own moved plan, every placement of a
 /// part took its own copy of the part's triangles on the GPU, so an assembly placed a few times
 /// ran out of memory.
-fn drawn_plan(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody, opaque: bool) -> Option<std::sync::Arc<solidcraft_kernel::services::tess::TessPlan>> {
+fn drawn_plan(
+    app: &SolveApp,
+    b: &solidcraft_engine::doc::ModelBody,
+    opaque: bool,
+) -> Option<std::sync::Arc<solidcraft_kernel::services::tess::TessPlan>> {
     let shaded = app.ui.visual_style != 2;
     (shaded && opaque && app.viewport.gpu.is_some_and(|g| g.tess))
         .then(|| match refined(app, b) {
@@ -6523,7 +6527,10 @@ fn highlight_plan(
 /// every triangle of a whole hovered assembly took about 150 ms and 240 MB at each change of
 /// the hovered row. The highlight hands the GPU the body's plan instead, as the model does
 /// when it shades.
-fn wireframe_highlight_plan(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> Option<std::sync::Arc<solidcraft_kernel::services::tess::TessPlan>> {
+fn wireframe_highlight_plan(
+    app: &SolveApp,
+    b: &solidcraft_engine::doc::ModelBody,
+) -> Option<std::sync::Arc<solidcraft_kernel::services::tess::TessPlan>> {
     if app.ui.visual_style != 2 || crate::render_workspace::active(app) || app.preview.effective_replaced().contains(&b.name) {
         return None;
     }

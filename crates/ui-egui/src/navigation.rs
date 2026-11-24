@@ -12,9 +12,9 @@
 
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::json;
-use solidcraft_kernel::services::{centroid_and_mean_radius, point_displacement, point_distance};
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::prelude::*;
+use solidcraft_kernel::services::{centroid_and_mean_radius, point_displacement, point_distance};
 use solidcraft_viewport::Camera;
 
 use crate::SolveApp;
