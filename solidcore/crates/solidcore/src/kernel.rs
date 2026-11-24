@@ -146,6 +146,12 @@ pub struct Caches {
     /// option, only the import's narrow seam. (tangency-labs/solidcore#3368 makes the proved
     /// raise fast enough for import and removes the sampled path.)
     pub(crate) prove_lazy_trim_raise: bool,
+    /// Not upstream (#21105): whether a UV trim built now leaves its edge's tolerance as
+    /// it is, as `SetUVTrimCurve` does on a B-rep marked `m_bValidateOnly`. Set only for
+    /// the duration of a validate-only tolerance pass ([`Kernel::with_held_trim_raise`]),
+    /// which so takes `bValidateOnly` as its argument instead of setting and restoring the
+    /// flag on the body it checks. Crate-private: not a kernel option.
+    pub(crate) hold_trim_raise: bool,
 }
 
 impl Default for Caches {
@@ -153,16 +159,18 @@ impl Default for Caches {
         Self {
             curve_analysis: RefCell::default(),
             prove_lazy_trim_raise: true,
+            hold_trim_raise: false,
         }
     }
 }
 
 impl Caches {
-    /// Drops all cached data. The trim raise's mode stays: clearing a kernel's caches must
+    /// Drops all cached data. The trim raise's modes stay: clearing a kernel's caches must
     /// change no result.
     pub fn clear(&mut self) {
         *self = Self {
             prove_lazy_trim_raise: self.prove_lazy_trim_raise,
+            hold_trim_raise: self.hold_trim_raise,
             ..Self::default()
         };
     }
@@ -1096,6 +1104,18 @@ impl Kernel {
         self.caches.prove_lazy_trim_raise = false;
         let out = f(self);
         self.caches.prove_lazy_trim_raise = proved;
+        out
+    }
+
+    /// Runs `f` with every UV trim it builds leaving its edge's tolerance as it is (see
+    /// [`Caches::hold_trim_raise`]), then restores the previous mode, whether `f` returns a
+    /// value or an error: the validate-only tolerance pass's `bValidateOnly`, carried for the
+    /// pass instead of written to the B-rep it checks (#21105).
+    pub(crate) fn with_held_trim_raise<T>(&mut self, f: impl FnOnce(&mut Kernel) -> T) -> T {
+        let held = self.caches.hold_trim_raise;
+        self.caches.hold_trim_raise = true;
+        let out = f(self);
+        self.caches.hold_trim_raise = held;
         out
     }
 

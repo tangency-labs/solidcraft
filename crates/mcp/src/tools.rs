@@ -150,7 +150,9 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              measure (inspect.measure), compare_picture (inspect.compare_picture, numbers only: no overlay PNG), \
              inspect_design (document.inspect), undo, redo, export, save, open, new_design, crash_reports; screenshot, \
              body_topology, batch and pending can't be steps. On an error the steps already run are undone (unless \
-             rollback: false), so the batch is all-or-nothing; the reply names the failing step (index from 0), its error, \
+             rollback: false). Connected to the desktop, rollback batches refuse known commands that open or switch design tabs. \
+             If the steps must run one at a time, this server must recognize every command in a rollback batch. \
+             The reply names the failing step (index from 0), its error, \
              every result before it, whether the design really went back (rolled_back), the steps whose changes are in the \
              design (applied) and those never sent (not_run). The usual way to build a part: sketch, draw, dimension, \
              finish, extrude, fillet… in one call. A long one (a polyline of hundreds of points) can be written to a JSON \
@@ -337,7 +339,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              The format comes from the extension unless given; for OpenUSD the path's extension picks text, binary or package, and a \
              format naming another encoding is refused. URDF (.urdf) exports the whole assembly for robot simulators: a link per \
              component placement with mass and inertia, joints from the assembly's joints, and STL meshes in metres written \
-             next to it (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/. SDF (.sdf) writes a Gazebo \
+             next to it, or where mesh_prefix points with place_meshes (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/. SDF (.sdf) writes a Gazebo \
              model folder at the path (a .sdf ending dropped): model.config, model.sdf, an STL per body and each decal's image \
              on a textured quad, the image also its visual's albedo map (docs/sdf.md).",
             object(
@@ -347,14 +349,16 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf)"},
                     "writer": {"type": "string", "enum": ["solidcraft", "cadmpeg"], "description": "STEP and IGES only: SolidCraft's own writer (default), or cadmpeg's, which writes STEP AP242 with the components and colours but no solid names, and IGES 5.3 with each body where the design shows it; refused for other formats"},
                     "mesh_prefix": string("urdf: put before each mesh file name (default: none, so relative to the .urdf)"),
-                    "effort": {"type": "number", "description": "urdf: joint effort limit, N or N m (default 1000)"},
-                    "velocity": {"type": "number", "description": "urdf: joint velocity limit, m/s or rad/s (default 10)"},
+                    "place_meshes": {"type": "boolean", "description": "urdf: write the meshes where mesh_prefix points, making its folder (default false: next to the .urdf)"},
+                    "effort": {"type": "number", "description": "urdf: effort limit for joints with none saved, N or N m (default 1000)"},
+                    "velocity": {"type": "number", "description": "urdf: velocity limit for joints with none saved, m/s or rad/s (default 10)"},
                     "hierarchy": {"type": "boolean", "description": "glb: false writes every body flat under the root in world coordinates, as SolidCraft 0.40 did (default true: a named node per occurrence)"},
                     "images": {"type": "boolean", "description": "urdf and usd: also write each picture shown on the model as a textured visual; usd writes it only in a .usdz package (default false)"},
                     "physics": {"type": "boolean", "description": "usd: also write the joints, grounded parts and each component's mass as OpenUSD physics, for a simulator (default false)"},
                     "render_setup": string("usd: the saved render setup whose image textures a .usdz package holds (default: none)"),
                     "purpose": {"type": "string", "enum": ["interchange", "distribution"], "description": "usd: what the file is for: interchange (exact shapes beside meshes, for CAD) or distribution (meshes only with the pictures shown on the model, for viewers and game engines); exact_brep and images override it (default interchange)"},
                     "exact_brep": {"type": "boolean", "description": "usd: write each body's exact shape beside its mesh (default: true for interchange, false for distribution)"},
+                    "mimic": {"type": "boolean", "description": "urdf: write <mimic> for motion links (default false)"},
                     "name": string("sdf: the model's name (default: the folder's name)"),
                     "static": {"type": "boolean", "description": "sdf: scenery Gazebo never moves (default true); false gives it the bodies' mass"},
                     "model_uris": {"type": "boolean", "description": "sdf: name files as model://<folder>/<file> (default false: relative to model.sdf)"},
@@ -1104,9 +1108,11 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
                     "bodies",
                     "writer",
                     "mesh_prefix",
+                    "place_meshes",
                     "effort",
                     "velocity",
                     "hierarchy",
+                    "mimic",
                     "images",
                     "physics",
                     "render_setup",
@@ -1394,9 +1400,11 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
                     "bodies",
                     "writer",
                     "mesh_prefix",
+                    "place_meshes",
                     "effort",
                     "velocity",
                     "hierarchy",
+                    "mimic",
                     "images",
                     "physics",
                     "render_setup",
@@ -1722,6 +1730,9 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options) -> Value {
         Ok(e) => e,
         Err(e) => return text_result(&Value::String(e), true, opts),
     };
+    // Discovery can change the backend while the headless session is still empty. Use one
+    // session for preflight, every step, and the final expectation or checkpoint restore.
+    let b = if let Some(active) = b.batch_backend() { active } else { b };
     match batch_run(b, a) {
         (reply, true) => text_result(&reply, true, opts),
         (reply, false) => with_expectation(b, reply, expect, opts),
@@ -1752,6 +1763,16 @@ fn atomic_layout_refusal(count: usize, rule: solidcraft_engine::panels::Rule, de
     (reply, true)
 }
 
+fn preflight_refusal(refusal: solidcraft_engine::batch_preflight::Refusal, count: usize, rollback: bool) -> (Value, bool) {
+    let mut reply = refusal.reply(count, rollback);
+    reply["ok"] = json!(false);
+    reply["applied"] = json!([]);
+    if let Some(command) = refusal.command.as_deref() {
+        reply["failed"]["error"] = Value::String(command_error(command, refusal.error));
+    }
+    (reply, true)
+}
+
 /// The batch itself: its reply and whether it failed.
 fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     let from_file = match script_file(a) {
@@ -1776,13 +1797,25 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     let mut mapped: Vec<Value> = Vec::with_capacity(steps.len());
     let mut narrows: Vec<(usize, Narrow)> = Vec::new();
     for (i, step) in steps.iter().enumerate() {
-        // The window goes to another design's tab for these, however the step names them: the
-        // batch's later steps and its rollback would land in the wrong design.
+        // Inspect the canonical command after mapping tool names and execute wrappers. A
+        // desktop checkpoint is local to its tab, so it cannot roll back across a tab change.
         let step_result = batch_step(step).and_then(|(command, params, narrow)| {
-            let id = if command.is_empty() { step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).unwrap_or("") } else { &command };
+            let (id, command_params) = if command.is_empty() {
+                (step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).unwrap_or(""), step.get("params"))
+            } else {
+                (command.as_str(), Some(&params))
+            };
             match solidcraft_engine::find_command(id).map(|spec| spec.id) {
                 Some(c @ ("component.edit_in_place" | "component.finish_edit")) => {
                     Err(format!("`{c}` goes to another design's tab: send it on its own, not in a batch"))
+                }
+                Some(c)
+                    if rollback
+                        && b.has_ui()
+                        && (matches!(c, "view.next_tab" | "view.previous_tab" | "document.activate" | "doc.open" | "file.import")
+                            || (c == "file.new" && command_params.and_then(|p| p.get("new_tab")).and_then(Value::as_bool) == Some(true))) =>
+                {
+                    Err(format!("`{c}` can change the active design tab: run it separately or use `rollback: false`"))
                 }
                 _ => Ok((command, params, narrow)),
             }
@@ -1823,15 +1856,7 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     if b.in_process()
         && let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, b.param_check(), &[])
     {
-        let mut reply = refusal.reply(steps.len(), rollback);
-        if let Some(o) = reply.as_object_mut() {
-            o.insert("ok".into(), Value::Bool(false));
-            o.insert("applied".into(), json!([]));
-        }
-        if let (Some(command), Some(failed)) = (refusal.command.as_deref(), reply.get_mut("failed").and_then(Value::as_object_mut)) {
-            failed.insert("error".into(), Value::String(command_error(command, refusal.error.clone())));
-        }
-        return (reply, true);
+        return preflight_refusal(refusal, steps.len(), rollback);
     }
     // A tool step's result as the tool would reply it: a `list_commands` step's catalog filtered,
     // a `measure {summary: true}` step's reply summarised.
@@ -1865,6 +1890,10 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
                 }
                 return batch_reply(&r, steps.len(), rollback, verbose, &narrow);
             }
+            // A newer app may know about tab-switching commands this server cannot preflight.
+            Err(e) if rollback && e.starts_with("engine.batch unavailable:") && e.ends_with("switches to another design") => {
+                return (Value::String(e), true);
+            }
             // Older apps and the headless session, or the app wants the steps one by one.
             Err(e) if e.starts_with("unknown method") || e.starts_with("engine.batch unavailable") => {}
             Err(e) if solidcraft_engine::panels::commands::structured_error(&e).is_some() => return (Value::String(e), true),
@@ -1894,6 +1923,17 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
                 "atomic layout batch exceeds transport size cap"
             },
         );
+    }
+    // Without the desktop's batch preflight, an unrecognized command could switch tabs.
+    // Check IDs here and leave parameter checking to the app that executes the steps.
+    if rollback
+        && b.has_ui()
+        && let Some(mut refusal) = solidcraft_engine::batch_preflight::check(steps, solidcraft_engine::schema::ParamCheck::Off, &[])
+    {
+        if let Some(command) = &refusal.command {
+            refusal.error = format!("this MCP server does not recognize `{command}`. Run it separately or use `rollback: false`");
+        }
+        return preflight_refusal(refusal, steps.len(), rollback);
     }
     let start = if rollback { Undo::begin(b) } else { Undo::None };
     let mut results = Vec::with_capacity(steps.len());
