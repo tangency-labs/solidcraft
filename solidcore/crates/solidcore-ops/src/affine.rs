@@ -71,6 +71,16 @@ pub fn orthonormal_axes(x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2]> {
     Ok([[x.x, x.y, x.z], [y.x, y.y, y.z]])
 }
 
+/// A plane's axes `x` and `y` with the coordinates smaller than `noise` dropped, each unit
+/// again, through [`Transform::axis_squared_frame`]: a flat face's plane, tilted only by
+/// rounding, made exactly square to the world axes it lies along. `None` when the kernel finds
+/// nothing sound to give (axes not finite, of no length or parallel once cleaned, or a bad
+/// `noise`); the caller keeps its own axes then.
+pub fn axis_squared_axes(x: [f64; 3], y: [f64; 3], noise: f64) -> Option<[[f64; 3]; 2]> {
+    let [x, y] = Transform::axis_squared_frame(vec3(x), vec3(y), noise)?;
+    Some([[x.x, x.y, x.z], [y.x, y.y, y.z]])
+}
+
 /// Carry planar axes by a rigid `matrix`, keeping UV scales and keeping square source
 /// axes square, through [`Transform::rigid_plane_axes`]. The caller establishes that the
 /// matrix is a rigid motion; skew source axes retain their parametrisation.
@@ -294,6 +304,24 @@ pub fn same_sense(direction: [f64; 3], like: [f64; 3]) -> Option<[f64; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A face's plane tilted by rounding comes back square to the axes; one tilted for real
+    /// keeps its axes; parallel axes give `None`.
+    #[test]
+    fn plane_axes_tilted_by_rounding_come_back_square() {
+        assert_eq!(
+            axis_squared_axes([1.0, 0.0, 2e-15], [0.0, 1.0, -1e-15], 1e-12),
+            Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+        );
+        assert_eq!(
+            axis_squared_axes([0.6, 0.0, 0.8], [0.0, 1.0, 0.0], 1e-12),
+            Some([[0.6, 0.0, 0.8], [0.0, 1.0, 0.0]])
+        );
+        assert_eq!(
+            axis_squared_axes([1.0, 0.0, 0.0], [1.0, 0.0, 0.0], 1e-12),
+            None
+        );
+    }
 
     #[test]
     fn a_direction_takes_the_sense_of_another_and_none_without_length() {
