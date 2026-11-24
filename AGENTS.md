@@ -10,7 +10,7 @@ Work: ROADMAP.md, CONTRIBUTING.md ("Where help is wanted most"), `help wanted`, 
 - Never copy other products' code, icons, text or templates; never drive or take data from commercial CAD. `.agents/skills/solidcraft-ground-rules/SKILL.md`.
 - No GPL/LGPL/AGPL code, not even reading it (OpenCASCADE, FreeCAD, SolveSpace, CadQuery, LibreCAD, QCAD): `cargo xtask licences --check`.
 - Original/openly licensed assets only, with ATTRIBUTION.md rows; read `assets/AGENTS.md` before icon work: `cargo xtask assets`, `cargo xtask icons`.
-- No unwrap/expect/panic/unsafe outside tests; errors use `Result`; input is hostile: clippy `-D warnings`, `hostile_params_never_panic`.
+- Never crash: no unwrap/expect/panic/unsafe outside tests; errors use `Result`; input is hostile: clippy `-D warnings`, `hostile_params_never_panic`.
 - Model decisions (operations, bodies, face/edge picks and names, depths, nearness) use exact geometry; meshes only for display, export, previews, mesh bodies (`xtask/mesh-decisions/` only shrinks): `cargo xtask mesh-decisions`.
 - Everything is a command; programmatic calls never open dialogs: `.agents/skills/solidcraft-commands/SKILL.md`.
 - Only `crates/kernel` uses truck; solidcore only via `solidcore-ops`/`-tess`/`-record` (`xtask/solidcore-seam.txt`): `cargo xtask layers`/`app-geometry`, `docs/layers.md`.
