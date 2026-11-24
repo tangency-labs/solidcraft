@@ -15,7 +15,7 @@
 //! the NURB the found spheres keep.
 //!
 //! #20179 (the point test asks the face whether to test) adds five UV trims to the result
-//! body of six `sphere_diff_3cylinders` rows; step 1 hashes those rows without them
+//! body of three `sphere_diff_3cylinders` rows; step 1 hashes those rows without them
 //! ([`run_without_classified_trims`]: the five edges' trim counts lowered, which
 //! `wr493_rows`' `sphere_diff_3cylinders_rows_move_only_by_the_classified_trims` proves is
 //! the body's record without those trims, each certified on its edge). `corpus.parity` runs its two sides in this process

@@ -1093,11 +1093,8 @@ fn wr493_moved_bodies_pass_level_2() {
 /// the cone face [`CLASSIFIED_TRIM_FACE`] (it has loop uses; main's cache, built in editing
 /// mode, stored point testing off), the face classification makes the face's missing trims
 /// (`CreateUVTrimCurves`) on the read (`tolsub::state::CLASSIFIED_READ_TRIMS`, the same
-/// edge uses), and the fillet keeps them.
-pub(crate) const CLASSIFIED_TRIM_ROWS: [&str; 6] = [
-    "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
-    "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
-    "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
+/// edge uses), which a refused round keeps and a built one does not.
+pub(crate) const CLASSIFIED_TRIM_ROWS: [&str; 3] = [
     "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
     "sweep4-sphere_diff_3cylinders-all-r0.1",
     "sweep5-sphere_diff_3cylinders-e29-r1.0",
@@ -1130,6 +1127,29 @@ pub(crate) fn without_classified_trims(unit: &str, case: &str, output: &mut crat
         let at = 4 * CLASSIFIED_TRIM_VERTICES + 18 * i + TRIM_COUNT;
         assert_eq!(g[at], 2.0, "{case}: edge {i} trim count");
         g[at] = 1.0;
+    }
+}
+
+#[test]
+fn a_built_sphere_diff_3cylinders_round_is_its_run_on_mains_read() {
+    use crate::golden::encode;
+    use crate::json::to_canonical_string;
+    let runner = &blend_fillet_executive_p3::Runner;
+    let built: Vec<&str> = SPHERE_DIFF_3CYLINDERS
+        .map(|row| row.0)
+        .into_iter()
+        .filter(|case| !CLASSIFIED_TRIM_ROWS.contains(case))
+        .collect();
+    assert_eq!(built.len(), 7, "{built:?}");
+    for case in built {
+        let now = to_canonical_string(&encode(case, &run(runner, case)));
+        let (main, reads) = crate::tolsub::state::strip_classified_trims(|| run(runner, case));
+        assert!(reads > 0, "{case}: main's read was not put back");
+        assert_eq!(
+            now,
+            to_canonical_string(&encode(case, &main)),
+            "{case}: the classified trims reach the built body"
+        );
     }
 }
 

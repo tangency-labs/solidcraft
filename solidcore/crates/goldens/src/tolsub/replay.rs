@@ -91,7 +91,7 @@
 //! were of an older main's run, not of the line main now commits.)
 //!
 //! #20179 (the point test asks the face whether to test) adds five UV trims to the result
-//! body of six `blend.fillet_executive_p3` `sphere_diff_3cylinders` rows: their put-back
+//! body of three `blend.fillet_executive_p3` `sphere_diff_3cylinders` rows: their put-back
 //! runs are hashed without them ([`run_without_classified_trims`], proved in `wr493_rows`'
 //! `sphere_diff_3cylinders_rows_move_only_by_the_classified_trims`).
 //!
