@@ -18,6 +18,12 @@
 //! imprinted on B by the coincident pair of B and A's neighbour), C is dropped, and C's
 //! end is never made a vertex, so it and V need not be related.
 //!
+//! C may also run within the tolerance of E from X before it leaves E: its classification
+//! on A then reads that stretch as on E and starts C's interval inside A at the point P
+//! on E where C leaves it (an end classified on E, not at X). The strip is then the one
+//! beside E's piece from P to V, and the same certificate decides it with that piece of
+//! E's trim in place of the whole trim; P is dropped as an event with C.
+//!
 //! The decision is a certificate over A's strip, not a sample. A's surface `S` is its net
 //! (a B-spline face's own surface, or a blend's or sweep's certified net) plus the net's
 //! certified distance from its definition, `ε` (0 for a plain B-spline face). The strip is
@@ -331,9 +337,10 @@ impl<O: ClassObject + SolutionObject + Ord> Strip<'_, O> {
         Ok(false)
     }
 
-    /// The edges E of A the strip may lie beside: E ends at the curve's end X (a vertex),
-    /// its other face is coincident with B in this intersection, and the curve's other
-    /// end is E's other end V or lies on an edge N of A at V.
+    /// The edges E of A the strip may lie beside: the curve's end X is an end of E (a
+    /// vertex) or lies on E (the classification's point on E where the curve leaves it,
+    /// [`XOn::Edge`]), E's other face is coincident with B in this intersection, and the
+    /// curve's other end is E's end V away from X or lies on an edge N of A at V.
     fn candidates(
         &self,
         k: &Kernel,
@@ -348,11 +355,20 @@ impl<O: ClassObject + SolutionObject + Ord> Strip<'_, O> {
             (&ivl.end, t.max(), &ivl.start, t.min()),
         ];
         for (x_class, tx, n_class, tn) in ends {
-            if x_class.point_class() != PointClassType::Vertex {
-                continue;
-            }
-            let Some(x) = x_class.object().and_then(|o| vertex_of(brep, a.b, o)) else {
-                continue;
+            let x_on = match x_class.point_class() {
+                PointClassType::Vertex => {
+                    match x_class.object().and_then(|o| vertex_of(brep, a.b, o)) {
+                        Some(x) => XOn::Vertex(x),
+                        None => continue,
+                    }
+                }
+                PointClassType::Edge => {
+                    match x_class.object().and_then(|o| edge_of(brep, a.b, o)) {
+                        Some(e) => XOn::Edge(e, x_class.t_param()),
+                        None => continue,
+                    }
+                }
+                _ => continue,
             };
             let far = match n_class.point_class() {
                 PointClassType::Edge => {
@@ -369,15 +385,38 @@ impl<O: ClassObject + SolutionObject + Ord> Strip<'_, O> {
                 }
                 _ => continue,
             };
-            for e in vertex::edges(a.b, x, Some(a.fa))? {
-                k.check_cancelled(OP)?;
-                if let Some(v) = self.beside(brep, a, e, x, far)? {
-                    out.push(Candidate {
-                        e,
-                        v,
-                        far,
-                        t: [tx, tn],
-                    });
+            match x_on {
+                XOn::Vertex(x) => {
+                    for e in vertex::edges(a.b, x, Some(a.fa))? {
+                        k.check_cancelled(OP)?;
+                        if let Some(v) = self.beside(brep, a, e, x, far)? {
+                            out.push(Candidate {
+                                e,
+                                v,
+                                far,
+                                t: [tx, tn],
+                                e_at_x: None,
+                            });
+                        }
+                    }
+                }
+                XOn::Edge(e, te) => {
+                    // (V is either end of E, read as the end away from the other one)
+                    for x in [edge::start_vertex(a.b, e)?, edge::end_vertex(a.b, e)?]
+                        .into_iter()
+                        .flatten()
+                    {
+                        k.check_cancelled(OP)?;
+                        if let Some(v) = self.beside(brep, a, e, x, far)? {
+                            out.push(Candidate {
+                                e,
+                                v,
+                                far,
+                                t: [tx, tn],
+                                e_at_x: Some(te),
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -452,6 +491,7 @@ impl<O: ClassObject + SolutionObject + Ord> Strip<'_, O> {
             v,
             far,
             t: [tx, tn],
+            e_at_x: x_inside_e,
         } = cand;
         let b = a.b;
         let domain = a.net.natural_uv_domain();
@@ -474,18 +514,12 @@ impl<O: ClassObject + SolutionObject + Ord> Strip<'_, O> {
         let c_x_uv = uv_at(k, self.uv, tx)?;
         let c_far_uv = uv_at(k, self.uv, tn)?;
 
-        // E's trim on A over the whole edge (A's own boundary there), checked at its ends
-        // against E's vertices
+        // E's trim on A between V and the curve's end at E (A's own boundary there): the
+        // whole edge when that end is E's end X, else the piece from V to the curve's
+        // point on E; checked at the piece's ends (against E's vertex at an end of E,
+        // against E's curve inside it)
         let e_ivl = b.edge(e)?.interval;
         let Some(e_trim) = trim_on(b, e, a.fa)? else {
-            return Ok(false);
-        };
-        for t in [e_ivl.min(), e_ivl.max()] {
-            if !trim_meets(k, b, e, a.surface, e_trim, t, self.tol)? {
-                return Ok(false);
-            }
-        }
-        let Some(e_boxes) = piece_boxes(e_trim, e_ivl) else {
             return Ok(false);
         };
         // (V's end of E by identity: E is not closed, `beside` refuses V = X)
@@ -493,12 +527,25 @@ impl<O: ClassObject + SolutionObject + Ord> Strip<'_, O> {
         else {
             return Ok(false);
         };
-        let (e_at_v, e_at_x) = ends(&e_boxes, e_v_at_start);
-        let (e_v_param, e_x_param) = if e_v_at_start {
+        let (e_v_param, e_end_param) = if e_v_at_start {
             (e_ivl.min(), e_ivl.max())
         } else {
             (e_ivl.max(), e_ivl.min())
         };
+        let e_x_param = x_inside_e.unwrap_or(e_end_param);
+        if !(e_ivl.min() <= e_x_param && e_x_param <= e_ivl.max()) {
+            return Ok(false);
+        }
+        for t in [e_v_param, e_x_param] {
+            if !trim_meets(k, b, e, a.surface, e_trim, t, self.tol)? {
+                return Ok(false);
+            }
+        }
+        let e_piece = Extent1d::from_min_max(e_v_param.min(e_x_param), e_v_param.max(e_x_param));
+        let Some(e_boxes) = piece_boxes(e_trim, e_piece) else {
+            return Ok(false);
+        };
+        let (e_at_v, e_at_x) = ends(&e_boxes, e_v_param <= e_x_param);
         let e_v_uv = uv_at(k, e_trim, e_v_param)?;
         let e_x_uv = uv_at(k, e_trim, e_x_param)?;
 
@@ -903,13 +950,25 @@ fn strip_within(
 }
 
 /// An edge E the strip may lie beside: E, its end V away from the curve's end at E,
-/// the curve's far end, and the curve's parameters at its two ends (at E's end first).
+/// the curve's far end, the curve's parameters at its two ends (at E first), and E's
+/// parameter at the curve's end on E when that end lies on E rather than at E's end X.
 #[derive(Clone, Copy)]
 struct Candidate {
     e: EdgeId,
     v: VertexId,
     far: Far,
     t: [f64; 2],
+    e_at_x: Option<f64>,
+}
+
+/// Where the curve's end at E lies: at a vertex X (an end of the candidate E), or on the
+/// edge E at E's parameter. The second is the classification of a curve that runs
+/// within the tolerance of E from E's end and leaves it: the curve's interval in A then
+/// starts where it leaves E, on E.
+#[derive(Clone, Copy)]
+enum XOn {
+    Vertex(VertexId),
+    Edge(EdgeId, f64),
 }
 
 /// Where the curve ends away from E: on A's boundary edge N at N's parameter, or at a
@@ -1162,11 +1221,16 @@ fn uv_meets(
 }
 
 /// Whether a curve interval can be a strip's curve on its face: it runs inside the face
-/// and one of its ends is a vertex.
+/// and one of its ends is a vertex or on an edge (the end at E).
 fn shape_fits<O: ClassObject>(ivl: &CurveInterval<O>) -> bool {
+    let on_boundary = |c: &PointClassification<O>| {
+        matches!(
+            c.point_class(),
+            PointClassType::Vertex | PointClassType::Edge
+        )
+    };
     ivl.mid.point_class() == PointClassType::Face
-        && (ivl.start.point_class() == PointClassType::Vertex
-            || ivl.end.point_class() == PointClassType::Vertex)
+        && (on_boundary(&ivl.start) || on_boundary(&ivl.end))
 }
 
 /// An edge use of edge `e` on face `fa`, where the edge meets the face once: its uses
