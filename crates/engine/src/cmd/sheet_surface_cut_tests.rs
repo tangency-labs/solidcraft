@@ -43,6 +43,13 @@ fn pockets(s: &mut Session) -> Vec<Value> {
     flat(s)["pockets"].as_array().cloned().unwrap_or_default()
 }
 
+/// What the kernel's full check finds wrong with the sheet's body, `None` when it passes.
+fn check_failure(s: &Session) -> Option<String> {
+    let state = s.model.state();
+    let body = &state.bodies.iter().find(|b| b.name == "Plate")?.body;
+    solidcraft_kernel::failing_check(body).map_or_else(|e| Some(e.to_string()), |f| f.map(|f| format!("{f:?}")))
+}
+
 fn exact_volume(s: &Session) -> f64 {
     s.model
         .state()
@@ -1300,6 +1307,12 @@ fn footprints_touching_a_bend_line_or_the_flats_edge_cut_as_solids_do() {
         let v = exact_volume(&s);
         assert!(want < whole - 1.0, "case {case}: the solid cuts something: {want} of {whole}");
         assert!((v - want).abs() < 1e-6 * want, "case {case}: {v} vs {want}");
+        // Case 0 covers the volume only, not tangency: the round hole tangent to the tangent line
+        // leaves a body that is not a valid solid, which the kernel's check refuses (Coincident
+        // Vertices, Intersecting Face Loops), cut as a solid as well (tangency-labs/solidcraft#21449).
+        if case != 0 {
+            assert_eq!(check_failure(&s), None, "case {case}: the refolded sheet passes the kernel's check");
+        }
     }
 }
 
