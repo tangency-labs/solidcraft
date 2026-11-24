@@ -955,17 +955,19 @@ fn a_driven_design_reopens_in_a_fresh_process_with_the_bodies_it_had() {
     let extruded = run(&mut s, "solid.extrude", json!({"distance": 3, "operation": "new", "name": "Boss"}));
     let boss_name = extruded["created_bodies"][0].as_str().unwrap_or_else(|| panic!("{extruded}")).to_string();
 
-    // Another hole: a new read. Then the same holes higher: records, twice. (The first drive after
-    // the linked design was opened reads too: the geometry a design opens with can list its faces
-    // in another order than a rebuild does.)
+    // Another hole: a new read. Then the same holes higher: records. (The first drive after the
+    // linked design was opened reads too, and so may the first after the new hole: a read can list
+    // a body's faces in another order than the rebuild did, and only a read that matches the live
+    // body face for face stands for the next ones.)
     let mut records = Vec::new();
-    for (name, value) in [("lift", "12 mm"), ("count", "3"), ("lift", "13 mm"), ("lift", "14 mm")] {
+    for (name, value) in [("lift", "12 mm"), ("count", "3"), ("lift", "13 mm"), ("lift", "13.5 mm"), ("lift", "14 mm")] {
         let before = super::RECORD_READS.with(std::cell::Cell::get);
         let changed = run(&mut s, "parameters.change", json!({"name": name, "expression": value}));
         assert_eq!(changed["linked"], json!(["Plate"]), "{changed}");
         records.push(super::RECORD_READS.with(std::cell::Cell::get) - before);
     }
-    assert_eq!(records[1..], [0, 1, 1], "a new hole reads STEP text; the drives that keep the topology hand over records");
+    assert_eq!(records[1], 0, "a new hole reads STEP text: {records:?}");
+    assert!(records[2..].iter().sum::<usize>() >= 2 && records[4] == 1, "the drives that keep the topology hand over records: {records:?}");
     let live = fingerprint(&s);
     let boss = live["bodies"].as_array().unwrap().iter().find(|b| b["name"] == boss_name.as_str()).expect("the boss").clone();
     assert!((boss["bbox"][2].as_f64().unwrap() - 14.0).abs() < 1e-6, "the boss follows the plate's top face: {boss}");
