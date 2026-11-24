@@ -249,10 +249,10 @@ pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     };
     let text = match &refused {
         Some(reason) => solidcraft_ui_text::format(key, &[("reason", reason)]),
-        None => solidcraft_ui_text::tr(key),
+        None => solidcraft_ui_text::tr(key).to_owned(),
     };
     let close = super::inset(ui, |ui| {
-        ui_kit::text(ui, text, ui_kit::Text::Note(key));
+        ui_kit::text(ui, &text, ui_kit::Text::Note(key));
         ui.separator();
         ui_kit::button(ui, solidcraft_ui_text::tr("ui.cancel"), Button::Normal).clicked()
     });
