@@ -98,3 +98,36 @@ fn a_quarter_of_a_great_circle_is_the_geodesic_distance() {
         solidcore_ops::error::Error::Argument
     );
 }
+/// The chart a design stores rebuilds from its axes and keeps its chart coordinates: the same
+/// point, the same region, and a degenerate axis pair is refused.
+#[test]
+fn a_saved_chart_rebuilds_from_its_axes() {
+    let body = make_cylinder([0.0, 0.0, 0.0], 5.0, 10.0).expect("a cylinder");
+    let (record, _) = body.to_record().expect("a record");
+    let face = cylinder_face(&record);
+    let on = FaceSurface::of(&record, face).expect("a face surface");
+    let [[u0, u1], [v0, v1]] = on.domain();
+    let uv = [(u0 + u1) * 0.5, (v0 + v1) * 0.5];
+    let pick = on.point(uv).expect("a pick");
+    let chart = SurfaceChart::build(&record, face, pick, 1e-6).expect("a chart");
+    let saved = *chart.chart();
+    let rebuilt = SurfaceChart::from_axes(
+        &record,
+        face,
+        saved.origin,
+        saved.u_axis,
+        saved.v_axis,
+        1e-6,
+    )
+    .expect("a rebuilt chart");
+    for (x, y) in [(0.0, 0.0), (1.5, -0.5), (-2.0, 0.25)] {
+        assert!(near(
+            chart.point(x, y).expect("a point"),
+            rebuilt.point(x, y).expect("a point")
+        ));
+        assert_eq!(chart.region(x, y), rebuilt.region(x, y));
+    }
+    assert!(
+        SurfaceChart::from_axes(&record, face, [0.0, 0.0], [1.0, 0.0], [2.0, 0.0], 1e-6).is_err()
+    );
+}

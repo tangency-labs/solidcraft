@@ -70,6 +70,74 @@ impl<'a> SurfaceChart<'a> {
         if !(tolerance.is_finite() && tolerance > 0.0) {
             return Err(Error::Argument);
         }
+        let (surface, on) = Self::surface_of(record, face)?;
+        let p = RecordVec3::new(pick[0], pick[1], pick[2]);
+        let query = Query::new(record);
+        let face_uv = query.face_uv(face, p, tolerance).ok_or(Error::Argument)?;
+        let normal = on.normal(face_uv)?;
+        let reference = EvalVec3::new(normal[0], normal[1], normal[2]);
+        let chart = KernelChart::build(&surface, face_uv, reference)
+            .ok_or(Error::Unsupported("a singular face at the pick"))?;
+        Ok(SurfaceChart {
+            record,
+            face,
+            surface,
+            chart,
+            on,
+            tolerance,
+        })
+    }
+
+    /// A chart on a face from its saved origin and axes in the surface's (u, v), the one a design
+    /// stored: the same chart its sketch was drawn in, so chart coordinates keep their meaning
+    /// across a reload.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Argument` for a face past the record's, a number that is not finite, a degenerate
+    /// axis pair or a tolerance that is not positive; `Error::Unsupported` for a face whose
+    /// surface the evaluator does not take, or a singular origin.
+    pub fn from_axes(
+        record: &'a Brep,
+        face: usize,
+        origin: [f64; 2],
+        u_axis: [f64; 2],
+        v_axis: [f64; 2],
+        tolerance: f64,
+    ) -> Result<SurfaceChart<'a>> {
+        if !(tolerance.is_finite() && tolerance > 0.0) {
+            return Err(Error::Argument);
+        }
+        let numbers = [
+            origin[0], origin[1], u_axis[0], u_axis[1], v_axis[0], v_axis[1],
+        ];
+        if !numbers.iter().all(|v| v.is_finite()) {
+            return Err(Error::Argument);
+        }
+        let det = u_axis[0] * v_axis[1] - u_axis[1] * v_axis[0];
+        if !(det.is_finite() && det.abs() > 1e-15) {
+            return Err(Error::Argument);
+        }
+        let (surface, on) = Self::surface_of(record, face)?;
+        if surface.metric(origin[0], origin[1]).is_none() {
+            return Err(Error::Unsupported("a singular chart origin"));
+        }
+        Ok(SurfaceChart {
+            record,
+            face,
+            surface,
+            chart: KernelChart {
+                origin,
+                u_axis,
+                v_axis,
+            },
+            on,
+            tolerance,
+        })
+    }
+
+    /// The evaluator and the face wrapper of one face of the record.
+    fn surface_of(record: &Brep, face: usize) -> Result<(SurfaceEval, FaceSurface)> {
         let on = FaceSurface::of(record, face)?;
         let record_face = record.faces.get(face).ok_or(Error::Argument)?;
         let record_surface: &RecordSurface = if on.trims() {
@@ -90,21 +158,7 @@ impl<'a> SurfaceChart<'a> {
             .map_err(|_| Error::Unsupported("a surface the evaluator does not take"))?;
         let surface = SurfaceEval::new(&converted)
             .map_err(|_| Error::Unsupported("a surface the evaluator does not take"))?;
-        let p = RecordVec3::new(pick[0], pick[1], pick[2]);
-        let query = Query::new(record);
-        let face_uv = query.face_uv(face, p, tolerance).ok_or(Error::Argument)?;
-        let normal = on.normal(face_uv)?;
-        let reference = EvalVec3::new(normal[0], normal[1], normal[2]);
-        let chart = KernelChart::build(&surface, face_uv, reference)
-            .ok_or(Error::Unsupported("a singular face at the pick"))?;
-        Ok(SurfaceChart {
-            record,
-            face,
-            surface,
-            chart,
-            on,
-            tolerance,
-        })
+        Ok((surface, on))
     }
 
     /// The kernel chart: origin and axes in the surface's (u, v).
