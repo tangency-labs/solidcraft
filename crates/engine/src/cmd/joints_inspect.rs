@@ -13,7 +13,7 @@ use super::filter::{Row, RowFilter, contents_groups, omit};
 use super::{active_joint_values, component_of, joint_id, link_info, named_value_list, occurrence_name, reply};
 use crate::schema::joints::{
     EdgeReference, FaceReference, InspectJointResult, InspectedJoint, JointLink, JointSide, LinkRole, MadeBy, Omitted, Reference, ReferenceRole,
-    Referent, SweptFrom, WorldFrame,
+    Referent, SketchPointReference, SweptFrom, WorldFrame,
 };
 use crate::{Result, Session};
 
@@ -169,6 +169,13 @@ fn references(doc: &Document, snap: &Snap) -> Vec<Reference> {
             if let Some(XRef::Face { face: n, .. }) = x {
                 face(ReferenceRole::X, &Some(n.clone()));
             }
+        }
+        Snap::Point { on: Some(on), .. } => {
+            let sketch = match doc.feature(on.sketch) {
+                Some(f) => MadeBy::Feature { id: f.id, name: f.name.clone(), kind: f.kind.type_name().to_string() },
+                None => MadeBy::Gone { id: on.sketch, error: format!("sketch {} is gone", on.sketch) },
+            };
+            out.push(Reference { role: ReferenceRole::Point, to: Referent::SketchPoint(SketchPointReference { point: on.point.clone(), sketch }) });
         }
         Snap::Frame { .. } | Snap::Point { .. } => {}
     }

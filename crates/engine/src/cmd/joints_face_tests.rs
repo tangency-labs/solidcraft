@@ -655,7 +655,7 @@ fn on_the_hole(s: &Session, w: f64) {
 
 fn origin(s: &Session, joint: &str, a: bool) -> Snap {
     let j = s.doc.assembly.joints.iter().find(|j| j.name == joint).map(|j| if a { &j.a } else { &j.b });
-    j.map(|o| o.snap.clone()).unwrap_or(Snap::Point { point: Vec3::ZERO, z: None, x: None })
+    j.map(|o| o.snap.clone()).unwrap_or(Snap::point(Vec3::ZERO, None, None))
 }
 
 #[test]
@@ -823,11 +823,8 @@ fn a_face_centre_by_name_follows_its_face() {
 #[test]
 fn an_origin_without_an_end_or_turn_opens_as_before() {
     // A design saved before origins named their end and turn: the snap reads without them.
-    let snap: Snap = serde_json::from_value(json!({"type": "circle_center", "pick": [1, 2, 3], "face": "F1:side"})).unwrap_or(Snap::Point {
-        point: Vec3::ZERO,
-        z: None,
-        x: None,
-    });
+    let snap: Snap =
+        serde_json::from_value(json!({"type": "circle_center", "pick": [1, 2, 3], "face": "F1:side"})).unwrap_or(Snap::point(Vec3::ZERO, None, None));
     assert_eq!(snap, Snap::CircleCenter { pick: Vec3::new(1.0, 2.0, 3.0), face: Some("F1:side".into()), end: None, x: None });
     let back: Value = serde_json::to_value(&snap).unwrap_or_default();
     assert_eq!(back, json!({"type": "circle_center", "pick": [1.0, 2.0, 3.0], "face": "F1:side"}));

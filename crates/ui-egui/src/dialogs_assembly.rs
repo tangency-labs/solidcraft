@@ -520,6 +520,8 @@ pub(crate) fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
             };
             return Some(Sel::Axis { name });
         }
+        // On a sketch point: that point, as it was picked (#21815).
+        Snap::Point { on: Some(on), .. } => return Some(Sel::SketchPoint { id: format!("{}:{}", on.sketch, on.point) }),
         Snap::Point { .. } | Snap::Frame { .. } => return Some(Sel::Occurrence { path: origin_placement(s, o)? }),
     };
     // The pick is in its part's coordinates; the placed bodies are in the world.
@@ -1137,16 +1139,18 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
         }
         Sel::SketchPoint { id } => {
             // A sketch point's world position, its plane's normal as the joint's z, kept by its
-            // sketch and id so it follows the sketch as the part changes. No body names it, so the
-            // engine finds the occurrence from the world point (its own body).
+            // sketch and id so it follows the sketch as the part changes (#21815). No body names
+            // it, so the engine finds the occurrence from the sketch's component.
             let (sketch, point) = match id.split_once(':') {
                 Some((sketch, point)) => (sketch.parse().ok()?, point),
                 None => (s.active_sketch?, id.as_str()),
             };
             let ss = st.sketch(sketch)?;
-            let at = ss.plane.to_world(ss.sketch.point(ss.sketch.resolve_point(point)?)?);
+            let i = ss.sketch.resolve_point(point)?;
+            let at = ss.plane.to_world(ss.sketch.point(i)?);
             let z = ss.plane.normal();
-            ("", SnapPt { at, z, kind: SnapKind::Vertex, param: json!({"point": pt(at), "z": pt(z)}) })
+            let point = &ss.sketch.points.get(i)?.id;
+            ("", SnapPt { at, z, kind: SnapKind::Vertex, param: json!({"sketch": sketch, "point": point, "z": pt(z)}) })
         }
         _ => return None,
     };

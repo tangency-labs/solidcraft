@@ -992,8 +992,18 @@ fn joint_origin_arg(origin: &solidcraft_doc::joints::JointOrigin, doc: &Document
             }
             arg.insert("frame".into(), Value::Object(frame));
         }
-        Snap::Point { point, z, x } => {
-            arg.insert("point".into(), json!(world(*point)));
+        Snap::Point { point, z, x, on } => {
+            // On a sketch point: by the sketch's name and the point's id, so the replayed joint
+            // follows the point too (#21815).
+            match on.as_ref().and_then(|on| doc.feature(on.sketch).map(|f| (f.name.clone(), on.point.clone()))) {
+                Some((sketch, id)) => {
+                    arg.insert("sketch".into(), json!(sketch));
+                    arg.insert("point".into(), json!(id));
+                }
+                None => {
+                    arg.insert("point".into(), json!(world(*point)));
+                }
+            }
             if let Some(z) = z {
                 arg.insert("z".into(), json!(dir(*z)));
             }

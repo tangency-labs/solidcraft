@@ -6,7 +6,7 @@ use solidcraft_doc::motion::{ContactSet, ExplodedView, MotionStudy, StudyKey};
 use solidcraft_doc::{IDENTITY, Occurrence};
 
 fn at(occurrence: u64) -> JointOrigin {
-    JointOrigin::new(occurrence, Snap::Point { point: Vec3::ZERO, z: None, x: None })
+    JointOrigin::new(occurrence, Snap::point(Vec3::ZERO, None, None))
 }
 
 #[test]

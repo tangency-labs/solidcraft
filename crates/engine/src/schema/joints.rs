@@ -439,7 +439,9 @@ impl JointOriginArg {
         // A plane or axis side, as the handler's plane_origin and axis_origin read them: a name
         // or key, or a plane/axis definition object. Read further by the handler.
         let datum = ["plane", "axis"].iter().any(|k| matches!(v.get(*k), Some(Value::String(_)) | Some(Value::Object(_))));
-        if named || picked || datum {
+        // A sketch point by its sketch (id or name) and the point's id (#21815).
+        let sketch_point = matches!(v.get("sketch"), Some(Value::Number(_) | Value::String(_))) && v.get("point").is_some_and(Value::is_string);
+        if named || picked || datum || sketch_point {
             return Ok(JointOriginArg(v.clone()));
         }
         match v.get("frame") {
@@ -464,7 +466,7 @@ impl JsonSchema for JointOriginArg {
         let point = json!({"anyOf": forms});
         let at = |description: &str| json!({"description": description, "anyOf": forms});
         json_schema!({
-            "description": "A joint origin: the name of a joint origin made with joint.origin, or an object that says where it is, in world coordinates. Give one of face, circle, edge, point, plane or axis (a point [x, y, z]; for face and circle also a face's name; a plane or axis by name or definition object), or a frame {origin, z, x?}.",
+            "description": "A joint origin: the name of a joint origin made with joint.origin, or an object that says where it is, in world coordinates. Give one of face, circle, edge, point, plane or axis (a point [x, y, z]; for face and circle also a face's name; a plane or axis by name or definition object), a frame {origin, z, x?}, or a sketch and the id of a point in it (the origin then follows that point).",
             "anyOf": [
                 {"type": "string", "description": "The name of a joint origin."},
                 {
@@ -476,7 +478,8 @@ impl JsonSchema for JointOriginArg {
                         "face": {"description": "The centre of a planar face: a point on it [x, y, z], or its name.", "anyOf": [point, {"type": "string"}]},
                         "circle": {"description": "The centre of a round end: a point [x, y, z] on its wall, rim or centre, or the round face's name.", "anyOf": [point, {"type": "string"}]},
                         "edge": at("A point [x, y, z] on an edge of a planar face."),
-                        "point": at("A point [x, y, z]."),
+                        "point": {"description": "A point [x, y, z], or with `sketch` the id of a point in that sketch (`c1.center`).", "anyOf": [point, {"type": "string", "minLength": 1}]},
+                        "sketch": {"description": "The sketch, by id or name, whose point `point` names. The origin follows that point when the design changes; z is the sketch plane's normal unless z is given.", "type": ["integer", "string"]},
                         "plane": {"description": "The plane to sit on: \"XY\", \"XZ\" or \"YZ\" (the design's own), \"o:<ids>/origin/<item>\" (a placement's origin plane), a construction plane's name, or a plane definition object.", "anyOf": [{"type": "string", "minLength": 1}, {"type": "object"}]},
                         "axis": {"description": "The axis to sit on: \"X\", \"Y\" or \"Z\", \"o:<ids>/origin/<item>\" (a placement's origin axis), a construction axis's name, or an axis definition object.", "anyOf": [{"type": "string", "minLength": 1}, {"type": "object"}]},
                         "frame": {"description": "An explicit frame {origin: [x, y, z], z: [x, y, z], x?: [x, y, z]}.", "type": "object"},
@@ -1171,14 +1174,15 @@ impl JsonSchema for SnapShape {
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         let point = json!({"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3});
         json_schema!({
-            "description": "Where a joint origin sits on its component's geometry, as saved: `type` is frame, face_center, circle_center, edge or point, with the keys that type holds: origin, pick, point, z or x as [x, y, z] (x may also be a face reference), face, end, edge and corner as persistent names, and for an edge origin its axis.",
+            "description": "Where a joint origin sits on its component's geometry, as saved: `type` is frame, face_center, circle_center, edge or point, with the keys that type holds: origin, pick, point, z or x as [x, y, z] (x may also be a face reference), face, end, edge and corner as persistent names, for an edge origin its axis, and for a point origin on a sketch point `on` {sketch, point}.",
             "type": "object",
             "properties": {
                 "type": {"enum": ["frame", "face_center", "circle_center", "edge", "point"]},
                 "origin": point, "pick": point, "point": point, "z": point,
                 "x": {"description": "A direction [x, y, z], or {face, pick?}: a face the turn is taken from."},
                 "face": {"type": "string"}, "end": {"type": "string"}, "edge": {"type": "string"}, "corner": {"type": "string"},
-                "axis": {"type": "object"}
+                "axis": {"type": "object"},
+                "on": {"type": "object", "properties": {"sketch": {"type": "integer"}, "point": {"type": "string"}}, "required": ["sketch", "point"]}
             },
             "required": ["type"]
         })
@@ -1594,6 +1598,17 @@ pub enum Referent {
     Face(FaceReference),
     /// An edge.
     Edge(EdgeReference),
+    /// A sketch point.
+    SketchPoint(SketchPointReference),
+}
+
+/// A sketch point a point origin follows.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SketchPointReference {
+    /// The point's id in its sketch, as saved.
+    pub point: String,
+    /// The sketch.
+    pub sketch: MadeBy,
 }
 
 /// What part of the snap a reference is.
@@ -1610,6 +1625,8 @@ pub enum ReferenceRole {
     Edge,
     /// The edge that gives an edge origin's corner.
     Corner,
+    /// The sketch point a point origin is on.
+    Point,
 }
 
 /// A persistent name a joint origin holds, with what it refers to.

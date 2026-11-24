@@ -131,13 +131,16 @@ pub enum Snap {
         axis: Option<EdgeAxis>,
     },
     /// A point, z along `z` (default +Z) and x toward `x` laid square to z (default: one chosen
-    /// from z alone).
+    /// from z alone). With `on`, the point is that sketch point as it is now, so the origin
+    /// follows the sketch when the design changes (#21815); `point` keeps where it was made.
     Point {
         point: Vec3,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         z: Option<Vec3>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         x: Option<Vec3>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on: Option<SketchPointRef>,
     },
     /// A plane (the root's origin planes, a construction plane feature, or a placement's origin
     /// datum): z along its normal, x along the plane's x axis (or `x` if given). Origin at `pick`
@@ -159,6 +162,30 @@ pub enum Snap {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         x: Option<XRef>,
     },
+}
+
+/// The sketch point a point joint origin sits on (a hole's centre): the sketch feature, and the
+/// point's id in it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SketchPointRef {
+    pub sketch: u64,
+    pub point: String,
+}
+
+impl Snap {
+    /// A point origin at `point`, kept as it is (no sketch point under it).
+    pub fn point(point: Vec3, z: Option<Vec3>, x: Option<Vec3>) -> Self {
+        Snap::Point { point, z, x, on: None }
+    }
+
+    /// The sketch feature a point origin follows, to rewrite when the sketch is copied.
+    pub fn sketch_feature_mut(&mut self) -> Option<&mut u64> {
+        match self {
+            Snap::Point { on: Some(on), .. } => Some(&mut on.sketch),
+            _ => None,
+        }
+    }
 }
 
 /// The z of an edge origin that isn't its face's normal (component coordinates); its x follows
@@ -474,7 +501,7 @@ impl Snap {
         match self {
             Snap::Frame { origin, z, x } => origin.is_finite() && z.is_finite() && x.is_none_or(|x| x.is_finite()),
             Snap::FaceCenter { pick, x, .. } | Snap::CircleCenter { pick, x, .. } => pick.is_finite() && x_ok(x),
-            Snap::Point { point, z, x } => point.is_finite() && z.is_none_or(|z| z.is_finite()) && x.is_none_or(|x| x.is_finite()),
+            Snap::Point { point, z, x, .. } => point.is_finite() && z.is_none_or(|z| z.is_finite()) && x.is_none_or(|x| x.is_finite()),
             Snap::Edge { pick, axis, .. } => pick.is_finite() && axis.is_none_or(|a| a.dir().is_finite()),
             Snap::Plane { pick, x, .. } | Snap::Axis { pick, x, .. } => pick.is_none_or(|p| p.is_finite()) && x_ok(x),
         }
@@ -1577,7 +1604,15 @@ fn resolve_snap(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<Mat>
     };
     match &o.snap {
         Snap::Frame { origin, z, x } => frame(*origin, *z, *x).ok_or_else(bad),
-        Snap::Point { point, z, x } => frame(*point, z.unwrap_or(Vec3::Z), *x).ok_or_else(bad),
+        Snap::Point { point, z, x, on } => {
+            // On a sketch point: where that point is now, in the sketch's component (#21815).
+            let at = match on {
+                Some(on) => crate::construct::sketch_point_position(st, on.sketch, &on.point)
+                    .ok_or_else(|| DocError::Unknown(format!("joint origin: sketch point `{}` in sketch {}", on.point, on.sketch)))?,
+                None => *point,
+            };
+            frame(at, z.unwrap_or(Vec3::Z), *x).ok_or_else(bad)
+        }
         Snap::FaceCenter { pick, face, x } => {
             // A named planar face gives its own centre and normal; another face (or none) the
             // planar face nearest the point.
@@ -3577,7 +3612,7 @@ mod tests {
     /// Revolute joints 1…n (joint 1 at `start`, the others at 0) linked 1 → 2 → … → n with
     /// ratio 2, the links stored from the end of the chain; joint 3 limited to ±50.
     pub(super) fn chain(n: u64, start: f64) -> Assembly {
-        let origin = JointOrigin::new(0, Snap::Point { point: Vec3::ZERO, z: None, x: None });
+        let origin = JointOrigin::new(0, Snap::point(Vec3::ZERO, None, None));
         let joints = (1..=n)
             .map(|id| Joint {
                 id,

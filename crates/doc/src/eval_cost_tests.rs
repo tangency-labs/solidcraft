@@ -867,7 +867,7 @@ fn a_cams_profile_is_meshed_once() {
     let st = model.state();
     let occurrence = doc.occurrences.iter().find(|o| o.component == comp).unwrap().id;
     // The joint that turns the cam, and the profile picked on the cam's body.
-    let origin = |occ: u64| JointOrigin::new(occ, Snap::Point { point: Vec3::ZERO, z: None, x: None });
+    let origin = |occ: u64| JointOrigin::new(occ, Snap::point(Vec3::ZERO, None, None));
     let joint = Joint {
         id: 1,
         name: "Cam".into(),

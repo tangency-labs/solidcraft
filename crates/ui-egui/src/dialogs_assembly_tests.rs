@@ -1304,7 +1304,7 @@ fn joint_origin_can_be_the_origin_or_a_sketch_point() {
     app.start("joint.create");
     let mut d = app.dialog.clone().unwrap();
     d.pick(&app.session, origin);
-    d.pick(&app.session, sketch_point);
+    d.pick(&app.session, sketch_point.clone());
     if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
         f.kind = 1;
         f.fit_limits(&app.session.doc);
@@ -1313,6 +1313,14 @@ fn joint_origin_can_be_the_origin_or_a_sketch_point() {
         app.run(&id, p).unwrap();
     }
     assert_eq!(app.session.doc.assembly.joints.len(), 1, "a joint was made from the origin and the sketch point");
+    // The sketch point side keeps the sketch and the point, so it follows the sketch (#21815),
+    // and an edit of the joint shows that point again.
+    let joint = app.session.doc.assembly.joints[0].clone();
+    let Snap::Point { on: Some(on), .. } = &joint.b.snap else { panic!("a sketch point origin: {:?}", joint.b) };
+    assert_eq!((on.sketch, on.point.as_str()), (sketch, "q"));
+    let edited = edit_joint(&app, joint.id).unwrap();
+    let Kind::Assembly(Asm::Joint(form)) = &edited.kind else { panic!("joint form") };
+    assert_eq!(form.sides[1], Some(sketch_point), "the edit shows the sketch point");
 }
 #[test]
 fn revolute_joint_uses_the_picked_straight_edges() {

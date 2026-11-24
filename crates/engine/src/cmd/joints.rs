@@ -906,6 +906,11 @@ fn read_origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<JointO
 
 /// [`origin_param`] for a snap on one occurrence's own component, read at its first placement.
 fn origin_on_part(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
+    // A sketch point by its sketch and id (`{sketch, point: "c1.center"}`), kept so it follows
+    // the sketch (#21815).
+    if let Some(sketch) = v.get("sketch").filter(|k| !k.is_null()) {
+        return origin_on_sketch_point(s, v, sketch, cmd);
+    }
     // A face given by its name, as `model.faces` lists it.
     if let Some((what, name)) = ["face", "circle"].iter().find_map(|k| v.get(*k).and_then(Value::as_str).map(|n| (*k, n))) {
         return origin_by_name(s, v, what, name, cmd);
@@ -948,7 +953,7 @@ fn origin_on_part(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
                 // point there as before.
                 Some(z) => {
                     let at = corner.unwrap_or(local(world));
-                    let point = Snap::Point { point: at, z: Some(z), x: None };
+                    let point = Snap::point(at, Some(z), None);
                     let followed = snap.ok().map(|snap| joints::edge_axis(&s.doc, &st, component, snap, z));
                     let o = followed.map(|snap| JointOrigin::new(occurrence, snap)).filter(|o| same_frame(s, o, at, z));
                     return Ok(o.unwrap_or(JointOrigin::new(occurrence, point)));
@@ -967,7 +972,7 @@ fn origin_on_part(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
             {
                 return Err(bad(cmd, "a point origin's `x` must be a direction off its z axis"));
             }
-            Snap::Point { point: local(world), z, x }
+            Snap::point(local(world), z, x)
         }
         _ => {
             let f = v.get("frame").cloned().unwrap_or_default();
@@ -1000,7 +1005,7 @@ fn origin_on_part(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
             return Ok(kept);
         }
         // The turn the point gave, kept.
-        let point = Snap::Point { point: at, z: Some(z), x: None };
+        let point = Snap::point(at, Some(z), None);
         let px = joints::resolve_origin(&s.doc, &st, &JointOrigin::new(occurrence, point.clone())).ok().map(|m| Vec3::new(m[0][0], m[0][1], m[0][2]));
         let turn = |snap: Snap| match (snap, px) {
             (Snap::CircleCenter { pick, face, end, x: None }, Some(x)) => Snap::CircleCenter { pick, face, end, x: Some(XRef::Dir(x)) },
@@ -1057,6 +1062,47 @@ pub(crate) const MAX_FACE_NAME: usize = 16_384;
 /// The component an occurrence places (0 for the root, or an unknown occurrence).
 pub(crate) fn component_of(s: &Session, occurrence: u64) -> u64 {
     if occurrence == 0 { 0 } else { s.doc.occurrences.iter().find(|o| o.id == occurrence).map_or(0, |o| o.component) }
+}
+
+/// A joint origin on a sketch point, `{sketch, point, z?, x?, occurrence?}`: the point as the
+/// sketch places it now, z along the sketch plane's normal unless `z` is given. The origin keeps
+/// the sketch and the point's id, so it moves with the point when the design changes (#21815).
+fn origin_on_sketch_point(s: &Session, v: &Value, sketch: &Value, cmd: &str) -> Result<JointOrigin> {
+    let sketch = super::features::sketch_id(s, Some(sketch), cmd, "sketch")?;
+    let name = v.get("point").and_then(Value::as_str).ok_or_else(|| bad(cmd, "a sketch point origin needs `point`, the point's id (`c1.center`)"))?;
+    let st = s.model.state();
+    let ss = st.sketch(sketch).ok_or_else(|| bad(cmd, format!("sketch {sketch} has not been solved")))?;
+    let i = ss.sketch.resolve_point(name).ok_or_else(|| bad(cmd, format!("no point `{name}` in that sketch")))?;
+    let (id, at) = match (ss.sketch.points.get(i), ss.sketch.point(i)) {
+        (Some(p), Some(at)) => (p.id.clone(), ss.plane.to_world(at)),
+        _ => return Err(bad(cmd, format!("no point `{name}` in that sketch"))),
+    };
+    let normal = ss.plane.normal();
+    let component = s.doc.feature(sketch).map_or(0, |f| f.component);
+    let occurrence = match v.get("occurrence") {
+        Some(o) => occurrence_id(s, Some(o), cmd)?,
+        None if component == 0 => 0,
+        None => s.doc.occurrence_of(component).map(|o| o.id).ok_or_else(|| bad(cmd, "the sketch's component is not placed"))?,
+    };
+    if component_of(s, occurrence) != component {
+        return Err(bad(cmd, "the sketch is not in that occurrence's component"));
+    }
+    // Directions given in the world → the component's own coordinates.
+    let t = if occurrence == 0 { solidcraft_doc::IDENTITY } else { joints::occurrence_world(&s.doc, occurrence) };
+    let inv = solidcraft_doc::mat_inverse(&t).ok_or_else(|| bad(cmd, "occurrence transform"))?;
+    let local_dir = |d: Vec3| solidcraft_doc::apply_vector(&inv, d);
+    let z = given_z(v, &local_dir, cmd)?.unwrap_or(normal);
+    let x = match v.get("x") {
+        None | Some(Value::Null) => None,
+        Some(x) => Some(vec3(x).map(local_dir).ok_or_else(|| bad(cmd, "a point origin's `x` is a direction [x, y, z]"))?),
+    };
+    if let Some(x) = x
+        && (!x.is_finite() || x.cross(z).len() <= 1e-9 * x.len().max(1.0))
+    {
+        return Err(bad(cmd, "a point origin's `x` must be a direction off its z axis"));
+    }
+    let on = Some(joints::SketchPointRef { sketch, point: id });
+    Ok(JointOrigin::new(occurrence, Snap::Point { point: at, z: Some(z), x, on }))
 }
 
 /// A joint origin on a face given by its name (`face: "<name>"`: its centre; `circle: "<name>"`:
@@ -1180,7 +1226,7 @@ fn circle_centre(s: &Session, occurrence: u64, pick: Vec3) -> Option<Snap> {
         .find_map(|b| solidcraft_doc::kernel::cylinder_end_at(&b.body, pick))?;
     let along = (pick - c.axis_point).dot(c.axis);
     let (at, dir) = if (along - c.start).abs() <= (c.end - along).abs() { (c.start, -1.0) } else { (c.end, 1.0) };
-    Some(Snap::Point { point: c.axis_point + c.axis * at, z: Some(c.axis * dir), x: None })
+    Some(Snap::point(c.axis_point + c.axis * at, Some(c.axis * dir), None))
 }
 
 pub(crate) fn joint_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {

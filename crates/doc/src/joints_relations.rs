@@ -79,7 +79,7 @@ mod tests {
     use solidcore_record::Vec3;
 
     fn joint(kind: JointKind) -> Joint {
-        let at = |occurrence| JointOrigin::new(occurrence, Snap::Point { point: Vec3::ZERO, z: None, x: None });
+        let at = |occurrence| JointOrigin::new(occurrence, Snap::point(Vec3::ZERO, None, None));
         Joint {
             id: 1,
             name: "R".into(),

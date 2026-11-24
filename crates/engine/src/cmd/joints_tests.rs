@@ -3785,7 +3785,7 @@ fn placement_analysis_preserves_held_loop_constraints_and_diagnostics() {
     }
     // A degenerate origin remains an error even in a placement-only trial.
     let mut broken = (*s.doc).clone();
-    broken.assembly.joints[0].b.snap = solidcraft_doc::joints::Snap::Point { point: Vec3::ZERO, z: Some(Vec3::ZERO), x: None };
+    broken.assembly.joints[0].b.snap = solidcraft_doc::joints::Snap::point(Vec3::ZERO, Some(Vec3::ZERO), None);
     let full = joints::solve(&broken, &s.model.state());
     let placement = joints::solve_holding_with_analysis(&broken, &s.model.state(), &BTreeMap::new(), Analysis::Placement);
     assert!(!full.errors.is_empty());
@@ -4861,4 +4861,55 @@ fn joint_dynamics_refuses_hostile_values() {
         assert!(s.execute("joint.dynamics", &p).is_err(), "{p}");
     }
     assert!(s.doc.assembly.joints[0].dynamics.iter().all(Option::is_none));
+}
+
+/// A joint origin on a sketch point keeps the sketch and the point's id, so it follows the point
+/// when a parameter moves it, also after saving and reopening (#21815).
+#[test]
+fn a_joint_origin_on_a_sketch_point_follows_the_sketch() {
+    use solidcraft_doc::joints::Snap;
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "100", "unit": "mm"}));
+    run(&mut s, "component.create", json!({"name": "Post", "parent": "root", "activate": true, "grounded": true}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": "h", "corner": [0, 0, 0], "operation": "new", "name": "PostBox"}));
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": 20, "name": "HoleSketch"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 90], "radius": 3}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["c1"], "type": "diameter", "value": "6"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "horizontal", "value": "10"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "vertical", "value": "h - 10"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Beam", "parent": "root", "activate": true, "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 50, "width": 20, "height": 20, "corner": [20, 0, 80], "operation": "new", "name": "BeamBox"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let r = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "name": "PostToBeam", "a": {"sketch": "HoleSketch", "point": "c1.center"}, "b": {"occurrence": "Beam", "face": [20, 10, 90]}}),
+    );
+    assert_eq!(r["errors"], json!([]), "{r}");
+    let sketch = s.doc.find_feature("HoleSketch").map(|f| f.id).unwrap_or_default();
+    let Snap::Point { on: Some(on), z, .. } = &s.doc.assembly.joints[0].a.snap else {
+        panic!("a sketch point origin: {:?}", s.doc.assembly.joints[0].a)
+    };
+    assert_eq!(on.sketch, sketch);
+    assert!(z.is_some_and(|z| z.dist(Vec3::X) < 1e-9), "z is the sketch plane's normal: {z:?}");
+    let end = Vec3::new(20.0, 10.0, 90.0);
+    assert!(near(place(&s, "Beam", end), Vec3::new(20.0, 10.0, 90.0)), "{:?}", place(&s, "Beam", end));
+    // The circle moves down with h, and the beam with it.
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "60"}));
+    assert!(near(place(&s, "Beam", end), Vec3::new(20.0, 10.0, 50.0)), "{:?}", place(&s, "Beam", end));
+    let inspected = run(&mut s, "joint.inspect", json!({"joint": "PostToBeam"}));
+    let references = &inspected["joints"][0]["a"]["references"];
+    assert_eq!(references[0]["role"], json!("point"), "{inspected}");
+    assert_eq!(references[0]["sketch"]["name"], json!("HoleSketch"), "{inspected}");
+    // Saved and reopened, the origin still follows the point.
+    let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    let mut reopened = Session::new(doc);
+    assert_eq!(reopened.doc.assembly.joints[0].a, s.doc.assembly.joints[0].a);
+    run(&mut reopened, "parameters.change", json!({"name": "h", "expression": "80"}));
+    assert!(near(place(&reopened, "Beam", end), Vec3::new(20.0, 10.0, 70.0)), "{:?}", place(&reopened, "Beam", end));
+    // A point that is not in the sketch is refused.
+    let bad = json!({"type": "rigid", "a": {"sketch": "HoleSketch", "point": "nope"}, "b": {"occurrence": "Beam", "face": [20, 10, 70]}});
+    assert!(reopened.execute("joint.create", &bad).is_err());
 }
