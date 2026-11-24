@@ -65,6 +65,7 @@ pub use design::read_design_thumbnail_file;
 pub use design::read_design_with_model;
 pub use design::read_drawing;
 pub use design::read_drawing_file;
+pub use design::take_last_cache_refusal;
 pub use design::write_design_container;
 pub use design::write_design_container_reusing;
 pub use design::write_design_container_with_cache;
