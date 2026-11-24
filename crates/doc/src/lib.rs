@@ -253,6 +253,7 @@ pub use eval::world_state_moved_reusing;
 pub use eval::world_state_reusing;
 pub use expr::Expr;
 pub use feature_geometry::restored_thread_pick;
+pub use name_lookup::pick_reach;
 pub use names::BodyName;
 pub use names::FeatureId;
 pub use names::FeatureName;

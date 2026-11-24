@@ -115,7 +115,8 @@ fn world_pick(
             return Err(bad(cmd, format!("give `{pk}` or `{fk}`, not both")));
         }
         let fp = vec3(fv).ok_or_else(|| bad(cmd, format!("`{fk}` must be [x, y, z]")))?;
-        let n = super::super::face::face_normal_world(s, fp).ok_or_else(|| bad(cmd, format!("`{fk}` must be on a planar face")))?;
+        let n = super::super::features_more::planar_face_normal(&*s.world_state()?, fp)
+            .ok_or_else(|| bad(cmd, format!("`{fk}` must be on a planar face")))?;
         return Ok((fp, Some(n)));
     }
     if p.get(pk).and_then(Value::as_str).is_some_and(|o| o.eq_ignore_ascii_case("origin")) {
@@ -130,8 +131,8 @@ fn world_pick(
             Some(Value::String(k)) if matches!(k.as_str(), "vertex" | "edge_mid" | "face_center" | "circle_center") => k.as_str(),
             _ => return Err(bad(cmd, format!("`{pk}.snap` must be vertex, edge_mid, face_center or circle_center"))),
         };
-        return super::super::features_more::snap_point(&*s.world_state()?, kind, at)
-            .map(|q| (q, None))
+        return super::super::features_more::snap_pick(&*s.world_state()?, kind, at)
+            .map_err(|why| bad(cmd, why))?
             .ok_or_else(|| bad(cmd, format!("no {kind} to snap to near `{pk}`")));
     }
     p.get(pk)
@@ -177,6 +178,10 @@ pub(super) fn align(s: &mut Session, p: &Value) -> Result<Value> {
     let (vals, _) = s.doc.param_values();
     let (from, from_normal) = world_pick(s, p, "from", "from_face", &from_plane, &vals, cmd)?;
     let (to, to_normal) = world_pick(s, p, "to", "to_face", &to_plane, &vals, cmd)?;
+    if flip && from_normal.is_none() && to_normal.is_none() {
+        return Err(bad(cmd, super::super::features_more::FLIP_NEEDS));
+    }
+    let (from_normal, to_normal) = super::super::features_more::mate_ways(from_normal, to_normal, None, None);
 
     let (mut axis, mut ang) = (Vec3::Z, 0.0);
     if let (Some(a), Some(b)) = (from_normal.and_then(Vec3::normalized), to_normal.and_then(Vec3::normalized)) {

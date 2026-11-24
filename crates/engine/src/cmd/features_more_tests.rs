@@ -4673,7 +4673,7 @@ fn align_bare_points_refuse_a_flip() {
     let mut flipped = p.clone();
     flipped["flip"] = json!(true);
     let e = s.execute("solid.align", &flipped);
-    assert!(e.as_ref().is_err_and(|e| e.to_string().contains("flip needs a face")), "{e:?}");
+    assert!(e.as_ref().is_err_and(|e| e.to_string().contains(super::FLIP_NEEDS)), "{e:?}");
     run(&mut s, "solid.align", p);
     assert_bounds(&mut s, "Block", [4.5, -11., -10.], [64.5, 29., 0.]);
 }

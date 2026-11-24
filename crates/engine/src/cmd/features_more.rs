@@ -84,7 +84,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("align")
         .contract(&ALIGN_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("bodies: [names]; from: [x,y,z] | \"origin\" | {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]} | from_face: [x,y,z] | from_plane: XY|XZ|YZ|construction or offset plane name or id|{origin, normal}; to: (the same) | to_face: [x,y,z] | to_plane: (a plane as from_plane; the point or face goes onto it along its normal, and the plane may move later: the bodies follow); from_frame / to_frame: a frame found again whenever the design changes, so the bodies follow it, in place of that side's point, face or plane: a joint origin as joint.create takes one ({face|circle|edge|point: [x,y,z]}, a face's name, a named joint origin) or {sketch, point|curve} (a sketch point, or a circle's, arc's or ellipse's centre, z along the sketch's normal), on the bodies' own component; faces, planes and frames also turn to meet; flip?: bool; axes?: [x, y, z] (point-to-point only: which world axes the offset moves along; default all three, at least one true); angle?: expr (a turn about the target's direction after the move)"),
+        .params("bodies: [names]; from: [x,y,z] | \"origin\" | {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]} | from_face: [x,y,z] | from_plane: XY|XZ|YZ|plane name or id|{origin, normal} | from_frame: a joint origin as joint.create takes one, or {sketch, point|curve}; to, to_face, to_plane, to_frame: the same (a plane or frame is found again when the design changes: the bodies follow it); a face or face_center faces along its normal, a circle_center along its axis out of its body, a plane or frame along its normal or z, a point, vertex or edge_mid no way; flip?: bool (two facing sides meet, or point the same way; one: flip turns the bodies half round about an axis square to its way; none: flip refused); axes?: [x, y, z] (two points only: the world axes the move keeps); angle?: expr (a turn about the target's direction)"),
     CommandSpec::new("solid.remove", "Remove", crate::checked!("solid.remove", remove)).begins_edit()
         .at("SOLID", "MODIFY")
         .icon("delete")
@@ -634,16 +634,10 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok((Vec3::ZERO, None));
         }
         if let Some(fp) = p.get(fk).and_then(vec3) {
-            let n = super::face::face_normal_world(s, fp).ok_or_else(|| bad(cmd, format!("`{fk}` must be on a planar face")))?;
+            let n = planar_face_normal(&*s.world_state()?, fp).ok_or_else(|| bad(cmd, format!("`{fk}` must be on a planar face")))?;
             return Ok((fp, Some(n)));
         }
-        match side_point(p.get(pk), pk, fk).map_err(|why| bad(cmd, why))? {
-            SidePoint::Origin => Ok((Vec3::ZERO, None)),
-            SidePoint::Snap { at, kind } => {
-                snap_point(&*s.world_state()?, &kind, at).map(|q| (q, None)).ok_or_else(|| bad(cmd, format!("no {kind} to snap to near `{pk}`")))
-            }
-            SidePoint::Point(v) => Ok((v, None)),
-        }
+        side_pick(&*s.world_state()?, p.get(pk), pk, fk).map_err(|why| bad(cmd, why))
     };
     let pick = |s: &Session, pk: &str, fk: &str, held: bool| -> Result<(Vec3, Option<Vec3>)> {
         let (at, n) = world_pick(s, pk, fk, held)?;
@@ -662,20 +656,22 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "`angle` turns about the target's direction: give `to_frame`, `to_face` or `to_plane`"));
         }
     }
-    // Faces turn only to meet another face, a plane or a frame; a plane's normal and a frame's z
-    // are read when evaluated. A target face's normal is also the axis of an `angle`.
-    let (from_normal, to_normal) = match (from_normal, to_normal) {
-        (Some(a), Some(b)) => (Some(a), Some(b)),
-        (a, b) if held(&from_plane, &from_frame) || held(&to_plane, &to_frame) || angle.is_some() => (a, b),
-        _ => (None, None),
-    };
     let axes = axes_param(p, cmd)?;
-    if axes.is_some() && (held(&from_plane, &from_frame) || held(&to_plane, &to_frame) || from_normal.is_some() || to_normal.is_some()) {
+    let facing = from_normal.is_some() || to_normal.is_some() || held(&from_plane, &from_frame) || held(&to_plane, &to_frame);
+    if axes.is_some() && facing {
         return Err(bad(
             cmd,
-            "`axes` applies to point-to-point alignment: leave out `from_face`, `to_face`, `from_plane`, `to_plane`, `from_frame` and `to_frame`",
+            "`axes` applies to point-to-point alignment: leave out faces, face and circle centres, `from_plane`, `to_plane`, `from_frame` and `to_frame`",
         ));
     }
+    let flip = bool_(p, "flip").unwrap_or(false);
+    if flip && !facing {
+        return Err(bad(cmd, FLIP_NEEDS));
+    }
+    let st = s.model.state();
+    let (vals, _) = s.doc.param_values();
+    let way = |plane: &Option<solidcraft_doc::PlaneRef>, frame: &Option<AlignFrame>| held_way(&s.doc, &vals, &st, s.active_component, plane, frame);
+    let (from_normal, to_normal) = mate_ways(from_normal, to_normal, way(&from_plane, &from_frame)?, way(&to_plane, &to_frame)?);
     // The directions are stored in the same frame as `from`/`to` (the first moved body's frame).
     let axes = axes.map(|mask| {
         mask.into_iter()
@@ -684,7 +680,6 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|(_, world)| Dir(solidcraft_doc::apply_vector(&inverse, world).normalized().unwrap_or(world)))
             .collect::<Vec<_>>()
     });
-    let flip = bool_(p, "flip").unwrap_or(false);
     add_feature(
         s,
         p,
@@ -785,38 +780,151 @@ fn remove(s: &mut Session, p: &Value) -> Result<Value> {
 #[path = "features_more_tests.rs"]
 mod tests;
 
-/// A snap point near `at` on the model: the nearest vertex, edge midpoint, planar face's centre
-/// or circular edge's centre (the end of a cylindrical face) of the placed model `st`.
-pub(crate) fn snap_point(st: &solidcraft_doc::ModelState, kind: &str, at: Vec3) -> Option<Vec3> {
+/// What `flip` says when neither side of an Align faces a way.
+pub(crate) const FLIP_NEEDS: &str =
+    "flip needs a face, a face centre, a circle centre, a plane or a frame on one side: two points face no way to turn over";
+
+/// An Align side given as a point (`from` or `to`) in the model `st`: where it lands and the way
+/// the pick faces, decided by what it picks (#21331). A circle's centre faces along the circle's
+/// axis out of its body, a face's centre as the face does; a vertex, an edge's middle, the
+/// origin and a bare point face no way. `fk` is the face key beside it, for the message.
+pub(crate) fn side_pick(st: &solidcraft_doc::ModelState, v: Option<&Value>, pk: &str, fk: &str) -> std::result::Result<(Vec3, Option<Vec3>), String> {
+    match side_point(v, pk, fk)? {
+        SidePoint::Origin => Ok((Vec3::ZERO, None)),
+        SidePoint::Point(v) => Ok((v, None)),
+        SidePoint::Snap { at, kind } => snap_pick(st, &kind, at)?.ok_or_else(|| format!("no {kind} to snap to near `{pk}`")),
+    }
+}
+
+/// A snap near `at` on the placed model `st` and the way it faces ([`side_pick`]): the nearest
+/// vertex or edge midpoint (no way), the centre of the planar face `at` lies on ([`face_pick`]:
+/// its outward normal; `Err` for a face that is not planar), or the centre of the circle `at`
+/// picks ([`circle_pick`]). `None` when there is none to snap to.
+pub(crate) fn snap_pick(st: &solidcraft_doc::ModelState, kind: &str, at: Vec3) -> std::result::Result<Option<(Vec3, Option<Vec3>)>, String> {
     let near = |pts: Vec<Vec3>| pts.into_iter().min_by(|a, b| a.dist(at).total_cmp(&b.dist(at)));
     match kind {
-        "vertex" => near(
+        "vertex" => Ok(near(
             st.bodies
                 .iter()
                 .flat_map(|b| b.mesh().edges.iter().flat_map(|e| [e.first().copied(), e.last().copied()]).flatten().collect::<Vec<_>>())
                 .collect(),
-        ),
+        )
+        .map(|q| (q, None))),
         "edge_mid" => {
             let d = |e: &solidcraft_doc::kernel::EdgeInfo| e.points.windows(2).map(|w| at.dist_to_segment(w[0], w[1])).fold(f64::MAX, f64::min);
-            st.bodies
+            Ok(st
+                .bodies
                 .iter()
-                .filter_map(|b| b.body.edges((b.body.size() * 2e-3).max(1e-3)).ok())
+                .filter_map(|b| b.body.edges(solidcraft_doc::pick_reach(b)).ok())
                 .flatten()
                 .min_by(|a, b| d(a).total_cmp(&d(b)))
-                .map(|e| e.mid)
+                .map(|e| (e.mid, None)))
         }
-        "face_center" => st.bodies.iter().find_map(|b| {
-            let i = solidcraft_doc::appearance::face_index_at(b, at)?;
-            b.body.faces((b.body.size() * 2e-3).max(1e-3)).ok()?.into_iter().find(|f| f.index == i).map(|f| f.centroid)
-        }),
-        "circle_center" => st.bodies.iter().find_map(|b| {
-            let c = solidcraft_doc::kernel::cylinder_face_at(&b.body, at)?;
-            let along = (at - c.axis_point).dot(c.axis);
-            let end = if (along - c.start).abs() <= (c.end - along).abs() { c.start } else { c.end };
-            Some(c.axis_point + c.axis * end)
-        }),
-        _ => None,
+        "face_center" => {
+            let Some((b, i, normal)) = face_pick(st, at) else { return Ok(None) };
+            let normal = normal.ok_or("face_center snaps to the centre of a planar face: the face there is curved")?;
+            let faces = b.body.faces(solidcraft_doc::pick_reach(b)).map_err(|e| e.to_string())?;
+            Ok(faces.into_iter().find(|f| f.index == i).map(|f| (f.centroid, Some(normal))))
+        }
+        "circle_center" => Ok(circle_pick(st, at)?.map(|(centre, axis)| (centre, Some(axis)))),
+        _ => Ok(None),
     }
+}
+
+/// The face a pick at `at` lies on in the placed model `st`, found on the exact geometry, never
+/// the display mesh: of the faces within the reach references take picks at (`pick_reach`), the
+/// nearest. Its body, its index and, when it is planar, its outward normal.
+fn face_pick(st: &solidcraft_doc::ModelState, at: Vec3) -> Option<(&solidcraft_doc::ModelBody, usize, Option<Vec3>)> {
+    use solidcraft_doc::kernel::{FaceSurface, face_surface};
+    let mut best: Option<(f64, &solidcraft_doc::ModelBody, usize)> = None;
+    for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
+        let reach = solidcraft_doc::pick_reach(b);
+        for f in 0..b.body.face_count() {
+            if let Some(d) = b.body.point_lies_on_face(f, at, reach).ok().flatten().map(|q| q.dist(at))
+                && best.is_none_or(|(x, ..)| d < x)
+            {
+                best = Some((d, b, f));
+            }
+        }
+    }
+    let (_, b, f) = best?;
+    let normal = match face_surface(&b.body, f) {
+        Some(FaceSurface::Plane { normal, .. }) => Some(normal.vec()),
+        _ => None,
+    };
+    Some((b, f, normal))
+}
+
+/// The outward normal of the planar face a pick at `at` lies on ([`face_pick`]); `None` off the
+/// faces or on one that is not planar.
+pub(crate) fn planar_face_normal(st: &solidcraft_doc::ModelState, at: Vec3) -> Option<Vec3> {
+    face_pick(st, at)?.2
+}
+
+/// The circle a pick at `at` stands for in the placed model `st`, by what the pick lies on: a
+/// circular edge (on it or at its centre), else the cylindrical face it lies on (that face's
+/// nearer rim). Its centre, and its axis pointing out of its body. `None` when the pick lies on
+/// neither; `Err` for a circle that faces out of its body neither way (between two walls).
+fn circle_pick(st: &solidcraft_doc::ModelState, at: Vec3) -> std::result::Result<Option<(Vec3, Vec3)>, String> {
+    use solidcraft_doc::kernel::{FaceSurface, circle_edge_at, face_edge_indices, face_surface, rim_circle};
+    let failed = |e: solidcraft_doc::kernel::KernelError| e.to_string();
+    let bodies: Vec<&solidcraft_doc::ModelBody> = st.bodies.iter().filter(|b| !b.body.is_mesh()).collect();
+    // A pick lies on what is within the reach references take picks at (`pick_reach`).
+    let mut on_edge: Option<(f64, &solidcraft_doc::ModelBody, usize)> = None;
+    for &b in &bodies {
+        if let Some((e, d)) = circle_edge_at(&b.body, at, solidcraft_doc::pick_reach(b), &[]).map_err(failed)?
+            && on_edge.is_none_or(|(x, ..)| d < x)
+        {
+            on_edge = Some((d, b, e));
+        }
+    }
+    let mut found = on_edge.map(|(_, b, e)| (b, e));
+    if found.is_none() {
+        for &b in &bodies {
+            let walls = solidcraft_doc::appearance::faces_within(b, at, solidcraft_doc::pick_reach(b));
+            let walls: Vec<usize> = walls.into_iter().filter(|&f| matches!(face_surface(&b.body, f), Some(FaceSurface::Cylinder { .. }))).collect();
+            let rims: Vec<usize> = walls.iter().flat_map(|&f| face_edge_indices(&b.body, f)).collect();
+            if rims.is_empty() {
+                continue;
+            }
+            // Of the face's own rims, however far along the wall.
+            if let Some((e, _)) = circle_edge_at(&b.body, at, f64::MAX, &rims).map_err(failed)? {
+                found = Some((b, e));
+                break;
+            }
+        }
+    }
+    let Some((b, e)) = found else { return Ok(None) };
+    let rim = rim_circle(&b.body, e).map_err(failed)?.ok_or("that circle lies between two round faces and faces out of its body neither way")?;
+    Ok(Some((rim.center, rim.axis.vec())))
+}
+
+/// The way an Align side held as a plane or a frame faces now, in the frame of `component` (the
+/// feature works it out again when it is evaluated). `None` for a side held by neither.
+pub(crate) fn held_way(
+    doc: &solidcraft_doc::Document,
+    vals: &std::collections::BTreeMap<String, solidcraft_doc::expr::Value>,
+    st: &solidcraft_doc::ModelState,
+    component: u64,
+    plane: &Option<solidcraft_doc::PlaneRef>,
+    frame: &Option<AlignFrame>,
+) -> Result<Option<Vec3>> {
+    if let Some(fr) = frame {
+        return Ok(Some(fr.resolve(doc, st)?.1));
+    }
+    let Some(pl) = plane else { return Ok(None) };
+    Ok(Some(doc.resolve_plane_in(vals, pl, 0, component, Some(st))?.normal()))
+}
+
+/// The stored directions of an Align's two sides, from each pick's own (`from`, `to`) and a held
+/// side's now (`from_held`, `to_held`). A side that faces no way takes the opposite of the other
+/// side's way, so the bodies keep their turn and `flip` turns them over about it; a held side is
+/// worked out when evaluated, so it stores none of its own.
+pub(crate) fn mate_ways(from: Option<Vec3>, to: Option<Vec3>, from_held: Option<Vec3>, to_held: Option<Vec3>) -> (Option<Vec3>, Option<Vec3>) {
+    let (from_way, to_way) = (from.or(from_held), to.or(to_held));
+    let from = if from_way.is_none() { to_way.map(|b| b * -1.0) } else { from };
+    let to = if to_way.is_none() { from_way.map(|a| a * -1.0) } else { to };
+    (from, to)
 }
 
 fn boundary_fill(s: &mut Session, p: &Value) -> Result<Value> {
