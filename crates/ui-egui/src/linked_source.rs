@@ -974,10 +974,14 @@ mod tests {
         app.run("file.save", json!({"path": case})).unwrap();
         drop(app);
         save_part(&housing, [10.0, 20.0, 30.0], true);
-        // The folder as the engine reads it, symlinks in it resolved, without the `\\?\` that
-        // `canonicalize` adds on Windows.
-        let folder = solidcraft_engine::agent_setup::plain_path(&root.join("parts").canonicalize().unwrap());
+        let folder = engine_folder(&root.join("parts"));
         (root, case, folder)
+    }
+
+    /// `dir` as the engine names it in a question: symlinks in it resolved, without the `\\?\`
+    /// that `canonicalize` adds on Windows.
+    fn engine_folder(dir: &std::path::Path) -> String {
+        solidcraft_engine::agent_setup::plain_path(&dir.canonicalize().unwrap())
     }
 
     /// Open `case` as File › Open does, or (`program`) as a control-channel caller does.
@@ -1036,7 +1040,7 @@ mod tests {
         saved.run("component.insert_design", json!({"path": housing})).unwrap();
         saved.run("file.save", json!({"path": case, "linked_bodies": false})).unwrap();
         drop(saved);
-        let folder = root.join("parts").canonicalize().unwrap().to_string_lossy().into_owned();
+        let folder = engine_folder(&root.join("parts"));
 
         let mut app = SolveApp::new(Session::default(), Default::default());
         open(&mut app, &case, false);
@@ -1075,7 +1079,7 @@ mod tests {
         assert!(autosaver.save(&stopped).unwrap());
         drop(autosaver);
         let entry = solidcraft_engine::recovery::orphans(&recovery).pop().unwrap();
-        let folder = root.join("parts").canonicalize().unwrap().to_string_lossy().into_owned();
+        let folder = engine_folder(&root.join("parts"));
 
         let mut app = SolveApp::new(Session::default(), Default::default());
         let kind = crate::file_load::Kind::Recover { id: entry.id.clone(), dir: Some(recovery.to_string_lossy().into_owned()) };
@@ -1139,7 +1143,7 @@ mod tests {
     #[test]
     fn a_link_in_an_allowed_folder_loads_without_asking() {
         let (root, case, folder) = outside_link("allowed");
-        let mut allowed_folders = vec![folder.clone(), solidcraft_engine::agent_setup::plain_path(&root.canonicalize().unwrap())];
+        let mut allowed_folders = vec![folder.clone(), engine_folder(&root)];
         // The same folder as `canonicalize` spells it on Windows, `\\?\C:\…`, is the same folder.
         if cfg!(windows) {
             allowed_folders.push(format!(r"\\?\{folder}"));
@@ -1351,7 +1355,7 @@ mod tests {
         app.run("file.save", json!({"path": case})).unwrap();
         assert!(app.session.path.is_some(), "the design is saved");
         assert!((volume(&app) - 1000.0).abs() < 1e-6, "{}", volume(&app));
-        let folder = root.join("parts").canonicalize().unwrap().to_string_lossy().into_owned();
+        let folder = engine_folder(&root.join("parts"));
         // Away to another tab; the source is replaced there by a longer part.
         crate::documents::open_tab(&mut app, Session::default()).unwrap();
         export(30);
