@@ -4570,7 +4570,8 @@ pub fn knots_ignoring_status(r: Result<KnotsWithStatus>) -> Result<(Vec<f64>, Ve
     Ok(ignored(r)?.map_or_else(Default::default, |r| (r.knots, r.mults)))
 }
 
-/// Not upstream: the content digest ([`crate::geom::content`]): the kind. The owner and the
+/// Not upstream: the content digest ([`crate::geom::content`]): the kind and the tolerance
+/// of the edge the curve defines (a cache built for the curve reads it). The owner and the
 /// notification identity name which object the curve is, not what it is, and the cache memo
 /// is a cache. Kinds that hold surfaces, volumes or other curves with state of their own
 /// have no digest yet.
@@ -4581,7 +4582,9 @@ impl crate::geom::content::Content for Curve {
             owner: _,
             notify_identity: _,
             memo: _,
+            owner_zone_tol_3d,
         } = self;
+        d.opt_f64(owner_zone_tol_3d.map(|(_, tol)| tol));
         match kind {
             CurveKind::BSpline(c) => {
                 d.tag(1);

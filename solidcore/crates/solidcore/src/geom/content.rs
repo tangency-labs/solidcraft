@@ -73,6 +73,17 @@ impl Digest {
         self.u64(t);
     }
 
+    /// Writes an optional float.
+    pub(crate) fn opt_f64(&mut self, x: Option<f64>) {
+        match x {
+            Some(x) => {
+                self.bool(true);
+                self.f64(x);
+            }
+            None => self.bool(false),
+        }
+    }
+
     /// Writes any value whose `Hash` writes all of it (a field-less enum, an integer).
     pub(crate) fn hashed(&mut self, v: &impl Hash) {
         for h in &mut self.0 {
