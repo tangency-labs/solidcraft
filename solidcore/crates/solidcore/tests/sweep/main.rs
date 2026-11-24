@@ -127,10 +127,6 @@ mod sweep_two_rails;
 mod sweep_upright;
 #[path = "../taper_profile_line_keeps_its_nurb.rs"]
 mod taper_profile_line_keeps_its_nurb;
-#[path = "../weld_spot.rs"]
-mod weld_spot;
-#[path = "../weld_spot_site.rs"]
-mod weld_spot_site;
 #[path = "../wr302_rail_returns_past_end_beyond_boss.rs"]
 mod wr302_rail_returns_past_end_beyond_boss;
 #[path = "../wr460_untrimmed_rails.rs"]

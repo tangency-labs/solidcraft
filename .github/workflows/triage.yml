@@ -1,5 +1,6 @@
 # Labels new issues and PRs from fixed rules, `/triage` for maintainers, asks short bug reports
-# for reproduction steps (`needs-info`, closed after 14 days unanswered), and a manual backfill
+# for reproduction steps (`needs-info`, closed after 14 days unanswered), asks app reports
+# without an image to attach a screenshot (`needs-screenshot`), and supports a manual backfill
 # (CONTRIBUTING.md, "Labels and triage"). The logic is in scripts/triage/ (tested in ci.yml).
 name: Triage
 
@@ -56,6 +57,7 @@ jobs:
           script: |
             const triage = require('./scripts/triage/triage.js');
             const info = require('./scripts/triage/needs-info.js');
+            const screenshot = require('./scripts/triage/needs-screenshot.js');
             const event = context.eventName;
             const action = context.payload.action;
             const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -82,5 +84,8 @@ jobs:
                 .write();
             } else {
               core.info(`Labelled: ${(await triage.handleOpened({ github, context })).join(', ') || 'nothing'}`);
-              if (event === 'issues') await info.handleOpened({ github, context });
+              if (event === 'issues') {
+                await info.handleOpened({ github, context });
+                await screenshot.handleOpened({ github, context });
+              }
             }

@@ -94,12 +94,26 @@ fn path_required<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::E
     design_path(d, "`path` is required")
 }
 
+/// A design the caller holds in memory, as its JSON text: a design open in the session that has
+/// no file yet (#16829). The handler's message for anything else.
+fn design_document<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::String(s) if !s.trim().is_empty() => Ok(Some(s)),
+        _ => Err(D::Error::custom(whole("`document` must be the design's JSON"))),
+    }
+}
+
 fn with_or_path<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     design_path(d, "`with` or `path` is required")
 }
 
 fn path_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({"type": "string", "pattern": not_blank_pattern(), "maxLength": 4095})
+}
+
+/// The design the caller holds in memory, as its JSON text.
+fn document_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": "string", "pattern": not_blank_pattern(), "minLength": 1})
 }
 
 /// Adds `key` to the schema's `required` list: for a key the type has optional so that the
@@ -126,8 +140,10 @@ fn component_and_path_required(schema: &mut Schema) {
     require(schema, "path");
 }
 
-fn path_only_required(schema: &mut Schema) {
-    require(schema, "path");
+/// The schema asks for `path` or `document` (`path_or_document_required`): the design to link is
+/// a file or one the caller holds in memory.
+fn path_or_document_required(schema: &mut Schema) {
+    schema.insert("anyOf".into(), json!([{"required": ["path"]}, {"required": ["document"]}]));
 }
 
 /// Select a source configuration row, or follow the saved source state with `null`.
@@ -177,13 +193,18 @@ impl JsonSchema for Translation {
 /// `component.update_links` can read it again. One undo step. With `reuse`, a design already
 /// linked gets another placement instead of another link.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields, transform = path_only_required)]
+#[schemars(deny_unknown_fields, transform = path_or_document_required)]
 pub struct InsertDesignKeys {
-    // Optional in the type and required in the schema (`path_only_required`).
+    // Optional in the type and required in the schema (`path_or_document_required`).
     /// The design (`.sc`) to link, by file path.
     #[serde(default, deserialize_with = "path_required", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "path_schema")]
     pub path: Option<String>,
+    /// The design itself, as its JSON: a design open in the session that has no file yet. Its
+    /// bodies come in as they are, and the link names no file.
+    #[serde(default, deserialize_with = "design_document", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "document_schema")]
+    pub document: Option<String>,
     /// Source configuration row, by name or stable id. Omitted or null follows the source's
     /// saved state. The link stores the resolved id, so renaming the row keeps the selection.
     #[serde(default, deserialize_with = "configuration")]
@@ -298,6 +319,7 @@ pub enum DesignInserted {
         /// The Import feature that holds the bodies, by id.
         feature: u64,
         /// The file as the link stores it (relative to this design's folder when it is saved).
+        /// Empty when the design came from the session and has no file yet.
         path: String,
         /// The bodies the link brought in.
         bodies: Vec<String>,
@@ -345,7 +367,7 @@ impl JsonSchema for ComponentList {
     }
 }
 
-/// Read the linked designs again and replace the bodies of the components whose file changed,
+/// Read the linked designs and STEP files again and replace the bodies of the components whose file changed,
 /// as one undo step. Without `component` or `components`, every linked component is read. A
 /// component that is not linked is refused.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -355,8 +377,8 @@ pub struct UpdateLinksKeys {
     #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ComponentRef")]
     pub component: Option<ComponentRef>,
-    /// Linked components, by id or name. Not with `component`. With a list, an update goes on
-    /// past a design it cannot read: that component keeps its bodies, is named in `failed` and
+    /// Linked components, by id or name. Not with `component`. With a list, or with neither key,
+    /// an update goes on past a design or STEP file it cannot read: that component keeps its bodies, is named in `failed` and
     /// gets a warning.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ComponentList")]

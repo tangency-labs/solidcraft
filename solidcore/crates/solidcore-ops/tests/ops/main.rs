@@ -153,8 +153,6 @@ mod tangent_rollover;
 mod trim;
 #[path = "../turn_over.rs"]
 mod turn_over;
-#[path = "../weld_spot_looks.rs"]
-mod weld_spot_looks;
 
 /// Every `tests/*.rs` file is a module above or a test target of its own in `Cargo.toml`, and so
 /// is every `tests/<dir>/main.rs`. With `autotests = false` cargo builds no file it is not told

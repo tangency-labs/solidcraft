@@ -36,7 +36,7 @@
 //! Foundation: [`math`], [`error`], [`kernel`], [`limits`], [`topology`], [`geom`]. Algorithm layers (filled
 //! in as units are ported, see `plan/modules.toml`): [`nurbs`], [`curve`],
 //! [`surface`], [`intersect`], [`boolean`], [`blend`], [`offset`], [`heal`], [`mass`],
-//! [`query`], [`sweep`], [`primitive`]. Not upstream: [`weld`] (weld display geometry).
+//! [`query`], [`sweep`], [`primitive`].
 #![forbid(unsafe_code)]
 
 pub mod error;
@@ -58,6 +58,7 @@ pub mod heal;
 pub mod hlr;
 pub mod intersect;
 pub mod mass;
+pub mod mesh_reduce;
 pub mod nurbs;
 pub mod offset;
 pub mod primitive;
@@ -66,10 +67,26 @@ pub mod profile;
 pub mod query;
 pub mod surface;
 pub mod sweep;
-pub mod weld;
 
-pub use error::{EntityRef, Result, SolidError};
+pub use error::EntityRef;
+pub use error::Result;
+pub use error::SolidError;
 pub use heal::face_props::Tri;
-pub use kernel::{Caches, CancelToken, Kernel, KernelOptions, Rng, Tolerances};
-pub use math::{Point2, Point3, Transform, Vec2, Vec3};
-pub use topology::{Brep, BrepId, EdgeId, FaceId, LoopId, ShellId, VertexId};
+pub use kernel::Caches;
+pub use kernel::CancelToken;
+pub use kernel::Kernel;
+pub use kernel::KernelOptions;
+pub use kernel::Rng;
+pub use kernel::Tolerances;
+pub use math::Point2;
+pub use math::Point3;
+pub use math::Transform;
+pub use math::Vec2;
+pub use math::Vec3;
+pub use topology::Brep;
+pub use topology::BrepId;
+pub use topology::EdgeId;
+pub use topology::FaceId;
+pub use topology::LoopId;
+pub use topology::ShellId;
+pub use topology::VertexId;

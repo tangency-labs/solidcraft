@@ -20,6 +20,8 @@ pub fn button_from_mouse_event(event: &web_sys::MouseEvent) -> Option<egui::Poin
         2 => Some(egui::PointerButton::Secondary),
         3 => Some(egui::PointerButton::Extra1),
         4 => Some(egui::PointerButton::Extra2),
+        // SolidCraft: further buttons by their number (`button` 5 is button 6).
+        n @ 5.. => u16::try_from(n + 1).ok().and_then(egui::PointerButton::from_number),
         _ => None,
     }
 }
