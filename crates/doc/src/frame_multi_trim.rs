@@ -37,15 +37,15 @@ fn squared(outline: &Loop2) -> Loop2 {
         Some(Seg2::Line { a, b }) => Some((*a, *b)),
         _ => None,
     };
-    // The loop's winding (shoelace over its segments' ends): an outside corner's arc turns the same way, an inside
-    // corner's (an angle's or a channel's root fillet) the other, and only an outside one is squared. Squaring an
-    // inside one would cut into the member's material.
-    let winding: f64 = segs.iter().map(|g| g.start().cross(g.end())).sum();
+    // Only an outside corner's arc is squared: squaring an inside corner's (an angle's or a channel's root fillet)
+    // would cut into the member's material.
+    let inside = solidcore_ops::section_corners::inside_corner_arcs(outline);
     // The corner replacing segment k, when it is an outside corner's arc between two lines that meet near it.
     let corner = |k: usize| {
-        let arc = segs.get(k.checked_rem(n)?)?;
-        let Seg2::Arc { radius, sweep, .. } = *arc else { return None };
-        if sweep * radius.signum() * winding < 0.0 {
+        let at = k.checked_rem(n)?;
+        let arc = segs.get(at)?;
+        let Seg2::Arc { radius, .. } = *arc else { return None };
+        if inside.get(at).copied().unwrap_or(false) {
             return None;
         }
         let at = meet(line(k + n - 1)?, line(k + 1)?)?;
@@ -76,16 +76,7 @@ fn meet((a, b): (Vec2, Vec2), (c, d): (Vec2, Vec2)) -> Option<Vec2> {
 /// Whether the section is open, like an angle, a channel or a beam: some corner of an outer outline turns inward
 /// (a line meeting the next at an inside corner, or an inside corner's fillet). A tube's or a bar's never does.
 pub fn is_open(regions: &[Region2]) -> bool {
-    regions.iter().any(|r| {
-        let segs = &r.outer.segs;
-        let winding: f64 = segs.iter().map(|g| g.start().cross(g.end())).sum();
-        let inward_arc = segs.iter().any(|g| matches!(*g, Seg2::Arc { radius, sweep, .. } if sweep * radius.signum() * winding < 0.0));
-        let inward_turn = segs.iter().zip(segs.iter().cycle().skip(1)).any(|(g, h)| match (*g, *h) {
-            (Seg2::Line { a, b }, Seg2::Line { a: c, b: d }) => (b - a).cross(d - c) * winding < -1e-9,
-            _ => false,
-        });
-        inward_arc || inward_turn
-    })
+    regions.iter().any(|r| solidcore_ops::section_corners::is_open(&r.outer))
 }
 
 /// The corners of the rectangle round each of the section's outer outlines (an arc's whole circle's box, a curve's

@@ -1413,7 +1413,7 @@ fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dy
     }
     let Some((_, a, b)) = segments.get(f.member) else { return 0.0 };
     let (end, toward) = if f.at_start { (*a, *a - *b) } else { (*b, *b - *a) };
-    let (Some(toward), length) = (toward.normalized(), a.dist(*b)) else { return 0.0 };
+    let length = a.dist(*b);
     let corners = frame_multi_trim::box_corners(regions);
     let reach = f
         .against
@@ -1422,7 +1422,8 @@ fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dy
             let (_, c, d) = segments.get(t)?;
             let at = solidcraft_geom::mesh_distance::closest_on_segments(end, end, *c, *d).1;
             let plane = placed(t, at);
-            corners.iter().map(|&q| (plane.to_world(q) - end).dot(toward)).reduce(f64::max)
+            let world: Vec<Vec3> = corners.iter().map(|&q| plane.to_world(q)).collect();
+            solidcore_ops::section_corners::reach_along(end, toward, &world)
         })
         .fold(0.0, f64::max);
     // Never more than the member's own length: a far side that far off is no joint this end makes.
