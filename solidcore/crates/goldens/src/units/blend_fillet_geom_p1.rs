@@ -1974,12 +1974,12 @@ enum Rec {
     Deferred(SolidError),
 }
 
-/// `Ok(value)` or `Err(status)` of a kernel result; an unported callee returns the
-/// deferral from the enclosing function.
 /// The status upstream's `sm_SurfaceDropPoint` returns when no tolerance drops the point
 /// (`SM_ERR`), which the Rust side answers with `None`.
 const SM_ERR_DROP_MISS: f64 = 1001.0;
 
+/// `Ok(value)` or `Err(status)` of a kernel result; an unported callee returns the
+/// deferral from the enclosing function.
 macro_rules! try_status {
     ($e:expr) => {
         match $e {

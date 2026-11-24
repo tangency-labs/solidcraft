@@ -4947,7 +4947,7 @@ mod tests {
         .unwrap();
         assert!(r.is_none());
         assert_eq!(dir, Vec3::new(0.0, 2.0, 0.0));
-        // a start on both and an end off the second: the end drop misses
+        // a start on both and an end off both: the end drop onto the first surface misses
         let r = two_pnts_intersection(
             k,
             Point3::new(1.0, 1.0, 0.0),
@@ -4956,6 +4956,42 @@ mod tests {
             None,
             &s1,
             &s1,
+            1e-6,
+        )
+        .unwrap();
+        assert!(r.is_none());
+        assert_eq!(dir, Vec3::new(0.0, 2.0, 0.0));
+        // the plane x = 1 over y in [0,2], z in [-1,1]: the start (1,1,0) is on both
+        // surfaces, the end (2,1,0) on the first only, so the end drop onto the second misses
+        let net = vec![
+            vec![
+                CPoint::new(1.0, 0.0, -1.0, NOW),
+                CPoint::new(1.0, 0.0, 1.0, NOW),
+            ],
+            vec![
+                CPoint::new(1.0, 2.0, -1.0, NOW),
+                CPoint::new(1.0, 2.0, 1.0, NOW),
+            ],
+        ];
+        let wall = Surface::from(BSplineSurface::from_nurb(
+            NurbSurface::new(
+                net,
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            false,
+        ));
+        let r = two_pnts_intersection(
+            k,
+            Point3::new(1.0, 1.0, 0.0),
+            Some(Point3::new(2.0, 1.0, 0.0)),
+            &mut dir,
+            None,
+            &s1,
+            &wall,
             1e-6,
         )
         .unwrap();
