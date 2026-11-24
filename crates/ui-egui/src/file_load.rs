@@ -117,6 +117,9 @@ pub struct Request {
     /// An export written to be printed: once written it opens in the system's PDF viewer
     /// ([`crate::drawing_workspace::print::written`]).
     pub print: bool,
+    /// An open (`doc.open` with `new_tab`) that gets a tab of its own, even where a blank design
+    /// would be replaced.
+    pub new_tab: bool,
 }
 
 impl Request {
@@ -140,6 +143,7 @@ impl Request {
             auto_verify: false,
             plugin_import: false,
             print: false,
+            new_tab: false,
         }
     }
     /// It adds what it reads to the active design.
@@ -159,10 +163,22 @@ impl Request {
         params.insert("path".into(), json!(self.path));
         Value::Object(params)
     }
+    /// [`Self::params`] for `doc.open`. A design saved without the bodies of its linked designs
+    /// reads only the linked files in its own folder or below it as it opens here: the others
+    /// wait for the question the app asks before it loads linked files from another folder
+    /// (`linked_source::update_changed`). A caller that names `linked_bodies` keeps its choice.
+    fn open_params(&self) -> Value {
+        let mut params = self.options.clone();
+        params.insert("path".into(), json!(self.path));
+        if solidcraft_engine::io::is_design_path(&self.path) {
+            params.entry("linked_bodies").or_insert_with(|| json!("folder"));
+        }
+        Value::Object(params)
+    }
     fn command(&self) -> (&'static str, Value) {
         match &self.kind {
             Kind::Open if self.plugin_import => ("file.import", self.params()),
-            Kind::Open => ("doc.open", self.params()),
+            Kind::Open => ("doc.open", self.open_params()),
             Kind::Insert if self.gerber => {
                 let mut params = self.options.clone();
                 params.insert("set".into(), json!(self.path));
@@ -172,7 +188,8 @@ impl Request {
             Kind::Insert if solidcraft_engine::io::is_point_cloud_path(&self.path) => ("pointcloud.insert", self.params()),
             Kind::Insert => (insert_command(&self.path), self.params()),
             Kind::InsertDesign => ("component.insert_design", self.params()),
-            Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir})),
+            // As an open: a link in another folder that the copy has no bodies of waits for Load.
+            Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir, "linked_bodies": "folder"})),
             Kind::ExportDxf => ("file.export_view_dxf", Value::Object(self.options.clone())),
             // Printing writes the whole drawing's PDF that asks for actual size.
             Kind::ExportSheet if self.print => ("drawing.print", Value::Object(self.options.clone())),
@@ -492,6 +509,10 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
     if crate::mesh_units::ask(app, path, insert) {
         return;
     }
+    // A STEP, IGES, FreeCAD, Rhino or glTF file: its import options first (`crate::import_options`).
+    if crate::import_options::ask(app, path, insert) {
+        return;
+    }
     let mut request = Request::new(path, if insert { Kind::Insert } else { Kind::Open });
     if !insert && app.preferences.verify_opened_designs && solidcraft_engine::io::is_design_path(path) {
         request.options.insert("verify".into(), json!(true));
@@ -533,8 +554,8 @@ fn default_reuse_import(app: &SolveApp, request: &mut Request) {
 }
 
 /// Import options the preferences add for `path` (with `history: solids` a FreeCAD file brings
-/// only its solids, as before its history was rebuilt; with `reader: cadmpeg` a STEP, FreeCAD or
-/// Rhino file is read by cadmpeg straight into records).
+/// only its solids, as before its history was rebuilt; with `reader: cadmpeg` a STEP, IGES,
+/// FreeCAD or Rhino file is read by cadmpeg straight into records).
 pub(crate) fn preferred_options(app: &SolveApp, path: &str) -> serde_json::Map<String, Value> {
     let mut out = serde_json::Map::new();
     let freecad = std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("fcstd"));
@@ -545,7 +566,8 @@ pub(crate) fn preferred_options(app: &SolveApp, path: &str) -> serde_json::Map<S
         .extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"));
-    if (step || solidcraft_engine::io::is_native_cad_path(path)) && app.preferences.cadmpeg_import {
+    let cadmpeg_reads = step || solidcraft_engine::io::is_iges_path(path) || solidcraft_engine::io::is_native_cad_path(path);
+    if cadmpeg_reads && app.preferences.cadmpeg_import {
         out.insert("reader".into(), json!("cadmpeg"));
     }
     out
@@ -762,6 +784,10 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         options.remove("path");
         options.retain(|_, v| !v.is_null());
     }
+    // `new_tab` is for where the design lands: the engine, which has no tabs, never sees it.
+    // A value that is no boolean stays in the options, for the engine's own check of them.
+    let new_tab =
+        id == "doc.open" && matches!(options.get("new_tab"), Some(serde_json::Value::Bool(_))) && options.remove("new_tab") == Some(json!(true));
     let request = Request {
         path: path.into(),
         kind,
@@ -781,6 +807,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         auto_verify: false,
         plugin_import: id == "file.import",
         print: false,
+        new_tab,
     };
     let _ = begin_request(app, request);
     None
@@ -840,19 +867,7 @@ fn start(app: &mut SolveApp) {
     if app.file_load.running.is_some() || app.file_picker_busy() {
         return;
     }
-    // A request for a tab that was closed has nowhere to land: answer it so it does not wait for
-    // a tab number that will never match again and hold the queue.
-    let mut at = 0;
-    while at < app.file_load.queued.len() {
-        let orphan = app.file_load.queued[at].tab.is_some_and(|tab| !app.docs.tab_open(tab));
-        if orphan {
-            if let Some(request) = app.file_load.queued.remove(at) {
-                orphaned_request(app, request);
-            }
-        } else {
-            at += 1;
-        }
-    }
+    answer_orphaned(app);
     // The first that can start: one for a design in a tab not shown waits for it.
     let shown = app.docs.active_tab();
     let Some(next) = app.file_load.queued.iter().position(|r| r.tab.is_none_or(|tab| tab == shown)) else { return };
@@ -940,7 +955,7 @@ fn start(app: &mut SolveApp) {
                 let began = std::time::Instant::now();
                 let picture = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| partial_picture(&partial.world, &stop))).ok().flatten();
                 if solidcraft_engine::geom::env::var_os("PROFILE_OPEN").is_some() {
-                    eprintln!(
+                    solidcraft_engine::note!(
                         "SolidCraft partial picture: features={} bodies={} drawn={} ms={:.1}",
                         partial.features,
                         partial.world.bodies.len(),
@@ -981,7 +996,7 @@ fn start(app: &mut SolveApp) {
                     if let Some(picture) = picture.filter(|_| !progress.is_cancelled()) {
                         let _ = preview_tx.send(picture);
                         if solidcraft_engine::geom::env::var_os("PROFILE_OPEN").is_some() {
-                            eprintln!("SolidCraft saved preview: ready_ms={:.3}", preview_began.elapsed().as_secs_f64() * 1000.0);
+                            solidcraft_engine::note!("SolidCraft saved preview: ready_ms={:.3}", preview_began.elapsed().as_secs_f64() * 1000.0);
                         }
                     }
                 }
@@ -1025,12 +1040,29 @@ fn start(app: &mut SolveApp) {
     }
 }
 
+/// Answer the queued requests whose design's tab was closed: each has nowhere to land, and it
+/// would wait for a tab number that never matches again and hold the queue.
+fn answer_orphaned(app: &mut SolveApp) {
+    let mut at = 0;
+    while at < app.file_load.queued.len() {
+        let orphan = app.file_load.queued[at].tab.is_some_and(|tab| !app.docs.tab_open(tab));
+        if orphan {
+            if let Some(request) = app.file_load.queued.remove(at) {
+                orphaned_request(app, request);
+            }
+        } else {
+            at += 1;
+        }
+    }
+}
+
 /// Start the next queued STEP file as a [`Staged`] import (see [`step_staged`]).
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn start_staged(app: &mut SolveApp) {
     if app.file_load.running.is_some() || app.file_picker_busy() {
         return;
     }
+    answer_orphaned(app);
     // The first that can start: one for a design in a tab not shown waits for it.
     let shown = app.docs.active_tab();
     let Some(next) = app.file_load.queued.iter().position(|r| r.tab.is_none_or(|tab| tab == shown)) else { return };
@@ -1447,7 +1479,7 @@ fn compute(
     phase.store(2, Ordering::Relaxed);
     let view_ms = view_began.elapsed().as_secs_f64() * 1000.0;
     if profile {
-        eprintln!(
+        solidcraft_engine::note!(
             "SolidCraft open phases: geometry_ms={geometry_ms:.3} placement_ms={placement_ms:.3} tessellation_ms={tessellation_ms:.3} display_warmup_ms={view_ms:.3} total_ms={:.3}",
             began.elapsed().as_secs_f64() * 1000.0
         );
@@ -1786,8 +1818,13 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     // No tab left for it: `adopt` said why, and nothing else of the open happens.
                     // Opened by a program, not the user: nothing is asked about its links.
                     app.docs.quiet_open = request.reply.is_some() || request.chat_turn.is_some();
-                    let adopted =
-                        crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| crate::documents::adopt(app, made.session));
+                    let adopted = crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| {
+                        if request.new_tab {
+                            crate::documents::adopt_in_new_tab(app, made.session)
+                        } else {
+                            crate::documents::adopt(app, made.session)
+                        }
+                    });
                     app.docs.quiet_open = false;
                     if !adopted {
                         app.open_meshing_next = false;
@@ -2328,28 +2365,71 @@ M30
         }
     }
 
-    /// A STEP file is read by SolidCraft's own reader, which keeps the STEP text; with "Import
-    /// with cadmpeg" on, by cadmpeg into records, with no STEP text kept. Both bring the same
-    /// washer.
+    /// A STEP or IGES file is read by SolidCraft's own reader, which keeps the STEP text (an IGES
+    /// file restated as STEP); with "Import with cadmpeg" on, by cadmpeg's STEP or IGES decoder
+    /// into records, with no STEP text kept. Both bring the same washer, and the same
+    /// 10 × 20 × 30 mm box (6000 mm³) written as an IGES manifold solid.
     #[test]
-    fn cadmpeg_import_preference_reads_step_with_cadmpeg_into_records() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/step-conformance/washer.step");
+    fn cadmpeg_import_preference_reads_step_and_iges_with_cadmpeg_into_records() {
+        use solidcore_record::Vec3;
         assert!(!crate::prefs::Prefs::default().cadmpeg_import, "off by default");
-        let mut volumes = Vec::new();
+        let dir = std::env::temp_dir().join(format!("solidcraft-cadmpeg-iges-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let block = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+        let body = solidcraft_engine::kernel::ExportBody { name: "Block".into(), body: &block, color: None };
+        let iges = dir.join("block.igs");
+        std::fs::write(&iges, solidcraft_engine::kernel::iges_export_bodies(&[body], &Default::default()).unwrap()).unwrap();
+        let washer = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/step-conformance/washer.step").to_string();
+        for (path, want) in [(washer, None), (iges.to_string_lossy().to_string(), Some(6000.0))] {
+            let file = &path;
+            let mut volumes = Vec::new();
+            for on in [false, true] {
+                let mut app = SolveApp::new(Session::default(), Default::default());
+                app.preferences.cadmpeg_import = on;
+                app.insert_path(&path);
+                let import = app.session.doc.features.iter().find_map(|f| match &f.kind {
+                    solidcraft_engine::doc::FeatureKind::Import { step, records, .. } => Some((step.is_empty(), records.is_some())),
+                    _ => None,
+                });
+                assert_eq!(import, Some((on, on)), "{file}: preference {on}");
+                let bodies = &app.session.model.state().bodies;
+                assert_eq!(bodies.len(), 1, "{file}: preference {on}");
+                volumes.push(solidcraft_engine::kernel::measure(&bodies[0].body).unwrap().volume);
+            }
+            assert!((volumes[0] - volumes[1]).abs() < 1e-6 * volumes[0], "{file}: {volumes:?}");
+            if let Some(want) = want {
+                assert!((volumes[0] - want).abs() < 1e-6 * want, "{file}: {volumes:?}");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// File › Export of a STEP or IGES file asks for cadmpeg's writer only while "Export STEP and
+    /// IGES with cadmpeg" is on (off by default); other formats never carry a writer. The file
+    /// written then names cadmpeg in its header, and SolidCraft's own writer's does not.
+    #[test]
+    fn cadmpeg_export_preference_chooses_the_step_and_iges_writer() {
+        assert!(!crate::prefs::Prefs::default().cadmpeg_export, "off by default");
+        let dir = std::env::temp_dir().join(format!("solidcraft-cadmpeg-export-pref-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
         for on in [false, true] {
             let mut app = SolveApp::new(Session::default(), Default::default());
-            app.preferences.cadmpeg_import = on;
-            app.insert_path(path);
-            let import = app.session.doc.features.iter().find_map(|f| match &f.kind {
-                solidcraft_engine::doc::FeatureKind::Import { step, records, .. } => Some((step.is_empty(), records.is_some())),
-                _ => None,
-            });
-            assert_eq!(import, Some((on, on)), "preference {on}");
-            let bodies = &app.session.model.state().bodies;
-            assert_eq!(bodies.len(), 1, "preference {on}");
-            volumes.push(solidcraft_engine::kernel::measure(&bodies[0].body).unwrap().volume);
+            app.preferences.cadmpeg_export = on;
+            app.run("solid.box", json!({"length": 10, "width": 20, "height": 30})).unwrap();
+            for name in ["part.step", "part.STP", "part.igs", "part.iges", "part.stl", "part.3mf", "part.usda", "part.3dm"] {
+                let path = dir.join(name).to_string_lossy().to_string();
+                let mut params = json!({"path": path});
+                crate::toolbar::with_export_writer(&app, &path, &mut params);
+                let step_or_iges = !matches!(name.rsplit_once('.').map(|(_, e)| e), Some("stl" | "3mf" | "usda" | "3dm"));
+                assert_eq!(params.get("writer").and_then(Value::as_str), (on && step_or_iges).then_some("cadmpeg"), "{name} {on}");
+                app.run("file.export", params).unwrap_or_else(|e| panic!("{name} {on}: {e}"));
+                if step_or_iges {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    assert_eq!(text.contains("cadmpeg"), on, "{name} {on}");
+                }
+            }
         }
-        assert!((volumes[0] - volumes[1]).abs() < 1e-6 * volumes[0], "{volumes:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -6,7 +6,7 @@ members = ["crates/*", "apps/*", "xtask"]
 exclude = ["solidcore", "vendor"]
 
 [workspace.package]
-version = "0.47.0"
+version = "0.48.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -31,6 +31,8 @@ solidcraft-doc = { path = "crates/doc" }
 # Versioned file formats: the format tag, the version registry and its upgrade, a newer file told
 solidcraft-format = { path = "crates/format" }
 solidcraft-io = { path = "crates/io" }
+# A saved design's picture and summary for file browsers, without the kernel (apps/solidcraft-quicklook)
+solidcraft-design-preview = { path = "crates/design-preview" }
 solidcraft-engine = { path = "crates/engine" }
 # Without its default features, so an app built with `--no-default-features` leaves out what
 # they bring (usage statistics); each app turns them on in its own defaults.
@@ -126,10 +128,11 @@ gethostname = "1"
 # FreeCAD and Rhino import (Apache-2.0, pure Rust; native and browser builds).
 # Pinned: its IR and codec APIs change between minor versions. Open formats only: no default
 # features, so cadmpeg's codecs for commercial formats (f3d, sldprt, inventor, catia, creo, nx)
-# and its ShapeManager/ACIS `sat` codec are not compiled in. `step` is the writer we restate through.
+# and its ShapeManager/ACIS `sat` codec are not compiled in. `step` is the writer we restate through;
+# `iges` writes IGES when "Export STEP and IGES with cadmpeg" is on (no IGES import route).
 cadmpeg-core = "=0.6.12"
 cadmpeg-ir = "=0.6.12"
-cadmpeg-registry = { version = "=0.6.12", default-features = false, features = ["fcstd", "rhino", "step", "usd"] }
+cadmpeg-registry = { version = "=0.6.12", default-features = false, features = ["fcstd", "iges", "rhino", "step", "usd"] }
 
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "variable-fonts"] }
@@ -177,6 +180,11 @@ too_many_arguments = "allow"
 type_complexity = "allow"
 # `!(x > tol)` is our idiom for "not a usable number" (NaN-safe).
 neg_cmp_op_on_partial_ord = "allow"
+# `eprintln!` and `eprint!` panic when stderr is a pipe whose reader has closed, which an agent
+# running `solidcraft mcp` (and the app that one starts) can leave behind (#10111). Write through
+# `solidcraft_geom::note!` (`solidcraft_engine::note!`), which ignores a failed write. Tests are
+# exempt (clippy.toml `allow-print-in-tests`); examples and build scripts allow it at the top.
+print_stderr = "deny"
 
 # Dev builds keep line tables only, so backtraces still name file:line. Full debug info made the
 # app binary 4.9 GB and every relink slow. For a debugger, override it:
