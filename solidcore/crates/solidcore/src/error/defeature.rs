@@ -12,8 +12,11 @@
 //! |----------------------------------------------|--------------------------|
 //! | [`DefeatureFailure::ExtensionRefused`]       | `SM_ERR` (WR-656)        |
 //! | [`DefeatureFailure::ExtensionWithinTolerance`] | `SM_ERR` (WR-656)      |
+//! | [`DefeatureFailure::InsufficientAnnularReach`] | no upstream counterpart |
 //! | [`DefeatureFailure::LoopNotPlanar`]          | `SM_ERR` (WR-656)        |
 //! | [`DefeatureFailure::NotEnclosed`]            | `SM_ERR` (WR-656)        |
+//! | [`DefeatureFailure::PatchEnclosesFace`]      | no upstream counterpart  |
+//! | [`DefeatureFailure::PatchIntersectsFace`]    | no upstream counterpart  |
 //! | [`DefeatureFailure::TangentNeighbours`]      | `SM_ERR` (WR-656)        |
 //!
 //! Deviations: not upstream. The failure's entity is the base loop edge of the hole the
@@ -45,6 +48,15 @@ pub enum DefeatureFailure {
         /// The identity radius at the loop's vertices: extend by more than this.
         identity_radius: f64,
     },
+    /// The two extensions fall short of a continuous annular patch. Distances are
+    /// lengths along the two meridians, in increasing station order on the first axis.
+    InsufficientAnnularReach {
+        /// The available extension at each rim.
+        available: [f64; 2],
+        /// A sufficient pair. On a shared support the two rims may divide the missing
+        /// length differently; on distinct supports each must reach the meeting circle.
+        sufficient: [f64; 2],
+    },
     /// A planar cap was asked for a loop whose curves no plane holds (the planar face's own
     /// refusal is the cause).
     LoopNotPlanar,
@@ -55,6 +67,16 @@ pub enum DefeatureFailure {
     NotEnclosed {
         /// How far the faces were extended, when the patch was built in this call.
         extended_by: Option<f64>,
+    },
+    /// The patch would bury another shell's face within the rebuilt material.
+    PatchEnclosesFace {
+        /// A retained face that would cease to separate material from void.
+        face: crate::topology::FaceId,
+    },
+    /// A face outside the feature and its supports obstructs the proposed patch.
+    PatchIntersectsFace {
+        /// The retained face the patch would intersect.
+        face: crate::topology::FaceId,
     },
     /// The faces along the loop, extended, meet only tangentially where the cap would need a
     /// bound: a piece of the patch on the loop is cut from its neighbour only along an edge
@@ -74,8 +96,11 @@ impl DefeatureFailure {
         match self {
             Self::ExtensionRefused { .. }
             | Self::ExtensionWithinTolerance { .. }
+            | Self::InsufficientAnnularReach { .. }
             | Self::LoopNotPlanar
             | Self::NotEnclosed { .. }
+            | Self::PatchEnclosesFace { .. }
+            | Self::PatchIntersectsFace { .. }
             | Self::TangentNeighbours { .. } => SM_ERR,
         }
     }
@@ -86,8 +111,11 @@ impl DefeatureFailure {
         match self {
             Self::ExtensionRefused { .. }
             | Self::ExtensionWithinTolerance { .. }
+            | Self::InsufficientAnnularReach { .. }
             | Self::LoopNotPlanar
             | Self::NotEnclosed { .. }
+            | Self::PatchEnclosesFace { .. }
+            | Self::PatchIntersectsFace { .. }
             | Self::TangentNeighbours { .. } => ErrorKind::Unsupported,
         }
     }
@@ -97,6 +125,15 @@ impl core::fmt::Display for DefeatureFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match *self {
             Self::LoopNotPlanar => f.write_str("a planar cap was asked for a loop no plane holds"),
+            Self::InsufficientAnnularReach { available: [a, b], sufficient: [x, y] } => write!(
+                f, "the circular rim extensions of {a} and {b} fall short. Extending them by {x} and {y} closes the gap"
+            ),
+            Self::PatchEnclosesFace { face } => write!(
+                f, "the circular patch would enclose retained face {}", face.index()
+            ),
+            Self::PatchIntersectsFace { face } => write!(
+                f, "the circular patch intersects retained face {}", face.index()
+            ),
             Self::ExtensionRefused { distance } => write!(
                 f,
                 "a face along the loop could not be extended by {distance}"

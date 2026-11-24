@@ -7074,8 +7074,7 @@ fn thin_ring(ro: f64, ri: f64, split_inner: bool) {
     assert!(rel(m.area, area) < 1e-4, "area {} vs {area}", m.area);
 }
 
-#[test]
-fn one_solid_mapped_several_times_in_a_part_comes_in_at_each_placement() {
+fn mapped_cube_row(extra: &str) -> String {
     // A unit cube in its own representation (#60), placed at x = 0, 30 and 60 by three mapped
     // items of the part's representation (#70); #5033 repeats the placement at x = 30.
     let mut mapped = String::new();
@@ -7084,16 +7083,129 @@ fn one_solid_mapped_several_times_in_a_part_comes_in_at_each_placement() {
         mapped += &format!("#{}=CARTESIAN_POINT('',({x}.,0.,0.));\n#{}=AXIS2_PLACEMENT_3D('',#{},$,$);\n", b, b + 1, b);
         mapped += &format!("#{}=REPRESENTATION_MAP(#4000,#60);\n#{}=MAPPED_ITEM('',#{},#{});\n", b + 2, b + 3, b + 2, b + 1);
     }
-    let text = format!(
-        "{HEAD}{}#4001=CARTESIAN_POINT('',(0.,0.,0.));\n#4000=AXIS2_PLACEMENT_3D('',#4001,$,$);\n#60=SHAPE_REPRESENTATION('cube',(#101,#4000),$);\n{mapped}#70=SHAPE_REPRESENTATION('row',(#5003,#5013,#5023,#5033,#4000),$);\n#80=PRODUCT_CONTEXT('',#81,'mechanical');\n#81=APPLICATION_CONTEXT('x');\n#82=PRODUCT_DEFINITION_CONTEXT('part definition',#81,'design');\n#83=PRODUCT('row','row','',(#80));\n#84=PRODUCT_DEFINITION_FORMATION('','',#83);\n#85=PRODUCT_DEFINITION('design','',#84,#82);\n#86=PRODUCT_DEFINITION_SHAPE('','',#85);\n#87=SHAPE_DEFINITION_REPRESENTATION(#86,#70);\n{TAIL}",
+    format!(
+        "{HEAD}{}#4001=CARTESIAN_POINT('',(0.,0.,0.));\n#4000=AXIS2_PLACEMENT_3D('',#4001,$,$);\n#60=SHAPE_REPRESENTATION('cube',(#101,#4000),$);\n{mapped}#70=SHAPE_REPRESENTATION('row',(#5003,#5013,#5023,#5033,#4000),$);\n#80=PRODUCT_CONTEXT('',#81,'mechanical');\n#81=APPLICATION_CONTEXT('x');\n#82=PRODUCT_DEFINITION_CONTEXT('part definition',#81,'design');\n#83=PRODUCT('row','row','',(#80));\n#84=PRODUCT_DEFINITION_FORMATION('','',#83);\n#85=PRODUCT_DEFINITION('design','',#84,#82);\n#86=PRODUCT_DEFINITION_SHAPE('','',#85);\n#87=SHAPE_DEFINITION_REPRESENTATION(#86,#70);\n{extra}{TAIL}",
         cube_entities()
-    );
+    )
+}
+
+#[test]
+fn one_solid_mapped_several_times_in_a_part_comes_in_at_each_placement() {
+    let text = mapped_cube_row("");
     let imp = step_import(&text).unwrap();
     let mut xs: Vec<f64> = imp.bodies.iter().map(|b| measure(&b.body).unwrap().bbox.min.x).collect();
     xs.sort_by(f64::total_cmp);
     assert_eq!(xs.len(), 3, "{xs:?} {:?}", imp.warnings);
     for (x, want) in xs.iter().zip([0.0, 30.0, 60.0]) {
         assert!((x - want).abs() < 1e-6, "{xs:?}");
+    }
+}
+
+// A second product owns the mapped shape. It is the source of the copies in "row".
+const MAPPED_CUBE_PRODUCT: &str = "\
+#91=PRODUCT('cube','cube','',(#80));\n\
+#92=PRODUCT_DEFINITION_FORMATION('','',#91);\n\
+#93=PRODUCT_DEFINITION('design','',#92,#82);\n\
+#94=PRODUCT_DEFINITION_SHAPE('','',#93);\n\
+#95=SHAPE_DEFINITION_REPRESENTATION(#94,#60);\n";
+
+#[test]
+fn mapped_template_product_adds_no_standalone_cube() {
+    let text = mapped_cube_row(MAPPED_CUBE_PRODUCT);
+    let imp = step_import(&text).unwrap();
+    let mut xs: Vec<f64> = imp.bodies.iter().map(|b| measure(&b.body).unwrap().bbox.min.x).collect();
+    xs.sort_by(f64::total_cmp);
+    assert_eq!(xs.len(), 3, "{xs:?} {:?}", imp.warnings);
+    for (x, want) in xs.iter().zip([0.0, 30.0, 60.0]) {
+        assert!((x - want).abs() < 1e-6, "{xs:?}");
+    }
+    assert_eq!(imp.tree.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["row"]);
+}
+
+#[test]
+fn repeated_mapped_placements_count_toward_the_discovery_limit() {
+    let text = mapped_cube_row(MAPPED_CUBE_PRODUCT);
+    let ex = Arc::new(p21::parse(&text).unwrap());
+    let mut reader = Reader::new(ex, 1);
+    reader.index();
+    // The row lists five items, then visits the two items of the cube four times.
+    // The four visits cost four more. The repeated placement still needs work.
+    let mut work = MAX_CLOSURE_WORK - 16;
+    assert!(reader.mapped_shapes(std::iter::once(70), &mut work).is_none());
+}
+
+#[test]
+fn roots_follow_nested_mappings_and_linked_representations() {
+    // "row" places a module three times. The module's linked shape places the cube.
+    let extra = format!(
+        "{MAPPED_CUBE_PRODUCT}\
+         #51=PRODUCT('module','module','',(#80));\n\
+         #52=PRODUCT_DEFINITION_FORMATION('','',#51);\n\
+         #53=PRODUCT_DEFINITION('design','',#52,#82);\n\
+         #54=PRODUCT_DEFINITION_SHAPE('','',#53);\n\
+         #55=SHAPE_REPRESENTATION('module shape',(#5103),$);\n\
+         #56=SHAPE_REPRESENTATION('module',(#4000),$);\n\
+         #57=SHAPE_REPRESENTATION_RELATIONSHIP('','',#56,#55);\n\
+         #58=SHAPE_DEFINITION_REPRESENTATION(#54,#56);\n\
+         #5102=REPRESENTATION_MAP(#5001,#60);\n\
+         #5103=MAPPED_ITEM('',#5102,#5001);\n"
+    );
+    let text = mapped_cube_row(&extra).replace("REPRESENTATION_MAP(#4000,#60)", "REPRESENTATION_MAP(#4000,#55)");
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 3, "{:?}", imp.warnings);
+    assert_eq!(imp.tree.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["row"]);
+}
+
+fn nested_scaled_cube(mapped_items: &str) -> String {
+    let row = mapped_cube_row(MAPPED_CUBE_PRODUCT)
+        .replace("REPRESENTATION_MAP(#4000,#60)", "REPRESENTATION_MAP(#4000,#55)")
+        .replace("#5003,#5013,#5023,#5033,#4000", mapped_items)
+        .replace(
+            "#5001=AXIS2_PLACEMENT_3D('',#5000,$,$)",
+            "#5001=CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM('','',$,$,#4001,1.E160,$,1.E-80,1.E-80)",
+        )
+        .replace(
+            "#5011=AXIS2_PLACEMENT_3D('',#5010,$,$)",
+            "#5011=CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM('','',$,$,#4001,1.E-160,$,1.E80,1.E80)",
+        );
+    let nested = "\
+        #55=SHAPE_REPRESENTATION('module',(#5103),$);\n\
+        #5102=REPRESENTATION_MAP(#4000,#60);\n\
+        #5103=MAPPED_ITEM('',#5102,#5001);\n";
+    row.replace(TAIL, &format!("{nested}{TAIL}"))
+}
+
+#[test]
+fn a_later_placement_can_reach_the_cube_when_the_first_overflows() {
+    // The first outer scale and the nested scale multiply to a non-finite X scale.
+    // The second outer scale is the inverse of the nested one and leaves a unit cube.
+    let imp = step_import(&nested_scaled_cube("#5003,#5013")).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert_eq!(imp.bodies[0].path, ["row"]);
+    assert!((measure(&imp.bodies[0].body).unwrap().volume - 1.0).abs() < 1e-6);
+    assert!(imp.warnings.iter().any(|w| w.contains("mapped item #5103")));
+}
+
+#[test]
+fn a_product_with_an_unmapped_shape_stays_in_the_import() {
+    let extra = format!(
+        "{MAPPED_CUBE_PRODUCT}#102=MANIFOLD_SOLID_BREP('Spare',#100);\n\
+         #62=SHAPE_REPRESENTATION('spare',(#102),$);\n\
+         #96=SHAPE_DEFINITION_REPRESENTATION(#94,#62);\n"
+    );
+    let imp = step_import(&mapped_cube_row(&extra)).unwrap();
+    assert_eq!(imp.bodies.len(), 5, "{:?}", imp.warnings);
+    assert!(imp.bodies.iter().any(|b| b.name == "Spare" && b.path == ["cube"]));
+}
+
+#[test]
+fn failed_mappings_keep_the_source_product() {
+    let missing = mapped_cube_row(MAPPED_CUBE_PRODUCT).replace("REPRESENTATION_MAP(#4000,#60)", "REPRESENTATION_MAP(#99999,#60)");
+    for text in [missing, nested_scaled_cube("#5003")] {
+        let imp = step_import(&text).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+        assert_eq!(imp.bodies[0].path, ["cube"]);
+        assert!(imp.warnings.iter().any(|w| w.contains("mapped item")));
     }
 }
 

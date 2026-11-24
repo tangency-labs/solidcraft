@@ -843,11 +843,14 @@ no forms.
 
 The component updates cells with `ui.set-data`, for example `/jobs/0/id` = `text("op1")` and
 `/jobs/0/name` = `text("Pocket")`. Values are typed scalars, with lengths in mm and angles in
-degrees. Slash paths identify cells; no JSON arrays cross the UI WIT interface. Successful calls
-merge into the panel once per frame. A failing entry discards its updates. `clear-data` replaces
-the panel data with an empty set; `show-panel` requests visibility in the current workspace.
-Calling `show-panel(true)` again reopens a panel the user closed. Closing a panel keeps the
-other workspaces' placements and does not cancel a command already running.
+degrees. Slash paths identify cells; no JSON arrays cross the UI WIT interface. A table row may
+carry an optional `indent` integer (0, 1, 2, …, capped at 8), for example `/jobs/0/indent` =
+`integer(1)`. The host indents the row's first cell to display nested data before dedicated tree
+widgets. Rows without an `indent` entry remain un-indented. Successful calls merge into the
+panel once per frame. A failing entry discards its updates. `clear-data` replaces the panel data
+with an empty set; `show-panel` requests visibility in the current workspace. Calling
+`show-panel(true)` again reopens a panel the user closed. Closing a panel keeps the other
+workspaces' placements and does not cancel a command already running.
 
 The phase 2 host draws groups, tabs, splits, forms, buttons, toolbars, lists, tables, text,
 progress and empty states. Trees, charts and newer widget versions show a placeholder.

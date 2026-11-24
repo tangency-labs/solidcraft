@@ -431,6 +431,41 @@ fn point_through_two_edges() {
 }
 
 #[test]
+fn point_at_the_average_of_points_takes_any_number_in_any_order_and_follows_them() {
+    let mut s = part();
+    // two vertices: halfway between them
+    run(&mut s, "construct.point.average", json!({"points": [{"vertex": [0.5, 0.5, 0.5]}, {"vertex": [39, 29, 19]}], "name": "M"}));
+    assert!(near(point(&s, "M"), Vec3::new(20.0, 15.0, 10.0)), "{:?}", point(&s, "M"));
+    // three points, given in either order: their centroid
+    let corners = [json!({"vertex": [0.5, 0.5, 0.5]}), json!({"vertex": [39, 0.5, 0.5]}), json!({"vertex": [0.5, 29, 0.5]})];
+    run(&mut s, "construct.point.average", json!({"points": corners, "name": "C"}));
+    let reversed: Vec<Value> = corners.iter().rev().cloned().collect();
+    run(&mut s, "construct.point.average", json!({"points": reversed, "name": "R"}));
+    let centroid = Vec3::new(40.0 / 3.0, 10.0, 0.0);
+    assert!(near(point(&s, "C"), centroid), "{:?}", point(&s, "C"));
+    assert!(near(point(&s, "R"), centroid), "{:?}", point(&s, "R"));
+    // four points, one a construction point that moves: the average follows it
+    run(&mut s, "construct.point.vertex", json!({"point": {"point": [0, 0, 0]}, "name": "A"}));
+    let points = json!([{"construct_point": "A"}, {"point": [10, 20, 30]}, {"point": [10, 0, 0]}, {"point": [0, 20, 30]}]);
+    run(&mut s, "construct.point.average", json!({"points": points, "name": "N"}));
+    assert!(near(point(&s, "N"), Vec3::new(5.0, 10.0, 15.0)), "{:?}", point(&s, "N"));
+    run(&mut s, "timeline.redefine", json!({"feature": "A", "command": "construct.point.vertex", "params": {"point": {"point": [-20, 0, 0]}}}));
+    assert!(near(point(&s, "N"), Vec3::new(0.0, 10.0, 15.0)), "{:?}", point(&s, "N"));
+    // saved as `{type: "average", points}`, and reopened where it was
+    let saved = s.doc.to_json();
+    assert!(saved.contains(r#""type":"average""#) || saved.contains(r#""type": "average""#), "{saved}");
+    let bytes = crate::io::write_design_container(&s.doc).unwrap();
+    let reopened = Session::new(crate::io::read_design(&bytes).unwrap());
+    assert!(near(point(&reopened, "N"), Vec3::new(0.0, 10.0, 15.0)), "{:?}", point(&reopened, "N"));
+    // fewer than two points, or no list, is refused and adds nothing
+    let features = s.doc.features.len();
+    for params in [json!({}), json!({"points": []}), json!({"points": [{"point": [1, 2, 3]}]}), json!({"points": {"point": [1, 2, 3]}})] {
+        assert!(s.execute("construct.point.average", &params).is_err(), "{params}");
+    }
+    assert_eq!(s.doc.features.len(), features);
+}
+
+#[test]
 fn point_through_three_planes() {
     let mut s = part();
     run(

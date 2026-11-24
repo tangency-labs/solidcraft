@@ -12,8 +12,8 @@
 //! - `ExtensionWithinTolerance`: the faces along a fillet's loop extended by less than the
 //!   distance within which the loop's vertices and the patch's are one point.
 //!
-//! The rib is swept from its profile here. The other models are read from the pinned
-//! upstream checkout when it is present.
+//! The rib is swept from its profile. The annular groove cases revolve dimensioned
+//! profiles. The file-based cases use the pinned upstream checkout when present.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -1167,4 +1167,460 @@ fn certify_feature(k: &mut Kernel, features: Vec<Option<Brep>>, removed: Removed
     let delta = sound_on_model(k, &mut fb, &named, names, &what);
     let kv = holds_volume(k, &mut fb, gap, delta, &what);
     eprintln!("{what}: delta {delta:e}, model {gap:?} built {kv:?}");
+}
+
+/// An annular groove meets the rest of the turned part at two disjoint circles.
+/// A single patch must use both circles to recover the wall between them.
+mod ring_grooves {
+    use solidcore::blend::feature_executive::{FeatureExecutive, KeptFeature, RebuildBrepType};
+    use solidcore::boolean::api_brep::boolean_union;
+    use solidcore::curve::curve::Curve;
+    use solidcore::error::defeature::DefeatureFailure;
+    use solidcore::error::Reason;
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::geom::vector3d::Vec3;
+    use solidcore::kernel::UpstreamFixes;
+    use solidcore::mass::enclosure::enclose_volume;
+    use solidcore::nurbs::b_spline_curve::{p1::BSplineCurve, NurbCircleParam};
+    use solidcore::primitive::api_primitives::create_sphere;
+    use solidcore::surface::implicit::AnalyticSupport;
+    use solidcore::sweep::directed::revolve;
+    use solidcore::topology::brep::{p2::is_manifold_solid, validation};
+    use solidcore::topology::{
+        edgeuse::p1::uv_trim_curve, face::p4::upward_edgeuses, face::p4::vertices, vertex,
+    };
+    use solidcore::{Brep, FaceId, Kernel, SolidError};
+    use std::f64::consts::PI;
+
+    struct Groove {
+        /// Radii of the opposite wall, and of the grooved wall at z = 0 and 20.
+        wall_radii: [f64; 3],
+        /// The entire groove, from one support at z = 8 to the other at z = 12.
+        meridian: &'static [(f64, f64)],
+        semicircle: bool,
+    }
+
+    const SQUARE: Groove = Groove {
+        wall_radii: [0.0, 5.0, 5.0],
+        meridian: &[(5.0, 8.0), (4.0, 8.0), (4.0, 12.0), (5.0, 12.0)],
+        semicircle: false,
+    };
+
+    const TAPERED: Groove = Groove {
+        wall_radii: [0.0, 5.0, 7.0],
+        meridian: &[(5.8, 8.0), (4.8, 8.0), (5.2, 12.0), (6.2, 12.0)],
+        ..SQUARE
+    };
+
+    impl Groove {
+        fn body(&self, k: &mut Kernel) -> Brep {
+            let [back, bottom, top] = self.wall_radii;
+            let mut profile = vec![(back, 0.0), (bottom, 0.0)];
+            profile.extend_from_slice(self.meridian);
+            profile.extend([(top, 20.0), (back, 20.0), (back, 0.0)]);
+            if back > bottom {
+                profile.reverse(); // The selected wall is inside the bore.
+            }
+            turned_part(k, &profile, self.semicircle)
+        }
+    }
+
+    fn turned_part(k: &mut Kernel, profile: &[(f64, f64)], semicircle: bool) -> Brep {
+        let point = |(r, z)| Vec3::new(r, 0.0, z);
+        let curves: Vec<Curve> = profile
+            .windows(2)
+            .map(|ends| {
+                let [a, b] = [ends[0], ends[1]];
+                let curve = if semicircle && [a, b] == [(5.0, 8.0), (5.0, 12.0)] {
+                    BSplineCurve::create_circle_segment(
+                        3,
+                        &Axis2Placement::new(point((5.0, 10.0)), -Vec3::Z, -Vec3::X),
+                        2.0,
+                        0.0,
+                        180.0,
+                        NurbCircleParam::Quadratic,
+                    )
+                } else {
+                    BSplineCurve::create_line_segment(3, point(a), point(b))
+                };
+                Curve::from(curve.unwrap())
+            })
+            .collect();
+        let refs: Vec<_> = curves.iter().map(Some).collect();
+        let mut body = revolve(k, &refs, Vec3::ZERO, Vec3::Z, 360.0, false).unwrap();
+        body.use_arena_naming().unwrap();
+        body
+    }
+
+    fn kernel() -> Kernel {
+        let mut k = Kernel::default();
+        for &name in UpstreamFixes::NAMES {
+            *k.fixes.flag_mut(name).unwrap() = true;
+        }
+        k
+    }
+
+    fn face_points(b: &Brep, f: FaceId) -> Vec<Vec3> {
+        vertices(b, f, None, false, None)
+            .unwrap()
+            .into_iter()
+            .map(|v| vertex::point(b, v).unwrap())
+            .collect()
+    }
+
+    fn faces_in_band(b: &Brep, lower: f64, upper: f64) -> Vec<FaceId> {
+        b.face_list()
+            .iter()
+            .copied()
+            .filter(|&f| {
+                let points = face_points(b, f);
+                !points.is_empty() && points.iter().all(|p| (lower..upper).contains(&p.z))
+            })
+            .collect()
+    }
+
+    fn solid(k: &mut Kernel, b: &mut Brep, faces: usize, volume: f64) {
+        assert_eq!(b.face_list().len(), faces);
+        assert!(is_manifold_solid(b).unwrap());
+        let check = validation::check_brep(k, b, validation::CheckLevel::Level2).unwrap();
+        assert!(check.is_valid(), "{:?}", check.lines());
+        let v = enclose_volume(k, b, 1e-6).unwrap();
+        assert!(
+            v.width() <= 1e-6 && v.lo <= volume && volume <= v.hi,
+            "expected {volume}, got {v:?}"
+        );
+    }
+
+    fn shaft_wall_tolerances(b: &Brep) -> Vec<f64> {
+        b.face_list()
+            .iter()
+            .filter_map(|&f| {
+                let face = b.face(f).unwrap();
+                let support = face.surface.as_ref().and_then(AnalyticSupport::of);
+                matches!(support, Some(AnalyticSupport::Cylinder { radius: 5.0, .. }))
+                    .then_some(face.tolerance)
+            })
+            .collect()
+    }
+
+    fn add_groove(k: &mut Kernel, ex: &mut FeatureExecutive<'_>, faces: &[FaceId]) {
+        let feature = ex
+            .add_feature(
+                k,
+                faces,
+                RebuildBrepType::ExtendSurface,
+                RebuildBrepType::FromOtherBrep,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(ex.features()[feature].loops.len(), 2);
+    }
+
+    fn remove(
+        k: &mut Kernel,
+        b: &mut Brep,
+        groove: &Groove,
+        reach: Option<[f64; 2]>,
+    ) -> solidcore::Result<Option<Brep>> {
+        let fs = faces_in_band(b, 7.5, 12.5);
+        assert_eq!(fs.len(), groove.meridian.len() - 1);
+        let mut ex = FeatureExecutive::new(k, b)?;
+        add_groove(k, &mut ex, &fs);
+        if let Some(distances) = reach {
+            ex.features_mut()[0].set_base_ext_dists(&distances).unwrap();
+        }
+        let kept = ex.do_defeature(k)?;
+        assert!(kept.is_empty(), "{kept:?}");
+        Ok(ex.into_feature_breps().into_iter().next().flatten())
+    }
+
+    #[test]
+    fn both_circles_bound_one_wall_on_a_shaft_frustum_or_bore() {
+        let mut k = kernel();
+        let vee = Groove {
+            meridian: &[(5.0, 8.0), (4.0, 10.0), (5.0, 12.0)],
+            ..SQUARE
+        };
+        let round = Groove {
+            meridian: &[(5.0, 8.0), (5.0, 12.0)],
+            semicircle: true,
+            ..SQUARE
+        };
+        let bore = Groove {
+            wall_radii: [7.0, 3.0, 3.0],
+            meridian: &[(3.0, 8.0), (4.0, 8.0), (4.0, 12.0), (3.0, 12.0)],
+            ..SQUARE
+        };
+        let shaft_volume = PI * 5.0 * 5.0 * 20.0;
+        for (groove, faces, volume) in [
+            (&SQUARE, 3, shaft_volume),
+            (&vee, 3, shaft_volume),
+            (&round, 3, shaft_volume),
+            (&TAPERED, 3, PI * 20.0 / 3.0 * (25.0 + 35.0 + 49.0)),
+            (&bore, 4, PI * 20.0 * (49.0 - 9.0)),
+        ] {
+            let mut body = groove.body(&mut k);
+            let feature = remove(&mut k, &mut body, groove, None).unwrap();
+            solid(&mut k, &mut body, faces, volume);
+            if groove.meridian == SQUARE.meridian {
+                // The extracted feature is the annular gap between radii 4 and 5.
+                solid(&mut k, &mut feature.unwrap(), 4, PI * 4.0 * (25.0 - 16.0));
+            }
+        }
+    }
+
+    #[test]
+    fn cylinder_and_cone_continue_to_the_circle_where_they_meet() {
+        let mut k = kernel();
+        let groove = Groove {
+            wall_radii: [0.0, 5.0, 7.5],
+            meridian: &[(5.0, 8.0), (4.0, 8.0), (4.0, 12.0), (5.5, 12.0)],
+            ..SQUARE
+        };
+        let mut body = groove.body(&mut k);
+        remove(&mut k, &mut body, &groove, None).unwrap();
+        // r = 5 below z = 10, then a 10 mm frustum from r = 5 to 7.5.
+        let volume = PI * (250.0 + 10.0 / 3.0 * (25.0 + 37.5 + 56.25));
+        solid(&mut k, &mut body, 4, volume);
+    }
+
+    fn sufficient_reach(
+        k: &mut Kernel,
+        body: &mut Brep,
+        groove: &Groove,
+        available: [f64; 2],
+    ) -> [f64; 2] {
+        let error = remove(k, body, groove, Some(available)).unwrap_err();
+        let SolidError::Failed(failure) = error else {
+            panic!("expected an annular reach refusal, got {error:?}");
+        };
+        let Reason::Defeature(DefeatureFailure::InsufficientAnnularReach {
+            available: reported,
+            sufficient,
+        }) = failure.reason
+        else {
+            panic!("expected the sufficient reach, got {failure:?}");
+        };
+        assert_eq!(reported, available);
+        sufficient
+    }
+
+    #[test]
+    fn supports_that_cannot_reach_each_other_leave_the_groove_unchanged() {
+        let mut k = kernel();
+        let unequal = Groove {
+            wall_radii: [0.0, 5.0, 6.0],
+            meridian: &[(5.0, 8.0), (4.0, 8.0), (4.0, 12.0), (6.0, 12.0)],
+            ..SQUARE
+        };
+        // Three 8, 4 and 8 mm cylinders; different support radii never meet.
+        let mut body = unequal.body(&mut k);
+        assert!(remove(&mut k, &mut body, &unequal, None).is_err());
+        solid(
+            &mut k,
+            &mut body,
+            7,
+            PI * (8.0 * 25.0 + 4.0 * 16.0 + 8.0 * 36.0),
+        );
+
+        // Both rims share the axial 4 mm gap. Splitting the missing reach evenly
+        // gives a pair that just closes it, including when the supplied reaches differ.
+        for (available, expected) in [([0.25, 0.25], [2.0, 2.0]), ([0.25, 1.25], [1.5, 2.5])] {
+            let mut body = SQUARE.body(&mut k);
+            let sufficient = sufficient_reach(&mut k, &mut body, &SQUARE, available);
+            assert_eq!(sufficient, expected);
+            solid(&mut k, &mut body, 7, PI * (16.0 * 25.0 + 4.0 * 16.0));
+            let [lower, upper]: [f64; 2] = shaft_wall_tolerances(&body).try_into().unwrap();
+            remove(&mut k, &mut body, &SQUARE, Some(sufficient)).unwrap();
+            solid(&mut k, &mut body, 3, 500.0 * PI);
+            let [wall]: [f64; 1] = shaft_wall_tolerances(&body).try_into().unwrap();
+            assert!(
+                wall <= lower && wall <= upper,
+                "wall {wall}, original supports {lower}, {upper}"
+            );
+        }
+        // On the 1:10 taper the measured reaches run along the slant. Rounding them
+        // down can leave their axial projections just short of 4 mm on the retry.
+        let mut body = TAPERED.body(&mut k);
+        let sufficient = sufficient_reach(&mut k, &mut body, &TAPERED, [0.001, 0.003]);
+        let axial = sufficient.map(|s| s / 1.0_f64.hypot(0.1));
+        assert!(axial[0] + axial[1] >= 4.0);
+        remove(&mut k, &mut body, &TAPERED, Some(sufficient)).unwrap();
+        solid(&mut k, &mut body, 3, PI * 20.0 / 3.0 * (25.0 + 35.0 + 49.0));
+    }
+
+    fn remove_two(
+        k: &mut Kernel,
+        body: &mut Brep,
+        blocked: &[FaceId],
+        free: &[FaceId],
+        blocked_first: bool,
+    ) -> KeptFeature {
+        assert_eq!((blocked.len(), free.len()), (3, 3));
+        let order = if blocked_first {
+            [blocked, free]
+        } else {
+            [free, blocked]
+        };
+        let mut ex = FeatureExecutive::new(k, body).unwrap();
+        for fs in order {
+            add_groove(k, &mut ex, fs);
+        }
+        let kept = ex.do_defeature(k).unwrap();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].feature, usize::from(!blocked_first));
+        kept[0]
+    }
+
+    #[test]
+    fn a_refused_step_groove_still_allows_the_independent_square_groove_in_either_order() {
+        let mut k = kernel();
+        let profile = [
+            (0., 0.),
+            (5., 0.),
+            (5., 8.),
+            (4., 8.),
+            (4., 12.),
+            (6., 12.),
+            (6., 15.),
+            (5., 15.),
+            (5., 17.),
+            (6., 17.),
+            (6., 20.),
+            (0., 20.),
+            (0., 0.),
+        ];
+        for blocked_first in [true, false] {
+            let mut body = turned_part(&mut k, &profile, false);
+            let blocked = faces_in_band(&body, 7.5, 12.5);
+            let free = faces_in_band(&body, 14.5, 17.5);
+            let kept = remove_two(&mut k, &mut body, &blocked, &free, blocked_first);
+            assert!(
+                matches!(kept.limit, Some(DefeatureFailure::NotEnclosed { .. })),
+                "{kept:?}"
+            );
+            assert_eq!(faces_in_band(&body, 7.5, 12.5).len(), 3);
+            assert!(faces_in_band(&body, 14.5, 17.5).is_empty());
+            // The unreached step stays at r=4 for 4 mm; the full upper 8 mm are r=6.
+            solid(
+                &mut k,
+                &mut body,
+                7,
+                PI * (8.0 * 25.0 + 4.0 * 16.0 + 8.0 * 36.0),
+            );
+        }
+    }
+
+    fn assert_same_lip(before: &Brep, after: &Brep, face: FaceId) {
+        let a = before.face(face).unwrap();
+        let b = after.face(face).unwrap();
+        assert_eq!(b.tolerance, a.tolerance);
+        assert_eq!(b.uv_domain, a.uv_domain);
+        let uses = upward_edgeuses(before, face, false, None).unwrap();
+        assert_eq!(upward_edgeuses(after, face, false, None).unwrap(), uses);
+        for eu in uses {
+            let (old, old_owner) = uv_trim_curve(before, eu).unwrap();
+            let (new, new_owner) = uv_trim_curve(after, eu).unwrap();
+            assert_eq!(new_owner, old_owner, "storage of the UV trim on {eu:?}");
+            assert!(
+                match (old, new) {
+                    (Some(a), Some(b)) => a.same_definition(b),
+                    (None, None) => true,
+                    _ => false,
+                },
+                "UV trim changed on {eu:?}"
+            );
+            let edge = before.edgeuse(eu).unwrap().edge.unwrap();
+            let a = before.edge(edge).unwrap();
+            let b = after.edge(edge).unwrap();
+            assert_eq!(b.tolerance, a.tolerance);
+            assert_eq!(b.interval, a.interval);
+            for v in a.vertices {
+                assert_eq!(
+                    vertex::tolerance(after, v).unwrap(),
+                    vertex::tolerance(before, v).unwrap()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_sleeve_blocks_one_groove_and_the_other_still_comes_off() {
+        let mut k = kernel();
+        // The attached outer sleeve has an inward lip at z = 10..11. Its radius of
+        // 4.5 clears the first groove (r = 4) and cuts through the proposed r = 5 wall.
+        let profile = [
+            (0., 0.),
+            (8., 0.),
+            (8., 11.),
+            (4.5, 11.),
+            (4.5, 10.),
+            (7., 10.),
+            (7., 1.),
+            (5., 1.),
+            (5., 8.),
+            (4., 8.),
+            (4., 12.),
+            (5., 12.),
+            (5., 15.),
+            (4., 15.),
+            (4., 17.),
+            (5., 17.),
+            (5., 20.),
+            (0., 20.),
+            (0., 0.),
+        ];
+        let original = turned_part(&mut k, &profile, false);
+        let lip_faces = faces_in_band(&original, 9.5, 11.5);
+        assert_eq!(lip_faces.len(), 3);
+        for blocked_first in [true, false] {
+            let mut body = turned_part(&mut k, &profile, false);
+            let blocked: Vec<_> = faces_in_band(&body, 7.5, 12.5)
+                .into_iter()
+                .filter(|&f| face_points(&body, f).iter().any(|p| p.x.hypot(p.y) < 4.25))
+                .collect();
+            let free = faces_in_band(&body, 14.5, 17.5);
+            let kept = remove_two(&mut k, &mut body, &blocked, &free, blocked_first);
+            let Some(DefeatureFailure::PatchIntersectsFace { face }) = kept.limit else {
+                panic!("expected the interfering sleeve face, got {kept:?}");
+            };
+            for &f in &lip_faces {
+                assert_same_lip(&original, &body, f);
+            }
+            let lip = face_points(&body, face);
+            assert!(lip.iter().all(|p| (9.5..11.5).contains(&p.z)));
+            assert!(lip.iter().any(|p| p.x.hypot(p.y) < 5.0));
+            assert!(lip.iter().any(|p| p.x.hypot(p.y) > 5.0));
+            // Shaft with the 4 mm groove, plus the sleeve's three annular sections.
+            let volume = PI * (500.0 - 4.0 * 9.0 + 39.0 + 9.0 * 15.0 + (64.0 - 4.5_f64.powi(2)));
+            solid(&mut k, &mut body, 13, volume);
+        }
+    }
+
+    #[test]
+    fn a_ball_wholly_inside_the_missing_material_keeps_its_region() {
+        let mut k = kernel();
+        let shaft = SQUARE.body(&mut k);
+        // The entire ball lies between the groove floor at r = 4 and its healed wall at r = 5.
+        let radius = 0.2;
+        let ball = create_sphere(&mut k, Vec3::new(4.5, 0.0, 10.0), radius).unwrap();
+        let mut body = boolean_union(&mut k, shaft, ball).unwrap();
+        body.use_arena_naming().unwrap();
+        let [ball_face]: [FaceId; 1] = faces_in_band(&body, 9.5, 10.5).try_into().unwrap();
+        let mut groove = faces_in_band(&body, 7.5, 12.5);
+        groove.retain(|f| *f != ball_face);
+        assert_eq!(groove.len(), 3);
+        let mut ex = FeatureExecutive::new(&mut k, &mut body).unwrap();
+        add_groove(&mut k, &mut ex, &groove);
+        let err = ex.do_defeature(&mut k).unwrap_err();
+        let SolidError::Failed(failure) = err else {
+            panic!("expected a refusal naming the enclosed face, got {err:?}");
+        };
+        assert_eq!(
+            failure.reason,
+            Reason::Defeature(DefeatureFailure::PatchEnclosesFace { face: ball_face })
+        );
+        let original = PI * (500.0 - 4.0 * 9.0 + 4.0 / 3.0 * radius.powi(3));
+        solid(&mut k, &mut body, 8, original);
+    }
 }
