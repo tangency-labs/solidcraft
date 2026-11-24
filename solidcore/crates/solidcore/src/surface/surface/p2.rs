@@ -7915,17 +7915,19 @@ impl<'s> IsoCurveLengthIntegrand<'s> {
 }
 
 /// Not upstream: the content digest ([`crate::geom::content`]): the kind as it evaluates
-/// (with the NURB a cone, sphere or torus made, [`Surface::kind`]) and the tolerance of the
-/// face it reaches. The owners and the notification identity name which object the surface is, not what it is, and the cache
-/// slot and the memos are caches. A surface that keeps a blend's definition, and the kinds
-/// that hold curves, other surfaces or volumes with state of their own, have no digest yet.
+/// (with the NURB a cone, sphere or torus made, [`Surface::kind`]). The owners, the
+/// tolerance recorded from the face reached (a copy has neither) and the notification
+/// identity say which object the surface is and who owns it, not what it is; a digest of a
+/// neighbourhood writes the face's tolerance itself. The cache slot and the memos are caches.
+/// A surface that keeps a blend's definition, and the kinds that hold curves, other surfaces
+/// or volumes with state of their own, have no digest yet.
 impl crate::geom::content::Content for Surface {
     fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
         let Self {
             kind: _,
             owner: _,
             owner_chain_face: _,
-            owner_zone_tol_3d,
+            owner_zone_tol_3d: _,
             cache_slot: _,
             notify_identity: _,
             made_kind: _,
@@ -7937,7 +7939,6 @@ impl crate::geom::content::Content for Surface {
         if definition.is_some() {
             return None;
         }
-        d.opt_f64(owner_zone_tol_3d.map(|(_, tol)| tol));
         match self.kind() {
             SurfaceKind::BSpline(s) => {
                 d.tag(1);

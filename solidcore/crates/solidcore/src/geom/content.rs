@@ -73,17 +73,6 @@ impl Digest {
         self.u64(t);
     }
 
-    /// Writes an optional float.
-    pub(crate) fn opt_f64(&mut self, x: Option<f64>) {
-        match x {
-            Some(x) => {
-                self.bool(true);
-                self.f64(x);
-            }
-            None => self.bool(false),
-        }
-    }
-
     /// Writes any value whose `Hash` writes all of it (a field-less enum, an integer).
     pub(crate) fn hashed(&mut self, v: &impl Hash) {
         for h in &mut self.0 {
@@ -205,8 +194,8 @@ mod tests {
 
     #[test]
     fn a_body_built_twice_has_the_same_digests() {
-        let mut k = Kernel::default();
         type Make = fn(&mut Kernel) -> crate::Result<Brep>;
+        let mut k = Kernel::default();
         let makers: [(Make, bool); 3] = [
             (
                 |k| create_box(k, Point3::new(1.0, -2.0, 3.0), 10.0, 20.0, 30.0),
