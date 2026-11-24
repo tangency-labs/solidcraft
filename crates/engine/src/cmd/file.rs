@@ -2658,11 +2658,6 @@ impl Session {
         let geometry = cache.then(|| saved_geometry(self, &design)).flatten();
         let preview = preview.then(|| saved_preview(self)).flatten();
         let thumbnail = cache.then(|| thumbnail::saved(self)).flatten();
-        // The container the design was opened from: its blobs whose content has not changed are
-        // copied as they are, instead of being encoded and compressed again. A part is copied only
-        // when its name (the SHA-256 of its content), length and CRC-32 match what this save
-        // writes, so the file reads back the same either way.
-        let reuse = self.reuse_container();
         match provenance {
             Some(save) => solidcraft_io::write_design_container_with_provenance(
                 &design,
@@ -2672,7 +2667,11 @@ impl Session {
                 thumbnail.as_deref(),
                 save,
             ),
-            None => match reuse.as_deref() {
+            // The container the design was opened from: its blobs whose content has not changed
+            // are copied as they are, instead of being encoded and compressed again. A part is
+            // copied only when its name (the SHA-256 of its content), length and CRC-32 match what
+            // this save writes, so the file reads back the same either way.
+            None => match self.reuse_container().as_deref() {
                 Some(bytes) => solidcraft_io::write_design_container_reusing(
                     &design,
                     compression,
