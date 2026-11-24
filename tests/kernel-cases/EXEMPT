@@ -178,6 +178,7 @@ expr.evaluate                     expression evaluation
 file.copy                        file operations: tested in crates/engine/src/cmd/file_library.rs tests
 file.export_sdf                  writes a robot model folder from the meshes: tested in crates/io/src/sdf.rs and crates/engine/src/tests.rs
 file.gerber_files                 a listing of a board's files: crates/engine/src/cmd/board_import_tests.rs
+file.revert_saved                 reads the open design again from its file: tested in crates/engine/src/cmd/file.rs tests
 file.gpg_keys                     GnuPG key listing: tested in crates/engine/src/gpg.rs tests
 file.import                       opens a file through an importer plugin: tested in crates/engine/src/plugin/tests.rs
 file.import_cache_clear           clears a cache of imported files
