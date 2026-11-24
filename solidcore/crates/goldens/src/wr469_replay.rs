@@ -10,33 +10,29 @@
 //! test here installs on its thread ([`with_seam`]).
 //!
 //! The tests run every row of `topology.face_p1` with the step answered by the tolerance
-//! the vertex already has, which leaves it as the pinned C++ (and main before this change)
-//! did:
-//! 1. the rows that then do not agree with their committed line (the goldens' own
-//!    comparison) are exactly [`MOVED`] (37), and each is then main's line ([`main_line`])
-//!    bit for bit. So the step is the only cause of every move in the unit.
-//! 2. On each of the 37, run as is and without the step: the encoded row as is is the
-//!    committed line; the two records differ only in the UV trim tally (`out[24..26]`,
-//!    `n own`: 15 without the step, 2 with it); the bodies have the same edge uses; with
-//!    the step every edge's curve end at a vertex the step grew lies within half that
-//!    vertex's tolerance (the property the step exists for, `AssertValid`'s test of an edge
-//!    end; the step sizes from the farthest end at the vertex and doubling is exact, so no
-//!    rounding allowance applies); as the operation leaves the body, exactly the four ends at
-//!    the split's own vertices v6 and v7 ([`UNCOVERED_AT_CAPTURE`], sized by the point
-//!    merge's zone neighbourhood, tangency-labs/solidcraft#21340) are uncovered, 148 over the 37 rows against 222
-//!    without the step: the step covers fewer ends, not all of them; and `check_brep`
-//!    level 2 fails on both bodies (with the step
-//!    and without it), each geometry's owner taken as the geometry records it (as
+//! the vertex already has, which leaves it as the pinned C++ did. Since the point merge
+//! covers its edge ends (tangency-labs/solidcraft#21340), the step has nothing left to grow
+//! on these rows:
+//! 1. no row of the unit then differs from its committed line (the goldens' own
+//!    comparison): the step moves no row. Before #21340 it moved exactly [`MOVED`] (37),
+//!    through the UV trim tally (`out[24..26]`, 15 without the step, 2 with it).
+//! 2. On each of the 37, run as is and without the step: the encoded row is the committed
+//!    line both ways and the raw records are the same bit for bit; both runs reach the same
+//!    steps (vertex, tolerance before, gap) and none grows a tolerance; the bodies have the
+//!    same edge uses; every edge's curve end lies within half its vertex's tolerance both
+//!    ways (`AssertValid`'s test of an edge end; before #21340 the four ends at the split's
+//!    own vertices v6 and v7, sized by the point merge's zone neighbourhood, were not, with
+//!    the step or without it); and `check_brep` level 2 still fails `ValidatePointers` on
+//!    both bodies, each geometry's owner taken as the geometry records it (as
 //!    `validation::soundness` checks a body), so the failure is the body's own and not the
-//!    runner's naming of it. The rows are invalid-input crash reproducers, and the value
-//!    that moves is a trim tally, not geometry.
+//!    runner's naming of it. The rows are invalid-input crash reproducers.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::ObjectKey;
 use solidcore::geom::object::ObjectRef;
@@ -55,7 +51,8 @@ const UNIT: &str = "topology.face_p1";
 /// Generated cases per unit, as `goldens` runs them (`main.rs` `DEFAULT_SEEDS`).
 const SEEDS: usize = 16;
 
-/// The rows the step moved: `MoveSeam` with split on `vase_rev.smb` face 0.
+/// The rows the step moved before tangency-labs/solidcraft#21340: `MoveSeam` with split on
+/// `vase_rev.smb` face 0, and one plain `vase_rev.smb` row.
 const MOVED: [&str; 37] = [
     "guard_vase_rev_m0_c01_00",
     "guard_vase_rev_m0_c01_01",
@@ -96,14 +93,6 @@ const MOVED: [&str; 37] = [
     "vase_rev.smb_1_f5_op9",
 ];
 
-/// Main's encoded `out` of every [`MOVED`] row (main before this change).
-fn main_line(name: &str) -> Value {
-    json!({
-        "case": name, "deferred": null, "error": null, "ints": {}, "topology": null,
-        "values": {"out": {"blocks": [[186.0, 186.0, 2397.0]], "n": 28}},
-    })
-}
-
 thread_local! {
     /// The seam a test here installed on this thread, for [`with_seam`].
     static SEAM: RefCell<Option<VertexStepSeam>> = const { RefCell::new(None) };
@@ -127,12 +116,6 @@ enum Step {
     /// The tolerance the vertex already has (main, the pinned C++).
     Without,
 }
-
-/// The (edge, vertex) ends the step leaves uncovered as the operation leaves the body, on
-/// every moved row: both ends at v6 (edges 6 and 7) and at v7 (edges 7 and 8), the
-/// vertices the edge split made, whose tolerance the point merge sized
-/// (`merge_vertex_neighborhood`, the zone neighbourhood of the merged points).
-const UNCOVERED_AT_CAPTURE: [(u32, u32); 4] = [(6, 6), (7, 7), (7, 6), (8, 7)];
 
 /// What a run of a `MoveSeam` row leaves.
 struct Body {
@@ -274,10 +257,10 @@ fn unit() -> Box<dyn UnitDiff> {
         .unwrap_or_else(|| panic!("no unit {UNIT}"))
 }
 
-/// Without the step, the rows of the unit that do not agree with their committed line (as
-/// the goldens compare) are exactly [`MOVED`], and each is then main's line bit for bit.
+/// Without the step, every row of the unit agrees with its committed line (as the goldens
+/// compare): the step moves no row.
 #[test]
-fn without_the_step_only_the_moved_rows_differ_and_they_are_mains() {
+fn without_the_step_no_row_of_the_unit_moves() {
     let u = unit();
     let golden = read(&default_dir(), UNIT).unwrap();
     let mut moved = Vec::new();
@@ -288,27 +271,21 @@ fn without_the_step_only_the_moved_rows_differ_and_they_are_mains() {
             .unwrap_or_else(|| panic!("{name}: no committed line"));
         // the goldens' own comparison (a committed line may lag the run within it)
         if crate::golden::diff(line, &row, u.abs_floors()).is_some() {
-            assert_eq!(
-                row,
-                main_line(&name),
-                "{name}: without the step the row is neither its committed line nor main's"
-            );
             moved.push(name);
         }
     }
-    assert_eq!(moved, MOVED.map(String::from).to_vec());
+    assert!(moved.is_empty(), "rows the step moves: {moved:?}");
 }
 
-/// On each moved row: the step grew a vertex, and every edge end at a vertex it grew lies
-/// within half that vertex's tolerance (the property WR-469 exists for); the records differ
-/// only in the UV trim tally; and level 2 fails on both bodies.
+/// On each row the step moved before #21340: the step grows no vertex and changes nothing,
+/// every edge end lies within half its vertex's tolerance both ways, and level 2 fails on
+/// both bodies.
 #[test]
-fn the_moved_rows_cover_every_end_at_a_grown_vertex_and_fail_level_2_both_ways() {
+fn the_moved_rows_take_no_step_cover_every_end_and_fail_level_2_both_ways() {
     let u = unit();
     let golden = read(&default_dir(), UNIT).unwrap();
     let cases = cases(u.as_ref());
     let mut not_committed = Vec::new();
-    let mut totals = (0, 0);
     for name in MOVED {
         let case = cases.get(name).unwrap_or_else(|| panic!("no case {name}"));
         let (row, out, steps, bodies) = run(u.as_ref(), case, Step::Own);
@@ -316,40 +293,20 @@ fn the_moved_rows_cover_every_end_at_a_grown_vertex_and_fail_level_2_both_ways()
             not_committed.push(name);
         }
         let (row0, out0, steps0, bodies0) = run(u.as_ref(), case, Step::Without);
-        assert_eq!(
-            row0,
-            main_line(name),
-            "{name}: without the step, not main's line"
-        );
+        assert_eq!(row0, row, "{name}: the step moves the row");
+        let bits = |xs: &[f64]| xs.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&out), bits(&out0), "{name}: the step moves the record");
 
-        // the runs reach the same steps (vertex, tolerance before, gap), in the same order,
-        // up to the first that grows a tolerance: until then the bodies are the same
+        // both runs reach the same steps (vertex, tolerance before, gap), and none grows
         let key = |s: &VertexStep| (s.vertex, s.before.to_bits(), s.gap.to_bits());
-        let first = steps
-            .iter()
-            .position(|s| s.own > s.before)
-            .unwrap_or_else(|| panic!("{name}: the step grew no vertex: {steps:?}"));
-        assert!(
-            steps0.len() > first,
-            "{name}: without the step the run stops before step {first}"
-        );
+        assert!(!steps.is_empty(), "{name}: the run reaches no step");
         assert_eq!(
-            steps[..=first].iter().map(key).collect::<Vec<_>>(),
-            steps0[..=first].iter().map(key).collect::<Vec<_>>(),
-            "{name}: the runs reach different steps before the first growth"
+            steps.iter().map(key).collect::<Vec<_>>(),
+            steps0.iter().map(key).collect::<Vec<_>>(),
+            "{name}: the runs reach different steps"
         );
-
-        // the raw records differ only in the UV trim tally (`n own`)
-        assert_eq!(out.len(), out0.len(), "{name}: record lengths");
-        let diff: Vec<usize> = (0..out.len())
-            .filter(|&i| out[i].to_bits() != out0[i].to_bits())
-            .collect();
-        assert_eq!(diff, vec![24, 25], "{name}: {out:?} against {out0:?}");
-        assert_eq!(
-            (out[24], out[25], out0[24], out0[25]),
-            (2.0, 2.0, 15.0, 15.0),
-            "{name}: UV trim tally"
-        );
+        let grown: Vec<_> = steps.iter().filter(|s| s.own > s.before).collect();
+        assert!(grown.is_empty(), "{name}: the step grew {grown:?}");
 
         assert_eq!(
             (bodies.len(), bodies0.len()),
@@ -361,44 +318,14 @@ fn the_moved_rows_cover_every_end_at_a_grown_vertex_and_fail_level_2_both_ways()
             b.edgeuses, b0.edgeuses,
             "{name}: the bodies' edge uses differ"
         );
-        assert!(!b.ends.is_empty(), "{name}: no edge ends");
-
-        // (A) every end at a vertex the step grew lies within half its tolerance
-        let grown: BTreeSet<VertexId> = steps
-            .iter()
-            .filter(|s| s.own > s.before)
-            .map(|s| s.vertex)
-            .collect();
-        let at_grown: Vec<_> = b.ends.iter().filter(|e| grown.contains(&e.1)).collect();
-        assert!(
-            !at_grown.is_empty(),
-            "{name}: no edge end at a grown vertex"
-        );
-        let bad: Vec<_> = at_grown.iter().filter(|e| e.2 > 0.5 * e.3).collect();
-        assert!(
-            bad.is_empty(),
-            "{name}: edge ends (edge, vertex, gap, tolerance) at a grown vertex {grown:?} not \
-             covered: {bad:?}"
-        );
-        // (B) as the operation leaves the body, the step leaves uncovered exactly the ends
-        // at the vertices the edge split made (v6, v7: the point merge sizes their
-        // tolerance as its zone neighbourhood, not from the edge ends; tangency-labs/solidcraft#21340), fewer than
-        // without it
-        assert_eq!(
-            b.uncovered(),
-            UNCOVERED_AT_CAPTURE.to_vec(),
-            "{name}: uncovered (edge, vertex) with the step"
-        );
-        totals.0 += b.uncovered().len();
-        totals.1 += b0.uncovered().len();
-        assert!(
-            b.uncovered().len() < b0.uncovered().len(),
-            "{name}: uncovered with the step {:?}, without {:?}",
-            b.uncovered(),
-            b0.uncovered()
-        );
-
         for (body, run) in [(b, "with"), (b0, "without")] {
+            assert!(!body.ends.is_empty(), "{name}: no edge ends {run} the step");
+            // every end within half its vertex's tolerance, as the operation leaves the body
+            assert_eq!(
+                body.uncovered(),
+                Vec::<(u32, u32)>::new(),
+                "{name}: uncovered (edge, vertex) {run} the step"
+            );
             assert!(
                 !body.valid && body.level2.iter().any(|l| l.contains("ValidatePointers")),
                 "{name}: level 2 {run} the step does not fail ValidatePointers: {:?}",
@@ -406,11 +333,6 @@ fn the_moved_rows_cover_every_end_at_a_grown_vertex_and_fail_level_2_both_ways()
             );
         }
     }
-    assert_eq!(
-        totals,
-        (4 * MOVED.len(), 6 * MOVED.len()),
-        "uncovered ends over the moved rows (with the step, without)"
-    );
     assert!(
         not_committed.is_empty(),
         "rows that are not their committed line: {not_committed:?}"
