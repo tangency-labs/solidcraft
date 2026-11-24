@@ -688,9 +688,20 @@ fn opposing_chamfers_on_a_skewed_or_tapered_face_name_their_fit() {
                 s.set_corner_bevel(corner, true).unwrap();
             }
             let result = s.do_filleting(&mut k, None);
-            (result, s.fit_size(), tol)
+            let fit = s.fit_size();
+            drop(s);
+            let valid = result.is_ok().then(|| {
+                let store = AttributeStore::new();
+                let key_of = |_| ObjectKey(0);
+                let attrs = PropertyAttributes {
+                    store: &store,
+                    key_of: &key_of,
+                };
+                brep_volume(&k, &mut b, 1e-9, &attrs).is_ok()
+            });
+            (result, fit, tol, valid)
         };
-        let (result, fit, _) = run_pair(ChamferSize::Distances([1.5, 1.5]));
+        let (result, fit, _, _) = run_pair(ChamferSize::Distances([1.5, 1.5]));
         assert!(result.is_err(), "skew {skew:e}: equal 1.5 built");
         let fit = fit.expect("equal skewed refusal names a fit");
         assert_eq!(fit.kind, FitKind::Radius, "skew {skew:e}");
@@ -700,19 +711,28 @@ fn opposing_chamfers_on_a_skewed_or_tapered_face_name_their_fit() {
             fit.size
         );
         // Slightly below the closed bound builds cleanly.
+        let (below, _, _, below_valid) = run_pair(ChamferSize::Distances([
+            want_radius - 0.01,
+            want_radius - 0.01,
+        ]));
+        assert!(below.is_ok(), "skew {skew:e}: control below fit failed");
+        assert_eq!(below_valid, Some(true), "skew {skew:e}: below fit invalid");
+        // Replaying the reported closed fit builds a valid closed solid.
+        let (at_fit, _, _, at_fit_valid) = run_pair(ChamferSize::Distances([fit.size, fit.size]));
         assert!(
-            run_pair(ChamferSize::Distances([
-                want_radius - 0.01,
-                want_radius - 0.01,
-            ]))
-            .0
-            .is_ok(),
-            "skew {skew:e}: control below fit failed"
+            at_fit.is_ok(),
+            "skew {skew:e}: reported closed fit {} failed: {at_fit:?}",
+            fit.size
+        );
+        assert_eq!(
+            at_fit_valid,
+            Some(true),
+            "skew {skew:e}: reported closed fit invalid"
         );
 
         // Distance-angle (80 deg) chamfers name an open common scale that builds cleanly.
         let angle = 80.0_f64.to_radians();
-        let (result, fit, tol) = run_pair(ChamferSize::DistanceAngle {
+        let (result, fit, tol, _) = run_pair(ChamferSize::DistanceAngle {
             distance: 1.5,
             angle,
         });

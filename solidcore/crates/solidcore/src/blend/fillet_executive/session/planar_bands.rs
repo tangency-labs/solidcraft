@@ -249,7 +249,19 @@ pub(super) fn supports(
     Ok(a.face == b.face)
 }
 
-pub(super) use opposing::PreparedBand;
+/// Precomputed straight-line band data cached once per `(solver, face)` before
+/// the pair loop in `geometry_bands_clear_other_rails`. The exact-parallel
+/// fields require only a native straight line on the shared planar face (no
+/// plane-tilt gate), while `opposing` holds the additional geometry for
+/// non-parallel opposing pairs.
+#[derive(Clone, Copy)]
+pub(super) struct PreparedBand {
+    face: FaceId,
+    line_point: Point3,
+    line_vector: Vec3,
+    width: f64,
+    opposing: Option<opposing::PreparedOpposing>,
+}
 
 /// Prepare one straight planar chamfer band on `face`, if `solver` has one.
 /// Cached once per `(solver, face)` before the pair loop so candidate pruning
@@ -271,7 +283,17 @@ pub(super) fn prepare_straight_band(
         let Some(b) = band(target, solver, rail)? else {
             return Ok(None);
         };
-        return opposing::prepare(k, target, &b, blended);
+        let CurveKind::Line(line) = b.curve.kind() else {
+            return Ok(None);
+        };
+        let opposing = opposing::prepare(k, target, &b, blended)?;
+        return Ok(Some(PreparedBand {
+            face: b.face,
+            line_point: line.line_point(),
+            line_vector: line.line_vector(),
+            width: b.width,
+            opposing,
+        }));
     }
     Ok(None)
 }
@@ -289,7 +311,10 @@ pub(super) fn overlap_candidate(a: &PreparedBand, b: &PreparedBand) -> Result<bo
     let parallel = exact::cross(tangent, b.line_vector)
         .ok_or_else(|| SolidError::invalid_input(OP, "line directions outside exact range"))?;
     if !parallel.iter().all(|component| exact::is_zero(component)) {
-        return Ok(opposing::overlap_candidate_prepared(a, b));
+        let (Some(oa), Some(ob)) = (a.opposing.as_ref(), b.opposing.as_ref()) else {
+            return Ok(false);
+        };
+        return Ok(opposing::overlap_candidate_prepared(oa, ob));
     }
     let (pa, pb) = (a.line_point, b.line_point);
     let [dx, dy, dz] = [
@@ -578,7 +603,7 @@ fn gap_proved_under(
 /// The witness location is retained for the caller's trimmed-face classification.
 pub(super) fn retained_contact(
     k: &Kernel,
-    target: &Brep,
+    target: &mut Brep,
     a: &SolverObject,
     b: &SolverObject,
     rails: [usize; 2],
@@ -745,5 +770,29 @@ mod tests {
                 assert!(!proved(g, rounding), "{g} {rounding}");
             }
         }
+    }
+
+    #[test]
+    fn exact_parallel_overlap_candidate_ignores_non_parallel_opposing_tilt_gate() {
+        let face = FaceId::from_index(1);
+        // Parallel lines with a tiny Z tilt (`1e-11`) that leaves `opposing: None`
+        // still pass the exact-parallel overlap candidate check when separated by
+        // less than `w_a + w_b`.
+        let dir = Vec3::new(1.0, 0.0, 1e-11);
+        let a = PreparedBand {
+            face,
+            line_point: Point3::new(0.0, 0.0, 0.0),
+            line_vector: dir,
+            width: 1.5,
+            opposing: None,
+        };
+        let b = PreparedBand {
+            face,
+            line_point: Point3::new(0.0, 2.0, 0.0),
+            line_vector: dir,
+            width: 1.5,
+            opposing: None,
+        };
+        assert!(overlap_candidate(&a, &b).unwrap());
     }
 }

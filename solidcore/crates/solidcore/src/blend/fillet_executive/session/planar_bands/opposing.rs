@@ -11,20 +11,23 @@
 //! The scale `s(u)` is affine along the bisector. Intersecting with each edge's
 //! end boundaries (a planar end face's line on the shared plane for an
 //! unblended planar cap, or the edge's interior perpendicular half-plane past
-//! its endpoint tolerance otherwise) and subtracting closed selected corner
-//! strips leaves a finite union of intervals whose minimum scale decides both
-//! overlap and the largest fitting size.
+//! its endpoint tolerance otherwise), subtracting closed selected corner strips,
+//! and splitting by exact crossings with the shared face's boundary edges yields
+//! the leftmost on-face bisector point whose scale decides both overlap and the
+//! largest fitting size.
 //!
 //! Deviations: no station sampling, no parallel-angle tolerance, and no retry
 //! builds. Unsupported selected corners name no contact, matching `family`.
 
 use super::{inward, Band, BandContact, CornerBand, OP};
 use crate::blend::fillet_executive::FitKind;
-use crate::curve::curve::CurveKind;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::error::blend::BandInput;
 use crate::error::{Result, SolidError};
+use crate::intersect::api_intersectors::curve_crossings;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, EFF_ZERO};
+use crate::primitive::api_curves::create_line_segment;
 use crate::surface::surface::SurfaceKind;
 use crate::topology::{edge, face, vertex, Brep, EdgeId, FaceId, VertexId};
 
@@ -134,21 +137,21 @@ pub(super) struct EndBoundary {
     /// Open exclusion distance from `origin` along `inward` (`0.0` for a closed
     /// planar cap; the edge tolerance for an uncertified open end).
     offset: f64,
+    edge_tol: f64,
     closed: bool,
     /// For a convex planar cap whose edge runs into the band, its unit direction
-    /// from `origin` and finite length, so a cap contact never runs past the end
-    /// of that cap edge.
+    /// from `origin` and finite length, so a crossing past that cap's end is
+    /// excluded as an open bound rather than treated as a closed cap contact.
     convex_cap: Option<(Vec3, f64)>,
 }
 
-/// Precomputed straight-band geometry for one `(solver, face)` rail, allowing
-/// `O(1)` stack-only overlap pruning across all pairs of a large outline.
+/// Precomputed opposing-bisector geometry for one straight planar rail, built
+/// once per `(solver, face)` so non-parallel candidate pruning runs in `O(1)`
+/// stack arithmetic.
 #[derive(Clone, Copy)]
-pub(in super::super) struct PreparedBand {
+pub(super) struct PreparedOpposing {
     pub(super) face: FaceId,
     pub(super) plane_normal: Vec3,
-    pub(super) line_point: Point3,
-    pub(super) line_vector: Vec3,
     pub(super) p0: Point3,
     pub(super) p1: Point3,
     pub(super) inward: Vec3,
@@ -216,6 +219,7 @@ fn end_boundary(
         origin: end_pt,
         inward: from_end,
         offset: edge_tol,
+        edge_tol,
         closed: false,
         convex_cap: None,
     };
@@ -293,21 +297,25 @@ fn end_boundary(
         origin: end_pt,
         inward: cap_inward,
         offset: 0.0,
+        edge_tol,
         closed: true,
         convex_cap,
     })
 }
 
-/// Prepare a straight planar band once per `(solver, face)` rail.
+/// Prepare the opposing-bisector geometry of a straight planar band once per
+/// `(solver, face)` rail. Returns `None` if the edge direction tilts out of the
+/// shared plane or lacks a constant inward normal (leaving exact-parallel pairs
+/// unaffected in `planar_bands::prepare_straight_band`).
 pub(super) fn prepare(
     k: &Kernel,
     target: &Brep,
     band: &Band,
     blended: &[EdgeId],
-) -> Result<Option<PreparedBand>> {
-    let CurveKind::Line(line) = band.curve.kind() else {
+) -> Result<Option<PreparedOpposing>> {
+    if !matches!(band.curve.kind(), CurveKind::Line(_)) {
         return Ok(None);
-    };
+    }
     let p0 = band.curve.evaluate_point(k, band.interval.min())?;
     let p1 = band.curve.evaluate_point(k, band.interval.max())?;
     let span = p1 - p0;
@@ -345,11 +353,9 @@ pub(super) fn prepare(
             blended,
         )?,
     ];
-    Ok(Some(PreparedBand {
+    Ok(Some(PreparedOpposing {
         face: band.face,
         plane_normal: band.plane_normal,
-        line_point: line.line_point(),
-        line_vector: line.line_vector(),
         p0,
         p1,
         inward: band_inward,
@@ -370,11 +376,10 @@ struct OpposingBisector {
     s0: f64,
     s_slope: f64,
     domain: Interval,
-    boundaries: [EndBoundary; 4],
 }
 
 impl OpposingBisector {
-    fn from_prepared(a: &PreparedBand, b: &PreparedBand) -> Option<Self> {
+    fn from_prepared(a: &PreparedOpposing, b: &PreparedOpposing) -> Option<Self> {
         if a.face != b.face {
             return None;
         }
@@ -424,7 +429,22 @@ impl OpposingBisector {
         for bound in &boundaries {
             let c0 = (x0 - bound.origin).dot(bound.inward) - bound.offset;
             let c1 = u_dir.dot(bound.inward);
-            domain = domain.clip_linear(c0, c1, bound.closed)?;
+            // If the bisector crosses a finite convex cap line past the cap
+            // edge's far end, exclude only that crossing point (open bound) so
+            // valid interior bisector points farther from the cap remain kept.
+            let mut closed = bound.closed;
+            if closed && c1 != 0.0 {
+                if let Some((cap_dir, cap_len)) = bound.convex_cap {
+                    let u_cap = -c0 / c1;
+                    if u_cap.is_finite() {
+                        let p_cap = x0 + u_dir * u_cap;
+                        if (p_cap - bound.origin).dot(cap_dir) > cap_len + bound.edge_tol {
+                            closed = false;
+                        }
+                    }
+                }
+            }
+            domain = domain.clip_linear(c0, c1, closed)?;
         }
         if !(domain.lo.is_finite() && domain.hi.is_finite()) {
             return None;
@@ -441,7 +461,6 @@ impl OpposingBisector {
             s0,
             s_slope,
             domain,
-            boundaries,
         })
     }
 
@@ -452,24 +471,11 @@ impl OpposingBisector {
     fn scale_at(&self, u: f64) -> f64 {
         self.s0 + self.s_slope * u
     }
-
-    fn within_convex_caps(&self, at: Point3, tolerance: f64) -> bool {
-        for bound in &self.boundaries {
-            if let Some((cap_dir, cap_len)) = bound.convex_cap {
-                if (at - bound.origin).dot(bound.inward).abs() <= tolerance
-                    && (at - bound.origin).dot(cap_dir) > cap_len + tolerance
-                {
-                    return false;
-                }
-            }
-        }
-        true
-    }
 }
 
 /// Pure `O(1)` stack-only necessary condition for two prepared non-parallel
 /// straight bands to overlap at their requested widths.
-pub(super) fn overlap_candidate_prepared(a: &PreparedBand, b: &PreparedBand) -> bool {
+pub(super) fn overlap_candidate_prepared(a: &PreparedOpposing, b: &PreparedOpposing) -> bool {
     let Some(bisector) = OpposingBisector::from_prepared(a, b) else {
         return false;
     };
@@ -510,11 +516,103 @@ fn subtract_corner_strip(
     Ok(())
 }
 
-/// Construct the retained contact of two non-parallel opposing straight bands
-/// on a shared planar face.
+/// Find the leftmost on-face bisector parameter `u` across `kept` by splitting
+/// each retained interval at exact crossings with `face_id`'s boundary edges
+/// (outer loop and inner holes) and classifying each resulting piece.
+fn first_on_face_parameter(
+    k: &Kernel,
+    target: &mut Brep,
+    face_id: FaceId,
+    bisector: &OpposingBisector,
+    kept: &[Interval],
+    tolerance: f64,
+) -> Result<Option<f64>> {
+    let face_edges = face::p4::edges(target, face_id, None, false, None)?;
+    let mut edge_curves = Vec::new();
+    for edge_id in face_edges {
+        if let Some(curve) = edge::evaluation_curve(target, edge_id)? {
+            let ivl = edge::interval(target, edge_id)?;
+            edge_curves.push((curve, ivl));
+        }
+    }
+    let cross_tol = tolerance.max(EFF_ZERO);
+    for &iv in kept {
+        if iv.lo == iv.hi {
+            if iv.lo_closed
+                && iv.hi_closed
+                && !super::super::sample_off_face(k, target, face_id, bisector.point(iv.lo))?
+            {
+                return Ok(Some(iv.lo));
+            }
+            continue;
+        }
+        let start = bisector.point(iv.lo);
+        let end = bisector.point(iv.hi);
+        let mut cuts = Vec::new();
+        if start.distance(end) > EFF_ZERO {
+            let seg = Curve::from(create_line_segment(start, end)?);
+            let seg_ivl = seg.natural_interval();
+            for (edge_curve, edge_ivl) in &edge_curves {
+                let crossings =
+                    curve_crossings(k, &seg, &seg_ivl, edge_curve, edge_ivl, None, cross_tol)?;
+                for (t_seg, _) in crossings {
+                    let pt = seg.evaluate_point(k, t_seg)?;
+                    let u = (pt - bisector.x0).dot(bisector.u_dir);
+                    if u.is_finite() && u > iv.lo && u < iv.hi {
+                        cuts.push(u);
+                    }
+                }
+            }
+        }
+        cuts.sort_by(f64::total_cmp);
+        cuts.push(iv.hi);
+        let mut sub_lo = iv.lo;
+        let mut sub_lo_is_iv_lo = true;
+        for sub_hi in cuts {
+            if sub_hi <= sub_lo {
+                continue;
+            }
+            let mid = 0.5 * (sub_lo + sub_hi);
+            let mid_on_face =
+                !super::super::sample_off_face(k, target, face_id, bisector.point(mid))?;
+            if mid_on_face {
+                if bisector.s_slope == 0.0 {
+                    return Ok(Some(mid));
+                }
+                let can_use_sub_lo = !sub_lo_is_iv_lo || iv.lo_closed;
+                if can_use_sub_lo
+                    && !super::super::sample_off_face(k, target, face_id, bisector.point(sub_lo))?
+                {
+                    return Ok(Some(sub_lo));
+                }
+                let span = sub_hi - sub_lo;
+                let step = (span * 0.5).min(tolerance * 1e-2).max(span * 1e-9);
+                let probe = sub_lo + step;
+                if probe > sub_lo
+                    && probe < sub_hi
+                    && !super::super::sample_off_face(k, target, face_id, bisector.point(probe))?
+                {
+                    return Ok(Some(probe));
+                }
+                return Ok(Some(mid));
+            }
+            sub_lo = sub_hi;
+            sub_lo_is_iv_lo = false;
+        }
+        if iv.hi_closed
+            && !super::super::sample_off_face(k, target, face_id, bisector.point(iv.hi))?
+        {
+            return Ok(Some(iv.hi));
+        }
+    }
+    Ok(None)
+}
+
+/// Construct the retained on-face contact of two non-parallel opposing straight
+/// bands on a shared planar face.
 pub(super) fn retained_contact(
     k: &Kernel,
-    target: &Brep,
+    target: &mut Brep,
     a: &Band,
     b: &Band,
     blended: &[EdgeId],
@@ -555,33 +653,14 @@ pub(super) fn retained_contact(
             return Ok(None);
         }
     }
-    let Some(&first) = kept.first() else {
-        return Ok(None);
-    };
     let tolerance = edge::tolerance(target, a.edge)?.max(edge::tolerance(target, b.edge)?);
-    let (u_scale, u_witness) = if bisector.s_slope == 0.0 {
-        let mid = 0.5 * (first.lo + first.hi);
-        (mid, mid)
-    } else if first.lo_closed {
-        (first.lo, first.lo)
-    } else {
-        let span = first.hi - first.lo;
-        let step = (span * 0.5).min(tolerance * 1e-2).max(span * 1e-9);
-        let probe = first.lo + step;
-        let witness = if probe > first.lo && probe < first.hi {
-            probe
-        } else {
-            0.5 * (first.lo + first.hi)
-        };
-        (first.lo, witness)
-    };
-    let at_scale = bisector.point(u_scale);
-    let contact_at = bisector.point(u_witness);
-    if !bisector.within_convex_caps(contact_at, tolerance) {
+    let Some(u_on_face) = first_on_face_parameter(k, target, a.face, &bisector, &kept, tolerance)?
+    else {
         return Ok(None);
-    }
-    let da = (at_scale - bisector.a0).dot(bisector.na);
-    let db = (at_scale - bisector.b0).dot(bisector.nb);
+    };
+    let contact_at = bisector.point(u_on_face);
+    let da = (contact_at - bisector.a0).dot(bisector.na);
+    let db = (contact_at - bisector.b0).dot(bisector.nb);
     if !(da.is_finite() && db.is_finite() && da > 0.0 && db > 0.0) {
         return Ok(None);
     }
@@ -597,7 +676,7 @@ pub(super) fn retained_contact(
             "invalid planar contact scale",
         ));
     }
-    let coord_scale = at_scale
+    let coord_scale = contact_at
         .max_dimension()
         .max(bisector.a0.max_dimension())
         .max(bisector.a1.max_dimension())
@@ -690,5 +769,74 @@ mod tests {
         let mut out = Vec::new();
         single.subtract_closed(0.0, 0.0, &mut out);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn crossing_past_a_short_convex_cap_keeps_the_open_interior_domain() {
+        let face = FaceId::from_index(1);
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        // Band A along y = 0 (x in [0, 10]), short 0.25 mm convex cap on x = 0.
+        let a = PreparedOpposing {
+            face,
+            plane_normal: z,
+            p0: Point3::new(0.0, 0.0, 0.0),
+            p1: Point3::new(10.0, 0.0, 0.0),
+            inward: Vec3::new(0.0, 1.0, 0.0),
+            width: 1.5,
+            boundaries: [
+                EndBoundary {
+                    origin: Point3::new(0.0, 0.0, 0.0),
+                    inward: Vec3::new(1.0, 0.0, 0.0),
+                    offset: 0.0,
+                    edge_tol: 1e-5,
+                    closed: true,
+                    convex_cap: Some((Vec3::new(0.0, 1.0, 0.0), 0.25)),
+                },
+                EndBoundary {
+                    origin: Point3::new(10.0, 0.0, 0.0),
+                    inward: Vec3::new(-1.0, 0.0, 0.0),
+                    offset: 0.0,
+                    edge_tol: 1e-5,
+                    closed: true,
+                    convex_cap: None,
+                },
+            ],
+        };
+        // Band B slightly skewed: (0, 2.0) -> (10, 2.1), inward normal roughly -Y.
+        let eb = Vec3::new(10.0, 0.1, 0.0).unitize().unwrap();
+        let nb = Vec3::new(eb.y, -eb.x, 0.0);
+        let b = PreparedOpposing {
+            face,
+            plane_normal: z,
+            p0: Point3::new(0.0, 2.0, 0.0),
+            p1: Point3::new(10.0, 2.1, 0.0),
+            inward: nb,
+            width: 1.5,
+            boundaries: [
+                EndBoundary {
+                    origin: Point3::new(0.0, 2.0, 0.0),
+                    inward: Vec3::new(1.0, 0.0, 0.0),
+                    offset: 0.0,
+                    edge_tol: 1e-5,
+                    closed: true,
+                    convex_cap: None,
+                },
+                EndBoundary {
+                    origin: Point3::new(10.0, 2.1, 0.0),
+                    inward: Vec3::new(-1.0, 0.0, 0.0),
+                    offset: 0.0,
+                    edge_tol: 1e-5,
+                    closed: true,
+                    convex_cap: None,
+                },
+            ],
+        };
+        // Bisector meets x = 0 at y ~ 1.0 > 0.25 (past cap_len): the lower bound
+        // becomes open (excluding only the crossing on x = 0), while the domain
+        // x in (0, 10] stays non-empty and reports overlap.
+        let bisector = OpposingBisector::from_prepared(&a, &b).expect("domain remains non-empty");
+        assert!(!bisector.domain.lo_closed);
+        assert!(bisector.domain.hi_closed);
+        assert!(overlap_candidate_prepared(&a, &b));
     }
 }

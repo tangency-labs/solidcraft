@@ -537,7 +537,14 @@ impl SessionObjects<'_> {
             return Err(invalid("object is not a solver"));
         };
         let contact = {
-            let (a, b) = (self.solver(ia)?, self.solver(ib)?);
+            let solvers_ref = &self.solvers;
+            let solver_of = |id: FilletSolverId| -> Result<&SolverObject> {
+                solvers_ref
+                    .get(id.0 as usize)
+                    .and_then(Option::as_ref)
+                    .ok_or_else(|| invalid("solver is not live in this session"))
+            };
+            let (a, b) = (solver_of(ia)?, solver_of(ib)?);
             let rail_on_face = |solver: &SolverObject| -> Result<Option<usize>> {
                 for rail in 0..2 {
                     if let Some(use_) = solver.base().edgeuse(rail)? {
@@ -559,8 +566,7 @@ impl SessionObjects<'_> {
                 if id == ia || id == ib {
                     continue;
                 }
-                if let Some(corner) =
-                    planar_bands::corner_band(self.target, self.solver(id)?, face)?
+                if let Some(corner) = planar_bands::corner_band(self.target, solver_of(id)?, face)?
                 {
                     corners.push(corner);
                 }

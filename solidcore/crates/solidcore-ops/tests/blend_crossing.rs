@@ -611,4 +611,39 @@ fn chamfers_on_a_land_with_tilted_trench_plane_or_hole_are_refused_with_fit() {
         panic!("hole: expected TooLarge(BandsOverlap), got {err:?}");
     };
     assert!((size - 0.5).abs() <= 1e-9, "hole: fit {size}");
+
+    // Hole covering the narrow end (`y = 2`) of a tapered land (`skew = 1.0`,
+    // width `1 + (y - 2) / 9`): the lower end of the bisector is off-face, so
+    // the contact moves to the on-face hole rim at `y = 2.5` (`width = 1 + 0.5 / 9`).
+    let (base_taper, _) = skewed_land_part(1.0, 0.0, false);
+    let end_hole = make_cylinder([54.5, 2.0, 5.0], 0.5, 14.0).unwrap();
+    let holed_end = boolean(base_taper, end_hole, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let holed_edges = [
+        edge_at(&holed_end, [55.5, 6.5, 18.0]),
+        edge_at(&holed_end, [54.0, 6.5, 18.0]),
+    ];
+    let err = blend(
+        &holed_end,
+        Blend::Chamfer,
+        &holed_edges,
+        &[1.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap_err();
+    let Error::TooLarge {
+        size,
+        kind: FitKind::Distance,
+        face: Some(_),
+        why: Some(RoomReason::BandsOverlap),
+        ..
+    } = err
+    else {
+        panic!("end hole: expected TooLarge(BandsOverlap), got {err:?}");
+    };
+    // At y ~ 2.5 the land is ~1.0556 wide, so the on-face bisector fit is ~0.526 mm
+    // (strictly above the y = 2 cap fit 0.4985 mm, and well below 1.0 mm).
+    assert!(size > 0.52 && size < 0.54, "end hole: fit {size}");
 }
