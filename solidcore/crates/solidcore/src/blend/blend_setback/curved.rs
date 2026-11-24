@@ -121,7 +121,9 @@ pub(super) fn comps(net: &Net) -> Result<[Tensor; 4]> {
     let mk = |c: usize| -> Result<Tensor> {
         let mut t = t_make(net.p, net.q);
         for (i, ti) in t.c.iter_mut().enumerate() {
-            *ti = el(el_ref(&net.pts, i)?, c)?;
+            // fewer points than the net's degrees give: only a caller's fill patch
+            // (`containment_kept`'s saddle test) can be one
+            *ti = el(net.pts.get(i).ok_or_else(fill_not_from_split)?, c)?;
         }
         Ok(t)
     };
@@ -2168,8 +2170,9 @@ pub(super) fn graph_g1_curved(
 ///
 /// # Errors
 /// [`CornerInput::FillNotFromSetbackSplit`](crate::error::blend::CornerInput::FillNotFromSetbackSplit)
-/// (`SM_ERR`) for a patch with a weight not positive, of more than one span, or of degree
-/// below 2 across a face it lies on: the fill is the caller's ([`super::containment`]).
+/// (`SM_ERR`) for a patch with a weight not positive, of more than one span, with fewer
+/// control points than a one-span net of its degrees, or of degree below 2 across a face it
+/// lies on: the fill is the caller's ([`super::containment`]).
 pub(super) fn containment_curved(fill: &Fill, faces: &[Face], convex: bool) -> Result<f64> {
     let d_side = if convex { 1.0 } else { -1.0 };
     let n = fill.face.len();
@@ -2187,8 +2190,10 @@ pub(super) fn containment_curved(fill: &Fill, faces: &[Face], convex: bool) -> R
         for (f, face) in faces.iter().enumerate() {
             let mut w = t_make(p, q);
             for (k, x) in w.c.iter_mut().enumerate() {
+                // fewer control points than a one-span net of degrees (p, q): the caller's
+                // fill (canonical data does not bound a knot's multiplicity by the degree)
                 *x = if rational {
-                    el(&canonical.weights, k)?
+                    *canonical.weights.get(k).ok_or_else(fill_not_from_split)?
                 } else {
                     1.0
                 };
@@ -2200,7 +2205,7 @@ pub(super) fn containment_curved(fill: &Fill, faces: &[Face], convex: bool) -> R
             for (c, uc) in u.iter_mut().enumerate() {
                 *uc = t_make(p, q);
                 for (k, x) in uc.c.iter_mut().enumerate() {
-                    let pt = *pts.get(k).ok_or_else(past_table)?;
+                    let pt = *pts.get(k).ok_or_else(fill_not_from_split)?;
                     *x = el(&w.c, k)? * (pt.component(c) - el(&origin, c)?);
                 }
                 if face.kind != FaceKind::Sphere {

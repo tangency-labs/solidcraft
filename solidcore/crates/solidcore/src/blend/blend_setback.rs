@@ -155,8 +155,12 @@ fn past_table() -> SolidError {
 /// rows and the per-round and per-face lists) are built at the sizes its order, degrees
 /// and round count give, from the canonical B-spline data of its rounds and patches. The
 /// indices a caller passes into a list are checked on entry: an edge's faces
-/// ([`distances`], `model_rounds`), a fill's faces ([`containment_kept`]).
-const WHY_TABLE: &str = "an index or size is past a table of the setback fill, though every table is built at the size its order, degrees and round count give, from the canonical B-spline data of its rounds and patches, and the indices a caller passes (an edge's faces, a fill's faces) are checked on entry";
+/// ([`distances`], `model_rounds`), a fill's faces ([`containment_kept`]). A caller's fill
+/// patch need not hold the points a one-span net of its degrees has (canonical data does not
+/// bound a knot's multiplicity by the degree): where its points are read into such a net
+/// ([`containment`]'s plane bound, the curved containment, `first` and `comps`) a count past
+/// it is [`CornerInput::FillNotFromSetbackSplit`] instead.
+const WHY_TABLE: &str = "an index or size is past a table of the setback fill, though every table is built at the size its order, degrees and round count give, from the canonical B-spline data of its rounds and patches, the indices a caller passes (an edge's faces, a fill's faces) checked on entry and a caller's fill patches' point counts checked where they are read";
 
 /// `round_jets` inserts the round's end parameter to the round's degree (`raise_knot`,
 /// which takes a knot within `param_tol` as that knot) once the end is checked inside the
@@ -1298,13 +1302,19 @@ fn second(net: &Net, u: f64, v: f64) -> Result<[Vec3; 3]> {
 }
 
 /// `sm_SbFirst`: the point and its first derivatives (Euclidean) at `(u, v)`.
+/// [`CornerInput::FillNotFromSetbackSplit`] for a net with fewer points than its degrees
+/// give: only a caller's fill patch ([`containment_kept`]) can be one, the kernel's nets
+/// being built at their size.
 fn first(net: &Net, u: f64, v: f64) -> Result<(Vec3, Vec3, Vec3)> {
     let (u0, u1, _) = basis(net.p, u)?;
     let (v0, v1, _) = basis(net.q, v)?;
     let mut h = [HOM_ZERO; 3];
     for i in 0..=net.p {
         for j in 0..=net.q {
-            let a = el_ref(&net.pts, i * (net.q + 1) + j)?;
+            let a = net
+                .pts
+                .get(i * (net.q + 1) + j)
+                .ok_or_else(fill_not_from_split)?;
             let (ui0, ui1, vj0, vj1) = (el(&u0, i)?, el(&u1, i)?, el(&v0, j)?, el(&v1, j)?);
             let [ha, hb, hc] = &mut h;
             for (c, &ac) in a.iter().enumerate() {
@@ -3077,9 +3087,10 @@ fn nets_never_turn_back(patches: &[BSplineSurface]) -> Result<bool> {
 /// by the faces' implicit forms, else `f64::INFINITY` (the fork's `HUGE_VAL`, 37c9e1d).
 ///
 /// # Errors
-/// `SM_ERR_INVALID_INPUT` for an empty fill; `SM_ERR` for a patch with a weight not positive
-/// (beside a curved face also: of more than one span, or of degree below 2 across a face it
-/// lies on).
+/// `SM_ERR_INVALID_INPUT` for an empty fill; [`CornerInput::FillNotFromSetbackSplit`]
+/// (`SM_ERR`) for a patch with a weight not positive or with more control points than a
+/// one-span net holds (beside a curved face also: of more than one span, with fewer control
+/// points than that net, or of degree below 2 across a face it lies on).
 pub fn containment(k: &Kernel, fill: &Fill, faces: &[Face], convex: bool, tol: f64) -> Result<f64> {
     if fill.patches.is_empty() {
         return Err(SolidError::invalid_input(
@@ -3258,7 +3269,9 @@ fn plane_bound(
             + d.z.abs() * face.normal.z.abs();
         most = smax(most, wi * terms);
         w_min = smin(w_min, wi);
-        *el_mut(&mut w.c, i)? = wi;
+        // more control points than a one-span net of degrees (p, q) holds: the caller's fill
+        // (canonical data does not bound a knot's multiplicity by the degree)
+        *w.c.get_mut(i).ok_or_else(fill_not_from_split)? = wi;
         *el_mut(&mut f.c, i)? = wi * side * d.dot(face.normal);
     }
     let ops = 8 + graph::GRAPH_DEPTH * (p + q);
@@ -3535,6 +3548,51 @@ mod tests {
         let err = containment_kept(&Kernel::default(), &fill, &plane, 1e-6).unwrap_err();
         assert_eq!(err, fill_not_from_split());
         assert_eq!(err.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+    }
+
+    /// A patch whose knots repeat past its degree has more control points than a one-span
+    /// net of its degrees holds: the caller's fill, invalid input with `SM_ERR`, not an index
+    /// past a table.
+    #[test]
+    fn a_patch_with_more_points_than_its_net_is_invalid_input() {
+        let mut pts = Vec::new();
+        for i in 0..5 {
+            for z in [0.0, 1.0] {
+                pts.push(Point3::new(f64::from(i), 1.0, z));
+            }
+        }
+        let patch = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 2,
+            v_degree: 1,
+            control_points: &pts,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[4, 4],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            uv_domain: None,
+        })
+        .unwrap();
+        let fill = Fill {
+            patches: vec![patch],
+            round: Vec::new(),
+            face: Vec::new(),
+            reversed: Vec::new(),
+            degree: 2,
+        };
+        let plane = [Face::plane(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        )];
+        // the hull stands 1 past the plane, past the tolerance: the bound is taken on the net
+        let err = containment(&Kernel::default(), &fill, &plane, true, 0.5).unwrap_err();
+        assert_eq!(err, fill_not_from_split());
         assert_eq!(
             crate::error::upstream_status(&err),
             Some(crate::error::SM_ERR)
