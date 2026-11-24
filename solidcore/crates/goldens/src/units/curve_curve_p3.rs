@@ -1902,6 +1902,10 @@ mod tests {
                 certify(&k, &built, answer)
             }))
             .unwrap_or_else(|_| panic!("{}: not the certified area normal", case.name));
+            if cert == Cert::SingleLinear {
+                // a single line's refusal is `SM_ERR`, not an area refusal's 1007
+                assert_eq!(status, 1001, "{}: a single line's status", case.name);
+            }
             *counts.entry(cert).or_default() += 1;
         }
         eprintln!("WR-587 Normal rows by class: {counts:?}; deferred {deferred}");

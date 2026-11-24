@@ -221,8 +221,8 @@ pub(crate) fn wrap<T: Bits>(
 }
 
 /// Runs `f`, the loop normal of `curves` written into `normal`, through `k`'s loop normal
-/// hook; with no hook it only runs `f`. [`SolidError::Unported`] and
-/// [`SolidError::Cancelled`] pass the hook by.
+/// hook; with no hook, or inside another seam call (the hook's own calls among them), it
+/// only runs `f`. [`SolidError::Unported`] and [`SolidError::Cancelled`] pass the hook by.
 ///
 /// # Errors
 ///
@@ -234,12 +234,18 @@ pub(crate) fn wrap_loop_normal(
     normal: &mut Vec3,
     f: impl FnOnce(&mut Vec3) -> Result<()>,
 ) -> Result<()> {
-    let Some(hook) = k.replay.loop_normal.as_ref() else {
+    let seam_state = &k.replay;
+    let Some(hook) = seam_state.loop_normal.as_ref() else {
         return f(normal);
     };
+    if seam_state.depth.load(Ordering::Relaxed) > 0 {
+        return f(normal);
+    }
+    seam_state.depth.fetch_add(1, Ordering::Relaxed);
     let own = f(normal);
     if let Err(e) = &own {
         if e.is_unported_or_cancelled() {
+            seam_state.depth.fetch_sub(1, Ordering::Relaxed);
             return own;
         }
     }
@@ -253,6 +259,7 @@ pub(crate) fn wrap_loop_normal(
             }),
         ),
     };
+    seam_state.depth.fetch_sub(1, Ordering::Relaxed);
     *normal = written;
     answer
 }

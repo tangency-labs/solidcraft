@@ -357,12 +357,48 @@ fn certify_plane(points: &[Vec3], n: Vec3, a: Vec3, e: f64) -> Cert {
         in_plane(points, n),
         "the plane normal {n:?} is not normal to every chord from the first sample"
     );
+    // the samples span a plane: some offset from the first is off the line to the
+    // farthest by more than the kernel's angular zero (1.75e-6) and its rounding
+    let mut d = Vec3::ZERO;
+    for &p in points {
+        if (p - first).length() > d.length() {
+            d = p - first;
+        }
+    }
+    assert!(
+        points.iter().any(|&p| {
+            let v = p - first;
+            d.cross(v).length() > 1.7e-6 * d.length() * v.length()
+        }),
+        "collinear samples span no plane"
+    );
     let along = n.dot(a);
     if along.abs() > e + 8.0 * f64::EPSILON * a.length() {
         assert!(
             along > 0.0,
             "the plane normal {n:?} is against the area {a:?}"
         );
+    } else {
+        // no certain area side: a certain sum of the chords' turns about `n` is positive
+        // (each turn `n . (c_i x c_i+1)` is off by at most its size `|c_i||c_i+1|` times
+        // `n`'s 2e-6 tilt out of the plane, and by rounding)
+        let (mut turns, mut weight, mut count) = (0.0, 0.0, 0.0);
+        let chords: Vec<Vec3> = points
+            .windows(2)
+            .map(|w| w[1] - w[0])
+            .filter(|&c| c != Vec3::ZERO)
+            .collect();
+        for w in chords.windows(2) {
+            turns += n.dot(w[0].cross(w[1]));
+            weight += w[0].length() * w[1].length();
+            count += 1.0;
+        }
+        if turns.abs() > ((count + 8.0) * 8.0 * f64::EPSILON + 4e-6) * weight {
+            assert!(
+                turns > 0.0,
+                "the plane normal {n:?} is against the chain's turns {turns:e}"
+            );
+        }
     }
     Cert::PlaneNormal
 }
@@ -651,10 +687,29 @@ fn plane_normals_of_open_chains_certify() {
             .collect();
         chains.push(polyline(&pts));
     }
-    for curves in &chains {
+    for (i, curves) in chains.iter().enumerate() {
         let n = solidcore::curve::curve::p3::compute_crvs_normal(&k, curves).unwrap();
         assert_eq!(certify(&k, curves, Answer::Normal(n)), Cert::PlaneNormal);
+        // the raised path's area is along +Z; the placed paths' area is exactly zero and
+        // their turns (-4, then +2 about u x v) sum against u x v
+        let expected = if i == 0 { Vec3::Z } else { -u.cross(v) };
+        assert!(n.dot(expected) > 1.0 - 1e-12, "{i}: {n:?}");
+        if i > 0 {
+            let reversed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                certify(&k, curves, Answer::Normal(-n))
+            }));
+            assert!(
+                reversed.is_err(),
+                "{i}: a plane normal against the turns certifies"
+            );
+        }
     }
+    // collinear samples of two curves span no plane: a normal for them fails
+    let collinear = polyline(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]);
+    let line = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        certify(&k, &collinear, Answer::Normal(Vec3::Z))
+    }));
+    assert!(line.is_err(), "a normal of collinear samples certifies");
     // the raised Z path's area is certainly along +Z: the reversed plane normal fails
     let reversed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         certify(&k, &chains[0], Answer::Normal(-Vec3::Z))

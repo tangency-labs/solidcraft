@@ -30,9 +30,9 @@
 //!   except that an open chain whose chord-closed area has no certain direction but
 //!   which spans a plane answers that plane's normal (on the area's side, or its turns'
 //!   when that is uncertain), and an area within its own rounding of zero is
-//!   `SM_ERR_INVALID_INPUT` too. A sample that is not finite, or samples so large that
-//!   their area vector overflows, are `SM_ERR_INVALID_INPUT` (upstream would unitize a
-//!   NaN or an infinity). The sampling (5 chords per curve, 1 for a
+//!   `SM_ERR_INVALID_INPUT` too. A sample that is not finite is `SM_ERR_INVALID_INPUT`
+//!   (upstream would unitize a NaN); samples whose sums overflow are scaled by a power
+//!   of two first (upstream would unitize an infinity). The sampling (5 chords per curve, 1 for a
 //!   two-point curve) is upstream's.
 //! - **Curve kinds.** `ComputeCrvsNormal` and `CrvsFixGaps` cast every curve to
 //!   `SmBSplineCurve`. `ComputeCrvsNormal` only calls virtual members and the
@@ -356,6 +356,44 @@ fn direction_is_certain(length: f64, error: f64) -> bool {
     length > error && 2.0 * error / (length - error) + 8.0 * UNIT_ROUNDOFF <= EFF_ZERO_RAD
 }
 
+/// The fan sum `A` of `samples` about the first (the sum of `a x b` over consecutive
+/// samples' offsets `a`, `b` from it) and its rounding bound `E` ([`area_normal_into`]).
+fn fan_area(samples: &[Point3]) -> (Vec3, f64) {
+    let mut area = Vec3::ZERO;
+    let mut magnitude = 0.0;
+    let mut componentwise = Vec3::ZERO;
+    let mut terms = 0.0;
+    if let Some(&origin) = samples.first() {
+        for w in samples.windows(2) {
+            let (Some(&previous), Some(&point)) = (w.first(), w.get(1)) else {
+                continue;
+            };
+            let (a, b) = (previous - origin, point - origin);
+            area += a.cross(b);
+            magnitude += norm(a) * norm(b);
+            componentwise += Vec3::new(
+                (a.y * b.z).abs() + (a.z * b.y).abs(),
+                (a.z * b.x).abs() + (a.x * b.z).abs(),
+                (a.x * b.y).abs() + (a.y * b.x).abs(),
+            );
+            terms += 1.0;
+        }
+    }
+    let error = (terms + 8.0) * UNIT_ROUNDOFF * magnitude.min(norm(componentwise)) * 1.01;
+    (area, error)
+}
+
+/// `|v|`, without the overflow or underflow of its squares: the plain length where its
+/// square is safely in range (the same bits), else the scaled one of
+/// [`Vec3::length_and_unit`].
+fn norm(v: Vec3) -> f64 {
+    let length = v.length();
+    if length.is_finite() && length > 1e-150 {
+        return length;
+    }
+    v.length_and_unit().map_or(length, |(l, _)| l)
+}
+
 /// [`crvs_normal_into`]'s computation.
 ///
 /// The fan sum `A` is within `E` of the exact fan area vector of the samples, the
@@ -367,7 +405,9 @@ fn direction_is_certain(length: f64, error: f64) -> bool {
 /// within `gamma_4` of its `M` share, and its sum within `gamma_(N-1)` of `M_i`), which is
 /// far the smaller for nearly parallel fan vectors (a long thin loop, or samples far
 /// along one axis). The factor 1.01 covers the rounding of `S`, `M` and the `gamma`s.
-/// The answer:
+/// Samples whose sums overflow are first scaled by a power of two (exact) to a largest
+/// coordinate in `[0.5, 1)`; the tests against `SM_EFF_ZERO` stay on the unscaled
+/// lengths. The answer:
 /// 1. `A`'s direction when it unitizes (`|A| >= SM_EFF_ZERO`) and that direction is
 ///    certain to the kernel's angular zero ([`direction_is_certain`]);
 /// 2. else, for an open chain that certainly spans a plane and lies in it, that plane's
@@ -380,9 +420,6 @@ fn direction_is_certain(length: f64, error: f64) -> bool {
 fn area_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<()> {
     *normal = Vec3::ZERO;
     let mut samples: Vec<Point3> = Vec::new();
-    let mut magnitude = 0.0;
-    let mut componentwise = Vec3::ZERO;
-    let mut terms = 0.0;
     for curve in curves {
         let domain = curve.natural_interval();
         if curve.is_linear(k, EFF_ZERO, false)?.linear && curves.len() == 1 {
@@ -407,51 +444,84 @@ fn area_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<(
                     "loop normal of a curve with a point that is not finite",
                 ));
             }
-            if let (Some(&origin), Some(&previous)) = (samples.first(), samples.last()) {
-                let (a, b) = (previous - origin, point - origin);
-                *normal += a.cross(b);
-                magnitude += a.length() * b.length();
-                componentwise += Vec3::new(
-                    (a.y * b.z).abs() + (a.z * b.y).abs(),
-                    (a.z * b.x).abs() + (a.x * b.z).abs(),
-                    (a.x * b.y).abs() + (a.y * b.x).abs(),
-                );
-                terms += 1.0;
-            }
             samples.push(point);
         }
     }
-    let error = (terms + 8.0) * UNIT_ROUNDOFF * magnitude.min(componentwise.length()) * 1.01;
-    let area = normal.length();
-    // finite samples so large that their cross products overflow have no computed
-    // direction (`Unitize` would answer a zero or NaN vector)
+    // an open chain: its end is not its start (decided before any scaling)
+    let open = match (samples.first(), samples.last()) {
+        (Some(first), Some(last)) => !first.approx_eq(*last),
+        _ => false,
+    };
+    let (mut area_vector, mut error) = fan_area(&samples);
+    let mut area = norm(area_vector);
+    // the power of two the samples are scaled by: `1 / scale^2` takes a scaled area back
+    let mut scale = 1.0;
     if !(area.is_finite() && error.is_finite()) {
-        *normal = Vec3::Z;
-        return Err(SolidError::invalid_input(
-            OP_NORMAL,
-            "loop normal of samples too large for their area vector",
-        ));
+        // samples so large that the sums overflow: the same samples scaled by a power of
+        // two (exact while no coordinate falls below 2^-1022) to a largest coordinate in
+        // [0.5, 1) have the same normal and certainty
+        let mut largest = samples
+            .iter()
+            .map(|p| p.max_dimension())
+            .fold(0.0_f64, f64::max);
+        while largest >= 1.0 {
+            largest *= 0.5;
+            scale *= 0.5;
+        }
+        for p in &mut samples {
+            *p *= scale;
+        }
+        (area_vector, error) = fan_area(&samples);
+        area = norm(area_vector);
+        if !(area.is_finite() && error.is_finite()) {
+            *normal = Vec3::Z;
+            return Err(SolidError::invalid_input(
+                OP_NORMAL,
+                "loop normal of samples too large for their area vector",
+            ));
+        }
     }
-    if area >= EFF_ZERO && direction_is_certain(area, error) {
-        return unitize_written(normal, |_| {
-            SolidError::invalid_input(OP_NORMAL, "zero area loop normal")
-        });
+    // the samples' own area reaches SM_EFF_ZERO (an overflow to infinity does)
+    let unitizes = area / scale / scale >= EFF_ZERO;
+    let direction = |normal: &mut Vec3, a: Vec3| -> Result<()> {
+        if scale == 1.0 {
+            // SER(crCrvsNormal.Unitize()): SM_ERR_INVALID_INPUT for an area below SM_EFF_ZERO
+            *normal = a;
+            return unitize_written(normal, |_| {
+                SolidError::invalid_input(OP_NORMAL, "zero area loop normal")
+            });
+        }
+        match a.length_and_unit() {
+            Some((_, unit)) if unitizes => {
+                *normal = unit;
+                Ok(())
+            }
+            _ => {
+                *normal = Vec3::Z;
+                Err(SolidError::invalid_input(
+                    OP_NORMAL,
+                    "zero area loop normal",
+                ))
+            }
+        }
+    };
+    if unitizes && direction_is_certain(area, error) {
+        return direction(normal, area_vector);
     }
-    if let Some(plane) = open_chain_plane_normal(&samples, *normal, error) {
-        *normal = plane;
-        return Ok(());
+    if open {
+        if let Some(plane) = open_chain_plane_normal(&samples, scale, area_vector, error) {
+            *normal = plane;
+            return Ok(());
+        }
     }
-    if area >= EFF_ZERO && area <= error {
+    if unitizes && area <= error {
         *normal = Vec3::Z;
         return Err(SolidError::invalid_input(
             OP_NORMAL,
             "loop normal of samples whose area vector is within its rounding of zero",
         ));
     }
-    // SER(crCrvsNormal.Unitize()): SM_ERR_INVALID_INPUT for an area below SM_EFF_ZERO
-    unitize_written(normal, |_| {
-        SolidError::invalid_input(OP_NORMAL, "zero area loop normal")
-    })
+    direction(normal, area_vector)
 }
 
 /// The normal of the plane an OPEN chain of `samples` spans, for a chain whose area
@@ -490,11 +560,17 @@ fn area_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<(
 /// counts as none, and so does a sum below that fraction of `T` (the weighted mean turn:
 /// a tolerance on the sum, not an angle). When the sum is none (a symmetric S),
 /// the sense is that of the first turn that is not; with none, `None`.
-fn open_chain_plane_normal(samples: &[Point3], area: Vec3, area_error: f64) -> Option<Vec3> {
-    let (&first, &last) = (samples.first()?, samples.last()?);
-    if first.approx_eq(last) {
-        return None;
-    }
+///
+/// `samples` are an open chain's (the caller decides that before any scaling), scaled by
+/// `scale` (a power of two, 1 unless their sums overflowed): `|c| / scale^2` is the
+/// unscaled `|c|`.
+fn open_chain_plane_normal(
+    samples: &[Point3],
+    scale: f64,
+    area: Vec3,
+    area_error: f64,
+) -> Option<Vec3> {
+    let &first = samples.first()?;
     let mut d = Vec3::ZERO;
     for &p in samples {
         let v = p - first;
@@ -510,26 +586,32 @@ fn open_chain_plane_normal(samples: &[Point3], area: Vec3, area_error: f64) -> O
         if w.length_squared() > c.length_squared() {
             (c, e) = (w, v);
         }
-        off_line |= w.length() > EFF_ZERO_RAD * d.length() * v.length();
+        off_line |= norm(w) > EFF_ZERO_RAD * norm(d) * norm(v);
     }
-    let error = 8.0 * UNIT_ROUNDOFF * d.length() * e.length();
-    let length = c.length();
+    let error = 8.0 * UNIT_ROUNDOFF * norm(d) * norm(e);
+    let length = norm(c);
     if !direction_is_certain(length, error) || !off_line {
         return None;
     }
-    let n = c.unitize().ok()?;
+    let n = if scale == 1.0 {
+        c.unitize().ok()?
+    } else if length / scale / scale >= EFF_ZERO {
+        c.length_and_unit()?.1
+    } else {
+        return None;
+    };
     let delta = 2.0 * error / (length - error) + 8.0 * UNIT_ROUNDOFF;
     // every sample lies in the plane (to the kernel's angular zero, as seen from the first;
     // `delta`, the plane's own uncertainty, is at most that)
     let off_plane = EFF_ZERO_RAD * 1.01;
     if samples
         .iter()
-        .any(|&p| n.dot(p - first).abs() > off_plane * (p - first).length())
+        .any(|&p| n.dot(p - first).abs() > off_plane * norm(p - first))
     {
         return None;
     }
     let along = area.dot(n);
-    if along.abs() > area_error + 4.0 * UNIT_ROUNDOFF * area.length() {
+    if along.abs() > area_error + 4.0 * UNIT_ROUNDOFF * norm(area) {
         return Some(if along > 0.0 { n } else { -n });
     }
     // (a turn within the kernel's angular zero of none is none)
@@ -549,7 +631,7 @@ fn open_chain_plane_normal(samples: &[Point3], area: Vec3, area_error: f64) -> O
         }
         if let Some(prev) = previous {
             let turn = n.dot(prev.cross(chord));
-            let size = prev.length() * chord.length();
+            let size = norm(prev) * norm(chord);
             turns += turn;
             weight += size;
             count += 1.0;
@@ -2988,11 +3070,12 @@ mod tests {
         assert_eq!(compute_crvs_normal(&k, &kinked).unwrap(), -Vec3::Z);
     }
 
-    /// Finite samples so large that their area vector overflows (1e155 and 1e80 squares)
-    /// have no computed direction: `SM_ERR_INVALID_INPUT` with `(0, 0, 1)` written, not a
-    /// zero or NaN success.
+    /// Finite samples so large that their sums overflow (1e80 and 1e155 squares, whose
+    /// area vector's length or cross products overflow, and a parallelogram at 2^516
+    /// whose area 2^497 is finite but whose offsets' lengths overflow) are scaled by a
+    /// power of two and answer their normal, +Z (main answered a zero or NaN vector).
     #[test]
-    fn loop_normal_of_samples_too_large_refuses() {
+    fn loop_normal_of_samples_too_large_is_scaled() {
         let k = Kernel::default();
         for size in [1e80, 1e155] {
             let square = polyline(&[
@@ -3002,13 +3085,21 @@ mod tests {
                 [0.0, size, 0.0],
                 [0.0, 0.0, 0.0],
             ]);
-            let (n, e) = compute_crvs_normal_written(&k, &square).unwrap();
-            assert_eq!(n, Vec3::Z, "{size:e}");
-            assert!(
-                matches!(e, Some(SolidError::InvalidInput { .. })),
-                "{size:e}: {e:?}"
+            assert_eq!(
+                compute_crvs_normal(&k, &square).unwrap(),
+                Vec3::Z,
+                "{size:e}"
             );
         }
+        let (l, d) = (2f64.powi(516), 2f64.powi(-20));
+        let parallelogram = polyline(&[
+            [0.0, 0.0, 0.0],
+            [l, 1.0, 0.0],
+            [2.0 * l, 2.0 + d, 0.0],
+            [l, 1.0 + d, 0.0],
+            [0.0, 0.0, 0.0],
+        ]);
+        assert_eq!(compute_crvs_normal(&k, &parallelogram).unwrap(), Vec3::Z);
     }
 
     /// The fork's be45e8d evaluates its samples with `SER(EvaluatePoint)`: a curve whose
