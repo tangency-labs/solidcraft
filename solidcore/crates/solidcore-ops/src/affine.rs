@@ -7,8 +7,8 @@
 //! [`solidcore::Transform::concat`], [`solidcore::Transform::inverse`]); ops checks the
 //! numbers and passes them on. Beside them, how far a point or a box reaches along a direction
 //! ([`distance_along`], [`span_along`]), as the kernel measures it, a point under a map
-//! ([`apply_point`]), the quads a pinned picture is drawn on ([`picture_frame`],
-//! [`lifted_quad`], [`parallelogram_point`]), and a direction turned to the sense of another
+//! ([`apply_point`]), parallelograms on a plane ([`rect_of_aspect`], [`fit_aspect`],
+//! [`offset_quad`], [`parallelogram_point`]), and a direction turned to the sense of another
 //! ([`same_sense`]).
 
 use solidcore::geom::certified::Verdict;
@@ -176,19 +176,19 @@ pub fn apply_point(matrix: &Matrix, point: [f64; 3]) -> [f64; 3] {
     p
 }
 
-/// The corners of a picture pinned to points of a plane, in that plane's coordinates, through
-/// [`solidcore::math::picture_frame`]: its bottom edge from `bl` to `br`, its top-left corner
+/// The corners of a parallelogram on a plane, in that plane's coordinates, through
+/// [`solidcore::math::rect_of_aspect`]: its bottom edge from `bl` to `br`, its top-left corner
 /// `top_left` when it may stretch, else `aspect` (height over width) times as high as wide with
 /// its top on the left of the bottom edge. Bottom-left, bottom-right, top-right, top-left;
 /// `None` for corners that give no area.
-pub fn picture_frame(
+pub fn rect_of_aspect(
     bl: [f64; 2],
     br: [f64; 2],
     top_left: Option<[f64; 2]>,
     aspect: f64,
 ) -> Option<[[f64; 2]; 4]> {
     let on = |[x, y]: [f64; 2]| Vec3::new(x, y, 0.0);
-    let corners = solidcore::math::picture_frame(
+    let corners = solidcore::math::rect_of_aspect(
         on(bl),
         on(br),
         top_left.map(on),
@@ -198,23 +198,23 @@ pub fn picture_frame(
     Some(corners.map(|p| [p.x, p.y]))
 }
 
-/// How a picture `aspect` (height over width) times as high as wide fits a frame pinned at `bl`,
-/// `br` and `tl`, through [`solidcore::math::picture_fit`]: its width, and whether the frame
+/// How a rectangle `aspect` (height over width) times as high as wide fits a frame pinned at `bl`,
+/// `br` and `tl`, through [`solidcore::math::fit_aspect`]: its width, and whether the frame
 /// stretches it. `None` for a frame with no area.
-pub fn picture_fit(bl: [f64; 3], br: [f64; 3], tl: [f64; 3], aspect: f64) -> Option<(f64, bool)> {
-    solidcore::math::picture_fit(vec3(bl), vec3(br), vec3(tl), aspect)
+pub fn fit_aspect(bl: [f64; 3], br: [f64; 3], tl: [f64; 3], aspect: f64) -> Option<(f64, bool)> {
+    solidcore::math::fit_aspect(vec3(bl), vec3(br), vec3(tl), aspect)
 }
 
-/// A quad's unit normal, its corners lifted along that normal and its corners lifted against it,
-/// as [`lifted_quad`] returns them.
-pub type LiftedQuad = ([f64; 3], [[f64; 3]; 4], [[f64; 3]; 4]);
+/// A quad's unit normal, its corners moved along that normal and its corners moved against it,
+/// as [`offset_quad`] returns them.
+pub type OffsetQuad = ([f64; 3], [[f64; 3]; 4], [[f64; 3]; 4]);
 
-/// A quad lifted `lift` clear of its own plane on both sides, through
-/// [`solidcore::math::lifted_quad`]: the quad's unit normal (bottom edge cross left edge), its
+/// A quad offset `lift` from its own plane on both sides, through
+/// [`solidcore::math::offset_quad`]: the quad's unit normal (bottom edge cross left edge), its
 /// corners moved `lift` along that normal and its corners moved `lift` against it. `None` for
 /// numbers not finite or corners with no area.
-pub fn lifted_quad(corners: [[f64; 3]; 4], lift: f64) -> Option<LiftedQuad> {
-    let (n, front, back) = solidcore::math::lifted_quad(corners.map(vec3), lift)?;
+pub fn offset_quad(corners: [[f64; 3]; 4], lift: f64) -> Option<OffsetQuad> {
+    let (n, front, back) = solidcore::math::offset_quad(corners.map(vec3), lift)?;
     let arr = |p: Vec3| [p.x, p.y, p.z];
     Some((arr(n), front.map(arr), back.map(arr)))
 }
@@ -250,13 +250,17 @@ pub fn span_along(
 }
 
 /// The axis-aligned box around the corners of the box `lo`..`hi` moved by `matrix`, through
-/// [`Transform::moved_box`]: it holds the moved box, a little larger for a turn. An empty box
+/// [`Transform::transformed_box`]: it holds the moved box, a little larger for a turn. An empty box
 /// (`lo` above `hi` on an axis) comes back as it is.
 ///
 /// # Errors
 /// [`Error::Argument`] for a matrix with a number not finite, a NaN bound (an empty box's
 /// too), or a corner of a non-empty box that is not finite or does not map to finite numbers.
-pub fn moved_box(matrix: &Matrix, lo: [f64; 3], hi: [f64; 3]) -> Result<([f64; 3], [f64; 3])> {
+pub fn transformed_box(
+    matrix: &Matrix,
+    lo: [f64; 3],
+    hi: [f64; 3],
+) -> Result<([f64; 3], [f64; 3])> {
     if !finite(matrix.as_flattened()) || lo.iter().chain(&hi).any(|v| v.is_nan()) {
         return Err(Error::Argument);
     }
@@ -266,7 +270,7 @@ pub fn moved_box(matrix: &Matrix, lo: [f64; 3], hi: [f64; 3]) -> Result<([f64; 3
     if !finite(&lo) || !finite(&hi) {
         return Err(Error::Argument);
     }
-    let (a, b) = Transform { m: *matrix }.moved_box(vec3(lo), vec3(hi));
+    let (a, b) = Transform { m: *matrix }.transformed_box(vec3(lo), vec3(hi));
     let (a, b) = ([a.x, a.y, a.z], [b.x, b.y, b.z]);
     if !finite(&a) || !finite(&b) {
         return Err(Error::Argument);
@@ -410,23 +414,23 @@ mod tests {
     }
 
     #[test]
-    fn a_moved_box_holds_the_moved_box_and_refuses_numbers_not_finite() {
+    fn transformed_box_holds_the_moved_box_and_refuses_numbers_not_finite() {
         let turn = then(
             &rotation([0.0; 3], [0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_2).unwrap(),
             &translation([10.0, 20.0, 30.0]).unwrap(),
         )
         .unwrap();
-        let (lo, hi) = moved_box(&turn, [0.0; 3], [1.0, 2.0, 3.0]).unwrap();
+        let (lo, hi) = transformed_box(&turn, [0.0; 3], [1.0, 2.0, 3.0]).unwrap();
         assert!(near(lo, [8.0, 20.0, 30.0], 1e-12) && near(hi, [10.0, 21.0, 33.0], 1e-12));
         let empty = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
-        assert_eq!(moved_box(&turn, empty.0, empty.1).unwrap(), empty);
-        assert!(moved_box(&turn, [f64::NAN, 0.0, 0.0], [1.0; 3]).is_err());
+        assert_eq!(transformed_box(&turn, empty.0, empty.1).unwrap(), empty);
+        assert!(transformed_box(&turn, [f64::NAN, 0.0, 0.0], [1.0; 3]).is_err());
         // a NaN on one axis is refused even when another axis is reversed (empty)
-        assert!(moved_box(&IDENTITY, [1.0, f64::NAN, 0.0], [0.0, 1.0, 1.0]).is_err());
-        assert!(moved_box(&IDENTITY, [1.0, 0.0, 0.0], [0.0, 1.0, f64::NAN]).is_err());
+        assert!(transformed_box(&IDENTITY, [1.0, f64::NAN, 0.0], [0.0, 1.0, 1.0]).is_err());
+        assert!(transformed_box(&IDENTITY, [1.0, 0.0, 0.0], [0.0, 1.0, f64::NAN]).is_err());
         let mut bad = IDENTITY;
         bad[3][0] = f64::NAN;
-        assert!(moved_box(&bad, [0.0; 3], [1.0; 3]).is_err());
+        assert!(transformed_box(&bad, [0.0; 3], [1.0; 3]).is_err());
     }
 
     #[test]
@@ -521,49 +525,52 @@ mod tests {
     /// A picture 2:1 on a 40 mm bottom edge is 20 mm high, on the edge's left; a top-left point
     /// stretches it; corners on one line give none.
     #[test]
-    fn a_picture_frame_follows_its_bottom_edge_and_its_shape_or_top_corner() {
+    fn rect_of_aspect_follows_its_bottom_edge_and_its_shape_or_top_corner() {
         assert_eq!(
-            picture_frame([0.0, 0.0], [40.0, 0.0], None, 0.5),
+            rect_of_aspect([0.0, 0.0], [40.0, 0.0], None, 0.5),
             Some([[0.0, 0.0], [40.0, 0.0], [40.0, 20.0], [0.0, 20.0]])
         );
         assert_eq!(
-            picture_frame([0.0, 0.0], [40.0, 0.0], Some([0.0, 30.0]), 0.5),
+            rect_of_aspect([0.0, 0.0], [40.0, 0.0], Some([0.0, 30.0]), 0.5),
             Some([[0.0, 0.0], [40.0, 0.0], [40.0, 30.0], [0.0, 30.0]])
         );
-        assert_eq!(picture_frame([0.0, 0.0], [0.0, 0.0], None, 0.5), None);
+        assert_eq!(rect_of_aspect([0.0, 0.0], [0.0, 0.0], None, 0.5), None);
         assert_eq!(
-            picture_frame([0.0, 0.0], [40.0, 0.0], Some([20.0, 0.0]), 0.5),
+            rect_of_aspect([0.0, 0.0], [40.0, 0.0], Some([20.0, 0.0]), 0.5),
             None
         );
-        assert_eq!(picture_frame([f64::NAN, 0.0], [40.0, 0.0], None, 0.5), None);
+        assert_eq!(
+            rect_of_aspect([f64::NAN, 0.0], [40.0, 0.0], None, 0.5),
+            None
+        );
     }
 
     /// A 2:1 picture on a 40 mm edge in the XZ plane fits a frame 20 mm high, and one 30 mm high
     /// stretches it; a top-left corner on the bottom edge's line gives no frame.
     #[test]
-    fn a_picture_fits_a_frame_of_its_shape_and_a_taller_one_stretches_it() {
+    fn fit_aspect_fits_a_frame_of_its_shape_and_a_taller_one_stretches_it() {
         let (bl, br) = ([0.0, 0.0, 0.0], [40.0, 0.0, 0.0]);
         assert_eq!(
-            picture_fit(bl, br, [0.0, 0.0, 20.0], 0.5),
+            fit_aspect(bl, br, [0.0, 0.0, 20.0], 0.5),
             Some((40.0, false))
         );
         assert_eq!(
-            picture_fit(bl, br, [0.0, 0.0, 30.0], 0.5),
+            fit_aspect(bl, br, [0.0, 0.0, 30.0], 0.5),
             Some((40.0, true))
         );
-        assert_eq!(picture_fit(bl, br, [20.0, 0.0, 0.0], 0.5), None);
+        assert_eq!(fit_aspect(bl, br, [20.0, 0.0, 0.0], 0.5), None);
     }
 
     /// A 10 mm square at z = 5 lifted 0.2 mm: the front 0.2 mm above, the back 0.2 mm below.
     #[test]
-    fn a_lifted_quad_lies_either_side_of_its_plane() {
+    fn an_offset_quad_lies_either_side_of_its_plane() {
         let square = [
             [0.0, 0.0, 5.0],
             [10.0, 0.0, 5.0],
             [10.0, 10.0, 5.0],
             [0.0, 10.0, 5.0],
         ];
-        let (n, front, back) = lifted_quad(square, 0.2).unwrap();
+        let (n, front, back) = offset_quad(square, 0.2).unwrap();
         assert_eq!(n, [0.0, 0.0, 1.0]);
         assert!(front
             .iter()
@@ -573,8 +580,8 @@ mod tests {
             .iter()
             .zip(square)
             .all(|(b, s)| near(*b, [s[0], s[1], 4.8], 1e-12)));
-        assert_eq!(lifted_quad([[1.0, 1.0, 1.0]; 4], 0.2), None);
-        assert_eq!(lifted_quad(square, f64::NAN), None);
+        assert_eq!(offset_quad([[1.0, 1.0, 1.0]; 4], 0.2), None);
+        assert_eq!(offset_quad(square, f64::NAN), None);
         assert_eq!(
             parallelogram_point([1.0, 0.0, 0.0], [4.0, 0.0, 0.0], [0.0, 2.0, 0.0], 0.5, 0.25),
             [3.0, 0.5, 0.0]
