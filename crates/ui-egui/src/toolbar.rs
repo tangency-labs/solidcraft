@@ -1562,12 +1562,63 @@ struct Panel {
     more: Vec<PanelMoreRow>,
 }
 
-/// The ribbon's Plugins group (Model tab): one button per command of each plugin turned on.
+/// The Model ribbon's Plugins group. Every enabled plugin command stays in the menu;
+/// only pinned commands take up space as buttons.
 struct PluginGroup {
     label: String,
     tip: String,
     buttons: Vec<crate::plugin_menu::RibbonButton>,
+    all: Vec<crate::plugin_menu::RibbonButton>,
     sizes: Vec<ButtonSize>,
+}
+
+impl PluginGroup {
+    /// The same pin controls as a built-in panel, without hiding the unpinned commands.
+    fn popup(&self, app: &mut SolveApp, ui: &mut egui::Ui, group: &ribbon::GroupOut) -> Option<(egui::Id, Rect)> {
+        let id = egui::Id::unique("sc_plugin_ribbon_menu");
+        let open = ui.ctx().data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open"))) == Some(id);
+        if !open {
+            return None;
+        }
+        let area = Container::new(ui.ctx(), Surface::Popup).area(id).fixed_pos(group.label.left_bottom()).order(egui::Order::Foreground).show(
+            ui.ctx(),
+            |ui| {
+                crate::ui_kit::Menu::show_frame(ui, crate::ui_kit::Menu::frame(), |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    ui.set_min_width(240.0);
+                    let room = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(ROW_H * 3.0);
+                    egui::ScrollArea::vertical().id_salt("plugin_pin_rows").max_height(room).show(ui, |ui| {
+                        for b in &self.all {
+                            let entry = ribbon::MenuEntry {
+                                id: &b.id,
+                                label: &b.label,
+                                icon: &b.icon,
+                                shortcut: "",
+                                enabled: true,
+                                checked: None,
+                                pinned: app.toolbar_custom.plugin_pinned(&b.id),
+                                tip: Some(ribbon::RowTip::Plain(&b.name)),
+                                app_paints: false,
+                            };
+                            match ribbon::menu_row(ui, &entry, 240.0, None, &menu_style(app)).0 {
+                                Some(ribbon::MenuAction::TogglePin) => app.toolbar_custom.toggle_plugin_pin(&b.id),
+                                Some(ribbon::MenuAction::Run(_)) => {
+                                    crate::plugin_menu::choose_ribbon(app, &b.id);
+                                    ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
+                                }
+                                _ => {}
+                            }
+                        }
+                    });
+                    ribbon::section_footer(ui, solidcraft_ui_text::tr("ui.ribbon_pin_footer"));
+                });
+            },
+        );
+        if (area.response.clicked_elsewhere() && !group.label_response.clicked()) || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
+        }
+        Some((id, area.response.rect))
+    }
 }
 
 /// The tab's panels for one pass of the ribbon, as the component's data.
@@ -1690,10 +1741,11 @@ impl RibbonPanels {
         // editing in place).
         let exit = (tab == "SKETCH" || (tab == "MODEL" && editing_in_place))
             && panels.last().is_some_and(|p| matches!(p.panel, "FINISH SKETCH" | "FINISH EDITING"));
-        let buttons = if tab == "MODEL" { crate::plugin_menu::ribbon_buttons(app) } else { Vec::new() };
-        let plugins = (!buttons.is_empty()).then(|| PluginGroup {
+        let all = if tab == "MODEL" { crate::plugin_menu::ribbon_buttons(app) } else { Vec::new() };
+        let buttons: Vec<_> = all.iter().filter(|b| app.toolbar_custom.plugin_pinned(&b.id)).cloned().collect();
+        let plugins = (!all.is_empty()).then(|| PluginGroup {
             label: app.tr("ui.plugins").to_string(),
-            tip: format!("{} ({})", app.tr("ui.plugins"), buttons.len()),
+            tip: format!("{} ({})", app.tr("ui.plugins"), all.len()),
             sizes: buttons
                 .iter()
                 .map(|b| {
@@ -1705,6 +1757,7 @@ impl RibbonPanels {
                 })
                 .collect(),
             buttons,
+            all,
         });
         RibbonPanels { panels, plugins, exit, running: if app.preferences.ribbon_reveal { running } else { None } }
     }
@@ -1769,15 +1822,14 @@ impl RibbonPanels {
                         tip: &g.tip,
                         buttons: g.buttons.iter().zip(&g.sizes).map(button).collect(),
                         cells: Vec::new(),
-                        commands: g.buttons.iter().map(|b| b.id.as_str()).collect(),
+                        commands: g.all.iter().map(|b| b.id.as_str()).collect(),
                         icon: Some("prefs_plugins"),
-                        // Its label (and its collapsed button) opens the Plugins menu below it,
-                        // which lists every command, the ones a narrow ribbon leaves out too.
+                        // The group menu lists all plugin commands, even the unpinned ones.
                         enabled: true,
                         open: false,
                         running: None,
                         more: g
-                            .buttons
+                            .all
                             .iter()
                             .map(|b| ribbon::MoreRow {
                                 id: &b.id,
@@ -2069,8 +2121,16 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             if let ribbon::Action::Section { group } | ribbon::Action::Open { group } = action
                 && Some(group) == plugin_group
             {
-                if let Some(g) = out.groups.iter().find(|g| g.group == group) {
-                    crate::plugin_menu::toggle_below(app, ui.ctx(), g.label);
+                if out.groups.iter().any(|g| g.group == group) {
+                    let id = egui::Id::unique("sc_plugin_ribbon_menu");
+                    ui.ctx().data_mut(|d| {
+                        let key = egui::Id::unique("sc_panel_open");
+                        if d.get_temp::<egui::Id>(key) == Some(id) {
+                            d.remove::<egui::Id>(key);
+                        } else {
+                            d.insert_temp(key, id);
+                        }
+                    });
                 }
                 continue;
             }
@@ -2144,6 +2204,13 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     opened.push(group);
                 }
             }
+        }
+        // The Plugins group's menu has the same per-row pin control as built-in groups.
+        if let Some(g) = out.groups.iter().find(|g| Some(g.group) == plugin_group)
+            && let Some(group) = panels.plugins.as_ref()
+            && let Some(popup) = group.popup(app, ui, g)
+        {
+            open_panel_menu = Some(popup);
         }
         // Each panel's drop-down, and a button dropped on its free space.
         for g in &out.groups {
@@ -5286,6 +5353,65 @@ mod dropdown_toggle_tests {
 #[cfg(test)]
 mod app_bar_tests {
     use super::*;
+
+    /// Plugin entries still appear in the menu after their individual buttons are removed.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn plugin_ribbon_pins_hide_only_buttons_and_keep_new_commands_pinned() {
+        let mut h = crate::scenario::Harness::new();
+        let root = h.dir.join("plugin-ribbon-pins");
+        let package = root.join("toolbox");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("entry.wasm"), []).unwrap();
+        std::fs::write(
+            package.join("plugin.json"),
+            json!({
+                "id":"toolbox", "name":"Toolbox", "version":"1.0", "capabilities":["commands@0.1"],
+                "runtime":{"module":"entry.wasm","commands":[],"entries":[
+                    {"name":"one","effect":"read"},
+                    {"name":"two","effect":"read"}
+                ]}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        h.app.session.plugin_state.plugins_dir = Some(root);
+        crate::plugin_menu::refresh(&mut h.app);
+        let first = "plugin_entry:toolbox:one";
+        let second = "plugin_entry:toolbox:two";
+
+        let examine = |h: &crate::scenario::Harness| {
+            let mut result = None;
+            crate::test_support::frame(&h.ctx, egui::RawInput::default(), |ui| {
+                let data = RibbonPanels::new(&h.app, ui, "MODEL", &[], ui.painter(), None);
+                let plugin = data.plugins.as_ref().expect("plugins stay accessible on the Model tab");
+                result = Some((
+                    plugin.buttons.iter().map(|b| b.id.clone()).collect::<Vec<_>>(),
+                    plugin.all.iter().map(|b| b.id.clone()).collect::<Vec<_>>(),
+                ));
+            });
+            result.unwrap()
+        };
+        let (buttons, menu) = examine(&h);
+        assert_eq!(buttons, vec![first.to_string(), second.to_string()]);
+        assert_eq!(menu, vec![first.to_string(), second.to_string()]);
+
+        h.app.toolbar_custom.toggle_plugin_pin(first);
+        let (buttons, menu) = examine(&h);
+        assert_eq!(buttons, vec![second.to_string()], "only the removed command leaves the ribbon");
+        assert_eq!(menu, vec![first.to_string(), second.to_string()], "it remains runnable from the group menu");
+
+        h.app.toolbar_custom.toggle_plugin_pin(second);
+        let (buttons, menu) = examine(&h);
+        assert!(buttons.is_empty(), "a group with zero pinned commands has a collapsed menu");
+        assert_eq!(menu, vec![first.to_string(), second.to_string()], "all entries are still available");
+
+        let saved = h.app.toolbar_custom.prefs();
+        let mut restored = crate::toolbar_custom::ToolbarCustom::default();
+        restored.load(&saved);
+        assert!(!restored.plugin_pinned(first) && !restored.plugin_pinned(second));
+        assert!(restored.plugin_pinned("plugin_entry:toolbox:three"), "a newly installed command starts pinned");
+    }
 
     #[test]
     fn toolbar_focus_rings_hug_bar_bodies_and_follow_lifted_tile_cells() {

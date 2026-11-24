@@ -906,6 +906,7 @@ pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
 
 /// The Plugins button was clicked at `rect`: open the menu (reading the installed plugins), or
 /// close it.
+#[cfg(test)]
 pub(crate) fn toggle(app: &mut SolveApp, ctx: &egui::Context, rect: egui::Rect) {
     let state = &mut app.plugin_menu;
     state.open = !state.open;
@@ -921,6 +922,7 @@ pub(crate) fn toggle(app: &mut SolveApp, ctx: &egui::Context, rect: egui::Rect) 
 
 /// The ribbon's Plugins group label at `rect` was clicked: open the Plugins menu below it, or
 /// close it.
+#[cfg(test)]
 pub(crate) fn toggle_below(app: &mut SolveApp, ctx: &egui::Context, rect: egui::Rect) {
     toggle(app, ctx, rect);
     app.plugin_menu.y = Some(rect.bottom());

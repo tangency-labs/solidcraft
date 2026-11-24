@@ -13,7 +13,7 @@
 //! The quick-access command inventory (#10223) is kept here too. The application bar's saved
 //! item list owns their order, zones and visibility. The inventory is empty until a command is added.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 use solidcraft_engine::{CommandSpec, command_specs};
@@ -33,6 +33,9 @@ pub struct ToolbarCustom {
     pub gallery_buttons: BTreeMap<String, Vec<String>>,
     /// Pinned commands in enrolment order (#10223); `app_bar` owns their drawing order.
     pub quick_access: Vec<String>,
+    /// Plugin commands the user removed from the Model ribbon (all start pinned).
+    /// Stable plugin/entry IDs survive disabling or updating a plugin.
+    pub plugin_unpinned: BTreeSet<String>,
     /// One saved list for every movable application-bar control.
     pub app_bar: ui_kit::app_bar_items::Layout,
     /// Newer versions' toolbar keys survive importing and saving on this version.
@@ -59,7 +62,7 @@ impl ToolbarCustom {
     }
 
     pub fn prefs(&self) -> Value {
-        let mut value = json!({"version": 4, "panels": self.panels, "gallery_buttons": self.gallery_buttons, "quick_access": self.quick_access, "app_bar": self.app_bar.to_value()});
+        let mut value = json!({"version": 4, "panels": self.panels, "gallery_buttons": self.gallery_buttons, "quick_access": self.quick_access, "app_bar": self.app_bar.to_value(), "plugin_unpinned": self.plugin_unpinned});
         if let Some(object) = value.as_object_mut() {
             for (key, value) in &self.extra {
                 object.entry(key.clone()).or_insert_with(|| value.clone());
@@ -67,6 +70,17 @@ impl ToolbarCustom {
         }
         value
     }
+
+    pub fn plugin_pinned(&self, id: &str) -> bool {
+        !self.plugin_unpinned.contains(id)
+    }
+
+    pub fn toggle_plugin_pin(&mut self, id: &str) {
+        if !self.plugin_unpinned.insert(id.to_owned()) {
+            self.plugin_unpinned.remove(id);
+        }
+    }
+
     pub fn load(&mut self, v: &Value) {
         let version = v.get("version").and_then(Value::as_u64).unwrap_or(0);
         let current = version >= 2;
@@ -75,7 +89,8 @@ impl ToolbarCustom {
             .into_iter()
             .flatten()
             .filter(|(key, value)| {
-                !matches!(key.as_str(), "version" | "panels" | "gallery_buttons" | "quick_access" | "app_bar") && (current || !value.is_array())
+                !matches!(key.as_str(), "version" | "panels" | "gallery_buttons" | "quick_access" | "app_bar" | "plugin_unpinned")
+                    && (current || !value.is_array())
             })
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
@@ -112,6 +127,15 @@ impl ToolbarCustom {
                 self.quick_access.push(id.to_string());
             }
         }
+        self.plugin_unpinned = v
+            .get("plugin_unpinned")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .filter(|id| id.starts_with(crate::plugin_menu::RIBBON_PREFIX) && id.len() <= 256)
+            .map(str::to_string)
+            .collect();
         if !current {
             self.migrate();
         }
@@ -832,6 +856,65 @@ mod migration_tests {
         assert!(!custom.panels["DESIGN/MODEL/CREATE"].contains(&"solid.extrude".into()));
         assert!(!custom.panels["DESIGN/MANAGE/RULES"].contains(&"plastic.manage_rules".into()));
         assert_eq!(custom.panels["DESIGN/SKETCH/CONSTRAIN"], vec!["sketch.dimension"]);
+    }
+}
+
+#[cfg(test)]
+mod plugin_pin_tests {
+    use super::*;
+
+    #[test]
+    fn plugin_commands_start_pinned_and_keep_individual_choices_in_toolbar_preferences() {
+        let measure = "plugin_entry:workshop-helper:measure";
+        let report = "plugin_entry:workshop-helper:report";
+        let added_later = "plugin_entry:workshop-helper:calibrate";
+        let mut settings = ToolbarCustom::default();
+        assert!(settings.plugin_pinned(measure) && settings.plugin_pinned(report));
+        settings.toggle_plugin_pin(measure);
+        assert!(!settings.plugin_pinned(measure));
+        assert!(settings.plugin_pinned(report));
+
+        let saved = settings.prefs();
+        assert_eq!(saved["version"], 4, "pin state coexists with the current application-bar layout");
+        assert!(saved.get("app_bar").is_some(), "retain upstream application-bar customisation");
+        let mut reloaded = ToolbarCustom::default();
+        reloaded.load(&saved);
+        assert!(!reloaded.extra.contains_key("plugin_unpinned"), "known pin state must not be stored as an unknown toolbar key");
+        assert!(!reloaded.plugin_pinned(measure), "disabled or updated plugins keep their pin choices");
+        assert!(reloaded.plugin_pinned(report));
+        assert!(reloaded.plugin_pinned(added_later), "a new entry starts pinned");
+        reloaded.toggle_plugin_pin(measure);
+        assert!(reloaded.plugin_pinned(measure));
+
+        let mut old = ToolbarCustom::default();
+        old.load(&json!({"version": 3, "panels": {}, "quick_access": []}));
+        assert!(old.plugin_pinned(measure), "old toolbar settings retain all plugin buttons");
+    }
+
+    #[test]
+    fn plugin_pin_settings_ignore_unrelated_or_oversized_ids() {
+        let mut settings = ToolbarCustom::default();
+        settings.load(&json!({"version": 3, "plugin_unpinned": [
+            "solid.box", "plugin_entry:workshop:run",
+            format!("plugin_entry:{}", "x".repeat(300))
+        ]}));
+        assert_eq!(settings.plugin_unpinned.len(), 1);
+        assert!(!settings.plugin_pinned("plugin_entry:workshop:run"));
+        assert!(settings.plugin_pinned("solid.box"));
+    }
+
+    #[test]
+    fn all_unpinned_plugin_commands_survive_preference_reload() {
+        let mut settings = ToolbarCustom::default();
+        for n in 0..=1000 {
+            settings.toggle_plugin_pin(&format!("plugin_entry:workshop:command-{n}"));
+        }
+        let mut restored = ToolbarCustom::default();
+        restored.load(&settings.prefs());
+        assert_eq!(restored.plugin_unpinned.len(), 1001);
+        for n in 0..=1000 {
+            assert!(!restored.plugin_pinned(&format!("plugin_entry:workshop:command-{n}")));
+        }
     }
 }
 
