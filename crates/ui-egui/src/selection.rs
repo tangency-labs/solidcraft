@@ -9,18 +9,8 @@ use solidcraft_engine::geom::prelude::*;
 
 use crate::viewport::Hit;
 
-/// Model picks retain an on-surface point, but their identity is the body and topology index.
-pub(crate) fn same_item(a: &Sel, b: &Sel) -> bool {
-    match (a, b) {
-        (Sel::Edge { body: a, index: i, .. }, Sel::Edge { body: b, index: j, .. })
-        | (Sel::Face { body: a, index: i, .. }, Sel::Face { body: b, index: j, .. }) => a == b && i == j,
-        // A curve of another sketch is the same item whether a click picked it (`SketchCurve`
-        // naming its sketch, #3726) or a chain or box did (`ExternalSketchCurve`).
-        (Sel::SketchCurve { id: a, sketch: Some(s) }, Sel::ExternalSketchCurve { sketch: t, id: b })
-        | (Sel::ExternalSketchCurve { sketch: t, id: b }, Sel::SketchCurve { id: a, sketch: Some(s) }) => a == b && s == t,
-        _ => a == b,
-    }
-}
+pub(crate) use solidcraft_engine::pick_pieces::polyline_mid;
+pub(crate) use solidcraft_engine::selection_context::same_item;
 
 /// Whether the selection holds the body `body`: selected on its own, or through a selected
 /// occurrence (the bodies its placement shows, as its Browser row lists them).
@@ -292,19 +282,6 @@ pub(crate) fn items(inputs: &[SelInput], i: usize) -> &[Sel] {
 
 pub(crate) fn point_value(v: Vec3) -> serde_json::Value {
     serde_json::json!([v.x, v.y, v.z])
-}
-
-pub(crate) fn polyline_mid(pts: &[Vec3]) -> Vec3 {
-    let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
-    let mut acc = 0.0;
-    for w in pts.windows(2) {
-        let l = w[0].dist(w[1]);
-        if acc + l >= len * 0.5 && l > 0.0 {
-            return w[0].lerp(w[1], (len * 0.5 - acc) / l);
-        }
-        acc += l;
-    }
-    pts.first().copied().unwrap_or_default()
 }
 
 /// World size of the origin widget: a fixed fraction of the viewport height, whatever the zoom

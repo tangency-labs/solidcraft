@@ -18,7 +18,7 @@ fn matches(schema: schemars::Schema, r: &Value) {
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<SelectionDeleteParams>(),
-        &["all_bodies", "canvases", "components", "dry_run", "items", "joints", "occurrences", "point_clouds"],
+        &["all_bodies", "canvases", "components", "contents", "dry_run", "items", "joints", "occurrences", "point_clouds"],
     );
 }
 
@@ -104,6 +104,7 @@ fn the_schema_takes_every_selection_item() {
         Sel::Edge { body: "B".into(), index: 0, point },
         Sel::Face { body: "B".into(), index: 1, point },
         Sel::Feature { id: 4 },
+        Sel::Drawing { drawing: 7, object: 9 },
         Sel::SketchCurve { id: "c1".into(), sketch: None },
         Sel::SketchCurve { id: "c1".into(), sketch: Some(2) },
         Sel::SketchPoint { id: "p1".into() },
@@ -133,6 +134,9 @@ fn the_schema_takes_every_selection_item() {
     takes(json!({"items": "all"}), false);
     takes(json!({"joints": [true]}), false);
     takes(json!({"dry_run": "yes"}), false);
+    takes(json!({"contents": "delete"}), true);
+    takes(json!({"contents": "keep"}), false);
+    takes(json!({"items": [{"type": "drawing", "drawing": 7, "object": 9}]}), false);
     takes(json!({"colour": 1}), false);
 }
 

@@ -31,6 +31,9 @@ pub struct RunParams {
     pub entry: String,
     #[serde(default = "empty_params")]
     pub params: Value,
+    /// Explicit panel action notification, separate from the entry's ordinary arguments.
+    #[serde(default)]
+    pub ui_event: Option<crate::plugin::ui::UiEvent>,
     /// Refuse an edit unless this is still the design state the caller computed against.
     #[serde(default)]
     pub expected_design: Option<craft_plugin::DesignToken>,
@@ -150,6 +153,9 @@ pub struct ListResult {
     /// The installed, enabled importers: the files `doc.open` and `file.import` open with them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub importers: Vec<ImporterInfo>,
+    /// The installed, enabled exporters: the files `file.export` writes with them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exporters: Vec<ImporterInfo>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
@@ -177,6 +183,8 @@ pub enum PluginToolKind {
     /// A command entry: called as the `<plugin>.<entry>` command with the entry's inputs, one
     /// undo step.
     Command,
+    /// An exporter entry: writes the open design through `file.export`.
+    Exporter,
     /// An importer entry: opens a file it claims as a new design through `file.import`.
     Importer,
 }
@@ -195,11 +203,11 @@ pub struct PluginTool {
     pub plugin_version: String,
     pub description: String,
     pub effect: crate::plugin::Effect,
-    /// The extensions an importer opens, lowercase, without the dot; empty for a command.
+    /// The extensions a format entry opens or writes, lowercase, without the dot; empty for a command.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extensions: Vec<String>,
-    /// The tool's arguments: a command entry's declared inputs, strict (no undeclared field); an
-    /// importer's `{path, options}`, `options` its declared options.
+    /// The tool's arguments: a command entry's declared inputs, strict (no undeclared field); a
+    /// format entry's `{path, options}`, `options` its declared options.
     pub input_schema: Value,
     /// A command entry's package hash, which its `<plugin>.<entry>` call passes as `approval`;
     /// given when the tool is asked for by `name`.
@@ -207,17 +215,38 @@ pub struct PluginTool {
     pub approval: Option<String>,
 }
 
-/// An installed importer entry.
+/// An installed import or export slot.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ImporterInfo {
     /// `plugin_id.entry`: what `format` names.
     pub id: String,
     /// The plugin's name.
     pub name: String,
+    /// The slot's own label, when it has one.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
     /// The file extensions it claims, lowercase, without the dot.
     pub extensions: Vec<String>,
     /// Its options, as a JSON schema.
     pub input_schema: Value,
+}
+
+/// What an exporter plugin wrote: `file.export` with a format an exporter plugin writes.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ExportedFile {
+    /// The file written.
+    pub path: String,
+    /// Its size in bytes.
+    pub bytes: usize,
+    /// The exporter that wrote it, as `plugin_id.entry`.
+    pub format: String,
+    /// That exporter plugin's name.
+    pub plugin: String,
+    /// The slot asks for the design's plugin data, which no export passes yet: a note saying so.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// Open a file with an installed importer plugin, as a new, unsaved design. Never opens a dialog.
@@ -286,6 +315,9 @@ pub struct InstallParams {
 }
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct InstallResult {
+    /// Host-drawn panels declared by the plugin, shown during permission review.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub panels: Vec<crate::plugin::ui::PanelSpec>,
     /// SHA-256 of the exact manifest and component. Send it as `approval` after reviewing this reply.
     pub approval: String,
     /// SHA-256 of the whole `.zip`. Send it as `archive` after reviewing this reply.
@@ -298,8 +330,8 @@ pub struct InstallResult {
     pub capabilities: Vec<String>,
     /// What it asks for: command groups, named folders, the clock.
     pub permissions: craft_plugin::Permissions,
-    /// The fuel, memory and time it asks for. Memory above `host_limits` is approved at install
-    /// (`approve.memory_mib`); fuel is not, and must fit `host_limits`.
+    /// The fuel, memory and time it asks for. Fuel and memory above `host_limits` can be approved
+    /// at install (`approve.fuel`, up to `MAX_APPROVED_FUEL`, and `approve.memory_mib`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<craft_plugin::Limits>,
     /// The app's ceilings for plugins, before any approval.
@@ -316,6 +348,9 @@ pub struct InstallResult {
     /// For an importer: the file extensions it opens, lowercase, without the dot.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub opens: Vec<String>,
+    /// For an exporter: the file extensions it writes, lowercase, without the dot.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub writes: Vec<String>,
     /// The installed plugin of the same id, `name version`, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replaces: Option<String>,
@@ -366,6 +401,9 @@ pub struct StoredGrant {
     pub package_hash: Option<String>,
     pub command_groups: std::collections::BTreeSet<String>,
     pub folders: Vec<crate::plugin::FileGrant>,
+    /// Fuel approved above Max plugin fuel for this exact package, up to `MAX_APPROVED_FUEL`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fuel: Option<u64>,
     /// Memory in MiB approved above the app's ceiling for plugins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_mib: Option<usize>,
@@ -402,6 +440,10 @@ pub struct InstallApproval {
     pub command_groups: std::collections::BTreeSet<String>,
     #[serde(default)]
     pub folders: Vec<ApprovedFolder>,
+    /// Fuel to allow above Max plugin fuel: exactly the manifest's `runtime.limits.fuel`, at
+    /// most 10,000,000,000,000. Omitted: the plugin runs under the app's default limit.
+    #[serde(default)]
+    pub fuel: Option<u64>,
     /// Memory in MiB to allow above the app's ceiling for plugins: exactly the manifest's
     /// `runtime.limits.memory_mib`. Omitted: the plugin runs under the app's ceiling.
     #[serde(default)]
@@ -430,6 +472,7 @@ impl From<InstallApproval> for crate::plugin::Grants {
                 .into_iter()
                 .map(|f| craft_plugin::FileGrant { name: f.name, folder: f.path, read: f.read, write: f.write })
                 .collect(),
+            fuel: approve.fuel,
             memory_mib: approve.memory_mib,
             input_folder: approve.input_folder,
         }

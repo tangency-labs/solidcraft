@@ -374,7 +374,7 @@ pub(crate) fn paint(painter: &Painter, c: Pos2, scale: f32, studio: Studio, item
         Some(item) => painter.text(
             c,
             Align2::CENTER_CENTER,
-            solidcraft_ui_text::tr_label(&item.label),
+            solidcraft_ui_text::tr_command(&item.id, &item.label),
             FontId::proportional((t.font_title * scale).max(t.font_badge)),
             t.text,
         ),

@@ -409,7 +409,9 @@ fn reaches(s: &Surface, v: [f64; 2], tolerance: f64) -> (f64, f64) {
 /// than one turn then has a form past one turn (a NURBS that covers part of its surface twice); a
 /// whole turn has a form of four quarters from the one it starts in, which ends short of the
 /// face's seam, so the seam's second use lies off the form. [`turned`] puts its start on a quarter
-/// line. `None` for another surface.
+/// line. A whole turn's start is on a quarter line only as its seam circle's is ([`conic`], no
+/// tolerance reach): its seam is a whole-turn circle on the same grid, whose form needs a fifth
+/// quarter whenever it starts off the line, however close. `None` for another surface.
 pub fn turn_quarters(s: &Surface, [u, v]: [[f64; 2]; 2], tolerance: f64) -> Option<usize> {
     if !matches!(
         s,
@@ -420,7 +422,12 @@ pub fn turn_quarters(s: &Surface, [u, v]: [[f64; 2]; 2], tolerance: f64) -> Opti
     ) {
         return None;
     }
-    Some(quarters(u, reaches(s, v, tolerance).0)?.1)
+    let reach = if u[1] - u[0] >= TAU * (1.0 - TURN_ROUNDING) {
+        0.0
+    } else {
+        reaches(s, v, tolerance).0
+    };
+    Some(quarters(u, reach)?.1)
 }
 
 /// A cylinder, cone, sphere or torus with its frame turned by `angle` about its own axis (its x
@@ -1042,6 +1049,38 @@ pub fn extent(
     reach: f64,
 ) -> Result<Option<[[f64; 2]; 2]>, EvalError> {
     let mut refused = None;
+    // On a cylinder or cone the box depends on which loop is placed first: a hole across the
+    // seam, placed before the loop that goes round the axis, pulls the box a turn to the wrong
+    // side (a tie between two placements of a turn each). The loops are taken widest first, so
+    // the order a file lists a face's bounds in does not change the box.
+    if loops.len() > 1 && matches!(label, Surface::Cylinder { .. } | Surface::Cone { .. }) {
+        let widths: Vec<f64> = loops
+            .iter()
+            .map(|l| {
+                // The raw box: a circle round the axis at one height has no height but a turn's width.
+                let mut ignored = None;
+                extent_raw(label, std::slice::from_ref(l), reach, &mut ignored)
+                    .map_or(0.0, |(lo, hi)| (hi[0] - lo[0]).max(0.0))
+            })
+            .collect();
+        let mut order: Vec<usize> = (0..loops.len()).collect();
+        order.sort_by(|a, b| {
+            let (wa, wb) = (
+                widths.get(*a).copied().unwrap_or(0.0),
+                widths.get(*b).copied().unwrap_or(0.0),
+            );
+            wb.total_cmp(&wa)
+        });
+        let ordered: Vec<Vec<(&Curve, [f64; 2], bool)>> = order
+            .iter()
+            .filter_map(|i| loops.get(*i).cloned())
+            .collect();
+        let out = extent_in(label, &ordered, reach, &mut refused);
+        return match refused {
+            Some(e) => Err(e),
+            None => Ok(out),
+        };
+    }
     let out = extent_in(label, loops, reach, &mut refused);
     match refused {
         Some(e) => Err(e),
@@ -1056,6 +1095,18 @@ fn extent_in(
     reach: f64,
     refused: &mut Option<EvalError>,
 ) -> Option<[[f64; 2]; 2]> {
+    let (lo, hi) = extent_raw(label, loops, reach, refused)?;
+    (lo[0] < hi[0] && lo[1] < hi[1]).then_some([[lo[0], hi[0]], [lo[1], hi[1]]])
+}
+
+/// [`extent_in`]'s box as corners `(lo, hi)`, before it is checked to have room in both
+/// directions: a full circle at one height is a turn wide and no height.
+fn extent_raw(
+    label: &Surface,
+    loops: &[Vec<(&Curve, [f64; 2], bool)>],
+    reach: f64,
+    refused: &mut Option<EvalError>,
+) -> Option<([f64; 2], [f64; 2])> {
     let eval = SurfaceEval::new(label).ok()?;
     let period = eval.domain().period;
     let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
@@ -1423,7 +1474,7 @@ fn extent_in(
             };
         }
     }
-    (lo[0] < hi[0] && lo[1] < hi[1]).then_some([[lo[0], hi[0]], [lo[1], hi[1]]])
+    Some((lo, hi))
 }
 
 /// The whole periods a loop's points after a pole are moved by: `a` the last point before it,

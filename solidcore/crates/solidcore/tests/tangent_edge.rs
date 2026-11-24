@@ -1,11 +1,16 @@
 //! `query::tangent_edge` (#3141): whether an edge's faces meet tangentially all along it,
 //! against closed forms: the angle between their outward normals is bracketed by the verdicts
-//! just below it (not tangent, by a witness) and just above it (no witness).
+//! just below it (not tangent, by a witness) and just above it (tangent, by the bound).
 //!
 //! - a box: every edge's faces meet square, pi/2;
 //! - a wedge whose two sloped faces meet at an inside angle of 60 degrees along its ridge: the
 //!   outward normals are 120 degrees apart there;
+//! - a thin wedge, its ridge's inside angle 5 degrees: 175 degrees apart;
 //! - a cylinder: its side meets its caps square, pi/2;
+//! - a cone's frustum: its side meets its base at acos(-3/5) and its top at acos(3/5), and
+//!   nearly flat ones their tops at just under and just over half a degree;
+//! - an oblique cylinder leaning 30 degrees: its side's angle with a cap runs from 60
+//!   degrees to 120 degrees round the cap's circle;
 //! - a box with one edge rounded: the round meets both its faces tangentially, so its two
 //!   edges along the box are smooth (angle 0), while the box's other edges stay square.
 //!
@@ -30,8 +35,8 @@ use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::knots::Side;
 use solidcore::nurbs::math::CPoint;
-use solidcore::primitive::api_curves::{create_arc, create_line_segment};
-use solidcore::primitive::api_primitives::{create_box, create_cylinder};
+use solidcore::primitive::api_curves::{create_arc, create_circle, create_line_segment};
+use solidcore::primitive::api_primitives::{create_box, create_cone, create_cylinder};
 use solidcore::query::api_queries::{edge_closest_point, get_edges};
 use solidcore::query::edge::edge_faces;
 use solidcore::query::edge_turn::{convex_at, joint_turn, turn_at};
@@ -61,13 +66,13 @@ fn pick(k: &Kernel, b: &Brep, q: Point3) -> EdgeId {
         .0
 }
 
-/// Edge `e`'s faces part by `want` (radians) somewhere along it, to `tol`: a witness proves
-/// them more than `want - tol` apart, and none proves them more than `want + tol` apart.
+/// Edge `e`'s faces part by `want` (radians) at most along it, to `tol`: a witness proves
+/// them more than `want - tol` apart, and the bound proves them within `want + tol` all along.
 fn parts_by(k: &Kernel, b: &mut Brep, e: EdgeId, want: f64, tol: f64) {
     let below = tangent_all_along(k, b, e, want - tol).unwrap();
     assert_eq!(below, Some(Tangency::NotTangent), "{e:?} below {want}");
     let above = tangent_all_along(k, b, e, want + tol).unwrap();
-    assert_ne!(above, Some(Tangency::NotTangent), "{e:?} above {want}");
+    assert_eq!(above, Some(Tangency::Tangent), "{e:?} above {want}");
 }
 
 #[test]
@@ -127,6 +132,111 @@ fn a_cylinder_s_side_meets_its_caps_square() {
         tangent_all_along(&k, &mut b, seam, SMOOTH).unwrap(),
         Some(Tangency::Tangent)
     );
+}
+
+/// A prism 10 long along x on the triangle (-w, 0), (w, 0), (0, h) in (y, z), `w = h tan 2.5`
+/// degrees: the ridge is a 5 degree inside angle, so its faces' outward normals are 175 degrees
+/// apart, and each base edge's 87.5 degree inside angle is 92.5 degrees apart.
+#[test]
+fn a_thin_wedge_s_faces_are_nearly_opposite() {
+    let mut k = Kernel::default();
+    let h = 5.0;
+    let w = h * 2.5_f64.to_radians().tan();
+    let p = |y: f64, z: f64| Point3::new(0.0, y, z);
+    let pts = [p(-w, 0.0), p(w, 0.0), p(0.0, h)];
+    let curves: Vec<Curve> = (0..3)
+        .map(|i| Curve::from(create_line_segment(pts[i], pts[(i + 1) % 3]).unwrap()))
+        .collect();
+    let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+    let x = Vec3::new(1.0, 0.0, 0.0);
+    let mut b = create_linear_sweep(&mut k, &refs, x, 10.0, true).unwrap();
+    let ridge = pick(&k, &b, Point3::new(5.0, 0.0, h));
+    parts_by(&k, &mut b, ridge, 175.0_f64.to_radians(), 1e-12);
+    let base = pick(&k, &b, Point3::new(5.0, w, 0.0));
+    parts_by(&k, &mut b, base, 92.5_f64.to_radians(), 1e-12);
+}
+
+/// A frustum, base r 5 at z = 0, top r 2 at z = 4: its side's slant is 5 long and its outward
+/// normal (4/5 radially, 3/5 up), so it is acos(-3/5) (126.87 degrees) from the base's
+/// (0, 0, -1) all along its circle.
+#[test]
+fn a_frustum_s_side_meets_its_base_past_square() {
+    let mut k = Kernel::default();
+    let mut b = create_cone(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 2.0, 4.0).unwrap();
+    let base = pick(&k, &b, Point3::new(0.0, 5.0, 0.0));
+    parts_by(&k, &mut b, base, (-0.6_f64).acos(), 1e-6);
+}
+
+/// The same frustum's top: its outward normal (0, 0, 1) is acos(3/5) (53.13 degrees) from the
+/// side's all along its circle.
+#[test]
+fn a_frustum_s_side_meets_its_top_under_square() {
+    let mut k = Kernel::default();
+    let mut b = create_cone(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 2.0, 4.0).unwrap();
+    let top = pick(&k, &b, Point3::new(0.0, 2.0, 4.0));
+    parts_by(&k, &mut b, top, 0.6_f64.acos(), 1e-4);
+}
+
+/// Frustums from r 5 to r 2, 3 tan(a) high: the side and the top are `a` apart all along the
+/// top's circle. Asked half a degree, every `a` under it is tangent and every one over it not.
+#[test]
+fn a_shallow_frustum_s_top_is_smooth_under_half_a_degree() {
+    let mut k = Kernel::default();
+    for (deg, want) in [
+        (0.1, Tangency::Tangent),
+        (0.25, Tangency::Tangent),
+        (0.3, Tangency::Tangent),
+        (0.4, Tangency::Tangent),
+        (0.49, Tangency::Tangent),
+        (0.499, Tangency::Tangent),
+        (0.501, Tangency::NotTangent),
+        (0.51, Tangency::NotTangent),
+        (1.0, Tangency::NotTangent),
+    ] {
+        let h = 3.0 * f64::to_radians(deg).tan();
+        let mut b = create_cone(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 2.0, h).unwrap();
+        let top = pick(&k, &b, Point3::new(0.0, 2.0, h));
+        assert_eq!(
+            tangent_all_along(&k, &mut b, top, SMOOTH).unwrap(),
+            Some(want),
+            "{deg}"
+        );
+    }
+}
+
+/// A circle r 3 at z = 0 swept 8 along (sin 30, 0, cos 30): the side's outward normal at the
+/// circle's angle f is (cos f cos a, sin f cos a, -cos f sin a) over sqrt(cos^2 a + cos^2 f
+/// sin^2 a), a = 30 degrees. Its cosine with the base's (0, 0, -1) runs from sin a at f = 0 to
+/// -sin a at f = pi: an angle from 60 to 120 degrees, square at f = +-pi/2, so `Q` changes
+/// sign along the edge. The top's is the same the other way round.
+#[test]
+fn an_oblique_cylinder_s_side_passes_square_along_its_caps() {
+    let mut k = Kernel::default();
+    let a = 30.0_f64.to_radians();
+    let circle = Curve::from(create_circle(Point3::new(0.0, 0.0, 0.0), 3.0).unwrap());
+    let lean = Vec3::new(a.sin(), 0.0, a.cos());
+    let mut b = create_linear_sweep(&mut k, &[Some(&circle)], lean, 8.0, true).unwrap();
+    let top = Point3::new(8.0 * a.sin(), 3.0, 8.0 * a.cos());
+    for at in [Point3::new(0.0, 3.0, 0.0), top] {
+        let e = pick(&k, &b, at);
+        parts_by(&k, &mut b, e, 2.0 * PI / 3.0, 1e-6);
+        for (deg, want) in [
+            (60.0, Tangency::NotTangent),
+            (89.0, Tangency::NotTangent),
+            (90.0, Tangency::NotTangent),
+            (100.0, Tangency::NotTangent),
+            (119.0, Tangency::NotTangent),
+            (121.0, Tangency::Tangent),
+            (135.0, Tangency::Tangent),
+            (179.0, Tangency::Tangent),
+        ] {
+            assert_eq!(
+                tangent_all_along(&k, &mut b, e, f64::to_radians(deg)).unwrap(),
+                Some(want),
+                "{e:?} within {deg}"
+            );
+        }
+    }
 }
 
 /// The box's top front edge rounded r 1: the round runs into the top along y = 1, z = 4 and
