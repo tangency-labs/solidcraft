@@ -3295,7 +3295,7 @@
   "plugin_error.unsupported": "{plugin} não suporta isto: {reason}",
   "plugin_error.unsupported_file": "{plugin} não suporta {file}: {reason}",
   "plugin_export.button": "Exportar…",
-  "plugin_export.done": "Exportado {path}",
+  "plugin_export.done": "Exportado para {path}",
   "plugin_export.menu": "Exportar {format} ({extensions})…",
   "plugin_install.asks": "Ele pede:",
   "plugin_install.asks_nothing": "Nada além de alterar o projeto aberto.",
