@@ -233,6 +233,7 @@ fn comparison_frame(scene: GpuScene, cam: &Camera, width: u32, height: u32, key:
         ao_radius: 0.0,
         ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
         hover_tint: [0.0; 3],
+        selection_all: false,
         selection_tint: [0.0; 3],
         hatch: Default::default(),
         sky: [0.0; 4],
