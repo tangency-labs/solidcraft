@@ -1114,6 +1114,8 @@ pub struct ModelState {
     pub surface_sheets: Vec<crate::SurfaceSheet>,
     /// Construction planes, axes and points as evaluated (by feature).
     pub construct: Vec<crate::construct::Construct>,
+    /// Frame members as made and trimmed so far (`frame.member`, `frame.trim`).
+    pub frame_members: Vec<crate::frame::MemberRecord>,
     /// Evaluation-cache keys of the sketches (by sketch feature id).
     sketch_keys: BTreeMap<u64, u64>,
     /// The edges each fillet or chamfer blended, as found in this evaluation (by feature id):
@@ -1199,6 +1201,7 @@ impl ModelState {
             reserved_body_names,
             surface_sheets,
             construct,
+            frame_members,
             sketch_keys,
             blend_edges,
             named_faces,
@@ -1219,6 +1222,7 @@ impl ModelState {
             reserved_body_names: reserved_body_names.clone(),
             surface_sheets: surface_sheets.clone(),
             construct: construct.clone(),
+            frame_members: frame_members.clone(),
             sketch_keys: sketch_keys.clone(),
             blend_edges: blend_edges.clone(),
             named_faces: named_faces.clone(),
@@ -1310,6 +1314,10 @@ impl ModelState {
         // a feature must change the key (#9544). A state without any hashes as before.
         if !self.construct.is_empty() {
             serde_json::to_string(&self.construct).unwrap_or_default().hash(&mut h);
+        }
+        // Designs without frame members retain their existing cache identities.
+        if !self.frame_members.is_empty() {
+            serde_json::to_string(&self.frame_members).unwrap_or_default().hash(&mut h);
         }
         h.finish()
     }
@@ -1757,6 +1765,14 @@ impl ModelState {
         #[cfg(test)]
         cost_tests::count(|c| c.body_searches += 1);
         self.bodies.iter().find(|b| b.name == name)
+    }
+
+    /// The frame member whose body is the body called `name` now. A member's record stays when a
+    /// later feature removes its body, and another body can take the name; it counts only while
+    /// the body of that name is the one its feature made.
+    pub fn frame_member(&self, name: &str) -> Option<&crate::frame::MemberRecord> {
+        let body = self.body(name)?;
+        self.frame_members.iter().rev().find(|m| m.body == name && m.feature == body.feature)
     }
 
     /// Make every body's display mesh now, on all cores (bodies are meshed independently and
@@ -3766,6 +3782,28 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 }
             }
         }
+        // A trim's face targets are read as an end cap's faces are: in the frame each was picked
+        // in, through the placement it was picked at, so moving that occurrence trims again.
+        FeatureKind::FrameTrim { to, .. } => {
+            let faces = to.iter().filter_map(|t| match t {
+                crate::frame::TrimTarget::Plane { plane } => crate::face_anchor::plane_face_anchor(plane),
+                crate::frame::TrimTarget::Member { .. } => None,
+            });
+            for anchor in faces {
+                match anchor.author_frame(doc, f.component) {
+                    Ok(m) => {
+                        hash_placement(&m, &mut h);
+                        frame.get_or_insert(m);
+                    }
+                    Err(e) => e.to_string().hash(&mut h),
+                }
+                if anchor.path.is_empty() {
+                    reads.components.insert(anchor.component);
+                } else {
+                    reads.paths.push(anchor.path.clone());
+                }
+            }
+        }
         _ => {}
     }
     // A Frame Member's pairs join points on bodies, sketches and construction points of any
@@ -5567,7 +5605,7 @@ fn voids(b: &Body) -> usize {
 }
 
 /// The operation of a feature that makes or changes bodies with one.
-fn feature_operation(f: &Feature) -> Option<Operation> {
+pub fn feature_operation(f: &Feature) -> Option<Operation> {
     Some(match &f.kind {
         FeatureKind::Extrude { operation, .. }
         | FeatureKind::Revolve { operation, .. }
@@ -14633,6 +14671,7 @@ fn eval_feature_kind(
         FeatureKind::FrameMemberTurn { .. } => frame_member::check_turn(doc, vals, f, st),
         FeatureKind::FrameGusset { .. } => crate::gusset::evaluate(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
+        FeatureKind::FrameTrim { .. } => frame_member::trim(doc, vals, f, st, warning),
         FeatureKind::FramePlate { .. } => crate::frame_plate::evaluate(doc, vals, f, st),
         FeatureKind::BoundingSolid { bodies, margin, contents, margins } => {
             let m = val(vals, margin, Kind::Length)?;
