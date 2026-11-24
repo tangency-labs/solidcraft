@@ -10,6 +10,7 @@ use solidcore_ops::surface::ruled;
 use solidcore_ops::sweep::{planar_faces, Curve as SweepCurve};
 use solidcore_ops::{
     make_box, make_cylinder, make_sphere, make_torus, Body, Error, Order, PointClass,
+    EDGE_POINTS_MAX,
 };
 use solidcore_record::brep::{Brep, Curve};
 
@@ -307,6 +308,54 @@ fn a_ray_through_a_tube_hits_its_nearer_side_with_the_face_and_uv() {
     }
 }
 
+/// Every point where the ray meets a face, nearest first: along +x at y = 3, z = 4 the tube's
+/// one face gives (-4, 3, 4) at 16 and (4, 3, 4) at 24, the first where `face_hit_by_ray` lands;
+/// at y = 0 the far crossing, (5, 0, 4), is on the seam and still one hit; from inside, only the
+/// far side; facing away, none.
+/// What is no ray is refused as `face_hit_by_ray` refuses it.
+#[test]
+fn a_ray_through_a_tube_hits_both_sides_nearest_first() {
+    all_fixes();
+    let (b, _, order) = tube();
+    let hits = b
+        .face_hits_by_ray(&order, [-20.0, 3.0, 4.0], [1.0, 0.0, 0.0])
+        .unwrap();
+    assert_eq!(hits.len(), 2, "{hits:?}");
+    for (hit, (at, distance)) in hits
+        .iter()
+        .zip([([-4.0, 3.0, 4.0], 16.0), ([4.0, 3.0, 4.0], 24.0)])
+    {
+        assert!(close(hit.point, at), "{hits:?}");
+        assert!(near(hit.distance, distance, 1e-6), "{hits:?}");
+    }
+    let first = b
+        .face_hit_by_ray(&order, [-20.0, 3.0, 4.0], [1.0, 0.0, 0.0])
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.face, hits[0].face);
+    assert!(close(first.point, hits[0].point), "{first:?} {hits:?}");
+    // through the seam: the tube's rings start at (5, 0), so x = 5 is one hit, not two
+    let seam = b
+        .face_hits_by_ray(&order, [-20.0, 0.0, 4.0], [1.0, 0.0, 0.0])
+        .unwrap();
+    assert_eq!(seam.len(), 2, "{seam:?}");
+    assert!(close(seam[0].point, [-5.0, 0.0, 4.0]), "{seam:?}");
+    assert!(close(seam[1].point, [5.0, 0.0, 4.0]), "{seam:?}");
+    let inside = b
+        .face_hits_by_ray(&order, [0.0, 3.0, 4.0], [1.0, 0.0, 0.0])
+        .unwrap();
+    assert_eq!(inside.len(), 1, "{inside:?}");
+    assert!(close(inside[0].point, [4.0, 3.0, 4.0]), "{inside:?}");
+    assert_eq!(
+        b.face_hits_by_ray(&order, [20.0, 3.0, 4.0], [1.0, 0.0, 0.0]),
+        Ok(vec![])
+    );
+    assert_eq!(
+        b.face_hits_by_ray(&order, [-20.0, 3.0, 4.0], [0.0, 0.0, 0.0]),
+        Err(Error::Argument)
+    );
+}
+
 /// A doubly curved face: a ray along +z through (1.72, 2.96) runs (0.72, 0.96) off the axis of
 /// the radius-2 sphere about (1, 2, 3), 1.2 from it (a 3-4-5 triangle scaled by 0.24), which
 /// leaves sqrt(4 - 1.44) = 1.6 in z: the ray meets the sphere first at z = 3 - 1.6 = 1.4, 11.4
@@ -497,6 +546,72 @@ fn a_ray_through_a_box_edge_hits_one_of_its_two_faces_on_the_edge() {
         .point(hit.uv)
         .unwrap();
     assert!(close(on, [0.0, 0.0, 1.0]), "{hit:?} evaluates to {on:?}");
+}
+
+/// Every face at an edge or a corner, once, at one point and distance, in the record's face order:
+/// on the box [0, 2]^3 the ray from (-3, -4, 1) along (3, 4, 0) meets the faces x = 0 and y = 0
+/// on their edge at (0, 0, 1), 5 along it, then leaves through y = 2 at 7.5; the ray from
+/// (-1, -1, -1) along (1, 1, 1) meets the three faces x = 0, y = 0, z = 0 at the corner (0, 0, 0),
+/// sqrt 3 along it, and x = 2, y = 2, z = 2 at (2, 2, 2), 3 sqrt 3 along it (compared squared:
+/// ops takes no square roots). `face_hit_by_ray` names one of the first.
+#[test]
+fn a_ray_through_a_box_edge_or_corner_hits_every_face_there_once() {
+    all_fixes();
+    let b = make_box([0.0; 3], [2.0; 3]).unwrap();
+    let (record, order) = b.to_record().unwrap();
+    // each group: its distance squared and its faces
+    let cases = [
+        (
+            [-3.0, -4.0, 1.0],
+            [3.0, 4.0, 0.0],
+            vec![(25.0, vec![(X, 0.0), (Y, 0.0)]), (56.25, vec![(Y, 2.0)])],
+        ),
+        (
+            [-1.0; 3],
+            [1.0; 3],
+            vec![
+                (3.0, vec![(X, 0.0), (Y, 0.0), (Z, 0.0)]),
+                (27.0, vec![(X, 2.0), (Y, 2.0), (Z, 2.0)]),
+            ],
+        ),
+    ];
+    for (origin, direction, groups) in cases {
+        let hits = b.face_hits_by_ray(&order, origin, direction).unwrap();
+        let mut rest = hits.as_slice();
+        for (squared, planes) in &groups {
+            let mut faces: Vec<usize> = planes
+                .iter()
+                .map(|&(axis, at)| box_face(&record, &order, axis, at))
+                .collect();
+            faces.sort_unstable();
+            assert!(rest.len() >= faces.len(), "{hits:?}");
+            let (here, after) = rest.split_at(faces.len());
+            assert_eq!(
+                here.iter().map(|h| h.face).collect::<Vec<_>>(),
+                faces,
+                "{hits:?}"
+            );
+            for hit in here {
+                assert_eq!((hit.point, hit.distance), (here[0].point, here[0].distance));
+                assert!(
+                    near(hit.distance * hit.distance, *squared, 1e-9),
+                    "{hits:?}"
+                );
+            }
+            rest = after;
+        }
+        assert!(rest.is_empty(), "{hits:?}");
+        let first = b
+            .face_hit_by_ray(&order, origin, direction)
+            .unwrap()
+            .unwrap();
+        assert!(
+            hits.iter()
+                .take_while(|h| h.distance == hits[0].distance)
+                .any(|h| h.face == first.face),
+            "{first:?} {hits:?}"
+        );
+    }
 }
 
 #[test]
@@ -814,4 +929,86 @@ fn a_fired_ray_meets_the_exact_face_edge_or_nothing() {
         near(20.0 - hit.distance, 3.0 + 1.732_050_807_568_877_2, 1e-9),
         "{hit:?}"
     );
+}
+
+/// Along each straight edge of a 1 x 2 x 3 box, `edge_points` gives `n` points evenly inside
+/// the edge: one point is `edge_middle`'s, and of three points the middle one is at the edge's
+/// middle and each is a quarter of the edge's length from its neighbours, so none is at an end.
+/// `EDGE_POINTS_MAX` points all lie inside the edge. A count of 0 or past `EDGE_POINTS_MAX`,
+/// and an edge the body does not have, are refused.
+#[test]
+fn edge_points_spread_evenly_inside_an_edge_and_refuse_a_bad_count() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    let (_, order) = b.to_record().unwrap();
+    // Squared distances: each check below compares them with a squared length.
+    let dist2 =
+        |p: [f64; 3], q: [f64; 3]| p.iter().zip(q).map(|(a, b)| (a - b) * (a - b)).sum::<f64>();
+    let most = EDGE_POINTS_MAX as usize;
+    for edge in 0..12 {
+        let middle = b.edge_middle(&order, edge).unwrap();
+        let length = b.edge_length(&order, edge, 1e-9).unwrap();
+        let one = b.edge_points(&order, edge, 1).unwrap();
+        assert_eq!(one.len(), 1);
+        assert!(close(one[0], middle), "{one:?} vs {middle:?}");
+        let three = b.edge_points(&order, edge, 3).unwrap();
+        assert_eq!(three.len(), 3);
+        assert!(close(three[1], middle), "{three:?} vs {middle:?}");
+        for w in three.windows(2) {
+            assert!(
+                near(dist2(w[0], w[1]), length * length / 16.0, 1e-9),
+                "{three:?}"
+            );
+        }
+        let many = b.edge_points(&order, edge, most).unwrap();
+        assert_eq!(many.len(), most);
+        for p in &many {
+            // Inside the edge: nearer the middle than half its length, never at an end.
+            let reach = length / 2.0 - length / 200.0;
+            assert!(
+                dist2(*p, middle) < reach * reach,
+                "{p:?} is at or past an end"
+            );
+        }
+        for bad in [0, most + 1, usize::MAX] {
+            assert!(
+                matches!(b.edge_points(&order, edge, bad), Err(Error::Argument)),
+                "a count of {bad}"
+            );
+        }
+    }
+    assert!(matches!(b.edge_points(&order, 12, 3), Err(Error::Argument)));
+}
+
+/// On a cylinder of radius 5 and height 10 about the z axis, every edge lies on its side: each
+/// point `edge_points` gives is 5 from the axis and between z 0 and 10. On each rim circle (an
+/// edge whose points share one z) the points are all different, none is at the rim's ends, and
+/// the one point of a count of 1, and the middle one of 3, are `edge_middle`'s.
+#[test]
+fn edge_points_lie_on_the_circles_of_a_cylinder() {
+    all_fixes();
+    let c = make_cylinder([0.0; 3], 5.0, 10.0).unwrap();
+    let (record, order) = c.to_record().unwrap();
+    let mut rims = 0;
+    for edge in 0..record.edges.len() {
+        let points = c.edge_points(&order, edge, 9).unwrap();
+        assert_eq!(points.len(), 9);
+        for p in &points {
+            assert!(near(p[0] * p[0] + p[1] * p[1], 25.0, 1e-9), "{p:?}");
+            assert!(p[2] > -1e-9 && p[2] < 10.0 + 1e-9, "{p:?}");
+        }
+        if !points.iter().all(|p| (p[2] - points[0][2]).abs() <= 1e-9) {
+            continue;
+        }
+        rims += 1;
+        for (i, p) in points.iter().enumerate() {
+            for q in points.iter().skip(i + 1) {
+                assert!(!close(*p, *q), "{points:?}");
+            }
+        }
+        let middle = c.edge_middle(&order, edge).unwrap();
+        assert!(close(c.edge_points(&order, edge, 1).unwrap()[0], middle));
+        assert!(close(c.edge_points(&order, edge, 3).unwrap()[1], middle));
+    }
+    assert_eq!(rims, 2, "the cylinder's two rims");
 }

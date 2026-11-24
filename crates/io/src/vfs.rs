@@ -59,6 +59,13 @@ mod imp {
             std::path::Path::new(path).exists()
         }
     }
+    /// The path with links and `.`/`..` resolved, for telling whether two paths name one file.
+    /// It opens the path: on Windows a network path connects to its host, so a path a design
+    /// names goes through [`design_path_refusal`] first. No agent scope applies (it reads nothing).
+    pub fn canonicalize(path: &str) -> Result<std::path::PathBuf> {
+        touched();
+        std::fs::canonicalize(path)
+    }
     /// Whether the path names a regular file the caller may access.
     pub fn is_file(path: &str) -> bool {
         check(path).is_ok() && {
@@ -77,6 +84,13 @@ mod imp {
         touched();
         std::fs::create_dir_all(path)
     }
+    /// A new folder and any missing folders above it, authorized as a new destination
+    /// ([`check_new`]): its parents need not exist yet, but those that do must be in scope.
+    pub fn create_new_dir_all(path: &str) -> Result<()> {
+        check_new(path)?;
+        touched();
+        std::fs::create_dir_all(path)
+    }
     /// The paths of the regular files directly in a folder, sorted; at most `max` of them.
     pub fn files_in(dir: &str, max: usize) -> Result<Vec<String>> {
         check(dir)?;
@@ -88,6 +102,24 @@ mod imp {
                 out.push(entry.path().to_string_lossy().into_owned());
                 if out.len() > max {
                     return Err(Error::new(ErrorKind::InvalidData, "too many files in the folder"));
+                }
+            }
+        }
+        out.sort();
+        Ok(out)
+    }
+    /// The paths of the folders directly in a folder, sorted; at most `max` of them. A link to a
+    /// folder is not one (its file type is the link's), so a listing never leaves `dir`.
+    pub fn dirs_in(dir: &str, max: usize) -> Result<Vec<String>> {
+        check(dir)?;
+        touched();
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                out.push(entry.path().to_string_lossy().into_owned());
+                if out.len() > max {
+                    return Err(Error::new(ErrorKind::InvalidData, "too many folders in the folder"));
                 }
             }
         }
@@ -150,6 +182,10 @@ mod imp {
     pub fn create_dir_all(_path: &str) -> Result<()> {
         Ok(())
     }
+    /// As [`create_dir_all`]: nothing to make.
+    pub fn create_new_dir_all(_path: &str) -> Result<()> {
+        Ok(())
+    }
     pub fn insert(path: &str, bytes: Vec<u8>) {
         FILES.with(|f| f.borrow_mut().insert(path.to_string(), bytes));
     }
@@ -166,6 +202,20 @@ mod imp {
             return Err(Error::new(ErrorKind::InvalidData, "too many files in the folder"));
         }
         Ok(out)
+    }
+    /// The folders directly in a folder, sorted; at most `max` of them. A folder here is a path
+    /// part that some stored file sits under, so a folder no file sits under is not there.
+    pub fn dirs_in(dir: &str, max: usize) -> Result<Vec<String>> {
+        let prefix = format!("{}/", dir.trim_end_matches('/'));
+        if !FILES.with(|f| f.borrow().keys().any(|p| p.starts_with(&prefix))) {
+            return Err(missing(dir));
+        }
+        let out: std::collections::BTreeSet<String> =
+            FILES.with(|f| f.borrow().keys().filter_map(|p| Some(format!("{prefix}{}", p.strip_prefix(&prefix)?.split_once('/')?.0))).collect());
+        if out.len() > max {
+            return Err(Error::new(ErrorKind::InvalidData, "too many folders in the folder"));
+        }
+        Ok(out.into_iter().collect())
     }
     pub fn list(prefix: &str) -> Vec<(String, u64)> {
         FILES.with(|f| f.borrow().iter().filter(|(p, _)| p.starts_with(prefix)).map(|(p, b)| (p.clone(), b.len() as u64)).collect())
@@ -188,6 +238,9 @@ pub struct PathScope {
     design_roots: Vec<std::path::PathBuf>,
     /// Folders named on purpose that could not be resolved (#16662), kept to explain a refusal.
     rejected: Vec<RejectedRoot>,
+    /// Whether hidden files and folders inside `roots` are out of reach too, as they always are
+    /// inside design folders ([`PathScope::without_hidden`]).
+    roots_skip_hidden: bool,
 }
 
 /// A folder named for a [`PathScope`] that could not be used, and why (#16662).
@@ -322,6 +375,14 @@ impl PathScope {
         if given > 0 && scope.roots.is_empty() { Err(rejected) } else { Ok((scope, rejected)) }
     }
 
+    /// The same scope, with hidden files and folders inside its named folders out of reach, as
+    /// they are inside design folders: for folders a person granted a plugin, whose own reads
+    /// skip hidden names. The named folders themselves count even inside a hidden folder.
+    pub fn without_hidden(mut self) -> PathScope {
+        self.roots_skip_hidden = true;
+        self
+    }
+
     /// The folders named for this scope that were left out, with the reason.
     pub fn rejected(&self) -> &[RejectedRoot] {
         &self.rejected
@@ -448,8 +509,9 @@ impl PathScope {
 
     /// Whether the resolved path `p` lies inside one of the folders.
     fn contains(&self, p: &std::path::Path) -> bool {
-        let inside_design = || self.design_roots.iter().any(|r| p.strip_prefix(r).is_ok_and(|rel| !rel.components().any(|c| hidden(c.as_os_str()))));
-        self.roots.iter().any(|r| p.starts_with(r)) || inside_design()
+        let visible = |rel: &std::path::Path| !rel.components().any(|c| hidden(c.as_os_str()));
+        let inside_design = || self.design_roots.iter().any(|r| p.strip_prefix(r).is_ok_and(visible));
+        self.roots.iter().any(|r| p.strip_prefix(r).is_ok_and(|rel| !self.roots_skip_hidden || visible(rel))) || inside_design()
     }
 
     /// The "folder does not exist" error for a path whose folder is missing, but only when the
@@ -851,6 +913,35 @@ pub fn check_new(path: &str) -> Result<()> {
     SCOPE.with(|s| s.borrow().as_ref().map_or(Ok(()), |scope| scope.check_new(path)))
 }
 
+/// The start of a path that names a file in one of a plugin's granted folders by the grant's
+/// name, `grant:<name>/<path inside it>`, so the plugin need not know where the folder is.
+pub const GRANT_PREFIX: &str = "grant:";
+
+/// `path` with its leading `grant:<name>` replaced by the folder granted as `<name>` in `grants`:
+/// `grant:outbox/a/b.step` is `<outbox>/a/b.step`, and `grant:outbox` is the folder itself.
+/// `None` when `path` doesn't start with `grant:`: it is an ordinary path, as before. Text only,
+/// nothing on disk is asked; the caller's scope still judges the result (links, devices). Refused:
+/// a name not in `grants`, and a rest that is not plain names (`..`, `.`, a root or a drive).
+pub fn grant_path(path: &str, grants: &[(&str, &std::path::Path)]) -> Option<Result<String>> {
+    let rest = path.strip_prefix(GRANT_PREFIX)?;
+    let (name, inner) = rest.split_once(['/', '\\']).unwrap_or((rest, ""));
+    let refused = |why: String| Error::new(ErrorKind::PermissionDenied, format!("{path}: {why}"));
+    let Some((_, folder)) = grants.iter().find(|(granted, _)| *granted == name) else {
+        let names: Vec<&str> = grants.iter().map(|(granted, _)| *granted).collect();
+        return Some(Err(refused(format!(
+            "`{name}` is not a folder this command may use (it may use: {}); any command but an input reader such as `file.insert_step` needs a folder granted for reading and writing",
+            if names.is_empty() { "none".to_string() } else { names.join(", ") }
+        ))));
+    };
+    let inner = std::path::Path::new(inner);
+    if inner.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+        return Some(Err(refused(format!(
+            "the path after `grant:{name}` must stay inside that folder: plain names only, no `..`, `.`, root or drive"
+        ))));
+    }
+    Some(Ok(if inner.as_os_str().is_empty() { folder.to_path_buf() } else { folder.join(inner) }.to_string_lossy().into_owned()))
+}
+
 /// A file's text, at most `max` bytes.
 pub fn read_to_string(path: &str, max: usize) -> Result<String> {
     String::from_utf8(read(path, max)?).map_err(|e| Error::new(ErrorKind::InvalidData, e))
@@ -1087,6 +1178,80 @@ mod tests {
             assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{bad}: {e}");
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A plugin names a file in a granted folder by the grant's name, judged from the text alone.
+    #[test]
+    fn grant_paths_name_a_file_in_a_granted_folder() {
+        use super::grant_path;
+        let outbox = std::path::Path::new("granted").join("outbox");
+        let grants = [("outbox", outbox.as_path()), ("c", std::path::Path::new("elsewhere"))];
+        let resolved = |p: &str| grant_path(p, &grants).expect("a grant path").expect("resolves");
+        assert_eq!(resolved("grant:outbox/part.sc"), outbox.join("part.sc").to_string_lossy());
+        assert_eq!(resolved("grant:outbox/sub/part.step"), outbox.join("sub/part.step").to_string_lossy());
+        assert_eq!(resolved(r"grant:outbox\part.sc"), outbox.join("part.sc").to_string_lossy());
+        assert_eq!(resolved("grant:outbox"), outbox.to_string_lossy());
+        assert_eq!(resolved("grant:c/x.sc"), std::path::Path::new("elsewhere").join("x.sc").to_string_lossy(), "a one-letter grant is no drive");
+        for refused in [
+            "grant:outbox/../x.sc",
+            "grant:outbox/sub/../../x.sc",
+            "grant:outbox/./x.sc",
+            "grant:outbox//etc/passwd",
+            "grant:other/x.sc",
+            "grant:/x.sc",
+            "grant:Outbox/x.sc",
+        ] {
+            let e = grant_path(refused, &grants).expect("a grant path").unwrap_err();
+            assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{refused}: {e}");
+            assert!(e.to_string().starts_with(refused), "{e}");
+        }
+        assert!(grant_path("grant:other/x.sc", &grants).unwrap().unwrap_err().to_string().contains("it may use: outbox, c"));
+        assert!(grant_path("grant:outbox/x.sc", &[]).unwrap().unwrap_err().to_string().contains("it may use: none"));
+        for ordinary in [
+            r"C:\work\x.sc",
+            "C:/work/x.sc",
+            "C:x.sc",
+            "c:/x.sc",
+            r"\\server\share\x.sc",
+            r"\\?\C:\x.sc",
+            "/home/me/x.sc",
+            "outbox/x.sc",
+            "outbox:/x.sc",
+            "{outbox}/x.sc",
+            "file:///x.sc",
+            "Grant:outbox/x.sc",
+            "grants:outbox/x.sc",
+            "",
+        ] {
+            assert!(grant_path(ordinary, &grants).is_none(), "{ordinary}");
+        }
+    }
+
+    /// On Windows a drive, UNC, device or verbatim prefix after the grant's name would make `join`
+    /// replace the granted folder, and `\` separates names as `/` does: all refused from the text.
+    #[cfg(windows)]
+    #[test]
+    fn grant_paths_refuse_windows_prefixes_and_backslash_parents_after_the_name() {
+        use super::grant_path;
+        let grants = [("outbox", std::path::Path::new(r"C:\granted\outbox"))];
+        for refused in [
+            "grant:outbox/C:/x.sc",
+            r"grant:outbox\C:\x.sc",
+            "grant:outbox/C:x.sc",
+            "grant:outbox/D:",
+            r"grant:outbox/\\server\share\x.sc",
+            "grant:outbox///server/share/x.sc",
+            r"grant:outbox/\\?\C:\x.sc",
+            r"grant:outbox/\\?\UNC\server\share\x.sc",
+            r"grant:outbox/\\.\COM1",
+            r"grant:outbox\..\x.sc",
+            r"grant:outbox/sub\..\..\x.sc",
+            r"grant:outbox\\x.sc",
+        ] {
+            let e = grant_path(refused, &grants).expect("a grant path").unwrap_err();
+            assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{refused}: {e}");
+            assert!(e.to_string().contains("must stay inside that folder"), "{refused}: {e}");
+        }
     }
 
     /// The short (8.3) spelling of an existing `path` as `cmd` gives it (`NAME~1.XYZ`), or `None`
@@ -1409,7 +1574,7 @@ mod tests {
         let expected = ((roots.capacity() + design_roots.capacity()) * std::mem::size_of::<std::path::PathBuf>()
             + roots[0].capacity()
             + design_roots[0].capacity()) as u64;
-        let scope = super::PathScope { roots, design_roots, rejected: Vec::new() };
+        let scope = super::PathScope { roots, design_roots, rejected: Vec::new(), roots_skip_hidden: false };
         let before = scope.clone();
         assert_eq!(scope.retained_heap_bytes().unwrap(), expected);
         assert_eq!(scope, before);

@@ -2,6 +2,7 @@
 //!
 //! - `assets/locales/pending/<slug>.json`: `{"<locale>": {"<id>": "<text>"}}`, folded into the
 //!   catalogs (`assets/locales/<locale>.json`, sorted as `cargo xtask lists` expects).
+//!   An id the shared catalogs (`crates/ui-text/locales/<locale>.json`) already have is refused too.
 //! - `attribution/pending/<slug>.md`: rows of the ATTRIBUTION.md files table, appended to it.
 //!
 //! `cargo xtask fold-pending` folds and deletes them (the Generated files workflow runs it on
@@ -14,7 +15,10 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 
 const LOCALES: &str = "assets/locales";
-const LOCALES_PENDING: &str = "assets/locales/pending";
+/// The catalogs the shared crates ship (the kit's Preferences words), merged into the app's
+/// catalogs for each language by the app's build (`crates/ui-egui/build.rs`).
+pub const SHARED_LOCALES: &str = "crates/ui-text/locales";
+pub const LOCALES_PENDING: &str = "assets/locales/pending";
 const ATTRIBUTION_PENDING: &str = "attribution/pending";
 
 /// One pending locale file: its path and, per locale, the messages it adds.
@@ -71,7 +75,43 @@ pub fn locale_messages(root: &Path, locale: &str) -> Result<BTreeMap<String, Str
 /// Fails on a pending file the fold could not apply: a locale without a catalog, an id the catalog
 /// already has, or an id two pending files both add. Returns nothing else.
 pub fn check_locales(root: &Path) -> Result<(), String> {
+    check_shared(root)?;
     plan_locales(root).map(|_| ())
+}
+
+/// The messages the shared catalogs hold for one locale (none when the crate ships none).
+pub fn shared_messages(root: &Path, locale: &str) -> Result<Map<String, Value>, String> {
+    let path = root.join(SHARED_LOCALES).join(format!("{locale}.json"));
+    if !path.is_file() {
+        return Ok(Map::new());
+    }
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", show(root, &path)))?;
+    match serde_json::from_str(&text) {
+        Ok(Value::Object(map)) => Ok(map),
+        Ok(_) => Err(format!("{}: a catalog must be a JSON object", show(root, &path))),
+        Err(e) => Err(format!("{}: {e}", show(root, &path))),
+    }
+}
+
+/// Fails on a shared catalog with no app catalog for its language, or an id the app catalog
+/// already has: the app's build merges the two, so an id may live in one of them only.
+fn check_shared(root: &Path) -> Result<(), String> {
+    let mut problems = Vec::new();
+    for path in files_with(&root.join(SHARED_LOCALES), "json")? {
+        let name = show(root, &path);
+        let Some(locale) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        if !root.join(LOCALES).join(format!("{locale}.json")).is_file() {
+            problems.push(format!("{name}: `{locale}` has no catalog assets/locales/{locale}.json"));
+            continue;
+        }
+        let app = read_catalog(root, locale)?;
+        for id in shared_messages(root, locale)?.keys() {
+            if app.contains_key(id) {
+                problems.push(format!("{name}: `{id}` is also in assets/locales/{locale}.json (one catalog holds each id)"));
+            }
+        }
+    }
+    if problems.is_empty() { Ok(()) } else { Err(problems.join("\n")) }
 }
 
 type Plan = (BTreeMap<String, Map<String, Value>>, Vec<PathBuf>);
@@ -92,10 +132,11 @@ fn plan_locales(root: &Path) -> Result<Plan, String> {
             if !catalogs.contains_key(locale) {
                 catalogs.insert(locale.clone(), read_catalog(root, locale)?);
             }
+            let shared = shared_messages(root, locale)?;
             for (id, text) in messages {
                 if let Some(other) = added_by.get(&(locale.clone(), id.clone())) {
                     problems.push(format!("{name}: `{id}` ({locale}) is also added by {other}"));
-                } else if catalogs[locale].contains_key(id) {
+                } else if catalogs[locale].contains_key(id) || shared.contains_key(id) {
                     problems.push(format!("{name}: `{id}` is already in {locale}.json (rename the new id, or edit the catalog)"));
                 } else {
                     added_by.insert((locale.clone(), id.clone()), name.clone());

@@ -572,6 +572,14 @@ pub struct CreateParams {
     #[serde(default, deserialize_with = "grounded_flag", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub grounded: Option<bool>,
+    /// What one placement means in a bill of materials, as an expression (`component.metadata.set`'s
+    /// `bom_quantity`). Default: one.
+    #[serde(default)]
+    pub bom_quantity: Option<String>,
+    /// A component with no geometry (grease, paint, a label): listed in bills of materials with
+    /// its quantity, never active, and nothing can be put in it. Only `true`. Default: not virtual.
+    #[serde(default, rename = "virtual")]
+    pub r#virtual: Option<bool>,
 }
 
 /// What `component.create` returns.
@@ -807,11 +815,24 @@ pub struct PlacementInfo {
     pub transform: [[f64; 4]; 4],
     /// Whether it is grounded.
     pub grounded: bool,
+    /// How this occurrence counts in the bill of materials, in place of its component's type;
+    /// left out when it counts as its component.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub bom_type: Option<solidcraft_doc::BomType>,
 }
 
 impl From<&Occurrence> for PlacementInfo {
     fn from(o: &Occurrence) -> Self {
-        PlacementInfo { id: o.id, component: o.component, parent: o.parent, name: o.name.clone(), transform: o.transform, grounded: o.grounded }
+        PlacementInfo {
+            id: o.id,
+            component: o.component,
+            parent: o.parent,
+            name: o.name.clone(),
+            transform: o.transform,
+            grounded: o.grounded,
+            bom_type: o.bom_type,
+        }
     }
 }
 
@@ -828,6 +849,11 @@ pub struct CompactPlacement {
     /// Its placement in its parent, as a 4×4 matrix; left out when it is the identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transform: Option<[[f64; 4]; 4]>,
+    /// How this occurrence counts in the bill of materials, in place of its component's type;
+    /// left out when it counts as its component.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub bom_type: Option<solidcraft_doc::BomType>,
 }
 
 /// A placement in a component's `occurrences`: in full, or compact.
@@ -1024,9 +1050,27 @@ pub struct PropertiesResult {
     pub name: String,
     #[serde(flatten)]
     pub properties: PhysicalProperties,
+    /// What robot exports use instead of the measured values (`component.physical_override`),
+    /// when one is saved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physical_override: Option<PhysicalOverrideSaved>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// A component's saved physical override (`component.physical_override`).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, JsonSchema)]
+pub struct PhysicalOverrideSaved {
+    /// The mass, in kg.
+    pub mass: f64,
+    /// The centre of mass in the component's frame, in mm; left out for the measured one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub com: Option<[f64; 3]>,
+    /// The inertia [xx, yy, zz, xy, xz, yz] about the centre of mass along the component's axes,
+    /// in kg m²; left out for the measured one scaled to the mass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inertia: Option<[f64; 6]>,
 }
 
 /// The new name `component.rename` reads: text of 1 to 128 characters once trimmed.
@@ -1129,8 +1173,12 @@ pub struct UnlockParams {
 pub struct UnlockResult {
     /// The component, by id.
     pub component: u64,
-    /// The joints removed, by id.
+    /// The rigid joints removed, by id (an import saved before rigid groups held its contents
+    /// with these).
     pub joints: Vec<u64>,
+    /// The rigid group removed, by id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rigid_group: Option<u64>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -2170,3 +2218,62 @@ pub struct MoveSketchesResult {
 #[cfg(test)]
 #[path = "component_tests.rs"]
 mod tests;
+
+/// Set or clear the mass values robot exports use for a component's own bodies (a bought motor
+/// modelled as a solid block). Its nested components keep theirs. Give none to clear them.
+/// Properties and the bill of materials keep the mass worked out from the bodies.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PhysicalOverrideParams {
+    /// The component, by id or name. Not the root design.
+    pub component: IdOrName,
+    /// Mass in kg. Required with `com` or `inertia`.
+    #[serde(default)]
+    pub mass: Option<f64>,
+    /// Centre of mass in mm, in the component's frame. Default: worked out from its bodies.
+    #[serde(default)]
+    pub com: Option<[f64; 3]>,
+    /// Inertia about the centre of mass, kg m², along the component's axes: xx, yy, zz, xy, xz, yz.
+    /// Default: worked out from its bodies, scaled by the mass.
+    #[serde(default)]
+    pub inertia: Option<[f64; 6]>,
+}
+
+/// What `component.physical_override` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PhysicalOverrideResult {
+    /// The component, by id.
+    pub component: u64,
+    /// The mass now saved in kg. Absent when cleared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mass: Option<f64>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Set what a body, or every body of a component, looks like to a simulator.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BodyCollisionParams {
+    /// The body, by name. Give this or `component`.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// The component whose bodies to set, by id or name. Give this or `body`.
+    #[serde(default)]
+    pub component: Option<IdOrName>,
+    /// `auto` (the export decides), `mesh`, `box`, `cylinder`, `sphere` or `none`.
+    pub shape: String,
+}
+
+/// What `body.collision` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BodyCollisionResult {
+    /// The bodies set.
+    pub bodies: Vec<String>,
+    /// The shape they now have.
+    pub shape: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

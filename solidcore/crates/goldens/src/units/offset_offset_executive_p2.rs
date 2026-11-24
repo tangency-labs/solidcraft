@@ -329,6 +329,12 @@ struct Inputs {
     /// measured entry point, `brep_volume` here), both compared as `volumes`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     volume_query: Option<VolumeQuery>,
+    /// A box the constructor refuses is the case's result (#15350, the `review_box_`
+    /// construction fixtures only): `create_box` returns each face's and the stitch's status
+    /// (the fork's `AddBoxFace`, WR-596), so a source or foreign box it cannot make is
+    /// recorded as constructor `rejected` with `status` its code, not a harness error.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    box_refusal_is_result: bool,
 }
 /// [`Inputs::volume_query`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -901,6 +907,34 @@ fn build(kernel: &mut Kernel, fixture: &Fixture, tolerance: f64, namespace: u64)
         }
     }
     Ok(brep)
+}
+
+/// [`Inputs::box_refusal_is_result`]: the first of the source and foreign boxes that
+/// `create_box` refuses, as constructor `rejected` with `status` its code; `None` when both
+/// build (or are not boxes).
+fn box_refusal(input: &Inputs) -> HResult<Option<Output>> {
+    for (side, fixture) in [("source", &input.source), ("foreign", &input.foreign)] {
+        let Some(Fixture::Box { origin, size }) = fixture else {
+            continue;
+        };
+        let [dx, dy, dz] = *size;
+        let made = solidcore::primitive::api_primitives::create_box(
+            &mut Kernel::default(),
+            v3(*origin),
+            dx,
+            dy,
+            dz,
+        );
+        if let Err(error) = made {
+            let code = solidcore::error::upstream_status(&error)
+                .ok_or_else(|| bad(format!("{side} box refused without a status: {error}")))?;
+            return Ok(Some(
+                Output::rejected(format!("{side} box refused by its constructor (status {code})"))
+                    .int("status", i64::from(code)),
+            ));
+        }
+    }
+    Ok(None)
 }
 
 /// The native fixture's `SmApiCreateBox(origin, dx, dy, dz)` then
@@ -1605,6 +1639,11 @@ fn purity_state(brep: &Brep) -> Result<String, SolidError> {
 }
 fn rust_output(input: &Inputs) -> RResult<Output> {
     validate(input)?;
+    if input.box_refusal_is_result {
+        if let Some(output) = box_refusal(input)? {
+            return Ok(output);
+        }
+    }
     let mut kernel = Kernel::default();
     let mut source = input
         .source
@@ -1740,6 +1779,9 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         ),
     };
     let (status, mut result) = operation(result)?;
+    if let Some(brep) = result.as_ref() {
+        crate::dump::body(&kernel, "result", brep);
+    }
     let result_projection = result.as_ref().map(rust_result_projection).transpose()?;
     let offset_projection = exec
         .as_ref()
@@ -1923,6 +1965,7 @@ fn generated(rng: &mut Rng) -> Inputs {
         heap_ordered_vertices: false,
         attributed: None,
         volume_query: None,
+        box_refusal_is_result: false,
     };
     match category {
         0 | 1 => {
@@ -2040,6 +2083,12 @@ mod tests {
     /// removed): the rounded outward offsets of `extrudeHoles1` at k 0.36, with the result
     /// bodies the soundness probe measures. `None` for a case that builds no body.
     fn wr533_overlap_offsets() -> Vec<(String, i64, Option<crate::soundness::Soundness>, i64)> {
+        overlap_offsets("0.36")
+    }
+
+    /// The rounded outward offsets of `extrudeHoles1` at `k`, each with its status, the
+    /// result body the soundness probe measures (`None` without one) and `result.present`.
+    fn overlap_offsets(k: &str) -> Vec<(String, i64, Option<crate::soundness::Soundness>, i64)> {
         let ctx = CaseContext {
             root: repo_root(),
             seeds: 0,
@@ -2048,7 +2097,7 @@ mod tests {
         [0, 2, 3, 4, 5]
             .into_iter()
             .map(|f| {
-                let name = format!("overlap_pc_extrudeHoles1_f{f}_k0.36_out_rnd");
+                let name = format!("overlap_pc_extrudeHoles1_f{f}_k{k}_out_rnd");
                 let case = cases.iter().find(|c| c.name == name).unwrap();
                 crate::soundness::start();
                 let out = Runner.run_rust(case).unwrap();
@@ -2110,6 +2159,23 @@ mod tests {
         }
     }
 
+    /// #18927's moved rows here (`ssi_proto_topology_statuses_pass_on` removed): the same
+    /// offsets at k 0.35 reach `resolve_overlapping_proto_edges`, whose replacement of an
+    /// overlap group fails (`find_interval`: the parameter is before the start) after the
+    /// group's proto edges and edge definitions were taken out of the intersection. Each is
+    /// refused (1001) and builds no result body. Measured on main 6ea034c437 (before
+    /// #18927, with `moved_cases_results_measured`): each returned success with a body
+    /// that `check_brep` level 2 refuses (faces with partially coincident edges, or a loop
+    /// of bad orientation), four of them not manifold.
+    #[test]
+    fn k035_overlap_offsets_are_refused() {
+        for (name, status, body, present) in overlap_offsets("0.35") {
+            assert_eq!(status, 1001, "{name}");
+            assert!(body.is_none(), "{name}: a refused case builds no result body");
+            assert_eq!(present, 0, "{name}");
+        }
+    }
+
     use std::collections::BTreeSet;
 
     use crate::case::repo_root;
@@ -2126,6 +2192,7 @@ mod tests {
             heap_ordered_vertices: false,
             attributed: None,
             volume_query: None,
+            box_refusal_is_result: false,
         }
     }
     fn case(input: &Inputs) -> Case {
@@ -2662,6 +2729,17 @@ mod tests {
                 continue;
             }
             let rust = Runner.run_rust(&case).unwrap();
+            // #15350: a box too small for its tolerance (1e-6 at the origin, 1e-3 at 1e6) is
+            // refused by `create_box` itself (the fork's `AddBoxFace`, WR-596): constructor
+            // rejected, status 1001
+            let refused = !case.name.ends_with("_selected")
+                && (case.name.contains("_tiny_") || case.name.contains("_translated_"));
+            if refused {
+                assert!(rust.rejected.is_some() && rust.error.is_none(), "{}", case.name);
+                assert_eq!(rust.ints["status"], [1001], "{}", case.name);
+                recorded += 1;
+                continue;
+            }
             assert!(rust.rejected.is_none() && rust.error.is_none(), "{}", case.name);
             if case.name.ends_with("_control") {
                 assert!(rust.deferred.is_none());
@@ -2669,7 +2747,7 @@ mod tests {
                 assert_eq!(rust.ints["input.pure"], [1, 1]);
                 assert!(!rust.values.is_empty());
             } else if !case.name.ends_with("_selected") {
-                // Null selection: the empty box is built and the API status is 1007.
+                // Null selection: the box is built and the API status is 1007.
                 assert_eq!(rust.ints["status"], [1007]);
             }
             recorded += 1;
@@ -3011,8 +3089,16 @@ mod tests {
                 });
             assert!(closed_form.is_some() != half_pipe.is_some(), "{name}");
 
-            // the half pipes' refinement ends at its cell budget long before 1e-9 (below)
-            crate::soundness::start_enclosing(if closed_form.is_some() { 1e-9 } else { 1e-6 });
+            // the enclosure is asked for a quarter of the relative width accepted below on the
+            // closed forms, half on the half pipes: a tighter ask only refines past it, to the
+            // cell budget (the half pipes, and the 2e-6 slab at 1e-8). Not the width itself:
+            // the ask is relative to the sign's enclosure's upper end, the acceptance to the
+            // final one's, which is lower (MEASURED: asked 2e-4, the R 12 inner half pipe ends
+            // 2.01e-4 of its upper end wide; asked half, the cylinder sheets end 9.8e-8 wide,
+            // within 2% of the 1e-7 accepted; asked a quarter, 4.7e-8, at no extra time; a
+            // quarter on the half pipes doubles the test's time)
+            let width = if closed_form.is_some() { 1e-7 } else { 2e-4 };
+            crate::soundness::start_enclosing(width / if closed_form.is_some() { 4.0 } else { 2.0 });
             let output = Runner.run_rust(case).unwrap();
             let found = crate::soundness::take();
             assert!(output.deferred.is_none() && output.error.is_none(), "{name}");
@@ -3048,20 +3134,20 @@ mod tests {
                 "{name}: {:?}",
                 body.volume
             );
-            // the certified enclosure, asked for 1e-9 of the volume (1e-6 on the half pipes)
+            // the certified enclosure, asked for `width` of the volume
             let Some(Ok(e)) = &body.enclosure else {
                 panic!("{name}: {:?}", body.enclosure);
             };
             eprintln!("WR564 {name}: [{:e}, {:e}]", e.lo, e.hi);
-            // measured: the plane and cylinder sheets refine to 1.5e-8 of the volume or
-            // below (the 2e-6 slab is the widest); the half pipes' refinement ends at its
-            // cell budget, near 2e-6 (R 12) and 1e-4 (R 20) of it, on main as here. On the
-            // half pipes the closed form inside the enclosure so certifies the body's
-            // volume only to 2e-4 of it: acceptance slack set from the measured R 20 width.
-            // It is enough here (argued) because a wall is replaced only where its control
-            // points lie within SM_EFF_ZERO of the new plane, so the replacement moves the
-            // volume by at most the replaced walls' area times SM_EFF_ZERO
-            let width = if closed_form.is_some() { 1e-7 } else { 2e-4 };
+            // measured, asked 1e-9 (1e-6 on the half pipes): the plane and cylinder sheets
+            // refine to 1.5e-8 of the volume or below (the 2e-6 slab is the widest); the half
+            // pipes' refinement ends at its cell budget, near 2e-6 (R 12) and 1e-4 (R 20) of
+            // it, on main as here. On the half pipes the closed form inside the enclosure so
+            // certifies the body's volume only to 2e-4 of it: acceptance slack set from the
+            // measured R 20 width. It is enough here (argued) because a wall is replaced only
+            // where its control points lie within SM_EFF_ZERO of the new plane, so the
+            // replacement moves the volume by at most the replaced walls' area times
+            // SM_EFF_ZERO
             assert!(e.lo > 0.0 && e.hi - e.lo <= width * e.hi, "{name}: [{}, {}]", e.lo, e.hi);
             if let Some(v) = closed_form {
                 assert!(e.lo <= v && v <= e.hi, "{name}: {v} not in [{}, {}]", e.lo, e.hi);

@@ -47,14 +47,12 @@ const RIM: [f64; 3] = [0.0, -25.0, 2.0];
 /// A point on the seam where the corner's cylinder runs into the tab's flat side.
 const SEAM: [f64; 3] = [4.0, 280.0 / 9.0, 1.0];
 
-/// Every opt-in fix on except `geometric_g2_continuity`, then `set` applied.
+/// Every opt-in fix on, then `set` applied.
 fn kernel(set: impl FnOnce(&mut UpstreamFixes)) -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     set(&mut f);
     k.fixes = f;

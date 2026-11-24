@@ -1,0 +1,21 @@
+{
+  "id": "plate-maker",
+  "name": "Plate Maker",
+  "version": "0.1.0",
+  "description": "Adds a square plate.",
+  "capabilities": ["commands@0.2"],
+  "runtime": {
+    "module": "plate-maker.wasm",
+    "commands": ["solid.box"],
+    "entries": [{
+      "name": "plate",
+      "effect": "edit",
+      "input_schema": {"type": "object", "properties": {
+        "size": {"type": "number", "title": "Size", "default": 40, "minimum": 1, "unit": "mm"},
+        "thickness": {"type": "number", "title": "Thickness", "default": 3, "minimum": 0.1, "unit": "mm"}
+      }},
+      "slots": [{"kind": "ribbon", "name": "Model"}]
+    }],
+    "limits": {"fuel": 1000000000, "memory_mib": 32, "deadline_ms": 5000}
+  }
+}

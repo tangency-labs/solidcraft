@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1020" height="400" viewBox="0 0 1020 400">
+  <title>combine-proto-edge</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="1020" height="400" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 20 50)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">1  After the split</tspan></text>
+    <text transform="matrix(1 0 0 1 20 74)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">the overlap runs the other way</tspan></text>
+    <path d="M90 195 C143.333 158.333 196 158.333 248 195" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linecap="round" stroke-miterlimit="10"/>
+    <polygon points="249.63,196.15 234.74,192.99 241.65,183.18" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 157 160)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">PE1</tspan></text>
+    <path d="M250 205 C196.667 241.667 144 241.667 92 205" fill="none" stroke="#555555" stroke-width="2" stroke-linecap="round" stroke-miterlimit="10"/>
+    <polygon points="90.37,203.85 105.26,207.01 98.35,216.82" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 157 252)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">PE2</tspan></text>
+    <circle cx="80" cy="200" r="7" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 56 205)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">A</tspan></text>
+    <circle cx="260" cy="200" r="7" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 274 205)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">B</tspan></text>
+    <text transform="matrix(1 0 0 1 20 300)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">A lists PE1, PE2</tspan></text>
+    <text transform="matrix(1 0 0 1 20 320)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">B lists PE1, PE2</tspan></text>
+    <line x1="335" y1="30" x2="335" y2="380" fill="none" stroke="#999999" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 360 50)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">2  Combined, upstream</tspan></text>
+    <text transform="matrix(1 0 0 1 360 74)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">PE2&apos;s ends moved onto PE1&apos;s</tspan></text>
+    <path d="M430 195 C483.333 158.333 536 158.333 588 195" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linecap="round" stroke-miterlimit="10"/>
+    <polygon points="589.63,196.15 574.74,192.99 581.65,183.18" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 497 160)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">PE1</tspan></text>
+    <path d="M590 205 C536.667 241.667 483.333 241.667 430 205" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <text transform="matrix(1 0 0 1 460 252)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">PE2 (merged)</tspan></text>
+    <circle cx="420" cy="200" r="7" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 396 205)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">A</tspan></text>
+    <circle cx="600" cy="200" r="7" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 614 205)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">B</tspan></text>
+    <text transform="matrix(1 0 0 1 360 300)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">A lists PE1, PE1</tspan></text>
+    <text transform="matrix(1 0 0 1 360 320)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">B lists PE1, PE1</tspan></text>
+    <text transform="matrix(1 0 0 1 360 348)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">PE2: start A, end B</tspan></text>
+    <text transform="matrix(1 0 0 1 360 366)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">removing PE2 at A: not listed</tspan></text>
+    <line x1="675" y1="30" x2="675" y2="380" fill="none" stroke="#999999" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 700 50)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">3  Combined, this change</tspan></text>
+    <path d="M770 195 C823.333 158.333 876 158.333 928 195" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linecap="round" stroke-miterlimit="10"/>
+    <polygon points="929.63,196.15 914.74,192.99 921.65,183.18" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 837 160)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">PE1</tspan></text>
+    <text transform="matrix(1 0 0 1 800 252)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">PE2 (merged)</tspan></text>
+    <circle cx="760" cy="200" r="7" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 736 205)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">A</tspan></text>
+    <circle cx="940" cy="200" r="7" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 954 205)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">B</tspan></text>
+    <text transform="matrix(1 0 0 1 700 74)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">PE2 runs B to A: no end moves</tspan></text>
+    <path d="M930 205 C876.667 241.667 824 241.667 772 205" fill="none" stroke="#555555" stroke-width="2" stroke-linecap="round" stroke-miterlimit="10"/>
+    <polygon points="770.37,203.85 785.26,207.01 778.35,216.82" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 700 300)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">A lists PE1, PE2</tspan></text>
+    <text transform="matrix(1 0 0 1 700 320)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">B lists PE1, PE2</tspan></text>
+    <text transform="matrix(1 0 0 1 700 348)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">PE2: start B, end A</tspan></text>
+    <text transform="matrix(1 0 0 1 700 366)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">removing PE2 at B and A: done</tspan></text>
+  </g>
+</svg>

@@ -389,8 +389,9 @@ pub fn paint_navigation_custom(p: &Painter, rect: Rect) {
         p.add(Shape::ellipse_stroke(top, ellipse, line));
     }
     let bore = c - vec2(0.0, 25.0 * scale);
-    p.add(Shape::ellipse_filled(bore, vec2(6.0, 2.4) * scale, ctx.ink(Ink::Right, 1.0)));
-    p.add(Shape::ellipse_stroke(bore, vec2(6.0, 2.4) * scale, line));
+    let bore_radii = vec2(6.0 * scale, 2.4 * scale);
+    p.add(Shape::ellipse_filled(bore, bore_radii, ctx.ink(Ink::Right, 1.0)));
+    p.add(Shape::ellipse_stroke(bore, bore_radii, line));
 }
 
 /// Preserve the mouse's figure palette, with slightly stronger lettering.
