@@ -746,6 +746,34 @@ pub fn calculate_uv_domain_from_uv_trim_curves_into(
     Ok(())
 }
 
+/// Not upstream: [`calculate_uv_domain_from_uv_trim_curves`] read-only and certified: the
+/// union of the certified boxes ([`Curve::certified_bounding_box`], each holding its whole
+/// curve) of the UV trim curves the face's edge uses already hold ([`eu1::uv_trim_curve`]:
+/// an edge use's, else its mate's), so every loop of the face lies in it. `None` when the
+/// face has no loop, or an edge use has no UV trim curve (none is made here), or a trim
+/// curve has no certified box.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of the loop traversal and the boxes.
+pub fn certified_uv_trim_domain(k: &Kernel, b: &Brep, f: FaceId) -> Result<Option<Extent2d>> {
+    let mut domain: Option<Extent2d> = None;
+    for lu in upward_loopuses(b, f)? {
+        for eu in eu1::loopuse_edgeuses(b, lu)? {
+            // the edge use's trim, or its mate's (the same face's other side)
+            let Some(curve) = eu1::uv_trim_curve(b, eu)?.0 else {
+                return Ok(None);
+            };
+            let Some(bx) = curve.certified_bounding_box(k, &curve.natural_interval())? else {
+                return Ok(None);
+            };
+            let bx = Extent2d::from_extent3d(&bx);
+            domain = Some(domain.map_or(bx, |d| d.union(&bx)));
+        }
+    }
+    Ok(domain)
+}
+
 // ---- oriented trim boundary ---------------------------------------------------------------
 
 /// The outputs of [`create_oriented_trim_boundary`].

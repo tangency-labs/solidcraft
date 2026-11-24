@@ -62,6 +62,7 @@ mod envelopes;
 mod face;
 mod features;
 mod features_more;
+mod hole_stacks;
 mod join_pieces;
 pub(crate) use bom::SAME_AS_COMPONENT;
 pub(crate) use bom::occurrence_bom_type;
@@ -639,6 +640,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(joints::COMMANDS.iter());
     v.extend(joints::constraint::COMMANDS.iter());
     v.extend(clearance::COMMANDS.iter());
+    v.extend(hole_stacks::COMMANDS.iter());
     v.extend(motion::COMMANDS.iter());
     v.extend(motion_simulate::COMMANDS.iter());
     v.extend(panels::COMMANDS.iter());

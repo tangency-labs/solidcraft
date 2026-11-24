@@ -4384,3 +4384,30 @@ fn redefining_a_sketch_onto_a_parallel_plane_keeps_its_points_where_they_were() 
         assert!((x2 - x).abs() < 1e-6 && (y2 - y).abs() < 1e-6, "{id}: ({x}, {y}) -> ({x2}, {y2})");
     }
 }
+
+/// #20503: on a face sketch, a rectangle with sides on the face's projected outline is picked by
+/// its own four curves. Each piece where a drawn side lies on a projected edge was named after the
+/// projected curve only, so the drawn curves bounded no profile.
+#[test]
+fn a_rectangle_with_sides_on_the_projected_face_outline_is_picked_by_its_own_curves() {
+    for (corner, far, sides_on_outline) in [([2.0, 2.0], [10.0, 18.0], 0), ([0.0, 2.0], [10.0, 18.0], 1), ([0.0, 0.0], [10.0, 20.0], 3)] {
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 40, "width": 20, "height": 10, "corner": [0, 0, 0], "name": "Box1", "operation": "new", "body_name": "Plate"}),
+        );
+        run(&mut s, "sketch.create", json!({"plane": {"face": [20, 10, 10]}, "name": "Top"}));
+        let curves = run(&mut s, "sketch.rectangle.two_point", json!({"p0": corner, "p1": far}))["curves"].clone();
+        run(&mut s, "sketch.finish", json!({}));
+        s.execute(
+            "solid.extrude",
+            &json!({"sketch": "Top", "profiles": [{"curves": curves}], "distance": 5, "operation": "new", "name": "Boss", "body_name": "Boss"}),
+        )
+        .unwrap_or_else(|e| panic!("{sides_on_outline} sides on the outline: {e}"));
+        let boss = s.model.state().body("Boss").unwrap().body.clone();
+        let volume = solidcraft_kernel::measure(&boss).unwrap().volume;
+        let want = (far[0] - corner[0]) * (far[1] - corner[1]) * 5.0;
+        assert!((volume - want).abs() < 1e-6 * want, "{sides_on_outline} sides on the outline: {volume} vs {want}");
+    }
+}

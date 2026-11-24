@@ -1681,14 +1681,15 @@ mod tests {
     /// page (#10043): the search keeps its query, and the key runs no command behind
     /// Preferences (P is Project's, which would open Create Sketch). P being Project's is
     /// reported there with the choice to use it anyway, as on the page. Going back to the search
-    /// field to type stops a recording.
+    /// field to type stops a recording. The search is "unfix", not "fix", which also finds the
+    /// URDF mesh prefix setting on General and pushes the shortcut matches below the window.
     #[test]
     fn a_shortcut_recorded_from_a_preferences_search_takes_the_key() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.prefs", json!({"open": "General"}));
         h.frames(3);
-        h.step(&json!({"text": "fix"})).expect("search");
+        h.step(&json!({"text": "unfix"})).expect("search");
         h.frames(3);
         h.step(&json!({"click": {"handle": "prefs:search:shortcuts"}})).expect("unfold the shortcut matches");
         h.frames(2);
@@ -1698,7 +1699,7 @@ mod tests {
         h.step(&json!({"text": "p"})).unwrap();
         h.step(&json!({"key": "P", "pressed": false})).unwrap();
         h.frames(65);
-        assert_eq!(h.app.prefs_window.shell.filter, "fix", "the key went to the search");
+        assert_eq!(h.app.prefs_window.shell.filter, "unfix", "the key went to the search");
         assert!(h.app.dialog.is_none() && h.app.session.active_sketch.is_none(), "the key ran a command");
         assert!(h.app.keymap.capturing.is_none());
         let conflict = h.app.keymap.conflict.as_ref().map(|(id, key, ..)| (id.as_str(), key.as_str()));
@@ -1715,7 +1716,7 @@ mod tests {
         h.step(&json!({"text": "x"})).unwrap();
         h.frames(2);
         assert!(h.app.keymap.capturing.is_none(), "typing in the search stops the recording");
-        assert_eq!(h.app.prefs_window.shell.filter, "fixx");
+        assert_eq!(h.app.prefs_window.shell.filter, "unfixx");
     }
 
     /// Dialog OK (`ui.dialog_ok`, #17416) has no default key: a Preferences search finds it on
