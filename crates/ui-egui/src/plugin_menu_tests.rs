@@ -3564,7 +3564,7 @@ fn annotated_folder_fields_grant_only_edited_visible_values_for_the_internal_req
             "x-solidcraft-grant":"read","x-solidcraft-visible-when":{"field":"use_library","eq":true}}
     }});
     h.app.plugin_menu.listed = vec![listed("files", vec![command])];
-    h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::pending())));
+    h.app.services.pick_folder = Some(Box::new(|_| Box::pin(std::future::pending())));
     open_entry(&mut h.app, 0, 0);
     h.frames(2);
     let note = h.app.tr("ui.plugin_dialog_folder_read_once").to_owned();
