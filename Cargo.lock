@@ -4034,6 +4034,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
+ "objc2-quartz-core 0.3.2",
 ]
 
 [[package]]
@@ -4233,6 +4234,30 @@ dependencies = [
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
  "objc2-metal 0.3.2",
+]
+
+[[package]]
+name = "objc2-quick-look-thumbnailing"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac8e00da1ca87ffe3ea8d20981026f013df91072a140432f0f88da9a356d9b3c"
+dependencies = [
+ "block2 0.6.2",
+ "objc2 0.6.5",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
+name = "objc2-quick-look-ui"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef5bce23577f7bcbb88339d4f4fcba83bcc376ca6a7f556d1707e49e7986d329"
+dependencies = [
+ "block2 0.6.2",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
 ]
 
 [[package]]
@@ -6178,6 +6203,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-design-preview"
+version = "0.48.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "zip",
+]
+
+[[package]]
 name = "solidcraft-develop"
 version = "0.48.0"
 dependencies = [
@@ -6236,6 +6270,7 @@ dependencies = [
  "image",
  "log",
  "png",
+ "quick-xml",
  "resvg",
  "schemars",
  "serde",
@@ -6439,6 +6474,23 @@ version = "0.48.0"
 dependencies = [
  "serde_json",
  "web-time",
+]
+
+[[package]]
+name = "solidcraft-quicklook"
+version = "0.48.0"
+dependencies = [
+ "block2 0.6.2",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation 0.3.2",
+ "objc2-metal 0.3.2",
+ "objc2-quartz-core 0.3.2",
+ "objc2-quick-look-thumbnailing",
+ "objc2-quick-look-ui",
+ "solidcraft-design-preview",
 ]
 
 [[package]]

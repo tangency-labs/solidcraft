@@ -1871,18 +1871,35 @@ fn tool_title(name: &str, args: &Value) -> String {
     }
 }
 
+/// Whether a `/models` row can hold a chat. Some endpoints list one row per API a model answers and
+/// name that API in `type` as `<format>/<endpoint>` (`openai/chat-completions`,
+/// `openai/image-generations`, `anthropic/messages`): only chat completions and messages can. A row
+/// without a `type`, or with a bare word (`model`), is kept as before.
+fn chat_capable(row: &Value) -> bool {
+    match row.get("type").and_then(Value::as_str).and_then(|t| t.split_once('/')) {
+        Some((_, endpoint)) => matches!(endpoint, "chat-completions" | "messages"),
+        None => true,
+    }
+}
+
 /// The ids of a `/models` body and the names the endpoint gives them (when not just the id), in
 /// its order. The body is the endpoint's to write: an id that could not be sent back is left out,
-/// and a name is cut. A body without a `data` array is no model list (a web page where the
-/// endpoint should be, say): an error, so the picker says so and asks again later.
+/// as is a row for an API other than chat, an id is listed once, and a name is cut. A body
+/// without a `data` array is no model list (a web page where the endpoint should be, say): an
+/// error, so the picker says so and asks again later.
 fn listed_models(body: &Value, name_key: &str) -> Result<Vec<(String, Option<String>)>, String> {
     let Some(entries) = body.get("data").and_then(Value::as_array) else {
         return Err(solidcraft_ui_text::tr("ui.agent_chat_models_not_a_list").to_string());
     };
+    let mut seen = std::collections::HashSet::new();
     Ok(entries
         .iter()
+        .filter(|m| chat_capable(m))
         .filter_map(|m| {
             let id = m.get("id").and_then(Value::as_str).filter(|id| super::model_id_valid(id))?;
+            if !seen.insert(id) {
+                return None;
+            }
             let name = m.get(name_key).and_then(Value::as_str).filter(|name| *name != id).map(|name| name.chars().take(MODEL_NAME_CAP).collect());
             Some((id.to_string(), name))
         })
@@ -2855,6 +2872,47 @@ mod tests {
         assert_eq!(same.name, "Same One");
         assert_eq!(long.name.chars().count(), MODEL_NAME_CAP);
         assert!(test_endpoint(&http, "https://openrouter.ai/api/v1", None, "openai/gpt-x", false).unwrap().contains(&MODEL_LIST_CAP.to_string()));
+    }
+
+    /// #20006: AI/ML API lists one row per API a model answers, naming it in `type`, so a model is
+    /// there several times beside image, video, speech and embedding models. A recorded sample of
+    /// that listing (`tests/fixtures/aimlapi-models.json`: 15 rows, 8 ids, 3 of them chat models)
+    /// gives the picker the 3 chat models, once each, in the order they are first listed.
+    #[test]
+    fn a_listing_with_api_types_keeps_only_chat_models_once() {
+        crate::i18n::install();
+        let body = include_bytes!("../../tests/fixtures/aimlapi-models.json").to_vec();
+        let rows: Value = serde_json::from_slice(&body).unwrap();
+        let rows = rows["data"].as_array().unwrap();
+        let ids: std::collections::HashSet<&str> = rows.iter().filter_map(|r| r["id"].as_str()).collect();
+        assert_eq!((rows.len(), ids.len()), (15, 8), "the sample as recorded");
+        let http: HttpFn = Arc::new(move |_: &HttpRequest| Ok((200, body.clone())));
+        let chat = ["radixark/daisyrose-27b", "mistralai/pixtral-large-2502", "anthropic/claude-fable-5-2"];
+        let list = model_list(&http, "https://api.aimlapi.com/v1", Some("k"), false).unwrap();
+        assert_eq!(list.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), chat);
+        let list = anthropic_model_list(&http, "https://api.aimlapi.com/v1", Some("k")).unwrap();
+        assert_eq!(list.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), chat);
+        let video = test_endpoint(&http, "https://api.aimlapi.com/v1", Some("k"), "heygen/avatar-6", false).unwrap();
+        assert_eq!(video, solidcraft_ui_text::format("ui.ai_test_no_model", &[("count", "3"), ("model", "heygen/avatar-6")]));
+    }
+
+    /// A listing without `type`, or with a bare word there (Anthropic's `"type": "model"`), is
+    /// listed as before: every row, in its order.
+    #[test]
+    fn a_listing_without_api_types_is_unchanged() {
+        crate::i18n::install();
+        for rows in [
+            json!([{"id": "gpt-x"}, {"id": "text-embedding-x"}, {"id": "image-x", "name": "Image X"}]),
+            json!([{"id": "gpt-x", "type": "model"}, {"id": "text-embedding-x", "type": "model"}, {"id": "image-x", "type": "model", "name": "Image X"}]),
+        ] {
+            let body = json!({"data": rows}).to_string().into_bytes();
+            let http: HttpFn = Arc::new(move |_: &HttpRequest| Ok((200, body.clone())));
+            let list = model_list(&http, "https://api.openai.com/v1", None, false).unwrap();
+            assert_eq!(
+                list.iter().map(|m| (m.id.as_str(), m.description.as_str())).collect::<Vec<_>>(),
+                [("gpt-x", ""), ("text-embedding-x", ""), ("image-x", "Image X")]
+            );
+        }
     }
 
     /// A 200 that is no model list (a web page where the endpoint should be) is an error, so the

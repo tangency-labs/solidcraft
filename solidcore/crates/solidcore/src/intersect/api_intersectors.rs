@@ -53,7 +53,7 @@
 
 use crate::curve::curve::Curve;
 use crate::error::intersect::IntersectFailure;
-use crate::error::{ignored, Failure, Result, SolidError, SM_ERR};
+use crate::error::{ignored, EntityRef, Failure, Result, SolidError, SM_ERR};
 use crate::eval::Frame;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -73,11 +73,13 @@ use crate::query::brep::{BrepFaceServices, CurveFaceObject, CurveFaceServices};
 use crate::surface::plane::Plane;
 use crate::surface::surface::{Surface, SurfaceIntersection, SurfaceKind, TsectCurveType};
 use crate::surface::surface_cache::face_context::FaceQueries;
+use crate::topology::brep::p3::brep_copy_mapped;
 use crate::topology::brep::planar_section::{
     create_planar_section_curves, PlanarSectionOptions, SectionOutputs,
 };
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::face::p3::{face_intersect_breps, FaceBreps, FaceIntersectOptions};
+use crate::topology::proto_topology::p1::CopyBrepMap;
 use crate::topology::Brep;
 use crate::topology::FaceId;
 
@@ -548,6 +550,41 @@ pub fn intersect_faces(
     })
 }
 
+/// [`intersect_faces`] of `face1` of `brep1` and `face2` of `brep2`, two B-reps it only
+/// reads: it meets the faces on copies of both ([`brep_copy_mapped`]), so neither B-rep
+/// changes, not even the caches and trim curves the intersection would make on it.
+///
+/// # Errors
+///
+/// Those of [`brep_copy_mapped`]; [`SolidError::InvalidInput`] for a face not of its
+/// B-rep; those of [`intersect_faces`].
+pub fn intersect_faces_read_only(
+    k: &mut Kernel,
+    brep1: &Brep,
+    face1: FaceId,
+    brep2: &Brep,
+    face2: FaceId,
+    want_points: bool,
+) -> Result<Intersections> {
+    let (mut copy1, map1) = brep_copy_mapped(k, brep1)?;
+    let (mut copy2, map2) = brep_copy_mapped(k, brep2)?;
+    let face_of = |map: &CopyBrepMap<EntityRef>, f| match map.get_at(Some(EntityRef::Face(f))) {
+        Ok(Some(EntityRef::Face(c))) => Ok(c),
+        _ => Err(SolidError::invalid_input(
+            "intersect_faces_read_only",
+            "a face not of its B-rep",
+        )),
+    };
+    let (f1, f2) = (face_of(&map1, face1)?, face_of(&map2, face2)?);
+    intersect_faces(
+        k,
+        FaceBodies::Two(&mut copy1, &mut copy2),
+        f1,
+        f2,
+        want_points,
+    )
+}
+
 /// The operands of [`intersect_breps`].
 #[derive(Debug)]
 pub enum BrepOperands<'a> {
@@ -749,7 +786,8 @@ fn curve_surface_solutions(
 }
 
 /// [`curve_surface_solutions`] of face `f`'s surface (`surface`, an evaluation copy of
-/// it) over the face's UV domain, through the B-rep's face services: the surface reaches
+/// it) over the face's UV domain within `tolerance` (upstream's: `0.001`), through the
+/// B-rep's face services: the surface reaches
 /// its face's trimmed cache (`smsurf_GetSurfaceCache`) as upstream's does through
 /// `GetFace()`.
 fn curve_face_solutions(
@@ -759,6 +797,7 @@ fn curve_face_solutions(
     f: FaceId,
     surface: &Surface,
     uv_domain: &Extent2d,
+    tolerance: f64,
 ) -> Result<Vec<CurveSurfaceSolution>> {
     let interval = curve.natural_interval();
     let solutions = surface.global_curve_intersect_with_context(
@@ -772,7 +811,7 @@ fn curve_face_solutions(
         uv_domain,
         curve,
         &interval,
-        CURVE_TOLERANCE,
+        tolerance,
     )?;
     Ok(solution_list(&solutions))
 }
@@ -918,6 +957,22 @@ pub fn intersect_curve_face(
     b: &mut Brep,
     f: FaceId,
 ) -> Result<CurveHits> {
+    intersect_curve_face_within(k, curve, b, f, CURVE_TOLERANCE)
+}
+
+/// (Not upstream) [`intersect_curve_face`] with the solve within `tolerance` instead of
+/// the fixed `0.001`.
+///
+/// # Errors
+///
+/// Those of [`intersect_curve_face`].
+pub(crate) fn intersect_curve_face_within(
+    k: &Kernel,
+    curve: &Curve,
+    b: &mut Brep,
+    f: FaceId,
+    tolerance: f64,
+) -> Result<CurveHits> {
     // (an evaluation copy of the face's surface: same owner and cache slot)
     let surface = crate::topology::face::p2::surface(b, f)?
         .ok_or_else(|| {
@@ -929,7 +984,7 @@ pub fn intersect_curve_face(
         .clone_for_evaluation()?;
     let uv_domain = crate::topology::face::p2::uv_domain(b, f)?;
     let services = BrepFaceServices::new(b);
-    let solutions = curve_face_solutions(k, curve, &services, f, &surface, &uv_domain)?;
+    let solutions = curve_face_solutions(k, curve, &services, f, &surface, &uv_domain, tolerance)?;
     let mut hits = CurveHits::default();
     append_curve_surface_hits(k, curve, &solutions, Some((&services, f)), false, &mut hits)?;
     found(hits, OP_CURVE_FACE)
@@ -964,7 +1019,15 @@ pub fn intersect_curve_brep(k: &Kernel, curve: &Curve, b: &mut Brep) -> Result<C
         let Some((surface, uv_domain)) = face_surface else {
             continue;
         };
-        let solutions = curve_face_solutions(k, curve, &services, f, &surface, &uv_domain)?;
+        let solutions = curve_face_solutions(
+            k,
+            curve,
+            &services,
+            f,
+            &surface,
+            &uv_domain,
+            CURVE_TOLERANCE,
+        )?;
         append_curve_surface_hits(k, curve, &solutions, Some((&services, f)), true, &mut hits)?;
     }
     found(hits, OP_CURVE_BREP)

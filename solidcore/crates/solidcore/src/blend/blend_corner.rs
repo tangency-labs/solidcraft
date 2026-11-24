@@ -78,6 +78,7 @@ pub mod mixed;
 pub mod on_face;
 pub(crate) mod piece;
 pub mod rollover;
+pub mod separate_ends;
 pub mod setback;
 pub mod swept;
 
