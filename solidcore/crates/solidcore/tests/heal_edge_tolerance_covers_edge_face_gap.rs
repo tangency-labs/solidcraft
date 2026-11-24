@@ -643,9 +643,31 @@ fn corpus_mass(
     lower: Option<(Tolerances<'_>, Tolerances<'_>)>,
 ) -> (f64, f64, Vec<f64>) {
     use solidcore::geom::attribute::ObjectKey;
-    use solidcore::mass::integrator::properties::{
-        brep_volume, face_properties, PropertyAttributes,
-    };
+    use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+    let (k, mut b, solid, face_areas) = corpus_faces_measured(name, lower);
+    let area = face_areas.iter().fold(0.0, |a, x| a + x);
+    let mut volume = f64::NAN;
+    if solid {
+        let store = AttributeStore::new();
+        let key = |_| ObjectKey(0);
+        let attributes = PropertyAttributes {
+            store: &store,
+            key_of: &key,
+        };
+        volume = brep_volume(&k, &mut b, 1e-6, &attributes).unwrap();
+    }
+    (area, volume, face_areas)
+}
+
+/// [`corpus_mass`]'s body up to its areas: the file read (with `lower` set), the runner's
+/// counts, kind and shells, then each face's area, which makes and repairs the face's UV
+/// trims as the area integrates them. Returns the kernel, that body, whether it is a
+/// manifold solid and each face's area (in [`bl::faces`] order).
+fn corpus_faces_measured(
+    name: &str,
+    lower: Option<(Tolerances<'_>, Tolerances<'_>)>,
+) -> (Kernel, Brep, bool, Vec<f64>) {
+    use solidcore::mass::integrator::properties::face_properties;
     use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
     use solidcore::topology::brep::p1 as bl;
     use solidcore::topology::brep::p2::{is_manifold_solid, is_sheet};
@@ -671,7 +693,6 @@ fn corpus_mass(
         is_sheet(&mut k, &b).unwrap();
     }
     bl::shells(&mut k, &b, None).unwrap();
-    let mut area = 0.0;
     let mut face_areas = Vec::new();
     for f in &faces {
         let bbox = solidcore::query::face::p1::calculate_bounding_box(&k, &b, *f, false).unwrap();
@@ -689,20 +710,9 @@ fn corpus_mass(
             PPF_AREA,
         )
         .unwrap();
-        area += p.area.abs();
         face_areas.push(p.area.abs());
     }
-    let mut volume = f64::NAN;
-    if solid {
-        let store = AttributeStore::new();
-        let key = |_| ObjectKey(0);
-        let attributes = PropertyAttributes {
-            store: &store,
-            key_of: &key,
-        };
-        volume = brep_volume(&k, &mut b, 1e-6, &attributes).unwrap();
-    }
-    (area, volume, face_areas)
+    (k, b, solid, face_areas)
 }
 
 /// The upstream test files the moved goldens rows read (`topology.brep_p10` `read_*`,
@@ -1066,7 +1076,12 @@ const UVTC_AREA_MAIN: [(&str, usize, u64); 2] = [
 
 /// Each [`UVTC_AREA_MAIN`] face classed against a certified enclosure of its exact area
 /// (`mass::enclosure::enclose_face_area`), asked `1e-9 * |A|` wide: the file, the face, its
-/// class, why the enclosure stopped and whether it reached the asked width.
+/// class, why the enclosure stopped and whether it reached the asked width. The enclosure is
+/// of the face on the body as the area measured it ([`corpus_faces_measured`]): each face's
+/// area makes and repairs the UV trims it integrates, so a fresh read's face is bounded by
+/// other trims (on `vase3`, its exact area lies 4e-9 and 3e-8 relative below both values).
+/// Both values lie inside each enclosure, which reaches the asked width: the move (1.4e-13
+/// relative) is below what a certified bound at the goldens' tolerance can tell apart.
 const UVTC_AREA_CLASSES: [(&str, usize, &str, EnclosureStop, bool); 2] = [
     (
         "Fillet/vase3.smb",
@@ -1220,9 +1235,16 @@ fn corpus_reads_change_only_the_covered_tolerances() {
                     put_back.to_bits()
                 ));
             }
-            let mut k = Kernel::default();
-            let mut b = Brep::new_with_infinite_region().unwrap();
-            fit(&mut || b = read_corpus(&mut k, name, false));
+            // (enclosed on the body as the area measured it: each face's area makes and
+            // repairs its UV trims, and the enclosure is of the face those trims bound)
+            let mut measured = None;
+            fit(&mut || measured = Some(corpus_faces_measured(name, None)));
+            let (k, mut b, _, again) = measured.unwrap();
+            assert_eq!(
+                again.iter().map(|a| a.to_bits()).collect::<Vec<_>>(),
+                face_areas.iter().map(|a| a.to_bits()).collect::<Vec<_>>(),
+                "{name}: the measured body's areas"
+            );
             let faces = solidcore::topology::brep::p1::faces(&b, None).unwrap();
             for &&(_, i, main) in &listed {
                 let (now, main) = (face_areas[i], f64::from_bits(main));

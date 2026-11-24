@@ -1275,6 +1275,13 @@ mod local_operation {
 /// vertex's gap, 4.7505e-4 in both bodies: at `feature0_geometry[171]` (the copy alone gives
 /// 4.4536e-4, main 5.657e-4) and at `base_geometry[267]` (main 4.4536e-4), which the row
 /// lists for it. Both are classed against main's values like any moved value.
+///
+/// WR-441's corner fix (`sm_FixUVTrimCurves` repairs only a trim's end points at a corner)
+/// moves two rows further, the 11th listed: `single_face_fillet1019_6`'s `*_record` and
+/// sample moves (its `main` stays the copy's main), and the whole of
+/// `single_face_fillet1019_8`'s row, which the copy did not move: its `main` is main's
+/// (223b506526) digest and its 56 moved values the difference of the two trees' full
+/// outputs (every int the same). Each is classed by [`certify_body`] like the copy's moves.
 mod feature_executive {
     use super::{certify_body, certify_rewritten, plain_digest, Class, FALSE_POSITIVES, REWRITTEN};
     use crate::units::blend_feature_executive::{result_breps, Runner};
@@ -1360,7 +1367,7 @@ mod feature_executive {
              moved values closer {closer}, equal {equal}",
             ROWS.len()
         );
-        assert_eq!(ROWS.len(), 10);
+        assert_eq!(ROWS.len(), 11);
     }
 }
 

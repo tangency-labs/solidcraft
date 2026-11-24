@@ -1,5 +1,6 @@
 // Generated from main's (7d4445c0c) `check_brep` level 2 (`validation::soundness`) of each
 // row's result bodies (the body the check runs on); a body not listed had no line.
+// `single_face_fillet1019_8`'s (WR-441's row) are main's (223b506526).
 const MAIN_LEVEL2: &[(&str, &str, &[&str])] = &[
     ("fc0000", "", &[
         "SmSurface::Test #4 Bad Surf Discontinuity: Surface sampled IsoLine contains a G1 or C0 discontinuity across a Knot Value [owner SmBSplineSurface]",
@@ -99,6 +100,23 @@ const MAIN_LEVEL2: &[(&str, &str, &[&str])] = &[
         "SmBSplineCurve::Test #14 Bad CurveCusp: 3D BSplineCurve Warning: Extremely small radius of curvature (often an almost kink point - sometimes what's desired) (offset=6.770777e-09, tolerance=9.1023684e-05) [owner SmBSplineCurve]",
         "SmBSplineCurve::Test #15 Bad Repeated CPts: BSplineCurve has Internal Coincident ControlPoints (causes internal point singularity) (tolerance= 1e-06) [owner SmBSplineCurve]",
         "SmBSplineCurve::Test #13 Bad CurveCusp: 2D BSplineCurve Warning: Extremely small radius of curvature (often an almost kink point - sometimes what's desired) (offset=3.3849857e-08, tolerance=0.00010060836) [owner SmBSplineCurve]",
+        "SmBSplineCurve::Test #15 Bad Repeated CPts: BSplineCurve has Internal Coincident ControlPoints (causes internal point singularity) (tolerance= 1e-06) [owner SmBSplineCurve]",
+    ]),
+    ("single_face_fillet1019_8", "base_", &[
+        "SmBSplineCurve::Test #14 Bad CurveCusp: 3D BSplineCurve Warning: Extremely small radius of curvature (often an almost kink point - sometimes what's desired) (offset=1.4592911e-07, tolerance=8.9843954e-05) [owner SmBSplineCurve]",
+        "SmBSplineCurve::Test #15 Bad Repeated CPts: BSplineCurve has Internal Coincident ControlPoints (causes internal point singularity) (tolerance= 1e-06) [owner SmBSplineCurve]",
+        "SmBSplineCurve::Test #13 Bad CurveCusp: 2D BSplineCurve Warning: Extremely small radius of curvature (often an almost kink point - sometimes what's desired) (offset=1.3436405e-07, tolerance=9.9400161e-05) [owner SmBSplineCurve]",
+        "SmBSplineCurve::Test #15 Bad Repeated CPts: BSplineCurve has Internal Coincident ControlPoints (causes internal point singularity) (tolerance= 1e-06) [owner SmBSplineCurve]",
+        "SmBSplineCurve::Test #13 Bad CurveCusp: 2D BSplineCurve Warning: Extremely small radius of curvature (often an almost kink point - sometimes what's desired) (offset=1.4470739e-07, tolerance=9.555614e-05) [owner SmBSplineCurve]",
+        "SmBSplineCurve::Test #15 Bad Repeated CPts: BSplineCurve has Internal Coincident ControlPoints (causes internal point singularity) (tolerance= 1e-06) [owner SmBSplineCurve]",
+        "SmBSplineCurve::Test #14 Bad CurveCusp: 3D BSplineCurve Warning: Extremely small radius of curvature (often an almost kink point - sometimes what's desired) (offset=6.770777e-09, tolerance=9.1023684e-05) [owner SmBSplineCurve]",
+        "SmBSplineCurve::Test #15 Bad Repeated CPts: BSplineCurve has Internal Coincident ControlPoints (causes internal point singularity) (tolerance= 1e-06) [owner SmBSplineCurve]",
+        "SmBSplineCurve::Test #13 Bad CurveCusp: 2D BSplineCurve Warning: Extremely small radius of curvature (often an almost kink point - sometimes what's desired) (offset=1.1170396e-07, tolerance=0.00010052347) [owner SmBSplineCurve]",
+    ]),
+    ("single_face_fillet1019_8", "feature0_", &[
+        "SmBSplineCurve::Test #14 Bad CurveCusp: 3D BSplineCurve Warning: Extremely small radius of curvature (often an almost kink point - sometimes what's desired) (offset=6.770777e-09, tolerance=9.1023684e-05) [owner SmBSplineCurve]",
+        "SmBSplineCurve::Test #15 Bad Repeated CPts: BSplineCurve has Internal Coincident ControlPoints (causes internal point singularity) (tolerance= 1e-06) [owner SmBSplineCurve]",
+        "SmBSplineCurve::Test #13 Bad CurveCusp: 2D BSplineCurve Warning: Extremely small radius of curvature (often an almost kink point - sometimes what's desired) (offset=3.4021652e-07, tolerance=0.00010060802) [owner SmBSplineCurve]",
         "SmBSplineCurve::Test #15 Bad Repeated CPts: BSplineCurve has Internal Coincident ControlPoints (causes internal point singularity) (tolerance= 1e-06) [owner SmBSplineCurve]",
     ]),
 ];
