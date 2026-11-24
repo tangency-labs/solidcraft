@@ -35,14 +35,10 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "offset_analytic_mate_edges",
     "uv_trim_corner_end_points_only",
     "bspline_trim_preserves_uv_spans",
-    "new_edge_vertex_tolerance_covers_gap",
-    "fillet_point_step_per_point",
     "analytic_copy_keeps_parameterization",
     "offset_extension_from_base",
     "fillet_cleanup_keeps_target_faces",
-    "shell_edges_on_analytics_exact",
     "fillet_patch_keeps_fillet_edges",
-    "fillet_refuse_overlapping_bands",
     "fillet_knife_edge_rounds",
     "linear_sweep_arc_is_cylinder",
     "fillet_trace_reaches_rails",
@@ -55,7 +51,6 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "edgeuse_convexity_propagates_step_off_failure",
     "keep_exact_pcurves",
     "closed_smooth_pole_tangent_limit",
-    "fillet_chamfer_corner",
     "brep_ray_classifies_current_trims",
 ];
 

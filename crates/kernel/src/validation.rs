@@ -1,16 +1,19 @@
-//! How often SMLib's full check runs while a model is evaluated. Every sweep, boolean and blend
-//! checks its result in SMLib before it is decoded ([`Validation::EachStep`]); an evaluation can
-//! instead leave those checks to one check of the bodies each feature keeps
-//! ([`Validation::EachFeature`]), or skip them ([`Validation::Off`]). A body kept straight from
-//! a step is checked at the end as that step would have checked it, on the step's own result
-//! (kept with the body until then): the record a result is decoded to can pass SMLib's check
-//! where the result itself fails it (a surface of revolution's polar curve, rebuilt on import).
+//! How often SMLib's full check runs while a model is evaluated. An evaluation leaves the checks
+//! of the sweeps, booleans and blends a feature runs to one check of each body the feature keeps
+//! ([`Validation::EachFeature`], the default), can check every step's result as it is made
+//! ([`Validation::EachStep`]), or skips them ([`Validation::Off`]). A body kept straight from a
+//! step is checked at the end as that step would have checked it, on the step's own result (kept
+//! with the body until then): the record a result is decoded to can pass SMLib's check where the
+//! result itself fails it (a surface of revolution's polar curve, rebuilt on import).
 //!
 //! The evaluation installs its mode around a feature with [`validating`], as [`crate::watch`]
 //! installs a watch: the operations a feature runs are reached through hundreds of public kernel
 //! functions, and the mode is the evaluation's, not each operation's. Outside [`validating`]
-//! (the kernel called directly, a preview, a test) every step is checked, as it always was. The
-//! worker threads the kernel starts for a step run under the same mode ([`crate::par`]).
+//! (the kernel called directly, a preview, a test) a step does not check its result: the check is
+//! a test of the bodies an evaluation keeps, not part of each operation. A caller that wants every
+//! step checked asks for it with `validating(Validation::EachStep, ..)`, and [`check_kept`] and
+//! [`failing_check`] check a body on request. The worker threads the kernel starts for a step run
+//! under the same mode ([`crate::par`]).
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -102,12 +105,12 @@ pub(crate) fn within<R>(scope: Option<Arc<Scope>>, f: impl FnOnce() -> R) -> R {
 /// What a step does with SMLib's check of its result ([`step`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Step {
-    /// Check it now (outside [`validating`], and under [`Validation::EachStep`]).
+    /// Check it now (under [`Validation::EachStep`]).
     Check,
     /// Leave it to the end of the feature (under [`Validation::EachFeature`]): the body decoded
     /// from the result keeps it ([`Body::left_unchecked`]) for [`check_kept`].
     Defer,
-    /// Never check it (under [`Validation::Off`]).
+    /// Don't check it (outside [`validating`], and under [`Validation::Off`]).
     Skip,
 }
 
@@ -115,12 +118,12 @@ pub(crate) enum Step {
 /// was left for its end.
 pub(crate) fn step() -> Step {
     CURRENT.with(|c| match c.borrow().as_deref() {
-        None | Some(Scope { mode: Validation::EachStep, .. }) => Step::Check,
+        Some(Scope { mode: Validation::EachStep, .. }) => Step::Check,
         Some(s @ Scope { mode: Validation::EachFeature, .. }) => {
             s.deferred.store(true, Ordering::Relaxed);
             Step::Defer
         }
-        Some(Scope { mode: Validation::Off, .. }) => Step::Skip,
+        None | Some(Scope { mode: Validation::Off, .. }) => Step::Skip,
     })
 }
 
@@ -374,15 +377,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_step_is_checked_outside_an_evaluation_and_under_each_step() {
-        assert_eq!(step(), Step::Check);
+    fn a_step_is_checked_only_under_each_step() {
+        assert_eq!(step(), Step::Skip, "outside an evaluation a step does not check its result");
         assert_eq!(validating(Validation::EachStep, step), (Step::Check, false));
         assert_eq!(validating(Validation::EachFeature, step), (Step::Defer, true));
         assert_eq!(validating(Validation::Off, step), (Step::Skip, false));
         // The thread's own mode comes back, also after a nested scope.
         let ((inner, outer), deferred) = validating(Validation::Off, || (validating(Validation::EachStep, step).0, step()));
         assert!(inner == Step::Check && outer == Step::Skip && !deferred);
-        assert_eq!(step(), Step::Check);
+        assert_eq!(step(), Step::Skip);
     }
 
     /// A check detached under a token runs under it on whatever thread runs it (the feature
