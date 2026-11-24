@@ -60,6 +60,7 @@ pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
 pub mod dialogs_frame_plate;
+pub mod dialogs_gusset;
 mod dialogs_hole;
 pub mod dialogs_insert_airfoil;
 pub mod dialogs_insert_drawing;

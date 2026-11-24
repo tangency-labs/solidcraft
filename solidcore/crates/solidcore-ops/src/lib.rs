@@ -72,6 +72,7 @@ pub mod form_subdivision;
 pub mod form_surface_replace;
 pub mod form_transform;
 pub mod forms_view_queries;
+pub mod frame_gusset;
 pub mod hatch;
 pub mod heal;
 pub mod history;

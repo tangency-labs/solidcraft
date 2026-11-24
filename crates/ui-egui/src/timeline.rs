@@ -362,6 +362,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::BoundingSolid { .. } => "bounding_solid",
         FeatureKind::Pipe { .. } => "pipe",
         FeatureKind::FrameEndCap { .. } => "end_cap",
+        FeatureKind::FrameGusset { .. } => "gusset",
         FeatureKind::FrameMember { .. } => "frame_member",
         FeatureKind::FrameMemberTurn { .. } => "rotate_member",
         FeatureKind::FramePlate { .. } => "frame_plate",

@@ -229,6 +229,7 @@ form.refined_weld.remove          Saved Forms topology: refined_weld_retains_bot
 form.repair                       Forms repair: retained_support_repair_is_explicit_cancelable_and_recoverable_without_document_mutation in crates/engine/src/cmd/forms_prototype.rs
 form.surface                      Forms construction: form_surface_guides_keep_the_rim_preview_cancel_and_saved_editing in crates/engine/src/cmd/forms_prototype.rs
 frame.end_cap                     plates on member ends; tested in crates/engine/src/cmd/frame_tests.rs
+frame.gusset                      support contact, placement and editing in engine frame_tests.rs and UI dialogs_frame_tests.rs
 frame.multi_trim                  sets one corner of a Frame Member; tested in crates/engine/src/cmd/frame_tests.rs
 frame.plate                       tested in crates/engine/src/cmd/frame_tests.rs and crates/ui-egui/src/dialogs_frame_tests.rs
 frame.profile.list                a listing of the profile library

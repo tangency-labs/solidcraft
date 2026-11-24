@@ -84,6 +84,7 @@ pub const DOCUMENTED: &[&str] = &[
     "form.repair",
     "form.surface",
     "frame.end_cap",
+    "frame.gusset",
     "frame.member",
     "frame.plate",
     "frame.rotate_member",
