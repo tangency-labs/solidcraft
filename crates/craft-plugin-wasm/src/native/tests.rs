@@ -270,6 +270,38 @@ fn ui_capability_requires_provider_exports() {
     assert!(check_component(&panel_manifest(), &component("call $box"), RuntimeOptions::default()).is_err());
 }
 
+#[test]
+fn panel_plugin_supports_dialog_hooks() {
+    let (package, version) = API.split_once('@').unwrap();
+    let dialog_export = format!(
+        "(export \"{package}/ui-provider@{version}\" (instance $provider))\n\
+         (instance $dialog (export \"json\" (type $json)) (export \"plugin-error\" (type $plugin-error)) (export \"update-fields\" (func $execute)))\n\
+         (export \"{package}/dialog-provider@{version}\" (instance $dialog))"
+    );
+    let target = format!("(export \"{package}/ui-provider@{version}\" (instance $provider))");
+    let component = wat::parse_str(
+        include_str!("../ui_fixture.wat")
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("__COMMAND__", "document.inspect")
+            .replace("__COMMAND_LEN__", "16")
+            .replace("__ARGS__", "{}")
+            .replace("__ARGS_LEN__", "2")
+            .replace(&target, &dialog_export),
+    )
+    .unwrap();
+    let mut manifest = panel_manifest();
+    manifest.capabilities.push("dialog@0.1".into());
+    manifest.runtime.as_mut().unwrap().commands.insert("document.inspect".into());
+    manifest.runtime.as_mut().unwrap().entries[0].dialog_hook = true;
+    check_component(&manifest, &component, RuntimeOptions::default()).unwrap();
+    let (mut app, result) = crate::dialog_fields(App::default(), &manifest, &component, "make", &json!({}), craft_plugin::HostLimits::default());
+    assert_eq!(result.unwrap(), "{\"bodies\":1,\"name\":\"Bracket\"}");
+    assert_eq!((app.begins, app.commits, app.rollbacks), (1, 1, 0));
+    app.panel_data.merge_frame();
+    assert_eq!(app.panel_data.get("/jobs/0/state"), Some(&craft_plugin::ui::UiValue::Text("ready".into())));
+}
+
 fn form_component() -> Vec<u8> {
     form_component_with_dialog(false)
 }
