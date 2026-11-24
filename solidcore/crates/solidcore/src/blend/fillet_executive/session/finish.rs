@@ -1045,9 +1045,10 @@ impl FilletSession<'_> {
         for face in p1::faces(self.objects.target, None)? {
             let mark = Attribute::tag(ids::FILLET_TARGET_FACE, TagData::default(), Behavior::Copy);
             let handle = self.objects.attributes.insert(mark)?;
+            // recorded first, so a failed attach is still destroyed at the end
+            self.objects.cleanup_face_marks.push(handle);
             let key = self.target_identity(EntityRef::Face(face)).key;
             self.objects.attributes.add_attribute(key, handle)?;
-            self.objects.cleanup_face_marks.push(handle);
         }
         Ok(())
     }
@@ -1056,6 +1057,14 @@ impl FilletSession<'_> {
     /// whether it succeeded or not, so the target's attributes are as they would be without
     /// them: the marks set, and the copies the splits and merges made of them.
     fn remove_target_face_marks(&mut self) -> Result<()> {
+        // the recorded marks go first, so a failed face walk below cannot leak them
+        let mut status = Ok(());
+        for handle in std::mem::take(&mut self.objects.cleanup_face_marks) {
+            if self.objects.attributes.get(handle).is_some() {
+                status = status.and(self.objects.attributes.destroy(handle));
+            }
+        }
+        // then the copies the splits and merges made, found on the target's faces
         let mut found = Vec::new();
         for face in p1::faces(self.objects.target, None)? {
             let key = self.target_identity(EntityRef::Face(face)).key;
@@ -1067,15 +1076,12 @@ impl FilletSession<'_> {
                 found.push(handle);
             }
         }
-        for handle in found
-            .into_iter()
-            .chain(std::mem::take(&mut self.objects.cleanup_face_marks))
-        {
+        for handle in found {
             if self.objects.attributes.get(handle).is_some() {
-                self.objects.attributes.destroy(handle)?;
+                status = status.and(self.objects.attributes.destroy(handle));
             }
         }
-        Ok(())
+        status
     }
 
     /// [`Self::do_filleting`]'s filleting, without the split at the radius law's corners

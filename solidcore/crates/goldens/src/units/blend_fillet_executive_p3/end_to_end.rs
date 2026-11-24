@@ -3751,11 +3751,13 @@ mod wr664_near_knot_trims {
 /// patches on one surface; the round splits one patch and the clean-up now keeps both, so
 /// their boundary (the input's own same-surface edge) stays. These tests check, row by
 /// row, that this is the only change: every face but the round's has a target face's
-/// surface, the round's surface is main's, the patches merged again give main's body and
-/// its failure set, and the kept boundary adds exactly one `check_brep` Level 2 failure, a
+/// surface, the round's surface is main's, the near-seam vertices and the other Level 2
+/// failures are main's (constants printed on main a2b7ec60e2 by a one-off probe of the
+/// same rows, not a recorder kept here), and the kept boundary adds exactly one
+/// `check_brep` Level 2 failure, a
 /// "Face Near missing Seam" whose cause is a vertex the round places a few nanometres off
-/// the sphere's seam on main too (bit-identical), well inside that vertex's tolerance.
-/// The volume is certified in `round_definition_rows`.
+/// the sphere's seam on main too (bit-identical), well inside that vertex's tolerance
+/// (that placement is #21421). The volume is certified in `round_definition_rows`.
 #[cfg(test)]
 mod wr459_sphere_rows {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -4039,7 +4041,7 @@ mod wr459_sphere_rows {
         assert_eq!(failures(&mut body), with_one, "{name}: Level 2 failures");
 
         // on main the two patches were one face (main_sphere, holding the same vertices
-        // at the same bits: printed by the probe at a2b7ec60e2, quoted in the PR); on e4
+        // at the same bits: printed by a one-off probe on main a2b7ec60e2); on e4
         // main's merged patch already fails the seam check, so the near-seam placement is
         // main's, which the kept boundary exposes on e1 too and does not cause
         let main_fails_seam = row.main_failures.contains(&(SEAM, Some((FACE, row.main_sphere))));

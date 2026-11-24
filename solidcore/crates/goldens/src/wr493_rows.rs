@@ -530,7 +530,7 @@ const WR459_MOVED: [&str; 4] = [
 /// retirement keeps the target's own faces, which splits the round into two edges with the
 /// same start (4.000000000004889e-3) in both bodies: the moving one is now edge 41 in
 /// `e1-r0.5` (37 before) and edge 40 in `e4-r0.5` (36 before), found by that start and its
-/// two end values below; the other one (38 and 41) ends at the near value on both sides.
+/// two end values below; the other one (e1: 38, e4: 41) ends at the near value on both sides.
 const E1_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 41);
 const E4_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 40);
 
