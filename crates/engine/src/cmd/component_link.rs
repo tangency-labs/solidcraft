@@ -18,7 +18,7 @@ use solidcraft_doc::config::RowKey;
 use solidcraft_doc::{DesignLink, Document, FeatureKind, LinkedBodyProperties, MeshData, UserMaterial};
 
 use super::CommandSpec;
-use super::design_link::{LinkState, absolute, link_presence, link_target, read_linked_file, resolve, same_file, stored};
+use super::design_link::{LinkState, absolute, inside_design_folder, link_presence, link_target, read_linked_file, resolve, same_file, stored};
 use crate::params::{bad, str_, vec3};
 use crate::schema::component_link::{
     BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, ExtractParams, ExtractResult, InsertDesignParams,
@@ -67,7 +67,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<UpdateLinksResult>)
         .params(
         "component?: id or name (default: every linked component); components?: a list of ids or names, which goes on past a design it \
-         cannot read (that one keeps its bodies, is named in failed and gets a warning) — reads the linked design or STEP files again and replaces \
+         cannot read (that one keeps its bodies, is named in failed and gets a warning); linked_bodies?: all|folder (a linked design that \
+         was itself saved without the bodies of its linked designs: which of those files are read for them; default all; folder: only \
+         files in this design's folder or the linked design's own, and a linked design reaching further is not read) — reads the linked design or STEP files again and replaces \
          their bodies where they changed, and their part properties (part number, revision…) where the design changed them and this \
          design did not, as one undo step; → updated, unchanged, failed ([{component, name, error}]), warnings (also \
          joints whose faces are gone or that no longer solve)",
@@ -153,6 +155,329 @@ pub fn resolve_design_links(doc: &mut Document, from: Option<&str>) {
     super::design_link::located(doc, from);
 }
 
+/// Whether `link`, of the component `comp`, has no bodies in `doc`: its Import feature holds
+/// neither STEP text nor records, as a file saved without linked bodies keeps it. A link to a
+/// STEP file always keeps its bodies ([`leave_out_linked_bodies`]).
+fn left_out(doc: &Document, comp: u64, link: &DesignLink) -> bool {
+    link.step_names.is_none()
+        && doc
+            .feature(link.feature)
+            .filter(|f| f.component == comp)
+            .is_some_and(|f| matches!(&f.kind, FeatureKind::Import { step, records: None, .. } if step.is_empty()))
+}
+
+/// `design`, the copy of `doc` a save writes, without the bodies of its linked designs: each
+/// link's Import feature loses its STEP text and its records, and the copy says so
+/// ([`Document::linked_bodies_left_out`]), so opening it reads them from the linked files again
+/// ([`read_left_out_bodies`]). A link whose file cannot be reached now, or changed since the
+/// link read it, keeps its bodies: they may be the only copy ([`link_file_problem`]). A link to
+/// a STEP file (Insert STEP) keeps its bodies too: only linked designs are left out. `doc` is
+/// the design in the session, saved at `from`, whose link paths are whole.
+pub(super) fn leave_out_linked_bodies(design: &mut std::borrow::Cow<'_, Document>, doc: &Document, from: Option<&str>) {
+    let features: Vec<u64> = doc
+        .links
+        .iter()
+        .filter(|(comp, link)| link.step_names.is_none() && link_file_problem(doc, **comp, link, from).is_none())
+        .map(|(_, l)| l.feature)
+        .collect();
+    let design = design.to_mut();
+    design.linked_bodies_left_out = true;
+    for id in features {
+        if let Some(FeatureKind::Import { step, records, .. }) = design.feature_mut(id).map(|f| &mut f.kind) {
+            *step = "".into();
+            *records = None;
+        }
+    }
+}
+
+/// Why a save without linked bodies keeps the bodies of `link`, of the component `comp`, in the
+/// file all the same: its design file cannot be reached now, or is no longer the file the link
+/// read them from, so the file would not give these bodies back. A link older than the record of
+/// what it read cannot tell, and keeps them until Update Links makes that record. `None` when it
+/// is that file, and for a link whose bodies are gone.
+fn link_file_problem(doc: &Document, comp: u64, link: &DesignLink, from: Option<&str>) -> Option<String> {
+    if !doc.feature(link.feature).is_some_and(|f| f.component == comp && matches!(f.kind, FeatureKind::Import { .. })) {
+        return None;
+    }
+    let file = resolve(from, &link.path);
+    if let Some(problem) = link_presence(&file, from) {
+        return Some(format!("its linked design cannot be read now: {}", problem.reason));
+    }
+    let Some(kept) = link.file_sha256.as_ref() else {
+        return Some(format!("this design has no record of which {} it read; run Update Links, then save again", file.display()));
+    };
+    (file_sha256(&file, from).as_ref() != Some(kept))
+        .then(|| format!("{} changed since this design read it; run Update Links, then save again", file.display()))
+}
+
+/// What a save without linked bodies says of each link that keeps its bodies in the file
+/// ([`leave_out_linked_bodies`]).
+pub(super) fn kept_linked_bodies(s: &Session) -> Vec<String> {
+    let from = s.path.as_deref();
+    s.doc
+        .links
+        .iter()
+        .filter(|(comp, link)| link.step_names.is_none() && !left_out(&s.doc, **comp, link))
+        .filter_map(|(comp, link)| {
+            let why = link_file_problem(&s.doc, *comp, link, from)?;
+            let name = s.doc.components.iter().find(|c| c.id == *comp).map_or_else(|| comp.to_string(), |c| c.name.clone());
+            Some(format!("{name} keeps its bodies in the file: {why}"))
+        })
+        .collect()
+}
+
+/// What one linked design gave when it was read for a link saved without bodies: the parts of
+/// its Import feature, its face names and its file's digest, or why it could not be read.
+type ReadOnce = std::result::Result<
+    (String, FeatureKind, Vec<String>, Vec<bool>, Vec<String>, std::sync::Arc<solidcraft_kernel::StepImport>, Vec<Vec<String>>, String),
+    String,
+>;
+
+/// The reads of linked designs saved without bodies that one open, or one Update Links, makes
+/// on this thread.
+struct Reading {
+    /// The design files being opened, outermost first (`None`: a design not saved yet). A design
+    /// saved without linked bodies reads its linked designs as it opens, and each of those may do
+    /// the same, so a chain of links that returns to one of these files would never end.
+    opening: Vec<Option<PathBuf>>,
+    /// Which files the outermost caller lets these reads take ([`LinkedRead`]); every design
+    /// opened below it follows the same rule.
+    which: LinkedRead,
+    /// How many links were not read because of where they are in `opening`: one that returns to
+    /// a file being opened, or one nested too deep. What a design gives after such a refusal
+    /// holds for this chain of links only.
+    refused: usize,
+    /// How many links were not read because they are outside the folders `which` allows. Those
+    /// folders are the same for every chain below one link of the outermost design
+    /// ([`may_read`]), so what a design gives after such a refusal is kept for that link.
+    outside: usize,
+    /// How many reads were not kept in `read` because of a refusal below them. Each may be made
+    /// again by another chain of links, so past [`READ_AGAIN`] no further design is read.
+    again: usize,
+    /// What each linked design gave, by its file and configuration, so that a design many links
+    /// lead to is read once: without it the reads grow with the number of ways to reach it. With
+    /// [`LinkedRead::Folder`] a design below a link of the outermost design is kept for that link
+    /// (the key's last part), whose folder decides what it may read.
+    read: std::collections::HashMap<(PathBuf, Option<(u64, Option<u64>)>, Option<PathBuf>), ReadOnce>,
+}
+
+thread_local! {
+    static READING: std::cell::RefCell<Reading> = std::cell::RefCell::new(Reading {
+        opening: Vec::new(),
+        which: LinkedRead::All,
+        refused: 0,
+        outside: 0,
+        again: 0,
+        read: std::collections::HashMap::new(),
+    });
+}
+
+/// How many designs deep [`read_left_out_bodies`] follows links saved without bodies.
+const OPENING_DEPTH: usize = 32;
+
+/// How many reads one open makes that it cannot keep for the next chain of links
+/// ([`Reading::again`]): those with a link below them that returns to a design being opened, or
+/// is nested too deep. Designs that link each other in a loop, each by several links, would
+/// otherwise be read once for every way round it. A design without such a link is not counted.
+const READ_AGAIN: usize = 64;
+
+/// One entry of [`Reading::opening`], taken off when it goes out of scope.
+pub(super) struct Opening;
+
+impl Opening {
+    /// `file` is being opened, or has its links read again. The outermost entry sets which files
+    /// the reads below it may take; `which` of an entry inside another is not used.
+    pub(super) fn enter(file: Option<&str>, which: LinkedRead) -> Opening {
+        READING.with(|reading| {
+            let mut reading = reading.borrow_mut();
+            if reading.opening.is_empty() {
+                reading.which = which;
+                reading.refused = 0;
+                reading.outside = 0;
+                reading.again = 0;
+                reading.read.clear();
+            }
+            reading.opening.push(file.map(|file| absolute(Path::new(file))));
+        });
+        Opening
+    }
+}
+
+impl Drop for Opening {
+    fn drop(&mut self) {
+        READING.with(|reading| {
+            let mut reading = reading.borrow_mut();
+            reading.opening.pop();
+            if reading.opening.is_empty() {
+                reading.read.clear();
+            }
+        });
+    }
+}
+
+/// Whether the reads under way may take `file` for a link saved without bodies. With
+/// [`LinkedRead::Folder`] it is in the folder of the outermost design, or in the folder of the
+/// linked design that design reads: the caller chose to read that one, and a design below it
+/// reaches no further than the two.
+fn may_read(file: &Path) -> bool {
+    READING.with(|reading| {
+        let reading = reading.borrow();
+        reading.which == LinkedRead::All
+            || reading.opening.iter().take(2).flatten().any(|design| inside_design_folder(Some(&design.to_string_lossy()), file))
+    })
+}
+
+/// Which linked design files a design saved without linked bodies reads as it opens
+/// ([`read_left_out_bodies`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LinkedRead {
+    /// Every link's file the caller may read.
+    All,
+    /// Only files in the design's own folder or below it. A design received from someone else
+    /// names what files it likes, and one reaching out of its folder would copy another design
+    /// of the user's into it unasked: the app asks before it reads those. A linked design that
+    /// was itself saved without linked bodies reads its own links from that folder or its own
+    /// ([`may_read`]).
+    Folder,
+}
+
+impl LinkedRead {
+    /// `linked_bodies` of `cmd` (`doc.open`, `component.update_links`): `all` (the default) or
+    /// `folder`.
+    pub(super) fn read(p: &Value, cmd: &str) -> Result<LinkedRead> {
+        match p.get("linked_bodies") {
+            None | Some(Value::Null) => Ok(LinkedRead::All),
+            Some(Value::String(word)) if word == "all" => Ok(LinkedRead::All),
+            Some(Value::String(word)) if word == "folder" => Ok(LinkedRead::Folder),
+            Some(_) => Err(bad(cmd, "`linked_bodies` must be all or folder")),
+        }
+    }
+}
+
+/// Read the bodies of `doc`'s links that its file was saved without ([`left_out`]) from their
+/// linked design files, before `doc`, opened from `from`, is evaluated. Each link takes the
+/// bodies and face names its file gives now, as Update Links takes them. Returns what to tell
+/// the user: a link whose file is not read (`which`, or the rule of the open this one is part
+/// of) or cannot be read keeps no bodies, and its feature says so when it is evaluated; a file that changed since the design was saved is
+/// named, because Update Links still has its materials and properties to take in. `doc`'s link
+/// paths are whole.
+pub(super) fn read_left_out_bodies(
+    doc: &mut Document,
+    from: Option<&str>,
+    validation: solidcraft_kernel::Validation,
+    which: LinkedRead,
+) -> Vec<String> {
+    let links: Vec<(u64, DesignLink)> = doc.links.iter().filter(|(comp, link)| left_out(doc, **comp, link)).map(|(c, l)| (*c, l.clone())).collect();
+    if links.is_empty() {
+        return Vec::new();
+    }
+    let _opening = Opening::enter(from, which);
+    let mut warnings = Vec::new();
+    for (comp, link) in links {
+        let name = doc.components.iter().find(|c| c.id == comp).map_or_else(|| comp.to_string(), |c| c.name.clone());
+        if !may_read(&resolve(from, &link.path)) {
+            READING.with(|reading| reading.borrow_mut().outside += 1);
+            warnings.push(format!("{name} has no bodies yet: its linked design is in another folder, and Update Links reads it"));
+            continue;
+        }
+        let (feature, faces, changed) = match left_out_bodies(&link, from, validation) {
+            Ok(read) => read,
+            Err(e) => {
+                warnings.push(format!("{name} has no bodies: {e}"));
+                continue;
+            }
+        };
+        if changed {
+            // What an unchanged file's read warns of was said when the link took it in.
+            warnings.extend(feature.warnings.iter().cloned());
+            warnings.push(format!(
+                "{name}: its linked design changed since this design was saved; its bodies are the new ones, and Update Links takes in its materials and properties"
+            ));
+        }
+        if let Some(f) = doc.feature_mut(link.feature) {
+            // Bodies keep their names where the design still has as many.
+            if f.body_names.len() != feature.body_names.len() {
+                f.body_names = feature.body_names;
+            }
+            f.kind = feature.kind;
+            f.link_faces = faces;
+        }
+    }
+    warnings
+}
+
+/// The Import feature and face names the file of `link` gives now, and whether that file
+/// changed since the link last read it, for a design opened from `from`.
+fn left_out_bodies(
+    link: &DesignLink,
+    from: Option<&str>,
+    validation: solidcraft_kernel::Validation,
+) -> Result<(solidcraft_io::StepFeature, Vec<Vec<String>>, bool)> {
+    link_refused(from, &link.path)?;
+    let file = resolve(from, &link.path);
+    let target = absolute(&file);
+    let (depth, again) = READING.with(|reading| {
+        let reading = reading.borrow();
+        (reading.opening.len(), reading.opening.iter().flatten().any(|open| *open == target || same_file(open, &target)))
+    });
+    let refuse = |why: String| {
+        READING.with(|reading| reading.borrow_mut().refused += 1);
+        Err(EngineError::Other(why))
+    };
+    if again {
+        return refuse(format!("{}: it links back to a design that links it, so its bodies cannot be read", file.display()));
+    }
+    if depth >= OPENING_DEPTH {
+        return refuse(format!("{}: linked designs saved without bodies are nested more than {OPENING_DEPTH} deep", file.display()));
+    }
+    let configuration = selected_configuration(link);
+    let allowed_by = READING.with(|reading| {
+        let reading = reading.borrow();
+        (reading.which == LinkedRead::Folder).then(|| reading.opening.get(1).cloned().flatten()).flatten()
+    });
+    let key = (target, configuration.map(|c| (c.row, c.identity)), allowed_by);
+    let known = READING.with(|reading| reading.borrow().read.get(&key).cloned());
+    let read = match known {
+        Some(read) => read,
+        None => {
+            let (refused, again) = READING.with(|reading| {
+                let reading = reading.borrow();
+                (reading.refused, reading.again)
+            });
+            if again >= READ_AGAIN {
+                return refuse(format!(
+                    "{}: the linked designs saved without bodies link each other in too many ways to read them all; Update Links reads it once the loop is gone",
+                    file.display()
+                ));
+            }
+            let read = read_once(&file, from, configuration, validation);
+            // What a design gives after a link below it was refused for its place in this chain
+            // is not what another chain gets.
+            READING.with(|reading| {
+                let mut reading = reading.borrow_mut();
+                if reading.refused == refused {
+                    reading.read.insert(key, read.clone());
+                } else {
+                    reading.again += 1;
+                }
+            });
+            read
+        }
+    };
+    let (name, kind, body_names, invisible, warnings, import, faces, digest) = read.map_err(EngineError::Other)?;
+    let changed = link.file_sha256.as_deref().is_some_and(|kept| kept != digest);
+    Ok((solidcraft_io::StepFeature { name, kind, body_names, invisible, warnings, import }, faces, changed))
+}
+
+/// [`left_out_bodies`]' read of the design at `file`, for a design opened from `from`.
+fn read_once(file: &Path, from: Option<&str>, configuration: Option<SelectedConfiguration>, validation: solidcraft_kernel::Validation) -> ReadOnce {
+    let bytes = read_link(file, from).map_err(|e| e.to_string())?;
+    let ((_, feature, faces, ..), _) =
+        design_bodies_reusing(&Source::File(file.to_path_buf()), &bytes, configuration, validation, true).map_err(|e| e.to_string())?;
+    let solidcraft_io::StepFeature { name, kind, body_names, invisible, warnings, import } = feature;
+    Ok((name, kind, body_names, invisible, warnings, import, faces, DesignLink::file_digest(&bytes)))
+}
+
 /// The bodies of a linked design: its name, the Import feature that holds its solids and the
 /// names the design gives their faces (`Feature::link_faces`), with the source's design
 /// properties, and its mesh bodies as placed in it.
@@ -206,6 +531,8 @@ struct LinkRead {
 thread_local! {
     /// Linked designs read and evaluated on this thread, for tests.
     static EVALUATED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Of those, the ones whose evaluation came from the local store, for tests.
+    static REUSED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn digest<T: Hash + ?Sized>(value: &T) -> u64 {
@@ -397,6 +724,33 @@ fn design_bodies(
     configuration: Option<SelectedConfiguration>,
     validation: solidcraft_kernel::Validation,
 ) -> Result<(Linked, LinkedImages)> {
+    design_bodies_reusing(source, bytes, configuration, validation, false)
+}
+
+/// The local store's key for the evaluation of `bytes`, the linked design at `file`
+/// ([`design_bodies_reusing`]), and the store. The file's whole path is part of the key: a design
+/// may read files beside it (a font), so the same bytes elsewhere are another evaluation.
+fn linked_evaluation(file: &Path, bytes: &[u8]) -> Option<(solidcraft_io::ImportCache, String)> {
+    let cache = super::file::import_cache().filter(|_| solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none())?;
+    let shown = file.display().to_string();
+    let key = solidcraft_io::ImportCache::key(bytes, &shown, &json!({"linked_design": absolute(file).to_string_lossy()}));
+    Some((cache, key))
+}
+
+/// [`design_bodies`], with `reuse` taking the design's evaluation from the local store of reused
+/// imports when it holds one for these bytes, and keeping it there otherwise
+/// (`solidcraft_io::ImportCache`, with its trust rules: only this build's evaluation of exactly
+/// this design is adopted). A design saved without linked bodies reads every link as it opens,
+/// and a plain JSON part keeps no model of its own, so each open would evaluate each part's whole
+/// timeline again. Only a design whose model depends on its bytes alone is kept: one with links
+/// of its own, read in a chosen configuration, or held in memory, is evaluated each time.
+fn design_bodies_reusing(
+    source: &Source,
+    bytes: &[u8],
+    configuration: Option<SelectedConfiguration>,
+    validation: solidcraft_kernel::Validation,
+    reuse: bool,
+) -> Result<(Linked, LinkedImages)> {
     #[cfg(test)]
     EVALUATED.with(|n| n.set(n.get() + 1));
     let shown = source.shown();
@@ -413,10 +767,38 @@ fn design_bodies(
     {
         return Err(EngineError::Other(format!("{shown}: configuration `{}` was replaced; select a configuration again", selected.row)));
     }
+    let file = source.file();
+    let store = if reuse && saved.is_none() && configuration.is_none() && doc.links.is_empty() {
+        file.and_then(|f| linked_evaluation(f, bytes))
+    } else {
+        None
+    };
+    let kept = store.as_ref().and_then(|(cache, key)| cache.read(key));
+    let fresh = kept.is_none();
+    #[cfg(test)]
+    REUSED.with(|n| n.set(n.get() + usize::from(!fresh)));
+    let (doc, saved) = match kept {
+        Some((doc, model, _)) => (doc, Some(model)),
+        None => (doc, saved),
+    };
     // A design in memory has no file: its own links stay as they are, as they do in the session
     // that holds it.
-    let file = source.file().map(|f| f.display().to_string());
-    let mut part = Session::opened_at_validating(doc, saved.as_ref(), file.as_deref(), validation);
+    let path = file.map(|f| f.display().to_string());
+    let outside = READING.with(|reading| reading.borrow().outside);
+    let mut part = Session::opened_at_validating(doc, saved.as_ref(), path.as_deref(), validation);
+    if READING.with(|reading| reading.borrow().outside) != outside {
+        // Part of the design would pass for the whole of it.
+        return Err(EngineError::Other(format!(
+            "{shown}: it was saved without the bodies of its own linked designs, and some of those are in another folder, which is not read unasked; Update Links reads them"
+        )));
+    }
+    if fresh
+        && let Some((cache, key)) = store
+        && part.model.results.iter().all(|r| r.error.is_none())
+        && let Some((model, pending)) = super::file::saved_geometry_now(&part, &part.doc)
+    {
+        super::file::write_import_cache(&cache, key, &part.doc, model, pending, &json!({}));
+    }
     if let Some(selected) = configuration {
         // Use the same rule, rebuild and style validation as an interactive activation.
         // Its scratch evaluation cannot use the saved geometry of another row.
@@ -1089,6 +1471,8 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     // A batch goes on past a source it cannot read: that link keeps its bodies and is named in
     // `failed`, so the others still come in as one step (#9743).
     let go_on = p.get("component").is_none();
+    // Linked designs saved without bodies of their own follow the caller's rule as they open.
+    let _reading = Opening::enter(s.path.as_deref(), LinkedRead::read(p, cmd)?);
     let links: Vec<(u64, DesignLink)> =
         s.doc.links.iter().filter(|(c, _)| only.as_ref().is_none_or(|o| o.contains(c))).map(|(c, l)| (*c, l.clone())).collect();
     let (mut updated, mut unchanged, mut warnings): (Vec<String>, Vec<String>, Vec<String>) = (Vec::new(), Vec::new(), Vec::new());
@@ -1549,6 +1933,8 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                     let current =
                         l.file_sha256.as_ref().filter(|_| found == Some(true)).and_then(|_| file_sha256(Path::new(&shown), s.path.as_deref()));
                     let changed = current.as_ref().zip(l.file_sha256.as_ref()).map(|(now, kept)| now != kept);
+                    // A link opened without its bodies has read nothing of its file yet.
+                    let changed = if found == Some(true) && left_out(&s.doc, *c, l) { Some(true) } else { changed };
                     if let (Some(digest), Some(changed)) = (current, changed)
                         && (changed || s.plugin_state.link_changes.get(c).is_some_and(|change| !change.read))
                     {
