@@ -767,6 +767,7 @@ fn offscreen(
         eye,
         ao_radius,
         ao_samples,
+        occlusion: false,
         edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
         ssaa,
         sky: [0.0; 4],
