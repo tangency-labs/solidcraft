@@ -519,7 +519,9 @@ fn slots_on_one_centre_line_stack_through_their_shared_middle() {
 #[test]
 fn a_chain_of_slots_past_its_own_start_stacks_in_runs() {
     // Four slots, each centred 5 mm from the last: every pair meets its neighbour, but the
-    // first and last share nothing, so no one axis runs through all four.
+    // first and last share nothing, so no one axis runs through all four. Two bodies carry
+    // the same chain: it answers two stacks (the runs [0, 5] and [10, 15]), not one on the
+    // first slot's centre.
     let sl = |x: f64| Bore {
         point: Vec3::new(x, 10.0, 0.0),
         axis: Vec3::new(0.0, 0.0, 1.0),
@@ -530,10 +532,43 @@ fn a_chain_of_slots_past_its_own_start_stacks_in_runs() {
             along: Vec3::new(1.0, 0.0, 0.0),
         }),
     };
-    let s = stacks(&[&[sl(0.0), sl(5.0), sl(10.0), sl(15.0)]], &opts()).unwrap();
-    // One body: a stack needs two, so all four answer lone, each on its own run's axis.
-    assert_eq!(s.stacks.len(), 0, "{s:?}");
-    assert_eq!(s.lone.len(), 4, "{s:?}");
+    let a = [sl(0.0), sl(5.0), sl(10.0), sl(15.0)];
+    let b = a.clone();
+    let s = stacks(&[&a, &b], &opts()).unwrap();
+    assert_eq!(s.stacks.len(), 2, "{s:?}");
+    assert_eq!(s.lone.len(), 0, "{s:?}");
+    // The runs' axes: through the middle of what each shares (x = 2.5 and 12.5).
+    let starts: Vec<f64> = s.stacks.iter().map(|st| st.start.x).collect();
+    assert!(
+        starts.iter().any(|x| (x - 2.5).abs() < 1e-9)
+            && starts.iter().any(|x| (x - 12.5).abs() < 1e-9),
+        "{s:?}"
+    );
+}
+
+#[test]
+fn a_bore_far_along_the_axis_holds_no_slot() {
+    // A round bore a hundred millimetres along the slots' axis, within the axis tolerance of
+    // the lower slot but past it from the upper: it never runs with either, so the slots
+    // still stack with each other and the bore answers lone.
+    let sl = |y: f64, z0: f64| Bore {
+        point: Vec3::new(0.0, y, z0),
+        axis: Vec3::new(0.0, 0.0, 1.0),
+        d: 6.0,
+        t: [0.0, 2.0],
+        slot: Some(Slot {
+            length: 12.0,
+            along: Vec3::new(1.0, 0.0, 0.0),
+        }),
+    };
+    // Across the slots' length (their centre segments swallow any offset along it): the
+    // bore 0.06 from the lower slot and 0.15 from the upper, the slots 0.09 apart.
+    let a = [sl(10.0, 0.0), hole([0.0, 9.94, 100.0], [0.0, 2.0], 6.0)];
+    let b = [sl(10.09, 2.0)];
+    let s = stacks(&[&a, &b], &opts()).unwrap();
+    assert_eq!(s.stacks.len(), 1, "{s:?}");
+    assert_eq!(s.stacks[0].layers.len(), 2, "{s:?}");
+    assert_eq!(s.lone.len(), 1, "{s:?}");
 }
 
 #[test]

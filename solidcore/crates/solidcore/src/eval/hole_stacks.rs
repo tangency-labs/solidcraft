@@ -557,7 +557,7 @@ fn through_cones(walls: &mut [Wall], cones: &[Cone]) {
 
 /// The stacks among bodies' bores, and the bores in none. Round holes whose axes sit within
 /// `axis_tolerance` of one line form one line of holes; along it, runs of bores whose extents
-/// sit within `touching` of each other are stacks, one layer per body (a counterbore and its
+/// sit within `touching` of each other are stacks, one layer per body's stretch (a counterbore and its
 /// through hole are one layer, of their narrowest opening), and a stack needs two bodies. A
 /// slot joins the line of any round hole that runs through it; slots that no round hole runs
 /// through stack on the axis through the middle of the length they share.
@@ -646,9 +646,22 @@ pub fn stacks(bodies: &[&[Bore]], o: &Options) -> Result<Stacks> {
             }
             if let Some(sl) = bore(s) {
                 if parallel(sl.axis, axis) && offset(p, axis, sl) <= o.axis_tolerance {
-                    members.push(s);
-                    if let Some(x) = threaded.get_mut(s) {
-                        *x = true;
+                    // The slot joins the line only where a round bore could actually run
+                    // with it: a bore far along the axis never reaches the slot's stretch,
+                    // and a slot held by such a bore would lose the slots it should stack
+                    // with.
+                    let st = extent(sl, p, axis);
+                    let reach = members.iter().any(|&m| {
+                        bore(m).is_some_and(|b| {
+                            let (m0, m1) = extent(b, p, axis);
+                            m0 <= st.1 + o.touching && st.0 <= m1 + o.touching
+                        })
+                    });
+                    if reach {
+                        members.push(s);
+                        if let Some(x) = threaded.get_mut(s) {
+                            *x = true;
+                        }
                     }
                 }
             }
@@ -726,7 +739,8 @@ pub fn stacks(bodies: &[&[Bore]], o: &Options) -> Result<Stacks> {
             });
         }
     }
-    // Along each line, runs of extents that sit within `touching`, one layer per body.
+    // Along each line, runs of extents that sit within `touching`, one layer per body's
+    // stretch: a clevis around its lug gives two layers of one body.
     let mut in_stack = vec![false; refs.len()];
     let mut out = Vec::new();
     for line in &lines {
