@@ -20,9 +20,9 @@
     "prefs.sheet_metal_dxf_export": "تصدير DXF",
     "prefs.sheet_dxf_units": "وحدات التصدير الافتراضية",
     "prefs.sheet_export_bend_lines": "التصدير مع خطوط الطي",
-    "prefs.sheet_export_bend_lines_help": "إبقاء خطوط الطي المركزية (BEND_UP، BEND_DOWN) في ملف DXF المصدَّر للنمط المسطح. أعدِها إن كانت الآلة ستقطعها.",
+    "prefs.sheet_export_bend_lines_help": "إبقاء خطوط الطي المركزية (BEND_UP، BEND_DOWN) في ملف DXF المصدَّر للنمط المسطح. عطّل هذا الخيار إن كانت الآلة ستقطعها.",
     "prefs.sheet_export_markings": "التصدير مع العلامات",
-    "prefs.sheet_export_markings_help": "إبقاء الحروف (TEXT، ETCH) وملاحظات الطي في ملف DXF المصدَّر. أعدِها إن كانت الآلة ستنقشها."
+    "prefs.sheet_export_markings_help": "إبقاء الحروف (TEXT، ETCH) وملاحظات الطي في ملف DXF المصدَّر. عطّل هذا الخيار إن كانت الآلة ستنقشها."
   },
   "de": {
     "prefs.structure.sheet_metal": "Blech",

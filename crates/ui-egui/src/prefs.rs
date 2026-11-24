@@ -1411,6 +1411,9 @@ pub struct Snapshot {
     panel_layout: Option<serde_json::Value>,
     panel_layout_state: crate::panel_runtime::PanelLayoutSnapshot,
     panel_visibility: crate::panel_runtime::PanelVisibilitySnapshot,
+    /// The open blank design's sheet rule when the dialog opened: the Sheet Metal page applies a
+    /// picked default to that design live, without an undo step, and Cancel gives it back.
+    sheet_rule: Option<solidcraft_engine::doc::sheet::SheetRule>,
     /// With no record yet, keep the small deferred legacy import state too.
     panel_layout_deferred: Option<crate::panel_runtime::PanelLayoutPreferences>,
     dark: bool,
@@ -1442,6 +1445,7 @@ impl Snapshot {
             panel_layout,
             panel_layout_state: crate::panel_runtime::panel_layout_snapshot(app),
             panel_visibility: crate::panel_runtime::PanelVisibilitySnapshot::capture(app),
+            sheet_rule: crate::documents::active_is_blank(app).then(|| app.session.doc.sheet_rule(None)),
             panel_layout_deferred,
             dark: app.ui.dark,
             layout: app.ui.layout,
@@ -1478,6 +1482,16 @@ impl Snapshot {
         app.preferences.plugin_grants = plugin_grants;
         app.preferences.view_window_setups = view_window_setups;
         crate::plugins::sync_policy(app);
+        // The Sheet Metal page applied a picked default rule to the open blank design live;
+        // Cancel gives that design the rule it had when the dialog opened.
+        if let Some(want) = &self.sheet_rule
+            && crate::documents::active_is_blank(app)
+        {
+            let now = app.session.doc.sheet_rule(None);
+            if now != *want {
+                set_design_sheet_rule(app, want).map_err(|why| why.to_string())?;
+            }
+        }
         self.panel_visibility.restore(app);
         sync_surface_analysis(app);
         crate::render_workspace::apply_memory_policy(app);
@@ -1519,6 +1533,7 @@ impl Snapshot {
             panel_layout: _,
             panel_layout_state,
             panel_visibility: _,
+            sheet_rule: _,
             panel_layout_deferred,
             dark,
             layout,
@@ -1989,14 +2004,43 @@ pub fn apply_new_design(app: &mut SolveApp) {
 pub(crate) fn apply_default_sheet_rule(app: &mut SolveApp) {
     if app.session.doc.features.is_empty() {
         let rule = app.preferences.sheet_rule.clone();
-        let saved = !app.session.is_dirty();
-        if app.session.execute("sheet.manage_rules", &json!({ "name": rule.name, "thickness": rule.thickness, "k_factor": rule.k_factor, "bend_radius": rule.bend_radius, "active": true })).is_ok() {
-            app.session.undo.pop();
-            if saved {
-                app.session.mark_saved();
-            }
+        if let Err(why) = set_design_sheet_rule(app, &rule) {
+            // Its values may name a parameter this design has (a personal rule captured in
+            // another): say so instead of keeping the fallback rule silently.
+            app.set_status(format!("The default sheet rule was not applied: {why}"), true);
         }
     }
+}
+
+/// A blank design's sheet rule set to `rule` in place: not an undo step, and a clean design
+/// stays clean. The page's default-rule change and its Cancel both use it.
+fn set_design_sheet_rule(app: &mut SolveApp, rule: &solidcraft_engine::doc::sheet::SheetRule) -> Result<(), solidcraft_engine::EngineError> {
+    let saved = !app.session.is_dirty();
+    let out = app.session.execute(
+        "sheet.manage_rules",
+        &json!({
+            "name": rule.name,
+            "thickness": rule.thickness,
+            "k_factor": rule.k_factor,
+            "bend_radius": rule.bend_radius,
+            "relief_width": rule.relief_width,
+            "relief_depth": rule.relief_depth,
+            "corner_relief": rule.corner_relief,
+            "hem_gap": rule.hem_gap,
+            "gap": rule.gap,
+            "corner_relief_shape": rule.corner_relief_shape,
+            "angle_display": rule.angle_display,
+            "material": rule.material,
+            "active": true,
+        }),
+    );
+    if out.is_ok() {
+        app.session.undo.pop();
+        if saved {
+            app.session.mark_saved();
+        }
+    }
+    out.map(|_| ())
 }
 
 /// The default rule also applies to the blank design already open.
@@ -14099,7 +14143,7 @@ mod kit_use_tests {
         h.app.home.open = false;
         // A personal rule the default-rule box must offer.
         h.app.preferences.personal_sheet_rules =
-            serde_json::from_value(json!([{ "name": "Alloy 42", "thickness": "4.2 mm", "k_factor": "0.5", "bend_radius": "Thickness", "relief_width": "Thickness", "relief_depth": "0", "corner_relief": "Thickness * 4", "corner_relief_shape": "notch", "hem_gap": "0", "gap": "0", "angle_display": "bend" }])).unwrap();
+            serde_json::from_value(json!([{ "name": "Alloy 42", "thickness": "4.2 mm", "k_factor": "0.5", "bend_radius": "Thickness", "relief_width": "Thickness", "relief_depth": "0", "corner_relief": "Thickness * 4", "corner_relief_shape": "notch", "hem_gap": "0", "gap": "0.01 mm", "angle_display": "bend" }])).unwrap();
         h.call("ui.resize", json!({"width": 1467, "height": 1146}));
         h.call("ui.prefs", json!({"language": "en", "theme": "light", "open": "Sheet Metal"}));
         h.frames(6);
@@ -14113,11 +14157,39 @@ mod kit_use_tests {
         super::reveal_preference(&mut h, "dialog:Rule:Alloy 42");
         h.step(&json!({"click": {"handle": "dialog:Rule:Alloy 42"}})).unwrap();
         h.frames(2);
-        assert_eq!(h.app.preferences.sheet_rule, h.app.preferences.personal_sheet_rules.rule("Alloy 42").unwrap().sheet_rule());
+        // The picked rule is stored as this design's values: its expressions are read where they
+        // were chosen, so the default applies where no such parameters exist.
+        assert_eq!(
+            h.app.preferences.sheet_rule,
+            solidcraft_engine::doc::sheet::SheetRule {
+                name: "Alloy 42".into(),
+                thickness: "4.2 mm".into(),
+                k_factor: "0.5".into(),
+                bend_radius: "4.2 mm".into(),
+                relief_width: "4.2 mm".into(),
+                relief_depth: "0 mm".into(),
+                corner_relief: "16.8 mm".into(),
+                corner_relief_shape: "notch".into(),
+                hem_gap: "0 mm".into(),
+                gap: "0.01 mm".into(),
+                angle_display: "bend".into(),
+                material: String::new(),
+            }
+        );
         // The open blank design follows the choice, without an undo step.
         assert!(h.app.session.doc.sheet.rules.iter().any(|r| r.name == "Alloy 42"), "{:?}", h.app.session.doc.sheet.rules);
         assert_eq!(h.app.session.doc.sheet.active, Some("Alloy 42".to_string()));
         assert!(!h.app.session.is_dirty());
+        // A stored default this design has no rule for stays a choice, shown as stored.
+        h.app.preferences.sheet_rule = solidcraft_engine::doc::sheet::SheetRule::named("Old Rule");
+        h.frames(2);
+        super::reveal_preference(&mut h, "dialog:Rule");
+        h.step(&json!({"click": {"handle": "dialog:Rule"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("dialog:Rule:Old Rule").is_some(), "the box shows what is stored");
+        assert_eq!(h.app.preferences.sheet_rule, solidcraft_engine::doc::sheet::SheetRule::named("Old Rule"), "showing it stores nothing");
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(2);
         // The export defaults: units, bend lines and markings.
         super::reveal_preference(&mut h, "prefs:sheet_dxf_units:inches");
         h.step(&json!({"click": {"handle": "prefs:sheet_dxf_units:inches"}})).unwrap();
@@ -14136,6 +14208,33 @@ mod kit_use_tests {
         h.step(&json!({"click": {"handle": "prefs:sheet_export_bend_lines_help"}})).unwrap();
         h.frames(2);
         assert!(crate::scenario::rect_of("prefs:help_icon:popover").is_some());
+    }
+
+    #[test]
+    fn canceling_the_prefs_returns_the_blank_design_to_its_rule() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.personal_sheet_rules =
+            serde_json::from_value(json!([{ "name": "Alloy 42", "thickness": "4.2 mm", "k_factor": "0.5", "bend_radius": "4.2 mm", "relief_width": "4 mm", "relief_depth": "0 mm", "corner_relief": "2 mm", "corner_relief_shape": "notch", "hem_gap": "0 mm", "gap": "0.01 mm", "angle_display": "bend" }])).unwrap();
+        h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+        h.call("ui.prefs", json!({"open": "Sheet Metal"}));
+        h.frames(6);
+        let at_open = h.app.session.doc.sheet_rule(None);
+        assert_eq!(at_open, solidcraft_engine::doc::sheet::SheetRule::steel());
+        super::reveal_preference(&mut h, "dialog:Rule");
+        h.step(&json!({"click": {"handle": "dialog:Rule"}})).unwrap();
+        h.frames(2);
+        super::reveal_preference(&mut h, "dialog:Rule:Alloy 42");
+        h.step(&json!({"click": {"handle": "dialog:Rule:Alloy 42"}})).unwrap();
+        h.frames(2);
+        // The open blank design followed the pick, live.
+        assert_eq!(h.app.session.doc.sheet_rule(None).name, "Alloy 42");
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        h.frames(4);
+        assert_eq!(h.app.preferences.sheet_rule, solidcraft_engine::doc::sheet::SheetRule::steel());
+        assert_eq!(h.app.session.doc.sheet_rule(None), at_open, "the design keeps the rule it had");
+        assert!(!h.app.session.is_dirty());
     }
 
     #[test]

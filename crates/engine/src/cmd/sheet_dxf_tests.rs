@@ -637,7 +637,8 @@ fn the_drawing_writes_its_coordinates_in_the_units_it_is_asked_for() {
         assert!(want.iter().zip(&got).all(|(a, b)| (a - b).abs() < 3e-8), "{}: {want:?} vs {got:?}", m.0);
     }
     // The file's DASHED pattern is half and quarter inches.
-    let types: Vec<(i32, &str)> = inches.lines().collect::<Vec<_>>().chunks(2).filter_map(|c| Some((c.first()?.trim().parse().ok()?, c.get(1)?.trim()))).collect();
+    let types: Vec<(i32, &str)> =
+        inches.lines().collect::<Vec<_>>().chunks(2).filter_map(|c| Some((c.first()?.trim().parse().ok()?, c.get(1)?.trim()))).collect();
     let at = types.iter().position(|(c, v)| *c == 2 && *v == "DASHED").unwrap();
     let pattern: Vec<f64> = types[at..].iter().take_while(|(c, _)| *c != 0).filter(|(c, _)| *c == 49).map(|(_, v)| v.parse().unwrap()).collect();
     assert_eq!(pattern, vec![0.5, -0.25]);
@@ -647,9 +648,7 @@ fn the_drawing_writes_its_coordinates_in_the_units_it_is_asked_for() {
             .iter()
             .filter(|e| e.0 == "TEXT")
             .map(|e| {
-                let DxfShape::Text { text, .. } = &e.1 else {
-                    panic!("{e:?}")
-                };
+                let DxfShape::Text { text, .. } = &e.1 else { panic!("{e:?}") };
                 text.clone()
             })
             .collect()

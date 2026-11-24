@@ -99,6 +99,12 @@ impl Rule {
         &self.name
     }
 
+    /// Whether this version can offer the row: a rule that has values a newer version saved is
+    /// kept, but it can neither be recalled nor used as the default here.
+    pub fn supported(&self) -> bool {
+        self.validate().is_ok() && self.unknown.is_empty()
+    }
+
     /// The rule as a design's sheet rule.
     pub fn sheet_rule(&self) -> SheetRule {
         SheetRule {

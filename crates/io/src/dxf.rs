@@ -1237,11 +1237,7 @@ fn layered_linetype_definition(record: &Ent, k: f64, types: &mut LayeredLinetype
     // Millimetre files keep the exact canonical values; the others agree to the file's
     // 1e-9 length grid.
     let close = |got: f64, want: f64| {
-        if k == 1.0 {
-            got == want
-        } else {
-            (got - want).abs() <= 1e-8
-        }
+        if k == 1.0 { got == want } else { (got - want).abs() <= 1e-8 }
     };
     // Public canonical decimal lengths, not a recomputation whose binary sum
     // may differ from the decimal field emitted by Out's fixed precision.

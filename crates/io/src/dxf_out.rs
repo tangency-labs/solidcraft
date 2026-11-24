@@ -434,12 +434,9 @@ impl DxfShape {
             S::Circle { c, r } => S::Circle { c: *c * k, r: *r * k },
             S::Arc { c, r, a0, a1 } => S::Arc { c: *c * k, r: *r * k, a0: *a0, a1: *a1 },
             S::Ellipse { c, major, ratio, t0, t1 } => S::Ellipse { c: *c * k, major: *major * k, ratio: *ratio, t0: *t0, t1: *t1 },
-            S::Spline { degree, knots, ctrl, weights } => S::Spline {
-                degree: *degree,
-                knots: knots.clone(),
-                ctrl: ctrl.iter().map(|p| *p * k).collect(),
-                weights: weights.clone(),
-            },
+            S::Spline { degree, knots, ctrl, weights } => {
+                S::Spline { degree: *degree, knots: knots.clone(), ctrl: ctrl.iter().map(|p| *p * k).collect(), weights: weights.clone() }
+            }
             S::Text { at, height, angle_deg, text } => S::Text { at: *at * k, height: *height * k, angle_deg: *angle_deg, text: text.clone() },
             S::AlignedText { at, height, angle_deg, text, horizontal, vertical } => S::AlignedText {
                 at: *at * k,
@@ -1293,7 +1290,14 @@ where
 
     // Everything but the header, which needs the handle seed.
     let mut o = Out::new(0x20, limit);
-    o.k = if insunits == 1 || insunits == 2 { 1.0 / 25.4 } else { 1.0 };
+    // File units per millimetre, the reciprocal of the reader's units_scale.
+    o.k = match insunits {
+        1 => 1.0 / 25.4,
+        2 => 1.0 / 304.8,
+        5 => 1.0 / 10.0,
+        6 => 1.0 / 1000.0,
+        _ => 1.0,
+    };
     let (model, paper) = (o.handle(), o.handle());
     let root = o.handle();
     // The objects the tables point at: the layout dictionary and the layout of each space, the
@@ -2344,6 +2348,18 @@ mod tests {
             matches!(&back[..], [Geom2::Line(a, b), Geom2::Circle(c, r)] if b.dist(Vec2::new(25.4, 0.0)) < 1e-9 && c.dist(Vec2::new(25.4, 25.4)) < 1e-9 && (r - 25.4).abs() < 1e-9),
             "{back:?}"
         );
+    }
+
+    #[test]
+    fn every_file_unit_keeps_the_dashed_pattern_its_millimetre_length() {
+        // $INSUNITS 1 in, 2 ft, 5 cm, 6 m: the DASHED pattern is the 12.7/6.35 mm pattern in the
+        // file's units, and the reader takes it (and the geometry) back to millimetres.
+        for (units, to_mm) in [(1, 25.4), (2, 304.8), (5, 10.0), (6, 1000.0)] {
+            let ents = vec![DxfEntity { layer: "BEND_UP".into(), shape: DxfShape::Line(Vec2::ZERO, Vec2::new(1.0, 0.0)) }];
+            let dxf = write_dxf_drawing_units(&[DxfLayer::new("BEND_UP", 7).dashed()], &ents, units).unwrap();
+            let back = read_dxf(&dxf).unwrap();
+            assert!(matches!(&back[..], [Geom2::Line(a, b)] if a == &Vec2::ZERO && b.dist(Vec2::new(to_mm, 0.0)) < 1e-6), "{units}: {back:?}");
+        }
     }
 
     #[test]

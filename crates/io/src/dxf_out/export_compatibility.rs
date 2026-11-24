@@ -168,9 +168,7 @@ fn pocket_name(name: &str) -> bool {
     let Some(rest) = name.strip_prefix("POCKET_") else { return false };
     let rest = ["TOP_Z", "BOTTOM_Z", "INTERNAL_Z"].into_iter().find_map(|prefix| rest.strip_prefix(prefix));
     // The depth unit in the name is the file's: `_MM` in a millimetre file, `_IN` in an inch one.
-    let Some(rest) = rest.and_then(|value| value.strip_suffix("_MM").or_else(|| value.strip_suffix("_IN"))) else {
-        return false
-    };
+    let Some(rest) = rest.and_then(|value| value.strip_suffix("_MM").or_else(|| value.strip_suffix("_IN"))) else { return false };
     let Some((low, high)) = rest.split_once("_TO_") else { return false };
     let number = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit() || matches!(c, b'-' | b'.'));
     number(low) && number(high)
@@ -186,8 +184,8 @@ impl DxfFile<DxfShape> {
         Self::for_flat_pattern_export_units(contours, bends, perforations, 4)
     }
 
-    /// [`for_flat_pattern_export`] for a file in another unit: `$INSUNITS` 1 (inches) or 2
-    /// (feet), the producer's geometry already in that unit.
+    /// [`for_flat_pattern_export`] for a file in another unit: `$INSUNITS` 1 (inches), 2 (feet),
+    /// 5 (centimetres) or 6 (metres), the producer's geometry already in that unit.
     pub fn for_flat_pattern_export_units(contours: usize, bends: usize, perforations: usize, units: i32) -> Result<Self> {
         let path_entities = mul(contours, path::MAX_PATH_ITEMS)?;
         let entities = add(add(path_entities, mul(bends, 2)?)?, perforations)?;
