@@ -204,6 +204,8 @@ pub struct WorkCounters {
     seam_tests: Cell<u64>,
     uv_trim_builds: Cell<u64>,
     trim_deviation_bounds: Cell<u64>,
+    band_face_solves: Cell<u64>,
+    band_edge_solves: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -427,6 +429,22 @@ impl WorkCounters {
         self.trim_deviation_bounds.get()
     }
 
+    /// Intersections of a convex blend's section with a face of the part, run to learn whether
+    /// the blend cuts the part or breaks through it
+    /// (`blend::fillet_executive::session::band_cuts`). Not the fork's (#21434).
+    #[must_use]
+    pub fn band_face_solves(&self) -> u64 {
+        self.band_face_solves.get()
+    }
+
+    /// Intersections of an edge of the part with a station's plane, run to learn whether a
+    /// convex blend cuts the part (`blend::fillet_executive::session::band_cuts`). Not the
+    /// fork's (#21434).
+    #[must_use]
+    pub fn band_edge_solves(&self) -> u64 {
+        self.band_edge_solves.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -454,6 +472,20 @@ impl WorkCounters {
         self.seam_tests.set(0);
         self.uv_trim_builds.set(0);
         self.trim_deviation_bounds.set(0);
+        self.band_face_solves.set(0);
+        self.band_edge_solves.set(0);
+    }
+
+    /// Counts one intersection of a blend's section with a face.
+    pub(crate) fn add_band_face_solve(&self) {
+        self.band_face_solves
+            .set(self.band_face_solves.get().saturating_add(1));
+    }
+
+    /// Counts one intersection of an edge with a station's plane.
+    pub(crate) fn add_band_edge_solve(&self) {
+        self.band_edge_solves
+            .set(self.band_edge_solves.get().saturating_add(1));
     }
 
     /// Counts one UV trim curve built.
