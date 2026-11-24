@@ -72,10 +72,11 @@ pub fn planes_meeting(
     let (da, db) = (a.point.dot(ua), b.point.dot(ub));
     let point = ((ub.cross(along) * da) + (along.cross(ua) * db)) * (1.0 / sine_squared);
     // Planes so near parallel (under a tiny angular tolerance) that rounding moves the point off
-    // either plane by more than the zone tolerance meet in no line this precision can place.
+    // either plane by more than the zone tolerance meet in no line this precision can place; nor
+    // do planes whose point overflows (a NaN residual fails the test).
     let zone = kernel.tolerances.zone_tol_3d;
-    if point.distance_along(a.point, ua).abs() > zone
-        || point.distance_along(b.point, ub).abs() > zone
+    if !(point.distance_along(a.point, ua).abs() <= zone
+        && point.distance_along(b.point, ub).abs() <= zone)
     {
         return Ok(None);
     }
@@ -292,6 +293,13 @@ mod tests {
                 }
             }
         }
+        // The plane through (M, M, 0) with normal (1, 1, 0) (M = f64::MAX) and z = 0 meet in the
+        // line through (M, M, 0) along (1, -1, 0), but its point nearest the origin, (M, M, 0), is
+        // built from the offset M·√2, which overflows: the point comes out (inf, inf, NaN), off
+        // both planes by NaN. No point can be placed, so none is given.
+        let far = plane(v(f64::MAX, f64::MAX, 0.0), v(1.0, 1.0, 0.0));
+        let floor = plane(v(0.0, 0.0, 0.0), v(0.0, 0.0, 1.0));
+        assert_eq!(planes_meeting(&k, &far, &floor).unwrap(), None);
     }
 
     #[test]
