@@ -555,6 +555,9 @@ fn axes_param(p: &Value, cmd: &str) -> Result<Option<[bool; 3]>> {
     Ok((mask != [true; 3]).then_some(mask))
 }
 
+/// The kinds of snap point an Align side takes.
+pub(crate) const SNAP_KINDS: [&str; 4] = ["vertex", "edge_mid", "face_center", "circle_center"];
+
 /// An Align side given as a point (`from` or `to`), as the handler reads it.
 pub(crate) enum SidePoint {
     /// The text `origin` (any case): the world origin.
@@ -568,17 +571,29 @@ pub(crate) enum SidePoint {
 /// The side `pk` (`from` or `to`) as a point, with the handler's message when it is none of the
 /// forms; `fk` is the face key beside it (`from_face`).
 pub(crate) fn side_point(v: Option<&Value>, pk: &str, fk: &str) -> std::result::Result<SidePoint, String> {
+    // `[x, y, z]`, which reads no coordinate 1e9 mm or more out: that is said, not taken for no point.
+    let point = |v: &Value| {
+        let far = v.as_array().is_some_and(|a| a.len() == 3 && a.iter().any(|c| c.as_f64().is_some_and(|c| c.abs() >= 1e9)));
+        if far { Err(format!("`{pk}` must lie within 1e9 mm of the origin")) } else { Ok(vec3(v)) }
+    };
     // The origin point.
     if v.and_then(Value::as_str).is_some_and(|o| o.eq_ignore_ascii_case("origin")) {
         return Ok(SidePoint::Origin);
     }
     // A snap point: {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]}.
     if let Some(o) = v.filter(|v| v.is_object()) {
-        let at = o.get("at").and_then(vec3).ok_or_else(|| format!("`{pk}.at` must be [x, y, z]"))?;
+        let at = o.get("at").map(point).transpose()?.flatten().ok_or_else(|| format!("`{pk}.at` must be [x, y, z]"))?;
         let kind = o.get("snap").and_then(Value::as_str).unwrap_or("vertex").to_string();
+        if !SNAP_KINDS.contains(&kind.as_str()) {
+            return Err(format!("`{pk}.snap` must be {}", SNAP_KINDS.join(", ")));
+        }
         return Ok(SidePoint::Snap { at, kind });
     }
-    v.and_then(vec3).map(SidePoint::Point).ok_or_else(|| format!("give `{pk}`, `{fk}` or `{pk}_plane` ([x, y, z], \"origin\", or a plane)"))
+    v.map(point)
+        .transpose()?
+        .flatten()
+        .map(SidePoint::Point)
+        .ok_or_else(|| format!("give `{pk}`, `{fk}` or `{pk}_plane` ([x, y, z], \"origin\", or a plane)"))
 }
 
 fn align(s: &mut Session, p: &Value) -> Result<Value> {

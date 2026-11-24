@@ -118,6 +118,7 @@ pub use features::shown_scope;
 pub(crate) use features::sketch_key;
 pub(crate) use features::sweep_orientation;
 pub(crate) use features_more::MAX_SKETCH_ID;
+pub(crate) use features_more::SNAP_KINDS;
 pub(crate) use features_more::SidePoint;
 pub(crate) use features_more::SketchFrameId;
 pub(crate) use features_more::axes_mask;

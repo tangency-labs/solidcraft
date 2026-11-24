@@ -33,14 +33,14 @@ use super::config::NameList;
 use super::joints::JointOriginArg;
 use super::motion::require;
 use super::types::{AngleExpr, FeatureCommon, PlaneParam, Point3, SketchRef, StringList, feature_common};
-use crate::cmd::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mask, sketch_frame_id, sketch_key};
+use crate::cmd::{MAX_SKETCH_ID, SNAP_KINDS, SidePoint, SketchFrameId, axes_mask, sketch_frame_id, sketch_key};
 use crate::params::{self, MAX_STRING_LIST};
 
 /// The handler's message for `bodies` left out, `null` or empty.
 const BODIES_MESSAGE: &str = "`bodies` must list the bodies to move";
 
 /// The kinds of snap point `from` and `to` take.
-const SNAPS: [&str; 4] = ["vertex", "edge_mid", "face_center", "circle_center"];
+const SNAPS: [&str; 4] = SNAP_KINDS;
 
 /// The `bodies` schema: one name, or a list of 1 to 10 000.
 fn bodies_schema(_: &mut SchemaGenerator) -> Schema {
