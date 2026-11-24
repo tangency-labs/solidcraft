@@ -53,7 +53,7 @@ const ON_CENTRE_MM: f64 = 1e-6;
 const DEFAULT_DECIMALS: u8 = 2;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new(ADD, "Add Drawing Dimension", crate::checked!("drawing.dimension.add", add))
+    CommandSpec::new(ADD, "Add Drawing Dimension", crate::checked!("drawing.dimension.add", add)).begins_edit()
         .icon("dimension")
         .in_drawing()
         .doc_only()
@@ -76,27 +76,28 @@ pub static COMMANDS: &[CommandSpec] = &[
              occurrences its body is placed through, from the top; offset_mm?: the dimension line's distance on paper (default 10;              a linear, length or chain one's on the side away from what it measures); \
              text?: centred (default) or {at: [x, y]} from the view's centre; text_to_mm?: [x, y], where its text's centre goes, or line_through_mm?: \
              [x, y], a point its line, arc or leader passes through, in paper mm from the sheet's lower-left corner, as edit's drag \
-             (instead of offset_mm and text); decimals?: 0..6 (default 2); override_text? (not a \
+             (instead of offset_mm and text); decimals?: 0..6 (default 2); override_text?: its text, in which \
+             {value} is its measured number as it reads alone (Ø12.00), so `2× {value} THRU` follows the model, and {{ and }} are a brace each (not a \
              chain's); dry_run?: true to answer what it would add, adding nothing (no id is taken, no undo step) → what \
              drawing.dimension.inspect answers for it. Saved by the edges' names, never the points picked; one the \
-             view can't measure, or on a part it doesn't draw, is refused. One undo step; no model is evaluated.",
+             view can't measure, or on a part it doesn't draw, is refused. This is the way to dimension a view, never a free line or text note; drawing.dimension.from_model brings the model's own dimensions in. One undo step; no model is evaluated.",
         ),
-    CommandSpec::new(EDIT, "Edit Drawing Dimension", crate::checked!("drawing.dimension.edit", edit))
+    CommandSpec::new(EDIT, "Edit Drawing Dimension", crate::checked!("drawing.dimension.edit", edit)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("dimension")
         .in_drawing()
         .doc_only()
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<EditResult>)
         .params(
-            "dimension: its id; set: {offset_mm?, text?: centred or {at: [x, y]}, decimals?: 0..6, override_text?: text, or null to show \
-             the number again; direction?, reading?: a linear or length dimension's, reading? and other_side?: an angle's, diameter?: a \
+            "dimension: its id; set: {offset_mm?, text?: centred or {at: [x, y]}, decimals?: 0..6, override_text?: its text ({value} is its measured number as it reads alone, {{ and }} \
+             a brace each; without {value} it is shown instead of the number), or null to show the number again; direction?, reading?: a linear or length dimension's, reading? and other_side?: an angle's, diameter?: a \
              radial dimension's, direction?: a chain's or a silhouettes one's; a drag, instead of offset_mm and text: \
              text_to_mm?: [x, y], where its text's centre goes, or line_through_mm?: [x, y], a point its line, arc or leader passes \
              through, each in paper mm from the sheet's lower-left corner, as inspect's layout} → \
              {dimension, changed: [fields]}. What it measures stays: to measure something else, add a new one. One undo step, none \
              when nothing changes; no model is evaluated.",
         ),
-    CommandSpec::new(REPAIR, "Repair Drawing Dimension", crate::checked!("drawing.dimension.repair", repair))
+    CommandSpec::new(REPAIR, "Repair Drawing Dimension", crate::checked!("drawing.dimension.repair", repair)).begins_edit()
         .icon("dimension")
         .in_drawing()
         .doc_only()
@@ -119,7 +120,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<DimensionResult>)
         .params(
             "dimension: its id → {dimension, view, record: as saved, status: ok, overridden, ambiguous, suppressed, failed, lost or unmeasurable, \
-             why?, value? (model mm, or degrees for an angle; a chain's overall), foreshortened?, text? (none for a chain), \
+             why?, value? (model mm, or degrees for an angle; a chain's overall), foreshortened?, text? (none for a chain; its text with {value} filled in), \
+             measured_text?: its number as it reads with no text of its own, \
              members?: a chain's [{value, text}] from its first point, last_good? (the value it last read, kept when the design \
              is saved, when it has none now), exact, candidates?: [{edge: {body, index}}, {corner: [x, y, z]} or {face: {body, index}}]: \
              what an ambiguous name finds, or a lost one's leads; one of a slot's kind passes back to drawing.dimension.repair as it \
@@ -472,7 +474,7 @@ fn drag_on_sheet(s: &Session, d: &Drawing, id: u64, drag: Drag, cmd: &str) -> Re
         .read_on(d, &[(id, dimension.view)], solidcraft_doc::Document::resolve_dimensions)
         .map_err(|e| bad(cmd, e.to_string()))?;
     let r = read.into_iter().next().ok_or_else(|| bad(cmd, format!("dimension {} wasn't read", ids::encode(id))))?;
-    let on = crate::drawing_view::on_its_sheet(s, d, dimension.view, cmd).map_err(|why| bad(cmd, why))?;
+    let on = crate::drawing_view::dimension_view_on_sheet(s, d, dimension, cmd).map_err(|why| bad(cmd, why))?;
     let lettering = PaperFonts::new(&d.font, &d.language, false);
     dragged(dimension, &r, &on.frame, &lettering, drag.seen_from(on.centre)).map_err(|why| {
         let words = match why {
@@ -675,6 +677,7 @@ fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
         value: r.measured.map(|m| shown(m.value)),
         foreshortened: r.measured.map(|m| m.foreshortened),
         text: r.text,
+        measured_text: r.number,
         members: r.members.into_iter().map(|m| MemberResult { value: m.measured.value, text: m.text }).collect(),
         last_good: last_good.map(shown),
         exact: r.exact,
@@ -700,27 +703,10 @@ const TEXT_WAITS: &str = "its text waits for a font to fall back to; drawing.sce
 /// no box, and says why. It reads the model as it is evaluated and draws no view's lines, so a view
 /// whose lines fail still answers.
 fn layout_on_sheet(s: &Session, d: &Drawing, dimension: &Dimension, r: &Resolved) -> (Option<DimensionLayoutResult>, Option<String>) {
-    // The view draws from where the design places its parts, as the sheet does; a dimension reads the
-    // same either way, as it reads the model, not the session's moves.
-    let on = match crate::drawing_view::on_its_sheet(s, d, dimension.view, INSPECT) {
-        Ok(on) => on,
-        Err(why) => return (None, Some(why.to_string())),
+    let (paper, centre) = match alone_on_sheet(s, d, dimension, r) {
+        Ok((paper, centre, _)) => (paper, centre),
+        Err(why) => return (None, why),
     };
-    let centre = on.centre;
-    // Asks for a font to fall back to and doesn't wait: add and its dry run run on the window thread.
-    let Some(paper) = paper_group(dimension, r, &on.frame, on.line_group, &PaperFonts::new(&d.font, &d.language, false)) else {
-        return (None, (!r.points.is_empty()).then(|| NO_PLACE.to_string()));
-    };
-    // No layout at all until the font is found: a short span's lines depend on its text's width.
-    if paper.pending {
-        return (None, Some(TEXT_WAITS.to_string()));
-    }
-    // As the sheet takes it: alone on its sheet, its group must pass the paper scene's checks.
-    let mut alone = Scene::new(on.size, vec![moved(&paper.group, centre)]);
-    alone.add_fonts(paper.fonts);
-    if let Err(e) = alone.validate() {
-        return (None, Some(e.to_string()));
-    }
     // Each point plus the centre, as the sheet moves the group, so the two are the same numbers.
     let at = |p: &Vec2| {
         let p = *p + centre;
@@ -734,6 +720,52 @@ fn layout_on_sheet(s: &Session, d: &Drawing, dimension: &Dimension, r: &Resolved
         text_boxes: paper.layout.text_boxes.iter().map(|corners| corners.each_ref().map(at)).collect(),
     };
     (Some(layout), paper.why)
+}
+
+/// `dimension` of `d`, read as `r`, laid out as the sheet draws it ([`paper_group`]): its group, its
+/// view's centre on the sheet, and the dimension alone on its sheet, moved there, as a scene that
+/// passes the paper scene's checks. Or why not ([`layout_on_sheet`] says it), none when its status says.
+fn alone_on_sheet(
+    s: &Session,
+    d: &Drawing,
+    dimension: &Dimension,
+    r: &Resolved,
+) -> std::result::Result<(crate::drawing_dimension_paper::OnPaper, Vec2, Scene), Option<String>> {
+    // The view draws from where the design places its parts, as the sheet does; a dimension reads the
+    // same either way, as it reads the model, not the session's moves.
+    let on = crate::drawing_view::dimension_view_on_sheet(s, d, dimension, INSPECT).map_err(|why| Some(why.to_string()))?;
+    let centre = on.centre;
+    // Asks for a font to fall back to and doesn't wait: add and its dry run run on the window thread.
+    let Some(paper) = paper_group(dimension, r, &on.frame, on.line_group, &PaperFonts::new(&d.font, &d.language, false)) else {
+        return Err((!r.points.is_empty()).then(|| NO_PLACE.to_string()));
+    };
+    // No layout at all until the font is found: a short span's lines depend on its text's width.
+    if paper.pending {
+        return Err(Some(TEXT_WAITS.to_string()));
+    }
+    // As the sheet takes it: alone on its sheet, its group must pass the paper scene's checks.
+    let mut alone = Scene::new(on.size, vec![moved(&paper.group, centre)]);
+    alone.add_fonts(paper.fonts.clone());
+    alone.validate().map_err(|e| Some(e.to_string()))?;
+    Ok((paper, centre, alone))
+}
+
+/// The dimension `params` (as `drawing.dimension.add` takes them) would add, alone on its sheet and
+/// drawn exactly as the sheet will draw it once placed: the same group, at the same size, from the
+/// same layout. Added on a copy of the session, so nothing is added, no id taken and no undo step
+/// made. What a Dimension tool previews while the dimension follows the pointer.
+pub fn preview_scene(s: &Session, params: &Value) -> Result<Scene> {
+    let request: AddParams = crate::schema::read(ADD, params)?;
+    let mut copy = s.scratch();
+    let reply = added(&mut copy, request)?;
+    let id = reply["dimension"].as_str().and_then(ids::decode).ok_or_else(|| bad(ADD, "the dimension wasn't added"))?;
+    let d = copy.drawing(ADD)?.clone();
+    let dimension = d.dimension(id).ok_or_else(|| bad(ADD, "the dimension wasn't added"))?;
+    let resolved = crate::drawing_view::ViewSessions::new(&copy)
+        .read_on(&d, &[(id, dimension.view)], solidcraft_doc::Document::resolve_dimensions)
+        .map_err(|e| bad(ADD, e.to_string()))?;
+    let r = resolved.into_iter().next().ok_or_else(|| bad(ADD, "the dimension wasn't read"))?;
+    alone_on_sheet(&copy, &d, dimension, &r).map(|(.., scene)| scene).map_err(|why| bad(ADD, why.unwrap_or_else(|| NO_PLACE.to_string())))
 }
 
 /// How a command's answer says where a reference stands with the model: the status's word, why

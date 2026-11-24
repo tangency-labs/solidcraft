@@ -161,6 +161,19 @@ fn same_triangles(a: &Body, b: &Body) -> bool {
 }
 
 impl ModelBody {
+    /// Indexed geometry underlying `mesh_in_place` for a mesh body without authored shading
+    /// normals. A rigid occurrence uses the definition's triangles in the definition's frame.
+    pub fn flat_mesh_in_place(&self) -> Option<(&[Vec3], &[[u32; 3]])> {
+        self.flat_mesh_body_in_place()?.triangle_mesh()
+    }
+
+    /// The body's indexed source in the frame of `mesh_in_place`. Clone this to share the
+    /// source with a background worker.
+    pub fn flat_mesh_body_in_place(&self) -> Option<&Body> {
+        let body = self.mesh_placement.as_deref().map_or(&self.body, |placed| &placed.body);
+        body.triangle_corner_normals()?.is_empty().then_some(body)
+    }
+
     /// Keep the meshes `old` holds when this body is the same shape: a feature evaluated again
     /// that gives the same solids (an import, from its shared file) doesn't mesh them again.
     pub(super) fn keep_meshes_of(&mut self, old: &ModelBody) {
@@ -194,8 +207,10 @@ pub(super) fn definition_plan(
     q: crate::display_quality::DisplayQuality,
     name: &str,
 ) -> Option<Arc<TessPlan>> {
-    cell.get_or_init(|| match body.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: q.chord(body.size()), angle: Some(q.angle()) }) {
-        Ok(plan) => Some(Arc::new(plan)),
+    // Shared: an imported part keeps the plan its import's check made at Normal quality
+    // ([`solidcraft_kernel::Body::keeping_plans`]), which this takes rather than planning again.
+    cell.get_or_init(|| match body.mesh_plan_shared(&solidcraft_kernel::MeshTolerance { chord: q.chord(body.size()), angle: Some(q.angle()) }) {
+        Ok(plan) => Some(plan),
         Err(e) => {
             log::debug!("{name}: no display plan ({e})");
             None

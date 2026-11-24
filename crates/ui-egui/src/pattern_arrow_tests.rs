@@ -179,3 +179,144 @@ fn a_solid_pattern_spacing_arrow_dragged_past_zero_goes_negative() {
         assert!((x - (5.0 + k * v)).abs() < 1e-6, "{copy} centred at x = {x} for Spacing {spacing}");
     }
 }
+
+/// Quantity and Extent, centred and flipped (#8523): the arrow runs the way the copies go
+/// furthest and shows that side's share of the extent (Quantity 4 over 30 mm: two 10 mm steps
+/// ahead, one behind); Spacing and Extent adds its own Extent arrow beside Spacing's.
+#[test]
+fn a_centred_extent_arrow_shows_its_own_side_and_turns_with_flip() {
+    let mut h = Harness::new();
+    h.run(&json!([
+        {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}},
+        {"call": "ui.view", "params": {"view": "iso"}},
+        {"start": "solid.pattern.rectangular"},
+        {"click": {"world": [5, 5, 10]}},
+        {"call": "ui.dialogInput", "params": {"index": 1}},
+        {"click": {"axis": "X"}}
+    ]))
+    .unwrap();
+    h.call("ui.camera", json!({"target": [5, 5, 5]}));
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        for (key, value) in [("distance1", json!("count_extent")), ("alignment", json!("center")), ("reversed", json!(true))] {
+            d.extra.insert(key.into(), value);
+        }
+        if let Kind::PatternRect { count, extent, .. } = &mut d.kind {
+            *count = "4".into();
+            *extent = "30 mm".into();
+        }
+    }
+    h.settle();
+    let (base, dir) = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).expect("an anchor");
+    assert!(dir.is_some_and(|v| v.dist(solidcore_record::Vec3::new(-1.0, 0.0, 0.0)) < 1e-9), "Flip turns the arrow round: {dir:?}");
+    let Some(tip) = handle_at("arrow") else { panic!("no extent arrow") };
+    let end = h.call("ui.worldToScreen", json!({"points": [[base.x - 20.0, base.y, base.z]]}))["result"][0].clone();
+    let end = egui::pos2(end[0].as_f64().unwrap() as f32, end[1].as_f64().unwrap() as f32);
+    assert!(tip.distance(end) < 2.0, "the arrow ends 20 mm along -X: tip {tip:?}, expected {end:?}");
+    assert!(handle_at("arrow_extent").is_none(), "Quantity and Extent has one arrow");
+    h.app.dialog.as_mut().unwrap().extra.insert("distance1".into(), json!("spacing_extent"));
+    h.settle();
+    assert!(handle_at("arrow").is_some() && handle_at("arrow_extent").is_some(), "Spacing and Extent shows both arrows");
+}
+
+/// A reopened pattern whose first direction is no origin axis keeps its arrow (#8523): the
+/// window keeps that direction in `dir1` alone, as it keeps a slanted second one in `dir2`.
+#[test]
+fn a_reopened_pattern_along_a_slanted_first_direction_keeps_its_arrow() {
+    let mut h = Harness::new();
+    h.run(&json!([
+        {"call": "engine.execute", "params": {"command": "solid.box", "params": {"corner": [0, 0, 0], "length": 60, "width": 40, "height": 5, "name": "Plate"}}},
+        {"call": "engine.execute", "params": {"command": "solid.box", "params": {"corner": [8, 6, 5], "length": 8, "width": 8, "height": 6, "operation": "join", "name": "Boss"}}},
+        {"call": "engine.execute", "params": {"command": "solid.pattern.rectangular", "params": {"features": ["Boss"], "dir1": [0.6, 0.8, 0], "count1": 2, "spacing1": 20, "name": "Pattern"}}},
+        {"call": "ui.view", "params": {"view": "iso"}},
+        {"call": "ui.editFeature", "params": {"feature": "Pattern"}}
+    ]))
+    .unwrap();
+    h.settle();
+    let d = h.app.dialog.as_ref().expect("the pattern dialog");
+    assert!(d.inputs.get(1).is_none_or(|i| i.items.is_empty()), "a slanted direction is no pick: {:?}", d.inputs);
+    let (_, dir) = crate::canvas::anchor(&h.app, d).expect("an anchor");
+    assert!(dir.is_some_and(|v| (v.x - 0.6).abs() < 1e-9 && (v.y - 0.8).abs() < 1e-9 && v.z.abs() < 1e-9), "{dir:?}");
+    assert!(handle_at("arrow").is_some(), "the Spacing arrow along the kept direction");
+}
+
+/// Spacing 2's and Extent 2's boxes in the view stay while their text does not evaluate, so a
+/// cleared box can be typed on in (#8523), as Distance 2's does for an extrude.
+#[test]
+fn a_solid_pattern_second_direction_boxes_stay_while_their_text_is_incomplete() {
+    let mut h = Harness::new();
+    h.run(&json!([
+        {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}},
+        {"call": "ui.view", "params": {"view": "iso"}},
+        {"start": "solid.pattern.rectangular"},
+        {"click": {"world": [5, 5, 10]}},
+        {"call": "ui.dialogInput", "params": {"index": 1}},
+        {"click": {"axis": "X"}},
+        {"call": "ui.dialogInput", "params": {"index": 2}},
+        {"click": {"axis": "Y"}}
+    ]))
+    .unwrap();
+    h.app.dialog.as_mut().unwrap().extra.insert("distance2".into(), json!("spacing_extent"));
+    h.settle();
+    let shown = |h: &Harness, what: &str| h.ctx.read_response(egui::Id::unique(what)).is_some();
+    assert!(shown(&h, "sc_canvas_value_spacing2") && shown(&h, "sc_canvas_value_extent2"), "both boxes with valid text");
+    for text in ["", "-"] {
+        if let Some(Kind::PatternRect { spacing2, extent2, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *spacing2 = text.into();
+            *extent2 = text.into();
+        }
+        h.settle();
+        assert!(shown(&h, "sc_canvas_value_spacing2"), "Spacing 2's box went away at {text:?}");
+        assert!(shown(&h, "sc_canvas_value_extent2"), "Extent 2's box went away at {text:?}");
+    }
+}
+
+/// Each floating dimension clears all four actual arrows, even those drawn later in the frame.
+#[test]
+fn floating_pattern_fields_clear_the_primary_and_secondary_spacing_and_extent_grips() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width":1600,"height":1200}));
+    h.call("ui.prefs", json!({"language":"en","look_at_anim":false}));
+    h.run(&json!([
+        {"call":"engine.execute","params":{"command":"solid.box","params":{"length":10,"width":10,"height":10}}},
+        {"call":"ui.view","params":{"view":"iso"}},
+        {"start":"solid.pattern.rectangular"},
+        {"click":{"world":[5,5,10]}},
+        {"call":"ui.dialogInput","params":{"index":1}},{"click":{"axis":"X"}},
+        {"call":"ui.dialogInput","params":{"index":2}},{"click":{"axis":"Y"}}
+    ])).unwrap();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.extra.insert("distance1".into(), json!("spacing_extent"));
+    d.extra.insert("distance2".into(), json!("spacing_extent"));
+    if let Kind::PatternRect { count, spacing, extent, count2, spacing2, extent2, .. } = &mut d.kind {
+        (*count, *spacing, *extent, *count2, *spacing2, *extent2) = ("4".into(),"10 mm".into(),"30 mm".into(),"4".into(),"8 mm".into(),"24 mm".into());
+    }
+    h.call("ui.camera", json!({"target":[15,15,5],"distance":100}));
+    h.settle();
+    let tip = handle_at("arrow2").expect("second spacing grip");
+    let window = h.app.viewport.dialog_rect.unwrap();
+    let title = handle_at("dialog:title").unwrap();
+    let delta = egui::vec2(tip.x + 30.0 - window.left(), tip.y - 80.0 - window.top());
+    h.call("ui.drag", json!({"x0":title.x,"y0":title.y,"x1":title.x+delta.x,"y1":title.y+delta.y,"steps":8}));
+    h.frames(24);
+    let tip = handle_at("arrow2").unwrap();
+    let window = h.app.viewport.dialog_rect.unwrap();
+    assert!((window.left()-tip.x-30.0).abs() < 3.0 && window.y_range().contains(tip.y), "window beside the actual secondary grip: {window:?}, {tip:?}");
+    let grips: Vec<_> = ["arrow", "arrow_extent", "arrow2", "arrow2_extent"].into_iter().map(|name| {
+        (name, egui::Rect::from_center_size(handle_at(name).unwrap_or_else(|| panic!("no {name}")),egui::vec2(20.0,20.0)))
+    }).collect();
+    for id in ["sc_canvas_area", "sc_canvas_area_extent", "sc_canvas_area_spacing2", "sc_canvas_area_extent2"] {
+        let field = h.ctx.memory(|m| m.area_rect(egui::Id::unique(id))).unwrap_or_else(|| panic!("no {id}"));
+        for (name, grip) in &grips {
+            assert!(!field.intersects(*grip), "{id} at {field:?} covers {name} at {grip:?}");
+        }
+    }
+    // Enter text through the actual secondary response and check the other dimension is intact.
+    let input = h.ctx.read_response(egui::Id::unique("sc_canvas_value_spacing2")).unwrap().rect;
+    h.step(&json!({"click":[input.center().x,input.center().y]})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"9 mm"})).unwrap();
+    h.frames(3);
+    assert_eq!(spacings(&h), ("10 mm".into(),"9 mm".into()));
+}

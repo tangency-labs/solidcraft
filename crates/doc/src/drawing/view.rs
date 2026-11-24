@@ -39,6 +39,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_geom::cell::{Projection, check_label};
+use solidcraft_geom::drawing_detail::Boundary;
 use solidcraft_geom::drawing_sheet::view_letter;
 use solidcraft_geom::drawing_view::{ProjectedSide, Scale, is_paper_coordinate, projected_basis};
 use solidcraft_geom::paper::MAX_SIDE_MM;
@@ -93,6 +94,8 @@ pub const MAX_LETTERS: usize = 3;
 /// What a new label prints before its letter: English capitals, as a new parts list's headings are,
 /// typed over after.
 pub const VIEW_WORDS: &str = "VIEW";
+/// What a detail view's label prints before its letter when made.
+pub const DETAIL_WORDS: &str = "DETAIL";
 /// What a new label prints before its scale.
 pub const SCALE_WORDS: &str = "SCALE";
 
@@ -227,6 +230,13 @@ pub enum ViewKind {
         parent: u64,
         toward: [f64; 2],
     },
+    /// A region of `parent` inside `boundary`, drawn again at its own scale and placed apart: the
+    /// parent shows the boundary and the detail's letter, the detail what lies inside it.
+    Detail {
+        #[serde(with = "crate::ids")]
+        parent: u64,
+        boundary: DetailBoundary,
+    },
     /// The flat pattern of sheet-metal body `body` of the design of `source` (#13030), turned `turn`.
     Flat {
         #[serde(with = "crate::ids")]
@@ -245,6 +255,7 @@ impl ViewKind {
             ViewKind::Section { .. } => "section",
             ViewKind::Pictorial { .. } => "pictorial",
             ViewKind::Auxiliary { .. } => "auxiliary",
+            ViewKind::Detail { .. } => "detail",
             ViewKind::Flat { .. } => "flat",
         }
     }
@@ -258,7 +269,8 @@ impl ViewKind {
             ViewKind::Projected { parent, .. }
             | ViewKind::Section { parent, .. }
             | ViewKind::Pictorial { parent, .. }
-            | ViewKind::Auxiliary { parent, .. } => Some(*parent),
+            | ViewKind::Auxiliary { parent, .. }
+            | ViewKind::Detail { parent, .. } => Some(*parent),
         }
     }
 
@@ -267,7 +279,7 @@ impl ViewKind {
     /// command puts it.
     pub fn beside(&self) -> Option<Beside> {
         match self {
-            ViewKind::Base { .. } | ViewKind::Flat { .. } | ViewKind::Section { .. } | ViewKind::Auxiliary { .. } => None,
+            ViewKind::Base { .. } | ViewKind::Flat { .. } | ViewKind::Section { .. } | ViewKind::Auxiliary { .. } | ViewKind::Detail { .. } => None,
             ViewKind::Projected { side, .. } => Some(Beside::Side(*side)),
             ViewKind::Pictorial { diagonal, .. } => Some(Beside::Diagonal(*diagonal)),
         }
@@ -278,7 +290,11 @@ impl ViewKind {
         match self {
             ViewKind::Base { .. } => Some("a base view"),
             ViewKind::Flat { .. } => Some("a flat pattern view"),
-            ViewKind::Projected { .. } | ViewKind::Section { .. } | ViewKind::Pictorial { .. } | ViewKind::Auxiliary { .. } => None,
+            ViewKind::Projected { .. }
+            | ViewKind::Section { .. }
+            | ViewKind::Pictorial { .. }
+            | ViewKind::Auxiliary { .. }
+            | ViewKind::Detail { .. } => None,
         }
     }
 }
@@ -485,6 +501,30 @@ pub struct ResolvedView {
     pub configuration: Setting<ViewConfiguration>,
     /// A flat pattern view's body and turn; none for a view of the model.
     pub flat: Option<FlatOf>,
+    /// A detail view's region of its parent, on the parent's plane: none for any other view.
+    pub detail: Option<Boundary>,
+}
+
+/// A detail view's region of its parent, in the parent's plane coordinates (model millimetres
+/// along the view's x and y), as saved.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum DetailBoundary {
+    /// The disc of `radius` round `centre`.
+    Circle { centre: [f64; 2], radius: f64 },
+    /// The rectangle from corner `min` to corner `max`, its sides along the view's x and y.
+    Rectangle { min: [f64; 2], max: [f64; 2] },
+}
+
+impl DetailBoundary {
+    /// The region as geometry, refused when it isn't one ([`Boundary`]'s rules).
+    pub fn geometry(&self) -> Result<Boundary> {
+        let made = match *self {
+            DetailBoundary::Circle { centre, radius } => Boundary::circle(Vec2::from(centre), radius),
+            DetailBoundary::Rectangle { min, max } => Boundary::rectangle(Vec2::from(min), Vec2::from(max)),
+        };
+        made.map_err(|e| DocError::Invalid(format!("a detail view's boundary: {e}")))
+    }
 }
 
 fn is_zero(v: &f64) -> bool {
@@ -502,7 +542,7 @@ impl View {
     pub fn needs_letter(&self) -> bool {
         matches!(
             (&self.kind, self.place),
-            (ViewKind::Projected { .. }, ViewPlace::At(_)) | (ViewKind::Section { .. } | ViewKind::Auxiliary { .. }, _)
+            (ViewKind::Projected { .. }, ViewPlace::At(_)) | (ViewKind::Section { .. } | ViewKind::Auxiliary { .. } | ViewKind::Detail { .. }, _)
         )
     }
 }
@@ -698,6 +738,13 @@ impl Drawing {
                 })?;
                 require(matches!(view.place, ViewPlace::At(_)), || "an auxiliary view is placed at a point: it isn't lined up with its parent".into())
             }
+            ViewKind::Detail { parent, boundary } => {
+                self.chain_of(view.id)?;
+                self.can_detail(*parent)?;
+                boundary.geometry()?;
+                require(view.settings.scale.is_some(), || "a detail view has a scale of its own".into())?;
+                require(matches!(view.place, ViewPlace::At(_)), || "a detail view is placed at a point: it isn't lined up with its parent".into())
+            }
         }
     }
 
@@ -711,7 +758,17 @@ impl Drawing {
         let pictorial = matches!(chain.first().map(|view| &view.kind), Some(ViewKind::Pictorial { .. }));
         require(!pictorial, || "not supported yet: a view projected from a pictorial view".into())?;
         let flat = matches!(chain.last().map(|end| &end.kind), Some(ViewKind::Flat { .. }));
-        require(!flat, || "not supported yet: a view made from a flat pattern view".into())
+        require(!flat, || "not supported yet: a view made from a flat pattern view".into())?;
+        let detail = matches!(chain.first().map(|view| &view.kind), Some(ViewKind::Detail { .. }));
+        require(!detail, || "not supported yet: a view made from a detail view".into())
+    }
+
+    /// Whether a detail view can be made of view `parent`: one a view can be made from
+    /// ([`Self::can_project_from`]), but not a section view yet, whose cut a detail doesn't keep.
+    pub fn can_detail(&self, parent: u64) -> Result<()> {
+        self.can_project_from(parent)?;
+        let section = matches!(self.view(parent).map(|view| &view.kind), Some(ViewKind::Section { .. }));
+        require(!section, || "not supported yet: a detail of a section view".into())
     }
 
     /// The rules of a view that ends a chain, a base or flat pattern view: it draws one of the
@@ -737,9 +794,12 @@ impl Drawing {
             _ => return Err(DocError::Invalid(format!("view {} has no base view", ids::encode(id)))),
         };
         let mut cut = None;
+        let mut detail = None;
         for view in chain.iter().rev() {
             match &view.kind {
                 ViewKind::Base { .. } | ViewKind::Flat { .. } => {}
+                // The parent's basis: only the view itself shows the region.
+                ViewKind::Detail { boundary, .. } => detail = (view.id == id).then(|| boundary.geometry()).transpose()?,
                 ViewKind::Projected { side, .. } => basis = Beside::Side(*side).basis(&basis, self.projection)?,
                 ViewKind::Pictorial { diagonal, .. } => basis = Beside::Diagonal(*diagonal).basis(&basis, self.projection)?,
                 ViewKind::Section { line, .. } => {
@@ -775,6 +835,7 @@ impl Drawing {
             pose: or_default(&chain, |s| s.pose.clone(), Pose::Designed),
             configuration: or_default(&chain, |s| s.configuration, ViewConfiguration::Active),
             flat,
+            detail,
         })
     }
 
@@ -795,7 +856,8 @@ impl Drawing {
                     | ViewKind::Flat { .. }
                     | ViewKind::Section { .. }
                     | ViewKind::Pictorial { .. }
-                    | ViewKind::Auxiliary { .. },
+                    | ViewKind::Auxiliary { .. }
+                    | ViewKind::Detail { .. },
                 ) => {
                     return Err(DocError::Invalid(format!("{} view {} isn't placed at a point", view.kind.name(), ids::encode(view.id))));
                 }
@@ -863,6 +925,18 @@ impl Drawing {
         }
         self.view_letters = given;
         Ok(())
+    }
+
+    /// Names detail view `id`'s label [`DETAIL_WORDS`] in place of [`VIEW_WORDS`], as ISO 128-30
+    /// names a detail (`DETAIL A`); a label with words of its own keeps them.
+    pub fn name_detail(&mut self, id: u64) {
+        let Some(view) = self.view_index(id).and_then(|at| self.views.get_mut(at)) else { return };
+        if !matches!(view.kind, ViewKind::Detail { .. }) {
+            return;
+        }
+        if let Some(label) = Arc::make_mut(view).label.as_mut().filter(|label| label.words == VIEW_WORDS) {
+            label.words = DETAIL_WORDS.into();
+        }
     }
 
     /// What view `id`'s label reads, a line for each part shown: its words and letter (`VIEW B`), its

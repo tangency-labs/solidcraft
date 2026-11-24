@@ -42,6 +42,9 @@ pub struct ParamsDialog {
     /// parameter had before the first, and the one the design listed right after the last, read
     /// before anything else can change it. Cancel and Escape put the first back.
     applied: std::collections::BTreeMap<String, (String, String)>,
+    /// Expressions applied and still computing off the window thread, by parameter name: their
+    /// rows show them until the change is in.
+    pub(crate) applying: std::collections::BTreeMap<String, String>,
     /// Comments being edited, by parameter name.
     pub comments: std::collections::BTreeMap<String, String>,
     /// A parameter being renamed: (old name, new name).
@@ -250,6 +253,18 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let Some(mut d) = app.params.take() else { return };
     forget_refused_add(app, &mut d);
+    if !d.applying.is_empty() && app.computing_since().is_none() && app.deferred_queue.is_empty() {
+        // A live edit computed off the window thread (#6777) is in now; what the design lists for
+        // it is what Cancel later checks is still there (#15377), as `apply_grid` read it too early.
+        let listed = rows(app);
+        for name in std::mem::take(&mut d.applying).into_keys() {
+            if let Some(entry) = d.applied.get_mut(&name)
+                && let Some(now) = listed.iter().find(|l| l.name == name)
+            {
+                entry.1 = now.expression.clone();
+            }
+        }
+    }
     d.sort = ctx.data_mut(|m| m.get_persisted(sort_id())).unwrap_or_default();
     let sort = d.sort;
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
@@ -277,8 +292,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     .reset_scroll(d.reset_scroll);
     // A width or body height the user dragged the card to replaces that default; each axis stays
     // automatic until the user drags it (review of #13422).
-    let chosen_width: Option<f32> = ctx.data_mut(|m| m.get_persisted(width_id())).filter(|w: &f32| w.is_finite());
-    let chosen_height: Option<f32> = ctx.data_mut(|m| m.get_persisted(height_id())).filter(|h: &f32| h.is_finite());
+    let (chosen_width, chosen_height) = (SIZE.width(ctx), SIZE.height(ctx));
     let width = chosen_width.map_or(solidcraft_theme::Tokens::get().form_card_width * 3.0, |w| w.max(crate::frame::DIALOG_MIN_W));
     let panel = panel.body_height(chosen_height);
     let panel = panel.width(width.min((docked.x - drag_bounds.left()).max(crate::frame::DIALOG_MIN_W)));
@@ -293,7 +307,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut outcome = (false, ui_kit::Action::None);
     let live = app.preferences.parameters_apply_live;
     let held_status = if live { None } else { held_status(held(&d, &all).len()) };
-    let mut resize = Resize::None;
+    let mut resize = crate::card_resize::Resize::None;
     d.previewing = false;
     let shown = panel.window(ctx).show(ctx, |ui| {
         outcome = panel.feature(
@@ -380,39 +394,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::ComputeStatus { text: held_status, busy: false, applying: false }
             },
         );
-        resize = resize_edges(ui, side, panel.last_body_scrollbar(ui.ctx()));
+        resize = SIZE.edges(ui, side, panel.last_body_scrollbar(ui.ctx()));
         d.reset_scroll = false;
     });
-    match resize {
-        Resize::None => {}
-        Resize::Reset(axes) => ctx.data_mut(|m| {
-            if axes.width {
-                m.remove::<f32>(width_id());
-            }
-            if axes.height {
-                m.remove::<f32>(height_id());
-            }
-        }),
-        Resize::By(axes, delta) => {
-            let t = solidcraft_theme::Tokens::get();
-            if axes.width
-                && let Some(card) = shown.as_ref().map(|r| r.response.rect)
-            {
-                let w = (card.width() + delta.x).clamp(crate::frame::DIALOG_MIN_W, viewport.width().max(crate::frame::DIALOG_MIN_W));
-                if w.is_finite() {
-                    ctx.data_mut(|m| m.insert_persisted(width_id(), w));
-                }
-            }
-            if axes.height
-                && let Some(body) = panel.last_body_height(ctx)
-            {
-                let h = (body + delta.y).clamp(t.control_height * 2.0, viewport.height().max(t.control_height * 2.0));
-                if h.is_finite() {
-                    ctx.data_mut(|m| m.insert_persisted(height_id(), h));
-                }
-            }
-        }
-    }
+    SIZE.apply(ctx, resize, shown.as_ref().map(|r| r.response.rect), panel.last_body_height(ctx), viewport);
     // Held edits (#9279) are set by Apply and OK; Cancel, the close button and Escape drop them.
     // Cancel and Escape also put back what was applied live (#15377); the close button keeps it,
     // as closing the window the usual way never loses an edit.
@@ -449,97 +434,12 @@ fn sort_id() -> egui::Id {
     egui::Id::unique("sc_params_sort")
 }
 
-/// Where the outer width the user dragged the card to is kept; absent while the width is automatic.
-fn width_id() -> egui::Id {
-    egui::Id::unique("sc_params_width")
-}
-
-/// Where the body height the user dragged the card to is kept; absent while the height is automatic.
-fn height_id() -> egui::Id {
-    egui::Id::unique("sc_params_height")
-}
+/// Where the card's dragged width and body height are kept, and the names its edges publish.
+const SIZE: crate::card_resize::CardSize = crate::card_resize::CardSize { width: "sc_params_width", height: "sc_params_height", handle: "params" };
 
 /// Where the column widths the user dragged are kept, shared by every section's table.
 fn columns_id() -> egui::Id {
     egui::Id::unique("sc_params_columns")
-}
-
-/// Which of the card's two sizes a resize edge changes: the side edge its width, the bottom edge
-/// its body height, the corner both. The other axis keeps its automatic size.
-#[derive(Clone, Copy)]
-struct Axes {
-    width: bool,
-    height: bool,
-}
-
-/// What the card's resize edges asked for this frame.
-enum Resize {
-    None,
-    /// Grow the card by this much on these axes: x widens it, y lengthens its body.
-    By(Axes, egui::Vec2),
-    /// A double-click on an edge returns these axes to their automatic size.
-    Reset(Axes),
-}
-
-/// Drag areas on the card's free side edge (the one away from its dock side), its bottom edge
-/// and the corner between them. The header stays the title drag area. When the free edge is the
-/// right one and the body scrolls, `scrollbar` is the body viewport whose right edge carries the
-/// scrollbar: the side grip skips that span so scrollbar drags still scroll (#13422 review).
-fn resize_edges(ui: &mut egui::Ui, side: crate::frame::Side, scrollbar: Option<egui::Rect>) -> Resize {
-    let t = solidcraft_theme::Tokens::get();
-    let card = ui.min_rect();
-    let grip = t.space_6;
-    if !card.is_finite() || card.width() < grip * 4.0 || card.height() < t.form_header_height + grip * 2.0 {
-        return Resize::None;
-    }
-    // A card docked right is held by its right edge, so it grows from its left edge.
-    let free_left = side == crate::frame::Side::Right;
-    let x_edge = if free_left { card.left()..=card.left() + grip } else { card.right() - grip..=card.right() };
-    let corner_x = if free_left { card.left()..=card.left() + grip * 2.0 } else { card.right() - grip * 2.0..=card.right() };
-    // The scrollbar sits on the body's right edge, so only a right-hand grip can cover it.
-    let side_top = match scrollbar {
-        Some(body) if !free_left && body.is_finite() => body.bottom().max(card.top() + t.form_header_height),
-        _ => card.top() + t.form_header_height,
-    };
-    let mut edges = vec![(
-        "bottom",
-        egui::Rect::from_x_y_ranges(card.left() + grip * 2.0..=card.right() - grip * 2.0, card.bottom() - grip..=card.bottom()),
-        egui::CursorIcon::ResizeVertical,
-        Axes { width: false, height: true },
-    )];
-    if side_top < card.bottom() - grip * 2.0 {
-        edges.push((
-            "side",
-            egui::Rect::from_x_y_ranges(x_edge, side_top..=card.bottom() - grip * 2.0),
-            egui::CursorIcon::ResizeHorizontal,
-            Axes { width: true, height: false },
-        ));
-    }
-    edges.push((
-        "corner",
-        egui::Rect::from_x_y_ranges(corner_x, card.bottom() - grip * 2.0..=card.bottom()),
-        if free_left { egui::CursorIcon::ResizeNeSw } else { egui::CursorIcon::ResizeNwSe },
-        Axes { width: true, height: true },
-    ));
-    let mut out = Resize::None;
-    for (name, rect, cursor, axes) in edges {
-        let response = ui.interact(rect, ui.make_persistent_id(("params_resize", name)), egui::Sense::click_and_drag()).on_hover_cursor(cursor);
-        crate::scenario::publish_target(&format!("params:resize:{name}"), rect);
-        if response.dragged() {
-            ui.ctx().set_cursor_icon(cursor);
-        }
-        if response.double_clicked() {
-            out = Resize::Reset(axes);
-        } else if response.dragged() {
-            let delta = response.drag_delta();
-            let delta =
-                egui::vec2(if axes.width { if free_left { -delta.x } else { delta.x } } else { 0.0 }, if axes.height { delta.y } else { 0.0 });
-            if delta.is_finite() && delta != egui::Vec2::ZERO {
-                out = Resize::By(axes, delta);
-            }
-        }
-    }
-    out
 }
 
 /// The dialog's sections, each in the chosen order.
@@ -661,9 +561,10 @@ impl ParamGrid<'_> {
         self.rows.get(row).copied()
     }
 
-    /// The expression a row shows: an edit held for Apply or being typed, else the design's.
+    /// The expression a row shows: an edit held for Apply or being typed, else one still being
+    /// applied, else the design's.
     fn expression<'r>(&'r self, r: &'r Row) -> &'r str {
-        self.d.editing.get(&r.name).map_or(r.expression.as_str(), String::as_str)
+        self.d.editing.get(&r.name).or_else(|| self.d.applying.get(&r.name)).map_or(r.expression.as_str(), String::as_str)
     }
 
     /// What the cell being typed in holds until its edit commits: the draft it had before (an edit
@@ -814,6 +715,15 @@ impl ui_kit::GridSource for ParamGrid<'_> {
                 let (shown, error) = self.shown(r);
                 Some(ui_kit::text(ui, &shown, ui_kit::Text::Value(&format!("value:{}", r.name), error)).backing_on_hover_text(&shown))
             }
+            COMMENT => {
+                let request = egui::Id::unique(("sc_parameter_comment_expand", self.d.opening, self.salt, &r.name));
+                let text = self.d.comments.get(&r.name).unwrap_or(&r.comment);
+                let response = ui_kit::expandable_cell_preview(ui, request, text, &format!("param:comment:{}", r.name));
+                if response.clicked() && !ui.input(|input| input.modifiers.shift) {
+                    ui.data_mut(|data| data.insert_temp(request, true));
+                }
+                Some(response)
+            }
             ACTIONS if r.source == "user" => {
                 let response = ui_kit::bin_button(ui, "Delete");
                 if response.clicked() {
@@ -847,7 +757,17 @@ impl ui_kit::GridSource for ParamGrid<'_> {
                 ui_kit::CellEditor { response, taken }
             }
             NAME => ui_kit::CellEditor { response: ui_kit::cell_editor(ui, id, text, "Name", false), taken: false },
-            _ => ui_kit::CellEditor { response: ui_kit::cell_editor(ui, id, text, "Comment", false), taken: false },
+            _ => {
+                let request = egui::Id::unique(("sc_parameter_comment_expand", self.d.opening, self.salt, &r.name));
+                if ui.data_mut(|data| data.remove_temp::<bool>(request)).unwrap_or(false) {
+                    ui.memory_mut(|memory| memory.request_focus(id));
+                    ui.data_mut(|data| data.insert_temp(id.with("expanded"), true));
+                }
+                ui_kit::CellEditor {
+                    response: ui_kit::expandable_cell_editor(ui, id, text, "Comment", &format!("param:comment:{}", r.name)),
+                    taken: false,
+                }
+            }
         }
     }
 
@@ -1057,7 +977,11 @@ fn apply_grid(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, row
         d.error = held_error;
         return;
     }
-    match run_as_one(app, &all) {
+    let ran = match all.as_slice() {
+        [("parameters.change", params)] => change(app, d, params.clone()),
+        _ => run_as_one(app, &all),
+    };
+    match ran {
         Ok(()) => {
             d.error = held_error;
             // Listed once, right after the edit, before anything else can change it (#15377).
@@ -1082,6 +1006,25 @@ fn apply_grid(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, row
             ui_kit::Grid::refuse(ctx, grid_state(d, salt), &error);
         }
     }
+}
+
+/// Run a `parameters.change` as the timeline's commands run (#6777): a rebuild that takes a while
+/// computes off the window thread, which goes on drawing meanwhile, and its rows show the
+/// expressions being applied until the change is in.
+fn change(app: &mut SolveApp, d: &mut ParamsDialog, params: Value) -> Result<(), String> {
+    let applying: Vec<(String, String)> = match (params.get("name").and_then(Value::as_str), params.get("expression").and_then(Value::as_str)) {
+        (Some(name), Some(expression)) => vec![(name.to_owned(), expression.to_owned())],
+        _ => params
+            .get("changes")
+            .and_then(Value::as_object)
+            .map(|changes| changes.iter().filter_map(|(name, e)| Some((name.clone(), e.as_str()?.to_owned()))).collect())
+            .unwrap_or_default(),
+    };
+    app.run_heavy("parameters.change", params)?;
+    if app.computing_since().is_some() || !app.deferred_queue.is_empty() {
+        d.applying.extend(applying);
+    }
+    Ok(())
 }
 
 /// Run `steps` as one gesture: all of them or none, and one undo step for all. A refused step
@@ -1159,7 +1102,7 @@ fn apply_held(app: &mut SolveApp, d: &mut ParamsDialog, rows: &[Row]) -> bool {
         Some((name, expression)) if changes.len() == 1 => json!({"name": name, "expression": expression}),
         Some(_) => json!({"changes": changes}),
     };
-    d.error = app.run("parameters.change", params).err();
+    d.error = change(app, d, params).err();
     if d.error.is_some() {
         return false;
     }
@@ -1173,6 +1116,8 @@ fn apply_held(app: &mut SolveApp, d: &mut ParamsDialog, rows: &[Row]) -> bool {
 /// `parameters.change`, so the design rebuilds once and one undo (or redo) covers them. A
 /// parameter changed since by something else (an agent, an undo) or gone (renamed, deleted) is
 /// left as it is. False, with the error shown, when the put-back is refused; what to put back is kept for the next try.
+/// An edit still computing off the window thread (#6777) is not in the design yet: its put-back
+/// waits its turn behind it.
 fn revert_applied(app: &mut SolveApp, d: &mut ParamsDialog) -> bool {
     if d.applied.is_empty() {
         return true;
@@ -1183,11 +1128,12 @@ fn revert_applied(app: &mut SolveApp, d: &mut ParamsDialog) -> bool {
         .iter()
         .filter_map(|(name, (before, listed))| {
             let current = &now.iter().find(|r| r.name == *name)?.expression;
-            (listed == current && current != before).then(|| (name.clone(), json!(before)))
+            (d.applying.contains_key(name) || (listed == current && current != before)).then(|| (name.clone(), json!(before)))
         })
         .collect();
     if !changes.is_empty() {
-        d.error = app.run("parameters.change", json!({"changes": changes})).err();
+        let params = json!({"changes": changes});
+        d.error = if d.applying.is_empty() { app.run("parameters.change", params) } else { app.run_heavy("parameters.change", params) }.err();
         if d.error.is_some() {
             return false;
         }
@@ -1262,6 +1208,7 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
     let mut submit = false;
     let mut left = false;
     let mut discard = false;
+    let mut comment_rect = egui::Rect::NOTHING;
     let reveal = d.focus_new;
     let response = table.row(ui, "new", false, |row| {
         row.cell(|_| {});
@@ -1299,7 +1246,8 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
             ui_kit::text(ui, &value, ui_kit::Text::Value("new_value", invalid)).backing_on_hover_text(&value);
         });
         row.cell(|ui| {
-            let response = ui_kit::cell_editor(ui, comment_id, &mut d.new_comment, "Comment", false);
+            let response = ui_kit::expandable_cell_editor(ui, comment_id, &mut d.new_comment, "Comment", "param:new:comment");
+            comment_rect = response.rect;
             crate::scenario::publish_handle("param:new:comment", response.rect.center());
             left |= response.lost_focus();
             submit |= enter_for(ui, focused_id.is_some());
@@ -1321,13 +1269,13 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
     let valid = !d.new_name.trim().is_empty() && live.is_ok();
     crate::scenario::publish_count("param:new:valid", f64::from(valid));
     let clicked = ui.input(|i| i.pointer.any_click().then(|| i.pointer.interact_pos()).flatten());
-    let clicked_outside = !menu_was_open && clicked.is_some_and(|p| !response.rect.contains(p));
+    let inside_row = |p| response.rect.contains(p) || comment_rect.contains(p);
+    let clicked_outside = !menu_was_open && clicked.is_some_and(|p| !inside_row(p));
     // Losing a cell's focus is not leaving the draft: a click or Tab into another cell
-    // must keep its values and geometry (#4461). The unit menu belongs to the draft too.
+    // must keep its values and geometry (#4461). The unit menu and comment overlay belong to the draft too.
     let left_row = !menu_was_open
         && !egui::Popup::is_any_open(ui.ctx())
-        && (clicked_outside
-            || (left && !ui.memory(|m| row_ids.iter().any(|id| m.has_focus(*id))) && !clicked.is_some_and(|p| response.rect.contains(p))));
+        && (clicked_outside || (left && !ui.memory(|m| row_ids.iter().any(|id| m.has_focus(*id))) && !clicked.is_some_and(inside_row)));
     let abandoned = d.new_name.trim().is_empty() && clicked_outside;
     if discard || abandoned {
         d.adding = false;
@@ -2911,6 +2859,179 @@ mod tests {
             assert!(crate::scenario::rect_of("dialog:body:viewport").unwrap().height() > 0.0);
         }
     }
+    #[test]
+    fn expanded_comment_opens_explicitly_wraps_and_saves_on_click_away() {
+        let evidence = |h: &mut crate::scenario::Harness, name: &str| {
+            let Some(directory) = std::env::var_os("SOLIDCRAFT_COMMENT_EVIDENCE") else { return };
+            let directory = std::path::PathBuf::from(directory);
+            std::fs::create_dir_all(&directory).unwrap();
+            crate::icons::clear_texture_cache(&h.ctx);
+            let output = h.ctx.run_ui(egui::RawInput { screen_rect: Some(h.ctx.content_rect()), focused: true, ..Default::default() }, |ui| {
+                h.app.logic(ui.ctx());
+                h.app.ui(ui);
+            });
+            let mut textures = std::collections::HashMap::from([(egui::TextureId::default(), h.ctx.fonts(|fonts| fonts.image()))]);
+            crate::ui_kit::update_test_textures(&mut textures, &output.textures_delta);
+            let dialog = crate::scenario::rect_of("dialog:header").unwrap().union(crate::scenario::rect_of("dialog:footer").unwrap());
+            let dialog = crate::scenario::rect_of("param:comment:width:popup").map_or(dialog, |popup| dialog.union(popup));
+            for (suffix, bounds) in [("", h.ctx.content_rect()), ("-dialog", dialog)] {
+                let mut image = crate::ui_kit::test_raster(&h.ctx, output.shapes.clone(), h.ctx.pixels_per_point(), bounds, &textures);
+                let background = solidcraft_theme::Tokens::get().dialog_body.to_array();
+                for pixel in image.pixels_mut() {
+                    let remaining = 1.0 - f32::from(pixel.0[3]) / 255.0;
+                    for (dest, back) in pixel.0.iter_mut().zip(background) {
+                        *dest = (f32::from(*dest) + f32::from(back) * remaining).round() as u8;
+                    }
+                }
+                image.save(directory.join(format!("solidcraft-comment-{name}{suffix}.png"))).unwrap();
+            }
+        };
+        let mut h = escape_dialog();
+        evidence(&mut h, "before");
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}, "shift":true})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none(), "Shift keeps the grid's selection gesture");
+        h.step(&json!({"click":{"handle":"param:comment:width"}})).unwrap();
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none(), "ordinary editing stays compact");
+        h.run(&json!([{"key":"A","cmd":true}, {"text":"Pending inline comment"}])).unwrap();
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        let popup = crate::scenario::rect_of("param:comment:width:popup").unwrap();
+        let tokens = solidcraft_theme::Tokens::get();
+        let font = egui::FontId::monospace(tokens.font_label);
+        let width = h.ctx.fonts_mut(|fonts| fonts.layout_no_wrap("M".repeat(30), font.clone(), tokens.form_ink)).size().x;
+        let line_height = h.ctx.fonts_mut(|fonts| fonts.row_height(&font));
+        assert!(popup.width() >= width, "expanded comment fits thirty characters: {popup:?}");
+        assert!(popup.height() >= line_height * 5.0, "expanded comment shows five lines: {popup:?}");
+        assert!(h.ctx.content_rect().contains_rect(popup), "popup stays within the window: {popup:?}");
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, "Saved comment", "opening does not prematurely save the inline draft");
+        assert_eq!(h.app.params.as_ref().unwrap().comments.get("width").map(String::as_str), Some("Pending inline comment"));
+
+        let long = "A longer comment with enough words to wrap across several visible rows while editing the parameter";
+        h.run(&json!([{"key":"A","cmd":true}, {"text":long}])).unwrap();
+        h.frames(2);
+        evidence(&mut h, "after");
+        assert!(
+            h.shapes
+                .iter()
+                .any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == long && text.galley.rows.len() > 1)),
+            "the expanded text wraps"
+        );
+        h.step(&json!({"click":{"handle":"dialog:Filter"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none());
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, long);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, "Saved comment", "the entire edit is one undoable command");
+    }
+
+    #[test]
+    fn expanded_comment_paste_stays_single_line_and_enter_commits() {
+        let mut h = escape_dialog();
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.app.synthetic.push(egui::Event::Paste("Mounting\r\n尺寸\n🙂\rClearance".into()));
+        h.frame();
+        let draft = h.app.params.as_ref().unwrap().comments.get("width").cloned().unwrap();
+        assert_eq!(draft, "Mounting 尺寸 🙂 Clearance");
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none());
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, draft);
+        assert!(h.app.params.is_some(), "Enter finishes the field without closing Parameters");
+    }
+
+    #[test]
+    fn expanded_comment_escape_discards_draft_and_closes_parameters() {
+        let mut h = escape_dialog();
+        let before = escape_state(&h);
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        h.run(&json!([{"key":"A","cmd":true}, {"text":"Expanded pending comment"}])).unwrap();
+        assert_eq!(h.app.params.as_ref().unwrap().comments.get("width").map(String::as_str), Some("Expanded pending comment"));
+        escape_closed(&mut h, &before, "10 mm");
+        h.frames(3);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none(), "reopening Parameters starts with the compact editor");
+    }
+
+    #[test]
+    fn expanded_comment_scrolls_long_text_and_reopens_after_tab() {
+        let mut h = escape_dialog();
+        let long = "A mounting clearance note with dimensions and installation details. ".repeat(40);
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        h.run(&json!([{"key":"A","cmd":true}, {"text":long}])).unwrap();
+        h.frames(2);
+        let (painted, text) = h
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text == long && text.galley.rows.len() > 1 => Some((shape, text)),
+                _ => None,
+            })
+            .unwrap();
+        assert!(text.galley.size().y > painted.clip_rect.height(), "very long text scrolls within its editor");
+        assert!(painted.clip_rect.height() < h.ctx.content_rect().height() / 2.0, "the editor leaves the dialog reachable");
+        h.step(&json!({"key":"Tab"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none(), "Tab leaves the expanded editor");
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, long);
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_some());
+        h.run(&json!([{"key":"A","cmd":true}, {"text":"Reopened"}, {"key":"Enter"}])).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, "Reopened");
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none());
+    }
+
+    #[test]
+    fn expanded_comment_context_menu_keeps_draft_until_edit_finishes() {
+        let mut h = escape_dialog();
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        h.run(&json!([{"key":"A","cmd":true}, {"text":"Pending expanded comment"}])).unwrap();
+        h.step(&json!({"click":{"handle":"param:comment:width:popup"},"button":"right"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::handle_at("menu:text_select_all").is_some());
+        h.step(&json!({"click":{"handle":"menu:text_select_all"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_some(), "the context menu returns to the expanded editor");
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, "Saved comment", "using the context menu does not commit the draft");
+        h.run(&json!([{"text":"Replacement from menu selection"}, {"key":"Enter"}])).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, "Replacement from menu selection");
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none());
+    }
+
+    #[test]
+    fn expanded_comment_draft_stays_in_row_until_click_away() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.step(&json!({"start":"parameters.change"})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
+        h.step(&json!({"text":"width"})).unwrap();
+        h.step(&json!({"click":{"handle":"param:new:expression"}})).unwrap();
+        h.step(&json!({"text":"25 mm"})).unwrap();
+        h.step(&json!({"click":{"handle":"param:new:comment:expand"}})).unwrap();
+        h.frames(3);
+        let popup = crate::scenario::rect_of("param:new:comment:popup").unwrap();
+        let row = crate::scenario::rect_of("dialog:table:user:new").unwrap();
+        let inside = egui::pos2(popup.center().x, popup.bottom() - 8.0);
+        assert!(!row.contains(inside), "the click is below the compact draft row");
+        assert!(h.app.session.doc.param("width").is_none(), "opening the expanded draft field stays in its row");
+        h.step(&json!({"click":[inside.x, inside.y]})).unwrap();
+        h.frames(2);
+        assert!(h.app.session.doc.param("width").is_none(), "clicking inside the expanded editor keeps the parameter as a draft");
+        h.step(&json!({"text":"Overall width"})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Filter"}})).unwrap();
+        h.frames(2);
+        let parameter = h.app.session.doc.param("width").unwrap();
+        assert_eq!(parameter.expr, "25 mm");
+        assert_eq!(parameter.comment, "Overall width");
+    }
+
     /// #9358: a formula longer than its column opens wide while it is edited, over the cells to
     /// its right, so all of it shows; Enter applies it and the field goes back into its column.
     /// A formula that fits stays in its cell.

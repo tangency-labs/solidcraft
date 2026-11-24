@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex};
 use egui_wgpu::wgpu;
 pub use solidcraft_viewport_gpu::view::{
     AccessMap, BlockBuilder, BlockBytes, BlockTris, DrawStats, DrawStatsHandle, Frame, GpuImage, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook,
-    InstancedMesh, LINE_SIZE, LOD_PX, LitEdges, MAX_PALETTE, Material, MovingLayer, PBR_SIZE, Palette, PaletteIndex, PlannedBody, Renderer,
-    SHARED_SIZE, SceneBlock, SceneSlot, SharedEdges, SharedTris, TRI_SIZE, TriClass, UploadError, extend_runs, level_for, lifted_width,
-    lit_line_style, placement_scale, runs_within, supersampled_size,
+    InstancedMesh, LINE_SIZE, LOD_PX, LitEdges, MAX_MOTIONS, MAX_PALETTE, Material, MotionRows, Motions, MovingLayer, PBR_SIZE, Palette,
+    PaletteIndex, PlannedBody, Renderer, SHARED_SIZE, SceneBlock, SceneSlot, SharedEdges, SharedTris, TRI_SIZE, TriClass, UNMOVED_SLOT, UploadError,
+    extend_runs, level_for, lifted_width, lit_line_style, placement_scale, runs_within, supersampled_size,
 };
 
 /// The part of a picture (as texture coordinates) that `rect` shows in a window `window`: the
@@ -414,7 +414,7 @@ pub(crate) fn offscreen_backends() -> wgpu::Backends {
             let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
             desc.backends = backends;
             desc.backend_options.dx12.shader_compiler = solidcraft_viewport_gpu::dx12_compiler();
-            let adapters = pollster::block_on(wgpu::Instance::new(desc).enumerate_adapters(backends));
+            let adapters = pollster::block_on(solidcraft_viewport_gpu::select::start_instance(desc).enumerate_adapters(backends));
             adapters.iter().any(|a| a.get_info().device_type != wgpu::DeviceType::Cpu)
         };
         [wgpu::Backends::DX12, wgpu::Backends::VULKAN, wgpu::Backends::GL].into_iter().find(|b| hardware(*b)).unwrap_or(wgpu::Backends::DX12)
@@ -423,7 +423,9 @@ pub(crate) fn offscreen_backends() -> wgpu::Backends {
 
 /// Held while a test starts an instance, adapter or device: starting an instance scans the Vulkan
 /// drivers, and tests doing that side by side crashed the test process inside the Vulkan loader
-/// (`loader_icd_scan`). Rendering on the devices still runs side by side.
+/// (`loader_icd_scan`). Rendering on the devices still runs side by side. The instance itself
+/// starts through `select::start_instance`, so it also waits for an instance that
+/// `solidcraft-viewport-gpu` is starting in the same test process (#10232).
 #[cfg(all(test, not(target_arch = "wasm32")))]
 fn offscreen_starting() -> std::sync::MutexGuard<'static, ()> {
     static STARTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -440,7 +442,7 @@ fn offscreen_adapter(policy: solidcraft_viewport_gpu::select::Policy) -> Option<
     use solidcraft_viewport_gpu::select::Policy;
     let mut desc = solidcraft_viewport_gpu::instance_descriptor_from_env();
     desc.backends = offscreen_backends();
-    let instance = wgpu::Instance::new(desc);
+    let instance = solidcraft_viewport_gpu::select::start_instance(desc);
     match policy {
         Policy::Auto => pollster::block_on(instance.request_adapter(&Default::default())).ok(),
         Policy::Hardware | Policy::Software => {
@@ -472,6 +474,8 @@ pub(crate) fn offscreen_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Q
 /// policy admits, or when the variable names no policy: [`solidcraft_gpu::env`]), on [`offscreen_backends`]. One test at a
 /// time starts its instance, adapter and device ([`offscreen_starting`]).
 #[cfg(all(test, not(target_arch = "wasm32")))]
+// Test-only (`allow-print-in-tests` does not see a `cfg(all(test, ..))`).
+#[allow(clippy::print_stderr)]
 pub(crate) fn offscreen_own_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
     let policy = solidcraft_gpu::env::policy().map_err(|e| eprintln!("no offscreen device: {e}")).ok()?;
     let _one_at_a_time = offscreen_starting();
@@ -727,6 +731,8 @@ pub(crate) fn render_offscreen_ao(
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
+// Test-only (`allow-print-in-tests` does not see a `cfg(all(test, ..))`).
+#[allow(clippy::print_stderr)]
 fn offscreen(
     scene: GpuScene,
     highlight: Option<GpuScene>,
@@ -778,12 +784,15 @@ fn offscreen(
         eye,
         ao_radius,
         ao_samples,
+        edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
         ssaa,
         sky: [0.0; 4],
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
         hatch: Default::default(),
         moving: moving.map(|(scene, transform)| MovingLayer { key: 1, slot: Arc::new(Mutex::new(Some(scene))), transform }),
+        motions: Default::default(),
+        ground: None,
     });
     let texture = |format, usage| {
         device.create_texture(&wgpu::TextureDescriptor {
@@ -1903,7 +1912,7 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    /// A device the driver loses (#4172): its lost callback marks it, the painter's probe sees it
+    /// A device the driver loses (#4172): its lost callback marks it, the painter sees the mark
     /// before the next frame's uploads, those uploads no longer reach the device (they panicked
     /// inside wgpu when they were the first to meet the loss), and pictures (thumbnails of saves)
     /// come from the CPU rasterizer. `destroy` loses the device as a driver reset does; wgpu calls
@@ -1942,11 +1951,11 @@ mod tests {
         assert_eq!((picture.renderer, picture.rgba.len()), ("cpu", 16 * 16 * 4));
     }
 
-    /// The probe runs before every frame's uploads, so on a working device it must cost nothing
-    /// visible: no error for any scope or handler, and the uploads after it go through. On a
-    /// reset D3D12 device an empty submission went through and the upload after it panicked
-    /// inside wgpu (#6528); the probe now opens a command list, the driver call that upload's
-    /// queue write would make first. A driver reset can't be made here: `destroy` loses the
+    /// The probe runs after a panicked frame and before every capture, so on a working device it
+    /// must cost nothing visible: no error for any scope or handler, and the uploads after it go
+    /// through. On a reset D3D12 device an empty submission went through and the upload after it
+    /// panicked inside wgpu (#6528); the probe now opens a command list, the driver call that
+    /// upload's queue write would make first. A driver reset can't be made here: `destroy` loses the
     /// device in wgpu itself, before any driver call.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
@@ -1963,7 +1972,7 @@ mod tests {
         let delta = egui::epaint::ImageDelta::full(image, egui::TextureOptions::LINEAR);
         let (scene, cam) = (solidcraft_viewport::Scene::default(), solidcraft_viewport::Camera::default());
         for frame in 0..3 {
-            // As the painter: the probe, then the frame's first queue write.
+            // The probe, then a queue write, as a frame after a survived panic makes them.
             let (was_lost, error) = egui_wgpu::capture_errors(&device, || {
                 let was_lost = lost.probe(&device, &queue);
                 renderer.update_texture(&device, &queue, egui::TextureId::Managed(0), &delta);
@@ -1977,7 +1986,7 @@ mod tests {
         assert!(!lost.is_lost() && lost.reason().is_none(), "{:?}", lost.reason());
     }
 
-    /// A driver reset that lands after the frame's probe is met by a queue write (or the present),
+    /// A driver reset that lands mid-frame is met by a queue write (or the present),
     /// which panics inside wgpu (#10240). The painter survives that panic once the device turns
     /// out lost, and draws nothing more; on a working device a panic is a bug and carries on. A
     /// driver reset can't be made here: `destroy` loses the device in wgpu itself, so the probe

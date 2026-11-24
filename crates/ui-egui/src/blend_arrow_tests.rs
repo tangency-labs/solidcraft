@@ -131,6 +131,65 @@ fn two_distances_chamfer_has_an_arrow_along_each_face() {
     }
 }
 
+/// The texts painted in the main value box in the view, left to right.
+fn value_box_texts(h: &Harness) -> Vec<String> {
+    fn walk(shape: &egui::Shape, area: egui::Rect, out: &mut Vec<(f32, String)>) {
+        match shape {
+            egui::Shape::Text(t) if area.contains(t.pos) && !t.galley.job.text.trim().is_empty() => {
+                out.push((t.pos.x, t.galley.job.text.trim().to_string()));
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, area, out)),
+            _ => {}
+        }
+    }
+    let area = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).expect("the value box in the view");
+    let mut texts = Vec::new();
+    h.shapes.iter().for_each(|s| walk(&s.shape, area, &mut texts));
+    texts.sort_by(|a, b| a.0.total_cmp(&b.0));
+    texts.into_iter().map(|(_, text)| text).collect()
+}
+
+/// The arrow that goes with the distance being edited is the active one and the other is dimmed;
+/// with neither edited, both are as before. Which face each arrow runs along (Flip swaps them)
+/// is `chamfer_face_dirs`' business, so the pairing of distance and arrow never changes.
+#[test]
+fn two_distances_chamfer_highlights_the_arrow_of_the_distance_being_edited() {
+    use crate::canvas::{ArrowLook::*, chamfer_arrow_looks};
+    assert_eq!(chamfer_arrow_looks(None), [Plain, Plain]);
+    assert_eq!(chamfer_arrow_looks(Some(0)), [Active, Dimmed]);
+    assert_eq!(chamfer_arrow_looks(Some(1)), [Dimmed, Active]);
+    assert_eq!(chamfer_arrow_looks(Some(5)), [Plain, Plain]);
+}
+
+/// The value box in the view shows and edits the distance being edited, and names it, with the
+/// distances unequal and Flip either way.
+#[test]
+fn two_distances_chamfer_box_shows_the_distance_being_edited() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    for flip in [false, true] {
+        h.app.session.selection = vec![edge(&h, Vec3::new(20.0, 0.0, 20.0))];
+        h.app.start("solid.chamfer");
+        let Some(Kind::Fillet { ctype, radius, distance2, flip: f, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) else {
+            panic!("a chamfer window")
+        };
+        (*ctype, *radius, *distance2, *f) = (1, "3 mm".into(), "7 mm".into(), flip);
+        h.frames(3);
+        let first = value_box_texts(&h);
+        assert!(first.iter().any(|t| t == "Distance 1") && first.iter().any(|t| t == "3 mm"), "flip {flip}: {first:?}");
+        // The keyboard goes to Distance 2.
+        crate::canvas::set_chamfer_editing(h.app.dialog.as_mut().unwrap(), 1);
+        h.frames(3);
+        let second = value_box_texts(&h);
+        assert!(second.iter().any(|t| t == "Distance 2") && second.iter().any(|t| t == "7 mm"), "flip {flip}: {second:?}");
+        assert!(!second.iter().any(|t| t == "3 mm"), "flip {flip}: {second:?}");
+        // The box's text is Distance 2's, so what it holds when edited goes to Distance 2.
+        let Some(Kind::Fillet { radius, distance2, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("a chamfer window") };
+        assert_eq!((radius.as_str(), distance2.as_str()), ("3 mm", "7 mm"), "flip {flip}");
+        h.app.dialog = None;
+    }
+}
+
 /// Open the real blend form and move its window just to the right of a drawn arrow.
 /// This is where clearing the window can move the value field back across that arrow.
 fn blend_beside_its_arrow(command: &str, two_distances: bool, flip: bool, secondary: bool) -> (Harness, Vec3) {

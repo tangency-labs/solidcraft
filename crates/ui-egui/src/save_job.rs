@@ -27,7 +27,7 @@ impl Saving {
 /// Run `file.save` or `file.save_as` with `params`. On the desktop it runs on a worker and is
 /// taken up by [`tick`] (true: it is under way); in the browser, or when no thread can start, it
 /// runs here and is finished on return (false).
-pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
+pub fn start(app: &mut SolveApp, command: &'static str, mut params: Value) -> bool {
     // An assembly reading its links for a part edited in place takes them up when the read is
     // done: a save before then would record a design that is about to change as saved.
     if let Some(name) = crate::edit_in_place::refreshing_assembly(app) {
@@ -36,6 +36,11 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
     }
     // A save keeps print faces only when the user keeps them (#11512).
     crate::print_face_ui::sync(&mut app.session, &app.preferences);
+    // The window's saves keep the bodies' display meshes, so a file browser can show the model
+    // in 3D (Quick Look on macOS, #19328). An explicit `preview` wins.
+    if let Some(given) = params.as_object_mut() {
+        given.entry("preview").or_insert(Value::Bool(true));
+    }
     #[cfg(not(target_arch = "wasm32"))]
     if app.saving.is_none() && app.file_picker.is_none() && !app.file_load_holds() {
         let mut copy = app.session.scratch();
@@ -61,8 +66,17 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
         }
         // No thread to write on: save here, as before.
     }
-    let _ = app.run(command, params);
+    let r = app.run(command, params);
+    offer_container(app, &r);
     false
+}
+
+/// A JSON save refused because the design holds binary data (images, plugin files): its toast
+/// offers Save as .sc, so that data is saved rather than left out.
+fn offer_container<T>(app: &mut SolveApp, r: &Result<T, String>) {
+    if r.as_ref().err().is_some_and(|e| e.contains(solidcraft_engine::io::JSON_CANT_CARRY)) && app.status.as_ref().is_some_and(|s| s.2) {
+        app.status_save_sc = true;
+    }
 }
 
 /// Take up a finished save (`wait`: wait for a running one).
@@ -94,10 +108,11 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
     crate::operations::ended(app, &format!("save:{command}"), outcome);
     if cancelled {
         // Not an error: the file is as it was, and the design still has its changes to save.
-        let name = solidcraft_ui_text::tr_label(crate::command_label(command)).to_string();
+        let name = solidcraft_ui_text::tr_command(command, crate::command_label(command)).to_string();
         app.set_status(solidcraft_ui_text::format("operations.cancelled", &[("name", &name)]), false);
     } else {
         app.finish_command(command, &r);
+        offer_container(app, &r);
         // Saving a newer SolidCraft's file keeps what this version can't read, unless it was changed
         // around: then the save says what went.
         if let Some(first) = r.as_ref().ok().and_then(|v| v["warnings"].as_array()).and_then(|w| w.first()).and_then(serde_json::Value::as_str) {
@@ -109,7 +124,7 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     #[test]
     fn a_pending_save_blocks_feature_computation_and_completed_transaction_adoption() {
@@ -148,6 +163,29 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
         assert_eq!(h.app.session.undo.len(), history);
         assert!(h.app.dialog.as_ref().unwrap().error.as_ref().unwrap().contains("file operation"));
+    }
+
+    /// #19328: the window's saves keep the bodies' display meshes for file browsers (Quick
+    /// Look's 3D view), deflated; a save that asks for no preview still leaves them out.
+    #[test]
+    fn saves_keep_display_meshes_for_file_browsers() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.frames(2);
+        let saved = |h: &mut crate::scenario::Harness, name: &str, extra: Value| {
+            let path = h.dir.join(name);
+            let mut params = json!({"path": path.to_string_lossy()});
+            if let (Some(params), Some(extra)) = (params.as_object_mut(), extra.as_object()) {
+                params.extend(extra.clone());
+            }
+            super::start(&mut h.app, "file.save_as", params);
+            super::tick(&mut h.app, true);
+            let bytes = std::fs::read(&path).unwrap();
+            bytes.windows(b"cache/preview.bin".len()).any(|entry| entry == b"cache/preview.bin")
+        };
+        assert!(saved(&mut h, "With meshes.sc", json!({})));
+        assert!(!saved(&mut h, "Plain.sc", json!({"preview": false})));
     }
 
     /// #6003: an agent's `engine.script` that arrives while the window's Save is being written
@@ -279,5 +317,25 @@ mod tests {
         // Its row fades out saying it was cancelled, not still cancelling.
         h.frame();
         assert_eq!(shown(&h), Some(solidcraft_ui_text::tr("operations.stopped").to_string()));
+    }
+
+    /// A design holding binary data (here a plugin's file) can't be a plain JSON design: Save As
+    /// .json is refused, writes nothing, keeps the design unsaved, and its toast offers Save as .sc.
+    #[test]
+    fn a_json_save_of_binary_data_is_refused_and_offers_a_container() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.app.session.doc_mut().plugin_data.insert("gears/blobs/table.bin".into(), vec![0, 1, 2, 255].into());
+        let path = h.dir.join("Gears.json");
+        super::start(&mut h.app, "file.save_as", json!({"path": path.to_string_lossy()}));
+        super::tick(&mut h.app, true);
+        assert!(!path.exists() && h.app.session.is_dirty(), "nothing written, nothing lost");
+        let (text, _, error) = h.app.status.clone().unwrap();
+        assert!(error && text.contains("plugin files"), "{text}");
+        assert!(h.app.status_save_sc, "the toast offers Save as .sc");
+        h.frame();
+        // Any other message takes the offer away.
+        h.app.set_status("Saved", false);
+        assert!(!h.app.status_save_sc);
     }
 }

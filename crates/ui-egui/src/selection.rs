@@ -9,18 +9,8 @@ use solidcraft_engine::geom::prelude::*;
 
 use crate::viewport::Hit;
 
-/// Model picks retain an on-surface point, but their identity is the body and topology index.
-pub(crate) fn same_item(a: &Sel, b: &Sel) -> bool {
-    match (a, b) {
-        (Sel::Edge { body: a, index: i, .. }, Sel::Edge { body: b, index: j, .. })
-        | (Sel::Face { body: a, index: i, .. }, Sel::Face { body: b, index: j, .. }) => a == b && i == j,
-        // A curve of another sketch is the same item whether a click picked it (`SketchCurve`
-        // naming its sketch, #3726) or a chain or box did (`ExternalSketchCurve`).
-        (Sel::SketchCurve { id: a, sketch: Some(s) }, Sel::ExternalSketchCurve { sketch: t, id: b })
-        | (Sel::ExternalSketchCurve { sketch: t, id: b }, Sel::SketchCurve { id: a, sketch: Some(s) }) => a == b && s == t,
-        _ => a == b,
-    }
-}
+pub(crate) use solidcraft_engine::pick_pieces::polyline_mid;
+pub(crate) use solidcraft_engine::selection_context::same_item;
 
 /// Whether the selection holds the body `body`: selected on its own, or through a selected
 /// occurrence (the bodies its placement shows, as its Browser row lists them).
@@ -87,6 +77,8 @@ pub const SNAP_POINTS: Accept = 65536;
 /// Placements of components (a pattern of components): a pick in the view or the Browser takes
 /// the placement under the active component, as Align's Components do.
 pub const OCCURRENCES: Accept = 131072;
+/// Sampled points of a visible point cloud (#8933).
+pub const CLOUD_POINTS: Accept = 262144;
 /// What a 3D axis input takes (Revolve, Circular Pattern, Plane at Angle, Move's Rotate): an
 /// origin or construction axis, a straight sketch line, and an edge or face of the model that
 /// has an axis (a straight or circular edge, a cylinder, cone or torus face; the dialog takes
@@ -106,6 +98,10 @@ pub struct SelInput {
     /// What the input is for, as a message id: its tooltip, and the note a click that picks
     /// nothing leaves under the form (#10428). Without one the tooltip names what it takes.
     pub tip: Option<&'static str>,
+    /// Points are picked in order and may repeat: a point pick always appends (a shared corner
+    /// picked twice joins two members), Ctrl+click takes out its last occurrence
+    /// ([`SelInput::remove_last`]). Other picks toggle as usual. Frame Member's path.
+    pub ordered_points: bool,
     pub items: Vec<Sel>,
     /// Where the points picked into this input came from when a hovered flat face offered them
     /// (#11476): a corner, an edge's middle or a hole's centre of that face, with the face, its
@@ -115,7 +111,7 @@ pub struct SelInput {
 
 impl SelInput {
     pub fn new(label: &'static str, accept: Accept, multi: bool) -> SelInput {
-        SelInput { label, accept, multi, places: false, tip: None, items: Vec::new(), from_face: Vec::new() }
+        SelInput { label, accept, multi, places: false, tip: None, ordered_points: false, items: Vec::new(), from_face: Vec::new() }
     }
 
     /// This input with face picks as places (see [`SelInput::places`]).
@@ -128,6 +124,19 @@ impl SelInput {
     pub fn tip(mut self, id: &'static str) -> SelInput {
         self.tip = Some(id);
         self
+    }
+
+    /// This input with points picked in order, repeats allowed (see [`SelInput::ordered_points`]).
+    pub fn ordered_points(mut self) -> SelInput {
+        self.ordered_points = true;
+        self
+    }
+
+    /// Take out the last occurrence of `sel`; false when it isn't in.
+    pub fn remove_last(&mut self, sel: &Sel) -> bool {
+        let Some(i) = self.items.iter().rposition(|x| same_item(x, sel)) else { return false };
+        self.items.remove(i);
+        true
     }
 
     /// Joint-origin inputs (`SNAPS`) have no snap for a sketch curve: `fits`/`accepts` let
@@ -172,12 +181,21 @@ impl SelInput {
                 Some(Sel::Vertex { body: String::new(), point: *point })
             }
             Hit::Vertex { body, point } if !body.is_empty() && a & VERTICES != 0 => Some(Sel::Vertex { body: body.clone(), point: *point }),
+            Hit::PointCloudPoint { cloud, index, point, .. } if a & CLOUD_POINTS != 0 => {
+                Some(Sel::PointCloudPoint { cloud: *cloud, index: *index, point: *point })
+            }
             _ => None,
         }
     }
 
-    /// Add or remove items: in a multi input a pick toggles, otherwise it replaces.
-    pub fn toggle(&mut self, picked: Vec<Sel>) {
+    /// Add or remove items: in a multi input a pick toggles, otherwise it replaces. With
+    /// [`SelInput::ordered_points`], points append instead.
+    pub fn toggle(&mut self, mut picked: Vec<Sel>) {
+        if self.multi && self.ordered_points {
+            let (points, rest): (Vec<Sel>, Vec<Sel>) = picked.into_iter().partition(is_point);
+            self.items.extend(points);
+            picked = rest;
+        }
         if picked.is_empty() {
             return;
         }
@@ -202,6 +220,12 @@ impl SelInput {
             }
         }
     }
+}
+
+/// A pick that stands for one point: a vertex (or the origin, or a woken snap point), a sketch
+/// point or a construction point.
+pub(crate) fn is_point(sel: &Sel) -> bool {
+    matches!(sel, Sel::Vertex { .. } | Sel::SketchPoint { .. } | Sel::ConstructionPoint { .. })
 }
 
 /// A sketch curve as a dialog's pick. A curve of another sketch than the `active` one names its
@@ -254,19 +278,6 @@ pub(crate) fn items(inputs: &[SelInput], i: usize) -> &[Sel] {
 
 pub(crate) fn point_value(v: Vec3) -> serde_json::Value {
     serde_json::json!([v.x, v.y, v.z])
-}
-
-pub(crate) fn polyline_mid(pts: &[Vec3]) -> Vec3 {
-    let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
-    let mut acc = 0.0;
-    for w in pts.windows(2) {
-        let l = w[0].dist(w[1]);
-        if acc + l >= len * 0.5 && l > 0.0 {
-            return w[0].lerp(w[1], (len * 0.5 - acc) / l);
-        }
-        acc += l;
-    }
-    pts.first().copied().unwrap_or_default()
 }
 
 /// World size of the origin widget: a fixed fraction of the viewport height, whatever the zoom

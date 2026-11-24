@@ -250,6 +250,15 @@ pub(crate) fn drawn_at(p: Pos2) -> bool {
     DRAWN.with(|h| h.borrow().iter().any(|(c, live)| *live && c.distance(p) <= REACH))
 }
 
+/// The actual placement hit regions drawn last frame, for floating value-box clearance.
+/// Like pointer ownership, this is gated by the current tool and placement preference.
+pub(crate) fn value_box_obstacles(app: &SolveApp, d: &Dialog) -> Vec<egui::Rect> {
+    if spec(app, d).is_none() {
+        return Vec::new();
+    }
+    DRAWN.with(|drawn| drawn.borrow().iter().filter(|(_, live)| *live).map(|(centre, _)| hit_area(*centre)).collect())
+}
+
 /// The tool whose dialog this is, if it has handles and they are on.
 fn spec(app: &SolveApp, d: &Dialog) -> Option<&'static Spec> {
     TOOLS.iter().copied().find(|s| (s.serves)(app, d))
@@ -265,6 +274,11 @@ pub(crate) fn arrow_clearance(app: &SolveApp, d: &Dialog) -> f32 {
 /// dragged onto one?
 pub(crate) fn snaps_to_points(app: &SolveApp, id: &str) -> bool {
     app.preferences.placement_handles && TOOLS.iter().any(|s| s.snap_commands.contains(&id))
+}
+
+/// The hit rectangle registered for a placement marker or the ring's drag grip.
+fn hit_area(centre: Pos2) -> egui::Rect {
+    egui::Rect::from_center_size(centre, vec2(2.0 * REACH, 2.0 * REACH))
 }
 
 /// Reach of a handle around its centre (pixels): wide, so a finger finds it.
@@ -429,7 +443,6 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let Some(sp) = app.dialog.as_ref().and_then(|d| spec(app, d)) else { return };
     let places = |app: &SolveApp| app.dialog.as_ref().map(|d| sp.places(app, d)).unwrap_or_default();
     let t = Tokens::get();
-    let area = |c: Pos2| egui::Rect::from_center_size(c, vec2(2.0 * REACH, 2.0 * REACH));
     let id = |what: &str| egui::Id::unique(("sc_place", sp.name, what));
     let at = |marker: u64, what: &str| egui::Id::unique(("sc_place", sp.name, marker, what));
     let store = id("markers");
@@ -453,7 +466,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         if arms(proj, pl.base, pl.n, bs, freedom_of(app, pl.key)).is_empty() {
             continue;
         }
-        let r = ui.interact(area(bs), at(marker, "position"), sense);
+        let r = ui.interact(hit_area(bs), at(marker, "position"), sense);
         let off = motion::grab(ui, at(marker, "grab"), &r, |p| Some(p - bs));
         if r.dragged() {
             crate::tool_modifiers::set_manipulator_dragging(true);
@@ -544,7 +557,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     };
     let at = |a: f64| on(a, 0.0, 0.0);
     let Some(mut gs) = at(angle) else { return };
-    let r = ui.interact(area(gs), id("rotate"), egui::Sense::drag());
+    let r = ui.interact(hit_area(gs), id("rotate"), egui::Sense::drag());
     let pointer_angle = |p: Pos2| match on_plane(proj, p, base, n) {
         Some(q) => Some((q - base).dot(y).atan2((q - base).dot(x))),
         None => crate::canvas::projected_rotation_angle(proj, p, base, x, y, radius, angle, (-std::f64::consts::PI, std::f64::consts::PI)),
@@ -625,6 +638,17 @@ fn ring_radius(proj: &Proj, base: Vec3, x: Vec3, y: Vec3) -> Option<f64> {
 /// collapses onto the place and the box sits just right of it, where the ring's grip often is.
 pub(crate) fn yield_box(ui: &egui::Ui, anchor: Pos2, at: Pos2) -> Pos2 {
     let Some(size) = ui.ctx().memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).map(|r| r.size()) else { return at };
+    yield_box_to(ui, egui::Id::unique("sc_place_box"), anchor, at, size)
+}
+
+/// The same placement clearance for another actual value-box area, with its own size and
+/// animation. `rect` is its desired rectangle regardless of the field's pivot.
+pub(crate) fn yield_box_in(ui: &egui::Ui, area: egui::Id, anchor: Pos2, rect: egui::Rect) -> egui::Rect {
+    let at = yield_box_to(ui, egui::Id::unique(("sc_place_box", area)), anchor, rect.min, rect.size());
+    egui::Rect::from_min_size(at, rect.size())
+}
+
+fn yield_box_to(ui: &egui::Ui, motion_id: egui::Id, anchor: Pos2, at: Pos2, size: egui::Vec2) -> Pos2 {
     let target = match RING_ABOUT.with(|c| c.get()) {
         // With a ring, the box keeps out of the whole circle the ring, its grip, the compass and
         // the readout sweep, whatever the turn: one place per view, nothing moves when a turn
@@ -643,7 +667,7 @@ pub(crate) fn yield_box(ui: &egui::Ui, anchor: Pos2, at: Pos2) -> Pos2 {
     };
     // The step aside slides, as an offset from where the box would be, so the box still follows
     // the arrow's tip at once when the view moves.
-    at + motion::slide(ui.ctx(), egui::Id::unique("sc_place_box"), target - at, DIM_S)
+    at + motion::slide(ui.ctx(), motion_id, target - at, DIM_S)
 }
 
 /// What the ring needs around it beyond its radius (pixels): the grip, the compass and the

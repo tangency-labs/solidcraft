@@ -230,7 +230,7 @@ fn arc_angles(clip: Clip, center: Vec2, radius: f64) -> Vec<f64> {
 }
 
 /// `group` with its items cut to `clip`.
-pub(super) fn clipped(group: &Group, clip: &Clip) -> Result<Group> {
+pub fn clipped(group: &Group, clip: &Clip) -> Result<Group> {
     let mut items = Vec::new();
     for item in &group.items {
         match item {

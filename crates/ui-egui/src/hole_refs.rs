@@ -482,7 +482,7 @@ fn nearest_edge(s: &Session, at: Vec3, p: Vec3) -> Option<Sel> {
 /// The reference distances on the canvas: a dimension from each edge to the hole's centre, and a
 /// box beside it to type the distance in. Whether a box took the keyboard (a newly picked edge's),
 /// which the dialog's main value then leaves to it.
-pub(crate) fn canvas(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) -> bool {
+pub(crate) fn canvas(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog, box_place: crate::canvas::BoxPlace<'_>) -> bool {
     if !takes(d) {
         return false;
     }
@@ -509,16 +509,21 @@ pub(crate) fn canvas(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter,
             took = true;
         }
         let Some(value) = refs.distance.get_mut(*k) else { continue };
-        let at = box_beyond(a, b);
+        let ids = (egui::Id::unique(("sc_hole_ref_area", *k)), egui::Id::unique(("sc_hole_ref", *k)));
+        let (at, pivot) = box_beyond(a, b);
+        let size = crate::canvas::box_size(ui, ids.0, label, None);
+        let offset = pivot.pos_in_rect(&egui::Rect::from_min_size(Pos2::ZERO, size)).to_vec2();
+        let rect = egui::Rect::from_min_size(at - offset, size);
+        let rect = crate::place_gizmo::yield_box_in(ui, ids.0, b, rect);
         let r = crate::canvas::value_box_in(
             ui,
-            (egui::Id::unique(("sc_hole_ref_area", *k)), egui::Id::unique(("sc_hole_ref", *k))),
+            ids,
             label,
             value,
-            at,
+            (rect.min + offset, pivot),
             focus,
             false,
-            crate::canvas::box_place(app, proj),
+            box_place,
         );
         if let Some(r) = r {
             crate::scenario::publish_handle(&format!("canvas:{label}"), r.center());

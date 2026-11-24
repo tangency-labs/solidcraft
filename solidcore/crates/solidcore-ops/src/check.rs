@@ -120,7 +120,14 @@ impl Body {
                 return Ok(Err(Refusal::Naming));
             }
             match check_brep(k, b, lv) {
-                Err(SolidError::Unported { upstream, .. }) => Ok(Err(Refusal::Unported(upstream))),
+                Err(e @ SolidError::Unported { upstream, .. }) => {
+                    // the refusal keeps the kernel's code ([`crate::session::noted`])
+                    drop(crate::session::noted(
+                        &e,
+                        Refusal::Unported(upstream).error(),
+                    ));
+                    Ok(Err(Refusal::Unported(upstream)))
+                }
                 r => r.map(Ok),
             }
         })? {

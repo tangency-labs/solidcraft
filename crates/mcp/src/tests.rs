@@ -556,6 +556,10 @@ fn handshake_and_tools_list() {
         "new_design",
         "open",
         "save",
+        "documents",
+        "quit_app",
+        "preferences",
+        "agent_cursor",
     ] {
         assert!(names.contains(&want), "{want} missing from {names:?}");
     }
@@ -639,6 +643,14 @@ fn skill_reference_is_advertised_as_read_only() {
     assert_eq!(t["annotations"]["openWorldHint"], false);
     assert_eq!(t["inputSchema"]["required"], json!(["skill"]));
     assert_eq!(t["inputSchema"]["properties"]["file"]["default"], "reference.md");
+    // The description names every skill the tool serves, so an agent that trusts it finds them all (#19633).
+    let description = t["description"].as_str().unwrap();
+    let refused = raw_tool(&mut s, "skill_reference", json!({"skill": "unknown"}));
+    let text = refused["result"]["content"][0]["text"].as_str().unwrap();
+    let available = text.split("Available skills: ").nth(1).expect("list of available skills");
+    for skill in available.split(", ") {
+        assert!(description.contains(skill), "{skill} missing from: {description}");
+    }
 }
 
 /// A URDF goes through `export` with its own options (#719).
@@ -649,13 +661,20 @@ fn export_tool_writes_a_urdf_package() {
     let dir = std::env::temp_dir().join(format!("solidcraft-mcp-urdf-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let urdf = dir.join("robot.urdf");
-    let r = tool(&mut s, "export", json!({"path": urdf.to_string_lossy(), "mesh_prefix": "package://robot/meshes/"}));
+    let r = tool(&mut s, "export", json!({"path": urdf.to_string_lossy(), "mesh_prefix": "package://robot/meshes/", "place_meshes": true}));
     assert_eq!(r["format"], "Urdf", "{r}");
     assert!(std::fs::read_to_string(&urdf).unwrap().contains(r#"filename="package://robot/meshes/robot-base.stl""#));
-    assert!(dir.join("robot-base.stl").exists());
+    assert!(dir.join("meshes/robot-base.stl").exists());
     // effort and velocity reach file.export, which refuses a bad one.
     let r = raw_tool(&mut s, "export", json!({"path": urdf.to_string_lossy(), "effort": -1}));
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    // Without place_meshes the meshes stay beside the URDF, as before.
+    let beside = dir.join("beside");
+    std::fs::create_dir_all(&beside).unwrap();
+    let urdf = beside.join("robot.urdf");
+    tool(&mut s, "export", json!({"path": urdf.to_string_lossy(), "mesh_prefix": "meshes/"}));
+    assert!(beside.join("robot-base.stl").exists());
+    assert!(!beside.join("meshes").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1647,6 +1666,32 @@ fn a_failed_batch_with_file_new_restores_the_original_design() {
     assert_eq!(d["name"], name, "{d}");
 }
 
+#[test]
+fn a_failed_headless_batch_can_restore_its_design_after_opening_another() {
+    let folder = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-mcp-batch-open-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let path = folder.join("replacement.sc");
+    solidcraft_engine::Session::default().execute("file.save_as", &json!({"path": path, "overwrite": true})).unwrap();
+
+    let mut s = server();
+    tool(&mut s, "set_parameter", json!({"name": "width", "value": 5}));
+    let before = tool(&mut s, "execute", json!({"command": "parameters.list"}));
+    let r = raw_tool(
+        &mut s,
+        "batch",
+        json!({"commands": [
+            {"command": "open", "params": {"path": path}},
+            {"command": "parameters.delete", "params": {"name": "width"}},
+        ]}),
+    );
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((&body["failed"]["index"], &body["completed"], &body["rolled_back"]), (&json!(1), &json!(1), &json!(true)), "{body}");
+    assert_eq!(tool(&mut s, "execute", json!({"command": "parameters.list"})), before);
+    drop(s);
+    let _ = std::fs::remove_dir_all(folder);
+}
+
 /// `expect` on a batch: the volume, body count and bounding box the agent computed beforehand
 /// are measured and compared by the server once the batch went through, so no separate
 /// `measure` call and no comparison by hand follow every stage.
@@ -2186,7 +2231,7 @@ fn list_commands_narrows_by_prefix_panel_fields_and_page() {
 #[test]
 fn legacy_design_files_open_by_contents() {
     let mut s = server();
-    let saved = String::from_utf8(solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::default())).unwrap();
+    let saved = String::from_utf8(solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::default()).unwrap()).unwrap();
     assert!(saved.contains("\"solidcraft/"), "{saved}");
     let legacy = saved.replace("\"solidcraft/", "\"solvecraft/");
     let path = std::env::temp_dir().join(format!("solidcraft-mcp-legacy-{}.solvecraft", std::process::id()));
@@ -2216,6 +2261,28 @@ fn legacy_design_files_open_by_contents() {
     tool(&mut s, "save", json!({"path": new.to_string_lossy()}));
     tool(&mut s, "open", json!({"path": new.to_string_lossy()}));
     assert!(old.is_file() && new.is_file(), "save as leaves the old file");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #20374: `save` takes `overwrite`, as file.save does: a design file another program changed is
+/// refused without it and replaced with it.
+#[test]
+fn save_overwrite_replaces_a_design_file_changed_on_disk() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-overwrite-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("part.sc");
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+    tool(&mut s, "save", json!({"path": path.to_string_lossy()}));
+    // Another program changes the file after the save.
+    let mut bytes = std::fs::read(&path).unwrap();
+    bytes.extend_from_slice(b"changed elsewhere");
+    std::fs::write(&path, &bytes).unwrap();
+    let refused = raw_tool(&mut s, "save", json!({}));
+    assert_eq!(refused["result"]["isError"], json!(true), "{refused}");
+    tool(&mut s, "save", json!({"overwrite": true}));
+    assert_eq!(solidcraft_engine::io::read_design(&std::fs::read(&path).unwrap()).unwrap().features.len(), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -2955,10 +3022,10 @@ fn compact_reply_counts_repeated_mesh_warnings() {
 /// to a file is not repeated in the reply; with `verbose: true` everything stays.
 #[test]
 fn compact_batch_reply_of_parameters_export_and_script() {
-    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-quiet-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let stl = dir.join("disc.stl");
-    let script = dir.join("disc.json");
+    // A new folder for this test alone, removed however the test ends; each run writes its own
+    // files, so the compact run's checks read what the compact run wrote (#19249).
+    let dir = tempfile::Builder::new().prefix("solidcraft-mcp-quiet-").tempdir_in(solidcraft_engine::io::vfs::temp_dir()).unwrap();
+    let (stl, script) = (dir.path().join("disc.stl"), dir.path().join("disc.json"));
     let steps = json!([
         {"command": "parameters.add", "params": {"name": "R", "expression": "20 mm"}},
         {"command": "parameters.add", "params": {"name": "H", "expression": "8 mm"}},
@@ -2966,20 +3033,25 @@ fn compact_batch_reply_of_parameters_export_and_script() {
         {"command": "solid.hole", "params": {"position": [12, 0, 8], "diameter": 6.3, "depth": 3.1}},
         {"command": "solid.hole", "params": {"position": [-12, 0, 8], "diameter": 6.3, "depth": 3.1}},
         {"command": "solid.hole", "params": {"position": [0, 12, 8], "diameter": 6.3, "depth": 3.1}},
-        {"command": "solid.fillet", "params": {"edges": [[20, 0, 8]], "radius": 1.5}},
+        {"command": "solid.fillet", "params": {"edges": [[15.15, 0, 8], [-8.85, 0, 8], [3.15, 12, 8]], "radius": 1.0}},
         {"command": "file.export_stl", "params": {"path": stl}},
         {"command": "timeline.export_script", "params": {"path": script}},
     ]);
+    // The verbose run writes the same steps to files of its own.
+    let mut verbose_steps = steps.clone();
+    assert_eq!((&steps[7]["command"], &steps[8]["command"]), (&json!("file.export_stl"), &json!("timeline.export_script")));
+    verbose_steps[7]["params"]["path"] = json!(dir.path().join("disc-verbose.stl"));
+    verbose_steps[8]["params"]["path"] = json!(dir.path().join("disc-verbose.json"));
     let mut s = server();
-    let full = tool(&mut s, "batch", json!({"commands": steps}));
+    let full = tool(&mut s, "batch", json!({"commands": verbose_steps}));
     tool(&mut s, "new_design", json!({}));
     let r = tool(&mut s, "batch", json!({"commands": steps, "verbose": false}));
     let written = std::fs::read_to_string(&script).unwrap_or_default();
-    let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(full["results"][0]["display_value"], json!(20.0), "{full}");
     assert_eq!(r["results"][0], json!({"name": "R", "unit": "mm", "value": 20.0}), "{r}");
     assert!(r["results"][2].get("warning").is_none() && full["results"][2]["warning"].is_null(), "a null warning is left out: {r}");
-    // The fillet leaves three faces whose shaping stopped at a bound: one line in the compact reply.
+    // The rounded hole rims leave three faces whose shaping stopped at a bound: one line in the
+    // compact reply.
     let export = &r["results"][7];
     let n = full["results"][7]["warnings"].as_array().map_or(0, Vec::len);
     assert!(n >= 2, "the part should give the export several warnings: {full}");
@@ -3375,6 +3447,17 @@ fn mechanisms_skill_example_moves_as_documented() {
     assert!(value(&list, "Stroke") <= 10.0 + 1e-6 && (value(&list, "Stroke") - stroke(hinge)).abs() < 1e-6, "{list}");
 }
 
+/// Every tool the server offers has a name for the person watching an agent use it (the UI shows
+/// that name, never the tool's id).
+#[test]
+fn every_tool_has_a_name_for_the_person_watching() {
+    use solidcraft_engine::agent_tools::{MESSAGE_TOOLS, tool_command};
+    for tool in tool_definitions() {
+        let name = tool["name"].as_str().unwrap();
+        assert!(tool_command(name).is_some() || MESSAGE_TOOLS.contains(&name), "tool `{name}` needs a name in solidcraft_engine::agent_tools");
+    }
+}
+
 /// Every tool and command the agent skills call exists, so a rename or removal can't leave the
 /// skills sending agents to names the server no longer has.
 #[test]
@@ -3569,20 +3652,102 @@ fn a_batch_the_app_could_not_roll_back_reports_it() {
 
 #[test]
 fn batch_falls_back_when_the_app_lacks_engine_batch() {
-    let (b, body, is_error) =
-        recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": [{"command": "a.one"}, {"command": "a.two"}]}));
+    let (b, body, is_error) = recorded_batch(
+        Err("unknown method `engine.batch`".into()),
+        json!({"commands": [{"command": "parameters.add"}, {"command": "parameters.list"}]}),
+    );
     assert!(!is_error, "{body}");
     let ran: Vec<&str> = b.calls.iter().filter(|(m, _)| m == "engine.execute").map(|(_, p)| p["command"].as_str().unwrap_or("")).collect();
-    assert!(ran.contains(&"a.one") && ran.contains(&"a.two"), "{ran:?}");
-    assert_eq!(body["results"], json!([{"ran": "a.one"}, {"ran": "a.two"}]));
+    assert!(ran.contains(&"parameters.add") && ran.contains(&"parameters.list"), "{ran:?}");
+    assert_eq!(body["results"], json!([{"ran": "parameters.add"}, {"ran": "parameters.list"}]));
+}
+
+#[test]
+fn bridged_rollback_batch_refuses_commands_that_can_switch_design_tabs() {
+    for (step, command) in [
+        (json!({"command": "view.next_tab"}), "view.next_tab"),
+        (json!({"command": "execute", "params": {"command": " View.Previous_Tab "}}), "view.previous_tab"),
+        (json!({"command": "open", "params": {"path": "another.sc"}}), "doc.open"),
+        (json!({"command": "open", "params": {"path": "another.sc", "new_tab": true}}), "doc.open"),
+        (json!({"id": "file.import", "params": {"path": "another.part"}}), "file.import"),
+        (json!({"command": "document.activate", "params": {"document_id": "another"}}), "document.activate"),
+        (json!({"id": "file.new", "params": {"new_tab": true}}), "file.new"),
+        (json!({"command": "new_design", "params": {"new_tab": true}}), "file.new"),
+    ] {
+        let steps = json!([{"command": "parameters.add", "params": {"name": "width", "expression": "5 mm"}}, step]);
+        let unavailable = Err("unknown method `engine.batch`".into());
+        let (b, body, is_error) = recorded_batch(unavailable.clone(), json!({"commands": steps}));
+        assert!(is_error && b.calls.is_empty(), "{body}");
+        assert_eq!((&body["completed"], &body["failed"]["index"], &body["not_run"]), (&json!(0), &json!(1), &json!([0, 1])), "{body}");
+        assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains(command) && e.contains("active design tab")), "{body}");
+
+        let (b, body, is_error) = recorded_batch(unavailable, json!({"commands": steps, "rollback": false}));
+        assert!(!is_error, "{body}");
+        assert_eq!(methods(&b), ["engine.batch", "engine.execute", "engine.execute"]);
+        assert_eq!(body["results"][1]["ran"].as_str().unwrap().trim().to_ascii_lowercase(), command, "{body}");
+    }
+
+    let (_, body, is_error) =
+        recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": [{"command": "new_design", "params": {"new_tab": false}}]}));
+    assert!(!is_error, "{body}");
+    assert_eq!(body["results"][0]["ran"], "file.new", "{body}");
+}
+
+#[test]
+fn rollback_batch_does_not_retry_a_tab_switch_refused_by_a_newer_app() {
+    let e = "engine.batch unavailable: step 1 (view.future_tab) switches to another design";
+    let (b, body, is_error) = recorded_batch(Err(e.into()), json!({"commands": [{"command": "solid.box"}, {"command": "view.future_tab"}]}));
+    assert!(is_error, "{body}");
+    assert_eq!(methods(&b), ["engine.batch"]);
+    assert_eq!(body, e);
+}
+
+#[test]
+fn bridged_rollback_batch_checks_command_ids_before_sequential_execution() {
+    let large_text = "x".repeat(solidcraft_engine::MAX_LINE / 2);
+    let mut oversized = json!([
+        {"command": "parameters.import", "params": {"text": large_text}},
+        {"command": "parameters.import", "params": {"text": large_text}},
+        {"command": "view.future_tab"},
+    ]);
+    let steps = json!([{"command": "parameters.add"}, {"command": "parameters.list"}, {"command": "view.future_tab"}]);
+    for (commands, calls) in [(&oversized, &[][..]), (&steps, &["engine.batch"][..])] {
+        let (b, body, is_error) = recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": commands}));
+        assert!(is_error, "{body}");
+        assert_eq!(methods(&b), calls);
+        assert_eq!(body["completed"], 0, "{body}");
+        assert_eq!(body["failed"]["index"], 2, "{body}");
+        assert_eq!(body["failed"]["command"], "view.future_tab", "{body}");
+        assert_eq!(body["not_run"], json!([0, 1, 2]), "{body}");
+        assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("rollback: false")), "{body}");
+    }
+    oversized[2]["command"] = json!("view.next_tab");
+    let (b, body, is_error) = recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": oversized}));
+    assert!(crate::Backend::has_ui(&b) && is_error && b.calls.is_empty(), "{body}");
+    assert_eq!(body["completed"], 0, "{body}");
+    assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("active design tab")), "{body}");
+
+    let (b, body, is_error) = recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": steps, "rollback": false}));
+    assert!(!is_error, "{body}");
+    assert_eq!(methods(&b), ["engine.batch", "engine.execute", "engine.execute", "engine.execute"]);
+    assert_eq!(body["results"][2]["ran"], "view.future_tab", "{body}");
+}
+
+#[test]
+fn rollback_batch_can_still_fall_back_for_a_loader_in_the_same_design() {
+    let e = "engine.batch unavailable: step 0 (file.insert_step) loads a file";
+    let (b, body, is_error) = recorded_batch(Err(e.into()), json!({"commands": [{"command": "file.insert_step", "params": {"path": "part.step"}}]}));
+    assert!(!is_error, "{body}");
+    let ran: Vec<_> = b.calls.iter().filter_map(|(_, p)| p["command"].as_str()).collect();
+    assert_eq!(ran, ["edit.checkpoint", "file.insert_step", "edit.restore_checkpoint"]);
 }
 
 #[test]
 fn batch_falls_back_while_the_agent_cursor_is_shown() {
     let (b, body, is_error) =
-        recorded_batch(Err("engine.batch unavailable: the agent cursor is shown".into()), json!({"commands": [{"command": "a.one"}]}));
+        recorded_batch(Err("engine.batch unavailable: the agent cursor is shown".into()), json!({"commands": [{"command": "parameters.list"}]}));
     assert!(!is_error, "{body}");
-    assert!(b.calls.iter().any(|(m, p)| m == "engine.execute" && p["command"] == "a.one"), "{:?}", b.calls);
+    assert!(b.calls.iter().any(|(m, p)| m == "engine.execute" && p["command"] == "parameters.list"), "{:?}", b.calls);
 }
 
 /// The app may have run the batch: sending the steps again would apply them twice.
@@ -3599,15 +3764,20 @@ fn batch_does_not_resend_after_a_transport_error() {
 #[test]
 fn batch_too_large_for_one_control_line_goes_per_step() {
     let big = "x".repeat(solidcraft_engine::MAX_LINE);
-    let (b, body, is_error) = recorded_batch(Ok(json!({})), json!({"commands": [{"command": "a.one", "params": {"text": big}}]}));
+    let (b, body, is_error) = recorded_batch(Ok(json!({})), json!({"commands": [{"command": "parameters.import", "params": {"text": big}}]}));
     assert!(!is_error, "{body}");
     assert!(!methods(&b).contains(&"engine.batch"), "{:?}", methods(&b));
-    assert!(b.calls.iter().any(|(m, p)| m == "engine.execute" && p["command"] == "a.one"));
+    assert!(b.calls.iter().any(|(m, p)| m == "engine.execute" && p["command"] == "parameters.import"));
 }
 
 /// A fake app on a loopback port: counts connections and `engine.batch` lines, never replies to
 /// them (`close_first`: close a connection as soon as it is accepted).
 fn silent_app(close_first: bool) -> (String, std::sync::Arc<std::sync::Mutex<(usize, usize)>>) {
+    silent_method_app(close_first, "engine.batch")
+}
+
+/// Count deliveries of one non-idempotent method while dropping its reply.
+fn silent_method_app(close_first: bool, method: &'static str) -> (String, std::sync::Arc<std::sync::Mutex<(usize, usize)>>) {
     use std::io::BufRead;
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap().to_string();
@@ -3624,7 +3794,7 @@ fn silent_app(close_first: bool) -> (String, std::sync::Arc<std::sync::Mutex<(us
                 let mut r = std::io::BufReader::new(stream);
                 let mut line = String::new();
                 while r.read_line(&mut line).is_ok_and(|n| n > 0) {
-                    if line.contains("engine.batch") {
+                    if line.contains(method) {
                         counts.lock().unwrap().1 += 1;
                         return;
                     }
@@ -3829,8 +3999,10 @@ fn tool_annotations_tell_the_whole_truth() {
     ] {
         assert_eq!(hints(name), (true, false, false), "{name}");
     }
-    assert_eq!(hints("new_design"), (false, true, false));
-    for name in ["set_parameter", "check_parameters", "undo", "redo"] {
+    for name in ["new_design", "documents", "quit_app"] {
+        assert_eq!(hints(name), (false, true, false), "{name}");
+    }
+    for name in ["set_parameter", "check_parameters", "undo", "redo", "preferences", "agent_cursor"] {
         assert_eq!(hints(name), (false, false, false), "{name}");
     }
     assert!(tools.iter().all(|t| t["annotations"]["readOnlyHint"].is_boolean()), "every tool is annotated");
@@ -3890,8 +4062,9 @@ fn batch_reports_timings_and_profile() {
     assert_eq!(b.calls[0].1["profile"], true);
     assert_eq!((body["timings"][0]["ms"].as_f64(), body["total_ms"].as_f64()), (Some(2.5), Some(2.6)), "{body}");
     // An app without engine.batch is timed step by step here, without a kernel split it can't measure.
-    let (_, body, _) = recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": [{"command": "a.one"}], "profile": true}));
-    assert_eq!(body["timings"][0]["command"], "a.one", "{body}");
+    let (_, body, _) =
+        recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": [{"command": "parameters.list"}], "profile": true}));
+    assert_eq!(body["timings"][0]["command"], "parameters.list", "{body}");
     assert!(body["timings"][0].get("profile").is_none(), "{body}");
 }
 
@@ -4218,7 +4391,8 @@ impl crate::backend::Backend for Stub {
 
 fn stub_batch(fail: Vec<(&'static str, String)>, restore_ok: bool, rollback: bool) -> (Stub, Value) {
     let mut b = Stub { calls: Vec::new(), fail, restore_ok };
-    let args = json!({"commands": [{"command": "a.one"}, {"command": "a.two"}, {"command": "a.three"}], "rollback": rollback});
+    let args =
+        json!({"commands": [{"command": "parameters.add"}, {"command": "parameters.change"}, {"command": "parameters.list"}], "rollback": rollback});
     let r = crate::tools::call_tool(&mut b, "batch", &args);
     assert_eq!(r["isError"], true, "{r}");
     let body = serde_json::from_str(r["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -4230,23 +4404,23 @@ fn stub_batch(fail: Vec<(&'static str, String)>, restore_ok: bool, rollback: boo
 /// step still running in the app counts as applied unless the rollback took it back.
 #[test]
 fn a_failed_batch_reports_what_really_happened() {
-    let still = format!("{} `engine.execute` (a.two) is still running in the app", crate::backend::STILL_RUNNING);
+    let still = format!("{} `engine.execute` (parameters.change) is still running in the app", crate::backend::STILL_RUNNING);
     // Still running, and the rollback could not restore the checkpoint.
-    let (b, body) = stub_batch(vec![("a.two", still.clone())], false, true);
+    let (b, body) = stub_batch(vec![("parameters.change", still.clone())], false, true);
     assert_eq!((&body["rolled_back"], &body["undone"]), (&json!(false), &json!(0)), "{body}");
     assert_eq!((&body["applied"], &body["not_run"]), (&json!([0, 1]), &json!([2])), "{body}");
     assert_eq!(body["failed"]["still_running"], true, "{body}");
-    assert!(!b.calls.iter().any(|(_, p)| p["command"] == "a.three"), "a step after the failure is never sent");
+    assert!(!b.calls.iter().any(|(_, p)| p["command"] == "parameters.list"), "a step after the failure is never sent");
     // Still running, and the rollback (after the backend waited for it) restored the checkpoint.
-    let (_, body) = stub_batch(vec![("a.two", still)], true, true);
+    let (_, body) = stub_batch(vec![("parameters.change", still)], true, true);
     assert_eq!((&body["rolled_back"], &body["undone"]), (&json!(true), &json!(1)), "{body}");
     assert_eq!((&body["applied"], &body["not_run"]), (&json!([]), &json!([2])), "{body}");
     assert!(body["failed"].get("still_running").is_none(), "{body}");
     // An ordinary failure whose rollback failed.
-    let (_, body) = stub_batch(vec![("a.two", "boom".into())], false, true);
+    let (_, body) = stub_batch(vec![("parameters.change", "boom".into())], false, true);
     assert_eq!((&body["rolled_back"], &body["applied"]), (&json!(false), &json!([0])), "{body}");
     // No rollback asked for: nothing is restored, and the reply does not say it was.
-    let (b, body) = stub_batch(vec![("a.two", "boom".into())], true, false);
+    let (b, body) = stub_batch(vec![("parameters.change", "boom".into())], true, false);
     assert_eq!((&body["rolled_back"], &body["applied"], &body["not_run"]), (&json!(false), &json!([0]), &json!([2])), "{body}");
     assert!(!b.calls.iter().any(|(_, p)| p["command"] == "edit.restore_checkpoint"), "{:?}", b.calls);
 
@@ -4497,6 +4671,8 @@ fn a_bridged_server_leaves_the_check_to_an_app_that_makes_it() {
         let level = req["params"]["param_check"].clone();
         match req["method"].as_str() {
             Some("control.capabilities") => json!({"ok": true, "result": {"param_check": ["off", "warn", "strict"]}}),
+            // The server's own question after each call (the selection block), not a tool call.
+            Some("document.selection") => json!({"ok": true, "result": {"selection": null}}),
             // The server's own question, not a tool call: it carries no level.
             Some("mcp.options") => json!({"ok": true, "result": {"compact": false}}),
             Some("engine.batch") => {
@@ -4597,6 +4773,23 @@ fn auto_session_bridges_to_a_late_app_only_while_empty() {
     let r = raw_tool(&mut s, "inspect_design", json!({}));
     assert!(text(&r).contains("headless session because the SolidCraft app was not found"), "{r}");
     assert!(!s.backend().has_ui());
+}
+
+#[test]
+fn batch_keeps_the_auto_session_it_was_checked_in() {
+    use crate::Backend;
+    let mut ready = false;
+    let mut backend = crate::Auto::new(Headless::default(), Box::new(move || std::mem::replace(&mut ready, true).then_some(1)), None);
+    let r = crate::tools::call_tool(
+        &mut backend,
+        "batch",
+        &json!({"commands": [{"command": "set_parameter", "params": {"name": "width", "value": 5}}], "expect": {"bodies": 0}}),
+    );
+    assert_ne!(r["isError"], true, "{r}");
+    assert!(!backend.has_ui(), "preflight, execution and expectation used the same session");
+    let body: Value = serde_json::from_str(r["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["results"][0]["name"], "width", "{body}");
+    assert_eq!(body["expectation"]["ok"], true, "{body}");
 }
 
 /// A server with no `Auto` backend (`--headless`, `--in`) adds no notice.
@@ -4807,6 +5000,183 @@ fn compact_output_follows_the_apps_preference() {
     assert!(inspect_design_is_compact(&mut s));
 }
 
+/// #3704: a fake desktop app that records the app-management methods it is asked.
+struct AppTools {
+    calls: Vec<(String, Value)>,
+}
+
+impl crate::backend::Backend for AppTools {
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        self.calls.push((method.to_string(), params.clone()));
+        match method {
+            "ui.documents" => Ok(json!({"documents": [{"name": "A", "active": true, "unsaved": false}], "active_index": 0})),
+            "app.quit" => Ok(json!({"quitting": true})),
+            "ui.prefs" => Ok(json!({"default_units": "mm", "theme": "dark", "plugin_grants": {"gears": ["/data"]}, "graphics_backend": "gl"})),
+            "ui.agent_cursor" => Ok(json!({"show": true, "speed": 2.0, "follow_camera": false})),
+            other => Err(format!("unknown method `{other}`")),
+        }
+    }
+    fn has_ui(&self) -> bool {
+        true
+    }
+    fn describe(&self) -> String {
+        "app-tools".into()
+    }
+}
+
+/// Dispatch one tool call to the recording desktop backend.
+fn app_tool(name: &str, args: Value) -> (AppTools, Value, bool) {
+    let mut b = AppTools { calls: Vec::new() };
+    let r = crate::tools::call_tool(&mut b, name, &args);
+    let is_error = r["isError"] == json!(true);
+    (b, r, is_error)
+}
+
+/// Method names reached by a tool, in call order.
+fn app_methods(b: &AppTools) -> Vec<&str> {
+    b.calls.iter().map(|(m, _)| m.as_str()).collect()
+}
+
+/// #3704: headless has no window, so the four app-management tools say so at once, naming the tool.
+#[test]
+fn app_tools_need_the_desktop_app() {
+    let mut s = server();
+    for name in ["documents", "quit_app", "preferences", "agent_cursor"] {
+        let r = raw_tool(&mut s, name, json!({}));
+        assert_eq!(r["result"]["isError"], json!(true), "{name}: {r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with(name), "{name}: {text}");
+        assert!(text.contains("needs the desktop app"), "{name}: {text}");
+    }
+}
+
+/// #3704: `documents` lists the tabs with no action, and passes action/index/force to ui.documents.
+#[test]
+fn documents_bridges_to_ui_documents() {
+    let (b, r, is_err) = app_tool("documents", json!({}));
+    assert!(!is_err, "{r}");
+    assert_eq!(app_methods(&b), ["ui.documents"]);
+    assert_eq!(b.calls[0].1, json!({}));
+
+    let (b, r, is_err) = app_tool("documents", json!({"action": "switch", "index": 2}));
+    assert!(!is_err, "{r}");
+    assert_eq!(b.calls[0].1, json!({"action": "switch", "index": 2}));
+
+    let (b, r, is_err) = app_tool("documents", json!({"action": "close", "force": true}));
+    assert!(!is_err, "{r}");
+    assert_eq!(b.calls[0].1, json!({"action": "close", "force": true, "ask": false}));
+
+    let (b, _r, is_err) = app_tool("documents", json!({"action": "new"}));
+    assert!(!is_err);
+    assert_eq!(b.calls[0].1, json!({"action": "new"}));
+}
+
+/// #3704: `quit_app` asks app.quit, with force only when given.
+#[test]
+fn quit_app_bridges_to_app_quit() {
+    let (b, r, is_err) = app_tool("quit_app", json!({}));
+    assert!(!is_err, "{r}");
+    assert_eq!(app_methods(&b), ["app.quit"]);
+    assert_eq!(b.calls[0].1, json!({"ask": false}));
+
+    let (b, _r, is_err) = app_tool("quit_app", json!({"force": true}));
+    assert!(!is_err);
+    assert_eq!(b.calls[0].1, json!({"force": true, "ask": false}));
+}
+
+/// #3704: `preferences` reads with no arguments and passes allowed settings straight to ui.prefs;
+/// a key outside the allowlist is refused before the app is asked.
+#[test]
+fn preferences_reads_and_sets() {
+    let (b, r, is_err) = app_tool("preferences", json!({}));
+    assert!(!is_err, "{r}");
+    assert_eq!(app_methods(&b), ["ui.prefs"]);
+    assert_eq!(b.calls[0].1, json!({}));
+
+    let (b, r, is_err) = app_tool("preferences", json!({"theme": "dark", "default_units": "cm"}));
+    assert!(!is_err, "{r}");
+    assert_eq!(b.calls[0].1, json!({"theme": "dark", "default_units": "cm"}));
+    assert!(r["content"][0]["text"].as_str().unwrap().contains("dark"));
+
+    // A made-up key passes the schema (additionalProperties) and is refused before any call.
+    let (b, r, is_err) = app_tool("preferences", json!({"no_such_preference": 1}));
+    assert!(is_err, "{r}");
+    assert!(b.calls.is_empty());
+}
+
+/// #3704 review: an AI client may not widen plugin access or change graphics, file limits, signing or file
+/// paths; those keys are refused before ui.prefs is asked, even next to an allowed one, and never read back.
+#[test]
+fn preferences_refuses_keys_outside_the_allowlist_and_reads_back_only_allowed_ones() {
+    for (key, value) in [
+        ("plugin_grants", json!({"gears": ["/"]})),
+        ("graphics_backend", json!("vulkan")),
+        ("disabled_plugins", json!([])),
+        ("theme_follow", json!("/tmp/theme.json")),
+    ] {
+        let (b, reply, is_error) = app_tool("preferences", json!({key: value, "theme": "dark"}));
+        assert!(is_error, "{key}: {reply}");
+        let text = reply["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains(key) && text.contains("default_units"), "{text}");
+        assert!(b.calls.is_empty(), "{key}: a refused request must not reach ui.prefs");
+    }
+    let (_b, reply, is_error) = app_tool("preferences", json!({}));
+    assert!(!is_error, "{reply}");
+    let text = reply["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("default_units") && !text.contains("plugin_grants") && !text.contains("graphics_backend"), "{text}");
+}
+
+/// Preference reads and writes must not drive dialogs or act on the current design.
+#[test]
+fn preferences_refuses_ui_actions_before_forwarding_any_change() {
+    for (key, value) in [("open", json!("General")), ("button", json!("restart_graphics")), ("stand_up", json!(true))] {
+        let (b, reply, is_error) = app_tool("preferences", json!({key: value, "theme": "dark"}));
+        assert!(is_error, "{key}: {reply}");
+        assert!(reply["content"][0]["text"].as_str().unwrap().contains(key), "{reply}");
+        assert!(b.calls.is_empty(), "a refused request must not change preferences or open a dialog");
+    }
+}
+
+/// #3704: `agent_cursor` passes show/speed/follow_camera to ui.agent_cursor, and speed may be "instant".
+#[test]
+fn agent_cursor_bridges_to_ui_agent_cursor() {
+    let (b, r, is_err) = app_tool("agent_cursor", json!({}));
+    assert!(!is_err, "{r}");
+    assert_eq!(app_methods(&b), ["ui.agent_cursor"]);
+    assert_eq!(b.calls[0].1, json!({}));
+
+    let (b, _r, is_err) = app_tool("agent_cursor", json!({"show": true, "speed": "instant", "follow_camera": true}));
+    assert!(!is_err);
+    assert_eq!(b.calls[0].1, json!({"show": true, "speed": "instant", "follow_camera": true}));
+}
+
+/// #3704: the app-management tools are not engine commands, so a batch step names the tool, not
+/// a confusing "unknown command"; and their schemas still refuse unknown arguments.
+#[test]
+fn app_tools_are_not_batch_steps_and_check_arguments() {
+    for name in ["documents", "quit_app", "preferences", "agent_cursor"] {
+        let mut s = server();
+        let r = raw_tool(&mut s, "batch", json!({"commands": [{"command": name}]}));
+        assert_eq!(r["result"]["isError"], json!(true), "{name}: {r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains(&format!("`{name}` is a tool")), "{name}: {text}");
+        // `execute` wrapping them is answered with the MCP-tool hint (#10680).
+        let r = raw_tool(&mut s, "execute", json!({"command": name}));
+        assert_eq!(r["result"]["isError"], json!(true), "execute {name}: {r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains(&format!("`{name}` is an MCP tool, not an engine command id")), "execute {name}: {text}");
+    }
+    let mut s = server();
+    // Unknown arguments are schema errors…
+    assert_eq!(raw_tool(&mut s, "documents", json!({"bogus": 1}))["error"]["code"], -32602);
+    assert_eq!(raw_tool(&mut s, "agent_cursor", json!({"bogus": 1}))["error"]["code"], -32602);
+    assert_eq!(raw_tool(&mut s, "quit_app", json!({"bogus": 1}))["error"]["code"], -32602);
+    // …while `preferences` takes any key (the app decides which it knows).
+    let r = raw_tool(&mut s, "preferences", json!({"any_preference": 1}));
+    assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("needs the desktop app"), "{r}");
+}
+
 /// A screw's counterbore through MCP alone (#12321): `describe_command` lists `head` and
 /// `head_gap`, `execute` forwards them to `solid.hole` unchanged (the command has no typed
 /// contract), the recess measures as the head table says, and a wrong head or gap is refused
@@ -4849,6 +5219,22 @@ fn execute_forwards_a_screw_head_to_a_hole_and_describes_it() {
     assert!(rel(volume(&mut s), want) < 1e-6, "a refused hole changes nothing");
 }
 
+/// A lost app-management reply must not close the next tab or create a duplicate tab.
+#[test]
+fn app_management_is_not_resent_after_a_lost_reply() {
+    use crate::backend::Backend;
+    for (method, params) in [
+        ("ui.documents", json!({"action": "close", "force": true, "ask": false})),
+        ("ui.documents", json!({"action": "new"})),
+        ("app.quit", json!({"ask": false})),
+    ] {
+        let (addr, seen) = silent_method_app(false, method);
+        let mut remote = crate::Remote::connect(&addr).unwrap();
+        assert!(remote.call(method, params).is_err());
+        assert_eq!(*seen.lock().unwrap(), (2, 1), "{method}: one initial connection and one delivery");
+    }
+}
+
 #[test]
 fn ordinary_tool_calls_do_not_look_up_plugin_tools() {
     let (addr, seen) = scripted_app(|req| {
@@ -4862,7 +5248,9 @@ fn ordinary_tool_calls_do_not_look_up_plugin_tools() {
     tool(&mut s, "new_design", json!({}));
     let unknown = raw_tool(&mut s, "no_such_tool", json!({}));
     assert_eq!(unknown["error"]["code"], -32602, "{unknown}");
-    assert_eq!(seen.lock().unwrap().1, ["mcp.options", "engine.execute file.save", "engine.execute solid.box", "engine.execute file.new"]);
+    // Each call is followed by the server's own `document.selection` question (the selection block).
+    let asked: Vec<String> = seen.lock().unwrap().1.iter().filter(|m| *m != "document.selection").cloned().collect();
+    assert_eq!(asked, ["mcp.options", "engine.execute file.save", "engine.execute solid.box", "engine.execute file.new"]);
 }
 
 #[test]
@@ -4887,7 +5275,9 @@ fn plugin_listing_without_an_advertised_capability_keeps_the_session_working() {
         tool(&mut s, "new_design", json!({}));
         let seen = seen.lock().unwrap();
         assert_eq!(seen.0, 1, "the same connection remains usable");
-        assert_eq!(seen.1, ["mcp.options", "control.capabilities", "engine.execute file.new"]);
+        // The server's own `document.selection` question after the call is not a plugin lookup.
+        let asked: Vec<String> = seen.1.iter().filter(|m| *m != "document.selection").cloned().collect();
+        assert_eq!(asked, ["mcp.options", "control.capabilities", "engine.execute file.new"]);
     }
 }
 
@@ -4988,6 +5378,53 @@ fn plugin_tool_arguments_must_be_objects_before_any_backend_call() {
     assert_eq!(backend.calls.last().unwrap().0, "control.running");
 }
 
+/// A docked panel and an MCP caller use the same entry and typed event payload.
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[test]
+fn plugin_panel_row_action_runs_the_same_entry_over_mcp() {
+    let root = std::env::temp_dir().join(format!("solidcraft-mcp-panel-{}", std::process::id()));
+    let folder = root.join("sample");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.2","ui@0.1"],"runtime":{
+        "module":"plugin.wasm","commands":["inspect.measure"],"entries":[{"name":"make","effect":"read","input_schema":{
+            "type":"object","properties":{"panel":{"type":"string"},"event":{"type":"string"},"path":{"type":"string"},
+                "row":{"type":["string","null"]},"value":{"type":["object","string","null"]}}
+        }}],"limits":{"fuel":1000000,"memory_mib":2,"deadline_ms":5000},
+        "ui":{"ui_version":1,"panels":[{"id":"jobs","title":"Jobs","zones":["bottom"],"layout":{"root":0,"nodes":[{"widget":{"table":{
+            "bind":"/jobs","row_id":"id","columns":[{"key":"state","label":"state","unit":null}],"select":"single","on_select":"make","on_edit":"make"
+        }}}]}}],"workspaces":[]}
+    }});
+    let (package, version) = solidcraft_engine::plugin::API.split_once('@').unwrap();
+    let source = include_str!("../../craft-plugin-wasm/src/ui_fixture.wat")
+        .replace("__PACKAGE__", package)
+        .replace("__VERSION__", version)
+        .replace("__COMMAND__", "inspect.measure")
+        .replace("__COMMAND_LEN__", "15")
+        .replace("__ARGS__", "{}")
+        .replace("__ARGS_LEN__", "2");
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    std::fs::write(folder.join("plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+    let mut session = solidcraft_engine::Session::default();
+    session.plugin_state.plugins_dir = Some(root.clone());
+    let mut backend = Headless::new(session);
+    let initial = crate::call_tool(&mut backend, "sample.make", &json!({"panel":"jobs","event":"refresh"}));
+    assert_ne!(initial["isError"], true, "{initial}");
+    backend.session.merge_plugin_panel_data();
+    assert_eq!(backend.session.plugin_panels()[0].data.get("/jobs/0/state"), Some(&solidcraft_engine::plugin::ui::UiValue::Text("ready".into())));
+    let described = solidcraft_engine::plugin::describe_entry(&backend.session, "sample.make").unwrap().unwrap();
+    assert!(described.pointer("/input/properties/ui_event").is_some(), "the explicit event envelope is discoverable");
+    backend.session.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+    let event = json!({"panel":"jobs","event":"edit","path":"/jobs","row":"op1","value":null});
+    let approval = solidcraft_engine::plugin::read_package(&folder.to_string_lossy()).unwrap().approval;
+    let posted =
+        crate::call_tool(&mut backend, "execute", &json!({"command":"sample.make","params":{"approval":approval,"params":event,"ui_event":event}}));
+    assert_ne!(posted["isError"], true, "{posted}");
+    backend.session.merge_plugin_panel_data();
+    assert_eq!(backend.session.plugin_panels()[0].data.get("/jobs/0/state"), Some(&solidcraft_engine::plugin::ui::UiValue::Text("posted".into())));
+    assert!(backend.session.doc.features.is_empty(), "read entry updates panels without editing the design");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 /// Installed plugins are tools (RFC 0002 section 6c): listed with a `plugin` field and their
 /// own text marked as plugin text, called with strict arguments, refused with the missing grant
 /// as data, and gone from the next listing once removed.
@@ -5011,6 +5448,12 @@ fn installed_plugins_are_listed_and_called_as_tools_until_removed() {
         json!({"id":"smp","name":"Sample importer","version":"1","capabilities":["formats@0.1"],
         "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["smp"]}]}}),
     );
+    write(
+        "out",
+        json!({"id":"out","name":"Sample exporter","version":"1","capabilities":["formats@0.1"],
+        "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"save","kind":"exporter","extensions":["out"],
+        "input_schema":{"type":"object","properties":{"precision":{"type":"integer","minimum":1}}}}]}}),
+    );
     let mut session = solidcraft_engine::Session::default();
     session.plugin_state.plugins_dir = Some(plugins.clone());
     // Grants approved for an older package: this one needs approving again.
@@ -5031,6 +5474,19 @@ fn installed_plugins_are_listed_and_called_as_tools_until_removed() {
     let importer = tools.iter().find(|t| t["name"] == "smp.convert").expect("the importer is a tool");
     assert_eq!(importer["title"], "Open .smp files with Sample importer");
     assert_eq!(importer["inputSchema"]["required"], json!(["path"]));
+    let exporter = tools.iter().find(|t| t["name"] == "out.save").expect("the exporter is a tool");
+    assert_eq!(exporter["title"], "Export .out files with Sample exporter");
+    assert_eq!(exporter["plugin"]["kind"], "exporter");
+    assert_eq!(exporter["inputSchema"]["required"], json!(["path"]));
+    let annotations = &exporter["annotations"];
+    assert_eq!(
+        (&annotations["readOnlyHint"], &annotations["destructiveHint"], &annotations["openWorldHint"]),
+        (&json!(false), &json!(true), &json!(true))
+    );
+    for args in [json!({}), json!({"path":"part.out","extra":true}), json!({"path":"part.out","options":{"precision":0}})] {
+        let invalid = raw_tool(&mut s, "out.save", args);
+        assert!(invalid["error"].is_object() || invalid["result"]["isError"] == true, "{invalid}");
+    }
     // Arguments are checked as strictly as a command's.
     assert!(
         call(&mut s, 2, "tools/call", json!({"name":"gears.make","arguments":{"colour":"red"}}))["error"]["message"]
@@ -5053,4 +5509,58 @@ fn installed_plugins_are_listed_and_called_as_tools_until_removed() {
     assert!(!names.contains(&"gears.make") && names.contains(&"smp.convert"), "{names:?}");
     assert!(call(&mut s, 4, "tools/call", json!({"name":"gears.make","arguments":{}}))["error"].is_object());
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Every reply carries what the user has selected, in the block the chat's Attach selection sends
+/// (faces and edges with the names and indices the tools take); nothing is added when nothing is.
+#[test]
+fn every_reply_carries_the_selection_and_none_when_nothing_is_selected() {
+    let mut s = server();
+    tool(
+        &mut s,
+        "batch",
+        json!({"commands": [
+            {"command": "sketch.create", "params": {"plane": "XY"}},
+            {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [20, 10]}},
+            {"command": "sketch.finish"},
+            {"command": "solid.extrude", "params": {"distance": 5}},
+        ]}),
+    );
+    // Nothing selected: the reply is one block, as before.
+    let r = raw_tool(&mut s, "list_commands", json!({}));
+    assert_eq!(r["result"]["content"].as_array().unwrap().len(), 1, "{r}");
+
+    let faces = tool(&mut s, "execute", json!({"command": "model.faces", "params": {"body": "Body1"}}));
+    let edges = tool(&mut s, "execute", json!({"command": "model.edges", "params": {"body": "Body1"}}));
+    let (face, edge) = (&faces["faces"][0], &edges["edges"][0]);
+    let items = json!([
+        {"type": "face", "body": "Body1", "index": face["index"], "point": face["centroid"]},
+        {"type": "edge", "body": "Body1", "index": edge["index"], "point": edge["mid"]},
+    ]);
+    tool(&mut s, "execute", json!({"command": "select.set", "params": {"items": items}}));
+    let r = raw_tool(&mut s, "list_commands", json!({}));
+    let content = r["result"]["content"].as_array().unwrap();
+    assert_eq!(content.len(), 2, "{r}");
+    let block = content[1]["text"].as_str().unwrap();
+    assert!(block.starts_with("[Selected in SolidCraft right now: 2 item(s)."), "{block}");
+    for want in ["Elements:", "face ", "· Body1", "Edge ", "index "] {
+        assert!(block.contains(want), "{want:?} missing from {block}");
+    }
+    assert!(block.contains(face["name"].as_str().unwrap()), "{block}");
+    assert!(block.contains(edge["name"].as_str().unwrap()), "{block}");
+
+    // Cleared again: back to the one block.
+    tool(&mut s, "execute", json!({"command": "select.set", "params": {"items": []}}));
+    let r = raw_tool(&mut s, "list_commands", json!({}));
+    assert_eq!(r["result"]["content"].as_array().unwrap().len(), 1, "{r}");
+}
+
+/// The server's instructions tell the agent to use the selection it is sent.
+#[test]
+fn the_instructions_tell_the_agent_to_use_the_selection() {
+    let mut s = server();
+    let r =
+        call(&mut s, 1, "initialize", json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}));
+    let text = r["result"]["instructions"].as_str().unwrap();
+    assert!(text.contains("The user's current selection comes with every reply; when they say 'this', 'these' or 'the selected', use it."), "{text}");
 }

@@ -110,6 +110,7 @@
 use core::any::Any;
 use std::collections::BTreeMap;
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::object;
 use crate::math::Vec3;
@@ -177,6 +178,27 @@ pub mod ids {
     /// id: the attribute carried to a replacement face is an entity's first of its id, so a
     /// mark sharing an id with one the face already carries would not travel.
     pub const DRAFT_MOVED: u64 = 136;
+    /// Not upstream (tangency-labs/solidcore#3138): how an offset made a face, set by the
+    /// offset executive on every face it relates to what it was made from, where those
+    /// relations are final (`OffsetExecutive::piecewise_merge`), with `Behavior::Copy` so a
+    /// split or merge after that carries it. Its value: [`OFFSET_ROLE_COPY`] (a face use's
+    /// offset copy), [`OFFSET_ROLE_EDGE`] (a face made along an edge: a sheet's wall, a
+    /// round about a convex edge) or [`OFFSET_ROLE_VERTEX`] (a face made at a vertex: a
+    /// ball). Every face of the original and of the offset loses the role an earlier offset
+    /// left on it first, so the role a face carries afterwards is this offset's.
+    pub const OFFSET_ROLE: u64 = 138;
+    /// [`OFFSET_ROLE`]'s value for a face use's offset copy.
+    pub const OFFSET_ROLE_COPY: i64 = 1;
+    /// [`OFFSET_ROLE`]'s value for a face made along an edge.
+    pub const OFFSET_ROLE_EDGE: i64 = 2;
+    /// [`OFFSET_ROLE`]'s value for a face made at a vertex.
+    pub const OFFSET_ROLE_VERTEX: i64 = 3;
+    /// Not upstream (tangency-labs/solidcore#3138): solidcore-ops' own operand tag, an
+    /// application attribute naming the operand faces and edges a result face or edge came
+    /// from, set before one ops call and read and removed after it (`solidcore_ops::history`).
+    /// Its own id below the applications' (`USER_1` and up), so no application's data is read
+    /// as it.
+    pub const OPS_HISTORY: u64 = 140;
     /// `SM_AI_METRIC_BASE`: first of the ids used by metric attributes (150-199).
     pub const METRIC_BASE: u64 = 150;
     /// `SM_AI_MASS_PROPERTIES`.
@@ -501,9 +523,12 @@ impl MergeRegionData {
     ) -> Result<()> {
         const OP: &str = "geom::attribute::MergeRegionData::set_regions";
         if index >= self.this_regions.len() {
-            return Err(SolidError::geom_failed(
+            return Err(SolidError::geom(
                 OP,
-                "the region index is out of range",
+                GeomFailure::IndexOutOfRange {
+                    index,
+                    len: self.this_regions.len(),
+                },
             ));
         }
         let (Some(tr), Some(tt), Some(or), Some(ot)) = (
@@ -2035,25 +2060,41 @@ fn append_new_regions(
 
 /// `GOTO_NEXT_ATTLINE`: consume through the next `'\n'`.
 fn goto_next_attline(s: &mut InputStream) -> Result<()> {
-    let err = || {
-        SolidError::geom_failed(
-            "geom::attribute::AttributeStore::read_indexed_attributes_from_db",
-            "the attribute line does not end",
-        )
-    };
+    const OP: &str = "geom::attribute::AttributeStore::read_indexed_attributes_from_db";
+    // `count` counts read attempts, as upstream, and drives the limit; `consumed`
+    // counts the bytes the stream returned, which the failure reports.
     let mut count = 0u32;
+    let mut consumed = 0u32;
     loop {
+        let got = s.get();
+        let at_end = got.is_none();
         // `(signed char)rFileIn.get()`: EOF and a 0xFF byte both become -1.
-        let ch: i8 = s.get().map_or(-1, |b| b as i8);
+        let ch: i8 = got.map_or(-1, |b| b as i8);
         if ch == b'\n' as i8 {
             return Ok(());
         }
         count += 1;
-        if count > 1000 {
-            return Err(err());
+        if !at_end {
+            consumed += 1;
         }
+        if count > 1000 {
+            return Err(SolidError::geom(
+                OP,
+                GeomFailure::AttributeLineUnterminated {
+                    bytes: consumed,
+                    end_of_input: at_end,
+                },
+            ));
+        }
+        // EOF, or a 0xFF byte the reader takes for one (and has consumed).
         if ch == -1 {
-            return Err(err());
+            return Err(SolidError::geom(
+                OP,
+                GeomFailure::AttributeLineUnterminated {
+                    bytes: consumed,
+                    end_of_input: true,
+                },
+            ));
         }
     }
 }
@@ -2517,5 +2558,30 @@ mod tests {
         assert!(s.is_live(shared));
         assert_eq!(s.attributes(O2), vec![shared]);
         assert_eq!(s.users(shared).unwrap(), vec![O1, O2]);
+    }
+
+    #[test]
+    fn goto_next_attline_reports_bytes_consumed() {
+        let fail = |data: Vec<u8>| {
+            goto_next_attline(&mut InputStream::new(data))
+                .unwrap_err()
+                .geom_failure()
+                .copied()
+        };
+        let unterminated = |bytes, end_of_input| {
+            Some(GeomFailure::AttributeLineUnterminated {
+                bytes,
+                end_of_input,
+            })
+        };
+        // EOF at once: no byte consumed.
+        assert_eq!(fail(Vec::new()), unterminated(0, true));
+        // A 0xFF byte reads as EOF upstream; it is counted as consumed.
+        assert_eq!(fail(vec![b'a', 0xFF, b'\n']), unterminated(2, true));
+        // EOF right after the limit's 1000 bytes: the input ended, 1000 bytes in.
+        assert_eq!(fail(vec![b'a'; 1000]), unterminated(1000, true));
+        // A 1001st byte that is not a line end passes the limit.
+        assert_eq!(fail(vec![b'a'; 1001]), unterminated(1001, false));
+        assert!(goto_next_attline(&mut InputStream::new(b"abc\nx".to_vec())).is_ok());
     }
 }

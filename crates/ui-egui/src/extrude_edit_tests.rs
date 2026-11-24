@@ -436,6 +436,41 @@ fn an_old_extrude_kept_on_its_flat_start_shows_the_arrow_at_that_level() {
     assert!((base.z - min_z).abs() < 1e-6, "displayed start {} geometry start {min_z}", base.z);
 }
 
+/// With To Object, the arrow starts where the build does (#18825). A square on the plane x 3,
+/// past the end of a slot whose wall slants across X (x = 4 (y + 11) / 7), extruded From that
+/// wall To the block's side: alone, the extrude starts on the wall's plane under the square's
+/// middle, x 4 (9 / 7); with Two Sides it starts at the From pick's level, x 20 / 7, as the build
+/// does, and the arrow follows it there.
+#[test]
+fn the_arrow_from_a_slanted_face_with_to_starts_where_the_build_does() {
+    for (two_sides, start_x) in [(false, 36.0 / 7.0), (true, 20.0 / 7.0)] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"corner":[-10,-10,0],"length":20,"width":20,"height":10,"body_name":"Block"})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY","name":"SlotSketch"})).unwrap();
+        h.app.run("sketch.line", json!({"closed":true,"points":[[0,-11],[2,-11],[6,-4],[4,-4]]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"sketch":"SlotSketch","distance":20,"operation":"cut","name":"Slot"})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"YZ","offset":3,"name":"Across"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[-3,4],"p1":[-1,6]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let mut p = json!({"sketch":"Across","from":[20.0 / 7.0, -6, 5],"to":[10, 5, 5],"operation":"new","name":"Depth","body_name":"Fill"});
+        if two_sides {
+            p["distance2"] = json!(3);
+        }
+        h.app.run("solid.extrude", p).unwrap();
+        h.frames(4);
+        // Where the body starts under the square's middle (y -2, z 5): a ray along +X first
+        // meets it there, 3 mm before the start with Two Sides.
+        let mesh = h.app.session.world_state().unwrap().body("Fill").unwrap().mesh();
+        let (t, _) = mesh.raycast(solidcore_record::Vec3::new(-20.0, -2.0, 5.0), solidcore_record::Vec3::new(1.0, 0.0, 0.0)).unwrap();
+        let built = -20.0 + t + if two_sides { 3.0 } else { 0.0 };
+        assert!((built - start_x).abs() < 1e-6, "two sides {two_sides}: the build starts at x {built}");
+        open(&mut h);
+        let base = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().0;
+        assert!((base.x - start_x).abs() < 1e-6, "two sides {two_sides}: the arrow starts at x {} where the build starts at {start_x}", base.x);
+    }
+}
+
 #[test]
 fn rotated_second_occurrence_keeps_saved_from_and_to_points_exact() {
     let mut h = Harness::new();
@@ -1441,4 +1476,86 @@ fn removing_an_earlier_input_keeps_the_active_one() {
     // The active input itself going leaves the input after it active, as before.
     crate::dialogs::set_object_accepting(&mut inputs, &mut active, "From Object", FACES | VERTICES, false);
     assert_eq!(inputs[active].label, "Target Bodies");
+}
+
+#[test]
+fn editing_symmetric_extrude_toggles_symmetric_offset() {
+    let mut h = make(json!({"direction": "symmetric", "start_offset": "4 mm"}));
+    assert!(!extent(&h).symmetric_offset);
+    open(&mut h);
+    h.frames(2);
+    assert!(crate::scenario::handle_at("dialog:Symmetric Offset").is_some());
+    h.step(&json!({"click":{"handle":"dialog:Symmetric Offset"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert!(extent(&h).symmetric_offset);
+}
+
+/// Clearing a moved command window must leave both real Extrude arrow grips accessible,
+/// including the primary arrow that is drawn after Distance 2's floating box.
+#[test]
+fn floating_extrude_fields_clear_both_arrow_grips_beside_the_window() {
+    for secondary in [false, true] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1200}));
+        h.call("ui.prefs", json!({"language":"en","look_at_anim":false}));
+        let mut h = make_in(h, json!({"distance":"2 mm","distance2":"1 mm"}));
+        h.call("ui.view", json!({"view":"iso"}));
+        h.call("ui.view", json!({"view":"fit"}));
+        open(&mut h);
+        h.app.cam = h.app.cam.looking_from(solidcore_record::Vec3::new(1.0, -1.0, 0.8));
+        h.app.cam.target += solidcore_record::Vec3::new(3.0, -2.0, 0.0);
+        h.frames(4);
+        let name = if secondary { "arrow2" } else { "arrow" };
+        let tip = crate::scenario::handle_at(name).expect("the drawn Extrude arrow");
+        let window = h.app.viewport.dialog_rect.unwrap();
+        let title = crate::scenario::handle_at("dialog:title").unwrap();
+        let delta = egui::vec2(tip.x + 30.0 - window.left(), tip.y - 80.0 - window.top());
+        h.call("ui.drag", json!({"x0":title.x,"y0":title.y,"x1":title.x+delta.x,"y1":title.y+delta.y,"steps":8}));
+        h.frames(24);
+        let tip = crate::scenario::handle_at(name).unwrap();
+        let window = h.app.viewport.dialog_rect.unwrap();
+        assert!((window.left() - tip.x - 30.0).abs() < 3.0 && window.y_range().contains(tip.y), "window beside {name}: {window:?}, {tip:?}");
+        let fields: Vec<_> = ["sc_canvas_area", "sc_canvas_area2"].into_iter().map(|id| {
+            h.ctx.memory(|m| m.area_rect(egui::Id::unique(id))).expect("each actual floating box")
+        }).collect();
+        let grabs: Vec<_> = ["arrow", "arrow2"].into_iter().map(|id| {
+            egui::Rect::from_center_size(crate::scenario::handle_at(id).unwrap(), egui::vec2(20.0,20.0))
+        }).collect();
+        let design = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+        let (base, dir) = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        let to = base + dir.unwrap() * if secondary { -6.0 } else { 6.0 };
+        h.step(&json!({"drag":[{"handle":name},{"world":[to.x,to.y,to.z]}],"ctrl":true})).unwrap();
+        h.frames(4);
+        for field in fields {
+            for grab in &grabs {
+                assert!(!field.intersects(*grab), "{name}: floating field {field:?} covers real arrow grip {grab:?}");
+            }
+        }
+        let Some(crate::dialogs::Kind::Extrude { distance, distance2, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("Extrude") };
+        let eval = |text: &str| h.app.session.doc.eval(text, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+        let (first, second) = (eval(distance), eval(distance2));
+        let (changed, kept, original) = if secondary { (second, first, 2.0) } else { (first, second, 1.0) };
+        assert!((changed - 6.0).abs() < 0.3, "{name}: Distance={first}, Distance2={second}");
+        assert!((kept-original).abs() < 1e-9, "the other distance stays unchanged");
+        assert_eq!(h.app.session.doc.to_json(), design, "a preview drag does not commit the feature");
+        assert_eq!(h.app.session.undo.len(), undo);
+    }
+}
+
+/// Deferring Distance 2's box until the arrows are known keeps its own text and keyboard target.
+#[test]
+fn floating_extrude_second_field_types_into_its_own_distance() {
+    let mut h = make(json!({"distance":"5 mm","distance2":"3 mm"}));
+    open(&mut h);
+    let field = h.ctx.read_response(egui::Id::unique("sc_canvas_value2")).expect("Distance 2's actual input").rect;
+    h.step(&json!({"click":[field.center().x,field.center().y]})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"7 mm"})).unwrap();
+    h.frames(3);
+    let Some(crate::dialogs::Kind::Extrude { distance, distance2, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("Extrude") };
+    assert_eq!((distance.as_str(),distance2.as_str()), ("5 mm","7 mm"));
 }

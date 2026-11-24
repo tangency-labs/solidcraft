@@ -8,8 +8,9 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Start a new, empty design and make it the current one, replacing the design that is open
-/// (save it first: this does not ask). A name you give is kept by Save As. Not an undo step.
+/// Start a new, empty design and make it the current one. Without `new_tab` it replaces the
+/// design that is open (save it first: this does not ask). A name you give is kept by Save As.
+/// Not an undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct NewDesignParams {
@@ -17,6 +18,12 @@ pub struct NewDesignParams {
     /// the user's own, so Save As offers it as the file name.
     #[serde(default)]
     pub name: Option<String>,
+    /// true opens the new design in a tab of its own, after the active one, and shows it: the
+    /// design that was open stays open, as it was, and every command after this one acts on the
+    /// new design. It always opens a tab, even when the active design is empty. Only a window with
+    /// design tabs has them: the command line and headless servers refuse it. Default: false.
+    #[serde(default)]
+    pub new_tab: Option<bool>,
 }
 
 /// What `file.new` returns.
@@ -24,6 +31,9 @@ pub struct NewDesignParams {
 pub struct NewDesignResult {
     /// The new design's name: the `name` given, else "Untitled".
     pub name: String,
+    /// With `new_tab`: the new design's id, as `document.list` and `document.revision` give it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_id: Option<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

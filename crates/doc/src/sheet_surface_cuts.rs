@@ -1435,13 +1435,21 @@ fn onto_panels(
         let (near_floors, far_floors) = (floors(after.near_floors)?, floors(after.far_floors)?);
         // Faces with the same loops see material at the same places: square walls, unless one
         // leans.
-        let square = !leaning && (same_regions(&near, &far, tol) || (off_outline(&near, &far)? <= slack && off_outline(&far, &near)? <= slack));
+        let same_faces = !leaning && same_regions(&near, &far, tol);
+        let square = same_faces || (!leaning && off_outline(&near, &far)? <= slack && off_outline(&far, &near)? <= slack);
         // Through: the flat material no face sees any longer, or, where the walls are not
         // square, their shadow; and each bore's band.
         let through = if square {
             let gone = match gone_by_loops(&footprint, &near, tol) {
                 Some(gone) => gone,
                 None => planar_regions_boolean(&footprint, &near, BoolOp::Cut, tol).map_err(|e| e.to_string())?,
+            };
+            // When the faces agree only within the panel-wide slack, material still seen on the
+            // far face is not a through-cut, however little of it remains.
+            let gone = if !same_faces && !gone.is_empty() && !far.is_empty() {
+                planar_regions_boolean(&gone, &far, BoolOp::Cut, tol).map_err(|e| e.to_string())?
+            } else {
+                gone
             };
             let mut kept = Vec::with_capacity(gone.len());
             for g in gone {
@@ -1468,7 +1476,9 @@ fn onto_panels(
             taken.shadowed = true;
             union(through.into_iter().chain(bands.iter().cloned()).collect(), tol).map_err(|e| e.to_string())?
         };
-        if area(&through) > slack {
+        // These regions are the material the cut removed. The slack for comparing whole faces
+        // above can exceed a real corner round on a large panel.
+        if !through.is_empty() {
             if whole.is_some() {
                 gone_from.push((p, through.clone()));
             }
@@ -1485,20 +1495,17 @@ fn onto_panels(
             for g in through {
                 own.push(across_laps(sk, p, g, &rips, tol)?);
             }
-            let through = own;
-            if !through.is_empty() {
-                match left(&panel.region, &through, &holders(sk, p), tol)? {
-                    Left::Kept(kept, parted) => {
-                        if let Some(x) = out.sheet.panels.get_mut(p) {
-                            x.region = kept;
-                        }
-                        out.loose.extend(parted.into_iter().map(|region| Loose { panel: p, region }));
+            match left(&panel.region, &own, &holders(sk, p), tol)? {
+                Left::Kept(kept, parted) => {
+                    if let Some(x) = out.sheet.panels.get_mut(p) {
+                        x.region = kept;
                     }
-                    Left::Apart => {
-                        // The panel stays whole: what went through is a cut of the sheet's, in the
-                        // panel's chart.
-                        out.sheet.cuts.extend(through.iter().map(|r| Cut { panel: p, region: r.clone() }));
-                    }
+                    out.loose.extend(parted.into_iter().map(|region| Loose { panel: p, region }));
+                }
+                Left::Apart => {
+                    // The panel stays whole: what went through is a cut of the sheet's, in the
+                    // panel's chart.
+                    out.sheet.cuts.extend(own.into_iter().map(|region| Cut { panel: p, region }));
                 }
             }
         }

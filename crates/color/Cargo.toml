@@ -1,6 +1,6 @@
 [package]
 name = "solidcraft-color"
-description = "Colour rules and data any crate may share: the sRGB transfer function and the surface analysis palette"
+description = "Colour rules and data any crate may share: the sRGB transfer function, colours as #rrggbb text and the surface analysis palette"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

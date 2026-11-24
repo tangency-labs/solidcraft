@@ -10,6 +10,7 @@ use crate::ui_kit::{Container, Surface};
 use egui::{Color32, Pos2, Stroke, vec2};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Sel;
+use solidcraft_engine::doc::PatternDistance;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::geom::Mesh;
 use solidcraft_engine::geom::prelude::*;
@@ -96,11 +97,16 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         _ => return None,
     };
     Some(match &d.kind {
-        Kind::Extrude { start, all, taper, .. } => {
+        Kind::Extrude { start, all, taper, direction, .. } => {
             let n = normal?;
             let plane = solidcore_record::Plane::from_normal(at, n)?;
-            let from =
-                from_slope_height(app, d, &plane, at, *all, taper).or_else(|| reference_height(app, d, "From Object", &plane, at)).unwrap_or(0.0);
+            let two_sided = crate::dialogs::two_sided(*direction);
+            // The window sends a taper only with one side (positive or negative), as the build
+            // gets it.
+            let taper = if *direction < 2 { taper.as_str() } else { "" };
+            let from = from_slope_height(app, d, &plane, at, *all, taper, two_sided)
+                .or_else(|| reference_height(app, d, "From Object", &plane, at))
+                .unwrap_or(0.0);
             let offset = if start.trim().is_empty() { 0.0 } else { crate::length_input::eval(&app.session.doc, start, ValueKind::Length).ok()? };
             (at + n * (from + offset), Some(n))
         }
@@ -151,7 +157,17 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         Kind::Plastic(_) => (at, normal),
         // A surface extrude's profiles stand square to their sketch, as a solid extrude's do.
         Kind::Surface(crate::dialogs_surface::Surf::Extrude { .. }) => (at, normal),
-        Kind::PatternRect { .. } => (at, d.inputs.get(1).and_then(|i| i.items.first()).and_then(|x| crate::dialogs::axis_of(app, x)).map(|a| a.1)),
+        // The way the first copy goes: Flip turns the arrow round (#8523).
+        // A reopened pattern whose first direction is no origin axis keeps it only in `dir1`,
+        // as the second keeps `dir2`; a picked direction comes first.
+        Kind::PatternRect { .. } => {
+            let heading = pattern_heading(&d.extra, 0);
+            let dir1 = match d.inputs.get(1).and_then(|i| i.items.first()) {
+                Some(x) => crate::dialogs::axis_of(app, x).map(|a| a.1),
+                None => d.extra.get("dir1").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2])),
+            };
+            (at, dir1.map(|n| n * heading))
+        }
         // A sketch move's X Distance grows along the sketch's own x axis, so its drag arrow
         // lies in the sketch plane. Scale has no arrow: a factor is not a length, and the
         // square handle it wants is its own change.
@@ -174,7 +190,8 @@ fn pattern_dir2(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
         Kind::PatternRect { .. } => match d.inputs.get(2).and_then(|i| i.items.first()) {
             Some(x) => crate::dialogs::axis_of(app, x).map(|a| a.1),
             None => d.extra.get("dir2").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2])),
-        },
+        }
+        .map(|n| n * pattern_heading(&d.extra, 1)),
         Kind::SketchModify(_) => crate::sketch_modify_ui::arrow2(app, d),
         _ => None,
     }
@@ -218,24 +235,37 @@ pub(crate) fn profile_plane(app: &SolveApp, sketch: u64) -> Option<solidcore_rec
 }
 
 /// Where an extrude From a flat face at a slant starts above `centre`, on the face, when the
-/// build starts it there ([`solidcraft_engine::doc::from_slope_height`]): not with To Object,
-/// Through All (`all`) or a nonzero `taper`, nor for an edited extrude kept on its old start
-/// at the face's level (`from_level`). `None` otherwise, so the arrow starts at
-/// [`reference_height`] as before.
-fn from_slope_height(app: &SolveApp, d: &Dialog, plane: &solidcore_record::Plane, centre: Vec3, all: bool, taper: &str) -> Option<f64> {
-    let to = d.inputs.iter().any(|input| input.label == "To Object" && !input.items.is_empty());
+/// build starts it there ([`solidcraft_engine::doc::from_slope_height`], which decides by the
+/// same rule as the build: To Object on a flat end, Through All (`all`), a nonzero `taper`, Two
+/// Sides (`two_sided`)), and not for an edited extrude kept on its old start at the face's level
+/// (`from_level`). `None` otherwise, so the arrow starts at [`reference_height`] as before.
+fn from_slope_height(
+    app: &SolveApp,
+    d: &Dialog,
+    plane: &solidcore_record::Plane,
+    centre: Vec3,
+    all: bool,
+    taper: &str,
+    two_sided: bool,
+) -> Option<f64> {
+    let to_point = crate::dialogs::object_point(&d.inputs, "To Object").and_then(|point| {
+        let p = point.as_array()?;
+        Some(Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?))
+    });
     let tapered = !taper.trim().is_empty() && crate::length_input::eval(&app.session.doc, taper, ValueKind::Angle).is_ok_and(|a| a != 0.0);
-    let kept_level = d
-        .editing
-        .and_then(|(id, _)| app.session.doc.feature(id))
-        .is_some_and(|f| matches!(&f.kind, solidcraft_engine::doc::FeatureKind::Extrude { extent, .. } if extent.from_level));
-    if to || all || tapered || kept_level {
+    // An edit that takes To Object off clears `from_level`, as `timeline.edit` does.
+    let has_to = d.inputs.iter().any(|input| input.label == "To Object" && !input.items.is_empty());
+    let kept_level = d.editing.and_then(|(id, _)| app.session.doc.feature(id)).is_some_and(
+        |f| matches!(&f.kind, solidcraft_engine::doc::FeatureKind::Extrude { extent, .. } if extent.from_level && (has_to || extent.to.is_none())),
+    );
+    if kept_level {
         return None;
     }
     let point = crate::dialogs::object_point(&d.inputs, "From Object")?;
     let p = point.as_array()?;
     let p = Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?);
-    solidcraft_engine::doc::from_slope_height(&crate::open_meshing::session_world(&app.session), plane, centre, p)
+    let ends = solidcraft_engine::doc::ExtrudeEnds { to: None, through_all: all, tapered, two_sided };
+    solidcraft_engine::doc::from_slope_height(&crate::open_meshing::session_world(&app.session), plane, centre, p, to_point, ends)
 }
 
 fn reference_height(app: &SolveApp, d: &Dialog, label: &str, plane: &solidcore_record::Plane, centre: Vec3) -> Option<f64> {
@@ -335,6 +365,55 @@ fn nearest_on_polyline(pts: &[Vec3], p: Vec3) -> Option<Vec3> {
         .or_else(|| pts.first().copied())
 }
 
+/// How one of a chamfer's two arrows is drawn: as always, in the accent colour and thicker (the
+/// distance being edited), or dimmed (the other one).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ArrowLook {
+    Plain,
+    Active,
+    Dimmed,
+}
+
+/// The looks of a two-distance chamfer's Distance 1 and Distance 2 arrows, given the distance
+/// being edited (0 or 1; none while neither field has been used: both as always). Flip needs no
+/// say here: it swaps which face each arrow runs along ([`chamfer_face_dirs`] hands the faces over
+/// already swapped), never which arrow belongs to which distance.
+pub(crate) fn chamfer_arrow_looks(editing: Option<usize>) -> [ArrowLook; 2] {
+    match editing {
+        Some(k) if k < 2 => [0, 1].map(|i| if i == k { ArrowLook::Active } else { ArrowLook::Dimmed }),
+        _ => [ArrowLook::Plain; 2],
+    }
+}
+
+/// The key in a chamfer dialog's `extra` for the distance last focused (0 or 1).
+const CHAMFER_EDITING: &str = "chamfer_distance";
+
+/// The distance (0 for Distance 1, 1 for Distance 2) a chamfer of two distances is editing: the
+/// one whose field, in the window or on the canvas, last held the keyboard. None for any other
+/// dialog, or before either did.
+pub(crate) fn chamfer_editing(d: &Dialog) -> Option<usize> {
+    let Kind::Fillet { chamfer: true, ctype: 1, .. } = &d.kind else { return None };
+    d.extra.get(CHAMFER_EDITING).and_then(serde_json::Value::as_u64).filter(|k| *k < 2).map(|k| k as usize)
+}
+
+/// Note that distance `k` of a chamfer is the one being edited.
+pub(crate) fn set_chamfer_editing(d: &mut Dialog, k: usize) {
+    if matches!(d.kind, Kind::Fillet { chamfer: true, ctype: 1, .. }) {
+        note_chamfer_editing(&mut d.extra, k);
+    }
+}
+
+/// [`set_chamfer_editing`] for a caller that holds the dialog's kind borrowed.
+pub(crate) fn note_chamfer_editing(extra: &mut serde_json::Map<String, serde_json::Value>, k: usize) {
+    if k < 2 && extra.get(CHAMFER_EDITING).and_then(serde_json::Value::as_u64) != Some(k as u64) {
+        extra.insert(CHAMFER_EDITING.into(), serde_json::json!(k));
+    }
+}
+
+fn chamfer_look(d: &Dialog, distance: usize) -> ArrowLook {
+    chamfer_arrow_looks(chamfer_editing(d))[distance.min(1)]
+}
+
 /// The directions Distance 1 and Distance 2 of a chamfer of two distances run from its edge at
 /// `at`: along the face that faces up most, or the other one with Flip, and along the remaining
 /// face (the kernel's `chamfer_tool_sides` picks them the same way). None for any other dialog.
@@ -362,6 +441,7 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
     // Test its geometry before navigation, including the first frame entering a handle.
     crate::joint_handles::owns_pointer(app, proj, p)
         || app.dialog.as_ref().and_then(|d| crate::dialogs_move::triad(app, d)).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p))
+        || app.dialog.as_ref().and_then(|d| sketch_move_triad(app, d, anchor(app, d)?.0)).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p))
         || app
             .dialog
             .as_ref()
@@ -374,6 +454,7 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
 
 /// Draw the manipulator and the value box (called by the viewport after the model is drawn).
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) {
+    let _tool_window = ToolWindow::enter(app);
     crate::extrude_face_snap::set(None);
     // While OK computes, the inputs hold what it computes: no arrow to drag, no box to type in.
     if app.applying.is_some() {
@@ -428,6 +509,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         if let Some(t) = triad.as_ref() {
             place.handles = crate::gizmo::handles_region(proj, t);
         }
+        if let Some((end, _)) = rotation {
+            let grip = egui::Rect::from_center_size(end, vec2(20.0, 20.0));
+            place.handles = Some(place.handles.map_or(grip, |triad| triad.union(grip)));
+        }
         let at = triad.map(|t| t.center).or_else(|| anchor(app, &d).map(|(base, _)| base));
         // Tab and Shift+Tab in the box show the next or previous value (Y after X; #4776),
         // keeping the keyboard in the box.
@@ -453,12 +538,53 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         app.dialog = Some(d);
         return;
     }
+    // Rotate Member: the dial round the member's line sets its Angle.
+    if matches!(d.kind, Kind::RotateMember(_)) {
+        draw_move_rotation(app, ui, painter, proj, &mut d);
+        app.dialog = Some(d);
+        return;
+    }
     // A cylinder's values are typed in its window; its distances from its reference edges
     // (#6380) are shown and typed on the canvas, as a hole's, then its placement handles drawn.
     if matches!(d.kind, Kind::Primitive { cmd: "solid.cylinder", .. }) {
-        crate::hole_refs::canvas(app, ui, painter, proj, &mut d);
+        let handles = crate::place_gizmo::value_box_obstacles(app, &d);
+        let place = BoxPlace { handle_obstacles: &handles, ..box_place(app, proj) };
+        crate::hole_refs::canvas(app, ui, painter, proj, &mut d, place);
         app.dialog = Some(d);
         crate::place_gizmo::show(app, ui, painter, proj);
+        return;
+    }
+    if let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. }) = d.kind
+        && !app.preferences.sketch_move_classic
+        && let Some((pivot, _)) = anchor(app, &d)
+    {
+        let mut dragging = false;
+        // Picking comes first: a click picks sketch geometry even under a handle of the triad.
+        let picked = d.inputs.first().map(|i| i.items.as_slice()).unwrap_or_default();
+        let unpicked = match &app.viewport.hover {
+            Some(crate::viewport::Hit::SketchCurve { id, .. }) => !picked.iter().any(|s| matches!(s, Sel::SketchCurve { id: p, .. } if p == id)),
+            Some(crate::viewport::Hit::SketchPoint { id, .. }) => !picked.iter().any(|s| matches!(s, Sel::SketchPoint { id: p } if p == id)),
+            _ => false,
+        };
+        crate::gizmo::give_way(unpicked);
+        if let Some(t) = sketch_move_triad(app, &d, pivot)
+            && let Some(g) = crate::gizmo::show(ui, painter, proj, egui::Id::unique("sc_sketch_move_triad"), &t, snap_step(app.cam.half_height()))
+        {
+            sketch_move_drag(app, &mut d, &t, g);
+            dragging = true;
+        }
+        crate::gizmo::give_way(false);
+        let triad = sketch_move_triad(app, &d, pivot);
+        let at = triad.as_ref().map_or(pivot, |t| t.center);
+        let mut place = box_place(app, proj);
+        place.handles = triad.as_ref().and_then(|t| crate::gizmo::handles_region(proj, t));
+        let focus = std::mem::take(&mut d.focus);
+        if let Some(bs) = proj.to_screen(at)
+            && let Some((label, _, value)) = d.primary()
+        {
+            value_box(ui, label, value, bs + vec2(crate::gizmo::LEN_PX as f32 + 16.0, -12.0), focus || dragging, place);
+        }
+        app.dialog = Some(d);
         return;
     }
     if let Some((base, dir)) = anchor(app, &d)
@@ -488,19 +614,28 @@ impl MoveRotation {
     }
 }
 
+/// Move's turn about its picked axis, or Rotate Member's about the member's line.
 fn move_rotation(app: &SolveApp, d: &Dialog, proj: &Proj) -> Option<MoveRotation> {
-    let Kind::Move { angle, .. } = &d.kind else { return None };
-    let (centre, axis) = crate::dialogs_move::rotation_axis(app, d)?;
+    let (angle, (centre, axis)) = match &d.kind {
+        Kind::Move { angle, .. } => (angle, crate::dialogs_move::rotation_axis(app, d)?),
+        Kind::RotateMember(c) => (&c.angle, crate::dialogs_rotate_member::dial(app, &d.inputs)?),
+        _ => return None,
+    };
     let angle = crate::length_input::eval(&app.session.doc, angle, ValueKind::Angle).ok().filter(|a| a.is_finite()).unwrap_or(0.0);
     Some(MoveRotation { centre, axis, radius: crate::gizmo::ring_radius(proj, centre)?, angle })
 }
 
-/// Reuse the angular handle's snapping and edge-on projection for Move's selected axis.
+/// Reuse the angular handle's snapping and edge-on projection for Move's selected axis and Rotate
+/// Member's line.
 fn draw_move_rotation(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) -> Option<(Pos2, bool)> {
     let r = move_rotation(app, d, proj)?;
     let points: Vec<_> = (0..=64).filter_map(|i| proj.to_screen(r.point(i as f64 / 64.0 * std::f64::consts::TAU))).collect();
     painter.add(egui::Shape::line(points, Stroke::new(1.8, Tokens::get().manipulator)));
-    let Kind::Move { angle, .. } = &mut d.kind else { return None };
+    let (angle, name) = match &mut d.kind {
+        Kind::Move { angle, .. } => (angle, "move_rotate"),
+        Kind::RotateMember(c) => (&mut c.angle, "rotate_member"),
+        _ => return None,
+    };
     let before = angle.clone();
     let e1 = r.axis.any_perp();
     // Keep full turns in the expression while the shared handle works near zero.
@@ -520,10 +655,77 @@ fn draw_move_rotation(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter
         1.0,
         offset,
         (offset - span, offset + span),
-        "move_rotate",
+        name,
         angle,
     )?;
     Some((end, *angle != before))
+}
+
+/// Move/Copy Sketch Entities' triad at `pivot` moved so far, in the sketch's x, y and normal.
+pub(crate) fn sketch_move_triad(app: &SolveApp, d: &Dialog, pivot: Vec3) -> Option<crate::gizmo::Triad> {
+    if app.preferences.sketch_move_classic {
+        return None;
+    }
+    let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { x, y, z, angle, three_d, .. }) = &d.kind else { return None };
+    let st = crate::open_meshing::session_world(&app.session);
+    let plane = app.session.active_sketch.and_then(|id| st.sketch(id))?.plane;
+    let (px, py, pn) = (plane.x, plane.y, plane.normal());
+    let len = |v: &String| sketch_move_len(app, v);
+    let dz = if *three_d { len(z) } else { 0.0 };
+    let turn = crate::length_input::eval(&app.session.doc, angle, ValueKind::Angle).ok().filter(|v| v.is_finite()).unwrap_or(0.0);
+    let centre = d
+        .inputs
+        .get(1)
+        .and_then(|i| i.items.first())
+        .and_then(|sel| crate::sketch_modify_ui::point_id(&app.session, sel))
+        .and_then(|id| sketch_point_at(app, &st, id))
+        .unwrap_or(plane.origin);
+    // The command turns the in-plane part about the centre, then moves it.
+    let from = pivot - centre;
+    let (u, v) = (from.dot(px), from.dot(py));
+    let (sin, cos) = turn.sin_cos();
+    let turned = pivot + px * ((u * cos - v * sin) - u) + py * ((u * sin + v * cos) - v);
+    Some(crate::gizmo::Triad {
+        center: turned + px * len(x) + py * len(y) + pn * dz,
+        translate: true,
+        rotate: true,
+        frame: [px, py, pn],
+        axes: [true, true, *three_d],
+        rings: [false, false, true],
+    })
+}
+
+/// A Move/Copy Sketch Entities distance field in mm, read as the command reads it (design units).
+fn sketch_move_len(app: &SolveApp, text: &str) -> f64 {
+    crate::length_input::eval(&app.session.doc, text, ValueKind::Length).ok().filter(|v| v.is_finite()).unwrap_or(0.0)
+}
+
+/// A triad drag on Move/Copy Sketch Entities, added to the values it had when the drag began.
+fn sketch_move_drag(app: &SolveApp, d: &mut Dialog, t: &crate::gizmo::Triad, g: crate::gizmo::Drag) {
+    let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { x, y, z, angle, .. }) = &d.kind else { return };
+    if g.started || !d.extra.contains_key("drag0") {
+        let len = |v: &String| sketch_move_len(app, v);
+        let deg = crate::length_input::eval(&app.session.doc, angle, ValueKind::Angle).ok().filter(|v| v.is_finite()).unwrap_or(0.0).to_degrees();
+        d.extra.insert("drag0".into(), serde_json::json!([len(x), len(y), len(z), deg]));
+    }
+    let v0: [f64; 4] = d.extra.get("drag0").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+    let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { x, y, z, angle, three_d, .. }) = &mut d.kind else { return };
+    match g.change {
+        crate::gizmo::Change::Translate(v) => {
+            *x = format_len(&app.session.doc, v0[0] + v.dot(t.frame[0]));
+            *y = format_len(&app.session.doc, v0[1] + v.dot(t.frame[1]));
+            if *three_d {
+                *z = format_len(&app.session.doc, v0[2] + v.dot(t.frame[2]));
+            }
+        }
+        crate::gizmo::Change::Rotate { angle: a, .. } => {
+            let deg = v0[3] + a.to_degrees();
+            *angle = format!("{} deg", (deg * 100.0).round() / 100.0);
+        }
+    }
+    if g.done {
+        d.extra.remove("drag0");
+    }
 }
 
 /// A round step for dragged values at this zoom (1, 2 or 5 times a power of ten).
@@ -568,6 +770,11 @@ fn sketch_point_at(app: &SolveApp, st: &solidcraft_engine::doc::ModelState, id: 
         None => (app.session.active_sketch?, id),
     };
     let ss = st.sketch(sketch)?;
+    // A drawn 3D point, `<wire>@<index>` (Move/Copy in a 3D sketch picks these).
+    if let Some((wire, index)) = point.split_once('@') {
+        let fit = &ss.sketch.wires.iter().find(|w| w.id == wire)?.fit;
+        return fit.get(index.parse::<usize>().ok()?).copied();
+    }
     Some(ss.plane.to_world(ss.sketch.point(ss.sketch.resolve_point(point)?)?))
 }
 
@@ -617,9 +824,22 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         (_, Kind::Surface(crate::dialogs_surface::Surf::Extrude { direction: 2, .. })) => -1.0,
         _ => 1.0,
     };
-    let symmetric = to_span.is_none()
-        && matches!(d.kind, Kind::Extrude { direction: 2, .. } | Kind::Surface(crate::dialogs_surface::Surf::Extrude { direction: 1, .. }));
-    let symmetric_scale = if symmetric {
+    // Quantity and Extent: the canvas value is the extent, which a centred pattern spreads half
+    // each way from the original (#8523).
+    let pattern_extent = matches!(d.kind, Kind::PatternRect { .. }) && crate::dialogs::pattern_distance(&d.extra, 0) == PatternDistance::CountExtent;
+    // How much of it lies ahead of the original and behind, when not all ahead: centred, the
+    // copies go both ways (an even quantity one step further ahead).
+    let pattern_split = match &d.kind {
+        Kind::PatternRect { count, .. } if pattern_extent => Some(extent_sides(&app.session.doc, &d.extra, 0, count)),
+        _ => None,
+    }
+    .filter(|(_, behind)| *behind > 0.0);
+    let symmetric = pattern_split.is_some()
+        || (to_span.is_none()
+            && matches!(d.kind, Kind::Extrude { direction: 2, .. } | Kind::Surface(crate::dialogs_surface::Surf::Extrude { direction: 1, .. })));
+    let symmetric_scale = if let Some((ahead, _)) = pattern_split {
+        ahead
+    } else if symmetric {
         d.extra
             .get("convention")
             .cloned()
@@ -638,8 +858,9 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         | Kind::Move { .. }
         | Kind::Section { .. }
         | Kind::OffsetPlane { .. }
-        | Kind::OffsetFaces { .. }
-        | Kind::PatternRect { .. } => true,
+        | Kind::OffsetFaces { .. } => true,
+        // An extent is a length, never below zero.
+        Kind::PatternRect { .. } => !pattern_extent,
         Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. } | crate::sketch_modify_ui::Mod::PatternRect { .. }) => true,
         Kind::SketchModify(crate::sketch_modify_ui::Mod::Offset { mode, .. }) => !crate::sketch_modify_ui::offset_symmetric(*mode),
         _ => false,
@@ -654,6 +875,9 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         }
         return;
     }
+    // A box is placed after all arrows are drawn, so it clears the other direction too.
+    let mut handles = crate::place_gizmo::value_box_obstacles(app, d);
+    let mut secondary_boxes = Vec::new();
     // Two sides: the second distance gets its own arrow, the other way from the first side.
     if let (Kind::Extrude { direction: crate::dialogs::TWO_SIDES | crate::dialogs::TWO_SIDES_REVERSED, distance2, .. }, Some(n)) = (&mut d.kind, dir)
     {
@@ -681,67 +905,122 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                 distance2,
             )
         });
-        value_box_in(
-            ui,
-            (egui::Id::unique("sc_canvas_area2"), egui::Id::unique("sc_canvas_value2")),
-            "Distance 2",
-            distance2,
-            (ts.unwrap_or(bs + vec2(16.0, 14.0)) + vec2(14.0, 8.0), egui::Align2::LEFT_TOP),
-            *distance2 != before,
-            false,
-            box_place(app, proj),
-        );
+        if let Some(tip) = ts {
+            handles.push(arrow_grab(bs, tip));
+        }
+        secondary_boxes.push(SecondaryCanvasBox {
+            field: SecondaryCanvasField::ExtrudeDistance2,
+            ids: (egui::Id::unique("sc_canvas_area2"), egui::Id::unique("sc_canvas_value2")),
+            label: "Distance 2",
+            at: (ts.unwrap_or(bs + vec2(16.0, 14.0)) + vec2(14.0, 8.0), egui::Align2::LEFT_TOP),
+            select_all: *distance2 != before,
+        });
     }
     // A chamfer of two distances: Distance 2 gets its own arrow along the other face.
     let faces = chamfer_face_dirs(app, d, base);
-    let mut blend_handles: Option<egui::Rect> = None;
+    let look2 = chamfer_look(d, 1);
+    let mut dragged2 = false;
+    let mut tip2 = None;
     if let (Kind::Fillet { distance2, .. }, Some((_, t2))) = (&mut d.kind, faces)
         && let Some(l2) = crate::length_input::eval(&app.session.doc, distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
-        blend_handles = drag_arrow(
+        let before = distance2.clone();
+        tip2 = drag_arrow_looked(
             &app.session.doc,
             ui,
             painter,
             proj,
-            base,
-            bs,
-            t2,
-            l2,
-            false,
+            (base, bs, t2),
+            (l2, false, 0.0),
             egui::Id::unique("sc_manipulator2"),
-            half_height,
-            0.0,
-            decimals,
+            (half_height, decimals),
+            look2,
             distance2,
-        )
-        .map(|ts| arrow_grab(bs, ts));
+        );
+        dragged2 = *distance2 != before;
+    }
+    if let Some(tip) = tip2 {
+        handles.push(arrow_grab(bs, tip));
+    }
+    if dragged2 {
+        set_chamfer_editing(d, 1);
     }
     // A rectangular pattern's second direction gets its own arrow for Spacing 2 (#2462), as the
     // first direction's arrow sets Spacing.
+    // Its distance type decides which: Spacing 2, Extent 2 or both, Extent 2 in the second arrow
+    // colour beside Spacing 2 and halved each way when the direction is centred (#8523).
+    let distance2 = crate::dialogs::pattern_distance(&d.extra, 1);
+    let sides2 = match &d.kind {
+        Kind::PatternRect { count2, .. } => extent_sides(&app.session.doc, &d.extra, 1, count2),
+        _ => (1.0, 0.0),
+    };
+    if let Some(n2) = pattern_dir2(app, d)
+        && let Kind::PatternRect { extent2, .. } = &mut d.kind
+        && distance2.uses_extent()
+    {
+        let (id, ink) = if distance2.uses_spacing() {
+            (egui::Id::unique("sc_manipulator2_extent"), second_inks())
+        } else {
+            (egui::Id::unique("sc_manipulator2"), [t.manipulator, t.accent])
+        };
+        let before = extent2.clone();
+        let ts = extent_arrow(&app.session.doc, ui, painter, proj, (base, bs, n2), sides2, id, half_height, decimals, ink, extent2);
+        // Text that is no length yet has no tip: the box stays beside the base, as Extent's
+        // does, so typing goes on in it.
+        if let Some(tip) = ts {
+            handles.push(arrow_grab(bs, tip));
+        }
+        secondary_boxes.push(SecondaryCanvasBox {
+            field: SecondaryCanvasField::PatternExtent2,
+            ids: (egui::Id::unique("sc_canvas_area_extent2"), egui::Id::unique("sc_canvas_value_extent2")),
+            label: "ui.pattern_extent_2",
+            at: (ts.unwrap_or(bs + vec2(16.0, 44.0)) + vec2(14.0, 8.0), egui::Align2::LEFT_TOP),
+            select_all: *extent2 != before,
+        });
+    }
     if let Some(n2) = pattern_dir2(app, d) {
+        let solid_pattern = matches!(d.kind, Kind::PatternRect { .. });
         let spacing2 = match &mut d.kind {
-            Kind::PatternRect { spacing2, .. } | Kind::SketchModify(crate::sketch_modify_ui::Mod::PatternRect { spacing2, .. }) => Some(spacing2),
+            Kind::PatternRect { spacing2, .. } if distance2.uses_spacing() => Some(spacing2),
+            Kind::SketchModify(crate::sketch_modify_ui::Mod::PatternRect { spacing2, .. }) => Some(spacing2),
             _ => None,
         };
-        if let Some(spacing2) = spacing2
-            && let Some(l2) = crate::length_input::eval(&app.session.doc, spacing2, ValueKind::Length).ok().filter(|v| v.is_finite())
-        {
-            drag_arrow(
-                &app.session.doc,
-                ui,
-                painter,
-                proj,
-                base,
-                bs,
-                n2,
-                l2,
-                true,
-                egui::Id::unique("sc_manipulator2"),
-                half_height,
-                0.0,
-                decimals,
-                spacing2,
-            );
+        if let Some(spacing2) = spacing2 {
+            let before = spacing2.clone();
+            // Text that is no length yet has no arrow to draw.
+            let l2 = crate::length_input::eval(&app.session.doc, spacing2, ValueKind::Length).ok().filter(|v| v.is_finite());
+            let ts = l2.and_then(|l2| {
+                drag_arrow(
+                    &app.session.doc,
+                    ui,
+                    painter,
+                    proj,
+                    base,
+                    bs,
+                    n2,
+                    l2,
+                    true,
+                    egui::Id::unique("sc_manipulator2"),
+                    half_height,
+                    0.0,
+                    decimals,
+                    spacing2,
+                )
+            });
+            if let Some(tip) = ts {
+                handles.push(arrow_grab(bs, tip));
+            }
+            // A solid pattern's Spacing 2 has its box at the tip, as Spacing has (#8523); with
+            // no tip it stays beside the base, below Extent 2's, so typing goes on in it.
+            if solid_pattern {
+                secondary_boxes.push(SecondaryCanvasBox {
+                    field: SecondaryCanvasField::PatternSpacing2,
+                    ids: (egui::Id::unique("sc_canvas_area_spacing2"), egui::Id::unique("sc_canvas_value_spacing2")),
+                    label: "Spacing 2",
+                    at: (ts.map_or(bs + vec2(30.0, 82.0), |ts| ts + vec2(14.0, -30.0)), egui::Align2::LEFT_TOP),
+                    select_all: *spacing2 != before,
+                });
+            }
         }
     }
     // An offset plane shows where it will be: at the distance, or through the picked point.
@@ -786,7 +1065,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                 })
                 .collect();
             let limits = taper_limits(taper_radii_kept(&mut smart.taper_radii, &regions), l.abs());
-            taper_handle(ui, painter, proj, base - e * (40.0 * px), n * l, -e, ang, limits, taper);
+            taper_handle(ui, painter, proj, base - e * (40.0 * px), n * l, -e, ang, limits, taper, &mut handles);
             if *taper != before {
                 *taper_present = true;
             }
@@ -799,7 +1078,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             crate::length_input::eval(&app.session.doc, depth, ValueKind::Length).ok().filter(|v| v.is_finite()).unwrap_or(0.0)
         };
         let before = depth.clone();
-        drag_arrow(
+        if let Some(tip) = drag_arrow(
             &app.session.doc,
             ui,
             painter,
@@ -814,7 +1093,9 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             0.0,
             decimals,
             depth,
-        );
+        ) {
+            handles.push(arrow_grab(bs, tip));
+        }
         // Dragging the depth turns "through all" into a distance.
         if *depth != before {
             opts.all = false;
@@ -822,13 +1103,14 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         dir = None;
         // A Single hole's distances from its reference edges (#37); a newly picked edge's box
         // takes the keyboard.
-        if crate::hole_refs::canvas(app, ui, painter, proj, d) {
+        let place = BoxPlace { handle_obstacles: &handles, ..box_place(app, proj) };
+        if crate::hole_refs::canvas(app, ui, painter, proj, d, place) {
             focus = false;
         }
     }
     // A fillet with a radius spline is shaped by its handles along the edge; the arrow would sit
     // on one of them.
-    if radius_spline_handles(app, ui, painter, proj, d) {
+    if radius_spline_handles(app, ui, painter, proj, d, &mut handles) {
         dir = None;
     }
     // Two-sided sketch offset: Distance 2 is its own dimension, the other way from Distance.
@@ -855,18 +1137,38 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             decimals,
             distance2,
         ) {
+            handles.push(arrow_grab(bs, ts));
             // Its own area and field, so it does not share Distance's focus or text.
-            value_box_in(
-                ui,
-                (egui::Id::unique("sc_canvas_area2"), egui::Id::unique("sc_canvas_value2")),
-                "Distance 2",
-                distance2,
-                (ts + vec2(14.0, 8.0), egui::Align2::LEFT_TOP),
-                *distance2 != before,
-                false,
-                box_place(app, proj),
-            );
+            secondary_boxes.push(SecondaryCanvasBox {
+                field: SecondaryCanvasField::SketchOffsetDistance2,
+                ids: (egui::Id::unique("sc_canvas_area2"), egui::Id::unique("sc_canvas_value2")),
+                label: "Distance 2",
+                at: (ts + vec2(14.0, 8.0), egui::Align2::LEFT_TOP),
+                select_all: *distance2 != before,
+            });
         }
+    }
+    // Spacing and Extent: Extent has its own arrow and box beside Spacing's, in the second
+    // arrow colour (#8523).
+    let sides1 = extent_sides(&app.session.doc, &d.extra, 0, "");
+    if matches!(d.kind, Kind::PatternRect { .. })
+        && crate::dialogs::pattern_distance(&d.extra, 0) == PatternDistance::SpacingExtent
+        && let (Kind::PatternRect { extent, .. }, Some(n)) = (&mut d.kind, dir)
+    {
+        let before = extent.clone();
+        let doc = &app.session.doc;
+        let id = egui::Id::unique("sc_manipulator_extent");
+        let ts = extent_arrow(doc, ui, painter, proj, (base, bs, n), sides1, id, half_height, decimals, second_inks(), extent);
+        if let Some(tip) = ts {
+            handles.push(arrow_grab(bs, tip));
+        }
+        secondary_boxes.push(SecondaryCanvasBox {
+            field: SecondaryCanvasField::PatternExtent1,
+            ids: (egui::Id::unique("sc_canvas_area_extent"), egui::Id::unique("sc_canvas_value_extent")),
+            label: "ui.pattern_extent",
+            at: (ts.unwrap_or(bs + vec2(16.0, 14.0)) + vec2(14.0, 8.0), egui::Align2::LEFT_TOP),
+            select_all: *extent != before,
+        });
     }
     // A placement marker at the base: the arrow stands above it and the base dot is the marker's.
     let clear = crate::place_gizmo::arrow_clearance(app, d);
@@ -880,8 +1182,22 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // With To Object picked the box holds To Offset, which is used, whatever All says: the
     // engine takes To Object first.
     let names_all = all_on && !d.inputs.iter().any(|input| input.label == "To Object");
-    let blend = matches!(d.kind, Kind::Fillet { .. });
+    // A chamfer of two distances: the box shows and edits the distance whose field was used last
+    // (a copy, written back below), and names it.
+    let look1 = chamfer_look(d, 0);
+    let two_distances = matches!(d.kind, Kind::Fillet { chamfer: true, ctype: 1, .. });
+    let on_second = two_distances && chamfer_editing(d) == Some(1);
+    let second_before = match &d.kind {
+        Kind::Fillet { distance2, .. } if on_second => Some(distance2.clone()),
+        _ => None,
+    };
+    let mut second = second_before.clone();
     let Some((label, kind, value)) = d.primary() else { return };
+    let label = match (two_distances, on_second) {
+        (true, true) => "Distance 2",
+        (true, false) => "Distance 1",
+        _ => label,
+    };
     let len = all_span.or_else(|| {
         if to_span.is_some() && value.trim().is_empty() {
             Some(0.0)
@@ -910,12 +1226,13 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             ui,
             painter,
             proj,
-            ArrowLine { base, bs, n, l: half + baseline, signed, clear_px: clear },
+            ArrowLine { base, bs, n, l: half + baseline, signed, clear_px: clear, look: look1 },
             arrow_id,
             half_height,
             &stops,
             decimals,
             dragged,
+            [t.manipulator, t.accent],
         );
         if let Some((_, Some(stop), _)) = &drawn {
             crate::extrude_face_snap::outline(app, painter, proj, stop);
@@ -930,29 +1247,31 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                 let step = snap_step(half_height);
                 *value = format_len_drag(&app.session.doc, (v - baseline) / symmetric_scale, step, decimals);
             }
-            if symmetric && let Some(bt) = proj.to_screen(base - n * half) {
-                arrow(painter, bs, bt, t.manipulator);
+            let behind = pattern_split.map_or(half, |(_, behind)| l * behind);
+            if symmetric && let Some(bt) = proj.to_screen(base - n * behind) {
+                let ink = if pattern_split.is_some() { behind_ink(t.manipulator) } else { t.manipulator };
+                arrow(painter, bs, bt, ink);
             }
             if clear == 0.0 {
                 painter.circle(bs, 3.5, t.manipulator, Stroke::new(1.0, Color32::WHITE));
             }
             box_at = ts + vec2(14.0, -12.0);
             anchor = ts;
+            handles.push(arrow_grab(bs, ts));
             if section {
                 past_tip = Some((bs, ts));
             }
-            if blend {
-                let primary = arrow_grab(bs, ts);
-                blend_handles = Some(blend_handles.map_or(primary, |secondary| secondary.union(primary)));
-            }
         }
+    }
+    if on_second && let Some(t2) = tip2 {
+        box_at = t2 + vec2(14.0, -12.0);
+        anchor = t2;
     }
     let note = crate::drag_extrude::step_note(app);
     // Also without an arrow (the value does not evaluate yet): the box still keeps off the handles.
     // Clear of the command window first, then off the placement handles: the handles have the
     // last word, as a box over a grip takes the press meant for it (#6608).
-    let mut place = box_place(app, proj);
-    place.handles = blend_handles;
+    let mut place = BoxPlace { handle_obstacles: &handles, ..box_place(app, proj) };
     let size = box_size(ui, egui::Id::unique("sc_canvas_area"), label, note.as_deref());
     let rect = match past_tip {
         Some((from, ts)) => {
@@ -967,13 +1286,42 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // extrude reaches, so the field is empty and its hint names the extent. Text typed there is
     // the new Distance. Like any empty box it has no number to step (Up, Down, the wheel).
     let shows_all = names_all && *value == before;
-    let select_all = focus || *value != before;
+    let changed = match (&second, &second_before) {
+        (Some(now), Some(was)) => now != was,
+        _ => *value != before,
+    };
+    let select_all = focus || changed;
+    // The other value boxes can now clear every arrow drawn for this command, including
+    // a primary arrow that was drawn after the secondary direction.
+    for field in secondary_boxes {
+        let value = match (field.field, &mut d.kind) {
+            (SecondaryCanvasField::ExtrudeDistance2, Kind::Extrude { distance2, .. })
+            | (SecondaryCanvasField::SketchOffsetDistance2, Kind::SketchModify(crate::sketch_modify_ui::Mod::Offset { distance2, .. })) => distance2,
+            (SecondaryCanvasField::PatternExtent1, Kind::PatternRect { extent, .. }) => extent,
+            (SecondaryCanvasField::PatternSpacing2, Kind::PatternRect { spacing2, .. }) => spacing2,
+            (SecondaryCanvasField::PatternExtent2, Kind::PatternRect { extent2, .. }) => extent2,
+            _ => continue,
+        };
+        value_box_in(ui, field.ids, field.label, value, field.at, field.select_all, false, place);
+    }
+    let Some((_, _, value)) = d.primary() else { return };
     let mut typed = String::new();
-    let shown = if shows_all { &mut typed } else { &mut *value };
+    let shown = match second.as_mut() {
+        Some(second) => second,
+        None if shows_all => &mut typed,
+        None => &mut *value,
+    };
     let hint = if shows_all { "All" } else { "" };
-    // Blend clearance is applied above; the field stays under its wheel-stepping pointer.
-    let place = BoxPlace { dialog: None, handles: if blend { None } else { place.handles }, ..place };
-    value_box_noted(ui, label, shown, box_at, select_all, hint, note.as_deref(), place);
+    value_box_noted(ui, label, shown, box_at, select_all, hint, note.as_deref(), BoxPlace { dialog: None, ..place });
+    // The box's distance, or the arrow's, is the one being edited now.
+    let box_has_keyboard = ui.ctx().memory(|m| m.has_focus(egui::Id::unique("sc_canvas_value")));
+    let editing_now = if two_distances && *value != before {
+        Some(0)
+    } else if two_distances && box_has_keyboard {
+        Some(usize::from(on_second))
+    } else {
+        None
+    };
     // Spaces alone are not an entry: the field has the keyboard as the dialog opens.
     let entered = !typed.trim().is_empty();
     if entered {
@@ -984,6 +1332,15 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         && let Kind::Extrude { all, .. } = &mut d.kind
     {
         *all = false;
+    }
+    if let (Some(text), Some(was)) = (second, second_before)
+        && text != was
+        && let Kind::Fillet { distance2, .. } = &mut d.kind
+    {
+        *distance2 = text;
+    }
+    if let Some(k) = editing_now {
+        set_chamfer_editing(d, k);
     }
     // Double-clicking the arrow reverses the direction, as the window's Reverse Direction does
     // (#17402). Symmetric has no direction to reverse.
@@ -997,22 +1354,40 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     }
 }
 
+enum SecondaryCanvasField {
+    ExtrudeDistance2,
+    PatternExtent1,
+    PatternSpacing2,
+    PatternExtent2,
+    SketchOffsetDistance2,
+}
+
+struct SecondaryCanvasBox {
+    field: SecondaryCanvasField,
+    ids: (egui::Id, egui::Id),
+    label: &'static str,
+    at: (Pos2, egui::Align2),
+    select_all: bool,
+}
+
 /// Where a value box may sit on the canvas: clear of the command window and of the
 /// manipulator's handles, inside the drawing area.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct BoxPlace {
+pub(crate) struct BoxPlace<'a> {
     /// The command window's rectangle: a box that would cover it moves out of it (#6608).
     pub dialog: Option<egui::Rect>,
     /// The drawing area the box stays in.
     pub view: Option<egui::Rect>,
     /// The manipulator's handles: a box that would cover them moves out of them (#6608).
     pub handles: Option<egui::Rect>,
+    /// Separate actual hit regions, so space between independent arrows remains available.
+    pub handle_obstacles: &'a [egui::Rect],
 }
 
 /// The place the value boxes of a command may take: clear of the command window, inside the
 /// drawing area. The handles are added by the caller that draws a manipulator.
-pub(crate) fn box_place(app: &SolveApp, proj: &Proj) -> BoxPlace {
-    BoxPlace { dialog: app.viewport.dialog_rect, view: Some(proj.rect), handles: None }
+pub(crate) fn box_place(app: &SolveApp, proj: &Proj) -> BoxPlace<'static> {
+    BoxPlace { dialog: app.viewport.dialog_rect, view: Some(proj.rect), ..Default::default() }
 }
 
 fn boxes_shown_id() -> egui::Id {
@@ -1033,8 +1408,32 @@ pub(crate) fn boxes_shown(ctx: &egui::Context) -> bool {
 
 /// Whether the command's value box takes the keyboard this frame: as the window opens, and after
 /// a pick. Without boxes in the view, it is left for the command window's value field (#9479).
+/// Only the window that shows the command has value boxes (see [`ToolWindow`]).
 fn take_focus(ctx: &egui::Context, d: &mut Dialog) -> bool {
-    boxes_shown(ctx) && std::mem::take(&mut d.focus)
+    boxes_shown(ctx) && TOOL_WINDOW.get() && std::mem::take(&mut d.focus)
+}
+
+thread_local! {
+    /// Whether the window being drawn shows the open command (always, with one window).
+    static TOOL_WINDOW: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// While it lives, value boxes are drawn only if the window being drawn shows the open command.
+/// The keyboard is in that window. Views of the design in other windows draw the manipulator
+/// alone: their box would share its field's text state, and its keyboard, with the real one.
+struct ToolWindow;
+
+impl ToolWindow {
+    fn enter(app: &SolveApp) -> ToolWindow {
+        TOOL_WINDOW.set(crate::view_windows::shows_tool(app));
+        ToolWindow
+    }
+}
+
+impl Drop for ToolWindow {
+    fn drop(&mut self) {
+        TOOL_WINDOW.set(true);
+    }
 }
 
 /// The command's main value in the viewport, next to the geometry: the keyboard goes here while
@@ -1046,20 +1445,20 @@ fn take_focus(ctx: &egui::Context, d: &mut Dialog) -> bool {
 /// the pointer is over it: the wheel steps its value (`value_step`), which moves the arrow tip
 /// the box follows, and a box sliding out from under the pointer would hand the next notch to
 /// the camera.
-fn value_box(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, place: BoxPlace) {
+fn value_box(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, place: BoxPlace<'_>) {
     value_box_with(ui, label, value, at, select_all, false, place);
 }
 
 /// [`value_box`]; with `keep_tab` Tab stays in the box for the caller (the Move box steps
 /// through its values with it).
-fn value_box_with(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, keep_tab: bool, place: BoxPlace) {
+fn value_box_with(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, keep_tab: bool, place: BoxPlace<'_>) {
     let ids = (egui::Id::unique("sc_canvas_area"), egui::Id::unique("sc_canvas_value"));
     value_box_in(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), select_all, keep_tab, place);
 }
 
 /// [`value_box`] with a note after the field (a pull's step size) and a `hint` for the empty
 /// field (`""` for none).
-fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, hint: &str, note: Option<&str>, place: BoxPlace) {
+fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, hint: &str, note: Option<&str>, place: BoxPlace<'_>) {
     let ids = (egui::Id::unique("sc_canvas_area"), egui::Id::unique("sc_canvas_value"));
     value_box_full(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), (select_all, false), (hint, note), place);
 }
@@ -1075,7 +1474,7 @@ pub(crate) fn value_box_in(
     at: (Pos2, egui::Align2),
     select_all: bool,
     keep_tab: bool,
-    place: BoxPlace,
+    place: BoxPlace<'_>,
 ) -> Option<egui::Rect> {
     value_box_full(ui, ids, label, value, at, (select_all, keep_tab), ("", None), place)
 }
@@ -1090,27 +1489,28 @@ fn value_box_full(
     (at, pivot): (Pos2, egui::Align2),
     (select_all, keep_tab): (bool, bool),
     (hint, note): (&str, Option<&str>),
-    place: BoxPlace,
+    place: BoxPlace<'_>,
 ) -> Option<egui::Rect> {
     // Off in Preferences: the value is typed in the command window only (#9479).
-    if !boxes_shown(ui.ctx()) {
+    if !boxes_shown(ui.ctx()) || !TOOL_WINDOW.get() {
         return None;
     }
     let t = Tokens::get();
     // Held in place while the pointer is over it and value stepping is on (see `value_box`): by
     // its pivot, the point of the box that sits at `at`, which is not always its top-left corner.
     let pointer = ui.ctx().pointer_hover_pos();
-    let at = ui
+    let held = ui
         .ctx()
         .memory(|m| m.area_rect(area))
-        .filter(|r| crate::value_step::enabled(ui.ctx()) && pointer.is_some_and(|p| r.contains(p)))
-        .map_or(at, |r| pivot.pos_in_rect(&r));
+        .filter(|r| crate::value_step::enabled(ui.ctx()) && pointer.is_some_and(|p| r.contains(p)));
+    let at = held.map_or(at, |r| pivot.pos_in_rect(&r));
+    let place = if held.is_some() { BoxPlace { handles: None, handle_obstacles: &[], ..place } } else { place };
     // #6608: the box moves out of the command window it would otherwise cover, and out of the
     // manipulator's handles: it keeps its place by its geometry, but a box that would cover
     // either of them moves out of it.
     // Always inside the drawing area too: a box hung from a handle that has left the window
     // (a far drag) would be cut off at its edge, out of reach (#18722).
-    let at = if place.dialog.is_some() || place.handles.is_some() || place.view.is_some() {
+    let at = if place.dialog.is_some() || place.handles.is_some() || !place.handle_obstacles.is_empty() || place.view.is_some() {
         let kept = clear_of_dialog(rect_at(at, pivot, box_size(ui, area, label, note)), place);
         pivot.pos_in_rect(&kept)
     } else {
@@ -1155,7 +1555,7 @@ const DIALOG_GAP: f32 = 4.0;
 /// clear of both wins. A box that misses them keeps its place (inside the drawing area), and
 /// one that no side clears keeps it too, unless a side leaves the handles free: a box over a
 /// handle takes the press the user meant for the handle.
-fn clear_of_dialog(rect: egui::Rect, place: BoxPlace) -> egui::Rect {
+fn clear_of_dialog(rect: egui::Rect, place: BoxPlace<'_>) -> egui::Rect {
     // A box beyond the drawing area comes back inside it before anything else (#18722).
     let rect = keep_in_view(rect, place.view);
     let mut obstacles: Vec<egui::Rect> = Vec::new();
@@ -1165,6 +1565,7 @@ fn clear_of_dialog(rect: egui::Rect, place: BoxPlace) -> egui::Rect {
     if let Some(handles) = place.handles {
         obstacles.push(handles);
     }
+    obstacles.extend_from_slice(place.handle_obstacles);
     if obstacles.iter().all(|o| !rect.intersects(*o)) {
         return rect;
     }
@@ -1187,7 +1588,11 @@ fn clear_of_dialog(rect: egui::Rect, place: BoxPlace) -> egui::Rect {
             }
             // A box that still covers the command window but leaves the handles free is
             // better than one over a handle: the handle takes the press (#6608).
-            if free.is_none() && place.handles.is_some_and(|h| !moved.intersects(h)) {
+            if free.is_none()
+                && (place.handles.is_some() || !place.handle_obstacles.is_empty())
+                && place.handles.is_none_or(|h| !moved.intersects(h))
+                && place.handle_obstacles.iter().all(|h| !moved.intersects(*h))
+            {
                 free = Some(moved);
             }
         }
@@ -1211,7 +1616,7 @@ fn rect_at(at: Pos2, pivot: egui::Align2, size: egui::Vec2) -> egui::Rect {
 
 /// The size of a value box: the one it had last frame, or measured from the fonts when it is
 /// new (its label, its field, and the margin the popup frame puts around them).
-fn box_size(ui: &egui::Ui, area: egui::Id, label: &str, note: Option<&str>) -> egui::Vec2 {
+pub(crate) fn box_size(ui: &egui::Ui, area: egui::Id, label: &str, note: Option<&str>) -> egui::Vec2 {
     if let Some(r) = ui.ctx().memory(|m| m.area_rect(area)) {
         let size = r.size();
         if size.is_finite() && size.x > 0.0 && size.y > 0.0 {
@@ -1313,8 +1718,130 @@ fn drag_arrow(
     decimals: u8,
     value: &mut String,
 ) -> Option<Pos2> {
-    let line = ArrowLine { base, bs, n, l, signed, clear_px };
-    drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], decimals, value).map(|(ts, _, _)| ts)
+    drag_arrow_looked(doc, ui, painter, proj, (base, bs, n), (l, signed, clear_px), id, (half_height, decimals), ArrowLook::Plain, value)
+}
+
+/// The colour of a second arrow beside one drawn in `ink` (a pattern's extent beside its
+/// spacing, #8523): `ink` a sixth of the way round the colour wheel, so it follows the theme's
+/// manipulator colour; a grey `ink`, which has no hue to turn, is made lighter or darker.
+pub(crate) fn second_ink(ink: Color32) -> Color32 {
+    let mut hsva = egui::ecolor::Hsva::from(ink);
+    if hsva.s < 0.15 {
+        hsva.v = if hsva.v > 0.5 { hsva.v * 0.65 } else { (hsva.v + 0.35).min(1.0) };
+    } else {
+        hsva.h = (hsva.h + 1.0 / 6.0).fract();
+    }
+    Color32::from(hsva)
+}
+
+/// A second arrow's colours at rest and while hovered or dragged, beside an arrow in the theme's
+/// manipulator and accent colours (#8523).
+pub(crate) fn second_inks() -> [Color32; 2] {
+    let t = Tokens::get();
+    [second_ink(t.manipulator), second_ink(t.accent)]
+}
+
+/// An arrow that only shows how far the copies reach the other way and can't be dragged: its
+/// colour, faded (#8523).
+fn behind_ink(ink: Color32) -> Color32 {
+    ink.gamma_multiply(0.4)
+}
+
+/// A rectangular pattern direction's (`index` 0 or 1) alignment and Flip, from the dialog's
+/// extra parameters.
+fn pattern_layout(extra: &serde_json::Map<String, serde_json::Value>, index: usize) -> (solidcraft_engine::sketch::PatternAlignment, bool) {
+    let (alignment, reversed) = if index == 0 { ("alignment", "reversed") } else { ("alignment2", "reversed2") };
+    let alignment = extra.get(alignment).cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+    (alignment, extra.get(reversed).and_then(serde_json::Value::as_bool).unwrap_or(false))
+}
+
+/// The way a rectangular pattern direction's first copy goes along its picked direction: 1, or
+/// -1 when Flip (or Left) sends it back.
+fn pattern_heading(extra: &serde_json::Map<String, serde_json::Value>, index: usize) -> f64 {
+    let (alignment, reversed) = pattern_layout(extra, index);
+    if alignment.multiplier(1, reversed) < 0.0 { -1.0 } else { 1.0 }
+}
+
+/// How much of a rectangular pattern direction's extent lies ahead of the original (the way its
+/// first copy goes) and behind it, as fractions (#8523): all ahead, unless the direction is
+/// centred. Centred with Quantity and Extent, each side has its own share: Quantity 4 puts two
+/// steps ahead and one behind. Centred with Spacing and Extent, half is on each side.
+fn extent_sides(doc: &solidcraft_engine::doc::Document, extra: &serde_json::Map<String, serde_json::Value>, index: usize, count: &str) -> (f64, f64) {
+    let (alignment, reversed) = pattern_layout(extra, index);
+    if alignment != solidcraft_engine::sketch::PatternAlignment::Center {
+        return (1.0, 0.0);
+    }
+    if crate::dialogs::pattern_distance(extra, index) != PatternDistance::CountExtent {
+        return (0.5, 0.5);
+    }
+    let heading = pattern_heading(extra, index);
+    let n = doc.eval(count.trim(), ValueKind::Unitless).ok().filter(|n| n.is_finite() && (2.0..=10_000.0).contains(n)).map(|n| n as usize);
+    let Some(n) = n else { return (1.0, 0.0) };
+    let steps = (n - 1) as f64;
+    let along = (0..n).map(|i| alignment.multiplier(i, reversed) * heading);
+    let ahead = along.clone().fold(0.0_f64, f64::max) / steps;
+    let behind = -along.fold(0.0_f64, f64::min) / steps;
+    (ahead, behind)
+}
+
+/// A rectangular pattern's extent arrow along `n`, drawn in `ink` (#8523): the share of the
+/// extent ahead of the base (see [`extent_sides`]), which a drag sets, and the share behind it
+/// the other way. Returns the tip of the arrow that can be dragged.
+#[allow(clippy::too_many_arguments)]
+fn extent_arrow(
+    doc: &solidcraft_engine::doc::Document,
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    proj: &Proj,
+    (base, bs, n): (Vec3, Pos2, Vec3),
+    (ahead, behind): (f64, f64),
+    id: egui::Id,
+    half_height: f64,
+    decimals: u8,
+    ink: [Color32; 2],
+    value: &mut String,
+) -> Option<Pos2> {
+    let l = crate::length_input::eval(doc, value, ValueKind::Length).ok().filter(|v| v.is_finite())?;
+    let scale = if ahead > 0.0 { ahead } else { 1.0 };
+    let line = ArrowLine { base, bs, n, l: l * scale, signed: false, clear_px: 0.0, look: ArrowLook::Plain };
+    let ts = if scale != 1.0 || behind > 0.0 {
+        let mut shown = format_len(doc, l * scale);
+        let original = shown.clone();
+        let drawn = drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], decimals, &mut shown, ink);
+        if shown != original
+            && let Ok(v) = crate::length_input::eval(doc, &shown, ValueKind::Length)
+        {
+            *value = format_len_drag(doc, v / scale, snap_step(half_height), decimals);
+        }
+        if behind > 0.0
+            && let Some(bt) = proj.to_screen(base - n * (l * behind))
+        {
+            arrow(painter, bs, bt, behind_ink(ink[0]));
+        }
+        drawn
+    } else {
+        drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], decimals, value, ink)
+    };
+    ts.map(|(ts, _, _)| ts)
+}
+
+/// [`drag_arrow`] drawn with `look` (a chamfer's two arrows tell which distance is being edited).
+#[allow(clippy::too_many_arguments)]
+fn drag_arrow_looked(
+    doc: &solidcraft_engine::doc::Document,
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    proj: &Proj,
+    (base, bs, n): (Vec3, Pos2, Vec3),
+    (l, signed, clear_px): (f64, bool, f32),
+    id: egui::Id,
+    (half_height, decimals): (f64, u8),
+    look: ArrowLook,
+    value: &mut String,
+) -> Option<Pos2> {
+    let line = ArrowLine { base, bs, n, l, signed, clear_px, look };
+    let t = Tokens::get();
+    drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], decimals, value, [t.manipulator, t.accent]).map(|(ts, _, _)| ts)
 }
 
 /// Where a drag arrow stands: from `base` (on screen `bs`) along `n`, showing `l`; `signed` lets
@@ -1327,6 +1854,7 @@ struct ArrowLine {
     l: f64,
     signed: bool,
     clear_px: f32,
+    look: ArrowLook,
 }
 
 /// [`drag_arrow`] that also stops at `stops` (#2398): a drag whose tip comes near a stop's
@@ -1344,10 +1872,10 @@ fn drag_arrow_to(
     stops: &[crate::extrude_face_snap::Stop],
     decimals: u8,
     value: &mut String,
+    ink: [Color32; 2],
 ) -> Option<(Pos2, Option<crate::extrude_face_snap::Stop>, bool)> {
-    let ArrowLine { base, bs, n, l, signed, clear_px } = line;
+    let ArrowLine { base, bs, n, l, signed, clear_px, look } = line;
     let mut stopped = None;
-    let t = Tokens::get();
     let min = f64::from(40.0 + clear_px) * 2.0 * half_height / f64::from(proj.rect.height().max(1.0));
     let tip = |length: f64| {
         let shown = if length.abs() < min { min * if length < 0.0 { -1.0 } else { 1.0 } } else { length };
@@ -1404,10 +1932,27 @@ fn drag_arrow_to(
     }
     // Paint the value just read from this frame's pointer, including the value box anchor.
     // Using the old distance here made both trail the drag by another frame.
-    crate::scenario::publish_handle(if id == egui::Id::unique("sc_manipulator") { "arrow" } else { "arrow2" }, ts);
+    let handle = if id == egui::Id::unique("sc_manipulator") {
+        "arrow"
+    } else if id == egui::Id::unique("sc_manipulator_extent") {
+        "arrow_extent"
+    } else if id == egui::Id::unique("sc_manipulator2_extent") {
+        "arrow2_extent"
+    } else {
+        "arrow2"
+    };
+    crate::scenario::publish_handle(handle, ts);
     let hot = r.hovered() || r.dragged();
-    let col = if hot { t.accent } else { t.manipulator };
-    arrow(painter, start(ts), ts, col);
+    // Its own colour at rest and while hovered or dragged; a chamfer's arrow being edited is
+    // wider and the other one faded.
+    let [rest, hot_ink] = ink;
+    let (col, width) = match look {
+        _ if hot => (hot_ink, 2.0),
+        ArrowLook::Plain => (rest, 2.0),
+        ArrowLook::Active => (hot_ink, 3.5),
+        ArrowLook::Dimmed => (rest.gamma_multiply(0.4), 2.0),
+    };
+    arrow_wide(painter, start(ts), ts, col, width);
     if hot {
         painter.circle_stroke(ts, 8.0, Stroke::new(1.5, col));
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
@@ -1423,7 +1968,7 @@ fn drag_arrow_to(
 /// share one spline, so every edge's handles edit it. A taper's handles show on a single edge
 /// only: the first edit makes the fillet a spline fillet starting from that edge's taper, which
 /// would put the same radius on every other edge. Whether the handles are shown.
-fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) -> bool {
+fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog, handles: &mut Vec<egui::Rect>) -> bool {
     use serde_json::{Value, json};
     use solidcraft_engine::doc::kernel::RadiusSpline;
     enum Edit {
@@ -1563,6 +2108,7 @@ fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
                 egui::Id::unique(("sc_fillet_r", i, k)),
                 egui::Sense::click_and_drag(),
             );
+            handles.push(r.rect);
             let hot = r.hovered() || r.dragged();
             let col = if hot { t.accent } else { t.manipulator };
             if let Some(fs) = proj.to_screen(at(*u)) {
@@ -1926,12 +2472,14 @@ fn taper_handle(
     angle: f64,
     limits: (f64, f64),
     value: &mut String,
+    handles: &mut Vec<egui::Rect>,
 ) {
     let t = Tokens::get();
     let l = span.len();
     let end = foot + span + e * (l * angle.tan().clamp(-10.0, 10.0));
     let (Some(fs), Some(es)) = (proj.to_screen(foot), proj.to_screen(end)) else { return };
     let r = ui.interact(egui::Rect::from_center_size(es, vec2(16.0, 16.0)), egui::Id::unique("sc_taper"), egui::Sense::drag());
+    handles.push(r.rect);
     crate::scenario::publish_handle("taper", es);
     let hot = r.hovered() || r.dragged();
     let col = if hot { t.accent } else { t.manipulator };
@@ -2016,6 +2564,7 @@ fn draw_revolve(
         curved_to: false,
     });
     let mut box_at = bs + vec2(16.0, -30.0);
+    let mut handles = Vec::new();
     let angle_before = if let Kind::Revolve { angle, .. } = &d.kind { angle.clone() } else { String::new() };
     if !extent.curved_to && extent.sweep.is_finite() {
         let (origin, direction) = axis;
@@ -2062,9 +2611,10 @@ fn draw_revolve(
                         angle,
                     ) {
                         box_at = end + vec2(14.0, -12.0);
+                        handles.push(egui::Rect::from_center_size(end, vec2(20.0, 20.0)));
                     }
-                    if symmetric {
-                        rotation_handle(
+                    if symmetric
+                        && let Some(end) = rotation_handle(
                             ui,
                             painter,
                             proj,
@@ -2079,14 +2629,16 @@ fn draw_revolve(
                             range,
                             "revolve2",
                             angle,
-                        );
+                        )
+                    {
+                        handles.push(egui::Rect::from_center_size(end, vec2(20.0, 20.0)));
                     }
                 }
                 if let Some(other) = d.extra.get_mut("angle2") {
                     let mut value = other.as_str().map(str::to_owned).unwrap_or_else(|| other.to_string());
                     let before = value.clone();
                     let first_angle = extent.sweep - other_angle;
-                    rotation_handle(
+                    if let Some(end) = rotation_handle(
                         ui,
                         painter,
                         proj,
@@ -2101,7 +2653,9 @@ fn draw_revolve(
                         (range.0 - first_angle, range.1 - first_angle),
                         "revolve2",
                         &mut value,
-                    );
+                    ) {
+                        handles.push(egui::Rect::from_center_size(end, vec2(20.0, 20.0)));
+                    }
                     if value != before {
                         *other = serde_json::Value::String(value);
                     }
@@ -2133,7 +2687,8 @@ fn draw_revolve(
         });
     } else if let Kind::Revolve { angle, .. } = &mut d.kind {
         let dragging = *angle != angle_before;
-        value_box(ui, solidcraft_ui_text::tr_label("Angle"), angle, box_at, focus || dragging, box_place(app, proj));
+        let place = BoxPlace { handle_obstacles: &handles, ..box_place(app, proj) };
+        value_box(ui, solidcraft_ui_text::tr_label("Angle"), angle, box_at, focus || dragging, place);
     }
 }
 
@@ -2299,6 +2854,11 @@ pub(crate) fn projected_rotation_angle(
     Some((a + b) / 2.0)
 }
 fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32) {
+    arrow_wide(painter, a, b, col, 2.0);
+}
+
+/// [`arrow`] with a stem `width` points wide.
+fn arrow_wide(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32, width: f32) {
     let v = b - a;
     let l = v.length();
     if l < 1.0 {
@@ -2306,7 +2866,7 @@ fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32) {
     }
     let u = v / l;
     let n = vec2(-u.y, u.x);
-    painter.line_segment([a, b], Stroke::new(2.0, col));
+    painter.line_segment([a, b], Stroke::new(width, col));
     let head = 11.0f32.min(l * 0.6);
     painter.add(egui::Shape::convex_polygon(vec![b, b - u * head + n * head * 0.45, b - u * head - n * head * 0.45], col, Stroke::NONE));
 }
@@ -2453,11 +3013,11 @@ mod tests {
         let dialog = egui::Rect::from_min_size(egui::pos2(700.0, 200.0), egui::vec2(280.0, 300.0));
         let view = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
         let on_the_window = egui::Rect::from_min_size(egui::pos2(800.0, 350.0), egui::vec2(140.0, 24.0));
-        let kept = clear_of_dialog(on_the_window, BoxPlace { dialog: Some(dialog), view: Some(view), handles: None });
+        let kept = clear_of_dialog(on_the_window, BoxPlace { dialog: Some(dialog), view: Some(view), handles: None, ..Default::default() });
         assert!(!kept.intersects(dialog), "the box {kept:?} still covers the window {dialog:?}");
         assert_eq!(kept.size(), on_the_window.size(), "the box keeps its size");
         let clear = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(140.0, 24.0));
-        let place = BoxPlace { dialog: Some(dialog), view: Some(view), handles: None };
+        let place = BoxPlace { dialog: Some(dialog), view: Some(view), handles: None, ..Default::default() };
         assert_eq!(clear_of_dialog(clear, place), clear, "a box that misses the window stays");
     }
 
@@ -2466,7 +3026,7 @@ mod tests {
     #[test]
     fn a_value_box_beyond_the_drawing_area_comes_back_inside() {
         let view = egui::Rect::from_min_size(egui::pos2(100.0, 40.0), egui::vec2(1000.0, 700.0));
-        let place = BoxPlace { dialog: None, view: Some(view), handles: None };
+        let place = BoxPlace { dialog: None, view: Some(view), handles: None, ..Default::default() };
         let size = egui::vec2(140.0, 24.0);
         for far in [egui::pos2(5000.0, 3000.0), egui::pos2(-900.0, -400.0), egui::pos2(1050.0, 300.0), egui::pos2(300.0, 735.0)] {
             let kept = clear_of_dialog(egui::Rect::from_min_size(far, size), place);
@@ -2495,12 +3055,29 @@ mod tests {
             };
             let (dialog, arrow, field) = (reflected(dialog), reflected(arrow), reflected(field));
             assert!(field.intersects(dialog));
-            let kept = clear_of_dialog(field, BoxPlace { dialog: Some(dialog), view: Some(view), handles: Some(arrow) });
+            let kept = clear_of_dialog(field, BoxPlace { dialog: Some(dialog), view: Some(view), handles: Some(arrow), ..Default::default() });
             assert!(view.contains_rect(kept), "viewport clamp: {kept:?}");
             assert!(!kept.intersects(dialog), "window clearance: {kept:?}, {dialog:?}");
             assert!(!kept.intersects(arrow), "tip/stem clearance: {kept:?}, {arrow:?}");
             assert_eq!(kept.size(), field.size());
         }
+    }
+
+    /// Opposite diagonal arrows can span the viewport as a union while leaving room between
+    /// their actual hit regions. Clearing each separately keeps a visible tip draggable.
+    #[test]
+    fn opposite_arrow_regions_leave_usable_space_in_a_narrow_view() {
+        let view = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1000.0, 700.0));
+        let base = egui::pos2(500.0, 350.0);
+        let tips = [egui::pos2(50.0, 5.0), egui::pos2(950.0, 695.0)];
+        let handles = tips.map(|tip| arrow_grab(base, tip));
+        let field = egui::Rect::from_min_size(tips[1] + egui::vec2(14.0, -12.0), egui::vec2(140.0, 24.0));
+        let kept = clear_of_dialog(field, BoxPlace { view: Some(view), handle_obstacles: &handles, ..Default::default() });
+        assert!(view.contains_rect(kept), "field remains in the viewport: {kept:?}");
+        for handle in handles {
+            assert!(!kept.intersects(handle), "field {kept:?} covers actual arrow region {handle:?}");
+        }
+        assert_eq!(kept.size(), field.size());
     }
 
     /// Canvas value boxes sit under Preferences and Report a bug (#9016).
@@ -2581,13 +3158,13 @@ mod tests {
         let view = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
         let handles = egui::Rect::from_min_size(egui::pos2(500.0, 300.0), egui::vec2(120.0, 120.0));
         let on_the_handles = egui::Rect::from_min_size(egui::pos2(540.0, 340.0), egui::vec2(140.0, 24.0));
-        let kept = clear_of_dialog(on_the_handles, BoxPlace { dialog: Some(dialog), view: Some(view), handles: Some(handles) });
+        let kept = clear_of_dialog(on_the_handles, BoxPlace { dialog: Some(dialog), view: Some(view), handles: Some(handles), ..Default::default() });
         assert!(!kept.intersects(handles), "the box {kept:?} still covers the handles {handles:?}");
         assert_eq!(kept.size(), on_the_handles.size(), "the box keeps its size");
         // The window and the handles side by side: no side clears both, so the box keeps off
         // the handles and covers the window instead.
         let side_by_side = egui::Rect::from_min_size(egui::pos2(560.0, 340.0), egui::vec2(280.0, 24.0));
-        let kept = clear_of_dialog(side_by_side, BoxPlace { dialog: Some(dialog), view: Some(view), handles: Some(handles) });
+        let kept = clear_of_dialog(side_by_side, BoxPlace { dialog: Some(dialog), view: Some(view), handles: Some(handles), ..Default::default() });
         assert!(!kept.intersects(handles), "the box {kept:?} still covers the handles {handles:?}");
     }
 }
@@ -2619,5 +3196,53 @@ mod taper_limit_tests {
         assert!(close(lo, -deg(2.0, 10.0)));
         assert_eq!(taper_limits(taper_radii(&[]), 10.0), (-89.0, 89.0));
         assert_eq!(taper_limits(taper_radii(&[&rect]), 0.0), (-89.0, 89.0));
+    }
+}
+
+/// The extent arrows of a rectangular pattern's directions and their colours (#8523).
+#[cfg(test)]
+mod pattern_arrow_tests {
+    use super::*;
+
+    /// A pattern direction's extent arrows (#8523): all ahead unless centred; centred with
+    /// Quantity and Extent each side shows its own share (Quantity 4: two steps ahead, one
+    /// behind), with Spacing and Extent half each way; Flip and Left turn the arrows round.
+    #[test]
+    fn pattern_extent_arrows_show_each_sides_share() {
+        use serde_json::json;
+        let doc = solidcraft_engine::doc::Document::new("Arrows");
+        let extra = |v: serde_json::Value| v.as_object().cloned().unwrap_or_default();
+        let near = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-12 && (a.1 - b.1).abs() < 1e-12;
+        let count_extent = extra(json!({"distance1": "count_extent"}));
+        assert_eq!(extent_sides(&doc, &count_extent, 0, "4"), (1.0, 0.0));
+        let centred = extra(json!({"distance1": "count_extent", "alignment": "center"}));
+        assert!(near(extent_sides(&doc, &centred, 0, "4"), (2.0 / 3.0, 1.0 / 3.0)));
+        assert!(near(extent_sides(&doc, &centred, 0, "5"), (0.5, 0.5)));
+        // Flip sends the extra step the other way, and the arrow with it: still two ahead.
+        let flipped = extra(json!({"distance1": "count_extent", "alignment": "center", "reversed": true}));
+        assert!(near(extent_sides(&doc, &flipped, 0, "4"), (2.0 / 3.0, 1.0 / 3.0)));
+        assert_eq!(pattern_heading(&flipped, 0), -1.0);
+        assert_eq!(pattern_heading(&extra(json!({"alignment": "left"})), 0), -1.0);
+        assert_eq!(pattern_heading(&extra(json!({})), 0), 1.0);
+        // A count that doesn't read yet keeps the whole arrow ahead.
+        assert_eq!(extent_sides(&doc, &centred, 0, "nope"), (1.0, 0.0));
+        let spacing_extent = extra(json!({"distance2": "spacing_extent", "alignment2": "center"}));
+        assert_eq!(extent_sides(&doc, &spacing_extent, 1, ""), (0.5, 0.5));
+        assert_eq!(extent_sides(&doc, &spacing_extent, 0, ""), (1.0, 0.0));
+    }
+
+    /// The second arrow's colour follows the theme's: another hue at the same lightness, and a
+    /// grey made lighter or darker; the arrow the other way is the same colour, faded.
+    #[test]
+    fn a_second_arrow_takes_its_colour_from_the_first() {
+        let blue = Color32::from_rgb(40, 110, 220);
+        let second = second_ink(blue);
+        assert_ne!(second, blue);
+        let (a, b) = (egui::ecolor::Hsva::from(blue), egui::ecolor::Hsva::from(second));
+        assert!((a.v - b.v).abs() < 0.02 && (a.s - b.s).abs() < 0.02, "{a:?} {b:?}");
+        for grey in [Color32::from_gray(60), Color32::from_gray(200)] {
+            assert_ne!(second_ink(grey), grey);
+        }
+        assert!(behind_ink(blue).a() < blue.a());
     }
 }
