@@ -38,7 +38,6 @@ pub mod output;
 pub(crate) mod own_builder;
 pub(crate) mod own_reader;
 pub mod plan;
-pub(crate) mod refit;
 pub mod rng;
 pub mod runner;
 pub mod script;
@@ -46,13 +45,10 @@ pub mod solidcraft;
 pub mod soundness;
 pub mod ssi;
 pub mod step;
-pub(crate) mod tolsub;
 pub(crate) mod trim_hook;
 #[cfg(test)]
 pub(crate) mod trims_on_edges;
 pub mod util;
-#[cfg(test)]
-pub(crate) mod wr493_rows;
 #[cfg(test)]
 mod wr57_replay;
 #[cfg(test)]

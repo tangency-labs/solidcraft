@@ -275,8 +275,7 @@ fn corpus_key(e: solidcore::EntityRef) -> solidcore::geom::object::ObjectRef {
 /// rebuilt (`bRebuildUVTrimCurves`, `topology.face_p3`'s `_rebuild` rows), with the
 /// tolerances the read's kept-trim cover raised after the healer put back as the healer
 /// left them ([`undo_trim_cover`]): the replay is of the healer's gap cover, against
-/// main's reads before the kept-trim cover (tangency-labs/solidcraft#19295), whose own
-/// raises are replayed by goldens' `tolsub::replay`.
+/// main's reads before the kept-trim cover (tangency-labs/solidcraft#19295).
 fn read_corpus(k: &mut Kernel, name: &str, rebuild: bool) -> Brep {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../upstream/TestFiles/pt_TestFiles")

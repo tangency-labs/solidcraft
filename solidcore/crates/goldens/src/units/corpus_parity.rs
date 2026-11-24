@@ -147,8 +147,7 @@ fn read_breps(k: &mut Kernel, bytes: Vec<u8>) -> solidcore::Result<Read> {
             records: &mut records,
             next_key: GEOMETRY_KEYS,
         };
-        let mut breps = read_part_from_file(k, bytes, FileType::Ascii, &mut env)?.breps;
-        breps.iter_mut().for_each(crate::tolsub::after_read);
+        let breps = read_part_from_file(k, bytes, FileType::Ascii, &mut env)?.breps;
         return Ok(Read {
             breps,
             attributes,
@@ -164,8 +163,7 @@ fn read_breps(k: &mut Kernel, bytes: Vec<u8>) -> solidcore::Result<Read> {
         records: &mut records,
         next_key: GEOMETRY_KEYS,
     };
-    crate::refit::read_from_file(k, &mut b, bytes, FileType::Ascii, false, &mut env)?;
-    crate::tolsub::after_read(&mut b);
+    solidcore::topology::brep::p7::read_from_file(k, &mut b, bytes, FileType::Ascii, false, &mut env)?;
     Ok(Read {
         breps: vec![b],
         attributes,
@@ -657,7 +655,7 @@ fn run_side(
 }
 
 /// A case's output, each side measured by `measure` (`measure_isolated` in a child; the
-/// tests measure in process, where [`crate::tolsub`] sees the reads).
+/// tests measure in process).
 fn run_with(case: &Case, measure: &dyn Fn(&str, &str) -> Measured) -> Result<Output, HarnessError> {
     let i: Inputs = case.parse()?;
     let mut out = Output::new();
