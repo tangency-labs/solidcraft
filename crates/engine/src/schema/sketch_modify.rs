@@ -903,7 +903,7 @@ pub struct MoveParams {
     /// unchanged. Default: true. Not used with `copy`.
     #[serde(default)]
     pub rotate_constraints: Option<bool>,
-    /// How far along the sketch's normal, in mm, within 1000 km: in a 3D sketch the moved lines
+    /// How far along the sketch's normal, in mm, within 1 km: in a 3D sketch the moved lines
     /// and fit-point splines (or their copies) become drawn 3D curves that far off the plane.
     /// Default: 0.
     #[serde(default)]

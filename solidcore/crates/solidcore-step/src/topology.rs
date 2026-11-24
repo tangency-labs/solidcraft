@@ -26,6 +26,9 @@
 //! vertex's and edge's to start with. A vertex measurably off its curve or surface, or an edge
 //! whose curve lies measurably off a face's surface, gets that distance (with margin) as its
 //! tolerance, and the solid's notes say how many and how far.
+//! Pcurves use a separate construction tolerance, never coarser than [`DEFAULT_TOLERANCE`]
+//! merely because the context states a coarse uncertainty. Measured gaps and explicit fit
+//! deviations still carry their own allowances; the source's tolerance remains the record's.
 //!
 //! Pcurves are the closed forms the 3D edges have on our surfaces ([`pcurve::exact_pcurves`]); a
 //! use with none gets its pcurve from the kernel ([`read_solids_with`], SMLib's own trims), except
@@ -705,7 +708,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             self.asm.raise_vertex(v, gap, id)?;
         }
         let i = index(self.asm.edges.len())?;
-        self.asm.edges.push(EdgeB { curve, interval, vertices, tolerance: self.asm.tol, form: None });
+        self.asm.edges.push(EdgeB { curve, interval, vertices, tolerance: self.asm.tol, pcurve_tolerance: self.asm.pcurve_tolerance(), form: None });
         self.edge_ids.insert(id, (i, mapped.with_step));
         Ok((i, mapped.with_step))
     }
@@ -1014,6 +1017,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                 interval: [0.0, 1.0],
                 vertices: [va, vb],
                 tolerance: self.asm.tol,
+                pcurve_tolerance: self.asm.pcurve_tolerance(),
                 form: None,
             });
             self.poly_edges.insert(key, e);

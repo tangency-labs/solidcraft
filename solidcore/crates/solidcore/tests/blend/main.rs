@@ -13,6 +13,8 @@
 // Each file keeps the `#[path]` support modules it had as a binary of its own.
 #![allow(clippy::duplicate_mod)]
 
+#[path = "../blend_bead_section.rs"]
+mod blend_bead_section;
 #[path = "../blend_refusal.rs"]
 mod blend_refusal;
 #[path = "../brep_file_round_trip.rs"]
@@ -47,6 +49,8 @@ mod fillet_rounds_meeting_at_a_knife_edge;
 mod fillet_session;
 #[path = "../fillet_variable_radius_closes_onto_vertex.rs"]
 mod fillet_variable_radius_closes_onto_vertex;
+#[path = "../fillet_vertex_on_split_rim.rs"]
+mod fillet_vertex_on_split_rim;
 #[path = "../fillet_wr300_320.rs"]
 mod fillet_wr300_320;
 #[path = "../fork_16bf1cb_full_turn_cover_across_seam.rs"]

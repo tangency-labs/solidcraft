@@ -131,3 +131,113 @@ fn the_card_sits_at_the_bottom_of_the_free_part() {
     assert!((corner.rect.width() - WIDTH).abs() < 0.5 && (corner.rect.right() - free.right()).abs() < 0.5, "in the corner: {:?}", corner.rect);
     assert!(solidcraft_ui_registry::handle_at("toast:test:close").is_some(), "the × publishes its handle");
 }
+
+#[test]
+fn compact_notice_expires_after_six_visible_seconds_and_pauses_while_held() {
+    let mut clock = NoticeLifetime::new(6.0);
+    assert!(!clock.advance(1.0, false));
+    assert!(!clock.advance(4.0, false));
+    assert!(!clock.advance(5.0, true));
+    assert!(!clock.advance(100.0, true), "hover or focus keeps the action available");
+    assert!(!clock.advance(101.0, false));
+    assert!(!clock.advance(102.9, false));
+    assert!(clock.advance(103.0, false));
+    let mut idle_then_hovered = NoticeLifetime::new(6.0);
+    assert!(!idle_then_hovered.advance(0.0, false));
+    assert!(!idle_then_hovered.advance(5.0, true));
+    assert_eq!(idle_then_hovered.remaining(), 1.0, "entering hover charges the preceding unpaused five seconds");
+    assert!(!idle_then_hovered.advance(10.0, false));
+    assert_eq!(idle_then_hovered.remaining(), 1.0, "leaving hover preserves the paused interval");
+    assert!(idle_then_hovered.advance(11.0, false), "five seconds before hover and one after use the six-second lifetime");
+    let mut uninterrupted = NoticeLifetime::new(6.0);
+    assert!(!uninterrupted.advance(10.0, false));
+    assert!(!uninterrupted.advance(15.9, false));
+    assert!(uninterrupted.advance(16.0, false));
+}
+
+#[test]
+fn compact_notice_is_bottom_centred_polite_and_its_link_is_keyboard_reachable() {
+    let ctx = context();
+    ctx.enable_accesskit();
+    let free = Rect::from_min_size(pos2(50.0, 40.0), vec2(700.0, 500.0));
+    let id = egui::Id::unique("compact_notice_test");
+    let run = |events, native_focused| {
+        let mut shown = None;
+        let output = raw_frame(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 600.0))),
+                events,
+                focused: native_focused,
+                ..Default::default()
+            },
+            |ui| shown = inline_notice(ui, free, id, "Sketch 1 finished", "Edit sketch"),
+        );
+        (output, shown.unwrap())
+    };
+    let (output, shown) = run(Vec::new(), true);
+    let frame = Container::completion_notice_frame(&ctx);
+    assert_eq!(frame.corner_radius, egui::CornerRadius::same(Tokens::get().radius_lg));
+    assert_eq!(frame.shadow, Container::popup_frame(&ctx.global_style()).shadow, "completion notices use shared popup elevation");
+    assert_eq!(shown.rect.height(), 34.0);
+    assert_eq!(shown.rect.center().x, free.center().x);
+    assert_eq!(shown.rect.bottom(), free.bottom());
+    assert!(shown.rect.contains_rect(shown.link));
+    let tree = output.platform_output.accesskit_update.unwrap();
+    let status = &tree.nodes.iter().find(|(node, _)| *node == id.with("status").accesskit_id()).unwrap().1;
+    assert_eq!(status.role(), egui::accesskit::Role::Status);
+    assert_eq!(status.label(), Some("Sketch 1 finished"));
+    assert_eq!(status.value(), None, "the status has an accessible name, not a stale Label value");
+    assert_eq!(status.live(), Some(egui::accesskit::Live::Polite));
+    assert!(tree.nodes.iter().any(|(_, node)| node.role() == egui::accesskit::Role::Link && node.label() == Some("Edit sketch")));
+    let (_, focused) = run(key(egui::Key::Tab), true);
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(id.with("link")), "Tab reaches the actual notice action");
+    assert!(focused.held, "Tab reaches the action and pauses its lifetime");
+    let (_, activated) = run(key(egui::Key::Enter), true);
+    assert!(activated.clicked, "Enter invokes the same inline edit action as the pointer");
+    let (_, hovering) = run(vec![egui::Event::PointerMoved(shown.link.center())], true);
+    assert!(hovering.held);
+    let (_, inactive_hover) = run(vec![egui::Event::PointerMoved(shown.link.center())], false);
+    assert!(inactive_hover.held, "a real pointer hovering in an inactive window still holds the notice");
+    ctx.memory_mut(|memory| memory.request_focus(id.with("link")));
+    let (_, inactive) = run(vec![egui::Event::PointerGone], false);
+    assert_eq!(ctx.input(|input| input.pointer.hover_pos()), None, "PointerGone removes the real hovering pointer");
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(id.with("link")), "the fixture retains stale keyboard focus");
+    assert!(!inactive.held, "an absent pointer and retained link focus in an inactive native window cannot pause expiry");
+    let mut clock = NoticeLifetime::new(6.0);
+    assert!(!clock.advance(0.0, inactive_hover.held));
+    assert!(!clock.advance(1.0, inactive.held));
+    assert!(clock.advance(7.0, inactive.held), "the inactive window's notice still expires");
+}
+
+#[test]
+fn compact_notice_link_uses_readable_main_ramp_ink_in_both_themes() {
+    for t in [Tokens::light(), Tokens::dark()] {
+        let ink = solidcraft_theme::TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Main).ink;
+        assert!(solidcraft_theme::contrast_ratio(ink, t.panel) >= 4.5);
+    }
+}
+
+#[test]
+fn compact_notice_measurement_matches_painted_bounds_in_both_themes_and_narrow_spaces() {
+    for t in [Tokens::light(), Tokens::dark()] {
+        let _theme = solidcraft_theme::scoped_tokens(t);
+        let ctx = context();
+        for width in [80.0, 160.0, 700.0] {
+            let free = Rect::from_min_size(pos2(50.0, 40.0), vec2(width, 500.0));
+            frame(&ctx, Vec::new(), |ui| {
+                let title = "A longer sketch name finished";
+                let measured = crate::measure_inline_notice(ui, title, "Edit sketch", width);
+                let shown = inline_notice(ui, free, egui::Id::unique("measured_notice"), title, "Edit sketch").unwrap();
+                assert!(
+                    (measured - shown.rect.size()).length() < 0.01,
+                    "the placement measurement must include the same truncation and spacing as painting: {measured:?} vs {:?}",
+                    shown.rect.size()
+                );
+                assert_eq!(measured.y, 34.0);
+                assert!(measured.x <= width && measured.x > 0.0);
+                assert!(free.contains_rect(shown.rect));
+            });
+        }
+    }
+}

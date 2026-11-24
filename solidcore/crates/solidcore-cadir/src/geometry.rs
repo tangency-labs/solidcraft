@@ -36,7 +36,8 @@
 //!
 //! A placed carrier (`Transformed`) is its basis mapped by its affine placement, when that is a
 //! rotation and a uniform scale (with a move): frames turn, lengths scale and parameters are
-//! kept. A placement that shears, scales unevenly or mirrors is refused. What the placement
+//! kept, and a spindle or horn torus's revolution has its circle and axis mapped. A placement
+//! that shears, scales unevenly or mirrors is refused. What the placement
 //! differs from a similarity by (its rounding), and the rounding of the map itself, moves a
 //! point of the carrier by at most a fixed fraction (its `slack`) of its distance from the
 //! origin; the carrier is refused unless that, over the largest distance from the origin of a
@@ -886,7 +887,9 @@ fn solved_surface(
             // its tube's meridian circle revolved about its axis, as the STEP reader reads one: the
             // circle about `C + R x` in the x–z plane, its parameter from x towards z, so the
             // revolution is ISO 10303-42's torus with the same normal (∂angle × ∂profile). The
-            // face's boundary keeps the sheet it is on (the lemon or the apple).
+            // face's boundary keeps the sheet it is on (the lemon or the apple). A negative tube
+            // radius is the same surface with v moved by π (the circle is the same), so the side
+            // is kept, as for a plain torus.
             if major <= minor.abs() {
                 let (x, y) = (Vec3::from(f.x_axis), Vec3::from(f.y_axis));
                 let z = x.cross(y);
@@ -905,7 +908,7 @@ fn solved_surface(
                             origin: f.origin,
                             axis: a(z),
                         }),
-                        minor < 0.0,
+                        false,
                     ),
                     bound,
                 ));
@@ -969,8 +972,27 @@ fn solved_surface(
                     };
                     (FaceSurface::Swept(cone), reach)
                 }
+                // A spindle or horn torus's revolution: its circle, axis point and axis mapped.
+                // A point of it is as far from the axis point as the profile's point it is turned
+                // from, so within twice the axis point's distance from the origin and the
+                // profile's reach.
+                FaceSurface::Swept(SweptSurface::Revolution {
+                    profile,
+                    origin,
+                    axis,
+                }) => {
+                    let (profile, origin, axis) =
+                        (s.curve(profile)?, s.point(origin), s.direction(axis));
+                    let reach = 2.0 * norm(origin) + curve_reach(&profile, fit);
+                    let revolution = SweptSurface::Revolution {
+                        profile,
+                        origin,
+                        axis,
+                    };
+                    (FaceSurface::Swept(revolution), reach)
+                }
                 FaceSurface::Swept(_) => {
-                    return Err(unsupported("a placed linear sweep or revolution"));
+                    return Err(unsupported("a placed linear sweep"));
                 }
             };
             bound = s.certify(reach, inner, 0.0, fit)?;
