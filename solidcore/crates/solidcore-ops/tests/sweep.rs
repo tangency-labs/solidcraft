@@ -1583,7 +1583,11 @@ fn a_swept_circle_saved_with_its_caps_off_square_opens() {
     let (again, _) = back.to_record().unwrap();
     assert_eq!(
         (again.faces.len(), again.edges.len(), again.vertices.len()),
-        (record.faces.len(), record.edges.len(), record.vertices.len())
+        (
+            record.faces.len(),
+            record.edges.len(),
+            record.vertices.len()
+        )
     );
     Body::from_record(&again, true).unwrap();
     let (v, w) = (body.volume(1e-9).unwrap(), back.volume(1e-9).unwrap());

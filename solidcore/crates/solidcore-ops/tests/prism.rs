@@ -1974,7 +1974,8 @@ fn an_extruded_rectangle_on_a_tilted_plane_reads_its_record_back() {
         x,
         y: Vec3::Y,
     };
-    let p = [(159.2, -6.5), (168.2, -6.5), (168.2, 6.5), (159.2, 6.5)].map(|(a, b)| Vec2::new(a, b));
+    let p =
+        [(159.2, -6.5), (168.2, -6.5), (168.2, 6.5), (159.2, 6.5)].map(|(a, b)| Vec2::new(a, b));
     let r = Region2 {
         outer: Loop2::polygon(&p),
         holes: vec![],
@@ -1982,7 +1983,11 @@ fn an_extruded_rectangle_on_a_tilted_plane_reads_its_record_back() {
     let body = extrude_planar_regions(&plane, &[r], 0.0, 12.0).unwrap();
     let (record, _) = body.to_record().unwrap();
     assert_eq!(
-        (record.faces.len(), record.edges.len(), record.vertices.len()),
+        (
+            record.faces.len(),
+            record.edges.len(),
+            record.vertices.len()
+        ),
         (6, 12, 8)
     );
     let (back, _) = Body::from_record(&record, false).unwrap();
