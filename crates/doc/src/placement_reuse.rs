@@ -149,6 +149,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         plastic,
         parts,
         links,
+        // What a file keeps of its links; a design in memory holds their bodies either way.
+        linked_bodies_left_out: _,
         configs,
         favorites,
         canvases,
@@ -157,6 +159,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         next_component_color_index,
         materials,
         print_faces,
+        // Read only by robot exports: no feature's geometry depends on it.
+        collision_shapes: _,
         user_materials,
         appearances,
         body_components,

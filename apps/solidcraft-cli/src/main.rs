@@ -12,7 +12,7 @@
 //! solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N]
 //!                                 [--timeout-s 300] [--json out.json] [--markdown out.md]
 //!                                                             the standard Assistant model test (#4851) on a running app
-//! solidcraft-cli snapshot <script|design> [--in design|part.step] --out shot.png [--width W] [--height H] [--view iso|front|top|…|NAME | --camera JSON] [--no-grid] [--no-axes] [--quality LEVEL]
+//! solidcraft-cli snapshot <script|design> [--in design|part.step] --out shot.png [--width W] [--height H] [--view iso|front|top|…|NAME | --camera JSON] [--no-grid] [--no-axes] [--transparent] [--quality LEVEL]
 //!                                                             [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27]
 //! solidcraft-cli exec <command> [json-params]                 run one command on an empty design
 //! solidcraft-cli commands                                     the command registry as JSON
@@ -88,7 +88,7 @@ const USAGE_BENCH_AGENT: &str = "  solidcraft-cli bench-agent [--scale F] [--sav
 /// `bench-assistant`'s lines in the usage.
 const USAGE_BENCH_ASSISTANT: &str = "  solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N] [--timeout-s 300] [--json out.json] [--markdown out.md]\n";
 /// `snapshot`'s lines in the usage.
-const USAGE_SNAPSHOT: &str = "  solidcraft-cli snapshot <script|design> [--in design.sc|part.step] --out shot.png [--width W] [--height H] [--view NAME | --camera JSON] [--no-grid] [--no-axes]\n      [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27] [--quality coarse|normal|fine|ultra]\n  solidcraft-cli snapshot --in <design.sc|part.step> --out shot.png ...\n      (as with run, --in starts from a design and the script runs on top of it; an option snapshot doesn't take is an error;\n       --view: iso, front, back, top, bottom, left, right, or the name of a view saved in the design with view.save;\n       --camera: {target: [x,y,z], yaw, pitch, distance, fov?} in mm and radians, as the MCP screenshot takes it (docs/mcp.md);\n       --no-grid and --no-axes leave the ground grid (on Z 0) and the origin's axes out of the picture;\n       --body: how one body is drawn, as appearance.assign takes it: opacity 0-1 (below 1 is see-through, so what is inside\n         it shows) and color #rrggbb, either or both, once per body;\n       --tool: draw this body solid in the tool colour and every other body see-through, so a cut's or a join's tool body\n         is visible inside the material it meets; a later --body overrides it;\n       --section: cut the model as inspect.section does, so the inside shows: z=27 (the plane through that world\n         coordinate, keeping the smaller side), add ,flip to keep the other side, or XY, XZ, YZ, or its own JSON;\n       --quality: the display quality the bodies are meshed at, as the app's setting (default normal))\n";
+const USAGE_SNAPSHOT: &str = "  solidcraft-cli snapshot <script|design> [--in design.sc|part.step] --out shot.png [--width W] [--height H] [--view NAME | --camera JSON] [--no-grid] [--no-axes] [--transparent]\n      [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27] [--quality coarse|normal|fine|ultra]\n  solidcraft-cli snapshot --in <design.sc|part.step> --out shot.png ...\n      (as with run, --in starts from a design and the script runs on top of it; an option snapshot doesn't take is an error;\n       --view: iso, front, back, top, bottom, left, right, or the name of a view saved in the design with view.save;\n       --camera: {target: [x,y,z], yaw, pitch, distance, fov?} in mm and radians, as the MCP screenshot takes it (docs/mcp.md);\n       --no-grid and --no-axes leave the ground grid (on Z 0) and the origin's axes out of the picture;\n       --transparent: a transparent background instead of the gradient: alpha 0 where nothing is drawn,\n         the model opaque, its anti-aliased edges and see-through bodies partly so; drawn twice (over black\n         and over white), so it takes about twice as long; the grid and the axes stay unless left out;\n       --body: how one body is drawn, as appearance.assign takes it: opacity 0-1 (below 1 is see-through, so what is inside\n         it shows) and color #rrggbb, either or both, once per body;\n       --tool: draw this body solid in the tool colour and every other body see-through, so a cut's or a join's tool body\n         is visible inside the material it meets; a later --body overrides it;\n       --section: cut the model as inspect.section does, so the inside shows: z=27 (the plane through that world\n         coordinate, keeping the smaller side), add ,flip to keep the other side, or XY, XZ, YZ, or its own JSON;\n       --quality: the display quality the bodies are meshed at, as the app's setting (default normal))\n";
 /// `render`'s lines in the usage.
 const USAGE_RENDER: &str = "  solidcraft-cli render <script|design> --out image.png [--setup NAME] [--width W] [--height H] [--transparent] [--overwrite] [--timeout SECONDS]\n      [--progressive] [--samples N] [--max-depth N] [--seed N] [--exposure EV] [--lighting FILE.json] [--environment FILE.json] [--tone-map reinhard|aces_fitted] [--legacy-memory-admission]\n      --legacy-memory-admission skips available-RAM checks; fixed shared/host budgets and allocation limits still apply.\n";
 /// `exec`'s lines in the usage.
@@ -190,7 +190,7 @@ fn main() -> ExitCode {
     let profiling = match profiling {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("error: {e}");
+            solidcraft_engine::note!("error: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -199,11 +199,11 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     if let Err(e) = plugin_limits(&mut args) {
-        eprintln!("error: {e}");
+        solidcraft_engine::note!("error: {e}");
         return ExitCode::FAILURE;
     }
     if let Err(e) = plugins_dir(&mut args) {
-        eprintln!("error: {e}");
+        solidcraft_engine::note!("error: {e}");
         return ExitCode::FAILURE;
     }
     // Compiled plugins are kept in the per-user cache folder, as the desktop app keeps them.
@@ -475,7 +475,7 @@ fn load_with(path: &str, check: solidcraft_engine::schema::ParamCheck, validatio
     let s = read_session(path, check, validation)?;
     // A newer SolidCraft's file opens all the same; stderr says so, stdout stays the caller's.
     for warning in s.doc.newer_file.iter().flat_map(|file| file.warnings()) {
-        eprintln!("{path}: warning: {warning}");
+        solidcraft_engine::note!("{path}: warning: {warning}");
     }
     Ok(s)
 }
@@ -524,9 +524,11 @@ fn read_session(
 fn warn_if_open_elsewhere(path: &str) {
     use solidcraft_engine::io::design_lock;
     if let Some(lock) = design_lock::held_elsewhere(std::path::Path::new(path), design_lock::now_secs()) {
-        eprintln!(
+        solidcraft_engine::note!(
             "{path}: warning: open in SolidCraft {} by {} on {}; saved all the same, and that window still shows the design it opened",
-            lock.app, lock.user, lock.host
+            lock.app,
+            lock.user,
+            lock.host
         );
     }
 }
@@ -575,7 +577,15 @@ fn positional_index(args: &[String]) -> Option<usize> {
         if a.starts_with("--") {
             i += if matches!(
                 a.as_str(),
-                "--quiet" | "--results" | "--timings" | "--profile" | "--allow-errors" | "--no-grid" | "--no-axes" | "--script-relative"
+                "--quiet"
+                    | "--results"
+                    | "--timings"
+                    | "--profile"
+                    | "--allow-errors"
+                    | "--no-grid"
+                    | "--no-axes"
+                    | "--script-relative"
+                    | "--transparent"
             ) {
                 1
             } else {
@@ -718,9 +728,16 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         // What the export noted (a mesh that is not a clean closed surface, a face short of its
         // shape) goes to stderr, as a newer file's warnings do, unless --quiet: the file is
         // written, but not silently.
-        if !args.iter().any(|a| a == "--quiet") {
+        let quiet = args.iter().any(|a| a == "--quiet");
+        // A body left out of the file is said whatever --quiet says: a part is missing from it.
+        for line in skipped_body_lines(out, &reply) {
+            solidcraft_engine::note!("{line}");
+        }
+        if !quiet {
             for w in reply.get("warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
-                eprintln!("{out}: warning: {w}");
+                if !w.contains(SKIPPED_NOTE) {
+                    solidcraft_engine::note!("{out}: warning: {w}");
+                }
             }
         }
     }
@@ -736,6 +753,23 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         print_json(&m, json_out)?;
     }
     Ok(())
+}
+
+/// What an export's note for a body it could not mesh has after the body's name.
+const SKIPPED_NOTE: &str = ": skipped: meshing failed";
+
+/// One line for each body the export of `out` left out because it could not be meshed, naming the
+/// body and why: `reply` is `file.export`'s.
+fn skipped_body_lines(out: &str, reply: &Value) -> Vec<String> {
+    let notes = reply.get("warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str);
+    notes
+        .filter_map(|w| w.split_once(SKIPPED_NOTE))
+        .map(|(body, why)| {
+            let why = why.trim().trim_start_matches('(').trim_end_matches(')');
+            let because = if why.is_empty() { String::new() } else { format!(": {why}") };
+            format!("{out}: warning: body {body} is NOT in this file, it could not be meshed{because}")
+        })
+        .collect()
 }
 
 /// Only this standalone CLI invocation changes directory, before the renderer or session starts.
@@ -1107,7 +1141,7 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
         "snapshot",
         args,
         &["--in", "--out", "--width", "--height", "--view", "--camera", "--body", "--tool", "--section", "--quality"],
-        &["--no-grid", "--no-axes"],
+        &["--no-grid", "--no-axes", "--transparent"],
         true,
     )?;
     // A snapshot writes one picture. Only the body and tool options take several values.
@@ -1159,8 +1193,13 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
         None => solidcraft_engine::view::home_camera(&s).map_err(|e| e.to_string())?,
     };
     let guides = Guides { grid: !args.iter().any(|a| a == "--no-grid"), axes: !args.iter().any(|a| a == "--no-axes") };
-    let scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides).map_err(|e| e.to_string())?;
-    let png = solidcraft_engine::capture::png(&scene, &cam, w, h)?;
+    let mut scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides).map_err(|e| e.to_string())?;
+    // `--transparent`: drawn over black and over white and the alpha recovered; else once, as before.
+    let png = if args.iter().any(|a| a == "--transparent") {
+        solidcraft_engine::capture::png_transparent(&mut scene, &cam, w, h)?
+    } else {
+        solidcraft_engine::capture::png(&scene, &cam, w, h)?
+    };
     std::fs::write(out, &png.bytes).map_err(|e| format!("{out}: {e}"))?;
     let mut reply = json!({"path": out, "width": w, "height": h, "bytes": png.bytes.len(), "renderer": png.renderer});
     if let Some(w) = solidcraft_engine::capture::warning(png.renderer) {
@@ -1249,7 +1288,7 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
     install_renderer();
     let options = solidcraft_mcp::Options::from_args_and_env(args).map_err(|e| format!("mcp: {e}"))?;
     if options.compact {
-        eprintln!("solidcraft mcp: compact output (inspect_design summarises sketches; tool JSON is not pretty-printed)");
+        solidcraft_engine::note!("solidcraft mcp: compact output (inspect_design summarises sketches; tool JSON is not pretty-printed)");
     }
     let allowed: Vec<std::path::PathBuf> = flags(args, "--allow-path").into_iter().map(std::path::PathBuf::from).collect();
     let scope = (!args.iter().any(|a| a == "--allow-any-path")).then(|| solidcraft_mcp::agent_scope(allowed.iter().cloned()));
@@ -1258,7 +1297,7 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
         // agent with nothing it asked for stops the start rather than serving a scope it didn't mean.
         let ignored: Vec<&solidcraft_engine::io::vfs::RejectedRoot> = s.rejected().iter().filter(|r| allowed.contains(&r.path)).collect();
         for r in &ignored {
-            eprintln!("solidcraft mcp: allow-path {} ignored: {}", r.path.display(), r.reason);
+            solidcraft_engine::note!("solidcraft mcp: allow-path {} ignored: {}", r.path.display(), r.reason);
         }
         if !allowed.is_empty()
             && args.iter().any(|a| a == "--require-allow-path")
@@ -1438,6 +1477,12 @@ pub(crate) fn cmd_bench_open(args: &[String]) -> Result<(), String> {
     let t = std::time::Instant::now();
     let step = solidcraft_engine::io::is_step_path(path);
     let kind = if step { solidcraft_engine::io::limits::Kind::Step } else { solidcraft_engine::io::limits::Kind::Design };
+    // As `doc.open` does: warned about, and read all the same, when it may need more memory than there is.
+    if let Ok(size) = std::fs::metadata(path).map(|m| m.len())
+        && let Some(warning) = solidcraft_engine::io::limits::memory_warning(path, size)
+    {
+        solidcraft_engine::note!("warning: {path}: {warning}");
+    }
     let bytes = solidcraft_engine::io::limits::read(path, kind).map_err(|e| format!("{path}: {e}"))?;
     let read_ms = t.elapsed().as_secs_f64() * 1000.0;
     println!("{}", json!({"step": "read", "ms": read_ms, "bytes": bytes.len()}));
@@ -1561,7 +1606,7 @@ mod tests {
     use serde_json::json;
     use solidcraft_engine::Session;
 
-    use super::read_session;
+    use super::{read_session, skipped_body_lines};
 
     /// A file removed when the test ends, failed or not.
     struct Temp(std::path::PathBuf);
@@ -1603,5 +1648,21 @@ mod tests {
             .unwrap();
         assert!(s.model.last_recomputed > 0, "evaluated while profiling");
         assert_eq!(volume(&s).to_bits(), volume(&built).to_bits());
+    }
+
+    /// A body left out of an export is named on its own line, with why, and the line is the same
+    /// whether or not the file's other notes are shown.
+    #[test]
+    fn a_body_left_out_of_an_export_is_named_on_stderr() {
+        let reply = json!({
+            "path": "out.stl",
+            "skipped": ["BrokenSliver"],
+            "warnings": ["Bolt: face 3 is short of its chord tolerance", "BrokenSliver: skipped: meshing failed (BrokenSliver: tessellation: face 7 (cylinder))"]
+        });
+        let lines = skipped_body_lines("out.stl", &reply);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].starts_with("out.stl: warning: body BrokenSliver is NOT in this file"), "{lines:?}");
+        assert!(lines[0].contains("face 7"), "{lines:?}");
+        assert!(skipped_body_lines("out.stl", &json!({"path": "out.stl", "warnings": ["Bolt: a note"]})).is_empty());
     }
 }

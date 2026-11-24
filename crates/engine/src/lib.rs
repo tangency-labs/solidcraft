@@ -906,6 +906,12 @@ pub struct Session {
     /// save leaves them out of the file and an opened design starts without them. The user's,
     /// like `param_check`, so it survives opening and starting designs.
     pub keep_print_faces: bool,
+    /// Whether a save keeps the bodies of linked designs in the design's file. On for a new
+    /// design. Off: `file.save` writes each link without its bodies, and opening the file reads
+    /// them from the linked design files again (#8170). The design's own choice, set by
+    /// `file.save`'s `linked_bodies` and carried by its file
+    /// ([`Document::linked_bodies_left_out`]), so it follows the design and not the user.
+    pub linked_bodies: bool,
     /// After a live frame: its sketch, the document it left and the revision. Its links were
     /// brought up to date by that frame, so the gesture's next frame needn't project them again
     /// while nothing else has run (#3222).
@@ -1312,6 +1318,8 @@ impl Session {
         solidcraft_io::vfs::install_checks();
         // The session keeps what is hidden (an undo step of its own); the design file carries it.
         let visibility = std::mem::take(&mut doc.visibility);
+        // Likewise the choice to save without linked bodies: the session keeps it.
+        let linked_bodies = !std::mem::take(&mut doc.linked_bodies_left_out);
         let mut doc = Arc::new(doc);
         // A model saved under another check mode holds that mode's results: evaluated again.
         let model = match Self::saved_model(&doc, saved).filter(|model| model.validation() == validation) {
@@ -1327,7 +1335,7 @@ impl Session {
                 model
             }
         };
-        Self::with_model(doc, visibility, model)
+        Session { linked_bodies, ..Self::with_model(doc, visibility, model) }
     }
 
     /// The model `doc`'s file kept, when it is `doc`'s evaluation and the cache is not turned off.
@@ -1415,6 +1423,7 @@ impl Session {
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             keep_print_faces: true,
+            linked_bodies: true,
             live_links: None,
             active_component: 0,
             active_occurrence_path: None,
@@ -1494,7 +1503,13 @@ impl Session {
         let single_surface_analysis = self.single_surface_analysis;
         let disabled_plugins = self.disabled_plugins.clone();
         let plugin_limits = self.plugin_limits;
-        let plugin_state = self.plugin_state.clone();
+        let mut plugin_state = self.plugin_state.clone();
+        for package in plugin_state.panels.values_mut() {
+            for data in package.data.values_mut() {
+                *data = Default::default();
+            }
+        }
+        plugin_state.ui_caller = None;
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
         let keep_print_faces = self.keep_print_faces;
@@ -2259,14 +2274,16 @@ impl Session {
     }
 
     /// Solve the joints, unless nothing they read changed since this session last solved them:
-    /// the model is the one that solve read and the design is as the solve left it, apart from
-    /// its features (the joints read those only through the model). A command that refreshes on
+    /// the model is the one that solve read and the design is as the solve left it, including
+    /// which component patterns are active. A command that refreshes on
     /// its own (a parameter change) is refreshed again after it, and that second solve would
     /// find every occurrence where it is.
     fn solve_joints(&mut self) -> Option<solidcraft_doc::joints::Solution> {
         let state = self.model.state();
         let settled = self.joints_settled.as_ref().is_some_and(|(doc, model)| {
-            std::sync::Weak::as_ptr(model) == Arc::as_ptr(&state) && (Arc::ptr_eq(doc, &self.doc) || same_but_features(doc, &self.doc))
+            std::sync::Weak::as_ptr(model) == Arc::as_ptr(&state)
+                && (Arc::ptr_eq(doc, &self.doc)
+                    || (same_but_features(doc, &self.doc) && doc.inactive_pattern_occurrences() == self.doc.inactive_pattern_occurrences()))
         });
         if settled {
             return None;
@@ -2675,6 +2692,41 @@ impl Session {
             {
                 return Err(EngineError::Other(format!("sketch `{}`: {e}; the values were not changed", r.name)));
             }
+            if r.error.is_some()
+                && let Some(before) = solved_before.get(&r.id)
+                && let Ok(sk) = self.doc.sketch(r.id)
+                && (!sk.offsets.is_empty() || !sk.freeform_offsets.is_empty() || !sk.freeform_chain_offsets.is_empty())
+            {
+                let vals = self.doc.evaluation_values();
+                let mut trial = sk.clone();
+                let applied = self.doc.apply_dimension_values(&vals, &mut trial);
+                let offset_err = if own_values(&trial) == *before {
+                    None
+                } else {
+                    match applied {
+                        Ok(()) => {
+                            let mut solved_trial = sk.clone();
+                            self.doc
+                                .solve_sketch_with_analysis(
+                                    &vals,
+                                    &mut solved_trial,
+                                    &sk.driving_values(),
+                                    Some(sk),
+                                    solidcraft_sketch::Analysis::StatusOnly,
+                                )
+                                .err()
+                                .map(|e| e.to_string())
+                        }
+                        Err(e) => {
+                            let msg = e.to_string();
+                            msg.contains("offset dimension").then_some(msg)
+                        }
+                    }
+                };
+                if let Some(e) = offset_err {
+                    return Err(EngineError::Other(format!("sketch `{}`: {e}; the values were not changed", r.name)));
+                }
+            }
             let (Some(before), Some(k)) = (solved_before.get(&r.id), r.state.sketch(r.id)) else { continue };
             if own_values(&k.sketch) == *before {
                 continue;
@@ -2791,6 +2843,23 @@ impl Session {
             return self.execute("plugin.run", &call);
         }
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        self.execute_spec(spec, params)
+    }
+
+    fn execute_spec(&mut self, spec: &cmd::CommandSpec, params: &Value) -> Result<Value> {
+        // Plugin data is transient view state, so it stays out of undo snapshots.
+        // Restore it for every command error, including failures after guest publication.
+        let plugin_panels_before = (spec.id == "plugin.run").then(|| self.plugin_state.panels.clone());
+        let result = self.execute_spec_inner(spec, params);
+        if result.is_err()
+            && let Some(panels) = plugin_panels_before
+        {
+            self.plugin_state.panels = panels;
+        }
+        result
+    }
+
+    fn execute_spec_inner(&mut self, spec: &cmd::CommandSpec, params: &Value) -> Result<Value> {
         if panels::commands::is_command(spec.id) {
             // Layout is application state. Even a missing capability must not
             // clear live links, map picks, snapshot, evaluate or refresh a design.
@@ -3329,6 +3398,7 @@ impl Session {
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
             keep_print_faces: self.keep_print_faces,
+            linked_bodies: self.linked_bodies,
             live_links: None,
             active_component: self.active_component,
             active_occurrence_path: self.active_occurrence_path.clone(),
@@ -3561,6 +3631,11 @@ impl Session {
                     usage::note_compute(spec.id, ms);
                 }
             }
+        }
+        // A model worker that did not update panels must keep newer view state on
+        // the window (including data merged into a frame or a panel the user closed).
+        if prepared.computed.plugin_state.panels != prepared.source.plugin_state.panels {
+            self.plugin_state.panels.clone_from(&prepared.computed.plugin_state.panels);
         }
         // Disk checks and no-op source reads may finish after a newer live observation.
         // Merge only entries whose source observation is still current in the live session.
@@ -3824,6 +3899,17 @@ impl Session {
             self.echo(message);
         }
         Ok(())
+    }
+
+    /// Read a primary origin for the Joint dialog without modifying the session.
+    pub fn joint_origin_for_alignment(&self, params: &serde_json::Value) -> Result<doc::joints::JointOrigin> {
+        cmd::joints::origin_param(self, Some(params), "joint.create")
+    }
+
+    /// Validate a secondary selection through the command resolver without authoring it.
+    pub fn joint_alignment_frame(&self, origin: doc::joints::JointOrigin, alignment: &serde_json::Value) -> Result<doc::Mat> {
+        let origin = cmd::joints::alignment_param(self, origin, Some(alignment), "joint.create")?;
+        doc::joints::resolve_origin(&self.doc, &self.model.state(), &origin).map_err(Into::into)
     }
 
     /// Live preview: run `commands` (id, parameters) on a scratch copy and return the model
@@ -4105,8 +4191,24 @@ pub(crate) fn as_saved<'a>(doc: &'a Document, visibility: &Visibility, dimension
 /// The values of a sketch's driving dimensions that come from parameters: what a value edit
 /// changes in it (as opposed to geometry it projects or links from upstream).
 fn own_values(sk: &solidcraft_sketch::Sketch) -> std::collections::BTreeMap<String, f64> {
-    let mut values: std::collections::BTreeMap<_, _> =
-        sk.constraints.iter().filter(|c| c.param.is_some() && !c.driven).filter_map(|c| Some((c.id.clone(), c.kind.value()?))).collect();
+    let mut values: std::collections::BTreeMap<_, _> = sk
+        .constraints
+        .iter()
+        .filter(|c| c.param.is_some() && !c.driven)
+        .filter_map(|c| {
+            let v = match c.kind {
+                solidcraft_sketch::ConstraintKind::OffsetDistance { value, reverse, .. } => {
+                    if reverse {
+                        -value
+                    } else {
+                        value
+                    }
+                }
+                _ => c.kind.value()?,
+            };
+            Some((c.id.clone(), v))
+        })
+        .collect();
     // 3D dimensions, and 3D points placed by expressions (#10608).
     for c in &sk.wire_constraints {
         match &c.kind {
@@ -4198,6 +4300,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         param_comments,
         materials,
         print_faces,
+        collision_shapes,
         user_materials,
         appearances,
         body_components,
@@ -4211,8 +4314,10 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         drawings,
         next_component_color_index,
         plugin_data,
+        linked_bodies_left_out,
     } = a;
     *plugin_data == b.plugin_data
+        && *linked_bodies_left_out == b.linked_bodies_left_out
         && *render == b.render
         && *format == b.format
         && *format_pending == b.format_pending
@@ -4238,6 +4343,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *param_comments == b.param_comments
         && *materials == b.materials
         && *print_faces == b.print_faces
+        && *collision_shapes == b.collision_shapes
         && *user_materials == b.user_materials
         && *appearances == b.appearances
         && *body_components == b.body_components
