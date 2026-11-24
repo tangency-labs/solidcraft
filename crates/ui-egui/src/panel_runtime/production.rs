@@ -335,7 +335,7 @@ impl Product {
                     .collect()
             }
             Self::Browser => {
-                presentation.status = Some(crate::browser_search::body_count(&app.session));
+                presentation.status = Some(crate::browser_search::body_count(app));
                 vec![RuntimeAction {
                     id: ControlId("magnifier".into()),
                     label: solidcraft_ui_text::tr("ui.browser_search_hint").into(),
@@ -386,6 +386,8 @@ impl PanelVisibilitySnapshot {
 struct PanelSnapshot {
     product: Product,
     available: bool,
+    /// Takes its column's whole height whatever it lists (the compact Browser holding the History, #14566).
+    fills: bool,
     presentation: PanelPresentation,
     extent: Option<ContentExtent>,
 }
@@ -440,6 +442,7 @@ impl ProductionState {
             panels: Product::all_map(|product| PanelSnapshot {
                 product,
                 available: product.available(app),
+                fills: product == Product::Browser && crate::browser::holds_compact_history(app),
                 presentation: product.presentation(app),
                 extent: None,
             }),
@@ -449,14 +452,31 @@ impl ProductionState {
 }
 
 pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
+    enable_production_for(app, VIEWPORT, None)
+}
+
+pub(super) fn enable_pop_out_production(app: &mut crate::SolveApp, window: &str, remembered: Option<Value>) -> PanelResult<()> {
+    let mut preferences = PanelLayoutPreferences::default();
+    preferences.record = remembered;
+    enable_production_for(app, window, Some(&preferences))
+}
+
+fn enable_production_for(app: &mut crate::SolveApp, window: &str, pop_out: Option<&PanelLayoutPreferences>) -> PanelResult<()> {
     if app.panel_runtime.is_some() {
         return Err(error(Rule::Lifecycle, "application panel runtime is already enabled"));
     }
+    // Register inert plugin declarations before decoding saved workspace layouts.
+    // Otherwise their placements would be quarantined as unknown at every startup.
+    crate::plugins::sync_policy(app);
+    solidcraft_engine::plugin::sync_panels(&mut app.session);
+    let plugins = super::plugin::PluginState::initial(&app.session)?;
     let state = ProductionState::new(app)?;
-    let registry = registry()?;
+    let mut registry = registry()?;
+    plugins.register_specs(&mut registry)?;
     let workspace = WorkspaceId::new(WORKSPACES[0].0)?;
     let defaults = crate::prefs::Prefs::default();
-    let placement = if app.panel_layout_preferences.record.is_none() { &app.preferences } else { &defaults };
+    let settings = pop_out.unwrap_or(&app.panel_layout_preferences);
+    let placement = if settings.record.is_none() { &app.preferences } else { &defaults };
     let layout = default_layout(app, placement, workspace.clone(), &registry)?;
     let mut runtime = PanelRuntime::new(
         LayoutService::new(
@@ -464,15 +484,15 @@ pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
             layout,
             HostCapabilities {
                 persistence: true,
-                native_windows: cfg!(not(target_arch = "wasm32")),
-                max_native_hosts: if cfg!(target_arch = "wasm32") { 0 } else { MAX_SECTIONS },
+                native_windows: pop_out.is_none() && cfg!(not(target_arch = "wasm32")),
+                max_native_hosts: if pop_out.is_some() || cfg!(target_arch = "wasm32") { 0 } else { MAX_SECTIONS },
             },
         )?,
         RuntimeEnvironment {
             workspace: workspace.clone(),
             document: Some(DocumentId::new(app.session.document_id.clone())?),
-            window: HostId::new(VIEWPORT)?,
-            viewport: ViewportId::new(VIEWPORT)?,
+            window: HostId::new(window)?,
+            viewport: ViewportId::new(window)?,
             direction: crate::i18n::panel_direction(&app.preferences.language),
             motion: Motion::Animated,
         },
@@ -487,18 +507,20 @@ pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
             },
         )?;
     }
+    plugins.register_controllers(&mut runtime)?;
     let services = ProductionServices {
         models: ProductionModels,
         commands: ProductionCommands,
         local: ProductionLocal {
             workspace,
             document: DocumentId::new(app.session.document_id.clone())?,
-            viewport: ViewportId(VIEWPORT.into()),
+            viewport: ViewportId(window.into()),
             keyboard: None,
         },
     };
     let mut integration = AppPanelRuntime::new(runtime, Box::new(services))?;
     integration.production = Some(state);
+    integration.plugins = plugins;
     integration.tick(&app.session)?;
     let mut options = HostOptions { content_header_height: 0.0, ..Default::default() };
     options.geometry.default_opaque = false;
@@ -515,10 +537,12 @@ pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
             default_preset: name.into(),
         })?;
     }
-    let repaired = super::preferences::configure_preferences(&mut integration, &app.panel_layout_preferences, &mut catalogue)?;
+    let repaired = super::preferences::configure_preferences(&mut integration, settings, &mut catalogue)?;
     app.panel_runtime = Some(integration);
-    crate::bom_panel::set_focus_pending(app, true);
-    if repaired {
+    if pop_out.is_none() {
+        crate::bom_panel::set_focus_pending(app, true);
+    }
+    if repaired && pop_out.is_none() {
         super::preferences::report_notice(app);
     }
     Ok(())
@@ -557,6 +581,7 @@ pub(crate) fn refresh_production(app: &crate::SolveApp) -> PanelResult<()> {
     }
     for panel in &mut snapshot.panels {
         panel.available = panel.product.available(app);
+        panel.fills = panel.product == Product::Browser && crate::browser::holds_compact_history(app);
         panel.presentation = panel.product.presentation(app);
     }
     Ok(())
@@ -1225,11 +1250,12 @@ impl PanelController for ProductionController {
     }
     fn measure(&self, _owner: &ContentOwner, _models: &dyn PanelModels, spec: &PanelSpec) -> PanelResult<Arc<dyn HostContentMetrics>> {
         let snapshot = self.state.0.try_borrow().map_err(|_| error(Rule::Lifecycle, "content measurement is borrowed"))?;
+        let panel = snapshot.panels.iter().find(|panel| panel.product == self.product);
         Ok(Arc::new(ProductionMetrics {
-            extent: snapshot.panels.iter().find(|panel| panel.product == self.product).and_then(|panel| panel.extent),
+            extent: panel.and_then(|panel| panel.extent),
             strip_width: (self.product == Product::History).then(|| crate::ui_kit::history_width(false)),
             inset: solidcraft_theme::Tokens::get().space_2 * 2.0,
-            policy: spec.side_height_policy,
+            policy: if panel.is_some_and(|panel| panel.fills) { SideHeightPolicy::Fill } else { spec.side_height_policy },
         }))
     }
     fn prepare_lifecycle(&self, event: &LifecycleEvent) -> PanelResult<()> {
@@ -1480,7 +1506,7 @@ impl FramePanelContent for ProductionFrame<'_> {
         content: &mut dyn PanelController,
         services: &mut ContentServices<'_>,
     ) -> PanelResult<()> {
-        if Product::from_instance(&context.instance).is_err() {
+        if context.instance.0.starts_with(super::plugin::PREFIX) {
             return content.render(slot, ui, context, services);
         }
         if slot == ContentSlot::Title {

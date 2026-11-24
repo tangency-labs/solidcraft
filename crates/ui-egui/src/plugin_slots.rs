@@ -141,35 +141,12 @@ pub(crate) fn refresh(app: &mut SolveApp) {
     }
     let root = app.session.plugin_state.plugins_dir();
     let inspected = app.session.plugin_state.packages.clone();
-    #[cfg(not(target_arch = "wasm32"))]
-    let disabled = app.preferences.disabled_plugins.clone();
     let (tx, rx) = std::sync::mpsc::channel();
     #[cfg(not(target_arch = "wasm32"))]
     if std::thread::Builder::new()
         .name("plugin-discovery".into())
         .spawn(move || {
-            let (mut plugins, mut skipped) = plugins::inventory(root.as_deref(), inspected.values());
-            // Menus also use the inert inventory reader. Only this worker runs guest describe.
-            for plugin in &mut plugins {
-                if disabled.contains(&plugin.id) {
-                    plugin.declarations = Default::default();
-                    continue;
-                }
-                if plugin.declarations.is_empty() {
-                    continue;
-                }
-                let described = solidcraft_engine::plugin::read_package(&plugin.path).and_then(|package| {
-                    solidcraft_engine::plugin::describe_workspace_ui(&package).map(|declarations| (package.approval, declarations))
-                });
-                match described {
-                    Ok((approval, declarations)) if approval == plugin.approval => plugin.declarations = declarations,
-                    Ok(_) => plugin.declarations = Default::default(),
-                    Err(error) => {
-                        skipped.push(plugins::Skipped { folder: plugin.id.clone(), reason: error.to_string() });
-                        plugin.declarations = Default::default();
-                    }
-                }
-            }
+            let (plugins, skipped) = plugins::inventory(root.as_deref(), inspected.values());
             let _ = tx.send(Inventory { root, plugins, skipped });
         })
         .is_err()
@@ -188,6 +165,23 @@ pub(crate) fn items(app: &SolveApp, slot: Slot) -> Vec<Item> {
         .filter(|item| item.slot == slot && item.command.split_once('.').is_some_and(|(id, _)| plugins::enabled(app, id)))
         .cloned()
         .collect()
+}
+
+/// The File menu's Export rows for the installed, enabled plugins' export slots (RFC 0015 §4):
+/// each slot's `plugin_id.entry` and its row label, "Export <label> (.ext)…", where the label is
+/// the slot's own or the plugin's name. From the discovered inventory: no file is read here.
+pub(crate) fn export_slots(app: &SolveApp) -> Vec<(String, String)> {
+    let Some(inventory) = app.plugin_slots.inventory.as_ref() else { return Vec::new() };
+    let mut rows = Vec::new();
+    for plugin in inventory.plugins.iter().filter(|p| plugins::enabled(app, &p.id)) {
+        for entry in plugin.entries.iter().filter(|e| e.kind == solidcraft_engine::plugin::EntryKind::Exporter) {
+            let label = if entry.label.is_empty() { plugin.name.as_str() } else { entry.label.as_str() };
+            let extensions = entry.extensions.iter().map(|e| format!(".{e}")).collect::<Vec<_>>().join(", ");
+            let label = solidcraft_ui_text::format("plugin_export.menu", &[("format", label), ("extensions", &extensions)]);
+            rows.push((format!("{}.{}", plugin.id, entry.name), label));
+        }
+    }
+    rows
 }
 
 /// Open the same input-schema dialog as the Plugins menu, resolving the namespaced entry id.

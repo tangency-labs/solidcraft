@@ -68,6 +68,7 @@
 //!   relabelled as [`PolarBoxState::Arc`] (WR-9); upstream keeps
 //!   `[lo.x, hi.x] x [lo.y, hi.y]`.
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::{Point2, Vec2};
@@ -240,9 +241,9 @@ impl PolarBox {
     /// (upstream returns `SmPoint2d()`).
     pub fn compute_polar_coord(&self, v: Vec3) -> Result<Point2> {
         if self.state.is_unknown() {
-            return Err(SolidError::geom_failed(
+            return Err(SolidError::geom(
                 "geom::polar_box::compute_polar_coord",
-                "the polar box is not set up",
+                GeomFailure::BoxNotSetUp,
             ));
         }
         Ok(self.polar_coord_raw(v))

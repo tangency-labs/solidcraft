@@ -420,6 +420,8 @@ pub(crate) struct Action {
 /// `app.quit {force?}`.
 #[derive(Deserialize)]
 pub(crate) struct Quit {
+    #[serde(default = "yes")]
+    pub ask: bool,
     #[serde(default)]
     pub force: bool,
 }

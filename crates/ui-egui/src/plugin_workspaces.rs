@@ -7,12 +7,12 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use solidcraft_engine::panels::*;
-use solidcraft_engine::plugin::{DesignKind, DockZone, PanelWidget, UiPanelSpec, WorkspaceSpec};
+use solidcraft_engine::plugin::ui::{DesignKind, DockZone, WorkspaceSpec};
 
 use crate::panel_runtime::*;
 use crate::{SolveApp, plugins};
 
-pub(crate) type CommandQueue = Rc<RefCell<VecDeque<(String, String)>>>;
+type CommandQueue = Rc<RefCell<VecDeque<(String, String)>>>;
 
 #[derive(Clone)]
 pub(crate) struct Workspace {
@@ -80,6 +80,22 @@ pub(crate) fn builtin_available(app: &SolveApp, panel: &str) -> bool {
     app.plugin_workspaces.active.as_ref().is_none_or(|workspace| workspace.spec.builtin_panels.iter().any(|id| id == panel))
 }
 
+/// Whether the plugin panel may open in the current layout. A plugin workspace shows exactly the
+/// panels it places; built-in workspaces open every declared panel as usual.
+pub(crate) fn panel_allowed(app: &SolveApp, plugin: &str, panel: &str) -> bool {
+    app.plugin_workspaces
+        .active
+        .as_ref()
+        .is_none_or(|workspace| workspace.plugin.id == plugin && workspace.spec.panels.iter().any(|(_, ids)| ids.iter().any(|id| id == panel)))
+}
+
+/// The identity the shared panel runtime gives one of a plugin's declared panels.
+#[cfg(test)]
+pub(crate) fn panel_instance(plugin: &plugins::Plugin, panel: &str) -> Option<InstanceId> {
+    let declared = plugin.declarations.panels.iter().find(|declared| declared.id == panel)?;
+    crate::panel_runtime::plugin_instance(&plugin.id, declared).ok()
+}
+
 pub(crate) fn discovered(app: &mut SolveApp, plugins: &[plugins::Plugin]) {
     app.plugin_workspaces.items = plugins
         .iter()
@@ -107,7 +123,7 @@ fn workspace_kind(app: &SolveApp) -> DesignKind {
 }
 
 fn design_kind(app: &SolveApp) -> DesignKind {
-    if crate::drawing_workspace::active(app) {
+    if crate::drawing_workspace::active(app) || crate::workspace::sheet_scope(app) {
         DesignKind::Drawing
     } else if app.session.active_sketch.is_some() {
         DesignKind::Sketch
@@ -124,7 +140,7 @@ pub(crate) fn switcher_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
         .iter()
         .filter(|workspace| plugins::enabled(app, &workspace.plugin.id))
         .map(|workspace| {
-            let enabled = applicable(app, workspace) && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy();
+            let enabled = applicable(app, workspace) && switchable(app);
             let action = format!("ui.workspace.{}", workspace.id);
             let mut item = crate::context_menu::act(&action, &workspace.spec.name, &workspace.spec.icon)
                 .with(json!({"workspace":workspace.id}))
@@ -136,6 +152,15 @@ pub(crate) fn switcher_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
             item
         })
         .collect()
+}
+
+/// Whether the window may change workspace now, by the same rule the built-in switcher uses.
+fn switchable(app: &SolveApp) -> bool {
+    if app.preferences.workspace_follows_view {
+        crate::workspace::switcher_available(app)
+    } else {
+        app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()
+    }
 }
 
 fn switch_layout(app: &mut SolveApp, workspace: &WorkspaceId) -> Result<(), String> {
@@ -159,7 +184,7 @@ pub(crate) fn enter(app: &mut SolveApp, id: &str) -> Result<(), String> {
         .find(|workspace| workspace.id == id && plugins::enabled(app, &workspace.plugin.id))
         .cloned()
         .ok_or_else(|| app_error("ui.plugin_workspace.unknown"))?;
-    if !applicable(app, &workspace) || app.tool.is_some() || app.dialog.is_some() || app.file_load.busy() {
+    if !applicable(app, &workspace) || !switchable(app) {
         return Err(app_error("ui.plugin_workspace.unavailable"));
     }
     // Build and validate registrations before changing the current workspace.
@@ -169,7 +194,6 @@ pub(crate) fn enter(app: &mut SolveApp, id: &str) -> Result<(), String> {
     if app.plugin_workspaces.registered.get(id).is_some_and(|approval| *approval != workspace.plugin.approval) {
         return Err(app_error("ui.plugin_workspace.updated"));
     }
-    let queue = app.plugin_workspaces.commands.clone();
     let base = app
         .plugin_workspaces
         .base_layout
@@ -177,7 +201,7 @@ pub(crate) fn enter(app: &mut SolveApp, id: &str) -> Result<(), String> {
         .or_else(|| app.panel_runtime.as_ref().map(|integration| integration.runtime().layout().layout().clone()))
         .ok_or_else(|| app_error("ui.plugin_workspace.unavailable"))?;
     let integration = app.panel_runtime.as_mut().ok_or_else(|| app_error("ui.plugin_workspace.unavailable"))?;
-    integration.register_plugin_workspace(&workspace, &base, queue).map_err(|error| error.to_string())?;
+    integration.register_plugin_workspace(&workspace, &base).map_err(|error| error.to_string())?;
     let previous = integration.runtime().layout().layout().workspace.clone();
     let old_tab = app.ui.tab.clone();
     let kind = workspace_kind(app);
@@ -408,112 +432,5 @@ pub(crate) fn zone(zone: DockZone) -> Zone {
         DockZone::Left => Zone::Left,
         DockZone::Right => Zone::Right,
         DockZone::Bottom => Zone::Bottom,
-    }
-}
-
-pub(crate) fn panels(workspace: &Workspace, queue: CommandQueue) -> Vec<(PanelSpec, ControllerBinding)> {
-    workspace
-        .plugin
-        .declarations
-        .panels
-        .iter()
-        .map(|panel| {
-            let panel = panel.clone();
-            let plugin = workspace.plugin.clone();
-            let queue = queue.clone();
-            let spec = PanelSpec {
-                kind: PanelKind(identity(&plugin.id, &panel.id)),
-                title_key: "ui.plugin_workspace.panel".into(),
-                icon: "prefs_plugins".into(),
-                allowed_zones: panel.zones.iter().copied().map(zone).chain([Zone::Floating]).collect(),
-                default_zone: panel.zones.first().copied().map(zone).unwrap_or(Zone::Left),
-                min_size: Size { width: 240.0, height: 80.0 },
-                default_size: Size { width: 280.0, height: 240.0 },
-                max_size: Size { width: MAX_LOGICAL, height: MAX_LOGICAL },
-                edge_rule: EdgeRule::None,
-                surface: PanelSurface::Translucent,
-                features: PanelFeatures { popout: false, ..Default::default() },
-                side_height_policy: SideHeightPolicy::Content,
-                fixed_bottom_height: None,
-                header_actions: Vec::new(),
-                text_heavy: false,
-            };
-            let binding = ControllerBinding {
-                ownership: Ownership::Document,
-                create: Box::new(move |_, _| {
-                    Ok(Box::new(PluginPanel {
-                        plugin: plugin.id.clone(),
-                        title: format!("{} · {}", plugin.name, panel.title),
-                        panel: panel.clone(),
-                        queue: queue.clone(),
-                    }))
-                }),
-            };
-            (spec, binding)
-        })
-        .collect()
-}
-
-struct PluginPanel {
-    plugin: String,
-    title: String,
-    panel: UiPanelSpec,
-    queue: CommandQueue,
-}
-impl PanelController for PluginPanel {
-    fn availability(&self, _owner: &ContentOwner, _models: &dyn PanelModels) -> Availability {
-        Availability::Available
-    }
-    fn update(&mut self, _owner: &ContentOwner, _services: &mut ContentServices<'_>) -> PanelResult<()> {
-        Ok(())
-    }
-    fn presentation(&self) -> PanelPresentation {
-        PanelPresentation {
-            title: self.title.clone(),
-            icon: "prefs_plugins".into(),
-            status: Some(app_error("ui.plugin_workspace.badge")),
-            attention: false,
-            actions: Vec::new(),
-        }
-    }
-    fn prepare_lifecycle(&self, _event: &LifecycleEvent) -> PanelResult<()> {
-        Ok(())
-    }
-    fn lifecycle(&mut self, _event: &LifecycleEvent) {}
-    fn render(&mut self, slot: ContentSlot, ui: &mut egui::Ui, _context: &PanelContext, _services: &mut ContentServices<'_>) -> PanelResult<()> {
-        if !matches!(slot, ContentSlot::Body | ContentSlot::Inline) {
-            return Ok(());
-        }
-        let t = solidcraft_theme::Tokens::get();
-        // Flatten the validated tree iteratively; the host owns every widget and its size.
-        let mut pending = vec![self.panel.layout.root];
-        let mut remaining = 512;
-        while let Some(index) = pending.pop() {
-            if remaining == 0 {
-                break;
-            }
-            remaining -= 1;
-            let Some(node) = self.panel.layout.nodes.get(index as usize) else { break };
-            match &node.widget {
-                PanelWidget::Group { children } => pending.extend(children.iter().rev().copied()),
-                PanelWidget::Text { text } => {
-                    ui.label(text);
-                }
-                PanelWidget::Button { label, entry, .. } => {
-                    if ui.add_sized([0.0, t.control_height], egui::Button::new(label)).clicked()
-                        && let Ok(mut queue) = self.queue.try_borrow_mut()
-                    {
-                        queue.push_back((self.plugin.clone(), entry.clone()));
-                    }
-                }
-                PanelWidget::Unknown => {
-                    ui.label(app_error("ui.plugin_workspace.newer"));
-                }
-            }
-        }
-        Ok(())
-    }
-    fn action(&mut self, _owner: &ContentOwner, _action: &ControlId, _services: &mut ContentServices<'_>) -> PanelResult<()> {
-        Err(error(Rule::Capability, "plugin panel actions use manifest entries"))
     }
 }

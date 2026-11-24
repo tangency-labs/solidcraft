@@ -1,11 +1,9 @@
 {
   "ar": {
-    "ui.plugin_workspace.badge": "إضافة",
     "ui.plugin_workspace.description": "مساحة عمل توفرها إضافة مفعّلة.",
     "ui.plugin_workspace.hook_failed": "مساحة العمل {workspace}: {error}",
     "ui.plugin_workspace.hooks": "يشغّل إجراءات للقراءة فقط عند الدخول إلى مساحة العمل أو مغادرتها.",
     "ui.plugin_workspace.install": "يضيف مساحة العمل {name}.",
-    "ui.plugin_workspace.newer": "تحتاج هذه الأداة إلى إصدار أحدث من SolidCraft.",
     "ui.plugin_workspace.panel": "لوحة الإضافة",
     "ui.plugin_workspace.tabs": "أدوات الإضافة",
     "ui.plugin_workspace.unavailable": "مساحة العمل هذه غير متاحة للتصميم أو العملية الحالية.",
@@ -13,12 +11,10 @@
     "ui.plugin_workspace.updated": "تغيّرت هذه الإضافة. أعد تشغيل SolidCraft قبل الدخول إلى مساحة عملها."
   },
   "de": {
-    "ui.plugin_workspace.badge": "Plugin",
     "ui.plugin_workspace.description": "Ein Arbeitsbereich eines aktivierten Plugins.",
     "ui.plugin_workspace.hook_failed": "Arbeitsbereich {workspace}: {error}",
     "ui.plugin_workspace.hooks": "Führt beim Öffnen oder Verlassen dieses Arbeitsbereichs schreibgeschützte Einträge aus.",
     "ui.plugin_workspace.install": "Fügt den Arbeitsbereich {name} hinzu.",
-    "ui.plugin_workspace.newer": "Dieses Steuerelement benötigt eine neuere Version von SolidCraft.",
     "ui.plugin_workspace.panel": "Plugin-Bereich",
     "ui.plugin_workspace.tabs": "Plugin-Werkzeuge",
     "ui.plugin_workspace.unavailable": "Dieser Arbeitsbereich ist für den aktuellen Entwurf oder Vorgang nicht verfügbar.",
@@ -26,12 +22,10 @@
     "ui.plugin_workspace.updated": "Dieses Plugin wurde geändert. Starten Sie SolidCraft neu, bevor Sie seinen Arbeitsbereich öffnen."
   },
   "en": {
-    "ui.plugin_workspace.badge": "Plugin",
     "ui.plugin_workspace.description": "A workspace provided by an enabled plugin.",
     "ui.plugin_workspace.hook_failed": "Workspace {workspace}: {error}",
     "ui.plugin_workspace.hooks": "Runs read-only entries when entering or leaving this workspace.",
     "ui.plugin_workspace.install": "Adds the {name} workspace.",
-    "ui.plugin_workspace.newer": "This widget needs a newer SolidCraft.",
     "ui.plugin_workspace.panel": "Plugin panel",
     "ui.plugin_workspace.tabs": "Plugin tools",
     "ui.plugin_workspace.unavailable": "This workspace is unavailable for the current design or operation.",
@@ -39,12 +33,10 @@
     "ui.plugin_workspace.updated": "This plugin has changed. Restart SolidCraft before entering its workspace."
   },
   "en-GB": {
-    "ui.plugin_workspace.badge": "Plugin",
     "ui.plugin_workspace.description": "A workspace provided by an enabled plugin.",
     "ui.plugin_workspace.hook_failed": "Workspace {workspace}: {error}",
     "ui.plugin_workspace.hooks": "Runs read-only entries when entering or leaving this workspace.",
     "ui.plugin_workspace.install": "Adds the {name} workspace.",
-    "ui.plugin_workspace.newer": "This widget needs a newer SolidCraft.",
     "ui.plugin_workspace.panel": "Plugin panel",
     "ui.plugin_workspace.tabs": "Plugin tools",
     "ui.plugin_workspace.unavailable": "This workspace is unavailable for the current design or operation.",
@@ -52,12 +44,10 @@
     "ui.plugin_workspace.updated": "This plugin has changed. Restart SolidCraft before entering its workspace."
   },
   "es": {
-    "ui.plugin_workspace.badge": "Complemento",
     "ui.plugin_workspace.description": "Un espacio de trabajo proporcionado por un complemento activado.",
     "ui.plugin_workspace.hook_failed": "Espacio de trabajo {workspace}: {error}",
     "ui.plugin_workspace.hooks": "Ejecuta entradas de solo lectura al entrar o salir de este espacio de trabajo.",
     "ui.plugin_workspace.install": "Añade el espacio de trabajo {name}.",
-    "ui.plugin_workspace.newer": "Este control necesita una versión más reciente de SolidCraft.",
     "ui.plugin_workspace.panel": "Panel del complemento",
     "ui.plugin_workspace.tabs": "Herramientas del complemento",
     "ui.plugin_workspace.unavailable": "Este espacio de trabajo no está disponible para el diseño o la operación actual.",
@@ -65,12 +55,10 @@
     "ui.plugin_workspace.updated": "Este complemento ha cambiado. Reinicie SolidCraft antes de entrar en su espacio de trabajo."
   },
   "he": {
-    "ui.plugin_workspace.badge": "תוסף",
     "ui.plugin_workspace.description": "סביבת עבודה שמסופקת על ידי תוסף פעיל.",
     "ui.plugin_workspace.hook_failed": "סביבת העבודה {workspace}: {error}",
     "ui.plugin_workspace.hooks": "מפעיל פעולות לקריאה בלבד בכניסה לסביבת העבודה או ביציאה ממנה.",
     "ui.plugin_workspace.install": "מוסיף את סביבת העבודה {name}.",
-    "ui.plugin_workspace.newer": "רכיב זה דורש גרסה חדשה יותר של SolidCraft.",
     "ui.plugin_workspace.panel": "לוח תוסף",
     "ui.plugin_workspace.tabs": "כלי תוסף",
     "ui.plugin_workspace.unavailable": "סביבת העבודה אינה זמינה לתכנון או לפעולה הנוכחיים.",
@@ -78,12 +66,10 @@
     "ui.plugin_workspace.updated": "התוסף השתנה. יש להפעיל מחדש את SolidCraft לפני הכניסה לסביבת העבודה שלו."
   },
   "ja": {
-    "ui.plugin_workspace.badge": "プラグイン",
     "ui.plugin_workspace.description": "有効なプラグインが提供するワークスペースです。",
     "ui.plugin_workspace.hook_failed": "ワークスペース {workspace}: {error}",
     "ui.plugin_workspace.hooks": "このワークスペースの開始時と終了時に読み取り専用の処理を実行します。",
     "ui.plugin_workspace.install": "ワークスペース {name} を追加します。",
-    "ui.plugin_workspace.newer": "このウィジェットには新しいバージョンの SolidCraft が必要です。",
     "ui.plugin_workspace.panel": "プラグインパネル",
     "ui.plugin_workspace.tabs": "プラグインツール",
     "ui.plugin_workspace.unavailable": "現在の設計または操作ではこのワークスペースを使用できません。",
@@ -91,12 +77,10 @@
     "ui.plugin_workspace.updated": "このプラグインは変更されました。ワークスペースを開く前に SolidCraft を再起動してください。"
   },
   "ko": {
-    "ui.plugin_workspace.badge": "플러그인",
     "ui.plugin_workspace.description": "활성화된 플러그인이 제공하는 작업 공간입니다.",
     "ui.plugin_workspace.hook_failed": "작업 공간 {workspace}: {error}",
     "ui.plugin_workspace.hooks": "이 작업 공간에 들어가거나 나갈 때 읽기 전용 항목을 실행합니다.",
     "ui.plugin_workspace.install": "{name} 작업 공간을 추가합니다.",
-    "ui.plugin_workspace.newer": "이 위젯에는 더 새로운 SolidCraft가 필요합니다.",
     "ui.plugin_workspace.panel": "플러그인 패널",
     "ui.plugin_workspace.tabs": "플러그인 도구",
     "ui.plugin_workspace.unavailable": "현재 설계 또는 작업에서는 이 작업 공간을 사용할 수 없습니다.",
@@ -104,12 +88,10 @@
     "ui.plugin_workspace.updated": "이 플러그인이 변경되었습니다. 작업 공간에 들어가기 전에 SolidCraft를 다시 시작하세요."
   },
   "uk": {
-    "ui.plugin_workspace.badge": "Плагін",
     "ui.plugin_workspace.description": "Робочий простір, який надає ввімкнений плагін.",
     "ui.plugin_workspace.hook_failed": "Робочий простір {workspace}: {error}",
     "ui.plugin_workspace.hooks": "Виконує дії лише для читання під час входу до цього робочого простору або виходу з нього.",
     "ui.plugin_workspace.install": "Додає робочий простір {name}.",
-    "ui.plugin_workspace.newer": "Для цього віджета потрібна новіша версія SolidCraft.",
     "ui.plugin_workspace.panel": "Панель плагіна",
     "ui.plugin_workspace.tabs": "Інструменти плагіна",
     "ui.plugin_workspace.unavailable": "Цей робочий простір недоступний для поточного проєкту або операції.",
@@ -117,12 +99,10 @@
     "ui.plugin_workspace.updated": "Цей плагін змінився. Перезапустіть SolidCraft перед входом до його робочого простору."
   },
   "vi": {
-    "ui.plugin_workspace.badge": "Phần bổ trợ",
     "ui.plugin_workspace.description": "Không gian làm việc do phần bổ trợ đang bật cung cấp.",
     "ui.plugin_workspace.hook_failed": "Không gian làm việc {workspace}: {error}",
     "ui.plugin_workspace.hooks": "Chạy các mục chỉ đọc khi vào hoặc rời không gian làm việc này.",
     "ui.plugin_workspace.install": "Thêm không gian làm việc {name}.",
-    "ui.plugin_workspace.newer": "Tiện ích này cần phiên bản SolidCraft mới hơn.",
     "ui.plugin_workspace.panel": "Bảng phần bổ trợ",
     "ui.plugin_workspace.tabs": "Công cụ phần bổ trợ",
     "ui.plugin_workspace.unavailable": "Không gian làm việc này không khả dụng cho thiết kế hoặc thao tác hiện tại.",
@@ -130,12 +110,10 @@
     "ui.plugin_workspace.updated": "Phần bổ trợ này đã thay đổi. Hãy khởi động lại SolidCraft trước khi mở không gian làm việc của nó."
   },
   "zh": {
-    "ui.plugin_workspace.badge": "插件",
     "ui.plugin_workspace.description": "由已启用的插件提供的工作区。",
     "ui.plugin_workspace.hook_failed": "工作区 {workspace}：{error}",
     "ui.plugin_workspace.hooks": "进入或离开此工作区时运行只读入口。",
     "ui.plugin_workspace.install": "添加 {name} 工作区。",
-    "ui.plugin_workspace.newer": "此控件需要更新版本的 SolidCraft。",
     "ui.plugin_workspace.panel": "插件面板",
     "ui.plugin_workspace.tabs": "插件工具",
     "ui.plugin_workspace.unavailable": "当前设计或操作无法使用此工作区。",

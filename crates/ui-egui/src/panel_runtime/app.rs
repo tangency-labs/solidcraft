@@ -18,15 +18,18 @@ pub trait AppPanelServices {
 }
 
 pub struct AppPanelRuntime {
+    pub(super) plugins: super::plugin::PluginState,
     pub(super) production: Option<super::production::ProductionState>,
-    runtime: PanelRuntime,
+    pub(super) runtime: PanelRuntime,
     services: Box<dyn AppPanelServices>,
     native: Box<dyn NativeHostAdapter>,
     #[cfg(not(target_arch = "wasm32"))]
     desktop: Option<super::native::DesktopNativeAdapter>,
     host: Option<WorkspacePanelHost>,
     last_tick_frame: Option<u64>,
+    detached_content: crate::semantic_content::Detached,
     last_error: Option<PanelError>,
+    sync_error: Option<PanelError>,
     catalogue: Box<dyn commands::LayoutCatalogue>,
     adapters_set: bool,
     pub(super) preferences: Option<super::preferences::PreferenceSession>,
@@ -38,6 +41,7 @@ impl AppPanelRuntime {
             return Err(error(Rule::Lifecycle, "install the app adapter before creating or restoring native placement"));
         }
         Ok(Self {
+            plugins: Default::default(),
             production: None,
             runtime,
             services,
@@ -46,7 +50,9 @@ impl AppPanelRuntime {
             desktop: None,
             host: None,
             last_tick_frame: None,
+            detached_content: Default::default(),
             last_error: None,
+            sync_error: None,
             catalogue: Box::<commands::InMemoryCatalogue>::default(),
             adapters_set: false,
             preferences: None,
@@ -94,7 +100,7 @@ impl AppPanelRuntime {
     }
 
     pub fn last_error(&self) -> Option<&PanelError> {
-        self.last_error.as_ref()
+        self.sync_error.as_ref().or(self.last_error.as_ref())
     }
     pub fn runtime(&self) -> &PanelRuntime {
         &self.runtime
@@ -1134,11 +1140,11 @@ impl crate::SolveApp {
         Ok(())
     }
     pub fn universal_panel_host_enabled(&self) -> bool {
-        !self.view_windows.is_child()
+        (!self.view_windows.is_child() || self.view_windows.painting_panels)
             && (self.panel_content_frame.is_some() || self.panel_runtime.as_ref().is_some_and(|integration| integration.host.is_some()))
     }
     pub fn universal_panel_frame(&self) -> Option<&HostFrame> {
-        if self.view_windows.is_child() {
+        if self.view_windows.is_child() && !self.view_windows.painting_panels {
             return None;
         }
         self.panel_runtime
@@ -1214,13 +1220,18 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             integration.last_error = Some(reason);
         }
     }
+    if app.panel_runtime.as_ref().is_some_and(|integration| integration.last_tick_frame == Some(ctx.cumulative_frame_nr())) {
+        return;
+    }
     crate::plugin_workspaces::tick(app, ctx);
-    if let Err(reason) = super::production::drain_production_actions(app)
+    let plugin_error = super::plugin::sync(app).err();
+    let production_error = super::production::drain_production_actions(app)
         .and_then(|()| super::production::sync_production_visibility(app))
         .and_then(|()| super::production::refresh_production(app))
-        && let Some(integration) = &mut app.panel_runtime
-    {
-        integration.last_error = Some(reason);
+        .err();
+    if let Some(integration) = &mut app.panel_runtime {
+        // Context reconciliation and painting cannot resolve an earlier sync failure.
+        integration.sync_error = plugin_error.or(production_error);
     }
     let direction = crate::i18n::panel_direction(&app.preferences.language);
     // The Browser's search field takes its title's place while it is open (#1634).
@@ -1319,6 +1330,125 @@ pub(crate) fn reserve_host_input(app: &mut crate::SolveApp, ctx: &egui::Context)
     if host.wants_escape(&integration.runtime) && crate::ui_kit::Container::reserve_host_escape(ctx) {
         host.request_escape();
         app.esc_handled = true;
+    }
+}
+
+/// State for one detached window. Swap it in only during that viewport's pass;
+/// root paint, focus, layout commands and preference saves keep their own host.
+#[derive(Default)]
+pub(crate) struct PopOutPanels {
+    runtime: Option<AppPanelRuntime>,
+    frame: Option<HostFrame>,
+    seen_layout: Option<u64>,
+    record: Option<serde_json::Value>,
+}
+
+impl PopOutPanels {
+    pub(crate) fn load(&mut self, record: &Option<serde_json::Value>) {
+        if &self.record != record {
+            self.runtime = None;
+            self.frame = None;
+            self.seen_layout = None;
+            self.record.clone_from(record);
+        }
+    }
+
+    pub(crate) fn swap(&mut self, app: &mut crate::SolveApp) {
+        std::mem::swap(&mut self.runtime, &mut app.panel_runtime);
+        std::mem::swap(&mut self.frame, &mut app.panel_content_frame);
+    }
+
+    pub(crate) fn save(&mut self, app: &crate::SolveApp, remembered: &mut Option<serde_json::Value>) {
+        let Some(integration) = &app.panel_runtime else { return };
+        if integration.preferences.as_ref().is_some_and(|settings| settings.pending.is_some()) {
+            return;
+        }
+        let revision = integration.runtime().layout().inspect().revision;
+        if self.seen_layout == Some(revision) {
+            return;
+        }
+        if let Ok(record) = integration.preference_record()
+            && let Some(record) = solidcraft_views::ViewSet::read_panel_layout(&record.value())
+        {
+            *remembered = Some(record.clone());
+            self.record = Some(record);
+            self.seen_layout = Some(revision);
+        }
+    }
+}
+
+pub(crate) fn panel_workspace(app: &crate::SolveApp) -> Option<WorkspaceId> {
+    app.panel_runtime.as_ref().map(|integration| integration.runtime().layout().layout().workspace.clone())
+}
+
+pub(crate) fn prepare_pop_out_panels(
+    app: &mut crate::SolveApp,
+    ui: &egui::Ui,
+    domain: egui::Rect,
+    workspace: Option<&WorkspaceId>,
+    owner: &str,
+    remembered: &Option<serde_json::Value>,
+) -> bool {
+    if !domain.is_finite() || !domain.is_positive() {
+        return false;
+    }
+    let gap = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Panel).gap();
+    let mut capacity = domain.shrink(gap.min(domain.width().min(domain.height()) / 4.0));
+    let chrome: Vec<_> = app.shell.ribbon_overlay.into_iter().map(logical_rect).collect();
+    if let Some(ribbon) = app.shell.ribbon_overlay {
+        capacity.min.y = ribbon.bottom().clamp(capacity.min.y, capacity.max.y);
+    }
+    let force_opaque = app.services.reduce_transparency.as_ref().and_then(|read| read(true)) == Some(true);
+    let language_direction = crate::i18n::panel_direction(&app.preferences.language);
+    let shortcuts = crate::keymap::panel_shortcuts(app);
+    let result: PanelResult<()> = (|| {
+        if app.panel_runtime.is_none() {
+            super::production::enable_pop_out_production(app, owner, remembered.clone())?;
+        }
+        super::production::sync_production_visibility(app)?;
+        super::production::refresh_production(app)?;
+        let runtime = app.panel_runtime.as_mut().ok_or_else(|| error(Rule::Lifecycle, "detached panel host unavailable"))?;
+        runtime.sync_native_direction(language_direction)?;
+        let frame = ui.ctx().cumulative_frame_nr();
+        if runtime.last_tick_frame != Some(frame) {
+            runtime.tick(&app.session)?;
+            runtime.last_tick_frame = Some(frame);
+        }
+        runtime.set_keyboard_shortcuts(shortcuts);
+        if let Some(host) = &mut runtime.host {
+            host.note_egui_context(ui.ctx(), force_opaque);
+            host.set_gap(gap)?;
+            host.set_live_drag(app.preferences.live_panel_drag_preview);
+        }
+        runtime.prepare_host_in_domain(&app.session, logical_rect(domain), logical_rect(capacity), &chrome)?;
+        if let Some(workspace) = workspace
+            && &runtime.runtime().layout().layout().workspace != workspace
+            && runtime.preferences.as_ref().is_some_and(|settings| settings.pending.is_none())
+        {
+            runtime.command(&app.session, "layout.workspace.select", &serde_json::json!({"workspace": workspace}))?;
+            runtime.prepare_host_in_domain(&app.session, logical_rect(domain), logical_rect(capacity), &chrome)?;
+        }
+        Ok(())
+    })();
+    if let Err(reason) = &result
+        && let Some(runtime) = &mut app.panel_runtime
+    {
+        runtime.last_error = Some(reason.clone());
+    }
+    result.is_ok()
+}
+
+pub(crate) fn paint_pop_out_panels(app: &mut crate::SolveApp, ui: &mut egui::Ui) {
+    if let Some(mut integration) = app.panel_runtime.take() {
+        let mut content = std::mem::take(&mut integration.detached_content);
+        content.show(app, ui, |app, ui| {
+            if let Err(reason) = integration.show_production_host(app, ui) {
+                integration.last_error = Some(reason);
+            }
+        });
+        integration.detached_content = content;
+        app.panel_content_frame = None;
+        app.panel_runtime = Some(integration);
     }
 }
 
@@ -1517,35 +1647,36 @@ impl crate::SolveApp {
 }
 
 impl AppPanelRuntime {
-    /// Extend the host with a validated plugin's own panel kinds and immutable starting layout.
-    pub(crate) fn register_plugin_workspace(
-        &mut self,
-        workspace: &crate::plugin_workspaces::Workspace,
-        base: &Layout,
-        queue: crate::plugin_workspaces::CommandQueue,
-    ) -> PanelResult<()> {
+    /// Give a plugin workspace its immutable starting layout: the host panels it keeps, then the
+    /// plugin's own declared panels where it places them. The panels are the ones the shared
+    /// plugin-panel runtime draws, so a workspace adds placement, never a second widget set.
+    pub(crate) fn register_plugin_workspace(&mut self, workspace: &crate::plugin_workspaces::Workspace, base: &Layout) -> PanelResult<()> {
         use commands::LayoutCatalogue as _;
         let id = WorkspaceId::new(&workspace.id)?;
         let registered = self.catalogue.state().summaries().iter().any(|entry| entry.id == id);
-        let panels = crate::plugin_workspaces::panels(workspace, queue)
-            .into_iter()
-            .filter(|(spec, _)| self.runtime.layout().registry().get(&spec.kind).is_err())
-            .collect::<Vec<_>>();
-        let mut registry = self.runtime.layout().registry().clone();
-        for (spec, _) in &panels {
-            registry.register(spec.clone())?;
+        let mut placed = Vec::new();
+        for (dock, ids) in &workspace.spec.panels {
+            for panel in ids {
+                let declared = workspace
+                    .plugin
+                    .declarations
+                    .panels
+                    .iter()
+                    .find(|declared| declared.id == *panel)
+                    .ok_or_else(|| error(Rule::MissingTarget, "workspace places an undeclared panel"))?;
+                let instance = self.plugins.ensure_registered(&mut self.runtime, &workspace.plugin.id, declared)?;
+                placed.push((crate::plugin_workspaces::zone(*dock), instance));
+            }
         }
         if registered {
-            if !panels.is_empty() {
-                self.runtime.register_panels(panels)?;
-            }
             return Ok(());
         }
+        let registry = self.runtime.layout().registry().clone();
         let mut layout = base.clone();
         layout.workspace = id.clone();
         layout.extent_priority_context = ExtentPriorityContext::default();
         for builtin in &workspace.spec.builtin_panels {
-            if !layout.instances.iter().any(|instance| instance.id.0 == *builtin && !instance.id.0.starts_with("plugin.")) {
+            if !layout.instances.iter().any(|instance| instance.id.0 == *builtin && !instance.id.0.starts_with(super::plugin::PREFIX)) {
                 return Err(error(Rule::MissingTarget, "workspace names an unavailable built-in panel"));
             }
         }
@@ -1561,61 +1692,56 @@ impl AppPanelRuntime {
         }
         layout.sections.retain(|section| !section.tabs.is_empty());
         layout.columns.retain(|column| layout.sections.iter().any(|section| section.column.as_ref() == Some(&column.id)));
-        for (dock, ids) in &workspace.spec.panels {
-            let zone = crate::plugin_workspaces::zone(*dock);
-            for panel in ids {
-                let key = crate::plugin_workspaces::identity(&workspace.plugin.id, panel);
-                let instance = InstanceId::new(&key)?;
-                let kind = PanelKind::new(&key)?;
-                let spec = registry.get(&kind)?;
-                let size = spec.default_size;
-                let section = SectionId::new(&key)?;
-                let location = SectionLocation::Dock { zone };
-                let dock_key = format!("{}.{zone:?}", workspace.spec.id);
-                let column = zone.side().then(|| ColumnId(crate::plugin_workspaces::identity(&workspace.plugin.id, &dock_key)));
-                if let Some(column) = &column
-                    && !layout.columns.iter().any(|existing| existing.id == *column)
-                {
-                    layout.columns.push(Column { id: column.clone(), zone, width: size.width });
-                }
-                let column_index = layout
-                    .columns
-                    .iter()
-                    .filter(|existing| existing.zone == zone)
-                    .position(|existing| Some(&existing.id) == column.as_ref())
-                    .unwrap_or(0);
-                layout.instances.push(PanelInstance {
-                    id: instance.clone(),
-                    kind,
-                    requested_open: true,
-                    memory: PlacementMemory {
-                        section: section.clone(),
-                        location: location.clone(),
-                        section_index: layout.sections.len(),
-                        tab_index: 0,
-                        size,
-                        collapsed: false,
-                        column: column.clone(),
-                        column_index,
-                        column_width: column.as_ref().map(|_| size.width),
-                        weight: 1.0,
-                        preferred_extent: None,
-                        extent_priority: 0,
-                    },
-                });
-                layout.sections.push(Section {
-                    id: section,
-                    location,
-                    tabs: vec![instance.clone()],
-                    active: instance,
+        for (zone, instance) in placed {
+            let kind = PanelKind::new(&instance.0)?;
+            let spec = registry.get(&kind)?;
+            let size = spec.default_size;
+            let section = SectionId::new(&instance.0)?;
+            let location = SectionLocation::Dock { zone };
+            let dock_key = format!("{}.{zone:?}", workspace.spec.id);
+            let column = zone.side().then(|| ColumnId(crate::plugin_workspaces::identity(&workspace.plugin.id, &dock_key)));
+            if let Some(column) = &column
+                && !layout.columns.iter().any(|existing| existing.id == *column)
+            {
+                layout.columns.push(Column { id: column.clone(), zone, width: size.width });
+            }
+            let column_index = layout
+                .columns
+                .iter()
+                .filter(|existing| existing.zone == zone)
+                .position(|existing| Some(&existing.id) == column.as_ref())
+                .unwrap_or(0);
+            layout.instances.push(PanelInstance {
+                id: instance.clone(),
+                kind,
+                requested_open: true,
+                memory: PlacementMemory {
+                    section: section.clone(),
+                    location: location.clone(),
+                    section_index: layout.sections.len(),
+                    tab_index: 0,
                     size,
                     collapsed: false,
-                    column,
+                    column: column.clone(),
+                    column_index,
+                    column_width: column.as_ref().map(|_| size.width),
                     weight: 1.0,
                     preferred_extent: None,
                     extent_priority: 0,
-                });
-            }
+                },
+            });
+            layout.sections.push(Section {
+                id: section,
+                location,
+                tabs: vec![instance.clone()],
+                active: instance,
+                size,
+                collapsed: false,
+                column,
+                weight: 1.0,
+                preferred_extent: None,
+                extent_priority: 0,
+            });
         }
         normalize_column_widths(&mut layout, &registry)?;
         validate(&layout, &registry)?;
@@ -1624,7 +1750,6 @@ impl AppPanelRuntime {
         catalogue.register_builtin(&preset, &LayoutEnvelope::new(layout), &registry)?;
         catalogue.register_workspace(commands::WorkspaceDescriptor { id, title_key: "ui.plugin_workspace.panel".into(), default_preset: preset })?;
         let staged = self.catalogue.prepare(catalogue.state().clone())?;
-        self.runtime.register_panels(panels)?;
         self.catalogue.publish(staged);
         Ok(())
     }

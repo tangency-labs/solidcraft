@@ -187,6 +187,13 @@ pub fn picture_frame(
     Some(corners.map(|p| [p.x, p.y]))
 }
 
+/// How a picture `aspect` (height over width) times as high as wide fits a frame pinned at `bl`,
+/// `br` and `tl`, through [`solidcore::math::picture_fit`]: its width, and whether the frame
+/// stretches it. `None` for a frame with no area.
+pub fn picture_fit(bl: [f64; 3], br: [f64; 3], tl: [f64; 3], aspect: f64) -> Option<(f64, bool)> {
+    solidcore::math::picture_fit(vec3(bl), vec3(br), vec3(tl), aspect)
+}
+
 /// A quad's unit normal, its corners lifted along that normal and its corners lifted against it,
 /// as [`lifted_quad`] returns them.
 pub type LiftedQuad = ([f64; 3], [[f64; 3]; 4], [[f64; 3]; 4]);
@@ -471,6 +478,22 @@ mod tests {
             None
         );
         assert_eq!(picture_frame([f64::NAN, 0.0], [40.0, 0.0], None, 0.5), None);
+    }
+
+    /// A 2:1 picture on a 40 mm edge in the XZ plane fits a frame 20 mm high, and one 30 mm high
+    /// stretches it; a top-left corner on the bottom edge's line gives no frame.
+    #[test]
+    fn a_picture_fits_a_frame_of_its_shape_and_a_taller_one_stretches_it() {
+        let (bl, br) = ([0.0, 0.0, 0.0], [40.0, 0.0, 0.0]);
+        assert_eq!(
+            picture_fit(bl, br, [0.0, 0.0, 20.0], 0.5),
+            Some((40.0, false))
+        );
+        assert_eq!(
+            picture_fit(bl, br, [0.0, 0.0, 30.0], 0.5),
+            Some((40.0, true))
+        );
+        assert_eq!(picture_fit(bl, br, [20.0, 0.0, 0.0], 0.5), None);
     }
 
     /// A 10 mm square at z = 5 lifted 0.2 mm: the front 0.2 mm above, the back 0.2 mm below.

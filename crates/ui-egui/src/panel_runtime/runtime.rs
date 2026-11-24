@@ -375,23 +375,6 @@ impl PanelRuntime {
             update_errors: Vec::new(),
         })
     }
-    pub(crate) fn register_panels(&mut self, panels: Vec<(PanelSpec, ControllerBinding)>) -> PanelResult<()> {
-        self.require_live()?;
-        if self.bindings.len().saturating_add(panels.len()) > MAX_INSTANCES {
-            return Err(error(Rule::CollectionLimit, "binding cap"));
-        }
-        let mut kinds = std::collections::BTreeSet::new();
-        for (spec, _) in &panels {
-            if self.bindings.contains_key(&spec.kind) || !kinds.insert(spec.kind.clone()) {
-                return Err(error(Rule::DuplicateId, "controller binding already registered"));
-            }
-        }
-        self.layout.register_panels(panels.iter().map(|(spec, _)| spec.clone()).collect())?;
-        for (spec, binding) in panels {
-            self.bindings.insert(spec.kind, binding);
-        }
-        Ok(())
-    }
     pub fn register(&mut self, kind: PanelKind, binding: ControllerBinding) -> PanelResult<()> {
         self.require_live()?;
         self.layout.registry().get(&kind)?;
@@ -403,6 +386,15 @@ impl PanelRuntime {
         }
         self.bindings.insert(kind, binding);
         Ok(())
+    }
+    pub(super) fn register_panel(&mut self, spec: PanelSpec, binding: ControllerBinding) -> PanelResult<()> {
+        self.require_live()?;
+        if self.bindings.contains_key(&spec.kind) || self.bindings.len() >= MAX_INSTANCES {
+            return Err(error(Rule::CollectionLimit, "panel controller registration unavailable"));
+        }
+        let kind = spec.kind.clone();
+        self.layout.register_panel(spec)?;
+        self.register(kind, binding)
     }
     pub fn layout(&self) -> &LayoutService {
         &self.layout

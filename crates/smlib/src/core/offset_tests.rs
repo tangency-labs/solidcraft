@@ -43,8 +43,7 @@ fn shell_of_a_drilled_frustum_keeps_its_failure_reason() {
     let Error::OutlineTouches { at, .. } = &error else { panic!("{words}") };
     assert!((at[0] - 10.0).abs() < 1e-4 && at[1].abs() < 1e-4 && (at[2] - 50.0).abs() < 1e-4, "at {at:?}");
     assert!(!words.contains("upstream status"), "{words}");
-    assert!(words.contains("stage_failed") && words.contains("; caused by "), "{words}");
-    assert!(words.contains("the joined offset edge could not be split at the gap bridge joint"), "{words}");
+    assert!(words.contains("an offset edge could not be split where a loop gap or a step corner needs it"), "{words}");
     eprintln!("{words}");
 }
 
@@ -711,6 +710,39 @@ fn a_draft_past_the_neighbours_meeting_is_refused_as_an_edge_that_vanishes() {
         draft(&prism, &tip, TOL, origin, z, z, angle).err(),
         Some(Error::RefusedWithDiagnostic { refusal, .. }) if refusal == vanishes
     ));
+}
+
+/// Stress corpus S8188 (#20767): a cone r 2 at z = 0 to r 1 at z = 3, shelled 0.12 in to a closed
+/// cavity, its side drafted 3 degrees about its base, leaning in going up, through the kernel
+/// wrapper's draft. The kernel's test (solidcore-ops `offset/tests.rs`,
+/// `a_shelled_cones_side_drafted_into_its_cavity_is_refused_naming_the_largest_angle`) derives
+/// the closed forms used here: the side reaches the cavity's rim at
+/// atan((2 - rim) / 2.88) - atan(1/3) = 0.038994633885685748 rad (2.234 degrees), rim =
+/// 2 - 0.04 sqrt(10) - 0.96, so 3 degrees is refused naming that angle, not as a body that fails
+/// its check. With a 0.5 wall the rim is reached only at 10.118 degrees, and 3 degrees builds the
+/// drafted cone less the cavity, 13.675559992581547.
+#[test]
+fn a_draft_into_a_shelled_cones_cavity_is_refused_naming_the_largest_angle() {
+    const LARGEST: f64 = 0.038_994_633_885_685_75;
+    const DRAFTED: f64 = 13.675_559_992_581_547;
+    // 3 degrees, radians
+    const THREE: f64 = 0.052_359_877_559_829_89;
+    let z = [0.0, 0.0, 1.0];
+    for wall in [0.12, 0.5] {
+        let cone = super::make_cone([0.0; 3], 2.0, 1.0, 3.0).unwrap();
+        let shelled = shell(&cone, &[], TOL, -wall).unwrap();
+        let drafted = draft(&shelled, &[[0.0, -1.5, 1.5]], TOL, [0.0; 3], z, z, THREE);
+        if wall == 0.12 {
+            let Some(Error::RefusedWithDiagnostic { refusal, diagnostic }) = drafted.as_ref().err() else { panic!("{drafted:?}") };
+            let solidcore_ops::Error::OffsetRefused { why: solidcore_ops::OffsetRefusal::DraftClosesWall { largest }, .. } = refusal else {
+                panic!("{refusal}")
+            };
+            assert!((largest - LARGEST).abs() < 1e-12, "{largest}: {diagnostic}");
+        } else {
+            let got = volume(&drafted.unwrap(), 1e-8).unwrap();
+            assert!(rel(got, DRAFTED) < 1e-9, "{got}");
+        }
+    }
 }
 
 /// A flat L of two faces thickened by 2 with mitred walls: 2 x 10 x (20 + 22).

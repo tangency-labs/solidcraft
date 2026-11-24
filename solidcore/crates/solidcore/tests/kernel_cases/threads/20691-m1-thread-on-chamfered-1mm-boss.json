@@ -1,0 +1,207 @@
+{
+  "area": "threads",
+  "bodies": {
+    "b17": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b64": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b62"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b62"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b63"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b64"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b65"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b65"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b66"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b63"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b67"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b66"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b68"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b67",
+        "b68"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b69"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "20691-m1-thread-on-chamfered-1mm-boss",
+  "expected": {
+    "body_count": 1,
+    "method": "ISO 68-1 basic profile, P = 0.25, H = P sqrt3/2: the external groove's root radius is r0 = 0.5 - 5H/8 = 0.36468, its axial width w(r) = P/4 + 2 tan30 (r - r0). The groove is screw-invariant, so at every height it takes the fraction w(r)/P of the circle of radius r; it is cut from the plate's face (z = 1, the shoulder plane it is trimmed at) up through the chamfer (its sweep starts below z = 1 and ends above the material at every radius). The material at radius r in [r0, 0.5] spans z in [1, 1.75 - r] (cylinder to 1.25, then the 45 degree cone to 1.5). Removed: integral over r0..0.5 of 2 pi r w(r)/P (0.75 - r) dr = 0.0642641467 (a cubic, exact by Simpson). Body: 100 + pi 0.25^2 0.25 + pi 0.25/3 (0.5^2 + 0.5 0.25 + 0.25^2) = 100.3108867730. V = 100.2466226263 mm3. Tolerance 5e-5 mm3: the sweep's walls fit the helicoids within 2.5e-5, over less than 2 mm2 of groove wall inside the material.",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#20691"
+    ],
+    "tolerance": {
+      "abs_mm": 5e-05
+    },
+    "volume_mm3": 100.2466226263,
+    "what": "a modelled M1x0.25 thread on the 0.25 mm of cylinder below a 0.25 chamfer of a 1 mm boss on a 10 x 10 x 1 block: the groove's root cylinder meets the chamfer's cone in a circle whose end is continued 2.9e-6 to its vertex, which the boolean refused (\"the end vertex has no shell in the region\" after the shoulder cut failed)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 42,
+      "faces": 17,
+      "vertices": 28
+    }
+  },
+  "records": "20691-m1-thread-on-chamfered-1mm-boss.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b69"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 241.5449109923116,
+      "body_count": 1,
+      "edges": 27,
+      "faces": 12,
+      "vertices": 18,
+      "volume_mm3": 100.24662262285153
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#20691"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "screw_sweep",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a modelled M1x0.25 thread on the 0.25 mm of cylinder below a 0.25 chamfer of a 1 mm boss on a 10 x 10 x 1 block: the groove's root cylinder meets the chamfer's cone in a circle whose end is continued 2.9e-6 to its vertex, which the boolean refused (\"the end vertex has no shell in the region\" after the shoulder cut failed)",
+  "why_not": []
+}
