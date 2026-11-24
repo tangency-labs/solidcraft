@@ -473,16 +473,12 @@ fn a_feature_started_while_the_marker_rolls_back_waits_for_it() {
     h.app.apply_off_thread = Some(std::time::Duration::ZERO);
     h.app.start("solid.extrude");
     assert_eq!(h.app.session.active_sketch, None, "the sketch finishes right away, and the marker restore follows after evaluation");
-    for _ in 0..500 {
-        if h.app.deferred.is_none() && h.app.deferred_queue.is_empty() {
-            break;
-        }
-        h.frames(1);
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
+    // Extrude waits for the restored model, worked out on the sketch model worker (not the
+    // history queue): each frame below is drawn once that worker has answered.
+    h.frames_after_sketch_refresh(5);
+    assert!(h.app.deferred.is_none() && h.app.deferred_queue.is_empty());
     assert_eq!(h.app.session.doc.marker, None);
     assert_eq!(h.app.session.active_sketch, None);
-    h.frames(5);
     assert!(h.app.dialog.is_some(), "Extrude opened once the marker was back");
     let _ = sketch;
 }
