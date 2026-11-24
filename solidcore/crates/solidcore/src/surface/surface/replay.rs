@@ -1,8 +1,10 @@
 //! A test-only seam (feature `wr57-replay`, off by default and never on in `cargo build`,
 //! a release or a wasm build) at the two WR-57 entry points:
 //! [`Surface::find_degen_param_for_direction`] and the singular point inversion
-//! ([`Surface::invert_point_near_singularity`]), and at WR-450's two choices
-//! ([`Seam::AnalyticCopy`], [`Seam::SplitTrims`]) for the goldens' `wr450_rows` replay.
+//! ([`Surface::invert_point_near_singularity`]), at WR-450's two choices
+//! ([`Seam::AnalyticCopy`], [`Seam::SplitTrims`]) for the goldens' `wr450_rows` replay,
+//! and at the loop normal ([`crate::curve::curve::p3::compute_crvs_normal`]:
+//! [`LoopNormalHook`], the WR-587 retirement's replay, #18931).
 //!
 //! The goldens crate's substitution replay (`wr57_replay`, #17856) gives a kernel a
 //! [`ReplaySeam`] ([`Kernel::replay`]): a hook that sees each outermost call's inputs,
@@ -27,9 +29,11 @@ use std::sync::{Arc, Mutex};
 use super::p7::DegenParam;
 use super::p8::SingularityInversion;
 use super::Surface;
+use crate::curve::curve::p2::Curve;
 use crate::error::{Result, SolidError};
 use crate::geom::local_solve_nd::TerminationReason;
 use crate::geom::vector2d::Point2;
+use crate::geom::vector3d::Vec3;
 use crate::Kernel;
 
 /// Which entry point a call went through.
@@ -73,10 +77,18 @@ pub struct Call<'a> {
 /// The hook: given a call, the answer the caller gets.
 pub type Hook = Box<dyn FnMut(Call<'_>) -> Answer + Send>;
 
+/// The loop normal seam's hook (the WR-587 retirement's replay, #18931): given the kernel,
+/// the curves and [`crate::curve::curve::p3::compute_crvs_normal`]'s own answer (the normal
+/// it wrote and its status), the answer the caller gets.
+pub type LoopNormalHook =
+    Box<dyn FnMut(&Kernel, &[Curve], (Vec3, Result<()>)) -> (Vec3, Result<()>) + Send>;
+
 /// A kernel's seam: no hook (the default), or a hook shared with the kernel's copies.
 #[derive(Clone, Default)]
 pub struct ReplaySeam {
     hook: Option<Arc<Mutex<Hook>>>,
+    /// The loop normal's hook ([`LoopNormalHook`]), if any.
+    loop_normal: Option<Arc<Mutex<LoopNormalHook>>>,
     /// The seam calls under way: a call inside another seam call (or inside the hook) is
     /// not an outermost call and goes straight to the function.
     depth: Arc<AtomicU32>,
@@ -88,6 +100,17 @@ impl ReplaySeam {
     pub fn new(hook: Hook) -> Self {
         Self {
             hook: Some(Arc::new(Mutex::new(hook))),
+            loop_normal: None,
+            depth: Arc::default(),
+        }
+    }
+
+    /// A seam with only the loop normal's `hook`.
+    #[must_use]
+    pub fn loop_normal(hook: LoopNormalHook) -> Self {
+        Self {
+            hook: None,
+            loop_normal: Some(Arc::new(Mutex::new(hook))),
             depth: Arc::default(),
         }
     }
@@ -97,6 +120,7 @@ impl core::fmt::Debug for ReplaySeam {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ReplaySeam")
             .field("hook", &self.hook.is_some())
+            .field("loop_normal", &self.loop_normal.is_some())
             .field("depth", &self.depth)
             .finish()
     }
@@ -235,6 +259,50 @@ pub(crate) fn wrap<T: Bits>(
     })
 }
 
+/// Runs `f`, the loop normal of `curves` written into `normal`, through `k`'s loop normal
+/// hook; with no hook, or inside another seam call (the hook's own calls among them), it
+/// only runs `f`. [`SolidError::Unported`] and [`SolidError::Cancelled`] pass the hook by.
+///
+/// # Errors
+///
+/// `f`'s error or the hook's; [`SolidError::InvalidInput`] when the hook panicked on an
+/// earlier call.
+pub(crate) fn wrap_loop_normal(
+    k: &Kernel,
+    curves: &[Curve],
+    normal: &mut Vec3,
+    f: impl FnOnce(&mut Vec3) -> Result<()>,
+) -> Result<()> {
+    let seam_state = &k.replay;
+    let Some(hook) = seam_state.loop_normal.as_ref() else {
+        return f(normal);
+    };
+    if seam_state.depth.load(Ordering::Relaxed) > 0 {
+        return f(normal);
+    }
+    seam_state.depth.fetch_add(1, Ordering::Relaxed);
+    let own = f(normal);
+    if let Err(e) = &own {
+        if e.is_unported_or_cancelled() {
+            seam_state.depth.fetch_sub(1, Ordering::Relaxed);
+            return own;
+        }
+    }
+    let (written, answer) = match hook.lock() {
+        Ok(mut h) => h(k, curves, (*normal, own)),
+        Err(_) => (
+            *normal,
+            Err(SolidError::InvalidInput {
+                operation: "surface::surface::replay::wrap_loop_normal",
+                reason: "the hook panicked on an earlier call",
+            }),
+        ),
+    };
+    seam_state.depth.fetch_sub(1, Ordering::Relaxed);
+    *normal = written;
+    answer
+}
+
 /// The error a surface routine `operation` answers when it fails as `reason` says, built
 /// as the routine builds it (a taped answer of main's).
 #[must_use]
@@ -248,7 +316,7 @@ pub fn surface_failed(operation: &'static str, reason: &'static str) -> SolidErr
 /// [`Seam::Degen`]'s inputs as bits.
 pub(crate) fn degen_input(
     uv: Point2,
-    dir: crate::geom::vector3d::Vec3,
+    dir: Vec3,
     dir_from_pole: bool,
     singular_dir: crate::nurbs::b_spline_surface::p1::SurfParamType,
     tol: f64,
@@ -267,7 +335,7 @@ pub(crate) fn degen_input(
 
 /// [`Seam::Invert`]'s inputs as bits.
 pub(crate) fn invert_input(
-    test_pt: crate::geom::vector3d::Vec3,
+    test_pt: Vec3,
     uv_domain: &crate::geom::extent2d::Extent2d,
     uv_guess: Point2,
     tol: f64,

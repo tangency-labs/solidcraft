@@ -114,6 +114,21 @@ pub(crate) fn active() -> bool {
     SEAM.with(|s| s.borrow().is_some())
 }
 
+/// Runs `f` with `seam` installed as this thread's seam (also for the WR-587 replay,
+/// [`crate::wr587_replay`]).
+/// The seam it replaced is restored when `f` returns or unwinds.
+pub(crate) fn with_installed<R>(seam: ReplaySeam, f: impl FnOnce() -> R) -> R {
+    struct Restore(Option<ReplaySeam>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let previous = self.0.take();
+            SEAM.with(|s| *s.borrow_mut() = previous);
+        }
+    }
+    let _restore = Restore(SEAM.with(|s| s.borrow_mut().replace(seam)));
+    f()
+}
+
 /// Runs `f` with `hook` installed as this thread's seam.
 pub(crate) fn with_hook<R>(
     hook: impl FnMut(Call<'_>) -> Answer + Send + 'static,
