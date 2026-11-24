@@ -1240,6 +1240,64 @@ fn common_point(surfaces: [&Surface; 3], start: Point3) -> Option<Point3> {
     None
 }
 
+/// The largest curvature of `a` at `x`, a bound on how fast its normal turns along it: none
+/// for a plane, one over the radius there for a cylinder or cone (a cone's normal turns by
+/// less, its radius's cosine over it), one over the radius for a sphere; infinite at a cone's
+/// apex, `None` for a torus.
+fn curvature_bound(a: &crate::surface::implicit::Implicit, x: Point3) -> Option<f64> {
+    use crate::surface::implicit::Implicit;
+    Some(match *a {
+        Implicit::Plane { .. } => 0.0,
+        Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        } => {
+            let r = (radius + tan_angle * (x - origin).dot(axis)).abs();
+            if r > 0.0 {
+                1.0 / r
+            } else {
+                f64::INFINITY
+            }
+        }
+        Implicit::Sphere { radius, .. } => 1.0 / radius.abs(),
+        Implicit::Torus { .. } => return None,
+    })
+}
+
+/// Whether surfaces `a` and `b` are tangent at `x` as far as a point within `tol` of it can
+/// tell (`None` where one is not a plane, cylinder, cone or sphere). Where two surfaces touch
+/// along a line, at a point `d` off it each one's normal has turned from the shared one by at
+/// most its curvature times `d`: within `tol`, their normals differ by up to `tol` times the
+/// sum of the curvatures. Tangent there, the two do not cross at `x`, and with a third surface
+/// they have no one common point: their equations meet in a double root, which rounding moves
+/// along the line (a sheet's web running into its bend: 2.8e-6 at a hole across their line).
+fn tangent_within(a: &Surface, b: &Surface, x: Point3, tol: f64) -> Option<bool> {
+    use crate::surface::implicit::AnalyticSupport;
+    implicits_tangent_within(
+        &AnalyticSupport::of(a)?.implicit(),
+        &AnalyticSupport::of(b)?.implicit(),
+        x,
+        tol,
+    )
+}
+
+/// [`tangent_within`] on the surfaces' implicit equations.
+fn implicits_tangent_within(
+    a: &crate::surface::implicit::Implicit,
+    b: &crate::surface::implicit::Implicit,
+    x: Point3,
+    tol: f64,
+) -> Option<bool> {
+    let (_, ga) = implicit_value(a, x)?;
+    let (_, gb) = implicit_value(b, x)?;
+    let sine = ga.cross(gb).length() / (ga.length() * gb.length());
+    let turn = tol * (curvature_bound(a, x)? + curvature_bound(b, x)?);
+    // (a NaN sine, from a zero gradient, is not a crossing either)
+    Some(sine.is_nan() || sine <= turn)
+}
+
 impl<O: ClassObject> VertexDefinition<O> {
     /// Not upstream (#3062): where this definition is a crossing of an edge of one B-rep
     /// (between two faces) and a face of the other, all three on planes, cylinders, cones or
@@ -1280,6 +1338,11 @@ impl<O: ClassObject> VertexDefinition<O> {
         ) else {
             return Ok(false);
         };
+        // An edge whose two faces are tangent where it is crossed (a flat running into a
+        // round) is not a crease the three surfaces fix a point on: left where the crossing put it.
+        if tangent_within(sa, sb, self.position, self.tolerance(k)) != Some(false) {
+            return Ok(false);
+        }
         let Some(x) = common_point([sa, sb, sf], self.position) else {
             return Ok(false);
         };
@@ -5103,5 +5166,54 @@ mod tests {
         assert_eq!(coinc(&m, f2), vec![kept]);
         assert!(m.proto_edge(other).unwrap().overlapping_pes().is_empty());
         assert_eq!(m.proto_edge(kept).unwrap().overlapping_pes(), &[other]);
+    }
+
+    /// A cylinder of radius 5.25 touching the plane z = 0 along the x axis (a web running into
+    /// its bend): 1.7e-6 off that line, still within a tolerance of 2.2e-4, the normals differ
+    /// by 1.7e-6 / 5.25 = 3.2e-7, under the 2.2e-4 / 5.25 = 4.2e-5 a point that close can see:
+    /// tangent. Two planes at right angles, and the cylinder cut by a plane through its axis's
+    /// height, cross.
+    #[test]
+    fn a_crossing_of_a_flat_and_the_round_it_runs_into_is_not_a_crease() {
+        use crate::surface::implicit::Implicit;
+        let r = 5.25;
+        let flat = Implicit::Plane {
+            origin: Point3::new(0.0, 0.0, 0.0),
+            normal: Vec3::new(0.0, 0.0, 1.0),
+        };
+        let round = Implicit::Cone {
+            origin: Point3::new(0.0, 0.0, r),
+            axis: Vec3::new(1.0, 0.0, 0.0),
+            radius: r,
+            tan_angle: 0.0,
+        };
+        let near = Point3::new(10.0, 1.7e-6, 0.0);
+        assert_eq!(
+            implicits_tangent_within(&flat, &round, near, 2.2e-4),
+            Some(true)
+        );
+        let side = Implicit::Plane {
+            origin: Point3::new(0.0, 0.0, 0.0),
+            normal: Vec3::new(1.0, 0.0, 0.0),
+        };
+        assert_eq!(
+            implicits_tangent_within(&flat, &side, Point3::new(0.0, 3.0, 0.0), 2.2e-4),
+            Some(false)
+        );
+        let across = Implicit::Plane {
+            origin: Point3::new(0.0, 0.0, r),
+            normal: Vec3::new(0.0, 0.0, 1.0),
+        };
+        assert_eq!(
+            implicits_tangent_within(&across, &round, Point3::new(10.0, r, r), 2.2e-4),
+            Some(false)
+        );
+        let torus = Implicit::Torus {
+            centre: Point3::new(0.0, 0.0, 0.0),
+            axis: Vec3::new(0.0, 0.0, 1.0),
+            major: 10.0,
+            minor: 1.0,
+        };
+        assert_eq!(implicits_tangent_within(&flat, &torus, near, 2.2e-4), None);
     }
 }
