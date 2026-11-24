@@ -2055,7 +2055,7 @@ mod tests {
         }
         assert_eq!(super::cap_screw_head("ISO 4762", "3.0").unwrap(), super::cap_screw_head("ISO 4762", "M3").unwrap());
         // Still refused, and named as written: a size the table lacks, or not a size at all.
-        assert!(super::countersunk_head("ISO 10642", "2").unwrap().unwrap_err().contains("`M2`"));
+        assert!(super::countersunk_head("ISO 10642", "1.6").unwrap().unwrap_err().contains("`M1.6`"));
         assert!(super::cap_screw_head("ISO 4762", "big").unwrap_err().contains("`big`"));
     }
 

@@ -4781,7 +4781,8 @@ fn countersink_for_a_countersunk_screw_head() {
 fn head_countersink_is_the_head_plus_the_default_gap() {
     assert_eq!(cmd::head_countersink("ISO 10642", "M6"), Some(14.44), "dk 13.44");
     assert_eq!(cmd::head_countersink("countersunk_socket_screw", "M4x0.7"), Some(9.96), "dk 8.96, the pitch written out");
-    assert_eq!(cmd::head_countersink("ISO 10642", "M2"), None, "the table starts at M3");
+    assert_eq!(cmd::head_countersink("ISO 10642", "M2"), Some(5.7), "dk 4.7");
+    assert_eq!(cmd::head_countersink("ISO 10642", "M1.6"), None, "the table starts at M2");
     assert_eq!(cmd::head_countersink("ISO 4762", "M6"), None, "a socket head is no countersunk head");
     assert_eq!(cmd::head_counterbore("ISO 10642", "M6"), None, "nor a counterbore's");
 }
