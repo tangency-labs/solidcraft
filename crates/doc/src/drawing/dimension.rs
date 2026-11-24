@@ -70,7 +70,7 @@ use std::sync::Arc;
 
 use super::measure::{self, AngleFrom, Cone, Cylinder, LinearDirection, Measured, Reading, SilhouetteSide, Sphere};
 use serde::{Deserialize, Serialize};
-use solidcore_record::brep::Loop;
+use solidcore_record::brep::{Curve, Frame, Loop};
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::drawing_view::{Invalid, is_paper_coordinate};
 use solidcraft_geom::paper::MAX_SIDE_MM;
@@ -1434,7 +1434,7 @@ impl<'a> Lookup<'a> {
         let (label, value, (start, sweep)) = if rim.is_empty() {
             (LabelKind::SphericalDiameter, 2.0 * sphere.radius, (0.0, TAU))
         } else {
-            let arc = contour_on(b, &seen, &sphere, &rim)?.ok_or_else(|| {
+            let arc = contour_on(b, &seen, &sphere, &on.faces, &rim)?.ok_or_else(|| {
                 Status::Unmeasurable(format!("face `{}`'s contour in this view isn't on it: the view sees its rim, not its radius", face.name))
             })?;
             (LabelKind::SphericalRadius, sphere.radius, arc)
@@ -1464,7 +1464,7 @@ impl<'a> Lookup<'a> {
         let rim = rim(b, &on.faces);
         let mut points = Vec::with_capacity(4);
         for way in sides {
-            let (near, far) = ray_on(b, cone.apex, way, reach, &rim)?.ok_or_else(|| {
+            let (near, far) = ray_on(b, cone.apex, cone.axis, way, reach, &on.faces, &rim)?.ok_or_else(|| {
                 Status::Unmeasurable(format!("face `{}` isn't a whole cone in this view: one of its silhouettes isn't on it", face.name))
             })?;
             points.extend([near, far].map(|t| apply_point(&on.frame, cone.apex + way * t)));
@@ -1591,8 +1591,6 @@ fn rim(b: &ModelBody, faces: &[usize]) -> Vec<usize> {
 /// The most rim edges [`contour_on`] reads a sphere's contour across: past it, the faces are too
 /// broken up to read a radius off.
 const MAX_RIM_EDGES: usize = 128;
-/// Where a rim edge isn't a circle, [`contour_on`] also cuts the contour at this many even steps.
-const CONTOUR_STEPS: u32 = 32;
 /// Cuts closer than this round the contour (radians) are one.
 const SAME_ANGLE: f64 = 1e-9;
 
@@ -1602,30 +1600,24 @@ const SAME_ANGLE: f64 = 1e-9;
 const EDGE_ON: f64 = 1e-6;
 
 /// The longest arc of `sphere`'s contour on the view `seen` (both in `b`'s own frame) that lies on
-/// `b`'s boundary: its start angle and its sweep, or `None` when none does. The contour is cut
-/// where it crosses the plane of each circle in `rim` (the edges where the sphere's faces end).
-/// Between two cuts it is all on the faces or all off them, so one point classification at its middle (exact,
-/// SMLib's) decides, and pieces on them next to each other join: a rim circle's plane can also cut
-/// the contour where the faces go on. A rim edge that isn't on a circle ([`edge_circle`]) adds
-/// [`CONTOUR_STEPS`] even cuts instead, so there the arc's ends are within half a step, and an arc
-/// that holds no step's middle is missed.
-fn contour_on(b: &ModelBody, seen: &Plane, sphere: &Sphere, rim: &[usize]) -> std::result::Result<Option<(f64, f64)>, Status> {
+/// `faces` of `b`: its start angle and its sweep, or `None` when none does. The contour is cut where
+/// it crosses the faces' rim `rim` (the kernel's `outline_cuts`: one call for every rim edge, each
+/// cut exact on the surface across it). Between two cuts it is all on the faces or all off them, so
+/// one point classification at its middle (exact, SMLib's) decides, and pieces on them next to each
+/// other join.
+fn contour_on(b: &ModelBody, seen: &Plane, sphere: &Sphere, faces: &[usize], rim: &[usize]) -> std::result::Result<Option<(f64, f64)>, Status> {
     if rim.len() > MAX_RIM_EDGES {
         return Err(Status::Unmeasurable(format!("the sphere's faces end at more than {MAX_RIM_EDGES} edges: give a radius another way")));
     }
-    let (mut cuts, mut stepped) = (Vec::new(), false);
-    for e in rim {
-        match edge_circle(&b.body, *e) {
-            Some(circle) => {
-                let crossed = measure::contour_crossings(seen, sphere, circle.center, Vec3::from(circle.axis));
-                cuts.extend(crossed.map_err(|e| Status::Unmeasurable(e.0.to_string()))?);
-            }
-            None => stepped = true,
-        }
-    }
-    if stepped {
-        cuts.extend((0..CONTOUR_STEPS).map(|k| TAU * f64::from(k) / f64::from(CONTOUR_STEPS)));
-    }
+    // The contour as a circle in its own axes about the centre, so a cut's parameter is the angle
+    // `Sphere::contour_point` turns.
+    let frame = Frame { origin: sphere.center.into(), x_axis: seen.x.into(), y_axis: seen.y.into() };
+    let contour = Curve::Circle { frame, radius: sphere.radius };
+    let crossed = b
+        .body
+        .outline_cuts(faces, &contour, [0.0, TAU], sphere.center, seen.normal())
+        .map_err(|why| Status::Unmeasurable(format!("the sphere's faces end at an edge that doesn't read ({why}): give a radius another way")))?;
+    let mut cuts: Vec<f64> = crossed.into_iter().map(|t| t.rem_euclid(TAU)).collect();
     cuts.sort_by(f64::total_cmp);
     cuts.dedup_by(|a, b| (*a - *b).abs() <= SAME_ANGLE);
     // Each cut to the next round, the last back to the first; no cut leaves the whole contour.
@@ -1664,35 +1656,33 @@ fn longest_run(pieces: &[(f64, f64, bool)], round: bool) -> Option<(f64, f64)> {
     longest
 }
 
-/// The longest piece of the ray from `apex` along the unit `way` (both in `b`'s own frame), out
-/// to `reach`, that lies on `b`'s boundary: how far from the apex it starts and ends, or `None`
-/// when none does. Cut as [`contour_on`] cuts a sphere's contour: where the ray crosses the plane of
-/// each circle in `rim`, or at [`CONTOUR_STEPS`] even steps where a rim edge isn't a circle, with
-/// one point classification at each piece's middle.
-fn ray_on(b: &ModelBody, apex: Vec3, way: Vec3, reach: f64, rim: &[usize]) -> std::result::Result<Option<(f64, f64)>, Status> {
+/// The longest piece of the ray from `apex` along the unit `way` (both in `b`'s own frame, `way`
+/// a side of the cone along `axis`), out to `reach`, that lies on `faces` of `b`: how far from the
+/// apex it starts and ends, or `None` when none does. Cut as [`contour_on`] cuts a sphere's
+/// contour, where the ray crosses the faces' rim `rim`, with one point classification at each
+/// piece's middle.
+fn ray_on(
+    b: &ModelBody,
+    apex: Vec3,
+    axis: Vec3,
+    way: Vec3,
+    reach: f64,
+    faces: &[usize],
+    rim: &[usize],
+) -> std::result::Result<Option<(f64, f64)>, Status> {
     if rim.len() > MAX_RIM_EDGES {
         return Err(Status::Unmeasurable(format!("the cone's faces end at more than {MAX_RIM_EDGES} edges: give its angle another way")));
     }
-    let (mut cuts, mut stepped) = (vec![0.0, reach], false);
-    for e in rim {
-        match edge_circle(&b.body, *e) {
-            Some(circle) => {
-                let normal = Vec3::from(circle.axis);
-                let slant = way.dot(normal);
-                // A ray in the circle's plane, or parallel to it, isn't cut by it.
-                if slant.abs() > SAME_ANGLE {
-                    let t = (circle.center - apex).dot(normal) / slant;
-                    if t > 0.0 && t < reach {
-                        cuts.push(t);
-                    }
-                }
-            }
-            None => stepped = true,
-        }
-    }
-    if stepped {
-        cuts.extend((1..CONTOUR_STEPS).map(|k| reach * f64::from(k) / f64::from(CONTOUR_STEPS)));
-    }
+    // The ray lies in the plane of the axis and the ray; as a line from the apex one unit along
+    // the ray, a cut's parameter is its distance from the apex.
+    let normal = way.cross(axis).normalized().ok_or_else(|| Status::Unmeasurable("the cone's silhouette runs along its axis".into()))?;
+    let ray = Curve::Line { start: apex.into(), end: (apex + way).into() };
+    let crossed = b
+        .body
+        .outline_cuts(faces, &ray, [0.0, reach], apex, normal)
+        .map_err(|why| Status::Unmeasurable(format!("the cone's faces end at an edge that doesn't read ({why}): give its angle another way")))?;
+    let mut cuts = vec![0.0, reach];
+    cuts.extend(crossed.into_iter().filter(|t| *t > 0.0 && *t < reach));
     cuts.sort_by(f64::total_cmp);
     cuts.dedup_by(|a, b| (*a - *b).abs() <= SAME_ANGLE * reach);
     let mut pieces = Vec::with_capacity(cuts.len());

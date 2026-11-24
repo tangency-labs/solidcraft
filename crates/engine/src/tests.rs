@@ -1364,7 +1364,9 @@ fn hostile_params_never_panic() {
     let ids: Vec<&str> = command_specs()
         .iter()
         .map(|spec| spec.id)
-        .filter(|id| !matches!(*id, "doc.open" | "file.save" | "file.save_as" | "file.export" | "file.save_mesh" | "sketch.export_dxf")) // file system side effects are covered by their own tests
+        .filter(|id| {
+            !matches!(*id, "doc.open" | "file.save" | "file.save_as" | "file.export" | "file.save_mesh" | "sketch.export_dxf" | "sketch.export_svg")
+        }) // file system side effects are covered by their own tests
         .collect();
     assert!(ids.contains(&"inspect.classify_points"), "exact point inspection must receive every hostile value");
     let next = std::sync::atomic::AtomicUsize::new(0);

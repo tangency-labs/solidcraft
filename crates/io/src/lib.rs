@@ -125,6 +125,7 @@ pub mod safe_zip;
 pub mod sdf;
 mod sketch2d;
 mod svg;
+mod svg_out;
 /// Explicit development-test seams; absent from ordinary production builds.
 #[cfg(any(test, feature = "dxf-legacy-baseline-tests"))]
 pub mod test_support {
@@ -219,6 +220,9 @@ pub use svg::read_svg;
 pub use svg::read_svg_drawing;
 pub use svg::svg_nothing_to_import;
 pub use svg::svg_sheet;
+pub use svg_out::SvgShape;
+pub use svg_out::svg_unit;
+pub use svg_out::write_svg;
 mod gltf_in;
 pub use gltf_in::GltfImport;
 pub use gltf_in::Loader;
