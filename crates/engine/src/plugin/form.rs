@@ -135,7 +135,7 @@ fn pick_exists(session: &Session, pick: &crate::Sel) -> bool {
             // Verify the stored index AND point on the exact trimmed curve. Never substitute
             // a nearest-looking edge or use the display mesh to establish identity.
             let Some(tolerance) = pick_coordinate_tolerance(&b.body) else { return false };
-            solidcraft_kernel::services::exact_edge_distance(&b.body, *index, [point.x, point.y, point.z]).is_some_and(|d| d <= tolerance)
+            solidcraft_kernel::services::exact_edge_distance(&b.body, *index, [point.x, point.y, point.z].into()).is_some_and(|d| d <= tolerance)
         }),
         Sel::Profile { sketch, index } => state.sketch(*sketch).is_some_and(|s| s.profiles.get(*index).is_some()),
         Sel::ExternalSketchPoint { sketch, id } => state.sketch(*sketch).is_some_and(|s| s.sketch.point_index(id).is_some()),
