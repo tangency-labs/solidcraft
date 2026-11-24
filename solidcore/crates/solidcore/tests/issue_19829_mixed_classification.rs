@@ -360,8 +360,9 @@ fn create_passes_a_classification_failure_on() {
 
 /// A blended edge whose loop uses lie in a shell without a region is a broken body, not a
 /// sheet: the classification refuses it with `EdgeBoundsNoMaterial` at that edge, as the
-/// convexity test did before #19829, and `FilletCorner::create` passes that on. Only a
-/// sheet (`a_sheet_is_not_mixed_and_keeps_its_corner`) is "not mixed".
+/// convexity test did before #19829, never "not mixed" (only a sheet is,
+/// `a_sheet_is_not_mixed_and_keeps_its_corner`). `FilletCorner::create` refuses that body
+/// too, before it classifies: its UV trim curve update finds no B-rep for the edge use.
 #[test]
 fn a_shell_without_a_region_is_a_failure_not_a_sheet() {
     let mut k = kernel();
@@ -370,19 +371,16 @@ fn a_shell_without_a_region_is_a_failure_not_a_sheet() {
     for s in edge::shells(&c.b, e, None).unwrap().into_iter().flatten() {
         c.b.shell_mut(s).unwrap().region = None;
     }
-    for found in [
-        classify(&k, &mut c, true).map(|_| ()),
-        create(&k, &mut c).map(|_| ()),
-    ] {
-        let err = found.unwrap_err();
-        assert_eq!(
-            err.blend_failure(),
-            Some(&BlendFailure::Solver(SolverFailure::EdgeBoundsNoMaterial {
-                edge: e
-            })),
-            "{err}"
-        );
-        assert_eq!(err.kind(), ErrorKind::Unsupported, "{err}");
-        assert!(!err.is_defect(), "{err}");
-    }
+    let err = classify(&k, &mut c, true).unwrap_err();
+    assert_eq!(
+        err.blend_failure(),
+        Some(&BlendFailure::Solver(SolverFailure::EdgeBoundsNoMaterial {
+            edge: e
+        })),
+        "{err}"
+    );
+    assert_eq!(err.kind(), ErrorKind::Unsupported, "{err}");
+    assert!(!err.is_defect(), "{err}");
+    let err = create(&k, &mut c).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
 }
