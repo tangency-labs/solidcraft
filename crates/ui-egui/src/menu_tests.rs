@@ -405,11 +405,12 @@ fn isolate_on_body_and_component_menus_toggles_unisolate() {
     app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0]})).unwrap();
     let kept = body(&app);
     let t = Target::Body { name: kept.clone() };
-    assert!(context_menu::items(&app, &t).iter().any(|i| i.label == "Isolate"));
+    // #3504: each entry shows its key.
+    assert!(context_menu::items(&app, &t).iter().any(|i| i.label == "Isolate" && i.shortcut == "Ctrl+I"));
     act(&mut app, &t, "Isolate");
     assert!(!app.session.visibility.hidden_bodies.is_empty());
     let after = context_menu::items(&app, &t);
-    assert!(after.iter().any(|i| i.label == "Unisolate"), "same menu offers Unisolate");
+    assert!(after.iter().any(|i| i.label == "Unisolate" && i.shortcut == "Ctrl+Shift+I"), "same menu offers Unisolate");
     assert!(!after.iter().any(|i| i.label == "Isolate"));
     act(&mut app, &t, "Unisolate");
     assert!(app.session.visibility.hidden_bodies.is_empty(), "Unisolate restores every body");

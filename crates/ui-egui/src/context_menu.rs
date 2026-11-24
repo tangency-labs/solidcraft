@@ -382,25 +382,31 @@ fn isolating(app: &SolveApp) -> bool {
     app.session.visibility.before_isolate.is_some()
 }
 
-/// The one Unisolate entry every menu shares: it puts back what the Isolates hid (#8120).
-fn unisolate_item() -> Item {
-    act("ui.unisolate", "Unisolate", "body")
+/// The one Unisolate entry every menu shares: it puts back what the Isolates hid (#8120), and
+/// shows `browser.unisolate`'s key (#3504).
+fn unisolate_item(app: &SolveApp) -> Item {
+    act("ui.unisolate", "Unisolate", "body").key(&crate::keymap::display_for(app, "browser.unisolate").unwrap_or_default())
+}
+
+/// `browser.isolate`'s key, for the menus' Isolate entries (#3504).
+fn isolate_key(app: &SolveApp) -> String {
+    crate::keymap::display_for(app, "browser.isolate").unwrap_or_default()
 }
 
 /// Isolate, or Unisolate on what an Isolate left on screen (#8120).
 pub fn isolate_bodies_item(app: &SolveApp, bodies: &[String]) -> Item {
     if !bodies.is_empty() && isolating(app) && bodies.iter().all(|b| app.session.body_visible(b)) {
-        return unisolate_item();
+        return unisolate_item(app);
     }
-    act("ui.isolate", "Isolate", "body").with(json!({ "bodies": bodies })).on(!bodies.is_empty())
+    act("ui.isolate", "Isolate", "body").with(json!({ "bodies": bodies })).key(&isolate_key(app)).on(!bodies.is_empty())
 }
 
 /// Isolate this placement, or Unisolate when an Isolate left it on screen (#8120).
 pub fn isolate_occurrence_item(app: &SolveApp, path: &[u64]) -> Item {
     if !path.is_empty() && isolating(app) && !app.session.occurrence_hidden(path) {
-        return unisolate_item();
+        return unisolate_item(app);
     }
-    act("ui.isolateOccurrence", "Isolate", "body").with(json!({ "path": path }))
+    act("ui.isolateOccurrence", "Isolate", "body").with(json!({ "path": path })).key(&isolate_key(app))
 }
 
 /// Returns an isolation menu item for a component. When its bodies are the only ones left on
@@ -978,7 +984,8 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             can_unisolate || !app.session.visibility.hidden_sketches.is_empty() || !app.session.visibility.hidden_folders.is_empty();
         v.push(act("ui.showAll", "Show All", "eye").on(anything_hidden));
         // The same Unisolate as the toggled Isolate entry on the item menus (#8120).
-        v.push(act("ui.unisolate", "Unisolate", "eye").on(can_unisolate || isolating(app)));
+        let key = crate::keymap::display_for(app, "browser.unisolate").unwrap_or_default();
+        v.push(act("ui.unisolate", "Unisolate", "eye").key(&key).on(can_unisolate || isolating(app)));
         v.push(Item::sep());
         v.push(cmd(app, "solid.extrude", "Extrude"));
         v.push(cmd(app, "solid.fillet", "Fillet"));

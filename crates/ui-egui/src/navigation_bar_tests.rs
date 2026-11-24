@@ -405,6 +405,8 @@ fn navigation_board_metrics_and_state_colors_are_shared_in_both_themes() {
         assert_eq!(navigation_fill(&tokens, NavigationFill::Hover), Some(tokens.nav_hover));
         assert_eq!(navigation_fill(&tokens, NavigationFill::Press), Some(tokens.nav_press));
         assert_eq!(navigation_fill(&tokens, NavigationFill::Active), Some(tokens.selected_bg));
+        assert_eq!(navigation_fill(&tokens, NavigationFill::Strong), Some(tokens.form_primary_fill));
+        assert_eq!(navigation_ink(&tokens, NavigationFill::Strong), tokens.on_accent);
         let frame = navigation_popup_frame();
         assert_eq!(frame.fill, tokens.dialog_body);
         assert_eq!(frame.stroke, egui::Stroke::new(NAV_BORDER, tokens.dialog_border));

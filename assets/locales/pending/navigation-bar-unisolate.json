@@ -1,45 +1,67 @@
 {
   "en": {
+    "cmd.browser_isolate": "Isolate",
+    "cmd.browser_unisolate": "Unisolate",
     "navbar.description.unisolate": "Appears while Isolate is in effect and brings back what it hid.",
     "navbar.unisolate": "Unisolate"
   },
   "ar": {
+    "cmd.browser_isolate": "عزل",
+    "cmd.browser_unisolate": "إلغاء العزل",
     "navbar.description.unisolate": "يظهر ما دام العزل ساريًا، ويعيد ما أخفاه.",
     "navbar.unisolate": "إلغاء العزل"
   },
   "de": {
+    "cmd.browser_isolate": "Isolieren",
+    "cmd.browser_unisolate": "Isolierung aufheben",
     "navbar.description.unisolate": "Erscheint, solange Isolieren wirkt, und holt zurück, was es ausgeblendet hat.",
     "navbar.unisolate": "Isolierung aufheben"
   },
   "es": {
+    "cmd.browser_isolate": "Aislar",
+    "cmd.browser_unisolate": "Dejar de aislar",
     "navbar.description.unisolate": "Aparece mientras Aislar está activo y devuelve lo que ocultó.",
     "navbar.unisolate": "Dejar de aislar"
   },
   "fr": {
+    "cmd.browser_isolate": "Isoler",
+    "cmd.browser_unisolate": "Annuler l'isolement",
     "navbar.description.unisolate": "Apparaît tant qu'Isoler est actif et fait revenir ce qu'il a masqué.",
     "navbar.unisolate": "Annuler l'isolement"
   },
   "he": {
+    "cmd.browser_isolate": "בידוד",
+    "cmd.browser_unisolate": "ביטול בידוד",
     "navbar.description.unisolate": "מופיע כל עוד הבידוד בתוקף, ומחזיר את מה שהוסתר.",
     "navbar.unisolate": "ביטול בידוד"
   },
   "ja": {
+    "cmd.browser_isolate": "分離表示",
+    "cmd.browser_unisolate": "分離表示を解除",
     "navbar.description.unisolate": "分離表示の間だけ現れ、非表示にしたものを元に戻します。",
     "navbar.unisolate": "分離表示を解除"
   },
   "ko": {
+    "cmd.browser_isolate": "분리 표시",
+    "cmd.browser_unisolate": "분리 표시 해제",
     "navbar.description.unisolate": "분리 표시 중에만 나타나며, 숨긴 항목을 다시 되돌립니다.",
     "navbar.unisolate": "분리 표시 해제"
   },
   "nl": {
+    "cmd.browser_isolate": "Isoleren",
+    "cmd.browser_unisolate": "Isolatie opheffen",
     "navbar.description.unisolate": "Verschijnt zolang Isoleren actief is en brengt terug wat het verborg.",
     "navbar.unisolate": "Isolatie opheffen"
   },
   "vi": {
+    "cmd.browser_isolate": "Cô lập đối tượng",
+    "cmd.browser_unisolate": "Hủy cô lập đối tượng",
     "navbar.description.unisolate": "Xuất hiện khi Cô lập đối tượng đang có hiệu lực và đưa trở lại những gì đã bị ẩn.",
     "navbar.unisolate": "Hủy cô lập đối tượng"
   },
   "zh": {
+    "cmd.browser_isolate": "隔离",
+    "cmd.browser_unisolate": "取消隔离",
     "navbar.description.unisolate": "隔离期间出现，恢复隔离时隐藏的内容。",
     "navbar.unisolate": "取消隔离"
   }

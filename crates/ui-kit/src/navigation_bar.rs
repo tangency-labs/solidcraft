@@ -39,14 +39,15 @@ pub struct Catalogue {
     pub value_menus: &'static [&'static str],
     /// Menu slots that show only their icon, whatever the stored options say.
     pub icon_menus: &'static [&'static str],
-    /// Action slots that always show their name beside the icon, even on a bar of icons: ones
-    /// the bar adds for a while, whose icon alone would read as another slot's.
-    pub named: &'static [&'static str],
+    /// Toggles whose on state takes the primary action's fill rather than the selection's, and that
+    /// stay at full strength while the bar fades: ways out of a mode that leaves part of the model
+    /// out of view.
+    pub strong: &'static [&'static str],
 }
 
-/// Whether slot `id` always shows its name ([`Catalogue::named`]).
-pub fn named(id: &str) -> bool {
-    installed().is_some_and(|catalogue| catalogue.named.contains(&id))
+/// Whether slot `id`'s on state takes the primary fill ([`Catalogue::strong`]).
+pub fn strong(id: &str) -> bool {
+    installed().is_some_and(|catalogue| catalogue.strong.contains(&id))
 }
 
 /// The host's catalogue, installed once per process ([`install_catalogue`]).

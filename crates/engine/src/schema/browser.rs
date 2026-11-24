@@ -963,7 +963,8 @@ fn some_visible<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Visible>, D::E
     Visible::deserialize(d).map(Some)
 }
 
-/// `browser.toggle_planes` and `browser.toggle_reference` take no parameters: an empty object.
+/// `browser.toggle_planes`, `browser.toggle_reference`, `browser.isolate` and
+/// `browser.unisolate` take no parameters: an empty object.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct BrowserToggleParams {}

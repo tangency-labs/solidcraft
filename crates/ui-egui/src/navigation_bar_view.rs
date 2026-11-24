@@ -25,15 +25,10 @@ const SHEET_ZOOM: &str = "sheet_zoom";
 const SELECTION_MODE: &str = "selection_mode";
 const UNISOLATE: &str = "unisolate";
 
-/// An Isolate is in effect, so the bar ends with Unisolate (#8120), as the menus' Isolate entries
+/// An Isolate is in effect, so the bar offers Unisolate (#8120), as the menus' Isolate entries
 /// turn into it.
 fn isolating(app: &SolveApp) -> bool {
     app.session.visibility.before_isolate.is_some()
-}
-
-/// A slot the bar adds while it applies, whether or not the user's bar holds it.
-fn added(id: &str) -> bool {
-    id == SHEET_ZOOM || id == UNISOLATE
 }
 
 /// The page picks by a rule of its own, not the selection mode: an open sketch picks its own
@@ -46,6 +41,12 @@ fn own_pick(app: &SolveApp) -> bool {
 /// picks by it (not where the page picks by a rule of its own, `own_pick`).
 pub(crate) fn shows(slot: &Slot, caps: NavCaps, own_pick: bool) -> bool {
     caps.shows(slot) && !(own_pick && slot.id == SELECTION_MODE)
+}
+
+/// A slot the bar adds while it applies, whether or not the user's bar holds it: the sheet zoom
+/// on a drawing's sheet, and Unisolate while an Isolate is in effect.
+fn added(id: &str) -> bool {
+    id == SHEET_ZOOM || id == UNISOLATE
 }
 
 fn live_preferences(app: &SolveApp) -> std::borrow::Cow<'_, NavigationBar> {
@@ -156,6 +157,8 @@ fn selected(app: &SolveApp, id: &str) -> bool {
         "grid" => app.ui.show_grid,
         "ground_shadow" => app.ui.ground_shadow,
         "ambient_occlusion" => app.preferences.ambient_occlusion,
+        // On while it is shown, so it takes the strong fill (`Catalogue::strong`).
+        UNISOLATE => isolating(app),
         _ => false,
     }
 }
@@ -236,8 +239,7 @@ fn slot_view(app: &SolveApp, bar: &BarLayout, slot: &'static Slot, index: usize,
         selected: editing.is_none() && selected(app, slot.id),
         enabled: editing.is_some() || !(slot.id == "projection" && projection_locked(app)),
         hidden: hidden.is_some(),
-        // Unisolate says what it does: it is there only for a while, and its eye alone is Show/Hide.
-        show_text: navigation_bar::named(slot.id) || if slot.kind == NavigationKind::Menu { bar.values && value } else { bar.labels },
+        show_text: if slot.kind == NavigationKind::Menu { bar.values && value } else { bar.labels },
         rect,
         // The View menu's slot, by the name older scenarios use.
         alias: (slot.id == "display").then_some("nav:view"),
@@ -791,8 +793,8 @@ mod tests {
         assert_eq!(solidcraft_ui_registry::handle_at("nav:view"), Some(in_more));
     }
 
-    /// #8120: while an Isolate is in effect the bar ends with a named Unisolate, whatever the
-    /// user's bar holds, and a click on it brings the rest back and takes it away again.
+    /// #8120: while an Isolate is in effect the bar ends with Unisolate, its icon alone in the
+    /// primary fill, whatever the user's bar holds; a click brings the rest back and takes it away.
     #[test]
     fn the_bar_offers_unisolate_while_isolating() {
         let mut h = crate::scenario::Harness::new();
@@ -803,10 +805,14 @@ mod tests {
         let kept = h.app.session.model.state().bodies[0].name.clone();
         h.app.run("browser.visibility", json!({"items": [kept], "visible": true, "isolate": true})).unwrap();
         h.settle();
-        assert!(navigation_bar::named(UNISOLATE));
         assert!(live_preferences(&h.app).slots.last().is_some_and(|id| id == UNISOLATE), "last on the bar");
         assert!(!h.app.preferences.navigation_bar.slots.iter().any(|id| id == UNISOLATE), "not stored in the user's bar");
         assert!(solidcraft_ui_registry::handle_at("nav:slot:unisolate").is_some(), "on the bar");
+        let slot = find(UNISOLATE).expect("the Unisolate slot");
+        let bar = measured(&h.app, &h.ctx, Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 720.0)));
+        let view = slot_view(&h.app, &bar, slot, usize::MAX, Rect::NOTHING, None);
+        assert!(view.selected && view.icon == "unisolate" && !view.show_text, "on, icon only");
+        assert!(navigation_bar::strong(UNISOLATE) && !navigation_bar::strong("grid"), "only Unisolate takes the primary fill");
         h.step(&json!({"click":{"handle":"nav:slot:unisolate"}})).unwrap();
         h.settle();
         assert!(h.app.session.visibility.hidden_bodies.is_empty(), "every body is back");

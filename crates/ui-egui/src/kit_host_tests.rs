@@ -666,11 +666,14 @@ mod navigation {
         themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.name.as_str(), crate::theme_files::resolve(theme))));
         let mut failures = Vec::new();
         for (name, tokens) in themes {
-            let Some(fill) = navigation_fill(&tokens, NavigationFill::Active) else { continue };
-            let ink = navigation_ink(&tokens, NavigationFill::Active);
-            let ratio = solidcraft_theme::contrast_ratio(ink, fill);
-            if ratio < 3.0 {
-                failures.push(format!("{name}: {ratio:.2}:1 ({ink:?} on {fill:?})"));
+            // Strong: Isolate's on state, the primary action's colours (#8120).
+            for state in [NavigationFill::Active, NavigationFill::Strong] {
+                let Some(fill) = navigation_fill(&tokens, state) else { continue };
+                let ink = navigation_ink(&tokens, state);
+                let ratio = solidcraft_theme::contrast_ratio(ink, fill);
+                if ratio < 3.0 {
+                    failures.push(format!("{name} {state:?}: {ratio:.2}:1 ({ink:?} on {fill:?})"));
+                }
             }
         }
         assert!(failures.is_empty(), "active navigation slot unreadable:\n{}", failures.join("\n"));

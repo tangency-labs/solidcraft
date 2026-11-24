@@ -146,6 +146,21 @@ pub static COMMANDS: &[CommandSpec] = &[
          or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (with paths or items of bodies, and visible:true: everything else is hidden, other placements as placements); \
          or unisolate?: bool (with visible:true and no target: put back what the isolates since the last unisolate hid, or show everything). Saved with the design and undone like any other change (the camera is not)",
     ),
+    CommandSpec::new("browser.isolate", "Isolate", crate::checked!("browser.isolate", isolate_selection))
+        .icon("body")
+        .key("Ctrl+I")
+        .contract(&TOGGLE_CONTRACT)
+        .output(output_schema_for::<BrowserVisibilityResult>)
+        .params(
+        "(no parameters) hides everything except the selection: the selected components' placements, or else the selected bodies \
+         and the bodies of the selected faces, edges and vertices. As browser.visibility with isolate:true; nothing selected is an error",
+    ),
+    CommandSpec::new("browser.unisolate", "Unisolate", crate::checked!("browser.unisolate", unisolate_all))
+        .icon("unisolate")
+        .key("Ctrl+Shift+I")
+        .contract(&TOGGLE_CONTRACT)
+        .output(output_schema_for::<BrowserVisibilityResult>)
+        .params("(no parameters) as browser.visibility with visible:true and unisolate:true: puts back what the isolates hid"),
     CommandSpec::new("browser.toggle_planes", "Show/Hide Planes", crate::checked!("browser.toggle_planes", toggle_planes))
         .icon("eye")
         .contract(&TOGGLE_CONTRACT)
@@ -680,6 +695,31 @@ fn folders_holding(s: &Session, world: &[String]) -> std::collections::BTreeSet<
 
 /// Unisolate: puts back what the Isolates since the last Unisolate hid, and leaves alone what was
 /// changed since (locks, sketches, dimensions). With no Isolate in effect, shows everything.
+/// `browser.isolate`: Isolate on the selection, for its key (#3504): placements when components
+/// are selected, else the bodies the selection names.
+fn isolate_selection(s: &mut Session, _p: &Value) -> Result<Value> {
+    let paths: Vec<Vec<u64>> =
+        s.selection.iter().filter_map(|item| if let crate::Sel::Occurrence { path } = item { Some(path.clone()) } else { None }).collect();
+    if !paths.is_empty() {
+        return visibility(s, &json!({"visible": true, "paths": paths, "isolate": true}));
+    }
+    let mut bodies: Vec<String> = Vec::new();
+    for name in s.selection.iter().filter_map(crate::Sel::body_name) {
+        if !bodies.iter().any(|b| b == name) {
+            bodies.push(name.to_owned());
+        }
+    }
+    if bodies.is_empty() {
+        return Err(bad("browser.isolate", "select a body or component to isolate"));
+    }
+    visibility(s, &json!({"visible": true, "items": bodies, "isolate": true}))
+}
+
+/// `browser.unisolate`: Unisolate, for its key (#3504).
+fn unisolate_all(s: &mut Session, _p: &Value) -> Result<Value> {
+    visibility(s, &json!({"visible": true, "unisolate": true}))
+}
+
 fn unisolate(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
     let cmd = "browser.visibility";
     if !visible {
@@ -2193,6 +2233,25 @@ mod tests {
             Ok(v) => v,
             Err(e) => panic!("selection.delete: {e}"),
         }
+    }
+
+    /// #3504: Ctrl+I isolates the selection (a face names its body) and Ctrl+Shift+I puts back what
+    /// it hid; with nothing selected Isolate refuses rather than hiding everything.
+    #[test]
+    fn the_isolate_keys_act_on_the_selection() {
+        let mut s = Session::default();
+        two_boxes(&mut s);
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "body_name": "C"}));
+        let spec = |id: &str| crate::find_command(id).unwrap_or_else(|| panic!("{id}"));
+        assert_eq!((spec("browser.isolate").shortcut, spec("browser.unisolate").shortcut), (Some("Ctrl+I"), Some("Ctrl+Shift+I")));
+        s.selection.clear();
+        assert!(s.execute("browser.isolate", &json!({})).is_err(), "nothing selected");
+        assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.before_isolate.is_none());
+        s.selection = vec![crate::Sel::Face { body: "B".into(), index: 0, point: Default::default() }];
+        run(&mut s, "browser.isolate", json!({}));
+        assert_eq!(s.visibility.hidden_bodies, ["A", "C"]);
+        run(&mut s, "browser.unisolate", json!({}));
+        assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.before_isolate.is_none());
     }
 
     /// #8120: Unisolate puts back what the Isolates hid, as it was before the first one, is one
