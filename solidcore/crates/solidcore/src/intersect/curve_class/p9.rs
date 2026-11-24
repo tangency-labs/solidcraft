@@ -374,7 +374,9 @@ impl<O: ClassObject> CurveClassification<O> {
                 // end vertex of the edge is the one contact at that vertex
                 if self.tangency_partner().is_some() {
                     for solution in &mut solutions {
-                        if let Some(point) = super::witness::tangency_point(
+                        // the witness only ever adds evidence: where it cannot run, the
+                        // classifier's own range stands; a cancellation stops the work
+                        match super::witness::tangency_point(
                             k,
                             &*geometry,
                             self,
@@ -383,8 +385,10 @@ impl<O: ClassObject> CurveClassification<O> {
                             edge,
                             solution,
                             tolerance,
-                        )? {
-                            *solution = point;
+                        ) {
+                            Ok(Some(point)) => *solution = point,
+                            Err(err) if err.is_cancelled() => return Err(err),
+                            Ok(None) | Err(_) => {}
                         }
                     }
                 }

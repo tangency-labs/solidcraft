@@ -29,7 +29,8 @@
 //!   ([`Curve::approaches_without_crossing`]);
 //! - neither end of the range is at an end vertex of E that the classification met;
 //! - E has no other face, or the classifying face lies on both sides of it;
-//! - G or a Z is not an analytic surface, or their intersection fails;
+//! - G or a Z is not an analytic surface, or their intersection fails (any error but a
+//!   cancellation, unported paths included);
 //! - E or a curve of K is not a line or a circle, a K curve overlaps E, or two circles do
 //!   not lie in one plane;
 //! - the stretch is no longer than the chord 2 sqrt(2 r tol) along which a carrier stays
@@ -451,8 +452,11 @@ struct RangeEnd {
 /// # Errors
 ///
 /// Those of the evaluations, the distance between the curves and the topology reads;
-/// the kernel's cancellation and unported errors from the surface intersection. Any
-/// other failure of the surface intersection keeps the range.
+/// a cancellation of the surface intersection. Any other failure of the surface
+/// intersection (an unported path among them: issue1517's tube ends and the shelled
+/// cylinder's top reach one) keeps the range. The caller keeps the range on every error
+/// but a cancellation: the witness only adds evidence, and where it cannot run the
+/// classifier's own answer stands.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub(crate) fn tangency_point<O: ClassObject>(
     k: &Kernel,
@@ -599,7 +603,7 @@ pub(crate) fn tangency_point<O: ClassObject>(
             Some(k.tolerances.ang_tol_rad()),
         ) {
             Ok(r) => r.curves_3d,
-            Err(err) if err.is_unported_or_cancelled() => return Err(err),
+            Err(err) if err.is_cancelled() => return Err(err),
             Err(_) => return Ok(None),
         };
         let Some(points) = stretch_points(e_carrier, &k_curves, stretch, tolerance, sin_ang) else {
