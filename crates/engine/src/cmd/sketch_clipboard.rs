@@ -352,7 +352,7 @@ fn cut(s: &mut Session, p: &Value) -> Result<Value> {
         d["sketch"] = sk.clone();
     }
     delete.run_nested(s, &d)?;
-    s.selection.clear();
+    s.clear_selection();
     // The cut geometry is gone: a paste back into this sketch goes where it was, not offset.
     if let Some(c) = s.sketch_clipboard.as_mut() {
         c.sketch = u64::MAX;
@@ -503,7 +503,7 @@ fn replace(s: &mut Session, p: &Value) -> Result<Value> {
         paste_clip(sk, doc, &clip, Vec2::ZERO, false, keep_ids)
     })?;
     if s.active_sketch == Some(target) {
-        s.selection.clear();
+        s.clear_selection();
     }
     let source = match from {
         Value::String(x) => x.clone(),
