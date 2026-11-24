@@ -63,7 +63,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "offset_extension_as_itself",
     "offset_extension_from_base",
     "point_class_gap_3d_propagates_no_drop_error",
-    "revolve_analytic_profile_faces",
     "simple_coincidence_crossing_is_point",
     "ssi_tangent_curve_tracer",
     "surface_continuity_checks_last_v_knot",

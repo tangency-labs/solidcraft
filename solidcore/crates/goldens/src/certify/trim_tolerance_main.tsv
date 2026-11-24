@@ -22,6 +22,7 @@
 # blend.fillet_executive_p3: the glue keeps a trim curve only when it spans the surviving edge (#18294): the digest is this branch's file with the rows put back. Seven issue-880 rows are this branch's lines (half-arc-rim-whole-offsets-1-1, -1-2, -1.4437-1.4437 and tilted-cylinder-rim-offsets-1-1, -1-2, setbacks-1-1, -1-2: the centroid's y and two products of inertia within 6.1e-11, whole-offsets-1-1's two edges swapped); none is a ROWS case, and no ROWS tolerance moves. The two half-arc-rim-0-setbacks rows it moves are FILLET_UV_CHANGES, put back before the digest
 # blend.fillet_executive_p3: a variable round's span follows the fillet solved at its test shares (WR-646, tangency-labs/solidcraft#18917): the digest is this branch's file with the rows put back. The seven law rows of a smooth or linear radius law are this branch's lines (volume, mass and geometry only; status and counts unchanged); the two law-box edge-map rows' lowered tolerances move 4.852094517696912e-5 -> 4.884070562533064e-5 and 4.166766991111495e-5 -> 4.192993148410815e-5, still below the rows' old values 5.957125873966091e-5 and 5.0819176600091676e-5, and each new value is certified over its trims on this branch's body by certify::trim_tolerance::fillet_executive_p3
 # blend.fillet_executive_p3, offset.offset_executive_p2: every shell ends with its exact analytic edges (WR-545's flag retired): the digests are this branch's files with the rows put back. fillet_executive_p3 lines moved against this main: real-box-fillet1v-r3-shell-closed and real-box-fillet4v-r3-shell-closed (the rim's edges exact arcs and lines, its vertices on them, the shell's area nearer its closed form; wr545_moved_rows_are_exact proves them); their rows lose the 26 rounding entries of vertex coordinates the exact edges move (6 and 20), and keep every moved tolerance. offset_executive_p2 lines moved: its 62 rows (59 lines where B-spline edges were, the vertex bounds of 36 of them moved by at most 1.7e-12, all proved by wr545_moved_rows_are_exact).
+# primitive.api_primitives, primitive.primitive_creation_p2, primitive.primitive_creation_p3, sweep.api_brep, sweep.rotational_sweep_geometry, sweep.topology_sweep: a revolved profile takes its analytic face (WR-448's flag retired, #14425): the digests are this branch's files with the rows put back. api_primitives' 16 overlapping ROWS rows (gen0129, 0329, 0479, 0533, 0600, 0700, 0724, 0749, 0880, 0885, 1120, 1133, 1189, 1375, 1377, 1391) are this branch's values, each still a lowered tolerance its certificate covers; gen0714 and gen0905 overlap unchanged
 # blend.fillet_executive_p3, intersect.surface_drop_lib_p3, topology.face_p3: main's files with the rows the drop's clamped-sliver rule moves (a first or last span whose clamped UV image is one point within the drop's tolerances is left out): the digests are this branch's files with the rows put back. Lines moved against this main: fillet_executive_p3's 10 sphere_diff_3cylinders rows (48 mass_properties entries, each EQUAL against a certified enclosure: drop_clamped_sliver_moved_mass_rows), surface_drop_lib_p3's gen0119 and gen0812 (each main's row with one folded end span removed: drop_clamped_sliver_moved_rows) and face_p3's own_reader_sphere_diff_3cylinders_uv_trim_f7_rebuild (its rebuilt face-7 trim: one edge tolerance moves 7.1e-7 relative, the row here)
 # geom.assert_array: the ValidatePointers label table gains test 147, "Warn Reversed End" (tangency-labs/solidcraft#21105): the digest is this branch's file (written by main_expected_digests; the unit has no ROWS case). It adds table_16011_1_147, brep_validate_pointers_last reads list_len 148 for 147, and the 183 generated cases that draw a test index from SmBrep list 1 draw from 148 entries; with only that entry removed the branch's unit compares changed=0 added=0 removed=0 against main's file
 # blend.fillet_geom_p1, blend.fillet_solver_p4, blend.fillet_standard_solver_p2, nlib.srf_adv_p1, nlib.srf_adv_p3, nurbs.b_spline_surface_n_lib_p1, surface.offset_surface: #21383 moves 179 rows, all ok -> ok, by the G1R homogeneous continuation (a rational side with mixed weight ratios gets the far row cb(1+t)B - tI, which is G1); each moved row is certified by its unit's g1r_moved_rows test (or each_moved_row_extends_its_base_by_certified_g1_steps); the digests are the branch files
@@ -29,6 +30,7 @@
 # intersect.curve_class_p1, surface.surface_p4, surface.surface_point_solve_p3: #21504 (#20438) drops a global minimise answer farther than the target, and a dropped minimise falls back to the tree solve; each moved row is certified empty over its domain (target_bounded_solves_are_certified_empty in surface_surface_p4 and surface_surface_point_solve_p3) or replayed to main's row with the drops kept and each drop certified (target_bounded_rows_moved_only_through_certified_drops); the digests are the branch files
 # intersect.surface_intersector_p2, intersect.surface_intersector_p3, offset.offset_executive_p2, topology.proto_topology_p1, topology.proto_topology_p2, topology.proto_topology_p3: this branch's files (the proto-topology statuses passed on and WR-73's misses answering false, #18927): 604 lines moved, none a ROWS case (offset_executive_p2's digest is main's file with its 5 k0.35 overlap lines this branch's, its 3 ROWS cases put back by the ledger as before); each proved by its unit's replay tests (status_proof_replays, moved_rows_return_their_failed_steps, k035_overlap_offsets_are_refused)
 # boolean.topology_intersector_p3, topology.brep_p9: the point merge grows its vertex to cover its certified edge ends (tangency-labs/solidcraft#21340): the digest is this branch's file (written by main_expected_digests, which gives main's digests from main's files). 7 p3 rows and brep_p9 point_merge_7_new_center move vertex tolerances only, each new value twice the certified reach and covering every end the old one left past its half; merged_vertex_rows replays each row and puts it back to main's line bit for bit; no ROWS case is in these units
+# intersect.surface_drop_lib_p1: main's file with trim0351 and trim0384 dropping cleanly across a closed U-seam (#20836): both move from 0 curves ([0.0, 0.0, 0.0, 0.0]) to 2 UV pieces meeting on opposite U-seam sides (n=182 and n=196); no tolerance moves
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -139,7 +141,7 @@ intersect.curve_class_p9	0b4e73f8539ea534
 intersect.point_class	7987e83088e89cb6
 intersect.ray_tracer	ce63de70cd21ace6
 intersect.surface_drop_curve	ee0183329c02962f
-intersect.surface_drop_lib_p1	2cf06152abbf3ea8
+intersect.surface_drop_lib_p1	9caefa02b77701ff
 intersect.surface_drop_lib_p2	e638190d664c28c3
 intersect.surface_drop_lib_p3	756347b51d8262c9
 intersect.surface_intersector_p1	c15dc4e9c25559c9
@@ -206,12 +208,12 @@ offset.offset_executive_p2	fcb52935cecf554f
 offset.offset_geometry_creation	e8c98d82f6680670
 primitive.api_curve_ops	631989d29fe6f1dc
 primitive.api_curves	b384f5e70c20e9db
-primitive.api_primitives	135f2a1c6d123a62
+primitive.api_primitives	9ee3ca6ac55fd5b5
 primitive.api_surface_ops	ac33d130cc4294e6
 primitive.api_trim_ops	853b9688cca8e37b
 primitive.primitive_creation_p1	1ee2418a9fa4c07b
-primitive.primitive_creation_p2	f71ee96379f4ff95
-primitive.primitive_creation_p3	175c8ac5f97453e0
+primitive.primitive_creation_p2	91729ae442da5957
+primitive.primitive_creation_p3	c500973c4b28e328
 query.api_queries	b6aa5ea7b8b4c704
 query.brep	8effe3f69fdd2520
 query.edge	55c7ad3f517b8bbd
@@ -266,10 +268,10 @@ surface.twist_volume	185622854f391b03
 surface.unbend_volume	94c42caa7f6f0475
 surface.volume_p1	abd24d71681331bd
 surface.volume_p2	0583bf0698f07807
-sweep.api_brep	e4f9ad425f1213ba
+sweep.api_brep	abe07b0a735b1602
 sweep.api_surfaces	a46bb969a19dac47
-sweep.rotational_sweep_geometry	57f788664cc53347
-sweep.topology_sweep	a8bdd96fe6dc7b61
+sweep.rotational_sweep_geometry	5b474ec3f398587f
+sweep.topology_sweep	58b44a27822309c7
 sweep.trans_sweep_geometry	d85c69dbbc2574b4
 topology.api_files	ffb949079ea871c5
 topology.api_projection	bfeb43d364a8f619

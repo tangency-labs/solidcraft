@@ -29,6 +29,7 @@
 //! continue, and a piece the bisection cannot close all give `None`: the gap is then not
 //! enclosed.
 
+use core::cell::RefCell;
 use std::collections::{btree_map::Entry, BTreeMap};
 
 use crate::blend::fillet_section::certificate::{
@@ -1051,6 +1052,49 @@ fn certified_gap(
 ///   cut on once the other pieces are done if `seen` is then above `enough`; if it is not,
 ///   the gap is not enclosed.
 fn bisect(
+    range: [f64; 2],
+    first_pieces: usize,
+    corners: &[f64],
+    relative: f64,
+    floor: f64,
+    limits: [f64; 2],
+    budget: Option<usize>,
+    piece: impl FnMut(f64, f64) -> Result<Option<PieceBound>>,
+) -> Result<Option<f64>> {
+    bisect_with_ends(
+        range,
+        first_pieces,
+        corners,
+        relative,
+        floor,
+        limits,
+        budget,
+        piece,
+        None,
+    )
+}
+
+/// Not upstream (#19889): [`bisect`], with `ends` (where given) the end value at a parameter
+/// that `piece` takes as the end value there: `Some(g)` where `piece` evaluates `g` there
+/// (its piece's end values are then the largest of its two and `0`), `None` (or an error
+/// other than a cancellation) where it bounds no piece ending there.
+///
+/// With `ends`, a budget, `over` infinite and `enough` at least `0`, the bisection stops at
+/// once with no bound (`None`) where [`bisect`] is sure to: once the budget stops a piece
+/// while the bound may still be at most `enough`, no piece is cut further until the largest
+/// end value `seen` is above `enough` (each piece still on the stack is bounded or set aside
+/// as it stands); where no end value of those pieces is above `enough`, `seen` stays at most
+/// `enough`, the pieces set aside stay so, and the gap is not enclosed whatever the pieces'
+/// bounds (`over` infinite: no bound stops it first). Only the end values are evaluated for
+/// that, not the pieces' second terms: a trim the budget stops on pieces cut at every knot of
+/// its reparametrisation (thousands of first pieces) evaluates one piece, not all (the
+/// `crashes/2992` union bounds 510 such cut passes, 666k pieces, 50 s of its 58 s). Where an
+/// end value is above `enough`, the bisection goes on as [`bisect`]'s.
+///
+/// # Errors
+///
+/// Those of `piece`, and a cancellation from `ends`.
+fn bisect_with_ends(
     [lo, hi]: [f64; 2],
     first_pieces: usize,
     corners: &[f64],
@@ -1059,6 +1103,7 @@ fn bisect(
     [enough, over]: [f64; 2],
     budget: Option<usize>,
     mut piece: impl FnMut(f64, f64) -> Result<Option<PieceBound>>,
+    mut ends: Option<&mut dyn FnMut(f64) -> Result<Option<f64>>>,
 ) -> Result<Option<f64>> {
     if !(lo.is_finite() && hi.is_finite() && lo < hi) || first_pieces == 0 {
         return Ok(None);
@@ -1088,6 +1133,10 @@ fn bisect(
     let mut seen = f64::NEG_INFINITY;
     // (the open pieces the budget stopped, in the order they were reached)
     let mut parked: Vec<(f64, f64, u32, f64)> = Vec::new();
+    // (whether the end values of the pieces left were looked at, once the budget first stopped
+    // a piece: [`bisect_with_ends`])
+    let mut ends_looked =
+        ends.is_none() || over != f64::INFINITY || enough.is_nan() || enough < 0.0;
     loop {
         while let Some((a, b, depth, parent)) = stack.pop() {
             let mid = 0.5 * (a + b);
@@ -1115,6 +1164,14 @@ fn bisect(
                     // (an open piece the budget stopped is not bounded as it stands)
                     if !closed && capped && out_of_pieces {
                         parked.push((a, b, depth, parent));
+                        if !ends_looked {
+                            ends_looked = true;
+                            if let Some(end) = ends.as_mut() {
+                                if ends_within(&stack, &mut **end, enough)? {
+                                    return Ok(None);
+                                }
+                            }
+                        }
                         continue;
                     }
                     if bottom || out_of_pieces || closed {
@@ -1133,6 +1190,14 @@ fn bisect(
                     let (capped, out_of_pieces) = out_of(seen);
                     if capped && out_of_pieces {
                         parked.push((a, b, depth, parent));
+                        if !ends_looked {
+                            ends_looked = true;
+                            if let Some(end) = ends.as_mut() {
+                                if ends_within(&stack, &mut **end, enough)? {
+                                    return Ok(None);
+                                }
+                            }
+                        }
                         continue;
                     }
                     if bottom || out_of_pieces {
@@ -1156,6 +1221,43 @@ fn bisect(
         stack.append(&mut parked);
     }
     Ok(worst.is_finite().then_some(worst))
+}
+
+/// Not upstream (#19889): `end` for the look at the end values of [`bisect_with_ends`],
+/// polling the kernel's cancel token before each value, cached or not, as the pieces it
+/// stands in for poll before each piece: a cancellation that arrives during the look
+/// cancels the bound instead of letting it finish as "not within".
+fn polled_end<'a>(
+    k: &'a Kernel,
+    mut end: impl FnMut(f64) -> Result<Option<f64>> + 'a,
+) -> impl FnMut(f64) -> Result<Option<f64>> + 'a {
+    move |t| {
+        k.check_cancelled(OP)?;
+        end(t)
+    }
+}
+
+/// Not upstream (#19889): whether no end value `end` gives at the ends of the pieces `stack`
+/// is above `enough` ([`bisect_with_ends`]).
+///
+/// # Errors
+///
+/// A cancellation from `end` (any other error is no end value, as `piece` takes it).
+fn ends_within<'a>(
+    stack: &[(f64, f64, u32, f64)],
+    end: &mut (dyn FnMut(f64) -> Result<Option<f64>> + 'a),
+    enough: f64,
+) -> Result<bool> {
+    for &(a, b, ..) in stack {
+        for t in [a, b] {
+            match end(t) {
+                Ok(Some(g)) if g > enough => return Ok(false),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Ok(_) | Err(_) => {}
+            }
+        }
+    }
+    Ok(true)
 }
 
 /// The parameters strictly inside `(lo, hi)` where the curve `cn` may not be C¹: its
@@ -3800,22 +3902,32 @@ fn bound_trim_pair(
         // (a gap at most `enough` less the curve's slack, rounded down, has a bound at most
         // `enough`: the sum's exact value is at most `enough`, so rounding it up stays there)
         let enough_gap = (Ivl::from(enough) - Ivl::from(c_slack)).lo;
-        let Some(gap) = bisect(
-            range,
-            FIRST_PIECES,
-            cuts,
-            CLOSE_RELATIVE,
-            floor,
-            [enough_gap, over],
-            budget,
-            |a, b| {
-                k.check_cancelled(OP)?;
-                piece_reparametrised(&sides, net, a, b, |t| {
-                    cached_trim_endpoint(endpoints, t, || reparametrised_endpoint(&sides, net, t))
-                })
-            },
-        )?
-        else {
+        // (the pieces and the look at the end values share the cache: the same values either
+        // way, [`bisect_with_ends`])
+        let cache = RefCell::new(core::mem::take(endpoints));
+        let end = |t: f64| {
+            let mut cache = cache.borrow_mut();
+            cached_trim_endpoint(&mut cache, t, || reparametrised_endpoint(&sides, net, t))
+        };
+        let gap = {
+            let mut look = polled_end(k, end);
+            bisect_with_ends(
+                range,
+                FIRST_PIECES,
+                cuts,
+                CLOSE_RELATIVE,
+                floor,
+                [enough_gap, over],
+                budget,
+                |a, b| {
+                    k.check_cancelled(OP)?;
+                    piece_reparametrised(&sides, net, a, b, end)
+                },
+                Some(&mut look),
+            )
+        };
+        *endpoints = cache.into_inner();
+        let Some(gap) = gap? else {
             return Ok(None);
         };
         if gap == f64::INFINITY {
@@ -4967,6 +5079,133 @@ mod tests {
         assert_eq!(run([1.0 + 1.0e-13, f64::INFINITY], Some(64)), None);
         // (an end value past `over`)
         assert_eq!(run([0.9, 0.95], Some(64)), Some(f64::INFINITY));
+    }
+
+    /// The look at the end values (#19889) changes no bound: over end-value profiles below,
+    /// at and above `enough`, pieces left unbounded, cut first pieces (as at the knots of a
+    /// reparametrisation), pieces left unbounded between known ends and budgets,
+    /// [`bisect_with_ends`] gives [`bisect`]'s answer bit for
+    /// bit, and where the budget stops a gap within `enough` on a thousand first pieces it
+    /// bounds one of them, not all.
+    #[test]
+    fn looking_at_the_end_values_changes_no_bound() {
+        let profiles: [fn(f64) -> Option<f64>; 6] = [
+            |t| Some(0.5 + 0.25 * t),
+            |t| Some(if (0.7..=0.71).contains(&t) { 1.0 } else { 0.5 }),
+            |t| (!(0.3..0.4).contains(&t)).then_some(0.5),
+            |t| (!(0.3..0.4).contains(&t)).then_some(if t > 0.9 { 2.0 } else { 0.5 }),
+            |t| Some(0.75 - 1.0e-4 * (40.0 * t).sin()),
+            |_| Some(0.75),
+        ];
+        let cuts: Vec<f64> = (1..1000).map(|i| f64::from(i) / 1000.0 + 1.0e-7).collect();
+        for (n, profile) in profiles.iter().enumerate() {
+            for corners in [&[][..], &cuts[..]] {
+                for enough in [0.4, 0.75, 0.75 + 1.0e-13, 1.5, 3.0] {
+                    for budget in [None, Some(64), Some(1 << 11)] {
+                        for (over, lost) in [f64::INFINITY, 1.75]
+                            .into_iter()
+                            .flat_map(|over| [(over, false), (over, true)])
+                        {
+                            let mut calls = [0usize; 2];
+                            let mut run = |with: bool| {
+                                let calls = &mut calls[usize::from(with)];
+                                let piece = |a: f64, b: f64| {
+                                    *calls += 1;
+                                    // (`lost`: pieces left unbounded with both ends known, as
+                                    // a second term that cannot be bounded leaves them)
+                                    if lost && (0.5..0.6).contains(&a) {
+                                        return Ok(None);
+                                    }
+                                    let (Some(ga), Some(gb)) = (profile(a), profile(b)) else {
+                                        return Ok(None);
+                                    };
+                                    let h = b - a;
+                                    let ends = 0.0_f64.max(ga).max(gb);
+                                    Ok(PieceBound::with(ends, Ivl::from(0.1 * h * h), 0.0))
+                                };
+                                let mut end = |t: f64| Ok(profile(t));
+                                let ends: Option<&mut dyn FnMut(f64) -> Result<Option<f64>>> =
+                                    if with { Some(&mut end) } else { None };
+                                bisect_with_ends(
+                                    [0.0, 1.0],
+                                    32,
+                                    corners,
+                                    0.0,
+                                    1.0e-13,
+                                    [enough, over],
+                                    budget,
+                                    piece,
+                                    ends,
+                                )
+                                .unwrap()
+                                .map(f64::to_bits)
+                            };
+                            let (without, with) = (run(false), run(true));
+                            let case = format!(
+                                "profile {n}, {} cuts, enough {enough}, budget {budget:?}, \
+                                 over {over}, lost {lost}",
+                                corners.len()
+                            );
+                            assert_eq!(with, without, "{case}");
+                            assert!(calls[1] <= calls[0], "{case}: {calls:?}");
+                            // (a gap of 0.75 throughout, within `enough` = 0.75 + 1e-13 only by
+                            // pieces far finer than a thousand first pieces)
+                            if n == 5
+                                && corners.len() == cuts.len()
+                                && enough == 0.75 + 1.0e-13
+                                && budget == Some(64)
+                                && over == f64::INFINITY
+                            {
+                                assert_eq!(without, None, "{case}");
+                                assert_eq!(calls[1], 1, "{case}: {calls:?}");
+                                assert!(calls[0] > 1000, "{case}: {calls:?}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A cancellation that arrives once the budget has parked the first piece cancels the
+    /// look at the end values ([`polled_end`]), as it cancelled the pieces the look stands in
+    /// for, instead of the bound finishing as "not within" (Ok(None)).
+    #[test]
+    fn a_cancellation_during_the_look_at_the_end_values_cancels_it() {
+        use crate::kernel::CancelToken;
+        let cuts: Vec<f64> = (1..1000).map(|i| f64::from(i) / 1000.0 + 1.0e-7).collect();
+        for cancel in [false, true] {
+            let mut k = Kernel::default();
+            let token = CancelToken::new();
+            k.set_cancel_token(token.clone());
+            let k = k;
+            let piece = |a: f64, b: f64| {
+                k.check_cancelled(OP)?;
+                // (the cancellation arrives right after the first piece's poll)
+                if cancel {
+                    token.cancel();
+                }
+                let h = b - a;
+                Ok(PieceBound::with(0.75, Ivl::from(0.1 * h * h), 0.0))
+            };
+            let mut look = polled_end(&k, |_| Ok(Some(0.75)));
+            let gap = bisect_with_ends(
+                [0.0, 1.0],
+                32,
+                &cuts,
+                0.0,
+                1.0e-13,
+                [0.75 + 1.0e-13, f64::INFINITY],
+                Some(64),
+                piece,
+                Some(&mut look),
+            );
+            if cancel {
+                assert!(matches!(gap, Err(SolidError::Cancelled { .. })), "{gap:?}");
+            } else {
+                assert_eq!(gap.unwrap(), None);
+            }
+        }
     }
 
     /// A slack no cut shrinks (a trim past its surface's net, #18166) does not hold a piece
