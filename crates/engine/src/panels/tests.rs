@@ -41,6 +41,22 @@ fn fixed_bottom_height_is_validated_without_weakening_other_zone_bounds() {
 }
 
 #[test]
+fn discovered_plugin_panel_kinds_register_without_changing_existing_placements() {
+    let registry = synthetic_registry().unwrap();
+    let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    spec.kind = PanelKind::new("plugin.panel.sample.jobs").unwrap();
+    let mut service =
+        LayoutService::new(registry, Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+    open(&mut service, "existing", "logs");
+    let before = service.inspect();
+    service.register_panel(spec.clone()).unwrap();
+    assert_eq!(service.inspect(), before);
+    assert_eq!(service.registry().get(&spec.kind).unwrap(), &spec);
+    assert_eq!(service.register_panel(spec).unwrap_err().rule, Rule::DuplicateId);
+    assert_eq!(service.inspect(), before);
+}
+
+#[test]
 fn fixed_bottom_rows_normalize_placement_but_reject_collapse_and_height_commands_atomically() {
     use serde_json::json;
     let mut registry = synthetic_registry().unwrap();

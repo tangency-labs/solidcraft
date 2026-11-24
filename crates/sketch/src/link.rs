@@ -1242,9 +1242,19 @@ impl Sketch {
                     if let Some(fresh_pos) = fresh_pos
                         && points.iter().zip(&fresh_pos).all(|(pi, q)| self.points.get(*pi).is_some_and(|p| near_point(p.pos, *q)))
                     {
-                        for (pi, q) in points.iter().zip(fresh_pos) {
-                            if let Some(p) = self.points.get_mut(*pi) {
-                                p.pos = q;
+                        // A face whose loops meet at a corner has coincident duplicate edges and
+                        // vertices in the model there, and what a later feature makes of them
+                        // depends on coordinates well below any tolerance (#15049). Such a link
+                        // was never moved by a re-read before the corner was accepted (#20621),
+                        // so a re-read that agrees to within one point's merge distance leaves
+                        // its points as saved. Radii and conic shapes still follow the face.
+                        let keep_points = loops::meets_at_corner(&lay.curves, lay.pts.len())
+                            && points.iter().zip(&fresh_pos).all(|(pi, q)| self.points.get(*pi).is_some_and(|p| p.pos.dist(*q) <= MERGE_TOL));
+                        if !keep_points {
+                            for (pi, q) in points.iter().zip(fresh_pos) {
+                                if let Some(p) = self.points.get_mut(*pi) {
+                                    p.pos = q;
+                                }
                             }
                         }
                         for (ci, c) in curves.iter().zip(&lay.curves) {

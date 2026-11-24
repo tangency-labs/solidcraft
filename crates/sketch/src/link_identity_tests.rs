@@ -376,34 +376,89 @@ fn touching_or_crossed_face_boundaries_refuse_without_retargeting_ids() {
     }
 }
 
-#[test]
-fn face_with_two_inner_loops_meeting_at_one_corner_projects_and_refreshes() {
-    // A plate with a block and a pad joined on it: the pad's corner meets the block's corner
-    // (#20619). Both footprints are inner loops that share one vertex.
+/// A plate with a block and a pad joined on it: the pad's corner meets the block's corner
+/// (#20619). Both footprints are inner loops that share one vertex when `pad_x` is 30, and
+/// overlap the block's edge when it is 29.
+fn corner_face(pad_x: f64) -> Vec<LinkGeom> {
     let rect = |x0: f64, y0: f64, x1: f64, y1: f64| {
         let p = [Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)];
         (0..4).map(|i| LinkGeom::Line(p[i], p[(i + 1) % 4])).collect::<Vec<_>>()
     };
-    let touching = |pad_x: f64| -> Vec<LinkGeom> {
-        let mut g = rect(0.0, 0.0, 50.0, 40.0);
-        g.extend(rect(15.0, 10.0, 30.0, 25.0));
-        g.extend(rect(pad_x, 25.0, pad_x + 6.0, 31.0));
-        g
-    };
+    let mut g = rect(0.0, 0.0, 50.0, 40.0);
+    g.extend(rect(15.0, 10.0, 30.0, 25.0));
+    g.extend(rect(pad_x, 25.0, pad_x + 6.0, 31.0));
+    g
+}
+
+/// `geom` with every line moved by `by`, so shared corners stay shared.
+fn moved(geom: Vec<LinkGeom>, by: Vec2) -> Vec<LinkGeom> {
+    geom.into_iter()
+        .map(|g| match g {
+            LinkGeom::Line(a, b) => LinkGeom::Line(a + by, b + by),
+            other => other,
+        })
+        .collect()
+}
+
+fn link_positions(sk: &Sketch, link: &str) -> Vec<Vec2> {
+    sk.link_points(link).iter().map(|p| sk.points[*p].pos).collect()
+}
+
+#[test]
+fn face_with_two_inner_loops_meeting_at_one_corner_projects_and_refreshes() {
     let mut sk = Sketch::new();
-    let link = sk.add_link(LinkKind::Project, face(), &touching(30.0)).unwrap();
+    let link = sk.add_link(LinkKind::Project, face(), &corner_face(30.0)).unwrap();
     assert_eq!(sk.link_curves(&link).len(), 12);
     // The corner is one shared point: 11 points, not 12.
     assert_eq!(sk.link_points(&link).len(), 11);
     // Re-reading the same face is not refused and keeps the link current.
-    assert!(!sk.update_link(&link, &touching(30.0)).unwrap());
+    assert!(!sk.update_link(&link, &corner_face(30.0)).unwrap());
     assert!(!sk.link(&link).unwrap().lost);
     // A pad that overlaps the block instead of touching it still refuses.
     let saved = sk.clone();
-    assert!(sk.update_link(&link, &touching(29.0)).is_err());
+    assert!(sk.update_link(&link, &corner_face(29.0)).is_err());
     assert_eq!(sk.points, saved.points);
     assert_eq!(sk.curves, saved.curves);
     assert!(sk.link(&link).unwrap().lost);
+}
+
+#[test]
+fn corner_face_reread_within_rounding_keeps_its_saved_points_and_a_real_move_follows() {
+    // The face of a sweep cut that two touching profiles made reads back a few billionths of a
+    // millimetre off what the sketch saved, and the next feature (a sweep from that sketch,
+    // #15049) is built from those coordinates: rounding is not a change there.
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &corner_face(30.0)).unwrap();
+    let saved = link_positions(&sk, &link);
+    let noise = Vec2::new(3e-9, -2e-9);
+    assert!(!sk.update_link(&link, &moved(corner_face(30.0), noise)).unwrap());
+    assert!(!sk.link(&link).unwrap().lost);
+    assert_eq!(link_positions(&sk, &link), saved, "rounding leaves the saved points where they were");
+    // A move beyond that is followed, as for any face.
+    let shift = Vec2::new(5e-7, 0.0);
+    assert!(!sk.update_link(&link, &moved(corner_face(30.0), shift)).unwrap());
+    for (now, before) in link_positions(&sk, &link).into_iter().zip(&saved) {
+        assert!(now.dist(*before + shift) < 1e-12, "{now:?} moved from {before:?}");
+    }
+    // A circle on that face still takes a new radius while its points stay as saved.
+    let mut with_hole = corner_face(30.0);
+    with_hole.push(LinkGeom::Circle(Vec2::new(5.0, 35.0), 2.0));
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &with_hole).unwrap();
+    let saved = link_positions(&sk, &link);
+    let mut resized = corner_face(30.0);
+    resized.push(LinkGeom::Circle(Vec2::new(5.0, 35.0), 2.000002));
+    assert!(!sk.update_link(&link, &resized).unwrap());
+    assert_eq!(link_positions(&sk, &link), saved);
+    assert!(sk.curves.iter().any(|c| matches!(c.kind, CurveKind::Circle { r, .. } if (r - 2.000002).abs() < 1e-12)), "the radius follows the face");
+    // A face whose loops do not touch has no such exception: it takes what it is read as.
+    let mut plain = Sketch::new();
+    let rim = plain.add_link(LinkKind::Project, face(), &ring(true, 10.0, 8.0)).unwrap();
+    let was = link_positions(&plain, &rim);
+    assert!(!plain.update_link(&rim, &moved(ring(true, 10.0, 8.0), noise)).unwrap());
+    for (now, before) in link_positions(&plain, &rim).into_iter().zip(&was) {
+        assert!(now.dist(*before + noise) < 1e-12);
+    }
 }
 
 #[test]

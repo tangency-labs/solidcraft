@@ -196,15 +196,22 @@ impl Lod {
 
     /// The tolerance (mm) `b`'s edges are simplified to, or 0 to draw them as meshed.
     pub fn edge_tolerance(&self, b: &ModelBody) -> f64 {
-        self.edges.get(&body_id(b).0).map_or(0.0, |&step| crate::edge_detail::tolerance(step))
+        self.edge_tolerance_of(body_id(b).0)
+    }
+
+    /// [`Self::edge_tolerance`] of the body whose [`body_id`] is `id`.
+    pub fn edge_tolerance_of(&self, id: usize) -> f64 {
+        self.edges.get(&id).map_or(0.0, |&step| crate::edge_detail::tolerance(step))
     }
 
     /// Choose each body's edge step from the most pixels per millimetre it can come to (`None`:
     /// as meshed) and the chord its edges were meshed to (mm), with
     /// [`crate::edge_detail::hysteresis`]. A body whose tolerance would be under half its chord
     /// keeps its edges as meshed: there is next to nothing to drop. Bodies left out keep no step.
-    /// Returns whether any body's edge step changed.
-    pub fn update_edges(&mut self, wanted: impl IntoIterator<Item = (usize, Option<f64>, f64)>) -> bool {
+    /// Choose each body's edge step, with the [`body_id`]s of the bodies whose step changed: the scene
+    /// rebuilds just the blocks those bodies are in ([`super::viewport::patch_edge_steps`]), the
+    /// per-block cache keeping every other block.
+    pub fn update_edges_changed(&mut self, wanted: impl IntoIterator<Item = (usize, Option<f64>, f64)>) -> Vec<usize> {
         let mut next = HashMap::with_capacity(self.edges.len());
         for (id, ppm, chord) in wanted {
             let Some(step) = ppm.and_then(crate::edge_detail::step_for) else { continue };
@@ -213,10 +220,13 @@ impl Lod {
                 next.insert(id, step);
             }
         }
-        let changed = next != self.edges;
+        let mut changed: std::collections::HashSet<usize> =
+            self.edges.iter().filter(|(id, step)| next.get(id) != Some(step)).map(|(id, _)| *id).collect();
+        changed.extend(next.iter().filter(|(id, step)| self.edges.get(id) != Some(step)).map(|(id, _)| *id));
+        let changed: Vec<usize> = changed.into_iter().collect();
         self.edges = next;
         self.stats.simplified_edges = self.edges.len();
-        if changed {
+        if !changed.is_empty() {
             self.generation += 1;
         }
         changed
