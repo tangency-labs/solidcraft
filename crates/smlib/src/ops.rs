@@ -388,11 +388,12 @@ impl Brep {
         r
     }
 
-    /// The flat faces nearest to `faces` (each within `tolerance`) tilted by `angle` radians
-    /// (0 < |angle| < 89.94 degrees) about the line where each meets the neutral plane through
-    /// `neutral_origin` with normal `neutral_normal`, a positive angle leaning them in going along
-    /// `pull`; the faces around them extended or trimmed to meet them. A face that isn't flat, or
-    /// isn't parallel to `pull`, is [`Error::Unsupported`].
+    /// The faces nearest to `faces` (each within `tolerance`) tilted by `angle` radians
+    /// (0 < |angle| < 89.94 degrees) about the line or circle where each meets the neutral plane
+    /// through `neutral_origin` with normal `neutral_normal`, a positive angle leaning them in going
+    /// along `pull`; the faces around them extended or trimmed to meet them. A face that is neither
+    /// a plane parallel to `pull` nor a cone or cylinder about it is refused with the reason
+    /// ([`Error::Refused`]).
     pub fn draft(
         &self,
         faces: &[[f64; 3]],

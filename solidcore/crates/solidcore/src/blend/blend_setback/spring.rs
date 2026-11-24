@@ -34,7 +34,7 @@
 //! recursion.
 
 use super::face_plane::FacePlane;
-use super::{axpy, bern_elevate, bern_mul, el, el_mut, sm_err, Bern, Refusal, HOM_ZERO};
+use super::{axpy, bern_elevate, bern_mul, el, el_mut, past_table, Bern, Refusal, HOM_ZERO};
 use super::{Face, FaceKind};
 use crate::math::{Point3, Vec3, EFF_ZERO};
 
@@ -170,7 +170,7 @@ pub fn spring_curve(
             }
         }
     };
-    let d = w.len().checked_sub(1).ok_or_else(sm_err)?;
+    let d = w.len().checked_sub(1).ok_or_else(past_table)?;
     // homogeneous world coordinates
     let mut curve = vec![HOM_ZERO; d + 1];
     for (i, h) in curve.iter_mut().enumerate() {

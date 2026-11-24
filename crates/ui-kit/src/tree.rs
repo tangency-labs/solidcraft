@@ -7,6 +7,17 @@ use solidcraft_theme::Tokens;
 const ROW_H: f32 = super::TREE_ROW_HEIGHT;
 const INDENT: f32 = 14.0;
 const DIM_ICON_OPACITY: f32 = 0.4;
+/// A badge on a row's icon: how far past the icon's right and bottom edges its 13-point circle
+/// reaches, the ring that keeps it clear of the icon, and the glyph centred in it.
+const BADGE: f32 = 13.0;
+const BADGE_PAST_RIGHT: f32 = 5.0;
+const BADGE_PAST_BOTTOM: f32 = 4.0;
+const BADGE_RING: f32 = 1.5;
+/// A state nobody checked has no fill to keep clear of the icon, so its ring is thinner.
+const BADGE_DASH_RING: f32 = 1.2;
+const BADGE_GLYPH: f32 = 10.0;
+/// Sides of the polygon a dashed badge ring is drawn as.
+const BADGE_RING_SIDES: usize = 16;
 /// A drag over the eyes scrolls the rows when the pointer is this near their top or bottom edge,
 /// by this many points a frame (#9680).
 const DRAG_EDGE: f32 = 24.0;
@@ -19,6 +30,21 @@ pub struct TreeAction<'a> {
     pub label: &'a str,
     pub reason: Option<&'a str>,
     pub target: &'a str,
+}
+
+/// A small badge on the corner of a row's icon, for a state of the thing the row names (which
+/// design file a component is linked to, and whether it is still there). The host picks every
+/// colour from its theme tokens.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct IconBadge<'a> {
+    /// The icon to draw in the badge.
+    pub glyph: &'a str,
+    /// The disc the glyph sits on, in one of the theme's state colours.
+    pub fill: Color32,
+    /// The glyph's colour; for an outlined badge, also the colour of its dashed ring.
+    pub ink: Color32,
+    /// A state nobody has checked: a plain disc with a dashed ring instead of a solid fill.
+    pub outlined: bool,
 }
 
 #[derive(Default)]
@@ -49,6 +75,9 @@ pub struct Row<'a> {
     pub color: Option<Color32>,
     /// Draw the icon in this one colour instead of its artwork (a sketch's solve state, #7245).
     pub icon_ink: Option<Color32>,
+    /// A badge on the icon's lower right corner, for a state of what the row names (a component
+    /// linked to another design file, #14024).
+    pub icon_badge: Option<IconBadge<'a>>,
     /// The row's tooltip (a sketch's solve state), after its full name when that is cut short.
     pub tip: Option<&'a str>,
     /// Component rows: is it the active one?
@@ -168,6 +197,34 @@ fn row_text(label: &str, name: bool) -> String {
 /// down (egui temporary data). Absent when no eye drag is under way.
 pub fn eye_drag_id() -> egui::Id {
     egui::Id::unique("sc_tree_eye_drag")
+}
+
+/// The badge on a row icon's lower right corner: a small circle standing past the icon's edge, kept
+/// clear of the icon by a ring in the panel colour, with the glyph centred in it. A faded row fades
+/// its badge with its label.
+fn paint_icon_badge(p: &egui::Painter, icon: Rect, badge: IconBadge<'_>, opacity: f32) {
+    let t = Tokens::get();
+    let centre = pos2(icon.right() + BADGE_PAST_RIGHT - BADGE / 2.0, icon.bottom() + BADGE_PAST_BOTTOM - BADGE / 2.0);
+    let radius = BADGE / 2.0;
+    let ink = badge.ink.gamma_multiply(opacity);
+    if badge.outlined {
+        p.circle_filled(centre, radius, badge.fill.gamma_multiply(opacity));
+        p.add(egui::Shape::dashed_line(&badge_ring(centre, radius - BADGE_DASH_RING / 2.0), Stroke::new(BADGE_DASH_RING, ink), 2.0, 2.0));
+    } else {
+        p.circle_filled(centre, radius, badge.fill.gamma_multiply(opacity));
+        p.circle_stroke(centre, radius - BADGE_RING / 2.0, Stroke::new(BADGE_RING, t.panel.gamma_multiply(opacity)));
+    }
+    icons::paint_ink(p, Rect::from_center_size(centre, vec2(BADGE_GLYPH, BADGE_GLYPH)), badge.glyph, ink);
+}
+
+/// A closed polygon around a circle: what a dashed badge ring is drawn as.
+fn badge_ring(centre: Pos2, radius: f32) -> Vec<Pos2> {
+    (0..=BADGE_RING_SIDES)
+        .map(|side| {
+            let angle = std::f32::consts::TAU * side as f32 / BADGE_RING_SIDES as f32;
+            centre + vec2(angle.cos() * radius, angle.sin() * radius)
+        })
+        .collect()
 }
 
 /// Geometry used by Browser culling and the shared row painter.
@@ -347,6 +404,9 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         match row.icon_ink {
             Some(ink) => icons::paint_ink(ui.painter(), ir, row.icon, ink.gamma_multiply(opacity)),
             None => icons::paint_icon(ui.painter(), ir, row.icon, opacity),
+        }
+        if let Some(badge) = row.icon_badge {
+            paint_icon_badge(ui.painter(), ir, badge, opacity);
         }
         x += 21.0;
     }

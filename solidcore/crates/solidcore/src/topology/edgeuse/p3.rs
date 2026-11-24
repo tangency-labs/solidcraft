@@ -436,13 +436,24 @@ pub(crate) fn fit_tolerance(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> 
     // the edge uses' gap caches as it found them; a failed calculation, ignored as
     // `GetMaxEdgeFaceGap` ignores it, adds no gap)
     let mut gap = 0.0_f64;
+    let mut measured_faces = std::collections::BTreeSet::new();
     for eu in b.edge(e)?.edgeuses.clone() {
         let g = if !eu1::has_edge_face_gap(b, eu)? {
             None
         } else if eu1::is_max_edge_face_gap_init(b, eu)? {
             eu1::cached_max_edge_face_gap(b, eu)?
         } else {
-            ignored(eu1::calc_max_edge_face_gap(k, b, eu, false))?
+            // Uncached uses of this edge on one face measure the same curve over
+            // the same interval against the same surface, including at a seam.
+            let face = eu1::face(b, eu)?;
+            if measured_faces.contains(&face) {
+                continue;
+            }
+            let measured = ignored(eu1::calc_max_edge_face_gap(k, b, eu, false))?;
+            if measured.is_some() {
+                measured_faces.insert(face);
+            }
+            measured
         };
         if let Some(g) = g {
             if g.gap_3d > gap {
@@ -486,6 +497,7 @@ pub fn create_uv_trim_curve(
     want_deviation: bool,
     opt_drop_curve_fail: Option<&mut DropCurveFail<ObjectHandle>>,
 ) -> Result<CreatedUvTrimCurve> {
+    k.work_counters.add_uv_trim_build();
     // always collect DropCurveData
     let mut local_fail = DropCurveFail::<ObjectHandle>::default();
     let fail: &mut DropCurveFail<ObjectHandle> = match opt_drop_curve_fail {
@@ -1204,7 +1216,7 @@ fn trim_other_uv_curves(
         },
         ..crate::kernel::KernelOptions::default()
     });
-    tk.rng = k.rng.clone();
+    tk.seed = k.seed;
     tk.cancel.clone_from(&k.cancel);
     tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
     for x in crate::topology::edge::edgeuses(b, e, None, None)? {
@@ -1771,7 +1783,15 @@ pub fn get_or_create_uv_trim_curve(
     // Not upstream (#18162): the edge tolerance follows the trim's proved distance from the
     // edge curve, not only the drop's reported error, whose fit part is the fit tolerance (the
     // edge's own tolerance) and would raise the edge from its own tolerance on every refit.
-    let raise_by = trim_raise_distance(k, b, eu, &created.curve, created.max_dist_to_surf)?;
+    //
+    // Not upstream (#21105): in a validate-only pass (`Kernel::with_held_trim_raise`, the
+    // pass's `bValidateOnly`) the trim raises nothing, as `SetUVTrimCurve` raises nothing on
+    // a B-rep marked validate-only; the raise distance is then not wanted, and not proved.
+    let raise_by = if k.caches.hold_trim_raise || b.validate_only() {
+        0.0
+    } else {
+        trim_raise_distance(k, b, eu, &created.curve, created.max_dist_to_surf)?
+    };
     set_uv_trim_curve(
         b,
         eu,
@@ -2296,7 +2316,6 @@ fn raised_trim_bound(
 ///
 /// [`SolidError::NotFound`] for a dangling id.
 fn cover_vertex_ends(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
-    let up = |x: f64| x * (1.0 + 4.0 * f64::EPSILON);
     let (v0, v1) = crate::topology::edge::start_end_vertices(b, e)?;
     let mut vertices: Vec<crate::topology::VertexId> = Vec::new();
     for v in [v0, v1].into_iter().flatten() {
@@ -2305,35 +2324,9 @@ fn cover_vertex_ends(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
         }
     }
     for v in vertices {
-        let at = b.vertex(v)?.point;
-        let mut reach = 0.0_f64;
-        for x in crate::topology::vertex::edges(b, v, None)? {
-            let rec = b.edge(x)?;
-            let Some(curve) = rec.curve.as_ref() else {
-                continue;
-            };
-            let (s0, s1) = crate::topology::edge::start_end_vertices(b, x)?;
-            for (end, t) in [
-                (s0, rec.interval.evaluate(0.0)),
-                (s1, rec.interval.evaluate(1.0)),
-            ] {
-                if end != Some(v) {
-                    continue;
-                }
-                // (an end not evaluated, or with no bound on its evaluation's error, raises
-                // nothing: the vertex is left as upstream leaves it for that end)
-                let Ok(p) = curve.evaluate_point(k, t) else {
-                    continue;
-                };
-                let Some(error) = curve.point_error_bound(t) else {
-                    continue;
-                };
-                let far = up(up(at.distance(p)) + up(error * up(3.0_f64.sqrt())));
-                if far.is_finite() {
-                    reach = reach.max(far);
-                }
-            }
-        }
+        // (an end not evaluated, or with no bound on its evaluation's error, raises
+        // nothing: the vertex is left as upstream leaves it for that end)
+        let reach = crate::topology::vertex::edge_end_reach(k, b, v)?;
         if reach > b.vertex(v)?.tolerance {
             crate::topology::vertex::set_tolerance(b, v, reach, true, true)?;
         }
@@ -2705,6 +2698,7 @@ pub(crate) fn trim_deviation_bound(
     let ivl = edge_rec.interval;
     // (below a thousandth of the fit tolerance a tighter bound changes nothing)
     let floor = TRIM_BOUND_FLOOR * fit;
+    k.work_counters.add_trim_deviation_bound();
     crate::query::curve_surface_gap::trim_image_gap_bound_within(
         k,
         &surface,
@@ -2782,7 +2776,7 @@ const TRIM_BOUND_FLOOR: f64 = 1.0e-3;
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id.
-fn existing_uv_trim_curve(
+pub(crate) fn existing_uv_trim_curve(
     b: &Brep,
     eu: EdgeuseId,
     want_dist: bool,
@@ -3425,13 +3419,46 @@ pub fn normalized_evaluate(
     // fetch or create UVTrimCurve (status ignored; the outputs are for the
     // suspicious-result debug check)
     let _ = get_or_create_uv_trim_curve(k, b, eu, true, true, true)?;
-    let b = &*b;
+    evaluate_with_trim(k, b, eu, normalized_parameter, want_first_deriv)
+}
+
+/// [`normalized_evaluate`] in UV space with `ok_to_make_uv_trim_curve` of an edge use
+/// whose UV trim curve exists (its own or its mate's): the same evaluation, reading the
+/// B-rep only.
+///
+/// # Errors
+///
+/// As [`normalized_evaluate`]; [`SolidError::PreparationRequired`] where the edge use
+/// has no UV trim curve (nothing is made).
+pub(crate) fn normalized_evaluate_existing_uv(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    normalized_parameter: f64,
+    want_first_deriv: bool,
+) -> Result<NormalizedEval> {
+    orientation(b, eu)?;
+    if existing_uv_trim_curve(b, eu, true)?.is_none() {
+        return Err(SolidError::PreparationRequired { operation: OP });
+    }
+    evaluate_with_trim(k, b, eu, normalized_parameter, want_first_deriv)
+}
+
+/// The UV evaluation of [`normalized_evaluate`] once the edge use's UV trim curve is
+/// fetched (shared by [`normalized_evaluate_existing_uv`]).
+fn evaluate_with_trim(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    normalized_parameter: f64,
+    want_first_deriv: bool,
+) -> Result<NormalizedEval> {
     on_own_surfaces(evaluate_fetched(
         k,
         b,
         eu,
         normalized_parameter,
-        parameter_space,
+        true,
         want_first_deriv,
         &own_surface(b),
     ))

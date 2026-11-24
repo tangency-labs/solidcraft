@@ -38,6 +38,11 @@
 //! bound, so this argues rather than proves that `o` was short), for a vertex `o` does not
 //! cover an edge end that `n` does.
 
+mod gap_samples;
+mod p6_split;
+
+use gap_samples::{GAP_CHANGES, GAP_MAIN};
+use p6_split::{P6_CURVE_CLASS_CHANGES, P6_CURVE_CLASS_MAIN, P6_HEAL_CHANGES, P6_HEAL_MAIN};
 use solidcore::curve::curve::p2::CurveKind;
 use solidcore::curve::curve::Curve;
 use solidcore::kernel::Kernel;
@@ -72,7 +77,10 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 ///   and whose vertex 0 the old tolerance did not cover either: that trim, on face 0, runs at
 ///   `u = 71.94`, `v` from 0 to 139.4, far outside the face's B-spline domain
 ///   `[-0.05, 1.05]^2`, so its image is the surface's extrapolation; the trim is in another
-///   parameterisation than its face's, in both kernels, and no tolerance covers it);
+///   parameterisation than its face's, in both kernels, and no tolerance covers it; and
+///   `topology.brep_p10`'s `gen0026` edges 20 and 33, [`DROP_MARGIN`] raises whose trim
+///   on another face, edge use 78 on face 3 and 86 on face 4, is enclosed at 1.675e-5, past
+///   both tolerances, on main's read as well: #20906);
 /// - `rounding-bound`: a vertex of `primitive.api_primitives`' `gen1157`, about 8e8 from
 ///   the origin, where the evaluation's own error bound at that
 ///   scale exceeds what the tolerance can show: its edge ends evaluate onto its point, but
@@ -103,6 +111,27 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 /// The test requires the uncertified edges to be exactly these, so an entry that becomes
 /// certified (or a new failure) shows up.
 const OPEN: &str = include_str!("trim_tolerance_open.tsv");
+
+/// The edges raised by `SetUVTrimCurve`'s margin (`topology::edgeuse::p1::set_uv_trim_curve`:
+/// an edge below twice its new trim's raise distance `r` is raised to `2 r`, upstream's
+/// `TOL_FACTOR`) where this branch's read of `Fillet/sphere_diff_3cylinders.smb` makes the
+/// classified trims (`tolsub::state::CLASSIFIED_READ_TRIMS`, #20179: the read's face
+/// classification makes its missing trims) and main's read makes none: unit, case, body, edge.
+/// `r` is upstream's drop distance `d` (the trim's `max_dist_to_surface`) or, where the trim's
+/// proved bound is below it, that bound (`trim_raise_distance`, #18162), so `n = 2 r <= 2 d`.
+/// The raise is not needed for the trim (its `B` is within the old tolerance): the margin is
+/// upstream's, wider than the B-rep check needs (a gap within the tolerance), and moves every
+/// dropped trim kernel-wide (#20912). Each is certified by [`drop_margin_raise`]: the
+/// drop replayed on main's read gives `n` bit for bit, and `n` is `trim_raise_distance`'s
+/// doubled, `2 d` with the made trim's `B` within `n`, or `2 B` with `B` below `d`. The
+/// edge's vertices follow it (`edge::set_tolerance`).
+const DROP_MARGIN: &[(&str, &str, usize, usize)] = &[
+    ("topology.brep_p10", "gen0026", 0, 20),
+    ("topology.brep_p10", "gen0026", 0, 22),
+    ("topology.brep_p10", "gen0026", 0, 27),
+    ("topology.brep_p10", "gen0026", 0, 31),
+    ("topology.brep_p10", "gen0026", 0, 33),
+];
 
 /// The smallest coordinate magnitude at which a `rounding-bound` entry is accepted: the class
 /// is the evaluation's own error bound at about 8e8, so an entity of that class nearer the
@@ -836,6 +865,88 @@ fn edge_bounds(k: &Kernel, b: &Brep, e: EdgeId, n: f64) -> (Vec<Option<f64>>, us
     (out, trimless)
 }
 
+/// Certifies a [`DROP_MARGIN`] raise of edge `e` of `b` (body `body` of `case`) from `old` to
+/// `new`: the edge's one classified use that holds a trim (the made trim, `eu`); `case` run
+/// again with main's read put back (`tolsub::state::strip_classified_trims`: the classified
+/// trims off, the raises at the zone tolerance), where the edge holds `old` and `eu` no trim;
+/// there `get_or_create_uv_trim_curve` on `eu` (the drop the classification makes) reports the
+/// drop distance `d` and leaves the edge at `new`, bit for bit, with `old < new`; and with the
+/// made trim's `B` on `b` ([`use_bound`]), `new` is one of `trim_raise_distance`'s raises,
+/// doubled: `2 d` with `B <= new` (upstream's, where `B` is from `d` to `2 d`, or where `2 B`
+/// would not cover another trim of the edge; then `B < new / 2`), or `2 B` with `B < d` (the
+/// proved distance, below upstream's). Either way `B <= new` and `new <= 2 d`. Returns
+/// `(d, B)`.
+fn drop_margin_raise(
+    unit: &str,
+    case: &str,
+    body: usize,
+    b: &Brep,
+    e: EdgeId,
+    old: f64,
+    new: f64,
+) -> Result<(f64, f64), String> {
+    use crate::tolsub::state::{strip_classified_trims, CLASSIFIED_READ_TRIMS};
+    let made: Vec<EdgeuseId> = b
+        .edge(e)
+        .expect("edge")
+        .edgeuses
+        .iter()
+        .copied()
+        .filter(|&eu| {
+            CLASSIFIED_READ_TRIMS.contains(&eu.index())
+                && b.edgeuse(eu).expect("edge use").uv_trim_curve.is_some()
+        })
+        .collect();
+    let [eu] = made[..] else {
+        return Err(format!("made trims {made:?}"));
+    };
+    let ((), reads) = strip_classified_trims(|| {
+        super::watch_written();
+        let _ = replay_case(unit, case);
+    });
+    let mut bodies = super::take_written();
+    if reads == 0 {
+        return Err("no classified read put back".to_string());
+    }
+    let m = bodies.get_mut(body).ok_or("no body on main's read")?;
+    let was = m.edge(e).map_err(|x| format!("{x:?}"))?.tolerance;
+    if was.to_bits() != old.to_bits() {
+        return Err(format!("main's read holds {was:e}, not {old:e}"));
+    }
+    if m.edgeuse(eu)
+        .map_err(|x| format!("{x:?}"))?
+        .uv_trim_curve
+        .is_some()
+    {
+        return Err("main's read holds the trim".to_string());
+    }
+    let k = crate::runner_kernel();
+    let fetch =
+        solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve(&k, m, eu, true, false, true)
+            .map_err(|x| format!("{x:?}"))?;
+    fetch.status.map_err(|x| format!("the drop: {x:?}"))?;
+    let d = fetch.dist_to_surf;
+    let replayed = m.edge(e).map_err(|x| format!("{x:?}"))?.tolerance;
+    if replayed.to_bits() != new.to_bits() {
+        return Err(format!(
+            "the drop leaves {replayed:e}, not {new:e} (d {d:e})"
+        ));
+    }
+    let bm = match use_bound(&Kernel::default(), b, e, eu) {
+        UseBound::Bound(x) => x,
+        x => return Err(format!("the made trim: {x:?}")),
+    };
+    // (written so a NaN fails; doubling is exact)
+    let upstream = new.to_bits() == (2.0 * d).to_bits() && bm <= new;
+    let proved = new.to_bits() == (2.0 * bm).to_bits() && bm < d;
+    if !(d > 0.0 && new > old && (upstream || proved)) {
+        return Err(format!(
+            "{old:e} -> {new:e} is neither 2 d (d {d:e}) covering B {bm:e} nor 2 B below 2 d"
+        ));
+    }
+    Ok((d, bm))
+}
+
 /// Whether the point of `v` is within `n` of the end of every edge curve of `v` that ends
 /// there, the evaluation's error bound and the distance's rounding counted against it.
 fn vertex_covers_its_ends(k: &Kernel, b: &Brep, v: VertexId, n: f64) -> bool {
@@ -890,6 +1001,9 @@ struct Tally {
     open_values: usize,
     /// Raised edges: every trim's `B` within the new tolerance, one above the old.
     raised: usize,
+    /// [`DROP_MARGIN`] raises certified by [`drop_margin_raise`], every trim within the new
+    /// tolerance.
+    drop_margin: usize,
     /// [`OTHER`] values: `rounding`, `quadrature`, `integration`, `padding`, `trim`,
     /// `domain` and `vertex-box`.
     rounding: usize,
@@ -1167,7 +1281,34 @@ fn certify(unit: &str) -> Tally {
                     // and the new tolerance exactly the entry's, so a raise that moves is
                     // seen; counted open, never proved)
                     let past = bounds.iter().flatten().any(|x| *x > old);
-                    if bad.is_empty() && past {
+                    if DROP_MARGIN.contains(&(unit, row.case.as_str(), body, index)) {
+                        // a raise by `SetUVTrimCurve`'s margin: derived and certified by
+                        // [`drop_margin_raise`]; every trim within the new tolerance, or the
+                        // edge in OPEN as `UNCOVERED`, every bound past the new tolerance past
+                        // the old as well (the old tolerance did not cover it either: #20906)
+                        match drop_margin_raise(unit, &row.case, body, b, e, old, new) {
+                            Err(why) => failures.push(format!("{at}: drop margin: {why}")),
+                            Ok((d, bm)) if bad.is_empty() => {
+                                println!("{at}: drop margin d {d:e} B {bm:e} n {new:e}");
+                                assert!(
+                                    !open.contains_key(&key),
+                                    "{at}: certified, remove it from OPEN"
+                                );
+                                tally.drop_margin += 1;
+                            }
+                            Ok((d, bm))
+                                if open.get(&key).is_some_and(|c| c == "UNCOVERED")
+                                    && bounds
+                                        .iter()
+                                        .all(|x| x.is_some_and(|x| x <= new || x > old)) =>
+                            {
+                                println!("{at}: drop margin d {d:e} B {bm:e} n {new:e}, open");
+                                open_seen.insert(key);
+                                tally.open += 1;
+                            }
+                            Ok(_) => failures.push(format!("{at}: drop margin: {bad:?}")),
+                        }
+                    } else if bad.is_empty() && past {
                         tally.raised += 1;
                     } else if open.get(&key).is_some_and(|c| c == "loose-raise")
                         && !past
@@ -1344,27 +1485,35 @@ struct GoldenChange {
 /// and none belongs to [`ROWS`]. The vertex crossing correction itself moves no golden.
 /// Derivation: `plan/findings/blend.fillet_solver_p5--issue-17016-non-tangent-rollover.md`,
 /// "Three goldens rows that move, and why". No topology or status changes in these rows.
+/// #18294 moves the two setbacks rows again (each reason names the change and the row before
+/// it); its other seven `issue-880-*` rows are in [`MAIN`]'s digest.
 const FILLET_UV_CHANGES: &[GoldenChange] = &[
     GoldenChange {
         case: "issue-880-half-arc-rim-0-setbacks-1-1",
-        old_hash: 0xb0e61815c7d93b13,
-        new_hash: 0x2e7fdccee3201ccc,
+        old_hash: 0x0c84b1bb5aabdeb6,
+        new_hash: 0xff20292224de653a,
         reason: "Keep the domain-proved oblique UV jets on the procedural surface: the old \
                  boundary fix-up flattened slopes of 5.3e-5 to 8.5e-4 and moved control \
-                 polygons by up to 2.2e-5 in UV without a bound on the procedural surface.",
+                 polygons by up to 2.2e-5 in UV without a bound on the procedural surface. \
+                 Then #18294: the glue keeps a trim curve only when it spans the surviving \
+                 edge, so two vertex and one edge tolerance fall from 6.82e-5 to 4e-5 and \
+                 three of the ten vertices are listed in another order (row was 064c8b893b765eaf).",
     },
     GoldenChange {
         case: "issue-880-half-arc-rim-0-setbacks-1-2",
-        old_hash: 0x9ae25a8b1d9a6a99,
-        new_hash: 0x40f0fbb85329c802,
+        old_hash: 0x0c29e482175fe1e2,
+        new_hash: 0x338bc7a48039bef7,
         reason: "Keep the domain-proved oblique UV jets on the procedural surface for the \
                  unequal setbacks too; the old boundary flattening and polygon moves have \
-                 no bound on that surface, and preserving the jets moves the mass integral.",
+                 no bound on that surface, and preserving the jets moves the mass integral. \
+                 Then #18294: the glue keeps a trim curve only when it spans the surviving \
+                 edge, so two vertex and one edge tolerance fall from 7.47e-5 to 4.15e-5 \
+                 (row was 94a9c0596e8f0db7).",
     },
     GoldenChange {
         case: "source-file-nurb_box-edge0",
-        old_hash: 0xddae5c6cc008ae31,
-        new_hash: 0xe3faf9d321c91634,
+        old_hash: 0xfa66dbe7062ca1e2,
+        new_hash: 0xdcf4807bfc81eec3,
         reason: "Preserve the procedural drop's transverse UV tangent (at most 7e-13) \
                  instead of zeroing it in four spans. The polygon stays unchanged; the \
                  resulting mass estimate moves far below its requested 1e-4 accuracy.",
@@ -1375,15 +1524,20 @@ const FILLET_UV_CHANGES: &[GoldenChange] = &[
 /// Putting these back keeps [`MAIN`]'s original digest and every tolerance proof intact.
 const FILLET_UV_MAIN: &str = include_str!("trim_tolerance_fillet_uv_main.jsonl");
 
-/// Reverse exactly [`FILLET_UV_CHANGES`], rejecting a missing, duplicate, overlapping or
+/// Reverse the listed changes, rejecting a missing, duplicate, overlapping or
 /// differently changed row. Every other line is retained for the whole-file digest.
-fn put_back_fillet_uv_changes(text: &str, rows: &[Row]) -> Result<String, String> {
+fn put_back_independent_changes(
+    text: &str,
+    rows: &[Row],
+    changes: &[GoldenChange],
+    originals: &str,
+) -> Result<String, String> {
     use crate::json::to_canonical_string;
     let mut original = std::collections::BTreeMap::new();
-    for line in FILLET_UV_MAIN.lines() {
+    for line in originals.lines() {
         let v: serde_json::Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
         let case = v["case"].as_str().ok_or("an original row has no case")?;
-        let change = FILLET_UV_CHANGES
+        let change = changes
             .iter()
             .find(|r| r.case == case)
             .ok_or_else(|| format!("{case}: unlisted original row"))?;
@@ -1403,7 +1557,7 @@ fn put_back_fillet_uv_changes(text: &str, rows: &[Row]) -> Result<String, String
             return Err(format!("{case}: duplicate original row"));
         }
     }
-    if original.len() != FILLET_UV_CHANGES.len() {
+    if original.len() != changes.len() {
         return Err("the independent changes and their original rows differ".into());
     }
     let mut out = String::new();
@@ -1412,7 +1566,7 @@ fn put_back_fillet_uv_changes(text: &str, rows: &[Row]) -> Result<String, String
         let v: serde_json::Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
         let change = v["case"]
             .as_str()
-            .and_then(|case| FILLET_UV_CHANGES.iter().find(|r| r.case == case));
+            .and_then(|case| changes.iter().find(|r| r.case == case));
         let line = if let Some(change) = change {
             if !seen.insert(change.case) {
                 return Err(format!("{}: duplicate changed row", change.case));
@@ -1433,7 +1587,7 @@ fn put_back_fillet_uv_changes(text: &str, rows: &[Row]) -> Result<String, String
         out.push_str(line);
         out.push('\n');
     }
-    if let Some(change) = FILLET_UV_CHANGES.iter().find(|r| !seen.contains(r.case)) {
+    if let Some(change) = changes.iter().find(|r| !seen.contains(r.case)) {
         return Err(format!("{}: missing changed row", change.case));
     }
     Ok(out)
@@ -1443,34 +1597,58 @@ fn put_back_fillet_uv_changes(text: &str, rows: &[Row]) -> Result<String, String
 /// later change that would bypass one of the tolerance proofs.
 #[test]
 fn independent_golden_changes_cannot_hide_other_changes_or_tolerance_rows() {
-    let text = include_str!("../../expected/blend.fillet_executive_p3.jsonl");
-    let lines: Vec<&str> = text
-        .lines()
-        .filter(|line| {
-            let v: serde_json::Value = serde_json::from_str(line).expect("a golden row");
-            FILLET_UV_CHANGES.iter().any(|r| v["case"] == r.case)
-        })
-        .collect();
-    let changed = lines.join("\n") + "\n";
-    assert_eq!(
-        put_back_fillet_uv_changes(&changed, &[]).expect("the documented changes"),
-        FILLET_UV_MAIN
-    );
-    let first = lines[0];
-    let missing = lines[1..].join("\n");
-    assert!(put_back_fillet_uv_changes(&missing, &[]).is_err());
-    let duplicate = format!("{changed}{first}\n");
-    assert!(put_back_fillet_uv_changes(&duplicate, &[]).is_err());
-    let mut v: serde_json::Value = serde_json::from_str(first).expect("a golden row");
-    v["error"] = serde_json::json!("an unrecorded change");
-    let corrupted = changed.replacen(first, &serde_json::to_string(&v).expect("a row"), 1);
-    assert!(put_back_fillet_uv_changes(&corrupted, &[]).is_err());
-    let overlap = Row {
-        case: FILLET_UV_CHANGES[0].case.to_string(),
-        moved: Vec::new(),
-        entities: Vec::new(),
-    };
-    assert!(put_back_fillet_uv_changes(&changed, &[overlap]).is_err());
+    for (text, changes, originals) in [
+        (
+            include_str!("../../expected/blend.fillet_executive_p3.jsonl"),
+            FILLET_UV_CHANGES,
+            FILLET_UV_MAIN,
+        ),
+        (
+            include_str!("../../expected/heal.gap.jsonl"),
+            GAP_CHANGES,
+            GAP_MAIN,
+        ),
+        (
+            include_str!("../../expected/heal.face_props.jsonl"),
+            P6_HEAL_CHANGES,
+            P6_HEAL_MAIN,
+        ),
+        (
+            include_str!("../../expected/intersect.curve_class_p5.jsonl"),
+            P6_CURVE_CLASS_CHANGES,
+            P6_CURVE_CLASS_MAIN,
+        ),
+    ] {
+        let put_back =
+            |text: &str, rows: &[Row]| put_back_independent_changes(text, rows, changes, originals);
+        let lines: Vec<&str> = text
+            .lines()
+            .filter(|line| {
+                let v: serde_json::Value = serde_json::from_str(line).expect("a golden row");
+                changes.iter().any(|r| v["case"] == r.case)
+            })
+            .collect();
+        let changed = lines.join("\n") + "\n";
+        assert_eq!(
+            put_back(&changed, &[]).expect("the documented changes"),
+            originals
+        );
+        let first = lines[0];
+        let missing = lines[1..].join("\n");
+        assert!(put_back(&missing, &[]).is_err());
+        let duplicate = format!("{changed}{first}\n");
+        assert!(put_back(&duplicate, &[]).is_err());
+        let mut v: serde_json::Value = serde_json::from_str(first).expect("a golden row");
+        v["error"] = serde_json::json!("an unrecorded change");
+        let corrupted = changed.replacen(first, &serde_json::to_string(&v).expect("a row"), 1);
+        assert!(put_back(&corrupted, &[]).is_err());
+        let overlap = Row {
+            case: changes[0].case.to_string(),
+            moved: Vec::new(),
+            entities: Vec::new(),
+        };
+        assert!(put_back(&changed, &[overlap]).is_err());
+    }
 }
 
 /// FNV-1a 64 of the canonical lines of the expected file `text` ([`crate::json`]: each line
@@ -1558,8 +1736,10 @@ fn row_units() -> std::collections::BTreeSet<String> {
 /// of [`ROWS`] put back to its old value, is main's file ([`MAIN`] holds the digest of every
 /// unit's expected file on main, each row case's line as main's kernel writes it). So no unit,
 /// case, moved value or other change is left out of the rows, and each row's new value is the
-/// expected one. Later independent changes are pinned separately ([`FILLET_UV_CHANGES`]);
-/// their exact original lines are restored before the tolerance changes are reversed.
+/// expected one. The ledger restores the original lines of [`FILLET_UV_CHANGES`] and
+/// [`GAP_CHANGES`], [`P6_HEAL_CHANGES`] and [`P6_CURVE_CLASS_CHANGES`], and main's lines of WR-587's loop normal rows (replayed with main's
+/// loop normal, [`crate::wr587_replay::put_back_main_lines`]), before it reverses the
+/// tolerance changes.
 #[test]
 fn the_rows_are_the_whole_golden_diff_from_main() {
     let main: std::collections::BTreeMap<String, u64> = MAIN
@@ -1602,11 +1782,27 @@ fn the_rows_are_the_whole_golden_diff_from_main() {
             .into_iter()
             .partition(|r| known.contains_key(&r.case));
         left_out.extend(out.into_iter().map(|r| (unit.clone(), r.case)));
-        let text = if unit == "blend.fillet_executive_p3" {
-            put_back_fillet_uv_changes(&text, &rows).unwrap_or_else(|e| panic!("{unit}: {e}"))
-        } else {
-            text
-        };
+        let text = match unit.as_str() {
+            "blend.fillet_executive_p3" => {
+                put_back_independent_changes(&text, &rows, FILLET_UV_CHANGES, FILLET_UV_MAIN)
+            }
+            "heal.gap" => put_back_independent_changes(&text, &rows, GAP_CHANGES, GAP_MAIN),
+            "heal.face_props" => {
+                put_back_independent_changes(&text, &rows, P6_HEAL_CHANGES, P6_HEAL_MAIN)
+            }
+            "intersect.curve_class_p5" => put_back_independent_changes(
+                &text,
+                &rows,
+                P6_CURVE_CLASS_CHANGES,
+                P6_CURVE_CLASS_MAIN,
+            ),
+            _ => Ok(text),
+        }
+        .unwrap_or_else(|e| panic!("{unit}: {e}"));
+        // and WR-587's loop normal rows (#21291), each replayed to main's line
+        let keep: Vec<&str> = rows.iter().map(|r| r.case.as_str()).collect();
+        let text = crate::wr587_replay::put_back_main_lines(unit, &text, &keep)
+            .unwrap_or_else(|e| panic!("{unit}: {e}"));
         let mut replay = |case: &str| replay_case(unit, case);
         let got =
             expected_digest(&text, &rows, &mut replay).unwrap_or_else(|e| panic!("{unit}: {e}"));

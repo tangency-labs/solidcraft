@@ -185,6 +185,31 @@ pub const HEBREW: Candidates = &[
     ),
 ];
 
+/// Georgian: Mkhedruli, Asomtavruli and Mtavruli are not in egui's built-in faces. The interface
+/// uses a candidate only if it draws Georgian; drawings do not search this list yet.
+pub const GEORGIAN: Candidates = &[
+    // Windows
+    ("Sylfaen", &["C:\\Windows\\Fonts\\sylfaen.ttf"]),
+    ("Segoe UI", &["C:\\Windows\\Fonts\\segoeui.ttf"]),
+    // macOS
+    ("SF Georgian", &["/System/Library/Fonts/SFGeorgian.ttf"]),
+    // Linux
+    (
+        "Noto Sans Georgian",
+        &[
+            "/usr/share/fonts/noto/NotoSansGeorgian-Regular.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSansGeorgian-Regular.ttf",
+            "/usr/share/fonts/google-noto/NotoSansGeorgian-Regular.ttf",
+            "/usr/share/fonts/google-noto-vf/NotoSansGeorgian[wght].ttf",
+            "/usr/share/fonts/opentype/noto/NotoSansGeorgian-Regular.ttf",
+        ],
+    ),
+    (
+        "DejaVu Sans",
+        &["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/TTF/DejaVuSans.ttf", "/usr/share/fonts/dejavu/DejaVuSans.ttf"],
+    ),
+];
+
 /// Arabic, with the joining forms a shaper uses. egui's built-in faces have none.
 pub const ARABIC: Candidates = &[
     // Windows
