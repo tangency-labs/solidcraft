@@ -2791,10 +2791,12 @@ impl FootBlend {
     /// `y` with the equations divided by `ρ` and `ρ²` (`W = (S(x) − e)/ρ`: `W·e′ = 0`,
     /// `|W|² = 1`), from `ρ` = [`ROOT_GAP`] times the bound on the gap `S(r(t)) − e(t)` (the
     /// root itself is known no closer). There `W` leaves along the face: `W·b > 0`, `b` the
-    /// face's side times `n × e′`. Each box's root at its top end (`t̃`, the piece's middle)
-    /// lies strictly inside the box above it, where it is the only one, and the foot's box
-    /// inside the last: by the implicit function theorem the boxes' roots are one branch over
-    /// all of the piece.
+    /// face's side times `n × e′`. Where two boxes meet, the branch's point at the piece's
+    /// middle `t̃` is proved to rounding (a box of no extent in `t` and `ρ`) and lies strictly
+    /// inside the regions of both, each of which holds one root only; the toe's lies so in the
+    /// last box's and in the foot's own. Each box's root is continuous in `t` and `ρ` (its
+    /// Jacobian is regular over its region), so the boxes' roots are one branch over all of
+    /// the piece.
     ///
     /// `Some(n)`, the form's normal `S_u × S_v` over the root's path (its own sense, for
     /// [`FootBlend::prove_feet`]'s rise); `None` where any of it is not proved.
