@@ -493,6 +493,69 @@ fn keep_picked(
     remove_faces(&cut, &order, &dropped)
 }
 
+/// Remove a connected feature whose two boundary loops need extensions that cross.
+/// The returned solid and its history belong to a copy. `None` means the selection
+/// did not use a patch trimmed at the intersection of its two extensions.
+///
+/// # Errors
+/// Invalid face indices, a refused extension or a result that is not a closed solid.
+pub fn remove_feature_with_crossing_patches(
+    body: &Body,
+    order: &Order,
+    faces: &[usize],
+) -> Result<Option<(Body, History)>> {
+    if faces.is_empty() || faces.len() > MAX_FACES {
+        return Err(Error::Argument);
+    }
+    let (result, mapped) = body.copy_with_order(order)?;
+    let picked = faces
+        .iter()
+        .map(|&i| order::face(&mapped, i))
+        .collect::<Result<Vec<_>>>()?;
+    let selection: HashSet<_> = picked.iter().copied().collect();
+    if selection.len() != picked.len() {
+        return Err(Error::Argument);
+    }
+    let mut trimmed = false;
+    let history = history::recorded(&result, &mapped, Made::Plain, || {
+        trimmed = with_body("remove_feature_with_crossing_patches", &result, |k, b| {
+            let mut executive = FeatureExecutive::new(k, b)?;
+            let Some(i) = executive.add_feature(
+                k,
+                &picked,
+                RebuildBrepType::ExtendSurface,
+                RebuildBrepType::FromOtherBrep,
+            )?
+            else {
+                return Ok(false);
+            };
+            // add_feature starts at the first face. A second disconnected selection
+            // must not be silently left behind.
+            if !executive.features().get(i).is_some_and(|feature| {
+                feature.loops.len() == 2
+                    && feature.faces.len() == selection.len()
+                    && feature.faces.iter().all(|face| selection.contains(face))
+            }) {
+                return Ok(false);
+            }
+            Ok(executive.do_defeature(k)?.is_empty()
+                && executive
+                    .features()
+                    .get(i)
+                    .is_some_and(|feature| feature.trimmed_crossing_base_patches))
+        })?;
+        Ok(())
+    })?;
+    if !trimmed {
+        return Ok(None);
+    }
+    // Recording materializes UV trims. Check the solid the caller will receive.
+    let (solid, proof) = run_taking("finish_crossing_patches", &[("brep", &result)], |k| {
+        finish_proved(k, result.take_held().0, Expect::SOLID)
+    })??;
+    Ok(Some((Body::held(solid, proof), history)))
+}
+
 /// A copy of `body` without record faces `faces` (indices into `order`, distinct), and without
 /// the edges and vertices only they used: what is left of a solid is a sheet. `body` is
 /// unchanged.
