@@ -29,8 +29,8 @@ use solidcore::topology::brep::p3::{
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::face::p2::{self as face_p2, face_side_regions};
 use solidcore::topology::proto_topology::p1::CopyBrepMap;
-use solidcore::topology::{edge, face};
-use solidcore::topology::{Brep, BrepId, EdgeId, FaceId, FaceuseId, RegionId};
+use solidcore::topology::{edge, face, vertex};
+use solidcore::topology::{Brep, BrepId, EdgeId, FaceId, FaceuseId, RegionId, VertexId};
 use solidcore::{Kernel, Point3, Vec3};
 
 use crate::blend::middle;
@@ -1876,6 +1876,113 @@ fn find_point_normal(
     Ok(None)
 }
 
+/// The boundary entity already located by `BrepQuery::point_3d_classify`.
+#[derive(Clone, Copy, Debug)]
+enum BoundaryHit {
+    Face { face: FaceId, uv: solidcore::Point2 },
+    Edge { edge: EdgeId, parameter: f64 },
+    Vertex(VertexId),
+    None,
+}
+
+/// Whole-body classification keeping the boundary entity for `OnBoundary` hits.
+#[derive(Clone, Copy, Debug)]
+enum PointLocation {
+    Inside,
+    Outside,
+    OnBoundary(BoundaryHit),
+}
+
+fn boundary_hit(pc: &PointClassification<EntityRef>) -> BoundaryHit {
+    match (pc.point_class(), pc.object()) {
+        (PointClassType::Face, Some(EntityRef::Face(face))) => BoundaryHit::Face {
+            face,
+            uv: pc.uv_param(),
+        },
+        (PointClassType::Edge, Some(EntityRef::Edge(edge))) => BoundaryHit::Edge {
+            edge,
+            parameter: pc.t_param(),
+        },
+        (PointClassType::Vertex, Some(EntityRef::Vertex(vertex))) => BoundaryHit::Vertex(vertex),
+        _ => BoundaryHit::None,
+    }
+}
+
+/// Outward normal from the boundary entity `BrepQuery::point_3d_classify` already
+/// located, used when `find_point_normal` misses an `OnBoundary` point (for example
+/// because B-rep classification uses `tol + entity_tol` while `face_parameters_at_point`
+/// checks strict `tol`, or at a trim boundary). Respects record order and `selected`.
+fn normal_from_boundary_hit(
+    k: &Kernel,
+    b: &mut Brep,
+    order: &Order,
+    hit: BoundaryHit,
+    selected: Option<usize>,
+) -> Result<Option<(usize, Normal)>> {
+    match hit {
+        BoundaryHit::Face { face, uv } => {
+            let Some(index) = order.faces.iter().position(|&id| id == face) else {
+                return Ok(None);
+            };
+            if selected.is_some_and(|sel| sel != index) || !uv.is_initialized() {
+                return Ok(None);
+            }
+            let fu = outer_faceuse(b, face).map_err(status)??;
+            let n = q::face_normal_at_clamped_uv(k, b, face, uv, fu).map_err(status)?;
+            Ok(Some((
+                index,
+                Normal {
+                    value: array(n.value),
+                    bound: n.bound,
+                },
+            )))
+        }
+        BoundaryHit::Edge { edge, parameter } => {
+            if !parameter.is_finite() {
+                return Ok(None);
+            }
+            let incident = edge::faces(b, edge, None).map_err(status)?;
+            for (index, &f) in order.faces.iter().enumerate() {
+                if selected.is_some_and(|sel| sel != index) || !incident.contains(&f) {
+                    continue;
+                }
+                let Some(eu) = edge::edgeuse_of_face(b, edge, Some(f)).map_err(status)? else {
+                    continue;
+                };
+                let fu = outer_faceuse(b, f).map_err(status)??;
+                let frame = q::edgeuse_face_frame(k, b, eu, parameter, fu).map_err(status)?;
+                return Ok(Some((
+                    index,
+                    Normal {
+                        value: array(frame.normal.value),
+                        bound: frame.normal.bound,
+                    },
+                )));
+            }
+            Ok(None)
+        }
+        BoundaryHit::Vertex(vertex) => {
+            let incident = vertex::faces(b, vertex).map_err(status)?;
+            for (index, &f) in order.faces.iter().enumerate() {
+                if selected.is_some_and(|sel| sel != index) || !incident.contains(&f) {
+                    continue;
+                }
+                let fu = outer_faceuse(b, f).map_err(status)??;
+                let n = q::face_normal_at_vertex(k, b, vertex, f, fu).map_err(status)?;
+                return Ok(Some((
+                    index,
+                    Normal {
+                        value: array(n.value),
+                        bound: n.bound,
+                    },
+                )));
+            }
+            Ok(None)
+        }
+        BoundaryHit::None => Ok(None),
+    }
+}
+
 /// The whole classification workflow, on the one body already protected by `with_body`.
 fn classify_with_normals(
     k: &Kernel,
@@ -1886,15 +1993,22 @@ fn classify_with_normals(
 ) -> Result<Vec<ClassifiedPoint>> {
     let tol = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
     let query = BrepQuery::of_brep(b);
-    let mut classes = Vec::new();
+    let mut locations = Vec::with_capacity(points.len());
     for &p in points {
         let pc = query
             .point_3d_classify(k, b, point(p)?, tol, true)
             .map_err(status)?;
-        classes.push(point_class(located(b, &pc))?);
+        let location = match point_class(located(b, &pc))? {
+            PointClass::Inside => PointLocation::Inside,
+            PointClass::Outside => PointLocation::Outside,
+            PointClass::OnBoundary => PointLocation::OnBoundary(boundary_hit(&pc)),
+        };
+        locations.push(location);
     }
     let needs_faces = matches!(face, Some(PointNormalFace::Point(_)))
-        || classes.contains(&PointClass::OnBoundary);
+        || locations
+            .iter()
+            .any(|loc| matches!(loc, PointLocation::OnBoundary(_)));
     let candidates = if needs_faces {
         let selected = match face {
             Some(PointNormalFace::Index(i)) => Some(i),
@@ -1906,23 +2020,38 @@ fn classify_with_normals(
     };
     let selected = match face {
         Some(PointNormalFace::Index(i)) => Some(i),
-        Some(PointNormalFace::Point(p)) => Some(
-            find_point_normal(k, b, &candidates, point(p)?, tol, None)?
-                .ok_or(Error::Argument)?
-                .0,
-        ),
+        Some(PointNormalFace::Point(p)) => {
+            let p = point(p)?;
+            let found = match find_point_normal(k, b, &candidates, p, tol, None)? {
+                Some((index, _)) => Some(index),
+                None => {
+                    let pc = query
+                        .point_3d_classify(k, b, p, tol, true)
+                        .map_err(status)?;
+                    match boundary_hit(&pc) {
+                        BoundaryHit::None => None,
+                        hit => normal_from_boundary_hit(k, b, order, hit, None)?
+                            .map(|(index, _)| index),
+                    }
+                }
+            };
+            Some(found.ok_or(Error::Argument)?)
+        }
         None => None,
     };
     points
         .iter()
-        .zip(classes)
-        .map(|(&p, class)| match class {
-            PointClass::Inside => Ok(ClassifiedPoint::Inside),
-            PointClass::Outside => Ok(ClassifiedPoint::Outside),
-            PointClass::OnBoundary => {
-                let (face, normal) =
-                    find_point_normal(k, b, &candidates, point(p)?, tol, selected)?
-                        .ok_or(Error::Argument)?;
+        .zip(locations)
+        .map(|(&p, location)| match location {
+            PointLocation::Inside => Ok(ClassifiedPoint::Inside),
+            PointLocation::Outside => Ok(ClassifiedPoint::Outside),
+            PointLocation::OnBoundary(hit) => {
+                let p = point(p)?;
+                let (face, normal) = match find_point_normal(k, b, &candidates, p, tol, selected)? {
+                    Some(found) => found,
+                    None => normal_from_boundary_hit(k, b, order, hit, selected)?
+                        .ok_or(Error::Argument)?,
+                };
                 Ok(ClassifiedPoint::On { face, normal })
             }
         })
@@ -2470,6 +2599,116 @@ pub(crate) mod tests {
             b.classify_points_with_normals(&order, &[[f64::NAN, 0., 0.]], None),
             Err(Error::Argument)
         );
+    }
+
+    /// `BrepQuery::point_3d_classify` classifies a point as `OnBoundary` up to
+    /// `tol + entity_tol` (and up to `tol + vertex.tolerance` per axis near a vertex),
+    /// whereas `face_parameters_at_point` checks strict `tol`. A batch must still resolve
+    /// the located face, edge or vertex normal instead of rejecting the batch, while
+    /// preserving `Error::Argument` when an unrelated `face` is explicitly selected.
+    #[test]
+    fn classify_points_with_normals_resolves_boundary_hits_beyond_strict_zone_tol() {
+        all_fixes();
+        let b = make_box([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+        let order = kernel_order(&b);
+        let tol = read_body("zone_tol", &b, |k, g| {
+            Ok(brep_zone_tol_3d(k, g, SmallTopoType::NormalSize))
+        })
+        .unwrap();
+
+        // Each point lies inside `tol + entity_tol` (so B-rep classification reports
+        // Face, Edge and Vertex respectively) yet outside strict `tol` from every face.
+        let face_pt = [-1.5 * tol, 5.0, 5.0];
+        let edge_pt = [-1.2 * tol, -1.2 * tol, 5.0];
+        let vertex_pt = [-1.2 * tol, -1.2 * tol, -1.2 * tol];
+        for p in [face_pt, edge_pt, vertex_pt] {
+            for f in 0..order.faces.len() {
+                assert_eq!(b.face_normal_at_point(&order, f, p).unwrap(), None);
+            }
+        }
+
+        let batch = [
+            face_pt,
+            edge_pt,
+            vertex_pt,
+            [5.0, 5.0, 5.0],
+            [20.0, 5.0, 5.0],
+        ];
+        let results = b
+            .classify_points_with_normals(&order, &batch, None)
+            .unwrap();
+        assert_eq!(results.len(), batch.len());
+
+        let ClassifiedPoint::On {
+            face: x0_face,
+            normal: face_normal,
+        } = results[0]
+        else {
+            panic!("expected face boundary hit: {:?}", results[0]);
+        };
+        for (value, expected) in face_normal.value.into_iter().zip([-1.0, 0.0, 0.0]) {
+            assert!((value - expected).abs() < 1e-12, "{face_normal:?}");
+        }
+
+        for (result, allowed) in [
+            (
+                results[1],
+                [[-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]].as_slice(),
+            ),
+            (
+                results[2],
+                [[-1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]].as_slice(),
+            ),
+        ] {
+            let ClassifiedPoint::On { normal, .. } = result else {
+                panic!("expected boundary hit: {result:?}");
+            };
+            let matches_any = allowed.iter().any(|want| {
+                normal
+                    .value
+                    .into_iter()
+                    .zip(*want)
+                    .all(|(v, e)| (v - e).abs() < 1e-12)
+            });
+            assert!(matches_any, "unexpected normal {normal:?}");
+        }
+        assert_eq!(results[3], ClassifiedPoint::Inside);
+        assert_eq!(results[4], ClassifiedPoint::Outside);
+
+        // Selecting the incident face (by index or by a point in the tolerance band)
+        // resolves cleanly for the face, edge and vertex hits.
+        for selected in [
+            PointNormalFace::Index(x0_face),
+            PointNormalFace::Point(face_pt),
+        ] {
+            let on_x0 = b
+                .classify_points_with_normals(&order, &[face_pt, edge_pt, vertex_pt], Some(selected))
+                .unwrap();
+            for item in on_x0 {
+                let ClassifiedPoint::On { face, normal } = item else {
+                    panic!("expected on x=0 face: {item:?}");
+                };
+                assert_eq!(face, x0_face);
+                for (value, expected) in normal.value.into_iter().zip([-1.0, 0.0, 0.0]) {
+                    assert!((value - expected).abs() < 1e-12, "{normal:?}");
+                }
+            }
+        }
+
+        // Selecting an unrelated face (x = 10) still rejects boundary points off that face.
+        let ClassifiedPoint::On { face: x10_face, .. } = b
+            .classify_points_with_normals(&order, &[[10.0, 5.0, 5.0]], None)
+            .unwrap()[0]
+        else {
+            panic!("expected x=10 face");
+        };
+        assert_ne!(x10_face, x0_face);
+        for p in [face_pt, edge_pt, vertex_pt] {
+            assert_eq!(
+                b.classify_points_with_normals(&order, &[p], Some(PointNormalFace::Index(x10_face))),
+                Err(Error::Argument)
+            );
+        }
     }
 
     /// The kernel's `Degenerate` (a normal at a pole or an apex) and `UnsureRegion` are typed
