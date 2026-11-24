@@ -1834,7 +1834,8 @@ mod tests {
     fn a_revolved_profile_trims_and_splits_with_its_walls_facing_out() {
         use std::f64::consts::FRAC_PI_8;
         let sq = Loop2::polygon(&[Vec2::new(2.0, 0.0), Vec2::new(3.0, 0.0), Vec2::new(3.0, 1.0), Vec2::new(2.0, 1.0)]);
-        let ring = revolve_sheet(&Plane::XY, std::slice::from_ref(&sq.segs), Vec2::ZERO, Vec2::new(0.0, 1.0), 0.0, std::f64::consts::FRAC_PI_2).unwrap();
+        let ring =
+            revolve_sheet(&Plane::XY, std::slice::from_ref(&sq.segs), Vec2::ZERO, Vec2::new(0.0, 1.0), 0.0, std::f64::consts::FRAC_PI_2).unwrap();
         // the turn runs from +x towards +z or -z about +y
         let s = if measure(&ring).unwrap().bbox.max.z > 1.0 { 1.0 } else { -1.0 };
         let radial = |a: f64| Vec3::new(a.cos(), 0.0, s * a.sin());

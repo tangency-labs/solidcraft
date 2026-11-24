@@ -494,12 +494,24 @@ fn faces_facing_against_a_curve_along_an_edge() {
     let p = Vec3::new(0.5, 0., 0.);
     let wall = q.faces_at(p, 1e-9);
     assert_eq!(wall.len(), 2, "{wall:?}");
-    assert_eq!(q.faces_against(Vec3::Z, &[(p, Vec3::X)], 1e-9), Vec::<usize>::new());
-    assert_eq!(q.faces_against(Vec3::Z, &[(p, Vec3::X * -1.0)], 1e-9), vec![1]);
+    assert_eq!(
+        q.faces_against(Vec3::Z, &[(p, Vec3::X)], 1e-9),
+        Vec::<usize>::new()
+    );
+    assert_eq!(
+        q.faces_against(Vec3::Z, &[(p, Vec3::X * -1.0)], 1e-9),
+        vec![1]
+    );
     let off = Vec3::new(5., 5., 5.);
-    assert_eq!(q.faces_against(Vec3::Z, &[(off, Vec3::X * -1.0)], 1e-9), Vec::<usize>::new());
+    assert_eq!(
+        q.faces_against(Vec3::Z, &[(off, Vec3::X * -1.0)], 1e-9),
+        Vec::<usize>::new()
+    );
     // along the normal: no side meant
-    assert_eq!(q.faces_against(Vec3::Z, &[(p, Vec3::Z)], 1e-9), Vec::<usize>::new());
+    assert_eq!(
+        q.faces_against(Vec3::Z, &[(p, Vec3::Z)], 1e-9),
+        Vec::<usize>::new()
+    );
 }
 
 /// A tube's side on its NURBS form, as SMLib holds it: its circles drawn within the sag asked
