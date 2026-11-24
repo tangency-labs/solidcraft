@@ -397,6 +397,10 @@ struct SessionObjects<'target> {
     /// WR-661: the target's boundary (lamina edges) and faces before filleting, which an
     /// open result must keep to be kept ([`finish::OpenInput`]).
     open_input: finish::OpenInput,
+    /// The target's vertices before filleting: those after it that are not among them are the
+    /// fillet's (on its faces, or where it split the target's edges), placed on their faces'
+    /// corners after the merge (`boolean::merge::p1::place_vertices_on_face_corners`).
+    vertices_before: BTreeSet<VertexId>,
     extended_surfaces: BTreeMap<FaceId, Surface>,
     edge_caches: BTreeMap<EdgeId, CurveCache<FilletObject>>,
     target_serial: u64,
@@ -1833,6 +1837,7 @@ impl<'target> FilletSession<'target> {
                 merge_attributes: None,
                 cleanup_kept: None,
                 open_input: finish::OpenInput::default(),
+                vertices_before: BTreeSet::new(),
                 extended_surfaces: BTreeMap::new(),
                 edge_caches: BTreeMap::new(),
                 target_serial,
