@@ -6411,17 +6411,29 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "solidcore-cadir",
  "solidcore-ops",
  "solidcore-record",
  "solidcore-step",
  "solidcore-tess",
  "solidcraft-geom",
+ "solidcraft-kernel-api",
  "solidcraft-profile",
  "solidcraft-smlib",
  "spade",
  "sysinfo",
  "thiserror 2.0.21",
  "web-time",
+]
+
+[[package]]
+name = "solidcraft-kernel-api"
+version = "0.48.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "solidcore-record",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

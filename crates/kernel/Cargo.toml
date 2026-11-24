@@ -13,9 +13,11 @@ solidcore-record = { workspace = true }
 solidcore-ops = { workspace = true }
 solidcore-tess = { workspace = true }
 solidcraft-geom = { workspace = true }
+solidcraft-kernel-api = { workspace = true }
 solidcraft-smlib = { workspace = true }
 solidcraft-profile = { workspace = true }
 solidcore-step = { workspace = true }
+solidcore-cadir = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

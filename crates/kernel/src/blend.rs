@@ -284,18 +284,7 @@ fn closed(input: &Body, b: Body) -> Result<Body> {
     }
 }
 
-/// How two constant rounds of one radius turn round a sharp, straight, convex side edge square to
-/// both on a plane, such as the rounds along a boss's base at its upright edges.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum FilletTurn {
-    /// The rounds run on to where they cross and meet in a mitre.
-    #[default]
-    Mitre,
-    /// The rounds end at the side edge and the corner is their section revolved about it, a
-    /// torus tangent to both. Refused where it is not built (unequal or variable rounds, a
-    /// concave, curved or tangent side edge, a corner of four edges), with the reason.
-    Swept,
-}
+pub use solidcraft_kernel_api::FilletTurn;
 
 /// Constant-radius fillet of the edges nearest to the given points. A radius too large for the
 /// faces around the edges is refused with [`KernelError::TooLarge`] ([`fillet_max`] finds the
@@ -305,7 +294,7 @@ pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
 }
 
 /// [`fillet`], its rounds turning at side edges as `turn` says.
-fn fillet_turning(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<Body> {
+pub(crate) fn fillet_turning(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "fillet");
     body.require_brep("fillet")?;
     crate::blend_smlib::fillet(body, edges, radius, turn).and_then(|b| closed(body, b))
@@ -1107,13 +1096,7 @@ pub fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
     crate::blend_smlib::chamfer(body, edges, distance)
 }
 
-/// The second side of an unequal chamfer: a distance along the other face, or the angle the
-/// chamfer makes with the first face.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ChamferSide {
-    Distance(f64),
-    Angle(f64),
-}
+pub use solidcraft_kernel_api::ChamferSide;
 
 /// A chamfer with different setbacks on the two faces of each edge: `d1` along the first face
 /// (the one facing up most, the other with `flip`), the second side by distance or angle.
