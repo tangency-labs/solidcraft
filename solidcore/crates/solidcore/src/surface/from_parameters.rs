@@ -624,6 +624,50 @@ mod tests {
         assert!(make(&skew, [0.0, 1.0], [0.0, 1.0]).is_err());
     }
 
+    /// A plane saved before its writer squared its axes (solidcore#3377, #21752) is off square
+    /// by about 1.36e-14. Up to what the kernel's placement keeps (`SetCanonical`: `EFF_ZERO`)
+    /// it reads with its v axis made square to its u, keeping its origin, u axis, normal and
+    /// box; further off it is refused.
+    #[test]
+    fn a_plane_a_hair_off_square_reads_square() {
+        use crate::math::EFF_ZERO;
+        use crate::surface::surface::SurfaceKind;
+        let skewed = |o: Point3, skew: f64, len: f64| Record::Plane {
+            origin: a(o),
+            u_axis: a(Vec3::X),
+            v_axis: a(Vec3::new(skew * len, len, 0.0)),
+        };
+        let far = Point3::new(10010.0, 9997.58, 10.0);
+        for (o, skew, len) in [
+            (Point3::ZERO, 1.36e-14, 1.0),
+            (far, 1.36e-14, 1.0),
+            (far, -0.5 * EFF_ZERO, 1.0),
+            (far, 0.5 * EFF_ZERO, 3.0),
+        ] {
+            let s = make(&skewed(o, skew, len), [0.0, 2.0], [-1.0, 1.0]).unwrap();
+            let SurfaceKind::Plane(p) = s.kind_with_nurb(&k()).unwrap() else {
+                panic!("{skew} at {o:?}: not a plane");
+            };
+            let (origin, x, y) = p.position().canonical();
+            assert_eq!((origin, x), (o, Vec3::X), "{skew} at {o:?}");
+            assert!(plane_axes_square(x, y), "{skew} at {o:?}: {y:?}");
+            // in the plane of the record's axes, on the same side: the normal stays +z
+            assert!(y.z == 0.0 && y.y > 0.0, "{skew} at {o:?}: {y:?}");
+            let d = s.natural_uv_domain_with_nurb(&k()).unwrap();
+            assert_eq!(
+                (d.min().x, d.max().x, d.min().y, d.max().y),
+                (0.0, 2.0, -len, len),
+                "{skew} at {o:?}"
+            );
+        }
+        for skew in [2.0 * EFF_ZERO, -1e-9, 1e-6] {
+            assert!(
+                make(&skewed(far, skew, 1.0), [0.0, 1.0], [0.0, 1.0]).is_err(),
+                "{skew}"
+            );
+        }
+    }
+
     #[test]
     fn a_cylinder_cone_sphere_and_torus_meet_their_closed_forms() {
         let cyl = Record::Cylinder {

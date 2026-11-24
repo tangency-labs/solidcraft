@@ -1961,3 +1961,30 @@ fn a_face_strays_across_a_direction_by_its_tilt_over_its_own_size() {
     let sin = 1e-3 / (1.0 + 1e-6_f64).sqrt();
     close(tilted, 2.0 * 10.0 * sin, "ruled, tilted");
 }
+
+/// An extruded rectangle on a sketch plane that is not axis-aligned reads its own record back
+/// (tangency-labs/solidcraft#13737: two side walls' planes were written 1.2 times past the
+/// reader's squareness bound, and `from_record` refused them).
+#[test]
+fn an_extruded_rectangle_on_a_tilted_plane_reads_its_record_back() {
+    // x = (584.394, 0, 385.337) made unit, the slot of tangency-labs/solidcraft#12365
+    let x = Vec3::new(0.8348477614519991, 0.0, 0.5504808944900683);
+    let plane = Plane {
+        origin: Vec3::new(3.302884, 0.0, -5.009087),
+        x,
+        y: Vec3::Y,
+    };
+    let p = [(159.2, -6.5), (168.2, -6.5), (168.2, 6.5), (159.2, 6.5)].map(|(a, b)| Vec2::new(a, b));
+    let r = Region2 {
+        outer: Loop2::polygon(&p),
+        holes: vec![],
+    };
+    let body = extrude_planar_regions(&plane, &[r], 0.0, 12.0).unwrap();
+    let (record, _) = body.to_record().unwrap();
+    assert_eq!(
+        (record.faces.len(), record.edges.len(), record.vertices.len()),
+        (6, 12, 8)
+    );
+    let (back, _) = Body::from_record(&record, false).unwrap();
+    assert!(back.check(CheckLevel::All).unwrap().is_valid());
+}
