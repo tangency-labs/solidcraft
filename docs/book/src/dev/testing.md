@@ -1,16 +1,17 @@
 # Test harnesses
 
 `cargo xtask ci` runs everything a pull request must pass: fmt, `xtask assets`,
-`xtask licences --check`, `xtask layers`, clippy with `-D warnings`, the tests with the `ci`
-profile and the wasm build check.
+`xtask licences --check`, `xtask layers`, the `xtask i18n --check` catalog check, the
+`xtask kernel-cases --coverage` check, clippy with `-D warnings`, the tests with the `ci` profile
+and the wasm build check.
 
 `cargo xtask fast` is the check before a commit and a push: it checks only what your change
 touches. It compares your branch with `origin/main` (`--base REF` for another), counting
 committed, uncommitted and untracked files, and:
 
 - formats the code;
-- runs the quick checks of `cargo xtask ci` (assets, lists, skills, layers, ui-containers,
-  mesh-decisions; `shared`, `licences --check` and `icons` only when the change can affect them);
+- runs the quick checks (assets, lists, skills, layers, ui-containers, mesh-decisions; `shared`,
+  `licences --check` and `icons` only when the change can affect them);
 - runs `cargo clippy --workspace --all-targets --profile ci -- -D warnings`, the same build as
   `cargo xtask ci`, so a change that breaks another crate still fails;
 - tests only the packages whose files changed, as `scripts/ci/affected.py --owners` maps them,

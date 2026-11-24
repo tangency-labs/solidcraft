@@ -168,9 +168,10 @@ commands:
                   units (a kernel change without it prints a hint). -p names the packages to
                   test instead; --list only prints what would run. Every step runs; the failures
                   are listed at the end. CI runs the full gate
-  ci              fmt --check, assets, icons, licences --check, lists, skills, layers, shared,
-                  ui-containers, mesh-decisions, app-geometry, clippy -D warnings, then the tests
-                  with the wasm check alongside, then web-offline-test when Chrome is installed
+  ci              fmt --check, assets, icons, licences --check, lists, i18n --check
+                  --no-registry, skills, layers, shared, ui-containers, mesh-decisions,
+                  app-geometry, kernel-cases --coverage, clippy -D warnings, then the tests with
+                  the wasm check alongside, then web-offline-test when Chrome is installed
                   (stops at the first failing step)
 ";
 
@@ -548,12 +549,14 @@ fn cmd_ci() -> Result<(), String> {
     icons::run(&root())?;
     licences::run(&root(), true)?;
     lists::run(&root(), false)?;
+    i18n::run(&root(), &["--check", "--no-registry"])?;
     skills::run(&root())?;
     cmd_layers()?;
     shared::run(&root())?;
     ui_containers::run(&root())?;
     mesh_decisions::run(&root())?;
     app_geometry::run(&root(), &[])?;
+    kernel_cases::run(&["--coverage"])?;
     let mut c = cargo();
     c.args(["clippy", "--workspace", "--all-targets", "--profile", "ci", "--", "-D", "warnings"]);
     run(c, "cargo clippy -D warnings")?;
