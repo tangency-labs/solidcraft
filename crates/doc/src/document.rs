@@ -2528,6 +2528,14 @@ pub enum FeatureKind {
         #[walk(length = "Tolerance")]
         tolerance: Expr,
     },
+    /// Derive a reduced mesh without changing its upstream source.
+    MeshReduce {
+        body: BodyName,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        triangle_count: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        percentage: Option<f64>,
+    },
     /// Mesh bodies imported from a 3MF or STL file, embedded in the design.
     MeshImport {
         /// Source file name (display only).
@@ -3510,6 +3518,7 @@ impl FeatureKind {
             FeatureKind::Import { .. } => "BaseFeature",
             FeatureKind::MeshImport { .. } => "MeshFeature",
             FeatureKind::MeshConvert { .. } => "MeshConvertFeature",
+            FeatureKind::MeshReduce { .. } => "MeshReduceFeature",
             FeatureKind::Repair { .. } => "RepairFeature",
         }
     }
@@ -3598,6 +3607,7 @@ impl FeatureKind {
             FeatureKind::Move { .. } => "move",
             FeatureKind::Import { .. } => "import",
             FeatureKind::MeshConvert { .. } => "mesh_convert",
+            FeatureKind::MeshReduce { .. } => "mesh_reduce",
             FeatureKind::MeshImport { .. } => "mesh_import",
             FeatureKind::Repair { .. } => "repair",
         }
@@ -3687,6 +3697,7 @@ impl FeatureKind {
             "BaseFeature" => "import",
             "MeshFeature" => "mesh_import",
             "MeshConvertFeature" => "mesh_convert",
+            "MeshReduceFeature" => "mesh_reduce",
             "RepairFeature" => "repair",
             _ => return None,
         })
@@ -3779,6 +3790,7 @@ impl FeatureKind {
             FeatureKind::Import { .. } => "Import",
             FeatureKind::MeshImport { .. } => "Mesh",
             FeatureKind::MeshConvert { .. } => "ConvertMesh",
+            FeatureKind::MeshReduce { .. } => "ReduceMesh",
             FeatureKind::Repair { .. } => "Repair",
         }
     }
@@ -4197,7 +4209,7 @@ pub struct Document {
     /// its own `Arc`, so an undo step shares every drawing it didn't change. Each is read by its own
     /// family's rules ([`crate::format::read`]), never as a field of the design; a container keeps
     /// each in its own entry.
-    #[serde(skip_deserializing, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_deserializing, skip_serializing_if = "Vec::is_empty", serialize_with = "crate::drawing::serialize_inline")]
     pub drawings: Vec<std::sync::Arc<crate::drawing::Drawing>>,
     /// Plugin data, by `<plugin-id>/<path>`, as bytes: kept and saved back untouched, plugin or no
     /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design;
@@ -5002,7 +5014,7 @@ impl Document {
         if self.canvases.iter().any(|c| !c.data.is_empty()) {
             kinds.push("images");
         }
-        if self.drawings.iter().any(|d| d.images.iter().next().is_some()) {
+        if self.drawings.iter().any(|d| d.has_binary_data()) {
             kinds.push("drawing images");
         }
         if self.point_clouds.iter().any(|c| !c.points.is_empty()) {
@@ -5020,14 +5032,26 @@ impl Document {
     /// The design as the text of a `.json` file. The same design always gives the same text, and a
     /// short list of numbers such as a point stays on one line (the layout is in `json_layout.rs`).
     pub fn to_json(&self) -> String {
+        self.to_json_checked().unwrap_or_default()
+    }
+
+    /// The same text as `to_json`, reporting serialization failures to a file writer.
+    pub fn to_json_checked(&self) -> Result<String> {
+        let error = |why: serde_json::Error| DocError::Invalid(format!("design not saved: {why}"));
+        let opaque_drawings = self.drawings.iter().any(|drawing| drawing.newer_file.is_some());
         let compact = if self.newer_file.is_some() {
-            let mut value = serde_json::to_value(self).unwrap_or_default();
+            let mut value = serde_json::to_value(self).map_err(error)?;
             crate::newer_file::restore(self, &mut value);
-            serde_json::to_string(&value).unwrap_or_default()
+            if opaque_drawings && let Some(fields) = value.as_object() {
+                return crate::json_layout::pretty_serialized(&crate::drawing::InlineDocument { fields, drawings: &self.drawings }).map_err(error);
+            }
+            serde_json::to_string(&value).map_err(error)?
+        } else if opaque_drawings {
+            return crate::json_layout::pretty_serialized(self).map_err(error);
         } else {
-            serde_json::to_string(self).unwrap_or_default()
+            serde_json::to_string(self).map_err(error)?
         };
-        crate::json_layout::pretty(&compact)
+        Ok(crate::json_layout::pretty(&compact))
     }
 
     pub fn feature(&self, id: u64) -> Option<&Feature> {
