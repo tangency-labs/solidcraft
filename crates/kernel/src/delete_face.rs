@@ -398,11 +398,14 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                         .find(|fs| fs.contains(&f) && fs.iter().any(|x| del.contains(x)))
                         .and_then(|fs| fs.iter().find(|x| del.contains(x)).copied())
                         .unwrap_or(0);
-                    return Err(fail(format!(
-                        "face {by} ({}), borders face {f}, {}: to remove a tangent chain of rounds, select all the round faces. Include face {f} if it should go too, or take off the feature that made it in the timeline",
-                        surface_kind(&rec, by),
-                        surface_kind(&rec, f),
-                    )));
+                    let reason = if matches!(surf_of(&rec, by), Some(Surf::Plane { .. })) {
+                        "healing this selection requires planar neighbours to close the gap. If a feature created the selected face, edit that feature in the timeline".to_owned()
+                    } else {
+                        format!(
+                            "to remove a tangent chain of rounds, select all the round faces. Include face {f} if it should go too, or take off the feature that made it in the timeline"
+                        )
+                    };
+                    return Err(fail(format!("face {by} ({}), borders face {f}, {}: {reason}", surface_kind(&rec, by), surface_kind(&rec, f))));
                 }
             }
         }
@@ -740,6 +743,20 @@ mod tests {
                 other => panic!("expected a point on the face, got {other:?}"),
             })
             .collect()
+    }
+
+    #[test]
+    fn deleting_a_planar_cylinder_cap_explains_the_healing_limit() {
+        let body = step_roundtrip(&cylinder(Vec3::ZERO, Vec3::Z, 10.0, 20.0).unwrap());
+        let cap = picked_faces(&body, &[Vec3::new(0.0, 0.0, 20.0)])[0];
+        let wall = picked_faces(&body, &[Vec3::new(6.0, 8.0, 10.0)])[0];
+
+        let Err(crate::KernelError::Invalid(why)) = delete_faces(&body, &[cap]) else {
+            panic!("expected Delete Face to refuse healing a planar cylinder cap");
+        };
+        assert!(why.contains(&format!("face {cap} (a plane), borders face {wall}, a cylinder")), "{why}");
+        assert!(why.contains("healing this selection requires planar neighbours"), "{why}");
+        assert!(!why.contains("tangent chain"), "{why}");
     }
 
     #[test]
