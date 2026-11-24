@@ -51,6 +51,7 @@ pub mod frame_layout;
 mod frame_multi_trim;
 mod frame_plate;
 pub mod gpu_plan;
+pub mod gusset;
 pub mod hardware_catalog;
 mod history_names;
 pub mod hole_reference;

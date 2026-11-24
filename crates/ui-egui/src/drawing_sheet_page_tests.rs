@@ -805,6 +805,42 @@ fn double_click_edits_a_title_block_cells_text_in_place() {
     assert!(!crate::dim_view::editing(), "the projection symbol has no text");
 }
 
+/// ISO 7200's cells (#20121) are edited where the others are: a double-click on each of the six opens
+/// the box, and Enter types the text over the cell, which shows it on the sheet.
+#[test]
+fn double_click_edits_each_iso_7200_cell_in_place() {
+    let (mut h, _) = plate_sheet();
+    for (name, text) in [
+        ("scale", "NTS"),
+        ("document_type", "Fabrication drawing"),
+        ("document_status", "Released"),
+        ("language", "DE"),
+        ("revision", "C"),
+        ("department", "Sheet metal"),
+    ] {
+        let at = {
+            let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+            let record = &drawing.sheets[0];
+            let (block, placed) = (record.title_block.as_ref().unwrap(), record.title_block_layout().unwrap().unwrap());
+            let i = block.cells.iter().position(|cell| cell.name == name).unwrap();
+            let rect = placed.cells[i].rect;
+            let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+            let (x, y) = ((rect.min.x + rect.max.x) / 2.0, (rect.min.y + rect.max.y) / 2.0);
+            [paper.left() + paper.width() * x as f32 / 420.0, paper.bottom() - paper.height() * y as f32 / 297.0]
+        };
+        h.step(&json!({"click": at, "double": true})).unwrap();
+        h.frames(4);
+        assert!(crate::dim_view::editing(), "the double-click opens the box on the {name} cell");
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        h.step(&json!({"text": text})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(4);
+        assert!(!crate::dim_view::editing());
+        let typed = h.app.session.drawing("drawing.inspect").unwrap().sheets[0].title_block_overrides.get(name).cloned();
+        assert_eq!(typed.as_deref(), Some(text), "{name}");
+    }
+}
+
 /// A view just placed says so before its lines arrive: it is listed as waiting and shows its box
 /// with Projecting…, and that goes once it is drawn. Placing the standard views and drawing them
 /// evaluates the model no more times than it was evaluated before.
