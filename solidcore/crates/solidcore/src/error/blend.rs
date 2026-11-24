@@ -2809,7 +2809,9 @@ impl crate::SolidError {
 
     /// [`crate::SolidError::Failed`] for something a blend routine needs that is not there,
     /// as the phrase says, with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)` on a
-    /// `NULL` pointer): a phrase cause.
+    /// `NULL` pointer): a phrase cause. Only tests build it now: no site in the kernel
+    /// keeps the phrase (#19829).
+    #[cfg(test)]
     #[must_use]
     #[track_caller]
     pub(crate) fn blend_missing(operation: &'static str, what: &'static str) -> Self {
