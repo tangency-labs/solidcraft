@@ -2864,6 +2864,10 @@ fn a_countersinks_cone_moves_into_the_material_over_the_well() {
 /// V + 12 pi δ√2. Past δ = 2 sin 45° = √2 the moved cone's apex, z = 5.5 - δ√2, is below
 /// the hole's old edge at z = 3.5, and the meeting there was sought from the edge on the
 /// cone's other nappe: +1.5 and +2 were refused for a reach with no certified bound (#20935).
+/// Past δ = 2 / cos 45° = 2√2 the moved cone's apex is past the image the cone's own
+/// parameters give the hole's circle, r = 2 - δ cos 45°: the face lost that edge and was
+/// refused as unsound, though the well's wall is still a band 4.5 - δ√2 high, 0.26 at 3 and
+/// 0.0027 at 3.18 (#21188).
 /// Moved 3.5, past the foot, the well's wall between the cone and the block's underside
 /// closes at 4.5 / √2 and is refused, naming it.
 #[test]
@@ -2871,6 +2875,20 @@ fn a_countersinks_cone_moves_into_the_material_over_the_well() {
 fn a_countersinks_cone_moves_off_the_material_past_its_apex_over_the_hole() {
     all_fixes();
     for delta in [1.0, 1.4, 1.5, 2.0] {
+        let b = countersunk_block(4.0);
+        let o = order(&b);
+        let cone = countersink_cone(&b, &o, 4.0);
+        offset_faces(&b, &o, &[cone], delta).unwrap();
+        let expected = countersunk_volume(4.0) + 12.0 * PI * delta * 2.0_f64.sqrt();
+        assert!(
+            rel(volume(&b), expected) < 1e-9,
+            "{delta}: {} vs {expected}",
+            volume(&b)
+        );
+        b.check_solid().unwrap();
+    }
+    // past 2√2, up to just short of the foot at 4.5 / √2 = 3.182
+    for delta in [2.9, 3.0, 3.1, 3.18] {
         let b = countersunk_block(4.0);
         let o = order(&b);
         let cone = countersink_cone(&b, &o, 4.0);

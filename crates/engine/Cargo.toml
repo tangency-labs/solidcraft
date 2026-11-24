@@ -86,6 +86,8 @@ solidcraft-io = { workspace = true, features = ["dxf-legacy-baseline-tests", "tr
 solidcraft-sketch = { workspace = true, features = ["solver-profiling", "test-font-gate"] }
 # Sheet metal tests read the joints of a sheet made from surfaces.
 solidcraft-develop = { workspace = true }
+# Render-job tests that check exact native RAM-ledger totals own their ledger.
+solidcraft-render = { workspace = true, features = ["test-support"] }
 # Sheet PDF tests inflate the pages' content to read them back.
 flate2 = { workspace = true }
 # Writes a KiCad `.stpZ` (a zipped STEP) for the board-import tests.
