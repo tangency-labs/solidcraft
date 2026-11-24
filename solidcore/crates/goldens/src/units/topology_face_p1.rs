@@ -1447,7 +1447,8 @@ mod tests {
     //!    `plane_circ.smb` rows with `SM_ERR_INVALID_INPUT` when splitting the plane);
     //! 1. `check_brep` at Level 2 reports no kind of failure the B-rep did not already
     //!    have before the op (the loaded files already fail some checks);
-    //! 2. every edge end lies within its vertex's tolerance;
+    //! 2. every edge end (the 3D curve evaluated at its interval end) lies within its
+    //!    vertex's tolerance;
     //! 3. every vertex tolerance is at most the largest of its tolerance before the op,
     //!    the body tolerance `1e-5` (a new vertex's) and the widest edge-end gap at it plus
     //!    a rounding allowance: the gap is one `Vec3`
@@ -1455,6 +1456,9 @@ mod tests {
     //!    `4 * EPSILON * m` (three differences, squares and a sum, a square root, each one
     //!    rounding of at most `m * EPSILON / 2` scaled by the norm); the allowance is
     //!    `16 * EPSILON * m`, four times that.
+    //!
+    //! Each replay must also be the committed golden row, so the checks before the op
+    //! (`check_brep` takes the B-rep `&mut`) change nothing the op reads.
     use super::*;
     use solidcore::topology::brep::validation::{check_brep_with_keys, CheckLevel};
     use solidcore::topology::{edge, vertex};
@@ -1641,11 +1645,18 @@ mod tests {
     fn seam_move_rows_keep_the_tolerances_the_geometry_needs() {
         let rows = moved_rows();
         assert_eq!(rows.len(), MOVED.len(), "every moved row is a case");
+        let golden =
+            crate::golden::read(&crate::golden::default_dir(), "topology.face_p1").expect("golden");
         let mut problems = Vec::new();
         for case in &rows {
             AFTER_MOVE_SEAM.with(|c| *c.borrow_mut() = None);
             let inputs: Inputs = case.parse().expect("inputs");
-            run_rust(&inputs).expect("row runs");
+            let out = run_rust(&inputs).expect("row runs");
+            // the checks before the op take the B-rep `&mut`; the row must still be the
+            // committed golden one, so they changed nothing the op reads
+            if golden.get(&case.name) != Some(&crate::golden::encode(&case.name, &out)) {
+                problems.push(format!("{}: the replay is not the committed golden row", case.name));
+            }
             match AFTER_MOVE_SEAM.with(|c| c.borrow_mut().take()) {
                 Some(found) => {
                     problems.extend(found.into_iter().map(|p| format!("{}: {p}", case.name)));
