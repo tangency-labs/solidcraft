@@ -58,6 +58,7 @@ pub mod export_geometry;
 pub mod extend;
 pub mod face_surface;
 pub mod faceted;
+pub mod facing_trough;
 pub mod file;
 pub mod fit_projection;
 pub mod hatch;
@@ -130,6 +131,7 @@ pub use blend::HoleEdge;
 pub use blend::Room;
 pub use blend::SetBack;
 pub use blend::Turn;
+pub use body::backward_sheet_faces;
 pub use body::make_box;
 pub use body::make_cone;
 pub use body::make_cylinder;
@@ -182,8 +184,26 @@ pub use offset::offset_surface;
 pub use offset::shell;
 pub use offset::thicken;
 pub use order::Order;
+pub use solidcore::mesh_reduce::ReducedMesh;
 pub use step_assembly::placed_bodies;
 pub use step_assembly::PlacedBody;
+
+/// Reduce a mesh under the current cooperative cancellation context.
+pub fn reduce_mesh(
+    positions: &[[f64; 3]],
+    indices: &[u32],
+    corner_normals: Option<&[[f64; 3]]>,
+    target_triangles: usize,
+) -> Result<ReducedMesh> {
+    solidcore::mesh_reduce::reduce_mesh_with_cancel(
+        positions,
+        indices,
+        corner_normals,
+        target_triangles,
+        cancel::is_cancelled,
+    )
+    .map_err(error::status)
+}
 
 #[cfg(test)]
 mod ball_corner_tests;

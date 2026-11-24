@@ -390,19 +390,30 @@ pub fn design_folder_refusal(dir: &std::path::Path) -> Option<String> {
 /// [`design_folder_refusal`] with the home and temporary folders given (tests).
 pub fn design_folder_refusal_in(dir: &std::path::Path, home: Option<&std::path::Path>, temp: Option<&std::path::Path>) -> Option<String> {
     let Some(d) = canonical(dir) else { return Some("it doesn't exist".into()) };
+    let home = home.and_then(canonical);
+    let temp = temp.and_then(canonical);
+    design_folder_refusal_resolved(&d, home.as_deref(), temp.as_deref(), system_drive())
+}
+
+fn design_folder_refusal_resolved(
+    d: &std::path::Path,
+    home: Option<&std::path::Path>,
+    temp: Option<&std::path::Path>,
+    sys_drive: Option<u8>,
+) -> Option<String> {
     if d.parent().is_none() {
         return Some("it is a drive or file-system root".into());
     }
-    let home = home.and_then(canonical);
-    if home.as_ref().is_some_and(|h| h.starts_with(&d)) {
+    if home.is_some_and(|h| h.starts_with(d)) {
         return Some("it is your home folder or a folder above it".into());
     }
-    let temp = temp.and_then(canonical).filter(|t| t.parent().is_some());
+    let temp = temp.filter(|t| t.parent().is_some());
     // The closer of the two (a temporary folder may lie inside home, in a hidden folder).
-    let Some(base) =
-        [home.as_ref(), temp.as_ref()].into_iter().flatten().filter(|b| d.starts_with(b) && d != **b).max_by_key(|b| b.components().count())
-    else {
-        return secondary_drive_design_refusal(&d, home.as_deref(), system_drive());
+    let Some(base) = [home, temp].into_iter().flatten().filter(|b| d.starts_with(b) && d != *b).max_by_key(|b| b.components().count()) else {
+        if temp.is_some_and(|t| d == t) {
+            return Some("it is the temporary folder itself".into());
+        }
+        return secondary_drive_design_refusal(d, home, sys_drive);
     };
     let rel = d.strip_prefix(base).ok()?;
     if rel.components().any(|c| hidden(c.as_os_str())) {
@@ -1619,5 +1630,15 @@ mod tests {
             let err = check(dir, h, sys).unwrap_or_else(|| panic!("expected refusal for {dir}"));
             assert!(err.contains(want_substr), "{dir}: got `{err}`, expected `{want_substr}`");
         }
+
+        // A temporary folder located on a secondary drive must still be refused itself, while
+        // strict descendants of temp and regular project folders on that drive stay eligible.
+        let temp = Some(Path::new(r"\\?\D:\Scratch\Temp"));
+        let home_p = home.map(Path::new);
+        let err = super::design_folder_refusal_resolved(Path::new(r"\\?\D:\Scratch\Temp"), home_p, temp, Some(b'C'))
+            .expect("the temporary folder itself on a secondary drive must stay refused");
+        assert!(err.contains("temporary folder"), "{err}");
+        assert_eq!(super::design_folder_refusal_resolved(Path::new(r"\\?\D:\Scratch\Temp\project"), home_p, temp, Some(b'C')), None);
+        assert_eq!(super::design_folder_refusal_resolved(Path::new(r"\\?\D:\Projects\CAD"), home_p, temp, Some(b'C')), None);
     }
 }

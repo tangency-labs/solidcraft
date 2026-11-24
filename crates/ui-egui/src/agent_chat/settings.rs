@@ -625,7 +625,8 @@ fn allowed_folders_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             solidcraft_ui_registry::publish_target("prefs:agent_allowed_folders:add", add.rect);
             solidcraft_ui_registry::publish_handle("prefs:agent_allowed_folders:add", add.rect.center());
             if add.clicked() {
-                app.pick_folder(|app, folder| {
+                let start = app.preferences.agent_allowed_paths.last().cloned().unwrap_or_default();
+                app.pick_folder(&start, |app, folder| {
                     if let Some(folder) = folder.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
                         && !app.preferences.agent_allowed_paths.contains(&folder)
                     {
@@ -1658,7 +1659,16 @@ mod card_tests {
             assert!(scope_visible, "the full localized permission scope remains visible without hovering, including with AI off");
             assert!(privacy_visible, "the localized privacy note remains visible without hovering, including with AI off");
             let mut previous: Option<f32> = None;
-            for key in ["assistant_availability", "permissions", "agents", "instructions", "panel", "assistant_connecting", "agent_pointer"] {
+            for key in [
+                "assistant_availability",
+                "permissions",
+                "agents",
+                "instructions",
+                "allowed_folders",
+                "panel",
+                "assistant_connecting",
+                "agent_pointer",
+            ] {
                 let section = solidcraft_ui_registry::rect_of(&format!("prefs:section:{key}")).unwrap();
                 assert!((section.left() - body.left()).abs() <= 1.0 && (section.right() - body.right()).abs() <= 1.0);
                 assert!((section.height() - (solidcraft_theme::Tokens::get().control_height + solidcraft_theme::Tokens::get().space_2)).abs() <= 1.0);

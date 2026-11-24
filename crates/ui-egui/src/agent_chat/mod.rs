@@ -539,6 +539,9 @@ pub struct AgentChat {
     all_selected: bool,
     /// The last message sent, kept to send again after a sign-in (its files too).
     last: Option<(String, bool, Option<usize>, Vec<attach::Attachment>)>,
+    /// The task of a turn the agent could not finish (the provider's usage limit, or any other
+    /// error): it waits to be continued, with its files, when the agent can work again (#16318).
+    unfinished: Option<(String, bool, Option<usize>, Vec<attach::Attachment>)>,
     /// Files for the next message (pictures, text files, imported parts), shown as chips.
     pub(crate) attachments: Vec<attach::Attachment>,
     /// Pictures pasted so far, to name the next one.
@@ -1083,6 +1086,11 @@ impl AgentChat {
                 if std::mem::take(&mut self.discard_end) {
                     return Some(Outcome::TurnEnd);
                 }
+                // A turn the agent could not finish (the provider's usage limit, or any other
+                // error) keeps its task: the user can continue it when the agent can work again.
+                if reason == "error" {
+                    self.unfinished = self.last.clone();
+                }
                 match reason.as_str() {
                     "" | "auth" | "error" => {}
                     // Not a missing tool: the answer ran out of room, or the model declined (#9495).
@@ -1281,8 +1289,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(hint) = entry.problem_hint() {
         chat.notice(hint, true);
     }
-    let allow_paths: Vec<std::path::PathBuf> =
-        app.preferences.agent_allowed_paths.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).map(std::path::PathBuf::from).collect();
+    let allow_paths = configured_allow_paths(&app.preferences.agent_allowed_paths);
     let bridge = cli.zip(chat.tools_port).map(|(cli, port)| acp::McpBridge { cli, port, allow_paths });
     chat.tools_available = Some(bridge.is_some());
     chat.tools_bridged = bridge.is_some();
@@ -1488,6 +1495,7 @@ pub(crate) fn leave_document(app: &mut SolveApp) {
     let chat = &mut app.agent_chat;
     chat.steering = false;
     chat.last = None;
+    chat.unfinished = None;
     // A prompt waiting for startup or sign-in has not reached the backend yet. Keep it
     // with the explicit queue so a late Ready event cannot send it on returning to the tab.
     if let Some((text, image, at, files)) = chat.queued.take() {
@@ -1507,6 +1515,9 @@ const MAX_PENDING: usize = 20;
 /// Said to the agent before a message that interrupted it, so it knows its last step may be
 /// incomplete.
 const INTERRUPT_NOTE: &str = "[The user interrupted your previous step.]";
+/// Said to the agent before a task it could not finish, so it goes on with it instead of
+/// starting again.
+const CONTINUE_NOTE: &str = "[The previous attempt was cut short before it finished. Continue the task from where it stopped.]";
 /// Most names one list of [`changed_note`] carries; the rest are counted.
 const CHANGED_ITEMS: usize = 12;
 
@@ -1871,6 +1882,21 @@ pub fn send_now(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// Continue the task the agent could not finish (the provider's usage limit, or any other
+/// error): it goes again, with a note that says it was cut short. The conversation does not
+/// repeat it: the task is the one that is already there.
+pub fn continue_task(app: &mut SolveApp) {
+    if app.agent_chat.state() != State::Ready {
+        return;
+    }
+    let Some((text, image, at, files)) = app.agent_chat.unfinished.take() else {
+        return;
+    };
+    // The task's place in the conversation is where its picture is kept: it is only still there
+    // when the conversation has not changed since.
+    let at = at.filter(|&at| matches!(app.agent_chat.items.get(at), Some(Item::User { .. })));
+    start_turn_with(app, text, image, at, files, Some(CONTINUE_NOTE));
+}
 /// New chat: stop what runs (as Stop does), clear the conversation and the queue, and start a
 /// fresh session with the selected agent; the agent and its mode stay, the design's undo
 /// history is untouched.
@@ -1895,6 +1921,7 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.pending_edit = None;
     chat.queued = None;
     chat.last = None;
+    chat.unfinished = None;
     chat.steering = false;
     chat.stopped = false;
     chat.ended = None;
@@ -1904,13 +1931,20 @@ pub fn new_chat(app: &mut SolveApp) {
     if matches!(chat.state(), State::Ready | State::Busy) {
         chat.restore_mode = Some(chat.mode.clone()).filter(|m| !m.is_empty());
         chat.state = Some(State::Starting);
+        let allow_paths = configured_allow_paths(&app.preferences.agent_allowed_paths);
         if let Some(b) = chat.backend.as_mut() {
-            // Instructions edited since the last session apply from this one on.
+            // Instructions and allowed folders edited since the last session apply from this one on.
             b.set_instructions(&app.preferences.agent_instructions);
+            b.set_allow_paths(&allow_paths);
             b.new_session();
         }
     }
     chat.clear_config();
+}
+
+/// Configured extra folders the assistant's MCP bridge may reach (#20326).
+fn configured_allow_paths(paths: &[String]) -> Vec<std::path::PathBuf> {
+    paths.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).map(std::path::PathBuf::from).collect()
 }
 
 /// Whether New chat would throw something away that the user may want (so it asks first).
@@ -1992,6 +2026,7 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
         heard: now,
     });
     app.agent_chat.last = Some((text, image, at, files));
+    app.agent_chat.unfinished = None;
     app.agent_chat.state = Some(State::Busy);
     app.agent_chat.stopped = false;
     app.agent_chat.steering = false;
@@ -2279,7 +2314,7 @@ fn merge_turn(undo: &mut Vec<solidcraft_engine::Snapshot>, turn: &Turn) -> usize
 /// Merge the undo steps made since `start_doc` (with the history at `start`) into one, labelled
 /// `label`; how many steps it took in (0: none were made, the history no longer reaches that far, or
 /// they changed several parts of the design, whose steps are each undone in their own part).
-fn merge_undo(
+pub(crate) fn merge_undo(
     undo: &mut Vec<solidcraft_engine::Snapshot>,
     start_doc: &Arc<solidcraft_engine::doc::Document>,
     start: &UndoMark,
