@@ -428,6 +428,143 @@ fn linked_bodies_with_one_conflicting_material_share_its_copy() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// #21651: an assembly already bloated up to `MAX_USER_MATERIALS` with pre-#21182 `(linked N)`
+/// duplicates consolidates them when inserting another link, remapping body assignments and
+/// link snapshots so future source edits still propagate.
+#[test]
+fn legacy_duplicate_linked_materials_consolidate_on_insert_and_keep_tracking_updates() {
+    let dir = folder("properties-legacy-consolidate");
+    let file_a = dir.join("part_a.solidcraft");
+    let file_b = dir.join("part_b.solidcraft");
+    let mut part_a = properties_part(&file_a, "Custom alloy", Some(4.2), [12, 34, 56]);
+    properties_part(&file_b, "Another alloy", Some(3.1), [90, 80, 70]);
+
+    let mut s = Session::default();
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Custom alloy".into(),
+        density: 9.0,
+        appearance: None,
+        physical_card: None,
+    });
+    let c1 = run(&mut s, "component.insert_design", json!({"path": file_a}))["component"].as_u64().unwrap();
+    let c2 = run(&mut s, "component.insert_design", json!({"path": file_a}))["component"].as_u64().unwrap();
+
+    // Simulate pre-#21182 bloat: duplicate `(linked 2..=999)` copies right up to MAX_USER_MATERIALS,
+    // with `c2`'s body pinned to `Custom alloy (linked 2)`.
+    let canonical = s.doc.user_materials.iter().find(|m| m.name == "Custom alloy (linked 1)").unwrap().clone();
+    let body2 = s.doc.links[&c2].feature;
+    let body2_name = s.model.state().bodies.iter().find(|b| b.feature == body2).unwrap().name.clone();
+    for i in 2..solidcraft_doc::MAX_USER_MATERIALS {
+        let mut dup = canonical.clone();
+        dup.name = format!("Custom alloy (linked {i})");
+        s.doc_mut().user_materials.push(dup);
+    }
+    assert_eq!(s.doc.user_materials.len(), solidcraft_doc::MAX_USER_MATERIALS);
+    let dup2 = s.doc.user_material("Custom alloy (linked 2)").unwrap().clone();
+    let dup2_fp = solidcraft_doc::LinkedBodyProperties::fingerprint(&dup2).unwrap();
+    s.doc_mut().materials.insert(body2_name.clone(), "Custom alloy (linked 2)".into());
+    let snap2 = &mut s.doc_mut().links.get_mut(&c2).unwrap().inherited[0];
+    snap2.material = "Custom alloy (linked 2)".into();
+    snap2.material_fingerprint = Some(dup2_fp);
+
+    // Inserting a new link with a brand-new custom material succeeds instead of hitting the 1000 cap.
+    let c3 = run(&mut s, "component.insert_design", json!({"path": file_b}))["component"].as_u64().unwrap();
+    assert_eq!(s.doc.user_materials.len(), 3, "duplicates consolidated: {:?}", s.doc.user_materials.iter().map(|m| &m.name).collect::<Vec<_>>());
+    assert_eq!(s.doc.materials.get(&body2_name).map(String::as_str), Some("Custom alloy (linked 1)"));
+    assert_link_properties(&mut s, c1, "Custom alloy (linked 1)", 4.2, [12, 34, 56]);
+    assert_link_properties(&mut s, c2, "Custom alloy (linked 1)", 4.2, [12, 34, 56]);
+    assert_link_properties(&mut s, c3, "Another alloy", 3.1, [90, 80, 70]);
+
+    // Because `c2`'s inherited fingerprint was remapped cleanly, a later source density edit still propagates.
+    part_a.doc_mut().user_materials[0].density = 5.5;
+    run(&mut part_a, "file.save", json!({}));
+    run(&mut s, "component.update_links", json!({}));
+    let p1 = run(&mut s, "component.properties", json!({"component": c1}));
+    let p2 = run(&mut s, "component.properties", json!({"component": c2}));
+    assert!((p1["total"]["mass_g"].as_f64().unwrap() - 5.5).abs() < 1e-6, "{p1}");
+    assert!((p2["total"]["mass_g"].as_f64().unwrap() - 5.5).abs() < 1e-6, "{p2}");
+    // Old 4.2 `(linked 1)` copy was pruned once no body used it, leaving base + updated copy + Another alloy.
+    assert_eq!(s.doc.user_materials.len(), 3, "{:?}", s.doc.user_materials.iter().map(|m| &m.name).collect::<Vec<_>>());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// #21651: `component.update_links` merges pinned `(linked N)` duplicates and remaps configuration
+/// material cells pointing to the removed duplicate; a second update is unchanged.
+#[test]
+fn update_links_consolidates_pinned_duplicates_and_remaps_configuration_cells() {
+    let dir = folder("properties-update-consolidate");
+    let file = dir.join("source.solidcraft");
+    properties_part(&file, "Custom alloy", Some(4.2), [12, 34, 56]);
+
+    let mut s = Session::default();
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Custom alloy".into(),
+        density: 9.0,
+        appearance: None,
+        physical_card: None,
+    });
+    let _c1 = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+    let c2 = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+    let body2_feat = s.doc.links[&c2].feature;
+    let body2_name = s.model.state().bodies.iter().find(|b| b.feature == body2_feat).unwrap().name.clone();
+
+    let mut dup2 = s.doc.user_material("Custom alloy (linked 1)").unwrap().clone();
+    dup2.name = "Custom alloy (linked 2)".into();
+    let dup2_fp = solidcraft_doc::LinkedBodyProperties::fingerprint(&dup2).unwrap();
+    s.doc_mut().user_materials.push(dup2);
+    s.doc_mut().materials.insert(body2_name.clone(), "Custom alloy (linked 2)".into());
+    s.doc_mut().links.get_mut(&c2).unwrap().inherited[0].material = "Custom alloy (linked 2)".into();
+    s.doc_mut().links.get_mut(&c2).unwrap().inherited[0].material_fingerprint = Some(dup2_fp);
+    s.doc_mut().configs.columns.push(solidcraft_doc::config::Column::Material(body2_name.clone()));
+    s.doc_mut().add_configuration_row("Alt".into(), vec!["Custom alloy (linked 2)".into()]).unwrap();
+
+    run(&mut s, "component.update_links", json!({}));
+    assert_eq!(s.doc.user_materials.len(), 2, "{:?}", s.doc.user_materials.iter().map(|m| &m.name).collect::<Vec<_>>());
+    assert_eq!(s.doc.materials.get(&body2_name).map(String::as_str), Some("Custom alloy (linked 1)"));
+    assert_eq!(s.doc.configs.rows[0].cells[0], "Custom alloy (linked 1)");
+    assert_eq!(run(&mut s, "component.update_links", json!({}))["unchanged"].as_array().unwrap().len(), 2);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// #21651: deleting a linked component or switching its source material prunes unreferenced
+/// auto-generated `(linked N)` materials while leaving user-created materials untouched, and Undo
+/// restores both the component and its linked material.
+#[test]
+fn orphaned_linked_materials_are_pruned_on_update_and_component_delete() {
+    let dir = folder("properties-orphan-prune");
+    let file = dir.join("source.solidcraft");
+    let mut part = properties_part(&file, "Custom alloy", Some(4.2), [12, 34, 56]);
+
+    let mut s = Session::default();
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Custom alloy".into(),
+        density: 9.0,
+        appearance: None,
+        physical_card: None,
+    });
+    let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+    assert_eq!(s.doc.user_materials.len(), 2);
+    assert!(s.doc.user_material("Custom alloy (linked 1)").is_some());
+
+    // Deleting the linked component prunes its orphaned `(linked 1)` copy while keeping user material.
+    run(&mut s, "component.delete", json!({"component": c}));
+    assert_eq!(s.doc.user_materials.len(), 1);
+    assert_eq!(s.doc.user_materials[0].name, "Custom alloy");
+
+    // Undo restores both the component and its `(linked 1)` material.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.user_materials.len(), 2);
+    assert!(s.doc.user_material("Custom alloy (linked 1)").is_some());
+
+    // Switching the linked part to a built-in material also prunes the orphaned `(linked 1)` copy.
+    run(&mut part, "material.assign", json!({"bodies": ["Cube"], "material": "Steel"}));
+    run(&mut part, "file.save", json!({}));
+    run(&mut s, "component.update_links", json!({}));
+    assert_eq!(s.doc.user_materials.len(), 1);
+    assert_eq!(s.doc.user_materials[0].name, "Custom alloy");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn linked_design_properties_keep_distinct_names_for_equal_material_properties() {
     let dir = folder("properties-equal-density");

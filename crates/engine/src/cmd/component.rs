@@ -682,11 +682,18 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "the design itself can't be deleted"));
     }
     let imported = imported_bodies_within(s, id);
+    let body_features: Vec<(String, u64)> = s.model.state().bodies.iter().map(|b| (b.name.clone(), b.feature)).collect();
     let removed = s.doc_mut().remove_component_tree(id).map_err(|e| match e {
         solidcraft_doc::DocError::Invalid(msg) => bad(cmd, msg),
         e => e.into(),
     })?;
     let d = s.doc_mut();
+    for (body, feat) in &body_features {
+        if removed.features.contains(feat) {
+            d.materials.remove(body);
+        }
+    }
+    super::component_link::prune_unused_linked_materials(d);
     for (feature, made, skipped) in imported {
         let Some(f) = d.feature_mut(feature) else { continue };
         // The bodies left keep the names they have now, though a skipped one had a name first.

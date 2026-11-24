@@ -973,27 +973,144 @@ fn linked_stem(name: &str) -> &str {
     stem
 }
 
+fn is_linked_copy(name: &str) -> bool {
+    linked_stem(name) != name
+}
+
+fn same_linked_family(a: &str, b: &str) -> bool {
+    let (sa, sb) = (linked_stem(a), linked_stem(b));
+    if sa.eq_ignore_ascii_case(sb) {
+        return true;
+    }
+    let trunc = |s: &str| s.chars().take(64).collect::<String>();
+    (is_linked_copy(b) && trunc(sa).eq_ignore_ascii_case(sb)) || (is_linked_copy(a) && trunc(sb).eq_ignore_ascii_case(sa))
+}
+
+fn same_material_properties(a: &UserMaterial, b: &UserMaterial) -> bool {
+    let mut candidate = a.clone();
+    candidate.name.clone_from(&b.name);
+    &candidate == b
+}
+
+/// Remove auto-generated `(linked N)` materials no longer referenced by any body, link snapshot,
+/// or material configuration column. User-created materials (without `(linked N)`) are never removed.
+pub(super) fn prune_unused_linked_materials(doc: &mut Document) -> bool {
+    let mut referenced: std::collections::HashSet<String> = doc.materials.values().map(|m| m.to_ascii_lowercase()).collect();
+    for link in doc.links.values() {
+        for snap in &link.inherited {
+            referenced.insert(snap.material.to_ascii_lowercase());
+        }
+    }
+    let material_cols: Vec<usize> =
+        doc.configs.columns.iter().enumerate().filter_map(|(i, c)| matches!(c, solidcraft_doc::config::Column::Material(_)).then_some(i)).collect();
+    for row in &doc.configs.rows {
+        for &ci in &material_cols {
+            if let Some(cell) = row.cells.get(ci) {
+                referenced.insert(cell.trim().to_ascii_lowercase());
+            }
+        }
+    }
+    let before = doc.user_materials.len();
+    doc.user_materials.retain(|m| !is_linked_copy(&m.name) || referenced.contains(&m.name.to_ascii_lowercase()));
+    doc.user_materials.len() != before
+}
+
+/// Merge identical auto-generated `(linked N)` material copies of the same stem onto a single
+/// canonical entry, remap body assignments / link snapshots / material configuration cells, and
+/// prune any unreferenced `(linked N)` copies (#21651).
+fn consolidate_and_prune_linked_materials(doc: &mut Document) -> Result<bool> {
+    let mut kept_linked: Vec<usize> = Vec::new();
+    let mut removed = vec![false; doc.user_materials.len()];
+    let mut remap: std::collections::HashMap<String, (String, Option<String>, Option<String>)> = std::collections::HashMap::new();
+    for (i, m) in doc.user_materials.iter().enumerate() {
+        if !is_linked_copy(&m.name) {
+            continue;
+        }
+        let canonical = doc
+            .user_materials
+            .iter()
+            .find(|c| !is_linked_copy(&c.name) && same_linked_family(&c.name, &m.name) && same_material_properties(c, m))
+            .or_else(|| {
+                kept_linked.iter().map(|&j| &doc.user_materials[j]).find(|c| same_linked_family(&c.name, &m.name) && same_material_properties(c, m))
+            });
+        if let Some(canon) = canonical {
+            let dup_fp = LinkedBodyProperties::fingerprint(m).map_err(|e| EngineError::Other(e.to_string()))?;
+            let canon_fp = LinkedBodyProperties::fingerprint(canon).map_err(|e| EngineError::Other(e.to_string()))?;
+            remap.insert(m.name.to_ascii_lowercase(), (canon.name.clone(), Some(dup_fp), Some(canon_fp)));
+            removed[i] = true;
+        } else {
+            kept_linked.push(i);
+        }
+    }
+    if !remap.is_empty() {
+        for mat in doc.materials.values_mut() {
+            if let Some((canon, ..)) = remap.get(&mat.to_ascii_lowercase()) {
+                mat.clone_from(canon);
+            }
+        }
+        for link in doc.links.values_mut() {
+            for snap in &mut link.inherited {
+                if let Some((canon, dup_fp, canon_fp)) = remap.get(&snap.material.to_ascii_lowercase()) {
+                    snap.material.clone_from(canon);
+                    if snap.material_fingerprint == *dup_fp {
+                        snap.material_fingerprint.clone_from(canon_fp);
+                    }
+                }
+            }
+        }
+        let material_cols: Vec<usize> = doc
+            .configs
+            .columns
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| matches!(c, solidcraft_doc::config::Column::Material(_)).then_some(i))
+            .collect();
+        for row in &mut doc.configs.rows {
+            for &ci in &material_cols {
+                if let Some(cell) = row.cells.get_mut(ci)
+                    && let Some((canon, ..)) = remap.get(&cell.trim().to_ascii_lowercase())
+                {
+                    cell.clone_from(canon);
+                }
+            }
+        }
+        let mut idx = 0usize;
+        doc.user_materials.retain(|_| {
+            let keep = !removed[idx];
+            idx += 1;
+            keep
+        });
+    }
+    let pruned = prune_unused_linked_materials(doc);
+    Ok(!remap.is_empty() || pruned)
+}
+
 /// Copy a design-owned definition without changing a same-named assembly material.
 fn inherit_material(doc: &mut Document, source: &SourceProperties, previous: Option<&str>) -> Result<String> {
     let Some(definition) = &source.definition else { return Ok(source.material.clone()) };
     let stem = linked_stem(&definition.name);
     let short: String = stem.chars().take(64).collect();
-    // Equal density/optics do not make differently named materials interchangeable. The same
-    // name, or the previous disambiguated copy on a source update, is reused first; then an equal
-    // `(linked N)` copy of the same name another body made.
-    let exact = |m: &UserMaterial| m.name.eq_ignore_ascii_case(&definition.name) || previous == Some(m.name.as_str());
+    // Equal density/optics do not make differently named materials interchangeable. Reuse the exact
+    // source name first, then the canonical `(linked N)` copy of the same stem, and finally any
+    // previously assigned renamed copy so updates converge rather than preserving duplicates (#21651).
+    let exact = |m: &UserMaterial| m.name.eq_ignore_ascii_case(&definition.name);
     let copy = |m: &UserMaterial| [stem, short.as_str()].iter().any(|n| linked_stem(&m.name).eq_ignore_ascii_case(n));
-    for same_name in [&exact as &dyn Fn(&UserMaterial) -> bool, &copy] {
+    let prev = |m: &UserMaterial| previous.is_some_and(|p| m.name.eq_ignore_ascii_case(p));
+    for same_name in [&exact as &dyn Fn(&UserMaterial) -> bool, &copy, &prev] {
         for existing in doc.user_materials.iter().filter(|m| same_name(m)) {
-            let mut candidate = definition.clone();
-            candidate.name.clone_from(&existing.name);
-            if &candidate == existing {
+            if same_material_properties(definition, existing) {
                 return Ok(existing.name.clone());
             }
         }
     }
     if doc.user_materials.len() >= solidcraft_doc::MAX_USER_MATERIALS {
-        return Err(EngineError::Other("cannot inherit linked material: this design already has 1000 custom materials".into()));
+        prune_unused_linked_materials(doc);
+    }
+    if doc.user_materials.len() >= solidcraft_doc::MAX_USER_MATERIALS {
+        return Err(EngineError::Other(format!(
+            "cannot inherit linked material: this design already has {} custom materials",
+            solidcraft_doc::MAX_USER_MATERIALS
+        )));
     }
     let mut copy = definition.clone();
     if doc.material_name(&copy.name).is_some() {
@@ -1107,13 +1224,16 @@ fn inherit_faces(
 /// values are kept independently for material and appearance, so overriding one does not
 /// stop updates of the other. Session::execute makes this part of the command's undo step.
 fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperties]) -> Result<bool> {
+    if !s.doc.links.contains_key(&component) {
+        return Ok(false);
+    }
+    let mut changed = consolidate_and_prune_linked_materials(s.doc_mut())?;
     let Some(link) = s.doc.links.get(&component).cloned() else { return Ok(false) };
     let state = s.model.state();
     let names: Vec<String> = state.bodies.iter().filter(|b| b.feature == link.feature).map(|b| b.name.clone()).collect();
     let slots = s.doc.feature(link.feature).map(|f| f.body_name_slots(names.len())).unwrap_or_default();
     let mut inherited = link.inherited.clone();
     inherited.resize(sources.len(), LinkedBodyProperties::default());
-    let mut changed = false;
     let threads = if sources.iter().any(|source| !source.threads.is_empty()) {
         sources.iter().map(|source| source.threads.clone()).collect()
     } else {
@@ -1163,6 +1283,7 @@ fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperti
     if let Some(link) = s.doc_mut().links.get_mut(&component) {
         link.inherited = inherited;
     }
+    changed |= consolidate_and_prune_linked_materials(s.doc_mut())?;
     Ok(changed)
 }
 
