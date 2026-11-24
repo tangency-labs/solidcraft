@@ -2966,7 +2966,7 @@ fn remove_history_saves_and_reopens_the_same_body() {
     run(&mut s, "body.remove_history", json!({"body": "Block"}));
     let bytes = solidcraft_io::write_design_container(&s.doc).unwrap();
     let archive = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
-    let parts: Vec<&str> = archive.file_names().collect();
+    let parts: Vec<String> = archive.file_names().map(|name| name.unwrap().to_string()).collect();
     assert!(parts.iter().any(|n| n.starts_with("blobs/") && n.ends_with(".step")), "{parts:?}");
     let mut reopened = Session::new(solidcraft_io::read_design(&bytes).unwrap());
     reopened.refresh();
