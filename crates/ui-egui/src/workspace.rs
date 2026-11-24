@@ -559,7 +559,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "MODEL",
         panel: "SKETCH",
         promoted: 1,
-        ids: &["sketch.create", "sketch.edit", "sketch.line3d", "sketch.arc3d", "sketch.spline3d", "sketch.point3d"],
+        ids: &["sketch.create", "sketch.edit", "sketch.line3d", "sketch.arc3d", "sketch.spline3d", "sketch.spline3d.control_point", "sketch.point3d"],
     },
     Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole"] },
     Section {
@@ -2074,9 +2074,9 @@ mod tests {
         assert!(h.app.params.is_some(), "the ordinary Parameters button opens the editor");
         assert!(h.app.dialog.is_none());
         assert!(h.widget("User Parameters").is_some());
-        assert!(h.widget("Model Parameters").is_some());
+        assert!(h.widget("Model Parameters").is_none(), "model groups are bands in the shared table");
         // Exercise the inline draft row through the public add prompt and Enter.
-        h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
         let parameters = h.app.params.as_mut().unwrap();
         parameters.new_name = "width".into();
         parameters.new_expr = "25 mm".into();

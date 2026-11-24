@@ -1387,6 +1387,25 @@ enum EditorSurface {
     Shell,
 }
 
+// A refused grid edit shares the editor's border, rather than adding an outer outline.
+pub(super) const CELL_INVALID: &str = "sc_cell_invalid";
+
+fn cell_invalid(ui: &Ui) -> bool {
+    ui.stack().iter().any(|node| node.tags().contains(CELL_INVALID))
+}
+
+fn paint_cell_border(ui: &Ui, response: &Response, rect: egui::Rect, invalid: bool) {
+    let t = Tokens::get();
+    let stroke = if invalid {
+        egui::Stroke::new(1.0, t.form_error)
+    } else if response.has_focus() {
+        egui::Stroke::new(1.5, solidcraft_theme::TabAccent::number_focus_color(ui))
+    } else {
+        egui::Stroke::new(1.0, if response.hovered() { t.control_border.lerp_to_gamma(t.form_dim, 0.35) } else { t.control_border })
+    };
+    ui.painter().rect_stroke(rect, t.control_radius, stroke, egui::StrokeKind::Inside);
+}
+
 /// Draw a table editor with the requested surface and space reserved for an in-field control.
 fn cell_editor_frame(
     ui: &mut Ui,
@@ -1399,6 +1418,8 @@ fn cell_editor_frame(
     reserve: f32,
 ) -> Response {
     let mut t = Tokens::get();
+    let invalid = invalid || cell_invalid(ui);
+    let cell_frame = matches!(surface, EditorSurface::Form);
     let frame = !matches!(surface, EditorSurface::Frameless);
     if matches!(surface, EditorSurface::Shell) {
         t.control_fill = t.field;
@@ -1418,7 +1439,17 @@ fn cell_editor_frame(
     } else {
         editor
     };
-    let editor = if invalid {
+    // Own the table border completely: egui's frame, accent overlay and bevel must not
+    // compete for the same corners. Keep the reserved in-field control's text margin.
+    let editor = if cell_frame {
+        let inset = t.form_inset.round() as i8;
+        editor.frame(
+            egui::Frame::NONE
+                .inner_margin(egui::Margin { left: inset, right: inset.saturating_add(reserve.round() as i8), top: 0, bottom: 0 })
+                .fill(if invalid { t.form_error_fill } else { t.input_fill() })
+                .corner_radius(t.control_radius),
+        )
+    } else if invalid {
         editor.frame(
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(t.form_inset as i8, 0))
@@ -1443,8 +1474,12 @@ fn cell_editor_frame(
         info.current_text_value = Some(value.clone());
         info
     });
-    solidcraft_theme::TabAccent::number_focus(ui, &response);
-    t.input_bevel(ui, &response);
+    if cell_frame {
+        paint_cell_border(ui, &response, response.rect, invalid);
+    } else {
+        solidcraft_theme::TabAccent::number_focus(ui, &response);
+        t.input_bevel(ui, &response);
+    }
     response
 }
 
@@ -1455,6 +1490,7 @@ fn cell_editor_frame(
 /// line: the caller commits on it as for the cell. Tokens: cell_editor tokens, popup frame.
 pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, right: f32, note: (&str, bool)) -> Response {
     let t = Tokens::get();
+    let invalid = invalid || cell_invalid(ui);
     let cell = egui::Rect::from_min_size(ui.cursor().min, vec2(dimension(ui.available_width()), row_height()));
     let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
     let font = egui::FontId::monospace(t.font_label);
@@ -1468,17 +1504,13 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
     ui.painter().rect_filled(rect, t.control_radius, if invalid { t.form_error_fill } else { t.input_fill() });
     let width = right - rect.left();
     let (ctx, enabled) = (ui.ctx().clone(), ui.is_enabled());
-    // The border sits outside the cell, so the text stays where it was.
-    let border = t.primary_border(t.dialog_border);
-    let area = Container::new(&ctx, Surface::Popup)
-        .area(id.with("wide"))
-        .fixed_pos(rect.min - vec2(border.width, border.width))
-        .constrain(true)
-        .order(egui::Order::Foreground);
+    let focus_color = solidcraft_theme::TabAccent::number_focus_color(ui);
+    let area = Container::new(&ctx, Surface::Popup).area(id.with("wide")).fixed_pos(rect.min).constrain(true).order(egui::Order::Foreground);
     let shown = area.show(&ctx, |ui| {
-        Container::popup_frame(ui.style())
+        ui.visuals_mut().selection.stroke.color = focus_color;
+        let frame = Container::popup_frame(ui.style())
             .fill(t.control_fill)
-            .stroke(border)
+            .stroke(egui::Stroke::NONE)
             .corner_radius(t.control_radius)
             .inner_margin(0.0)
             .show(ui, |ui| {
@@ -1490,6 +1522,12 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
                     .desired_width(width)
                     .hint_text(solidcraft_ui_text::tr_label(hint))
                     .font(font)
+                    .frame(
+                        egui::Frame::NONE
+                            .inner_margin(egui::Margin::symmetric(t.form_inset as i8, 0))
+                            .fill(if invalid { t.form_error_fill } else { t.input_fill() })
+                            .corner_radius(t.control_radius),
+                    )
                     .background_color(if invalid { t.form_error_fill } else { t.input_fill() })
                     .text_color(if invalid { t.form_error } else { t.form_ink });
                 let mut response = ui.add(editor);
@@ -1512,8 +1550,6 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
                 }
                 super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
                 publish(ui, &response, egui::Role::TextInput);
-                solidcraft_theme::TabAccent::number_focus(ui, &response);
-                t.input_bevel(ui, &response);
                 let (text, error) = note;
                 if !text.is_empty() {
                     ui.add_space(t.space_2);
@@ -1524,8 +1560,9 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
                     ui.add_space(t.space_2);
                 }
                 response
-            })
-            .inner
+            });
+        paint_cell_border(ui, &frame.inner, frame.response.rect, invalid);
+        frame.inner
     });
     let response = shown.inner;
     response.widget_info(|| {

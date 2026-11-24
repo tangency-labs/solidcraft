@@ -1693,6 +1693,7 @@ mod tests {
             "--theme-file",
             "a theme.json",
             "--sample",
+            "--read-only",
             "--max-file-size",
             "2GB",
             "other-original.sc",

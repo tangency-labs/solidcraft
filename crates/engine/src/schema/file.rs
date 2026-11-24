@@ -1309,6 +1309,12 @@ pub enum FileExportResult {
 #[serde(deny_unknown_fields)]
 pub struct ImportCacheClearParams {}
 
+/// Read the active design again from the file it was opened or saved as, as File > Revert to
+/// Saved does. It takes nothing and never asks: unsaved changes are lost.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RevertSavedParams {}
+
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ImportCacheClearResult {
     /// Number of cached imports removed. Open designs and stand-up answers are retained.
