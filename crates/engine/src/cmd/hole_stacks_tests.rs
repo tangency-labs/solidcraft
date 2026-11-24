@@ -291,3 +291,23 @@ fn a_countersink_on_a_mating_face_does_not_split_the_stack() {
     let names: Vec<&str> = st["layers"].as_array().into_iter().flatten().filter_map(|l| l["body"].as_str()).collect();
     assert_eq!(names, ["Top", "Middle", "Bottom"], "{st}");
 }
+
+#[test]
+fn a_hole_near_a_sheet_metal_bend_is_still_a_bore() {
+    // The assembly case the command is for: a sheet part, a hole near its bend.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    run(&mut s, "sheet.flange", json!({"type": "edge", "edges": [[50, 0, 2.5]], "height": 15}));
+    // One hole 10 mm from the bend line, one far from it; nearer than that, the sheet
+    // model itself refuses the hole (its wall would cross the bend).
+    run(&mut s, "solid.hole", json!({"position": [50, 10, 2.5], "diameter": 5, "depth": 2.5}));
+    run(&mut s, "solid.hole", json!({"position": [50, 45, 2.5], "diameter": 5, "depth": 2.5}));
+    let r = run(&mut s, "inspect.hole_stacks", json!({}));
+    let lone = r["lone"].as_array().cloned().unwrap_or_default();
+    assert_eq!(lone.len(), 2, "{r}");
+    assert!(lone.iter().all(|h| close(h["d_mm"].as_f64().unwrap_or(0.0), 5.0)), "{r}");
+    assert!(lone.iter().all(|h| h["slot"].is_null()), "two round holes, not one long slot: {r}");
+}

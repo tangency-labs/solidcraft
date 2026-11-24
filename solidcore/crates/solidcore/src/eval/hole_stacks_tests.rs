@@ -213,6 +213,58 @@ fn opts() -> Options {
     }
 }
 
+/// A record of one hole whose wall comes as two half faces on one cylinder, the way the sheet
+/// model cuts it: no seam, two sides on one diameter per half, the halves' openings opposed.
+fn split_hole() -> Record {
+    let half = |base: usize| -> Face {
+        Face {
+            parameters: None,
+            surface: Some(Surface::Cylinder {
+                frame: frame([0.0, 0.0, 0.0]),
+                radius: 2.5,
+            }),
+            domain: [[0.0, std::f64::consts::PI * 2.5], [0.0, 2.5]],
+            forward: Some(false),
+            loops: vec![Loop::Edges(vec![
+                use_of(base, 0.0, 2.5),
+                use_of(base + 1, 0.0, 2.5),
+                use_of(base + 2, 0.0, 0.0),
+                use_of(base + 3, 2.5, 2.5),
+            ])],
+        }
+    };
+    Record {
+        edges: vec![
+            line_edge([2.5, 0.0, 0.0], [2.5, 0.0, 2.5]),
+            line_edge([-2.5, 0.0, 0.0], [-2.5, 0.0, 2.5]),
+            arc_edge([0.0, 0.0, 0.0], 2.5, [0.0, std::f64::consts::PI]),
+            arc_edge([0.0, 0.0, 2.5], 2.5, [0.0, std::f64::consts::PI]),
+            line_edge([2.5, 0.0, 0.0], [2.5, 0.0, 2.5]),
+            line_edge([-2.5, 0.0, 0.0], [-2.5, 0.0, 2.5]),
+            arc_edge(
+                [0.0, 0.0, 0.0],
+                2.5,
+                [std::f64::consts::PI, std::f64::consts::TAU],
+            ),
+            arc_edge(
+                [0.0, 0.0, 2.5],
+                2.5,
+                [std::f64::consts::PI, std::f64::consts::TAU],
+            ),
+        ],
+        faces: vec![half(0), half(4)],
+    }
+}
+
+#[test]
+fn two_halves_of_one_cylinder_close_into_one_round_hole() {
+    let b = bores(&split_hole());
+    assert_eq!(b.len(), 1, "{b:?}");
+    assert_eq!(b[0].d, 5.0);
+    assert_eq!(b[0].t, [0.0, 2.5]);
+    assert_eq!(b[0].slot, None, "{b:?}");
+}
+
 #[test]
 fn a_round_hole_is_one_bore_with_its_extent() {
     let b = bores(&round_hole());

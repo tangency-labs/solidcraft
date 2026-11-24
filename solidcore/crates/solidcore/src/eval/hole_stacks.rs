@@ -225,6 +225,38 @@ pub fn bores(record: &Record) -> Vec<Bore> {
     through_cones(&mut walls, &cones);
     let mut out = Vec::new();
     let mut used = vec![false; walls.len()];
+    // Pieces of one cylinder: the sheet model cuts a hole's wall as two half faces, each with
+    // two sides on one diameter and no seam. Two halves of one cylinder — the same axis line,
+    // the same radius, the same extent — close into one round hole before slots pair, so
+    // halves of two different holes cannot pair as a slot across the gap between them.
+    for (i, a) in walls.iter().enumerate() {
+        let Some(oa) = a.opening else { continue };
+        if used.get(i).copied().unwrap_or(true) {
+            continue;
+        }
+        for (j, b) in walls.iter().enumerate().skip(i + 1) {
+            if used.get(i).copied().unwrap_or(true) || used.get(j).copied().unwrap_or(true) {
+                continue;
+            }
+            let Some(ob) = b.opening else { continue };
+            if !one_cylinder(a, b) || oa.dot(ob) > -0.9 {
+                continue;
+            }
+            if let Some(x) = used.get_mut(i) {
+                *x = true;
+            }
+            if let Some(y) = used.get_mut(j) {
+                *y = true;
+            }
+            out.push(Bore {
+                point: a.point,
+                axis: a.axis,
+                d: 2.0 * a.radius,
+                t: a.t,
+                slot: None,
+            });
+        }
+    }
     for (i, a) in walls.iter().enumerate() {
         let Some(oa) = a.opening else { continue };
         if used.get(i).copied().unwrap_or(true) {
@@ -401,6 +433,26 @@ fn frame_extent(f: &Face) -> Option<[f64; 2]> {
         (d0, d1)
     };
     (lo < hi).then_some([lo, hi])
+}
+
+/// Whether two partial walls are two halves of one cylinder: one axis line, one radius, one
+/// extent. (A slot whose ends sit closer than [`COAXIAL`] apart also passes, and closes into
+/// a round hole: at that stride the slot is a hole anyway.)
+fn one_cylinder(a: &Wall, b: &Wall) -> bool {
+    if a.axis.dot(b.axis).abs() < PARALLEL || (a.radius - b.radius).abs() > NEAR {
+        return false;
+    }
+    let gap = b.point - a.point;
+    let along = gap.dot(a.axis);
+    if (gap - a.axis * along).len() > COAXIAL {
+        return false;
+    }
+    let (u0, u1) = if b.axis.dot(a.axis) >= 0.0 {
+        (b.t[0], b.t[1])
+    } else {
+        (-b.t[1], -b.t[0])
+    };
+    (a.t[0] - (u0 + along)).abs() <= COAXIAL && (a.t[1] - (u1 + along)).abs() <= COAXIAL
 }
 
 /// The slot two facing partial walls make: its centre, axis, extent and shape. `None` when
