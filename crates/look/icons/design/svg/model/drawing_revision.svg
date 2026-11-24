@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Add drawing revision</title>
+  <path d="M14.5 7L49.5 7A2.5 2.5 0 0 1 52 9.5L52 54.5A2.5 2.5 0 0 1 49.5 57L14.5 57A2.5 2.5 0 0 1 12 54.5L12 9.5A2.5 2.5 0 0 1 14.5 7Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20 19L43 19M20 29L37 29" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M43 33L58 57L28 57Z" fill="#ffffff" stroke="#ffffff" stroke-width="4.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M43 33L58 57L28 57Z" fill="#b9ddf8" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

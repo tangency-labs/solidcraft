@@ -40,7 +40,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::error::{Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::context::{MarkLock, MarkType};
 use crate::kernel::Kernel;
 use crate::math::Vec3;
@@ -153,8 +154,41 @@ impl Marks {
     }
 }
 
-fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::topology_missing(OP, "a link of the topology"))
+// Why each link the traversals follow is the kernel's to keep: a missing one is a defect of
+// the B-rep's own bookkeeping, not a fact of the geometry.
+const NO_PRIMARY: &str = "the edge has no primary edge use; the kernel gives an edge its edge \
+    uses when it makes the edge and keeps one of them as the primary while any remain";
+const NO_START: &str = "the edge use has no vertex use; the kernel makes every edge use with the \
+    vertex use at its start";
+const NO_EDGEUSE_MATE: &str =
+    "the edge use has no mate; the kernel makes edge uses in mated pairs and deletes them in pairs";
+const NO_VERTEX: &str = "the vertex use names no vertex; the kernel makes a vertex use on its \
+    vertex and deletes it when it leaves the vertex";
+const NO_RADIAL: &str = "an edge use of a face's loop has no radial neighbour; the kernel links \
+    the edge uses round an edge into a closed radial ring";
+const NO_RADIAL_FACEUSE: &str = "the radial neighbour of an edge use in a face's loop lies on no \
+    face use; the radial ring the kernel builds round an edge of faces holds only edge uses of \
+    faces' loops";
+const NO_FACE: &str = "the face use names no face; the kernel makes a face's two face uses with \
+    the face and never unlinks one from it";
+const NO_FACEUSE_MATE: &str =
+    "the face use has no mate; the kernel makes a face's two face uses as a mated pair";
+const NO_EDGEUSE: &str = "the vertex use is of the edge kind but names no edge use; the kernel \
+    sets the kind and the edge use together when it puts a vertex use at an edge use's start";
+const NO_LOOP_VERTEXUSE: &str = "a loop use of the face lists a missing vertex use; the kernel \
+    makes every edge use of a loop with the vertex use at its start, and a vertex loop with its \
+    one vertex use";
+
+/// The link `value` that the traversal follows, or the reviewed defect `why` (one of the
+/// reasons above) with upstream's `SM_ERR_NULL_POINTER` (`NER`) when the B-rep lacks it.
+#[track_caller]
+fn link<T>(value: Option<T>, why: &'static str) -> Result<T> {
+    match value {
+        Some(value) => Ok(value),
+        None => Err(Failure::new(OP, TopologyFailure::Defect { why })
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()),
+    }
 }
 
 fn check_mark(mark: MarkType) -> Result<()> {
@@ -178,13 +212,13 @@ pub fn face_edges(b: &Brep, f: FaceId) -> Result<Vec<EdgeId>> {
 }
 
 fn edge_vertices(b: &Brep, e: EdgeId) -> Result<(VertexId, VertexId)> {
-    let primary = required(eu::primary_edgeuse(b, e)?)?;
-    let first = required(b.edgeuse(primary)?.vertexuse)?;
-    let mate = required(eu::mate(b, primary)?)?;
-    let second = required(b.edgeuse(mate)?.vertexuse)?;
+    let primary = link(eu::primary_edgeuse(b, e)?, NO_PRIMARY)?;
+    let first = link(b.edgeuse(primary)?.vertexuse, NO_START)?;
+    let mate = link(eu::mate(b, primary)?, NO_EDGEUSE_MATE)?;
+    let second = link(b.edgeuse(mate)?.vertexuse, NO_START)?;
     Ok((
-        required(b.vertexuse(first)?.vertex)?,
-        required(b.vertexuse(second)?.vertex)?,
+        link(b.vertexuse(first)?.vertex, NO_VERTEX)?,
+        link(b.vertexuse(second)?.vertex, NO_VERTEX)?,
     ))
 }
 
@@ -336,8 +370,8 @@ pub fn faceuse_traversal(
         marks.mark(k, Entity::Faceuse(fu), mark);
         for &lu in &b.faceuse(fu)?.loopuses {
             for edgeuse in eu::loopuse_edgeuses(b, lu)? {
-                let radial = required(eu::radial(b, edgeuse)?)?;
-                let neighbor = required(eu::faceuse(b, radial)?)?;
+                let radial = link(eu::radial(b, edgeuse)?, NO_RADIAL)?;
+                let neighbor = link(eu::faceuse(b, radial)?, NO_RADIAL_FACEUSE)?;
                 if !marks.is_marked(k, Entity::Faceuse(neighbor), mark) {
                     stack.push(neighbor);
                 }
@@ -376,7 +410,7 @@ pub fn closure_traversal(
     if let Some(out) = &mut faceuses {
         out.clear();
     }
-    let f = required(b.faceuse(start)?.face)?;
+    let f = link(b.faceuse(start)?.face, NO_FACE)?;
     if has_lamina_edge(b, f)? {
         return Ok(false);
     }
@@ -400,11 +434,11 @@ pub fn closure_traversal(
 /// expanded edge use, dangling ids, or those of the lamina test.
 pub fn closure_traversal_from_both_sides(b: &Brep, start: FaceuseId) -> Result<bool> {
     // A face with any lamina edges is not closed (as ClosureTraversal).
-    let f = required(b.faceuse(start)?.face)?;
+    let f = link(b.faceuse(start)?.face, NO_FACE)?;
     if has_lamina_edge(b, f)? {
         return Ok(false);
     }
-    let mate = required(b.faceuse(start)?.mate)?;
+    let mate = link(b.faceuse(start)?.mate, NO_FACEUSE_MATE)?;
 
     // the side (0 = from the face use, 1 = from its mate) each visited face use was
     // reached from, by arena slot
@@ -441,8 +475,8 @@ pub fn closure_traversal_from_both_sides(b: &Brep, start: FaceuseId) -> Result<b
             for &lu in &b.faceuse(fu)?.loopuses {
                 for edgeuse in eu::loopuse_edgeuses(b, lu)? {
                     // a missing link fails, as in faceuse_traversal (the fork skips it)
-                    let radial = required(eu::radial(b, edgeuse)?)?;
-                    let neighbor = required(eu::faceuse(b, radial)?)?;
+                    let radial = link(eu::radial(b, edgeuse)?, NO_RADIAL)?;
+                    let neighbor = link(eu::faceuse(b, radial)?, NO_RADIAL_FACEUSE)?;
                     match side.get(neighbor.index() as usize).copied().flatten() {
                         None => {
                             set_side(&mut side, neighbor, k);
@@ -511,13 +545,13 @@ fn shell_connectivity(
     while let Some(vu) = stack.pop() {
         let mut propagate = Vec::new();
         let fu = if vertexuse::is_edge_vertexuse(b, vu)? {
-            let e = required(vertexuse::edgeuse(b, vu)?)?;
+            let e = link(vertexuse::edgeuse(b, vu)?, NO_EDGEUSE)?;
             if let Some(out) = edgeuses {
                 out.push(e);
             }
-            let mate = required(eu::mate(b, e)?)?;
+            let mate = link(eu::mate(b, e)?, NO_EDGEUSE_MATE)?;
             if eu::shell(b, mate)? == Some(shell) {
-                let mate_vu = required(b.edgeuse(mate)?.vertexuse)?;
+                let mate_vu = link(b.edgeuse(mate)?.vertexuse, NO_START)?;
                 if !marks.is_marked(k, Entity::Vertexuse(mate_vu), mark) {
                     marks.mark(k, Entity::Vertexuse(mate_vu), mark);
                     stack.push(mate_vu);
@@ -540,14 +574,14 @@ fn shell_connectivity(
                     out.push(fu);
                 }
             }
-            let f = required(b.faceuse(fu)?.face)?;
+            let f = link(b.faceuse(fu)?.face, NO_FACE)?;
             if !marks.is_marked(k, Entity::Face(f), mark) {
                 marks.mark(k, Entity::Face(f), mark);
                 k.work_counters.add_shell_traversal_face();
                 propagate.push(fu);
             }
         }
-        let v = required(b.vertexuse(vu)?.vertex)?;
+        let v = link(b.vertexuse(vu)?.vertex, NO_VERTEX)?;
         if !marks.is_marked(k, Entity::Vertex(v), mark) {
             marks.mark(k, Entity::Vertex(v), mark);
             if asked.remove(&v) && asked.is_empty() {
@@ -565,7 +599,7 @@ fn shell_connectivity(
         for fu in propagate {
             for &lu in &b.faceuse(fu)?.loopuses {
                 for next in face::loopuse_vertexuses(b, lu)? {
-                    let next = required(next)?;
+                    let next = link(next, NO_LOOP_VERTEXUSE)?;
                     if !marks.is_marked(k, Entity::Vertexuse(next), mark)
                         && vertexuse::shell(b, next)? == Some(shell)
                     {
@@ -726,9 +760,12 @@ fn line_parameters(
 ///
 /// The rays and face samples run on `b` itself, so the UV trim curves their face
 /// classifications create stay on the B-rep, as upstream's `const` queries leave them.
+/// The samples' dithers come from one generator the call makes from the kernel's seed
+/// ([`Kernel::seeded_rng`]), drawn in the order of `faceuses`, so the answer is a function
+/// of the B-rep, the face uses and the seed.
 pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> Result<bool> {
     if faceuses.is_empty() {
-        return Err(SolidError::topology_failed(OP, "there are no face uses"));
+        return Err(SolidError::topology(OP, TopologyFailure::NoFaceUses));
     }
     let mut samples = 3;
     if faceuses.len() < 6 {
@@ -742,10 +779,13 @@ pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> R
     // each target face surface's cache, built on its first ray (upstream's
     // smsurf_GetSurfaceCache keeps one per surface; the rays do not change surfaces)
     let mut caches: BTreeMap<FaceId, HeldSolveCache<RaySurface>> = BTreeMap::new();
+    // this call's own draws, from the start of the seed's sequence: each face use's sample
+    // dithers take the next draws, in the order of `faceuses`
+    let mut rng = k.seeded_rng();
     for &source in faceuses {
         let source = b.faceuse(source)?;
-        let (f, orientation) = (required(source.face)?, source.orientation);
-        let mut points = face::points_in_face(k, b, f, samples)?.pv;
+        let (f, orientation) = (link(source.face, NO_FACE)?, source.orientation);
+        let mut points = face::points_in_face_drawing(k, b, f, samples, &mut rng)?.pv;
         if orientation == OrientType::Opposite {
             for pair in points.chunks_exact_mut(2) {
                 if let Some(normal) = pair.get_mut(1) {
@@ -760,7 +800,7 @@ pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> R
             forward = 0;
             backward = 0;
             for &target in faceuses {
-                let f = required(b.faceuse(target)?.face)?;
+                let f = link(b.faceuse(target)?.face, NO_FACE)?;
                 let tol = b.face(f)?.tolerance;
                 let held = caches.entry(f).or_default();
                 match line_parameters(k, b, f, held, origin, direction) {
@@ -797,9 +837,9 @@ pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> R
     if backward > forward && forward == 0 && backward % 2 != 0 {
         return Ok(false);
     }
-    Err(SolidError::topology_failed(
+    Err(SolidError::topology(
         OP,
-        "the rays do not decide whether the shell is inner",
+        TopologyFailure::ShellSideUndecided { forward, backward },
     ))
 }
 

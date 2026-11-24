@@ -87,7 +87,7 @@ impl FilletSession<'_> {
     /// of each two blends mitred at a face's concave corner (an Nx2 corner whose
     /// `IsMitre` is set), two by two in corner order; empty otherwise (preparing the edges
     /// clears them). Mitres at such corners come from
-    /// `fixes.fillet_mitre_concave_face_corners` (WR-642) or a corner set to bevel.
+    /// the mixed-convexity mitre (WR-642) or a corner set to bevel.
     #[must_use]
     pub fn mitred_edges(&self) -> Vec<EdgeId> {
         self.executive

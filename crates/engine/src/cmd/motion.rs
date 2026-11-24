@@ -647,7 +647,7 @@ fn closest(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 /// longer close: the values are moved from where they are toward `want` as far as they go. The
 /// `given` values (joint, index) are driven; in a closed loop the others follow. Returns the
 /// answer and the last solve.
-pub(super) fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSet<(u64, usize)>) -> Result<(Value, joints::Solution)> {
+pub(crate) fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSet<(u64, usize)>) -> Result<(Value, joints::Solution)> {
     drive_with_contact_within(s, want, given, false)
 }
 
@@ -937,7 +937,8 @@ fn check(s: &mut Session, _p: &Value) -> Result<Value> {
 
 // ---- Motion studies ----
 
-fn study_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
+/// The index of the study `p`'s `study` names, by its id or name.
+pub(crate) fn study_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
     // A number is an id first, text a name first: a study may be named like another's id.
     let (key, id_first) = match p.get("study") {
         Some(Value::Number(n)) => (n.to_string(), true),
@@ -1029,7 +1030,7 @@ fn study(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Joint values of a study at a step: (joint, full value vector).
-fn values_at(s: &Session, m: &MotionStudy, step: f64) -> Vec<(u64, Vec<f64>)> {
+pub(crate) fn values_at(s: &Session, m: &MotionStudy, step: f64) -> Vec<(u64, Vec<f64>)> {
     let mut out: Vec<(u64, Vec<f64>)> = Vec::new();
     for k in &m.keys {
         let Some(v) = k.value_at(step) else { continue };
@@ -1054,7 +1055,7 @@ fn values_at(s: &Session, m: &MotionStudy, step: f64) -> Vec<(u64, Vec<f64>)> {
 }
 
 /// The values a study keys: (joint, index).
-fn keyed(m: &MotionStudy) -> BTreeSet<(u64, usize)> {
+pub(crate) fn keyed(m: &MotionStudy) -> BTreeSet<(u64, usize)> {
     m.keys.iter().map(|k| (k.joint, k.index)).collect()
 }
 
@@ -1349,17 +1350,17 @@ fn keep_sampled_trace(
     };
     let pts: Vec<Value> = points.iter().map(|v| json!([v.x, v.y, v.z])).collect();
     // Made in the root, whatever is being edited, which is then as it was (also on an error).
-    let before = (s.active_sketch, s.active_component, s.active_occurrence_path.take());
+    let before = (s.active_sketch, s.sketching_view, s.active_component, s.active_occurrence_path.take());
     s.active_component = 0;
     let made = (|| {
-        let run = |s: &mut Session, id: &str, q: Value| super::find_command(id).ok_or_else(|| bad(cmd, id.to_string()))?.run_nested(s, &q);
+        let run = |s: &mut Session, id: &str, q: Value| super::find_command(id).ok_or_else(|| bad(cmd, id.to_string()))?.run_nested_continuing(s, &q);
         let made = run(s, "sketch.create", json!({"plane": "XY", "project_edges": false, "name": name}))?;
         let sketch = made.get("sketch").cloned().unwrap_or(Value::Null);
         run(s, "sketch.options", json!({"sketch": sketch, "sketch_3d": true}))?;
         let spline = run(s, "sketch.spline3d", json!({"sketch": sketch, "points": pts}))?;
         Ok::<_, EngineError>((made, spline))
     })();
-    (s.active_sketch, s.active_component, s.active_occurrence_path) = before;
+    (s.active_sketch, s.sketching_view, s.active_component, s.active_occurrence_path) = before;
     s.revision += 1;
     let (made, spline) = made?;
     let sketch = made.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "trace sketch is missing"))?;
@@ -1536,7 +1537,7 @@ pub(crate) fn shows_exploded_view(s: &Session) -> bool {
 /// component moves the way the view gives, not along the component's axes (#13939). A component
 /// placed more than once shares its parts' placements, so there a part moves the way given in
 /// the component's first placement ([`solidcraft_doc::joints::occurrence_world`]).
-fn explode_moves(s: &Session, v: &ExplodedView) -> Vec<(u64, Mat, Vec3)> {
+pub(crate) fn explode_moves(s: &Session, v: &ExplodedView) -> Vec<(u64, Mat, Vec3)> {
     let placed: std::collections::BTreeMap<u64, (Mat, u64)> = s.doc.occurrences.iter().map(|o| (o.id, (o.transform, o.parent))).collect();
     v.moves
         .iter()
@@ -1553,7 +1554,7 @@ fn explode_moves(s: &Session, v: &ExplodedView) -> Vec<(u64, Mat, Vec3)> {
 }
 
 /// The pending moves that show `moves` `amount` of the way out: 0 assembled, 1 exploded.
-fn exploded_at(moves: &[(u64, Mat, Vec3)], amount: f64) -> std::collections::BTreeMap<u64, Mat> {
+pub(crate) fn exploded_at(moves: &[(u64, Mat, Vec3)], amount: f64) -> std::collections::BTreeMap<u64, Mat> {
     let mut out = std::collections::BTreeMap::new();
     for (o, m, t) in moves {
         let mut m = *m;

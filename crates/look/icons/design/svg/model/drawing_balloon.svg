@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Drawing balloon</title>
+  <path d="M9.5 37L29.5 37A2.5 2.5 0 0 1 32 39.5L32 52.5A2.5 2.5 0 0 1 29.5 55L9.5 55A2.5 2.5 0 0 1 7 52.5L7 39.5A2.5 2.5 0 0 1 9.5 37Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20 45L35 30L40 25" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M15 50L19 37L28 45Z" fill="#236ead"/>
+  <circle cx="45" cy="17" r="12" fill="#b9ddf8" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

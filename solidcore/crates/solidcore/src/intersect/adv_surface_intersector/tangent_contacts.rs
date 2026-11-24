@@ -33,13 +33,16 @@
 //! Not reached for higher-order contacts (equal curvature at the point), where the
 //! system is singular.
 
+#[path = "contact_identity.rs"]
+mod identity;
+
+use crate::blend::fillet_section::series::{GnScalar, V3};
 use crate::curve::curve::p6::DropPointCaches;
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
-use crate::geom::global_solver::SolverOperation;
 use crate::geom::vector2d::Point2;
-use crate::geom::vector3d::{Point3, Vec3};
+use crate::geom::vector3d::Point3;
 use crate::intersect::surface_intersector::p1::{
     surface_evaluate_normal, SrfIndex, SurfaceIntersector,
 };
@@ -75,38 +78,46 @@ fn cpp_max(a: f64, b: f64) -> f64 {
 }
 
 /// `tp_dot`.
-fn tp_dot(a: Vec3, b: Vec3) -> f64 {
+fn tp_dot<T: GnScalar>(a: V3<T>, b: V3<T>) -> T {
     a.x * b.x + a.y * b.y + a.z * b.z
 }
 
 /// `tp_cross`.
-fn tp_cross(a: Vec3, b: Vec3) -> Vec3 {
-    Vec3::new(
-        a.y * b.z - a.z * b.y,
-        a.z * b.x - a.x * b.z,
-        a.x * b.y - a.y * b.x,
-    )
+fn tp_cross<T: GnScalar>(a: V3<T>, b: V3<T>) -> V3<T> {
+    V3 {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x,
+    }
 }
 
 /// `tp_add`: component sums (as the fork writes them out).
-fn tp_add(a: Vec3, b: Vec3) -> Vec3 {
-    Vec3::new(a.x + b.x, a.y + b.y, a.z + b.z)
+fn tp_add<T: GnScalar>(a: V3<T>, b: V3<T>) -> V3<T> {
+    V3 {
+        x: a.x + b.x,
+        y: a.y + b.y,
+        z: a.z + b.z,
+    }
 }
 
 /// `tp_sub`.
-fn tp_sub(a: Vec3, b: Vec3) -> Vec3 {
-    Vec3::new(a.x - b.x, a.y - b.y, a.z - b.z)
+fn tp_sub<T: GnScalar>(a: V3<T>, b: V3<T>) -> V3<T> {
+    V3 {
+        x: a.x - b.x,
+        y: a.y - b.y,
+        z: a.z - b.z,
+    }
 }
 
 /// `SmTpEval`: the point and its first and second partials.
 #[derive(Debug, Clone, Copy)]
-struct TpEval {
-    p: Vec3,
-    pu: Vec3,
-    pv: Vec3,
-    puu: Vec3,
-    puv: Vec3,
-    pvv: Vec3,
+struct TpEval<T = f64> {
+    p: V3<T>,
+    pu: V3<T>,
+    pv: V3<T>,
+    puu: V3<T>,
+    puv: V3<T>,
+    pvv: V3<T>,
 }
 
 /// `tp_Evaluate`: `Evaluate(uv, 2, 2, TRUE, TRUE, TRUE, aD, FALSE)`.
@@ -123,10 +134,11 @@ fn tp_evaluate(k: &Kernel, srf: &Surface, uv: Point2) -> Result<TpEval> {
             non_zero_tangents: false,
         },
     )?;
-    let at = |i: usize, j: usize| -> Result<Vec3> {
+    let at = |i: usize, j: usize| -> Result<V3<f64>> {
         d.get(i)
             .and_then(|row| row.get(j))
             .copied()
+            .map(V3::from_vec3)
             .ok_or(SolidError::invalid_input(OP, "short evaluation"))
     };
     Ok(TpEval {
@@ -137,6 +149,51 @@ fn tp_evaluate(k: &Kernel, srf: &Surface, uv: Point2) -> Result<TpEval> {
         puv: at(1, 1)?,
         pvv: at(0, 2)?,
     })
+}
+
+/// The stationary parallel-normal system and its Jacobian, in the search's surface
+/// order. Floating-point Newton and the rounded interval certificate use the same
+/// formulas and operation order. This certifies identity of stationary solutions;
+/// the search separately validates each candidate's gap and normals.
+fn stationary_system<T: GnScalar>(a: TpEval<T>, b: TpEval<T>) -> ([T; 4], [[T; 4]; 4]) {
+    let d = tp_sub(a.p, b.p);
+    let m = tp_cross(b.pu, b.pv);
+    let ms = tp_add(tp_cross(b.puu, b.pv), tp_cross(b.pu, b.puv));
+    let mt = tp_add(tp_cross(b.puv, b.pv), tp_cross(b.pu, b.pvv));
+    let neg = |x: T| T::of(-1.0) * x;
+    let f = [
+        tp_dot(d, b.pu),
+        tp_dot(d, b.pv),
+        tp_dot(a.pu, m),
+        tp_dot(a.pv, m),
+    ];
+    let j = [
+        [
+            tp_dot(a.pu, b.pu),
+            tp_dot(a.pv, b.pu),
+            neg(tp_dot(b.pu, b.pu)) + tp_dot(d, b.puu),
+            neg(tp_dot(b.pv, b.pu)) + tp_dot(d, b.puv),
+        ],
+        [
+            tp_dot(a.pu, b.pv),
+            tp_dot(a.pv, b.pv),
+            neg(tp_dot(b.pu, b.pv)) + tp_dot(d, b.puv),
+            neg(tp_dot(b.pv, b.pv)) + tp_dot(d, b.pvv),
+        ],
+        [
+            tp_dot(a.puu, m),
+            tp_dot(a.puv, m),
+            tp_dot(a.pu, ms),
+            tp_dot(a.pu, mt),
+        ],
+        [
+            tp_dot(a.puv, m),
+            tp_dot(a.pvv, m),
+            tp_dot(a.pv, ms),
+            tp_dot(a.pv, mt),
+        ],
+    ];
+    (f, j)
 }
 
 /// `tp_Solve4`: solves `a x = b` by Gaussian elimination with partial pivoting;
@@ -274,43 +331,7 @@ fn tp_newton(
     for _ in 0..25 {
         let a = tp_evaluate(k, sa, Point2::new(par[0], par[1]))?;
         let b = tp_evaluate(k, sb, Point2::new(par[2], par[3]))?;
-        let d = tp_sub(a.p, b.p);
-        let m = tp_cross(b.pu, b.pv);
-        let ms = tp_add(tp_cross(b.puu, b.pv), tp_cross(b.pu, b.puv));
-        let mt = tp_add(tp_cross(b.puv, b.pv), tp_cross(b.pu, b.pvv));
-
-        let f = [
-            tp_dot(d, b.pu),
-            tp_dot(d, b.pv),
-            tp_dot(a.pu, m),
-            tp_dot(a.pv, m),
-        ];
-        let j = [
-            [
-                tp_dot(a.pu, b.pu),
-                tp_dot(a.pv, b.pu),
-                -tp_dot(b.pu, b.pu) + tp_dot(d, b.puu),
-                -tp_dot(b.pv, b.pu) + tp_dot(d, b.puv),
-            ],
-            [
-                tp_dot(a.pu, b.pv),
-                tp_dot(a.pv, b.pv),
-                -tp_dot(b.pu, b.pv) + tp_dot(d, b.puv),
-                -tp_dot(b.pv, b.pv) + tp_dot(d, b.pvv),
-            ],
-            [
-                tp_dot(a.puu, m),
-                tp_dot(a.puv, m),
-                tp_dot(a.pu, ms),
-                tp_dot(a.pu, mt),
-            ],
-            [
-                tp_dot(a.puv, m),
-                tp_dot(a.pvv, m),
-                tp_dot(a.pv, ms),
-                tp_dot(a.pv, mt),
-            ],
-        ];
+        let (f, j) = stationary_system(a, b);
         let rhs = [-f[0], -f[1], -f[2], -f[3]];
         let Some(mut dx) = tp_solve4(j, rhs) else {
             return Ok(None);
@@ -352,13 +373,13 @@ fn tp_newton(
 /// captures).
 struct Search<'a, 's> {
     si: &'a SurfaceIntersector<'s>,
-    /// `sTried`: contact candidates already examined (accepted or not).
-    tried: Vec<Point3>,
+    /// Only accepted contacts participate in identity comparisons.
+    contacts: Vec<(identity::Contact, Point3)>,
+    identities: Option<identity::Comparator>,
     /// `lNumCurvesIn`.
     num_curves_in: usize,
     /// `dGapTol`.
     gap_tol: f64,
-    tol_3d: f64,
 }
 
 impl Search<'_, '_> {
@@ -389,15 +410,6 @@ impl Search<'_, '_> {
             return Ok(());
         }
 
-        if self
-            .tried
-            .iter()
-            .any(|t| t.distance(pnt) < 100.0 * self.tol_3d)
-        {
-            return Ok(());
-        }
-        self.tried.push(pnt);
-
         // normals must be parallel (EvaluateNormal also handles poles)
         let n1 = surface_evaluate_normal(k, srf1, uv1)?;
         let n2 = surface_evaluate_normal(k, srf2, uv2)?;
@@ -412,27 +424,33 @@ impl Search<'_, '_> {
             return Ok(());
         }
 
-        // skip points on curves already found
+        // Curves and isolated points have different identity tests. In particular,
+        // a point inside another contact's modelling tolerance may be a distinct root.
+        let existing = out.curves_3d.get(..self.num_curves_in).ok_or_else(|| {
+            SolidError::port_invariant(OP, "the initial intersection curves were removed")
+        })?;
         if self
             .si
-            .is_point_on_curve_cached(k, pnt, &out.curves_3d, None, caches)?
+            .is_point_on_curve_cached(k, pnt, existing, None, caches)?
         {
             return Ok(());
         }
-        for (index, curve) in out.curves_3d.iter().enumerate().take(self.num_curves_in) {
-            let ivl = curve.natural_interval();
-            let drop = curve.drop_point_in(
+        let reach = 100.0 * self.si.this_approx_tol_3d;
+
+        let mut contact = identity::Contact::new([uv1, uv2]);
+        if !self.contacts.is_empty() && self.identities.is_none() {
+            self.identities = Some(identity::Comparator::new(
                 k,
-                &ivl,
-                pnt,
-                None,
-                100.0 * self.tol_3d,
-                None,
-                SolverOperation::Intersect,
-                caches,
-                index,
-            )?;
-            if drop.success && drop.distance < 100.0 * self.tol_3d {
+                [srf1, srf2],
+                self.si.uv_domains,
+            )?);
+        }
+        for (old, point) in &mut self.contacts {
+            let identity = match &self.identities {
+                Some(comparator) => comparator.same(k, [srf1, srf2], old, &mut contact)?,
+                None => None,
+            };
+            if identity.unwrap_or_else(|| point.distance(pnt) < reach) {
                 return Ok(());
             }
         }
@@ -451,6 +469,7 @@ impl Search<'_, '_> {
             )?));
         out.deviations.push(gap);
         out.curve_types.push(TsectCurveType::Touching);
+        self.contacts.push((contact, pnt));
         Ok(())
     }
 }
@@ -486,10 +505,10 @@ pub(super) fn find_tangent_contact_points(
     // keeps such loops below the approximation tolerance.
     let mut search = Search {
         si,
-        tried: Vec::new(),
+        contacts: Vec::new(),
+        identities: None,
         num_curves_in: out.curves_3d.len(),
         gap_tol: 1.0e-7 * tol_3d,
-        tol_3d,
     };
 
     // Poles: the Newton system degenerates where a surface's partials vanish, so
@@ -559,6 +578,42 @@ pub(super) fn find_tangent_contact_points(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::Vec2;
+    use crate::surface::plane::Plane;
+
+    #[test]
+    fn an_inconclusive_contact_comparison_uses_the_distance_check() {
+        let k = Kernel::default();
+        let domain = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
+        let surface = Surface::from(Plane::new(
+            Point3::ZERO,
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            &domain,
+        ));
+        let mut si =
+            SurfaceIntersector::new(&k, &surface, &domain, &surface, &domain, false).unwrap();
+        si.this_approx_tol_3d = 1e-6;
+        let mut search = Search {
+            si: &si,
+            contacts: Vec::new(),
+            identities: None,
+            num_curves_in: 0,
+            gap_tol: 0.0,
+        };
+        let mut out = InteriorCurves::default();
+        let mut caches = DropPointCaches::default();
+        // Coplanar samples give a singular stationary Jacobian. The distance
+        // check merges the first two and keeps the far one.
+        for x in [0.0, 5e-5, 0.1] {
+            let uv = Point2::new(x, 0.0);
+            search
+                .accept(&k, uv, uv, 0.0, &mut out, &mut caches)
+                .unwrap();
+        }
+        assert_eq!(out.curve_types, [TsectCurveType::Touching; 2]);
+    }
 
     #[test]
     fn solve4_solves_and_rejects_singular() {

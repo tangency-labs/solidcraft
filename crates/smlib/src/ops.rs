@@ -320,7 +320,8 @@ impl Brep {
     /// outside), open at the faces nearest to `open_faces` (each within `tolerance`); none gives
     /// a closed hollow body. An inward wall that leaves no room inside is [`Error::NoRoom`]; one
     /// whose walls would just meet (a hole exactly twice the wall from a side) is
-    /// [`Error::WallsTouch`].
+    /// [`Error::WallsTouch`]. A shell that fails on a body with a face whose outline touches
+    /// itself (a pad's corner on its face's edge) is [`Error::OutlineTouches`].
     pub fn shell(&self, open_faces: &[[f64; 3]], tolerance: f64, thickness: f64) -> Result<Brep> {
         let r = core::offset::shell(self.core(), open_faces, tolerance, thickness).map(Brep::made_core);
         trace::made(
@@ -365,11 +366,12 @@ impl Brep {
         r
     }
 
-    /// The flat faces nearest to `faces` (each within `tolerance`) tilted by `angle` radians
-    /// (0 < |angle| < 89.94 degrees) about the line where each meets the neutral plane through
-    /// `neutral_origin` with normal `neutral_normal`, a positive angle leaning them in going along
-    /// `pull`; the faces around them extended or trimmed to meet them. A face that isn't flat, or
-    /// isn't parallel to `pull`, is [`Error::Unsupported`].
+    /// The faces nearest to `faces` (each within `tolerance`) tilted by `angle` radians
+    /// (0 < |angle| < 89.94 degrees) about the line or circle where each meets the neutral plane
+    /// through `neutral_origin` with normal `neutral_normal`, a positive angle leaning them in going
+    /// along `pull`; the faces around them extended or trimmed to meet them. A face that is neither
+    /// a plane parallel to `pull` nor a cone or cylinder about it is refused with the reason
+    /// ([`Error::Refused`]).
     pub fn draft(
         &self,
         faces: &[[f64; 3]],
