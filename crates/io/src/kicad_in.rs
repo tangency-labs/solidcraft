@@ -960,8 +960,11 @@ pub fn kicad_board_mesh(board: &KicadBoard, thickness: f64) -> Result<crate::Mes
 fn board_solid(board: &KicadBoard, thickness: f64) -> Result<String> {
     let loops = outline_loops(board)?;
     let regions = regions_from_loops(loops.clone(), Some(&board.drills));
-    let bodies =
-        extrude_regions_bodies(&regions, 0.0, thickness).or_else(|_| extrude_regions_bodies(&regions_from_loops(loops, None), 0.0, thickness))?;
+    // SMLib's check of each extrusion runs here: a board with drills it refuses is built without them.
+    let checked = |regions: &[Region2]| {
+        solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || extrude_regions_bodies(regions, 0.0, thickness)).0
+    };
+    let bodies = checked(&regions).or_else(|_| checked(&regions_from_loops(loops, None)))?;
     if bodies.is_empty() {
         return Err(IoError::Invalid("the board has no closed outline to build".into()));
     }
