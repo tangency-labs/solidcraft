@@ -37,7 +37,7 @@
 //!   Upstream splits the surface there and joins the open ends, so the face's
 //!   surface no longer passes through its edges (11.8 away on `vase_rev.smb`), and the
 //!   seam split that follows merges interval ends onto edge points up to 4.19 away,
-//!   growing the vertex tolerances to match (#21368).
+//!   growing the vertex tolerances to 1.18-2.59 (#21368).
 //! - **Shrink keeps exact trims and ends on knots (the fork's, not upstream).**
 //!   `shrink_geometry` keeps the face's trim curves where its surface's trim keeps the
 //!   surface's parameterization (WR-700, the fork's tangency-labs/smlib@6f811b8), and

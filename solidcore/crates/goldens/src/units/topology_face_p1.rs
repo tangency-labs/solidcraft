@@ -1440,7 +1440,7 @@ mod tests {
     //! Before the fix `move_seam` split the surface there and joined the open ends. On
     //! `vase_rev.smb` it split at V = 58.166, so the face's surface left its edges (11.8
     //! away), and the seam split merged interval ends onto edge points up to 4.19 away,
-    //! growing vertex tolerances to that (Test #82 allows 2L = 0.02). Each row is replayed
+    //! growing vertex tolerances to 1.18-2.59 (Test #82 allows 2L = 0.02). Each row is replayed
     //! and its B-rep checked against what the geometry needs; without the fix every row
     //! breaks at least one of these:
     //! 0. `move_seam` succeeds: the input is valid (before the fix it refused the three
@@ -1458,7 +1458,9 @@ mod tests {
     //!    `16 * EPSILON * m`, four times that.
     //!
     //! Each replay must also be the committed golden row, so the checks before the op
-    //! (`check_brep` takes the B-rep `&mut`) change nothing the op reads.
+    //! (`check_brep` takes the B-rep `&mut`) change nothing the row records. The golden
+    //! file is blessed by the `goldens` binary, built without `cfg(test)` and so without
+    //! these checks.
     use super::*;
     use solidcore::topology::brep::validation::{check_brep_with_keys, CheckLevel};
     use solidcore::topology::{edge, vertex};
@@ -1653,7 +1655,7 @@ mod tests {
             let inputs: Inputs = case.parse().expect("inputs");
             let out = run_rust(&inputs).expect("row runs");
             // the checks before the op take the B-rep `&mut`; the row must still be the
-            // committed golden one, so they changed nothing the op reads
+            // committed golden one, so they changed nothing the row records
             if golden.get(&case.name) != Some(&crate::golden::encode(&case.name, &out)) {
                 problems.push(format!("{}: the replay is not the committed golden row", case.name));
             }
