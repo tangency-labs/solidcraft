@@ -906,6 +906,11 @@ pub enum FeatureKind {
         plane: PlaneRef,
         sketch: Sketch,
     },
+    /// A sketch attached to a curved face, solved in the chart in its reference.
+    SurfaceSketch {
+        surface: crate::SurfaceRef,
+        sketch: Sketch,
+    },
     Extrude {
         /// Feature id of the sketch.
         sketch: SketchId,
@@ -3549,6 +3554,7 @@ impl FeatureKind {
             FeatureKind::NewerFileFeature { .. } => "NewerFileFeature",
             FeatureKind::BodyTransfer { .. } => "BodyTransferFeature",
             FeatureKind::Sketch { .. } => "Sketch",
+            FeatureKind::SurfaceSketch { .. } => "SurfaceSketch",
             FeatureKind::Extrude { .. } => "ExtrudeFeature",
             FeatureKind::Revolve { .. } => "RevolveFeature",
             FeatureKind::Fillet { .. } => "FilletFeature",
@@ -3645,6 +3651,7 @@ impl FeatureKind {
             FeatureKind::NewerFileFeature { .. } => "newer_file_feature",
             FeatureKind::BodyTransfer { .. } => "body_transfer",
             FeatureKind::Sketch { .. } => "sketch",
+            FeatureKind::SurfaceSketch { .. } => "surface_sketch",
             FeatureKind::Extrude { .. } => "extrude",
             FeatureKind::Revolve { .. } => "revolve",
             FeatureKind::Fillet { .. } => "fillet",
@@ -3828,6 +3835,7 @@ impl FeatureKind {
             FeatureKind::NewerFileFeature { .. } => "Unknown",
             FeatureKind::BodyTransfer { .. } => "BodyTransfer",
             FeatureKind::Sketch { .. } => "Sketch",
+            FeatureKind::SurfaceSketch { .. } => "SurfaceSketch",
             FeatureKind::Extrude { .. } => "Extrude",
             FeatureKind::Revolve { .. } => "Revolve",
             FeatureKind::Fillet { .. } => "Fillet",

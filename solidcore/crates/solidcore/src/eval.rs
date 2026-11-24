@@ -16,11 +16,13 @@
 //! Surfaces*, §3.2 (normal sections, Meusnier).
 
 pub mod agreement;
+pub mod chart;
 pub mod check;
 pub mod collapse;
 pub mod curve;
 pub mod folded;
 pub mod form;
+pub mod geodesic;
 pub mod geometry;
 pub mod hole_stacks;
 pub mod label;
@@ -38,14 +40,19 @@ pub mod surface;
 pub mod uv;
 pub mod vec;
 
+pub use chart::Chart;
 pub use collapse::{Collapse, OntoKnots};
 pub use curve::{CurveEval, CurveJet};
+pub use geodesic::{
+    arc, circle, distance, geodesic, Geodesic, GeodesicCircle, GeodesicError, GeodesicSolver,
+    DEFAULT_TOLERANCE,
+};
 pub use geometry::{Curve, Curve2, Frame, Surface};
 pub use spline::{
     EvalCurve, EvalSurface, Partials, MAX_EVAL_KNOTS, MAX_EVAL_POINTS, MAX_PARTIAL_ORDER,
     MAX_SPLINE_DEGREE,
 };
-pub use surface::{face_flux, Axes, SurfaceEval};
+pub use surface::{face_flux, Axes, Metric, SurfaceEval};
 pub use uv::{Domain, Starts};
 
 /// Why a curve or surface cannot be evaluated.

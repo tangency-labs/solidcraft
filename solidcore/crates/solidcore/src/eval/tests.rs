@@ -2058,3 +2058,73 @@ fn a_lune_between_two_poles_keeps_its_width_round_the_axis() {
         }
     }
 }
+
+/// The first fundamental form, closed form, on every analytic kind: a cylinder's (R^2, 0, 1),
+/// a sphere's (R^2 cos^2 v, 0, R^2), a cone's ((r0 + v s)^2, 0, 1 + s^2), a torus's
+/// ((M + m cos v)^2, 0, m^2) and a plane's (1, 0, 1).
+#[test]
+fn a_surfaces_metric_is_the_first_fundamental_form() {
+    let near = |a: f64, b: f64| (a - b).abs() <= 1e-12 * (1.0 + b.abs());
+    let cylinder = SurfaceEval::new(&Surface::Cylinder {
+        frame: a_frame(),
+        radius: 2.0,
+    })
+    .expect("a cylinder");
+    let m = cylinder.metric(0.3, 0.7).expect("a metric");
+    assert!(near(m.e, 4.0) && near(m.f, 0.0) && near(m.g, 1.0), "{m:?}");
+    assert!(near(m.det(), 4.0));
+
+    let sphere = SurfaceEval::new(&Surface::Sphere {
+        frame: a_frame(),
+        radius: 2.0,
+    })
+    .expect("a sphere");
+    let v = 0.4;
+    let m = sphere.metric(0.3, v).expect("a metric");
+    assert!(
+        near(m.e, 4.0 * v.cos() * v.cos()) && near(m.f, 0.0) && near(m.g, 4.0),
+        "{m:?}"
+    );
+
+    let cone = SurfaceEval::new(&Surface::Cone {
+        frame: a_frame(),
+        radius_at_origin: 2.0,
+        half_angle: 0.5,
+    })
+    .expect("a cone");
+    let slope = 0.5f64.tan();
+    let r = 2.0 + slope;
+    let m = cone.metric(0.3, 1.0).expect("a metric");
+    assert!(
+        near(m.e, r * r) && near(m.f, 0.0) && near(m.g, 1.0 + slope * slope),
+        "{m:?}"
+    );
+
+    let torus = SurfaceEval::new(&Surface::Torus {
+        frame: a_frame(),
+        major_radius: 4.0,
+        minor_radius: 1.0,
+        tube_start: 0.0,
+    })
+    .expect("a torus");
+    let v = 0.3;
+    let m = torus.metric(0.3, v).expect("a metric");
+    assert!(
+        near(m.e, (4.0 + v.cos()) * (4.0 + v.cos())) && near(m.f, 0.0) && near(m.g, 1.0),
+        "{m:?}"
+    );
+
+    let plane = SurfaceEval::new(&Surface::Plane {
+        origin: [0.0, 0.0, 0.0],
+        u_axis: [1.0, 0.0, 0.0],
+        v_axis: [0.0, 1.0, 0.0],
+    })
+    .expect("a plane");
+    let m = plane.metric(0.3, 0.7).expect("a metric");
+    assert!(near(m.e, 1.0) && near(m.f, 0.0) && near(m.g, 1.0), "{m:?}");
+    assert!(near(m.norm(3.0, 4.0), 5.0));
+    assert!(near(m.dot((3.0, 0.0), (0.0, 4.0)), 0.0));
+    assert!(near(m.angle((1.0, 0.0), (0.0, 1.0)), FRAC_PI_2));
+    assert!(plane.metric(f64::NAN, 0.0).is_none());
+    assert!(m.angle((0.0, 0.0), (1.0, 0.0)).is_nan());
+}

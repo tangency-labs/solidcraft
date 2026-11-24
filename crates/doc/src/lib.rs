@@ -124,6 +124,7 @@ mod sheet_surface_perforation;
 mod sheet_surface_shadow;
 mod sheet_surface_tab;
 pub mod sketch_equation;
+pub mod surface_sketch;
 pub use sheet_surface_convert::ConvertRule;
 pub use sheet_surface_convert::RollEdge;
 pub use sheet_surface_convert::RollInfo;
@@ -247,6 +248,7 @@ pub use points::plain;
 pub use solidcraft_develop as develop;
 pub use solidcraft_kernel as kernel;
 pub use solidcraft_sketch as sketch;
+pub use surface_sketch::{SurfaceChart, SurfaceRef, SurfaceSketch};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum DocError {

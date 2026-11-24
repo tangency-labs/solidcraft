@@ -13820,6 +13820,8 @@ fn eval_feature_kind(
     refuse_ambiguous_targets(doc, st, f, &f.participants)?;
     match &f.kind {
         FeatureKind::NewerFileFeature { raw } => Err(DocError::Invalid(raw.why())),
+        // The surface solver (PR 4) evaluates these; until then the feature reports why.
+        FeatureKind::SurfaceSketch { .. } => Err(DocError::Invalid("surface sketches are not solved yet".into())),
         FeatureKind::BodyTransfer { bodies, from, to, transform } => {
             crate::body_transfer::evaluate(doc, st, &crate::plain(bodies), *from, *to, *transform)
         }
