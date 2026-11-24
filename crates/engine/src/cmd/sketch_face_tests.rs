@@ -1096,7 +1096,7 @@ fn a_point_near_an_edge_resolves_to_its_own_face() {
 #[test]
 fn a_face_of_a_moved_and_turned_component_is_picked_by_its_world_point() {
     let mut s = Session::default();
-    let part = run(&mut s, "component.create", json!({"name":"Part","parent":0}));
+    let part = run(&mut s, "component.create", json!({"name":"Part","parent":0,"grounded":false}));
     run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base"}));
     run(&mut s, "occurrence.move", json!({"occurrence":part["occurrence"],"translate":[100,20,30],"axis":[0,0,1],"angle":"90 deg"}));
     run(&mut s, "component.activate", json!({"component":0}));
