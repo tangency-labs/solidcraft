@@ -34,6 +34,11 @@
 //! - `DoStitching`'s edge gluing skips a lamina pair that crosses another lamina edge on
 //!   the same curve round it, where each face there meets that curve once (`RadialGlue`;
 //!   #2506, not upstream).
+//! - `DoStitching`'s region nesting sets the void flags by nesting
+//!   (`SM_VS_NESTEDSOLID`) where every shell is closed and there are more than two
+//!   regions, so a cavity sewn from loose faces is a void; upstream only swaps the
+//!   infinite region's flag (`SM_VS_INFINITEREGION_SWAP`) and leaves it solid (not
+//!   upstream, WR-21540, as WR-569 for `StitchIntoSolid`).
 //! - `DoStitching` collects the modified faces (`sModifiedFaces`) as upstream, though
 //!   only commented-out code reads them; its `dMinEdgeLength` is dropped for the same
 //!   reason (the lengths are still computed).
@@ -61,7 +66,7 @@ use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
-use crate::topology::brep::p6::InfiniteHalf;
+use crate::topology::brep::p6::{every_shell_closed, InfiniteHalf};
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, RegionId, ShellId, VertexId};
 use crate::{Result, SolidError};
@@ -964,7 +969,19 @@ impl Stitch<'_> {
 
         // when asked - find and set the infinite region by classifying a ray from a
         // point outside the Brep
-        if self.do_region_nesting && bp1::regions(b, None)?.len() > 1 {
+        let regions = bp1::regions(b, None)?.len();
+        if self.do_region_nesting && regions > 1 {
+            // Not upstream (WR-21540, as WR-569 for `stitch_into_solid`): each closed shell
+            // the glue closed split off a new region, solid, and upstream only finds the
+            // infinite region, so the region inside a shell nested in another (a cavity)
+            // stays solid. Where every shell is closed the regions are a nested solid
+            // model: material inside the outer shell, a void inside a shell within it, and
+            // so on. With two regions both settings give the same flags.
+            let void_setting = if regions > 2 && every_shell_closed(b)? {
+                SetRegionVoidType::NestedSolid
+            } else {
+                SetRegionVoidType::InfiniteRegionSwap
+            };
             let old = b.editing_enabled();
             b.set_editing_enabled(false);
             let r = find_and_set_infinite_region_with_identity(
@@ -972,7 +989,7 @@ impl Stitch<'_> {
                 b,
                 self.query_identity,
                 None,
-                SetRegionVoidType::InfiniteRegionSwap,
+                void_setting,
                 None,
             );
             b.set_editing_enabled(old);
