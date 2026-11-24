@@ -391,19 +391,13 @@ fn cone_pit(k: &mut Kernel, block: Brep) -> Result<Brep> {
 #[test]
 fn cylinders_keep_their_pinned_volumes() {
     let column = column_under_footprint();
-    let v = assert_pinned(
-        cylinder_boss,
-        8.0,
-        23528.165527389272,
-        23528.165493405155,
-        9,
-    );
+    let v = assert_pinned(cylinder_boss, 8.0, 23528.165527389272, 23528.16549340516, 9);
     assert_near_closed_form(v, featured_rounded(true, 8.0) + column);
     let v = assert_pinned(
         cylinder_hole,
         8.0,
         23402.501834781691,
-        23402.501787261564,
+        23402.501787261568,
         9,
     );
     assert_near_closed_form(v, featured_rounded(false, 8.0) + column);
@@ -411,7 +405,7 @@ fn cylinders_keep_their_pinned_volumes() {
         cylinder_boss,
         1.9,
         24031.843347866372,
-        24031.843347866376,
+        24031.843347866386,
         9,
     );
     assert_near_closed_form(v, featured_rounded(true, 1.9));
@@ -514,12 +508,12 @@ fn transposed_pins_lie_within_their_sums_rounding_of_the_references() {
 fn cones_keep_their_pinned_volumes() {
     // the boss's footprint (radius 2) swept down to the round, as keep features continues a
     // boss's walls along the top's normal
-    let v = assert_pinned(cone_boss, 8.0, 23501.985588609361, 23501.985554625244, 11);
+    let v = assert_pinned(cone_boss, 8.0, 23501.985588609361, 23501.985554625247, 11);
     assert_near_closed_form(
         v,
         rounded_r8() + frustum(2.0, 1.0, 5.0) + column_under_footprint(),
     );
-    let v = assert_pinned(cone_pit, 8.0, 23427.54088905338, 23427.54082790698, 9);
+    let v = assert_pinned(cone_pit, 8.0, 23427.54088905338, 23427.540827906985, 9);
     assert_near_closed_form(v, rounded_r8() - cone_pit_void());
 }
 
@@ -551,14 +545,111 @@ fn cone_pit_volume_at_the_default_accuracy_is_converged() {
     );
 }
 
+/// A cone boss whose wall leans 19 degrees, within the fillet's angular tolerance.
+fn lean_19(k: &mut Kernel, block: Brep) -> Result<Brep> {
+    let c = create_cone(k, Point3::new(20.0, 4.0, 20.0), 2.0, 1.0, 2.9)?;
+    boolean_union(k, block, c)
+}
+
+/// #18913: retiring the exact-round flags moves five pins by one last bit (the r 8 cylinder
+/// boss and the 19-degree cone boss CLOSER to their 70-digit references, by 1.7e-12 and
+/// 0.4e-12; the cone boss, the cylinder hole and the cone pit FARTHER, by 3.6e-12, 0.4e-12
+/// and 5.0e-12; MEASURED on the exact doubles). As in
+/// [`transposed_pins_lie_within_their_sums_rounding_of_the_references`], whose bound and
+/// margin of two this repeats, each pin, main's and this branch's, lies within the rounding
+/// bound of the volume's own sum of its face terms, so the move is a change of rounding, not
+/// of the integral. The references are the closed forms the pins are held to
+/// (`featured_rounded(boss, 8) + column_under_footprint()`, `rounded_r8() + frustum(2, 1, h) +
+/// column_under_footprint()` for h 5 and 2.9, `rounded_r8() - cone_pit_void()`) to 70 digits (`pins-ref70-gk.py`, tanh-sinh at
+/// level 7), each held here as its nearest double, whose half ulp is added to the distance.
+#[test]
+fn pins_moved_by_18913_lie_within_their_sums_rounding_of_the_references() {
+    // (feature, pinned volume, main's pin, 70-digit reference, its nearest double, faces)
+    let pins: [(Feature, f64, f64, &str, f64, usize); 5] = [
+        (
+            cylinder_boss,
+            23528.16549340516,
+            23528.165493405155,
+            "23528.1654934051575356764322355",
+            23528.16549340516,
+            9,
+        ),
+        (
+            cone_boss,
+            23501.985554625247,
+            23501.985554625244,
+            "23501.9855546252425920225768740",
+            23501.985554625244,
+            11,
+        ),
+        (
+            lean_19,
+            23486.591750622654,
+            23486.59175062265,
+            "23486.5917506226526051541099214",
+            23486.591750622654,
+            11,
+        ),
+        (
+            cylinder_hole,
+            23402.501787261568,
+            23402.501787261564,
+            "23402.5017872615658061379265002",
+            23402.501787261564,
+            9,
+        ),
+        (
+            cone_pit,
+            23427.540827906985,
+            23427.54082790698,
+            "23427.5408279069781598768686995",
+            23427.540827906978,
+            9,
+        ),
+    ];
+    for (feature, pinned, main, reference, exact, faces) in pins {
+        let (v, n) = rounded_with(feature, 8.0).unwrap();
+        assert_eq!(n, faces, "{reference}");
+        assert!(
+            (v - pinned).abs() <= 1e-14 * pinned,
+            "volume {v:.17}, pinned {pinned:.17}"
+        );
+        let half_ulp = 0.5 * (f64::from_bits(exact.to_bits() + 1) - exact);
+        for (side, x) in [("this branch's", v), ("main's", main)] {
+            let off = (x - exact).abs() + half_ulp;
+            let bound = gamma(u32::try_from(n - 1).unwrap()) * x.abs();
+            println!("{side} {x:.17}: {off:e} off {reference}, sum's rounding bound {bound:e}");
+            assert!(
+                2.0 * off <= bound,
+                "{side} volume {x:.17} is {off:e} off its reference {reference}, at least half \
+                 the sum's rounding bound {bound:e}"
+            );
+        }
+    }
+}
+
+/// #18913: the r 1.9 cylinder boss's pin moves by three last bits onto the nearest double of
+/// its closed form, `featured_rounded(true, 1.9)` = 23855.6 + 56.1 pi (r the double nearest
+/// 1.9, 3.2e-15 off in the volume) = 24031.843347866387403574946039297642601221530 to 45
+/// digits (Machin's pi in 80-digit decimals). Main's pin, 24031.843347866376, lay 1.19e-11
+/// (three ulps) off it. It moves with the class frame of `cylinder_fillet_geom_parts_of`.
+#[test]
+fn the_r1_9_cylinder_boss_pin_is_its_closed_form_s_nearest_double() {
+    let reference = 24031.843347866386_f64;
+    let (v, n) = rounded_with(cylinder_boss, 1.9).unwrap();
+    assert_eq!(n, 9);
+    let off = (v - reference).abs();
+    let bound = gamma(u32::try_from(n - 1).unwrap()) * v.abs();
+    assert!(
+        2.0 * (off + 0.5 * (f64::from_bits(reference.to_bits() + 1) - reference)) <= bound,
+        "volume {v:.17} is {off:e} off the closed form's nearest double, bound {bound:e}"
+    );
+}
+
 /// A boss's walls count as upright within the fillet's angular tolerance: at 19 degrees off they
 /// are carried down, at 30 and 45 the round is refused, as the fork.
 #[test]
 fn a_boss_leaning_past_the_angular_tolerance_is_refused_as_the_fork() {
-    fn lean_19(k: &mut Kernel, block: Brep) -> Result<Brep> {
-        let c = create_cone(k, Point3::new(20.0, 4.0, 20.0), 2.0, 1.0, 2.9)?;
-        boolean_union(k, block, c)
-    }
     fn lean_30(k: &mut Kernel, block: Brep) -> Result<Brep> {
         let c = create_cone(k, Point3::new(20.0, 4.0, 20.0), 2.0, 1.0, 1.732)?;
         boolean_union(k, block, c)
@@ -568,7 +659,7 @@ fn a_boss_leaning_past_the_angular_tolerance_is_refused_as_the_fork() {
         boolean_union(k, block, c)
     }
     // its footprint swept down to the round, as the cone boss's
-    let v = assert_pinned(lean_19, 8.0, 23486.591790262424, 23486.59175062265, 11);
+    let v = assert_pinned(lean_19, 8.0, 23486.591790262424, 23486.591750622654, 11);
     assert_near_closed_form(
         v,
         rounded_r8() + frustum(2.0, 1.0, 2.9) + column_under_footprint(),
