@@ -4030,15 +4030,15 @@ pub struct StandardPart {
     pub length: Option<f64>,
 }
 
-/// A component whose contents come from another design file (Insert Design): where that file
+/// A component whose contents come from a design or STEP source file: where that file
 /// is, and the Import feature in the component that holds its bodies (Update Links replaces
 /// them; Break Link keeps them and forgets the file).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct DesignLink {
-    /// The design file: relative to this design's folder once this design is saved, else as
+    /// The source file: relative to this design's folder once this design is saved, else as
     /// given (`/` separates folders).
     pub path: String,
-    /// The Import feature holding the linked design's bodies.
+    /// The Import feature holding the linked source's bodies.
     pub feature: u64,
     /// The source configuration row's stable id. Without one, the link follows the source's
     /// saved state. A renamed row keeps its id; a deleted row must not select another row.
@@ -4058,7 +4058,10 @@ pub struct DesignLink {
     /// keep none, so a property the component already has stays and one it lacks is added.
     #[serde(default, skip_serializing_if = "crate::Metadata::is_empty")]
     pub inherited_metadata: crate::Metadata,
-    /// SHA-256 of the design file's bytes as this design last read them ([`Self::file_digest`]):
+    /// STEP source naming policy; absent for linked designs and older unlinked imports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_names: Option<String>,
+    /// SHA-256 of the source file's bytes as this design last read them ([`Self::file_digest`]):
     /// opened again, this design tells which linked files changed meanwhile (#9739). Links made
     /// before it was kept have none and are taken as up to date.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4066,7 +4069,7 @@ pub struct DesignLink {
 }
 
 impl DesignLink {
-    /// What [`Self::file_sha256`] keeps for a design file's `bytes`.
+    /// What [`Self::file_sha256`] keeps for a source file's `bytes`.
     pub fn file_digest(bytes: &[u8]) -> String {
         use sha2::{Digest, Sha256};
         format!("{:x}", Sha256::digest(bytes))

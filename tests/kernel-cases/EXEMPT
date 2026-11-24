@@ -68,6 +68,7 @@ construct.axis                    builds with the first construct.axis.* method 
 construct.plane                   builds with the first construct.plane.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
 construct.plane.square_to_line    a plane through a point, square to a line: plane_through_point_square_to_line_* (crates/engine/src/construct_tests.rs)
 construct.point                   builds with the first construct.point.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
+construct.point.average           the point at the average of two or more points: tested in crates/engine/src/construct_tests.rs
 diagnostics.crash_report          crash reports
 diagnostics.crash_reports         crash reports
 diagnostics.crash_reports.clear   crash reports

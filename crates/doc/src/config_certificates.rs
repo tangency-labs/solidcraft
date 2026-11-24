@@ -804,7 +804,7 @@ fn split_on_purpose(body: &ModelBody, plane: &solidcore_record::Plane) -> bool {
 }
 
 /// Whether two exact planes are one oriented plane (pieces of one face).
-fn same_oriented_plane(a: &solidcore_record::Plane, b: &solidcore_record::Plane, scale: f64) -> bool {
+pub(crate) fn same_oriented_plane(a: &solidcore_record::Plane, b: &solidcore_record::Plane, scale: f64) -> bool {
     a.normal().dot(b.normal()) >= 1. - 1e-8 && (b.origin - a.origin).dot(a.normal()).abs() <= 1e-7 * (1. + scale)
 }
 

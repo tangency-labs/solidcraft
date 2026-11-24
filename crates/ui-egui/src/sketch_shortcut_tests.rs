@@ -700,6 +700,56 @@ fn a_line_starts_on_a_snap_point_of_an_existing_shape() {
     }
 }
 
+/// #14724: the Line tool's first click on a rectangle's side holds the line's start on that side,
+/// as its last click holds its end. The rectangle the reporter drew was a centre rectangle, whose
+/// diagonals are construction curves, and the pointer moved between the two clicks.
+#[test]
+fn a_line_started_on_a_rectangle_side_is_held_on_it() {
+    use solidcraft_engine::sketch::{ConstraintKind, CurveKind, Shape};
+    for (rectangle, params) in [
+        ("sketch.rectangle.two_point", json!({"p0":[-20,-12.5],"p1":[20,12.5]})),
+        ("sketch.rectangle.center", json!({"center":[0,0],"corner":[20,12.5]})),
+    ] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run(rectangle, params).unwrap();
+        h.call("ui.camera", json!({"target":[0,0,0],"distance":200}));
+        h.settle();
+        let before = lines(&h).len();
+        h.step(&json!({"start":"sketch.line"})).unwrap();
+        // The start on the left side, the end on the right one. The pointer moves between the
+        // two clicks, as a hand does.
+        for at in [[-20.0, 6.0], [20.0, 6.0]] {
+            h.step(&json!({"move":{"sketch":at}})).unwrap();
+            h.step(&json!({"click":{"sketch":at}})).unwrap();
+        }
+        h.settle();
+        let drawn = lines(&h);
+        assert_eq!(drawn.len(), before + 1, "{rectangle}: no line from the first click; {:?}", h.app.status);
+        let sid = h.app.session.active_sketch.unwrap();
+        let state = h.app.session.world_state().unwrap();
+        let sketch = &state.sketch(sid).unwrap().sketch;
+        let Some(CurveKind::Line { a, b }) = sketch.curves.last().map(|c| c.kind.clone()) else { panic!("{rectangle}: no new line") };
+        let side = |x: f64| {
+            (0..sketch.curves.len())
+                .find(|&c| matches!(sketch.shape(c), Some(Shape::Line { a, b }) if a.x == x && b.x == x))
+                .unwrap_or_else(|| panic!("{rectangle}: no side at x {x}"))
+        };
+        let (left, right) = (side(-20.0), side(20.0));
+        let held = |p: usize, c: usize| {
+            sketch.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::PointOnCurve { p: q, c: on } if q == p && on == c))
+        };
+        let kinds = || sketch.constraints.iter().map(|k| &k.kind).collect::<Vec<_>>();
+        assert!(held(a, left), "{rectangle}: the line's start is not held on the left side: {:?}", kinds());
+        assert!(held(b, right), "{rectangle}: the line's end is not held on the right side: {:?}", kinds());
+        // The start is on the side, not merely near it: its x is the side's own. Its height is
+        // where the pointer was, and a click comes from an f32 screen position, so it is a hair
+        // off it (the same reason the test above measures an on-curve click in 1e-5).
+        let start = sketch.point(a).unwrap();
+        assert!((start.x + 20.0).abs() < 1e-6 && (start.y - 6.0).abs() < 1e-5, "{rectangle}: the line's start is at {start:?}");
+    }
+}
+
 /// The Line tool's first click also starts on projected geometry and in construction mode, as its
 /// last click does: a projected origin axis or plane (#11598), the projected edges of the face a
 /// sketch sits on (#12382), and a construction line on a rectangle's edge (#12228). Reported as one

@@ -1171,6 +1171,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `design_sub_tab_render` (default true: Render and Animate open as views of their design; false: they replace the current view)
 - `design_sub_tab_sheets` (default true: a drawing sheet opens as a view of its design; false: it replaces the current view)
 - `design_views_as_tabs` (default false: each design keeps one tab, with a view switcher menu while it has more than one view; true: a design's views are tabs inside its tab)
+- `designs_folder` (string, default empty: Save and Save As open in the folder last used; otherwise the folder they open in for a design that has never been saved. Save As for a saved design still opens beside it. Desktop app only; [default folders](book/src/guide/files.md#default-folders), #5522)
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dimension_colour` (`null` (default) or `[r, g, b]` numbers 0…255: the colour a sketch dimension draws its lines, arrows and value in; null uses the theme's dimension colours. Selection, hover and conflicts keep their own colours, #14121)
 - `dimension_rim` (default true: dimension lines and arrows, and fully constrained sketch lines, are drawn over a rim in the theme's halo colour so they read on a lit face in the Dark theme; false draws them bare, #17575)
@@ -1180,6 +1181,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `dimension_text_scale` (default 1, 0.5…2.5: how far a sketch dimension's text is scaled; it applies in the open sketch and to Show Dimensions, #14121)
 - `escape_twice_finishes_sketch` (default true: in a sketch, two quick presses of Esc (0.4 s apart or less) with no tool or dialog left to cancel finish it, as before; false: Esc only cancels the tool, dialog or selection and the sketch stays open until Finish Sketch, #12069)
 - `export_name` (string, default empty: each export offers the design's name, or a mesh its body's; otherwise the name File › Export and Save As Mesh offer, with `{design}`, `{body}` (the exported body's name) and the design properties (`{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}`) replaced; [export file names](book/src/guide/files.md#export-file-names))
+- `exports_folder` (string, default empty: export dialogs open in the folder last used; otherwise the folder File › Export, Save As Mesh and other saved files open in, until another folder is chosen in one of them. Desktop app only; [default folders](book/src/guide/files.md#default-folders), #5522)
 - `extrude_arrow_face_stops` (default true: dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it, takes their exact distance and outlines them, #2398; false: the drag moves in round steps only, as before)
 - `extrude_auto_to_object` (default true: in the Extrude dialog, with a profile picked, a face, vertex or parallel plane picked off its plane switches the extent to To Object, unless the Profiles box was clicked into; it applies to Extrude dialogs opened afterwards)
 - `extrude_custom_distance` (string, default `10 mm`: the length a new Extrude starts at when `extrude_start` is `custom`; any length expression, and one that doesn't read as a length gives the fixed 10)
@@ -1241,6 +1243,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `perspective_fov` (Perspective view's vertical field of view in radians, 0.2618…1.5708 (15°…90°), default 0.6; when it changes, the camera's distance scales so the view keeps its size)
 - `placement_handles` (default false: handles on the preview of a Rest, Boss, Snap Fit, Box, Cylinder, Cone, Sphere, Torus or Coil that move it across the model and turn it where it can turn)
 - `plugin_grants` (default `{}`): approved command groups and named folder grants by plugin id, at most 256 ids, four groups and 32 folders each; `plugin.install` validates and stores its optional `approve` object, and `plugin.remove` and `plugin.revoke` delete the record. The app also keeps the records in the plugins folder's grant store, shared with the command line and headless MCP when they run with `--keep-plugin-approvals` ([Headless use](plugins.md#headless-use)). Approval folders use `{name, path, read, write}`; stored folder grants use `folder` for the local path. Omitting `approve` grants nothing, including on replacement; explicit approvals replace the set, dropping stale grants. Package permissions still limit every run. Stored grants and removal survive closing or resetting Preferences. `dry_run: true` validates and describes the package without writing files or grants.
+- `preview_reselect_modifier` (`primary_at_least` (default: Command on macOS or Control elsewhere, with extra modifiers allowed), `control` (physical Control alone), `primary` (Command on macOS or Control elsewhere, alone), `alt`, `shift`, or `disabled`: temporarily hide the feature preview for geometry reselect; see Preview Reselect Modifier below)
 - `print_face_highlight` (0…1, default 0.2: how strongly a print face is tinted and outlined in the view, #8429; 0 draws no highlight)
 - `quick_measure` (default false: the selection's length, area or distance in the view's bottom right corner, the rect `measure:quick`; #7000)
 - `region_pick_takes_holes` (default false: a click inside a closed profile for the Entities of Sketch Transform, Move/Copy, Scale, Mirror and the sketch patterns picks the curves of its outline, and a shape inside it is picked by a click inside that shape, #14496; true also picks the curves of its holes, as before)
@@ -1390,6 +1393,24 @@ Pan and orbit take `delta: [dx,dy]` in screen points (each within ±10000); pan 
 viewport size. Zoom takes `factor` (0.05..20, below 1 zooms in) and an optional world-space
 `anchor`. The returned `camera` is applied immediately by the UI, without animation,
 document edits, undo steps or a success-log entry per movement.
+
+### Preview Reselect Modifier
+
+Preferences > Keyboard Shortcuts > Modifier Keys controls **Hide preview for reselect**.
+The default keeps the old platform-primary behaviour: Command on macOS or Control elsewhere
+hides the preview even when extra modifiers are held. The modifier temporarily hides an active
+feature preview so obscured geometry can be selected; it does not suppress the saved feature.
+Manipulator drags prevent rollback for every choice.
+
+`ui.prefs {"preview_reselect_modifier":"primary_at_least"}` selects the default, labelled
+**Cmd + modifiers** or **Ctrl + modifiers**. It retains the old interaction with macOS
+screenshot chords. To avoid that interaction, select `control` (physical Control alone),
+`primary` (Command on macOS or Control elsewhere, alone), `alt` (Option on macOS), `shift`,
+or `disabled`. These opt-in key choices require an exact match: extra modifiers, including
+physical Control with Command on macOS, prevent rollback.
+
+The setting follows Apply/OK/Cancel, the per-row Reset button and Restore page defaults, and
+is included in shortcut exports. Older settings without it retain `primary_at_least`.
 
 ## MCP
 

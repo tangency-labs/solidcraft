@@ -132,6 +132,7 @@ pub use blend::HoleEdge;
 pub use blend::Room;
 pub use blend::SetBack;
 pub use blend::Turn;
+pub use body::backward_sheet_faces;
 pub use body::make_box;
 pub use body::make_cone;
 pub use body::make_cylinder;

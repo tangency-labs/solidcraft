@@ -6469,6 +6469,55 @@ mod tests {
         assert_eq!(h.app.preferences.stand_up_unknown, StandUpUnknown::Note);
     }
 
+    /// #5522: Browse… fills a folder setting with the folder chosen, starting in the one it
+    /// names; Clear empties it; Defaults empties both; a host without folders shows neither.
+    #[test]
+    fn design_folders_browse_clear_defaults_and_a_host_without_folders() {
+        let started = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let seen = started.clone();
+        h.app.services.pick_folder = Some(Box::new(move |current: &str| {
+            seen.borrow_mut().push(current.to_string());
+            Box::pin(async { Some("/home/sam/Picked".to_string()) })
+        }));
+        h.call("ui.prefs", json!({"language":"en","open":"Design"}));
+        assert_eq!((h.app.preferences.designs_folder.as_str(), h.app.preferences.exports_folder.as_str()), ("", ""));
+
+        h.app.prefs_window.shell.filter = "Designs folder".into();
+        h.frames(5);
+        super::reveal_preference(&mut h, "prefs:designs_folder:browse");
+        h.step(&json!({"click":{"handle":"prefs:designs_folder:browse"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.preferences.designs_folder, "/home/sam/Picked");
+        assert_eq!(started.borrow().as_slice(), [""], "an empty setting lets the system choose where Browse… starts");
+        super::reveal_preference(&mut h, "prefs:designs_folder:clear");
+        h.step(&json!({"click":{"handle":"prefs:designs_folder:clear"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.preferences.designs_folder, "");
+
+        h.app.preferences.exports_folder = "/home/sam/Prints".into();
+        h.app.prefs_window.shell.filter = "Exports folder".into();
+        h.frames(5);
+        super::reveal_preference(&mut h, "prefs:exports_folder:browse");
+        h.step(&json!({"click":{"handle":"prefs:exports_folder:browse"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.preferences.exports_folder, "/home/sam/Picked");
+        assert_eq!(started.borrow().last().map(String::as_str), Some("/home/sam/Prints"), "Browse… starts in the folder set");
+
+        h.call("ui.prefs", json!({"designs_folder":"/home/sam/Designs"}));
+        assert_eq!(h.app.preferences.designs_folder, "/home/sam/Designs", "scripts set it by name");
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert_eq!((h.app.preferences.designs_folder.as_str(), h.app.preferences.exports_folder.as_str()), ("", ""));
+
+        // The web app has no folders: no rows to show.
+        h.app.services.pick_folder = None;
+        h.app.prefs_window.shell.filter = "folder".into();
+        h.frames(5);
+        assert!(crate::scenario::rect_of("prefs:designs_folder").is_none() && crate::scenario::rect_of("prefs:exports_folder:browse").is_none());
+        h.call("ui.prefs", json!({"button":"cancel"}));
+    }
+
     #[test]
     fn tools_ghost_and_pointer_tiles_edit_only_their_state_and_preserve_transactions() {
         for theme in ["light", "dark"] {
@@ -10551,7 +10600,7 @@ mod tests {
         h.call("ui.resize", json!({"width":2400,"height":1000}));
         for (lang, want) in [
             ("en", ["Model", "Surface", "Mesh", "Form", "Sheet Metal", "Render"]),
-            ("de", ["Modell", "Fläche", "Mesh", "Form", "Blech", "Rendern"]),
+            ("de", ["Modell", "Fläche", "Netz", "Form", "Blech", "Rendern"]),
             ("fr", ["Modèle", "Surface", "Maillage", "Forme", "Tôlerie", "Rendu"]),
         ] {
             h.app.preferences.language = lang.into();
@@ -11601,6 +11650,30 @@ mod tests {
         assert!(!app.preferences.selection_shift_add_only, "the merged Sketch & selection page resets both sets of modifiers");
         control(&mut app, &json!({"button": "cancel"})).unwrap();
         assert_eq!(app.preferences.suppress_sketch_snap, ModifierCombo::CTRL);
+    }
+
+    #[test]
+    fn preview_modifier_persists_and_follows_shortcut_dialog_buttons() {
+        use crate::tool_modifiers::PreviewModifier;
+        let old: Prefs = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(old.preview_reselect_modifier, PreviewModifier::PrimaryAtLeast);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        for (value, binding) in [("control", PreviewModifier::Control), ("alt", PreviewModifier::Alt), ("disabled", PreviewModifier::Disabled)] {
+            control(&mut app, &json!({"open":"Keyboard Shortcuts", "preview_reselect_modifier":value})).unwrap();
+            control(&mut app, &json!({"button":"apply"})).unwrap();
+            let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+            restored.load_prefs(&app.prefs());
+            assert_eq!(restored.preferences.preview_reselect_modifier, binding);
+            control(&mut app, &json!({"preview_reselect_modifier":"shift"})).unwrap();
+            control(&mut app, &json!({"button":"cancel"})).unwrap();
+            assert_eq!(app.preferences.preview_reselect_modifier, binding);
+            control(&mut app, &json!({"open":"Keyboard Shortcuts", "button":"defaults"})).unwrap();
+            assert_eq!(app.preferences.preview_reselect_modifier, PreviewModifier::PrimaryAtLeast);
+            control(&mut app, &json!({"button":"cancel"})).unwrap();
+            assert_eq!(app.preferences.preview_reselect_modifier, binding);
+        }
+        control(&mut app, &json!({"open":"Keyboard Shortcuts", "preview_reselect_modifier":"primary", "button":"ok"})).unwrap();
+        assert_eq!(app.preferences.preview_reselect_modifier, PreviewModifier::Primary);
     }
 
     #[test]
