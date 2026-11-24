@@ -1834,12 +1834,13 @@ impl ModelState {
     }
 
     /// Point `id` of sketch `sketch` on the copy of its part at `path` ([`SketchCopy`]), in the
-    /// world, and the sketch plane's normal there.
+    /// world, and the sketch plane's normal there. A copy's delta is rigid (placements are), so
+    /// the moved normal is still a unit vector.
     pub fn placed_sketch_point(&self, sketch: u64, path: &[u64], id: &str) -> Option<(Vec3, Vec3)> {
         let ss = self.sketch(sketch)?;
         let copy = self.sketch_copies.get(&sketch)?.iter().find(|c| c.path == path)?;
         let at = ss.plane.to_world(ss.sketch.point(ss.sketch.resolve_point(id)?)?);
-        Some((crate::apply_point(&copy.delta, at), crate::apply_vector(&copy.delta, ss.plane.normal()).normalized()?))
+        Some((crate::apply_point(&copy.delta, at), crate::apply_vector(&copy.delta, ss.plane.normal())))
     }
 }
 
