@@ -16,8 +16,10 @@
 //! | the named causes, from [`QueryFailure::BoundOverflows`] on | the status of the phrase each replaced (`comparison_status`), or the site's through `with_status` |
 //!
 //! [`QueryFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
-//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
-//! not yet converted (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
+//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes
+//! ([`QueryFailure::Failed`], [`QueryFailure::Missing`], [`QueryFailure::InvalidValue`]) have
+//! no library sites left, and `the_query_phrase_cause_sites_only_shrink` keeps it so (the
+//! conversion guide: `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! Deviations: not upstream. A failure names what went wrong (a named cause, or a phrase
 //! where a site is not yet converted); the failure's `operation` path says which routine.
@@ -38,6 +40,10 @@ pub enum QueryFailure {
     /// given is finite: the inputs' size, or how far apart they are, reaches past it. Class
     /// `failed`.
     BoundOverflows,
+    /// The classification curve's intersection with the face's trim boundary failed (its
+    /// error is the cause). Class `failed`; whether it is a defect or a refusal is its
+    /// cause's ([`crate::SolidError::is_defect`] follows the chain).
+    BoundaryNotIntersected,
     /// A bounding box asked of the edge's curve could not be found (the first box's error is
     /// the cause). Class `failed`; whether it is a defect or a refusal is its cause's
     /// ([`crate::SolidError::is_defect`] follows the chain).
@@ -67,6 +73,8 @@ pub enum QueryFailure {
     EdgeuseOrientationUnset,
     /// An edge use of the caller's body has no edge. [`ErrorKind::InvalidInput`].
     EdgeuseWithoutEdge,
+    /// A face of the caller's body has no (upward) face use. [`ErrorKind::InvalidInput`].
+    FaceWithoutFaceuse,
     /// The face has no loops: no upward face use, or none with a loop use. Class `failed`.
     FaceWithoutLoops,
     /// A face of the caller's body has no surface. [`ErrorKind::InvalidInput`].
@@ -81,6 +89,9 @@ pub enum QueryFailure {
     /// `SM_ERR_INVALID_INPUT` as a status here, so its kind is
     /// [`ErrorKind::InvalidInput`].
     InvalidValue(&'static str),
+    /// A loop use of the caller's body lists a vertex use slot that holds none.
+    /// [`ErrorKind::InvalidInput`].
+    LoopuseWithoutVertexuse,
     /// Something the query needs is missing, as the phrase says (for example "the edge's
     /// curve").
     Missing(&'static str),
@@ -95,6 +106,9 @@ pub enum QueryFailure {
     NoFaceAtPoint,
     /// A drop of a point onto a curve or a surface found no foot point. Class `failed`.
     NoFoot,
+    /// No loop of the face classifies the point (a loop that crosses the face's seam does
+    /// not). The failure is at the face. Class `failed`.
+    NoLoopClassifies,
     /// The classification curve's touch list holds no entry to start the loop walk from:
     /// no touch, or in a cyclic walk no exit followed by an entry. Class `failed`.
     NoLoopTouches,
@@ -110,6 +124,10 @@ pub enum QueryFailure {
     /// No tessellation driver was given where the test needs one.
     /// [`ErrorKind::InvalidInput`].
     NoTessDriver,
+    /// The face's surface cache is not a trimmed one: its trim curves could not be cached (the
+    /// trimmed build's error is not kept by the cache lease, so there is no cause to chain).
+    /// Status `SM_ERR_NULL_POINTER`, class `missing`.
+    NoTrimmedCache,
     /// The cache's poly B-rep has no face (the caller's poly B-rep: phase 1 gives it one).
     /// [`ErrorKind::InvalidInput`].
     PolyBrepWithoutFace,
@@ -160,6 +178,8 @@ pub enum QueryFailure {
     /// line's one error is ends that coincide, the caller's points). Status
     /// `SM_ERR_NULL_POINTER`, [`ErrorKind::InvalidInput`].
     UvLineNotMade,
+    /// A vertex use of the caller's body has no vertex. [`ErrorKind::InvalidInput`].
+    VertexuseWithoutVertex,
     /// A vector the query unitizes or measures an angle with has zero length, so it has no
     /// direction. Upstream returns `SM_ERR_INVALID_INPUT` as a status here, so its kind is
     /// [`ErrorKind::InvalidInput`].
@@ -171,6 +191,7 @@ impl QueryFailure {
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
             Self::BoundOverflows
+            | Self::BoundaryNotIntersected
             | Self::BoundingBoxNotFound
             | Self::BrepWithoutEdges
             | Self::BrepWithoutFaces
@@ -186,6 +207,7 @@ impl QueryFailure {
             | Self::NoEdgeAtPoint
             | Self::NoFaceAtPoint
             | Self::NoFoot
+            | Self::NoLoopClassifies
             | Self::NoLoopTouches
             | Self::NoPatchInBox
             | Self::NoStationDropped
@@ -202,14 +224,18 @@ impl QueryFailure {
             | Self::TangentAlongEdge
             | Self::UnsupportedObjectKind => SM_ERR,
             Self::EdgeWithoutCurve
+            | Self::FaceWithoutFaceuse
             | Self::FaceWithoutSurface
+            | Self::LoopuseWithoutVertexuse
             | Self::Missing(_)
             | Self::NoEdgeGiven
             | Self::NoPolyBrep
             | Self::NoTessDriver
+            | Self::NoTrimmedCache
             | Self::PolyBrepWithoutFace
             | Self::PolyEdgeWithoutVertex
-            | Self::UvLineNotMade => SM_ERR_NULL_POINTER,
+            | Self::UvLineNotMade
+            | Self::VertexuseWithoutVertex => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) | Self::UndefinedScale | Self::ZeroLengthVector => {
                 SM_ERR_INVALID_INPUT
             }
@@ -229,8 +255,10 @@ impl QueryFailure {
             Self::EdgeWithoutCurve
             | Self::EdgeuseOrientationUnset
             | Self::EdgeuseWithoutEdge
+            | Self::FaceWithoutFaceuse
             | Self::FaceWithoutSurface
             | Self::InvalidReach
+            | Self::LoopuseWithoutVertexuse
             | Self::NoEdgeGiven
             | Self::NoPatchInBox
             | Self::NoPolyBrep
@@ -243,7 +271,8 @@ impl QueryFailure {
             | Self::PolyLoopNotClosed
             | Self::PolyRadialRingNotClosed
             | Self::UndefinedScale
-            | Self::UvLineNotMade => ErrorKind::InvalidInput,
+            | Self::UvLineNotMade
+            | Self::VertexuseWithoutVertex => ErrorKind::InvalidInput,
             Self::SurfaceWithoutNurbs | Self::UnsupportedObjectKind => ErrorKind::Unsupported,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
@@ -254,6 +283,9 @@ impl core::fmt::Display for QueryFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::BoundOverflows => f.write_str("the bound overflows the floating range"),
+            Self::BoundaryNotIntersected => f.write_str(
+                "the classification curve's intersection with the face's boundary failed",
+            ),
             Self::BoundingBoxNotFound => f.write_str("the curve's bounding box could not be found"),
             Self::BrepWithoutEdges => f.write_str("the B-rep has no edges"),
             Self::BrepWithoutFaces => f.write_str("the B-rep has no faces"),
@@ -267,16 +299,21 @@ impl core::fmt::Display for QueryFailure {
                 f.write_str("the edge use's orientation is neither same nor opposite")
             }
             Self::EdgeuseWithoutEdge => f.write_str("the edge use has no edge"),
+            Self::FaceWithoutFaceuse => f.write_str("the face has no face use"),
             Self::FaceWithoutLoops => f.write_str("the face has no loops"),
             Self::FaceWithoutSurface => f.write_str("the face has no surface"),
             Self::Failed(what) | Self::InvalidValue(what) => f.write_str(what),
             Self::InvalidReach => f.write_str("the reach must be finite and at least zero"),
+            Self::LoopuseWithoutVertexuse => f.write_str("a loop use's vertex use is missing"),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::NoClosestPoint => f.write_str("no closest point was found"),
             Self::NoEdgeAtPoint => f.write_str("no edge is at the point"),
             Self::NoEdgeGiven => f.write_str("no edge was given"),
             Self::NoFaceAtPoint => f.write_str("no face is at the point"),
             Self::NoFoot => f.write_str("the drop found no foot point"),
+            Self::NoLoopClassifies => {
+                f.write_str("the point is in no loop of the face (a loop crosses its seam)")
+            }
             Self::NoLoopTouches => {
                 f.write_str("the touch-direction list is empty or its index is unset")
             }
@@ -284,6 +321,7 @@ impl core::fmt::Display for QueryFailure {
             Self::NoPolyBrep => f.write_str("the surface cache has no poly B-rep"),
             Self::NoStationDropped => f.write_str("no station dropped onto the other"),
             Self::NoTessDriver => f.write_str("no tessellation driver was given"),
+            Self::NoTrimmedCache => f.write_str("the face's surface cache has no trim curves"),
             Self::PolyBrepWithoutFace => f.write_str("the poly B-rep has no face"),
             Self::PolyEdgeNotAtVertex => f.write_str("the poly edge does not start at the vertex"),
             Self::PolyEdgeNotContinuing => {
@@ -310,6 +348,7 @@ impl core::fmt::Display for QueryFailure {
                 f.write_str("the solution's object is not a vertex, curve, edge, surface or face")
             }
             Self::UvLineNotMade => f.write_str("the UV line could not be made"),
+            Self::VertexuseWithoutVertex => f.write_str("the vertex use has no vertex"),
             Self::ZeroLengthVector => f.write_str("a vector of zero length has no direction"),
         }
     }
@@ -320,21 +359,6 @@ impl crate::SolidError {
     #[must_use]
     pub(crate) fn query(operation: &'static str, failure: QueryFailure) -> Self {
         Failure::new(operation, failure).into_error()
-    }
-
-    /// [`crate::SolidError::Failed`] for a query that could not continue, as the phrase
-    /// says, with status [`SM_ERR`] (upstream `return SE(SM_ERR)`).
-    #[must_use]
-    pub(crate) fn query_failed(operation: &'static str, what: &'static str) -> Self {
-        Self::query(operation, QueryFailure::Failed(what))
-    }
-
-    /// [`crate::SolidError::Failed`] for something a query needs that is not there, as the
-    /// phrase says, with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)` on a `NULL`
-    /// pointer).
-    #[must_use]
-    pub(crate) fn query_missing(operation: &'static str, what: &'static str) -> Self {
-        Self::query(operation, QueryFailure::Missing(what))
     }
 
     /// The query failure behind this error, for a [`crate::SolidError::Failed`] with a
@@ -385,11 +409,12 @@ pub(super) mod tests {
             assert_eq!(typed.query_failure(), Some(&failure));
         }
         assert_eq!(
-            SolidError::query_missing("query::op", "the edge's curve").to_string(),
+            SolidError::query("query::op", QueryFailure::Missing("the edge's curve")).to_string(),
             "query::op: the edge's curve is missing"
         );
         assert_eq!(
-            SolidError::query_failed("query::op", "the loop does not close").to_string(),
+            SolidError::query("query::op", QueryFailure::Failed("the loop does not close"))
+                .to_string(),
             "query::op: the loop does not close"
         );
         assert_eq!(
@@ -437,6 +462,20 @@ pub(super) mod tests {
             (F::SegmentOutsideTree, SM_ERR, K::Failed),
             (F::NoTessDriver, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::PolyBrepWithoutFace, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::FaceWithoutFaceuse, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (
+                F::LoopuseWithoutVertexuse,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                F::VertexuseWithoutVertex,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (F::BoundaryNotIntersected, SM_ERR, K::Failed),
+            (F::NoLoopClassifies, SM_ERR, K::Failed),
+            (F::NoTrimmedCache, SM_ERR_NULL_POINTER, K::Missing),
             (F::UndefinedScale, SM_ERR_INVALID_INPUT, K::InvalidInput),
             (F::PolyEdgeNotContinuing, SM_ERR, K::InvalidInput),
             (F::PolyLoopEmpty, SM_ERR, K::InvalidInput),
@@ -518,17 +557,11 @@ pub(super) mod tests {
                 Builder::Variant("QueryFailure", "Failed"),
                 Builder::Variant("QueryFailure", "Missing"),
                 Builder::Variant("QueryFailure", "InvalidValue"),
-                Builder::Method("query_failed", Some(1)),
-                Builder::Method("query_missing", Some(1)),
-                Builder::Method("query_invalid_value", Some(1)),
             ],
             wrappers: Wrappers::Phrase,
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/query/brep/ray.rs", 2),
-            ("solidcore/src/query/brep/ray/live.rs", 4),
-            ("solidcore/src/query/face/p2.rs", 19),
         ];
         assert_pinned("query phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }

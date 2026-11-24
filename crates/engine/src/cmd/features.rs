@@ -1599,7 +1599,9 @@ fn body_reachable(s: &Session, body_name: &str, path: &[u64]) -> Result<()> {
         if c == s.active_component || c == 0 {
             break;
         }
-        if s.doc.links.contains_key(&c) {
+        // STEP links remain editable import bases: downstream features rebuild when their
+        // source updates. Linked designs keep their own editable history in the source file.
+        if s.doc.links.get(&c).is_some_and(|link| link.step_names.is_none()) {
             return Err(EngineError::Other(format!(
                 "`{}` is in {}, which is linked to a design file: open that design to change it, or break the link first",
                 body.name,
@@ -4807,7 +4809,8 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
             ends.push(*p);
         }
     }
-    ss.sketch.points.iter().enumerate().filter(|(i, p)| p.id != "origin" && !ends.contains(i)).map(|(_, p)| p.id.clone()).collect()
+    // A point marked construction (#18448) is reference geometry too.
+    ss.sketch.points.iter().enumerate().filter(|(i, p)| p.id != "origin" && !p.construction && !ends.contains(i)).map(|(_, p)| p.id.clone()).collect()
 }
 
 fn face_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
