@@ -340,6 +340,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
             PointDef::Center { .. } => "point_center",
             PointDef::EdgeAndPlane { .. } => "point_edge_plane",
             PointDef::AlongPath { .. } => "point_along_path",
+            PointDef::Average { .. } => "c_midpoint",
         },
         FeatureKind::Hole { .. } => "hole",
         FeatureKind::Loft { .. } => "loft",
@@ -360,8 +361,10 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::BoundingSolid { .. } => "bounding_solid",
         FeatureKind::Pipe { .. } => "pipe",
         FeatureKind::FrameEndCap { .. } => "end_cap",
+        FeatureKind::FrameGusset { .. } => "gusset",
         FeatureKind::FrameMember { .. } => "frame_member",
         FeatureKind::FrameMemberTurn { .. } => "rotate_member",
+        FeatureKind::FrameTrim { .. } => "frame_trim",
         FeatureKind::FramePlate { .. } => "frame_plate",
         FeatureKind::Emboss { .. } => "emboss",
         FeatureKind::ReplaceFace { .. } => "replace_face",
@@ -1981,6 +1984,7 @@ mod tests {
             ("center", PointDef::Center { of: point() }),
             ("edge_plane", PointDef::EdgeAndPlane { edge: point(), plane: point() }),
             ("along_path", PointDef::AlongPath { path: point(), t: "0.5".into() }),
+            ("average", PointDef::Average { points: vec![point(), point()] }),
         ] {
             cases.push((format!("construct.point.{id}"), FeatureKind::ConstructionPoint { def }));
         }
