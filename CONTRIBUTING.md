@@ -279,16 +279,19 @@ suite. Doc tests, reference tests and the Windows jobs run on `main` and nightly
 **CI shards the tests.** One job builds them into a cargo-nextest archive; two shards run on
 pull requests and four during full validation. Every test runs in its own process: don't rely
 on state left by another test.
-Pull requests skip a few heavy tests (one to twelve minutes each), which run in full validation
+Pull requests skip a few heavy tests (up to four minutes each on a runner), which run in full validation
 (the merge queue, nightly, manual runs and pushes to `main` not already tested by the queue).
-Check that validation after merging. They are listed in
+Check that validation after merging. `cargo xtask test` and `cargo xtask ci` skip them too;
+`SOLIDCRAFT_TEST_HEAVY=1` runs them locally. They are listed in
 `.config/nextest.toml` and the [testing page](docs/book/src/dev/testing.md):
 
 - `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness`,
+  `tests::a_round_whose_contact_line_misses_the_seam_it_joins_across_names_the_radius_that_fits`,
+  `cmd::sheet::tests::perforated_sheet_takes_a_thousand_round_holes`,
   `pattern_suppress_tests::enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen`,
   `pattern_suppress_tests::enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs`,
   `cmd::plastic::tests::enclosure_snap_fit_follows_resized_front_wall`, the `atomic_commands` contract tests
-- `solidcraft-kernel`: `tests::boolean_identity_on_tangent_primitives`, `tspline::tests::hostile_tsplines_never_panic`, and the `boolean_props` property tests
+- `solidcraft-kernel`: `tests::loft_through_sections_whose_match_is_past_the_skins_bound_builds`, and the `boolean_props` property tests
   (these run only in the nightly "Property tests" job: their inputs are random, so main skips them too)
 - `solidcraft-ui-egui` scenarios: `acceptance_sensor_enclosure`
 
