@@ -172,6 +172,25 @@ fn references(doc: &Document, snap: &Snap) -> Vec<Reference> {
         }
         Snap::Frame { .. } | Snap::Point { .. } => {}
     }
+    let x = match snap {
+        Snap::FaceCenter { x, .. } | Snap::CircleCenter { x, .. } | Snap::Plane { x, .. } | Snap::Axis { x, .. } => x.as_ref(),
+        _ => None,
+    };
+    use joints::AlignmentRef;
+    match x {
+        Some(XRef::Planar { planar_face: name, .. } | XRef::Reference { reference: AlignmentRef::Cylinder { name }, .. }) => {
+            out.push(Reference { role: ReferenceRole::X, to: Referent::Face(face_ref(doc, name)) });
+        }
+        Some(XRef::Reference { reference: AlignmentRef::Edge { name }, .. }) => {
+            out.push(Reference { role: ReferenceRole::X, to: Referent::Edge(edge_ref(doc, name)) });
+        }
+        Some(XRef::Reference { reference: AlignmentRef::CircleCenter(rim), .. }) => {
+            for name in [&rim.name, &rim.end] {
+                out.push(Reference { role: ReferenceRole::X, to: Referent::Face(face_ref(doc, name)) });
+            }
+        }
+        _ => {}
+    }
     out
 }
 

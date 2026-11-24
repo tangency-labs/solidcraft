@@ -352,7 +352,12 @@ fn shared_volume(s: &Session, doc: &Document, a: u64, b: u64, booleans: &mut usi
                 solidcraft_kernel::transform_matrix(&ba.body, *fa).map_err(|e| failed(&e))?,
                 solidcraft_kernel::transform_matrix(&bb.body, *fb).map_err(|e| failed(&e))?,
             );
-            if let Some(shared) = solidcraft_kernel::boolean(&pa, &pb, solidcraft_kernel::BoolOp::Intersect).map_err(|e| failed(&e))? {
+            // SMLib's check of the shared part runs here: a part it refuses is not measured.
+            let shared = solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || {
+                solidcraft_kernel::boolean(&pa, &pb, solidcraft_kernel::BoolOp::Intersect)
+            })
+            .0;
+            if let Some(shared) = shared.map_err(|e| failed(&e))? {
                 total += solidcraft_kernel::measure(&shared).map_err(|e| failed(&e))?.volume;
             }
         }

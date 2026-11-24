@@ -415,7 +415,13 @@ impl ContactGeometry {
                 bad("contact.sweep", format!("whether {} and {} pass into each other could not be decided ({e})", oa.1, ob.1))
             };
             let (pa, pb) = (self.placed_body(*a, &frames, &mut placed)?, self.placed_body(*b, &frames, &mut placed)?);
-            let Some(shared) = solidcraft_kernel::boolean(&pa, &pb, solidcraft_kernel::BoolOp::Intersect).map_err(|e| undecided(&e))? else {
+            // SMLib's check of the shared part runs here: a part it refuses leaves the pair undecided.
+            let Some(shared) = solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || {
+                solidcraft_kernel::boolean(&pa, &pb, solidcraft_kernel::BoolOp::Intersect)
+            })
+            .0
+            .map_err(|e| undecided(&e))?
+            else {
                 continue;
             };
             if solidcraft_kernel::measure_mass(&shared).map_err(|e| undecided(&e))?.volume > 0.0 {

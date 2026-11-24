@@ -197,7 +197,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("component.paste_from_design", "Paste from Another Design", foreign::paste_from_design).begins_edit().icon("paste").params(
         "component?: where it goes (default: the active one); component_path?: its placement (default: the active one, else its \
-         only one). Pastes what was copied in another design, at the same world coordinates: its bodies as imported bodies \
+         only one); placement?: `world` (default) or `origin`, where copied components go: at the same world coordinates, or \
+         with the first one's origin on the target's origin, the others kept where they are from it (bodies always keep \
+         their world coordinates). Pastes what was copied in another design: its bodies as imported bodies \
          (no history) in one Import feature, or its components as independent copies with their history, appearances, \
          joints and motion (as `component.paste_new`); the user parameters they use come along, renamed `w_2` when taken. \
          A component that uses what isn't in it (another body, sketch or parameter) is refused, saying what. Returns \
@@ -529,7 +531,7 @@ fn from_bodies(s: &mut Session, p: &Value) -> Result<Value> {
 fn edit_in_place(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.edit_in_place";
     let id = component(s, p, "component", cmd)?;
-    if !s.doc.links.contains_key(&id) {
+    if !s.doc.links.get(&id).is_some_and(|link| link.step_names.is_none()) {
         return Err(bad(cmd, "that component is not linked to a design"));
     }
     let path = match p.get("path") {
@@ -1289,6 +1291,16 @@ fn revert(s: &mut Session, p: &Value) -> Result<Value> {
 pub fn to_active_frame(s: &Session, kind: &mut FeatureKind) {
     // Commands whose picks `frames` maps are already in their frames.
     if s.active_component == 0 || crate::frames::mapped() {
+        return;
+    }
+    to_active_frame_geometry(s, kind);
+}
+
+/// The active component's frame from world coordinates, for a command whose picks `frames` maps
+/// but whose other geometry is still in the world: a sweep's path on a body's edges and the
+/// direction its profile follows.
+pub fn to_active_frame_geometry(s: &Session, kind: &mut FeatureKind) {
+    if s.active_component == 0 {
         return;
     }
     let m = s.active_component_frame();

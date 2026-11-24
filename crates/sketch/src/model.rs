@@ -114,6 +114,11 @@ pub struct SPoint {
     /// come to (`Document::apply_point_values` works them out before each solve).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exprs: Option<Box<PointExprs>>,
+    /// A point that only helps place or dimension other geometry, as a construction line does:
+    /// features that read a sketch's points (a Hole from the whole sketch) leave it out (#18448).
+    /// Not saved when false, so a design without one is written as it was.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub construction: bool,
 }
 
 /// The expressions of a point placed by parameters, over the design's parameters; a coordinate
@@ -874,7 +879,7 @@ impl Default for Sketch {
 impl Sketch {
     pub fn new() -> Self {
         Sketch {
-            points: vec![SPoint { id: "origin".into(), pos: Vec2::ZERO, fixed: true, link: None, exprs: None }],
+            points: vec![SPoint { id: "origin".into(), pos: Vec2::ZERO, fixed: true, link: None, exprs: None, construction: false }],
             curves: Vec::new(),
             constraints: Vec::new(),
             patterns: Vec::new(),
@@ -1019,7 +1024,7 @@ impl Sketch {
             return Err(SketchError::TooLarge);
         }
         let id = self.new_id(id, "p", taken)?;
-        self.points.push(SPoint { id, pos: p, fixed: false, link: None, exprs: None });
+        self.points.push(SPoint { id, pos: p, fixed: false, link: None, exprs: None, construction: false });
         Ok(self.points.len() - 1)
     }
 
@@ -1243,10 +1248,13 @@ impl Sketch {
             | Vertical { l }
             | Length { l, .. }
             | LineAngle { l, .. }
-            | Midpoint { l, .. }
             | Symmetric { l, .. }
             | PointLineDistance { l, .. }
             | LinearDiameter { l, .. } => need_line(l)?,
+            // The middle of a line is its ends' mean; the middle of an arc is halfway along it.
+            Midpoint { l, .. } if !matches!(self.curves.get(l).map(|c| &c.kind), Some(CurveKind::Line { .. } | CurveKind::Arc { .. })) => {
+                return Err(SketchError::WrongKind(name(l), "needs a line or an arc".into()));
+            }
             ArcLength { c, .. } | ArcSweep { c, .. } if !matches!(self.curves.get(c).map(|c| &c.kind), Some(CurveKind::Arc { .. })) => {
                 return Err(SketchError::WrongKind(name(c), "arc length needs an arc".into()));
             }
@@ -1334,12 +1342,12 @@ impl Sketch {
             _ => {}
         }
         if let Some(v) = k.value()
-            && (!v.is_finite() || v.abs() > MAX_COORD || (v < 0.0 && !k.is_angle()))
+            && (!v.is_finite() || v.abs() > MAX_COORD || (v < 0.0 && !k.is_angle() && !matches!(k, OffsetDistance { .. })))
         {
             return Err(SketchError::Invalid(format!("dimension value {v}")));
         }
         if let OffsetDistance { output, value, .. } = k
-            && (*value <= 1e-9 || output.len() > 512 || self.offset_distance(output).is_none())
+            && (value.abs() <= 1e-9 || output.len() > 512 || self.offset_distance(output).is_none())
         {
             return Err(SketchError::Invalid("offset dimension needs a nonzero distance and an existing association".into()));
         }
@@ -1465,6 +1473,21 @@ impl Sketch {
                 } else {
                     false
                 }
+            }
+            ConstraintKind::OffsetDistance { ref output, .. } => {
+                if !mag.is_finite() || mag <= 1e-9 || mag > MAX_COORD {
+                    return false;
+                }
+                let Some(constraint) =
+                    self.constraints.iter_mut().find(|c| matches!(&c.kind, ConstraintKind::OffsetDistance { output: id, .. } if id == output))
+                else {
+                    return false;
+                };
+                if let ConstraintKind::OffsetDistance { value, reverse, .. } = &mut constraint.kind {
+                    *reverse = !*reverse;
+                    *value = mag;
+                }
+                true
             }
             _ => false,
         }

@@ -1150,6 +1150,30 @@ fn an_ellipse_axis_end_is_no_corner_to_pick() {
     }
 }
 
+/// A corner where a conic or a control point spline meets a line is one the Fillet tool offers
+/// (#9178), and one the Chamfer tool does not: chamfers stay on lines. A fit point spline's
+/// corner is offered to neither (fillets do not take it yet).
+#[test]
+fn a_conic_or_spline_corner_is_offered_to_fillet_only() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[10,0]],"ids":["base"],"connect":false})).unwrap();
+    h.app.run("sketch.conic", json!({"start":"base.end","apex":[20,5],"end":[20,10],"rho":0.5})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,20],[10,20]],"ids":["top"],"connect":false})).unwrap();
+    h.app.run("sketch.spline.control_point", json!({"points":["top.end",[15,25],[20,24],[25,30]]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,40],[10,40]],"ids":["fit"],"connect":false})).unwrap();
+    h.app.run("sketch.spline.fit_point", json!({"points":["fit.end",[15,45],[20,44],[25,50]]})).unwrap();
+    let st = h.app.session.model.state();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    for corner in ["base.end", "top.end"] {
+        let pi = sk.resolve_point(corner).unwrap();
+        assert!(crate::sketch_tools::corner_curves(sk, pi, true).is_some(), "{corner} is a corner a fillet rounds");
+        assert_eq!(crate::sketch_tools::corner_curves(sk, pi, false), None, "{corner} is no corner a chamfer cuts");
+    }
+    let pi = sk.resolve_point("fit.end").unwrap();
+    assert_eq!(crate::sketch_tools::corner_curves(sk, pi, true), None, "a fit point spline corner is not offered");
+}
+
 /// A sketch on XY with a horizontal line `base` (y = 0, x 0 to 60) and a vertical line `side`
 /// (x = 50, y -10 to 40), both fixed, and the drawing tool `tool` clicked at each of `clicks`.
 /// Returns the sketch as the clicks left it.

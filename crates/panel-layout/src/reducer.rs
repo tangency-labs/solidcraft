@@ -309,6 +309,10 @@ impl LayoutService {
     pub fn registry(&self) -> &PanelRegistry {
         &self.registry
     }
+    /// Register a newly discovered panel kind without changing any placement.
+    pub fn register_panel(&mut self, spec: PanelSpec) -> PanelResult<()> {
+        self.registry.register(spec)
+    }
     pub fn layout(&self) -> &Layout {
         &self.layout
     }
