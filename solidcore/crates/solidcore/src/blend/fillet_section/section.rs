@@ -1670,11 +1670,18 @@ impl GnSectionFsg {
             // with a ball of a given radius or law (feet_check), a station that does not
             // solve from the solver's rails (Newton from within the tolerance of a regular
             // root converges) says the rails are not that ball's feet there (c596548)
-            let solved = solve_top(
-                k, faces, leader, s, seed, r, side, tr, solve_tol, n, None, false, gn_law,
-            );
-            let st = match solved {
-                Ok(st) => st,
+            let series = law_series(gn_law, s, tr.s(), false)?;
+            let opts = StationOptions {
+                law: series.as_ref(),
+                equal_setback: gn_law.and_then(GnLaw::equal_setback),
+                top: n,
+                sides: None,
+                before: false,
+            };
+            let solved =
+                gn_solve_station_with(k, faces, leader, s, seed, r, side, tr, solve_tol, opts);
+            let st = match solved.0 {
+                Ok((st, _)) => st,
                 // a cancel (#2136) is not a refused ball: it ends the operation
                 Err(e @ SolidError::Cancelled { .. }) => return Err(e),
                 Err(_) if feet_check => return Ok(None),

@@ -446,9 +446,10 @@ impl ProceduralBlend {
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] (`SM_ERR_INVALID_INPUT`, named) for an order out of
-    /// 1 to 4, n >= 2 with a law or an invalid thumbweight, sides other than +-1,
-    /// offsets or a bound not finite and positive, a circle's offsets that differ, and
-    /// supports nested deeper than [`BLEND_MAX_DEPTH`]; those of copying a support.
+    /// 0 to 4, inconsistent chamfer sizes or reference offsets, n >= 2 with a law or
+    /// an invalid thumbweight, sides other than +-1, offsets or a bound not finite
+    /// and positive, a circle's offsets that differ, and supports nested deeper than
+    /// [`BLEND_MAX_DEPTH`]; those of copying a support.
     pub fn create(
         k: &Kernel,
         net: &BSplineSurface,
@@ -462,9 +463,12 @@ impl ProceduralBlend {
                 "a section's order is 0 to 4",
             ));
         }
-        // the chord is a chamfer: its sizes, of a constant pair of offsets (#2486)
+        // The chord's sizes and reference wedge must agree with its offsets.
         let chamfer_held = match (&input.chamfer, order, input.law) {
-            (Some(c), 0, None) => c.holds(input.offsets),
+            (Some(c), 0, None) => {
+                c.validate()?;
+                c.holds(input.offsets)
+            }
             (None, 1..=MAX_ORDER, _) => true,
             _ => false,
         };
@@ -2173,6 +2177,35 @@ mod tests {
                 .at_every_station()
                 .is_err()
         );
+    }
+
+    #[test]
+    fn create_rechecks_the_size_of_a_stationwise_chamfer() {
+        let k = Kernel::default();
+        let wedge = 0.5 * crate::math::PI;
+        let local = ChamferDefinition::new(ChamferSize::Distances([0.2; 2]), wedge)
+            .unwrap()
+            .at_every_station()
+            .unwrap();
+        let blend = chord(&k, 0, local.offsets().unwrap(), Some(local)).unwrap();
+        for size in [
+            ChamferSize::Distances([0.2, 0.3]),
+            ChamferSize::Chord(0.2),
+            ChamferSize::DistanceAngle {
+                distance: 0.2,
+                angle: 0.25 * crate::math::PI,
+            },
+        ] {
+            let ordinary = ChamferDefinition::new(size, wedge).unwrap();
+            let offsets = ordinary.offsets().unwrap();
+            assert!(chord(&k, 0, offsets, Some(ordinary)).is_ok());
+            let mut changed = *blend.chamfer().unwrap();
+            changed.size = size;
+            assert!(matches!(
+                chord(&k, 0, offsets, Some(changed)),
+                Err(SolidError::InvalidInput { .. })
+            ));
+        }
     }
 
     #[test]

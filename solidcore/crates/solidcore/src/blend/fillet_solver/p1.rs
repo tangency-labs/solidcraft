@@ -737,6 +737,17 @@ impl FilletSolver {
         )
     }
 
+    /// Reject a Newton trial outside the equal-setback radius domain.
+    pub(crate) fn check_station_radius(&self, radius: f64, op: &'static str) -> Result<()> {
+        if self.station_setback().is_some() && !(radius.is_finite() && radius >= 0.0) {
+            return Err(SolidError::invalid_input(
+                op,
+                "the equal-setback radius must be finite and nonnegative",
+            ));
+        }
+        Ok(())
+    }
+
     /// `SmFilletSolver(crContext, dThisApproxTol3d, dThisAngTolRad,
     /// dTangencyTolerance)` without its fillet geometry: no edge uses, surfaces or
     /// executive. The constructor's `new SmFilletGeom(this)` is stored in the pseudo
@@ -3101,6 +3112,7 @@ impl<'a> FindClippedRadiusEfo<'a> {
     }
 
     fn set_offsets(&mut self, radius: f64) -> Result<()> {
+        self.solver.check_station_radius(radius, OP)?;
         let (i, o) = (self.surf_index, 1 - self.surf_index);
         let d = radius * self.orientation;
         let od = radius * self.other_orientation;

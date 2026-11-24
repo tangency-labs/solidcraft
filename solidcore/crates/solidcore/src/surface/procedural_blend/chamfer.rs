@@ -82,13 +82,25 @@ impl ChamferDefinition {
     /// `InvalidInput` for a size that is not finite and positive, a wedge outside
     /// `(0, pi)`, or an angle outside `(0, pi - wedge)`.
     pub fn new(size: ChamferSize, wedge: f64) -> Result<Self> {
+        let definition = Self {
+            size,
+            wedge,
+            stationwise: false,
+        };
+        definition.validate()?;
+        Ok(definition)
+    }
+
+    /// Check the public size and wedge against the kind of chamfer being stored.
+    pub(super) fn validate(&self) -> Result<()> {
+        let wedge = self.wedge;
         if !(wedge.is_finite() && wedge > 0.0 && wedge < PI) {
             return Err(SolidError::invalid_input(
                 OP,
                 "a chamfer's wedge angle is between 0 and pi",
             ));
         }
-        let sizes_ok = match size {
+        let sizes_ok = match self.size {
             ChamferSize::Distances([a, b]) => positive(a) && positive(b),
             ChamferSize::DistanceAngle { distance, angle } => {
                 positive(distance) && positive(angle) && angle + wedge < PI
@@ -101,26 +113,21 @@ impl ChamferDefinition {
                 "a chamfer's sizes are finite and positive, its angle less than pi less the wedge's",
             ));
         }
-        Ok(Self {
-            size,
-            wedge,
-            stationwise: false,
-        })
+        if self.stationwise && !matches!(self.size, ChamferSize::Distances([a, b]) if a == b) {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a local wedge needs equal positive setbacks",
+            ));
+        }
+        Ok(())
     }
 
     /// Hold the same setback in the tangent planes at every pair of support feet.
     /// The stored wedge describes the reference section for reporting the sizes.
-    pub(crate) fn at_every_station(self) -> Result<Self> {
-        match self.size {
-            ChamferSize::Distances([a, b]) if a == b && positive(a) => Ok(Self {
-                stationwise: true,
-                ..self
-            }),
-            _ => Err(SolidError::invalid_input(
-                OP,
-                "a local wedge needs equal positive setbacks",
-            )),
-        }
+    pub(crate) fn at_every_station(mut self) -> Result<Self> {
+        self.stationwise = true;
+        self.validate()?;
+        Ok(self)
     }
 
     /// The setback that fixes the rolling radius at each station, if specified.

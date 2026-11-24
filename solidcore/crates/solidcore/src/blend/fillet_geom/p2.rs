@@ -1054,6 +1054,7 @@ fn rail_rail_intersect(
 fn point_on_plane_solve(
     k: &Kernel,
     fs: &mut dyn FilletSolverOps,
+    target: Option<&mut Brep>,
     plane_orig: Point3,
     plane_normal: Vec3,
     domain1: &Extent2d,
@@ -1066,7 +1067,7 @@ fn point_on_plane_solve(
     let found = FilletSolverOps::point_on_plane_solve(
         fs,
         k,
-        None,
+        target,
         plane_orig,
         plane_normal,
         domain1,
@@ -1076,6 +1077,46 @@ fn point_on_plane_solve(
         &mut tsect,
     )?;
     Ok((found, tsect))
+}
+
+/// The two contact points in the order of the shared section's vertices. The
+/// continued plane is evaluated beyond the cliff rim, and a curved support keeps
+/// the same extension that its solver used.
+fn cliff_section_feet(
+    k: &Kernel,
+    fs: &FilletSolver,
+    tsect: &TsectPnt,
+    first: usize,
+) -> Result<[Point3; 2]> {
+    let foot = |side: SrfIndex| {
+        let offset = solver_surface(fs, side.index(), OP_JOIN)?;
+        let uv = tsect.uv_pos(side);
+        if let SurfaceKind::Plane(plane) = offset.base_surface().kind() {
+            return Ok(plane.evaluate_point(uv));
+        }
+        let support = offset.clone();
+        support.set_offset_distance(0.0);
+        support.evaluate_point(k, uv)
+    };
+    Ok([
+        foot(srf(first, OP_JOIN)?)?,
+        foot(other_srf(first, OP_JOIN)?)?,
+    ])
+}
+
+fn check_cliff_section(reference: [Point3; 2], current: [Point3; 2], tol: f64) -> Result<()> {
+    if !tol.is_finite()
+        || reference.into_iter().zip(current).any(|(a, b)| {
+            let gap = a.distance(b);
+            !gap.is_finite() || gap > tol
+        })
+    {
+        return Err(SolidError::blend(
+            OP_JOIN,
+            BlendFailure::NoRoom(crate::blend::fillet_executive::NoRoomReason::JoinOffsetsDiffer),
+        ));
+    }
+    Ok(())
 }
 
 /// `SmFilletGeom::RailEdgeuseIntersect(lRailIndex, pSideEU, dGuess, rbFound,
@@ -3478,6 +3519,7 @@ impl FilletBrep {
             let (found, t) = point_on_plane_solve(
                 k,
                 solvers.solver_ops_mut(s1)?,
+                None,
                 plane_orig,
                 plane_normal,
                 &domain1,
@@ -3566,7 +3608,8 @@ impl FilletBrep {
     /// `SM_ERR_NULL_POINTER` without corner, mate, faces, filleted vertex, solver, edge
     /// use, edge, curve, offset or base surface or rail-end vertex use; `SM_ERR` without a
     /// fillet geometry and, after setting `SM_FV_SOLVER_NOT_CONVERGE`, when a blend has
-    /// no ball in the plane; those of the evaluations and solves.
+    /// no ball in the plane; a stationwise cliff join whose contact points differ;
+    /// those of the evaluations and solves.
     pub fn calc_join_section(
         &mut self,
         k: &Kernel,
@@ -3647,10 +3690,15 @@ impl FilletBrep {
         // Not the fork's (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): whether
         // a blend of the join rolled a rail over a smooth far edge of its face
         let mut any_rolled = false;
+        let mut stationwise = false;
         for &g in &geoms {
-            any_rolled |= rolls_anywhere(self, solvers, g)?;
+            let fs = solvers.solver(self.geom_solver_id(g, OP)?)?;
+            any_rolled |= fs.rolled_faces.iter().any(Option::is_some);
+            stationwise |= fs.station_setback().is_some();
         }
-        let mut ended = false;
+        let check_cliff = at_cliff && stationwise && !any_rolled && geoms.len() == 2;
+        let mut cliff_section = None;
+        let mut ends = None;
         for (gg, &g) in geoms.iter().enumerate() {
             let sid = self.geom_solver_id(g, OP)?;
             let fs = solvers.solver(sid)?;
@@ -3810,6 +3858,8 @@ impl FilletBrep {
             let (found, tsect) = point_on_plane_solve(
                 k,
                 solvers.solver_ops_mut(sid)?,
+                // The constant-distance solver seeds from the other edge use.
+                (at_cliff && stationwise).then_some(&mut *target),
                 plane_orig,
                 plane_normal,
                 &domain1,
@@ -3818,8 +3868,10 @@ impl FilletBrep {
                 uv1,
                 &tsect,
             )?;
-            self.fillet_vertexuse_mut(vu)?.set_tsect_pnt(&tsect);
             if !found {
+                if !check_cliff {
+                    self.fillet_vertexuse_mut(vu)?.set_tsect_pnt(&tsect);
+                }
                 self.fillet_vertex_mut(v)?
                     .set_status(FilStatus::SolverNotConverge);
                 // SER_MSG: no ball of the blend lies in the shared section's plane
@@ -3828,6 +3880,35 @@ impl FilletBrep {
                     BlendFailure::JoinSectionNotConverged { blend: gg },
                 ));
             }
+            if check_cliff {
+                let fs = solvers.solver(sid)?;
+                let first = self.rail_index_of_vertexuse(g, Some(vu))?;
+                let feet = cliff_section_feet(k, fs, &tsect, first)?;
+                let tol = fs.approx_tol_3d.max(target.tolerance());
+                let rail_ends = [Some(vu), self.vu_at_rail_end(v, Some(g), Some(vu), None)?];
+                if let Some((reference_ends, reference_tsect, reference, reference_tol)) =
+                    cliff_section.take()
+                {
+                    check_cliff_section(reference, feet, reference_tol + tol)?;
+                    for (ends, point) in [(reference_ends, &reference_tsect), (rail_ends, &tsect)] {
+                        for end in ends.into_iter().flatten() {
+                            self.fillet_vertexuse_mut(end)?.set_tsect_pnt(point);
+                        }
+                    }
+                } else {
+                    let [p_first, p_other] = feet;
+                    ends = Some((
+                        tsect.uv_pos(srf(first, OP)?),
+                        p_first,
+                        tsect.uv_pos(other_srf(first, OP)?),
+                        p_other,
+                    ));
+                    cliff_section = Some((rail_ends, tsect, feet, tol));
+                }
+                continue;
+            }
+
+            self.fillet_vertexuse_mut(vu)?.set_tsect_pnt(&tsect);
             // a closed blend's other rail end here
             if let Some(other_vu) = self.vu_at_rail_end(v, Some(g), Some(vu), None)? {
                 self.fillet_vertexuse_mut(other_vu)?.set_tsect_pnt(&tsect);
@@ -3842,7 +3923,7 @@ impl FilletBrep {
             // beyond's
             let first = if !any_rolled {
                 (gg == 0).then_some(usize::from(eu1::face(target, eu)? != Some(first_face)))
-            } else if ended {
+            } else if ends.is_some() {
                 None
             } else {
                 let fs = solvers.solver(sid)?;
@@ -3873,12 +3954,13 @@ impl FilletBrep {
                 };
                 let p_first = foot_on_support(first_face, uv_first)?;
                 let p_other = foot_on_support(other_face, uv_other)?;
-                self.set_processed(v, uv_first, p_first)?;
-                self.set_processed(mate, uv_other, p_other)?;
-                ended = true;
+                ends = Some((uv_first, p_first, uv_other, p_other));
             }
         }
-        if any_rolled && !ended {
+        if let Some((uv_first, p_first, uv_other, p_other)) = ends {
+            self.set_processed(v, uv_first, p_first)?;
+            self.set_processed(mate, uv_other, p_other)?;
+        } else if any_rolled {
             // no blend of the join rolls on the two faces its shared section ends on
             return Err(SolidError::blend(
                 OP,
@@ -4012,6 +4094,7 @@ impl FilletBrep {
         let (found, tsect) = point_on_plane_solve(
             k,
             solvers.solver_ops_mut(si)?,
+            None,
             plane_orig,
             plane_normal,
             &domain1,
@@ -4733,6 +4816,110 @@ mod tests {
         domain.set_min_max_coords(0.0, 0.0, 360.0, 40.0).unwrap();
         cylinder.adjust_step_uv_domain(k, &domain).unwrap();
         Surface::from(cylinder)
+    }
+
+    #[test]
+    fn stationwise_cliff_section_requires_both_physical_feet_to_match() -> Result<()> {
+        use crate::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
+        use crate::blend::fillet_solver::p1::OffsetSurfaceSlot;
+        use crate::blend::fillet_standard_solver::p1::ConstantDistanceFs;
+        use crate::geom::vector2d::Vec2;
+        use crate::surface::offset_surface::SS_UNKNOWN;
+        use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
+
+        let k = Kernel::default();
+        let sharp = Point3::new(10.0, 0.0, 0.0);
+        // Both sides have a right wedge between z = 0 and the cylinder of
+        // radius 10. Its section in y = 0 has the exact feet (10 - d, 0, 0)
+        // and (10, 0, d), so the compatible chord is d sqrt(2).
+        let solve = |chord: f64, setback: Option<f64>, reversed: bool| -> Result<[Point3; 2]> {
+            let plane = Plane::new(
+                sharp + f64::from(u8::from(reversed)) * Vec3::Y,
+                Vec3::X,
+                Vec3::Y,
+                Vec2::new(1.0, 1.0),
+                &Extent2d::from_bounds(-2.0, -2.0, 2.0, 2.0),
+            );
+            let plane_uv = plane.project_point_to_uv_domain(sharp - 0.25 * Vec3::X);
+            let cylinder = seamed_cylinder(&k, -90.0);
+            let domain = cylinder.natural_uv_domain_with_nurb(&k)?;
+            let dropped = cylinder.drop_point::<NoObject>(
+                &k,
+                sharp + 0.25 * Vec3::Z,
+                &domain,
+                &DropPointOptions::default(),
+            )?;
+            assert!(dropped.success);
+            let mut sides = [
+                (Surface::from(plane), plane_uv, 1.0),
+                (cylinder, dropped.result_uv, -1.0),
+            ];
+            if reversed {
+                sides.reverse();
+            }
+            let [a, b] = &sides;
+            let (uv0, uv1) = (a.1, b.1);
+            let domain0 = a.0.natural_uv_domain_with_nurb(&k)?;
+            let domain1 = b.0.natural_uv_domain_with_nurb(&k)?;
+            let mut solver = FilletSolver::new(1e-7, 1e-6, 1e-6);
+            if let Some(d) = setback {
+                solver.chamfer = Some(
+                    ChamferDefinition::new(ChamferSize::Distances([d, d]), PI / 2.0)?
+                        .at_every_station()?,
+                );
+            }
+            for (rail, (surface, _, sign)) in sides.into_iter().enumerate() {
+                let id = rail as u32;
+                let offset = OffsetSurface::new(
+                    &k,
+                    sign * chord * std::f64::consts::FRAC_1_SQRT_2,
+                    surface,
+                    SurfaceId::Free(id),
+                    SS_UNKNOWN,
+                )?;
+                solver.orientations[rail] = sign;
+                solver.set_surface(
+                    rail,
+                    Some(OffsetSurfaceSlot {
+                        key: u64::from(id),
+                        surface: offset,
+                    }),
+                )?;
+            }
+            let mut fs = ConstantDistanceFs {
+                solver,
+                distance: chord,
+            };
+            let (found, point) = point_on_plane_solve(
+                &k,
+                &mut fs,
+                None,
+                sharp,
+                Vec3::Y,
+                &domain0,
+                &domain1,
+                uv0,
+                uv1,
+                &TsectPnt::new(),
+            )?;
+            assert!(found);
+            cliff_section_feet(&k, &fs.solver, &point, usize::from(reversed))
+        };
+        let reference = solve(0.4 * std::f64::consts::SQRT_2, Some(0.25), false)?;
+        let exact = [Point3::new(9.75, 0.0, 0.0), Point3::new(10.0, 0.0, 0.25)];
+        for (found, expected) in reference.into_iter().zip(exact) {
+            assert!(found.distance(expected) < 1e-7, "{found:?}");
+        }
+        let compatible = solve(0.25 * std::f64::consts::SQRT_2, None, true)?;
+        check_cliff_section(reference, compatible, 1e-7)?;
+
+        let too_wide = solve(0.5 * std::f64::consts::SQRT_2, None, true)?;
+        let refused = check_cliff_section(reference, too_wide, 1e-7).unwrap_err();
+        assert_eq!(refused.kind(), crate::error::ErrorKind::JoinOffsetsDiffer);
+        let [a, mut b] = compatible;
+        b.x = f64::NAN;
+        assert!(check_cliff_section(reference, [a, b], 1e-7).is_err());
+        Ok(())
     }
 
     /// The ends of a curve.
