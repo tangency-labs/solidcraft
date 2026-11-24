@@ -83,8 +83,9 @@
 //!   arrays are a function of the surface ([`Surface::continuities`]), which those
 //!   readers ask directly: they get no cache at all, so a read during a Boolean
 //!   operation builds no tree and makes no UV trim curves. No history of the surface's
-//!   caches is kept (the fast-drop face test's state bits still depend on whether the
-//!   face's cache was built: [`SurfaceSolveContext::surface_cache_without_get_tree`]). The rest of the cache (its UV domain, face
+//!   caches is kept (the fast-drop face test asks the face whether to test, not the
+//!   cache's build: [`SurfaceSolveContext::surface_cache_without_get_tree`]). The rest
+//!   of the cache (its UV domain, face
 //!   containment and modified-face state) is rebuilt as before. The debug cache
 //!   counters are not modelled. The owner of a face's surface is an
 //!   [`ObjectRef`] the surface cannot follow to the B-rep: a caller holding the face
@@ -134,7 +135,8 @@ use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
 use crate::curve::line::Line;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::a_object::{CacheId, ObjectCacheType};
 use crate::geom::assert_array::labels::FACE_TYPE;
 use crate::geom::extent1d::Extent1d;
@@ -347,9 +349,9 @@ pub fn evaluate_directional_derivs<S: SurfaceEvaluate + ?Sized>(
     const OP: &str = "surface::surface::p1::evaluate_directional_derivs";
     // check state
     if highest_deriv > 3 {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP,
-            "a derivative order above three was asked",
+            SurfaceFailure::DerivativeOrderTooHigh { max: 3 },
         ));
     }
 
@@ -994,9 +996,9 @@ pub fn validate_surface_cache(
         }
         // low work - use OldCache when its given
         ObjectCacheType::Surface => Ok(old),
-        _ => Err(SolidError::surface_failed(
+        _ => Err(SolidError::surface(
             OP_CACHE,
-            "the cache type has no surface cache",
+            SurfaceFailure::UnsupportedCacheKind,
         )),
     }
 }
@@ -1195,11 +1197,13 @@ pub trait SurfaceSolveContext<O: Copy + PartialEq> {
     /// This surface's cache as `smsurf_GetSurfaceCache` hands it out to a reader that
     /// does not call `GetTree` (the state bits `GlobalPointSolve`'s fast-drop face
     /// test reads). Upstream's factory defers the tree during a Boolean operation, and
-    /// the tree build may change those bits (it turns point testing off on a face
+    /// upstream's tree build changes those bits (it turns point testing off on a face
     /// without UV trim curves), so a context that keeps face caches answers the cache
-    /// without the deferred tree; by default the solve's cache. The bits then depend on
-    /// whether the face's cache was built before, as upstream's and as the live
-    /// readers' (`intersect::point_class`, `topology::vertexuse`) do.
+    /// without the deferred tree; by default the solve's cache. No build writes the
+    /// point test bit here: whether the test runs is asked of the face (its loop uses)
+    /// each time, so the answer does not depend on whether or how the face's cache was
+    /// built before (upstream's does), as for the live readers (`intersect::point_class`,
+    /// `topology::vertexuse`).
     ///
     /// Only those state bits are answered ([`SurfaceCacheState`]), read from a kept
     /// cache in place: the values the cache handed out would read.
@@ -2436,8 +2440,22 @@ impl Surface {
 
         // get or create SurfaceCache with Subdivision Tree containing Bounding boxes
         // (smsurf_GetSurfaceCache returns NULL when no cache can be made: NER)
-        let mut cache = ignored_surface_result(get_surface_cache::<()>(k, self, None))?
-            .ok_or_else(|| SolidError::surface_missing(OP_BOX, "the surface's cache"))?;
+        let mut cache = match get_surface_cache::<()>(k, self, None) {
+            Ok(cache) => cache,
+            Err(e)
+                if e.is_unported_or_cancelled()
+                    || matches!(e, SolidError::PreparationRequired { .. }) =>
+            {
+                return Err(e);
+            }
+            Err(e) => {
+                return Err(super::p7::chained(
+                    OP_BOX,
+                    SurfaceFailure::SurfaceCacheNotBuilt,
+                    e,
+                ))
+            }
+        };
         let top = cache
             .get_tree(k)?
             .top_node()
@@ -2962,10 +2980,14 @@ impl Surface {
             for (ii, curve) in curves_3d.iter_mut().enumerate() {
                 // SM_CAST_PTR(SmBSplineCurve, ..): NULL (then dereferenced) otherwise
                 if !matches!(curve.kind(), CurveKind::BSpline(_)) {
-                    return Err(SolidError::surface_missing(
+                    return Err(Failure::new(
                         OP,
-                        "the B-spline form of the 3D curve",
-                    ));
+                        SurfaceFailure::Defect {
+                            why: "a silhouette 3D curve is not a B-spline, but the tracer stores only B-splines (copied as B-splines or flushed from its B-spline fit)",
+                        },
+                    )
+                    .with_status(SM_ERR_NULL_POINTER)
+                    .into_error());
                 }
 
                 // To add color attribute for curve from color of surface: not modelled
@@ -3010,12 +3032,25 @@ impl Surface {
 
                     let uv_curve = curves_uv
                         .get_mut(ii)
-                        .ok_or_else(|| SolidError::surface_missing(OP, "the UV curve"))?;
+                        .ok_or_else(|| {
+                            Failure::new(
+                                OP,
+                                SurfaceFailure::Defect {
+                                    why: "a silhouette 3D curve has no UV curve, but the tracer stores its 3D and UV curves in pairs",
+                                },
+                            )
+                            .with_status(SM_ERR_NULL_POINTER)
+                            .into_error()
+                        })?;
                     if !matches!(uv_curve.kind(), CurveKind::BSpline(_)) {
-                        return Err(SolidError::surface_missing(
+                        return Err(Failure::new(
                             OP,
-                            "the B-spline form of the UV curve",
-                        ));
+                            SurfaceFailure::Defect {
+                                why: "a silhouette UV curve is not a B-spline, but the tracer stores only B-splines (copied as B-splines or flushed from its B-spline fit)",
+                            },
+                        )
+                        .with_status(SM_ERR_NULL_POINTER)
+                        .into_error());
                     }
                     let mut new_uv_bsc = uv_curve.clone();
                     // may snap sIvl by tol to existing knots
@@ -3795,9 +3830,11 @@ pub fn find_uv_curve_ivl_in_domain<O: SolutionObject>(
     }
 
     // error: arrive here when no segments contain the input dParamInside value
-    Err(SolidError::surface_failed(
+    Err(SolidError::surface(
         OP_IVL,
-        "no segment contains the parameter",
+        SurfaceFailure::ParameterOutsideInterval {
+            param: param_inside,
+        },
     ))
 }
 
@@ -4245,9 +4282,9 @@ impl<'s> FindSingularParamWithGivenTangentDir<'s> {
         let derivs =
             at(&m, w.0, w.1).unitized_derivative2(at(&m, ws.0, ws.1), at(&m, wss.0, wss.1));
         let Ok([unit_t, unit_tt]) = derivs else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 "surface::surface::p1::FindSingularParamWithGivenTangentDir::evaluate",
-                "the unit derivatives of the singular direction are undefined",
+                SurfaceFailure::ZeroLengthTangent,
             ));
         };
 
