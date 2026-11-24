@@ -2056,7 +2056,7 @@ fn a_directory_field_browses_a_folder_and_an_outside_folder_stays_ungranted() {
 
     let picked = outside.to_string_lossy().into_owned();
     let answer = picked.clone();
-    h.app.services.pick_folder = Some(Box::new(move || Box::pin(std::future::ready(Some(answer.clone())))));
+    h.app.services.pick_folder = Some(Box::new(move |_: &str| Box::pin(std::future::ready(Some(answer.clone())))));
     h.frames(2);
     assert_eq!(h.widgets(&browse).len(), 1, "only the directory field has Browse");
     let y = |label: &str| h.widgets(label)[0][1];
@@ -2158,12 +2158,9 @@ mod native {
         root
     }
 
-    #[test]
-    fn panel_row_click_runs_on_the_command_worker_and_refreshes_its_data() {
-        let mut h = crate::scenario::Harness::new();
-        h.app.home.open = false;
-        let folder = h.dir.join("sample");
-        std::fs::create_dir_all(&folder).unwrap();
+    /// Write the "sample" plugin, whose panel "jobs" lists rows that run its `make` entry, to `folder`.
+    fn write_panel_plugin(folder: &std::path::Path) {
+        std::fs::create_dir_all(folder).unwrap();
         let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.2","ui@0.1"],"runtime":{
             "module":"plugin.wasm","commands":["inspect.measure"],"entries":[{"name":"make","effect":"read","input_schema":{
                 "type":"object","properties":{"panel":{"type":"string"},"event":{"type":"string"},"path":{"type":"string"},"row":{"type":["string","null"]},"value":{"type":["object","string","null"]}}
@@ -2182,6 +2179,29 @@ mod native {
             .replace("__ARGS_LEN__", "2");
         std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
         std::fs::write(folder.join("plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+    }
+
+    /// Another design comes to the front: it gets the installed plugins' panels at once. The Model
+    /// tab no longer reads the plugins, and so no longer syncs the panels, on every frame (#21594).
+    #[test]
+    fn a_design_that_comes_to_the_front_gets_the_plugin_panels() {
+        let mut h = crate::scenario::Harness::new();
+        write_panel_plugin(&h.dir.join("sample"));
+        h.app.session.plugin_state.plugins_dir = Some(h.dir.clone());
+        let mut other = solidcraft_engine::Session::default();
+        other.plugin_state.plugins_dir = Some(h.dir.clone());
+        assert!(other.plugin_panels().is_empty());
+        crate::documents::open_tab(&mut h.app, other).unwrap();
+        let panels: Vec<String> = h.app.session.plugin_panels().iter().map(|p| p.plugin.clone()).collect();
+        assert_eq!(panels, ["sample"]);
+    }
+
+    #[test]
+    fn panel_row_click_runs_on_the_command_worker_and_refreshes_its_data() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let folder = h.dir.join("sample");
+        write_panel_plugin(&folder);
         h.app.session.plugin_state.plugins_dir = Some(h.dir.clone());
         let inspected = h.app.run("plugin.inspect", json!({"path":folder.to_string_lossy()})).unwrap();
         let (initial, _) = h.call_queued("engine.execute", json!({"command":"sample.make","params":{"approval":inspected["approval"],"params":{}}}));
